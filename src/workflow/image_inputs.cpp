@@ -237,6 +237,8 @@ bool clipboardHasImage(const QMimeData &data) {
 namespace {
 
 bool sameBytes(const QString &a, const QString &b) {
+    if (QFileInfo(a).isSymLink())
+        return false;
     QFile one(a);
     QFile two(b);
     if (one.size() != two.size() || !one.open(QIODevice::ReadOnly) || !two.open(QIODevice::ReadOnly))
@@ -261,7 +263,9 @@ QString nameIn(const QString &folder, const QString &source, QHash<QString, QStr
             continue;
         }
         const QString there = QDir(folder).filePath(name);
-        if (!QFileInfo::exists(there) || sameBytes(there, source)) {
+        const QFileInfo found(there);
+        // A link (even one that leads nowhere) holds its name: it is never reused or replaced.
+        if (!found.isSymLink() && (!found.exists() || sameBytes(there, source))) {
             claimed.insert(name, source);
             return name;
         }
@@ -336,7 +340,7 @@ Errors relocateInputs(Document &document, const Registry &registry, const QStrin
             return made;
         const QString name = change.literal.mid(7);
         const QString destination = QDir(target).filePath(name);
-        if (QFileInfo::exists(destination))
+        if (QFileInfo(destination).isFile() && !QFileInfo(destination).isSymLink())
             continue; // the same bytes (nameIn)
         QFile file(change.copy);
         if (!file.open(QIODevice::ReadOnly))
@@ -346,8 +350,14 @@ Errors relocateInputs(Document &document, const Registry &registry, const QStrin
         PartialFile partial(target, name);
         if (const Errors written = partial.write(file.readAll(), QStringLiteral("the image")); hasErrors(written))
             return written;
-        if (const Result<bool> committed = partial.commit(destination, Overwrite::Never); !committed)
+        const Result<bool> committed = partial.commit(destination, Overwrite::Never);
+        if (!committed)
             return committed.errors();
+        // Something took the name since it was chosen: the node must not point at it.
+        if (!*committed && !sameBytes(destination, change.copy))
+            return {makeError(QStringLiteral("node_failed"),
+                              QStringLiteral("Another file appeared at %1 while the workflow's inputs were copied; "
+                                             "save again.").arg(destination))};
     }
     for (const Change &change : std::as_const(changes))
         (*change.nodes)[change.node].inputs.insert(change.input, InputValue::literal(change.literal));

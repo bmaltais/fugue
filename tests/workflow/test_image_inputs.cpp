@@ -205,6 +205,31 @@ private slots:
         QVERIFY(!clipboardHasImage(QMimeData()));
     }
 
+    // Moving a workflow's inputs never points a node at a name it did not write: a symbolic
+    // link (even one that leads nowhere) holds the name, so the copy takes another.
+    void movingInputsNeverTakesANameALinkHolds() {
+        Pictures p;
+        QTemporaryDir place;
+        const QByteArray png = encoded(picture(), "PNG");
+        const Result<QString> stored = storeImage(png, p.inputs(), FileRoots::forInputs(), "cat.png");
+        QVERIFY(stored.ok());
+        const QString name = QFileInfo(stored.value()).fileName();
+        QVERIFY(QDir().mkpath(place.filePath("inputs")));
+        QVERIFY(QFile::link(place.filePath("nowhere.png"), place.filePath("inputs/" + name)));
+        Registry registry;
+        nodes::addBuiltinNodeTypes(registry);
+        Document document = Document::load(QStringLiteral(R"({"fugue": 1, "graph": {"nodes": {
+            "src": {"type": "fugue/load-image", "version": "1.0.0", "inputs": {"file": "%1"}}}}})")
+                                               .arg(stored.value()).toUtf8()).value();
+        const Errors errors = relocateInputs(document, registry, {}, place.filePath("flow.fugue"));
+        QVERIFY2(!hasErrors(errors), qPrintable(errors.isEmpty() ? QString() : errors.first().message));
+        const QString literal = document.graph.nodes.value("src").inputs.value("file").literal().toString();
+        QVERIFY2(literal.startsWith("inputs/") && literal != "inputs/" + name, qPrintable(literal));
+        QVERIFY(!QFileInfo(place.filePath(literal)).isSymLink());
+        QCOMPARE(read(place.filePath(literal)), png);
+        QVERIFY(QFileInfo(place.filePath("inputs/" + name)).isSymLink());
+    }
+
     void recentInputsAreNewestFirstAndCapped() {
         Pictures p;
         const FileRoots roots = FileRoots::forInputs();
