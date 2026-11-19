@@ -59,6 +59,8 @@ const QMap<QString, QMap<QString, Spec>> &table() {
          {{"status", {0, 0, {}, {}, true}}, {"clear", {0, 0, {"workflow", "node"}, {}, true}}}},
         {"command", {{"list", {0, 0, {}, {}, true}}}},
         {"skill", {{"install", {0, 0, {}, {}, true}}}},
+        // Not for people: what `fugue run` starts, detached, to run one queued run.
+        {"__worker", {{"", {1, 1, {}, {}, false}}}},
     };
     return commands;
 }

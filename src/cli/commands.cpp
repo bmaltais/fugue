@@ -11,6 +11,9 @@
 #include <QThread>
 
 #include "cli/compile_step.h"
+#include "cli/process.h"
+#include "cli/queue.h"
+#include "cli/runs.h"
 #include "engine/compiler.h"
 #include "engine/document.h"
 #include "engine/json.h"
@@ -98,16 +101,13 @@ Reply validate(const Command &command, Context &context) {
     const std::optional<Document> document = Document::loadFile(command.positionals.at(0), errors);
     if (!document)
         return loadFailed(errors);
-    errors = validateDocument(*document, context.registry);
+    Process process(context);
+    errors = validateDocument(*document, context.registry, process.environment);
     if (hasErrors(errors))
         return Reply::failure(errors);
     Reply reply = Reply::success(QJsonObject{{"valid", true}}, QStringLiteral("%1 is valid.").arg(command.positionals.at(0)));
     reply.errors = errors; // warnings only
     return reply;
-}
-
-CompileSettings settingsOf(const Command &command) {
-    return {command.value("to"), command.value("provider")};
 }
 
 Reply compile(const Command &command, Context &context) {
@@ -122,18 +122,6 @@ Reply compile(const Command &command, Context &context) {
     Reply reply = Reply::success(compiled, QString::fromUtf8(writeJson(compiled)));
     reply.errors = compilation.errors; // warnings only
     return reply;
-}
-
-Reply runWorkflow(const Command &command, Context &context) {
-    Errors errors;
-    const std::optional<Document> document = Document::loadFile(command.positionals.at(0), errors);
-    if (!document)
-        return loadFailed(errors);
-    // --set is phase 2b's. Phase 2b: queue (9.8), start the worker, print the run id; --wait streams events.
-    const Compilation compilation = compileDocument(*document, context.registry, settingsOf(command));
-    if (!compilation.ok())
-        return Reply::failure(compilation.errors);
-    return Reply::failure(makeError("internal", "Running is not built yet.", "The scheduler arrives with issue #9."));
 }
 
 Reply workflowNew(const Command &command, Context &) {
@@ -202,32 +190,13 @@ Result<RunFolder> openRun(const Command &command, Context &context) {
     return RunFolder::open(context.runsRoot, command.positionals.at(0));
 }
 
-QString eventStatus(const QList<QJsonObject> &events) {
-    for (auto it = events.crbegin(); it != events.crend(); ++it)
-        if (it->value("event").toString() == "run.done")
-            return it->value("status").toString();
-    return {};
-}
-
-// The run's status: run.json's, else what the events say, else "unknown".
-QString runStatus(const RunFolder &folder, const QList<QJsonObject> &events) {
-    QString status = folder.state().value("status").toString();
-    if (status.isEmpty())
-        status = eventStatus(events);
-    if (status.isEmpty() && !events.isEmpty()) {
-        const QString last = events.last().value("event").toString();
-        status = last == "run.queued" ? "queued" : "running";
-    }
-    return status.isEmpty() ? QStringLiteral("unknown") : status;
-}
-
-bool isTerminal(const QString &status) {
-    return status == "ok" || status == "failed" || status == "cancelled";
-}
-
 Reply runsList(const Command &, Context &context) {
     QJsonArray runs;
     QStringList lines;
+    QMap<QString, int> positions; // 0 is the run that is going, then the waiting ones in order
+    const QList<QueueEntry> queued = Queue(context.queueDir).entries();
+    for (int i = 0; i < queued.size(); ++i)
+        positions.insert(queued.at(i).run, i);
     const QStringList ids = QDir(context.runsRoot).entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name | QDir::Reversed);
     for (const QString &id : ids) {
         const Result<RunFolder> folder = RunFolder::open(context.runsRoot, id);
@@ -238,6 +207,8 @@ Reply runsList(const Command &, Context &context) {
         for (const char *key : {"workflow", "started", "ended"})
             if (state.contains(key))
                 run.insert(key, state.value(key));
+        if (positions.contains(id) && !isTerminal(run.value("status").toString()))
+            run.insert("position", positions.value(id));
         runs.append(run);
         lines << QStringLiteral("%1  %2").arg(id, run.value("status").toString());
     }
@@ -317,24 +288,6 @@ Reply runsResult(const Command &command, Context &context) {
     return Reply::success(data, QString::fromUtf8(writeJson(outputs)));
 }
 
-// Writes events as JSON lines as they arrive, until run.done; returns that status.
-// Phase 2's `run --wait` uses the same function.
-QString streamEvents(const RunFolder &folder, Context &context) {
-    int printed = 0;
-    for (;;) {
-        const QList<QJsonObject> events = folder.events();
-        for (; printed < events.size(); ++printed)
-            context.line(compact(events.at(printed)).toUtf8());
-        const QString done = eventStatus(events);
-        if (!done.isEmpty())
-            return done;
-        const QString state = folder.state().value("status").toString();
-        if (isTerminal(state))
-            return state; // the worker is gone without a run.done
-        QThread::msleep(100);
-    }
-}
-
 Reply runsEvents(const Command &command, Context &context) {
     const Result<RunFolder> folder = openRun(command, context);
     if (!folder)
@@ -353,14 +306,6 @@ Reply runsEvents(const Command &command, Context &context) {
         lines << compact(event);
     }
     return Reply::success(QJsonObject{{"events", array}}, lines.join('\n'));
-}
-
-Reply runsCancel(const Command &command, Context &context) {
-    const Result<RunFolder> folder = openRun(command, context);
-    if (!folder)
-        return Reply::failure(folder.errors());
-    // Phase 2: signal the worker (run.json's pid) and remove a queued entry (9.8).
-    return Reply::failure(makeError("internal", "Cancelling is not built yet.", "The scheduler arrives with issue #9."));
 }
 
 } // namespace
@@ -401,13 +346,19 @@ Reply execute(const Command &command, Context &context) {
     if (name == "compile")
         return compile(command, context);
     if (name == "run")
-        return runWorkflow(command, context);
+        return startRun(command, context);
     if (name == "workflow.new")
         return workflowNew(command, context);
     if (name == "workflow.describe")
         return workflowDescribe(command, context);
     if (name == "workflow.export")
         return Reply::failure(makeError("internal", "Exporting a share copy is not built yet."));
+    if (name == "__worker") {
+        Reply reply;
+        reply.streamed = true;
+        reply.exitCode = runWorker(command.positionals.at(0), context);
+        return reply;
+    }
     if (name == "runs.list")
         return runsList(command, context);
     if (name == "runs.status")
@@ -417,7 +368,7 @@ Reply execute(const Command &command, Context &context) {
     if (name == "runs.result")
         return runsResult(command, context);
     if (name == "runs.cancel")
-        return runsCancel(command, context);
+        return cancelRun(command, context);
     return Reply::failure(makeError("internal", QStringLiteral("Command %1 has no handler.").arg(name)));
 }
 

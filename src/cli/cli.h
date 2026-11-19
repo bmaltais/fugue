@@ -7,10 +7,21 @@
 
 #include <QStringList>
 
+#include <functional>
+
+#include "engine/node_kernel.h"
+
 namespace fugue::cli {
+
+// What the process adds to the CLI. Production passes nothing: the built-in nodes
+// register their kernels here when they exist (M1). A test binary passes fake kernels,
+// so the real run path, queue and worker can be driven without shipping test code.
+struct Hooks {
+    std::function<void(Kernels &)> addKernels;
+};
 
 // Runs one command to the end and returns the process exit code (0 or 1).
 // Creates its own QCoreApplication, so call it from main() only.
-int run(int argc, char **argv);
+int run(int argc, char **argv, const Hooks &hooks = {});
 
 } // namespace fugue::cli

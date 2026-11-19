@@ -60,14 +60,20 @@ foreach(test_source ${fugue_engine_tests})
   add_test(NAME ${test_name} COMMAND ${test_name})
 endforeach()
 
+# A test-only `fugue` with fake node kernels (tests/cli_support): the real CLI, queue and
+# worker, but nodes that do fake work. Not installed.
+add_executable(fugue_with_fakes tests/cli_support/fugue_with_fakes.cpp)
+target_link_libraries(fugue_with_fakes PRIVATE fugue_cli)
+
 # CLI tests drive the built `fugue` binary as a subprocess with no display.
 file(GLOB fugue_cli_tests CONFIGURE_DEPENDS tests/cli/*.cpp)
 foreach(test_source ${fugue_cli_tests})
   get_filename_component(test_name ${test_source} NAME_WE)
   add_executable(${test_name} ${test_source})
   target_link_libraries(${test_name} PRIVATE fugue_cli Qt6::Test)
-  target_compile_definitions(${test_name} PRIVATE FUGUE_BINARY="$<TARGET_FILE:fugue>")
-  add_dependencies(${test_name} fugue)
+  target_compile_definitions(${test_name} PRIVATE FUGUE_BINARY="$<TARGET_FILE:fugue>"
+                             FUGUE_FAKE_BINARY="$<TARGET_FILE:fugue_with_fakes>")
+  add_dependencies(${test_name} fugue fugue_with_fakes)
   add_test(NAME ${test_name} COMMAND ${test_name})
 endforeach()
 

@@ -9,6 +9,7 @@
 
 #include "cli/args.h"
 #include "cli/commands.h"
+#include "cli/queue.h"
 #include "engine/run_folder.h"
 
 namespace fugue::cli {
@@ -51,7 +52,7 @@ const char *helpText =
 
 } // namespace
 
-int run(int argc, char **argv) {
+int run(int argc, char **argv, const Hooks &hooks) {
     QCoreApplication app(argc, argv);
     QCoreApplication::setApplicationName("fugue");
     QCoreApplication::setApplicationVersion("0.1.0");
@@ -83,6 +84,10 @@ int run(int argc, char **argv) {
 
     Context context;
     context.runsRoot = RunFolder::defaultRoot();
+    context.queueDir = Queue::defaultDir();
+    context.lockPath = Queue::defaultLockPath();
+    if (hooks.addKernels)
+        hooks.addKernels(context.kernels);
     context.line = writeLine;
     context.log = logLine;
     loadManifestFolder(context.registry, qEnvironmentVariable("FUGUE_NODE_MANIFESTS"), logLine);
