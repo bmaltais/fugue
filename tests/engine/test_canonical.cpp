@@ -131,6 +131,28 @@ private slots:
         QCOMPARE(writeJson(value), QByteArray("{\n  \"\xf0\x9f\x98\x80\": 2,\n  \"\xef\xac\xb3\": 1\n}\n"));
     }
 
+    // Qt orders the keys of an object it parsed differently from one built by insertion
+    // when a key at U+E000 or above meets one outside the basic plane, so the on-disk form
+    // must sort for itself. The same document, however it was made, is the same bytes.
+    void onDiskOrderDoesNotDependOnHowTheObjectWasMade() {
+        const QByteArray expected("{\n  \"\xf0\x9f\x98\x80\": 2,\n  \"\xee\x80\x80\": 1,\n  \"\xef\xac\xb3\": 3\n}\n");
+        QJsonObject inserted;
+        inserted.insert(QString(QChar(char16_t(0xe000))), 1);
+        inserted.insert(QString::fromUcs4(U"\U0001F600"), 2);
+        inserted.insert(QString(QChar(char16_t(0xfb33))), 3);
+        QCOMPARE(writeJson(inserted), expected);
+
+        const QJsonObject parsed = QJsonDocument::fromJson(expected).object();
+        QCOMPARE(parsed.size(), 3);
+        QCOMPARE(writeJson(parsed), expected);
+        const QJsonObject reversed =
+            QJsonDocument::fromJson("{\"\xef\xac\xb3\": 3, \"\xee\x80\x80\": 1, \"\xf0\x9f\x98\x80\": 2}").object();
+        QCOMPARE(writeJson(reversed), expected);
+        // Nested objects too.
+        QCOMPARE(writeJson(QJsonArray{parsed}), QByteArray("[\n  {\n    \"\xf0\x9f\x98\x80\": 2,\n    \"\xee\x80\x80\": 1,\n"
+                                                           "    \"\xef\xac\xb3\": 3\n  }\n]\n"));
+    }
+
     void controlCharactersAndUnicodeSeparators() {
         const QString text = QString::fromUtf16(u"\b\t\n\f\r\u0001\u001f\u2028\u007f");
         QCOMPARE(canon(text),

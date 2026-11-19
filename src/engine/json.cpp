@@ -1,5 +1,7 @@
 #include "json.h"
 
+#include <algorithm>
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -28,14 +30,19 @@ void write(QByteArray &out, const QJsonValue &value, int depth) {
             out += "{}";
             return;
         }
+        // Sorted here, by UTF-16 code unit as canonical JSON does (canonical.cpp), not
+        // left to QJsonObject: Qt orders a parsed object's keys differently from an
+        // inserted one's once a key at U+E000 or above meets one outside the basic plane.
+        QStringList keys = object.keys();
+        std::sort(keys.begin(), keys.end());
         out += "{\n";
         bool first = true;
-        for (auto it = object.begin(); it != object.end(); ++it) {
+        for (const QString &key : std::as_const(keys)) {
             if (!first)
                 out += ",\n";
             first = false;
-            out += indent + scalar(it.key()) + ": ";
-            write(out, it.value(), depth + 1);
+            out += indent + scalar(key) + ": ";
+            write(out, object.value(key), depth + 1);
         }
         out += "\n" + closing + "}";
     } else if (value.isArray()) {
