@@ -9,10 +9,12 @@
 #include <QUndoStack>
 
 #include "canvas/canvas_model.h"
+#include "canvas/widget_edit.h"
 #include "engine/document.h"
 #include "engine/registry.h"
 #include "workflow/content_hash.h"
 #include "nodes/builtin.h"
+#include "../cpu_time.h"
 
 using namespace fugue;
 
@@ -233,6 +235,8 @@ private slots:
         QCOMPARE(canvas.undoStack()->count(), 1);
     }
 
+
+
     void pastingTextThatIsNotAWorkflowDoesNothing() {
         CanvasModel canvas(&m_registry);
         canvas.setDocument(document(chain));
@@ -440,6 +444,36 @@ private slots:
         QCOMPARE(canvas.position("gen"), QPointF(300, 80));
         QVERIFY(canvas.canRedo());
     }
+
+
+    // A gesture's undo step holds the gesture alone: an edit made while it is open (a key,
+    // a run's seeds) ends it first and is a step of its own.
+    void anEditDuringAGestureIsAStepOfItsOwn() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(chain));
+        canvas.select({"other"});
+        canvas.beginMove("gen");
+        canvas.moveBy(100, 0);
+        canvas.toggleMode("bypass");
+        canvas.moveBy(150, 0); // the move is over
+        canvas.endMove();
+        QCOMPARE(canvas.undoStack()->count(), 2);
+        QCOMPARE(canvas.undoText(), QString("Bypass"));
+        canvas.undo();
+        QCOMPARE(canvas.position("gen"), QPointF(400, 80));
+
+        canvas.beginLinkDrag("other", "text", true);
+        canvas.widgets()->advanceSeeds();
+        QVERIFY(canvas.linkDrag().isEmpty());
+        canvas.beginResize("gen");
+        canvas.resizeBy(40, 0);
+        canvas.deleteSelection(); // other
+        QCOMPARE(canvas.undoText(), QString("Delete"));
+        canvas.undo();
+        QCOMPARE(canvas.undoText(), QString("Resize"));
+    }
+
+
 
     void fitFramesTheSelectionOrEverything() {
         CanvasModel canvas(&m_registry);

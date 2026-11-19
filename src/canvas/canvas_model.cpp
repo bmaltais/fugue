@@ -13,6 +13,7 @@
 #include <QJsonObject>
 #include <QLineF>
 #include <QRandomGenerator>
+#include <QScopedValueRollback>
 #include <QUndoStack>
 
 #include <algorithm>
@@ -1031,6 +1032,7 @@ void CanvasModel::beginLinkDrag(const QString &node, const QString &port, bool o
             startNode = value.from().node;
             startPort = value.from().port;
             startOutput = true;
+            const QScopedValueRollback<bool> own(m_gestureEditing, true);
             disconnectInput(node, port);
         }
     }
@@ -1077,6 +1079,7 @@ bool CanvasModel::endLinkDrag(const QString &node, const QString &port, bool out
     m_drag.clear();
     m_dragUnreachable.clear();
     emit linkDragChanged();
+    const QScopedValueRollback<bool> own(m_gestureEditing, m_dragOpen); // putting it down is the drag's edit
     bool connected = false;
     if (!targets.isEmpty()) {
         // Moving an output's links: each one now comes from the new output.

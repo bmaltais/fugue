@@ -10,6 +10,7 @@
 
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QScopedValueRollback>
 #include <QUndoCommand>
 #include <QUndoStack>
 
@@ -252,6 +253,9 @@ void CanvasModel::beginEdit() {
     // A widget being typed into (#48) ends its step first, so this edit is a step of its own.
     if (m_widgets->editing() && !m_widgets->writing())
         m_widgets->endSession();
+    // So does a drag (a key during it, a run's seeds), unless it is the drag's own edit.
+    if (!m_gestureEditing && (m_moveOpen || m_cloneOpen || m_resizeOpen || m_dragOpen))
+        endMouseGestures();
     if (m_editDepth++ == 0)
         m_editBefore = snapshot();
 }
@@ -277,14 +281,22 @@ void CanvasModel::commit(const Document &document, const QString &text) {
     endEdit(text);
 }
 
-void CanvasModel::finishGestures() {
-    m_widgets->endSession();
-    if (!m_drag.isEmpty())
+void CanvasModel::endMouseGestures() {
+    if (!m_drag.isEmpty()) {
         endLinkDrag();
+    } else if (m_dragOpen) {
+        m_dragOpen = false;
+        endEdit(tr("Disconnect"));
+    }
     if (m_resizeOpen)
         endResize();
     if (m_moveOpen || m_cloneOpen)
         endMove();
+}
+
+void CanvasModel::finishGestures() {
+    m_widgets->endSession();
+    endMouseGestures();
     while (m_editDepth > 0)
         endEdit(tr("Edit"));
 }
@@ -513,6 +525,7 @@ void CanvasModel::beginCloneMove(const QString &node) {
     const QStringList ids = m_selected.contains(node) ? selectedIds() : QStringList{node};
     beginEdit();
     m_cloneOpen = true;
+    const QScopedValueRollback<bool> own(m_gestureEditing, true);
     QHash<QString, QString> copies;
     insertCopy(copyOf(ids), boundsOf(ids).topLeft(), false, tr("Clone"), &copies);
     beginMove(copies.value(node));

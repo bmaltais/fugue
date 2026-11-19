@@ -369,6 +369,8 @@ public:
     void setUndoStack(std::unique_ptr<QUndoStack> stack);
     // Brackets several edits into one undo step: the first begin takes the document as it
     // is, the last end pushes one command named `text` when the content changed.
+    // An edit that begins while a mouse gesture (a move, a link drag, a resize) is open ends
+    // that gesture first, so the gesture's step holds the gesture alone.
     void beginEdit();
     void endEdit(const QString &text);
     // Makes the document this one as one undo step named `text`, touching only what differs
@@ -546,6 +548,8 @@ private:
     void restore(const Snapshot &target, bool selectAdded);
     void relink(const QSet<QString> &nodes);
     void finishGestures();
+    // Ends the open mouse gestures, each as its own step (beginEdit's rule).
+    void endMouseGestures();
     void contentChanged();
     static std::unique_ptr<QUndoStack> makeUndoStack();
     void watchUndoStack();
@@ -616,6 +620,7 @@ private:
     bool m_cloneOpen = false; // an Alt+drag clone holds one more
     bool m_dragOpen = false;  // a link drag holds an edit open
     bool m_resizeOpen = false; // a resize holds one too
+    bool m_gestureEditing = false; // a gesture makes its own edits (a link put down, a clone)
     QString m_resizeNode;
     QSizeF m_resizeStart;     // its size when the resize began
     bool m_resizeWasSized = false;
