@@ -1,0 +1,620 @@
+#include "node_type.h"
+
+#include "engine/canonical.h"
+#include "engine/ids.h"
+
+#include <QJsonArray>
+#include <QSet>
+
+#include <algorithm>
+#include <cmath>
+
+namespace fugue {
+
+namespace {
+
+const QString invalidDocument = QStringLiteral("invalid_document");
+constexpr double maxSafeInteger = 9007199254740992.0; // 2^53 (spec 2.1)
+
+// A literal as JSON, for messages.
+QString shown(const QJsonValue &value) {
+    if (value.isUndefined())
+        return QStringLiteral("nothing");
+    return QString::fromUtf8(canonicalJson(value).value_or("?"));
+}
+
+int distance(const QString &a, const QString &b) {
+    QList<int> row(b.size() + 1);
+    for (qsizetype j = 0; j <= b.size(); ++j)
+        row[j] = int(j);
+    for (qsizetype i = 1; i <= a.size(); ++i) {
+        int diagonal = row[0];
+        row[0] = int(i);
+        for (qsizetype j = 1; j <= b.size(); ++j) {
+            const int above = row[j];
+            row[j] = std::min({row[j] + 1, row[j - 1] + 1,
+                               diagonal + (a.at(i - 1) == b.at(j - 1) ? 0 : 1)});
+            diagonal = above;
+        }
+    }
+    return row[b.size()];
+}
+
+// The closest choice to a near miss, or nothing.
+QString nearest(const QString &value, const QStringList &choices) {
+    QString best;
+    int bestDistance = 3; // more than two edits is not a near miss
+    for (const QString &choice : choices) {
+        const int d = choice.compare(value, Qt::CaseInsensitive) == 0 ? 0 : distance(value, choice);
+        if (d < bestDistance && d < value.size()) {
+            best = choice;
+            bestDistance = d;
+        }
+    }
+    return best;
+}
+
+Error literalError(const QString &code, const InputSpec &input, const QString &message) {
+    Error error;
+    error.code = code;
+    error.input = input.name;
+    error.message = message;
+    return error;
+}
+
+// Collects manifest errors, every message starting with the type id.
+class Reader {
+public:
+    Reader(const QString &id, Errors &errors) : m_id(id), m_errors(errors) {}
+
+    void fail(const QString &message, const QString &input = {}, const QString &output = {}) {
+        add(invalidDocument, Error::Severity::Error, message, input, output);
+    }
+
+    void warn(const QString &message, const QString &input = {}, const QString &output = {}) {
+        add(invalidDocument, Error::Severity::Warning, message, input, output);
+    }
+
+    void add(const QString &code, Error::Severity severity, const QString &message,
+             const QString &input = {}, const QString &output = {}) {
+        Error error;
+        error.code = code;
+        error.severity = severity;
+        error.input = input;
+        error.output = output;
+        error.message = m_id + QStringLiteral(": ") + message;
+        m_errors << error;
+        if (severity == Error::Severity::Error)
+            ++m_errorCount;
+    }
+
+    void addPrefixed(const Errors &errors) {
+        for (Error error : errors) {
+            error.message = m_id + QStringLiteral(": the default of input ") + error.input +
+                            QStringLiteral(" is invalid: ") + error.message;
+            m_errors << error;
+            ++m_errorCount;
+        }
+    }
+
+    bool failed() const { return m_errorCount > 0; }
+    // Errors added so far, not counting warnings.
+    int count() const { return m_errorCount; }
+
+    // Field readers: absent leaves `out` unchanged; a wrong JSON type fails.
+    void string(const QJsonObject &o, const char *key, QString &out, const QString &where,
+                const QString &input = {}, const QString &output = {}) {
+        const QJsonValue v = o.value(QLatin1String(key));
+        if (v.isUndefined())
+            return;
+        if (!v.isString())
+            fail(QStringLiteral("%1 \"%2\" must be a string.").arg(where, QLatin1String(key)), input, output);
+        else
+            out = v.toString();
+    }
+
+    void boolean(const QJsonObject &o, const char *key, bool &out, const QString &where,
+                 const QString &input = {}, const QString &output = {}) {
+        const QJsonValue v = o.value(QLatin1String(key));
+        if (v.isUndefined())
+            return;
+        if (!v.isBool())
+            fail(QStringLiteral("%1 \"%2\" must be true or false.").arg(where, QLatin1String(key)), input,
+                 output);
+        else
+            out = v.toBool();
+    }
+
+    void number(const QJsonObject &o, const char *key, std::optional<double> &out, const QString &where,
+                const QString &input) {
+        const QJsonValue v = o.value(QLatin1String(key));
+        if (v.isUndefined())
+            return;
+        if (!v.isDouble())
+            fail(QStringLiteral("%1 \"%2\" must be a number.").arg(where, QLatin1String(key)), input);
+        else
+            out = v.toDouble();
+    }
+
+    void count(const QJsonObject &o, const char *key, std::optional<int> &out, const QString &where,
+               const QString &input) {
+        const QJsonValue v = o.value(QLatin1String(key));
+        if (v.isUndefined())
+            return;
+        const double d = v.toDouble(-1);
+        if (!v.isDouble() || d < 0 || d != std::trunc(d) || d > 1e9)
+            fail(QStringLiteral("%1 \"%2\" must be a whole number of at least 0.").arg(where, QLatin1String(key)),
+                 input);
+        else
+            out = int(d);
+    }
+
+    void strings(const QJsonObject &o, const char *key, QStringList &out, const QString &where,
+                 const QString &input = {}) {
+        const QJsonValue v = o.value(QLatin1String(key));
+        if (v.isUndefined())
+            return;
+        bool ok = v.isArray();
+        QStringList list;
+        for (const QJsonValue item : v.toArray()) {
+            ok &= item.isString();
+            list << item.toString();
+        }
+        if (!ok)
+            fail(QStringLiteral("%1 \"%2\" must be a list of strings.").arg(where, QLatin1String(key)), input);
+        else
+            out = list;
+    }
+
+    void unknownFields(const QJsonObject &o, const QStringList &known, const QString &where,
+                       const QString &input = {}, const QString &output = {}) {
+        for (auto it = o.begin(); it != o.end(); ++it)
+            if (!known.contains(it.key()))
+                warn(QStringLiteral("%1 has an unknown field \"%2\", which is ignored.").arg(where, it.key()),
+                     input, output);
+    }
+
+private:
+    QString m_id;
+    Errors &m_errors;
+    int m_errorCount = 0;
+};
+
+bool widgetFits(const QString &widget, const InputSpec &input) {
+    const QString type = input.type.type.id;
+    if (widget == "spin" || widget == "slider" || widget == "seed")
+        return type == "number";
+    if (widget == "line" || widget == "multiline" || widget == "file" || widget == "folder" ||
+        widget == "color")
+        return type == "text";
+    if (widget == "toggle")
+        return type == "boolean";
+    if (widget == "choice")
+        return type == "text" && input.choices.has_value();
+    return false;
+}
+
+std::optional<InputSpec> readInput(Reader &r, const QJsonValue &value, int index) {
+    InputSpec input;
+    const QString at = QStringLiteral("input %1").arg(index + 1);
+    if (!value.isObject()) {
+        r.fail(at + QStringLiteral(" must be an object."));
+        return std::nullopt;
+    }
+    const QJsonObject o = value.toObject();
+    const int before = r.count();
+    bool bad = false;
+
+    const QJsonValue name = o.value("name");
+    input.name = name.toString();
+    if (!isPortName(input.name)) {
+        r.fail(at + QStringLiteral(" needs a \"name\" matching [a-z][a-z0-9_]*, not %1.").arg(shown(name)),
+               input.name);
+        bad = true;
+    }
+    const QString where = bad ? at : QStringLiteral("input ") + input.name;
+    const QString &n = input.name;
+
+    const QJsonValue type = o.value("type");
+    const std::optional<PortType> parsed = PortType::parse(type.toString());
+    if (!parsed) {
+        r.fail(where + QStringLiteral(" has %1 as its \"type\", which is not a port type.").arg(shown(type)), n);
+        bad = true;
+    } else {
+        input.type.type = *parsed;
+    }
+
+    r.boolean(o, "list", input.type.list, where, n);
+    r.string(o, "label", input.label, where, n);
+    r.string(o, "description", input.description, where, n);
+    r.boolean(o, "optional", input.optional, where, n);
+    r.count(o, "min_items", input.minItems, where, n);
+    r.count(o, "max_items", input.maxItems, where, n);
+    r.number(o, "min", input.min, where, n);
+    r.number(o, "max", input.max, where, n);
+    r.number(o, "step", input.step, where, n);
+    r.boolean(o, "integer", input.integer, where, n);
+    r.string(o, "widget", input.widgetName, where, n);
+    r.string(o, "section", input.section, where, n);
+    r.boolean(o, "advanced", input.advanced, where, n);
+    if (o.contains("choices")) {
+        QStringList choices;
+        r.strings(o, "choices", choices, where, n);
+        if (choices.isEmpty())
+            r.fail(where + QStringLiteral(" has empty \"choices\"."), n);
+        input.choices = choices;
+    }
+    input.defaultValue = o.value("default");
+    r.unknownFields(o,
+                    {"name", "type", "label", "description", "default", "optional", "list", "min_items",
+                     "max_items", "min", "max", "step", "integer", "choices", "widget", "section",
+                     "advanced"},
+                    where, n);
+
+    if (parsed) {
+        const QString id = parsed->id;
+        const bool isNumber = id == "number";
+        const bool scalar = isNumber || id == "text" || id == "boolean";
+        if (!isNumber)
+            for (const char *key : {"min", "max", "step", "integer"})
+                if (o.contains(QLatin1String(key)))
+                    r.fail(where + QStringLiteral(" is %1, but \"%2\" only applies to number inputs.")
+                                       .arg(id, QLatin1String(key)),
+                           n);
+        if (input.choices && id != "text")
+            r.fail(where + QStringLiteral(" is %1, but \"choices\" only applies to text inputs.").arg(id), n);
+        if (!input.type.list && (input.minItems || input.maxItems))
+            r.fail(where + QStringLiteral(" has \"min_items\" or \"max_items\" but is not a list."), n);
+        if (input.min && input.max && *input.min > *input.max)
+            r.fail(where + QStringLiteral(" has \"min\" above \"max\"."), n);
+        if (input.step && *input.step <= 0)
+            r.fail(where + QStringLiteral(" has a \"step\" that is not above 0."), n);
+        if (input.minItems && input.maxItems && *input.minItems > *input.maxItems)
+            r.fail(where + QStringLiteral(" has \"min_items\" above \"max_items\"."), n);
+        if (!input.widgetName.isEmpty() && !widgetFits(input.widgetName, input))
+            r.fail(where + QStringLiteral(" is %1 and cannot use the widget \"%2\".")
+                               .arg(input.type.toString(), input.widgetName),
+                   n);
+        if (!input.defaultValue.isUndefined()) {
+            if (!scalar) {
+                r.fail(where + QStringLiteral(" is %1 and cannot have a \"default\"; only text, number "
+                                              "and boolean inputs can.")
+                                   .arg(id),
+                       n);
+            } else if (input.type.list && input.defaultValue.isArray()) {
+                for (const QJsonValue item : input.defaultValue.toArray())
+                    r.addPrefixed(checkLiteral(input, item, PortKind::Builtin));
+            } else {
+                r.addPrefixed(checkLiteral(input, input.defaultValue, PortKind::Builtin));
+            }
+        }
+    }
+
+    if (bad || r.count() != before)
+        return std::nullopt;
+    return input;
+}
+
+std::optional<OutputSpec> readOutput(Reader &r, const QJsonValue &value, int index) {
+    OutputSpec output;
+    const QString at = QStringLiteral("output %1").arg(index + 1);
+    if (!value.isObject()) {
+        r.fail(at + QStringLiteral(" must be an object."));
+        return std::nullopt;
+    }
+    const QJsonObject o = value.toObject();
+    const int before = r.count();
+    bool bad = false;
+
+    const QJsonValue name = o.value("name");
+    output.name = name.toString();
+    if (!isPortName(output.name)) {
+        r.fail(at + QStringLiteral(" needs a \"name\" matching [a-z][a-z0-9_]*, not %1.").arg(shown(name)), {},
+               output.name);
+        bad = true;
+    }
+    const QString where = bad ? at : QStringLiteral("output ") + output.name;
+    const QString &n = output.name;
+
+    const QJsonValue type = o.value("type");
+    const std::optional<PortType> parsed = PortType::parse(type.toString());
+    if (!parsed) {
+        r.fail(where + QStringLiteral(" has %1 as its \"type\", which is not a port type.").arg(shown(type)), {},
+               n);
+        bad = true;
+    } else if (parsed->isAny()) {
+        r.fail(where + QStringLiteral(" cannot be of type \"any\"; only inputs of built-in nodes can."), {}, n);
+        bad = true;
+    } else {
+        output.type.type = *parsed;
+    }
+    r.boolean(o, "list", output.type.list, where, {}, n);
+    r.string(o, "label", output.label, where, {}, n);
+    r.string(o, "description", output.description, where, {}, n);
+    r.boolean(o, "optional", output.optional, where, {}, n);
+    r.unknownFields(o, {"name", "type", "label", "description", "list", "optional"}, where, {}, n);
+
+    if (bad || r.count() != before)
+        return std::nullopt;
+    return output;
+}
+
+void putIf(QJsonObject &o, const char *key, const QString &value) {
+    if (!value.isEmpty())
+        o.insert(QLatin1String(key), value);
+}
+
+void putIf(QJsonObject &o, const char *key, const std::optional<double> &value) {
+    if (value)
+        o.insert(QLatin1String(key), *value);
+}
+
+void putIf(QJsonObject &o, const char *key, const std::optional<int> &value) {
+    if (value)
+        o.insert(QLatin1String(key), *value);
+}
+
+void putIfTrue(QJsonObject &o, const char *key, bool value) {
+    if (value)
+        o.insert(QLatin1String(key), true);
+}
+
+} // namespace
+
+bool InputSpec::required() const {
+    return !optional && defaultValue.isUndefined();
+}
+
+QString InputSpec::widget() const {
+    if (!widgetName.isEmpty())
+        return widgetName;
+    const QString &id = type.type.id;
+    if (id == "number")
+        return QStringLiteral("spin");
+    if (id == "text")
+        return choices ? QStringLiteral("choice") : QStringLiteral("line");
+    if (id == "boolean")
+        return QStringLiteral("toggle");
+    return {};
+}
+
+const InputSpec *NodeType::input(const QString &name) const {
+    for (const InputSpec &each : inputs)
+        if (each.name == name)
+            return &each;
+    return nullptr;
+}
+
+const OutputSpec *NodeType::output(const QString &name) const {
+    for (const OutputSpec &each : outputs)
+        if (each.name == name)
+            return &each;
+    return nullptr;
+}
+
+std::optional<NodeType> NodeType::fromJson(const QJsonObject &manifest, Errors &errors) {
+    NodeType type;
+    const QJsonValue id = manifest.value("id");
+    Reader r(id.isString() && !id.toString().isEmpty() ? id.toString() : QStringLiteral("manifest"), errors);
+
+    const QJsonValue format = manifest.value("manifest");
+    if (format.isDouble() && format.toDouble() > 1 && format.toDouble() == std::trunc(format.toDouble())) {
+        r.add(QStringLiteral("unsupported_format_version"), Error::Severity::Error,
+              QStringLiteral("manifest format %1 is newer than this Fugue supports (1).").arg(shown(format)));
+        return std::nullopt;
+    }
+    if (format != QJsonValue(1))
+        r.fail(QStringLiteral("\"manifest\" must be 1, not %1.").arg(shown(format)));
+
+    type.id = id.toString();
+    if (!isTypeId(type.id))
+        r.fail(QStringLiteral("\"id\" must be \"<pack id>/<name>\", not %1.").arg(shown(id)));
+
+    const QJsonValue version = manifest.value("version");
+    if (const std::optional<Version> parsed = Version::parse(version.toString()))
+        type.version = *parsed;
+    else
+        r.fail(QStringLiteral("\"version\" must be a semver version such as \"1.0.0\", not %1.").arg(shown(version)));
+
+    const QJsonValue name = manifest.value("name");
+    if (!name.isString() || name.toString().isEmpty())
+        r.fail(QStringLiteral("\"name\" must be a display name."));
+    type.name = name.toString();
+
+    const QString where = QStringLiteral("the manifest");
+    r.string(manifest, "description", type.description, where);
+    r.string(manifest, "category", type.category, where);
+    r.strings(manifest, "keywords", type.keywords, where);
+    r.strings(manifest, "aliases", type.aliases, where);
+    for (const QString &alias : std::as_const(type.aliases))
+        if (!isTypeId(alias))
+            r.fail(QStringLiteral("alias \"%1\" is not a node type id.").arg(alias));
+    r.boolean(manifest, "sink", type.sink, where);
+    r.boolean(manifest, "deterministic", type.deterministic, where);
+
+    static const QStringList kinds{"command", "group", "native", "script", "builtin"};
+    const QJsonValue runtime = manifest.value("runtime");
+    type.runtime = runtime.toObject();
+    if (!runtime.isObject() || !kinds.contains(type.runtime.value("kind").toString()))
+        r.fail(QStringLiteral("\"runtime\" must be an object whose \"kind\" is one of %1.")
+                   .arg(kinds.join(QStringLiteral(", "))));
+
+    const QJsonValue needs = manifest.value("needs");
+    if (!needs.isUndefined() && !needs.isObject())
+        r.fail(QStringLiteral("\"needs\" must be an object."));
+    type.needs = needs.toObject();
+    type.capabilities = manifest.value("capabilities");
+    if (manifest.contains("ui"))
+        r.fail(QStringLiteral("\"ui\" is reserved and must be absent in this version."));
+
+    r.unknownFields(manifest,
+                    {"manifest", "id", "version", "name", "description", "category", "keywords", "aliases",
+                     "sink", "deterministic", "runtime", "inputs", "outputs", "needs", "capabilities", "ui"},
+                    where);
+
+    QSet<QString> seen;
+    const QJsonValue inputs = manifest.value("inputs");
+    if (!inputs.isArray())
+        r.fail(QStringLiteral("\"inputs\" must be a list (it may be empty)."));
+    const QJsonArray inputList = inputs.toArray();
+    for (qsizetype i = 0; i < inputList.size(); ++i) {
+        const std::optional<InputSpec> input = readInput(r, inputList.at(i), int(i));
+        const QString inputName = inputList.at(i).toObject().value("name").toString();
+        if (isPortName(inputName) && seen.contains(inputName))
+            r.fail(QStringLiteral("input %1 is declared more than once.").arg(inputName), inputName);
+        seen.insert(inputName);
+        if (input)
+            type.inputs << *input;
+    }
+
+    seen.clear();
+    const QJsonValue outputs = manifest.value("outputs");
+    if (!outputs.isArray())
+        r.fail(QStringLiteral("\"outputs\" must be a list (it may be empty)."));
+    const QJsonArray outputList = outputs.toArray();
+    for (qsizetype i = 0; i < outputList.size(); ++i) {
+        const std::optional<OutputSpec> output = readOutput(r, outputList.at(i), int(i));
+        const QString outputName = outputList.at(i).toObject().value("name").toString();
+        if (isPortName(outputName) && seen.contains(outputName))
+            r.fail(QStringLiteral("output %1 is declared more than once.").arg(outputName), {}, outputName);
+        seen.insert(outputName);
+        if (output)
+            type.outputs << *output;
+    }
+
+    if (r.failed())
+        return std::nullopt;
+    return type;
+}
+
+QJsonObject NodeType::toJson() const {
+    QJsonObject o{{"manifest", 1}, {"id", id}, {"version", version.toString()}, {"name", name},
+                  {"runtime", runtime}};
+    putIf(o, "description", description);
+    putIf(o, "category", category);
+    if (!keywords.isEmpty())
+        o.insert("keywords", QJsonArray::fromStringList(keywords));
+    if (!aliases.isEmpty())
+        o.insert("aliases", QJsonArray::fromStringList(aliases));
+    putIfTrue(o, "sink", sink);
+    if (!deterministic)
+        o.insert("deterministic", false);
+    if (!needs.isEmpty())
+        o.insert("needs", needs);
+    if (!capabilities.isUndefined())
+        o.insert("capabilities", capabilities);
+
+    QJsonArray inputList;
+    for (const InputSpec &input : inputs) {
+        QJsonObject i{{"name", input.name}, {"type", input.type.type.toString()}};
+        putIfTrue(i, "list", input.type.list);
+        putIf(i, "label", input.label);
+        putIf(i, "description", input.description);
+        if (!input.defaultValue.isUndefined())
+            i.insert("default", input.defaultValue);
+        putIfTrue(i, "optional", input.optional);
+        putIf(i, "min_items", input.minItems);
+        putIf(i, "max_items", input.maxItems);
+        putIf(i, "min", input.min);
+        putIf(i, "max", input.max);
+        putIf(i, "step", input.step);
+        putIfTrue(i, "integer", input.integer);
+        if (input.choices)
+            i.insert("choices", QJsonArray::fromStringList(*input.choices));
+        putIf(i, "widget", input.widgetName);
+        putIf(i, "section", input.section);
+        putIfTrue(i, "advanced", input.advanced);
+        inputList << i;
+    }
+    o.insert("inputs", inputList);
+
+    QJsonArray outputList;
+    for (const OutputSpec &output : outputs) {
+        QJsonObject out{{"name", output.name}, {"type", output.type.type.toString()}};
+        putIfTrue(out, "list", output.type.list);
+        putIf(out, "label", output.label);
+        putIf(out, "description", output.description);
+        putIfTrue(out, "optional", output.optional);
+        outputList << out;
+    }
+    o.insert("outputs", outputList);
+    return o;
+}
+
+Errors checkLiteral(const InputSpec &input, const QJsonValue &value, PortKind kind) {
+    const QString type = input.type.type.toString();
+    const auto mismatch = [&](const QString &message) {
+        return Errors{literalError(QStringLiteral("type_mismatch"), input, message)};
+    };
+
+    if (value.isObject() && value.toObject().contains("auto")) {
+        if (value.toObject().value("auto") == QJsonValue("random") && input.widget() == "seed")
+            return {};
+        return mismatch(QStringLiteral("%1 is only for inputs with the seed widget, and %2 has none.")
+                            .arg(shown(value), input.name));
+    }
+
+    switch (kind) {
+    case PortKind::Any:
+        return {};
+    case PortKind::Resource: {
+        const std::optional<PortType> handleType =
+            PortType::parse(value.toObject().value("resource").toString());
+        if (value.isObject() && handleType && *handleType == input.type.type)
+            return {};
+        return mismatch(QStringLiteral("Input %1 takes a link or a %2 resource handle, not %3.")
+                            .arg(input.name, type, shown(value)));
+    }
+    case PortKind::Data:
+        return mismatch(QStringLiteral("Input %1 is %2 and takes a link only, not a value.").arg(input.name, type));
+    case PortKind::Unknown:
+        return mismatch(QStringLiteral("Input %1 has the unknown type %2.").arg(input.name, type));
+    case PortKind::Builtin:
+        break;
+    }
+
+    const QString &id = input.type.type.id;
+    if (id == "text") {
+        if (!value.isString())
+            return mismatch(QStringLiteral("Input %1 takes text, not %2.").arg(input.name, shown(value)));
+        if (input.choices && !input.choices->contains(value.toString())) {
+            Error error = literalError(QStringLiteral("value_not_in_choices"), input,
+                                       QStringLiteral("%1 is not a valid %2.").arg(shown(value), input.name));
+            error.valid = QJsonArray::fromStringList(*input.choices);
+            const QString near = nearest(value.toString(), *input.choices);
+            if (!near.isEmpty())
+                error.hint = QStringLiteral("Did you mean \"%1\"?").arg(near);
+            return {error};
+        }
+        return {};
+    }
+    if (id == "boolean") {
+        if (!value.isBool())
+            return mismatch(QStringLiteral("Input %1 takes true or false, not %2.").arg(input.name, shown(value)));
+        return {};
+    }
+    if (id == "number") {
+        if (!value.isDouble())
+            return mismatch(QStringLiteral("Input %1 takes a number, not %2.").arg(input.name, shown(value)));
+        const double d = value.toDouble();
+        const auto outOfRange = [&](const QString &message) {
+            return Errors{literalError(QStringLiteral("value_out_of_range"), input, message)};
+        };
+        if (input.integer && d != std::trunc(d))
+            return outOfRange(QStringLiteral("Input %1 takes a whole number, not %2.").arg(input.name, shown(value)));
+        if (input.integer && std::abs(d) > maxSafeInteger)
+            return outOfRange(QStringLiteral("%1 is too large for input %2; whole numbers must lie within "
+                                             "plus or minus 2^53.")
+                                  .arg(shown(value), input.name));
+        if (input.min && d < *input.min)
+            return outOfRange(QStringLiteral("%1 is below the minimum of %2 for input %3.")
+                                  .arg(shown(value), shown(*input.min), input.name));
+        if (input.max && d > *input.max)
+            return outOfRange(QStringLiteral("%1 is above the maximum of %2 for input %3.")
+                                  .arg(shown(value), shown(*input.max), input.name));
+        return {};
+    }
+    return mismatch(QStringLiteral("Input %1 is %2 and takes a link only, not a value.").arg(input.name, type));
+}
+
+} // namespace fugue
