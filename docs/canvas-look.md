@@ -106,7 +106,7 @@ the mockups use the same.
 
 | Part | Value |
 | --- | --- |
-| Width | default 60u (240), minimum 40u (160), maximum 120u; resizable |
+| Width | default 60u (240), minimum 40u (160), maximum 120u; auto-sized (longer text values widen it) until a resize pins it; a grip in the bottom right corner, 3u square, two short diagonals shown on hover and selection; double-click returns to auto |
 | Edge | 1 px `hairline` inside the box; `hairline-strong` on hover |
 | Fill | `body` |
 | Corner | `r` (header top corners `r − 1` inside the edge) |

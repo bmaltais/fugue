@@ -91,6 +91,22 @@ private slots:
         QCOMPARE(nodeItem(app, "gen")->size(), nodeItem(plain, "gen")->size());
     }
 
+    // FUGUE_SIZE_SHOT=<file.png> QT_QUICK_BACKEND=rhi build/test_canvas_resize_window screenshot
+    void screenshot() {
+        const QString out = qEnvironmentVariable("FUGUE_SIZE_SHOT");
+        if (out.isEmpty())
+            QSKIP("set FUGUE_SIZE_SHOT to a .png path");
+        App app(load(R"({"fugue":1,"graph":{"nodes":{
+          "p":{"type":"fugue/text","version":"1.0.0","inputs":{"text":"a red fox in a misty birch wood at dawn, soft light, a long prompt that wraps over several lines of the node"}},
+          "g":{"type":"fugue/generate-image","version":"1.0.0","inputs":{"prompt":{"from":"p.text"}}},
+          "x":{"type":"acme.tools/ghost","version":"1.0.0","inputs":{"in":{"from":"p.text"}}}}},
+          "layout":{"nodes":{"p":{"pos":[0,0]},"g":{"pos":[300,0]},"x":{"pos":[0,200]}},"view":{"center":[300,150],"zoom":1}}})"));
+        QVERIFY(app.open());
+        QTest::mouseMove(app.window, grip(app, "g"));
+        QTest::qWait(200);
+        QVERIFY(app.window->grabWindow().save(out));
+    }
+
     void aPressOnTheBodyStillMovesTheNode() {
         App app(load(sheet));
         QVERIFY(app.open());
