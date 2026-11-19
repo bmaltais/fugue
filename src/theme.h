@@ -10,7 +10,23 @@
 #include <QVariantMap>
 
 // Follows the Omarchy theme live: its whole palette, whether it is light or
-// dark, and Hyprland's window rounding as radius.
+// dark, Hyprland's window rounding as radius, and the desktop text size.
+//
+// Exposed to QML as the context property `theme`. For all QML (the canvas
+// included), use only these names and never a literal color or size:
+//   background, panel, border, text, muted, accent, accentForeground, error
+//                         semantic colors (panel is a surface raised from
+//                         background, border a hairline on either, muted
+//                         secondary text; all readable on light and dark)
+//   portColor(type)       color of a port type ("text", "number", "boolean",
+//                         "image", "video", "audio"; anything else, a declared
+//                         type, gets "declared"); portColors is the whole map.
+//                         Color is never the only signal (spec 12.6)
+//   radius                corner radius in px (Hyprland rounding)
+//   textSize              desktop base text size in px (12 by default);
+//                         derive other sizes from it, e.g. textSize * 1.2
+//   light                 true on a light theme
+//   colors                the raw palette (red, green, selection, ...)
 class Theme : public QObject {
     Q_OBJECT
     Q_PROPERTY(QColor accent READ accent NOTIFY changed)
@@ -20,6 +36,13 @@ class Theme : public QObject {
     Q_PROPERTY(QVariantMap colors READ colors NOTIFY changed)
     Q_PROPERTY(bool light READ light NOTIFY changed)
     Q_PROPERTY(int radius READ radius NOTIFY changed)
+    Q_PROPERTY(int textSize READ textSize NOTIFY changed)
+    Q_PROPERTY(QColor text READ foreground NOTIFY changed)
+    Q_PROPERTY(QColor panel READ panel NOTIFY changed)
+    Q_PROPERTY(QColor border READ border NOTIFY changed)
+    Q_PROPERTY(QColor muted READ muted NOTIFY changed)
+    Q_PROPERTY(QColor error READ error NOTIFY changed)
+    Q_PROPERTY(QVariantMap portColors READ portColors NOTIFY changed)
 
 public:
     // Tests pass a temp directory, a fake hyprctl, and their own event socket.
@@ -34,12 +57,22 @@ public:
     QVariantMap colors() const;
     bool light() const { return m_light; }
     int radius() const { return m_radius; }
+    int textSize() const { return m_textSize; }
+    QColor text() const { return foreground(); }
+    QColor panel() const;
+    QColor border() const;
+    QColor muted() const;
+    QColor error() const { return color("red"); }
+    QVariantMap portColors() const;
+    Q_INVOKABLE QColor portColor(const QString &type) const;
 
     struct Palette {
         QHash<QString, QColor> colors;
         bool light = false;
     };
     static Palette readThemeColors(const QString &path);
+    // `[font] base-size` of a shell.toml in px, or 0 when absent or not sane.
+    static int readTextSize(const QString &path);
 
 signals:
     void changed();
@@ -50,6 +83,8 @@ private:
     void refreshRounding();
 
     QString m_directory;
+    QString m_shellFile;
+    int m_textSize = 12;
     QHash<QString, QColor> m_colors;
     bool m_light = false;
     QFileSystemWatcher m_watcher;

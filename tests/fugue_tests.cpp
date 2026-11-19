@@ -12,6 +12,7 @@
 #include <QRegularExpression>
 #include <QTemporaryDir>
 #include <QtTest>
+#include <cmath>
 
 #include "backend.h"
 #include "theme.h"
@@ -244,6 +245,140 @@ private slots:
         QVERIFY(events.listen(hypr.filePath("events.sock")));
         QTRY_VERIFY_WITH_TIMEOUT(events.hasPendingConnections(), 5000);
         QTRY_COMPARE(theme.radius(), 8);
+    }
+
+    void themeFollowsTheDesktopTextSize() {
+        QTemporaryDir dir;
+        Theme theme(dir.path());
+        QCOMPARE(theme.textSize(), 12);
+        // The user's shell.toml wins over the theme's own.
+        QVERIFY(QDir(dir.path()).mkpath("theme"));
+        QVERIFY(write(dir.path() + "/theme/shell.toml", "[font]\nbase-size = 14\n"));
+        QTRY_COMPARE(theme.textSize(), 14);
+        QVERIFY(write(dir.path() + "/shell.toml", "[bar]\nbase-size = 3\n[font]\nfamily = \"x\"\nbase-size = 18 # big\n"));
+        QTRY_COMPARE(theme.textSize(), 18);
+        QVERIFY(write(dir.path() + "/shell.toml", "[font]\nbase-size = 400\n"));
+        QTRY_COMPARE(theme.textSize(), 14);
+    }
+
+    void themeHasSemanticTokens() {
+        QTemporaryDir dir;
+        Theme dark(dir.path());
+        QCOMPARE(dark.error(), dark.colors().value("red").value<QColor>());
+        QCOMPARE(dark.text(), dark.foreground());
+        QCOMPARE(dark.portColor("number"), dark.colors().value("blue").value<QColor>());
+        QCOMPARE(dark.portColor("some-declared-type"), dark.portColor("declared"));
+        for (const QString &type : QStringList{"text", "number", "boolean", "image", "video", "audio", "declared"})
+            QVERIFY2(dark.portColor(type).isValid(), qPrintable(type));
+        QVERIFY(dark.portColors().contains("image"));
+
+        // Panels and muted text read on both a dark and a light theme.
+        auto contrast = [](const QColor &a, const QColor &b) {
+            auto l = [](const QColor &c) {
+                auto f = [](double v) { return v <= .04045 ? v / 12.92 : std::pow((v + .055) / 1.055, 2.4); };
+                return .2126 * f(c.redF()) + .7152 * f(c.greenF()) + .0722 * f(c.blueF());
+            };
+            return (std::max(l(a), l(b)) + .05) / (std::min(l(a), l(b)) + .05);
+        };
+        QVERIFY(QDir(dir.path()).mkpath("theme"));
+        QVERIFY(write(dir.path() + "/theme/colors.toml", "mode = \"light\"\nbackground = \"#fafafa\"\n"
+                                                         "foreground = \"#202020\"\naccent = \"#2255cc\"\n"));
+        Theme light(dir.path());
+        for (const Theme *theme : {&dark, &light}) {
+            QVERIFY(contrast(theme->text(), theme->panel()) >= 7);
+            QVERIFY(contrast(theme->muted(), theme->panel()) >= 3);
+            QVERIFY(contrast(theme->border(), theme->background()) >= 1.2);
+            QVERIFY(theme->panel() != theme->background());
+        }
+        QVERIFY(light.light());
+        QVERIFY(light.panel().lightness() > 200);
+    }
+
+    void translatorMirrorsTheLayoutForRightToLeftLanguages() {
+        QTemporaryDir dir;
+        QVERIFY(write(dir.path() + "/language", "ar\n"));
+        QVERIFY(write(dir.path() + "/ar.json", R"({"Count": "عد"})"));
+        {
+            Translator translator(dir.path() + "/language", dir.path());
+            QCOMPARE(QGuiApplication::layoutDirection(), Qt::RightToLeft);
+            QCOMPARE(translator.translate("Main", "Count"), QString("عد"));
+        }
+        QVERIFY(write(dir.path() + "/language", "da\n"));
+        Translator back(dir.path() + "/language", dir.path());
+        QCOMPARE(QGuiApplication::layoutDirection(), Qt::LeftToRight);
+    }
+
+    // The window on a dark and a light theme, left-to-right and right-to-left:
+    // follows the palette, mirrors its content, scales its text, and is saved
+    // to images (set FUGUE_SHOTS to a directory to keep them for a look).
+    void windowLooksRightInEveryThemeAndDirection_data() {
+        QTest::addColumn<bool>("light");
+        QTest::addColumn<QString>("language");
+        QTest::newRow("dark ltr") << false << "en";
+        QTest::newRow("light ltr") << true << "en";
+        QTest::newRow("dark rtl") << false << "ar";
+        QTest::newRow("light rtl") << true << "ar";
+    }
+
+    void windowLooksRightInEveryThemeAndDirection() {
+        QFETCH(bool, light);
+        QFETCH(QString, language);
+        QTemporaryDir dir;
+        QVERIFY(QDir(dir.path()).mkpath("theme"));
+        QVERIFY(write(dir.path() + "/theme/colors.toml",
+                      light ? "mode = \"light\"\nbackground = \"#fafafa\"\nforeground = \"#202020\"\n"
+                              "accent = \"#2255cc\"\n"
+                            : "background = \"#101418\"\nforeground = \"#d8dee9\"\naccent = \"#88c0d0\"\n"));
+        QVERIFY(write(dir.path() + "/shell.toml", "[font]\nbase-size = 16\n"));
+        QVERIFY(write(dir.path() + "/language", language.toUtf8() + "\n"));
+        QVERIFY(write(dir.path() + "/ar.json", R"({"Count": "عد", "Quit": "إنهاء"})"));
+        Translator translator(dir.path() + "/language", dir.path());
+        QCoreApplication::installTranslator(&translator);
+        Theme theme(dir.path());
+        Backend backend;
+
+        QQmlApplicationEngine engine;
+        QStringList warnings;
+        connect(&engine, &QQmlEngine::warnings, this, [&](const QList<QQmlError> &errors) {
+            for (const auto &error : errors)
+                warnings << error.toString();
+        });
+        engine.rootContext()->setContextProperty("translator", &translator);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.load(QUrl("qrc:/Main.qml"));
+        QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        QTest::qWait(100);
+
+        const bool rtl = language == "ar";
+        const QImage shot = window->grabWindow();
+        QVERIFY(!shot.isNull());
+        // The window's own surface is the theme's background, and the text
+        // follows the desktop size.
+        QCOMPARE(QColor(shot.pixel(4, 4)), theme.background());
+        QCOMPARE(window->property("font").value<QFont>().pixelSize(), 16);
+        QCOMPARE(QGuiApplication::layoutDirection(), rtl ? Qt::RightToLeft : Qt::LeftToRight);
+
+        // Mirrored: the help popup's key column moves to the right edge.
+        QTest::keyClick(window, '?');
+        auto *help = window->findChild<QObject *>("help");
+        QTRY_VERIFY(help->property("opened").toBool());
+        auto *keys = item(help->property("contentItem").value<QQuickItem *>(), "helpKeys");
+        QVERIFY(keys);
+        const QPointF at = keys->mapToItem(help->property("contentItem").value<QQuickItem *>(), QPointF(0, 0));
+        const qreal middle = help->property("contentItem").value<QQuickItem *>()->width() / 2;
+        QVERIFY(rtl ? at.x() > middle : at.x() < middle);
+        QTest::qWait(300);
+        const QImage popup = window->grabWindow();
+        QVERIFY(!popup.isNull());
+        if (const QString out = qEnvironmentVariable("FUGUE_SHOTS"); !out.isEmpty())
+            QVERIFY(popup.save(QString("%1/%2-%3.png").arg(out, light ? "light" : "dark", rtl ? "rtl" : "ltr")));
+
+        QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join('\n')));
+        QCoreApplication::removeTranslator(&translator);
     }
 
     void translatorFallsBackToEnglish() {

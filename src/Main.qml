@@ -12,6 +12,7 @@ ApplicationWindow {
     visible: true
     title: "Fugue"
     color: theme.background
+    font.pixelSize: theme.textSize
 
     Material.theme: theme.light ? Material.Light : Material.Dark
     Material.accent: theme.accent
@@ -99,6 +100,7 @@ ApplicationWindow {
 
                     Label {
                         Layout.preferredWidth: 64
+                        objectName: "helpKeys"
                         text: modelData.keys
                         color: theme.accent
                         font.bold: true
