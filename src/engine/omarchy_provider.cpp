@@ -1,5 +1,6 @@
 #include "omarchy_provider.h"
 
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -87,12 +88,17 @@ struct OmarchyProvider::Job {
     JobResult result;
     bool asking = false; // a poll is in flight
     int failures = 0;    // polls in a row that got no answer
+    qint64 endedAt = 0;  // when it reached a terminal state, in ms
 };
 
 namespace {
 
 // Polls in a row without an answer before the job counts as lost.
 constexpr int kMaxPollFailures = 3;
+
+// How long a finished job is kept when nobody takes its result: as long as the server
+// keeps its own (--completed-ttl-seconds, 8.6).
+constexpr qint64 kFinishedJobTtlMs = 600 * 1000;
 
 // A server's error text: {"error": "..."} or {"error": {"message": "..."}}.
 QString serverMessage(const QJsonObject &body) {
@@ -397,7 +403,24 @@ void OmarchyProvider::describe(Reply<Description> reply) {
     });
 }
 
+qint64 OmarchyProvider::now() const {
+    return m_clock ? m_clock() : QDateTime::currentMSecsSinceEpoch();
+}
+
+// A job leaves m_jobs when its result is taken (result()). One that ended with nothing
+// to take, or whose result nobody asked for, leaves here once it is old.
+void OmarchyProvider::forgetOldJobs() {
+    const qint64 oldest = now() - kFinishedJobTtlMs;
+    for (auto it = m_jobs.begin(); it != m_jobs.end();) {
+        if (it.value()->status.isTerminal() && it.value()->endedAt < oldest)
+            it = m_jobs.erase(it);
+        else
+            ++it;
+    }
+}
+
 void OmarchyProvider::submit(const JobRequest &request, Reply<QString> reply) {
+    forgetOldJobs();
     QPointer<OmarchyProvider> self(this);
     discover([self, request, reply = std::move(reply)](const Result<Discovery> &found) {
         if (!self)
@@ -467,6 +490,7 @@ void OmarchyProvider::submit(const JobRequest &request, Reply<QString> reply) {
 }
 
 void OmarchyProvider::status(const QString &job, Reply<JobStatus> reply) {
+    forgetOldJobs();
     const auto found = m_jobs.value(job);
     if (!found)
         return later(std::move(reply), Result<JobStatus>(makeError("internal", "No job " + job + ".")));
@@ -503,6 +527,9 @@ void OmarchyProvider::result(const QString &job, Reply<JobResult> reply) {
         return later(std::move(reply),
                      Result<JobResult>(makeError("internal", QStringLiteral("Job %1 is %2, not done.")
                                                                  .arg(job, found->status.state))));
+    // Handed over once: the files are in the caller's outputDir, and nothing else is
+    // kept for a job that is over.
+    m_jobs.remove(job);
     later(std::move(reply), Result<JobResult>(found->result));
 }
 
@@ -613,6 +640,8 @@ void OmarchyProvider::change(const QString &id, const JobStatus &status) {
     if (!job || sameStatus(job->status, status))
         return;
     job->status = status;
+    if (status.isTerminal())
+        job->endedAt = now();
     emit statusChanged(id, status);
 }
 

@@ -96,9 +96,12 @@ public:
         if (instance.name.isEmpty())
             instance.name = QStringLiteral("This machine");
         instance.type = QStringLiteral("omarchy");
-        instance.settings.insert("poll_ms", 10);
+        instance.settings.insert("poll_ms", pollMs);
         return std::make_unique<OmarchyProvider>(instance, paths);
     }
+
+    // How often the providers of this fixture poll their jobs (the `poll_ms` setting).
+    static constexpr int pollMs = 10;
 
     // Klein (an edit model) running on the fake server.
     void runKlein() {
@@ -442,7 +445,9 @@ private slots:
             }
         QVERIFY(sawSampling);
 
-        QTest::qWait(50); // a provider that kept polling would hit the 410 now
+        // A provider that kept polling would ask again within one poll interval and get
+        // the 410; five intervals pass and it has not.
+        QTest::qWait(5 * Fixture::pollMs);
         QCOMPARE(fixture.server.requestsTo("GET", "/sdcpp/v1/jobs/job_1").size(), 3);
         const auto result = await<JobResult>([&](auto reply) { provider->result(id, reply); });
         QVERIFY(result.ok());
@@ -455,6 +460,11 @@ private slots:
         QCOMPARE(used.value("width").toInt(), 1024);
         QCOMPARE(used.value("height").toInt(), 768);
         QCOMPARE(used.value("steps").toInt(), 4);
+
+        // The result is handed over once; the provider then forgets the job, so a
+        // long-lived process does not keep every finished job.
+        QVERIFY(!await<JobStatus>([&](auto reply) { provider->status(id, reply); }).ok());
+        QVERIFY(!await<JobResult>([&](auto reply) { provider->result(id, reply); }).ok());
         QCOMPARE(used.value("engine").toString(), QStringLiteral("sdcpp"));
         QCOMPARE(used.value("model").toObject().value("name").toString(), kKlein);
     }
@@ -599,6 +609,25 @@ private slots:
         QCOMPARE(status.state, QStringLiteral("error"));
         QCOMPARE(status.error.code, QStringLiteral("out_of_memory"));
         QVERIFY(status.error.message.contains("out of memory"));
+    }
+
+    // A job with no result to take (failed or cancelled) is kept as long as the server
+    // keeps its own finished jobs, 600 seconds (8.6), then forgotten.
+    void aFinishedJobNobodyAsksAboutIsForgottenAfterTenMinutes() {
+        Fixture fixture;
+        fixture.runKlein();
+        fixture.acceptJobs("job_1");
+        fixture.scriptJob("job_1", {job("failed", {{"error", QJsonObject{{"code", "generation_failed"}, {"message", "no"}}}})});
+        auto provider = fixture.provider();
+        qint64 now = 1000;
+        provider->setClock([&now] { return now; });
+        const QString id = await<QString>([&](auto reply) { provider->submit(fixture.request("image.generate", {{"prompt", "x"}}), reply); }).value();
+        QTRY_VERIFY(await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value().isTerminal());
+
+        now += 599 * 1000;
+        QVERIFY(await<JobStatus>([&](auto reply) { provider->status(id, reply); }).ok());
+        now += 2 * 1000;
+        QVERIFY(!await<JobStatus>([&](auto reply) { provider->status(id, reply); }).ok());
     }
 
     void aServerThatDiesDuringTheJobIsUnreachable() {
