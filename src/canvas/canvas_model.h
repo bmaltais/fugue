@@ -119,6 +119,8 @@ public:
         Thumbnail, // the last image or video frame, as a URL
         ThumbnailInfo, // its info chip ("1024 × 1024")
         ThumbnailRect, // where it sits in the node, from the node's top left
+        ThumbnailText, // text in the thumbnail's place: a shown text or number, a label ("Video · 0:04")
+        ThumbnailDim,  // the slot is a placeholder ("No result yet"): drawn dimmed
     };
 
     explicit NodeList(CanvasModel *canvas);
@@ -309,6 +311,9 @@ public:
     // `thumbnailSize`), empty without one. previewSizeChanged(node) fires when a thumbnail
     // comes, goes or changes size, after the node's rows were laid out again with it.
     QSizeF previewSize(const QString &node) const;
+    // The node card made its rows (it came into view at a readable zoom): rowsMade(node) tells
+    // whoever makes previews only for those (CanvasRuns, the image of a Load Image's file).
+    Q_INVOKABLE void noteRowsMade(const QString &node) { emit rowsMade(node); }
 
     // --- clipboard ---
 
@@ -427,6 +432,7 @@ signals:
     void edited();
     void undoChanged();
     void previewSizeChanged(const QString &node);
+    void rowsMade(const QString &node);
     void zoomRequested(qreal factor);
     void fitRequested();
 
@@ -497,6 +503,8 @@ private:
         qreal thumbnailAspect = 1;
         QSizeF thumbnailSize;
         QString thumbnailInfo;
+        QString thumbnailText;
+        bool thumbnailDim = false;
         QVariantMap values;
     };
 

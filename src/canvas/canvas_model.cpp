@@ -89,6 +89,8 @@ QVariant NodeList::data(const QModelIndex &index, int role) const {
     case Warnings: return run.warnings;
     case Thumbnail: return run.thumbnail;
     case ThumbnailInfo: return run.thumbnailInfo;
+    case ThumbnailText: return run.thumbnailText;
+    case ThumbnailDim: return run.thumbnailDim;
     default: return {};
     }
 }
@@ -99,7 +101,7 @@ QHash<int, QByteArray> NodeList::roleNames() const {
             {Collapsed, "collapsed"}, {Mode, "mode"}, {Selected, "selected"}, {Inputs, "inputs"}, {Outputs, "outputs"},
             {Color, "color"}, {Pinned, "pinned"}, {RunState, "runState"}, {Progress, "progress"},
             {Seconds, "seconds"}, {Error, "error"}, {Warnings, "warnings"}, {Thumbnail, "thumbnail"},
-            {ThumbnailInfo, "thumbnailInfo"}, {ThumbnailRect, "thumbnailRect"}};
+            {ThumbnailInfo, "thumbnailInfo"}, {ThumbnailRect, "thumbnailRect"}, {ThumbnailText, "thumbnailText"}, {ThumbnailDim, "thumbnailDim"}};
 }
 
 LinkList::LinkList(CanvasModel *canvas) : QAbstractListModel(canvas), m_canvas(canvas) {}
@@ -1405,6 +1407,8 @@ void CanvasModel::setRunState(const QString &node, const QVariantMap &state) {
     run.thumbnailAspect = state.value("thumbnailAspect", 1).toReal();
     run.thumbnailInfo = state.value("thumbnailInfo").toString();
     run.thumbnailSize = state.value("thumbnailSize").toSizeF();
+    run.thumbnailText = state.value("thumbnailText").toString();
+    run.thumbnailDim = state.value("thumbnailDim").toBool();
     run.values = state.value("values").toMap();
     const RunInfo before = m_run.value(node);
     const bool previewChanged = before.thumbnail.isEmpty() != run.thumbnail.isEmpty()
@@ -1412,7 +1416,8 @@ void CanvasModel::setRunState(const QString &node, const QVariantMap &state) {
                                 || before.thumbnailAspect != run.thumbnailAspect;
     m_run.insert(node, run);
     relayOut(r, {NodeList::RunState, NodeList::Progress, NodeList::Seconds, NodeList::Error, NodeList::Warnings,
-                 NodeList::Thumbnail, NodeList::ThumbnailInfo, NodeList::Outputs});
+                 NodeList::Thumbnail, NodeList::ThumbnailInfo, NodeList::ThumbnailText, NodeList::ThumbnailDim,
+                 NodeList::Outputs});
     if (previewChanged)
         emit previewSizeChanged(node);
 }

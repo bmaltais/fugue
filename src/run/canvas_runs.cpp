@@ -1,12 +1,14 @@
 #include "run/canvas_runs.h"
 
 #include <QJsonArray>
+#include <QFileInfo>
 #include <QSizeF>
 
 #include <cmath>
 
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
+#include "engine/registry.h"
 #include "workflow/workflows.h"
 
 namespace fugue {
@@ -14,6 +16,15 @@ namespace fugue {
 namespace {
 
 QString topOf(const QString &path) { return path.section('/', 0, 0); }
+
+// The image in a slot that shows text: one transparent pixel.
+constexpr const char *kBlank = "data:image/png;base64,"
+                               "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+
+bool isImagePath(const QString &path) {
+    static const QStringList extensions{"png", "jpg", "jpeg", "webp", "gif", "bmp", "tif", "tiff", "avif"};
+    return extensions.contains(QFileInfo(path).suffix().toLower());
+}
 
 // The last value on an output port as its chip shows it (docs/canvas-look.md 4.5): numbers,
 // on/off and the first line of a text. Media and resources have their own displays.
@@ -35,8 +46,14 @@ QString chipText(const QJsonValue &value) {
 
 } // namespace
 
-CanvasRuns::CanvasRuns(CanvasModel *canvas, Workflows *workflows, RunService *service, QObject *parent)
-    : QObject(parent), m_canvas(canvas), m_workflows(workflows), m_service(service) {
+CanvasRuns::CanvasRuns(CanvasModel *canvas, Workflows *workflows, RunService *service, const Registry *registry,
+                       QObject *parent)
+    : QObject(parent), m_canvas(canvas), m_workflows(workflows), m_service(service), m_registry(registry) {
+    connect(m_service, &RunService::filePreviewed, this, &CanvasRuns::onFilePreviewed);
+    connect(m_canvas, &CanvasModel::rowsMade, this, [this](const QString &node) {
+        m_rowsMade.insert(node);
+        requestInputPreview(node);
+    });
     connect(m_service, &RunService::event, this, &CanvasRuns::onEvent);
     connect(m_service, &RunService::checked, this, &CanvasRuns::onChecked);
     m_checkTimer.setSingleShot(true);
@@ -45,7 +62,10 @@ CanvasRuns::CanvasRuns(CanvasModel *canvas, Workflows *workflows, RunService *se
     m_progressTimer.setSingleShot(true);
     m_progressTimer.setInterval(33);
     connect(&m_progressTimer, &QTimer::timeout, this, &CanvasRuns::flushProgress);
-    connect(m_canvas, &CanvasModel::edited, this, [this] { scheduleCheck(true); });
+    connect(m_canvas, &CanvasModel::edited, this, [this] {
+        scheduleCheck(true);
+        refreshInputs();
+    });
     connect(m_canvas, &CanvasModel::documentReset, this, &CanvasRuns::showTab);
     connect(m_workflows, &Workflows::currentChanged, this, &CanvasRuns::showTab);
     showTab();
@@ -153,12 +173,32 @@ void CanvasRuns::show(const QString &tab, const QString &node) {
     const NodeView view = m_tabs.value(tab).nodes.value(node);
     QVariantMap state{{"state", aggregate(view)}, {"progress", view.progress}, {"seconds", view.seconds},
                       {"error", view.error},      {"warnings", view.warnings}, {"values", view.values}};
-    if (!view.thumbnail.isEmpty() && view.thumbnailWidth > 0) {
-        state.insert("thumbnail", view.thumbnail);
-        state.insert("thumbnailAspect", qreal(view.thumbnailHeight) / view.thumbnailWidth);
-        state.insert("thumbnailSize", QSizeF(view.thumbnailWidth, view.thumbnailHeight));
-        state.insert("thumbnailInfo", QStringLiteral("%1 × %2").arg(view.thumbnailWidth).arg(view.thumbnailHeight));
-    }
+    const auto image = [&](const QString &url, int width, int height, const QString &file) {
+        const QString size = QStringLiteral("%1 \u00d7 %2").arg(width).arg(height);
+        state.insert("thumbnail", url);
+        state.insert("thumbnailAspect", qreal(height) / width);
+        state.insert("thumbnailSize", QSizeF(width, height));
+        state.insert("thumbnailInfo", file.isEmpty() ? size : file + QStringLiteral(" \u00b7 ") + size);
+    };
+    const auto text = [&](const QString &shown, qreal aspect, bool dim) {
+        state.insert("thumbnail", QString::fromLatin1(kBlank));
+        state.insert("thumbnailAspect", aspect);
+        state.insert("thumbnailText", shown);
+        state.insert("thumbnailDim", dim);
+    };
+    // One slot (docs/canvas-look.md 4.5, 4.6): the last result, else the input file's image
+    // (Load Image before it runs), else a dimmed placeholder on a node made to show one.
+    const NodeInfo info = m_nodeInfo.value(node);
+    if (!view.thumbnail.isEmpty() && view.thumbnailWidth > 0 && view.thumbnailHeight > 0)
+        image(view.thumbnail, view.thumbnailWidth, view.thumbnailHeight, view.thumbnailFile);
+    else if (!view.text.isEmpty())
+        text(view.text, view.textAspect, false);
+    else if (!view.inputThumbnail.isEmpty())
+        image(view.inputThumbnail, view.inputWidth, view.inputHeight, {});
+    else if (view.inputMissing)
+        text(tr("File not found"), 0.5, true);
+    else if (info.showsResult && aggregate(view) != QLatin1String("running"))
+        text(tr("No result yet"), 0.5, true);
     m_pendingProgress.remove(node);
     // A check after each edit restates every node; only the ones that changed are laid out.
     auto shown = m_shown.find(node);
@@ -170,6 +210,8 @@ void CanvasRuns::show(const QString &tab, const QString &node) {
 
 void CanvasRuns::showTab() {
     m_shownTab = currentTab();
+    m_rowsMade.clear(); // the cards are made again, and say so
+    readNodes();
     m_pendingProgress.clear();
     m_shown.clear();
     m_canvas->clearRunState();
@@ -324,12 +366,31 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
                     view.values.insert(it.key(), text);
         }
         const QJsonObject thumbnails = event.value("thumbnails").toObject();
-        if (!thumbnails.isEmpty()) {
-            const QJsonObject thumbnail = thumbnails.contains("image") ? thumbnails.value("image").toObject()
-                                                                       : thumbnails.begin().value().toObject();
+        if (!thumbnails.isEmpty() && !inner) {
+            const QJsonObject thumbnail = thumbnails.contains("image")  ? thumbnails.value("image").toObject()
+                                          : thumbnails.contains("file") ? thumbnails.value("file").toObject()
+                                                                        : thumbnails.begin().value().toObject();
             view.thumbnail = thumbnail.value("url").toString();
             view.thumbnailWidth = thumbnail.value("width").toInt();
             view.thumbnailHeight = thumbnail.value("height").toInt();
+            view.thumbnailFile = m_nodeInfo.value(top).showsResult ? thumbnail.value("file").toString() : QString();
+            view.text = thumbnail.value("label").toString();
+            view.textAspect = view.thumbnailWidth > 0 && view.thumbnail.isEmpty()
+                                  ? qreal(view.thumbnailHeight) / view.thumbnailWidth : 0.5;
+        } else if (!inner) {
+            // What a Preview shows when it is a text or a number: its excerpt in the slot.
+            const QJsonObject shown = event.value("shown").toObject();
+            for (auto it = shown.begin(); it != shown.end(); ++it) {
+                if (it.value().isObject() || it.value().isArray())
+                    continue;
+                QString excerpt = it.value().isString() ? it.value().toString() : chipText(it.value());
+                if (excerpt.size() > 240)
+                    excerpt = excerpt.left(239) + QChar(0x2026);
+                view.text = excerpt;
+                view.textAspect = 0.5;
+                view.thumbnail.clear();
+                break;
+            }
         }
     } else if (kind == QLatin1String("node.skipped")) {
         // Cancelled before it started: it would still run.
@@ -469,6 +530,85 @@ void CanvasRuns::showError(const QString &node) {
     // Its header in the middle of the view, at the zoom the view has.
     const QPointF at = m_canvas->position(node) + QPointF(30 * m_canvas->unit(), 10 * m_canvas->unit());
     m_canvas->setView(at.x(), at.y(), m_canvas->view().value("zoom", 1).toReal());
+}
+
+// What each node of the shown workflow is, for its slot: a node made to show a result
+// (Preview, Save Image) and the image file a file input names (Load Image).
+void CanvasRuns::readNodes() {
+    m_nodeInfo.clear();
+    if (!m_registry)
+        return;
+    const Document document = m_canvas->document();
+    for (auto it = document.graph.nodes.cbegin(); it != document.graph.nodes.cend(); ++it) {
+        NodeInfo info;
+        info.showsResult = it->type == QLatin1String("fugue/preview") || it->type == QLatin1String("fugue/save-image");
+        if (const NodeType *type = m_registry->nodeType(it->type)) {
+            for (const InputSpec &input : type->inputs) {
+                const InputValue value = it->inputs.value(input.name);
+                if (input.widget() == QLatin1String("file") && value.kind() == InputValue::Kind::Literal
+                    && value.literal().isString() && isImagePath(value.literal().toString())) {
+                    info.imageFile = value.literal().toString();
+                    break;
+                }
+            }
+        }
+        if (info.showsResult || !info.imageFile.isEmpty())
+            m_nodeInfo.insert(it.key(), info);
+    }
+    TabRuns &runs = m_tabs[m_shownTab];
+    for (auto it = m_nodeInfo.cbegin(); it != m_nodeInfo.cend(); ++it)
+        if (it->showsResult && !runs.nodes.contains(it.key()))
+            runs.nodes.insert(it.key(), NodeView{});
+}
+
+// After an edit (a paste, a drop, a pick, an undo): a Load Image whose file changed shows the
+// new one; its last result goes, being of the old file.
+void CanvasRuns::refreshInputs() {
+    const QHash<QString, NodeInfo> before = m_nodeInfo;
+    readNodes();
+    TabRuns &runs = m_tabs[m_shownTab];
+    QSet<QString> nodes;
+    for (auto it = before.cbegin(); it != before.cend(); ++it)
+        nodes.insert(it.key());
+    for (auto it = m_nodeInfo.cbegin(); it != m_nodeInfo.cend(); ++it)
+        nodes.insert(it.key());
+    for (const QString &node : std::as_const(nodes)) {
+        const QString was = before.value(node).imageFile, now = m_nodeInfo.value(node).imageFile;
+        if (was == now) {
+            if (!before.contains(node)) // a new Preview or Save Image: its placeholder
+                show(m_shownTab, node);
+            continue;
+        }
+        if (runs.nodes.contains(node)) {
+            NodeView &view = runs.nodes[node];
+            view.thumbnail.clear();
+            view.text.clear();
+            view.inputThumbnail.clear();
+            view.inputMissing = false;
+        }
+        requestInputPreview(node);
+        show(m_shownTab, node);
+    }
+}
+
+void CanvasRuns::requestInputPreview(const QString &node) {
+    const QString file = m_nodeInfo.value(node).imageFile;
+    if (file.isEmpty() || !m_rowsMade.contains(node))
+        return;
+    m_service->previewFile(m_shownTab + '\n' + node, file);
+}
+
+void CanvasRuns::onFilePreviewed(const QString &token, const QString &path, const QJsonObject &thumbnail) {
+    const QString tab = token.section('\n', 0, 0), node = token.section('\n', 1);
+    if (tab != m_shownTab || m_nodeInfo.value(node).imageFile != path)
+        return; // the file changed since
+    NodeView &view = m_tabs[tab].nodes[node];
+    view.inputMissing = thumbnail.value("missing").toBool();
+    view.inputThumbnail = thumbnail.value("url").toString();
+    view.inputWidth = thumbnail.value("width").toInt();
+    view.inputHeight = thumbnail.value("height").toInt();
+    show(tab, node);
+    emit inputPreviewed(node);
 }
 
 QVariantList CanvasRuns::errors() const { return m_tabs.value(m_shownTab).errors; }

@@ -62,7 +62,9 @@ class CanvasRuns : public QObject {
     Q_PROPERTY(QString lastStatus READ lastStatus NOTIFY errorsChanged)
 
 public:
-    CanvasRuns(CanvasModel *canvas, Workflows *workflows, RunService *service, QObject *parent = nullptr);
+    // `registry` tells which inputs are image files (a Load Image's) for their thumbnails.
+    CanvasRuns(CanvasModel *canvas, Workflows *workflows, RunService *service, const Registry *registry = nullptr,
+               QObject *parent = nullptr);
     ~CanvasRuns() override;
 
     void registerCommands(CommandRegistry &commands);
@@ -95,6 +97,7 @@ signals:
     void errorsChanged();
     void finished(const QString &run, const QString &status);
     void checkApplied();
+    void inputPreviewed(const QString &node);
 
 private:
     struct NodeView {
@@ -107,6 +110,13 @@ private:
         int thumbnailWidth = 0;
         int thumbnailHeight = 0;
         QVariantMap values;
+        QString thumbnailFile; // the file a sink wrote, named under its picture
+        QString text;          // a text, number or media label shown in the slot
+        qreal textAspect = 0.5;
+        QString inputThumbnail; // the image of the node's input file, before it runs
+        int inputWidth = 0;
+        int inputHeight = 0;
+        bool inputMissing = false;
         QHash<QString, QString> inner; // a group's nodes: path id -> state
         QHash<QString, qreal> innerSeconds;
     };
@@ -127,6 +137,10 @@ private:
     void show(const QString &tab, const QString &node);
     void flushProgress();
     void setContext();
+    void readNodes();
+    void refreshInputs();
+    void requestInputPreview(const QString &node);
+    void onFilePreviewed(const QString &token, const QString &path, const QJsonObject &thumbnail);
     void updateRunning();
     QString nodeTitle(const QString &tab, const QString &path) const;
     static QString aggregate(const NodeView &view);
@@ -134,6 +148,13 @@ private:
     CanvasModel *m_canvas;
     Workflows *m_workflows;
     RunService *m_service;
+    const Registry *m_registry;
+    struct NodeInfo {
+        bool showsResult = false; // Preview, Save Image: a placeholder until a result comes
+        QString imageFile;        // the image file its file input names
+    };
+    QHash<QString, NodeInfo> m_nodeInfo; // of the shown workflow
+    QSet<QString> m_rowsMade;            // its nodes whose cards made their rows
     CommandRegistry *m_commands = nullptr;
     QHash<QString, TabRuns> m_tabs;
     QHash<QString, QString> m_tabOf; // run id -> tab id

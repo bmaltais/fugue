@@ -17,6 +17,9 @@
 // A run that does not compile never gets a folder, like `fugue run`: it ends at once with a
 // run.done whose errors are the compiler's.
 //
+// Video and audio results get {"label": "Video · 0:04", "width"?, "height"?} in place of a
+// thumbnail, and a result with a file (Save Image's) also "file": its file name.
+//
 // Events come back as event(run, {...}) on the UI thread: the scheduler's (9.4), plus the
 // run.queued and run.done of runs that never reached the scheduler. node.done, node.cached
 // and node.preview also carry "thumbnails": {<output name>: {"url", "width", "height"}} for
@@ -97,6 +100,12 @@ public:
     // replaces one not made yet.
     void check(const RunRequest &request, int ticket);
 
+    // A thumbnail of the image file at `path` (a Load Image's input, before any run), made on
+    // the run thread like a result's (cached by path, time and size) and answered by
+    // filePreviewed() with the same token: {"url", "width", "height"}, or {"missing": true}
+    // for a file that is gone, unreadable, not an image or outside the runs' file roots.
+    void previewFile(const QString &token, const QString &path);
+
     // Calls `call` on the run thread and waits for it (tests: a FakeProvider lives there).
     void onRunThread(const std::function<void()> &call);
 
@@ -105,6 +114,7 @@ signals:
     // nodes: {<path id>: {"state", "reason"?}}; problems: the compiler's and checkGraph's
     // errors and warnings.
     void checked(int ticket, const QJsonObject &nodes, const QJsonArray &problems);
+    void filePreviewed(const QString &token, const QString &path, const QJsonObject &thumbnail);
 
 private:
     QThread *m_thread;

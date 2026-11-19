@@ -75,7 +75,7 @@ int main(int argc, char *argv[]) {
     runSetup.addNodeTypes = fugue::nodes::addBuiltinNodeTypes;
     runSetup.addKernels = fugue::nodes::addBuiltinKernels;
     fugue::RunService runService(runSetup);
-    fugue::CanvasRuns runs(&canvasModel, &workflows, &runService);
+    fugue::CanvasRuns runs(&canvasModel, &workflows, &runService, &registry);
     runs.registerCommands(commands);
 
     QQmlApplicationEngine engine;

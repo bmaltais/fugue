@@ -41,7 +41,9 @@ QJsonObject thumbnailOf(const QJsonObject &handle, const QString &dir) {
     if (key.isEmpty() || key.contains('/')) {
         const QFileInfo info(path);
         key = QString::fromLatin1(
-            QCryptographicHash::hash((path + QString::number(info.lastModified().toMSecsSinceEpoch())).toUtf8(),
+            QCryptographicHash::hash((path + QString::number(info.lastModified().toMSecsSinceEpoch()) + ':'
+                                      + QString::number(info.size()))
+                                         .toUtf8(),
                                      QCryptographicHash::Sha256)
                 .toHex());
     }
@@ -72,6 +74,23 @@ QJsonObject thumbnailOf(const QJsonObject &handle, const QString &dir) {
         }
     }
     return {{"url", QUrl::fromLocalFile(file).toString()}, {"width", width}, {"height", height}};
+}
+
+// What stands in for a thumbnail of a video or audio result: a label, and a video's shape.
+// (A video's first frame would need ffmpeg per result; the label is what 4.5 falls back to.)
+QJsonObject mediaLabel(const QJsonObject &handle) {
+    const QString type = handle.value("type").toString();
+    if (type != QLatin1String("video") && type != QLatin1String("audio"))
+        return {};
+    const int seconds = qRound(handle.value("duration").toDouble());
+    const QString length = QStringLiteral("%1:%2").arg(seconds / 60).arg(seconds % 60, 2, 10, QLatin1Char('0'));
+    QJsonObject label{{"label", (type == QLatin1String("video") ? RunService::tr("Video") : RunService::tr("Audio"))
+                                    + QStringLiteral(" \u00b7 ") + length}};
+    if (type == QLatin1String("video")) {
+        label.insert("width", handle.value("width").toInt());
+        label.insert("height", handle.value("height").toInt());
+    }
+    return label;
 }
 
 bool isImage(const QJsonValue &value) {
@@ -213,6 +232,26 @@ public:
         }
     }
 
+    // A thumbnail of an input file (Load Image before it runs): what the run could read only.
+    void previewFile(const QString &token, const QString &path) {
+        if (m_quitting)
+            return;
+        QString file = expandHome(path);
+        if (m_setup.roots) {
+            const Result<QString> allowed = m_setup.roots->checkRead(file, QStringLiteral("file"));
+            if (!allowed) {
+                emit filePreviewed(token, path, {{"missing", true}});
+                return;
+            }
+            file = allowed.value();
+        }
+        const QFileInfo info(file);
+        QJsonObject t;
+        if (info.isFile() && info.isReadable())
+            t = thumbnailOf(QJsonObject{{"path", info.absoluteFilePath()}}, m_thumbnails);
+        emit filePreviewed(token, path, t.isEmpty() ? QJsonObject{{"missing", true}} : t);
+    }
+
     void check(const RunRequest &request, int ticket) {
         m_check = request;
         m_checkTicket = ticket;
@@ -223,6 +262,7 @@ public:
 signals:
     void event(const QString &run, const QJsonObject &event);
     void checked(int ticket, const QJsonObject &nodes, const QJsonArray &problems);
+    void filePreviewed(const QString &token, const QString &path, const QJsonObject &thumbnail);
 
 private:
     struct Waiting {
@@ -344,16 +384,19 @@ private:
             if (const QJsonObject t = thumbnailOf(image, dir); !t.isEmpty())
                 thumbnails.insert("preview", t);
         } else if (kind == QLatin1String("node.done") || kind == QLatin1String("node.cached")) {
-            const QJsonObject outputs = e.value("outputs").toObject();
-            for (auto it = outputs.begin(); it != outputs.end(); ++it)
-                if (isImage(it.value()))
-                    if (const QJsonObject t = thumbnailOf(it.value().toObject(), m_thumbnails); !t.isEmpty())
-                        thumbnails.insert(it.key(), t);
-            const QJsonObject shown = e.value("shown").toObject();
-            for (auto it = shown.begin(); it != shown.end(); ++it)
-                if (isImage(it.value()))
-                    if (const QJsonObject t = thumbnailOf(it.value().toObject(), m_thumbnails); !t.isEmpty())
-                        thumbnails.insert(it.key(), t);
+            for (const char *part : {"outputs", "shown"}) {
+                const QJsonObject values = e.value(QLatin1String(part)).toObject();
+                for (auto it = values.begin(); it != values.end(); ++it) {
+                    QJsonObject t = isImage(it.value()) ? thumbnailOf(it.value().toObject(), m_thumbnails)
+                                                        : mediaLabel(it.value().toObject());
+                    if (t.isEmpty())
+                        continue;
+                    // The file a sink wrote (Save Image): its name goes under the picture.
+                    if (it.value().toObject().contains("path"))
+                        t.insert("file", QFileInfo(it.value().toObject().value("path").toString()).fileName());
+                    thumbnails.insert(it.key(), t);
+                }
+            }
         }
         if (!thumbnails.isEmpty())
             e.insert("thumbnails", thumbnails);
@@ -427,6 +470,7 @@ RunService::RunService(RunSetup setup, QObject *parent)
     m_worker->moveToThread(m_thread);
     connect(m_worker, &RunThread::event, this, &RunService::event);
     connect(m_worker, &RunThread::checked, this, &RunService::checked);
+    connect(m_worker, &RunThread::filePreviewed, this, &RunService::filePreviewed);
     m_thread->start();
     QMetaObject::invokeMethod(m_worker, [w = m_worker] { w->init(); }, Qt::BlockingQueuedConnection);
 }
@@ -452,6 +496,11 @@ void RunService::cancel(const QString &run) {
 
 void RunService::check(const RunRequest &request, int ticket) {
     QMetaObject::invokeMethod(m_worker, [w = m_worker, request, ticket] { w->check(request, ticket); },
+                              Qt::QueuedConnection);
+}
+
+void RunService::previewFile(const QString &token, const QString &path) {
+    QMetaObject::invokeMethod(m_worker, [w = m_worker, token, path] { w->previewFile(token, path); },
                               Qt::QueuedConnection);
 }
 

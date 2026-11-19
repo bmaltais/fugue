@@ -6,6 +6,10 @@
 // every folder (runs, queue, lock, cache, thumbnails) is in the test's temporary folder.
 
 #include <QBuffer>
+#include <QClipboard>
+#include <QGuiApplication>
+#include <QMimeData>
+#include <QTemporaryDir>
 #include <QImage>
 #include <QElapsedTimer>
 #include <QJsonDocument>
@@ -116,7 +120,7 @@ struct RunApp {
         setup.thumbnailDir = root + "/thumbnails";
         setup.collectGarbage = false;
         service = std::make_unique<RunService>(setup);
-        runs = std::make_unique<CanvasRuns>(&app.model, &app.workflows, service.get());
+        runs = std::make_unique<CanvasRuns>(&app.model, &app.workflows, service.get(), &app.registry);
         runs->registerCommands(app.commands);
         app.engine.rootContext()->setContextProperty("runs", runs.get());
     }
@@ -147,10 +151,106 @@ struct RunApp {
 
 } // namespace
 
+const QByteArray kLoadImage = R"({
+  "fugue": 1,
+  "graph": {"nodes": {"src": {"type": "fugue/load-image", "version": "1.0.0"}}},
+  "layout": {"nodes": {"src": {"pos": [100, 100]}}, "view": {"center": [300, 300], "zoom": 1}}
+})";
+
+// Generate Image into a Preview and a Save Image (into the test's folder), and a number shown.
+QByteArray sinksGraph(const QString &folder) {
+    return QStringLiteral(R"({
+  "fugue": 1,
+  "graph": {"nodes": {
+    "words": {"type": "fugue/text", "version": "1.0.0", "inputs": {"text": "a cat"}},
+    "gen": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"prompt": {"from": "words.text"}, "seed": 5}},
+    "show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "gen.image"}}},
+    "save": {"type": "fugue/save-image", "version": "1.0.0",
+             "inputs": {"image": {"from": "gen.image"}, "name": "cat", "folder": "%1", "embed": "none"}},
+    "size": {"type": "fugue/number", "version": "1.0.0", "inputs": {"value": 768}},
+    "show-size": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "size.value"}}}
+  }},
+  "layout": {"nodes": {"words": {"pos": [0, 0]}, "gen": {"pos": [300, 0]}, "show": {"pos": [600, 0]},
+                       "save": {"pos": [600, 300]}, "size": {"pos": [0, 300]}, "show-size": {"pos": [300, 300]}},
+             "view": {"center": [400, 300], "zoom": 0.6}}
+})").arg(folder).toUtf8();
+}
+
 class TestCanvasRun : public QObject {
     Q_OBJECT
 
+    QTemporaryDir pictures;
+
 private slots:
+    void initTestCase() {
+        // Pasted images go to <pictures>/Fugue/inputs (paths.h inputsDir).
+        qputenv("XDG_PICTURES_DIR", pictures.path().toUtf8());
+    }
+
+    // Load Image shows its file before any run (spec 12.7): a paste puts the picture on the
+    // node, undo takes it away again.
+    void pastingIntoLoadImageShowsItsPictureAndUndoTakesItAway() {
+        RunApp r(kLoadImage);
+        QVERIFY(r.app.open());
+        QCOMPARE(r.role("src", NodeList::Thumbnail).toString(), QString());
+        r.app.model.select({"src"});
+        QImage picture(64, 32, QImage::Format_RGB32);
+        picture.fill(Qt::red);
+        auto *data = new QMimeData;
+        data->setImageData(picture);
+        QGuiApplication::clipboard()->setMimeData(data);
+        const qreal height = r.role("src", NodeList::Height).toReal();
+        r.app.key(Qt::Key_V, Qt::ControlModifier);
+        QTRY_VERIFY(r.role("src", NodeList::Thumbnail).toString().startsWith("file://"));
+        QCOMPARE(r.role("src", NodeList::ThumbnailInfo).toString(), QStringLiteral("64 \u00d7 32"));
+        QVERIFY(r.role("src", NodeList::Height).toReal() > height); // the node grew to hold it
+        QQuickItem *card = item(r.app.window->contentItem(), "node-src");
+        QVERIFY(card);
+        QTRY_VERIFY(item(card, "thumbnail") && item(card, "thumbnail")->property("active").toBool());
+
+        r.app.key(Qt::Key_Z, Qt::ControlModifier);
+        QTRY_COMPARE(r.role("src", NodeList::Thumbnail).toString(), QString());
+        QTRY_COMPARE(r.role("src", NodeList::Height).toReal(), height);
+        QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
+    }
+
+    // A file that is not there shows a quiet placeholder, not an error.
+    void aMissingFileShowsAPlaceholder() {
+        RunApp r(kLoadImage);
+        QVERIFY(r.app.open());
+        QVERIFY(r.app.model.widgets()->setText("src", "file", r.app.dir.filePath("gone.png")).isEmpty());
+        QTRY_COMPARE(r.role("src", NodeList::ThumbnailText).toString(), QStringLiteral("File not found"));
+        QVERIFY(r.role("src", NodeList::ThumbnailDim).toBool());
+        QVERIFY(r.app.warnings.isEmpty());
+    }
+
+    // Preview and Save Image show a dimmed "No result yet" before a run, then the image (Save:
+    // with the file it wrote); a Preview of a number shows the number.
+    void previewAndSaveImageShowTheirResultInTheSlot() {
+        QTemporaryDir out;
+        RunApp r(sinksGraph(out.path()));
+        QVERIFY(r.app.open());
+        QCOMPARE(r.role("show", NodeList::ThumbnailText).toString(), QStringLiteral("No result yet"));
+        QVERIFY(r.role("show", NodeList::ThumbnailDim).toBool());
+        QCOMPARE(r.role("save", NodeList::ThumbnailText).toString(), QStringLiteral("No result yet"));
+
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(r.jobs().size(), 1);
+        r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(0), {{"image.png", png(320, 240)}}); });
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(finished.first().at(1).toString(), QStringLiteral("ok"));
+        QVERIFY(r.role("show", NodeList::Thumbnail).toString().startsWith("file://"));
+        QCOMPARE(r.role("show", NodeList::ThumbnailText).toString(), QString());
+        QVERIFY(!r.role("show", NodeList::ThumbnailDim).toBool());
+        QVERIFY(r.role("save", NodeList::Thumbnail).toString().startsWith("file://"));
+        const QString info = r.role("save", NodeList::ThumbnailInfo).toString();
+        QVERIFY2(info.startsWith("cat") && info.endsWith("320 \u00d7 240"), qPrintable(info));
+        QCOMPARE(r.role("show-size", NodeList::ThumbnailText).toString(), QStringLiteral("768"));
+        QVERIFY(r.app.warnings.isEmpty());
+    }
+
+
     // Ctrl+Enter runs the shown workflow: progress shows on the running node, a finished
     // node shows cached with its time, values and thumbnail, a failure inside a group shows
     // on the group's node with the inner node's path id, and its downstream is skipped.

@@ -36,6 +36,8 @@ Item {
     required property string thumbnail
     required property string thumbnailInfo
     required property rect thumbnailRect
+    required property string thumbnailText // in the image's place (a shown text, a label)
+    required property bool thumbnailDim    // a placeholder: no result yet
 
     // Set by the canvas.
     property var canvasModel
@@ -58,6 +60,7 @@ Item {
     readonly property bool wanted: inView && tier <= 1
     property bool rowsMade: false
     onWantedChanged: if (wanted) rowsMade = true
+    onRowsMadeChanged: if (rowsMade) canvasModel.noteRowsMade(nodeId) // previews are made from here (#19)
     property bool seen: false
     onInViewChanged: if (inView) seen = true
     Component.onCompleted: {
@@ -356,10 +359,12 @@ Item {
                 sourceComponent: Thumbnail {
                     source: node.thumbnail
                     info: node.thumbnailInfo
+                    text: node.thumbnailText
                     look: node.look
                     full: face.full
-                    // While a node runs, its previous result stays at half strength.
-                    opacity: face.running ? 0.5 : 1
+                    // While a node runs, its previous result stays at half strength, as does a
+                    // placeholder.
+                    opacity: face.running || node.thumbnailDim ? 0.5 : 1
                 }
             }
             // The resize grip (#49): two short diagonals in the bottom right corner, shown while the
