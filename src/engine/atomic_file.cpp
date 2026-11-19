@@ -45,6 +45,28 @@ QString partialName(QString name) {
     return QStringLiteral(".%1.%2.part").arg(name, unique);
 }
 
+// Puts what was written to `path` (a file or a folder) on the disk, so a rename after it
+// never leaves an empty file behind a power loss. errno on failure.
+bool syncToDisk(const QString &path, bool folder) {
+    const int fd = ::open(QFile::encodeName(path).constData(), (folder ? O_RDONLY | O_DIRECTORY : O_WRONLY) | O_CLOEXEC);
+    if (fd < 0)
+        return false;
+    const bool synced = ::fsync(fd) == 0;
+    const int error = errno;
+    ::close(fd);
+    errno = error;
+    return synced;
+}
+
+// The file a link at `path` stands for (a dotfile manager's), followed to its end, so it is
+// that file that is replaced and the link stays. `path` itself when it is no link.
+QString linkedFile(const QString &path) {
+    QFileInfo info(path);
+    for (int hops = 0; hops < 40 && info.isSymLink(); ++hops)
+        info = QFileInfo(info.symLinkTarget());
+    return info.absoluteFilePath();
+}
+
 } // namespace
 
 QString writeFailureCode(int error) {
@@ -125,7 +147,7 @@ Result<bool> PartialFile::commit(const QString &target, Overwrite overwrite) {
 }
 
 Errors replaceFile(const QString &path, const QByteArray &bytes, const QString &what, FileMode mode) {
-    const QFileInfo info(path);
+    const QFileInfo info(linkedFile(path));
     if (Errors errors = makeFolder(info.absolutePath()); !errors.isEmpty())
         return errors;
     PartialFile partial(info.absolutePath(), info.fileName());
@@ -139,9 +161,12 @@ Errors replaceFile(const QString &path, const QByteArray &bytes, const QString &
     }
     if (Errors errors = partial.write(bytes, what); !errors.isEmpty())
         return errors;
-    const Result<bool> committed = partial.commit(path, Overwrite::Replace);
+    if (!syncToDisk(partial.path(), false))
+        return {writeFailed(what, errno)};
+    const Result<bool> committed = partial.commit(info.absoluteFilePath(), Overwrite::Replace);
     if (!committed)
         return committed.errors();
+    syncToDisk(info.absolutePath(), true); // the new name; the content is safe either way
     return {};
 }
 
