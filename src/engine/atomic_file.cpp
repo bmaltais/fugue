@@ -25,8 +25,19 @@ QString uniquePart() {
     return QStringLiteral("%1-%2").arg(::getpid()).arg(next.fetch_add(1));
 }
 
-Error moveFailed(const QString &target, int error) {
-    return makeError(QStringLiteral("permission_denied"),
+// The 13.3 code for a failed write, from its errno: a missing folder is file_not_found, a
+// refusal is permission_denied, and anything else (a full disk) is node_failed, the code
+// for a failure no other code fits. The message names the cause.
+QString writeFailureCode(int error) {
+    if (error == ENOENT || error == ENOTDIR)
+        return QStringLiteral("file_not_found");
+    if (error == EACCES || error == EPERM || error == EROFS)
+        return QStringLiteral("permission_denied");
+    return QStringLiteral("node_failed");
+}
+
+Error writeFailed(const QString &target, int error) {
+    return makeError(writeFailureCode(error),
                      QStringLiteral("Cannot write %1: %2.").arg(target, QString::fromLocal8Bit(std::strerror(error))));
 }
 
@@ -69,8 +80,9 @@ PartialFile::~PartialFile() {
 
 Errors PartialFile::write(const QByteArray &bytes, const QString &what) const {
     QFile out(m_path);
+    errno = 0;
     if (!out.open(QIODevice::WriteOnly) || out.write(bytes) != bytes.size() || !out.flush())
-        return {makeError(QStringLiteral("permission_denied"), QStringLiteral("Cannot write %1.").arg(what))};
+        return {writeFailed(what, errno != 0 ? errno : EIO)};
     return {};
 }
 
@@ -79,7 +91,7 @@ Result<bool> PartialFile::commit(const QString &target, Overwrite overwrite) {
     const QByteArray to = QFile::encodeName(target);
     if (overwrite == Overwrite::Replace) {
         if (std::rename(from.constData(), to.constData()) != 0)
-            return moveFailed(target, errno);
+            return writeFailed(target, errno);
         m_committed = true;
         return true;
     }
@@ -92,10 +104,10 @@ Result<bool> PartialFile::commit(const QString &target, Overwrite overwrite) {
     if (errno == EEXIST)
         return false;
     if (errno != EINVAL && errno != ENOSYS)
-        return moveFailed(target, errno);
+        return writeFailed(target, errno);
     // A filesystem without RENAME_NOREPLACE: a hard link is made only when the name is free.
     if (::link(from.constData(), to.constData()) != 0)
-        return errno == EEXIST ? Result<bool>(false) : Result<bool>(moveFailed(target, errno));
+        return errno == EEXIST ? Result<bool>(false) : Result<bool>(writeFailed(target, errno));
     QFile::remove(m_path);
     m_committed = true;
     return true;

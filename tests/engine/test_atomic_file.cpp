@@ -140,7 +140,7 @@ private slots:
         PartialFile partial(path("no/such/folder"), "a.png");
         const Errors written = partial.write("x", path("no/such/folder/a.png"));
         QVERIFY(hasErrors(written));
-        QCOMPARE(written.first().code, QString("permission_denied"));
+        QCOMPARE(written.first().code, QString("file_not_found"));
     }
 };
 
