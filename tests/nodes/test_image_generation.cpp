@@ -16,6 +16,7 @@
 
 #include <vips/vips8>
 
+#include "engine/embed.h"
 #include "engine/file_hashes.h"
 #include "engine/media.h"
 #include "engine/registry.h"
@@ -555,6 +556,49 @@ private slots:
         // The reference sent was the generated picture, byte for byte (it already fits).
         QCOMPARE(QByteArray::fromBase64(sent.at(1).value("ref_images").toArray().at(0).toString().toLatin1()),
                  readFile(machine.file("job_1.png")));
+    }
+
+    // The same nodes ending in sinks: Save Image writes the edited picture with the workflow
+    // embedded (engine and model from the run), and Previews show Generate Image's values used.
+    void aGraphEndsInSaveImageAndPreviews() {
+        FakeMachine machine;
+        const auto node = [](const QString &type, const QJsonObject &inputs) {
+            return QJsonObject{{"type", type}, {"version", "1.0.0"}, {"inputs", inputs}};
+        };
+        const auto from = [](const QString &port) { return QJsonObject{{"from", port}}; };
+        const QJsonObject nodes{
+            {"g", node(kGenerate, {{"prompt", "a lighthouse at dusk"}, {"seed", 42}, {"width", 768}})},
+            {"e", node(kEdit, {{"instruction", "make it night"}, {"images", QJsonArray{from("g.image")}}})},
+            {"s", node("fugue/save-image", {{"image", from("e.image")}, {"name", "night"},
+                                            {"folder", machine.file("out")}})},
+            {"seed", node("fugue/preview", {{"value", from("g.seed")}})},
+            {"size", node("fugue/preview", {{"value", from("g.height")}})},
+            {"model", node("fugue/preview", {{"value", from("g.model")}})}};
+        writeFile(machine.file("flow.fugue"), compact(QJsonObject{{"fugue", 1}, {"graph", QJsonObject{{"nodes", nodes}}}}));
+
+        const FakeMachine::Ran ran = machine.fugue({"run", machine.file("flow.fugue"), "--wait", "--json"});
+        QCOMPARE(ran.exitCode, 0);
+        QCOMPARE(ran.lines().last().value("status").toString(), QStringLiteral("ok"));
+        // Width set, height the model's default.
+        QCOMPARE(machine.jobsSent().at(0).value("width").toInt(), 768);
+        QCOMPARE(machine.jobsSent().at(0).value("height").toInt(), 1024);
+
+        const FakeMachine::Ran result =
+            machine.fugue({"runs", "result", ran.lines().first().value("run").toString(), "--json"});
+        const QJsonObject outputs =
+            QJsonDocument::fromJson(result.out).object().value("data").toObject().value("outputs").toObject();
+        QCOMPARE(outputs.value("seed").toObject().value("value").toInteger(), qint64(42));
+        QCOMPARE(outputs.value("size").toObject().value("value").toInt(), 1024);
+        QCOMPARE(outputs.value("model").toObject().value("value").toObject(), handle(FakeMachine::kRecipe));
+
+        const QString saved = outputs.value("s").toObject().value("file").toObject().value("path").toString();
+        QVERIFY2(saved.startsWith(machine.file("out")), qPrintable(result.out));
+        QCOMPARE(sizeOf(saved), QSize(768, 1024));
+        const Result<QJsonObject> embedded = readEmbeddedWorkflow(saved);
+        QVERIFY2(embedded.ok(), qPrintable(embedded.ok() ? QString() : embedded.error().message));
+        const QJsonObject ranNodes = embedded->value("run").toObject().value("nodes").toObject();
+        QCOMPARE(ranNodes.value("e").toObject().value("engine").toString(), QStringLiteral("sdcpp"));
+        QCOMPARE(ranNodes.value("g").toObject().value("model").toObject(), handle(FakeMachine::kRecipe));
     }
 };
 
