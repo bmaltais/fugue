@@ -701,6 +701,10 @@ FocusScope {
         // the port under it when that can take it; dashed in the error color when it cannot.
         Shape {
             id: draggedLink
+            objectName: "draggedLink"
+            // The default (geometry) renderer drew this wire as only its casing after a frame
+            // had been drawn with the pointer still on the start port (a degenerate curve).
+            preferredRendererType: Shape.CurveRenderer
             visible: canvas.dragging
             readonly property bool invalid: canvas.hoverProblem !== ""
             readonly property bool snapped: canvas.hoverPort.node !== undefined && !invalid
