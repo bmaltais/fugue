@@ -593,4 +593,21 @@ Errors checkLiteral(const InputSpec &input, const QJsonValue &value, PortKind ki
     return mismatch(QStringLiteral("Input %1 is %2 and takes a link only, not a value.").arg(input.name, type));
 }
 
+Errors checkItemCount(const InputSpec &input, qsizetype count) {
+    Errors errors;
+    if (input.minItems && count < *input.minItems)
+        errors.append(literalError(QStringLiteral("value_out_of_range"), input,
+                                   QStringLiteral("Input %1 takes at least %2 items, not %3.")
+                                       .arg(input.name)
+                                       .arg(*input.minItems)
+                                       .arg(count)));
+    if (input.maxItems && count > *input.maxItems)
+        errors.append(literalError(QStringLiteral("value_out_of_range"), input,
+                                   QStringLiteral("Input %1 takes at most %2 items, not %3.")
+                                       .arg(input.name)
+                                       .arg(*input.maxItems)
+                                       .arg(count)));
+    return errors;
+}
+
 } // namespace fugue

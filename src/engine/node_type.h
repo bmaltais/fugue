@@ -99,4 +99,8 @@ struct NodeType {
 // and item counts. Errors carry `input`; the caller sets `node`.
 Errors checkLiteral(const InputSpec &input, const QJsonValue &value, PortKind kind);
 
+// Checks a list input's item count against its `min_items` and `max_items`
+// (`value_out_of_range`). Errors carry `input`; the caller sets `node`.
+Errors checkItemCount(const InputSpec &input, qsizetype count);
+
 } // namespace fugue

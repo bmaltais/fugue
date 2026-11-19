@@ -634,9 +634,18 @@ private:
         std::optional<Error> problem; // the node fails
     };
 
-    // What is wrong with a linked value of a built-in type (text, number, boolean) for
-    // `spec`, by the rules checkLiteral applies to a literal; one item at a time for a list.
+    // What is wrong with a linked value for `spec`: a list's item count (min_items,
+    // max_items, which the compiler cannot count through a link), and for a built-in type
+    // (text, number, boolean) the rules checkLiteral applies to a literal, item by item.
     Errors linkedValueProblems(const InputSpec &spec, const Value &value) const {
+        if (spec.type.list && value.isList()) {
+            Errors counted = checkItemCount(spec, value.items().size());
+            if (!counted.isEmpty()) {
+                for (Error &error : counted)
+                    error.hint = QStringLiteral("The list comes by a link: change it where it is made.");
+                return counted;
+            }
+        }
         if (!m_env.registry || m_env.registry->portKind(spec.type.type) != PortKind::Builtin)
             return {};
         const QList<Value> items = value.isList() ? value.items() : QList<Value>{value};
