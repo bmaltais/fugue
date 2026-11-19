@@ -27,13 +27,16 @@ Item {
     }
 
     // One shortcut for each key that has an owner. Qt Quick turns a window's shortcuts off
-    // while a modal popup is open, so each popup carries its own set (`?` closes the overlay
-    // it opened; Ctrl+Q quits from the question), and the window's set sleeps meanwhile so
-    // that a key never fires twice.
+    // while a modal popup is open, so each popup carries the keys of its own commands, `only`
+    // (`?` closes the overlay it opened; Ctrl+Q quits from the question), never an edit of
+    // the canvas behind its scrim; the window's set sleeps meanwhile so that a key never
+    // fires twice.
     component KeyShortcuts: Instantiator {
         id: keys
         property bool awake: true
-        model: App.commands.activeKeys
+        property list<string> only: [] // command ids; empty: every command
+        model: keys.only.length === 0 ? App.commands.activeKeys
+                                      : App.commands.activeKeys.filter(k => keys.only.indexOf(App.commands.ownerOf(k)) >= 0)
         delegate: Shortcut {
             required property string modelData
             sequence: modelData
@@ -91,7 +94,7 @@ Item {
         background: PopupSurface { look: root.look }
         ColumnLayout {
             spacing: 4 * root.u
-            KeyShortcuts { awake: quitAsk.opened }
+            KeyShortcuts { awake: quitAsk.opened; only: ["app.quit"] }
             LayoutMirroring.enabled: root.rightToLeft
             LayoutMirroring.childrenInherit: true
             Label {
@@ -186,7 +189,7 @@ Item {
 
         contentItem: ColumnLayout {
             spacing: 0
-            KeyShortcuts { awake: help.opened }
+            KeyShortcuts { awake: help.opened; only: ["app.shortcuts"] }
             LayoutMirroring.enabled: root.rightToLeft
             LayoutMirroring.childrenInherit: true
 

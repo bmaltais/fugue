@@ -306,6 +306,42 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // The `?` overlay and the quit question cover the canvas: only their own keys work
+    // there, never an edit of the canvas behind the scrim.
+    void aModalPopupKeepsOnlyItsOwnKeys() {
+        App app(load(linked));
+        QVERIFY(app.open());
+        app.drag(Qt::LeftButton, app.screen(100, 110), app.screen(100, 160)); // prompt, selected and unsaved
+        QCOMPARE(app.model.selectedIds(), QStringList{"prompt"});
+        auto *help = app.window->findChild<QObject *>("help");
+        auto *ask = app.window->findChild<QObject *>("quitAsk");
+        QVERIFY(help && ask);
+        auto tryEdits = [&] {
+            app.key(Qt::Key_Delete);
+            app.key(Qt::Key_Backspace);
+            app.key(Qt::Key_B, Qt::ControlModifier);
+            app.key(Qt::Key_D, Qt::ControlModifier);
+            app.key(Qt::Key_L);
+        };
+
+        app.key(Qt::Key_F1);
+        QTRY_VERIFY(help->property("opened").toBool());
+        tryEdits();
+        app.key('?');
+        QTRY_VERIFY(!help->property("visible").toBool());
+
+        app.key(Qt::Key_Q, Qt::ControlModifier);
+        QTRY_VERIFY(ask->property("opened").toBool());
+        tryEdits();
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!ask->property("visible").toBool());
+
+        QCOMPARE(app.model.nodes()->rowCount(), 4);
+        QCOMPARE(nodeModeName(app.model.document().graph.nodes.value("prompt").mode), QString("normal"));
+        QVERIFY(!app.model.linksHidden());
+        QCOMPARE(app.model.undoStack()->count(), 1);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
 
 
     // The hovered wire is worked out again when the wires change under a still pointer: a

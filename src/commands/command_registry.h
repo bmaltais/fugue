@@ -103,7 +103,7 @@ public:
     // The command that owns the key in the active contexts, when it has a handler; empty
     // when none does. Among commands bound to one key, the most specific context wins, and
     // the user's own binding wins over a default in the same context.
-    QString ownerOf(const QString &key) const;
+    Q_INVOKABLE QString ownerOf(const QString &key) const;
     // Runs the owner of the key. False when nothing owns it.
     Q_INVOKABLE bool triggerKey(const QString &key);
 
