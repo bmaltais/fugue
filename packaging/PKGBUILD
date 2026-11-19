@@ -13,6 +13,7 @@ url='https://github.com/bmaltais/fugue'
 license=('MIT')
 options=('!debug')
 depends=(
+  'ffmpeg'
   'hicolor-icon-theme'
   'libvips'
   'qt6-base'
