@@ -275,6 +275,17 @@ private slots:
         QTRY_COMPARE(theme.radius(), 8);
     }
 
+    // hyprctl answering slowly, as on a busy machine (a test run under ctest -j8), still
+    // sets the corners: the query is only given up when it hangs.
+    void themeWaitsForASlowHyprctl() {
+        QTemporaryDir dir, hypr;
+        const QString command = fakeHyprctl(hypr.path());
+        QVERIFY(write(command, "#!/bin/bash\nsleep 1\ncat '" + hypr.path().toUtf8() + "/response.json'\n"));
+        QVERIFY(write(hypr.filePath("response.json"), "{\"int\":6}"));
+        Theme theme(dir.path(), nullptr, command);
+        QTRY_COMPARE(theme.radius(), 6);
+    }
+
     void themeFollowsTheDesktopTextSize() {
         QTemporaryDir dir;
         Theme theme(dir.path());

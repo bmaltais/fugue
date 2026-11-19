@@ -54,8 +54,10 @@ Theme::Theme(const QString &directory, QObject *parent, const QString &hyprctl, 
     // Without Hyprland the corners stay sharp, like Omarchy's default.
     const bool hyprland = directory.isEmpty() && !qEnvironmentVariableIsEmpty("HYPRLAND_INSTANCE_SIGNATURE");
     m_hyprctl = !hyprctl.isEmpty() ? hyprctl : hyprland ? QStandardPaths::findExecutable("hyprctl") : QString();
+    // The query runs beside the event loop, so the wait only gives up on a hyprctl that hangs;
+    // half a second dropped answers on a busy machine and left the corners as they were.
     m_roundingTimeout.setSingleShot(true);
-    m_roundingTimeout.setInterval(500);
+    m_roundingTimeout.setInterval(5000);
     connect(&m_roundingTimeout, &QTimer::timeout, &m_roundingProcess, &QProcess::kill);
     connect(&m_roundingProcess, &QProcess::errorOccurred, this, [this] { m_roundingTimeout.stop(); });
     connect(&m_roundingProcess, &QProcess::finished, this, [this](int code, QProcess::ExitStatus status) {

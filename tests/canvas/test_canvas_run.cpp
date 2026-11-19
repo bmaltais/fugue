@@ -409,7 +409,12 @@ private slots:
         QTRY_COMPARE(finished.size(), 1);
         QCOMPARE(finished.first().at(1).toString(), QStringLiteral("ok"));
         QCOMPARE(r.jobs().size(), 1); // the group never ran
-        QCOMPARE(r.state("show"), QString()); // not part of this run
+        // Not part of this run: Preview has no result, and a check says it would run. (The
+        // check after the seed edit's pause may land before or after the run ends, so its
+        // state is read after a check of its own.)
+        QVERIFY(r.state("show") != QLatin1String("cached") && r.state("show") != QLatin1String("running"));
+        r.runs->checkNow();
+        QTRY_COMPARE(r.state("show"), QStringLiteral("stale"));
     }
 
     // A run of the window waits in the queue the CLI's workers share, behind theirs.
