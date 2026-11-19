@@ -27,20 +27,11 @@ private:
     const QString m_port;
 };
 
-// "~" and "~/..." mean the home folder, as the file picker's paths and hand-written
-// workflows both use it.
-QString expandHome(const QString &path) {
-    if (path == QLatin1String("~"))
-        return QDir::homePath();
-    if (path.startsWith(QLatin1String("~/")))
-        return QDir::homePath() + path.mid(1);
-    return path;
-}
-
 class LoadImageKernel : public NodeKernel {
 public:
     Result<Values> run(const NodeContext &context) override {
-        const QString file = expandHome(context.input("file").text());
+        // The scheduler has expanded "~" (paths.h), so the file is the one the key was made from.
+        const QString file = context.input("file").text();
         if (!QFileInfo(file).isFile())
             return makeError(QStringLiteral("file_not_found"), QStringLiteral("No image file at %1.").arg(file),
                              QStringLiteral("Pick the file again in the node."));
@@ -113,7 +104,7 @@ public:
 
         // Relative folders are under the output folder, so a workflow made elsewhere cannot
         // write outside it by accident.
-        QString folder = expandHome(context.input("folder").text().trimmed());
+        QString folder = context.input("folder").text().trimmed();
         if (folder.isEmpty())
             folder = outputDir();
         else if (QDir::isRelativePath(folder))

@@ -255,6 +255,34 @@ private slots:
         QVERIFY(run(flow(second)).outcome.ran.contains("l"));
     }
 
+    // "~/..." is the home folder, and the file there is keyed by its content like any other:
+    // the same file by its absolute path is a hit, other bytes under the same "~" path a miss.
+    void loadImageUnderHomeIsKeyedByContent() {
+        const QByteArray home = qgetenv("HOME");
+        QVERIFY(QDir().mkpath(path("home")));
+        qputenv("HOME", path("home").toUtf8());
+        auto restore = qScopeGuard([&] { qputenv("HOME", home); });
+        const QString file = path("home/tilde.png");
+        QVERIFY(QFile::copy(makePng("tilde-a", 13, 3), file));
+        auto flow = [](const QString &where) {
+            return QByteArray("{'l': {'type': 'fugue/load-image', 'inputs': {'file': '") + where.toUtf8() + "'}},"
+                   " 'p': {'type': 'fugue/preview', 'inputs': {'value': {'from': 'l.width'}}}}";
+        };
+        const Ran first = run(flow(file));
+        QVERIFY2(first.error.isEmpty(), qPrintable(first.error));
+        QVERIFY(first.outcome.ran.contains("l"));
+        const Ran tilde = run(flow("~/tilde.png"));
+        QVERIFY2(tilde.error.isEmpty(), qPrintable(tilde.error));
+        QVERIFY2(!tilde.outcome.ran.contains("l"), "the same file under ~ was not a cache hit");
+        // Other bytes at the same path: not the cached result.
+        QVERIFY(QFile::remove(file));
+        QVERIFY(QFile::copy(makePng("tilde-b", 15, 5), file));
+        const Ran changed = run(flow("~/tilde.png"));
+        QVERIFY2(changed.error.isEmpty(), qPrintable(changed.error));
+        QVERIFY(changed.outcome.ran.contains("l"));
+        QCOMPARE(changed.outcome.outputs.value("l").value("width").number(), 15.0);
+    }
+
     // --- Save Image ---
 
     // load -> save, with the given inputs of the save node (JSON object text without braces).

@@ -18,6 +18,7 @@
 
 #include "engine/file_hashes.h"
 #include "engine/ids.h"
+#include "engine/paths.h"
 
 namespace fugue {
 
@@ -671,9 +672,14 @@ private:
             } else if (empty) {
                 continue;
             }
+            const bool pathLiteral = (spec.widget() == QLatin1String("file") || spec.widget() == QLatin1String("folder")) &&
+                                     value.kind() == Value::Kind::Json && value.json().isString();
+            // "~" is expanded here, once: the node reads, and the key names, the same file.
+            if (pathLiteral)
+                value = Value(expandHome(value.text()));
             n.inputs.insert(spec.name, value);
             // A file read by path is keyed by its content, not its path (10.1).
-            if (spec.widget() == QLatin1String("file") && value.kind() == Value::Kind::Json && value.json().isString()) {
+            if (pathLiteral && spec.widget() == QLatin1String("file")) {
                 const QString hash = m_env.hashes->hash(value.text());
                 if (!hash.isEmpty()) {
                     resolved.keyInputs.insert(spec.name, QJsonObject{{"file", hash}});
