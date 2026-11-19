@@ -228,9 +228,10 @@ private slots:
         // sets it late in exec), which is why only a worker records its own pid.
         QTRY_VERIFY(isRunWorker(worker.processId(), "run-a"));
         QVERIFY(!isRunWorker(worker.processId(), "run-b"));
+        const qint64 pid = worker.processId(); // QProcess forgets it once the process ends
         worker.closeWriteChannel();
         QVERIFY(worker.waitForFinished());
-        QVERIFY(!isRunWorker(worker.processId(), "run-a"));
+        QVERIFY(!isRunWorker(pid, "run-a"));
     }
 
     // A cancel signals the worker it checked, never a process that got its id since:
@@ -251,10 +252,11 @@ private slots:
         worker.start("sh", {"-c", "read line", "__worker", "run-a"});
         QVERIFY(worker.waitForStarted());
         QTRY_VERIFY(isRunWorker(worker.processId(), "run-a"));
-        QVERIFY(signalRunWorker(worker.processId(), "run-a", SIGTERM));
+        const qint64 pid = worker.processId(); // QProcess forgets it once the process ends
+        QVERIFY(signalRunWorker(pid, "run-a", SIGTERM));
         QVERIFY(worker.waitForFinished());
         QCOMPARE(worker.exitStatus(), QProcess::CrashExit); // ended by the signal
-        QVERIFY(!signalRunWorker(worker.processId(), "run-a", SIGTERM)); // gone
+        QVERIFY(!signalRunWorker(pid, "run-a", SIGTERM)); // gone
     }
 };
 
