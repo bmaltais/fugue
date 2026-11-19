@@ -12,8 +12,10 @@
 // is typed (so a save or a copy meanwhile has it), and finish() ends the edit, one step for
 // the whole session; cancel() puts the value back and leaves no step. An invalid value is
 // never written: preview() and the set calls return why, for the field to show, and leave the
-// document as it was. A session ends by itself when the document is replaced (another tab, a
-// file opened), and a value is never written to a node or input that is no longer there.
+// document as it was. A session ends by itself, as its own step, when any other edit begins
+// (a command run while the field has focus, an undo), so the two never merge into one step;
+// and without a step when the document is replaced (another tab, a file opened). Either way
+// sessionEnded tells the field. A value is never written to a node or input that is gone.
 //
 // Seeds (6.2): "fixed" stores a number, "random" stores {"auto": "random"}, and "increment"
 // stores a number and lists the input under layout.nodes.<id>.increment, so the file keeps
@@ -90,6 +92,11 @@ public:
     Q_INVOKABLE void finish();
     Q_INVOKABLE void cancel();
     Q_INVOKABLE bool editing() const { return !m_session.node.isEmpty(); }
+    // Ends the session as finish() does and tells the field (sessionEnded). The canvas model
+    // calls it when another edit begins.
+    void endSession();
+    // True while the session writes its own value (not another edit).
+    bool writing() const { return m_writing; }
 
     // --- numbers (spin, slider, seed) ---
     // `from` moved by `steps` of the input's step (1 for a whole number, else 0.1 when it has
@@ -133,8 +140,9 @@ public:
 
 signals:
     void modelsChanged();
-    // A session ended without finish() or cancel(): the document was replaced under it.
-    void sessionDropped();
+    // A session ended without finish() or cancel(): another edit began, or the document was
+    // replaced. The field closes.
+    void sessionEnded();
 
 private:
     struct Target {
@@ -159,6 +167,7 @@ private:
         fugue::InputValue before;
         bool open = false; // holds an edit open on the model
     } m_session;
+    bool m_writing = false;
     ModelSource m_source;
     QHash<QString, QList<Model>> m_models; // by resource type
     QSet<QString> m_loading;

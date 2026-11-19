@@ -428,10 +428,21 @@ private slots:
         app.key(Qt::Key_C, Qt::AltModifier); // node.collapse is not a field's key
         QTRY_VERIFY(!app.typing());
         QCOMPARE(app.stored("all", "name"), QJsonValue("owl"));
-        QCOMPARE(app.steps(), 1);
-        // Nothing is left open: the next edit is a step of its own.
-        app.model.widgets()->setValue("all", "flag", true);
+        // The typing and the collapse are a step each.
         QCOMPARE(app.steps(), 2);
+        app.key(Qt::Key_Z, Qt::ControlModifier);
+        QCOMPARE(app.stored("all", "name"), QJsonValue("owl"));
+        QVERIFY(!app.model.document().layout.value("nodes").toObject().value("all").toObject().value("collapsed").toBool());
+        // Bypass while typing (Ctrl+B is not a field's key): again a step each.
+        app.click(app.in("all", "name"));
+        QTRY_VERIFY(app.typing());
+        app.key(Qt::Key_End);
+        app.type("s");
+        app.key(Qt::Key_B, Qt::ControlModifier);
+        QTRY_VERIFY(!app.typing());
+        QCOMPARE(app.steps(), 3);
+        QCOMPARE(app.stored("all", "name"), QJsonValue("owls"));
+        QCOMPARE(app.model.document().graph.nodes.value("all").mode, NodeMode::Bypass);
     }
 
     void anotherTabEndsTheEditWithoutWritingIntoIt() {

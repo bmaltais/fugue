@@ -140,7 +140,7 @@ WidgetEdit::WidgetEdit(const Registry *registry, CanvasModel *canvas, QObject *p
         if (!editing())
             return;
         m_session = {};
-        emit sessionDropped();
+        emit sessionEnded();
     });
 }
 
@@ -269,12 +269,13 @@ void WidgetEdit::write(const QString &node, const QString &input, const QJsonVal
         n.inputs.remove(input);
     else
         n.inputs.insert(input, InputValue::fromJson(value));
+    // The session's own value goes into its open edit; anything else is an edit of its own,
+    // which ends the session first (CanvasModel::beginEdit).
     const bool inSession = editing() && m_session.node == node && m_session.input == input;
-    // The session's edit was closed under it (an undo finishes gestures): open it again, so
-    // the rest of the typing is still one step.
-    if (inSession && m_canvas->m_editDepth == 0)
-        m_canvas->beginEdit();
+    const bool wasWriting = m_writing;
+    m_writing = inSession;
     m_canvas->commit(document, text);
+    m_writing = wasWriting;
 }
 
 QString WidgetEdit::stepText(const QString &node, const QString &input) const {
@@ -335,8 +336,9 @@ void WidgetEdit::begin(const QString &node, const QString &input) {
         finish();
     if (!target(node, input).spec || !m_canvas->m_document.graph.nodes.contains(node))
         return;
-    m_session = {node, input, m_canvas->m_document.graph.nodes.value(node).inputs.value(input), true};
+    // Opened before the session exists, so it is not taken for another edit.
     m_canvas->beginEdit();
+    m_session = {node, input, m_canvas->m_document.graph.nodes.value(node).inputs.value(input), true};
 }
 
 QString WidgetEdit::preview(const QString &text) {
@@ -362,6 +364,13 @@ void WidgetEdit::finish() {
     m_session = {};
     if (m_canvas->m_editDepth > 0)
         m_canvas->endEdit(text);
+}
+
+void WidgetEdit::endSession() {
+    if (!editing())
+        return;
+    finish();
+    emit sessionEnded();
 }
 
 void WidgetEdit::cancel() {

@@ -96,11 +96,12 @@ Rectangle {
 
     Connections {
         target: field.host.edits
-        function onSessionDropped() {
+        function onSessionEnded() {
             if (field.closing)
                 return
             field.closing = true
             field.host.closeEditor()
+            field.host.giveFocusBack()
         }
     }
 

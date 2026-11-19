@@ -177,7 +177,7 @@ private slots:
 
     void aSessionEndsWhenTheDocumentIsReplaced() {
         Fixture f;
-        QSignalSpy dropped(&f.edits, &WidgetEdit::sessionDropped);
+        QSignalSpy dropped(&f.edits, &WidgetEdit::sessionEnded);
         f.edits.begin("prompt", "text");
         QCOMPARE(f.edits.preview("snow"), QString());
         f.canvas.setDocument(document(fixture)); // another tab, or a file opened
@@ -188,6 +188,32 @@ private slots:
         f.edits.finish();
         QCOMPARE(f.stored("prompt", "text"), QJsonValue("a red fox"));
         QCOMPARE(f.steps(), 0);
+    }
+
+    void anotherEditEndsTheSessionAsItsOwnStep() {
+        Fixture f;
+        QSignalSpy ended(&f.edits, &WidgetEdit::sessionEnded);
+        f.edits.begin("prompt", "text");
+        QCOMPARE(f.edits.preview("snow"), QString());
+        // A toggle, a command, a seed advance: not merged into the typing.
+        QCOMPARE(f.edits.setValue("all", "flag", true), QString());
+        QCOMPARE(ended.count(), 1);
+        QVERIFY(!f.edits.editing());
+        QCOMPARE(f.steps(), 2);
+        f.canvas.undo();
+        QCOMPARE(f.stored("all", "flag"), QJsonValue(QJsonValue::Undefined));
+        QCOMPARE(f.stored("prompt", "text"), QJsonValue("snow"));
+        // The field's late finish does nothing.
+        f.edits.finish();
+        QCOMPARE(f.steps(), 2);
+
+        f.edits.begin("all", "count");
+        QCOMPARE(f.edits.preview("9"), QString());
+        f.canvas.select({"all"});
+        f.canvas.toggleCollapsed();
+        QCOMPARE(f.canvas.undoStack()->index(), 3);
+        f.canvas.undo();
+        QCOMPARE(f.stored("all", "count"), QJsonValue(9));
     }
 
     void aSessionOnANodeThatGoesAwayWritesNothing() {

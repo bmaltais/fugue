@@ -90,11 +90,12 @@ Rectangle {
 
     Connections {
         target: area.host.edits
-        function onSessionDropped() {
+        function onSessionEnded() {
             if (area.closing)
                 return
             area.closing = true
             area.host.closeEditor()
+            area.host.giveFocusBack()
         }
     }
 
