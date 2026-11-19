@@ -362,6 +362,25 @@ private slots:
         QVERIFY(nodeEnded);
     }
 
+    // A window that closed (or crashed) mid-run is not asked to cancel through its folder: no
+    // one would read the request. Its run is ended as its worker's would be.
+    void cancellingADeadWindowsRunSaysTheWorkerIsGone() {
+        const QString id = "20260101-000000-000-wind";
+        auto folder = RunFolder::create(runsRoot(), id);
+        QVERIFY(folder.ok());
+        folder->writeState(QJsonObject{{"status", "running"}});
+        write(queueDir() + "/0-00000000000001-" + id,
+              QJsonDocument(QJsonObject{{"run", id}, {"pid", double(deadPid())}, {"owner", "window"},
+                                        {"process_start", 1}})
+                  .toJson());
+        const Outcome o = fugue({"runs", "cancel", id, "--json"});
+        QVERIFY(o.exitCode != 0);
+        QVERIFY(o.data().value("status").toString() != QLatin1String("cancelling"));
+        QCOMPARE(statusOf(id), QString("failed"));
+        QVERIFY(!QFile::exists(RunFolder::open(runsRoot(), id)->path() + "/cancel"));
+        QVERIFY(queued().isEmpty());
+    }
+
     void anEntryWhoseProcessIsGoneIsDiscarded() {
         // A crashed worker left itself first in the queue, and its run unfinished.
         const QString dead = "20260101-000000-000-dead";

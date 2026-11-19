@@ -237,8 +237,10 @@ Reply cancelRun(const RunFolder &folder, const std::optional<QueueEntry> &seen, 
         QueueEntry now;
         entry = queue.find(id, &now) ? std::optional<QueueEntry>(now) : std::nullopt;
     }
-    // The window's own run: no signal reaches it, so it is asked through the run folder.
-    if (entry && entry->inProcess && folder.requestCancel())
+    // The window's own run: no signal reaches it, so it is asked through the run folder,
+    // while that window lives (its pid and start time); a gone one's run is ended below.
+    if (entry && entry->inProcess && entry->pid > 0 && processStartTime(entry->pid) == entry->processStart
+        && folder.requestCancel())
         return Reply::success(QJsonObject{{"id", id}, {"status", "cancelling"}, {"cancelled", true}},
                               QStringLiteral("Cancelling %1.").arg(id));
     // Active (or about to be): the worker ends the run when it is told to. Only a process
