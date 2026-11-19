@@ -327,10 +327,10 @@ QStringList ImageInputs::storeClipboard(const QMimeData &data) {
     const QStringList files = clipboardFiles(data);
     if (files.isEmpty())
         emit message(tr("Could not paste the image: %1").arg(bytes.error().message));
-    return storeFiles(files, tr("paste"));
+    return storeFiles(files);
 }
 
-QStringList ImageInputs::storeFiles(const QStringList &paths, const QString &verb) {
+QStringList ImageInputs::storeFiles(const QStringList &paths) {
     const FileRoots roots = FileRoots::forInputs();
     QStringList stored, failures;
     for (const QString &path : paths) {
@@ -341,7 +341,7 @@ QStringList ImageInputs::storeFiles(const QStringList &paths, const QString &ver
             failures.append(QStringLiteral("%1: %2").arg(QFileInfo(path).fileName(), result.error().message));
     }
     if (!failures.isEmpty())
-        emit message(tr("Could not %1 the image: %2").arg(verb, failures.join(QLatin1Char(' '))));
+        emit message(tr("Could not take the image: %1").arg(failures.join(QLatin1Char(' '))));
     return stored;
 }
 
@@ -393,7 +393,7 @@ bool ImageInputs::pasteInto(const QString &node) {
 }
 
 bool ImageInputs::dropFiles(const QStringList &paths, QPointF at, const QString &onNode) {
-    return take(storeFiles(paths, tr("drop")), accepts(onNode, QStringLiteral("file")) ? onNode : QString(), at);
+    return take(storeFiles(paths), accepts(onNode, QStringLiteral("file")) ? onNode : QString(), at);
 }
 
 } // namespace fugue

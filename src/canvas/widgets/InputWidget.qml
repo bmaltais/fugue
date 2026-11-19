@@ -132,29 +132,33 @@ Rectangle {
         font.pixelSize: 12
     }
 
-    Rectangle {
-        id: pasteButton
-        objectName: "pasteImageButton"
-        visible: root.pasteable && !root.editingText
-        x: root.width - root.pad - width
-        y: 2
+    // Made only for a Load Image's file input.
+    Loader {
+        id: pasteLoader
+        active: root.pasteable
         z: 2
-        width: root.pasteWidth
-        height: root.height - 4
-        radius: root.smallCorner
-        color: pasteArea.containsMouse ? root.look.selectedRow : "transparent"
-        border.color: root.look.hairline
-        Text {
-            anchors.centerIn: parent
-            text: qsTr("Paste")
-            color: root.look.label
-            font.pixelSize: root.look.labelSize
-        }
-        MouseArea {
-            id: pasteArea
-            anchors.fill: parent
-            hoverEnabled: true
-            onClicked: root.edits.pasteImage(root.nodeId)
+        sourceComponent: Rectangle {
+            objectName: "pasteImageButton"
+            visible: !root.editingText
+            x: root.width - root.pad - width
+            y: 2
+            width: root.pasteWidth
+            height: root.height - 4
+            radius: root.smallCorner
+            color: pasteArea.containsMouse ? root.look.selectedRow : "transparent"
+            border.color: root.look.hairline
+            Text {
+                anchors.centerIn: parent
+                text: qsTr("Paste")
+                color: root.look.label
+                font.pixelSize: root.look.labelSize
+            }
+            MouseArea {
+                id: pasteArea
+                anchors.fill: parent
+                hoverEnabled: true
+                onClicked: root.edits.pasteImage(root.nodeId)
+            }
         }
     }
 

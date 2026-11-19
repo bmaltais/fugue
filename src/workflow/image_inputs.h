@@ -126,7 +126,7 @@ signals:
 
 private:
     QStringList storeClipboard(const QMimeData &data);
-    QStringList storeFiles(const QStringList &paths, const QString &verb);
+    QStringList storeFiles(const QStringList &paths);
     // Puts stored files on the canvas as one undo step: the first into `replace` when it is a
     // node, the others (or all) in new Load Image nodes down from `at`.
     bool take(const QStringList &files, const QString &replace, QPointF at);

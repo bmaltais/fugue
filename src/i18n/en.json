@@ -105,5 +105,13 @@
   "or": "or",
   "random": "random",
   "to close": "to close",
-  "unavailable": "unavailable"
+  "unavailable": "unavailable",
+  "Browse files…": "Browse files…",
+  "Could not paste the image: %1": "Could not paste the image: %1",
+  "Move images": "Move images",
+  "Paste image": "Paste image",
+  "Replace image": "Replace image",
+  "The clipboard holds no image.": "The clipboard holds no image.",
+  "The file of this node comes from a link; take the link out to paste an image.": "The file of this node comes from a link; take the link out to paste an image.",
+  "Could not take the image: %1": "Could not take the image: %1"
 }
