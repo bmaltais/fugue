@@ -52,6 +52,8 @@ FocusScope {
     // "pan", "move", "link", "marquee", or "alt" (a press with Alt on a node, not yet a drag)
     // while a button is down
     property string gesture: ""
+    property int gestureButton: 0  // the button that holds the gesture
+    property int ignoredButtons: 0 // pressed while another held a gesture: their release does nothing
     property point pressAt        // where the gesture began, in canvas coordinates
     property point rightPressAt   // where the right button went down
     property point panStart       // world.x, world.y when a pan began
@@ -291,16 +293,25 @@ FocusScope {
                    : canvas.spaceHeld ? Qt.OpenHandCursor : Qt.ArrowCursor
 
         onPressed: mouse => {
+            // A second button while one holds a gesture is left out of it: the gesture goes
+            // on, and that button's release does nothing (no context menu mid-drag).
+            if (canvas.gesture !== "") {
+                if (mouse.buttons & canvas.gestureButton) {
+                    canvas.ignoredButtons |= mouse.button
+                    return
+                }
+                canvas.finishGesture(canvas.pointer.x, canvas.pointer.y, 0) // its release never came
+            }
             // A field on the canvas (a widget being typed into) gives up its focus first: the
             // canvas is its focus scope, so forceActiveFocus alone would hand focus back to it.
             if (canvas.Window.activeFocusItem)
                 canvas.Window.activeFocusItem.focus = false
             canvas.forceActiveFocus()
-            canvas.gesture = ""
             if (mouse.button === Qt.RightButton) {
                 canvas.rightPressAt = Qt.point(mouse.x, mouse.y) // a click opens the menu on release
                 return
             }
+            canvas.gestureButton = mouse.button
             canvas.pressAt = Qt.point(mouse.x, mouse.y)
             canvas.pointer = canvas.pressAt
             canvas.pressWorld = canvas.toWorld(mouse.x, mouse.y)
@@ -395,16 +406,23 @@ FocusScope {
         }
 
         onReleased: mouse => {
+            if (canvas.ignoredButtons & mouse.button) {
+                canvas.ignoredButtons &= ~mouse.button
+                return
+            }
             // A right-click opens the context menu; a right-drag does nothing (12.3).
             if (mouse.button === Qt.RightButton) {
-                if (Math.hypot(mouse.x - canvas.rightPressAt.x, mouse.y - canvas.rightPressAt.y)
+                if (canvas.gesture === "" && Math.hypot(mouse.x - canvas.rightPressAt.x, mouse.y - canvas.rightPressAt.y)
                         < Application.styleHints.startDragDistance)
                     canvas.contextMenuRequested(mouse.x, mouse.y)
                 return
             }
             canvas.finishGesture(mouse.x, mouse.y, mouse.modifiers)
         }
-        onCanceled: canvas.finishGesture(canvas.pointer.x, canvas.pointer.y, 0)
+        onCanceled: {
+            canvas.ignoredButtons = 0
+            canvas.finishGesture(canvas.pointer.x, canvas.pointer.y, 0)
+        }
 
         onDoubleClicked: mouse => {
             if (mouse.button !== Qt.LeftButton)
@@ -474,6 +492,11 @@ FocusScope {
             model.select([pressedNode], "subtract")
             break
         case "link": {
+            // The model ended the drag already (an undo, an edit from a key): nothing to let go.
+            if (!dragging) {
+                hoverProblem = ""
+                break
+            }
             const from = { node: linkDrag.node, port: linkDrag.port, output: linkDrag.output }
             // Links being moved (Shift+drag) let go on nothing stay as they were: no search.
             const moving = linkDrag.targets !== undefined

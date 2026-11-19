@@ -237,6 +237,78 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // A second button pressed during a left-drag is ignored: the drag goes on and ends as
+    // one step, and the right button's release opens no menu.
+    void anotherButtonDuringADragLeavesItAlone_data() {
+        QTest::addColumn<int>("button");
+        QTest::newRow("right") << int(Qt::RightButton);
+        QTest::newRow("middle") << int(Qt::MiddleButton);
+    }
+    void anotherButtonDuringADragLeavesItAlone() {
+        QFETCH(int, button);
+        const auto other = Qt::MouseButton(button);
+        App app(load(linked));
+        QVERIFY(app.open());
+        QSignalSpy menu(app.canvas, SIGNAL(contextMenuRequested(double, double)));
+        auto press = [&](Qt::MouseButton b, QPoint at) { QTest::mousePress(app.window, b, {}, at); };
+        auto release = [&](Qt::MouseButton b, QPoint at) { QTest::mouseRelease(app.window, b, {}, at); };
+
+        // A node drag: right or middle down and up halfway, then the left let go.
+        const QPoint start = app.screen(100, 110), end = app.screen(100, 160), half = start + (end - start) / 2;
+        press(Qt::LeftButton, start);
+        QTest::mouseMove(app.window, half);
+        press(other, half);
+        release(other, half);
+        QTest::mouseMove(app.window, end);
+        release(Qt::LeftButton, end);
+        QCOMPARE(app.model.position("prompt"), QPointF(20, 150));
+        QCOMPARE(app.model.undoText(), QString("Move"));
+        QVERIFY(app.workflows.unsaved());
+        // The next edit is a step of its own.
+        app.key(Qt::Key_B, Qt::ControlModifier);
+        QCOMPARE(app.model.undoText(), QString("Bypass"));
+        QCOMPARE(app.model.undoStack()->count(), 2);
+
+        // A link drag the same way connects where it is let go.
+        const QPoint out = app.screen(260, 444), in = app.screen(341, 224);
+        press(Qt::LeftButton, out);
+        for (int i = 1; i <= 4; ++i)
+            QTest::mouseMove(app.window, out + (in - out) * i / 8);
+        press(other, out + (in - out) / 2);
+        release(other, out + (in - out) / 2);
+        for (int i = 5; i <= 8; ++i)
+            QTest::mouseMove(app.window, out + (in - out) * i / 8);
+        release(Qt::LeftButton, in);
+        QCOMPARE(from(app, "gen", "prompt"), QString("other.text"));
+        QVERIFY(!canvas_test::item(app.window->contentItem(), "draggedLink")->isVisible());
+        QCOMPARE(app.model.undoText(), QString("Connect"));
+        QCOMPARE(menu.count(), 0);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // Ctrl+Z during a link drag ends the drag; letting go then asks for nothing.
+    void undoDuringALinkDragEndsIt() {
+        App app(load(linked));
+        QVERIFY(app.open());
+        app.drag(Qt::LeftButton, app.screen(100, 110), app.screen(100, 160)); // a step to undo
+        QSignalSpy released(app.canvas, SIGNAL(linkReleased(QVariant, double, double)));
+        const QPoint out = app.screen(260, 444), to = app.screen(500, 650);
+        QTest::mousePress(app.window, Qt::LeftButton, {}, out);
+        for (int i = 1; i <= 4; ++i)
+            QTest::mouseMove(app.window, out + (to - out) * i / 8);
+        app.key(Qt::Key_Z, Qt::ControlModifier);
+        QCOMPARE(app.model.position("prompt"), QPointF(20, 100));
+        for (int i = 5; i <= 8; ++i)
+            QTest::mouseMove(app.window, out + (to - out) * i / 8);
+        QTest::mouseRelease(app.window, Qt::LeftButton, {}, to);
+        QCOMPARE(released.count(), 0);
+        QVERIFY(!app.model.search()->active());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+
+
+
     void editsOnThreeHundredNodesStayQuick() {
         App app(grid(300));
         QVERIFY(app.open());
