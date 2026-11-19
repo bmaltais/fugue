@@ -25,6 +25,7 @@
 #include "menu/menu_commands.h"
 #include "nodes/builtin.h"
 #include "search/node_search.h"
+#include "settings/settings_model.h"
 #include "theme.h"
 #include "translator.h"
 #include "workflow/workflows.h"
@@ -85,6 +86,8 @@ struct App {
     CanvasModel model{&registry};
     fugue::CommandRegistry commands;
     fugue::Workflows workflows{&model, &registry, &commands, {dir.path() + "/recovery", dir.path() + "/trust.json"}};
+    // settings.json and providers.json in the test's own folder, never the owner's.
+    fugue::SettingsModel settings{dir.path() + "/config/fugue/settings.json", dir.path() + "/config/fugue/providers.json"};
     QQmlApplicationEngine engine;
     QStringList warnings;
     QList<QUrl> openedUrls; // what help.docs and help.report-issue opened
@@ -106,6 +109,8 @@ struct App {
         model.search()->registerCommands(commands);
         registerCanvasCommands(commands, model);
         fugue::bindMenuCommands(commands, model, [this](const QUrl &url) { openedUrls << url; });
+        settings.attach(&translator, &model);
+        settings.registerCommands(commands, [this](const QUrl &url) { openedUrls << url; });
         // Opened as a file is: one tab, nothing unsaved.
         workflows.openText(QString::fromUtf8(document.save()));
         QObject::connect(&engine, &QQmlEngine::warnings, [this](const QList<QQmlError> &errors) {
@@ -118,6 +123,7 @@ struct App {
         engine.rootContext()->setContextProperty("canvasModel", &model);
         engine.rootContext()->setContextProperty("commands", &commands);
         engine.rootContext()->setContextProperty("workflows", &workflows);
+        engine.rootContext()->setContextProperty("appSettings", &settings);
     }
 
     bool open() {

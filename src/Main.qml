@@ -5,6 +5,7 @@ import QtQuick.Layouts
 import "canvas"
 import "menu"
 import "search"
+import "settings"
 import "workflow"
 
 ApplicationWindow {
@@ -25,6 +26,8 @@ ApplicationWindow {
     Material.foreground: theme.foreground
 
     readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
+    // The settings (settings/settings_model.h); a test window may run without them.
+    readonly property var appSettingsModel: typeof appSettings === "undefined" ? null : appSettings
 
     // Right-to-left languages mirror the window; the Translator sets the
     // application's layout direction.
@@ -51,6 +54,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 model: canvasModel
+                navigation: win.appSettingsModel ? win.appSettingsModel.navigation : "legacy"
                 onSearchRequested: (x, y) => canvasModel.search.openAt(x, y)
                 onLinkReleased: (from, x, y) => canvasModel.search.openFromLink(from, x, y)
                 onContextMenuRequested: (x, y) => contextMenu.openAt(x, y, false)
@@ -79,6 +83,23 @@ ApplicationWindow {
 
     // The command registry's shortcuts, the `?` overlay and the quit question.
     CommandUi { anchors.fill: parent }
+
+    // The settings panel (#51), made the first time app.settings (Ctrl+,) asks for it.
+    Connections {
+        target: commands
+        function onWindowRequested(id) {
+            if (id !== "app.settings" || !win.appSettingsModel)
+                return
+            if (!win.settingsPanel)
+                win.settingsPanel = settingsComponent.createObject(win.contentItem)
+            win.settingsPanel.open()
+        }
+    }
+    property var settingsPanel: null
+    Component {
+        id: settingsComponent
+        SettingsPanel { model: win.appSettingsModel }
+    }
 
     NodeSearchPopup {
         id: searchPopup

@@ -13,6 +13,8 @@ QString cacheDir();  // $XDG_CACHE_HOME/fugue   (~/.cache/fugue)
 // ($XDG_PICTURES_DIR, else the desktop's setting, else ~/Pictures): ~/Pictures/Fugue, unless
 // settings.json's output_folder names another (engine/settings.h).
 QString outputDir();
+// The output folder when settings.json names none.
+QString defaultOutputDir();
 
 // Where pasted and dropped images are kept (spec 1.4, 14.1): one folder for every workflow,
 // outputDir()/inputs (~/Pictures/Fugue/inputs, so it follows the output folder

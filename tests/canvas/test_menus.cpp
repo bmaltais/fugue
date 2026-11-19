@@ -177,11 +177,13 @@ private slots:
         QVERIFY(app.open());
         QTest::keyClick(app.window, 'E', Qt::AltModifier);
         QTRY_VERIFY(isOpen(app.window, "menuDropdown"));
-        // Nothing selected: Delete is off. Settings (#51) is not built yet: off, at half opacity.
+        // Nothing selected: Delete is off. Rename (#55) is not built yet: off, at half opacity.
+        // Settings (#51) is.
         QVERIFY(!NEED("menuItem-edit.delete")->isEnabled());
-        QQuickItem *settings = find(app.window, "menuItem-app.settings");
-        QVERIFY(settings && !settings->isEnabled());
-        QCOMPARE(settings->opacity(), 0.5);
+        QQuickItem *rename = find(app.window, "menuItem-edit.rename");
+        QVERIFY(rename && !rename->isEnabled());
+        QCOMPARE(rename->opacity(), 0.5);
+        QVERIFY(NEED("menuItem-app.settings")->isEnabled());
         QCOMPARE(NEED("menuItem-edit.undo")->property("text").toString(), QString("Undo"));
         app.key(Qt::Key_Escape);
         QTRY_VERIFY(!isOpen(app.window, "menuDropdown"));

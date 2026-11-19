@@ -91,10 +91,10 @@ public:
     QStringList providerTypes() const;
 
     // Sets one setting (a settings.json key) and writes the file. For a folder, empty text
-    // goes back to the default. Empty when done, else why not (nothing is written).
+    // goes back to the default; a folder may be text or the folder picker's URL. Empty when done, else why not (nothing is written).
     Q_INVOKABLE QString set(const QString &key, const QVariant &value);
     // Adds a folder to, or removes one from, model_paths or pack_paths.
-    Q_INVOKABLE QString addPath(const QString &key, const QString &path);
+    Q_INVOKABLE QString addPath(const QString &key, const QVariant &path);
     Q_INVOKABLE QString removePath(const QString &key, int index);
     // Reads both files again.
     Q_INVOKABLE void reload();

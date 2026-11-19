@@ -29,6 +29,14 @@ QString tilde(const QString &path) {
     return path;
 }
 
+// A path from the panel: typed text, or the folder picker's file:// URL.
+QString pathText(const QVariant &value) {
+    if (value.typeId() == QMetaType::QUrl)
+        return value.toUrl().toLocalFile();
+    const QString text = value.toString();
+    return text.startsWith(QLatin1String("file:")) ? QUrl(text).toLocalFile() : text;
+}
+
 // The path to write: ~ kept as typed, else cleaned.
 QString folderValue(const QString &typed) {
     const QString path = typed.trimmed();
@@ -119,7 +127,8 @@ void SettingsModel::reload() {
 QVariantList SettingsModel::languages() const {
     QVariantList list;
     for (const QString &code : Translator::catalogs()) {
-        QString name = QLocale(code).nativeLanguageName();
+        // A bare code names the language, not a country's variant ("English", not "American English").
+        QString name = code == QLatin1String("en") ? QStringLiteral("English") : QLocale(code).nativeLanguageName();
         if (!name.isEmpty())
             name[0] = name[0].toUpper();
         list.append(QVariantMap{{"code", code}, {"name", name.isEmpty() ? code : name}});
@@ -127,15 +136,23 @@ QVariantList SettingsModel::languages() const {
     return list;
 }
 
-QString SettingsModel::outputFolder() const { return tilde(outputDir()); }
-QString SettingsModel::inputsFolder() const { return tilde(inputsDir()); }
+// As paths.h's outputDir() and inputsDir() find them, from this model's file.
+QString SettingsModel::outputFolder() const {
+    const QString chosen = m_file.settings.outputFolder;
+    return tilde(chosen.isEmpty() ? defaultOutputDir() : QDir::cleanPath(expandHome(chosen)));
+}
+
+QString SettingsModel::inputsFolder() const {
+    const QString chosen = m_file.settings.inputsFolder;
+    return chosen.isEmpty() ? outputFolder() + QStringLiteral("/inputs") : tilde(QDir::cleanPath(expandHome(chosen)));
+}
 
 QString SettingsModel::set(const QString &key, const QVariant &value) {
     if (!m_file.writable)
         return tr("Fix %1 first: it is not a JSON object.").arg(tilde(m_path));
     QJsonValue json = QJsonValue::fromVariant(value);
     if (key == QLatin1String("output_folder") || key == QLatin1String("inputs_folder")) {
-        const QString typed = value.toString().trimmed();
+        const QString typed = pathText(value).trimmed();
         json = typed.isEmpty() ? settingDefault(key) : QJsonValue(folderValue(typed));
     } else if (key == QLatin1String("language")) {
         const QString code = value.toString();
@@ -153,7 +170,8 @@ QString SettingsModel::set(const QString &key, const QVariant &value) {
     return {};
 }
 
-QString SettingsModel::addPath(const QString &key, const QString &path) {
+QString SettingsModel::addPath(const QString &key, const QVariant &value) {
+    const QString path = pathText(value);
     if (key != QLatin1String("model_paths") && key != QLatin1String("pack_paths"))
         return tr("%1 is not a list of folders.").arg(key);
     QJsonArray list = QJsonArray::fromStringList(key == QLatin1String("model_paths") ? modelPaths() : packPaths());

@@ -20,12 +20,16 @@ QString configDir() { return under(QStandardPaths::GenericConfigLocation); }
 QString stateDir() { return under(QStandardPaths::GenericStateLocation); }
 QString cacheDir() { return under(QStandardPaths::GenericCacheLocation); }
 
-QString outputDir() {
-    if (const QString chosen = currentSettings().outputFolder; !chosen.isEmpty())
-        return QDir::cleanPath(expandHome(chosen));
+QString defaultOutputDir() {
     const QString pictures = qEnvironmentVariable("XDG_PICTURES_DIR");
     return (pictures.isEmpty() ? QStandardPaths::writableLocation(QStandardPaths::PicturesLocation) : pictures) +
            QStringLiteral("/Fugue");
+}
+
+QString outputDir() {
+    if (const QString chosen = currentSettings().outputFolder; !chosen.isEmpty())
+        return QDir::cleanPath(expandHome(chosen));
+    return defaultOutputDir();
 }
 
 QString inputsDir() {
