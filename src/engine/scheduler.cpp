@@ -106,6 +106,14 @@ template <typename T, typename Call> Result<T> guarded(Call call) {
     }
 }
 
+// `record` (a node's run.json entry, its node.done or node.cached event) with `shown`, what
+// a sink with no outputs shows, when it shows anything.
+QJsonObject withShown(QJsonObject record, const QJsonObject &shown) {
+    if (!shown.isEmpty())
+        record.insert("shown", shown);
+    return record;
+}
+
 // Gives every output a file and a hash, on the worker thread: an image held
 // in memory is written to <workDir>/<output>.png, and a data handle gets its
 // content hash.
@@ -349,8 +357,7 @@ private:
                 node.insert("key", n.key);
             if (!n.outputs.isEmpty())
                 node.insert("outputs", valuesJson(n.outputs));
-            if (!n.shown.isEmpty())
-                node.insert("shown", n.shown);
+            node = withShown(node, n.shown);
             if (!n.reason.isEmpty())
                 node.insert("reason", n.reason);
             if (n.state == NodeState::Error)
@@ -964,10 +971,8 @@ private:
         n.shown = shownBy(n);
         m_outcome.ran.append(n.path);
         const double seconds = n.started.msecsTo(now()) / 1000.0;
-        QJsonObject done{{"event", "node.done"}, {"node", n.path}, {"outputs", valuesJson(n.outputs)}, {"seconds", seconds}};
-        if (!n.shown.isEmpty())
-            done.insert("shown", n.shown);
-        emitEvent(done);
+        emitEvent(withShown({{"event", "node.done"}, {"node", n.path}, {"outputs", valuesJson(n.outputs)}, {"seconds", seconds}},
+                            n.shown));
         advance();
     }
 
@@ -1051,10 +1056,7 @@ private:
         n.state = state;
         n.outputs = outputs;
         n.shown = shownBy(n);
-        QJsonObject cached{{"event", "node.cached"}, {"node", n.path}, {"outputs", valuesJson(outputs)}};
-        if (!n.shown.isEmpty())
-            cached.insert("shown", n.shown);
-        emitEvent(cached);
+        emitEvent(withShown({{"event", "node.cached"}, {"node", n.path}, {"outputs", valuesJson(outputs)}}, n.shown));
     }
 
     void finish() {
