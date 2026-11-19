@@ -155,6 +155,13 @@ private slots:
         QTRY_COMPARE(r.runs->progress(), 0.5);
         QCOMPARE(r.runs->runningNodes(), QStringList{"gen"});
         QCOMPARE(r.runs->runningWires().size(), 1); // words -> gen
+        // The run pill says so, and a dot travels the wire into the running node.
+        QQuickItem *pillText = item(r.app.window->contentItem(), "runPillText");
+        QVERIFY(pillText);
+        QTRY_VERIFY(pillText->property("text").toString().endsWith("50%"));
+        QQuickItem *dots = item(r.app.window->contentItem(), "runningDots");
+        QVERIFY(dots);
+        QCOMPARE(dots->property("count").toInt(), 1);
 
         r.onFake([&](FakeProvider &f) { f.finish(first, {{"image.png", png(640, 480)}}); });
         QTRY_COMPARE(r.state("gen"), QStringLiteral("cached"));
@@ -187,6 +194,15 @@ private slots:
         QCOMPARE(errors.first().toMap().value("shown").toString(), QStringLiteral("grp"));
         QVERIFY(!r.runs->busy());
         QVERIFY(!r.app.commands.contextActive("run"));
+        QTRY_COMPARE(dots->property("count").toInt(), 0);
+        // After the run the pill counts its errors; a click lists them by path id.
+        pillText = item(r.app.window->contentItem(), "runPillText");
+        QTRY_COMPARE(pillText->property("text").toString(), QStringLiteral("1 error"));
+        QQuickItem *box = item(r.app.window->contentItem(), "runPillBox");
+        QTest::mouseClick(r.app.window, Qt::LeftButton, {},
+                          box->mapToScene(QPointF(box->width() / 2, box->height() / 2)).toPoint());
+        QQuickItem *list = item(r.app.window->contentItem(), "runErrors");
+        QTRY_VERIFY(list && list->isVisible());
         QVERIFY(r.app.warnings.isEmpty());
     }
 
@@ -276,7 +292,8 @@ private slots:
         QTRY_COMPARE(queue.entries().size(), 2);
         QTest::qWait(200);
         QVERIFY(r.jobs().isEmpty()); // still waiting
-        QCOMPARE(r.state("gen"), QString());
+        QVERIFY(r.state("gen") != QLatin1String("running"));
+        QVERIFY(r.runs->busy() && !r.runs->running());
 
         QVERIFY(queue.remove(QStringLiteral("cli-run")));
         worker.release();

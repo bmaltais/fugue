@@ -242,6 +242,25 @@ private slots:
         QCOMPARE(WidgetEdit::numberText(0.25), QString("0.25"));
     }
 
+    // Spec Appendix A (#19): a node added on the canvas starts its seeds on randomize, as
+    // ComfyUI's do; the manifest's default (and so the CLI) stays a fixed number.
+    void aNodeAddedOnTheCanvasStartsItsSeedOnRandomize() {
+        Fixture f;
+        const QString id = f.canvas.addNode("io.example.widgets/all", 0, 400);
+        QCOMPARE(f.edits.seedMode(id, "seed"), QString("random"));
+        QCOMPARE(f.stored(id, "seed"), QJsonValue(QJsonObject{{"auto", "random"}}));
+    }
+
+    // Leaving randomize keeps the seed of the result the node shows, so the image the user
+    // liked can be made again; with no result one is drawn.
+    void leavingRandomizeKeepsTheSeedOfTheLastResult() {
+        Fixture f;
+        f.edits.setSeedMode("all", "seed", "random");
+        f.canvas.setRunState("all", {{"state", "cached"}, {"values", QVariantMap{{"seed", "1234"}}}});
+        f.edits.setSeedMode("all", "seed", "fixed");
+        QCOMPARE(f.stored("all", "seed"), QJsonValue(1234));
+    }
+
     void seedsAreFixedRandomOrIncrement() {
         Fixture f;
         QCOMPARE(f.edits.seedMode("all", "seed"), QString("fixed"));

@@ -181,6 +181,9 @@ FocusScope {
     }
     // The look (look.h), and the port colors as a JS object, converted once per theme change.
     readonly property var look: theme.look
+    // The window's runs (#19, run/canvas_runs.h), when the app gives them: a window made
+    // without them (most tests) draws no run pill and no running dots.
+    readonly property var windowRuns: typeof runs === "undefined" ? null : runs
     readonly property var ports: theme.look.ports
     readonly property var shadowMargins: theme.look.shadowMargins
     // A port color key from the model (CanvasModel::colorKey).
@@ -571,6 +574,45 @@ FocusScope {
                 }
             }
 
+            // Into a running node (8.2): a 7 px dot in the wire's color with a 2 px canvas ring
+            // travels the wire every 900 ms. Only while a run is going, at the full tier.
+            Repeater {
+                objectName: "runningDots"
+                model: canvas.windowRuns && canvas.tier === 0 ? canvas.windowRuns.runningWires : []
+                delegate: Item {
+                    id: dot
+                    required property var modelData
+                    PathInterpolator {
+                        id: along
+                        path: Path {
+                            PathSvg { path: dot.modelData.path }
+                        }
+                        NumberAnimation on progress {
+                            from: 0
+                            to: 1
+                            duration: 900
+                            loops: Animation.Infinite
+                        }
+                    }
+                    Rectangle {
+                        x: along.x - 5.5
+                        y: along.y - 5.5
+                        width: 11
+                        height: 11
+                        radius: 5.5
+                        color: canvas.look.canvas
+                        Rectangle {
+                            x: 2
+                            y: 2
+                            width: 7
+                            height: 7
+                            radius: 3.5
+                            color: canvas.portColor(dot.modelData.color)
+                        }
+                    }
+                }
+            }
+
             // Reroute points: a 10 px dot in the wire's color with a 2 px canvas ring.
             Repeater {
                 model: canvas.tier <= 1 ? canvas.model.reroutes : []
@@ -823,6 +865,18 @@ FocusScope {
                 color: canvas.look.text
                 font.pixelSize: canvas.look.labelSize
             }
+        }
+    }
+
+    // The run, top right (11).
+    Loader {
+        objectName: "runPill"
+        active: canvas.windowRuns !== null
+        x: canvas.width - width - 4 * canvas.look.unit
+        y: 4 * canvas.look.unit
+        sourceComponent: RunPill {
+            look: canvas.look
+            runs: canvas.windowRuns
         }
     }
 

@@ -448,9 +448,16 @@ void WidgetEdit::setSeedMode(const QString &node, const QString &input, const QS
     if (mode == QLatin1String("random"))
         n.inputs.insert(input, InputValue::autoRandom());
     else if (n.inputs.value(input).kind() == InputValue::Kind::Auto)
-        n.inputs.insert(input, InputValue::literal(randomSeed(*t.spec)));
+        n.inputs.insert(input, InputValue::literal(lastSeed(node, input).value_or(randomSeed(*t.spec))));
     setIncrementing(document, node, input, mode == QLatin1String("increment"));
     m_canvas->commit(document, stepText(node, input));
+}
+
+std::optional<double> WidgetEdit::lastSeed(const QString &node, const QString &input) const {
+    // The value a run reported on the output of the same name ("Seed used"), as shown.
+    bool ok = false;
+    const double seed = m_canvas->m_run.value(node).values.value(input).toString().toDouble(&ok);
+    return ok ? std::optional<double>(seed) : std::nullopt;
 }
 
 void WidgetEdit::advanceSeeds() {

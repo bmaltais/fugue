@@ -1087,6 +1087,11 @@ QString CanvasModel::addNode(const QString &typeId, qreal x, qreal y) {
     Node node;
     node.type = type->id;
     node.version = type->version;
+    // A seed starts on randomize, as ComfyUI's do: each run makes a new picture. The
+    // manifest's own default (what the CLI and agents get) stays a number (spec Appendix A).
+    for (const InputSpec &input : type->inputs)
+        if (input.widget() == QLatin1String("seed"))
+            node.inputs.insert(input.name, InputValue::autoRandom());
     document.graph.nodes.insert(id, node);
     QJsonObject layoutNodes = document.layout.value("nodes").toObject();
     layoutNodes.insert(id, QJsonObject{{"pos", QJsonArray{x, y}}});
