@@ -1917,6 +1917,25 @@ Building M1 made these further choices.
 | Seeds default to 0; `strength` defaults to 0.7 and is sent only with a start image; an empty negative prompt is not sent | 14.1 | medium |
 | Unset steps, guidance and size are filled from the model's defaults in the request, so the job is fully specified | 8.1 | medium-high |
 
+Building M2 made these further choices.
+
+| Choice made in M2 | Section | Confidence |
+| --- | --- | --- |
+| A node's face is ComfyUI's: wire-only inputs (media, data, resource, `any`) and the outputs side by side under the title, then one row per value input showing its value or default | 12.2, 3.2 | medium-high |
+| Port shapes: circle for text, number and boolean, square for image, video and audio, diamond for declared types, a ring for `any`; a list port has a second outline behind it. Colors are theme roles: text green, number yellow, boolean red, image blue (ComfyUI's IMAGE), video magenta, audio cyan, a declared type a fixed pick by its id | 12.6 | medium |
+| Link checks during a drag and on connect: the engine's compatibility (2.3), a node into itself, a cycle, and a node type that is not installed, each with a sentence saying why | 12.6, 2.3 | high |
+| Dragging a linked single input picks its link up and carries it from its source (ComfyUI); dragging an unlinked input reaches back to an output | 12.4 | high |
+| A new link into a list input adds an item at the end: the first is stored as a plain link, a second turns the value into an array | 2.3, 4.2 | medium |
+| Nodes the layout does not place (agent-written files) go in columns by depth, below the placed ones | 4.5, 13.4 | medium |
+| Positions are written to `layout.nodes.<id>.pos` as whole numbers, the viewport to `layout.view` (center whole, zoom to three decimals) | 4.5, 4.6 | medium-high |
+| Zoom runs 0.1 to 4, 1.1 per wheel step (ComfyUI's step); below 0.5 node text is not drawn (ComfyUI draws a low-detail node below about 0.6) | 12.1, 12.3 | medium-high |
+| A node's port rows are made the first time it is in view at a readable zoom, so a 300-node file opens at the cost of what is on screen | 12.1 | high |
+| A trackpad is a wheel event with `pixelDelta` and pans in both presets; Ctrl+wheel zooms in both; a pinch arrives as a native zoom gesture | 12.3 | medium-high |
+| Space+drag pans with the left button held; Space and a move with no button does nothing (ComfyUI pans on that too) | 12.3 | medium |
+| The canvas is never mirrored in right-to-left languages: a graph's direction and its saved positions are geometry | 12.11 | medium-high |
+| A click selects a node, Shift or Ctrl+click adds, dragging a selected node moves the selection, and a click on empty canvas clears it (legacy) | 12.3, 12.4 | high |
+| Furniture (12.9) in #16 is drawn from the layout only (collapsed nodes, Frames, reroute points); making and editing it waits for the command registry and undo (#17, #21) | 12.9 | medium |
+
 ## Appendix B: issue to section map
 
 | Issue | Sections |

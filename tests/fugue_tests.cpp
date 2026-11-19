@@ -1,4 +1,5 @@
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -14,6 +15,7 @@
 #include <QtTest>
 
 #include "backend.h"
+#include "canvas/canvas_model.h"
 #include "theme.h"
 #include "translator.h"
 
@@ -72,7 +74,10 @@ QStringList placeholders(const QString &text) {
 // single quotes count. A text that isn't a literal can't be in a catalog.
 QMap<QString, bool> translatables(const QString &folder, QStringList *problems) {
     QMap<QString, bool> found;
-    for (const QFileInfo &info : QDir(folder).entryInfoList({"*.qml", "*.js", "*.cpp", "*.h"}, QDir::Files)) {
+    // Every folder under src/ too: the canvas keeps its QML and C++ in src/canvas/.
+    QDirIterator files(folder, {"*.qml", "*.js", "*.cpp", "*.h"}, QDir::Files, QDirIterator::Subdirectories);
+    while (files.hasNext()) {
+        const QFileInfo info(files.next());
         QFile file(info.filePath());
         if (!file.open(QIODevice::ReadOnly))
             continue;
@@ -369,6 +374,7 @@ private slots:
         QCoreApplication::installTranslator(&translator);
         Theme theme(dir.path());
         Backend backend;
+        CanvasModel canvasModel(nullptr);
 
         QQmlApplicationEngine engine;
         QStringList warnings;
@@ -379,6 +385,7 @@ private slots:
         engine.rootContext()->setContextProperty("translator", &translator);
         engine.rootContext()->setContextProperty("theme", &theme);
         engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("canvasModel", &canvasModel);
         engine.load(QUrl("qrc:/Main.qml"));
         QVERIFY(!engine.rootObjects().isEmpty());
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
@@ -387,19 +394,10 @@ private slots:
         window->requestActivate();
         QVERIFY(QTest::qWaitForWindowActive(window));
 
-        auto *count = item(window->contentItem(), "count");
-        QVERIFY(count);
-        QTest::keyClick(window, Qt::Key_Space);
-        QCOMPARE(count->property("text").toString(), QString("1 press"));
-        QTest::keyClick(window, Qt::Key_Space);
-        QCOMPARE(count->property("text").toString(), QString("2 presses"));
-        QCOMPARE(backend.count(), 2);
-
-        // The caption reads on the accent: black on the fallback yellow.
-        auto *button = item(window->contentItem(), "countButton");
-        QVERIFY(button);
-        QCOMPARE(button->property("contentItem").value<QQuickItem *>()->property("color").value<QColor>(),
-                 theme.accentForeground());
+        // The window is the canvas, and it has the keyboard.
+        auto *canvas = item(window->contentItem(), "canvas");
+        QVERIFY(canvas);
+        QTRY_VERIFY(canvas->hasActiveFocus());
 
         auto *help = window->findChild<QObject *>("help");
         QTest::keyClick(window, '?');

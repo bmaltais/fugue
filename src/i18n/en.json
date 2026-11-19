@@ -1,7 +1,17 @@
 {
-  "%Ln presses": { "one": "%Ln press", "other": "%Ln presses" },
-  "Count": "Count",
-  "Count one more": "Count one more",
+  "%1 cannot feed %2: the types differ, and Fugue does not convert between them.": "%1 cannot feed %2: the types differ, and Fugue does not convert between them.",
+  "%1 is not installed, so its ports have no known type.": "%1 is not installed, so its ports have no known type.",
+  "A list of %1 cannot feed an input that takes one.": "A list of %1 cannot feed an input that takes one.",
+  "A node cannot feed itself.": "A node cannot feed itself.",
+  "Connect an input to an output.": "Connect an input to an output.",
+  "Connect an output to an input.": "Connect an output to an input.",
   "Quit": "Quit",
-  "Show or hide the shortcuts": "Show or hide the shortcuts"
+  "Show or hide the shortcuts": "Show or hide the shortcuts",
+  "That node is not on the canvas.": "That node is not on the canvas.",
+  "That port is not on the node.": "That port is not on the node.",
+  "The type of this port is not known.": "The type of this port is not known.",
+  "This link would make a cycle: %1 already feeds %2.": "This link would make a cycle: %1 already feeds %2.",
+  "off": "off",
+  "on": "on",
+  "random": "random"
 }

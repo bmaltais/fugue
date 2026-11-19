@@ -24,13 +24,23 @@ target_compile_options(fugue_engine PUBLIC -Wall -Wextra)
 
 # Everything else but main.cpp, shared by the app and the tests, so each source
 # compiles once and a new file in src/ needs no line here.
-file(GLOB fugue_sources CONFIGURE_DEPENDS src/*.cpp src/*.h)
+file(GLOB fugue_sources CONFIGURE_DEPENDS src/*.cpp src/*.h src/canvas/*.cpp src/canvas/*.h)
 list(REMOVE_ITEM fugue_sources ${CMAKE_SOURCE_DIR}/src/main.cpp)
 add_library(fugue_core STATIC ${fugue_sources})
 target_include_directories(fugue_core PUBLIC src)
 target_link_libraries(fugue_core PUBLIC fugue_engine
   Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::DBus)
 target_compile_options(fugue_core PUBLIC -Wall -Wextra)
+
+# The canvas (spec 12): its QML files in src/canvas/, compiled in under qrc:/canvas, where
+# Main.qml imports them. A new .qml file there needs no line here.
+file(GLOB fugue_canvas_qml CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/src/canvas src/canvas/*.qml)
+set(fugue_canvas_qml_files)
+foreach(qml ${fugue_canvas_qml})
+  set_source_files_properties(src/canvas/${qml} PROPERTIES QT_RESOURCE_ALIAS ${qml})
+  list(APPEND fugue_canvas_qml_files src/canvas/${qml})
+endforeach()
+qt_add_resources(fugue_core fugue_canvas_qml PREFIX /canvas FILES ${fugue_canvas_qml_files})
 
 # The command line (spec 13): the same `fugue` binary, but it needs nothing
 # beyond the engine, so it is its own library with no Gui, Quick or QML. main.cpp
@@ -87,6 +97,17 @@ foreach(test_source ${fugue_nodes_tests})
   target_compile_definitions(${test_name} PRIVATE FUGUE_BINARY="$<TARGET_FILE:fugue>")
   add_dependencies(${test_name} fugue)
   add_test(NAME ${test_name} COMMAND ${test_name})
+endforeach()
+
+# Canvas tests: each tests/canvas/<name>.cpp is its own QtTest executable with the app's
+# code, the real Main.qml and the built-in node types.
+file(GLOB fugue_canvas_tests CONFIGURE_DEPENDS tests/canvas/*.cpp)
+foreach(test_source ${fugue_canvas_tests})
+  get_filename_component(test_name ${test_source} NAME_WE)
+  add_executable(${test_name} ${test_source} src/resources.qrc)
+  target_link_libraries(${test_name} PRIVATE fugue_core fugue_nodes Qt6::Test)
+  add_test(NAME ${test_name} COMMAND ${test_name})
+  set_tests_properties(${test_name} PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
 endforeach()
 
 # A test-only `fugue` with fake node kernels (tests/cli_support): the real CLI, queue and

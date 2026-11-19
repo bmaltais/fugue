@@ -11,8 +11,10 @@
 #include <QUrl>
 
 #include "backend.h"
+#include "canvas/canvas_model.h"
 #include "cli/args.h"
 #include "cli/cli.h"
+#include "engine/registry.h"
 #include "nodes/builtin.h"
 #include "theme.h"
 #include "translator.h"
@@ -43,11 +45,18 @@ int main(int argc, char *argv[]) {
     Theme theme;
     Backend backend;
 
+    // The canvas reads node types from the same registry the CLI fills (built-ins now,
+    // packs from M3) and starts on an empty workflow.
+    fugue::Registry registry;
+    fugue::nodes::addBuiltinNodeTypes(registry);
+    CanvasModel canvasModel(&registry);
+
     QQmlApplicationEngine engine;
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
     engine.rootContext()->setContextProperty("translator", &translator);
     engine.rootContext()->setContextProperty("theme", &theme);
     engine.rootContext()->setContextProperty("backend", &backend);
+    engine.rootContext()->setContextProperty("canvasModel", &canvasModel);
     engine.load(QUrl("qrc:/Main.qml"));
     if (engine.rootObjects().isEmpty())
         return 1;
