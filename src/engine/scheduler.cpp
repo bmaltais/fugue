@@ -771,6 +771,7 @@ private:
         context.workDir = n.workDir;
         context.hashes = m_env.hashes;
         context.models = m_env.models;
+        context.registry = m_env.registry;
         context.document = m_options.document;
         context.used = usedUpstream(n);
         const QString path = n.path;

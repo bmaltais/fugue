@@ -56,6 +56,7 @@
 namespace fugue {
 
 class FileHashes;
+class Registry;
 class ResidentModels;
 
 struct NodeContext {
@@ -78,6 +79,9 @@ struct NodeContext {
     // keeps it here under resourceIdentity(handle) so the next node reuses it.
     ResidentModels *models = nullptr;
 
+    // The registry the run was compiled against: node types, for a kernel that reads the
+    // document (share_copy.h).
+    const Registry *registry = nullptr;
     // The workflow being run, in Document::toJson() form, exactly as the run was
     // started (after `--set` overrides), or empty when the run did not start from a
     // document (a compiled graph). For a node that writes the workflow into its
