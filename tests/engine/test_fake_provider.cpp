@@ -33,16 +33,16 @@ private slots:
         FakeProvider provider(imageDescription());
         const auto described = await<Description>([&](auto reply) { provider.describe(reply); });
         QVERIFY(described.ok());
-        QCOMPARE(described.value.engine, QStringLiteral("fake"));
-        QVERIFY(described.value.offer("image.generate"));
-        QVERIFY(!described.value.offer("image.edit"));
-        QCOMPARE(described.value.offer("image.generate")->status(), QStringLiteral("ready"));
+        QCOMPARE(described.value().engine, QStringLiteral("fake"));
+        QVERIFY(described.value().offer("image.generate"));
+        QVERIFY(!described.value().offer("image.edit"));
+        QCOMPARE(described.value().offer("image.generate")->status(), QStringLiteral("ready"));
     }
 
     void repliesNeverArriveInsideTheCall() {
         FakeProvider provider(imageDescription());
         bool replied = false;
-        provider.describe([&](const Outcome<Description> &) { replied = true; });
+        provider.describe([&](const Result<Description> &) { replied = true; });
         QVERIFY(!replied);
         QTRY_VERIFY(replied);
     }
@@ -60,7 +60,7 @@ private slots:
         request.outputDir = dir.path();
         const auto submitted = await<QString>([&](auto reply) { provider.submit(request, reply); });
         QVERIFY(submitted.ok());
-        const QString job = submitted.value;
+        const QString job = submitted.value();
         QCOMPARE(provider.submitted(job).params.value("prompt").toString(), QStringLiteral("a cat"));
 
         provider.progress(job, 0.5, QStringLiteral("sampling"));
@@ -73,12 +73,12 @@ private slots:
 
         const auto result = await<JobResult>([&](auto reply) { provider.result(job, reply); });
         QVERIFY(result.ok());
-        const QString path = result.value.outputs.value("image").toObject().value("path").toString();
+        const QString path = result.value().outputs.value("image").toObject().value("path").toString();
         QCOMPARE(path, QDir(dir.path()).filePath("image.png"));
         QFile file(path);
         QVERIFY(file.open(QIODevice::ReadOnly));
         QCOMPARE(file.readAll(), QByteArray("pixels"));
-        QCOMPARE(result.value.used.value("seed").toInt(), 7);
+        QCOMPARE(result.value().used.value("seed").toInt(), 7);
     }
 
     void cancelEndsTheJobCancelled() {
@@ -87,21 +87,21 @@ private slots:
         JobRequest request;
         request.capability = QStringLiteral("image.generate");
         request.outputDir = dir.path();
-        const QString job = await<QString>([&](auto reply) { provider.submit(request, reply); }).value;
+        const QString job = await<QString>([&](auto reply) { provider.submit(request, reply); }).value();
         const auto cancelled = await<QString>([&](auto reply) { provider.cancel(job, reply); });
-        QCOMPARE(cancelled.value, QStringLiteral("cancelled"));
+        QCOMPARE(cancelled.value(), QStringLiteral("cancelled"));
         const auto status = await<JobStatus>([&](auto reply) { provider.status(job, reply); });
-        QCOMPARE(status.value.state, QStringLiteral("cancelled"));
+        QCOMPARE(status.value().state, QStringLiteral("cancelled"));
         const auto result = await<JobResult>([&](auto reply) { provider.result(job, reply); });
         QVERIFY(!result.ok());
     }
 
     void describeCanFailLikeAnUnreachableProvider() {
         FakeProvider provider(imageDescription());
-        provider.setDescribeErrors({providerError("provider_unreachable", "Nothing answers.")});
+        provider.setDescribeErrors({makeError("provider_unreachable", "Nothing answers.")});
         const auto described = await<Description>([&](auto reply) { provider.describe(reply); });
         QVERIFY(!described.ok());
-        QCOMPARE(described.errors.first().code, QStringLiteral("provider_unreachable"));
+        QCOMPARE(described.errors().first().code, QStringLiteral("provider_unreachable"));
     }
 };
 

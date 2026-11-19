@@ -15,7 +15,7 @@ namespace {
 const QString kProvidersFile = QStringLiteral("~/.config/fugue/providers.json");
 
 Error invalid(const QString &message) {
-    return providerError(QStringLiteral("invalid_document"), message,
+    return makeError(QStringLiteral("invalid_document"), message,
                          QStringLiteral("Fix %1.").arg(kProvidersFile));
 }
 
@@ -57,23 +57,21 @@ void appendUnique(QStringList &list, const QString &item) {
         list.append(item);
 }
 
-Outcome<Selection> chosen(const Match &match) {
-    return Outcome<Selection>{
-        Selection{match.candidate->instance.name, match.candidate->description.value.engine,
-                  *match.model},
-        {}};
+Result<Selection> chosen(const Match &match) {
+    return Result<Selection>(Selection{match.candidate->instance.name,
+                                       match.candidate->description->engine, *match.model});
 }
 
-Outcome<Selection> failed(const Error &error) { return Outcome<Selection>{{}, {error}}; }
+Result<Selection> failed(const Error &error) { return Result<Selection>(error); }
 
 // Selection among instances that are enabled and described. `pinned` names the one pinned
 // instance, for the wording; `disabled` and `unreachable` are only for the hint.
-Outcome<Selection> choose(const QList<const Candidate *> &usable, const Requirement &requirement,
+Result<Selection> choose(const QList<const Candidate *> &usable, const Requirement &requirement,
                           const QString &pinned, const QStringList &disabled,
                           const QStringList &unreachable) {
     QList<Match> fitting; // models of the capability that have the required properties
     for (const Candidate *candidate : usable) {
-        const CapabilityOffer *offer = candidate->description.value.offer(requirement.capability);
+        const CapabilityOffer *offer = candidate->description->offer(requirement.capability);
         if (!offer)
             continue;
         for (const OfferedModel &model : offer->models)
@@ -103,7 +101,7 @@ Outcome<Selection> choose(const QList<const Candidate *> &usable, const Requirem
                                   .arg(wanted, first.candidate->instance.name);
             if (!first.model->reason.isEmpty())
                 message += QLatin1Char(' ') + first.model->reason;
-            Error error = providerError(
+            Error error = makeError(
                 QStringLiteral("model_not_running"), message,
                 first.model->hint.isEmpty()
                     ? QStringLiteral("Start %1 on %2.").arg(wanted, first.candidate->instance.name)
@@ -111,7 +109,7 @@ Outcome<Selection> choose(const QList<const Candidate *> &usable, const Requirem
             error.valid = readyNames;
             return failed(error);
         }
-        Error error = providerError(
+        Error error = makeError(
             QStringLiteral("model_missing"),
             pinned.isEmpty()
                 ? QStringLiteral("No provider has %1 for %2.").arg(wanted, requirement.capability)
@@ -151,7 +149,7 @@ Outcome<Selection> choose(const QList<const Candidate *> &usable, const Requirem
     for (const Match &match : fitting)
         if (!match.model->reason.isEmpty() && !message.contains(match.model->reason))
             message += QLatin1Char(' ') + match.model->reason;
-    return failed(providerError(QStringLiteral("capability_unavailable"), message,
+    return failed(makeError(QStringLiteral("capability_unavailable"), message,
                                 fixes.join(QLatin1Char(' '))));
 }
 
@@ -161,12 +159,11 @@ QString providersPath() {
     return QDir::home().filePath(QStringLiteral(".config/fugue/providers.json"));
 }
 
-Outcome<QList<ProviderInstance>> parseProviderInstances(const QJsonObject &document) {
-    Outcome<QList<ProviderInstance>> outcome;
-    if (!document.value("providers").isArray()) {
-        outcome.errors.append(invalid(QStringLiteral("providers.json has no \"providers\" list.")));
-        return outcome;
-    }
+Result<QList<ProviderInstance>> parseProviderInstances(const QJsonObject &document) {
+    if (!document.value("providers").isArray())
+        return Result<QList<ProviderInstance>>(invalid(QStringLiteral("providers.json has no \"providers\" list.")));
+    QList<ProviderInstance> instances;
+    Errors errors;
     QSet<QString> names;
     int index = 0;
     for (const QJsonValue &entry : document.value("providers").toArray()) {
@@ -182,39 +179,40 @@ Outcome<QList<ProviderInstance>> parseProviderInstances(const QJsonObject &docum
             if (!QStringList{"name", "type", "address", "key", "enabled"}.contains(it.key()))
                 instance.settings.insert(it.key(), it.value());
         if (instance.name.isEmpty()) {
-            outcome.errors.append(invalid(QStringLiteral("Provider %1 has no name.").arg(index)));
+            errors.append(invalid(QStringLiteral("Provider %1 has no name.").arg(index)));
             continue;
         }
         if (instance.type.isEmpty()) {
-            outcome.errors.append(invalid(QStringLiteral("Provider %1 has no type.").arg(instance.name)));
+            errors.append(invalid(QStringLiteral("Provider %1 has no type.").arg(instance.name)));
             continue;
         }
         if (names.contains(instance.name)) {
-            outcome.errors.append(
+            errors.append(
                 invalid(QStringLiteral("Two providers are named %1.").arg(instance.name)));
             continue;
         }
         names.insert(instance.name);
-        outcome.value.append(instance);
+        instances.append(instance);
     }
-    return outcome;
+    if (!errors.isEmpty())
+        return Result<QList<ProviderInstance>>(errors);
+    return Result<QList<ProviderInstance>>(instances);
 }
 
-Outcome<QList<ProviderInstance>> loadProviderInstances(const QString &path) {
+Result<QList<ProviderInstance>> loadProviderInstances(const QString &path) {
     QFile file(path);
     if (!file.exists())
-        return Outcome<QList<ProviderInstance>>{defaultProviderInstances(), {}};
+        return Result<QList<ProviderInstance>>(defaultProviderInstances());
     if (!file.open(QIODevice::ReadOnly))
-        return Outcome<QList<ProviderInstance>>{
-            {}, {providerError(QStringLiteral("permission_denied"),
-                               QStringLiteral("Cannot read %1.").arg(path))}};
+        return Result<QList<ProviderInstance>>(
+            makeError(QStringLiteral("permission_denied"), QStringLiteral("Cannot read %1.").arg(path)));
     QJsonParseError parseError;
     const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
     if (parseError.error != QJsonParseError::NoError || !document.isObject())
-        return Outcome<QList<ProviderInstance>>{
-            {}, {providerError(QStringLiteral("invalid_json"),
-                               QStringLiteral("%1 is not valid JSON: %2.").arg(path, parseError.errorString()),
-                               QStringLiteral("Fix the file, or remove it to use this machine only."))}};
+        return Result<QList<ProviderInstance>>(
+            makeError(QStringLiteral("invalid_json"),
+                      QStringLiteral("%1 is not valid JSON: %2.").arg(path, parseError.errorString()),
+                      QStringLiteral("Fix the file, or remove it to use this machine only.")));
     return parseProviderInstances(document.object());
 }
 
@@ -225,16 +223,16 @@ QList<ProviderInstance> defaultProviderInstances() {
     return {local};
 }
 
-Outcome<std::shared_ptr<Provider>> createProvider(const ProviderInstance &instance) {
+Result<std::shared_ptr<Provider>> createProvider(const ProviderInstance &instance) {
     if (instance.type == QLatin1String("omarchy"))
-        return Outcome<std::shared_ptr<Provider>>{
-            std::make_shared<OmarchyProvider>(instance, OmarchyPaths::standard()), {}};
-    Error error = providerError(
+        return Result<std::shared_ptr<Provider>>(
+            std::make_shared<OmarchyProvider>(instance, OmarchyPaths::standard()));
+    Error error = makeError(
         QStringLiteral("unknown_provider"),
         QStringLiteral("%1 has the provider type %2, which this Fugue does not have.").arg(instance.name, instance.type),
         QStringLiteral("Change its type in %1.").arg(kProvidersFile));
     error.valid = QJsonArray{"omarchy"};
-    return Outcome<std::shared_ptr<Provider>>{nullptr, {error}};
+    return Result<std::shared_ptr<Provider>>(error);
 }
 
 bool sameModel(const QJsonObject &requested, const QJsonObject &offered) {
@@ -249,7 +247,7 @@ bool sameModel(const QJsonObject &requested, const QJsonObject &offered) {
     return !name.isEmpty() && offered.value("name").toString() == name;
 }
 
-Outcome<Selection> selectProvider(const QList<Candidate> &candidates, const Requirement &requirement) {
+Result<Selection> selectProvider(const QList<Candidate> &candidates, const Requirement &requirement) {
     const QString pin = requirement.nodePin.isEmpty() ? requirement.workflowPin : requirement.nodePin;
     if (!pin.isEmpty()) {
         const Candidate *pinned = nullptr;
@@ -260,7 +258,7 @@ Outcome<Selection> selectProvider(const QList<Candidate> &candidates, const Requ
                 pinned = &candidate;
         }
         if (!pinned) {
-            Error error = providerError(
+            Error error = makeError(
                 QStringLiteral("unknown_provider"),
                 QStringLiteral("No provider is named %1.").arg(pin),
                 QStringLiteral("Pin one of the configured providers, or add %1 to %2.").arg(pin, kProvidersFile));
@@ -268,12 +266,12 @@ Outcome<Selection> selectProvider(const QList<Candidate> &candidates, const Requ
             return failed(error);
         }
         if (!pinned->instance.enabled)
-            return failed(providerError(
+            return failed(makeError(
                 QStringLiteral("capability_unavailable"),
                 QStringLiteral("The pinned provider %1 is disabled.").arg(pin),
                 QStringLiteral("Enable %1 in %2, or remove the pin.").arg(pin, kProvidersFile)));
         if (!pinned->description.ok())
-            return Outcome<Selection>{{}, pinned->description.errors};
+            return Result<Selection>(pinned->description.errors());
         return choose({pinned}, requirement, pin, {}, {});
     }
 
@@ -284,9 +282,9 @@ Outcome<Selection> selectProvider(const QList<Candidate> &candidates, const Requ
         if (!candidate.instance.enabled) {
             disabled.append(candidate.instance.name);
         } else if (!candidate.description.ok()) {
-            const QString why = candidate.description.errors.isEmpty()
+            const QString why = candidate.description.errors().isEmpty()
                                     ? QString()
-                                    : candidate.description.errors.first().message;
+                                    : candidate.description.errors().first().message;
             unreachable.append(QStringLiteral("%1 is unavailable: %2").arg(candidate.instance.name, why));
         } else {
             usable.append(&candidate);

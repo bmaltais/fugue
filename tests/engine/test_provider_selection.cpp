@@ -33,8 +33,8 @@ Candidate candidate(const QString &name, QList<CapabilityOffer> offers, bool ena
     result.instance.name = name;
     result.instance.type = QStringLiteral("fake");
     result.instance.enabled = enabled;
-    result.description.value.engine = QStringLiteral("sdcpp");
-    result.description.value.capabilities = std::move(offers);
+    result.description.value().engine = QStringLiteral("sdcpp");
+    result.description.value().capabilities = std::move(offers);
     return result;
 }
 
@@ -72,15 +72,15 @@ private slots:
         };
         const auto parsed = parseProviderInstances(QJsonObject{{"providers", providers}});
         QVERIFY(parsed.ok());
-        QCOMPARE(parsed.value.size(), 3);
-        QCOMPARE(parsed.value.at(0).name, QStringLiteral("This machine"));
-        QVERIFY(parsed.value.at(0).enabled);
-        QVERIFY(parsed.value.at(0).address.isEmpty());
-        QCOMPARE(parsed.value.at(1).address, QStringLiteral("https://studio.example.ts.net"));
-        QVERIFY(!parsed.value.at(1).enabled);
-        QCOMPARE(parsed.value.at(1).settings.value("poll_ms").toInt(), 250);
-        QCOMPARE(parsed.value.at(2).key, QStringLiteral("k"));
-        QVERIFY(!parsed.value.at(2).settings.contains("key"));
+        QCOMPARE(parsed.value().size(), 3);
+        QCOMPARE(parsed.value().at(0).name, QStringLiteral("This machine"));
+        QVERIFY(parsed.value().at(0).enabled);
+        QVERIFY(parsed.value().at(0).address.isEmpty());
+        QCOMPARE(parsed.value().at(1).address, QStringLiteral("https://studio.example.ts.net"));
+        QVERIFY(!parsed.value().at(1).enabled);
+        QCOMPARE(parsed.value().at(1).settings.value("poll_ms").toInt(), 250);
+        QCOMPARE(parsed.value().at(2).key, QStringLiteral("k"));
+        QVERIFY(!parsed.value().at(2).settings.contains("key"));
     }
 
     void instancesNeedAUniqueNameAndAType() {
@@ -91,8 +91,8 @@ private slots:
         };
         const auto parsed = parseProviderInstances(QJsonObject{{"providers", providers}});
         QVERIFY(!parsed.ok());
-        QCOMPARE(parsed.errors.size(), 2);
-        for (const Error &error : parsed.errors)
+        QCOMPARE(parsed.errors().size(), 2);
+        for (const Error &error : parsed.errors())
             QCOMPARE(error.code, QStringLiteral("invalid_document"));
     }
 
@@ -100,9 +100,9 @@ private slots:
         QTemporaryDir dir;
         const auto loaded = loadProviderInstances(dir.filePath("providers.json"));
         QVERIFY(loaded.ok());
-        QCOMPARE(loaded.value.size(), 1);
-        QCOMPARE(loaded.value.first().name, QStringLiteral("This machine"));
-        QCOMPARE(loaded.value.first().type, QStringLiteral("omarchy"));
+        QCOMPARE(loaded.value().size(), 1);
+        QCOMPARE(loaded.value().first().name, QStringLiteral("This machine"));
+        QCOMPARE(loaded.value().first().type, QStringLiteral("omarchy"));
     }
 
     void aProvidersFileThatIsNotJsonIsAnError() {
@@ -113,7 +113,7 @@ private slots:
         file.close();
         const auto loaded = loadProviderInstances(file.fileName());
         QVERIFY(!loaded.ok());
-        QCOMPARE(loaded.errors.first().code, QStringLiteral("invalid_json"));
+        QCOMPARE(loaded.errors().first().code, QStringLiteral("invalid_json"));
     }
 
     void anOmarchyInstanceMakesTheOmarchyProvider() {
@@ -122,19 +122,19 @@ private slots:
         instance.type = QStringLiteral("omarchy");
         const auto made = createProvider(instance);
         QVERIFY(made.ok());
-        QVERIFY(made.value);
+        QVERIFY(made.value());
 
         instance.type = QStringLiteral("io.example.engine");
         const auto unknown = createProvider(instance);
         QVERIFY(!unknown.ok());
-        QVERIFY(!unknown.value);
-        QCOMPARE(unknown.errors.first().code, QStringLiteral("unknown_provider"));
-        QCOMPARE(strings(unknown.errors.first().valid), QStringList{"omarchy"});
+        QVERIFY(!unknown.value());
+        QCOMPARE(unknown.errors().first().code, QStringLiteral("unknown_provider"));
+        QCOMPARE(strings(unknown.errors().first().valid), QStringList{"omarchy"});
     }
 
     void autoTakesTheFirstEnabledReadyInstanceInTheUsersOrder() {
         Candidate unreachable = candidate("Down", {generate({model("a")})});
-        unreachable.description.errors = {providerError("provider_unreachable", "Down does not answer.")};
+        unreachable.description = Result<Description>(Errors{makeError("provider_unreachable", "Down does not answer.")});
         const QList<Candidate> candidates{
             candidate("Off", {generate({model("a")})}, false),
             unreachable,
@@ -144,9 +144,9 @@ private slots:
         };
         const auto chosen = selectProvider(candidates, wants("image.generate"));
         QVERIFY(chosen.ok());
-        QCOMPARE(chosen.value.instance, QStringLiteral("Ready"));
-        QCOMPARE(chosen.value.engine, QStringLiteral("sdcpp"));
-        QCOMPARE(chosen.value.model.handle.value("name").toString(), QStringLiteral("c"));
+        QCOMPARE(chosen.value().instance, QStringLiteral("Ready"));
+        QCOMPARE(chosen.value().engine, QStringLiteral("sdcpp"));
+        QCOMPARE(chosen.value().model.handle.value("name").toString(), QStringLiteral("c"));
     }
 
     void autoNeedsTheRequiredProperties() {
@@ -159,7 +159,7 @@ private slots:
         requirement.properties = QJsonObject{{"input", QJsonArray{"image"}}, {"edit", true}};
         const auto chosen = selectProvider(candidates, requirement);
         QVERIFY(chosen.ok());
-        QCOMPARE(chosen.value.instance, QStringLiteral("B"));
+        QCOMPARE(chosen.value().instance, QStringLiteral("B"));
     }
 
     void aRequestedModelIsFoundByNameOrByHash() {
@@ -171,14 +171,14 @@ private slots:
         };
         Requirement byName = wants("image.generate");
         byName.model = handle("z-image");
-        QCOMPARE(selectProvider(candidates, byName).value.instance, QStringLiteral("B"));
+        QCOMPARE(selectProvider(candidates, byName).value().instance, QStringLiteral("B"));
 
         Requirement byHash = wants("image.generate");
         byHash.model = QJsonObject{{"resource", "fugue/image-model"}, {"hash", "sha256:" + QString(64, 'a')},
                                    {"name", "renamed.gguf"}};
         const auto chosen = selectProvider(candidates, byHash);
         QVERIFY(chosen.ok());
-        QCOMPARE(chosen.value.model.handle.value("name").toString(), QStringLiteral("other-name"));
+        QCOMPARE(chosen.value().model.handle.value("name").toString(), QStringLiteral("other-name"));
     }
 
     void aNodePinBeatsTheWorkflowPinWhichBeatsAuto() {
@@ -189,9 +189,9 @@ private slots:
         };
         Requirement requirement = wants("image.generate");
         requirement.workflowPin = QStringLiteral("Second");
-        QCOMPARE(selectProvider(candidates, requirement).value.instance, QStringLiteral("Second"));
+        QCOMPARE(selectProvider(candidates, requirement).value().instance, QStringLiteral("Second"));
         requirement.nodePin = QStringLiteral("Third");
-        QCOMPARE(selectProvider(candidates, requirement).value.instance, QStringLiteral("Third"));
+        QCOMPARE(selectProvider(candidates, requirement).value().instance, QStringLiteral("Third"));
     }
 
     void aPinThatIsNotConfiguredIsUnknownProvider() {
@@ -201,7 +201,7 @@ private slots:
         requirement.nodePin = QStringLiteral("Studio");
         const auto chosen = selectProvider(candidates, requirement);
         QVERIFY(!chosen.ok());
-        const Error error = chosen.errors.first();
+        const Error error = chosen.errors().first();
         QCOMPARE(error.code, QStringLiteral("unknown_provider"));
         QCOMPARE(strings(error.valid), (QStringList{"This machine", "Studio box"}));
         QVERIFY(!error.hint.isEmpty());
@@ -216,8 +216,8 @@ private slots:
         requirement.workflowPin = QStringLiteral("Pinned");
         const auto chosen = selectProvider(candidates, requirement);
         QVERIFY(!chosen.ok());
-        QCOMPARE(chosen.errors.first().code, QStringLiteral("capability_unavailable"));
-        QVERIFY(chosen.errors.first().message.contains("Pinned"));
+        QCOMPARE(chosen.errors().first().code, QStringLiteral("capability_unavailable"));
+        QVERIFY(chosen.errors().first().message.contains("Pinned"));
     }
 
     void aPinnedDisabledInstanceSaysToEnableIt() {
@@ -225,20 +225,20 @@ private slots:
         Requirement requirement = wants("image.generate");
         requirement.nodePin = QStringLiteral("Studio box");
         const auto chosen = selectProvider(candidates, requirement);
-        QCOMPARE(chosen.errors.first().code, QStringLiteral("capability_unavailable"));
-        QVERIFY(chosen.errors.first().hint.contains("Enable"));
-        QVERIFY(chosen.errors.first().hint.contains("Studio box"));
+        QCOMPARE(chosen.errors().first().code, QStringLiteral("capability_unavailable"));
+        QVERIFY(chosen.errors().first().hint.contains("Enable"));
+        QVERIFY(chosen.errors().first().hint.contains("Studio box"));
     }
 
     void aPinnedUnreachableInstanceReportsWhy() {
         Candidate down = candidate("Studio box", {});
-        down.description.errors = {
-            providerError("provider_unreachable", "Studio box does not answer.", "Turn it on.")};
+        down.description = Result<Description>(Errors{
+            makeError("provider_unreachable", "Studio box does not answer.", "Turn it on.")});
         Requirement requirement = wants("image.generate");
         requirement.nodePin = QStringLiteral("Studio box");
         const auto chosen = selectProvider({down}, requirement);
-        QCOMPARE(chosen.errors.first().code, QStringLiteral("provider_unreachable"));
-        QCOMPARE(chosen.errors.first().hint, QStringLiteral("Turn it on."));
+        QCOMPARE(chosen.errors().first().code, QStringLiteral("provider_unreachable"));
+        QCOMPARE(chosen.errors().first().hint, QStringLiteral("Turn it on."));
     }
 
     void nothingOfferingTheCapabilitySaysHowToFixIt() {
@@ -248,7 +248,7 @@ private slots:
         };
         const auto chosen = selectProvider(candidates, wants("image.generate"));
         QVERIFY(!chosen.ok());
-        const Error error = chosen.errors.first();
+        const Error error = chosen.errors().first();
         QCOMPARE(error.code, QStringLiteral("capability_unavailable"));
         QVERIFY(error.message.contains("image.generate"));
         QVERIFY(error.hint.contains("Start a model"));
@@ -261,7 +261,7 @@ private slots:
             candidate("This machine", {generate({model("klein", "unavailable")})}),
         };
         const auto chosen = selectProvider(candidates, wants("image.generate"));
-        const Error error = chosen.errors.first();
+        const Error error = chosen.errors().first();
         QCOMPARE(error.code, QStringLiteral("capability_unavailable"));
         QVERIFY(error.hint.contains("omarchy-agent-local start klein"));
     }
@@ -274,7 +274,7 @@ private slots:
         requirement.model = handle("klein");
         const auto chosen = selectProvider(candidates, requirement);
         QVERIFY(!chosen.ok());
-        const Error error = chosen.errors.first();
+        const Error error = chosen.errors().first();
         QCOMPARE(error.code, QStringLiteral("model_not_running"));
         QVERIFY(error.message.contains("klein"));
         QVERIFY(error.hint.contains("omarchy-agent-local start klein"));
@@ -286,9 +286,9 @@ private slots:
         Requirement requirement = wants("image.generate");
         requirement.model = handle("klein");
         const auto chosen = selectProvider(candidates, requirement);
-        QCOMPARE(chosen.errors.first().code, QStringLiteral("model_missing"));
-        QCOMPARE(chosen.errors.first().severity, Error::Severity::Error);
-        QCOMPARE(strings(chosen.errors.first().valid), QStringList{"z-image"});
+        QCOMPARE(chosen.errors().first().code, QStringLiteral("model_missing"));
+        QCOMPARE(chosen.errors().first().severity, Error::Severity::Error);
+        QCOMPARE(strings(chosen.errors().first().valid), QStringList{"z-image"});
     }
 };
 

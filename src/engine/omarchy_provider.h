@@ -73,7 +73,7 @@ private:
     };
     struct Job;
 
-    void discover(std::function<void(const Outcome<Discovery> &)> done);
+    void discover(std::function<void(const Result<Discovery> &)> done);
     QNetworkReply *send(const Server &server, const QByteArray &method, const QString &path,
                         const QByteArray &body = {});
     void poll();

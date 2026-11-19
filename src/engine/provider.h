@@ -18,23 +18,14 @@
 #include <functional>
 
 #include "engine/error.h"
+#include "engine/result.h"
 
 namespace fugue {
 
-// A value or the errors that stopped it. `ok()` is false only for severity error.
-template <typename T> struct Outcome {
-    T value{};
-    Errors errors;
-    bool ok() const { return !hasErrors(errors); }
-};
-
-template <typename T> using Reply = std::function<void(const Outcome<T> &)>;
+template <typename T> using Reply = std::function<void(const Result<T> &)>;
 
 // The value of an operation that returns nothing (shutdown).
 struct Nothing {};
-
-// An error with a code from 13.3, a sentence and how to fix it.
-Error providerError(const QString &code, const QString &message, const QString &hint = {});
 
 // One model a provider can serve for a capability. Status, properties, limits and defaults are
 // per model, not per capability as 8.8's table reads, because one omarchy instance can run
@@ -121,7 +112,7 @@ signals:
 
 protected:
     // Delivers a reply from the event loop, after the current call has returned.
-    template <typename T> void later(Reply<T> reply, Outcome<T> outcome) {
+    template <typename T> void later(Reply<T> reply, Result<T> outcome) {
         deliverLater([reply = std::move(reply), outcome = std::move(outcome)] { reply(outcome); });
     }
 

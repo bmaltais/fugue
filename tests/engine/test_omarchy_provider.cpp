@@ -212,10 +212,10 @@ private slots:
 
         const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
         QVERIFY(described.ok());
-        QCOMPARE(described.value.engine, QStringLiteral("sdcpp"));
-        QVERIFY(!described.value.offer("text.generate"));
+        QCOMPARE(described.value().engine, QStringLiteral("sdcpp"));
+        QVERIFY(!described.value().offer("text.generate"));
 
-        const OfferedModel *ready = findModel(described.value, "image.generate", kKlein);
+        const OfferedModel *ready = findModel(described.value(), "image.generate", kKlein);
         QVERIFY(ready);
         QCOMPARE(ready->status, QStringLiteral("ready"));
         QCOMPARE(ready->handle, (QJsonObject{{"resource", "fugue/image-model"}, {"name", kKlein}}));
@@ -224,14 +224,14 @@ private slots:
         QCOMPARE(ready->defaults.value("guidance").toDouble(), 1.0);
         QCOMPARE(ready->defaults.value("width").toInt(), 1024);
         QCOMPARE(ready->limits.value("max_width").toInt(), 4096);
-        QVERIFY(findModel(described.value, "image.edit", kKlein));
+        QVERIFY(findModel(described.value(), "image.edit", kKlein));
 
-        const OfferedModel *stopped = findModel(described.value, "image.generate", kZImage);
+        const OfferedModel *stopped = findModel(described.value(), "image.generate", kZImage);
         QVERIFY(stopped);
         QCOMPARE(stopped->status, QStringLiteral("unavailable"));
         QVERIFY(stopped->reason.contains("13 GiB"));
         QVERIFY(stopped->hint.contains("omarchy-agent-local start " + kZImage));
-        QVERIFY(!findModel(described.value, "image.edit", kZImage));
+        QVERIFY(!findModel(described.value(), "image.edit", kZImage));
 
         const auto asked = fixture.server.requestsTo("GET", "/sdcpp/v1/capabilities");
         QCOMPARE(asked.size(), 1); // only the running server is asked
@@ -243,8 +243,8 @@ private slots:
         fixture.writeStatus(QJsonObject{{kKlein, row(kKlein, "image", "activating", fixture.endpoint())}});
         auto provider = fixture.provider();
         const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
-        QCOMPARE(findModel(described.value, "image.generate", kKlein)->status, QStringLiteral("loading"));
-        QCOMPARE(described.value.offer("image.generate")->status(), QStringLiteral("loading"));
+        QCOMPARE(findModel(described.value(), "image.generate", kKlein)->status, QStringLiteral("loading"));
+        QCOMPARE(described.value().offer("image.generate")->status(), QStringLiteral("loading"));
     }
 
     void aRunningServerStillLoadingItsModelIsLoading() {
@@ -255,7 +255,7 @@ private slots:
         fixture.writeStatus(QJsonObject{{kKlein, row(kKlein, "image", "active", fixture.endpoint())}});
         auto provider = fixture.provider();
         const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
-        QCOMPARE(findModel(described.value, "image.generate", kKlein)->status, QStringLiteral("loading"));
+        QCOMPARE(findModel(described.value(), "image.generate", kKlein)->status, QStringLiteral("loading"));
     }
 
     void aRunningServerThatDoesNotAnswerIsUnavailable() {
@@ -271,7 +271,7 @@ private slots:
         auto provider = fixture.provider();
         const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
         QVERIFY(described.ok());
-        const OfferedModel *model = findModel(described.value, "image.generate", kKlein);
+        const OfferedModel *model = findModel(described.value(), "image.generate", kKlein);
         QCOMPARE(model->status, QStringLiteral("unavailable"));
         QVERIFY(model->reason.contains("not answering"));
     }
@@ -281,8 +281,8 @@ private slots:
         auto provider = fixture.provider();
         const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
         QVERIFY(!described.ok());
-        QCOMPARE(described.errors.first().code, QStringLiteral("provider_unreachable"));
-        QVERIFY(described.errors.first().hint.contains("omarchy-agent-local"));
+        QCOMPARE(described.errors().first().code, QStringLiteral("provider_unreachable"));
+        QVERIFY(described.errors().first().hint.contains("omarchy-agent-local"));
     }
 
     void evenAnImmediateFailureRepliesFromTheEventLoop() {
@@ -290,9 +290,9 @@ private slots:
         auto provider = fixture.provider();
         bool described = false;
         bool submitted = false;
-        provider->describe([&](const Outcome<Description> &) { described = true; });
+        provider->describe([&](const Result<Description> &) { described = true; });
         provider->submit(fixture.request("image.generate", {{"prompt", "x"}}),
-                         [&](const Outcome<QString> &) { submitted = true; });
+                         [&](const Result<QString> &) { submitted = true; });
         QVERIFY(!described);
         QVERIFY(!submitted);
         QTRY_VERIFY(described && submitted);
@@ -305,8 +305,8 @@ private slots:
         auto provider = fixture.provider();
         const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
         QVERIFY(!described.ok());
-        QCOMPARE(described.errors.first().code, QStringLiteral("provider_unreachable"));
-        QVERIFY(described.errors.first().hint.contains("key"));
+        QCOMPARE(described.errors().first().code, QStringLiteral("provider_unreachable"));
+        QVERIFY(described.errors().first().hint.contains("key"));
     }
 
     void aRefusedKeySaysSo() {
@@ -316,7 +316,7 @@ private slots:
         instance.key = QStringLiteral("wrong-key");
         auto provider = fixture.provider(instance);
         const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
-        const OfferedModel *model = findModel(described.value, "image.generate", kKlein);
+        const OfferedModel *model = findModel(described.value(), "image.generate", kKlein);
         QCOMPARE(model->status, QStringLiteral("unavailable"));
         QVERIFY(model->reason.contains("key"));
         QCOMPARE(fixture.server.requests().first().headers.value("authorization"), QByteArray("Bearer wrong-key"));
@@ -372,13 +372,13 @@ private slots:
 
         const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
         QVERIFY(described.ok());
-        QCOMPARE(described.value.offer("image.generate")->models.size(), 3);
-        QCOMPARE(findModel(described.value, "image.generate", kKlein)->status, QStringLiteral("ready"));
-        QCOMPARE(findModel(described.value, "image.edit", kKlein)->defaults.value("steps").toInt(), 4);
-        const OfferedModel *offline = findModel(described.value, "image.generate", kZImage);
+        QCOMPARE(described.value().offer("image.generate")->models.size(), 3);
+        QCOMPARE(findModel(described.value(), "image.generate", kKlein)->status, QStringLiteral("ready"));
+        QCOMPARE(findModel(described.value(), "image.edit", kKlein)->defaults.value("steps").toInt(), 4);
+        const OfferedModel *offline = findModel(described.value(), "image.generate", kZImage);
         QCOMPARE(offline->status, QStringLiteral("unavailable"));
         QVERIFY(offline->reason.contains("offline"));
-        const OfferedModel *stopped = findModel(described.value, "image.generate", "stopped-sdcpp");
+        const OfferedModel *stopped = findModel(described.value(), "image.generate", "stopped-sdcpp");
         QCOMPARE(stopped->status, QStringLiteral("unavailable"));
         QVERIFY(stopped->hint.contains("on studio: omarchy-agent-local start stopped-sdcpp"));
     }
@@ -391,8 +391,8 @@ private slots:
         auto provider = fixture.provider(instance);
         const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
         QVERIFY(!described.ok());
-        QCOMPARE(described.errors.first().code, QStringLiteral("provider_unreachable"));
-        QVERIFY(described.errors.first().hint.contains("omarchy-agent-local pair studio"));
+        QCOMPARE(described.errors().first().code, QStringLiteral("provider_unreachable"));
+        QVERIFY(described.errors().first().hint.contains("omarchy-agent-local pair studio"));
     }
 
     void generateWritesTheImageTheMomentTheJobFinishes() {
@@ -412,8 +412,8 @@ private slots:
             "image.generate", {{"prompt", "a lighthouse"}, {"negative_prompt", "blurry"}, {"width", 1024},
                                {"height", 768}, {"steps", 4}, {"guidance", 1.0}, {"seed", -1}});
         const auto submitted = await<QString>([&](auto reply) { provider->submit(request, reply); });
-        QVERIFY2(submitted.ok(), qPrintable(submitted.errors.value(0).message));
-        const QString id = submitted.value;
+        QVERIFY2(submitted.ok(), qPrintable(submitted.errors().value(0).message));
+        const QString id = submitted.value();
 
         const QJsonObject body = requestBody(fixture.server);
         QCOMPARE(body.value("prompt").toString(), QStringLiteral("a lighthouse"));
@@ -446,11 +446,11 @@ private slots:
         QCOMPARE(fixture.server.requestsTo("GET", "/sdcpp/v1/jobs/job_1").size(), 3);
         const auto result = await<JobResult>([&](auto reply) { provider->result(id, reply); });
         QVERIFY(result.ok());
-        const QJsonObject image = result.value.outputs.value("image").toObject();
+        const QJsonObject image = result.value().outputs.value("image").toObject();
         QCOMPARE(image.value("path").toString(), QDir(request.outputDir).filePath("image.png"));
         QCOMPARE(image.value("format").toString(), QStringLiteral("png"));
         QCOMPARE(readAll(image.value("path").toString()), QByteArray("PNGDATA"));
-        const QJsonObject used = result.value.used;
+        const QJsonObject used = result.value().used;
         QCOMPARE(used.value("seed").toInteger(), Q_INT64_C(123456789012));
         QCOMPARE(used.value("width").toInt(), 1024);
         QCOMPARE(used.value("height").toInt(), 768);
@@ -496,7 +496,7 @@ private slots:
                                     {{"images", QJsonArray{QJsonObject{{"path", fixture.home.filePath("nope.png")}}}}});
         const auto submitted = await<QString>([&](auto reply) { provider->submit(edit, reply); });
         QVERIFY(!submitted.ok());
-        QCOMPARE(submitted.errors.first().code, QStringLiteral("file_not_found"));
+        QCOMPARE(submitted.errors().first().code, QStringLiteral("file_not_found"));
         QVERIFY(fixture.server.requestsTo("POST", "/sdcpp/v1/img_gen").isEmpty());
     }
 
@@ -531,8 +531,8 @@ private slots:
         request.model = QJsonObject{{"resource", "fugue/image-model"}, {"name", kZImage}};
         const auto submitted = await<QString>([&](auto reply) { provider->submit(request, reply); });
         QVERIFY(!submitted.ok());
-        QCOMPARE(submitted.errors.first().code, QStringLiteral("model_not_running"));
-        QVERIFY(submitted.errors.first().hint.contains("omarchy-agent-local start " + kZImage));
+        QCOMPARE(submitted.errors().first().code, QStringLiteral("model_not_running"));
+        QVERIFY(submitted.errors().first().hint.contains("omarchy-agent-local start " + kZImage));
     }
 
     void aRefusedSubmissionSaysWhy() {
@@ -545,8 +545,8 @@ private slots:
         auto request = fixture.request("image.generate", {{"prompt", "x"}, {"width", 1000}});
         const auto submitted = await<QString>([&](auto reply) { provider->submit(request, reply); });
         QVERIFY(!submitted.ok());
-        QCOMPARE(submitted.errors.first().code, QStringLiteral("node_failed"));
-        QVERIFY(submitted.errors.first().message.contains("multiple of 16"));
+        QCOMPARE(submitted.errors().first().code, QStringLiteral("node_failed"));
+        QVERIFY(submitted.errors().first().message.contains("multiple of 16"));
     }
 
     void cancelKeepsFollowingUntilTheServerSaysCancelled() {
@@ -574,12 +574,12 @@ private slots:
         connect(provider.get(), &Provider::statusChanged, this,
                 [&](const QString &, const JobStatus &status) { stream.append(status); });
         auto request = fixture.request("image.generate", {{"prompt", "x"}});
-        const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value;
+        const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value();
         QTRY_VERIFY(!stream.isEmpty() && stream.last().state == QLatin1String("running"));
 
         const auto asked = await<QString>([&](auto reply) { provider->cancel(id, reply); });
         QVERIFY(asked.ok());
-        QCOMPARE(asked.value, QStringLiteral("running"));
+        QCOMPARE(asked.value(), QStringLiteral("running"));
         QTRY_COMPARE(stream.last().state, QStringLiteral("cancelled"));
         QVERIFY(*afterCancel >= 2);
         QVERIFY(!await<JobResult>([&](auto reply) { provider->result(id, reply); }).ok());
@@ -593,9 +593,9 @@ private slots:
                                                                          {"message", "CUDA error: out of memory"}}}})});
         auto provider = fixture.provider();
         auto request = fixture.request("image.generate", {{"prompt", "x"}});
-        const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value;
+        const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value();
         JobStatus status;
-        QTRY_VERIFY((status = await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value).isTerminal());
+        QTRY_VERIFY((status = await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value()).isTerminal());
         QCOMPARE(status.state, QStringLiteral("error"));
         QCOMPARE(status.error.code, QStringLiteral("out_of_memory"));
         QVERIFY(status.error.message.contains("out of memory"));
@@ -607,10 +607,10 @@ private slots:
         fixture.acceptJobs("job_1");
         auto provider = fixture.provider();
         auto request = fixture.request("image.generate", {{"prompt", "x"}});
-        const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value;
+        const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value();
         fixture.server.close();
         JobStatus status;
-        QTRY_VERIFY((status = await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value).isTerminal());
+        QTRY_VERIFY((status = await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value()).isTerminal());
         QCOMPARE(status.state, QStringLiteral("error"));
         QCOMPARE(status.error.code, QStringLiteral("provider_unreachable"));
     }
@@ -622,9 +622,9 @@ private slots:
         fixture.scriptJob("job_1", {});
         auto provider = fixture.provider();
         auto request = fixture.request("image.generate", {{"prompt", "x"}});
-        const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value;
+        const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value();
         JobStatus status;
-        QTRY_VERIFY((status = await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value).isTerminal());
+        QTRY_VERIFY((status = await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value()).isTerminal());
         QCOMPARE(status.state, QStringLiteral("error"));
         QCOMPARE(status.error.code, QStringLiteral("node_failed"));
     }

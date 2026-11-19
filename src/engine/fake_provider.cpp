@@ -9,7 +9,7 @@ namespace fugue {
 namespace {
 
 Error unknownJob(const QString &job) {
-    return providerError(QStringLiteral("internal"), QStringLiteral("No job %1.").arg(job));
+    return makeError(QStringLiteral("internal"), QStringLiteral("No job %1.").arg(job));
 }
 
 } // namespace
@@ -22,7 +22,8 @@ void FakeProvider::setDescription(const Description &description) { m_descriptio
 void FakeProvider::setDescribeErrors(const Errors &errors) { m_describeErrors = errors; }
 
 void FakeProvider::describe(Reply<Description> reply) {
-    later(std::move(reply), Outcome<Description>{m_description, m_describeErrors});
+    later(std::move(reply), m_describeErrors.isEmpty() ? Result<Description>(m_description)
+                                                       : Result<Description>(m_describeErrors));
 }
 
 void FakeProvider::submit(const JobRequest &request, Reply<QString> reply) {
@@ -32,36 +33,36 @@ void FakeProvider::submit(const JobRequest &request, Reply<QString> reply) {
     job.status.state = QStringLiteral("queued");
     m_jobs.insert(id, job);
     m_order.append(id);
-    later(std::move(reply), Outcome<QString>{id, {}});
+    later(std::move(reply), Result<QString>(id));
 }
 
 void FakeProvider::status(const QString &job, Reply<JobStatus> reply) {
     if (!m_jobs.contains(job))
-        return later(std::move(reply), Outcome<JobStatus>{{}, {unknownJob(job)}});
-    later(std::move(reply), Outcome<JobStatus>{m_jobs.value(job).status, {}});
+        return later(std::move(reply), Result<JobStatus>(unknownJob(job)));
+    later(std::move(reply), Result<JobStatus>(m_jobs.value(job).status));
 }
 
 void FakeProvider::cancel(const QString &job, Reply<QString> reply) {
     if (!m_jobs.contains(job))
-        return later(std::move(reply), Outcome<QString>{{}, {unknownJob(job)}});
+        return later(std::move(reply), Result<QString>(unknownJob(job)));
     if (!m_jobs.value(job).status.isTerminal()) {
         JobStatus cancelled;
         cancelled.state = QStringLiteral("cancelled");
         change(job, cancelled);
     }
-    later(std::move(reply), Outcome<QString>{m_jobs.value(job).status.state, {}});
+    later(std::move(reply), Result<QString>(m_jobs.value(job).status.state));
 }
 
 void FakeProvider::result(const QString &job, Reply<JobResult> reply) {
     if (!m_jobs.contains(job))
-        return later(std::move(reply), Outcome<JobResult>{{}, {unknownJob(job)}});
+        return later(std::move(reply), Result<JobResult>(unknownJob(job)));
     const Job &found = m_jobs[job];
     if (found.status.state != QLatin1String("done"))
         return later(std::move(reply),
-                     Outcome<JobResult>{{}, {providerError(QStringLiteral("internal"),
+                     Result<JobResult>(makeError(QStringLiteral("internal"),
                                                            QStringLiteral("Job %1 is %2, not done.")
-                                                               .arg(job, found.status.state))}});
-    later(std::move(reply), Outcome<JobResult>{found.result, {}});
+                                                               .arg(job, found.status.state))));
+    later(std::move(reply), Result<JobResult>(found.result));
 }
 
 JobRequest FakeProvider::submitted(const QString &job) const { return m_jobs.value(job).request; }
@@ -86,7 +87,7 @@ void FakeProvider::finish(const QString &job, const QMap<QString, QByteArray> &f
         const QString path = dir.filePath(it.key());
         QFile file(path);
         if (!file.open(QIODevice::WriteOnly) || file.write(it.value()) != it.value().size())
-            return fail(job, providerError(QStringLiteral("internal"),
+            return fail(job, makeError(QStringLiteral("internal"),
                                            QStringLiteral("Could not write %1.").arg(path)));
         const QFileInfo info(path);
         outputs.insert(info.completeBaseName(),

@@ -102,7 +102,7 @@ QString serverMessage(const QJsonObject &body) {
 
 Error jobError(const QString &message) {
     const bool memory = message.contains(QLatin1String("out of memory"), Qt::CaseInsensitive);
-    return providerError(memory ? QStringLiteral("out_of_memory") : QStringLiteral("node_failed"),
+    return makeError(memory ? QStringLiteral("out_of_memory") : QStringLiteral("node_failed"),
                          message.isEmpty() ? QStringLiteral("The model server failed the job.") : message,
                          memory ? QStringLiteral("Stop other models to free memory, or ask for a smaller image.")
                                 : QString());
@@ -146,7 +146,7 @@ bool encodeInput(const QJsonValue &input, QString *encoded, Errors *errors) {
     const QString path = input.toObject().value("path").toString();
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
-        errors->append(providerError(QStringLiteral("file_not_found"),
+        errors->append(makeError(QStringLiteral("file_not_found"),
                                      QStringLiteral("Cannot read the input image %1.").arg(path)));
         return false;
     }
@@ -227,7 +227,7 @@ QNetworkReply *OmarchyProvider::send(const Server &server, const QByteArray &met
     return m_network.sendCustomRequest(request, method, body);
 }
 
-void OmarchyProvider::discover(std::function<void(const Outcome<Discovery> &)> done) {
+void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> done) {
     const QDir state(m_paths.stateDir);
     const QDir config(m_paths.configDir);
     const bool remote = !m_instance.address.isEmpty();
@@ -235,8 +235,8 @@ void OmarchyProvider::discover(std::function<void(const Outcome<Discovery> &)> d
     const QString host = dns.section(QLatin1Char('.'), 0, 0);
     // Replies come from the event loop, never inside the call (provider.h).
     const auto fail = [this, &done](const QString &message, const QString &hint) {
-        const Error error = providerError(QStringLiteral("provider_unreachable"), message, hint);
-        QTimer::singleShot(0, this, [done = std::move(done), error] { done(Outcome<Discovery>{{}, {error}}); });
+        const Error error = makeError(QStringLiteral("provider_unreachable"), message, hint);
+        QTimer::singleShot(0, this, [done = std::move(done), error] { done(Result<Discovery>(error)); });
     };
 
     // The rows to serve from, and the key for them.
@@ -284,7 +284,7 @@ void OmarchyProvider::discover(std::function<void(const Outcome<Discovery> &)> d
         QList<OfferedModel> models;
         QList<bool> edits;
         int waiting = 0;
-        std::function<void(const Outcome<Discovery> &)> done;
+        std::function<void(const Result<Discovery> &)> done;
     };
     auto pending = std::make_shared<Pending>();
     pending->done = std::move(done);
@@ -300,7 +300,7 @@ void OmarchyProvider::discover(std::function<void(const Outcome<Discovery> &)> d
             description.capabilities.append(generate);
         if (!edit.models.isEmpty())
             description.capabilities.append(edit);
-        pending->done(Outcome<Discovery>{pending->discovery, {}});
+        pending->done(Result<Discovery>(pending->discovery));
     };
 
     const QString where = remote ? QStringLiteral(" on %1").arg(host) : QString();
@@ -392,38 +392,37 @@ void OmarchyProvider::discover(std::function<void(const Outcome<Discovery> &)> d
 }
 
 void OmarchyProvider::describe(Reply<Description> reply) {
-    discover([reply = std::move(reply)](const Outcome<Discovery> &found) {
-        reply(Outcome<Description>{found.value.description, found.errors});
+    discover([reply = std::move(reply)](const Result<Discovery> &found) {
+        reply(found.ok() ? Result<Description>(found->description) : Result<Description>(found.errors()));
     });
 }
 
 void OmarchyProvider::submit(const JobRequest &request, Reply<QString> reply) {
     QPointer<OmarchyProvider> self(this);
-    discover([self, request, reply = std::move(reply)](const Outcome<Discovery> &found) {
+    discover([self, request, reply = std::move(reply)](const Result<Discovery> &found) {
         if (!self)
             return;
         if (!found.ok())
-            return reply(Outcome<QString>{{}, found.errors});
+            return reply(Result<QString>(found.errors()));
         if (request.capability != QLatin1String("image.generate") &&
             request.capability != QLatin1String("image.edit"))
-            return reply(Outcome<QString>{
-                {}, {providerError(QStringLiteral("capability_unavailable"),
-                                   QStringLiteral("The omarchy provider does not offer %1.").arg(request.capability))}});
+            return reply(Result<QString>(makeError(QStringLiteral("capability_unavailable"),
+                                                   QStringLiteral("The omarchy provider does not offer %1.").arg(request.capability))));
         // The same rules as choosing among instances (8.3, 8.4), within this one.
         Requirement requirement;
         requirement.capability = request.capability;
         requirement.model = request.model;
         requirement.nodePin = self->m_instance.name;
-        const auto chosen = selectProvider({Candidate{self->m_instance, {found.value.description, {}}}}, requirement);
+        const auto chosen = selectProvider({Candidate{self->m_instance, Result<Description>(found->description)}}, requirement);
         if (!chosen.ok())
-            return reply(Outcome<QString>{{}, chosen.errors});
+            return reply(Result<QString>(chosen.errors()));
         Errors errors;
         const QJsonObject body = imgGenBody(request, &errors);
         if (hasErrors(errors))
-            return reply(Outcome<QString>{{}, errors});
+            return reply(Result<QString>(errors));
 
-        const QJsonObject model = chosen.value.model.handle;
-        const Server server = found.value.servers.value(model.value("name").toString());
+        const QJsonObject model = chosen->model.handle;
+        const Server server = found->servers.value(model.value("name").toString());
         QNetworkReply *posted = self->send(server, "POST", QStringLiteral("/sdcpp/v1/img_gen"),
                                            QJsonDocument(body).toJson(QJsonDocument::Compact));
         connect(posted, &QNetworkReply::finished, self, [self, posted, server, request, model, reply] {
@@ -442,19 +441,19 @@ void OmarchyProvider::submit(const JobRequest &request, Reply<QString> reply) {
                 self->m_jobs.insert(id, job);
                 if (!self->m_poll.isActive())
                     self->m_poll.start();
-                return reply(Outcome<QString>{id, {}});
+                return reply(Result<QString>(id));
             }
             Error error;
             if (code == 0)
-                error = providerError(QStringLiteral("provider_unreachable"),
+                error = makeError(QStringLiteral("provider_unreachable"),
                                       QStringLiteral("%1 is not answering at %2.").arg(server.recipe, server.base),
                                       QStringLiteral("Check that it is running: omarchy-agent-local status."));
             else if (code == 401 || code == 403)
-                error = providerError(QStringLiteral("provider_unreachable"),
+                error = makeError(QStringLiteral("provider_unreachable"),
                                       QStringLiteral("%1 refused the key.").arg(server.recipe),
                                       QStringLiteral("Check the key, or pair again."));
             else if (code == 503)
-                error = providerError(QStringLiteral("model_not_running"),
+                error = makeError(QStringLiteral("model_not_running"),
                                       QStringLiteral("%1 has no model loaded yet.").arg(server.recipe),
                                       QStringLiteral("Wait for it to finish loading."));
             else
@@ -462,7 +461,7 @@ void OmarchyProvider::submit(const JobRequest &request, Reply<QString> reply) {
                                      .arg(server.recipe, serverMessage(answer).isEmpty()
                                                              ? QStringLiteral("HTTP %1").arg(code)
                                                              : serverMessage(answer)));
-            reply(Outcome<QString>{{}, {error}});
+            reply(Result<QString>(error));
         });
     });
 }
@@ -470,16 +469,16 @@ void OmarchyProvider::submit(const JobRequest &request, Reply<QString> reply) {
 void OmarchyProvider::status(const QString &job, Reply<JobStatus> reply) {
     const auto found = m_jobs.value(job);
     if (!found)
-        return later(std::move(reply), Outcome<JobStatus>{{}, {providerError("internal", "No job " + job + ".")}});
-    later(std::move(reply), Outcome<JobStatus>{found->status, {}});
+        return later(std::move(reply), Result<JobStatus>(makeError("internal", "No job " + job + ".")));
+    later(std::move(reply), Result<JobStatus>(found->status));
 }
 
 void OmarchyProvider::cancel(const QString &job, Reply<QString> reply) {
     const auto found = m_jobs.value(job);
     if (!found)
-        return later(std::move(reply), Outcome<QString>{{}, {providerError("internal", "No job " + job + ".")}});
+        return later(std::move(reply), Result<QString>(makeError("internal", "No job " + job + ".")));
     if (found->status.isTerminal())
-        return later(std::move(reply), Outcome<QString>{found->status.state, {}});
+        return later(std::move(reply), Result<QString>(found->status.state));
     // Cooperative (api.md "POST /sdcpp/v1/jobs/{id}/cancel"): a generating job stays generating
     // until a checkpoint, so the poller keeps following it to its terminal state (9.6).
     QNetworkReply *posted = send(found->server, "POST", QStringLiteral("/sdcpp/v1/jobs/%1/cancel").arg(found->serverId));
@@ -487,25 +486,24 @@ void OmarchyProvider::cancel(const QString &job, Reply<QString> reply) {
         posted->deleteLater();
         const int code = httpStatus(posted);
         if (code == 0)
-            return reply(Outcome<QString>{
-                {}, {providerError(QStringLiteral("provider_unreachable"),
-                                   QStringLiteral("%1 is not answering at %2.").arg(found->server.recipe, found->server.base))}});
+            return reply(Result<QString>(makeError(QStringLiteral("provider_unreachable"),
+                                                   QStringLiteral("%1 is not answering at %2.").arg(found->server.recipe, found->server.base))));
         const QJsonObject answer = jsonBody(posted);
         if (code == 200 && answer.value("status").toString() == QLatin1String("cancelled") && !found->status.isTerminal())
             change(job, statusOf(answer));
-        reply(Outcome<QString>{found->status.state, {}});
+        reply(Result<QString>(found->status.state));
     });
 }
 
 void OmarchyProvider::result(const QString &job, Reply<JobResult> reply) {
     const auto found = m_jobs.value(job);
     if (!found)
-        return later(std::move(reply), Outcome<JobResult>{{}, {providerError("internal", "No job " + job + ".")}});
+        return later(std::move(reply), Result<JobResult>(makeError("internal", "No job " + job + ".")));
     if (found->status.state != QLatin1String("done"))
         return later(std::move(reply),
-                     Outcome<JobResult>{{}, {providerError("internal", QStringLiteral("Job %1 is %2, not done.")
-                                                                           .arg(job, found->status.state))}});
-    later(std::move(reply), Outcome<JobResult>{found->result, {}});
+                     Result<JobResult>(makeError("internal", QStringLiteral("Job %1 is %2, not done.")
+                                                                 .arg(job, found->status.state))));
+    later(std::move(reply), Result<JobResult>(found->result));
 }
 
 void OmarchyProvider::poll() {
@@ -535,7 +533,7 @@ void OmarchyProvider::pollJob(const QString &id) {
             if (++job->failures >= kMaxPollFailures) {
                 JobStatus lost;
                 lost.state = QStringLiteral("error");
-                lost.error = providerError(QStringLiteral("provider_unreachable"),
+                lost.error = makeError(QStringLiteral("provider_unreachable"),
                                            QStringLiteral("%1 stopped answering during the job.").arg(job->server.recipe));
                 change(id, lost);
             }
@@ -546,7 +544,7 @@ void OmarchyProvider::pollJob(const QString &id) {
             // 404 or 410: the server no longer has the job, so its result is lost.
             JobStatus gone;
             gone.state = QStringLiteral("error");
-            gone.error = providerError(QStringLiteral("node_failed"),
+            gone.error = makeError(QStringLiteral("node_failed"),
                                        QStringLiteral("%1 no longer has the job (HTTP %2).").arg(job->server.recipe).arg(code),
                                        QStringLiteral("Run the node again."));
             return change(id, gone);
@@ -578,7 +576,7 @@ void OmarchyProvider::finishJob(const QString &id, const QJsonObject &answer) {
     const QByteArray bytes = QByteArray::fromBase64(first.value("b64_json").toString().toLatin1());
     if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size()) {
         status.state = QStringLiteral("error");
-        status.error = providerError(QStringLiteral("internal"), QStringLiteral("Cannot write %1.").arg(path));
+        status.error = makeError(QStringLiteral("internal"), QStringLiteral("Cannot write %1.").arg(path));
         return change(id, status);
     }
     file.close();

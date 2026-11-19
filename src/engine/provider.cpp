@@ -4,14 +4,6 @@
 
 namespace fugue {
 
-Error providerError(const QString &code, const QString &message, const QString &hint) {
-    Error error;
-    error.code = code;
-    error.message = message;
-    error.hint = hint;
-    return error;
-}
-
 QString CapabilityOffer::status() const {
     bool loading = false;
     for (const OfferedModel &model : models) {
@@ -36,7 +28,7 @@ bool JobStatus::isTerminal() const {
 
 Provider::~Provider() = default;
 
-void Provider::shutdown(Reply<Nothing> reply) { later(std::move(reply), Outcome<Nothing>{}); }
+void Provider::shutdown(Reply<Nothing> reply) { later(std::move(reply), Result<Nothing>(Nothing{})); }
 
 void Provider::deliverLater(std::function<void()> deliver) {
     QTimer::singleShot(0, this, std::move(deliver));
