@@ -115,6 +115,12 @@ Rectangle {
     Connections {
         target: commands
         function onWindowRequested(id) {
+            if (id === "help.about") {
+                if (!bar.about)
+                    bar.about = aboutComponent.createObject(bar)
+                bar.about.open()
+                return
+            }
             if (id !== "app.menu-bar")
                 return
             if (bar.anyShown) {
@@ -209,6 +215,41 @@ Rectangle {
                         height: Math.max(1, Math.round(bar.u / 2))
                         color: bar.look.text
                     }
+                }
+            }
+        }
+    }
+
+    // Help > About Fugue: the name, version and what it is; Esc or a click outside closes it.
+    property var about: null
+    Component {
+        id: aboutComponent
+        Popup {
+            objectName: "about"
+            parent: Overlay.overlay
+            anchors.centerIn: parent
+            modal: true
+            focus: true
+            padding: 6 * bar.u
+            Overlay.modal: Rectangle { color: bar.look.scrim }
+            background: PopupSurface { look: bar.look }
+            contentItem: Column {
+                spacing: 2 * bar.u
+                Text {
+                    text: qsTr("Fugue %1").arg(Qt.application.version)
+                    font.pixelSize: bar.look.overlayTitleSize
+                    font.weight: Font.DemiBold
+                    color: bar.look.text
+                }
+                Text {
+                    text: qsTr("Node-based workflows for local AI on Omarchy.")
+                    color: bar.look.label
+                    font.pixelSize: bar.look.textSize
+                }
+                Text {
+                    text: qsTr("MIT license.")
+                    color: bar.look.label
+                    font.pixelSize: bar.look.labelSize
                 }
             }
         }

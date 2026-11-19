@@ -212,6 +212,14 @@ private slots:
         QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("menuItem-help.docs")));
         QTRY_COMPARE(app.openedUrls.size(), 1);
         QVERIFY(app.openedUrls.first().toString().contains("github.com/bmaltais/fugue"));
+        // Help > About Fugue opens a card, and Esc closes it.
+        QTRY_VERIFY(allClosed(app.window));
+        QTest::keyClick(app.window, 'H', Qt::AltModifier);
+        QTRY_VERIFY(isOpen(app.window, "menuDropdown"));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("menuItem-help.about")));
+        QTRY_VERIFY(isOpen(app.window, "about"));
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!isOpen(app.window, "about"));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
