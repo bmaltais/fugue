@@ -8,8 +8,8 @@ import ".."
 // Everything that decides (constraints, parsing, checks, the undo step) is WidgetEdit's
 // (canvas/widget_edit.h); this file draws and forwards.
 //
-// At rest a widget is the well, one text and a mouse area, so a big graph stays cheap (12.1).
-// A slider's fill, a toggle's switch and a color's swatch are made only for those widgets,
+// At rest a widget is the well, one text, a glyph and a mouse area, so a big graph stays cheap
+// (12.1). A slider's fill, a toggle's switch and a color's swatch are made only for those widgets,
 // spin chevrons on the first hover, and what a widget needs only while it is used (the text
 // editor, a menu, a file or color picker) on the first click, dropped after. Typed fields are
 // QQuickTextInput or QQuickTextEdit, so while one has focus the keys of 12.4 belong to it.
@@ -91,15 +91,6 @@ Rectangle {
     radius: smallCorner
     color: editable ? wellColor : "transparent"
 
-    // A slider's share of its range (canvas-look 4.4).
-    Rectangle {
-        visible: root.kind === "slider" && root.editable
-        height: root.height
-        width: visible ? root.width * root.edits.fraction(root.nodeId, root.name, root.number) : 0
-        radius: root.smallCorner
-        color: Qt.alpha(root.look.accent, 0.22)
-    }
-
     Text {
         id: valueLabel
         objectName: "widgetValue"
@@ -142,6 +133,9 @@ Rectangle {
         return Qt.createComponent(file).createObject(root, Object.assign({ host: root }, properties || {}))
     }
     Component.onCompleted: {
+        // A slider keeps its fill while linked (hidden), so it shows again when unlinked.
+        if (kind === "slider")
+            make("SliderFill.qml")
         if (!editable)
             return
         if (kind === "toggle")

@@ -385,20 +385,16 @@ Item {
                 Layout.fillWidth: true
                 Layout.topMargin: 4 * root.u
                 spacing: root.u
-                Text {
-                    color: root.look.label
-                    font.pixelSize: root.look.labelSize
-                    text: qsTr("Change keys in")
-                }
-                // The path in the monospace face, elided in the middle when the card is narrow.
+                // One sentence for translators, the path in the monospace face (StyledText has
+                // no <tt>, so this is rich text).
                 Text {
                     Layout.fillWidth: true
-                    elide: Text.ElideMiddle
-                    color: root.look.text
-                    font.family: "monospace"
+                    wrapMode: Text.Wrap
+                    color: root.look.label
                     font.pixelSize: root.look.labelSize
-                    textFormat: Text.PlainText
-                    text: commands.keymapFile
+                    textFormat: Text.RichText
+                    text: qsTr("Change keys in %1").arg("<tt>" + commands.keymapFile.replace(/&/g, "&amp;")
+                                                         .replace(/</g, "&lt;").replace(/>/g, "&gt;") + "</tt>")
                 }
                 Keycap { look: root.look; text: "?" }
                 Text {

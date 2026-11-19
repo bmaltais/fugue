@@ -1,6 +1,7 @@
 # Canvas look
 
-Issue #47, step 1. Date: 2026-11-19. Status: **proposed**, for the owner to approve before step 2.
+Issue #47. Date: 2026-11-19. Status: **approved** by the owner, with section 18's questions
+answered as recommended; step 2 built it (what differs is in [spec Appendix A](spec.md#appendix-a-choices-made-in-this-document)).
 
 [spec 12](spec.md#12-canvas) fixes how the canvas behaves, and its feel is approved. This document
 fixes how it looks: every size, color, state and motion the restyle (#47 step 2, on top of #16)
@@ -336,10 +337,11 @@ pre-painted texture shared by every node, drawn in one batch, off below the read
 measured budget and a fallback (below). If the measurement fails the budget, nodes at rest lose
 their shadow and 12.1 wins.
 
-**How, in QML.** One `QQuickImageProvider` (`image://fugue/shadow/<level>/<corner>/<light>`)
-paints each shadow once into a small QImage: a rounded rect of the node's corner, blurred, with
-the level's two layers. Each node shows it through a `BorderImage` (9-slice) stretched to the node
-plus the blur margin. All nodes at one level share one texture.
+**How, in QML.** C++ (`look::shadowImage`) paints each shadow once into a small QImage: a
+rounded rect of the node's corner, blurred, with the level's two layers, handed to QML as a
+`data:` URL (`theme.look.shadow1` to `shadow3`; the plan was an image provider, which each
+engine would have to register). Each node shows it through a `BorderImage` (9-slice) stretched to
+the node plus the blur margin. All nodes at one level share one texture.
 
 - Put the shadows in **their own `Repeater` over the node model, below the node `Repeater`**, so
   they are contiguous in the render order and batch into one draw call.
@@ -347,7 +349,8 @@ plus the blur margin. All nodes at one level share one texture.
 - Never `MultiEffect`, `layer.enabled` or a `DropShadow` per node.
 - Budget: the shadow layer adds at most 1 ms of render-thread time at 300 nodes, measured with
   `QSG_RENDER_TIMING=1` as in spike 05. If it costs more, drop level 1 and keep level 2 for the
-  selection only.
+  selection only. Measured after step 2 (`test_canvas_window benchmark`, 302 nodes, 600 wires,
+  RTX 3090): 0.45 ms at most, so nodes at rest keep their shadow.
 
 ## 8. Wires
 
@@ -423,7 +426,7 @@ Glyphs are [Lucide](https://lucide.dev) icons (ISC license), bundled as a subset
 | Missing type | dashed `error` | title in `error`: the type id | `circle-help` | | 1 | ports kept from the file; a body line "Not installed. Find it in packs…" (spec 11.6) |
 | Warning | | | `triangle-alert`, `label`, with a count | | 1 | the warnings in a tooltip |
 | Pinned | | | `pin`, `label` | | 1 | |
-| Collapsed | | header only, corner `r` all round | | | 1 | width fits the title plus 12u, at most 60u |
+| Collapsed | | header only, corner `r` all round | | | 1 | width fits the title plus 24u (kind mark, meta, padding), at most 60u; one port mark at each end |
 | Group (a node type) | `hairline` | layers glyph for the kind mark | `layers` | | 1 | a second card offset (1u, 1u) behind it; a caption row "4 nodes · Tab to enter" |
 
 A dashed edge in QML is a `Shape` with `strokeStyle: ShapePath.DashLine` around a `PathRectangle`
@@ -559,6 +562,8 @@ Measure before and after with spike 05's method at 300 nodes and 600 wires (pan,
 the target stays 12.1's.
 
 ## 18. Questions for the owner
+
+Answered 2026-11-19: all five as recommended (step 2 builds them so).
 
 1. **Port colors that collide.** Repair them in `Theme::portColor` as 6.2 describes (keep theme
    colors that are distinct, replace only the colliding ones), or always use the theme's colors

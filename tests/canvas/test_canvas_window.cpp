@@ -2,6 +2,7 @@
 // and what the mouse, wheel, trackpad and keyboard do on it (spec 12.1 to 12.3, 12.6).
 
 #include <atomic>
+#include <ctime>
 #include <QElapsedTimer>
 #include <QVariantAnimation>
 #include <QJsonArray>
@@ -39,6 +40,14 @@ QQuickItem *item(QQuickItem *from, const QString &name) {
             return found;
     }
     return nullptr;
+}
+
+// Every item under `from`, itself included: what the scene graph has to walk.
+int countItems(QQuickItem *from) {
+    int count = 1;
+    for (auto *child : from->childItems())
+        count += countItems(child);
+    return count;
 }
 
 Document load(const QByteArray &json) {
@@ -115,6 +124,9 @@ struct App {
     QQuickItem *world = nullptr;
     qint64 openedMs = 0;
     qint64 createdMs = 0; // the QML objects made, before the first frame
+    // The CPU time the process spent to the first frame: what opening costs, unlike the wall
+    // clock not stretched when other programs (ctest -j8) take the CPU meanwhile.
+    qint64 openedCpuMs = 0;
 
     explicit App(const Document &document, int textSize = 12) : theme(themeFolder(dir, textSize)) {
         nodes::addBuiltinNodeTypes(registry);
@@ -132,9 +144,16 @@ struct App {
         engine.rootContext()->setContextProperty("workflows", &workflows);
     }
 
+    static qint64 cpuMs() {
+        timespec now{};
+        clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &now);
+        return qint64(now.tv_sec) * 1000 + now.tv_nsec / 1000000;
+    }
+
     bool open() {
         QElapsedTimer timer;
         timer.start();
+        const qint64 cpuStart = cpuMs();
         engine.load(QUrl("qrc:/Main.qml"));
         if (engine.rootObjects().isEmpty())
             return false;
@@ -149,6 +168,7 @@ struct App {
         if (!up)
             return false;
         openedMs = timer.elapsed();
+        openedCpuMs = cpuMs() - cpuStart;
         window->requestActivate();
         if (!QTest::qWaitForWindowActive(window))
             return false;
@@ -192,11 +212,19 @@ private slots:
         QVERIFY(app.open());
         // 12.1: up in well under half a second. Offscreen this is the QML and scene graph
         // work without a GPU; the budget leaves room for a slow CI machine.
-        qInfo("window up with 302 nodes and 600 wires in %lld ms (objects made in %lld ms)", app.openedMs,
-              app.createdMs);
+        const int items = countItems(app.window->contentItem());
+        qInfo("window up with 302 nodes and 600 wires in %lld ms, %lld ms of CPU (objects made in %lld ms); "
+              "%d items", app.openedMs, app.openedCpuMs, app.createdMs, items);
         // 12.1's target is the window itself (opensQuicklyEmpty); a 300-node file gets a
-        // looser bound, so a slow CI machine does not fail it.
-        QVERIFY2(app.openedMs < 500, qPrintable(QString::number(app.openedMs)));
+        // looser bound, so a slow CI machine does not fail it. It is on CPU time: the wall
+        // clock also counts the time other tests take the CPU under ctest -j8, which made it
+        // flaky. The wall clock only catches a hang.
+        QVERIFY2(app.openedCpuMs < 500, qPrintable(QString::number(app.openedCpuMs)));
+        QVERIFY2(app.openedMs < 3000, qPrintable(QString::number(app.openedMs)));
+        // What the time grows with, counted, so it can be checked without a clock: 3534 items
+        // on 2026-11-19 (the faces and rows of the 44 nodes in view, two items for each other
+        // node, a shadow each, a shape per wire). One more item on every node is 302 more.
+        QVERIFY2(items < 3800, qPrintable(QString::number(items)));
         QCOMPARE(item(app.window->contentItem(), "nodes")->property("count").toInt(), 302);
         QCOMPARE(item(app.window->contentItem(), "wires")->property("count").toInt(), 600);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
