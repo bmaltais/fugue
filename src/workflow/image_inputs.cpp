@@ -7,6 +7,7 @@
 #include "engine/vips.h"
 
 #include <QBuffer>
+#include <cerrno>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -253,6 +254,30 @@ bool sameBytes(const QString &a, const QString &b) {
     return true;
 }
 
+// Copies the rest of `from` into a new file at `to`, a megabyte at a time, so a big image is
+// never held whole in memory.
+Errors copyInto(QFile &from, const QString &to) {
+    QFile out(to);
+    errno = 0;
+    if (!out.open(QIODevice::WriteOnly))
+        return {makeError(writeFailureCode(errno != 0 ? errno : EIO),
+                          QStringLiteral("Cannot write the image: %1.").arg(out.errorString()))};
+    while (!from.atEnd()) {
+        const QByteArray chunk = from.read(1 << 20);
+        if (chunk.isEmpty())
+            return {makeError(QStringLiteral("file_not_found"),
+                              QStringLiteral("Cannot read %1: %2.").arg(QFileInfo(from.fileName()).fileName(), from.errorString()))};
+        errno = 0;
+        if (out.write(chunk) != chunk.size())
+            return {makeError(writeFailureCode(errno != 0 ? errno : EIO),
+                              QStringLiteral("Cannot write the image: %1.").arg(out.errorString()))};
+    }
+    if (!out.flush())
+        return {makeError(writeFailureCode(errno != 0 ? errno : EIO),
+                          QStringLiteral("Cannot write the image: %1.").arg(out.errorString()))};
+    return {};
+}
+
 // The name `source` takes in `folder`: its own, else `<stem>-2.<ext>`, `-3`, ...; a file there
 // with the same bytes is reused. `claimed` holds the names other sources took this time.
 QString nameIn(const QString &folder, const QString &source, QHash<QString, QString> &claimed) {
@@ -352,7 +377,7 @@ Errors relocateInputs(Document &document, const Registry &registry, const QStrin
                               QStringLiteral("The image %1 is gone, so the workflow's inputs cannot be moved: %2.")
                                   .arg(QFileInfo(change.copy).fileName(), file.errorString()))};
         PartialFile partial(target, name);
-        if (const Errors written = partial.write(file.readAll(), QStringLiteral("the image")); hasErrors(written))
+        if (const Errors written = copyInto(file, partial.path()); hasErrors(written))
             return written;
         const Result<bool> committed = partial.commit(destination, Overwrite::Never);
         if (!committed)
