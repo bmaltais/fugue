@@ -7,7 +7,12 @@
 //     input whose widget is `file` or `folder`; a literal that is an absolute path
 //     (`/...`, `~`, `C:\...`) in an input of a node type the registry does not know (a
 //     pack that is not installed); also the default of a group's exposed input that
-//     drives such an input. A relative path stays.
+//     drives such an input. A relative path stays. A path can also reach such an input
+//     through links (a Text node typed with a path, linked to Load Image's file): every
+//     absolute-path literal of a node upstream of a file or folder input goes too, as does
+//     every one inside a group whose instance is upstream of one, and the literal of a
+//     group input that drives, inside the group, a node upstream of one. Text that feeds no
+//     path stays, however it looks (a prompt may start with `/`).
 //   - Optionally the prompts are blanked: the literal of every `text` input with the
 //     `multiline` widget. (Node types name their prompt inputs that way: Text, Generate
 //     Image, Edit Image.) Links and randomized values are untouched.

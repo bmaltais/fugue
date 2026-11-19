@@ -81,6 +81,62 @@ private slots:
         QCOMPARE(input(copy, "a", "file").toObject().value("from").toString(), QString("b.text"));
     }
 
+    // A path typed into a text node that feeds a file or folder input is a path too, however
+    // many nodes it goes through; text that feeds no path is the user's, whatever it looks like.
+    void aPathThatFlowsIntoAFileInputThroughLinksIsStripped() {
+        const QJsonObject document = json(
+            "{'fugue': 1, 'graph': {'nodes': {"
+            " 't': {'type': 'fugue/prompter', 'version': '1.0.0', 'inputs': {'title': '/home/me/pics/fox.png', 'prompt': '~/x/y.png'}},"
+            " 'mid': {'type': 'fugue/prompter', 'version': '1.0.0', 'inputs': {'title': {'from': 't.text'}, 'prompt': 'C:\\\\Users\\\\me\\\\z.png'}},"
+            " 'a': {'type': 'fugue/loader', 'version': '1.0.0', 'inputs': {'file': {'from': 'mid.text'}, 'dir': [{'from': 'd.text'}]}},"
+            " 'd': {'type': 'fugue/prompter', 'version': '1.0.0', 'inputs': {'title': '/home/me/out'}},"
+            " 'other': {'type': 'fugue/prompter', 'version': '1.0.0', 'inputs': {'title': '/r/pics style', 'prompt': {'from': 't.text'}}}"
+            "}}}");
+        const QJsonObject copy = shareCopy(document, m_registry);
+        QCOMPARE(input(copy, "t", "title").toString(), QString("fox.png"));
+        QCOMPARE(input(copy, "t", "prompt").toString(), QString("y.png"));
+        QCOMPARE(input(copy, "mid", "prompt").toString(), QString("z.png"));
+        QCOMPARE(input(copy, "mid", "title").toObject().value("from").toString(), QString("t.text"));
+        QCOMPARE(input(copy, "d", "title").toString(), QString("out")); // through a list input
+        QCOMPARE(input(copy, "other", "title").toString(), QString("/r/pics style")); // feeds no path
+        QVERIFY(!QJsonDocument(copy).toJson().contains("/home/me"));
+    }
+
+    // A group instance upstream of a path input: what is typed inside its definition can
+    // reach the path through the group's outputs, so its absolute paths go too.
+    void aGroupThatFeedsAPathLosesItsAbsolutePaths() {
+        const QJsonObject document = json(
+            "{'fugue': 1, 'graph': {'nodes': {"
+            " 'g': {'type': 'local/namer', 'version': '1.0.0', 'inputs': {'start': '/home/me/a'}},"
+            " 'a': {'type': 'fugue/loader', 'version': '1.0.0', 'inputs': {'file': {'from': 'g.text'}}}}},"
+            " 'groups': {'local/namer': {'version': '1.0.0', 'name': 'Namer',"
+            "   'inputs': [{'name': 'start', 'targets': ['p.title'], 'default': '/home/me/b'}],"
+            "   'outputs': [{'name': 'text', 'from': 'p.text'}],"
+            "   'nodes': {'p': {'type': 'fugue/prompter', 'version': '1.0.0', 'inputs': {'prompt': '/home/me/c.png'}}}}}}");
+        const QJsonObject copy = shareCopy(document, m_registry);
+        QVERIFY2(!QJsonDocument(copy).toJson().contains("/home/me"), QJsonDocument(copy).toJson().constData());
+        QCOMPARE(input(copy, "g", "start").toString(), QString("a"));
+    }
+
+    // An instance's literal that goes, inside the group, into a node that feeds a path input.
+    void aGroupInputThatFeedsAPathInsideIsStripped() {
+        const QJsonObject document = json(
+            "{'fugue': 1, 'graph': {'nodes': {"
+            " 'h': {'type': 'local/opener', 'version': '1.0.0', 'inputs': {'start': '/home/me/q.png', 'note': '/r/pics style'}}}},"
+            " 'groups': {'local/opener': {'version': '1.0.0', 'name': 'Opener',"
+            "   'inputs': [{'name': 'start', 'targets': ['p.title'], 'default': '/home/me/d.png'},"
+            "              {'name': 'note', 'targets': ['n.title']}],"
+            "   'outputs': [],"
+            "   'nodes': {'p': {'type': 'fugue/prompter', 'version': '1.0.0', 'inputs': {}},"
+            "             'n': {'type': 'fugue/prompter', 'version': '1.0.0', 'inputs': {}},"
+            "             'l': {'type': 'fugue/loader', 'version': '1.0.0', 'inputs': {'file': {'from': 'p.text'}}}}}}}");
+        const QJsonObject copy = shareCopy(document, m_registry);
+        QCOMPARE(input(copy, "h", "start").toString(), QString("q.png"));
+        QCOMPARE(input(copy, "h", "note").toString(), QString("/r/pics style"));
+        const QJsonObject group = copy.value("groups").toObject().value("local/opener").toObject();
+        QCOMPARE(group.value("inputs").toArray().at(0).toObject().value("default").toString(), QString("d.png"));
+    }
+
     void anUnknownTypeLosesAbsolutePathsOnly() {
         const QJsonObject copy = shareCopy(
             json("{'fugue': 1, 'graph': {'nodes': {'a': {'type': 'org.x/missing', 'version': '1.0.0',"

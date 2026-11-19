@@ -323,6 +323,21 @@ private slots:
         QVERIFY(workflow.contains("run"));
     }
 
+    // A path typed in a Text node that feeds Load Image's file is still a local path (11.7).
+    void aPathLinkedFromATextNodeIsNotEmbedded() {
+        const QString source = makePng("src-linked", 6, 3);
+        const Ran ran = run(QByteArray("{'t': {'type': 'fugue/text', 'inputs': {'text': '") + source.toUtf8() + "'}},"
+                            " 'l': {'type': 'fugue/load-image', 'inputs': {'file': {'from': 't.text'}}},"
+                            " 's': {'type': 'fugue/save-image', 'inputs': {'image': {'from': 'l.image'}, 'name': 'linked',"
+                            " 'folder': '" + outDir().toUtf8() + "'}}}");
+        QVERIFY2(ran.error.isEmpty(), qPrintable(ran.error));
+        const QByteArray text = pngWorkflowText(outDir() + "/linked.png");
+        QVERIFY(!text.isEmpty());
+        QVERIFY2(!text.contains(m_dir.path().toUtf8()), text.constData());
+        const QJsonObject nodes = parsed(text).value("graph").toObject().value("nodes").toObject();
+        QCOMPARE(nodes.value("t").toObject().value("inputs").toObject().value("text").toString(), QString("src-linked.png"));
+    }
+
     void embedNoPromptsBlanksTheTextButKeepsTheGraph() {
         const QString source = makePng("src-np", 4, 4);
         const Ran ran = run(saveFlow(source, "'name': 'np', 'embed': 'no-prompts', 'folder': '" + outDir() + "'"));
