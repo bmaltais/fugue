@@ -219,20 +219,28 @@ Item {
                         color: root.look.label
                         font.pixelSize: 12
                     }
-                    TextField {
+                    TextInput {
                         id: filterField
                         objectName: "helpFilter"
                         x: filterGlyph.x + filterGlyph.width + 2 * root.u
                         width: parent.width - x - 2 * root.u
                         anchors.verticalCenter: parent.verticalCenter
-                        background: null
-                        padding: 0
-                        placeholderText: qsTr("Filter")
-                        placeholderTextColor: root.look.label
+                        clip: true
+                        selectByMouse: true
                         color: root.look.text
+                        selectionColor: root.look.selectedRow
+                        selectedTextColor: root.look.text
                         font.pixelSize: root.look.textSize
+                        Accessible.role: Accessible.EditableText
                         Accessible.name: qsTr("Filter the shortcuts")
                         onTextEdited: help.filter = text
+                        Text {
+                            visible: filterField.text === ""
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: qsTr("Filter")
+                            color: root.look.label
+                            font: filterField.font
+                        }
                     }
                 }
             }

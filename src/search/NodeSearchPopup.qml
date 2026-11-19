@@ -134,20 +134,20 @@ Popup {
                     color: root.look.label
                     font.pixelSize: 16
                 }
-                TextField {
+                // A plain TextInput, so no control style draws over the look.
+                TextInput {
                     id: field
                     objectName: "searchField"
                     x: searchGlyph.x + searchGlyph.width + 2.5 * root.u
                     width: escCap.x - x - 2 * root.u
                     anchors.verticalCenter: parent.verticalCenter
-                    background: null
-                    padding: 0
-                    placeholderText: qsTr("Search nodes")
-                    placeholderTextColor: root.look.label
+                    clip: true
                     color: root.look.text
                     selectionColor: root.look.selectedRow
                     selectedTextColor: root.look.text
+                    selectByMouse: true
                     font.pixelSize: root.look.searchFieldSize
+                    Accessible.role: Accessible.EditableText
                     Accessible.name: qsTr("Search nodes")
                     text: root.search.query
                     onTextEdited: root.search.query = text
@@ -155,6 +155,13 @@ Popup {
                     Keys.onUpPressed: list.currentIndex = Math.max(list.currentIndex - 1, 0)
                     Keys.onReturnPressed: root.accept(list.currentIndex)
                     Keys.onEnterPressed: root.accept(list.currentIndex)
+                    Text {
+                        visible: field.text === ""
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: qsTr("Search nodes")
+                        color: root.look.label
+                        font: field.font
+                    }
                 }
                 Keycap {
                     id: escCap

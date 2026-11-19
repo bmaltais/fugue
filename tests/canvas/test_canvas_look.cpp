@@ -86,10 +86,10 @@ const char *workflow = R"({
               "save": {"pos": [1110, 120], "size": [250, 0], "pinned": true},
               "sharp": {"pos": [770, 330], "size": [230, 0]}, "prev": {"pos": [1110, 400], "size": [250, 0]},
               "edit": {"pos": [770, 520], "size": [250, 0]}},
-    "frames": [{"id": "f1", "title": "Inputs", "rect": [40, 96, 320, 450], "color": "muted", "nodes": ["prompt", "start"]}],
+    "frames": [{"id": "f1", "title": "Inputs", "rect": [40, 96, 320, 470], "color": "muted", "nodes": ["prompt", "start"]}],
     "links": {"edit.images#0": {"points": [[720, 600]]}},
     "comments": [{"id": "c1", "text": "Try 8 steps for drafts, 20 for finals. The seed stays fixed so a change shows on its own.",
-                  "pos": [48, 572], "size": [232, 60]}],
+                  "pos": [48, 590], "size": [232, 60]}],
     "view": {"center": [800, 500], "zoom": 1}
   }
 })";
@@ -216,7 +216,7 @@ private slots:
         QTest::addColumn<QString>("board");
         QTest::addColumn<QString>("theme");
         QTest::addColumn<int>("radius");
-        for (const char *board : {"canvas", "states"})
+        for (const char *board : {"canvas", "states", "search", "overlay"})
             for (const auto &[theme, radius] : {std::pair{"ethereal", 0}, {"ethereal", 8}, {"flexoki-light", 0},
                                                 {"flexoki-light", 8}, {"rose-pine", 8}, {"tokyo-night", 8}, {"white", 0}})
                 QTest::newRow(qPrintable(QStringLiteral("%1-%2-r%3").arg(board, theme).arg(radius)))
@@ -232,10 +232,10 @@ private slots:
             QSKIP("set FUGUE_LOOK_SHOTS to a folder to take the screenshots");
         if (!QFile::exists("/usr/share/omarchy/themes/" + theme))
             QSKIP("Omarchy's themes are not installed here");
-        App app(board == "canvas" ? load(workflow) : statesBoard(), {}, Look{theme, radius});
+        App app(board == "states" ? statesBoard() : load(workflow), {}, Look{theme, radius});
         QTRY_COMPARE(app.theme.radius(), radius);
         QVERIFY(openAt(app));
-        if (board == "canvas") {
+        if (board != "states") {
             const QString scene = writeScene(app.dir.filePath("scene.png"), 512, 512);
             app.model.setRunState("prompt", {{"state", "cached"}});
             app.model.setRunState("start", {{"state", "cached"}, {"seconds", 0.1}});
@@ -251,7 +251,20 @@ private slots:
         } else {
             setStates(app, writeScene(app.dir.filePath("scene.png"), 512, 288));
         }
+        if (board == "search") {
+            // Search from Tab at a point on the canvas, as docs/canvas-look/search.html shows it.
+            app.model.search()->openAt(250, 150);
+            QTRY_VERIFY(app.engine.rootObjects().first()->findChild<QObject *>("nodeSearch")->property("opened").toBool());
+            for (const char c : {'i', 'm', 'a'})
+                QTest::keyClick(app.window, c);
+        } else if (board == "overlay") {
+            QTest::keyClick(app.window, '?');
+            QTRY_VERIFY(app.engine.rootObjects().first()->findChild<QObject *>("help")->property("opened").toBool());
+        }
         QTest::qWait(400);
+        if (board == "states")
+            app.canvas->setProperty("hoveredNode", "hover");
+        QTest::qWait(50);
         const QImage shot = app.window->grabWindow();
         QVERIFY(shot.save(QStringLiteral("%1/%2-%3-r%4.png").arg(out, board, theme).arg(radius)));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
