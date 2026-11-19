@@ -129,6 +129,8 @@ struct RunOptions {
     // provider instance that could not be made. They join run.done's `errors` and the
     // outcome with severity warning; they do not fail the run.
     Errors warnings;
+    // The folders nodes may read and write under (13.6), or none: not limited.
+    std::optional<FileRoots> roots;
 };
 
 // The state of a node (10.3).

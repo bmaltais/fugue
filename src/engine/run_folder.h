@@ -4,6 +4,7 @@
 //   run.json       the run's state (its contents belong to the scheduler)
 //   compiled.json  the compiled graph that ran
 //   workflow.json  the workflow document it was compiled from, when there was one
+//   roots.json     the folders its nodes may read and write (file_roots.h), when limited
 //   events.jsonl   every event, one compact JSON object per line
 //   nodes/<path id>/  each node's working folder; a path id's groups become
 //                  nested folders, so g7/first is nodes/g7/first/.
@@ -14,9 +15,12 @@
 
 #include <QJsonObject>
 #include <QList>
+
+#include <optional>
 #include <QString>
 
 #include "engine/clock.h"
+#include "engine/file_roots.h"
 #include "engine/result.h"
 
 namespace fugue {
@@ -65,6 +69,10 @@ public:
     // permission_denied naming the file (writeJsonFile).
     Errors writeWorkflow(const QJsonObject &document) const;
     QJsonObject workflow() const;
+    // The file roots the run's nodes are held to (13.6, roots.json), written by `fugue run`;
+    // none for a run started without them (not limited).
+    Errors writeRoots(const FileRoots &roots) const;
+    std::optional<FileRoots> roots() const;
 
     // What whoever queues the run writes (9.8): run.json with the status `queued`, and
     // the workflow's path when there is one, then the run.queued event.

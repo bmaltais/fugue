@@ -214,6 +214,7 @@ public:
         env.insert("XDG_CONFIG_HOME", file("config"));
         QProcess process;
         process.setProcessEnvironment(env);
+        process.setWorkingDirectory(m_dir.path()); // inside the write roots (13.6)
         process.start(QStringLiteral(FUGUE_BINARY), args);
         Ran ran;
         if (!process.waitForStarted())

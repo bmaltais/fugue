@@ -718,7 +718,14 @@ private:
             if (pathLiteral)
                 value = Value(expandHome(value.text().trimmed()));
             n.inputs.insert(spec.name, value);
-            // A file read by path is keyed by its content, not its path (10.1).
+            // A file read by path is keyed by its content, not its path (10.1). Hashing reads
+            // it, so the read roots (13.6) are checked first, cached result or not.
+            if (pathLiteral && spec.widget() == QLatin1String("file") && m_options.roots) {
+                if (Errors refused = m_options.roots->checkRead(value.text(), spec.name); !refused.isEmpty()) {
+                    resolved.problem = refused.first();
+                    return resolved;
+                }
+            }
             if (pathLiteral && spec.widget() == QLatin1String("file")) {
                 const QString hash = m_env.hashes->hash(value.text());
                 if (!hash.isEmpty()) {
@@ -838,6 +845,7 @@ private:
         context.registry = m_env.registry;
         context.document = m_options.document;
         context.usedUpstream = usedUpstream(n);
+        context.roots = m_options.roots;
         const QString path = n.path;
         context.progress = [this, path](double value, const QString &stage, const QString &message) {
             later([this, path, value, stage, message] { progress(path, value, stage, message); });

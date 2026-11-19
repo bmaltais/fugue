@@ -32,6 +32,9 @@ public:
     Result<Values> run(const NodeContext &context) override {
         // The scheduler has expanded "~" (paths.h), so the file is the one the key was made from.
         const QString file = context.input("file").text();
+        if (context.roots)
+            if (Errors refused = context.roots->checkRead(file, QStringLiteral("file")); !refused.isEmpty())
+                return refused;
         if (!QFileInfo(file).isFile())
             return makeError(QStringLiteral("file_not_found"), QStringLiteral("No image file at %1.").arg(file),
                              QStringLiteral("Pick the file again in the node."));
@@ -113,10 +116,18 @@ public:
         // Relative folders are under the output folder, so a workflow made elsewhere cannot
         // write outside it by accident.
         QString folder = context.input("folder").text().trimmed();
-        if (folder.isEmpty())
+        if (folder.isEmpty()) {
             folder = outputDir();
-        else if (QDir::isRelativePath(folder))
+        } else if (QDir::isRelativePath(folder)) {
             folder = outputDir() + QLatin1Char('/') + folder;
+            if (!isInside(canonicalPath(folder), canonicalPath(outputDir())))
+                return makeInputError(QStringLiteral("permission_denied"), QStringLiteral("folder"),
+                                      QStringLiteral("%1 leads out of the output folder %2.").arg(context.input("folder").text().trimmed(), outputDir()),
+                                      QStringLiteral("A relative folder is under the output folder; write an absolute one to go elsewhere."));
+        }
+        if (context.roots)
+            if (Errors refused = context.roots->checkWrite(folder, QStringLiteral("folder")); !refused.isEmpty())
+                return refused;
         if (Errors made = makeFolder(folder); !made.isEmpty()) {
             made.first().input = QStringLiteral("folder");
             made.first().hint = QStringLiteral("Pick another folder in the node.");

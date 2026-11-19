@@ -1237,6 +1237,7 @@ Each run has a folder `~/.cache/fugue/runs/<run-id>/`:
 | `run.json` | The run's state: status, the worker's process id, start and end times, the workflow's path and hash, the resolved `auto` values, providers and models, and the cache key of each node. |
 | `compiled.json` | The compiled graph that ran. |
 | `events.jsonl` | Every event, appended as it happens. |
+| `roots.json` | The folders the run's nodes may read and write ([13.6](#136-safety)), when `fugue run` started it. |
 | `nodes/<path id>/` | Each node's working directory, where it writes its outputs. |
 
 - A run id is an opaque string of `[a-z0-9-]`, unique and sortable by start time.
@@ -1702,7 +1703,10 @@ authoring, validating, running and fetching results.
 - A run that reaches an untrusted pack fails with `pack_untrusted`.
 - File access by CLI commands is limited to configured roots. Defaults: read anywhere under the
   home folder; write under the current directory, the output folder and `~/Documents/Fugue`.
-  Outside them is `permission_denied`.
+  Outside them is `permission_denied`. "The current directory" is the one `fugue run` was started
+  in; `fugue run` records the roots in the run folder for the worker. Paths are judged after `..`
+  and symbolic links are resolved. A run started without roots (the canvas, for now) is not
+  limited.
 - This is a guard against mistakes and prompt injection, not a security boundary: anything with
   a shell as the user can edit Fugue's files. The docs say so.
 
@@ -1899,7 +1903,8 @@ Building M1 made these further choices.
 | Save Image never overwrites: the name is claimed in the same step as the file appears, and taken names go to `-2`, `-3`; a name may not hold `/` or `\` or start with `.`; a relative folder is under the output folder; WebP is lossless | 14.1 | medium |
 | The embedded `run` section is `{"nodes": {<path id>: {"auto", "engine", "model"}}}` for the saving node and everything upstream | 11.7 | high |
 | A "prompt" is the literal of a `text` input with the `multiline` widget; a "path" is an absolute literal that names something (`/x`, `~/x`, `C:\x`; not a lone `/` or `~`) of a `file` or `folder` input, or of any node upstream of one | 11.5, 11.7 | medium |
-| A value that arrives by link is checked against the input's `min`, `max`, `integer` and `choices` when the node is about to run, as the compiler checks a literal; failing fails the node on that input with the same code | 3.2, 9.5 | high |
+| A value that arrives by link is checked against the input's `min`, `max`, `integer`, `choices`, `min_items` and `max_items` when the node is about to run, as the compiler checks a literal; failing fails the node on that input with the same code | 3.2, 9.5 | high |
+| File roots: `fugue run` records 13.6's defaults with its own working directory in the run folder (`roots.json`); Load Image (and the scheduler, before it hashes a `file` input) checks read, Save Image checks write, on canonical paths; outside is `permission_denied` on the input with a hint naming the roots. A relative Save folder may not lead out of the output folder. Runs without roots are not limited | 9.7, 13.6 | medium-high |
 | A run from a compiled graph embeds nothing and warns `workflow_not_embedded`; a kernel's warnings go to run.done on its node | 11.7, 13.3 | medium-high |
 | `~` in a file or folder literal is expanded before the node runs and before its key is made, so `~/x.png` is keyed by content | 10.1 | high |
 | A cached Save Image does not rewrite its file when only the layout or an unrelated node changed, so the embedded copy can lag the canvas | 10.2, 11.7 | medium |

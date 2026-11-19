@@ -47,8 +47,12 @@ class TestBasicCli : public QObject {
 
     QString path(const QString &name) const { return m_dir.filePath(name); }
 
-    Outcome fugue(const QStringList &args) const {
+    // The binary with the temporary folder as its home and its working directory, so the
+    // fixtures there are inside the default file roots (13.6): read under home, write under
+    // the working directory, the output folder and ~/Documents/Fugue.
+    Outcome fugue(const QStringList &args, const QString &workingDirectory = {}) const {
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        env.insert("HOME", m_dir.path());
         env.remove("QT_QPA_PLATFORM");
         env.remove("DISPLAY");
         env.remove("WAYLAND_DISPLAY");
@@ -58,6 +62,7 @@ class TestBasicCli : public QObject {
         env.insert("XDG_PICTURES_DIR", path("pictures"));
         QProcess process;
         process.setProcessEnvironment(env);
+        process.setWorkingDirectory(workingDirectory.isEmpty() ? m_dir.path() : workingDirectory);
         process.start(FUGUE_BINARY, args);
         Outcome outcome;
         if (!process.waitForFinished(60000)) {
@@ -257,6 +262,97 @@ private slots:
         QVERIFY(!QFileInfo::exists(out + "/shot.jpg"));
     }
 
+    // --- file roots (13.6) ---
+
+    // A load -> save workflow at `file`; the save writes `name` into `folder`.
+    QString rootsFlow(const QString &file, const QString &source, const QString &folder, const QString &name) {
+        write(file, QByteArray("{\"fugue\": 1, \"graph\": {\"nodes\": {"
+                               "\"load\": {\"type\": \"fugue/load-image\", \"version\": \"1.0.0\", \"inputs\": {\"file\": \"") +
+                        source.toUtf8() + "\"}},"
+                        "\"save\": {\"type\": \"fugue/save-image\", \"version\": \"1.0.0\", \"inputs\": {\"image\": {\"from\": \"load.image\"},"
+                        " \"name\": \"" + name.toUtf8() + "\", \"embed\": \"none\", \"folder\": \"" + folder.toUtf8() + "\"}}}}}");
+        return file;
+    }
+
+    QString rootsSource() {
+        FileHashes hashes(path("hashes-roots.json"));
+        const vips::VImage pixels = (vips::VImage::black(5, 4, vips::VImage::option()->set("bands", 3)) + 70).cast(VIPS_FORMAT_UCHAR);
+        return MediaHandle::fromImage(pixels).value().saved(path("in-roots"), "src", hashes).value().path();
+    }
+
+    static QJsonObject firstError(const Outcome &ran) {
+        return ran.lines().last().value("errors").toArray().at(0).toObject();
+    }
+
+    // Writing under the directory `fugue run` was started in works.
+    void aSaveUnderTheWorkingDirectoryIsWritten() {
+        const QString flow = rootsFlow(path("roots-ok.fugue"), rootsSource(), path("work/out"), "inside");
+        QVERIFY(QDir().mkpath(path("work")));
+        const Outcome ran = fugue({"run", flow, "--wait", "--json"}, path("work"));
+        QVERIFY2(ran.exitCode == 0, ran.out.constData());
+        QVERIFY(QFileInfo::exists(path("work/out/inside.png")));
+    }
+
+    // Outside the write roots is permission_denied on the folder, naming the roots; nothing
+    // is written.
+    void aSaveOutsideTheWriteRootsIsRefused() {
+        QTemporaryDir elsewhere;
+        QVERIFY(elsewhere.isValid());
+        const QString flow = rootsFlow(path("roots-out.fugue"), rootsSource(), elsewhere.filePath("out"), "outside");
+        QVERIFY(QDir().mkpath(path("work2")));
+        const Outcome ran = fugue({"run", flow, "--wait", "--json"}, path("work2"));
+        QCOMPARE(ran.exitCode, 1);
+        const QJsonObject error = firstError(ran);
+        QCOMPARE(error.value("code").toString(), QString("permission_denied"));
+        QCOMPARE(error.value("node").toString(), QString("save"));
+        QCOMPARE(error.value("input").toString(), QString("folder"));
+        QVERIFY2(error.value("hint").toString().contains(path("work2")), qPrintable(error.value("hint").toString()));
+        QVERIFY(!QFileInfo::exists(elsewhere.filePath("out")));
+    }
+
+    // `..` and a symbolic link cannot lead out of the roots.
+    void dotDotAndSymlinksCannotEscapeTheRoots() {
+        QTemporaryDir elsewhere;
+        QVERIFY(elsewhere.isValid());
+        QVERIFY(QDir().mkpath(path("work3")));
+        const QString source = rootsSource();
+        const Outcome up = fugue({"run", rootsFlow(path("roots-up.fugue"), source, path("work3") + "/../../" +
+                                                       QFileInfo(elsewhere.path()).fileName(), "up"),
+                                  "--wait", "--json"},
+                                 path("work3"));
+        QCOMPARE(up.exitCode, 1);
+        QCOMPARE(firstError(up).value("code").toString(), QString("permission_denied"));
+        QVERIFY(QFile::link(elsewhere.path(), path("work3/link")));
+        const Outcome linked = fugue({"run", rootsFlow(path("roots-link.fugue"), source, path("work3/link/sub"), "linked"),
+                                      "--wait", "--json"},
+                                     path("work3"));
+        QCOMPARE(linked.exitCode, 1);
+        QCOMPARE(firstError(linked).value("code").toString(), QString("permission_denied"));
+        QVERIFY(QDir(elsewhere.path()).entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty());
+        // A relative folder stays under the output folder.
+        const Outcome relative = fugue({"run", rootsFlow(path("roots-rel.fugue"), source, "../../escape", "rel"),
+                                        "--wait", "--json"},
+                                       path("work3"));
+        QCOMPARE(relative.exitCode, 1);
+        QCOMPARE(firstError(relative).value("code").toString(), QString("permission_denied"));
+        QVERIFY(!QFileInfo::exists(path("escape")));
+    }
+
+    // Load Image reads only under the home folder.
+    void aLoadOutsideTheReadRootsIsRefused() {
+        QTemporaryDir elsewhere;
+        QVERIFY(elsewhere.isValid());
+        const QString outside = elsewhere.filePath("src.png");
+        QVERIFY(QFile::copy(rootsSource(), outside));
+        const Outcome ran = fugue({"run", rootsFlow(path("roots-read.fugue"), outside, path("out-read"), "read"),
+                                   "--wait", "--json"});
+        QCOMPARE(ran.exitCode, 1);
+        const QJsonObject error = firstError(ran);
+        QCOMPARE(error.value("code").toString(), QString("permission_denied"));
+        QCOMPARE(error.value("node").toString(), QString("load"));
+        QCOMPARE(error.value("input").toString(), QString("file"));
+    }
+
     // Number gives what was typed in it, and a Preview of it shows that in the run result.
     void aNumberRunsFromTheCommandLine() {
         write(path("number.fugue"),
@@ -284,12 +380,12 @@ private slots:
     void aMissingImageIsReportedByName() {
         write(path("missing.fugue"),
               "{\"fugue\": 1, \"graph\": {\"nodes\": {"
-              "\"load\": {\"type\": \"fugue/load-image\", \"version\": \"1.0.0\", \"inputs\": {\"file\": \"/nonexistent/none.png\"}},"
+              "\"load\": {\"type\": \"fugue/load-image\", \"version\": \"1.0.0\", \"inputs\": {\"file\": \"" + path("nonexistent/none.png").toUtf8() + "\"}},"
               "\"look\": {\"type\": \"fugue/preview\", \"version\": \"1.0.0\", \"inputs\": {\"value\": {\"from\": \"load.width\"}}}}}}");
         const Outcome ran = fugue({"run", path("missing.fugue"), "--wait", "--json"});
         QCOMPARE(ran.exitCode, 1);
         QVERIFY(ran.out.contains("file_not_found"));
-        QVERIFY(ran.out.contains("/nonexistent/none.png"));
+        QVERIFY(ran.out.contains(path("nonexistent/none.png").toUtf8()));
     }
 };
 

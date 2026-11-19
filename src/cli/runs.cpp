@@ -2,6 +2,7 @@
 
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -165,6 +166,8 @@ Reply startRun(const Command &command, Context &context) {
         written.append(makeError("permission_denied", "The compiled graph could not be written to " + folder->path() + "."));
     if (!plan.document.isEmpty())
         written += folder->writeWorkflow(plan.document);
+    // The worker is not started here, so "the current directory" of 13.6 is recorded now.
+    written += folder->writeRoots(FileRoots::defaults(QDir::currentPath()));
     if (hasErrors(written)) {
         folder->finish(RunStatus::Failed, written, utcNow());
         return Reply::failure(written);
@@ -311,6 +314,7 @@ int work(const QString &runId, Context &context) {
     options.warnings = providerProblems;
     options.workflow = folder->state().value("workflow").toObject().value("path").toString();
     options.document = folder->workflow();
+    options.roots = folder->roots();
     const RunOutcome outcome = runGraph(*graph, *folder, process.environment, options, &g_cancel);
     queue.remove(runId);
     return outcome.status == RunStatus::Ok ? 0 : 1;
