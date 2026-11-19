@@ -1,0 +1,105 @@
+{
+  "fugue": 1,
+  "graph": {
+    "nodes": {
+      "subject": {
+        "type": "fugue/text",
+        "version": "1.0.0",
+        "inputs": {
+          "text": "a lighthouse on a cliff"
+        }
+      },
+      "style": {
+        "type": "fugue/text",
+        "version": "1.0.0",
+        "inputs": {
+          "text": "oil painting, stormy sky, dramatic light"
+        }
+      },
+      "prompt": {
+        "type": "fugue/text-concat",
+        "version": "1.0.0",
+        "inputs": {
+          "a": {
+            "from": "subject.text"
+          },
+          "b": {
+            "from": "style.text"
+          },
+          "separator": ", "
+        }
+      },
+      "generate": {
+        "type": "fugue/generate-image",
+        "inputs": {
+          "prompt": {
+            "from": "prompt.text"
+          },
+          "seed": {
+            "auto": "random"
+          }
+        },
+        "version": "1.0.0"
+      },
+      "preview": {
+        "type": "fugue/preview",
+        "inputs": {
+          "value": {
+            "from": "generate.image"
+          }
+        },
+        "version": "1.0.0"
+      },
+      "save": {
+        "type": "fugue/save-image",
+        "inputs": {
+          "image": {
+            "from": "generate.image"
+          },
+          "name": "lighthouse"
+        },
+        "version": "1.0.0"
+      }
+    }
+  },
+  "layout": {
+    "nodes": {
+      "subject": {
+        "pos": [
+          0,
+          0
+        ]
+      },
+      "style": {
+        "pos": [
+          0,
+          220
+        ]
+      },
+      "prompt": {
+        "pos": [
+          320,
+          80
+        ]
+      },
+      "generate": {
+        "pos": [
+          660,
+          0
+        ]
+      },
+      "preview": {
+        "pos": [
+          1060,
+          0
+        ]
+      },
+      "save": {
+        "pos": [
+          1060,
+          360
+        ]
+      }
+    }
+  }
+}
