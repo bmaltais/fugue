@@ -7,7 +7,6 @@
 // process's peak resident size (VmHWM), reset before each measured step.
 
 #include <QDir>
-#include <QElapsedTimer>
 #include <QFile>
 #include <QProcess>
 #include <QStandardPaths>
@@ -23,6 +22,7 @@
 #include "engine/hash.h"
 #include "engine/media.h"
 #include "engine/video_frames.h"
+#include "../cpu_time.h"
 
 using namespace fugue;
 using vips::VImage;
@@ -175,6 +175,8 @@ private slots:
         resetPeak();
         qint64 before = procStatus("VmRSS:");
         qint64 count = 0;
+        // ffmpeg's CPU time (it is waited for, so it counts as a child's) for the whole clip.
+        const qint64 childrenBefore = test_support::childrenCpuMs();
         {
             Result<VideoFrames> frames = VideoFrames::open(*clip);
             QVERIFY2(frames.ok(), qPrintable(frames.error().message));
@@ -189,19 +191,22 @@ private slots:
             QVERIFY2(!frames->failed(), qPrintable(frames->error().message));
         }
         QCOMPARE(count, 250);
+        const qint64 whole = test_support::childrenCpuMs() - childrenBefore;
         const qint64 peak = procStatus("VmHWM:") - before;
         QVERIFY2(peak < decoded / 16, qPrintable(QStringLiteral("streaming peaked %1 MiB above start").arg(peak >> 20)));
 
-        // Stopping early ends ffmpeg at once rather than decoding the rest.
-        QElapsedTimer timer;
-        timer.start();
+        // Stopping early ends ffmpeg at once rather than decoding the rest: it spends a small
+        // part of the whole clip's CPU time (CPU, not wall-clock, so a busy machine is no matter).
+        const qint64 start = test_support::childrenCpuMs();
         {
             Result<VideoFrames> frames = VideoFrames::open(*clip);
             QVERIFY(frames.ok());
             for (int i = 0; i < 3; ++i)
                 QVERIFY(frames->next().has_value());
         }
-        QVERIFY2(timer.elapsed() < 2000, qPrintable(QStringLiteral("%1 ms").arg(timer.elapsed())));
+        const qint64 stopped = test_support::childrenCpuMs() - start;
+        qInfo("ffmpeg CPU: the whole clip %lld ms, stopped after 3 frames %lld ms", whole, stopped);
+        QVERIFY2(stopped * 2 < whole, qPrintable(QStringLiteral("%1 of %2 ms").arg(stopped).arg(whole)));
     }
 
     void framesHonourPendingTrimAndCrop() {

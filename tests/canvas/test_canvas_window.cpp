@@ -2,7 +2,6 @@
 // and what the mouse, wheel, trackpad and keyboard do on it (spec 12.1 to 12.3, 12.6).
 
 #include <atomic>
-#include <ctime>
 #include <QElapsedTimer>
 #include <QVariantAnimation>
 #include <QJsonArray>
@@ -27,6 +26,7 @@
 #include "theme.h"
 #include "workflow/workflows.h"
 #include "translator.h"
+#include "../cpu_time.h"
 
 using namespace fugue;
 
@@ -144,16 +144,10 @@ struct App {
         engine.rootContext()->setContextProperty("workflows", &workflows);
     }
 
-    static qint64 cpuMs() {
-        timespec now{};
-        clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &now);
-        return qint64(now.tv_sec) * 1000 + now.tv_nsec / 1000000;
-    }
-
     bool open() {
         QElapsedTimer timer;
         timer.start();
-        const qint64 cpuStart = cpuMs();
+        const qint64 cpuStart = test_support::cpuMs();
         engine.load(QUrl("qrc:/Main.qml"));
         if (engine.rootObjects().isEmpty())
             return false;
@@ -168,7 +162,7 @@ struct App {
         if (!up)
             return false;
         openedMs = timer.elapsed();
-        openedCpuMs = cpuMs() - cpuStart;
+        openedCpuMs = test_support::cpuMs() - cpuStart;
         window->requestActivate();
         if (!QTest::qWaitForWindowActive(window))
             return false;

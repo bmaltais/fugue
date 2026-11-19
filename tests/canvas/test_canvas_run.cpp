@@ -11,7 +11,6 @@
 #include <QMimeData>
 #include <QTemporaryDir>
 #include <QImage>
-#include <QElapsedTimer>
 #include <QJsonDocument>
 #include <QTimer>
 #include <QtTest>
@@ -548,16 +547,17 @@ private slots:
         RunApp r(QJsonDocument(document).toJson());
         QVERIFY(r.app.open());
         QSignalSpy checked(r.runs.get(), &CanvasRuns::checkApplied);
-        QElapsedTimer timer;
-        timer.start();
+        // CPU time of the whole process, the run thread's check included (tests/cpu_time.h).
+        qint64 start = test_support::cpuMs();
         r.runs->checkNow();
         QTRY_COMPARE(checked.size(), 1);
-        const qint64 first = timer.elapsed();
+        const qint64 first = test_support::cpuMs() - start;
         QCOMPARE(r.state("p149"), QStringLiteral("stale"));
-        timer.restart();
+        start = test_support::cpuMs();
         r.runs->checkNow(); // the same states again: nothing to lay out
         QTRY_COMPARE(checked.size(), 2);
-        qInfo("first check of 300 nodes applied in %lld ms, the same again in %lld ms", first, timer.elapsed());
+        qInfo("first check of 300 nodes applied in %lld ms CPU, the same again in %lld ms", first,
+              test_support::cpuMs() - start);
         QVERIFY(first < 1500);
     }
 

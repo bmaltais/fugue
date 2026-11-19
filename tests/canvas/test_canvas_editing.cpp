@@ -240,24 +240,25 @@ private slots:
     void editsOnThreeHundredNodesStayQuick() {
         App app(grid(300));
         QVERIFY(app.open());
-        QElapsedTimer timer;
-        timer.start();
+        // CPU time (tests/cpu_time.h), so a busy machine does not count against it.
+        qint64 start = test_support::cpuMs();
         app.key(Qt::Key_A, Qt::ControlModifier);
         app.key(Qt::Key_Delete);
         QCOMPARE(app.model.nodes()->rowCount(), 0);
-        const qint64 deleted = timer.restart();
+        const qint64 deleted = test_support::cpuMs() - start;
+        start = test_support::cpuMs();
         app.key(Qt::Key_Z, Qt::ControlModifier);
         QCOMPARE(app.model.links()->rowCount(), 600);
-        const qint64 undone = timer.restart();
+        const qint64 undone = test_support::cpuMs() - start;
         // Undoing a move in a full graph touches only what moved and its wires.
         QTest::mouseClick(app.window, Qt::LeftButton, {}, app.screen(100, 10));
         QCOMPARE(app.model.selectedIds(), QStringList{"n0"});
         app.drag(Qt::LeftButton, app.screen(100, 10), app.screen(100, 40));
         QCOMPARE(app.model.position("n0"), QPointF(0, 30));
-        timer.restart();
+        start = test_support::cpuMs();
         app.key(Qt::Key_Z, Qt::ControlModifier);
-        const qint64 moved = timer.elapsed();
-        qInfo("302 nodes: delete all %lld ms, undo it %lld ms, undo a move %lld ms", deleted, undone, moved);
+        const qint64 moved = test_support::cpuMs() - start;
+        qInfo("302 nodes, CPU time: delete all %lld ms, undo it %lld ms, undo a move %lld ms", deleted, undone, moved);
         QCOMPARE(app.model.position("n0"), QPointF(0, 0));
         // Generous bounds for a slow CI machine; a whole-graph rebuild per edit would blow them.
         QVERIFY2(deleted < 1000 && undone < 1000, qPrintable(QStringLiteral("%1 %2").arg(deleted).arg(undone)));

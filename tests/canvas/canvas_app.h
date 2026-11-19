@@ -29,6 +29,7 @@
 #include "theme.h"
 #include "translator.h"
 #include "workflow/workflows.h"
+#include "../cpu_time.h"
 #include "../window_grab.h"
 
 namespace canvas_test {
