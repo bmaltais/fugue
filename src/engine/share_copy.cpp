@@ -63,7 +63,10 @@ Kind kindOfInput(const Context &context, const QJsonObject &nodes, const QString
     return Kind::UnknownType;
 }
 
-QString bareName(const QString &path) {
+QString bareName(QString path) {
+    // A folder written with a trailing separator keeps its own name.
+    while (path.size() > 1 && (path.endsWith(QLatin1Char('/')) || path.endsWith(QLatin1Char('\\'))))
+        path.chop(1);
     // Both separators: a Windows path in a file made elsewhere.
     const qsizetype slash = qMax(path.lastIndexOf(QLatin1Char('/')), path.lastIndexOf(QLatin1Char('\\')));
     return slash < 0 ? path : path.mid(slash + 1);
@@ -215,9 +218,10 @@ QJsonObject rewriteNodes(const Context &context, const QJsonObject &nodes, const
 } // namespace
 
 bool isLocalAbsolutePath(const QString &text) {
-    static const QRegularExpression drive(QStringLiteral("^[A-Za-z]:[\\\\/]"));
-    return text.startsWith(QLatin1Char('/')) || text == QLatin1String("~") || text.startsWith(QLatin1String("~/")) ||
-           drive.match(text).hasMatch();
+    // A root (`/`, `~/`, `C:\`) and then a name: a lone separator, a bare `~` or a drive
+    // alone name nothing of anyone's, and a separator is common text (Text Concat).
+    static const QRegularExpression path(QStringLiteral("^(?:/+|~/+|[A-Za-z]:[\\\\/]+)[^/\\\\]"));
+    return path.match(text).hasMatch();
 }
 
 QJsonObject shareCopy(const QJsonObject &document, const Registry &registry, const ShareOptions &options) {

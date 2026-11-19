@@ -74,6 +74,29 @@ private slots:
         QCOMPARE(input(copy, "a", "file").toString(), QString("pics/fox.png"));
     }
 
+    // Only a path that names something is a path: a lone separator (Text Concat's "/" feeding a
+    // folder) or a bare "~" names no one's files and stays. A folder path ending in a separator
+    // keeps its last name.
+    void aSeparatorAloneIsNotAPath() {
+        const QJsonObject copy = shareCopy(
+            json("{'fugue': 1, 'graph': {'nodes': {"
+                 " 's': {'type': 'fugue/prompter', 'version': '1.0.0', 'inputs': {'title': '/'}},"
+                 " 'a': {'type': 'fugue/loader', 'version': '1.0.0', 'inputs': {'file': {'from': 's.text'}, 'dir': '~'}},"
+                 " 'b': {'type': 'fugue/loader', 'version': '1.0.0', 'inputs': {'file': '\\\\\\\\', 'dir': '/home/me/out/'}}"
+                 "}}}"),
+            m_registry);
+        QCOMPARE(input(copy, "s", "title").toString(), QString("/"));
+        QCOMPARE(input(copy, "a", "dir").toString(), QString("~"));
+        QCOMPARE(input(copy, "b", "file").toString(), QString("\\\\"));
+        QCOMPARE(input(copy, "b", "dir").toString(), QString("out"));
+        QVERIFY(isLocalAbsolutePath("/home"));
+        QVERIFY(isLocalAbsolutePath("~/x"));
+        QVERIFY(isLocalAbsolutePath("C:\\Users"));
+        QVERIFY(!isLocalAbsolutePath("/"));
+        QVERIFY(!isLocalAbsolutePath("~/"));
+        QVERIFY(!isLocalAbsolutePath("C:\\"));
+    }
+
     void aLinkedInputIsLeftAlone() {
         const QJsonObject copy = shareCopy(
             json("{'fugue': 1, 'graph': {'nodes': {'a': {'type': 'fugue/loader', 'version': '1.0.0', 'inputs': {'file': {'from': 'b.text'}}}}}}"),

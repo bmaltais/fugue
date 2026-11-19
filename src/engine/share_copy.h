@@ -5,7 +5,7 @@
 //
 //   - Local absolute paths are replaced by the bare file name. A path is a literal of an
 //     input whose widget is `file` or `folder`; a literal that is an absolute path
-//     (`/...`, `~`, `C:\...`) in an input of a node type the registry does not know (a
+//     (`/x`, `~/x`, `C:\x`) in an input of a node type the registry does not know (a
 //     pack that is not installed); also the default of a group's exposed input that
 //     drives such an input. A relative path stays. A path can also reach such an input
 //     through links (a Text node typed with a path, linked to Load Image's file): every
@@ -34,8 +34,8 @@ struct ShareOptions {
 // `document` is in Document::toJson() form.
 QJsonObject shareCopy(const QJsonObject &document, const Registry &registry, const ShareOptions &options = {});
 
-// Whether the text is an absolute local path: starts with `/`, is `~` or starts with
-// `~/`, or is a Windows drive path.
+// Whether the text is an absolute local path that names something: `/`, `~/` or a Windows
+// drive (`C:\`) followed by a name. A lone separator, `~` and `C:\` alone are not.
 bool isLocalAbsolutePath(const QString &text);
 
 } // namespace fugue
