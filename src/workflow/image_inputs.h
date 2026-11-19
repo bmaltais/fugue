@@ -67,9 +67,10 @@ Result<QString> storeImageFile(const QString &path, const QString &folder, const
 
 // The MIME types taken from the clipboard, best first.
 QStringList clipboardImageTypes();
-// What an image paste would store: the encoded bytes of the first of those types whose bytes
-// really are an image, else the decoded pixels as PNG. Not ok when the data holds no image.
-Result<QByteArray> clipboardImageBytes(const QMimeData &data);
+// The encoded bytes of the first of those types whose bytes really are an image, else (with
+// `pixels`) the decoded pixels as PNG. Not ok when the data holds no such image. A paste tries
+// a `text/uri-list`'s files between the two.
+Result<QByteArray> clipboardImageBytes(const QMimeData &data, bool pixels = true);
 // True when the data offers an image to paste: encoded, decoded, or as local image files.
 bool clipboardHasImage(const QMimeData &data);
 // The local files of a `text/uri-list` (a file manager's copy).

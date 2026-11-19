@@ -203,7 +203,7 @@ QStringList clipboardFiles(const QMimeData &data) {
     return files;
 }
 
-Result<QByteArray> clipboardImageBytes(const QMimeData &data) {
+Result<QByteArray> clipboardImageBytes(const QMimeData &data, bool pixels) {
     for (const QString &type : imageTypes) {
         if (!data.hasFormat(type))
             continue;
@@ -212,7 +212,7 @@ Result<QByteArray> clipboardImageBytes(const QMimeData &data) {
         if (sniffImage(bytes))
             return bytes;
     }
-    if (data.hasImage()) {
+    if (pixels && data.hasImage()) {
         const QImage image = qvariant_cast<QImage>(data.imageData());
         if (!image.isNull()) {
             QByteArray png;
@@ -422,20 +422,23 @@ QPointF ImageInputs::pastePoint() const {
 }
 
 QStringList ImageInputs::storeClipboard(const QMimeData &data) {
-    const FileRoots roots = FileRoots::forInputs();
-    const Result<QByteArray> bytes = clipboardImageBytes(data);
-    if (bytes) {
-        const Result<QString> stored = storeImage(bytes.value(), inputsDir(), roots);
-        if (stored)
-            return {stored.value()};
-        emit message(tr("Could not paste the image: %1").arg(stored.error().message));
+    // Encoded bytes first, then a file manager's copy (the files themselves, which its decoded
+    // pixels would lose), and only then the pixels (Appendix A).
+    Result<QByteArray> bytes = clipboardImageBytes(data, false);
+    if (!bytes) {
+        if (const QStringList files = clipboardFiles(data); !files.isEmpty())
+            return storeFiles(files);
+        bytes = clipboardImageBytes(data);
+    }
+    if (!bytes) {
+        emit message(tr("Could not paste the image: %1").arg(bytes.error().message));
         return {};
     }
-    // No image data: a file manager's copy offers the files themselves.
-    const QStringList files = clipboardFiles(data);
-    if (files.isEmpty())
-        emit message(tr("Could not paste the image: %1").arg(bytes.error().message));
-    return storeFiles(files);
+    const Result<QString> stored = storeImage(bytes.value(), inputsDir(), FileRoots::forInputs());
+    if (stored)
+        return {stored.value()};
+    emit message(tr("Could not paste the image: %1").arg(stored.error().message));
+    return {};
 }
 
 QStringList ImageInputs::storeFiles(const QStringList &paths) {

@@ -230,6 +230,28 @@ private slots:
         QVERIFY(QFileInfo(place.filePath("inputs/" + name)).isSymLink());
     }
 
+    // A file manager's copy also offers decoded pixels: the file, byte for byte, is taken
+    // before them (Appendix A: encoded bytes, then files, then pixels).
+    void aCopiedFileIsTakenBeforeDecodedPixels() {
+        Pictures p;
+        QTemporaryDir other;
+        const QByteArray jpeg = encoded(picture(), "JPEG") + "EXTRA";
+        QVERIFY(write(other.filePath("photo.jpg"), jpeg));
+        Registry registry;
+        nodes::addBuiltinNodeTypes(registry);
+        CanvasModel canvas(&registry);
+        ImageInputs inputs(&canvas, &registry);
+        QMimeData data;
+        data.setImageData(picture(Qt::blue));
+        data.setUrls({QUrl::fromLocalFile(other.filePath("photo.jpg"))});
+        QVERIFY(inputs.paste(data));
+        const Nodes nodes = canvas.document().graph.nodes;
+        QCOMPARE(nodes.size(), 1);
+        const QString file = nodes.cbegin()->inputs.value("file").literal().toString();
+        QVERIFY2(file.endsWith(".jpg"), qPrintable(file));
+        QCOMPARE(read(file), jpeg);
+    }
+
     void recentInputsAreNewestFirstAndCapped() {
         Pictures p;
         const FileRoots roots = FileRoots::forInputs();
