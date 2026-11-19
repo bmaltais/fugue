@@ -86,25 +86,46 @@ FocusScope {
         world.x = width / 2 - c[0] * world.scale
         world.y = height / 2 - c[1] * world.scale
     }
-    // The theme as nodes need it, worked out once: theme.colors is a map that would be
+    // The theme as nodes need it (theme.h's names), worked out once: its maps would be
     // converted again on every read.
-    readonly property var look: {
-        const body = Qt.tint(theme.background, Qt.alpha(theme.foreground, 0.07))
-        return {
-            colors: theme.colors,
-            foreground: theme.foreground,
-            background: theme.background,
-            accent: theme.accent,
-            body: body,
-            header: Qt.tint(body, Qt.alpha(theme.foreground, 0.06)),
-            dimText: Qt.tint(theme.foreground, Qt.alpha(theme.background, 0.4)),
-            corner: Math.min(theme.radius, 8)
-        }
+    readonly property var look: ({
+        ports: theme.portColors,
+        palette: theme.colors,
+        text: theme.text,
+        muted: theme.muted,
+        background: theme.background,
+        panel: theme.panel,
+        header: Qt.tint(theme.panel, Qt.alpha(theme.text, 0.05)),
+        border: theme.border,
+        accent: theme.accent,
+        error: theme.error,
+        corner: Math.min(theme.radius, 8),
+        textSize: theme.textSize,
+        smallText: Math.round(theme.textSize * 0.9)
+    })
+    // A port color key from the model (CanvasModel::colorKey).
+    function portColor(key) {
+        if (key === "any")
+            return look.text
+        if (key === "unknown")
+            return look.muted
+        const c = look.ports[key]
+        return c !== undefined ? c : look.ports.declared
     }
+    // A layout color (4.5) is a theme role: a semantic name, else a palette name.
     function roleColor(role) {
-        const c = look.colors[role]
-        return c !== undefined ? c : look.foreground
+        const semantic = { accent: look.accent, muted: look.muted, text: look.text, error: look.error,
+                           border: look.border, panel: look.panel }
+        if (semantic[role] !== undefined)
+            return semantic[role]
+        const c = look.palette[role]
+        return c !== undefined ? c : look.muted
     }
+
+    // Rows follow the desktop text size (22 and 26 px at the default 12).
+    Binding { target: canvas.model; property: "rowHeight"; value: Math.round(theme.textSize * 11 / 6) }
+    Binding { target: canvas.model; property: "headerHeight"; value: Math.round(theme.textSize * 13 / 6) }
+
     // A port is hit within 10 pixels on screen, and never less than its own size.
     function portUnder(px, py) {
         const w = toWorld(px, py)
@@ -307,18 +328,18 @@ FocusScope {
                 y: modelData.y
                 width: modelData.width
                 height: modelData.height
-                radius: Math.min(theme.radius, 8)
-                color: Qt.alpha(canvas.roleColor(modelData.color || "muted"), 0.12)
+                radius: canvas.look.corner
+                color: Qt.alpha(canvas.roleColor(modelData.color), 0.12)
                 border.width: 1
-                border.color: Qt.alpha(canvas.roleColor(modelData.color || "muted"), 0.5)
+                border.color: Qt.alpha(canvas.roleColor(modelData.color), 0.5)
                 Text {
                     x: 10
                     y: 6
                     width: parent.width - 20
                     text: parent.modelData.title
                     elide: Text.ElideRight
-                    color: theme.foreground
-                    font.pixelSize: 14
+                    color: canvas.look.text
+                    font.pixelSize: Math.round(canvas.look.textSize * 1.2)
                     font.bold: true
                 }
             }
@@ -334,7 +355,7 @@ FocusScope {
                 required property string color
                 ShapePath {
                     strokeWidth: 2.5
-                    strokeColor: canvas.roleColor(wire.color)
+                    strokeColor: canvas.portColor(wire.color)
                     fillColor: "transparent"
                     capStyle: ShapePath.RoundCap
                     PathSvg { path: wire.path }
@@ -352,6 +373,7 @@ FocusScope {
                 headerHeight: canvas.model.headerHeight
                 rowHeight: canvas.model.rowHeight
                 look: canvas.look
+                canvasView: canvas
                 detailArea: canvas.detailArea
                 readable: world.scale >= canvas.readableZoom
             }
@@ -366,7 +388,7 @@ FocusScope {
                                          * (canvas.linkDrag.output ? 1 : -1)
             ShapePath {
                 strokeWidth: 2.5
-                strokeColor: canvas.roleColor(canvas.linkDrag.color || "foreground")
+                strokeColor: canvas.portColor(canvas.linkDrag.color || "any")
                 strokeStyle: ShapePath.DashLine
                 fillColor: "transparent"
                 startX: canvas.linkDrag.x || 0
@@ -390,9 +412,9 @@ FocusScope {
         y: Math.min(canvas.pressAt.y, canvas.pointer.y)
         width: Math.abs(canvas.pointer.x - canvas.pressAt.x)
         height: Math.abs(canvas.pointer.y - canvas.pressAt.y)
-        color: Qt.alpha(theme.accent, 0.12)
+        color: Qt.alpha(canvas.look.accent, 0.12)
         border.width: 1
-        border.color: theme.accent
+        border.color: canvas.look.accent
     }
 
     // Why the port under a dragged link cannot take it (12.6).
@@ -403,10 +425,10 @@ FocusScope {
         y: Math.min(canvas.pointer.y + 16, canvas.height - height - 8)
         width: Math.min(problemText.implicitWidth + 16, 360)
         height: problemText.implicitHeight + 10
-        radius: Math.min(theme.radius, 6)
-        color: theme.background
+        radius: Math.min(canvas.look.corner, 6)
+        color: canvas.look.panel
         border.width: 1
-        border.color: theme.colors.red
+        border.color: canvas.look.error
         Text {
             id: problemText
             x: 8
@@ -414,8 +436,8 @@ FocusScope {
             width: parent.width - 16
             text: canvas.hoverProblem
             wrapMode: Text.Wrap
-            color: theme.foreground
-            font.pixelSize: 12
+            color: canvas.look.text
+            font.pixelSize: canvas.look.textSize
         }
     }
 }

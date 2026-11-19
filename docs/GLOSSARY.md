@@ -135,3 +135,7 @@ _Avoid_: connection, endpoint, server
 **Freeze**:
 Keep a node's current result so it is reused until unfrozen, whatever changes upstream.
 _Avoid_: lock, pin (that is the canvas action that fixes a node's position)
+
+**Command (registry)**:
+An action of the window with a string id (`file.save`), registered once with its description, default keys, context and a handler. The menus, the `?` overlay and the settings read the one registry. The user's keymap is a diff against its defaults.
+_Avoid_: action id, menu item, shortcut (a shortcut is only one key bound to a command)

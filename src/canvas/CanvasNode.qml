@@ -42,10 +42,8 @@ Item {
     readonly property bool dragging: linkDrag.node !== undefined
     readonly property int corner: look.corner
 
-    function roleColor(role) {
-        const c = node.look.colors[role]
-        return c !== undefined ? c : node.look.foreground
-    }
+    property var canvasView // the FugueCanvas, for its portColor()
+    function portColor(key) { return canvasView.portColor(key) }
 
     x: posX
     y: posY
@@ -55,9 +53,9 @@ Item {
     Rectangle {
         anchors.fill: parent
         radius: node.corner
-        color: node.look.body
+        color: node.look.panel
         border.width: node.selected ? 2 : 1
-        border.color: node.selected ? node.look.accent : node.missing ? node.look.colors.red : node.look.colors.selection
+        border.color: node.selected ? node.look.accent : node.missing ? node.look.error : node.look.border
     }
     Rectangle {
         width: parent.width
@@ -80,9 +78,9 @@ Item {
             text: node.title
             elide: Text.ElideRight
             textFormat: Text.PlainText
-            color: node.missing ? node.look.colors.red : node.look.foreground
+            color: node.missing ? node.look.error : node.look.text
             font.bold: true
-            font.pixelSize: 12
+            font.pixelSize: node.look.textSize
         }
     }
 
@@ -108,14 +106,14 @@ Item {
             text: modelData.label
             elide: Text.ElideRight
             textFormat: Text.PlainText
-            color: node.look.dimText
-            font.pixelSize: 11
+            color: node.look.muted
+            font.pixelSize: node.look.smallText
 
             PortDot {
                 x: -17
                 y: (input.height - height) / 2
                 shape: input.modelData.shape
-                fill: node.roleColor(input.modelData.color)
+                fill: node.portColor(input.modelData.color)
                 edge: node.look.background
                 list: input.modelData.list
             }
@@ -129,8 +127,8 @@ Item {
                 text: input.modelData.value !== undefined ? input.modelData.value : ""
                 elide: Text.ElideRight
                 textFormat: Text.PlainText
-                color: input.modelData.isDefault ? node.look.dimText : node.look.foreground
-                font.pixelSize: 11
+                color: input.modelData.isDefault ? node.look.muted : node.look.text
+                font.pixelSize: node.look.smallText
             }
         }
     }
@@ -156,14 +154,14 @@ Item {
             text: modelData.label
             elide: Text.ElideLeft
             textFormat: Text.PlainText
-            color: node.look.dimText
-            font.pixelSize: 11
+            color: node.look.muted
+            font.pixelSize: node.look.smallText
 
             PortDot {
                 x: output.width + 12 - width / 2
                 y: (output.height - height) / 2
                 shape: output.modelData.shape
-                fill: node.roleColor(output.modelData.color)
+                fill: node.portColor(output.modelData.color)
                 edge: node.look.background
                 list: output.modelData.list
             }

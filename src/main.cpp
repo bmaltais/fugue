@@ -12,6 +12,7 @@
 
 #include "backend.h"
 #include "canvas/canvas_model.h"
+#include "commands/command_registry.h"
 #include "cli/args.h"
 #include "cli/cli.h"
 #include "engine/registry.h"
@@ -44,6 +45,10 @@ int main(int argc, char *argv[]) {
 
     Theme theme;
     Backend backend;
+    // The command registry: the default keymap, then the user's changes to it (spec 12.5).
+    fugue::CommandRegistry commands;
+    fugue::registerDefaultCommands(commands);
+    commands.loadKeymap(fugue::CommandRegistry::keymapPath());
 
     // The canvas reads node types from the same registry the CLI fills (built-ins now,
     // packs from M3) and starts on an empty workflow.
@@ -57,6 +62,7 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("theme", &theme);
     engine.rootContext()->setContextProperty("backend", &backend);
     engine.rootContext()->setContextProperty("canvasModel", &canvasModel);
+    engine.rootContext()->setContextProperty("commands", &commands);
     engine.load(QUrl("qrc:/Main.qml"));
     if (engine.rootObjects().isEmpty())
         return 1;

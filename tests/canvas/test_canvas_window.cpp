@@ -18,6 +18,7 @@
 
 #include "backend.h"
 #include "canvas/canvas_model.h"
+#include "commands/command_registry.h"
 #include "engine/document.h"
 #include "engine/registry.h"
 #include "nodes/builtin.h"
@@ -95,6 +96,7 @@ struct App {
     Backend backend;
     Registry registry;
     CanvasModel model{&registry};
+    CommandRegistry commands;
     QQmlApplicationEngine engine;
     QStringList warnings;
     QQuickWindow *window = nullptr;
@@ -105,6 +107,7 @@ struct App {
 
     explicit App(const Document &document) {
         nodes::addBuiltinNodeTypes(registry);
+        registerDefaultCommands(commands);
         model.setDocument(document);
         QObject::connect(&engine, &QQmlEngine::warnings, [this](const QList<QQmlError> &errors) {
             for (const auto &error : errors)
@@ -114,6 +117,7 @@ struct App {
         engine.rootContext()->setContextProperty("theme", &theme);
         engine.rootContext()->setContextProperty("backend", &backend);
         engine.rootContext()->setContextProperty("canvasModel", &model);
+        engine.rootContext()->setContextProperty("commands", &commands);
     }
 
     bool open() {

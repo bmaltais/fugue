@@ -105,7 +105,7 @@ private slots:
         QCOMPARE(l.value("y1").toDouble(), 137.0);
         QCOMPARE(l.value("x2").toDouble(), 300.0);
         QCOMPARE(l.value("y2").toDouble(), 227.0);
-        QCOMPARE(l.value("color").toString(), QString("green"));
+        QCOMPARE(l.value("color").toString(), QString("text"));
         QVERIFY(l.value("path").toString().startsWith("M 220.0 137.0 C"));
     }
 
@@ -117,12 +117,14 @@ private slots:
             "edit": {"type": "fugue/edit-image", "version": "1.0.0", "inputs": {}}}}})"));
         const QVariantMap gen = node(canvas, "gen");
         QCOMPARE(port(gen, "inputs", "prompt").value("shape").toString(), QString("circle"));
-        QCOMPARE(port(gen, "inputs", "prompt").value("color").toString(), QString("green"));
+        QCOMPARE(port(gen, "inputs", "prompt").value("color").toString(), QString("text"));
         QCOMPARE(port(gen, "inputs", "image").value("shape").toString(), QString("square"));
-        QCOMPARE(port(gen, "inputs", "image").value("color").toString(), QString("blue"));
+        QCOMPARE(port(gen, "inputs", "image").value("color").toString(), QString("image"));
         QCOMPARE(port(gen, "inputs", "model").value("shape").toString(), QString("diamond"));
-        QCOMPARE(port(gen, "outputs", "seed").value("color").toString(), QString("yellow"));
+        QCOMPARE(port(gen, "inputs", "model").value("color").toString(), QString("declared"));
+        QCOMPARE(port(gen, "outputs", "seed").value("color").toString(), QString("number"));
         QCOMPARE(port(node(canvas, "show"), "inputs", "value").value("shape").toString(), QString("ring"));
+        QCOMPARE(port(node(canvas, "show"), "inputs", "value").value("color").toString(), QString("any"));
         QVERIFY(port(node(canvas, "edit"), "inputs", "images").value("list").toBool());
     }
 

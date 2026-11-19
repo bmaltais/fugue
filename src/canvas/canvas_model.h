@@ -32,7 +32,8 @@
 //   row is found by id in O(1) (rowOf).
 // - #20 save, open: setDocument() and document(); document() writes positions back into
 //   layout.nodes.<id>.pos and the viewport into layout.view, keeping every other layout key.
-// - #22 text size: setRowHeight() and setHeaderHeight() lay every node out again.
+// - Text size: FugueCanvas binds rowHeight and headerHeight to the theme's text size;
+//   either setter lays every node out again.
 
 #include "engine/document.h"
 #include "engine/port_type.h"
@@ -96,7 +97,7 @@ public:
         ToNode,
         ToPort,
         Item,  // the list item it fills, or -1 for the whole value
-        Color, // the theme color role of the source's type
+        Color, // the source's color key, see CanvasModel::colorKey
         X1,    // the output's end, in world coordinates
         Y1,
         X2,    // the input's end
@@ -200,8 +201,10 @@ public:
     Q_INVOKABLE void select(const QStringList &ids, const QString &mode = QStringLiteral("replace"));
     Q_INVOKABLE QStringList selectedIds() const;
 
-    // The theme color role and shape for a port type (12.6).
-    static QString colorRole(const std::optional<fugue::PortSpec> &type, fugue::PortKind kind);
+    // A port type's color and shape (12.6). The color is a key for the theme's portColor()
+    // (a built-in type's id, or "declared"), or "any" or "unknown" (a placeholder's port);
+    // the QML picks the color. The shape: circle, square, diamond or ring.
+    static QString colorKey(const std::optional<fugue::PortSpec> &type, fugue::PortKind kind);
     static QString shape(const std::optional<fugue::PortSpec> &type, fugue::PortKind kind);
 
 signals:

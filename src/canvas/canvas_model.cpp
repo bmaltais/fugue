@@ -125,25 +125,12 @@ CanvasModel::CanvasModel(const Registry *registry, QObject *parent)
 
 CanvasModel::~CanvasModel() = default;
 
-QString CanvasModel::colorRole(const std::optional<PortSpec> &type, PortKind kind) {
+QString CanvasModel::colorKey(const std::optional<PortSpec> &type, PortKind kind) {
     if (!type)
-        return QStringLiteral("muted");
+        return QStringLiteral("unknown");
     if (type->type.isAny())
-        return QStringLiteral("foreground");
-    static const QHash<QString, QString> builtin{
-        {"text", "green"}, {"number", "yellow"}, {"boolean", "red"},
-        {"image", "blue"}, {"video", "magenta"}, {"audio", "cyan"},
-    };
-    if (kind == PortKind::Builtin)
-        return builtin.value(type->type.id, QStringLiteral("muted"));
-    // A declared type: a stable pick by its id (and version), since a pack names its own.
-    static const QStringList roles{"orange", "cyan", "magenta", "green", "yellow", "red", "blue"};
-    quint32 hash = 2166136261u; // FNV-1a, the same in every run
-    for (const QChar c : type->type.toString()) {
-        hash ^= c.unicode();
-        hash *= 16777619u;
-    }
-    return roles[int(hash % quint32(roles.size()))];
+        return QStringLiteral("any");
+    return kind == PortKind::Builtin ? type->type.id : QStringLiteral("declared");
 }
 
 QString CanvasModel::shape(const std::optional<PortSpec> &type, PortKind kind) {
@@ -471,7 +458,7 @@ QVariantMap CanvasModel::portMap(const NodeRow &row, const Port &port) const {
                     {"type", port.type ? port.type->toString() : QString()},
                     {"list", port.type && port.type->list},
                     {"shape", shape(port.type, port.kind)},
-                    {"color", colorRole(port.type, port.kind)},
+                    {"color", colorKey(port.type, port.kind)},
                     {"y", port.y},
                     {"wired", isWired(row.id, port.name, port.output)},
                     {"widget", port.widget},
@@ -558,7 +545,7 @@ void CanvasModel::rebuildLinks() {
     for (int i = 0; i < int(m_links.size()); ++i) {
         const LinkRow &link = m_links[size_t(i)];
         const Port *out = findPort(link.from.node, link.from.port, true);
-        m_links[size_t(i)].color = out ? colorRole(out->type, out->kind) : QStringLiteral("muted");
+        m_links[size_t(i)].color = out ? colorKey(out->type, out->kind) : QStringLiteral("unknown");
         refreshLinkEnds(i);
     }
 }
@@ -668,7 +655,7 @@ void CanvasModel::insertLink(const LinkRow &link) {
     if (link.toNode != link.from.node)
         m_linksOf[link.toNode].append(at);
     const Port *out = findPort(link.from.node, link.from.port, true);
-    m_links.back().color = out ? colorRole(out->type, out->kind) : QStringLiteral("muted");
+    m_links.back().color = out ? colorKey(out->type, out->kind) : QStringLiteral("unknown");
     refreshLinkEnds(at);
     m_linkList->endInsertRows();
 }
@@ -813,7 +800,7 @@ void CanvasModel::beginLinkDrag(const QString &node, const QString &port, bool o
     m_drag = {{"node", startNode},
               {"port", startPort},
               {"output", startOutput},
-              {"color", colorRole(start->type, start->kind)},
+              {"color", colorKey(start->type, start->kind)},
               {"x", row.pos.x() + (startOutput ? row.width : 0)},
               {"y", row.pos.y() + start->y}};
     emit linkDragChanged();
