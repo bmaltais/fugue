@@ -13,6 +13,8 @@
 #include "backend.h"
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
+#include "menu/menu_commands.h"
+#include "menu/menus.h"
 #include "theme.h"
 #include "workflow/workflows.h"
 #include "translator.h"
@@ -105,6 +107,124 @@ private slots:
         QVERIFY(!registry.spec("file.save")->deviates());
         QVERIFY(registry.hasHandler("app.quit"));
         QVERIFY(!registry.hasHandler("file.save"));
+    }
+
+    void aMenuEntryReadsItsNameKeysAndStateFromTheRegistry() {
+        CommandRegistry registry;
+        CommandSpec quit = spec("app.quit", {"Ctrl+Q"});
+        quit.description = "Quit (asks if there is unsaved content)";
+        quit.label = "Quit";
+        QVERIFY(registry.add(quit).isEmpty());
+        QVERIFY(registry.add(spec("edit.undo", {"Ctrl+Z"}, "canvas")).isEmpty());
+        QVERIFY(registry.add(spec("view.toggle-links", {"L"}, "canvas")).isEmpty());
+
+        // No handler yet: listed, not available, not enabled.
+        QVariantMap entry = registry.entry("app.quit");
+        QCOMPARE(entry.value("label").toString(), QString("Quit"));
+        QCOMPARE(entry.value("keys").toStringList(), QStringList{"Ctrl+Q"});
+        QVERIFY(!entry.value("available").toBool());
+        QVERIFY(!entry.value("enabled").toBool());
+        // Without a label of its own a command shows its description.
+        QCOMPARE(registry.entry("edit.undo").value("label").toString(), QString("Test edit.undo"));
+        QVERIFY(registry.entry("nothing.here").isEmpty());
+
+        int undone = 0;
+        QVERIFY(registry.setHandler("edit.undo", [&] { ++undone; }));
+        // A handler, but its context (canvas) is off: not enabled, and trigger() refuses.
+        QVERIFY(registry.entry("edit.undo").value("available").toBool());
+        QVERIFY(!registry.entry("edit.undo").value("enabled").toBool());
+        QVERIFY(!registry.trigger("edit.undo"));
+        registry.setContextActive("canvas", true);
+        QVERIFY(registry.entry("edit.undo").value("enabled").toBool());
+
+        // The ticket that owns a command says when it can run, and whether it is on.
+        bool canUndo = false;
+        QVERIFY(registry.setEnabledWhen("edit.undo", [&] { return canUndo; }));
+        QVERIFY(!registry.entry("edit.undo").value("enabled").toBool());
+        QVERIFY(!registry.trigger("edit.undo"));
+        canUndo = true;
+        QVERIFY(registry.trigger("edit.undo"));
+        QCOMPARE(undone, 1);
+        QVERIFY(!registry.setEnabledWhen("nothing.here", [] { return true; }));
+
+        QVERIFY(!registry.entry("view.toggle-links").value("checkable").toBool());
+        bool shown = true;
+        QVERIFY(registry.setCheckedWhen("view.toggle-links", [&] { return shown; }));
+        QVERIFY(registry.entry("view.toggle-links").value("checkable").toBool());
+        QVERIFY(registry.entry("view.toggle-links").value("checked").toBool());
+        shown = false;
+        QVERIFY(!registry.entry("view.toggle-links").value("checked").toBool());
+    }
+
+    void everyMenuItemIsARegisteredCommand() {
+        CommandRegistry registry;
+        fugue::registerDefaultCommands(registry);
+        fugue::registerMenuCommands(registry);
+        QVERIFY2(registry.problems().isEmpty(), qPrintable(registry.problems().join('\n')));
+        QStringList problems;
+        std::function<void(const QVariantList &, const QString &)> walk = [&](const QVariantList &items,
+                                                                              const QString &where) {
+            for (const QVariant &value : items) {
+                const QVariantMap item = value.toMap();
+                if (item.contains("items"))
+                    walk(item.value("items").toList(), where + " > " + item.value("title").toString());
+                else if (item.contains("command") && !registry.contains(item.value("command").toString()))
+                    problems << where + ": " + item.value("command").toString();
+            }
+        };
+        for (const QString &name : fugue::menus::names())
+            walk(fugue::menus::tree(name), name);
+        QVERIFY2(problems.isEmpty(), qPrintable(problems.join('\n')));
+        // registry.menu() resolves each command to its entry, so QML reads one map per item.
+        const QVariantList bar = registry.menu("bar");
+        QVERIFY(bar.size() >= 4);
+        const QVariantMap file = bar.first().toMap();
+        QCOMPARE(file.value("title").toString(), QString("&File"));
+        const QVariantMap first = file.value("items").toList().first().toMap();
+        QCOMPARE(first.value("command").toString(), QString("file.new"));
+        QCOMPARE(first.value("label").toString(), QString("New workflow"));
+        QCOMPARE(first.value("keys").toStringList(), QStringList{"Ctrl+N"});
+        // One command per color, each with its swatch's theme role (spec 4.5).
+        for (const QString &role : fugue::menus::colorRoles())
+            QVERIFY2(registry.contains("node.color." + role), qPrintable(role));
+        // Every top menu, and every context menu, has something in it.
+        for (const QString &name : fugue::menus::names())
+            QVERIFY2(!registry.menu(name).isEmpty(), qPrintable(name));
+    }
+
+    void aContextMenuCommandSeesWhatItWasOpenedOn() {
+        CommandRegistry registry;
+        QVERIFY(registry.add(spec("node.color.red")).isEmpty());
+        QVariantMap seen;
+        QVERIFY(registry.setHandler("node.color.red", [&] { seen = registry.target(); }));
+        QVERIFY(registry.setEnabledWhen("node.color.red", [&] { return registry.target().contains("frame"); }));
+        QVERIFY(!registry.entry("node.color.red").value("enabled").toBool());
+        QVERIFY(registry.entry("node.color.red", {{"frame", "f1"}}).value("enabled").toBool());
+        QVERIFY(!registry.trigger("node.color.red"));
+        QVERIFY(registry.triggerOn("node.color.red", {{"frame", "f1"}}));
+        QCOMPARE(seen.value("frame").toString(), QString("f1"));
+        QVERIFY(registry.target().isEmpty()); // only while it runs
+    }
+
+    void menuMnemonicsDoNotClashWithTheKeymap() {
+        // Alt+letter opens a top menu only where 12.4 binds nothing to it (Alt+C collapses).
+        CommandRegistry registry;
+        fugue::registerDefaultCommands(registry);
+        fugue::registerMenuCommands(registry);
+        QSet<QString> altKeys;
+        for (const QString &id : registry.ids())
+            for (const QString &key : registry.keys(id))
+                altKeys.insert(key);
+        QSet<QChar> seen;
+        for (const QVariant &value : fugue::menus::tree("bar")) {
+            const QString title = value.toMap().value("title").toString();
+            const qsizetype amp = title.indexOf('&');
+            QVERIFY2(amp >= 0 && amp + 1 < title.size(), qPrintable(title));
+            const QChar letter = title.at(amp + 1).toUpper();
+            QVERIFY2(!seen.contains(letter), qPrintable(title));
+            seen.insert(letter);
+            QVERIFY2(!altKeys.contains(QStringLiteral("Alt+") + letter), qPrintable(title));
+        }
     }
 
     void theMoreSpecificContextOwnsAKey() {
