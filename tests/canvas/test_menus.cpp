@@ -342,6 +342,46 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // Pictures of the menus for a look at them, not a check:
+    //   FUGUE_MENU_SHOTS=/tmp/shots QT_QUICK_BACKEND=rhi build/test_menus screenshots
+    void screenshots_data() {
+        QTest::addColumn<QString>("theme");
+        QTest::addColumn<int>("radius");
+        QTest::newRow("ethereal r0") << "ethereal" << 0;
+        QTest::newRow("flexoki-light r8") << "flexoki-light" << 8;
+    }
+    void screenshots() {
+        QFETCH(QString, theme);
+        QFETCH(int, radius);
+        const QString out = qEnvironmentVariable("FUGUE_MENU_SHOTS");
+        if (out.isEmpty())
+            QSKIP("set FUGUE_MENU_SHOTS to a folder to take the screenshots");
+        if (!QFile::exists("/usr/share/omarchy/themes/" + theme))
+            QSKIP("Omarchy's themes are not installed here");
+        App app(load(framed), {}, canvas_test::Look{theme, radius});
+        QTRY_COMPARE(app.theme.radius(), radius);
+        QVERIFY(app.open());
+        applyLayoutColor(app.model, "blue", "f1");
+        app.model.select({"c"});
+        applyLayoutColor(app.model, "red");
+        const QString name = QStringLiteral("%1/%2-r%3").arg(out, theme).arg(radius);
+        QTest::keyClick(app.window, 'E', Qt::AltModifier);
+        QTRY_VERIFY(isOpen(app.window, "menuDropdown"));
+        QTest::mouseMove(app.window, centerOf(NEED("subMenu-Colors")));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("subMenu-Colors")));
+        QTRY_VERIFY(find(app.window, "menuItem-node.color.red"));
+        QTest::qWait(400);
+        QVERIFY(app.window->grabWindow().save(name + "-edit.png"));
+        app.key(Qt::Key_Escape);
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(allClosed(app.window));
+        QTest::mouseClick(app.window, Qt::RightButton, {}, app.screen(620, 90));
+        QTRY_VERIFY(isOpen(app.window, "contextMenuPopup"));
+        QTest::mouseMove(app.window, centerOf(NEED("menuItem-node.mute")));
+        QTest::qWait(400);
+        QVERIFY(app.window->grabWindow().save(name + "-node.png"));
+    }
+
     void shiftF10OpensTheContextMenuFromTheKeys() {
         App app(load(framed));
         QVERIFY(app.open());

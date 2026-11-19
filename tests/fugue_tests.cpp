@@ -130,10 +130,28 @@ QMap<QString, bool> translatables(const QString &folder, QStringList *problems) 
                     ++i;
                 const QString word = code.mid(start, i - start);
                 skipSpace();
-                if ((word != "qsTr" && word != "tr") || i >= code.size() || code[i] != '(')
+                // qsTr("text") and tr("text"); QT_TRANSLATE_NOOP("Context", "text") and
+                // translate("Context", "text"), which C++ uses for strings listed in tables
+                // (command names, menu titles) and translated when shown.
+                const bool withContext = word == "QT_TRANSLATE_NOOP" || word == "translate";
+                if ((word != "qsTr" && word != "tr" && !withContext) || i >= code.size() || code[i] != '(')
                     continue;
                 ++i;
                 skipSpace();
+                if (withContext) {
+                    // translate() with a text that is not a literal looks up one listed elsewhere.
+                    if (i >= code.size() || code[i] != '"')
+                        continue;
+                    QString context;
+                    literal(&context);
+                    skipSpace();
+                    if (i >= code.size() || code[i] != ',')
+                        continue;
+                    ++i;
+                    skipSpace();
+                    if (i >= code.size() || code[i] != '"')
+                        continue;
+                }
                 if (i >= code.size() || (code[i] != '"' && code[i] != '\'')) {
                     *problems << info.fileName() + ": not a literal: " + code.mid(start, 40);
                     continue;

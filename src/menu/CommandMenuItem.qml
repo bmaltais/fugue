@@ -59,10 +59,13 @@ MenuItem {
                 width: 3 * row.u
                 height: width
                 radius: Math.min(row.look.smallCorner, 2)
-                readonly property var role: visible && row.entry.swatch !== "none" ? row.look.role(row.entry.swatch) : null
-                color: role ? role.frameEdge : "transparent"
-                border.width: 1
-                border.color: role ? Qt.darker(role.frameEdge, row.look.light ? 1.15 : 0.85) : row.look.hairlineStrong
+                // The theme's own color for the role, so the swatch names the hue plainly; on
+                // the node it becomes the gentler header tint (docs/canvas-look.md 6.1).
+                readonly property string role: visible ? row.entry.swatch : "none"
+                color: role === "none" ? "transparent" : role === "accent" ? theme.accent
+                     : role === "muted" ? row.look.label : (theme.colors[role] || row.look.label)
+                border.width: role === "none" ? 1 : 0
+                border.color: row.look.hairlineStrong
             }
             Text {
                 visible: row.checkable && row.checked
@@ -89,7 +92,9 @@ MenuItem {
             id: keys
             anchors.right: chevron.visible ? chevron.left : parent.right
             anchors.verticalCenter: parent.verticalCenter
-            text: row.entry !== undefined && row.entry.keys.length > 0 ? row.entry.keys[0] : ""
+            // The overlay's key names: Enter, Esc.
+            text: row.entry !== undefined && row.entry.keys.length > 0
+                  ? row.entry.keys[0].replace("Return", "Enter").replace("Escape", "Esc") : ""
             font.pixelSize: row.look.labelSize
             font.features: {"tnum": 1}
             color: row.look.label

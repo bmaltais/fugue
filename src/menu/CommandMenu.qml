@@ -53,7 +53,9 @@ Menu {
     onAboutToHide: { shown = false; commands.menuShown(false) }
     Component.onDestruction: if (shown) commands.menuShown(false)
     padding: 1.5 * u
-    implicitWidth: Math.max(56 * u, contentItem.implicitWidth + leftPadding + rightPadding)
+    // As wide as its widest row wants, so names and keys never elide.
+    property real widest: 0
+    implicitWidth: Math.max(56 * u, widest + leftPadding + rightPadding)
     background: PopupSurface { look: menu.look }
 
     delegate: CommandMenuItem {}
@@ -62,7 +64,6 @@ Menu {
     // so Left and Right reach the menu bar from any row: rows pass them on to it.
     contentItem: ListView {
         implicitHeight: contentHeight
-        implicitWidth: contentItem.childrenRect.width
         model: menu.contentModel
         interactive: Window.window ? contentHeight + menu.topPadding + menu.bottomPadding > menu.height : false
         clip: true
@@ -109,6 +110,10 @@ Menu {
             }
         }
         menu.made = list
+        let widest = 0
+        for (let i = 0; i < menu.count; ++i)
+            widest = Math.max(widest, menu.itemAt(i) ? menu.itemAt(i).implicitWidth : 0)
+        menu.widest = widest
     }
 
     Component {
