@@ -260,20 +260,18 @@ private slots:
 
     void anErrorInsideAGroupNamesThePathId() {
         World world;
-        Errors errors;
         const auto document = Document::fromJson(
             json("{'fugue': 1, 'graph': {'nodes': {"
                  " 'g7': {'type': 'local/broken', 'version': '1.0.0', 'inputs': {}},"
                  " 's': {'type': 'fugue/save', 'version': '1.0.0', 'inputs': {'value': {'from': 'g7.text'}}}}},"
                  " 'groups': {'local/broken': {'version': '1.0.0', 'name': 'Broken', 'inputs': [],"
                  "   'outputs': [{'name': 'text', 'from': 'inner.text'}],"
-                 "   'nodes': {'inner': {'type': 'fugue/fail', 'version': '1.0.0', 'inputs': {'text': 'x'}}}}}}"),
-            errors);
-        QVERIFY2(document.has_value(), qPrintable(World::dump(errors)));
+                 "   'nodes': {'inner': {'type': 'fugue/fail', 'version': '1.0.0', 'inputs': {'text': 'x'}}}}}}"));
+        QVERIFY2(document.ok(), qPrintable(World::dump(document.errors())));
         const Compilation compiled = compile(*document, world.registry);
-        QVERIFY2(compiled.ok(), qPrintable(World::dump(compiled.errors)));
+        QVERIFY2(compiled.ok(), qPrintable(World::dump(compiled.errors())));
 
-        const Ran ran = world.run(*compiled.graph);
+        const Ran ran = world.run(*compiled);
         QCOMPARE(ran.outcome.errors.size(), 1);
         QCOMPARE(ran.outcome.errors.first().node, QStringLiteral("g7/inner"));
         QVERIFY(QDir(ran.path + "/nodes/g7/inner").exists());

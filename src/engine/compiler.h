@@ -111,7 +111,7 @@ struct CompiledGraph {
     // Reads what toJson wrote (`fugue run compiled.json`). Checks the shape
     // only: invalid_document for a malformed graph, unsupported_format_version
     // for a `fugue-compiled` newer than 1. The registry is not consulted.
-    static std::optional<CompiledGraph> fromJson(const QJsonObject &json, Errors &errors);
+    static Result<CompiledGraph> fromJson(const QJsonObject &json);
 };
 
 struct CompileOptions {
@@ -128,15 +128,10 @@ struct CompileOptions {
     std::optional<QStringList> providers;
 };
 
-struct Compilation {
-    // Present when `errors` has no entry of severity error.
-    std::optional<CompiledGraph> graph;
-    // Errors and warnings together, in a stable order; Error::severity tells
-    // them apart (hasErrors()).
-    Errors errors;
-
-    bool ok() const { return graph.has_value(); }
-};
+// What compiling gives: the compiled graph with the warnings found, or, when
+// anything of severity error was found, every error and warning together.
+// problems() is all that was reported either way, in a stable order.
+using Compilation = Result<CompiledGraph>;
 
 // The one entry point for `fugue validate`, `fugue compile` and every run.
 Compilation compile(const Document &document, const Registry &registry, const CompileOptions &options = {});

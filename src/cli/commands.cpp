@@ -129,10 +129,9 @@ Reply nodeDescribe(const Command &command, Context &context) {
 }
 
 Reply validateWorkflow(const Command &command, Context &context) {
-    Errors errors;
-    const std::optional<Document> document = Document::loadFile(command.positionals.at(0), errors);
+    const Result<Document> document = Document::loadFile(command.positionals.at(0));
     if (!document)
-        return loadFailed(errors);
+        return loadFailed(document.errors());
     const Validation validation = validateDocument(*document, context);
     if (hasErrors(validation.errors))
         return Reply::failure(validation.errors);
@@ -150,16 +149,15 @@ Reply validateWorkflow(const Command &command, Context &context) {
 }
 
 Reply compileWorkflow(const Command &command, Context &context) {
-    Errors errors;
-    const std::optional<Document> document = Document::loadFile(command.positionals.at(0), errors);
+    const Result<Document> document = Document::loadFile(command.positionals.at(0));
     if (!document)
-        return loadFailed(errors);
+        return loadFailed(document.errors());
     const Compilation compilation = compileDocument(*document, context.registry);
     if (!compilation.ok())
-        return Reply::failure(compilation.errors);
-    const QJsonObject compiled = compilation.graph->toJson();
+        return Reply::failure(compilation.errors());
+    const QJsonObject compiled = compilation->toJson();
     Reply reply = Reply::success(compiled, QString::fromUtf8(writeJson(compiled)));
-    reply.errors = compilation.errors; // warnings only
+    reply.errors = compilation.warnings();
     return reply;
 }
 
@@ -168,17 +166,16 @@ Reply workflowNew(const Command &command, Context &) {
     if (QFileInfo::exists(path))
         return Reply::failure(makeError("usage", QStringLiteral("%1 already exists.").arg(path),
                                         "Choose a new file name; fugue does not overwrite."));
-    Errors errors;
-    if (!Document().saveFile(path, errors))
+    const Errors errors = Document().saveFile(path);
+    if (hasErrors(errors))
         return loadFailed(errors);
     return Reply::success(QJsonObject{{"file", path}}, QStringLiteral("Wrote %1.").arg(path));
 }
 
 Reply workflowDescribe(const Command &command, Context &context) {
-    Errors errors;
-    const std::optional<Document> document = Document::loadFile(command.positionals.at(0), errors);
+    const Result<Document> document = Document::loadFile(command.positionals.at(0));
     if (!document)
-        return loadFailed(errors);
+        return loadFailed(document.errors());
     QJsonArray nodes;
     QJsonArray links;
     QStringList lines;
@@ -203,13 +200,13 @@ Reply workflowDescribe(const Command &command, Context &context) {
     const Compilation compilation = compileDocument(*document, context.registry);
     QJsonArray sinks;
     QJsonArray missing;
-    const QJsonArray problems = toJson(compilation.errors);
+    const QJsonArray problems = toJson(compilation.problems());
     if (compilation.ok())
-        for (const QString &sink : compilation.graph->sinks())
+        for (const QString &sink : compilation->sinks())
             sinks.append(sink);
     static const QSet<QString> missingCodes{"missing_input", "unknown_node_type", "unknown_link_source", "unknown_output",
                                             "unknown_input"};
-    for (const Error &error : compilation.errors) {
+    for (const Error &error : compilation.problems()) {
         lines << humanProblem(error);
         if (missingCodes.contains(error.code))
             missing.append(error.toJson());
@@ -271,8 +268,7 @@ Reply runsResult(const Command &command, Context &context) {
     QSet<QString> wanted;
     bool filter = false;
     if (const QJsonObject json = folder->compiled(); !json.isEmpty()) {
-        Errors ignored;
-        if (const auto graph = CompiledGraph::fromJson(json, ignored)) {
+        if (const Result<CompiledGraph> graph = CompiledGraph::fromJson(json)) {
             filter = true;
             for (const QString &sink : graph->sinks())
                 wanted.insert(sink);

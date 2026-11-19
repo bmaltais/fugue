@@ -48,11 +48,10 @@ const Error *find(const Errors &errors, const QString &node, const QString &inpu
 }
 
 std::optional<Document> load(const QByteArray &bytes) {
-    Errors errors;
-    std::optional<Document> document = Document::load(bytes, errors);
-    if (!document || !errors.isEmpty())
-        qWarning().noquote() << dump(errors);
-    return document;
+    const Result<Document> document = Document::load(bytes);
+    if (!document.problems().isEmpty())
+        qWarning().noquote() << dump(document.problems());
+    return document ? std::optional<Document>(document.value()) : std::nullopt;
 }
 
 const QByteArray minimal = "{\n  \"fugue\": 1,\n  \"graph\": {\n    \"nodes\": {}\n  }\n}\n";
@@ -212,7 +211,8 @@ private slots:
 
     void shapeErrorsAreAllReported() {
         Errors errors;
-        QVERIFY(!Document::load(fixture("broken.fugue"), errors));
+        errors += Document::load(fixture("broken.fugue")).errors();
+        QVERIFY(hasErrors(errors));
         const QString all = dump(errors);
         for (const Error &error : errors) {
             QCOMPARE(error.code, QStringLiteral("invalid_document"));
@@ -262,7 +262,8 @@ private slots:
 
     void formatVersionIsChecked() {
         Errors errors;
-        QVERIFY(!Document::load("{\"fugue\": 2, \"graph\": 5}", errors));
+        errors += Document::load("{\"fugue\": 2, \"graph\": 5}").errors();
+        QVERIFY(hasErrors(errors));
         // A newer format is refused alone: its other fields may mean other things.
         QCOMPARE(codes(errors), QStringList{"unsupported_format_version"});
 
@@ -271,37 +272,42 @@ private slots:
                                       QByteArray("{\"fugue\": 0, \"graph\": {\"nodes\": {}}}"),
                                       QByteArray("{\"graph\": {\"nodes\": {}}}")}) {
             errors.clear();
-            QVERIFY(!Document::load(bad, errors));
+            errors += Document::load(bad).errors();
+            QVERIFY(hasErrors(errors));
             QCOMPARE(codes(errors), QStringList{"invalid_document"});
         }
     }
 
     void sectionsMustHaveTheirShape() {
         Errors errors;
-        QVERIFY(!Document::load("{\"fugue\": 1, \"groups\": [], \"layout\": 1, \"requires\": \"x\", \"run\": []}",
-                                errors));
+        errors += Document::load("{\"fugue\": 1, \"groups\": [], \"layout\": 1, \"requires\": \"x\", \"run\": []}").errors();
+        QVERIFY(hasErrors(errors));
         const QString all = dump(errors);
         QCOMPARE(errors.size(), 5);
         for (const char *word : {"graph", "groups", "layout", "requires", "run"})
             QVERIFY2(find(errors, "", "", QString::fromLatin1(word)), word);
 
         errors.clear();
-        QVERIFY(!Document::load("{\"fugue\": 1, \"graph\": {}}", errors));
+        errors += Document::load("{\"fugue\": 1, \"graph\": {}}").errors();
+        QVERIFY(hasErrors(errors));
         QVERIFY(find(errors, "", "", "graph.nodes"));
     }
 
     void invalidJsonSaysWhere() {
         Errors errors;
-        QVERIFY(!Document::load("{\n  \"fugue\": 1,\n  \"graph\": {\n}", errors));
+        errors += Document::load("{\n  \"fugue\": 1,\n  \"graph\": {\n}").errors();
+        QVERIFY(hasErrors(errors));
         QCOMPARE(codes(errors), QStringList{"invalid_json"});
         QVERIFY2(errors.first().message.contains("line 4"), qPrintable(errors.first().message));
 
         errors.clear();
-        QVERIFY(!Document::load("[1]", errors));
+        errors += Document::load("[1]").errors();
+        QVERIFY(hasErrors(errors));
         QCOMPARE(codes(errors), QStringList{"invalid_document"});
 
         errors.clear();
-        QVERIFY(!Document::load("", errors));
+        errors += Document::load("").errors();
+        QVERIFY(hasErrors(errors));
         QCOMPARE(codes(errors), QStringList{"invalid_json"});
     }
 
@@ -313,10 +319,10 @@ private slots:
     void textMustBeValidUnicode() {
         // A lone surrogate is reported where it is, beside the other errors.
         Errors errors;
-        QVERIFY(!Document::load("{\"fugue\": 1, \"graph\": {\"nodes\": {\"a\": {\"type\": \"fugue/text\", "
+        errors += Document::load("{\"fugue\": 1, \"graph\": {\"nodes\": {\"a\": {\"type\": \"fugue/text\", "
                                 "\"version\": \"1.0.0\", \"inputs\": {\"text\": \"\\ud800\"}}, "
-                                "\"b\": {\"type\": \"fugue/text\"}}}}",
-                                errors));
+                                "\"b\": {\"type\": \"fugue/text\"}}}}").errors();
+        QVERIFY(hasErrors(errors));
         QCOMPARE(codes(errors), (QStringList{"invalid_document", "invalid_document"}));
         QVERIFY2(find(errors, "", "", "graph.nodes.a.inputs.text"), qPrintable(dump(errors)));
         QVERIFY2(find(errors, "", "", "Unicode"), qPrintable(dump(errors)));
@@ -337,30 +343,31 @@ private slots:
     void files() {
         QTemporaryDir dir;
         Errors errors;
-        QVERIFY(!Document::loadFile(dir.filePath("missing.fugue"), errors));
+        errors += Document::loadFile(dir.filePath("missing.fugue")).errors();
+        QVERIFY(hasErrors(errors));
         QCOMPARE(codes(errors), QStringList{"file_not_found"});
 
         const std::optional<Document> document = load(fixture("full.fugue"));
         const QString path = dir.filePath("saved.fugue");
         errors.clear();
-        QVERIFY(document->saveFile(path, errors));
-        QVERIFY(errors.isEmpty());
+        QVERIFY(document->saveFile(path).isEmpty());
         QFile saved(path);
         QVERIFY(saved.open(QIODevice::ReadOnly));
         QCOMPARE(saved.readAll(), fixture("full.fugue"));
 
-        const std::optional<Document> again = Document::loadFile(path, errors);
-        QVERIFY2(again, qPrintable(dump(errors)));
+        const Result<Document> again = Document::loadFile(path);
+        QVERIFY2(again.ok(), qPrintable(dump(again.errors())));
         QCOMPARE(again->save(), document->save());
 
         errors.clear();
-        QVERIFY(!document->saveFile(dir.filePath("no/such/folder/x.fugue"), errors));
+        errors = document->saveFile(dir.filePath("no/such/folder/x.fugue"));
         QCOMPARE(codes(errors), QStringList{"permission_denied"});
 
         if (geteuid() != 0) {
             QVERIFY(QFile::setPermissions(path, QFileDevice::Permissions()));
             errors.clear();
-            QVERIFY(!Document::loadFile(path, errors));
+            errors += Document::loadFile(path).errors();
+            QVERIFY(hasErrors(errors));
             QCOMPARE(codes(errors), QStringList{"permission_denied"});
         }
     }

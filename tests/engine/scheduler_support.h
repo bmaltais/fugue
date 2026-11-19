@@ -311,14 +311,13 @@ public:
                 node.insert("inputs", QJsonObject());
             it.value() = node;
         }
-        Errors errors;
-        const auto document = Document::fromJson(QJsonObject{{"fugue", 1}, {"graph", QJsonObject{{"nodes", nodes}}}}, errors);
+        const Result<Document> document = Document::fromJson(QJsonObject{{"fugue", 1}, {"graph", QJsonObject{{"nodes", nodes}}}});
         if (!document)
-            qFatal("bad test document: %s", qPrintable(dump(errors)));
+            qFatal("bad test document: %s", qPrintable(dump(document.errors())));
         const Compilation compiled = compile(*document, registry);
         if (!compiled.ok())
-            qFatal("test graph does not compile: %s", qPrintable(dump(compiled.errors)));
-        return *compiled.graph;
+            qFatal("test graph does not compile: %s", qPrintable(dump(compiled.errors())));
+        return *compiled;
     }
 
     RunFolder folder() {

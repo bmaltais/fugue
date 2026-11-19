@@ -113,36 +113,28 @@ namespace {
 // already is a compiled graph (4.8).
 Compilation graphToRun(const Command &command, Context &context) {
     const QString file = command.positionals.at(0);
-    Compilation result;
     const Result<QJsonObject> json = readJsonObject(file);
     if (json && json->contains("fugue-compiled")) {
         // Nothing is compiled, so what changes a compile has nothing to act on.
-        for (const char *option : {"set", "to", "provider"}) {
-            if (command.has(option)) {
-                result.errors << makeError("usage", QStringLiteral("--%1 cannot be used with a compiled graph.").arg(option),
-                                           "Run the workflow file itself with this option.");
-                return result;
-            }
-        }
-        result.errors = registerProviders(context.registry);
-        if (hasErrors(result.errors))
-            return result;
-        Errors shape;
-        result.graph = CompiledGraph::fromJson(*json, shape);
-        result.errors += shape;
-        return result;
+        for (const char *option : {"set", "to", "provider"})
+            if (command.has(option))
+                return makeError("usage", QStringLiteral("--%1 cannot be used with a compiled graph.").arg(option),
+                                 "Run the workflow file itself with this option.");
+        const Errors providerProblems = registerProviders(context.registry);
+        if (hasErrors(providerProblems))
+            return Compilation(providerProblems);
+        const Result<CompiledGraph> graph = CompiledGraph::fromJson(*json);
+        const Errors problems = providerProblems + graph.problems();
+        return graph ? Compilation(graph.value(), problems) : Compilation(problems);
     }
     // Not a compiled graph: a workflow document, whose loader reports what is wrong
     // with the file in a workflow's terms.
-    Errors errors;
-    std::optional<Document> document = Document::loadFile(file, errors);
-    if (!document) {
-        result.errors = errors;
-        return result;
-    }
-    result.errors = applyOverrides(*document, command.options.value("set"));
-    if (!result.errors.isEmpty())
-        return result;
+    Result<Document> document = Document::loadFile(file);
+    if (!document)
+        return Compilation(document.errors());
+    const Errors setErrors = applyOverrides(*document, command.options.value("set"));
+    if (!setErrors.isEmpty())
+        return Compilation(setErrors);
     return compileDocument(*document, context.registry, {command.value("to"), command.value("provider")});
 }
 
@@ -152,13 +144,13 @@ Reply startRun(const Command &command, Context &context) {
     const QString file = command.positionals.at(0);
     const Compilation compilation = graphToRun(command, context);
     if (!compilation.ok())
-        return Reply::failure(compilation.errors);
+        return Reply::failure(compilation.errors());
 
     const Result<RunFolder> folder = RunFolder::create(context.runsRoot);
     if (!folder)
         return Reply::failure(folder.errors());
     const QString workflow = QFileInfo(file).absoluteFilePath();
-    folder->writeCompiled(compilation.graph->toJson());
+    folder->writeCompiled(compilation->toJson());
     folder->queued(workflow);
 
     const Queue queue(context.queueDir);
@@ -288,14 +280,10 @@ int work(const QString &runId, Context &context) {
     // broken, since `fugue run` compiled. A file that cannot be used fails the run with
     // the reason; an instance that cannot be made is a warning of the run.
     const Errors providerProblems = registerProviders(context.registry);
-    Errors errors;
-    std::optional<CompiledGraph> graph;
-    if (hasErrors(providerProblems))
-        errors = providerProblems;
-    else
-        graph = CompiledGraph::fromJson(folder->compiled(), errors);
+    const Result<CompiledGraph> graph = hasErrors(providerProblems) ? Result<CompiledGraph>(providerProblems)
+                                                                    : CompiledGraph::fromJson(folder->compiled());
     if (!graph) {
-        folder->finish(RunStatus::Failed, errors, utcNow());
+        folder->finish(RunStatus::Failed, graph.errors(), utcNow());
         queue.remove(runId);
         return 1;
     }

@@ -29,10 +29,8 @@ QString joined(const QStringList &items) {
 }
 
 Error nodeError(const QString &code, const QString &node, const QString &message) {
-    Error error;
-    error.code = code;
+    Error error = makeError(code, message);
     error.node = node;
-    error.message = message;
     return error;
 }
 
@@ -263,13 +261,12 @@ void Compiler::checkRecursion() {
             return;
         for (const QString &id : component)
             m_recursive.insert(id);
-        Error error;
-        error.code = QStringLiteral("group_recursion");
-        error.message = selfLoop ? QStringLiteral("Group %1 contains an instance of itself.").arg(group)
-                                 : QStringLiteral("Groups %1 contain each other.").arg(joined(component));
+        Error error = makeError(QStringLiteral("group_recursion"),
+                                selfLoop ? QStringLiteral("Group %1 contains an instance of itself.").arg(group)
+                                         : QStringLiteral("Groups %1 contain each other.").arg(joined(component)),
+                                QStringLiteral("A group cannot contain itself, directly or through another group; "
+                                               "remove the inner instance that closes the loop."));
         error.valid = QJsonArray::fromStringList(component);
-        error.hint = QStringLiteral("A group cannot contain itself, directly or through another group; "
-                                    "remove the inner instance that closes the loop.");
         fail(error);
     };
     for (auto it = uses.constBegin(); it != uses.constEnd(); ++it)
@@ -312,11 +309,10 @@ void Compiler::checkTarget() {
     for (const Flat &flat : m_flat)
         if (!flat.hidden && flat.mode != NodeMode::Bypass)
             paths << flat.path;
-    Error error;
-    error.code = QStringLiteral("usage");
-    error.message = it == m_flat.constEnd()
-                        ? QStringLiteral("There is no node %1 to run to.").arg(m_options.target)
-                        : QStringLiteral("Node %1 is bypassed, so a run cannot stop at it.").arg(m_options.target);
+    Error error = makeError(QStringLiteral("usage"),
+                            it == m_flat.constEnd()
+                                ? QStringLiteral("There is no node %1 to run to.").arg(m_options.target)
+                                : QStringLiteral("Node %1 is bypassed, so a run cannot stop at it.").arg(m_options.target));
     error.valid = QJsonArray::fromStringList(paths);
     addHint(error, m_options.target, paths);
     fail(error);
@@ -1083,14 +1079,12 @@ Compilation Compiler::run() {
     // Cycles are looked for even when there are other errors: links that did
     // not resolve are not in the flattened graph, so what is there is sound.
     const bool cyclic = findCycles();
-    Compilation result;
     if (!hasErrors(m_errors) && !cyclic) {
         CompiledGraph graph = shape();
         if (!hasErrors(m_errors))
-            result.graph = std::move(graph);
+            return Compilation(std::move(graph), m_errors); // warnings only
     }
-    result.errors = m_errors;
-    return result;
+    return Compilation(m_errors);
 }
 
 // --- reading compiled.json ---------------------------------------------------
@@ -1210,7 +1204,9 @@ QJsonObject CompiledGraph::toJson() const {
     return result;
 }
 
-std::optional<CompiledGraph> CompiledGraph::fromJson(const QJsonObject &json, Errors &errors) {
+namespace {
+
+std::optional<CompiledGraph> readCompiled(const QJsonObject &json, Errors &errors) {
     const qsizetype before = errors.size();
     const auto fail = [&](const QString &message, const QString &node = {}, const QString &input = {}) {
         Error error = makeError(QStringLiteral("invalid_document"), message);
@@ -1219,16 +1215,16 @@ std::optional<CompiledGraph> CompiledGraph::fromJson(const QJsonObject &json, Er
         errors << error;
     };
     const QJsonValue formatValue = json.value("fugue-compiled");
-    if (formatValue.isDouble() && formatValue.toDouble() > format) {
+    if (formatValue.isDouble() && formatValue.toDouble() > CompiledGraph::format) {
         errors << makeError(QStringLiteral("unsupported_format_version"),
                             QStringLiteral("This compiled graph has format %1; this Fugue reads format %2.")
                                 .arg(shown(formatValue))
-                                .arg(format),
+                                .arg(CompiledGraph::format),
                             QStringLiteral("Update Fugue, or compile the workflow again with this version."));
         return std::nullopt;
     }
-    if (formatValue != QJsonValue(format))
-        fail(QStringLiteral("\"fugue-compiled\" must be %1, not %2.").arg(format).arg(shown(formatValue)));
+    if (formatValue != QJsonValue(CompiledGraph::format))
+        fail(QStringLiteral("\"fugue-compiled\" must be %1, not %2.").arg(CompiledGraph::format).arg(shown(formatValue)));
 
     CompiledGraph graph;
     if (!json.value("source").isString())
@@ -1300,6 +1296,14 @@ std::optional<CompiledGraph> CompiledGraph::fromJson(const QJsonObject &json, Er
     if (errors.size() > before)
         return std::nullopt;
     return graph;
+}
+
+} // namespace
+
+Result<CompiledGraph> CompiledGraph::fromJson(const QJsonObject &json) {
+    Errors problems;
+    std::optional<CompiledGraph> graph = readCompiled(json, problems);
+    return collected(std::move(graph), std::move(problems));
 }
 
 Compilation compile(const Document &document, const Registry &registry, const CompileOptions &options) {

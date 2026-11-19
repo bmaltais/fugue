@@ -85,6 +85,35 @@ private slots:
         QCOMPARE(marked.value().value("a").toInt(), 1);
     }
 
+    // result.h: a value with its warnings, or everything a failure reported.
+    void aResultCarriesWarningsOnSuccessAndEverythingOnFailure() {
+        Error warning = makeError("not_part_of_output", "Node x feeds nothing.");
+        warning.severity = Error::Severity::Warning;
+        const Error error = makeError("missing_input", "Input text has no value.");
+
+        const Result<int> fine(7, Errors{warning});
+        QVERIFY(fine.ok());
+        QCOMPARE(fine.value(), 7);
+        QCOMPARE(fine.warnings().size(), 1);
+        QVERIFY(fine.errors().isEmpty());
+        QCOMPARE(fine.problems().size(), 1);
+
+        const Result<int> failed(Errors{warning, error});
+        QVERIFY(!failed.ok());
+        QCOMPARE(failed.errors().size(), 2); // in the order they were found
+        QCOMPARE(failed.error().code, QStringLiteral("not_part_of_output"));
+        QVERIFY(failed.warnings().isEmpty());
+
+        QVERIFY(Result<int>(3).problems().isEmpty());
+        QCOMPARE(Result<int>(error).errors().first().code, QStringLiteral("missing_input"));
+
+        // collected(): what code that gathered problems as it went hands back.
+        QCOMPARE(collected(std::optional<int>(5), Errors{warning}).warnings().size(), 1);
+        const Result<int> none = collected(std::optional<int>(), Errors{error});
+        QVERIFY(!none.ok());
+        QCOMPARE(none.error().code, QStringLiteral("missing_input"));
+    }
+
     void errorsBecomeAJsonArray() {
         Error warning = makeError("model_missing", "No model.", "Add one.");
         warning.severity = Error::Severity::Warning;

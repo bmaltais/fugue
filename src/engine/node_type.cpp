@@ -25,10 +25,8 @@ QString shown(const QJsonValue &value) {
 }
 
 Error literalError(const QString &code, const InputSpec &input, const QString &message) {
-    Error error;
-    error.code = code;
+    Error error = makeError(code, message);
     error.input = input.name;
-    error.message = message;
     return error;
 }
 
@@ -47,12 +45,10 @@ public:
 
     void add(const QString &code, Error::Severity severity, const QString &message,
              const QString &input = {}, const QString &output = {}) {
-        Error error;
-        error.code = code;
+        Error error = makeError(code, m_id + QStringLiteral(": ") + message);
         error.severity = severity;
         error.input = input;
         error.output = output;
-        error.message = m_id + QStringLiteral(": ") + message;
         m_errors << error;
         if (severity == Error::Severity::Error)
             ++m_errorCount;
@@ -362,7 +358,9 @@ const OutputSpec *NodeType::output(const QString &name) const {
     return nullptr;
 }
 
-std::optional<NodeType> NodeType::fromJson(const QJsonObject &manifest, Errors &errors) {
+namespace {
+
+std::optional<NodeType> readManifest(const QJsonObject &manifest, Errors &errors) {
     NodeType type;
     const QJsonValue id = manifest.value("id");
     Reader r(id.isString() && !id.toString().isEmpty() ? id.toString() : QStringLiteral("manifest"), errors);
@@ -455,6 +453,14 @@ std::optional<NodeType> NodeType::fromJson(const QJsonObject &manifest, Errors &
     if (r.failed())
         return std::nullopt;
     return type;
+}
+
+} // namespace
+
+Result<NodeType> NodeType::fromJson(const QJsonObject &manifest) {
+    Errors problems;
+    std::optional<NodeType> type = readManifest(manifest, problems);
+    return collected(std::move(type), std::move(problems));
 }
 
 QJsonObject NodeType::toJson() const {

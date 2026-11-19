@@ -7,10 +7,8 @@ namespace fugue {
 namespace {
 
 Error problem(const QString &message, Error::Severity severity = Error::Severity::Error) {
-    Error error;
-    error.code = QStringLiteral("invalid_document");
+    Error error = makeError(QStringLiteral("invalid_document"), message);
     error.severity = severity;
-    error.message = message;
     return error;
 }
 
@@ -29,8 +27,9 @@ Errors Registry::add(const DeclaredPortType &type) {
 }
 
 Errors Registry::add(const NodeType &type) {
-    Errors errors;
-    if (!NodeType::fromJson(type.toJson(), errors))
+    const Result<NodeType> valid = NodeType::fromJson(type.toJson());
+    Errors errors = valid.problems();
+    if (!valid)
         return errors;
 
     const auto fail = [&](const QString &message, const QString &input = {}, const QString &output = {}) {
@@ -78,10 +77,9 @@ Errors Registry::add(const NodeType &type) {
 }
 
 Errors Registry::addManifest(const QJsonObject &manifest) {
-    Errors errors;
-    const std::optional<NodeType> type = NodeType::fromJson(manifest, errors);
+    const Result<NodeType> type = NodeType::fromJson(manifest);
     if (!type)
-        return errors;
+        return type.errors();
     return add(*type);
 }
 

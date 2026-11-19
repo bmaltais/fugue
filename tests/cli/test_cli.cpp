@@ -123,9 +123,7 @@ class TestCli : public QObject {
     QString workflow(const QString &name = "flow.fugue") const {
         const QString path = m_dir.filePath(name);
         if (!QFile::exists(path)) {
-            Errors errors;
-            Document document;
-            if (!document.saveFile(path, errors))
+            if (hasErrors(Document().saveFile(path)))
                 qFatal("cannot write the fixture workflow");
         }
         return path;
