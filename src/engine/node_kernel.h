@@ -32,6 +32,10 @@
 // left where it is. A data handle needs "data" and "path"; the scheduler adds
 // its "hash".
 //
+// Warnings: a kernel may return them beside its outputs (Result(values, warnings)); the
+// scheduler gives each the node's path id and puts it among the run's warnings (run.done's
+// `errors`, run.json). A cached result does not repeat them.
+//
 // Errors: return an Error with a code of 13.3 (node_failed when none fits,
 // out_of_memory when memory ran out so the scheduler can free a resident
 // model and try again). `node` is filled in by the scheduler. An exception

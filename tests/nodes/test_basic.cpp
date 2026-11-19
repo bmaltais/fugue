@@ -103,8 +103,9 @@ class TestBasic : public QObject {
 
     QString path(const QString &name) const { return m_dir.filePath(name); }
 
-    // Runs a document given as JSON text; a node without a version gets 1.0.0.
-    Ran run(const QByteArray &nodes, const QJsonObject &layout = {}) {
+    // Runs a document given as JSON text; a node without a version gets 1.0.0. Without
+    // `fromDocument` the run gets only the compiled graph, as `fugue run compiled.json` does.
+    Ran run(const QByteArray &nodes, const QJsonObject &layout = {}, bool fromDocument = true) {
         QJsonObject nodeObject = json(nodes);
         for (auto it = nodeObject.begin(); it != nodeObject.end(); ++it) {
             QJsonObject node = it.value().toObject();
@@ -132,12 +133,16 @@ class TestBasic : public QObject {
         environment.cache = m_cache.get();
         environment.hashes = m_hashes.get();
         RunOptions options;
-        options.document = document->toJson();
+        if (fromDocument)
+            options.document = document->toJson();
         ran.outcome = runGraph(*compiled, *made, environment, options);
         ran.events = made->events();
         ran.state = made->state();
-        if (!ran.outcome.errors.isEmpty())
-            ran.error = ran.outcome.errors.value(0).code + ": " + ran.outcome.errors.value(0).message;
+        for (const Error &error : std::as_const(ran.outcome.errors))
+            if (error.severity == Error::Severity::Error) {
+                ran.error = error.code + ": " + error.message;
+                break;
+            }
         return ran;
     }
 
@@ -308,6 +313,37 @@ private slots:
         QVERIFY2(ran.error.isEmpty(), qPrintable(ran.error));
         QVERIFY(QFileInfo::exists(outDir() + "/plain.png"));
         QVERIFY(pngWorkflowText(outDir() + "/plain.png").isEmpty());
+    }
+
+    // A run from a compiled graph has no document to embed (11.7): the image is saved and the
+    // run says why it holds no workflow, on the node, as a warning.
+    void aRunFromACompiledGraphWarnsThatNothingWasEmbedded() {
+        const QString source = makePng("src-compiled", 4, 4);
+        const Ran ran = run(saveFlow(source, "'name': 'compiled', 'folder': '" + outDir() + "'"), {}, false);
+        QVERIFY2(ran.error.isEmpty(), qPrintable(ran.error));
+        QVERIFY(QFileInfo::exists(outDir() + "/compiled.png"));
+        QVERIFY(pngWorkflowText(outDir() + "/compiled.png").isEmpty());
+        QCOMPARE(ran.outcome.status, RunStatus::Ok);
+        QCOMPARE(ran.outcome.errors.size(), 1);
+        const Error warning = ran.outcome.errors.first();
+        QCOMPARE(warning.code, QString("workflow_not_embedded"));
+        QVERIFY(warning.severity == Error::Severity::Warning);
+        QCOMPARE(warning.node, QString("s"));
+        QVERIFY2(warning.message.contains("compiled graph"), qPrintable(warning.message));
+        // run.done carries it, as it does every warning of the run.
+        const QJsonArray done = ran.events.last().value("errors").toArray();
+        QCOMPARE(done.size(), 1);
+        QCOMPARE(done.at(0).toObject().value("code").toString(), QString("workflow_not_embedded"));
+        QCOMPARE(done.at(0).toObject().value("severity").toString(), QString("warning"));
+    }
+
+    // Embedding none is the node's own setting: nothing to warn about.
+    void embedNoneFromACompiledGraphDoesNotWarn() {
+        const QString source = makePng("src-compiled-none", 4, 4);
+        const Ran ran = run(saveFlow(source, "'name': 'compiled-none', 'embed': 'none', 'folder': '" + outDir() + "'"), {},
+                            false);
+        QVERIFY2(ran.error.isEmpty(), qPrintable(ran.error));
+        QVERIFY(ran.outcome.errors.isEmpty());
     }
 
     void saveImageWritesAWebpWithTheWorkflowInXmp() {

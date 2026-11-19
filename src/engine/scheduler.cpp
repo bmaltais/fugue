@@ -163,6 +163,17 @@ Result<Values> withFiles(const Values &outputs, const QString &workDir, FileHash
     return out;
 }
 
+// The kernel's outputs given files and hashes (withFiles), keeping the warnings the kernel
+// returned beside them.
+Result<Values> filed(const Result<Values> &made, const QString &workDir, FileHashes &hashes) {
+    if (!made)
+        return made;
+    const Result<Values> withFile = guarded<Values>([&] { return withFiles(made.value(), workDir, hashes); });
+    if (!withFile || made.warnings().isEmpty())
+        return withFile;
+    return Result<Values>(withFile.value(), made.warnings() + withFile.warnings());
+}
+
 // Whether one item fits a port type. Only the built-in types are checked;
 // values of declared types are the packs' business.
 bool fits(const Value &value, const PortType &type) {
@@ -815,9 +826,8 @@ private:
         }
         const auto kernel = n.kernel;
         m_pool.start([this, kernel, context, path, hashes] {
-            Result<Values> result = guarded<Values>([&] { return kernel->run(context); });
-            if (result)
-                result = guarded<Values>([&] { return withFiles(result.value(), context.workDir, *hashes); });
+            const Result<Values> result =
+                filed(guarded<Values>([&] { return kernel->run(context); }), context.workDir, *hashes);
             later([this, path, result] { returned(path, result); });
         });
     }
@@ -915,9 +925,8 @@ private:
         const JobResult job = result.value();
         FileHashes *hashes = m_env.hashes;
         m_pool.start([this, kernel, context, selection, job, path, hashes] {
-            Result<Values> outputs = guarded<Values>([&] { return kernel->outputs(context, selection, job); });
-            if (outputs)
-                outputs = guarded<Values>([&] { return withFiles(outputs.value(), context.workDir, *hashes); });
+            const Result<Values> outputs = filed(guarded<Values>([&] { return kernel->outputs(context, selection, job); }),
+                                                 context.workDir, *hashes);
             later([this, path, outputs] { returned(path, outputs); });
         });
     }
@@ -939,6 +948,12 @@ private:
         NodeRun &n = m_nodes[path];
         if (!result)
             return failed(n, result.error());
+        // A kernel's warnings are the run's, on this node (run.done, run.json).
+        for (Error warning : result.warnings()) {
+            warning.severity = Error::Severity::Warning;
+            warning.node = n.path;
+            m_outcome.errors.append(warning);
+        }
 
         Values outputs = result.value();
         // A randomized input is also a "value used" output (10.1): when the

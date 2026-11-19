@@ -1662,7 +1662,7 @@ Codes in v0.1:
 | --- | --- |
 | Files | `file_not_found`, `invalid_json`, `invalid_document`, `unsupported_format_version`, `permission_denied`, `media_unreadable` |
 | Graph | `unknown_node_type`, `node_version_mismatch`, `unknown_input`, `missing_input`, `unknown_link_source`, `unknown_output`, `type_mismatch`, `value_out_of_range`, `value_not_in_choices`, `cycle`, `group_recursion`, `unknown_provider` |
-| Warnings | `not_part_of_output`, `model_missing`, `frozen_result_missing`, `pack_update_available` |
+| Warnings | `not_part_of_output`, `model_missing`, `frozen_result_missing`, `pack_update_available`, `workflow_not_embedded` |
 | Trust | `pack_untrusted`, `needs_confirmation` |
 | Providers | `capability_unavailable`, `model_not_running`, `provider_unreachable` |
 | Running | `node_failed`, `node_bad_output`, `node_timeout`, `out_of_memory`, `cancelled` |

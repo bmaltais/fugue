@@ -53,12 +53,21 @@ public:
     }
 };
 
-// The workflow text Save Image embeds, or empty when the node embeds none or the run did not
-// start from a document: the share copy (11.5) with a `run` section holding what was used
-// upstream (11.7). `embed` is full, no-prompts or none.
-QByteArray workflowToEmbed(const NodeContext &context, const QString &embed) {
-    if (embed == QLatin1String("none") || context.document.isEmpty() || !context.registry)
-        return {};
+// The workflow text Save Image embeds: the share copy (11.5) with a `run` section holding
+// what was used upstream (11.7). `embed` is full, no-prompts or none. Empty for none, and
+// empty with a warning when the run did not start from a document (a compiled graph), so
+// the image is saved and the run says why it holds no workflow.
+Result<QByteArray> workflowToEmbed(const NodeContext &context, const QString &embed) {
+    if (embed == QLatin1String("none"))
+        return QByteArray();
+    if (context.document.isEmpty() || !context.registry) {
+        Error warning = makeError(QStringLiteral("workflow_not_embedded"),
+                                  QStringLiteral("The image holds no workflow: the run started from a compiled graph, "
+                                                 "which has none to embed."),
+                                  QStringLiteral("Run the workflow file itself to embed it."));
+        warning.severity = Error::Severity::Warning;
+        return Result<QByteArray>(QByteArray(), Errors{warning});
+    }
     ShareOptions options;
     options.withoutPrompts = embed == QLatin1String("no-prompts");
     QJsonObject document = shareCopy(context.document, *context.registry, options);
@@ -125,7 +134,8 @@ public:
         if (!scratch)
             return scratch.errors();
 
-        const QByteArray workflow = workflowToEmbed(context, embed);
+        const Result<QByteArray> embedded = workflowToEmbed(context, embed);
+        const QByteArray workflow = embedded.value();
         QByteArray bytes;
         if (format == QLatin1String("webp")) {
             // From the PNG just written, so 16-bit and float images take the same road to 8 bits.
@@ -146,10 +156,10 @@ public:
             bytes = source.readAll();
             source.close();
             if (!workflow.isEmpty()) {
-                const Result<QByteArray> embedded = pngWithWorkflow(bytes, workflow);
-                if (!embedded)
-                    return embedded.errors();
-                bytes = embedded.value();
+                const Result<QByteArray> withWorkflow = pngWithWorkflow(bytes, workflow);
+                if (!withWorkflow)
+                    return withWorkflow.errors();
+                bytes = withWorkflow.value();
             }
         }
         QFile::remove(scratch->path());
@@ -160,7 +170,7 @@ public:
         const Result<MediaHandle> file = MediaHandle::probe(MediaType::Image, *target, *context.hashes);
         if (!file)
             return file.errors();
-        return Values{{"file", Value(file.value())}};
+        return Result<Values>(Values{{"file", Value(file.value())}}, embedded.warnings());
     }
 };
 
