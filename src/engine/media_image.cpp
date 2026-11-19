@@ -117,7 +117,7 @@ Result<MediaHandle> MediaHandle::probeImage(const QString &path, FileHashes &has
         handle.m_height = image.height();
         handle.m_channels = image.bands();
         handle.m_format = formatOf(image);
-    } catch (const vips::VError &error) {
+    } catch (const vips::VError &) {
         return makeError(QStringLiteral("media_unreadable"), QStringLiteral("%1 is not an image Fugue can read.").arg(path));
     }
     handle.m_hash = hashes.hash(path);
