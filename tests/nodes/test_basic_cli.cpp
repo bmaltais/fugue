@@ -338,6 +338,40 @@ private slots:
         QVERIFY(!QFileInfo::exists(path("escape")));
     }
 
+    // `..` after a link goes up from where the link leads, as the system resolves it.
+    void dotDotAfterALinkCannotEscapeTheRoots() {
+        QTemporaryDir elsewhere;
+        QVERIFY(elsewhere.isValid());
+        QVERIFY(QDir().mkpath(elsewhere.filePath("deep")));
+        const QString source = rootsSource();
+
+        // Write: <cwd>/wlink/../wout is elsewhere/wout, not <cwd>/wout.
+        QVERIFY(QDir().mkpath(path("work4")));
+        QVERIFY(QFile::link(elsewhere.filePath("deep"), path("work4/wlink")));
+        const Outcome wrote = fugue({"run", rootsFlow(path("roots-wlink.fugue"), source, path("work4/wlink/../wout"), "esc"),
+                                     "--wait", "--json"},
+                                    path("work4"));
+        QCOMPARE(wrote.exitCode, 1);
+        QCOMPARE(firstError(wrote).value("code").toString(), QString("permission_denied"));
+        QCOMPARE(firstError(wrote).value("input").toString(), QString("folder"));
+        QVERIFY(!QFileInfo::exists(elsewhere.filePath("wout")));
+        QVERIFY(!QFileInfo::exists(path("work4/wout")));
+
+        // Read: ~/rlink/../x.png is elsewhere/x.png. The same bytes are first loaded from inside
+        // home, so a cached result is waiting: the check must not depend on a cache miss.
+        const Outcome inside = fugue({"run", rootsFlow(path("roots-in.fugue"), source, path("out-rlink"), "in"),
+                                      "--wait", "--json"});
+        QVERIFY2(inside.exitCode == 0, inside.out.constData());
+        QVERIFY(QFile::copy(source, elsewhere.filePath("x.png")));
+        QVERIFY(QFile::link(elsewhere.filePath("deep"), path("rlink")));
+        const Outcome read = fugue({"run", rootsFlow(path("roots-rlink.fugue"), "~/rlink/../x.png", path("out-rlink"), "in"),
+                                    "--wait", "--json"});
+        QCOMPARE(read.exitCode, 1);
+        QCOMPARE(firstError(read).value("code").toString(), QString("permission_denied"));
+        QCOMPARE(firstError(read).value("node").toString(), QString("load"));
+        QCOMPARE(firstError(read).value("input").toString(), QString("file"));
+    }
+
     // Load Image reads only under the home folder.
     void aLoadOutsideTheReadRootsIsRefused() {
         QTemporaryDir elsewhere;

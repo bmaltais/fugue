@@ -7,8 +7,10 @@
 // them to the worker (roots.json, RunFolder::writeRoots). A run without them (the canvas,
 // in-process tests) is not limited; the canvas decides for itself (#19).
 //
-// Paths are compared in canonical form: made absolute, `.` and `..` resolved, and every
-// symbolic link of the part that exists resolved, so neither `..` nor a link leads out.
+// Paths are compared in canonical form, resolved one component at a time the way the
+// kernel resolves them: a link is followed where it stands, so `link/..` is the folder above
+// where the link leads, not the folder holding the link. Neither `..` nor a link leads out.
+// The nodes then use the canonical path the check returns, so check and use agree.
 
 #include <QJsonObject>
 #include <QString>
@@ -31,17 +33,19 @@ struct FileRoots {
     bool allowsRead(const QString &path) const;
     bool allowsWrite(const QString &path) const;
 
-    // permission_denied on `input` when the path is outside, with a hint naming the roots;
-    // empty when it is inside.
-    Errors checkRead(const QString &path, const QString &input) const;
-    Errors checkWrite(const QString &path, const QString &input) const;
+    // The canonical path to read or write when `path` is inside, the one to use from then
+    // on; else permission_denied on `input`, with a hint naming the roots.
+    Result<QString> checkRead(const QString &path, const QString &input) const;
+    Result<QString> checkWrite(const QString &path, const QString &input) const;
 
     QJsonObject toJson() const;
     static Result<FileRoots> fromJson(const QJsonObject &object);
 };
 
-// `path` in the form the roots compare: absolute, cleaned, and with the existing part's
-// symbolic links resolved (the rest, not made yet, is appended as written).
+// `path` in the form the roots compare: absolute, walked from `/` one component at a time.
+// `.` is skipped, `..` drops the last component resolved so far, and a component that is a
+// symbolic link is replaced by where it leads (followed again, 40 links at most). A
+// component that does not exist yet is kept as written. Empty when the links loop.
 QString canonicalPath(const QString &path);
 
 // Whether canonical `path` is `root` or inside it (both canonical).

@@ -31,10 +31,14 @@ class LoadImageKernel : public NodeKernel {
 public:
     Result<Values> run(const NodeContext &context) override {
         // The scheduler has expanded "~" (paths.h), so the file is the one the key was made from.
-        const QString file = context.input("file").text();
-        if (context.roots)
-            if (Errors refused = context.roots->checkRead(file, QStringLiteral("file")); !refused.isEmpty())
-                return refused;
+        QString file = context.input("file").text();
+        if (context.roots) {
+            // Read the path that was checked, so check and use cannot disagree.
+            const Result<QString> readable = context.roots->checkRead(file, QStringLiteral("file"));
+            if (!readable)
+                return readable.errors();
+            file = readable.value();
+        }
         if (!QFileInfo(file).isFile())
             return makeError(QStringLiteral("file_not_found"), QStringLiteral("No image file at %1.").arg(file),
                              QStringLiteral("Pick the file again in the node."));
@@ -125,9 +129,20 @@ public:
                                       QStringLiteral("%1 leads out of the output folder %2.").arg(context.input("folder").text().trimmed(), outputDir()),
                                       QStringLiteral("A relative folder is under the output folder; write an absolute one to go elsewhere."));
         }
-        if (context.roots)
-            if (Errors refused = context.roots->checkWrite(folder, QStringLiteral("folder")); !refused.isEmpty())
-                return refused;
+        // The folder as the system resolves it (links followed where they stand, then `..`),
+        // so making it, writing in it and checking it are about one folder. QDir::mkpath
+        // would clean `link/..` away on paper while the write follows the link.
+        folder = canonicalPath(folder);
+        if (folder.isEmpty())
+            return makeInputError(QStringLiteral("node_failed"), QStringLiteral("folder"),
+                                  QStringLiteral("The folder %1 goes through links that loop.").arg(context.input("folder").text().trimmed()));
+        if (context.roots) {
+            // Write into the path that was checked.
+            const Result<QString> writable = context.roots->checkWrite(folder, QStringLiteral("folder"));
+            if (!writable)
+                return writable.errors();
+            folder = writable.value();
+        }
         if (Errors made = makeFolder(folder); !made.isEmpty()) {
             made.first().input = QStringLiteral("folder");
             made.first().hint = QStringLiteral("Pick another folder in the node.");

@@ -542,6 +542,23 @@ private slots:
         QCOMPARE(ran.outcome.errors.value(0).input, QString("folder"));
     }
 
+    // Without roots nothing is limited, but the folder still means what the system makes of
+    // it: `link/..` is the folder above where the link leads, for making it and writing in it.
+    void aFolderThroughALinkAndDotDotIsWhereTheSystemSaysItIs() {
+        QTemporaryDir other;
+        QVERIFY(other.isValid());
+        QVERIFY(QDir().mkpath(other.filePath("deep")));
+        QVERIFY(QDir().mkpath(outDir()));
+        QVERIFY(QFile::link(other.filePath("deep"), outDir() + "/wl"));
+        const QString source = makePng("src-wl", 3, 7);
+        const Ran ran = run(saveFlow(source, "'name': 'wl', 'embed': 'none', 'folder': '" + outDir() + "/wl/../wout'"));
+        QVERIFY2(ran.error.isEmpty(), qPrintable(ran.error));
+        const QString written = ran.outcome.outputs.value("s").value("file").media().path();
+        QCOMPARE(written, QDir(other.path()).canonicalPath() + "/wout/wl.png");
+        QVERIFY(QFileInfo::exists(written));
+        QVERIFY(!QFileInfo::exists(outDir() + "/wout"));
+    }
+
     void aRelativeFolderIsUnderTheOutputFolder() {
         const QString source = makePng("src-rel", 4, 4);
         qputenv("XDG_PICTURES_DIR", path("pictures").toUtf8());

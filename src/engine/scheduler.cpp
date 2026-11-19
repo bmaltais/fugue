@@ -727,10 +727,14 @@ private:
             // A file read by path is keyed by its content, not its path (10.1). Hashing reads
             // it, so the read roots (13.6) are checked first, cached result or not.
             if (pathLiteral && spec.widget() == QLatin1String("file") && m_options.roots) {
-                if (Errors refused = m_options.roots->checkRead(value.text(), spec.name); !refused.isEmpty()) {
-                    resolved.problem = refused.first();
+                const Result<QString> readable = m_options.roots->checkRead(value.text(), spec.name);
+                if (!readable) {
+                    resolved.problem = readable.error();
                     return resolved;
                 }
+                // The node reads, and the key names, the path that was checked.
+                value = Value(readable.value());
+                n.inputs.insert(spec.name, value);
             }
             if (pathLiteral && spec.widget() == QLatin1String("file")) {
                 const QString hash = m_env.hashes->hash(value.text());
