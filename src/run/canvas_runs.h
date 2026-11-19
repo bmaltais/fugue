@@ -179,13 +179,15 @@ private:
     QHash<QString, qreal> m_pendingProgress; // canvas node id -> progress, of the shown tab
     QStringList m_running; // runningNodes() as last announced
     QHash<QString, QVariantMap> m_shown;     // what each node of the shown tab was last given
+    // The latest check asked (m_ticket), the only one the run thread answers and the only
+    // one applied: a newer one replaces it, taking over its edit.
     int m_ticket = 0;
     struct Ticket {
         QString tab;
         int epoch = 0;
         bool edit = false; // asked after an edit: the last run's errors go
     };
-    QHash<int, Ticket> m_ticketTab;
+    Ticket m_asked;
     bool m_checkFromEdit = false;
 };
 

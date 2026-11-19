@@ -519,6 +519,28 @@ private slots:
         QVERIFY(r.app.warnings.isEmpty());
     }
 
+    // An edit's check that a newer check replaces before it is answered (only the latest is
+    // answered) still counts as the edit's: the last run's error goes.
+    void anEditsCheckReplacedByANewerOneStillClearsTheLastRunsErrors() {
+        RunApp r(kGraph);
+        QVERIFY(r.app.open());
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(r.jobs().size(), 1);
+        r.onFake([&](FakeProvider &f) { f.fail(f.jobs().at(0), fugue::makeError("node_failed", "The model fell over.")); });
+        QTRY_COMPARE(r.jobs().size(), 2);
+        r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(1), {{"image.png", png(64, 64)}}); });
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(r.state("gen"), QStringLiteral("error"));
+
+        QSignalSpy checked(r.runs.get(), &CanvasRuns::checkApplied);
+        QVERIFY(r.app.model.widgets()->setText("words", "text", "a dog").isEmpty());
+        r.runs->checkNow(); // the edit's
+        r.runs->checkNow(); // replaces it before the run thread answers it
+        QTRY_VERIFY(checked.size() >= 1);
+        QCOMPARE(r.state("gen"), QStringLiteral("stale"));
+    }
+
     // 10.3 between runs: what is in the cache is cached, what would run is stale; an edit
     // upstream makes its downstream stale again.
     void nodesShowTheirCacheStateBetweenRuns() {

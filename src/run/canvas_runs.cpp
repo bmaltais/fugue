@@ -6,6 +6,7 @@
 #include <QSizeF>
 
 #include <cmath>
+#include <utility>
 
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
@@ -461,7 +462,9 @@ void CanvasRuns::checkNow() {
     if (tab.isEmpty())
         return;
     const int ticket = ++m_ticket;
-    m_ticketTab.insert(ticket, {tab, m_tabs[tab].epoch, m_checkFromEdit});
+    // The check this replaces is never answered: an edit it was asked for counts here.
+    const bool edit = m_checkFromEdit || (m_asked.tab == tab && m_asked.edit);
+    m_asked = {tab, m_tabs[tab].epoch, edit};
     m_checkFromEdit = false;
     RunRequest request;
     request.document = m_canvas->document();
@@ -470,9 +473,9 @@ void CanvasRuns::checkNow() {
 }
 
 void CanvasRuns::onChecked(int ticket, const QJsonObject &nodes, const QJsonArray &problems) {
-    const Ticket asked = m_ticketTab.take(ticket);
-    if (ticket != m_ticket || asked.tab.isEmpty())
+    if (ticket != m_ticket || m_asked.tab.isEmpty())
         return;
+    const Ticket asked = std::exchange(m_asked, {});
     TabRuns &runs = m_tabs[asked.tab];
     // A run since the check was asked knows better.
     if (runs.busy > 0 || runs.epoch != asked.epoch)
