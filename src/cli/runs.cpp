@@ -158,9 +158,17 @@ Reply startRun(const Command &command, Context &context) {
     if (!folder)
         return Reply::failure(folder.errors());
     const QString workflow = QFileInfo(file).absoluteFilePath();
-    folder->writeCompiled(compilation->toJson());
+    // The worker reads both back. Without workflow.json the run would save its images
+    // without their workflow (11.7), so a failed write ends the run before it starts.
+    Errors written;
+    if (!folder->writeCompiled(compilation->toJson()))
+        written.append(makeError("permission_denied", "The compiled graph could not be written to " + folder->path() + "."));
     if (!plan.document.isEmpty())
-        folder->writeWorkflow(plan.document);
+        written += folder->writeWorkflow(plan.document);
+    if (hasErrors(written)) {
+        folder->finish(RunStatus::Failed, written, utcNow());
+        return Reply::failure(written);
+    }
     folder->queued(workflow);
 
     const Queue queue(context.queueDir);

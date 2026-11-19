@@ -153,8 +153,8 @@ QJsonObject RunFolder::compiled() const {
     return readObject(compiledJsonPath());
 }
 
-bool RunFolder::writeWorkflow(const QJsonObject &document) const {
-    return writeJsonFile(m_path + QStringLiteral("/workflow.json"), document).isEmpty();
+Errors RunFolder::writeWorkflow(const QJsonObject &document) const {
+    return writeJsonFile(m_path + QStringLiteral("/workflow.json"), document);
 }
 
 QJsonObject RunFolder::workflow() const {

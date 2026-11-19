@@ -98,6 +98,25 @@ private slots:
         QCOMPARE(run->state().value("status").toString(), QStringLiteral("ok"));
     }
 
+    // The workflow a Save Image embeds comes from workflow.json: a write that fails says so,
+    // so a run never saves images without their workflow unnoticed.
+    void theWorkflowIsReadBackAndAFailedWriteSaysWhy() {
+        QTemporaryDir root;
+        Result<RunFolder> run = RunFolder::create(root.path());
+        QVERIFY(run.ok());
+        const QJsonObject document{{"fugue", 1}, {"graph", QJsonObject{{"nodes", QJsonObject{}}}}};
+        QVERIFY(run->writeWorkflow(document).isEmpty());
+        QCOMPARE(run->workflow(), document);
+
+        QFile::remove(run->path() + "/workflow.json");
+        QVERIFY(QFile::setPermissions(run->path(), QFile::ReadOwner | QFile::ExeOwner));
+        const Errors failed = run->writeWorkflow(document);
+        QVERIFY(QFile::setPermissions(run->path(), QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+        QVERIFY(hasErrors(failed));
+        QCOMPARE(failed.first().code, QStringLiteral("permission_denied"));
+        QVERIFY(failed.first().message.contains("workflow.json"));
+    }
+
     void eventsAreOneCompactLineEachWithRunAndTime() {
         QTemporaryDir root;
         Result<RunFolder> run = RunFolder::create(root.path());

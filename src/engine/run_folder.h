@@ -61,8 +61,9 @@ public:
     QJsonObject compiled() const;
     // The workflow document the run started from (Document::toJson()), kept so the worker
     // can hand it to kernels that embed it (RunOptions::document); the file's later edits
-    // do not reach it. Empty when the run did not start from a document.
-    bool writeWorkflow(const QJsonObject &document) const;
+    // do not reach it. Empty when the run did not start from a document. Errors: one
+    // permission_denied naming the file (writeJsonFile).
+    Errors writeWorkflow(const QJsonObject &document) const;
     QJsonObject workflow() const;
 
     // What whoever queues the run writes (9.8): run.json with the status `queued`, and
