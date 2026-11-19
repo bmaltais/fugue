@@ -13,6 +13,8 @@ Popup {
     signal picked(var value)
 
     readonly property real rowHeight: Math.round(look.textSize * 2)
+    // An entry with a `thumbnail` (a file URL) shows it small at the left, in a taller row.
+    readonly property real thumbHeight: Math.round(look.textSize * 3.2)
     modal: true
     dim: false
     focus: true
@@ -46,7 +48,8 @@ Popup {
             required property int index
             readonly property bool usable: modelData.enabled !== false
             width: ListView.view.width
-            height: menu.rowHeight
+            readonly property bool hasThumbnail: modelData.thumbnail !== undefined
+            height: hasThumbnail ? menu.thumbHeight : menu.rowHeight
             radius: Math.max(0, menu.look.popupCorner - 2)
             color: ListView.isCurrentItem && usable ? menu.look.selectedRow : "transparent"
             Glyph {
@@ -59,8 +62,21 @@ Popup {
                 color: menu.look.accent
                 font.pixelSize: 12
             }
+            // Decoded small and only as the row scrolls into view.
+            Image {
+                visible: entry.hasThumbnail
+                x: 8
+                y: 3
+                width: parent.height - 6
+                height: width
+                source: entry.hasThumbnail ? entry.modelData.thumbnail : ""
+                sourceSize: Qt.size(96, 96)
+                asynchronous: true
+                cache: false
+                fillMode: Image.PreserveAspectCrop
+            }
             Text {
-                x: 8 + 12 + 6
+                x: entry.hasThumbnail ? parent.height + 4 : 8 + 12 + 6
                 width: parent.width - x - 8 - detail.width
                 height: parent.height
                 verticalAlignment: Text.AlignVCenter

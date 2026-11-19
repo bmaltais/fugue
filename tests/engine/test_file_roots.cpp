@@ -8,6 +8,7 @@
 #include <QtTest>
 
 #include "engine/file_roots.h"
+#include "engine/paths.h"
 
 using namespace fugue;
 
@@ -88,10 +89,13 @@ private slots:
 
     void theDefaultsAreThoseOf13_6() {
         const FileRoots roots = FileRoots::defaults(path("cwd"));
-        QCOMPARE(roots.read, QStringList{QDir::homePath()});
+        QVERIFY(roots.read.contains(QDir::homePath()));
+        QVERIFY(roots.read.contains(inputsDir())); // the inputs folder, wherever the pictures folder is
         QVERIFY(roots.write.contains(path("cwd")));
         QVERIFY(roots.write.contains(QDir::homePath() + "/Documents/Fugue"));
-        QCOMPARE(roots.write.size(), 3); // and the output folder
+        QCOMPARE(roots.write.size(), 3); // and the output folder, which holds the inputs folder
+        QVERIFY(roots.allowsWrite(inputsDir() + "/x.png"));
+        QVERIFY(FileRoots::defaults(path("cwd"), "/mnt/flows/a.fugue").allowsRead("/mnt/flows/inputs/x.png"));
     }
 
     void theyRoundTripThroughJson() {

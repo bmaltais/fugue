@@ -47,7 +47,11 @@ Rectangle {
     readonly property bool tall: kind === "multiline" && !linked
     readonly property int glyphZone: Math.round(look.textSize * 1.5)
     // The room a toggle's switch or a color's swatch takes at the right end.
-    readonly property int decorWidth: !editable ? 0 : kind === "toggle" ? 26 : kind === "color" ? glyphZone : 0
+    // A Load Image's file has a Paste button beside its picker (workflow/image_inputs.h).
+    readonly property bool pasteable: editable && kind === "file" && edits.canPasteImage(nodeId, name)
+    readonly property int pasteWidth: Math.round(look.textSize * 3.6)
+    readonly property int decorWidth: !editable ? 0 : kind === "toggle" ? 26 : kind === "color" ? glyphZone
+                                      : pasteable ? pasteWidth + pad : 0
     // A toggle's state, the default when unset.
     readonly property bool on: kind === "toggle"
         && (literal !== undefined ? literal === true : edits.spec(nodeId, name)["default"] === true)
@@ -128,6 +132,36 @@ Rectangle {
         font.pixelSize: 12
     }
 
+    // Made only for a Load Image's file input.
+    Loader {
+        id: pasteLoader
+        active: root.pasteable
+        z: 2
+        sourceComponent: Rectangle {
+            objectName: "pasteImageButton"
+            visible: !root.editingText
+            x: root.width - root.pad - width
+            y: 2
+            width: root.pasteWidth
+            height: root.height - 4
+            radius: root.smallCorner
+            color: pasteArea.containsMouse ? root.look.selectedRow : "transparent"
+            border.color: root.look.hairline
+            Text {
+                anchors.centerIn: parent
+                text: qsTr("Paste")
+                color: root.look.label
+                font.pixelSize: root.look.labelSize
+            }
+            MouseArea {
+                id: pasteArea
+                anchors.fill: parent
+                hoverEnabled: true
+                onClicked: root.edits.pasteImage(root.nodeId)
+            }
+        }
+    }
+
     // Made once, only for the widgets that have one.
     function make(file, properties) {
         return Qt.createComponent(file).createObject(root, Object.assign({ host: root }, properties || {}))
@@ -202,7 +236,8 @@ Rectangle {
     }
 
     function clicked(x) {
-        const atEnd = x > width - glyphZone
+        const buttons = pasteable ? pasteWidth + pad : 0
+        const atEnd = x > width - glyphZone - buttons && x <= width - buttons
         switch (kind) {
         case "spin":
             if (x < glyphZone)
@@ -222,6 +257,8 @@ Rectangle {
         case "file":
         case "folder":
         case "color":
+            if (atEnd && pasteable)
+                return openMenu(inputEntries())
             return atEnd ? openDialog() : openEditor()
         default:
             return openEditor()
@@ -305,7 +342,19 @@ Rectangle {
         entries.push({ text: qsTr("Type a name…"), value: { typeName: true } })
         return entries
     }
+    // A Load Image's picker: the file browser, then the images last pasted or dropped.
+    function inputEntries() {
+        const entries = [{ text: qsTr("Browse files…"), value: { browse: true } }]
+        for (const input of edits.recentInputs())
+            entries.push({ text: input.name, thumbnail: "file://" + encodeURI(input.path), value: { recent: input.path } })
+        return entries
+    }
     function picked(value) {
+        if (kind === "file") {
+            if (value.browse)
+                return openDialog()
+            return edits.useInput(nodeId, value.recent)
+        }
         switch (kind) {
         case "choice":
             return edits.setValue(nodeId, name, value)

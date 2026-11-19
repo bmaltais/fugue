@@ -84,6 +84,14 @@ public:
     Q_INVOKABLE QString setPath(const QString &node, const QString &input, const QVariant &url);
     // A color from the color picker, stored as #rrggbb, or #rrggbbaa when not opaque.
     Q_INVOKABLE QString setColor(const QString &node, const QString &input, const QColor &color);
+    // The Paste button of a Load Image's file input (workflow/image_inputs.h): whether the input
+    // has one, and replacing its image with the clipboard's, as one undo step.
+    Q_INVOKABLE bool canPasteImage(const QString &node, const QString &input) const;
+    Q_INVOKABLE bool pasteImage(const QString &node);
+    // The images in the inputs folder, newest first: {path, name, modified}. At most 48.
+    Q_INVOKABLE QVariantList recentInputs() const;
+    // Points the node's file at one of them, one undo step.
+    Q_INVOKABLE bool useInput(const QString &node, const QString &path);
     // Takes the stored value out, so the default applies (or, for an optional input, nothing).
     Q_INVOKABLE void unset(const QString &node, const QString &input);
 

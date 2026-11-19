@@ -167,7 +167,7 @@ Reply startRun(const Command &command, Context &context) {
     if (!plan.document.isEmpty())
         written += folder->writeWorkflow(plan.document);
     // The worker is not started here, so "the current directory" of 13.6 is recorded now.
-    written += folder->writeRoots(FileRoots::defaults(QDir::currentPath()));
+    written += folder->writeRoots(FileRoots::defaults(QDir::currentPath(), workflow));
     if (hasErrors(written)) {
         folder->finish(RunStatus::Failed, written, utcNow());
         return Reply::failure(written);
