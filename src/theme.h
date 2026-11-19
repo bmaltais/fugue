@@ -108,5 +108,6 @@ private:
     QTimer m_roundingTimeout;
     QLocalSocket m_events;
     QTimer m_reconnect;
+    QFileSystemWatcher m_eventsFolder;
     CanvasLook *m_look;
 };

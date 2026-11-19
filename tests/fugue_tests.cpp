@@ -267,9 +267,11 @@ private slots:
         QTRY_COMPARE(theme.radius(), 4);
 
         QVERIFY(write(hypr.filePath("response.json"), "{\"int\":8}"));
+        // The socket appearing in its folder brings the connection, not the next retry (1 s,
+        // 2 s, 4 s and on), which a busy machine could push past any wait here.
         QLocalServer events;
         QVERIFY(events.listen(hypr.filePath("events.sock")));
-        QTRY_VERIFY_WITH_TIMEOUT(events.hasPendingConnections(), 5000);
+        QTRY_VERIFY(events.hasPendingConnections());
         QTRY_COMPARE(theme.radius(), 8);
     }
 

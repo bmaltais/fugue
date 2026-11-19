@@ -100,14 +100,27 @@ Theme::Theme(const QString &directory, QObject *parent, const QString &hyprctl, 
         m_events.abort();
         m_events.connectToServer(events, QIODevice::ReadOnly);
     });
-    if (!events.isEmpty())
+    // Hyprland starting again makes its socket anew in the same folder: connect then, not at
+    // the next retry, which may be a minute away.
+    connect(&m_eventsFolder, &QFileSystemWatcher::directoryChanged, this, [this, events] {
+        if (m_events.state() != QLocalSocket::UnconnectedState || !QFileInfo::exists(events))
+            return;
+        m_reconnect.stop();
+        m_events.abort();
         m_events.connectToServer(events, QIODevice::ReadOnly);
+    });
+    if (!events.isEmpty()) {
+        if (QFileInfo(events).dir().exists())
+            m_eventsFolder.addPath(QFileInfo(events).absolutePath());
+        m_events.connectToServer(events, QIODevice::ReadOnly);
+    }
     refreshRounding();
     reload();
 }
 
 Theme::~Theme() {
     // Nothing reconnects or asks again while the members go.
+    m_eventsFolder.disconnect();
     m_events.disconnect();
     m_roundingProcess.disconnect();
     if (m_roundingProcess.state() != QProcess::NotRunning) {
