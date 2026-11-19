@@ -72,7 +72,8 @@ public:
     // The serialized form of 2.4. fromJson needs an absolute path and a
     // sha256 hash, and fails with invalid_document otherwise. toJson writes
     // only the fields that belong to the type, and edits only when there are
-    // some.
+    // some. An image held only in memory has no path or hash yet, so call
+    // saved() before serializing a node's output.
     static Result<MediaHandle> fromJson(const QJsonObject &object);
     QJsonObject toJson() const;
 
