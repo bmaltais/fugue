@@ -152,6 +152,7 @@ private:
     const Registry *m_registry;
     struct NodeInfo {
         bool showsResult = false; // Preview, Save Image: a placeholder until a result comes
+        bool savesFile = false;   // Save Image: its chip names the file it wrote
         QString imageFile;        // the image file its file input names
     };
     QHash<QString, NodeInfo> m_nodeInfo; // of the shown workflow

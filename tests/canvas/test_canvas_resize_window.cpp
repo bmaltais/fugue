@@ -27,6 +27,17 @@ const char *sheet = R"({
              "view": {"center": [500, 300], "zoom": 1}}
 })";
 
+const char *sinks = R"({
+  "fugue": 1,
+  "graph": {"nodes": {
+    "gen": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {}},
+    "show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "gen.image"}}},
+    "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "gen.image"}}}
+  }},
+  "layout": {"nodes": {"gen": {"pos": [0, 0]}, "show": {"pos": [300, 0]}, "save": {"pos": [300, 300]}},
+             "view": {"center": [300, 200], "zoom": 1}}
+})";
+
 QQuickItem *nodeItem(App &app, const QString &id) { return item(app.window->contentItem(), "node-" + id); }
 
 // The node's bottom right corner, a little inside, in window coordinates.
@@ -118,6 +129,46 @@ private slots:
 
     // A fixture image stands in for a result: its aspect gives the preview's height, and the
     // thumbnail item sits where the model says. A wider node makes a taller preview.
+    void theInfoChipNeverPassesTheNodeAndOnlySaveImageNamesAFile() {
+        QTemporaryDir dir;
+        const QString file = dir.filePath("fixture.png");
+        QImage image(800, 1024, QImage::Format_RGB32);
+        image.fill(Qt::darkCyan);
+        QVERIFY(image.save(file));
+        const QString hash = "b512d2e337f6a4507fe7c4c6a08ba8d0c36cd2a7a494aa523331dcb026e0ee78.png";
+        App app(load(sinks));
+        QVERIFY(app.open());
+        for (const char *id : {"show", "save"}) {
+            // What CanvasRuns sends: a Preview has no file; a Save Image has the name it wrote.
+            const bool saves = QLatin1String(id) == "save";
+            app.model.setRunState(id, {{"state", "cached"}, {"thumbnail", QUrl::fromLocalFile(file).toString()},
+                                       {"thumbnailAspect", 1024.0 / 800}, {"thumbnailInfo", "800 \u00d7 1024"},
+                                       {"thumbnailFile", saves ? hash : QString()}});
+        }
+        for (const char *id : {"show", "save"}) {
+            QQuickItem *node = nodeItem(app, id);
+            QTRY_VERIFY(item(node, "infoChip") && item(node, "infoChip")->isVisible());
+            QQuickItem *chip = item(node, "infoChip");
+            QQuickItem *thumb = item(node, "thumbnail");
+            QVERIFY(chip->width() > 0);
+            QVERIFY2(chip->width() <= thumb->width(), id);
+            QVERIFY(chip->x() >= 0 && chip->x() + chip->width() <= thumb->width());
+            QQuickItem *size = item(chip, "infoSize");
+            QVERIFY(size->property("text").toString().endsWith("800 \u00d7 1024"));
+            QVERIFY(size->x() >= 0 && size->x() + size->width() <= chip->width()); // the size stays whole
+            QQuickItem *name = item(chip, "infoFile");
+            if (QLatin1String(id) == "show") {
+                QVERIFY(name->property("text").toString().isEmpty());
+                QVERIFY(!size->property("text").toString().contains("b512"));
+            } else {
+                QCOMPARE(name->property("text").toString(), hash); // the full name, for the tooltip
+                QVERIFY(name->width() < name->property("implicitWidth").toReal());  // elided
+                QVERIFY(name->x() + name->width() <= size->x());
+            }
+        }
+        QVERIFY(app.warnings.isEmpty());
+    }
+
     void anImageDrivesAutoSize() {
         QTemporaryDir dir;
         const QString file = dir.filePath("fixture.png");
