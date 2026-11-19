@@ -348,6 +348,10 @@ private:
         m_active.reset(new Run(waiting.graph, waiting.folder, m_process->environment, waiting.options));
         connect(m_active.get(), &Run::emitted, this, [this, id](const QJsonObject &e) { emit event(id, withThumbnails(e)); });
         connect(m_active.get(), &Run::finished, this, [this, id] {
+            // shutdown() deletes the run, which cancels it and finishes on the way: shutdown
+            // clears up after it, and m_active is already empty.
+            if (m_quitting)
+                return;
             queue().remove(id);
             m_active.release()->deleteLater();
             m_activeId.clear();

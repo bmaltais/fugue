@@ -465,6 +465,15 @@ private slots:
         r.reset();
     }
 
+    // Closing the window while a node runs cancels the run, which reports its end as it goes.
+    void closingDuringARunIsClean() {
+        auto r = std::make_unique<RunApp>(kGraph, true);
+        QVERIFY(r->app.open());
+        r->app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(r->state("gen"), QStringLiteral("running"));
+        r.reset();
+    }
+
     // Escape cancels a run only when nothing else wants it: open node search takes it first.
     void escapeClosesSearchBeforeItCancelsTheRun() {
         RunApp r(kGraph);
