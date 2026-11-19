@@ -10,6 +10,7 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QRandomGenerator>
 #include <QSaveFile>
 #include <QSet>
 
@@ -664,6 +665,38 @@ QJsonObject groupsJson(const QMap<QString, GroupDefinition> &groups) {
     return o;
 }
 
+// --- Unicode ------------------------------------------------------------------
+
+bool validUnicode(const QString &text) {
+    return canonicalJson(QJsonValue(text)).has_value();
+}
+
+// Every place in `v` that holds a lone surrogate, as a dotted path.
+void findLoneSurrogates(const QJsonValue &v, const QString &path, Errors &errors) {
+    const auto report = [&](const QString &where) {
+        Error error;
+        error.code = invalidDocument;
+        error.message = QStringLiteral("The text at %1 is not valid Unicode (a lone UTF-16 surrogate).").arg(where);
+        errors << error;
+    };
+    if (v.isString() && !validUnicode(v.toString())) {
+        report(path);
+    } else if (v.isArray()) {
+        const QJsonArray array = v.toArray();
+        for (qsizetype i = 0; i < array.size(); ++i)
+            findLoneSurrogates(array.at(i), QStringLiteral("%1[%2]").arg(path).arg(i), errors);
+    } else if (v.isObject()) {
+        const QJsonObject o = v.toObject();
+        for (auto it = o.begin(); it != o.end(); ++it) {
+            if (!validUnicode(it.key())) {
+                report(QStringLiteral("a key in ") + (path.isEmpty() ? QStringLiteral("the top level") : path));
+                continue;
+            }
+            findLoneSurrogates(it.value(), path.isEmpty() ? it.key() : path + u'.' + it.key(), errors);
+        }
+    }
+}
+
 // --- requirements -------------------------------------------------------------
 
 // Every handle with a hash anywhere inside `v` (derived handles nest them).
@@ -773,6 +806,19 @@ QList<InputValue> InputValue::items() const {
     return list;
 }
 
+QString newNodeId(const Nodes &taken) {
+    static const char letters[] = "abcdefghijklmnopqrstuvwxyz";
+    static const char alphabet[] = "abcdefghijklmnopqrstuvwxyz0123456789";
+    QRandomGenerator *random = QRandomGenerator::global();
+    while (true) {
+        QString id(1, QLatin1Char(letters[random->bounded(26)]));
+        for (int i = 1; i < 6; ++i)
+            id += QLatin1Char(alphabet[random->bounded(36)]);
+        if (!taken.contains(id))
+            return id;
+    }
+}
+
 // --- Document -----------------------------------------------------------------
 
 const GroupDefinition *Document::group(const QString &id) const {
@@ -802,11 +848,17 @@ std::optional<Document> Document::load(const QByteArray &bytes, Errors &errors) 
         c.fail(QStringLiteral("A workflow must be a JSON object."));
         return std::nullopt;
     }
-    if (!canonicalJson(json.object())) {
-        c.fail(QStringLiteral("The workflow holds text that is not valid Unicode (a lone UTF-16 surrogate)."));
-        return std::nullopt;
-    }
-    return fromJson(json.object(), errors);
+    const qsizetype before = errors.size();
+    std::optional<Document> document = fromJson(json.object(), errors);
+    for (qsizetype i = before; i < errors.size(); ++i)
+        if (errors.at(i).code == QLatin1String("unsupported_format_version"))
+            return std::nullopt;
+    Errors unicode;
+    findLoneSurrogates(json.object(), {}, unicode);
+    if (unicode.isEmpty())
+        return document;
+    errors << unicode;
+    return std::nullopt;
 }
 
 std::optional<Document> Document::fromJson(const QJsonObject &json, Errors &errors) {

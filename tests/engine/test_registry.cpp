@@ -217,6 +217,11 @@ private slots:
         Errors errors;
         QVERIFY(!NodeType::fromJson(manifest, errors));
         QCOMPARE(codes(errors), QStringList{"unsupported_format_version"});
+
+        manifest["manifest"] = 1.5;
+        errors.clear();
+        QVERIFY(!NodeType::fromJson(manifest, errors));
+        QCOMPARE(codes(errors), QStringList{"invalid_document"});
     }
 
     void literalNumbers() {

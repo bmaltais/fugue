@@ -398,7 +398,7 @@ std::optional<NodeType> NodeType::fromJson(const QJsonObject &manifest, Errors &
     Reader r(id.isString() && !id.toString().isEmpty() ? id.toString() : QStringLiteral("manifest"), errors);
 
     const QJsonValue format = manifest.value("manifest");
-    if (format.isDouble() && format.toDouble() > 1) {
+    if (format.isDouble() && format.toDouble() > 1 && format.toDouble() == std::trunc(format.toDouble())) {
         r.add(QStringLiteral("unsupported_format_version"), Error::Severity::Error,
               QStringLiteral("manifest format %1 is newer than this Fugue supports (1).").arg(shown(format)));
         return std::nullopt;

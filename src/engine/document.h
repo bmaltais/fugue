@@ -103,6 +103,10 @@ struct Node {
 
 using Nodes = QMap<QString, Node>; // by node id
 
+// A fresh node id (4.2): six random characters, a letter then letters and
+// digits, that is not a key of `taken`.
+QString newNodeId(const Nodes &taken);
+
 struct Graph {
     Nodes nodes;
     QString provider; // the workflow-wide provider pin, or empty
@@ -169,7 +173,8 @@ struct Document {
     // inner id and the message starts "Group <id>"; an error about an exposed
     // input or output of a group sets `input` or `output` to its name. When
     // there is any error, nothing is returned. A UTF-8 byte order mark is
-    // accepted.
+    // accepted. Text that is not valid Unicode (a lone UTF-16 surrogate)
+    // is an error naming its path, such as graph.nodes.a.inputs.text.
     static std::optional<Document> load(const QByteArray &bytes, Errors &errors);
     static std::optional<Document> fromJson(const QJsonObject &json, Errors &errors);
     // Adds `file_not_found` or `permission_denied` to the above.

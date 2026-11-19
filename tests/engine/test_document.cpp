@@ -13,6 +13,7 @@
 #include "engine/canonical.h"
 #include "engine/document.h"
 #include "engine/hash.h"
+#include "engine/ids.h"
 #include "engine/json.h"
 
 using namespace fugue;
@@ -303,12 +304,27 @@ private slots:
     }
 
     void textMustBeValidUnicode() {
+        // A lone surrogate is reported where it is, beside the other errors.
         Errors errors;
         QVERIFY(!Document::load("{\"fugue\": 1, \"graph\": {\"nodes\": {\"a\": {\"type\": \"fugue/text\", "
-                                "\"version\": \"1.0.0\", \"inputs\": {\"text\": \"\\ud800\"}}}}}",
+                                "\"version\": \"1.0.0\", \"inputs\": {\"text\": \"\\ud800\"}}, "
+                                "\"b\": {\"type\": \"fugue/text\"}}}}",
                                 errors));
-        QCOMPARE(codes(errors), QStringList{"invalid_document"});
-        QVERIFY2(errors.first().message.contains("Unicode"), qPrintable(errors.first().message));
+        QCOMPARE(codes(errors), (QStringList{"invalid_document", "invalid_document"}));
+        QVERIFY2(find(errors, "", "", "graph.nodes.a.inputs.text"), qPrintable(dump(errors)));
+        QVERIFY2(find(errors, "", "", "Unicode"), qPrintable(dump(errors)));
+        QVERIFY2(find(errors, "b", "", "version"), qPrintable(dump(errors)));
+    }
+
+    void newNodeIdsAreSixFreeCharacters() {
+        Nodes taken;
+        for (int i = 0; i < 2000; ++i) {
+            const QString id = newNodeId(taken);
+            QCOMPARE(id.size(), 6);
+            QVERIFY2(isNodeId(id), qPrintable(id));
+            QVERIFY2(!taken.contains(id), qPrintable(id));
+            taken.insert(id, Node{});
+        }
     }
 
     void files() {
