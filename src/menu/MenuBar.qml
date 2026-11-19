@@ -27,8 +27,29 @@ Rectangle {
     // The open top menu's index, or -1.
     property int current: -1
     readonly property bool narrow: titles.implicitWidth + 8 * u > width
-    readonly property alias dropdown: dropdown
-    readonly property alias hamburgerMenu: everything
+    // The open top menu and the menu button's menu, made the first time one opens so the
+    // window opens without them.
+    property var dropdown: null
+    property var everything: null
+    readonly property bool dropdownShown: dropdown !== null && dropdown.shown
+    readonly property bool anyShown: dropdownShown || (everything !== null && everything.shown)
+    // From the file at run time, so opening the window does not compile Menu's QML.
+    function makeMenus() {
+        if (dropdown)
+            return
+        const component = Qt.createComponent("CommandMenu.qml")
+        // A press on its own title (its parent) is the title's: it closes it.
+        const policy = Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+        dropdown = component.createObject(bar, {objectName: "menuDropdown", closePolicy: policy})
+        dropdown.stepRequested.connect(delta => bar.openMenu(bar.current + delta, true))
+        everything = component.createObject(bar, {objectName: "menuEverything", closePolicy: policy})
+    }
+    function closeMenus() {
+        if (dropdown)
+            dropdown.close()
+        if (everything)
+            everything.close()
+    }
 
     implicitHeight: 7 * u
     color: look.well
@@ -52,7 +73,9 @@ Rectangle {
     function openMenu(index, byKey) {
         const count = bar.tree.length
         index = (index + count) % count
-        everything.close()
+        bar.makeMenus()
+        const dropdown = bar.dropdown
+        bar.everything.close()
         if (dropdown.shown && bar.current === index) {
             if (!byKey)
                 dropdown.close() // a second press on the open title closes it
@@ -80,7 +103,9 @@ Rectangle {
         dropdown.popup(anchor, 0, anchor.height)
     }
     function openEverything(byKey) {
-        dropdown.close()
+        bar.makeMenus()
+        const everything = bar.everything
+        bar.dropdown.close()
         bar.current = -1
         everything.items = commands.menu("bar")
         everything.byKey = byKey
@@ -92,9 +117,8 @@ Rectangle {
         function onWindowRequested(id) {
             if (id !== "app.menu-bar")
                 return
-            if (dropdown.shown || everything.shown) {
-                dropdown.close()
-                everything.close()
+            if (bar.anyShown) {
+                bar.closeMenus()
             } else if (bar.narrow) {
                 bar.openEverything(true)
             } else {
@@ -132,7 +156,7 @@ Rectangle {
                 required property var modelData
                 required property int index
                 objectName: "menuTitle-" + index
-                readonly property bool open: dropdown.shown && bar.current === index
+                readonly property bool open: bar.dropdownShown && bar.current === index
                 // No `&` here: the bar binds the Alt keys itself, for the narrow form too.
                 text: modelData.title.replace("&", "")
                 focusPolicy: Qt.NoFocus
@@ -141,7 +165,7 @@ Rectangle {
                 leftPadding: 2.5 * bar.u
                 rightPadding: 2.5 * bar.u
                 onPressed: bar.openMenu(index, false)
-                onHoveredChanged: if (hovered && dropdown.shown && bar.current !== index) bar.openMenu(index, false)
+                onHoveredChanged: if (hovered && bar.dropdownShown && bar.current !== index) bar.openMenu(index, false)
                 Accessible.role: Accessible.MenuItem
                 background: Rectangle {
                     color: titleButton.open ? bar.look.body
@@ -167,11 +191,11 @@ Rectangle {
         height: parent.height - 1
         focusPolicy: Qt.NoFocus
         hoverEnabled: true
-        onPressed: everything.shown || dropdown.shown ? (everything.close(), dropdown.close()) : bar.openEverything(false)
+        onPressed: bar.anyShown ? bar.closeMenus() : bar.openEverything(false)
         Accessible.name: qsTr("Menu")
         Accessible.role: Accessible.ButtonMenu
         background: Rectangle {
-            color: everything.shown || dropdown.shown ? bar.look.body
+            color: bar.anyShown ? bar.look.body
                  : hamburger.hovered ? Qt.tint(bar.look.well, Qt.alpha(bar.look.text, 0.05)) : "transparent"
         }
         contentItem: Item {
@@ -188,18 +212,5 @@ Rectangle {
                 }
             }
         }
-    }
-
-    CommandMenu {
-        id: dropdown
-        objectName: "menuDropdown"
-        onStepRequested: delta => bar.openMenu(bar.current + delta, true)
-        // A press on its own title (its parent) is the title's: it closes it.
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
-    }
-    CommandMenu {
-        id: everything
-        objectName: "menuEverything"
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
     }
 }

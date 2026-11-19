@@ -16,7 +16,8 @@ Item {
 
     required property var canvas // FugueCanvas
     property string kind: ""     // canvas, node or frame, the last one opened
-    readonly property alias menu: menu
+    // Made from the file the first time it opens, so opening the window does not compile Menu's QML.
+    property var menu: null
 
     // The topmost Frame under a world point, or "".
     function frameAt(x, y) {
@@ -31,6 +32,9 @@ Item {
 
     // Opens the menu for what is at the canvas point (px, py).
     function openAt(px, py, byKey) {
+        if (!root.menu)
+            root.menu = Qt.createComponent("CommandMenu.qml").createObject(root, {objectName: "contextMenuPopup"})
+        const menu = root.menu
         const w = canvas.toWorld(px, py)
         const node = canvasModel.nodeAt(w.x, w.y)
         const target = {x: w.x, y: w.y}
@@ -70,10 +74,5 @@ Item {
             }
             root.openAt(p.x, p.y, true)
         }
-    }
-
-    CommandMenu {
-        id: menu
-        objectName: "contextMenuPopup"
     }
 }
