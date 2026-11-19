@@ -378,15 +378,18 @@ private slots:
         QCOMPARE(window->property("font").value<QFont>().pixelSize(), 16);
         QCOMPARE(QGuiApplication::layoutDirection(), rtl ? Qt::RightToLeft : Qt::LeftToRight);
 
-        // Mirrored: the help popup's key column moves to the right edge.
+        // Mirrored: the help popup's first column (Run, its keys at its far side) moves to the
+        // right half. Its rows are laid out once the popup is, so wait for that.
         QTest::keyClick(window, '?');
         auto *help = window->findChild<QObject *>("help");
         QTRY_VERIFY(help->property("opened").toBool());
-        auto *keys = item(help->property("contentItem").value<QQuickItem *>(), "helpKeys");
-        QVERIFY(keys);
-        const QPointF at = keys->mapToItem(help->property("contentItem").value<QQuickItem *>(), QPointF(0, 0));
-        const qreal middle = help->property("contentItem").value<QQuickItem *>()->width() / 2;
-        QVERIFY(rtl ? at.x() > middle : at.x() < middle);
+        auto *content = help->property("contentItem").value<QQuickItem *>();
+        QTRY_VERIFY(item(content, "helpKeys"));
+        auto *keys = item(content, "helpKeys");
+        const qreal middle = content->width() / 2;
+        QTRY_VERIFY(keys->mapToItem(content, QPointF(0, 0)).x() > 0);
+        const QPointF at = keys->mapToItem(content, QPointF(0, 0));
+        QVERIFY2(rtl ? at.x() > middle : at.x() < middle, qPrintable(QStringLiteral("%1 %2").arg(at.x()).arg(middle)));
         QTest::qWait(300);
         const QImage popup = window->grabWindow();
         QVERIFY(!popup.isNull());

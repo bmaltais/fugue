@@ -43,6 +43,9 @@ class CommandRegistry : public QObject {
     Q_PROPERTY(bool workflowOpen READ workflowOpen WRITE setWorkflowOpen NOTIFY changed)
     // What was wrong with the keymap file and the keymap it holds, one line each.
     Q_PROPERTY(QStringList problems READ problems NOTIFY changed)
+    // Where the keymap file is (the last one loaded, else the default), with the home folder
+    // as ~, for the `?` overlay's footer.
+    Q_PROPERTY(QString keymapFile READ keymapFile NOTIFY changed)
 
 public:
     using Handler = std::function<void()>;
@@ -94,6 +97,7 @@ public:
     void loadKeymap(const QString &path);
     // ~/.config/fugue/keybindings.json
     static QString keymapPath();
+    QString keymapFile() const;
 
     // Every command, ordered by id, as maps for QML: id, description (translated), keys,
     // gestures, context, versus, deviates, available.
@@ -142,6 +146,7 @@ private:
     QSet<QString> m_activeContexts;
     QList<Edit> m_adds, m_unsets;
     QStringList m_fileProblems, m_keymapProblems;
+    QString m_keymapFile;
     bool m_textFieldFocus = false;
     bool m_unsavedWork = false;
     bool m_workflowOpen = false;

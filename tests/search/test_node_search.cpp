@@ -126,6 +126,27 @@ private slots:
         QCOMPARE(search->count(), 0);
     }
 
+    // The filter chip (docs/canvas-look.md 12): a few words, the dragged port's mark, and an
+    // × that drops the filter.
+    void theLinkFilterIsAChipThatCanBeRemoved() {
+        search->openFromLink({{"node", "prompt"}, {"port", "text"}, {"output", true}}, 300, 300);
+        QCOMPARE(search->filterChip(), QString("Takes text"));
+        QCOMPARE(search->link().value("color").toString(), QString("text"));
+        QCOMPARE(search->link().value("shape").toString(), QString("circle"));
+        const int filtered = search->count();
+        QVERIFY(filtered < search->total());
+        search->clearFilter();
+        QCOMPARE(search->filterChip(), QString());
+        QVERIFY(search->link().isEmpty());
+        QCOMPARE(search->count(), search->total());
+        QVERIFY(search->active());
+        // Accepted now, the node comes unlinked.
+        const int links = canvas->links()->rowCount();
+        search->setQuery("brightness");
+        QVERIFY(!search->accept(0).isEmpty());
+        QCOMPARE(canvas->links()->rowCount(), links);
+    }
+
     void aLinkFromAnInputKeepsNodesWithACompatibleOutput() {
         search->openFromLink({{"node", "save"}, {"port", "image"}, {"output", false}}, 300, 300);
         const QStringList found = names(search->results());

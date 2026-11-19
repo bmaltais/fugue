@@ -96,8 +96,13 @@ class NodeSearch : public QObject {
     Q_PROPERTY(int count READ count NOTIFY resultsChanged)
     // The dragged link this search was opened from, or empty: {node, port, output, type}.
     Q_PROPERTY(QVariantMap link READ link NOTIFY activeChanged)
-    // One translated line saying what the results are filtered by, or empty.
+    // One translated line saying what the results are filtered by, or empty; and the same as
+    // a few words for the filter chip ("Takes image"), with the dragged port's color key and
+    // shape (CanvasModel::colorKey, shape) in `link`.
     Q_PROPERTY(QString filterText READ filterText NOTIFY activeChanged)
+    Q_PROPERTY(QString filterChip READ filterChip NOTIFY activeChanged)
+    // How many node types there are to search, for "5 of 61".
+    Q_PROPERTY(int total READ total NOTIFY resultsChanged)
     // Where the node goes, in world coordinates.
     Q_PROPERTY(QPointF point READ point NOTIFY activeChanged)
 
@@ -111,6 +116,8 @@ public:
     int count() const { return m_results.rowCount(); }
     QVariantMap link() const { return m_link; }
     QString filterText() const { return m_filterText; }
+    QString filterChip() const { return m_filterChip; }
+    int total() const;
     QPointF point() const { return m_point; }
 
     // Opens search to add a node at the world point; the query starts empty.
@@ -120,6 +127,9 @@ public:
     // dragged port's type is not known (a placeholder) nothing is compatible.
     Q_INVOKABLE void openFromLink(const QVariantMap &from, qreal x, qreal y);
     Q_INVOKABLE void close();
+    // Drops the dragged link's filter (the chip's ×): every node type shows, and accepting
+    // one adds it unlinked.
+    Q_INVOKABLE void clearFilter();
 
     // Adds the node of the result at `row` at the search point and, for a dragged link,
     // links it to the dragged port. Closes the search; returns the new node's id, or empty
@@ -147,6 +157,7 @@ private:
     QVariantMap m_link;
     std::optional<PortSpec> m_linkType;
     QString m_filterText;
+    QString m_filterChip;
     QPointF m_point;
 };
 

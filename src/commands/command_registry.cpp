@@ -1,6 +1,7 @@
 #include "command_registry.h"
 
 #include <QCoreApplication>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -179,7 +180,14 @@ bool CommandRegistry::isTextInput(QObject *object) {
 
 QString CommandRegistry::keymapPath() { return configDir() + QStringLiteral("/keybindings.json"); }
 
+QString CommandRegistry::keymapFile() const {
+    const QString path = m_keymapFile.isEmpty() ? keymapPath() : m_keymapFile;
+    const QString home = QDir::homePath();
+    return path.startsWith(home + '/') ? QStringLiteral("~") + path.mid(home.size()) : path;
+}
+
 void CommandRegistry::loadKeymap(const QString &path) {
+    m_keymapFile = path;
     m_adds.clear();
     m_unsets.clear();
     m_fileProblems.clear();

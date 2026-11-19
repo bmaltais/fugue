@@ -3,7 +3,9 @@
 // The app's window around a canvas model, as main() makes it, for tests that drive the real
 // window (Main.qml, offscreen) with the mouse and keys.
 
+#include <QDir>
 #include <QElapsedTimer>
+#include <QFile>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickItem>
@@ -43,10 +45,38 @@ inline fugue::Document load(const QByteArray &json) {
     return loaded.value();
 }
 
+// An Omarchy theme for the window: a shipped theme's palette by name (empty: Theme's
+// fallbacks) and Hyprland's rounding (negative: none, as without Hyprland).
+struct Look {
+    QString theme;
+    int radius = -1;
+};
+
+// Writes the theme's folder into `dir`; the fake hyprctl that reports the rounding, or empty.
+inline QString prepareLook(const QTemporaryDir &dir, const Look &look) {
+    if (!look.theme.isEmpty()) {
+        const QString from = QStringLiteral("/usr/share/omarchy/themes/") + look.theme;
+        QDir(dir.path()).mkpath("theme");
+        QFile::copy(from + "/colors.toml", dir.filePath("theme/colors.toml"));
+        if (QFile::exists(from + "/light.mode"))
+            QFile::copy(from + "/light.mode", dir.filePath("theme/light.mode"));
+    }
+    if (look.radius < 0)
+        return {};
+    QFile script(dir.filePath("hyprctl"));
+    if (!script.open(QIODevice::WriteOnly))
+        return {};
+    script.write(QStringLiteral("#!/bin/sh\necho '{\"int\": %1}'\n").arg(look.radius).toUtf8());
+    script.close();
+    script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+    return script.fileName();
+}
+
 struct App {
     QTemporaryDir dir;
+    QString hyprctl;
     Translator translator{dir.path() + "/language"};
-    Theme theme{dir.path()};
+    Theme theme;
     Backend backend;
     fugue::Registry registry;
     CanvasModel model{&registry};
@@ -58,7 +88,8 @@ struct App {
     QQuickItem *canvas = nullptr;
     QQuickItem *world = nullptr;
 
-    explicit App(const fugue::Document &document) {
+    explicit App(const fugue::Document &document, const Look &look = {})
+        : hyprctl(prepareLook(dir, look)), theme(dir.path(), nullptr, hyprctl) {
         fugue::nodes::addBuiltinNodeTypes(registry);
         fugue::registerDefaultCommands(commands);
         fugue::registerFileCommands(commands, workflows);

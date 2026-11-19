@@ -265,7 +265,7 @@ private slots:
         typeText(app.window, "resize");
         QTRY_VERIFY(app.search()->count() >= 1);
         QTRY_VERIFY(app.inResults("resultCategory"));
-        QCOMPARE(app.inResults("resultCategory")->property("text").toString(), QString("Image/Transform"));
+        QCOMPARE(app.inResults("resultCategory")->property("text").toString(), QString("Image › Transform · fugue"));
         QCOMPARE(app.inResults("resultVersion")->property("text").toString(), QString("v1.0.0"));
         auto *ports = app.inResults("resultPorts");
         QVERIFY(ports);

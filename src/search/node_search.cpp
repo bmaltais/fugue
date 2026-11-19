@@ -232,6 +232,7 @@ void NodeSearch::openAt(qreal x, qreal y) {
     m_link.clear();
     m_linkType.reset();
     m_filterText.clear();
+    m_filterChip.clear();
     m_query.clear();
     m_active = true;
     refresh();
@@ -245,20 +246,40 @@ void NodeSearch::openFromLink(const QVariantMap &from, qreal x, qreal y) {
     const bool output = from.value("output").toBool();
     m_point = {x, y};
     m_linkType = m_canvas ? m_canvas->portType(node, port, output) : std::nullopt;
+    const PortKind kind = m_registry && m_linkType ? m_registry->portKind(m_linkType->type) : PortKind::Unknown;
     m_link = {{"node", node}, {"port", port}, {"output", output},
-              {"type", m_linkType ? m_linkType->toString() : QString()}};
-    if (!m_linkType)
+              {"type", m_linkType ? m_linkType->toString() : QString()},
+              {"color", CanvasModel::colorKey(m_linkType, kind)},
+              {"shape", CanvasModel::shape(m_linkType, kind)}};
+    if (!m_linkType) {
         m_filterText = QCoreApplication::translate("NodeSearch", "The type of that port is not known, so no node fits it.");
-    else if (output)
+        m_filterChip = QCoreApplication::translate("NodeSearch", "Unknown type");
+    } else if (output) {
         m_filterText = QCoreApplication::translate("NodeSearch", "Nodes with an input that takes %1").arg(m_linkType->toString());
-    else
+        m_filterChip = QCoreApplication::translate("NodeSearch", "Takes %1").arg(m_linkType->toString());
+    } else {
         m_filterText = QCoreApplication::translate("NodeSearch", "Nodes with an output that gives %1").arg(m_linkType->toString());
+        m_filterChip = QCoreApplication::translate("NodeSearch", "Gives %1").arg(m_linkType->toString());
+    }
     m_query.clear();
     m_active = true;
     refresh();
     emit queryChanged();
     emit activeChanged();
 }
+
+void NodeSearch::clearFilter() {
+    if (m_link.isEmpty())
+        return;
+    m_link.clear();
+    m_linkType.reset();
+    m_filterText.clear();
+    m_filterChip.clear();
+    refresh();
+    emit activeChanged();
+}
+
+int NodeSearch::total() const { return m_registry ? int(m_registry->nodeTypes().size()) : 0; }
 
 void NodeSearch::close() {
     if (!m_active)

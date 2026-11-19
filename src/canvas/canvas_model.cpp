@@ -458,6 +458,9 @@ void CanvasModel::layOut(NodeRow &row) const {
                           && linksIn(node.inputs.value(port.name)).isEmpty();
         place(port, tall ? m_tallRowHeight : m_rowHeight);
     }
+    // A placeholder says so on a row of its own (spec 11.6).
+    if (row.missing)
+        top += m_rowHeight;
     const auto run = m_run.constFind(row.id);
     if (run != m_run.constEnd() && !run->thumbnail.isEmpty()) {
         // 1.5u in from the sides, 1u under the rows, its height from its aspect (0.5 to 1.5).

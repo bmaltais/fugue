@@ -1,6 +1,8 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import "canvas"
 
 // Everything the command registry shows or listens to in the window (spec 12.4, 12.5): one
 // shortcut for each key that has an owner, the `?` overlay, the unsaved-work question on
@@ -11,6 +13,8 @@ Item {
     objectName: "commandUi"
 
     readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
+    readonly property var look: theme.look
+    readonly property real u: look.unit
     property alias overlay: help
     property alias quitDialog: quitAsk
 
@@ -52,7 +56,7 @@ Item {
         visible: commands.problems.length > 0 && !dismissed
         anchors { left: parent.left; right: parent.right; top: parent.top }
         height: visible ? noticeRow.implicitHeight + 16 : 0
-        color: theme.colors.red
+        color: root.look.errorChip
         RowLayout {
             id: noticeRow
             anchors { fill: parent; margins: 8 }
@@ -61,7 +65,7 @@ Item {
             Label {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
-                color: "white"
+                color: root.look.text
                 text: qsTr("Your keymap file has problems; the default keys apply where it could not be used. Press ? to see them.")
             }
             ToolButton {
@@ -79,21 +83,21 @@ Item {
         anchors.centerIn: Overlay.overlay
         modal: true
         focus: true
-        padding: 24
-        background: Rectangle {
-            color: theme.background
-            border.color: theme.colors.selection
-            radius: theme.radius
-        }
+        padding: 6 * root.u
+        Overlay.modal: Rectangle { color: root.look.scrim }
+        background: PopupSurface { look: root.look }
         ColumnLayout {
-            spacing: 16
+            spacing: 4 * root.u
             KeyShortcuts { active: quitAsk.opened }
             LayoutMirroring.enabled: root.rightToLeft
             LayoutMirroring.childrenInherit: true
-            Label { text: qsTr("There is unsaved work. Quit anyway?") }
+            Label {
+                text: qsTr("There is unsaved work. Quit anyway?")
+                color: root.look.text
+            }
             RowLayout {
                 Layout.alignment: Qt.AlignRight
-                Button { text: qsTr("Keep working"); onClicked: quitAsk.close() }
+                Button { text: qsTr("Keep working"); flat: true; onClicked: quitAsk.close() }
                 Button {
                     objectName: "quitAnyway"
                     text: qsTr("Quit")
@@ -104,91 +108,293 @@ Item {
         }
     }
 
+    // The `?` overlay (spec 12.4, 12.5, docs/canvas-look.md 13): every command by group, in
+    // two columns, with its keys as keycaps and a badge where it differs from ComfyUI.
     Popup {
         id: help
         objectName: "help"
         anchors.centerIn: Overlay.overlay
         modal: true
         focus: true
-        padding: 24
-        width: Math.min(root.width - 48, 720)
-        height: Math.min(root.height - 48, 560)
+        topPadding: 6 * root.u
+        leftPadding: 7 * root.u
+        rightPadding: 7 * root.u
+        bottomPadding: 5 * root.u
+        width: Math.min(880, root.width - 12 * root.u)
+        height: Math.min(root.height - 12 * root.u, implicitHeight)
+        Overlay.modal: Rectangle { color: root.look.scrim }
+        background: PopupSurface { look: root.look }
+        enter: Transition {
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 140; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] }
+            NumberAnimation { property: "scale"; from: 0.97; to: 1; duration: 140; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.2, 0, 0, 1, 1, 1] }
+        }
+        exit: Transition {
+            NumberAnimation { property: "opacity"; to: 0; duration: 90; easing.type: Easing.OutCubic }
+        }
         // The registry is read each time the overlay opens, so a later registration or a
         // changed language shows.
         property var entries: []
-        onAboutToShow: entries = commands.list()
-        background: Rectangle {
-            color: theme.background
-            border.color: theme.colors.selection
-            radius: theme.radius
+        property string filter: ""
+        onAboutToShow: {
+            entries = commands.list()
+            filter = ""
+            filterField.text = ""
         }
 
-        ColumnLayout {
-            anchors.fill: parent
-            spacing: 8
+        // The groups by command id prefix, left column then right; and Mouse, the gestures.
+        readonly property var columns: [[{prefixes: ["run"], title: qsTr("Run")},
+                                         {prefixes: ["node"], title: qsTr("Node")},
+                                         {prefixes: ["frame", "group"], title: qsTr("Frame and group")},
+                                         {gestures: true, title: qsTr("Mouse")}],
+                                        [{prefixes: ["file", "app.quit", "app.settings"], title: qsTr("File")},
+                                         {prefixes: ["edit"], title: qsTr("Edit")},
+                                         {prefixes: ["view", "app.shortcuts"], title: qsTr("View")},
+                                         {prefixes: ["panel"], title: qsTr("Panels")}]]
+        function rowsOf(group) {
+            const f = filter.toLowerCase()
+            const rows = []
+            for (const e of entries) {
+                const keys = group.gestures ? e.gestures : e.keys
+                if (group.gestures ? e.gestures.length === 0
+                                   : !group.prefixes.some(p => e.id === p || e.id.startsWith(p + ".")))
+                    continue
+                for (const key of group.gestures ? keys : [keys.length > 0 ? keys[0] : ""]) {
+                    const row = {description: e.description, key: key, allKeys: group.gestures ? [key] : keys,
+                                 badge: !group.gestures && e.deviates ? e.versus : "", available: e.available,
+                                 gesture: !!group.gestures}
+                    if (f === "" || row.description.toLowerCase().indexOf(f) >= 0
+                            || row.allKeys.join(" ").toLowerCase().indexOf(f) >= 0)
+                        rows.push(row)
+                }
+            }
+            return rows
+        }
+        // "Ctrl+Shift+Return" as the keycaps Ctrl, Shift, Enter.
+        function capsOf(key) {
+            const names = {Return: "Enter", Escape: "Esc", Backspace: "⌫", Delete: "Del"}
+            const parts = key.length > 1 && key.endsWith("+") ? key.slice(0, -1).split("+").concat(["+"]) : key.split("+")
+            return parts.filter(p => p !== "").map(p => names[p] || p)
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 0
             KeyShortcuts { active: help.opened }
             LayoutMirroring.enabled: root.rightToLeft
             LayoutMirroring.childrenInherit: true
 
-            Label {
-                text: qsTr("Shortcuts")
-                font.bold: true
-                font.pixelSize: 18
-            }
-            Label {
+            RowLayout {
                 Layout.fillWidth: true
-                wrapMode: Text.Wrap
-                opacity: 0.7
-                text: qsTr("Matches ComfyUI except where marked. Greyed commands are not built yet.")
+                spacing: 4 * root.u
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: root.u
+                    Text {
+                        text: qsTr("Shortcuts")
+                        color: root.look.text
+                        font.pixelSize: root.look.overlayTitleSize
+                        font.weight: Font.DemiBold
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        color: root.look.label
+                        text: qsTr("Matches ComfyUI except where marked. Greyed commands are not built yet.")
+                    }
+                }
+                // Narrows the list as you type.
+                Rectangle {
+                    Layout.alignment: Qt.AlignTop
+                    Layout.preferredWidth: 60 * root.u
+                    Layout.preferredHeight: 8 * root.u
+                    radius: Math.min(root.look.popupCorner, 4)
+                    color: root.look.well
+                    border.width: 1
+                    border.color: filterField.activeFocus ? root.look.accent : root.look.hairlineStrong
+                    Glyph {
+                        id: filterGlyph
+                        x: 3 * root.u
+                        anchors.verticalCenter: parent.verticalCenter
+                        name: "search"
+                        look: root.look
+                        color: root.look.label
+                        font.pixelSize: 12
+                    }
+                    TextField {
+                        id: filterField
+                        objectName: "helpFilter"
+                        x: filterGlyph.x + filterGlyph.width + 2 * root.u
+                        width: parent.width - x - 2 * root.u
+                        anchors.verticalCenter: parent.verticalCenter
+                        background: null
+                        padding: 0
+                        placeholderText: qsTr("Filter")
+                        placeholderTextColor: root.look.label
+                        color: root.look.text
+                        font.pixelSize: root.look.textSize
+                        Accessible.name: qsTr("Filter the shortcuts")
+                        onTextEdited: help.filter = text
+                    }
+                }
             }
             Repeater {
                 model: commands.problems
-                delegate: Label {
+                delegate: Text {
                     required property string modelData
                     Layout.fillWidth: true
+                    Layout.topMargin: root.u
                     wrapMode: Text.Wrap
-                    color: theme.colors.red
+                    color: root.look.error
                     text: modelData
                 }
             }
 
-            ListView {
+            Flickable {
                 id: rows
                 objectName: "commandList"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                Layout.topMargin: 4 * root.u
+                Layout.preferredHeight: columnsRow.implicitHeight
+                contentHeight: columnsRow.implicitHeight
                 clip: true
-                spacing: 4
-                model: help.entries
+                boundsBehavior: Flickable.StopAtBounds
                 ScrollBar.vertical: ScrollBar {}
-                delegate: RowLayout {
-                    id: row
-                    required property var modelData
-                    width: ListView.view.width
-                    spacing: 16
-                    opacity: modelData.available ? 1 : 0.5
+                Row {
+                    id: columnsRow
+                    width: rows.width
+                    spacing: 9 * root.u
+                    Repeater {
+                        model: help.columns
+                        delegate: Column {
+                            id: column
+                            required property var modelData
+                            required property int index
+                            width: (columnsRow.width - columnsRow.spacing) / 2
+                            spacing: 0
+                            Repeater {
+                                model: column.modelData
+                                delegate: Column {
+                                    id: group
+                                    required property var modelData
+                                    required property int index
+                                    readonly property var rows: help.rowsOf(modelData)
+                                    visible: rows.length > 0
+                                    width: column.width
+                                    Text {
+                                        width: parent.width
+                                        topPadding: group.index > 0 ? 4 * root.u : 0
+                                        bottomPadding: root.u
+                                        text: group.modelData.title
+                                        color: root.look.label
+                                        font.pixelSize: root.look.captionSize
+                                        font.weight: Font.DemiBold
+                                    }
+                                    Repeater {
+                                        model: group.rows
+                                        delegate: Item {
+                                            id: entry
+                                            required property var modelData
+                                            required property int index
+                                            width: group.width
+                                            height: 7 * root.u
+                                            opacity: modelData.available ? 1 : 0.5
+                                            Text {
+                                                anchors.left: parent.left
+                                                anchors.right: badges.left
+                                                anchors.rightMargin: 2 * root.u
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: entry.modelData.description
+                                                elide: Text.ElideRight
+                                                color: root.look.text
+                                                font.pixelSize: root.look.textSize
+                                            }
+                                            Row {
+                                                id: badges
+                                                objectName: column.index === 0 && group.index === 0 && entry.index === 0
+                                                            ? "helpKeys" : ""
+                                                anchors.right: parent.right
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                spacing: root.u
+                                                // Where ComfyUI differs (12.4).
+                                                Rectangle {
+                                                    visible: entry.modelData.badge !== ""
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    width: badgeText.implicitWidth + 3 * root.u
+                                                    height: 4.5 * root.u
+                                                    radius: Math.min(root.look.popupCorner, 8)
+                                                    color: "transparent"
+                                                    border.width: 1
+                                                    border.color: root.look.hairlineStrong
+                                                    Text {
+                                                        id: badgeText
+                                                        anchors.centerIn: parent
+                                                        text: entry.modelData.badge
+                                                        color: root.look.label
+                                                        font.pixelSize: root.look.captionSize
+                                                    }
+                                                }
+                                                Repeater {
+                                                    model: entry.modelData.gesture ? [] : help.capsOf(entry.modelData.key)
+                                                    delegate: Keycap {
+                                                        required property string modelData
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                        look: root.look
+                                                        text: modelData
+                                                    }
+                                                }
+                                                Text {
+                                                    visible: entry.modelData.gesture
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    text: entry.modelData.key
+                                                    color: root.look.label
+                                                    font.pixelSize: root.look.labelSize
+                                                }
+                                            }
+                                            Rectangle {
+                                                anchors.bottom: parent.bottom
+                                                width: parent.width
+                                                height: 1
+                                                color: root.look.hairline
+                                                opacity: 0.6
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
-                    Label {
-                        Layout.preferredWidth: 220
-                        Layout.alignment: Qt.AlignTop
-                        objectName: "helpKeys"
-                        wrapMode: Text.Wrap
-                        text: modelData.keys.concat(modelData.gestures).join(", ")
-                        color: theme.accent
-                        font.bold: true
-                    }
-                    Label {
-                        Layout.fillWidth: true
-                        wrapMode: Text.Wrap
-                        text: modelData.description
-                    }
-                    Label {
-                        // Where ComfyUI differs (12.4), or the sign that nothing runs yet.
-                        visible: modelData.deviates
-                        text: modelData.versus
-                        font.italic: true
-                        opacity: 0.8
-                    }
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.topMargin: 4 * root.u
+                Layout.preferredHeight: 1
+                color: root.look.hairline
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.topMargin: 4 * root.u
+                spacing: root.u
+                Text {
+                    Layout.fillWidth: true
+                    elide: Text.ElideMiddle
+                    color: root.look.label
+                    font.pixelSize: root.look.labelSize
+                    textFormat: Text.StyledText
+                    text: qsTr("Change keys in %1").arg("<tt>" + commands.keymapFile.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</tt>")
+                }
+                Keycap { look: root.look; text: "?" }
+                Text {
+                    text: qsTr("or")
+                    color: root.look.label
+                    font.pixelSize: root.look.labelSize
+                }
+                Keycap { look: root.look; text: "Esc" }
+                Text {
+                    text: qsTr("to close")
+                    color: root.look.label
+                    font.pixelSize: root.look.labelSize
                 }
             }
         }

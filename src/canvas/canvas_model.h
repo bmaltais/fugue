@@ -47,8 +47,9 @@
 //   A node's row is found by id in O(1) (rowOf).
 // - #47 look (docs/canvas-look.md): the geometry here is the spec's. u = textSize / 3; a node is
 //   60u wide by default, its header 7u, then 1u of padding, outputs first and then inputs in
-//   their order, one 6u row each (an unlinked multiline input 16u), 2u under the last row, and
-//   a thumbnail, when the run gave one, 1u under the rows. Wires are cubics with horizontal
+//   their order, one 6u row each (an unlinked multiline input 16u), a row saying so on a node
+//   whose type is not installed, 2u under the last row, and a thumbnail, when the run gave
+//   one, 1u under the rows. Wires are cubics with horizontal
 //   tangents (8.1); linkAt() finds the wire under the pointer.
 // - The window's commands (edit.*, node.bypass, node.mute, node.collapse, view.*) call the
 //   edits below; canvas_commands.h registers them.

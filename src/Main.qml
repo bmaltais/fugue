@@ -66,5 +66,8 @@ ApplicationWindow {
     // The command registry's shortcuts, the `?` overlay and the quit question.
     CommandUi { anchors.fill: parent }
 
-    NodeSearchPopup { id: searchPopup }
+    NodeSearchPopup {
+        id: searchPopup
+        canvas: canvas
+    }
 }

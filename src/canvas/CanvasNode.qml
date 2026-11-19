@@ -478,8 +478,10 @@ Item {
             Text {
                 visible: node.missing && node.full && !node.collapsed
                 x: 3 * node.u
-                y: node.height - 2 * node.u - height
+                y: node.height - 2 * node.u - node.canvasModel.rowHeight
                 width: node.width - 6 * node.u
+                height: node.canvasModel.rowHeight
+                verticalAlignment: Text.AlignVCenter
                 text: qsTr("Not installed. Find it in packs…")
                 elide: Text.ElideRight
                 color: node.look.label
