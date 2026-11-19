@@ -207,6 +207,22 @@ private slots:
         QVERIFY(!f.workflows->unsaved());
     }
 
+    // The dialog asked about "mine", not "mine.fugue": a file already there is never replaced.
+    void anAddedExtensionNeverReplacesAnExistingFile() {
+        Fixture f;
+        QVERIFY(write(f.file("mine.fugue"), textNode));
+        f.canvas.addNode("fugue/number", 0, 0);
+        QVERIFY(!f.workflows->saveAs(QUrl::fromLocalFile(f.file("mine")).toString()));
+        QCOMPARE(read(f.file("mine.fugue")), QByteArray(textNode));
+        QVERIFY2(f.workflows->notice().contains("mine.fugue") && f.workflows->notice().contains("exists"),
+                 qPrintable(f.workflows->notice()));
+        QVERIFY(f.workflows->unsaved());
+        QVERIFY(f.workflows->pathOf(0).isEmpty());
+        // A name typed in full was asked about by the dialog: it replaces.
+        QVERIFY(f.workflows->saveAs(f.file("mine.fugue")));
+        QCOMPARE(Document::loadFile(f.file("mine.fugue"))->graph.nodes.size(), 1);
+    }
+
     void aFailedSaveKeepsTheWorkAndSaysWhy() {
         Fixture f;
         f.canvas.addNode("fugue/text", 0, 0);

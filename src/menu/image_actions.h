@@ -16,7 +16,9 @@
 //                    happen on a worker thread: a big image never holds the window.
 //   node.save-image  asks the window for a save dialog (`saveRequested`); the answer comes to
 //                    saveTo, which copies the original bytes (the embedded workflow stays)
-//                    atomically. The dialog has already asked about an existing file.
+//                    atomically. The dialog has already asked about an existing file; a name
+//                    typed without an extension gets the real one and never replaces a file
+//                    already at that name (a notice instead), since the dialog did not ask.
 //
 // A failure is a `message` for the window banner (Workflows notice).
 
@@ -52,8 +54,10 @@ public:
     Q_INVOKABLE void cancelSave() { m_pendingSource.clear(); }
 
 signals:
-    // The window should ask where to save: the folder to start in and the suggested file name.
-    void saveRequested(const QUrl &folder, const QString &name);
+    // The window should ask where to save: the folder to start in, the suggested file in it
+    // (file URLs made from paths, so any name survives) and the extension of the image's real
+    // format (the dialog's default suffix and filter).
+    void saveRequested(const QUrl &folder, const QUrl &file, const QString &suffix);
     void saved(const QString &path);
     // The image reached the clipboard.
     void copied();

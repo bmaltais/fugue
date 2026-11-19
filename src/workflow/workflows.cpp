@@ -1,6 +1,8 @@
 #include "workflow/workflows.h"
 
+#include "engine/atomic_file.h"
 #include "engine/embed.h"
+#include "engine/json.h"
 #include "engine/paths.h"
 #include "workflow/content_hash.h"
 #include "workflow/workflow_io.h"
@@ -39,6 +41,20 @@ QStringList missingTypes(const Document &document, const Registry &registry) {
     QStringList list(missing.begin(), missing.end());
     list.sort();
     return list;
+}
+
+// Writes the workflow file atomically. Without `replace`, false and nothing written when a
+// file is already at `path`.
+Result<bool> writeWorkflow(const Document &document, const QString &path, bool replace) {
+    if (replace) {
+        const Errors errors = document.saveFile(path);
+        return hasErrors(errors) ? Result<bool>(errors) : Result<bool>(true);
+    }
+    const QFileInfo info(path);
+    PartialFile partial(info.absolutePath(), info.fileName());
+    if (const Errors errors = partial.write(writeJson(document.toJson()), info.fileName()); hasErrors(errors))
+        return errors;
+    return partial.commit(path, Overwrite::Never);
 }
 
 QString firstMessage(const Errors &errors) {
@@ -379,7 +395,13 @@ void Workflows::analyze(const Document &document, const QString &title) {
 
 // --- save and close ---
 
-bool Workflows::saveTab(int index, const QString &path) {
+bool Workflows::saveTab(int index, const QString &path, bool replace) {
+    const QString taken = tr("Could not save %1: a file of that name already exists; choose another name.")
+                              .arg(QFileInfo(path).fileName());
+    if (!replace && QFileInfo::exists(path)) {
+        setNotice(taken);
+        return false;
+    }
     Document document = documentOf(index);
     // A saved workflow stays portable: the images it takes from Fugue's inputs folder are copied
     // into an `inputs` folder beside it, and its nodes point there (Appendix A, always, no question).
@@ -392,8 +414,12 @@ bool Workflows::saveTab(int index, const QString &path) {
     const bool moved = contentHash(document) != contentHash(before);
     const Document relocated = document;
     document.refreshRequirements(appVersion());
-    const Errors errors = document.saveFile(path);
-    if (hasErrors(errors)) {
+    const Result<bool> written = writeWorkflow(document, path, replace);
+    if (written && !*written) {
+        setNotice(taken);
+        return false;
+    }
+    if (const Errors errors = written.errors(); hasErrors(errors)) {
         setNotice(tr("Could not save %1: %2").arg(QFileInfo(path).fileName(), firstMessage(errors)));
         return false;
     }
@@ -431,10 +457,11 @@ bool Workflows::saveAs(const QString &pathOrUrl) {
     QString path = toPath(pathOrUrl);
     if (path.isEmpty())
         return false;
-    if (QFileInfo(path).suffix().isEmpty())
+    const bool appended = QFileInfo(path).suffix().isEmpty();
+    if (appended)
         path += QStringLiteral(".fugue");
     const QString id = m_tabs[size_t(m_current)].id;
-    if (!saveTab(m_current, path))
+    if (!saveTab(m_current, path, !appended))
         return false;
     if (m_closeAfterSave == id) {
         m_closeAfterSave.clear();

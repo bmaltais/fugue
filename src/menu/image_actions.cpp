@@ -53,6 +53,17 @@ std::optional<ImageFormat> formatOf(const QString &path) {
     return sniffImage(file.read(64));
 }
 
+// Writes `bytes` as a new file at `path`: false, and nothing written, when a file is there.
+Result<bool> writeNew(const QString &path, const QByteArray &bytes) {
+    const QFileInfo info(path);
+    if (const Errors made = makeFolder(info.absolutePath()); !made.isEmpty())
+        return made;
+    PartialFile partial(info.absolutePath(), info.fileName());
+    if (const Errors errors = partial.write(bytes, info.fileName()); !errors.isEmpty())
+        return errors;
+    return partial.commit(path, Overwrite::Never);
+}
+
 bool hasExtension(const QString &path, const QString &extension) {
     const QString suffix = QFileInfo(path).suffix().toLower();
     return suffix == extension || (extension == QLatin1String("jpg") && suffix == QLatin1String("jpeg"))
@@ -164,7 +175,9 @@ void ImageActions::save() {
         const auto format = formatOf(path);
         name = safeStem(m_canvas.nodeTitle(node())) + '.' + (format ? format->extension : QStringLiteral("png"));
     }
-    emit saveRequested(QUrl::fromLocalFile(suggestedFolder()), name);
+    const QString folder = suggestedFolder();
+    emit saveRequested(QUrl::fromLocalFile(folder), QUrl::fromLocalFile(QDir(folder).filePath(name)),
+                       QFileInfo(name).suffix().toLower());
 }
 
 void ImageActions::saveTo(const QString &target) {
@@ -182,12 +195,24 @@ void ImageActions::saveTo(const QString &target) {
             failure = bytes.error().message;
         } else {
             // A name typed without an extension gets the real one, so the file opens anywhere.
-            if (QFileInfo(path).suffix().isEmpty())
+            // The dialog asked about the name as typed, not this one: a file there stays.
+            const bool appended = QFileInfo(path).suffix().isEmpty();
+            if (appended)
                 path += '.' + format.extension;
-            // The dialog has asked about an existing file by now.
-            const Errors errors = replaceFile(path, *bytes, QFileInfo(path).fileName());
+            Errors errors;
+            bool taken = false;
+            if (!appended) {
+                errors = replaceFile(path, *bytes, QFileInfo(path).fileName());
+            } else if (const Result<bool> written = writeNew(path, *bytes); !written) {
+                errors = written.errors();
+            } else {
+                taken = !*written;
+            }
             if (!errors.isEmpty())
                 failure = say("The image was not saved: %1").arg(errors.first().message);
+            else if (taken)
+                failure = say("%1 already exists, so the image was not saved; choose another name.")
+                              .arg(QFileInfo(path).fileName());
         }
         if (!self)
             return;

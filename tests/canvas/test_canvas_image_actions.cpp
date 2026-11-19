@@ -270,6 +270,63 @@ private slots:
         QVERIFY(!QFileInfo::exists(r.app.dir.filePath("never.png")));
     }
 
+    // A name typed without an extension gets the real one, and a file already at that name is
+    // never replaced: the dialog only asked about the name as typed. The dialog itself offers
+    // the real format's suffix and filter, so the portal can ask about the full name.
+    void aNameWithoutExtensionNeverReplacesAnExistingFile() {
+        ActionApp r(kSinks);
+        QVERIFY(r.app.open());
+        const QByteArray picture = png(1200, 800);
+        r.runWithPicture(picture);
+        QVERIFY(QDir().mkpath(r.app.dir.filePath("out")));
+        QFile existing(r.app.dir.filePath("out/cat.png"));
+        QVERIFY(existing.open(QIODevice::WriteOnly) && existing.write("mine") == 4);
+        existing.close();
+        QSignalSpy saved(&r.actions, &fugue::ImageActions::saved);
+        r.app.model.select({"show"});
+        QVERIFY(r.app.commands.trigger("node.save-image"));
+        QObject *dialog = r.app.window->findChild<QObject *>("imageSaveDialog");
+        QVERIFY(dialog);
+        QCOMPARE(dialog->property("defaultSuffix").toString(), QStringLiteral("png"));
+        QVERIFY2(dialog->property("nameFilters").toStringList().join(' ').contains("*.png"),
+                 qPrintable(dialog->property("nameFilters").toStringList().join(' ')));
+        r.actions.saveTo(QUrl::fromLocalFile(r.app.dir.filePath("out/cat")).toString());
+        QTRY_COMPARE(r.messages.size(), 1);
+        QVERIFY2(r.messages.first().contains("cat.png") && r.messages.first().contains("exists"),
+                 qPrintable(r.messages.first()));
+        QVERIFY(saved.isEmpty());
+        QVERIFY(existing.open(QIODevice::ReadOnly));
+        QCOMPARE(existing.readAll(), QByteArray("mine"));
+        QCOMPARE(QDir(r.app.dir.filePath("out")).entryList(QDir::Files | QDir::Hidden | QDir::NoDotAndDotDot), QStringList{"cat.png"});
+        QVERIFY(r.app.warnings.isEmpty());
+    }
+
+    // The suggested file reaches the dialog as a file URL made from the path, so a name with
+    // #, ? or % in it is the name, not a fragment or a query.
+    void theSuggestedNameKeepsItsOddCharacters() {
+        ActionApp r(kLoadImage);
+        QVERIFY(r.app.open());
+        const QString file = r.app.dir.filePath("c#1 %41?.png");
+        {
+            QFile out(file);
+            QVERIFY(out.open(QIODevice::WriteOnly));
+            out.write(png(8, 8));
+        }
+        QVERIFY(r.app.model.widgets()->setText("src", "file", file).isEmpty());
+        QTRY_VERIFY(r.app.commands.isEnabled("node.save-image", {{"node", "src"}}));
+        QSignalSpy requested(&r.actions, &fugue::ImageActions::saveRequested);
+        r.app.model.select({"src"});
+        QVERIFY(r.app.commands.trigger("node.save-image"));
+        QCOMPARE(requested.size(), 1);
+        QCOMPARE(QFileInfo(requested.first().at(1).toUrl().toLocalFile()).fileName(), QStringLiteral("c#1 %41?.png"));
+        QObject *dialog = r.app.window->findChild<QObject *>("imageSaveDialog");
+        QVERIFY(dialog);
+        QCOMPARE(QFileInfo(dialog->property("selectedFile").toUrl().toLocalFile()).fileName(), QStringLiteral("c#1 %41?.png"));
+        QMetaObject::invokeMethod(dialog, "close");
+        r.actions.cancelSave();
+        QVERIFY(r.app.warnings.isEmpty());
+    }
+
     // Open gives the viewer a file URL of the full picture, with the right extension.
     void openGivesTheViewerTheFullFile() {
         ActionApp r(kSinks);
