@@ -16,6 +16,7 @@
 #include "cli/process.h"
 #include "engine/queue.h"
 #include "engine/document.h"
+#include "engine/json.h"
 
 namespace fugue::cli {
 
@@ -137,16 +138,50 @@ QString streamEvents(const RunFolder &folder, Context &context) {
     }
 }
 
-Reply startRun(const Command &command, Context &context) {
+namespace {
+
+// What `fugue run <file>` is to run: the file compiled, or the file itself when it
+// already is a compiled graph (4.8).
+Compilation graphToRun(const Command &command, Context &context) {
     const QString file = command.positionals.at(0);
+    Compilation result;
+    const Result<QJsonObject> json = readJsonObject(file);
+    if (json && json->contains("fugue-compiled")) {
+        // Nothing is compiled, so what changes a compile has nothing to act on.
+        for (const char *option : {"set", "to", "provider"}) {
+            if (command.has(option)) {
+                result.errors << makeError("usage", QStringLiteral("--%1 cannot be used with a compiled graph.").arg(option),
+                                           "Run the workflow file itself with this option.");
+                return result;
+            }
+        }
+        result.errors = registerProviders(context.registry);
+        if (hasErrors(result.errors))
+            return result;
+        Errors shape;
+        result.graph = CompiledGraph::fromJson(*json, shape);
+        result.errors += shape;
+        return result;
+    }
+    // Not a compiled graph: a workflow document, whose loader reports what is wrong
+    // with the file in a workflow's terms.
     Errors errors;
     std::optional<Document> document = Document::loadFile(file, errors);
-    if (!document)
-        return Reply::failure(errors);
-    const Errors setErrors = applyOverrides(*document, command.options.value("set"));
-    if (!setErrors.isEmpty())
-        return Reply::failure(setErrors);
-    const Compilation compilation = compileDocument(*document, context.registry, {command.value("to"), command.value("provider")});
+    if (!document) {
+        result.errors = errors;
+        return result;
+    }
+    result.errors = applyOverrides(*document, command.options.value("set"));
+    if (!result.errors.isEmpty())
+        return result;
+    return compileDocument(*document, context.registry, {command.value("to"), command.value("provider")});
+}
+
+} // namespace
+
+Reply startRun(const Command &command, Context &context) {
+    const QString file = command.positionals.at(0);
+    const Compilation compilation = graphToRun(command, context);
     if (!compilation.ok())
         return Reply::failure(compilation.errors);
 
@@ -278,17 +313,25 @@ int runWorker(const QString &runId, Context &context) {
         QThread::msleep(50);
     }
 
-    Process process(context);
-    collectGarbageIfDue(context, process);
-
+    // providers.json is read now, when the run's turn has come: it may have changed, or
+    // broken, since `fugue run` compiled. A file that cannot be used fails the run with
+    // the reason; an instance that cannot be made is a warning of the run.
+    const Errors providerProblems = registerProviders(context.registry);
     Errors errors;
-    const std::optional<CompiledGraph> graph = CompiledGraph::fromJson(folder->compiled(), errors);
+    std::optional<CompiledGraph> graph;
+    if (hasErrors(providerProblems))
+        errors = providerProblems;
+    else
+        graph = CompiledGraph::fromJson(folder->compiled(), errors);
     if (!graph) {
         endUnrun(*folder, "failed", errors);
         queue.remove(runId);
         return 1;
     }
+    Process process(context);
+    collectGarbageIfDue(context, process);
     RunOptions options;
+    options.warnings = providerProblems;
     options.workflow = folder->state().value("workflow").toObject().value("path").toString();
     const RunOutcome outcome = runGraph(*graph, *folder, process.environment, options, &g_cancel);
     queue.remove(runId);

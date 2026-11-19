@@ -214,12 +214,13 @@ public:
     Scheduler(const CompiledGraph &graph, std::optional<RunFolder> folder, const RunEnvironment &environment,
               const RunOptions &options, bool dry)
         : m_graph(graph), m_folder(std::move(folder)), m_env(environment), m_options(options), m_dry(dry),
+          m_providers(environment.registry ? environment.registry->providers() : QList<ProviderEntry>()),
           m_cancel(std::make_shared<std::atomic<bool>>(false)) {
         m_cpuSlots = m_env.cpuSlots > 0 ? m_env.cpuSlots : qMax(1, QThread::idealThreadCount() - 1);
         // Every lane can be full at once: the CPU slots, the GPU lane, and
         // one job's translation per provider instance.
-        m_pool.setMaxThreadCount(m_cpuSlots + 1 + int(m_env.providers.size()));
-        m_busy.fill(false, m_env.providers.size());
+        m_pool.setMaxThreadCount(m_cpuSlots + 1 + int(m_providers.size()));
+        m_busy.fill(false, m_providers.size());
     }
 
     ~Scheduler() override {
@@ -240,6 +241,10 @@ public:
             return;
         m_startedRun = true;
         m_startTime = now();
+        for (Error warning : m_options.warnings) {
+            warning.severity = Error::Severity::Warning;
+            m_outcome.errors.append(warning);
+        }
         m_order = m_graph.order();
         bool needsProviders = false;
         for (const QString &path : std::as_const(m_order)) {
@@ -273,7 +278,7 @@ public:
                     emitEvent({{"event", "node.skipped"}, {"node", it.key()}, {"reason", it.value()}});
         }
 
-        for (const ProviderEntry &entry : std::as_const(m_env.providers)) {
+        for (const ProviderEntry &entry : std::as_const(m_providers)) {
             Candidate candidate;
             candidate.instance = entry.instance;
             if (!entry.provider)
@@ -359,8 +364,8 @@ private:
     // --- providers ---
 
     void describeProviders() {
-        for (int i = 0; i < m_env.providers.size(); ++i) {
-            const ProviderEntry &entry = m_env.providers.at(i);
+        for (int i = 0; i < m_providers.size(); ++i) {
+            const ProviderEntry &entry = m_providers.at(i);
             if (!entry.provider || !entry.instance.enabled)
                 continue;
             connect(entry.provider.get(), &Provider::statusChanged, this,
@@ -380,7 +385,7 @@ private:
     void cancelJobs() {
         for (NodeRun &n : m_nodes)
             if (n.phase == Phase::Running && !n.job.isEmpty() && !n.jobOver)
-                m_env.providers.at(n.instance).provider->cancel(n.job, [](const Result<QString> &) {});
+                m_providers.at(n.instance).provider->cancel(n.job, [](const Result<QString> &) {});
     }
 
     // --- the loop ---
@@ -506,8 +511,8 @@ private:
                 return stale(n);
             }
             n.selection = selection.value();
-            for (int i = 0; i < m_env.providers.size(); ++i)
-                if (m_env.providers.at(i).instance.name == n.selection->instance)
+            for (int i = 0; i < m_providers.size(); ++i)
+                if (m_providers.at(i).instance.name == n.selection->instance)
                     n.instance = i;
             if (n.instance < 0)
                 return fail(n, nodeError(QStringLiteral("internal"),
@@ -660,7 +665,7 @@ private:
 
     bool usesGpuLane(const NodeRun &n) const {
         if (n.providerKernel)
-            return isLocal(m_env.providers.at(n.instance).instance);
+            return isLocal(m_providers.at(n.instance).instance);
         const QJsonValue gpu = n.type->needs.value("gpu");
         return gpu.isObject() && !gpu.toObject().value("parallel").toBool();
     }
@@ -785,7 +790,7 @@ private:
         JobRequest request = made.value();
         request.outputDir = n.workDir;
         const QPointer<Scheduler> self(this);
-        m_env.providers.at(n.instance).provider->submit(request, [self, path](const Result<QString> &job) {
+        m_providers.at(n.instance).provider->submit(request, [self, path](const Result<QString> &job) {
             if (self)
                 self->submitted(path, job);
         });
@@ -799,7 +804,7 @@ private:
         const QString id = jobId(n.instance, n.job);
         m_jobs.insert(id, path);
         if (m_cancel->load())
-            m_env.providers.at(n.instance).provider->cancel(n.job, [](const Result<QString> &) {});
+            m_providers.at(n.instance).provider->cancel(n.job, [](const Result<QString> &) {});
         // A status that came before the job id did.
         if (m_early.contains(id))
             jobStatus(n.instance, n.job, m_early.take(id));
@@ -841,7 +846,7 @@ private:
         if (status.state == QLatin1String("cancelled"))
             return failed(n, nodeError(QStringLiteral("cancelled"), QStringLiteral("The provider's job was cancelled.")));
         const QPointer<Scheduler> self(this);
-        m_env.providers.at(instance).provider->result(job, [self, path](const Result<JobResult> &result) {
+        m_providers.at(instance).provider->result(job, [self, path](const Result<JobResult> &result) {
             if (self)
                 self->jobResult(path, result);
         });
@@ -1027,6 +1032,7 @@ private:
     const RunEnvironment m_env;
     const RunOptions m_options;
     const bool m_dry;
+    const QList<ProviderEntry> m_providers; // the registry's, as they were when the run was made
 
     std::shared_ptr<std::atomic<bool>> m_cancel;
     QThreadPool m_pool;

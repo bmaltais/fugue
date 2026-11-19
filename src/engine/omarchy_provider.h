@@ -42,7 +42,9 @@ struct OmarchyPaths {
     QString stateDir;  // holds status.json and network.json
     QString configDir; // holds key and remotes/<host>.key
 
-    // ~/.local/state/omarchy/agent-local and ~/.config/omarchy/agent-local.
+    // ~/.local/state/omarchy/agent-local and ~/.config/omarchy/agent-local. These are
+    // omarchy-local-ai's folders, and it builds them from $HOME with no XDG variable, so
+    // neither does this.
     static OmarchyPaths standard();
 };
 

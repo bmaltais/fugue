@@ -16,29 +16,38 @@ QString stampPath() {
 
 } // namespace
 
+Errors registerProviders(Registry &registry) {
+    const Result<QList<ProviderInstance>> instances = loadProviderInstances(providersPath());
+    if (!instances)
+        return instances.errors();
+    Errors problems;
+    QList<ProviderEntry> entries;
+    for (const ProviderInstance &instance : instances.value()) {
+        ProviderEntry entry;
+        entry.instance = instance;
+        if (instance.enabled) {
+            const Result<std::shared_ptr<Provider>> provider = createProvider(instance);
+            if (provider) {
+                entry.provider = provider.value();
+            } else {
+                for (Error problem : provider.errors()) {
+                    problem.severity = Error::Severity::Warning;
+                    problems << problem;
+                }
+            }
+        }
+        entries.append(entry);
+    }
+    const Errors refused = registry.setProviders(entries);
+    return hasErrors(refused) ? refused : problems;
+}
+
 Process::Process(const Context &context)
     : cache(ResultCache::defaultRoot()), hashes(FileHashes::defaultPath()) {
     environment.registry = &context.registry;
     environment.kernels = &context.kernels;
     environment.cache = &cache;
     environment.hashes = &hashes;
-    const Result<QList<ProviderInstance>> instances = loadProviderInstances(providersPath());
-    if (!instances) {
-        errors = instances.errors();
-        return;
-    }
-    for (const ProviderInstance &instance : instances.value()) {
-        ProviderEntry entry;
-        entry.instance = instance;
-        if (instance.enabled) {
-            const Result<std::shared_ptr<Provider>> provider = createProvider(instance);
-            if (provider)
-                entry.provider = provider.value();
-            else
-                errors += provider.errors();
-        }
-        environment.providers.append(entry);
-    }
 }
 
 void collectGarbageIfDue(const Context &context, Process &process) {

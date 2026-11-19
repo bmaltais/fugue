@@ -33,8 +33,22 @@ void logLine(const QString &text) {
 QString humanError(const Error &error) {
     QString text = QStringLiteral("%1[%2]: %3")
                        .arg(error.severity == Error::Severity::Warning ? "warning" : "error", error.code, error.message);
+    // The same information as the JSON form (13.2): where, and what would be valid.
+    QStringList where;
     if (!error.node.isEmpty())
-        text += QStringLiteral(" (node %1)").arg(error.node);
+        where << QStringLiteral("node %1").arg(error.node);
+    if (!error.input.isEmpty())
+        where << QStringLiteral("input %1").arg(error.input);
+    if (!error.output.isEmpty())
+        where << QStringLiteral("output %1").arg(error.output);
+    if (!where.isEmpty())
+        text += QStringLiteral(" (%1)").arg(where.join(", "));
+    if (!error.valid.isEmpty()) {
+        QStringList valid;
+        for (const QJsonValue &option : error.valid)
+            valid << option.toVariant().toString();
+        text += QStringLiteral("\n  valid: %1").arg(valid.join(", "));
+    }
     if (!error.hint.isEmpty())
         text += QStringLiteral("\n  hint: %1").arg(error.hint);
     return text;

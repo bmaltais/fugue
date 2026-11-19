@@ -102,6 +102,7 @@ class TestCli : public QObject {
         env.remove("WAYLAND_DISPLAY");
         env.insert("XDG_CACHE_HOME", cache());
         env.insert("XDG_STATE_HOME", m_dir.filePath("state"));
+        env.insert("XDG_CONFIG_HOME", m_dir.filePath("config")); // not the developer's providers.json
         env.insert("FUGUE_NODE_MANIFESTS", m_dir.filePath("manifests"));
         QProcess process;
         process.setProcessEnvironment(env);
@@ -184,6 +185,37 @@ private slots:
             codes << error.toObject().value("code").toString();
         QVERIFY(codes.contains("unknown_node_type"));
         QVERIFY(codes.contains("missing_input"));
+    }
+
+    // 10.3: validate shows the state of every node.
+    void validateShowsTheStateOfEveryNode() {
+        const Outcome o = fugue({"validate", m_dir.filePath("good.fugue"), "--json"});
+        QCOMPARE(o.exitCode, 0);
+        const QJsonObject data = o.json().value("data").toObject();
+        QCOMPARE(data.value("valid").toBool(), true);
+        const QJsonObject nodes = data.value("nodes").toObject();
+        QCOMPARE(nodes.keys(), (QStringList{"a", "b", "c"}));
+        QCOMPARE(nodes.value("a").toObject().value("state").toString(), QString("stale")); // would run
+        QCOMPARE(nodes.value("b").toObject().value("state").toString(), QString("stale"));
+        QCOMPARE(nodes.value("c").toObject().value("state").toString(), QString("skipped"));
+        QCOMPARE(nodes.value("c").toObject().value("reason").toString(), QString("not_part_of_output"));
+
+        // People get the same information (13.2).
+        const Outcome human = fugue({"validate", m_dir.filePath("good.fugue")});
+        QCOMPARE(human.exitCode, 0);
+        QVERIFY2(human.out.contains("a  stale") && human.out.contains("c  skipped (not_part_of_output)"),
+                 human.out.constData());
+    }
+
+    // 13.2: without --json an error still says which input and what the valid options are.
+    void humanErrorsKeepTheInputAndTheValidOptions() {
+        const Outcome missing = fugue({"validate", m_dir.filePath("broken.fugue")});
+        QCOMPARE(missing.exitCode, 1);
+        QVERIFY2(missing.err.contains("node b, input text"), missing.err.constData());
+        const Outcome unknown = fugue({"nonsense"});
+        QCOMPARE(unknown.exitCode, 1);
+        QVERIFY2(unknown.err.contains("valid: ") && unknown.err.contains("validate") && unknown.err.contains("workflow"),
+                 unknown.err.constData());
     }
 
     void validateAndCompilePrintWarningsOnSuccess() {

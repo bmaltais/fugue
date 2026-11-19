@@ -85,6 +85,28 @@ Errors Registry::addManifest(const QJsonObject &manifest) {
     return add(*type);
 }
 
+Errors Registry::setProviders(const QList<ProviderEntry> &providers) {
+    Errors errors;
+    QStringList names;
+    for (const ProviderEntry &entry : providers) {
+        if (entry.instance.name.isEmpty())
+            errors << problem(QStringLiteral("A provider instance has no name."));
+        else if (names.contains(entry.instance.name))
+            errors << problem(QStringLiteral("Two providers are named %1.").arg(entry.instance.name));
+        names << entry.instance.name;
+    }
+    if (errors.isEmpty())
+        m_providers = providers;
+    return errors;
+}
+
+QStringList Registry::providerNames() const {
+    QStringList names;
+    for (const ProviderEntry &entry : m_providers)
+        names << entry.instance.name;
+    return names;
+}
+
 const NodeType *Registry::nodeType(const QString &id) const {
     auto found = m_nodeTypes.find(id);
     if (found == m_nodeTypes.end()) {

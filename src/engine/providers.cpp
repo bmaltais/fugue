@@ -7,6 +7,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QSet>
+#include <QStandardPaths>
 
 namespace fugue {
 
@@ -156,7 +157,9 @@ Result<Selection> choose(const QList<const Candidate *> &usable, const Requireme
 } // namespace
 
 QString providersPath() {
-    return QDir::home().filePath(QStringLiteral(".config/fugue/providers.json"));
+    // $XDG_CONFIG_HOME is honored (1.4), as for every other path of Fugue's own.
+    return QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) +
+           QStringLiteral("/fugue/providers.json");
 }
 
 Result<QList<ProviderInstance>> parseProviderInstances(const QJsonObject &document) {

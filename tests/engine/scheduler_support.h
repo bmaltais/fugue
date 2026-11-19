@@ -291,7 +291,7 @@ public:
         env.kernels = &kernels;
         env.cache = cache.get();
         env.hashes = hashes.get();
-        env.providers = providers;
+        must(registry.setProviders(providers));
         env.models = &models;
         env.cpuSlots = cpuSlots;
         env.clock = [this] { return clock.now(); };
@@ -349,7 +349,7 @@ public:
     std::unique_ptr<FileHashes> hashes;
     std::unique_ptr<ResultCache> cache;
     ResidentModels models;
-    QList<ProviderEntry> providers;
+    QList<ProviderEntry> providers; // go into the registry when environment() is called
     FakeClock clock;
     Calls calls;
     int cpuSlots = 4;

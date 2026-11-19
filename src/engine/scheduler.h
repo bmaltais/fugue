@@ -3,8 +3,8 @@
 // The scheduler (spec 9): runs a compiled graph to the end.
 //
 // The one entry point for a worker process is runGraph(): given a compiled
-// graph, a run folder and a RunEnvironment (registry, kernels, result cache,
-// providers), it runs every node, writes run.json, compiled.json and
+// graph, a run folder and a RunEnvironment (the registry with its node types
+// and providers, kernels, result cache), it runs every node, writes run.json, compiled.json and
 // events.jsonl into the run folder, and returns the outcome. Run is the same
 // thing without blocking, for a caller that has its own event loop (the
 // canvas). checkGraph() is the part `fugue validate` needs: the
@@ -85,22 +85,15 @@ namespace fugue {
 
 class FileHashes;
 
-// A configured provider instance and the provider made for it
-// (loadProviderInstances + createProvider).
-struct ProviderEntry {
-    ProviderInstance instance;
-    std::shared_ptr<Provider> provider; // may be null for a disabled instance
-};
-
 // What a process needs to run graphs. Everything pointed at must outlive the
 // runs that use it. One environment serves every run of a process.
 struct RunEnvironment {
+    // Node types, and the provider instances in the user's order (8.3); there
+    // may be none when no node needs a provider.
     const Registry *registry = nullptr;
     const Kernels *kernels = nullptr;
     ResultCache *cache = nullptr;
     FileHashes *hashes = nullptr;
-    // In the user's order (8.3). May be empty when no node needs a provider.
-    QList<ProviderEntry> providers;
     // Optional. Shared by the runs of a process so a model stays loaded
     // between them. Without it there is no residency preference.
     ResidentModels *models = nullptr;
@@ -126,6 +119,10 @@ struct RunOptions {
     // The workflow file the graph came from, absolute, or empty. It goes
     // into run.json and into the cache's `used_by`.
     QString workflow;
+    // What the caller wants said with the run though no node caused it, such as a
+    // provider instance that could not be made. They join run.done's `errors` and the
+    // outcome with severity warning; they do not fail the run.
+    Errors warnings;
 };
 
 // The state of a node (10.3).

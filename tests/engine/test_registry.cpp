@@ -6,6 +6,7 @@
 #include <QJsonObject>
 #include <QtTest>
 
+#include "engine/fake_provider.h"
 #include "engine/node_type.h"
 #include "engine/registry.h"
 #include "engine/version.h"
@@ -373,6 +374,43 @@ private slots:
         Registry registry;
         QVERIFY(registry.add(preview).isEmpty());
         QVERIFY(hasErrors(registry.add(packPreview)));
+    }
+
+    // 6.12: one registry of node types, port types and providers.
+    void theRegistryHoldsTheConfiguredProvidersInTheUsersOrder() {
+        Registry registry;
+        QVERIFY(registry.providers().isEmpty());
+        ProviderInstance studio;
+        studio.name = "Studio";
+        studio.type = "fake";
+        ProviderInstance local;
+        local.name = "This machine";
+        local.type = "fake";
+        local.enabled = false;
+        const auto provider = std::make_shared<FakeProvider>(Description{});
+        QVERIFY(registry.setProviders({ProviderEntry{studio, provider}, ProviderEntry{local, nullptr}}).isEmpty());
+        QCOMPARE(registry.providerNames(), (QStringList{"Studio", "This machine"}));
+        QCOMPARE(registry.providers().at(0).provider.get(), provider.get());
+        QVERIFY(!registry.providers().at(1).instance.enabled);
+
+        // Setting them again replaces the list (providers.json was edited).
+        QVERIFY(registry.setProviders({ProviderEntry{local, nullptr}}).isEmpty());
+        QCOMPARE(registry.providerNames(), (QStringList{"This machine"}));
+    }
+
+    void providerNamesMustBeUniqueAndSet() {
+        Registry registry;
+        ProviderInstance one;
+        one.name = "Studio";
+        one.type = "fake";
+        QVERIFY(registry.setProviders({ProviderEntry{one, nullptr}}).isEmpty());
+        const Errors twice = registry.setProviders({ProviderEntry{one, nullptr}, ProviderEntry{one, nullptr}});
+        QCOMPARE(twice.size(), 1);
+        QCOMPARE(twice.first().code, QString("invalid_document"));
+        ProviderInstance nameless;
+        nameless.type = "fake";
+        QVERIFY(hasErrors(registry.setProviders({ProviderEntry{nameless, nullptr}})));
+        QCOMPARE(registry.providerNames(), (QStringList{"Studio"})); // unchanged by a refused list
     }
 
     void aliasesAnswerOnlyWhenNoTypeHasTheId() {

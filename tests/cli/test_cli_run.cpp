@@ -418,6 +418,70 @@ private slots:
         QCOMPARE(bystander.exitCode(), 0);
     }
 
+    // 4.8: "A compiled graph can be run directly."
+    void aCompiledGraphRunsDirectly() {
+        const Outcome compiled = fugue({"compile", path("flow.fugue"), "--json"});
+        QCOMPARE(compiled.exitCode, 0);
+        write(path("compiled.json"), QJsonDocument(compiled.data()).toJson());
+        const Outcome o = fugue({"run", path("compiled.json"), "--wait"});
+        QCOMPARE(o.exitCode, 0);
+        QCOMPARE(o.lines().last().value("status").toString(), QString("ok"));
+        QJsonObject done;
+        for (const QJsonObject &event : o.lines())
+            if (event.value("event").toString() == "node.done" && event.value("node").toString() == "b")
+                done = event;
+        QCOMPARE(done.value("outputs").toObject().value("text").toString(), QString("hello"));
+
+        // What changes a compile cannot be applied to a graph that is already compiled.
+        const Outcome set = fugue({"run", path("compiled.json"), "--set", "b.text=x", "--json"});
+        QCOMPARE(set.exitCode, 1);
+        QCOMPARE(set.firstCode(), QString("usage"));
+        // A compiled graph that is not one is refused with what is wrong.
+        write(path("bad-compiled.json"), "{\"fugue-compiled\": 1, \"nodes\": 3}");
+        const Outcome bad = fugue({"run", path("bad-compiled.json"), "--json"});
+        QCOMPARE(bad.exitCode, 1);
+        QCOMPARE(bad.firstCode(), QString("invalid_document"));
+        QTRY_VERIFY_WITH_TIMEOUT(queued().isEmpty(), 10000);
+    }
+
+    // 1.4: XDG variables are honored.
+    void providersJsonIsReadFromXdgConfigHome() {
+        write(path("config/fugue/providers.json"),
+              "{\"providers\": [{\"name\": \"Elsewhere\", \"type\": \"omarchy\", \"enabled\": false}]}");
+        write(path("pinned.fugue"), flow("\"a\": {\"type\": \"fugue/note\", \"version\": \"1.0.0\", \"provider\": \"Elsewhere\"},"
+                                         + node("b", "fugue/echo", "{\"text\": {\"from\": \"a.text\"}}")));
+        const Outcome o = fugue({"compile", path("pinned.fugue"), "--json"});
+        QVERIFY2(o.exitCode == 0, o.out.constData()); // not unknown_provider: the pin names a configured instance
+    }
+
+    // A provider instance that cannot be made is said, not dropped in silence.
+    void validateWarnsAboutAProviderInstanceThatCannotBeMade() {
+        write(path("config/fugue/providers.json"), "{\"providers\": [{\"name\": \"Cloud\", \"type\": \"no-such-module\"}]}");
+        const Outcome o = fugue({"validate", path("flow.fugue"), "--json"});
+        QCOMPARE(o.exitCode, 0);
+        const QJsonArray warnings = o.json().value("warnings").toArray();
+        QCOMPARE(warnings.size(), 1);
+        QCOMPARE(warnings.at(0).toObject().value("code").toString(), QString("unknown_provider"));
+        QCOMPARE(warnings.at(0).toObject().value("severity").toString(), QString("warning"));
+    }
+
+    // The worker reads providers.json when its turn comes, which may be long after
+    // `fugue run` compiled; a file broken in between fails the run with the reason.
+    void aWorkerThatCannotReadProvidersJsonFailsTheRunWithTheReason() {
+        const QString a = start("hold.fugue");
+        QTRY_COMPARE_WITH_TIMEOUT(statusOf(a), QString("running"), 15000);
+        const QString b = start("flow.fugue");
+        QVERIFY(!b.isEmpty());
+        write(path("config/fugue/providers.json"), "{ this is not JSON");
+        QVERIFY(QFile(gate()).open(QIODevice::WriteOnly));
+        QTRY_COMPARE_WITH_TIMEOUT(statusOf(a), QString("ok"), 20000); // it had its providers already
+        QTRY_VERIFY_WITH_TIMEOUT(statusOf(b) == "failed" || statusOf(b) == "ok", 20000);
+        QCOMPARE(statusOf(b), QString("failed"));
+        const QJsonObject done = RunFolder::open(runsRoot(), b)->events().last();
+        QCOMPARE(done.value("event").toString(), QString("run.done"));
+        QCOMPARE(done.value("errors").toArray().at(0).toObject().value("code").toString(), QString("invalid_json"));
+    }
+
     void validateWarnsWhenNoProviderCanServeANode() {
         write(path("config/fugue/providers.json"), "{\"providers\": [{\"name\": \"off\", \"type\": \"omarchy\", \"enabled\": false}]}");
         const Outcome o = fugue({"validate", path("gen.fugue"), "--json"});

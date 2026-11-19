@@ -100,12 +100,19 @@ Reply validate(const Command &command, Context &context) {
     const std::optional<Document> document = Document::loadFile(command.positionals.at(0), errors);
     if (!document)
         return loadFailed(errors);
-    Process process(context);
-    errors = validateDocument(*document, context.registry, process.environment);
-    if (hasErrors(errors))
-        return Reply::failure(errors);
-    Reply reply = Reply::success(QJsonObject{{"valid", true}}, QStringLiteral("%1 is valid.").arg(command.positionals.at(0)));
-    reply.errors = errors; // warnings only
+    const Validation validation = validateDocument(*document, context);
+    if (hasErrors(validation.errors))
+        return Reply::failure(validation.errors);
+    // The state of every node (10.3), for people too.
+    QStringList lines{QStringLiteral("%1 is valid.").arg(command.positionals.at(0))};
+    for (auto it = validation.nodes.begin(); it != validation.nodes.end(); ++it) {
+        const QJsonObject node = it.value().toObject();
+        const QString reason = node.value("reason").toString();
+        lines << QStringLiteral("  %1  %2%3").arg(it.key(), node.value("state").toString(),
+                                                  reason.isEmpty() ? QString() : " (" + reason + ")");
+    }
+    Reply reply = Reply::success(QJsonObject{{"valid", true}, {"nodes", validation.nodes}}, lines.join('\n'));
+    reply.errors = validation.errors; // warnings only
     return reply;
 }
 

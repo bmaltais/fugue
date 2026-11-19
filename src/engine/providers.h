@@ -26,7 +26,7 @@ struct ProviderInstance {
     QJsonObject settings; // every other field, as the module declares them
 };
 
-// The standard path, ~/.config/fugue/providers.json.
+// The standard path, $XDG_CONFIG_HOME/fugue/providers.json (~/.config/fugue/providers.json).
 QString providersPath();
 
 // The list in the user's order. Errors are invalid_document, one per bad entry.

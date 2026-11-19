@@ -642,6 +642,22 @@ private slots:
                  QStringLiteral("frozen"));
     }
 
+    void warningsGivenWithTheRunAreReportedAndDoNotFailIt() {
+        World world;
+        RunOptions options;
+        options.warnings = {makeError("unknown_provider", "Cloud has a provider type this Fugue does not have.")};
+        const Ran ran = world.run(world.graph("{'a': {'type': 'fugue/text', 'inputs': {'text': 'fox'}},"
+                                              " 's': {'type': 'fugue/save', 'inputs': {'value': {'from': 'a.text'}}}}"),
+                                  options);
+        QCOMPARE(ran.outcome.status, QStringLiteral("ok"));
+        QCOMPARE(ran.outcome.errors.size(), 1);
+        QCOMPARE(ran.outcome.errors.first().severity, Error::Severity::Warning);
+        const QJsonArray told = ran.events.last().value("errors").toArray();
+        QCOMPARE(told.size(), 1);
+        QCOMPARE(told.at(0).toObject().value("code").toString(), QStringLiteral("unknown_provider"));
+        QCOMPARE(told.at(0).toObject().value("severity").toString(), QStringLiteral("warning"));
+    }
+
     void aMissingFrozenResultWarnsAndTheNodeRuns() {
         World world;
         QJsonObject nodes = json(branches("fox", "!"));
