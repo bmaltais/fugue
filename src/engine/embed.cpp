@@ -2,8 +2,9 @@
 
 #include <QFile>
 #include <QJsonDocument>
-#include <QRegularExpression>
 #include <QtEndian>
+
+#include <array>
 
 #include <glib.h>
 
@@ -71,7 +72,7 @@ QByteArray xmpPacket(const QByteArray &workflowJson) {
            QByteArray("</rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end=\"w\"?>");
 }
 
-// The payload of the first chunk satisfying `wanted` in a PNG, or null.
+// The text of the first uncompressed `fugue` iTXt chunk in a PNG, or null.
 QByteArray pngFugueText(const QByteArray &bytes) {
     qsizetype at = 8;
     while (at + 12 <= bytes.size()) {

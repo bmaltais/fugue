@@ -3,7 +3,6 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QJsonDocument>
 
 #include "engine/embed.h"
 #include "engine/file_hashes.h"
@@ -24,7 +23,7 @@ public:
     Result<Values> run(const NodeContext &context) override { return Values{{m_port, context.input(m_port)}}; }
 
 private:
-    QString m_port;
+    const QString m_port;
 };
 
 // "~" and "~/..." mean the home folder, as the file picker's paths and hand-written
