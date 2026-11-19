@@ -641,6 +641,29 @@ private slots:
         QTRY_VERIFY(!r.runs->busy());
     }
 
+    // `fugue runs cancel` of a waiting window run takes its entry, then ends its folder. A
+    // window that looks in between ends it as cancelled, never with the status it had.
+    void aWaitingRunCancelledFromOutsideEndsCancelled() {
+        RunApp r(kGraph);
+        QVERIFY(r.app.open());
+        const fugue::Queue queue(r.app.dir.path() + "/queue");
+        QVERIFY(queue.enqueue("cli-run", "/w/a.fugue", false));
+        QVERIFY(queue.activate("cli-run"));
+        fugue::Lock worker(r.app.dir.path() + "/engine.lock");
+        QVERIFY(worker.tryAcquire());
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(queue.entries().size(), 2);
+        const QString run = r.runs->runs().value(0);
+        QVERIFY(queue.remove(run)); // and the canceller has not ended the folder yet
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(finished.first().at(1).toString(), QStringLiteral("cancelled"));
+        const fugue::Result<fugue::RunFolder> folder = fugue::RunFolder::open(r.app.dir.path() + "/runs", run);
+        QVERIFY(folder.ok());
+        QCOMPARE(fugue::runStatusName(folder->status()), QStringLiteral("cancelled"));
+        QVERIFY(queue.remove(QStringLiteral("cli-run")));
+    }
+
     // Closing the window while a check waits on a provider neither hangs nor crashes.
     void closingDuringACheckIsClean() {
         auto r = std::make_unique<RunApp>(kGraph, true);

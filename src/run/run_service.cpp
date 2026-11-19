@@ -318,12 +318,12 @@ private:
         return compilation ? Compilation(compilation.value(), problems) : Compilation(problems);
     }
 
-    // The run.done of a run someone else ended (a `fugue runs cancel` of a waiting run).
+    // The run.done of a waiting run whose entry someone else took: only a cancel does that
+    // (`fugue runs cancel`), which takes the entry and then ends the folder. One not ended yet
+    // (or whose canceller died in between) is ended here as cancelled; RunFolder::finish
+    // writes one run.done whoever comes first.
     static QJsonObject ended(const RunFolder &folder) {
-        for (const QJsonObject &e : folder.events())
-            if (e.value("event") == QLatin1String("run.done"))
-                return e;
-        return {{"event", "run.done"}, {"status", runStatusName(folder.status())}};
+        return folder.finish(RunStatus::Cancelled, {}, now());
     }
 
     void poll() {
