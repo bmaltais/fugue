@@ -17,6 +17,22 @@ namespace {
 
 QString topOf(const QString &path) { return path.section('/', 0, 0); }
 
+// The errors of 8.5: nothing can serve the node's capability, its model is not running or
+// missing, its provider cannot be reached or is not configured. The node shows what is
+// missing and how to fix it.
+bool cannotRunNow(const Error &error) {
+    static const QStringList codes{"capability_unavailable", "model_not_running", "model_missing",
+                                   "provider_unreachable", "unknown_provider"};
+    return codes.contains(error.code);
+}
+
+// What a node says of an error: its message, and for the errors of 8.5 the fix too.
+QString shownMessage(const Error &error) {
+    if (!cannotRunNow(error) || error.hint.isEmpty())
+        return error.message;
+    return error.message + QLatin1Char(' ') + error.hint;
+}
+
 // The image in a slot that shows text: one transparent pixel.
 constexpr const char *kBlank = "data:image/png;base64,"
                                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
@@ -172,7 +188,8 @@ void CanvasRuns::show(const QString &tab, const QString &node) {
         return;
     const NodeView view = m_tabs.value(tab).nodes.value(node);
     QVariantMap state{{"state", aggregate(view)}, {"progress", view.progress}, {"seconds", view.seconds},
-                      {"error", view.error},      {"warnings", view.warnings}, {"values", view.values}};
+                      {"error", view.error},      {"warnings", view.warnings}, {"values", view.values},
+                      {"notice", view.notice}};
     const auto image = [&](const QString &url, int width, int height, const QString &file) {
         const QString size = QStringLiteral("%1 \u00d7 %2").arg(width).arg(height);
         state.insert("thumbnail", url);
@@ -270,7 +287,8 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
             if (!shown.isEmpty()) {
                 NodeView &view = runs.nodes[shown];
                 view.state = QStringLiteral("error");
-                view.error = error.node.contains('/') ? error.node + QStringLiteral(": ") + error.message : error.message;
+                view.error = error.node.contains('/') ? error.node + QStringLiteral(": ") + shownMessage(error)
+                                                      : shownMessage(error);
                 show(tab, shown);
             }
         }
@@ -400,7 +418,7 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
         const Error error = Error::fromJson(event.value("error").toObject());
         setState(QStringLiteral("error"));
         view.progress = -1;
-        view.error = inner ? path + QStringLiteral(": ") + error.message : error.message;
+        view.error = inner ? path + QStringLiteral(": ") + shownMessage(error) : shownMessage(error);
         runs.errors << QVariantMap{{"node", path}, {"shown", top}, {"message", error.message},
                                    {"code", error.code}, {"hint", error.hint}};
         if (tab == m_shownTab)
@@ -447,6 +465,7 @@ void CanvasRuns::onChecked(int ticket, const QJsonObject &nodes, const QJsonArra
             NodeView view = runs.nodes.value(top);
             view.inner.clear();
             view.warnings.clear();
+            view.notice.clear();
             // An error stays until the workflow is edited.
             if (asked.edit || view.state != QLatin1String("error")) {
                 view.error.clear();
@@ -464,8 +483,11 @@ void CanvasRuns::onChecked(int ticket, const QJsonObject &nodes, const QJsonArra
     for (const QJsonValue &value : problems) {
         const Error error = Error::fromJson(value.toObject());
         const QString top = topOf(error.node);
-        if (error.severity == Error::Severity::Warning && next.contains(top))
+        if (error.severity == Error::Severity::Warning && next.contains(top)) {
             next[top].warnings << error.message;
+            if (next[top].notice.isEmpty() && cannotRunNow(error))
+                next[top].notice = shownMessage(error);
+        }
     }
     // Nodes the check has no state for (not part of any output) keep their last values only.
     for (auto it = runs.nodes.cbegin(); it != runs.nodes.cend(); ++it) {
@@ -474,6 +496,7 @@ void CanvasRuns::onChecked(int ticket, const QJsonObject &nodes, const QJsonArra
         NodeView view = it.value();
         view.inner.clear();
         view.warnings.clear();
+        view.notice.clear();
         if (asked.edit || view.state != QLatin1String("error")) {
             view.state.clear();
             view.error.clear();

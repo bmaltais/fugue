@@ -190,7 +190,12 @@ shader, compiled with `qt_add_shaders`) only when the thumbnail corner is above 
 
 Under a node in error, 1.5u below its edge, the node's width: `error-chip` fill, a 2 px `error`
 rule on the left, small corner, padding 1.5u 2u, an alert glyph in `error`, and the message in
-`text` at label size, two lines then elided. A click opens the error panel at that node's path id.
+`text` at label size, four lines then elided (an error of spec 8.5 carries its fix). A click opens
+the error panel at that node's path id.
+
+A node that cannot run now (a check's warning of spec 8.5: no model, no provider) gets the same chip
+in `well` with the rule and glyph in `label`: what is missing and how to fix it, until a run or an
+edit says more.
 
 ## 5. Ports (spec 12.6)
 

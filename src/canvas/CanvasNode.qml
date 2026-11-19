@@ -33,6 +33,7 @@ Item {
     required property real seconds
     required property string error
     required property var warnings
+    required property string notice // why it cannot run now, and the fix (8.5), from a check
     required property string thumbnail
     required property string thumbnailInfo
     required property rect thumbnailRect
@@ -571,6 +572,45 @@ Item {
                         font.pixelSize: node.look.captionSize
                     }
 
+                    // Cannot run now (8.5): what is missing and how to fix it, in a chip under the
+                    // node in the label color, until a run says more.
+                    Rectangle {
+                        objectName: "noticeChip"
+                        visible: !face.failed && node.notice !== "" && face.full
+                        y: node.height + Math.round(1.5 * face.u)
+                        width: node.width
+                        height: noticeText.height + 3 * face.u
+                        radius: node.look.smallCorner
+                        color: node.look.well
+                        Rectangle {
+                            width: 2
+                            height: parent.height
+                            color: node.look.label
+                        }
+                        Glyph {
+                            x: 2 * face.u
+                            y: 1.5 * face.u
+                            name: "triangle-alert"
+                            look: node.look
+                            color: node.look.label
+                        }
+                        Text {
+                            id: noticeText
+                            x: 2 * face.u + 14 + 1.5 * face.u
+                            y: 1.5 * face.u
+                            width: parent.width - x - 2 * face.u
+                            text: node.notice
+                            wrapMode: Text.Wrap
+                            maximumLineCount: 4
+                            elide: Text.ElideRight
+                            textFormat: Text.PlainText
+                            lineHeightMode: Text.FixedHeight
+                            lineHeight: 15
+                            color: node.look.text
+                            font.pixelSize: node.look.labelSize
+                        }
+                    }
+
                     // In error: the message in a chip under the node (4.7).
                     Rectangle {
                         visible: face.failed && node.error !== "" && face.full
@@ -598,7 +638,7 @@ Item {
                             width: parent.width - x - 2 * face.u
                             text: node.error
                             wrapMode: Text.Wrap
-                            maximumLineCount: 2
+                            maximumLineCount: 4
                             elide: Text.ElideRight
                             textFormat: Text.PlainText
                             lineHeightMode: Text.FixedHeight

@@ -121,6 +121,7 @@ public:
         ThumbnailRect, // where it sits in the node, from the node's top left
         ThumbnailText, // text in the thumbnail's place: a shown text or number, a label ("Video · 0:04")
         ThumbnailDim,  // the slot is a placeholder ("No result yet"): drawn dimmed
+        Notice,        // why the node cannot run now and how to fix it (8.5), from a check
     };
 
     explicit NodeList(CanvasModel *canvas);
@@ -506,6 +507,7 @@ private:
         QString thumbnailText;
         bool thumbnailDim = false;
         QVariantMap values;
+        QString notice;
     };
 
     Snapshot snapshot() const;

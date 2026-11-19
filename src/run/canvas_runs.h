@@ -106,6 +106,7 @@ private:
         qreal seconds = -1;
         QString error;
         QStringList warnings;
+        QString notice; // a check's word on why the node cannot run now, and the fix (8.5)
         QString thumbnail;
         int thumbnailWidth = 0;
         int thumbnailHeight = 0;
