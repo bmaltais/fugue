@@ -52,11 +52,15 @@ QJsonObject okEnvelope(const QJsonValue &data) {
     return QJsonObject{{"ok", true}, {"data", data}};
 }
 
-QJsonObject errorEnvelope(const Errors &errors) {
+QJsonArray toJson(const Errors &errors) {
     QJsonArray list;
     for (const Error &error : errors)
         list.append(error.toJson());
-    return QJsonObject{{"ok", false}, {"errors", list}};
+    return list;
+}
+
+QJsonObject errorEnvelope(const Errors &errors) {
+    return QJsonObject{{"ok", false}, {"errors", toJson(errors)}};
 }
 
 } // namespace fugue

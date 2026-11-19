@@ -1,5 +1,6 @@
 // The shared engine pieces: hashes, the on-disk JSON form and the error envelope.
 
+#include <QDir>
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -9,6 +10,7 @@
 #include "engine/error.h"
 #include "engine/hash.h"
 #include "engine/json.h"
+#include "engine/result.h"
 
 using namespace fugue;
 
@@ -34,6 +36,66 @@ private slots:
         file.close();
         QCOMPARE(sha256File(path), sha256(bytes));
         QCOMPARE(sha256File(dir.filePath("missing")), QString());
+    }
+
+    void aJsonFileIsWrittenAtomicallyInTheOnDiskFormAndReadBack() {
+        QTemporaryDir dir;
+        const QString path = dir.filePath("a/b/state.json"); // the folder is made
+        const QJsonObject value{{"b", 1}, {"a", QJsonArray{true}}};
+        QVERIFY(writeJsonFile(path, value).isEmpty());
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.readAll(), writeJson(value));
+        QCOMPARE(QDir(dir.filePath("a/b")).entryList(QDir::Files), (QStringList{"state.json"})); // no temporary left
+
+        const Result<QJsonObject> read = readJsonObject(path);
+        QVERIFY(read.ok());
+        QCOMPARE(read.value(), value);
+    }
+
+    void aJsonFileThatCannotBeWrittenSaysSo() {
+        QTemporaryDir dir;
+        QFile blocker(dir.filePath("file"));
+        QVERIFY(blocker.open(QIODevice::WriteOnly));
+        blocker.close();
+        const Errors errors = writeJsonFile(dir.filePath("file/inside.json"), QJsonObject{}); // a file is in the way
+        QCOMPARE(errors.size(), 1);
+        QCOMPARE(errors.first().code, QStringLiteral("permission_denied"));
+        QVERIFY(errors.first().message.contains("inside.json"));
+    }
+
+    void readingAJsonFileTellsMissingFromCorrupt() {
+        QTemporaryDir dir;
+        QCOMPARE(readJsonObject(dir.filePath("missing.json")).error().code, QStringLiteral("file_not_found"));
+        QCOMPARE(readJsonObject(dir.path()).error().code, QStringLiteral("file_not_found")); // a folder
+
+        const auto write = [&](const QString &name, const QByteArray &bytes) {
+            QFile file(dir.filePath(name));
+            if (!file.open(QIODevice::WriteOnly))
+                qFatal("cannot write %s", qPrintable(name));
+            file.write(bytes);
+            return dir.filePath(name);
+        };
+        const Result<QJsonObject> torn = readJsonObject(write("torn.json", "{\n  \"a\": 1,\n  \"b\": tru"));
+        QCOMPARE(torn.error().code, QStringLiteral("invalid_json"));
+        QVERIFY2(torn.error().message.contains("line 3"), qPrintable(torn.error().message));
+        QCOMPARE(readJsonObject(write("list.json", "[1, 2]")).error().code, QStringLiteral("invalid_json"));
+        QCOMPARE(readJsonObject(write("empty.json", "")).error().code, QStringLiteral("invalid_json"));
+        // A byte order mark is skipped.
+        const Result<QJsonObject> marked = readJsonObject(write("bom.json", "\xef\xbb\xbf{\"a\": 1}"));
+        QVERIFY(marked.ok());
+        QCOMPARE(marked.value().value("a").toInt(), 1);
+    }
+
+    void errorsBecomeAJsonArray() {
+        Error warning = makeError("model_missing", "No model.", "Add one.");
+        warning.severity = Error::Severity::Warning;
+        const QJsonArray array = toJson(Errors{makeError("usage", "Bad."), warning});
+        QCOMPARE(array.size(), 2);
+        QCOMPARE(array.at(0).toObject().value("code").toString(), QStringLiteral("usage"));
+        QCOMPARE(array.at(1).toObject().value("severity").toString(), QStringLiteral("warning"));
+        QCOMPARE(errorEnvelope({makeError("usage", "Bad.")}).value("errors").toArray(), toJson(Errors{makeError("usage", "Bad.")}));
+        QVERIFY(toJson(Errors{}).isEmpty());
     }
 
     void jsonIsSortedTwoSpaceWithTrailingNewline() {
