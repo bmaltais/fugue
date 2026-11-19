@@ -99,8 +99,9 @@ struct RunEnvironment {
     // between them. Without it there is no residency preference.
     ResidentModels *models = nullptr;
 
-    // Free GPU memory in MB, measured as 8.10 says (by Vulkan device type);
-    // unset means it is not measured. Before a GPU node that declares
+    // Free GPU memory in MB, measured as 8.10 says (by Vulkan device type;
+    // gpu_memory.h has the unified-memory figure); unset means it is not
+    // measured, which is the case until the helper (#32) can tell the device. Before a GPU node that declares
     // `needs.gpu.vram_mb` starts, resident models are dropped, least recently
     // used first, while this is short of it.
     std::function<qint64()> freeGpuMemoryMb;
