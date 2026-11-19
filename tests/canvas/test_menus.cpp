@@ -396,8 +396,9 @@ private slots:
         QCOMPARE(color("a"), QString());
         QCOMPARE(color("b"), QString());
 
-        // On the Frame's empty part: the Frame menu, its colors go to the Frame.
-        app.model.select({});
+        // On the Frame's empty part: the Frame menu, its colors go to the Frame alone, not
+        // to the selection the menu keeps.
+        app.model.select({"c"});
         QTest::mouseClick(app.window, Qt::RightButton, {}, app.screen(320, 30));
         QTRY_VERIFY(isOpen(app.window, "contextMenuPopup"));
         QCOMPARE(popup(app.window, "contextMenu")->property("kind").toString(), QString("frame"));
@@ -407,6 +408,7 @@ private slots:
         QVERIFY(blue->isEnabled());
         QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(blue));
         QTRY_COMPARE(app.model.frames().first().toMap().value("color").toString(), QString("blue"));
+        QCOMPARE(color("c"), QString());
         // "No color" takes it off again.
         applyLayoutColor(app.model, "none", "f1");
         QCOMPARE(app.model.frames().first().toMap().value("color").toString(), QString());

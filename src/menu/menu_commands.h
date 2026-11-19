@@ -28,7 +28,7 @@ void registerMenuCommands(CommandRegistry &registry);
 void bindMenuCommands(CommandRegistry &registry, CanvasModel &canvas,
                       std::function<void(const QUrl &)> openUrl = {});
 
-// Gives the selected nodes, and the Frame `frame` when set, the layout color `role` (a theme
+// Gives the Frame `frame` when set, else the selected nodes, the layout color `role` (a theme
 // role; "none" takes the color off), as one undo step.
 void applyLayoutColor(CanvasModel &canvas, const QString &role, const QString &frame = {});
 

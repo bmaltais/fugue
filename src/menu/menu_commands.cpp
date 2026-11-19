@@ -171,7 +171,8 @@ void applyLayoutColor(CanvasModel &canvas, const QString &role, const QString &f
             entry.insert("color", role);
         return entry;
     };
-    const QStringList selected = canvas.selectedIds();
+    // From a Frame's menu the color is the Frame's alone, whatever is selected (Appendix A).
+    const QStringList selected = frame.isEmpty() ? canvas.selectedIds() : QStringList();
     for (const QString &id : selected)
         nodes.insert(id, paint(nodes.value(id).toObject()));
     if (!selected.isEmpty())
