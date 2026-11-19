@@ -235,8 +235,14 @@ private slots:
     void opensQuicklyEmpty() {
         App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
         QVERIFY(app.open());
-        qInfo("empty window up in %lld ms", app.openedMs);
-        QVERIFY2(app.openedMs < 100, qPrintable(QString::number(app.openedMs)));
+        qInfo("empty window up in %lld ms, %lld ms of CPU", app.openedMs, app.openedCpuMs);
+        // On CPU time, as the 302-node test: under ctest -j8 the wall clock also counts the
+        // time other tests take the CPU, which made it flaky. The wall clock only catches a
+        // hang. CPU time is the whole process's, the render and loader threads too, so it runs
+        // above the wall clock (about 77 ms against 60 on 2026-11-19); 150 leaves room for a
+        // slower machine and still catches a window that does real work before its first frame.
+        QVERIFY2(app.openedCpuMs < 150, qPrintable(QString::number(app.openedCpuMs)));
+        QVERIFY2(app.openedMs < 3000, qPrintable(QString::number(app.openedMs)));
     }
 
     void nodesDrawTheirPortsOnceInViewAndNotWhenZoomedOut() {

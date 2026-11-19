@@ -56,7 +56,7 @@ QString CommandRegistry::add(const CommandSpec &spec, Handler handler) {
         return QStringLiteral("%1 has no description").arg(spec.id);
     if (!kContexts.contains(spec.context))
         return QStringLiteral("%1: unknown context \"%2\"").arg(spec.id, spec.context);
-    Entry entry{spec, std::move(handler), {}, {}, {}, {}};
+    Entry entry{spec, std::move(handler), {}, {}, {}, {}, {}};
     entry.spec.keys.clear();
     for (const QString &key : spec.keys) {
         QString problem;
