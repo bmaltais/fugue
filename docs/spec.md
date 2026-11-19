@@ -1399,8 +1399,9 @@ The look and feel of the prototype is approved. This section fixes behavior.
 
 Our own canvas, no library: node bodies as QML items in a Repeater under one transformed item,
 wires as shape paths. Not `Canvas`, not `QQuickPaintedItem`, not Qt Canvas Painter (GPL or
-commercial). The wire renderer (one Shape, a Shape per wire, or one Shape with CurveRenderer) is
-chosen from a measurement ([17](#17-open-items)).
+commercial). Each wire is its own `Shape` with the default geometry renderer, not `CurveRenderer`
+([spikes/05](spikes/05-canvas.md): same cost as one Shape, 1.5 ms per frame at 300 nodes;
+CurveRenderer drops to 15 fps when dragging at 1000 nodes).
 
 ### 12.3 Navigation
 
@@ -1735,7 +1736,7 @@ To measure or confirm before the part that depends on each is built. None blocks
 
 | Item | Blocks | Tracked |
 | --- | --- | --- |
-| Frame rate with 300 nodes, and the wire renderer | [12.2](#122-construction) | #5 |
+| ~~Frame rate with 300 nodes, and the wire renderer~~ Done: a Shape per wire ([spikes/05](spikes/05-canvas.md)) | [12.2](#122-construction) | #5 |
 | ~~libvips speed on 1 to 4 megapixel images, thread and cache settings~~ Done: keep libvips ([spikes/03](spikes/03-libvips.md)) | [14.1](#141-m1-the-first-twelve) pixel nodes | #3 |
 | ~~Offscreen GPU compute, Vulkan device enumeration, free-memory measurement, CUDA terms~~ Done ([spikes/04](spikes/04-gpu.md)); AMD free memory unmeasured | [8.10](#810-gpu-memory-and-the-helper) | #4 |
 | Plugin-interface prior art | freezing [6.9](#69-native-tier) | #6 |
