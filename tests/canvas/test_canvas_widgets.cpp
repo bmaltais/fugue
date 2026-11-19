@@ -325,17 +325,17 @@ private slots:
         QFile file(owl);
         QVERIFY(file.open(QIODevice::WriteOnly));
         file.close();
-        files->setProperty("currentFolder", QUrl::fromLocalFile(app.dir.path()));
         files->setProperty("selectedFile", QUrl::fromLocalFile(owl));
         QMetaObject::invokeMethod(files, "accepted"); // as the portal answers
+        QVERIFY(QMetaObject::invokeMethod(files, "close"));
         QCOMPARE(app.stored("all", "file"), QJsonValue(owl));
 
         app.click(app.atEnd("all", "folder"));
         QObject *folders = nullptr;
         QTRY_VERIFY((folders = app.popup("widgetFolderDialog")));
-        folders->setProperty("currentFolder", QUrl::fromLocalFile(app.dir.path()));
         folders->setProperty("selectedFolder", QUrl::fromLocalFile(app.dir.path()));
         QMetaObject::invokeMethod(folders, "accepted");
+        QVERIFY(QMetaObject::invokeMethod(folders, "close"));
         QCOMPARE(app.stored("all", "folder"), QJsonValue(app.dir.path()));
         QCOMPARE(app.steps(), 3);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));

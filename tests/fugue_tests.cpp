@@ -196,6 +196,41 @@ class FugueTests : public QObject {
 private slots:
     void initTestCase() { QQuickStyle::setStyle("Material"); }
 
+    // No test may open the desktop's own file or colour picker (the xdg-desktop-portal's,
+    // through the owner's platform theme): it would show on the owner's screen. Tests run on
+    // the generic theme (tests/test_environment.cpp), so a FileDialog is Qt's own, an item
+    // in the test's window.
+    void noTestOpensANativeDialog() {
+        QCOMPARE(qgetenv("QT_NO_XDG_DESKTOP_PORTAL"), QByteArray("1"));
+        QVERIFY(qgetenv("DBUS_SESSION_BUS_ADDRESS").contains("nonexistent"));
+        QQmlApplicationEngine engine;
+        engine.loadData(R"(
+            import QtQuick
+            import QtQuick.Dialogs
+            Window {
+                width: 640; height: 480; visible: true
+                FileDialog { id: files; objectName: "files" }
+                ColorDialog { id: colors; objectName: "colors" }
+            })");
+        QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        // Qt's own dialog is a popup item made in the window when it opens.
+        auto made = [&](const char *impl) {
+            for (QObject *child : window->findChildren<QObject *>())
+                if (QByteArray(child->metaObject()->className()).startsWith(impl))
+                    return true;
+            return false;
+        };
+        for (const auto &[name, impl] : {std::pair{"files", "QQuickFileDialogImpl"}, {"colors", "QQuickColorDialogImpl"}}) {
+            QObject *dialog = window->findChild<QObject *>(name);
+            QVERIFY(dialog);
+            QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+            QTRY_VERIFY2(made(impl), impl);
+            QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
+        }
+    }
+
     void primaryActionCounts() {
         Backend backend;
         backend.primaryAction();

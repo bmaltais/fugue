@@ -125,7 +125,7 @@ target_link_libraries(fugue PRIVATE fugue_core fugue_cli fugue_nodes)
 
 # The tests load the real Main.qml, so they carry the resources too.
 enable_testing()
-add_executable(fugue_tests tests/fugue_tests.cpp src/resources.qrc)
+add_executable(fugue_tests tests/fugue_tests.cpp tests/test_environment.cpp src/resources.qrc)
 target_link_libraries(fugue_tests PRIVATE fugue_core Qt6::Test)
 add_test(NAME fugue_tests COMMAND fugue_tests)
 set_tests_properties(fugue_tests PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
@@ -135,7 +135,7 @@ set_tests_properties(fugue_tests PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscree
 file(GLOB fugue_commands_tests CONFIGURE_DEPENDS tests/commands/*.cpp)
 foreach(test_source ${fugue_commands_tests})
   get_filename_component(test_name ${test_source} NAME_WE)
-  add_executable(${test_name} ${test_source} src/resources.qrc)
+  add_executable(${test_name} ${test_source} tests/test_environment.cpp src/resources.qrc)
   target_link_libraries(${test_name} PRIVATE fugue_core Qt6::Test)
   add_test(NAME ${test_name} COMMAND ${test_name})
   set_tests_properties(${test_name} PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
@@ -168,7 +168,7 @@ endforeach()
 file(GLOB fugue_canvas_tests CONFIGURE_DEPENDS tests/canvas/*.cpp)
 foreach(test_source ${fugue_canvas_tests})
   get_filename_component(test_name ${test_source} NAME_WE)
-  add_executable(${test_name} ${test_source} src/resources.qrc)
+  add_executable(${test_name} ${test_source} tests/test_environment.cpp src/resources.qrc)
   target_link_libraries(${test_name} PRIVATE fugue_core fugue_nodes Qt6::Test)
   target_compile_definitions(${test_name} PRIVATE FUGUE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
   add_test(NAME ${test_name} COMMAND ${test_name})
@@ -179,7 +179,7 @@ endforeach()
 file(GLOB fugue_search_tests CONFIGURE_DEPENDS tests/search/*.cpp)
 foreach(test_source ${fugue_search_tests})
   get_filename_component(test_name ${test_source} NAME_WE)
-  add_executable(${test_name} ${test_source} src/resources.qrc)
+  add_executable(${test_name} ${test_source} tests/test_environment.cpp src/resources.qrc)
   target_link_libraries(${test_name} PRIVATE fugue_core fugue_nodes Qt6::Test)
   add_test(NAME ${test_name} COMMAND ${test_name})
   set_tests_properties(${test_name} PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
@@ -190,7 +190,7 @@ endforeach()
 file(GLOB fugue_workflow_tests CONFIGURE_DEPENDS tests/workflow/*.cpp)
 foreach(test_source ${fugue_workflow_tests})
   get_filename_component(test_name ${test_source} NAME_WE)
-  add_executable(${test_name} ${test_source} src/resources.qrc)
+  add_executable(${test_name} ${test_source} tests/test_environment.cpp src/resources.qrc)
   target_link_libraries(${test_name} PRIVATE fugue_core fugue_nodes Qt6::Test)
   target_compile_definitions(${test_name} PRIVATE FUGUE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
   add_test(NAME ${test_name} COMMAND ${test_name})
@@ -216,11 +216,17 @@ foreach(test_source ${fugue_cli_tests})
 endforeach()
 
 # No test reads or writes the owner's settings, providers or keymap: every test starts with
-# XDG_CONFIG_HOME on an empty folder of its own (a test may still set its own).
+# XDG_CONFIG_HOME on an empty folder of its own (a test may still set its own). No test
+# reaches the owner's desktop either: the generic platform theme, so a FileDialog is Qt's own
+# and never the portal's picker on the owner's screen, and no session bus (the GUI tests also
+# set these themselves, tests/test_environment.cpp, for runs outside ctest).
 get_property(fugue_all_tests DIRECTORY PROPERTY TESTS)
 foreach(test_name ${fugue_all_tests})
   set_property(TEST ${test_name} APPEND PROPERTY ENVIRONMENT
-               XDG_CONFIG_HOME=${CMAKE_BINARY_DIR}/test-config/${test_name})
+               XDG_CONFIG_HOME=${CMAKE_BINARY_DIR}/test-config/${test_name}
+               QT_QPA_PLATFORMTHEME=generic
+               QT_NO_XDG_DESKTOP_PORTAL=1
+               DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent/fugue-tests-have-no-session-bus)
 endforeach()
 
 # `cmake --install build --prefix ~/.local` puts the app in the launcher

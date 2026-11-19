@@ -216,8 +216,10 @@ private slots:
         // 12.1's target is the window itself (opensQuicklyEmpty); a 300-node file gets a
         // looser bound, so a slow CI machine does not fail it. It is on CPU time: the wall
         // clock also counts the time other tests take the CPU under ctest -j8, which made it
-        // flaky. The wall clock only catches a hang.
-        QVERIFY2(app.openedCpuMs < 500, qPrintable(QString::number(app.openedCpuMs)));
+        // flaky. The wall clock only catches a hang. CPU time grows under load too (cores
+        // shared with other tests: about 280 ms alone, 643 once under ctest -j8 beside a
+        // build), so the bound is loose; the item count below is the exact check.
+        QVERIFY2(app.openedCpuMs < 1000, qPrintable(QString::number(app.openedCpuMs)));
         QVERIFY2(app.openedMs < 3000, qPrintable(QString::number(app.openedMs)));
         // What the time grows with, counted, so it can be checked without a clock: 3534 items
         // on 2026-11-19 (the faces and rows of the 44 nodes in view, two items for each other
