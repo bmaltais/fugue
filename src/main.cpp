@@ -19,6 +19,7 @@
 #include "commands/command_registry.h"
 #include "cli/args.h"
 #include "cli/cli.h"
+#include "menu/image_actions.h"
 #include "menu/menu_commands.h"
 #include "engine/registry.h"
 #include "nodes/builtin.h"
@@ -88,6 +89,9 @@ int main(int argc, char *argv[]) {
     fugue::RunService runService(runSetup);
     fugue::CanvasRuns runs(&canvasModel, &workflows, &runService, &registry);
     runs.registerCommands(commands);
+    // Open, Copy and Save Image on a node's menu (#57); failures go to the window banner.
+    fugue::ImageActions imageActions(commands, canvasModel, runs);
+    QObject::connect(&imageActions, &fugue::ImageActions::message, &workflows, &fugue::Workflows::notify);
 
     QQmlApplicationEngine engine;
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
@@ -98,6 +102,7 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("commands", &commands);
     engine.rootContext()->setContextProperty("workflows", &workflows);
     engine.rootContext()->setContextProperty("runs", &runs);
+    engine.rootContext()->setContextProperty("imageActions", &imageActions);
     engine.rootContext()->setContextProperty("appSettings", &appSettings);
     engine.load(QUrl("qrc:/Main.qml"));
     if (engine.rootObjects().isEmpty())

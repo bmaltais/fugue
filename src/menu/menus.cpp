@@ -36,7 +36,8 @@ QVariantList bar() {
                  command("view.toggle-links"), separator(), command("panel.nodes"), command("panel.workflows")}),
         submenu(QT_TRANSLATE_NOOP("Menu", "&Node"),
                 {command("node.search"), separator(), command("node.bypass"), command("node.mute"),
-                 command("node.collapse"), command("node.pin"), separator(), command("frame.make"),
+                 command("node.collapse"), command("node.pin"), separator(), command("node.open-image"),
+                 command("node.copy-image"), command("node.save-image"), separator(), command("frame.make"),
                  command("group.make"), command("group.ungroup"), command("group.enter"), command("group.leave")}),
         submenu(QT_TRANSLATE_NOOP("Menu", "&Run"),
                 {command("run.start"), command("run.start-first"), command("run.to-here"), separator(),
@@ -57,7 +58,8 @@ QVariantList canvas() {
 // Right-click on a node: it is selected first, so each command acts on the selection.
 QVariantList node() {
     return {command("edit.rename"), separator(), command("node.bypass"), command("node.mute"),
-            command("node.collapse"), command("node.pin"), colors(), separator(), command("edit.copy"),
+            command("node.collapse"), command("node.pin"), colors(), separator(), command("node.open-image"),
+            command("node.copy-image"), command("node.save-image"), separator(), command("edit.copy"),
             command("edit.clone"), separator(), command("frame.make"), command("group.make"),
             command("group.ungroup"), command("group.enter"), separator(), command("run.to-here"), separator(),
             command("edit.delete")};
