@@ -222,6 +222,34 @@ private slots:
         QCOMPARE(app.fits, 1);
     }
 
+    // A wheel over an open multiline field scrolls its text while there is more to read;
+    // anywhere else, or with nothing to scroll, it is the canvas's (zoom, in the legacy preset).
+    void aWheelOverAnOpenMultilineFieldScrollsItOtherwiseZooms() {
+        WidgetApp app;
+        QVERIFY(app.open());
+        auto wheelAt = [&](QPoint at) {
+            QWheelEvent event(at, app.window->mapToGlobal(at), {}, QPoint(0, -120), Qt::NoButton, {},
+                              Qt::NoScrollPhase, false);
+            QCoreApplication::sendEvent(app.window, &event);
+        };
+        app.click(app.in("all", "notes"));
+        QTRY_COMPARE(app.focused()->objectName(), QString("widgetArea"));
+        QQuickItem *flick = app.focused()->parentItem()->parentItem();
+        // Short text: nothing to scroll, so the wheel zooms the canvas.
+        app.type("one");
+        wheelAt(app.focused()->mapToScene(QPointF(20, 10)).toPoint());
+        QVERIFY2(app.zoom() < 1.0, qPrintable(QString::number(app.zoom())));
+        const qreal zoom = app.zoom();
+        // Long text: the wheel scrolls the field and the zoom stays.
+        for (int i = 0; i < 40; ++i)
+            app.key(Qt::Key_Return);
+        QTRY_VERIFY(flick->property("contentHeight").toReal() > flick->height());
+        flick->setProperty("contentY", 0);
+        wheelAt(app.focused()->mapToScene(QPointF(20, 10)).toPoint());
+        QTRY_VERIFY2(flick->property("contentY").toReal() > 0, "the field did not scroll");
+        QCOMPARE(app.zoom(), zoom);
+    }
+
     void aMultilineFieldTakesNewLinesUntilFocusLeaves() {
         WidgetApp app;
         QVERIFY(app.open());

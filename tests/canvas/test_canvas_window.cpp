@@ -193,9 +193,11 @@ struct App {
         QTest::mouseRelease(window, button, modifiers, to);
     }
 
-    void wheel(QPoint at, QPoint angle, QPoint pixels = {}, Qt::KeyboardModifiers modifiers = {}) {
-        QWheelEvent event(at, window->mapToGlobal(at), pixels, angle, Qt::NoButton, modifiers, Qt::NoScrollPhase,
-                          false);
+    // A mouse wheel has no scroll phase; a touchpad's two-finger scroll does (Begin, Update, End,
+    // Momentum). Either may carry a pixelDelta.
+    void wheel(QPoint at, QPoint angle, QPoint pixels = {}, Qt::KeyboardModifiers modifiers = {},
+               Qt::ScrollPhase phase = Qt::NoScrollPhase) {
+        QWheelEvent event(at, window->mapToGlobal(at), pixels, angle, Qt::NoButton, modifiers, phase, false);
         QCoreApplication::sendEvent(window, &event);
     }
 };
@@ -261,7 +263,7 @@ private slots:
         // n0 is on screen; n19, at x = 4940, is far to the right.
         QVERIFY(node("n0")->property("rowsMade").toBool());
         QVERIFY(!node("n19")->property("rowsMade").toBool());
-        app.wheel({500, 300}, {0, 0}, {-4600, 0}); // a trackpad swipe to the right end
+        app.wheel({500, 300}, {0, 0}, {-4600, 0}, {}, Qt::ScrollUpdate); // a touchpad swipe to the right end
         QTRY_VERIFY(node("n19")->property("rowsMade").toBool());
         QCOMPARE(node("n19")->property("tier").toInt(), 0);
         // Zoomed out the nodes shed detail by tier (docs/canvas-look.md 14): the map below
@@ -425,6 +427,50 @@ private slots:
         QCOMPARE(app.model.document().layout.value("view").toObject().value("zoom").toDouble(), 0.1);
     }
 
+    // Qt on Wayland and libinput high-resolution wheels can give a mouse wheel a pixelDelta too;
+    // only the scroll phase tells it from a touchpad (spec 12.3).
+    void aMouseWheelWithAPixelDeltaStillZooms() {
+        App app(load(small));
+        QVERIFY(app.open());
+        const QPoint at = app.at(500, 300);
+        app.wheel(at, {0, 120}, {0, 15});
+        QVERIFY(qAbs(app.zoom() - 1.1) < 1e-9);
+        QCOMPARE(app.pan().x() + app.pan().y() != 0, true); // zoomed at the pointer, not at the origin
+        QCOMPARE(app.screen(500, 300), at);
+        app.wheel(at, {0, -60}, {0, -8}); // a fractional high-resolution step
+        QVERIFY(qAbs(app.zoom() - 1.1 * qPow(1.1, -0.5)) < 1e-9);
+    }
+
+    void aTouchpadScrollPansInBothPresetsAndCtrlZooms() {
+        for (const char *preset : {"legacy", "standard"}) {
+            App app(load(small));
+            QVERIFY(app.open());
+            app.canvas->setProperty("navigation", preset);
+            app.wheel({500, 300}, {10, -20}, {10, -20}, {}, Qt::ScrollBegin);
+            QCOMPARE(app.pan(), QPointF(10, -20));
+            QCOMPARE(app.zoom(), 1.0);
+            app.wheel({500, 300}, {0, 50}, {0, 50}, Qt::ControlModifier, Qt::ScrollUpdate);
+            QVERIFY(qAbs(app.zoom() - 1.1) < 1e-9);
+        }
+    }
+
+    void ctrlWheelZoomsInBothPresets() {
+        for (const char *preset : {"legacy", "standard"}) {
+            App app(load(small));
+            QVERIFY(app.open());
+            app.canvas->setProperty("navigation", preset);
+            app.wheel({500, 300}, {0, 120}, {0, 15}, Qt::ControlModifier);
+            QVERIFY2(qAbs(app.zoom() - 1.1) < 1e-9, preset);
+            QCOMPARE(app.pan().x() != 0 || app.pan().y() != 0, true);
+        }
+    }
+
+    void theDefaultPresetIsLegacy() {
+        App app(load(small));
+        QVERIFY(app.open());
+        QCOMPARE(app.canvas->property("navigation").toString(), QStringLiteral("legacy"));
+    }
+
     void aLeftDragOnEmptyCanvasPans() {
         App app(load(small));
         QVERIFY(app.open());
@@ -451,8 +497,12 @@ private slots:
     void aTrackpadPansAndPinchZooms() {
         App app(load(small));
         QVERIFY(app.open());
-        app.wheel({500, 300}, {0, 24}, {-12, 18});
+        app.wheel({500, 300}, {0, 24}, {-12, 18}, {}, Qt::ScrollUpdate);
         QCOMPARE(app.pan(), QPointF(-12, 18));
+        app.wheel({500, 300}, {0, 24}, {-12, 18}, {}, Qt::ScrollMomentum);
+        QCOMPARE(app.pan(), QPointF(-24, 36));
+        app.wheel({500, 300}, {24, -36}, {24, -36}, {}, Qt::ScrollUpdate);
+        QCOMPARE(app.pan(), QPointF(0, 0));
         QCOMPARE(app.zoom(), 1.0);
         QNativeGestureEvent pinch(Qt::ZoomNativeGesture, QPointingDevice::primaryPointingDevice(), 2, QPointF(500, 300),
                                   QPointF(500, 300), app.window->mapToGlobal(QPointF(500, 300)), 0.25, QPointF());

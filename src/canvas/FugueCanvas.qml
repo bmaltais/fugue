@@ -11,7 +11,8 @@ import QtQuick.Shapes
 // model, so the node delegates carry no input handlers. Navigation follows 12.3: the legacy
 // preset (ComfyUI's default) pans with a left-drag on empty canvas and zooms with the wheel;
 // the standard preset selects with a left-drag and pans with the wheel. In both, middle-drag
-// and Space+drag pan, a trackpad (a wheel event with pixelDelta) pans and a pinch zooms, and
+// and Space+drag pan, a touchpad (a wheel event with a scroll phase, or from a touchpad device;
+// never told by pixelDelta, which a mouse wheel can carry too) pans and a pinch zooms, and
 // right-drag does nothing.
 //
 // Editing (12.4): Shift or Ctrl+click adds a node to the selection, or takes one already in
@@ -31,7 +32,7 @@ FocusScope {
     id: canvas
 
     required property var model
-    // "legacy" or "standard" (12.3). A setting once settings exist.
+    // "legacy" or "standard" (12.3). Bound to the navigation setting; legacy when unset.
     property string navigation: "legacy"
     readonly property real minZoom: 0.1
     readonly property real maxZoom: 4
@@ -419,13 +420,17 @@ FocusScope {
         }
 
         onWheel: wheel => {
-            const trackpad = wheel.pixelDelta.x !== 0 || wheel.pixelDelta.y !== 0
+            // A touchpad is told by its scroll phase or its device, never by pixelDelta: a mouse
+            // wheel can carry one too (Wayland, libinput high-resolution wheels).
+            const trackpad = wheel.phase !== Qt.NoScrollPhase
+                || (wheel.device && wheel.device.type === PointerDevice.TouchPad)
+            const pixels = wheel.pixelDelta.x !== 0 || wheel.pixelDelta.y !== 0
             const zooms = (wheel.modifiers & Qt.ControlModifier)
                 || (!trackpad && canvas.navigation === "legacy")
             if (zooms) {
-                const steps = (trackpad ? wheel.pixelDelta.y / 50 : wheel.angleDelta.y / 120)
+                const steps = (trackpad && pixels ? wheel.pixelDelta.y / 50 : wheel.angleDelta.y / 120)
                 canvas.zoomAt(wheel.x, wheel.y, Math.pow(1.1, steps))
-            } else if (trackpad) {
+            } else if (trackpad && pixels) {
                 canvas.panBy(wheel.pixelDelta.x, wheel.pixelDelta.y)
             } else {
                 canvas.panBy(wheel.angleDelta.x / 2, wheel.angleDelta.y / 2)
