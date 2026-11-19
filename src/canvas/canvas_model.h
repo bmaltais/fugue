@@ -217,8 +217,11 @@ public:
     qreal headerHeight() const { return m_headerHeight; }
     qreal rowHeight() const { return m_rowHeight; }
     qreal unit() const { return m_textSize / 3.0; }
-    // A node's width when the layout sets none: 60u.
+    // A node's width when the layout sets none: 60u (longer text values widen it, up to the maximum).
     qreal defaultWidth() const { return m_defaultWidth; }
+    // What a manual resize allows (docs/canvas-look.md 4.1): 40u to 120u wide.
+    qreal minWidth() const { return qRound(40 * unit()); }
+    qreal maxWidth() const { return qRound(120 * unit()); }
 
     // --- hit tests, in world coordinates ---
 
@@ -370,6 +373,22 @@ public:
 
     // Moving: beginMove picks what moves (the selection when the node is in it, else just
     // the node), moveBy offsets them from where they started, endMove finishes.
+    // Resizing (#49). A node is auto-sized unless the layout pins its size: it grows to fit
+    // its content (longer text values, multiline text, the run's thumbnail) and is
+    // recomputed only when that changes. A resize pins the width and height (never below
+    // what the content needs, 40u to 120u wide); autoSize() unpins them. resizeGripAt finds
+    // the node whose bottom-right grip (size world units square) holds the point. A
+    // resize, begin to end, is one undo step.
+    Q_INVOKABLE QString resizeGripAt(qreal x, qreal y, qreal size) const;
+    Q_INVOKABLE void beginResize(const QString &node);
+    Q_INVOKABLE void resizeBy(qreal dx, qreal dy); // from the size at beginResize
+    Q_INVOKABLE void endResize();
+    Q_INVOKABLE bool autoSize(const QString &node);
+    // The hook for anything that changes what a node's content needs without a document
+    // edit (a run's thumbnail arriving, #19): lays the node out again, tells the views what
+    // moved (size, thumbnail, ports) and brings its wires along. False when nothing changed.
+    Q_INVOKABLE bool refreshSize(const QString &node);
+
     Q_INVOKABLE void beginMove(const QString &node);
     Q_INVOKABLE void moveBy(qreal dx, qreal dy);
     Q_INVOKABLE void endMove();
@@ -439,7 +458,8 @@ private:
         bool missing = false;
         QPointF pos;
         qreal width = 0;
-        bool sized = false; // the layout sets the width
+        bool sized = false; // the layout pins the width (a manual resize, layout.nodes.<id>.size)
+        qreal pinnedHeight = 0; // the height the layout pins, 0: automatic (never below the content's)
         qreal height = 0;
         bool collapsed = false;
         qreal collapsedWidth = 0; // the header alone: fits the title (docs/canvas-look.md 9)
@@ -492,6 +512,12 @@ private:
 
     void rebuildLinks();
     void layOut(NodeRow &row) const;
+    qreal autoWidth(const NodeRow &row, const fugue::Node &node) const;
+    // layOut again and emit what changed (plus `roles`); the node's wires follow.
+    // `resized`: the caller already changed the size state, so nothing before it to compare with.
+    bool relayOut(int row, QList<int> roles = {}, bool resized = false);
+    void refreshLinksOf(const QString &node);
+    std::pair<qreal, qreal> pinnedSize(const QJsonObject &entry) const;
     void autoPlace(const QSet<QString> &unplaced);
     NodeRow makeRow(const QString &id) const;
     void portsFromType(NodeRow &row, const fugue::Node &node) const;
@@ -541,6 +567,11 @@ private:
     bool m_moveOpen = false;  // a move holds an edit open
     bool m_cloneOpen = false; // an Alt+drag clone holds one more
     bool m_dragOpen = false;  // a link drag holds an edit open
+    bool m_resizeOpen = false; // a resize holds one too
+    QString m_resizeNode;
+    QSizeF m_resizeStart;     // its size when the resize began
+    bool m_resizeWasSized = false;
+    qreal m_resizeWasWidth = 0, m_resizeWasHeight = 0;
 
     std::unique_ptr<QUndoStack> m_undo;
     int m_editDepth = 0;

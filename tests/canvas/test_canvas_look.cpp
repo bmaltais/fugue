@@ -269,6 +269,66 @@ private slots:
         QVERIFY(shot.save(QStringLiteral("%1/%2-%3-r%4.png").arg(out, board, theme).arg(radius)));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
+
+    // The wire dragged from any port has the color it will have once attached: a text wire is
+    // the text port's color, from an output, an unconnected input, or an input whose link
+    // was picked up, also right after a link was deleted.
+    void aDraggedWireIsInThePortColor_data() {
+        QTest::addColumn<bool>("deleteFirst");
+        QTest::addColumn<QPointF>("from");
+        QTest::addColumn<bool>("hover");
+        QTest::addRow("output after delete") << true << QPointF(260, 144) << false;
+        QTest::addRow("unconnected input after delete") << true << QPointF(340, 224) << false;
+        QTest::addRow("picked-up input") << false << QPointF(340, 224) << false;
+        QTest::addRow("output, link kept") << false << QPointF(260, 144) << false;
+        QTest::addRow("output onto input") << true << QPointF(260, 144) << true;
+        QTest::addRow("input onto output") << true << QPointF(340, 224) << true;
+    }
+
+    void aDraggedWireIsInThePortColor() {
+        QFETCH(bool, deleteFirst);
+        QFETCH(bool, hover);
+        QFETCH(QPointF, from);
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {
+            "prompt": {"type": "fugue/text", "version": "1.0.0", "inputs": {"text": "a red fox"}},
+            "gen": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"prompt": {"from": "prompt.text"}}}}},
+          "layout": {"nodes": {"prompt": {"pos": [20, 100]}, "gen": {"pos": [340, 60]}},
+                     "view": {"center": [480, 340], "zoom": 1}}})"));
+        QVERIFY(openAt(app, 900, 700));
+        QCOMPARE(app.model.links()->rowCount(), 1);
+        if (deleteFirst) {
+            // Delete the link with its cut handle, then press on a port.
+            QTest::mouseMove(app.window, app.screen(300, 184));
+            auto *cut = canvas_test::item(app.window->contentItem(), "cutHandle");
+            QTRY_VERIFY(cut->isVisible());
+            QTest::mouseClick(app.window, Qt::LeftButton, {}, cut->mapToScene(QPointF(cut->width() / 2, cut->height() / 2)).toPoint());
+            QCOMPARE(app.model.links()->rowCount(), 0);
+        }
+        const QPointF to = hover ? (from.x() > 300 ? QPointF(260, 144) : QPointF(340, 224)) : QPointF(150, 450);
+        const QPoint start = app.screen(from.x(), from.y()), end = app.screen(to.x(), to.y());
+        QTest::mousePress(app.window, Qt::LeftButton, {}, start);
+        // The pointer leaves from over its own port first, which is no target (an invalid
+        // wire), and then goes on.
+        QTest::mouseMove(app.window, start + QPoint(3, 3));
+        QTest::qWait(100);
+        for (int i = 1; i <= 8; ++i)
+            QTest::mouseMove(app.window, start + (end - start) * i / 8);
+        QTRY_VERIFY(app.canvas->property("dragging").toBool());
+        QTest::qWait(100);
+        const QImage shot = app.window->grabWindow();
+        const QColor want = app.theme.look()->property("ports").toMap().value("text").value<QColor>();
+        int right = 0;
+        const QRect box = hover ? QRect(app.screen(262, 130), app.screen(338, 230)) : QRect(app.screen(100, 260), app.screen(335, 470));
+        for (int y = box.top(); y <= box.bottom(); ++y)
+            for (int x = box.left(); x <= box.right(); ++x) {
+                const QColor c = shot.pixelColor(x, y);
+                if (qAbs(c.red() - want.red()) + qAbs(c.green() - want.green()) + qAbs(c.blue() - want.blue()) < 30)
+                    ++right;
+            }
+        QTest::mouseRelease(app.window, Qt::LeftButton, {}, end);
+        QVERIFY2(right > 40, qPrintable(QStringLiteral("want %1: %2 pixels right").arg(want.name()).arg(right)));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
 };
 
 QTEST_MAIN(TestCanvasLook)

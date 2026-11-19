@@ -1,5 +1,6 @@
 #include "canvas/canvas_model.h"
 #include "canvas/input_links.h"
+#include "canvas/node_size.h"
 
 #include "engine/node_type.h"
 #include "engine/registry.h"
@@ -219,6 +220,14 @@ Document CanvasModel::document() const {
     for (const NodeRow &row : m_rows) {
         QJsonObject entry = nodes.value(row.id).toObject();
         entry.insert("pos", QJsonArray{qRound64(row.pos.x()), qRound64(row.pos.y())});
+        // A pinned size is [width, height], 0 for the part left automatic (4.5).
+        if (row.sized || row.pinnedHeight > 0) {
+            entry.insert("size", QJsonArray{qRound64(row.sized ? row.width : 0), qRound64(row.pinnedHeight)});
+        } else {
+            const QJsonArray was = entry.value("size").toArray();
+            if (was.at(0).toDouble() > 0 || was.at(1).toDouble() > 0)
+                entry.remove("size"); // auto again
+        }
         nodes.insert(row.id, entry);
     }
     // Entries of nodes that are gone would only confuse a reader.
@@ -299,11 +308,8 @@ void CanvasModel::setTextSize(int size) {
     m_padTop = qRound(u);
     m_padBottom = qRound(2 * u);
     m_defaultWidth = qRound(60 * u);
-    for (NodeRow &row : m_rows) {
-        if (!row.sized)
-            row.width = m_defaultWidth;
+    for (NodeRow &row : m_rows)
         layOut(row);
-    }
     for (int i = 0; i < int(m_links.size()); ++i)
         refreshLinkEnds(i);
     m_nodeList->endResetModel();
@@ -353,6 +359,7 @@ CanvasModel::NodeRow CanvasModel::makeRow(const QString &id) const {
         row.title = title;
     const QJsonArray size = layout.value("size").toArray();
     row.sized = size.size() == 2 && size[0].toDouble() > 0;
+    row.pinnedHeight = size.size() == 2 ? std::max(0.0, size[1].toDouble()) : 0;
     row.width = row.sized ? size[0].toDouble() : m_defaultWidth;
     row.collapsed = layout.value("collapsed").toBool();
     row.color = layout.value("color").toString();
@@ -436,11 +443,31 @@ void CanvasModel::portsFromType(NodeRow &row, const Node &node) const {
     row.missing = true;
 }
 
+// The width of a node the layout does not pin: 60u, wider for the longest text value a `line`
+// input shows (its label and value side by side, the whole value), up to 120u.
+qreal CanvasModel::autoWidth(const NodeRow &row, const Node &node) const {
+    qreal needed = 0;
+    for (const Port &port : row.inputs) {
+        if (!port.widget || port.widgetType != QLatin1String("line"))
+            continue;
+        const InputValue value = node.inputs.value(port.name);
+        if (value.kind() != InputValue::Kind::Literal || !value.literal().isString() || value.literal().toString().isEmpty())
+            continue;
+        needed = std::max(needed, node_size::lineWidgetWidth(port.label, value.literal().toString(), m_textSize));
+    }
+    return std::clamp(needed, m_defaultWidth, maxWidth());
+}
+
 // Outputs first, then inputs in their order, one row each, as in Blender (docs/canvas-look.md
 // 4.3): nothing shares a row, so a widget can span the node. An unlinked multiline input is a
-// tall row; its port stays level with a normal row's middle. The run's thumbnail goes under.
+// tall row, taller for the lines its text wraps to (up to 40u); its port stays level with a
+// normal row's middle. The run's thumbnail goes under. Auto-size (#49): a width the layout
+// does not pin fits the longest text value; a pinned height gives what the content does not
+// need to the thumbnail, else to the last multiline input.
 void CanvasModel::layOut(NodeRow &row) const {
     row.thumbnail = {};
+    const Node node = m_document.graph.nodes.value(row.id);
+    row.width = row.sized ? std::clamp(row.width, minWidth(), maxWidth()) : autoWidth(row, node);
     if (row.collapsed) {
         // The title plus room for the kind mark, the meta and the padding, at most 60u and
         // never wider than the node open (docs/canvas-look.md 9).
@@ -457,34 +484,113 @@ void CanvasModel::layOut(NodeRow &row) const {
         row.height = m_headerHeight;
         return;
     }
-    const Node node = m_document.graph.nodes.value(row.id);
-    qreal top = m_headerHeight + m_padTop;
-    auto place = [&](Port &port, qreal height) {
-        port.rowTop = top;
-        port.rowHeight = height;
-        port.y = top + m_rowHeight / 2;
-        top += height;
-    };
-    for (Port &port : row.outputs)
-        place(port, m_rowHeight);
-    for (Port &port : row.inputs) {
-        const bool tall = port.widgetType == QLatin1String("multiline") && port.widget
-                          && linksIn(node.inputs.value(port.name)).isEmpty();
-        place(port, tall ? m_tallRowHeight : m_rowHeight);
-    }
-    // A placeholder says so on a row of its own (spec 11.6).
-    if (row.missing)
-        top += m_rowHeight;
     const auto run = m_run.constFind(row.id);
-    if (run != m_run.constEnd() && !run->thumbnail.isEmpty()) {
-        // 1.5u in from the sides, 1u under the rows, its height from its aspect (0.5 to 1.5).
-        const qreal inset = qRound(1.5 * unit());
-        const qreal width = row.width - 2 * inset;
-        const qreal height = qRound(width * std::clamp(run->thumbnailAspect, 0.5, 1.5));
-        row.thumbnail = QRectF(inset, top + m_padTop, width, height);
-        top = row.thumbnail.bottom();
+    const bool hasThumbnail = run != m_run.constEnd() && !run->thumbnail.isEmpty();
+    const qreal maxTall = qRound(40 * unit());
+    const qreal textWidth = row.width - 10 * unit(); // the well's inset and padding, both sides
+    // One pass; `extra` is what a pinned height adds to the item that grows.
+    auto build = [&](qreal extra) {
+        qreal top = m_headerHeight + m_padTop;
+        auto place = [&](Port &port, qreal height) {
+            port.rowTop = top;
+            port.rowHeight = height;
+            port.y = top + m_rowHeight / 2;
+            top += height;
+        };
+        for (Port &port : row.outputs)
+            place(port, m_rowHeight);
+        Port *grows = nullptr;
+        for (Port &port : row.inputs) {
+            const InputValue value = node.inputs.value(port.name);
+            const bool tall = port.widgetType == QLatin1String("multiline") && port.widget && linksIn(value).isEmpty();
+            qreal height = m_rowHeight;
+            if (tall) {
+                height = m_tallRowHeight;
+                if (value.kind() == InputValue::Kind::Literal && value.literal().isString())
+                    height = std::clamp(node_size::multilineHeight(
+                                            node_size::wrappedLines(value.literal().toString(), textWidth, m_textSize), m_textSize),
+                                        m_tallRowHeight, std::max(maxTall, m_tallRowHeight));
+                grows = &port;
+            }
+            place(port, height);
+            if (tall && !hasThumbnail && extra > 0)
+                port.rowHeight = height; // the last one takes the extra below
+        }
+        // A placeholder says so on a row of its own (spec 11.6).
+        if (row.missing)
+            top += m_rowHeight;
+        if (hasThumbnail) {
+            // 1.5u in from the sides, 1u under the rows, its height from its aspect (0.5 to 1.5).
+            const qreal inset = qRound(1.5 * unit());
+            const qreal width = row.width - 2 * inset;
+            const qreal height = qRound(width * std::clamp(run->thumbnailAspect, 0.5, 1.5));
+            row.thumbnail = QRectF(inset, top + m_padTop, width, height + extra);
+            top = row.thumbnail.bottom();
+        } else if (grows && extra > 0) {
+            // The last multiline input is taller; what is below it moves down.
+            grows->rowHeight += extra;
+            bool below = false;
+            for (Port &port : row.inputs) {
+                if (below)
+                    port.rowTop += extra, port.y += extra;
+                if (&port == grows)
+                    below = true;
+            }
+            top += extra;
+        }
+        row.height = top + m_padBottom + (hasThumbnail || grows ? 0 : extra);
+    };
+    build(0);
+    if (row.pinnedHeight > row.height + 0.5)
+        build(row.pinnedHeight - row.height);
+}
+
+bool CanvasModel::relayOut(int r, QList<int> roles, bool resized) {
+    NodeRow &row = m_rows[size_t(r)];
+    const qreal width = row.shownWidth(), height = row.height;
+    const QRectF thumbnail = row.thumbnail;
+    QList<qreal> ys;
+    for (const Port &port : row.inputs)
+        ys << port.y;
+    for (const Port &port : row.outputs)
+        ys << port.y;
+    layOut(row);
+    QList<qreal> now;
+    for (const Port &port : row.inputs)
+        now << port.y;
+    for (const Port &port : row.outputs)
+        now << port.y;
+    const bool moved = ys != now;
+    const bool wider = width != row.shownWidth();
+    if (wider)
+        roles << NodeList::Width;
+    if (height != row.height)
+        roles << NodeList::Height;
+    if (thumbnail != row.thumbnail)
+        roles << NodeList::ThumbnailRect;
+    if (moved)
+        roles << NodeList::Inputs << NodeList::Outputs;
+    if (resized)
+        roles << NodeList::Width << NodeList::Height << NodeList::ThumbnailRect << NodeList::Inputs << NodeList::Outputs;
+    if (roles.isEmpty())
+        return false;
+    emitNodeChanged(r, roles);
+    if (moved || wider || resized)
+        refreshLinksOf(row.id);
+    return true;
+}
+
+void CanvasModel::refreshLinksOf(const QString &node) {
+    for (const int l : m_linksOf.value(node)) {
+        refreshLinkEnds(l);
+        const QModelIndex index = m_linkList->index(l, 0);
+        emit m_linkList->dataChanged(index, index, {LinkList::X1, LinkList::Y1, LinkList::X2, LinkList::Y2, LinkList::Path});
     }
-    row.height = top + m_padBottom;
+}
+
+bool CanvasModel::refreshSize(const QString &node) {
+    const int r = rowOf(node);
+    return r >= 0 && relayOut(r);
 }
 
 // Columns by depth: a node sits one column right of the deepest node it reads from.
@@ -539,13 +645,31 @@ QVariantList CanvasModel::portMaps(const NodeRow &row, bool outputs) const {
 }
 
 QVariantMap CanvasModel::portMap(const NodeRow &row, const Port &port) const {
+    // A placeholder's port has no type of its own: it shows the type of what it is linked to
+    // (the output feeding it, or an input it feeds), so its mark is that type's shape.
+    std::optional<PortSpec> type = port.type;
+    PortKind kind = port.kind;
+    if (!type) {
+        for (const int i : m_linksOf.value(row.id)) {
+            const LinkRow &link = m_links[size_t(i)];
+            const Port *other = port.output ? (link.from.node == row.id && link.from.port == port.name
+                                                   ? findPort(link.toNode, link.toInput, false) : nullptr)
+                                            : (link.toNode == row.id && link.toInput == port.name
+                                                   ? findPort(link.from.node, link.from.port, true) : nullptr);
+            if (other && other->type) {
+                type = other->type;
+                kind = other->kind;
+                break;
+            }
+        }
+    }
     QVariantMap map{{"name", port.name},
                     {"label", port.label},
                     {"output", port.output},
-                    {"type", port.type ? port.type->toString() : QString()},
-                    {"list", port.type && port.type->list},
-                    {"shape", shape(port.type, port.kind)},
-                    {"color", colorKey(port.type, port.kind)},
+                    {"type", type ? type->toString() : QString()},
+                    {"list", type && type->list},
+                    {"shape", shape(type, kind)},
+                    {"color", colorKey(type, kind)},
                     {"y", port.y},
                     {"rowTop", port.rowTop},
                     {"rowHeight", port.rowHeight},
@@ -559,6 +683,8 @@ QVariantMap CanvasModel::portMap(const NodeRow &row, const Port &port) const {
         const InputValue value = node.inputs.value(port.name);
         map.insert("value", displayValue(value, port, &isDefault));
         map.insert("isDefault", isDefault);
+        // The word shown for an unset input that has no default: not a value to start typing from.
+        map.insert("placeholder", isDefault && port.defaultValue.isUndefined() && !map.value("value").toString().isEmpty());
         // The stored value as it is, for the widget (undefined when unset).
         map.insert("literal", value.toJson().toVariant());
         // A slider fills its value's share of its range.
@@ -599,7 +725,12 @@ QString CanvasModel::displayValue(const InputValue &value, const Port &port, boo
     *isDefault = false;
     if (value.isEmpty()) {
         *isDefault = true;
-        return port.defaultValue.isUndefined() ? QString() : literal(port.defaultValue);
+        if (!port.defaultValue.isUndefined())
+            return literal(port.defaultValue);
+        // An optional number with no default is left to the run: say so, dimmed, not an empty well.
+        const QString kind = port.widgetType;
+        return kind == QLatin1String("spin") || kind == QLatin1String("slider") || kind == QLatin1String("seed")
+                   ? tr("auto") : QString();
     }
     switch (value.kind()) {
     case InputValue::Kind::Literal: return literal(value.literal());
@@ -1100,6 +1231,80 @@ QString CanvasModel::addNode(const QString &typeId, qreal x, qreal y) {
     return id;
 }
 
+std::pair<qreal, qreal> CanvasModel::pinnedSize(const QJsonObject &entry) const {
+    const QJsonArray size = entry.value("size").toArray();
+    const qreal w = size.at(0).toDouble(), h = size.at(1).toDouble();
+    return {w > 0 ? std::clamp(w, minWidth(), maxWidth()) : 0, std::max(0.0, h)};
+}
+
+// --- resizing (#49) ----------------------------------------------------------------
+
+QString CanvasModel::resizeGripAt(qreal x, qreal y, qreal size) const {
+    const QString id = nodeAt(x, y);
+    if (id.isEmpty())
+        return {};
+    const NodeRow &row = m_rows[size_t(rowOf(id))];
+    if (row.collapsed)
+        return {};
+    const qreal reach = std::min({size, row.width / 2, row.height / 2});
+    return x >= row.pos.x() + row.width - reach && y >= row.pos.y() + row.height - reach ? id : QString();
+}
+
+void CanvasModel::beginResize(const QString &node) {
+    if (m_resizeOpen)
+        endResize();
+    const int r = rowOf(node);
+    if (r < 0)
+        return;
+    beginEdit();
+    m_resizeOpen = true;
+    const NodeRow &row = m_rows[size_t(r)];
+    m_resizeNode = node;
+    m_resizeStart = QSizeF(row.width, row.height);
+    m_resizeWasSized = row.sized;
+    m_resizeWasWidth = row.width;
+    m_resizeWasHeight = row.pinnedHeight;
+}
+
+void CanvasModel::resizeBy(qreal dx, qreal dy) {
+    const int r = rowOf(m_resizeNode);
+    if (!m_resizeOpen || r < 0)
+        return;
+    NodeRow &row = m_rows[size_t(r)];
+    if (dx == 0 && dy == 0) {
+        row.sized = m_resizeWasSized;
+        row.width = m_resizeWasWidth;
+        row.pinnedHeight = m_resizeWasHeight;
+    } else {
+        row.sized = true;
+        row.width = std::round(std::clamp(m_resizeStart.width() + dx, minWidth(), maxWidth()));
+        row.pinnedHeight = std::round(m_resizeStart.height() + dy);
+    }
+    relayOut(r, {}, true);
+    if (row.pinnedHeight > 0)
+        row.pinnedHeight = std::round(row.height); // never stored below what the content needs
+}
+
+void CanvasModel::endResize() {
+    if (!m_resizeOpen)
+        return;
+    m_resizeOpen = false;
+    endEdit(tr("Resize"));
+}
+
+bool CanvasModel::autoSize(const QString &node) {
+    const int r = rowOf(node);
+    if (r < 0 || (!m_rows[size_t(r)].sized && m_rows[size_t(r)].pinnedHeight <= 0))
+        return false;
+    beginEdit();
+    NodeRow &row = m_rows[size_t(r)];
+    row.sized = false;
+    row.pinnedHeight = 0;
+    relayOut(r, {}, true);
+    endEdit(tr("Auto size"));
+    return true;
+}
+
 void CanvasModel::beginMove(const QString &node) {
     if (m_moveOpen)
         endMove();
@@ -1206,15 +1411,8 @@ void CanvasModel::setRunState(const QString &node, const QVariantMap &state) {
                                 || before.thumbnailSize != run.thumbnailSize
                                 || before.thumbnailAspect != run.thumbnailAspect;
     m_run.insert(node, run);
-    NodeRow &row = m_rows[size_t(r)];
-    const qreal height = row.height;
-    layOut(row);
-    QList<int> roles{NodeList::RunState, NodeList::Progress,  NodeList::Seconds,       NodeList::Error,
-                     NodeList::Warnings, NodeList::Thumbnail, NodeList::ThumbnailInfo, NodeList::ThumbnailRect,
-                     NodeList::Outputs};
-    if (row.height != height)
-        roles << NodeList::Height;
-    emitNodeChanged(r, roles);
+    relayOut(r, {NodeList::RunState, NodeList::Progress, NodeList::Seconds, NodeList::Error, NodeList::Warnings,
+                 NodeList::Thumbnail, NodeList::ThumbnailInfo, NodeList::Outputs});
     if (previewChanged)
         emit previewSizeChanged(node);
 }
