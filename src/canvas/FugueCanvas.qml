@@ -608,7 +608,8 @@ FocusScope {
                 delegate: Shape {
                     id: lit
                     required property int modelData
-                    readonly property Item wire: wires.itemAt(modelData)
+                    // The wires delegate (an inline Shape with path and color), so not a type to name.
+                    readonly property var wire: wires.itemAt(modelData)
                     visible: wire !== null
                     ShapePath {
                         strokeWidth: 6

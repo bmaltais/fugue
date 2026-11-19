@@ -4,7 +4,7 @@ import QtQuick
 Rectangle {
     id: track
     objectName: "widgetToggle"
-    required property Item host
+    required property InputWidget host
     anchors.right: parent.right
     anchors.rightMargin: host.pad / 2
     anchors.verticalCenter: parent.verticalCenter

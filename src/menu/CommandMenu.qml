@@ -24,7 +24,7 @@ Menu {
 
     readonly property var look: App.theme.look
     readonly property real u: look.unit
-    readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
+    readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
 
     // Not modal, so a press on another menu title or on the canvas both closes it and lands
     // there; while it is open the window's shortcuts sleep (CommandRegistry::menuOpen), so
@@ -99,7 +99,7 @@ Menu {
                     menu.subMenuComponent = Qt.createComponent("CommandMenu.qml")
                 const sub = menu.subMenuComponent.createObject(menu, {title: entry.title, items: entry.items,
                                                                       target: menu.target, sub: true,
-                                                                      cascade: true, overlap: menu.u})
+                                                                      cascade: true, overlap: menu.u}) as Menu
                 sub.aboutToShow.connect(() => menu.subOpen = true)
                 sub.aboutToHide.connect(() => menu.subOpen = false)
                 menu.addMenu(sub)

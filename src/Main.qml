@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
@@ -26,7 +27,7 @@ ApplicationWindow {
     Material.background: App.theme.background
     Material.foreground: App.theme.foreground
 
-    readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
+    readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
     // The settings (settings/settings_model.h); a test window may run without them.
     readonly property SettingsModel appSettingsModel: App.settings
 
@@ -50,7 +51,7 @@ ApplicationWindow {
                 Layout.preferredHeight: implicitHeight
             }
             FugueCanvas {
-                id: canvas
+                id: fugueCanvas
                 objectName: "canvas"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -66,20 +67,20 @@ ApplicationWindow {
                     target: App.canvasModel.search
                     function onPointerSearchRequested() {
                         const t = App.commands.target()
-                        const p = t.x !== undefined ? Qt.point(t.x, t.y) : canvas.pointerWorld()
+                        const p = t.x !== undefined ? Qt.point(t.x, t.y) : fugueCanvas.pointerWorld()
                         App.canvasModel.search.openAt(p.x, p.y)
                     }
                 }
                 ContextMenu {
                     id: contextMenu
                     anchors.fill: parent
-                    canvas: canvas
+                    canvas: fugueCanvas
                 }
             }
         }
 
         // The file pickers, the save and trust and recovery questions, the drop area.
-        WorkflowDialogs { anchors.fill: parent; canvasView: canvas }
+        WorkflowDialogs { anchors.fill: parent; canvasView: fugueCanvas }
     }
 
     // The command registry's shortcuts, the `?` overlay and the quit question.
@@ -104,6 +105,6 @@ ApplicationWindow {
 
     NodeSearchPopup {
         id: searchPopup
-        canvas: canvas
+        canvas: fugueCanvas
     }
 }

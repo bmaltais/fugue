@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 
 // The run pill, top right of the canvas (docs/canvas-look.md 11): while a run of the window

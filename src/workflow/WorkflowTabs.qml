@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -18,7 +19,7 @@ Rectangle {
     implicitHeight: visible ? 9 * look.unit : 0
     color: look.well
 
-    readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
+    readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
     readonly property var look: App.theme.look
 
     Rectangle {
@@ -69,8 +70,8 @@ Rectangle {
                         // Unsaved: a small dot before the title.
                         visible: tabButton.modelData.unsaved
                         Layout.leftMargin: 3 * root.look.unit
-                        width: 6
-                        height: 6
+                        implicitWidth: 6
+                        implicitHeight: 6
                         radius: 3
                         color: root.look.accent
                     }

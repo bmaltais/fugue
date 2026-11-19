@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
@@ -13,10 +14,10 @@ import "../canvas"
 Item {
     id: root
 
-    readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
+    readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
     readonly property var look: App.theme.look
     // The canvas, to turn a drop point into world coordinates.
-    property Item canvasView
+    property FugueCanvas canvasView
     property alias closeQuestion: closeAsk
     property alias trustQuestion: trustAsk
     property alias recoveryQuestion: recoverAsk

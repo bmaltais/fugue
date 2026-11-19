@@ -3,7 +3,7 @@ import QtQuick
 // A color widget's swatch at the right end of its well (canvas-look 4.4); a click on it opens
 // the color picker.
 Rectangle {
-    required property Item host
+    required property InputWidget host
     anchors.right: parent.right
     anchors.rightMargin: (host.glyphZone - width) / 2
     anchors.verticalCenter: parent.verticalCenter

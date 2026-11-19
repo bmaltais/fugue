@@ -14,7 +14,7 @@ MenuItem {
 
     readonly property var look: App.theme.look
     readonly property real u: look.unit
-    readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
+    readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
     readonly property bool available: entry === undefined || entry.available
 
     objectName: entry !== undefined ? "menuItem-" + entry.command : subMenu ? "subMenu-" + subMenu.title.replace("&", "") : ""

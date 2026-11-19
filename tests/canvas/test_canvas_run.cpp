@@ -126,6 +126,8 @@ struct RunApp {
         app.runs = runs.get();
     }
     ~RunApp() {
+        // The window goes before the runs it shows, as in main(), which makes its engine last.
+        qDeleteAll(app.engine.rootObjects());
         runs.reset();
         service.reset(); // stops the run thread before the fake goes
     }

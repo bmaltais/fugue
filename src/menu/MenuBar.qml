@@ -17,7 +17,7 @@ Rectangle {
 
     readonly property var look: App.theme.look
     readonly property real u: look.unit
-    readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
+    readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
 
     // The top menus; read again when the language changes.
     property var tree: App.commands.menu("bar")

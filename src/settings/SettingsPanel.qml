@@ -17,7 +17,7 @@ Popup {
 
     readonly property var look: App.theme.look
     readonly property real u: look.unit
-    readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
+    readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
     property int page: 0
     // Why the last change was refused, until the next change.
     property string error: ""
@@ -50,7 +50,7 @@ Popup {
     property var pickDone: null
     function pickFolder(callback) {
         pickDone = callback
-        folderDialog.createObject(panel).open()
+        (folderDialog.createObject(panel) as FolderDialog).open()
     }
     Component {
         id: folderDialog
@@ -159,7 +159,7 @@ Popup {
                         note: panel.model.navigation === "legacy"
                               ? qsTr("Left-drag on empty canvas pans and the wheel zooms; Ctrl+drag selects. ComfyUI's default.")
                               : qsTr("Left-drag on empty canvas selects and the wheel pans; Ctrl+wheel zooms.")
-                        SettingsParts.Choices {
+                        Choices {
                             Layout.fillWidth: true
                             name: "navigation"
                             current: panel.model.navigation
@@ -171,7 +171,7 @@ Popup {
                         visible: panel.page === 0
                         title: qsTr("Language")
                         note: qsTr("Follows Omarchy's language unless you pick one here.")
-                        SettingsParts.Choices {
+                        Choices {
                             Layout.fillWidth: true
                             name: "language"
                             current: panel.model.language
@@ -200,7 +200,7 @@ Popup {
                         value: panel.model.inputsFolder
                         isDefault: panel.model.inputsFolderIsDefault
                     }
-                    SettingsParts.PathsSetting {
+                    PathsSetting {
                         visible: panel.page === 1
                         title: qsTr("Extra model folders")
                         note: qsTr("Searched for models besides Fugue's own, so an existing ComfyUI models folder can be shared without copying.")
@@ -208,7 +208,7 @@ Popup {
                         key: "model_paths"
                         value: panel.model.modelPaths
                     }
-                    SettingsParts.PathsSetting {
+                    PathsSetting {
                         visible: panel.page === 1
                         title: qsTr("Extra pack folders")
                         note: qsTr("Searched for node packs besides Fugue's own.")
@@ -222,7 +222,7 @@ Popup {
                         visible: panel.page === 2
                         title: qsTr("Seeds of new nodes")
                         note: qsTr("Randomize makes a new picture each run; fixed starts on a random number that stays.")
-                        SettingsParts.Choices {
+                        Choices {
                             Layout.fillWidth: true
                             name: "newSeed"
                             current: panel.model.newSeed
@@ -234,7 +234,7 @@ Popup {
                         visible: panel.page === 2
                         title: qsTr("Embed the workflow in new Save Image nodes")
                         note: qsTr("Dropping an image back onto Fugue reloads its workflow. Local file paths are never embedded.")
-                        SettingsParts.Choices {
+                        Choices {
                             Layout.fillWidth: true
                             name: "embed"
                             current: panel.model.embedWorkflow

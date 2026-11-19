@@ -14,7 +14,7 @@ Popup {
     objectName: "nodeSearch"
 
     property Item canvas // the FugueCanvas, to put the popup's corner at the search point
-    readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
+    readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
     readonly property var search: App.canvasModel.search
     readonly property var look: App.theme.look
     readonly property real u: look.unit

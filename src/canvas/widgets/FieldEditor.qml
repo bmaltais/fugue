@@ -7,7 +7,7 @@ import QtQuick
 // Up and Down step a number. An invalid text shows why and is not written.
 Rectangle {
     id: field
-    required property Item host
+    required property InputWidget host
     property bool closing: false
     readonly property bool numeric: ["spin", "slider", "seed"].indexOf(host.kind) >= 0
 

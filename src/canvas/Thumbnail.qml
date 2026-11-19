@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 
 // A node's last image (docs/canvas-look.md 4.6): fitted on the well color, a 1 px outline

@@ -25,7 +25,7 @@ Rectangle {
         anchors.centerIn: parent
         anchors.verticalCenterOffset: -1
         text: cap.glyph ? cap.look.glyph(cap.text) : cap.text
-        font.family: cap.glyph ? cap.look.iconFont : Qt.application.font.family
+        font.family: cap.glyph ? cap.look.iconFont : Application.font.family
         font.pixelSize: cap.glyph ? 12 : cap.look.labelSize
         font.weight: Font.Medium
         color: cap.look.text

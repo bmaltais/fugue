@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls
 import QtQuick.Layouts
 import Fugue
 import "../canvas"
@@ -70,27 +69,6 @@ QtObject {
         }
     }
 
-    // A row of choices, one of them current (the segmented control of canvas-look 4.4).
-    component Choices: Flow {
-        id: choices
-        property var options: [] // {value, text}
-        property var current
-        property string name // objectName prefix: <name>-<value>
-        signal picked(var value)
-        spacing: App.theme.look.unit
-        Repeater {
-            model: choices.options
-            delegate: SmallButton {
-                required property var modelData
-                objectName: choices.name + "-" + modelData.value
-                text: modelData.text
-                highlighted: modelData.value === choices.current
-                Accessible.checked: highlighted
-                onClicked: choices.picked(modelData.value)
-            }
-        }
-    }
-
     // A one-line text field in a well. It commits on Enter or when focus leaves; the model
     // decides, and a refused text goes back to the value.
     component Field: Rectangle {
@@ -98,7 +76,7 @@ QtObject {
         property string value
         property string placeholder
         property bool secret: false
-        property alias input: input
+        property alias input: textInput
         signal committed(string text)
         Layout.fillWidth: true
         implicitWidth: 60 * App.theme.look.unit
@@ -106,14 +84,14 @@ QtObject {
         radius: App.theme.look.smallCorner
         color: App.theme.look.well
         border.width: 1
-        border.color: input.activeFocus ? App.theme.look.accent : App.theme.look.hairlineStrong
+        border.color: textInput.activeFocus ? App.theme.look.accent : App.theme.look.hairlineStrong
         function commit() {
-            if (input.text !== field.value)
-                field.committed(input.text)
-            input.text = Qt.binding(() => field.secret ? "" : field.value)
+            if (textInput.text !== field.value)
+                field.committed(textInput.text)
+            textInput.text = Qt.binding(() => field.secret ? "" : field.value)
         }
         TextInput {
-            id: input
+            id: textInput
             anchors { left: parent.left; right: parent.right; leftMargin: 2 * App.theme.look.unit; rightMargin: 2 * App.theme.look.unit
                       verticalCenter: parent.verticalCenter }
             clip: true
@@ -129,21 +107,21 @@ QtObject {
             onAccepted: field.commit()
             onActiveFocusChanged: if (!activeFocus && text !== (field.secret ? "" : field.value)) field.commit()
             Keys.onEscapePressed: event => {
-                if (input.text !== (field.secret ? "" : field.value)) {
-                    input.text = Qt.binding(() => field.secret ? "" : field.value)
+                if (textInput.text !== (field.secret ? "" : field.value)) {
+                    textInput.text = Qt.binding(() => field.secret ? "" : field.value)
                     event.accepted = true
                 } else {
                     event.accepted = false
                 }
             }
             Text {
-                visible: input.text === ""
+                visible: textInput.text === ""
                 anchors.verticalCenter: parent.verticalCenter
                 Layout.fillWidth: true
                 elide: Text.ElideRight
                 text: field.placeholder
                 color: App.theme.look.label
-                font: input.font
+                font: textInput.font
             }
         }
     }
@@ -176,57 +154,4 @@ QtObject {
             }
         }
     }
-
-    // A list of folders (model and pack search paths): each with a remove button, then a
-    // field and Choose… to add one.
-    component PathsSetting: Setting {
-        id: paths
-        required property var host
-        property string key
-        property var value: []
-        ColumnLayout {
-            Layout.fillWidth: true
-            spacing: App.theme.look.unit
-            Repeater {
-                model: paths.value
-                delegate: RowLayout {
-                    id: pathRow
-                    required property string modelData
-                    required property int index
-                    Layout.fillWidth: true
-                    Text {
-                        Layout.fillWidth: true
-                        text: pathRow.modelData
-                        elide: Text.ElideMiddle
-                        color: App.theme.look.text
-                        font.pixelSize: App.theme.look.textSize
-                    }
-                    SmallButton {
-                        objectName: paths.key + "-remove-" + pathRow.index
-                        glyph: "x"
-                        Accessible.name: qsTr("Remove %1").arg(pathRow.modelData)
-                        onClicked: paths.host.apply(paths.host.model.removePath(paths.key, pathRow.index))
-                    }
-                }
-            }
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: App.theme.look.unit
-                Field {
-                    id: addField
-                    objectName: paths.key + "-add"
-                    placeholder: qsTr("Add a folder: type its path and press Enter")
-                    onCommitted: text => {
-                        if (text.trim() !== "" && paths.host.apply(paths.host.model.addPath(paths.key, text)))
-                            addField.input.text = ""
-                    }
-                }
-                SmallButton {
-                    text: qsTr("Choose…")
-                    onClicked: paths.host.pickFolder(url => paths.host.apply(paths.host.model.addPath(paths.key, url)))
-                }
-            }
-        }
-    }
-
 }

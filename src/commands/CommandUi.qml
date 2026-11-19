@@ -13,7 +13,7 @@ Item {
     id: root
     objectName: "commandUi"
 
-    readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
+    readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
     readonly property var look: App.theme.look
     readonly property real u: look.unit
     property alias overlay: help
