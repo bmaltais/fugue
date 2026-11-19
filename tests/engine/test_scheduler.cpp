@@ -86,6 +86,19 @@ private slots:
         }
     }
 
+    // A kernel that runs out of memory (a huge Resize: std::bad_alloc) is out_of_memory, so
+    // the canvas can offer the right fix (9.5), not a crash or a plain failure.
+    void aKernelThatRunsOutOfMemoryIsOutOfMemory() {
+        World world;
+        world.type("fugue/hungry", "'inputs': [], 'outputs': [{'name': 'text', 'type': 'text'}]",
+                   [](const NodeContext &) -> Result<Values> { throw std::bad_alloc(); });
+        const Ran ran = world.run(world.graph("{'h': {'type': 'fugue/hungry'},"
+                                              " 's': {'type': 'fugue/save', 'inputs': {'value': {'from': 'h.text'}}}}"));
+        QCOMPARE(ran.outcome.status, RunStatus::Failed);
+        QCOMPARE(ran.outcome.errors.first().code, QStringLiteral("out_of_memory"));
+        QCOMPARE(ran.outcome.errors.first().node, QStringLiteral("h"));
+    }
+
     void aChainRunsInDependencyOrder() {
         World world;
         world.cpuSlots = 1;

@@ -12,6 +12,8 @@
 #include <QSet>
 #include <QRandomGenerator>
 #include <QThread>
+
+#include <new>
 #include <QThreadPool>
 #include <QTimer>
 #include <QUrl>
@@ -96,10 +98,15 @@ Error nodeError(const QString &code, const QString &message, const QString &hint
     return makeError(code, message, hint);
 }
 
-// Runs kernel code, turning an exception into node_failed (libvips throws).
+// Runs kernel code, turning an exception into node_failed (libvips throws), and running
+// out of memory into out_of_memory.
 template <typename T, typename Call> Result<T> guarded(Call call) {
     try {
         return call();
+    } catch (const std::bad_alloc &) {
+        // Memory ran out (a huge image): its own code (9.5), so a resident model can be freed
+        // and the node tried again.
+        return nodeError(QStringLiteral("out_of_memory"), QStringLiteral("The node ran out of memory."));
     } catch (const std::exception &thrown) {
         return nodeError(QStringLiteral("node_failed"), QString::fromUtf8(thrown.what()));
     } catch (...) {
