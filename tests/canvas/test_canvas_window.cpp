@@ -529,7 +529,8 @@ private slots:
             QTest::mouseMove(app.window, from + (to - from) * i / 8);
         QTRY_VERIFY(problem->isVisible());
         const QString why = app.canvas->property("hoverProblem").toString();
-        QVERIFY2(why.contains("text") && why.contains("image"), qPrintable(why));
+        // The two type names bold in the chip (docs/canvas-look.md 8.2).
+        QVERIFY2(why.contains("<b>text</b>") && why.contains("<b>image</b>"), qPrintable(why));
         QTest::mouseRelease(app.window, Qt::LeftButton, {}, to);
         QVERIFY(!problem->isVisible());
         QCOMPARE(app.model.links()->rowCount(), 0);

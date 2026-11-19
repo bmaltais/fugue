@@ -757,7 +757,10 @@ QSet<QString> CanvasModel::downstreamOf(const QString &node) const {
 }
 
 QString CanvasModel::problem(const QString &fromNode, const QString &output, const QString &toNode,
-                             const QString &input, bool useDrag) const {
+                             const QString &input, bool useDrag, bool styled) const {
+    // Styled: a type name bold, any other name escaped.
+    auto type = [styled](const QString &name) { return styled ? "<b>" + name.toHtmlEscaped() + "</b>" : name; };
+    auto plain = [styled](const QString &name) { return styled ? name.toHtmlEscaped() : name; };
     const int from = rowOf(fromNode), to = rowOf(toNode);
     if (from < 0 || to < 0)
         return tr("That node is not on the canvas.");
@@ -770,23 +773,23 @@ QString CanvasModel::problem(const QString &fromNode, const QString &output, con
     for (const int r : {from, to})
         if (m_rows[size_t(r)].missing)
             return tr("%1 is not installed, so its ports have no known type.")
-                .arg(m_document.graph.nodes.value(m_rows[size_t(r)].id).type);
+                .arg(plain(m_document.graph.nodes.value(m_rows[size_t(r)].id).type));
     if (!out->type || !in->type)
         return tr("The type of this port is not known.");
     switch (compatibility(*out->type, *in->type)) {
     case Compatibility::Compatible: break;
     case Compatibility::DifferentType:
         return tr("%1 cannot feed %2: the types differ, and Fugue does not convert between them.")
-            .arg(out->type->type.toString(), in->type->type.toString());
+            .arg(type(out->type->type.toString()), type(in->type->type.toString()));
     case Compatibility::ListIntoSingle:
-        return tr("A list of %1 cannot feed an input that takes one.").arg(out->type->type.toString());
+        return tr("A list of %1 cannot feed an input that takes one.").arg(type(out->type->type.toString()));
     }
     // A link into toNode from fromNode closes a cycle when fromNode already reads from toNode.
     const bool cycle = useDrag ? m_dragUnreachable.contains(m_drag.value("output").toBool() ? toNode : fromNode)
                                : upstreamOf(fromNode).contains(toNode);
     if (cycle)
         return tr("This link would make a cycle: %1 already feeds %2.")
-            .arg(m_rows[size_t(to)].title, m_rows[size_t(from)].title);
+            .arg(plain(m_rows[size_t(to)].title), plain(m_rows[size_t(from)].title));
     return {};
 }
 
@@ -887,7 +890,7 @@ void CanvasModel::beginLinkDrag(const QString &node, const QString &port, bool o
     emit linkDragChanged();
 }
 
-QString CanvasModel::dragProblem(const QString &node, const QString &port, bool output) const {
+QString CanvasModel::dragProblem(const QString &node, const QString &port, bool output, bool styled) const {
     if (m_drag.isEmpty())
         return {};
     const bool fromOutput = m_drag.value("output").toBool();
@@ -896,12 +899,13 @@ QString CanvasModel::dragProblem(const QString &node, const QString &port, bool 
     // Links being moved (Shift+drag): the output must feed every input they lead to.
     for (const QVariant &target : m_drag.value("targets").toList()) {
         const QVariantMap t = target.toMap();
-        if (const QString why = problem(node, port, t.value("node").toString(), t.value("port").toString(), true);
+        if (const QString why = problem(node, port, t.value("node").toString(), t.value("port").toString(), true, styled);
             !why.isEmpty())
             return why;
     }
     const QString dragNode = m_drag.value("node").toString(), dragPort = m_drag.value("port").toString();
-    return fromOutput ? problem(dragNode, dragPort, node, port, true) : problem(node, port, dragNode, dragPort, true);
+    return fromOutput ? problem(dragNode, dragPort, node, port, true, styled)
+                      : problem(node, port, dragNode, dragPort, true, styled);
 }
 
 bool CanvasModel::endLinkDrag(const QString &node, const QString &port, bool output) {

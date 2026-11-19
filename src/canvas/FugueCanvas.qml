@@ -354,7 +354,7 @@ FocusScope {
             case "link": {
                 const port = canvas.portUnder(mouse.x, mouse.y)
                 canvas.hoverProblem = port.node !== undefined
-                    ? canvas.model.dragProblem(port.node, port.port, port.output) : ""
+                    ? canvas.model.dragProblem(port.node, port.port, port.output, true) : ""
                 canvas.updateHover(mouse.x, mouse.y)
                 break
             }
@@ -806,8 +806,8 @@ FocusScope {
                 x: 1.75 * canvas.look.unit + 14 + 1.5 * canvas.look.unit
                 anchors.verticalCenter: parent.verticalCenter
                 width: Math.min(implicitWidth, 380 - x - 2.25 * canvas.look.unit)
-                text: canvas.hoverProblem
-                textFormat: Text.PlainText
+                text: canvas.hoverProblem // the type names bold
+                textFormat: Text.StyledText
                 wrapMode: Text.Wrap
                 color: canvas.look.text
                 font.pixelSize: canvas.look.labelSize

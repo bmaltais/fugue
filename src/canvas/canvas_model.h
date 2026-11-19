@@ -251,8 +251,10 @@ public:
     Q_INVOKABLE void beginLinkDrag(const QString &node, const QString &port, bool output);
     QVariantMap linkDrag() const { return m_drag; }
     // Why the dragged link cannot end on this port; empty when it can. Cheap: what the drag
-    // cannot reach is worked out once when it starts.
-    Q_INVOKABLE QString dragProblem(const QString &node, const QString &port, bool output) const;
+    // cannot reach is worked out once when it starts. Styled, it is StyledText for the reason
+    // chip: the type names bold (docs/canvas-look.md 8.2), everything else escaped.
+    Q_INVOKABLE QString dragProblem(const QString &node, const QString &port, bool output,
+                                    bool styled = false) const;
     // Ends the drag on a port (connecting when allowed), or anywhere else with an empty node.
     Q_INVOKABLE bool endLinkDrag(const QString &node = {}, const QString &port = {}, bool output = false);
 
@@ -490,7 +492,7 @@ private:
     // exposed input leads to. None for a placeholder or an unknown name.
     const fugue::InputSpec *inputSpec(const QString &node, const QString &input) const;
     QString problem(const QString &fromNode, const QString &output, const QString &toNode, const QString &input,
-                    bool useDrag) const;
+                    bool useDrag, bool styled = false) const;
     QSet<QString> upstreamOf(const QString &node) const;
     QSet<QString> downstreamOf(const QString &node) const;
     bool isWired(const QString &node, const QString &port, bool output) const;
