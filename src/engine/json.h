@@ -5,8 +5,9 @@
 // Writing the same value twice gives identical bytes.
 //
 // JSON values are Qt's (QJsonValue): Qt 6 keeps 64-bit integers exact and
-// QJsonObject keeps its keys sorted. The canonical form used for hashing
-// (RFC 8785) belongs to the document model, not here.
+// QJsonObject keeps its keys sorted, in UTF-16 code unit order: the order of
+// canonical JSON (tested in test_canonical). The canonical form used for
+// hashing (RFC 8785) is engine/canonical.h.
 
 #include <QByteArray>
 #include <QJsonValue>

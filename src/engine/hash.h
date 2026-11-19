@@ -1,7 +1,7 @@
 #pragma once
 
 // Content hashes (spec 1.5): SHA-256, written "sha256:<64 hex digits>".
-// Canonical JSON for hashing (RFC 8785) lives with the document model.
+// Canonical JSON for hashing (RFC 8785) is engine/canonical.h.
 
 #include <QByteArray>
 #include <QByteArrayView>
