@@ -81,7 +81,7 @@ XDG variables are honored; the defaults are shown.
 
 | Path | Holds |
 | --- | --- |
-| `~/.config/fugue/settings.json` | Settings. |
+| `~/.config/fugue/settings.json` | Settings, written by the settings panel (`app.settings`, Ctrl+,): `navigation`, `language`, `output_folder`, `inputs_folder`, `model_paths`, `pack_paths`, `new_seed`, `embed_workflow` (`src/engine/settings.h` has the table). Keys Fugue does not know are kept. |
 | `~/.config/fugue/providers.json` | Provider instances and their keys, mode 0600 ([8.2](#82-provider-instances)). |
 | `~/.config/fugue/keybindings.json` | Keymap diff ([12.5](#125-command-registry-and-keymap)). |
 | `~/.local/share/fugue/packs/<pack-id>/` | Installed packs ([6.5](#65-where-packs-live-and-how-they-load)). |
@@ -94,7 +94,7 @@ XDG variables are honored; the defaults are shown.
 | `~/.cache/fugue/runs/<run-id>/` | Run folders ([9.7](#97-run-folder)). |
 | `~/Documents/Fugue/` | Suggested place for workflows. Not required. |
 | `~/Pictures/Fugue/` | Default output folder for Save nodes. A setting. |
-| `~/Pictures/Fugue/inputs/` | Images pasted or dropped into Load Image, `<name>-<10 hex of the content hash>.<ext>` ([14.1](#141-m1-the-first-twelve)). Follows the output folder. |
+| `~/Pictures/Fugue/inputs/` | Images pasted or dropped into Load Image, `<name>-<10 hex of the content hash>.<ext>` ([14.1](#141-m1-the-first-twelve)). Follows the output folder unless set on its own. |
 
 ### 1.5 Hashes and canonical JSON
 
@@ -1456,7 +1456,7 @@ CurveRenderer drops to 15 fps when dragging at 1000 nodes).
 
 ### 12.3 Navigation
 
-Two presets, chosen in settings:
+Two presets, chosen in settings (`navigation`, applied at once):
 
 | | Legacy (default, ComfyUI's default) | Standard |
 | --- | --- | --- |
@@ -2000,6 +2000,12 @@ Building M2 made these further choices.
 | Frames are not selectable until #26, so a Frame's color comes only from its own context menu | 5.1 | medium |
 | The `?` overlay lists the commands that have a key; the rest (colors, exports, help links) are in the menus and appear in the overlay once the keymap file binds them | 12.5 | medium |
 | Menu items and gaps from ComfyUI: export a share copy and the compiled graph (11.5, #54), Clear workflow, the help links and About are commands; templates, Clipspace, refresh node definitions, unload models, focus mode, theme switching, node shapes, properties panels and the Manager are not planned (Fugue has no Python node definitions, follows the Omarchy theme, and installs packs per 6.6); rename and pin (#55), the side panels (#56), a node's image actions (#57), align and distribute (#58) and the tab menu (#59) are later tickets | 12.5 | medium |
+| Settings panel (#51): six pages (General, Folders, Run, Providers, Keymap, Theme) instead of ComfyUI's category tree, since Fugue has about a dozen settings. Each change is written at once (no Apply), checked in C++; QML only asks | 1.4 | high |
+| settings.json keeps keys it does not know; a known key with a bad value is listed as a problem and its default used, the value left as written; a file that is not a JSON object is never overwritten. A value equal to the default leaves the file, so a later default reaches users who never chose | 1.4 | high |
+| `new_seed`: random (default, as ComfyUI's control_after_generate) or fixed (a random number that stays) for seed widgets of nodes added on the canvas; increment stays a per-node choice. `embed_workflow` sets what new Save Image nodes start with (11.7) | 6.2, 11.7 | medium |
+| `language`: follow Omarchy (default) or a shipped catalog, live. `output_folder` and `inputs_folder` are read afresh by every run and the CLI | 1.4, 12.11 | high |
+| Providers page: the effective instances in preference order; with no providers.json the defaults show as "default, not saved", and the first change writes them all (mode 0600, atomically). Keys and secret module fields reach the panel only as set or not set | 8.2, 8.8 | medium |
+| ComfyUI settings not taken: custom navigation mix, zoom and pointer tuning, link render modes, node opacity and badges, palettes and background images (the Omarchy theme), auto save (recovery, 11.3), server flags (each provider owns its engine's), accounts. Later: minimap, snap to grid, side panel layout, reduce motion, keys edited in place, pack enable/disable. Full table in the #51 pull request | 12 | medium |
 
 ## Appendix B: issue to section map
 
