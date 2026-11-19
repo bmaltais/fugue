@@ -8,7 +8,6 @@
 #include <QJsonObject>
 #include <QRegularExpression>
 #include <QStandardPaths>
-#include <cmath>
 
 namespace {
 
@@ -36,18 +35,14 @@ const QList<QStringList> &aliases() {
     return aliases;
 }
 
-double luminance(const QColor &c) {
-    auto linear = [](double v) { return v <= .04045 ? v / 12.92 : std::pow((v + .055) / 1.055, 2.4); };
-    return .2126 * linear(c.redF()) + .7152 * linear(c.greenF()) + .0722 * linear(c.blueF());
-}
-
 } // namespace
 
 Theme::Theme(const QString &directory, QObject *parent, const QString &hyprctl, const QString &hyprlandEvents)
     : QObject(parent),
       m_directory(directory.isEmpty() ? QDir::homePath() + "/.local/state/omarchy/current" : directory),
       // The user's own shell.toml; tests keep theirs in the directory they pass.
-      m_shellFile(directory.isEmpty() ? QDir::homePath() + "/.config/omarchy/shell.toml" : directory + "/shell.toml") {
+      m_shellFile(directory.isEmpty() ? QDir::homePath() + "/.config/omarchy/shell.toml" : directory + "/shell.toml"),
+      m_look(new CanvasLook(this)) {
     m_debounce.setSingleShot(true);
     m_debounce.setInterval(80);
     connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this, [this] { m_debounce.start(); });
@@ -69,6 +64,7 @@ Theme::Theme(const QString &directory, QObject *parent, const QString &hyprctl, 
         if (code == 0 && status == QProcess::NormalExit && value.isDouble() && value.toInt(-1) >= 0
             && value.toInt() != m_radius) {
             m_radius = value.toInt();
+            refreshLook();
             emit changed();
         }
         if (m_roundingAgain) {
@@ -204,7 +200,7 @@ QVariantMap Theme::colors() const {
 
 // Black or white, whichever reads on the accent (WCAG relative luminance).
 QColor Theme::accentForeground() const {
-    return luminance(accent()) > .179 ? QColor("black") : QColor("white");
+    return fugue::look::luminance(accent()) > .179 ? QColor("black") : QColor("white");
 }
 
 void Theme::reload() {
@@ -242,19 +238,27 @@ void Theme::reload() {
 
     const Palette palette = readThemeColors(m_directory + "/theme/colors.toml");
     const bool light = palette.colors.isEmpty() ? false : palette.light;
-    if (palette.colors != m_colors || light != m_light || sizeChanged) {
+    const bool first = m_look->tokens().canvas == QColor();
+    if (palette.colors != m_colors || light != m_light || sizeChanged || first) {
         m_colors = palette.colors;
         m_light = light;
+        refreshLook();
         emit changed();
     }
 }
 
-namespace {
-QColor mix(const QColor &a, const QColor &b, double toB) {
+void Theme::refreshLook() {
+    QHash<QString, QColor> colors;
+    const QVariantMap all = this->colors();
+    for (auto it = all.cbegin(); it != all.cend(); ++it)
+        colors.insert(it.key(), it.value().value<QColor>());
+    m_look->update(colors, m_light, m_radius, m_textSize);
+}
+
+QColor Theme::mix(const QColor &a, const QColor &b, double toB) {
     return QColor::fromRgbF(a.redF() + (b.redF() - a.redF()) * toB, a.greenF() + (b.greenF() - a.greenF()) * toB,
                             a.blueF() + (b.blueF() - a.blueF()) * toB);
 }
-} // namespace
 
 // A surface a step toward the text color, so it lifts off the background on
 // dark and light themes alike.
@@ -266,14 +270,7 @@ QColor Theme::border() const { return mix(background(), foreground(), .25); }
 // take a fixed share of the text color instead.
 QColor Theme::muted() const { return mix(background(), foreground(), .65); }
 
-QColor Theme::portColor(const QString &type) const {
-    static const QHash<QString, QString> names{
-        {"text", "green"},    {"number", "blue"},  {"boolean", "orange"},
-        {"image", "magenta"}, {"video", "cyan"},   {"audio", "yellow"},
-    };
-    const auto it = names.constFind(type);
-    return it == names.constEnd() ? accent() : color(*it);
-}
+QColor Theme::portColor(const QString &type) const { return m_look->portColor(type); }
 
 QVariantMap Theme::portColors() const {
     QVariantMap colors;

@@ -171,7 +171,9 @@ void CanvasModel::restore(const Snapshot &target, bool selectAdded) {
         emit m_linkList->dataChanged(index, index,
                                      {LinkList::X1, LinkList::Y1, LinkList::X2, LinkList::Y2, LinkList::Path});
     }
-    if (oldLayout.value("frames") != doc.layout.value("frames"))
+    if (reroutesChanged)
+        emit this->reroutesChanged();
+    if (oldLayout.value("frames") != doc.layout.value("frames") || oldLayout.value("comments") != doc.layout.value("comments"))
         emit framesChanged();
     if (selectAdded && !added.isEmpty())
         select(added, QStringLiteral("replace"));
@@ -235,6 +237,7 @@ void CanvasModel::relink(const QSet<QString> &nodes) {
     }
     for (const QString &id : ends)
         refreshPorts(id);
+    emit reroutesChanged();
 }
 
 // --- edit bounds and the undo stack ---------------------------------------------
@@ -495,7 +498,7 @@ QStringList CanvasModel::insertCopy(const Document &copy, QPointF topLeft, bool 
     int unplaced = 0;
     for (auto it = copy.graph.nodes.cbegin(); it != copy.graph.nodes.cend(); ++it)
         pos.insert(it.key(), point(entries.value(it.key()).toObject().value("pos"))
-                                 .value_or(QPointF(unplaced++ * (defaultWidth + pasteGap), 0)));
+                                 .value_or(QPointF(unplaced++ * (m_defaultWidth + pasteGap), 0)));
     QPointF corner(std::numeric_limits<qreal>::max(), std::numeric_limits<qreal>::max());
     for (const QPointF &p : pos)
         corner = QPointF(std::min(corner.x(), p.x()), std::min(corner.y(), p.y()));

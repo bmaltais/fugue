@@ -301,7 +301,7 @@ private slots:
         App app(load(small), 15);
         QVERIFY(app.open());
         QCOMPARE(app.theme.textSize(), 15);
-        QCOMPARE(app.model.rowHeight(), 28.0);
+        QCOMPARE(app.model.rowHeight(), 30.0);
         QVERIFY(app.model.connectPorts("prompt", "text", "gen", "prompt"));
         QQuickItem *wires = item(app.window->contentItem(), "wires");
         QQuickItem *wire = nullptr;
@@ -309,8 +309,8 @@ private slots:
         QVERIFY(wire);
         const QString path = app.model.links()->data(app.model.links()->index(0, 0), LinkList::Path).toString();
         QCOMPARE(wire->property("path").toString(), path);
-        // Text's output, on its first row: 100 + 33 + 14.
-        QVERIFY2(path.startsWith("M 240.0 147.0 "), qPrintable(path));
+        // Text's output, at the end of its 300-wide node (60u) on its first row: 100 + 35 + 5 + 15.
+        QVERIFY2(path.startsWith("M 320.0 155.0 "), qPrintable(path));
     }
 
     void zoomedOutAPressOnANodeMovesIt() {
@@ -443,9 +443,9 @@ private slots:
     void draggingFromAnOutputToAnInputConnectsThem() {
         App app(load(small));
         QVERIFY(app.open());
-        // Text's output sits at its right edge, on the first row: (20 + 220, 100 + 37).
-        // Generate Image's prompt is its first value input, on row 6: (340, 60 + 147).
-        app.drag(Qt::LeftButton, app.screen(240, 137), app.screen(341, 207));
+        // Text's output sits at its right edge, on the first row: (20 + 240, 100 + 28 + 4 + 12).
+        // Generate Image's prompt is its first input, after its five outputs: (340, 60 + 164).
+        app.drag(Qt::LeftButton, app.screen(260, 144), app.screen(341, 224));
         QCOMPARE(app.model.links()->rowCount(), 1);
         QCOMPARE(app.model.document().graph.nodes.value("gen").inputs.value("prompt").from().toString(),
                  QString("prompt.text"));
@@ -457,8 +457,8 @@ private slots:
         QVERIFY(app.open());
         auto *problem = item(app.window->contentItem(), "linkProblem");
         QVERIFY(problem);
-        // Text into Save Image's image input (its first slot: 660, 300 + 37).
-        const QPoint from = app.screen(240, 137), to = app.screen(660, 337);
+        // Text into Save Image's image input (its first input, after one output: 660, 300 + 68).
+        const QPoint from = app.screen(260, 144), to = app.screen(660, 368);
         QTest::mousePress(app.window, Qt::LeftButton, {}, from);
         for (int i = 1; i <= 8; ++i)
             QTest::mouseMove(app.window, from + (to - from) * i / 8);
@@ -474,7 +474,7 @@ private slots:
         App app(load(small));
         QVERIFY(app.open());
         QSignalSpy released(app.canvas, SIGNAL(linkReleased(QVariant, double, double)));
-        app.drag(Qt::LeftButton, app.screen(240, 137), app.screen(300, 600));
+        app.drag(Qt::LeftButton, app.screen(260, 144), app.screen(300, 600));
         QCOMPARE(released.count(), 1);
         QCOMPARE(released.first().at(0).toMap().value("node").toString(), QString("prompt"));
         QCOMPARE(app.model.links()->rowCount(), 0);

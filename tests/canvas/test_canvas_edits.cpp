@@ -116,7 +116,7 @@ private slots:
         QCOMPARE(bytes(canvas), before);
         QCOMPARE(canvas.position("gen"), QPointF(300, 80));
         // The wires follow the node back.
-        QCOMPARE(link(canvas, "save.image").value("x1").toDouble(), 300 + CanvasModel::defaultWidth);
+        QCOMPARE(link(canvas, "save.image").value("x1").toDouble(), 300 + canvas.defaultWidth());
         canvas.redo();
         QCOMPARE(canvas.position("gen"), QPointF(350, 100));
         // A drag that ends where it began is no step at all.
@@ -442,9 +442,9 @@ private slots:
         QVERIFY(canvas.fitView(1000, 1000));
         const QVariantMap one = canvas.view();
         QVERIFY(one.value("zoom").toDouble() > all.value("zoom").toDouble());
-        QCOMPARE(one.value("center").toList().value(0).toDouble(), CanvasModel::defaultWidth / 2);
-        // Its 220 world units of width fill three quarters of the 1000 pixels.
-        QCOMPARE(one.value("zoom").toDouble(), 750.0 / 220);
+        QCOMPARE(one.value("center").toList().value(0).toDouble(), canvas.defaultWidth() / 2);
+        // Its 240 world units of width (60u) fill three quarters of the 1000 pixels.
+        QCOMPARE(one.value("zoom").toDouble(), 750.0 / 240);
         canvas.setDocument(document(R"({"fugue": 1, "graph": {"nodes": {}}})"));
         QVERIFY(!canvas.fitView(1000, 1000));
     }

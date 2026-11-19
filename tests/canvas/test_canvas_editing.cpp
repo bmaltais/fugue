@@ -20,9 +20,11 @@ using canvas_test::load;
 namespace {
 
 // prompt (Text) -> gen (Generate Image) -> save (Save Image), and a second Text; the view at
-// zoom 1 with the world's origin at the window's top left. At text size 12 a title is 26
-// high and a row 22: Text's output is at (240, 137), Generate Image's prompt input (its sixth
-// row) at (340, 207) and its image output at (560, 97), Save Image's image input at (660, 337).
+// zoom 1 with the world's origin at the window's top left. At text size 12 a node is 240 wide,
+// its title 28 high, then 4 of padding and 24 per row, outputs first (docs/canvas-look.md 4):
+// Text's output is at (260, 144), Generate Image's prompt input (its sixth row, after its five
+// outputs) at (340, 224), Save Image's image input (after its one output) at (660, 368), and
+// other's output at (260, 444).
 const char *linked = R"({
   "fugue": 1,
   "graph": {"nodes": {
@@ -81,7 +83,7 @@ private slots:
         // A drag of Text, then a link from other into Generate Image's prompt.
         app.drag(Qt::LeftButton, app.screen(100, 110), app.screen(100, 160));
         QCOMPARE(app.model.position("prompt"), QPointF(20, 150));
-        app.drag(Qt::LeftButton, app.screen(240, 437), app.screen(341, 207));
+        app.drag(Qt::LeftButton, app.screen(260, 444), app.screen(341, 224));
         QCOMPARE(from(app, "gen", "prompt"), QString("other.text"));
         QCOMPARE(app.model.undoStack()->count(), 2);
 
@@ -210,10 +212,10 @@ private slots:
     void ctrlAltClickOnAPortDisconnectsIt() {
         App app(load(linked));
         QVERIFY(app.open());
-        QTest::mouseClick(app.window, Qt::LeftButton, Qt::ControlModifier | Qt::AltModifier, app.screen(660, 337));
+        QTest::mouseClick(app.window, Qt::LeftButton, Qt::ControlModifier | Qt::AltModifier, app.screen(660, 368));
         QCOMPARE(from(app, "save", "image"), QString());
         QCOMPARE(app.model.links()->rowCount(), 1);
-        QTest::mouseClick(app.window, Qt::LeftButton, Qt::ControlModifier | Qt::AltModifier, app.screen(240, 137));
+        QTest::mouseClick(app.window, Qt::LeftButton, Qt::ControlModifier | Qt::AltModifier, app.screen(260, 144));
         QCOMPARE(app.model.links()->rowCount(), 0);
         app.key(Qt::Key_Z, Qt::ControlModifier);
         app.key(Qt::Key_Z, Qt::ControlModifier);
@@ -224,11 +226,11 @@ private slots:
         App app(load(linked));
         QVERIFY(app.open());
         // From Text's output to other's: Generate Image now reads other.
-        app.drag(Qt::LeftButton, app.screen(240, 137), app.screen(240, 437), Qt::ShiftModifier);
+        app.drag(Qt::LeftButton, app.screen(260, 144), app.screen(260, 444), Qt::ShiftModifier);
         QCOMPARE(from(app, "gen", "prompt"), QString("other.text"));
         QCOMPARE(app.model.links()->rowCount(), 2);
         // Let go on empty canvas: the links stay where they are, and search does not open.
-        app.drag(Qt::LeftButton, app.screen(240, 437), app.screen(500, 600), Qt::ShiftModifier);
+        app.drag(Qt::LeftButton, app.screen(260, 444), app.screen(500, 600), Qt::ShiftModifier);
         QCOMPARE(from(app, "gen", "prompt"), QString("other.text"));
         QVERIFY(!app.model.search()->active());
         QCOMPARE(app.model.undoStack()->count(), 1);
@@ -306,7 +308,7 @@ private slots:
             bounds = bounds.united(QRectF(role(NodeList::X), role(NodeList::Y), role(NodeList::Width), role(NodeList::Height)));
         }
         QCOMPARE(bounds.left(), 20.0);
-        QCOMPARE(bounds.right(), 880.0);
+        QCOMPARE(bounds.right(), 900.0);
         app.key(Qt::Key_Period);
         QVERIFY(qAbs(app.zoom() - std::min(width / bounds.width(), height / bounds.height()) * 0.75) < 1e-9);
         QCOMPARE(app.screen(bounds.center().x(), bounds.center().y()), middle);
@@ -318,7 +320,7 @@ private slots:
         for (int i = 0; i < app.model.nodes()->rowCount(); ++i)
             if (app.model.nodes()->data(app.model.nodes()->index(i, 0), NodeList::NodeId) == "other")
                 otherHeight = app.model.nodes()->data(app.model.nodes()->index(i, 0), NodeList::Height).toDouble();
-        QCOMPARE(app.screen(130, 400 + otherHeight / 2), middle);
+        QCOMPARE(app.screen(140, 400 + otherHeight / 2), middle);
         // The view is not an edit.
         QVERIFY(!app.model.canUndo());
         QVERIFY(!app.workflows.unsaved());

@@ -41,8 +41,15 @@
 //   undo step; the canvas emits searchRequested (double-click on empty canvas) and
 //   linkReleased (a dragged link let go on empty canvas) with the world point and the
 //   dragged port, for search filtered by port type.
-// - #19 run state: add roles to NodeList (state, progress, last output values); a node's
-//   row is found by id in O(1) (rowOf).
+// - #19 run state (done as a seam by #47): setRunState(node, {...}) fills the NodeList roles a
+//   run shows (runState, progress, seconds, error, warnings, thumbnail, output values);
+//   clearRunState() empties them. With no run they are empty and a node shows no state.
+//   A node's row is found by id in O(1) (rowOf).
+// - #47 look (docs/canvas-look.md): the geometry here is the spec's. u = textSize / 3; a node is
+//   60u wide by default, its header 7u, then 1u of padding, outputs first and then inputs in
+//   their order, one 6u row each (an unlinked multiline input 16u), 2u under the last row, and
+//   a thumbnail, when the run gave one, 1u under the rows. Wires are cubics with horizontal
+//   tangents (8.1); linkAt() finds the wire under the pointer.
 // - The window's commands (edit.*, node.bypass, node.mute, node.collapse, view.*) call the
 //   edits below; canvas_commands.h registers them.
 // - Text size: FugueCanvas binds textSize to the theme's; rows and titles follow it.
@@ -60,6 +67,7 @@
 #include <QVariantList>
 #include <QVariantMap>
 
+#include <array>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -90,6 +98,17 @@ public:
         Selected,
         Inputs,    // list of port maps, see CanvasModel::portMap
         Outputs,
+        Color,     // layout color: a theme role (4.5), or empty
+        Pinned,    // layout: pinned in place
+        // Set by a run (#19, setRunState); empty or -1 when there is none.
+        RunState,  // "", "cached", "stale", "running", "frozen", "error" or "skipped" (10.3)
+        Progress,  // 0 to 1 while running, else -1
+        Seconds,   // time taken, else -1
+        Error,     // the error message
+        Warnings,  // list of warning messages
+        Thumbnail, // the last image or video frame, as a URL
+        ThumbnailInfo, // its info chip ("1024 × 1024")
+        ThumbnailRect, // where it sits in the node, from the node's top left
     };
 
     explicit NodeList(CanvasModel *canvas);
@@ -99,7 +118,6 @@ public:
 
 private:
     friend class CanvasModel;
-class QUndoStack;
     CanvasModel *m_canvas;
 };
 
@@ -120,6 +138,7 @@ public:
         X2,    // the input's end
         Y2,
         Path,  // the wire as SVG path data, through the layout's reroute points
+        Muted, // the source node is muted: its outgoing wires fade (docs/canvas-look.md 9)
     };
 
     explicit LinkList(CanvasModel *canvas);
@@ -129,7 +148,6 @@ public:
 
 private:
     friend class CanvasModel;
-class QUndoStack;
     CanvasModel *m_canvas;
 };
 
@@ -138,6 +156,9 @@ class CanvasModel : public QObject {
     Q_PROPERTY(NodeList *nodes READ nodes CONSTANT)
     Q_PROPERTY(LinkList *links READ links CONSTANT)
     Q_PROPERTY(QVariantList frames READ frames NOTIFY framesChanged)
+    // Comments ({id, text, x, y, width}) and reroute points ({x, y, color}) from the layout.
+    Q_PROPERTY(QVariantList comments READ comments NOTIFY framesChanged)
+    Q_PROPERTY(QVariantList reroutes READ reroutes NOTIFY reroutesChanged)
     Q_PROPERTY(QVariantMap view READ view NOTIFY documentReset)
     // Node search (src/search/node_search.h): it adds nodes through addNode() and connectPorts().
     Q_PROPERTY(fugue::NodeSearch *search READ search CONSTANT)
@@ -145,6 +166,7 @@ class CanvasModel : public QObject {
     Q_PROPERTY(int textSize READ textSize WRITE setTextSize NOTIFY metricsChanged)
     Q_PROPERTY(qreal headerHeight READ headerHeight NOTIFY metricsChanged)
     Q_PROPERTY(qreal rowHeight READ rowHeight NOTIFY metricsChanged)
+    Q_PROPERTY(qreal unit READ unit NOTIFY metricsChanged)
     // While a link is dragged: the port it started from ({node, port, output, color, x, y}),
     // else empty. Ports bind their dimming to this, so it changes at the start and end only.
     Q_PROPERTY(QVariantMap linkDrag READ linkDrag NOTIFY linkDragChanged)
@@ -167,6 +189,8 @@ public:
     fugue::Document document() const;
 
     QVariantList frames() const;
+    QVariantList comments() const;
+    QVariantList reroutes() const;
     // {center: [x, y], zoom} from layout.view, or empty when the file has none.
     QVariantMap view() const;
     Q_INVOKABLE void setView(qreal centerX, qreal centerY, qreal zoom);
@@ -176,7 +200,9 @@ public:
     void setTextSize(int size);
     qreal headerHeight() const { return m_headerHeight; }
     qreal rowHeight() const { return m_rowHeight; }
-    static constexpr qreal defaultWidth = 220;
+    qreal unit() const { return m_textSize / 3.0; }
+    // A node's width when the layout sets none: 60u.
+    qreal defaultWidth() const { return m_defaultWidth; }
 
     // --- hit tests, in world coordinates ---
 
@@ -186,6 +212,10 @@ public:
     Q_INVOKABLE QString nodeAt(qreal x, qreal y) const;
     // Every node the rectangle touches, as ComfyUI's marquee selects.
     Q_INVOKABLE QStringList nodesIn(const QRectF &rect) const;
+    // The wire within `radius` of the point, nearest first: {row, fromNode, fromPort, toNode,
+    // toPort, item, midX, midY} (mid: where its cut handle goes), or empty. Only wires whose
+    // bounds hold the point are measured, each in 16 straight pieces per curve.
+    Q_INVOKABLE QVariantMap linkAt(qreal x, qreal y, qreal radius) const;
 
     // --- links ---
 
@@ -236,6 +266,14 @@ public:
     Q_INVOKABLE void toggleMode(const QString &mode);
     // Collapses the selection, or expands it when all of it is collapsed already.
     Q_INVOKABLE void toggleCollapsed();
+
+    // --- run state (#19) ---
+
+    // What a run shows on a node, replacing what it showed: {state, progress, seconds, error,
+    // warnings, thumbnail, thumbnailAspect (height / width), thumbnailInfo, values (output
+    // name -> the last value as text)}. Missing keys are empty. Kept across edits of the node.
+    Q_INVOKABLE void setRunState(const QString &node, const QVariantMap &state);
+    Q_INVOKABLE void clearRunState();
 
     // --- clipboard ---
 
@@ -319,6 +357,7 @@ public:
 signals:
     void documentReset();
     void framesChanged();
+    void reroutesChanged();
     void metricsChanged();
     void linkDragChanged();
     // An edit changed the document (not a selection or a viewport change), undo and redo
@@ -345,19 +384,27 @@ private:
         bool output = false;
         std::optional<fugue::PortSpec> type; // none: unknown (a placeholder's port)
         fugue::PortKind kind = fugue::PortKind::Unknown;
-        bool widget = false; // a value input, shown in the widget band
+        bool widget = false; // a value input: shown as a widget when unlinked
+        QString widgetKind;  // spin, slider, line, multiline, toggle, choice, file, folder, color, seed, model
         bool required = false;
         QJsonValue defaultValue = QJsonValue::Undefined;
-        qreal y = 0; // from the node's top
+        std::optional<double> min, max;
+        qreal y = 0;         // the port's center, from the node's top
+        qreal rowTop = 0;    // its row
+        qreal rowHeight = 0;
     };
     struct NodeRow {
         QString id;
         QString title;
         bool missing = false;
         QPointF pos;
-        qreal width = defaultWidth;
+        qreal width = 0;
+        bool sized = false; // the layout sets the width
         qreal height = 0;
         bool collapsed = false;
+        QString color;      // layout color
+        bool pinned = false;
+        QRectF thumbnail;   // where the run's thumbnail goes, empty without one
         std::vector<Port> inputs;
         std::vector<Port> outputs;
     };
@@ -369,6 +416,19 @@ private:
         QString color;
         QPointF a, b;
         QString path;
+        std::vector<std::array<QPointF, 4>> curves; // the path's cubics
+        QRectF bounds;
+    };
+    struct RunInfo {
+        QString state;
+        qreal progress = -1;
+        qreal seconds = -1;
+        QString error;
+        QStringList warnings;
+        QString thumbnail;
+        qreal thumbnailAspect = 1;
+        QString thumbnailInfo;
+        QVariantMap values;
     };
 
     Snapshot snapshot() const;
@@ -417,8 +477,13 @@ private:
     QSet<QString> m_selected;
     QVariantMap m_view;
     int m_textSize = 12;
-    qreal m_headerHeight = 26; // textSize * 13 / 6, rounded
-    qreal m_rowHeight = 22;    // textSize * 11 / 6, rounded
+    qreal m_headerHeight = 28;  // 7u, rounded
+    qreal m_rowHeight = 24;     // 6u
+    qreal m_tallRowHeight = 64; // 16u: an unlinked multiline input
+    qreal m_padTop = 4;         // 1u
+    qreal m_padBottom = 8;      // 2u
+    qreal m_defaultWidth = 240; // 60u
+    QHash<QString, RunInfo> m_run;
 
     QVariantMap m_drag;
     QSet<QString> m_dragUnreachable; // nodes the dragged link would make a cycle with

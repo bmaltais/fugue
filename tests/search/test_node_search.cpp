@@ -177,7 +177,7 @@ private slots:
         const QModelIndex link = canvas->links()->index(0);
         QCOMPARE(canvas->links()->data(link, LinkList::FromNode).toString(), id);
         QCOMPARE(canvas->links()->data(link, LinkList::ToNode).toString(), QString("save"));
-        QCOMPARE(canvas->position(id).x(), 500 - CanvasModel::defaultWidth);
+        QCOMPARE(canvas->position(id).x(), 500 - canvas->defaultWidth());
     }
 
     void aRowThatIsNotThereAddsNothing() {

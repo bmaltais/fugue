@@ -274,7 +274,7 @@ QString NodeSearch::accept(int row) {
     const bool linked = m_link.contains("node") && !chosen->match.isEmpty();
     const bool fromOutput = m_link.value("output").toBool();
     // A node dropped from an input goes to the left of the point, so its output faces it.
-    const qreal x = linked && !fromOutput ? m_point.x() - CanvasModel::defaultWidth : m_point.x();
+    const qreal x = linked && !fromOutput ? m_point.x() - m_canvas->defaultWidth() : m_point.x();
     // The node and its link are one undo step.
     m_canvas->beginEdit();
     const QString id = m_canvas->addNode(chosen->type->id, x, m_point.y());

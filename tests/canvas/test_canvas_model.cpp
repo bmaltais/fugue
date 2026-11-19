@@ -93,20 +93,110 @@ private slots:
     }
 
     void wiresRunBetweenTheirPorts() {
-        // Text's one output sits on the first row (26 + 11). Generate Image has five outputs
-        // beside its wire-only inputs, so its first value input, prompt, is on row 6 (26 + 5 * 22 + 11).
+        // docs/canvas-look.md 4: a 28 px header (7u at text size 12), 4 px of padding, then
+        // 24 px rows, outputs first. Text's one output is on its first row (28 + 4 + 12); Generate
+        // Image's five outputs come before its inputs, so prompt is on row 6 (28 + 4 + 5 * 24 + 12).
         CanvasModel canvas(&m_registry);
         canvas.setDocument(document(threeNodes));
         QCOMPARE(canvas.links()->rowCount(), 2);
         const QVariantMap l = link(canvas, "gen.prompt");
         QCOMPARE(l.value("fromNode").toString(), QString("prompt"));
         QCOMPARE(l.value("fromPort").toString(), QString("text"));
-        QCOMPARE(l.value("x1").toDouble(), 220.0);
-        QCOMPARE(l.value("y1").toDouble(), 137.0);
+        QCOMPARE(l.value("x1").toDouble(), 240.0);
+        QCOMPARE(l.value("y1").toDouble(), 144.0);
         QCOMPARE(l.value("x2").toDouble(), 300.0);
-        QCOMPARE(l.value("y2").toDouble(), 227.0);
+        QCOMPARE(l.value("y2").toDouble(), 244.0);
         QCOMPARE(l.value("color").toString(), QString("text"));
-        QVERIFY(l.value("path").toString().startsWith("M 220.0 137.0 C"));
+        // Horizontal tangents half the run apart, at least 6u (8.1).
+        QCOMPARE(l.value("path").toString(), QString("M 240.0 144.0 C 270.0 144.0 270.0 244.0 300.0 244.0"));
+    }
+
+    void outputsComeFirstThenInputsInTheirOrder() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(threeNodes));
+        QCOMPARE(canvas.headerHeight(), 28.0);
+        QCOMPARE(canvas.rowHeight(), 24.0);
+        QCOMPARE(canvas.defaultWidth(), 240.0);
+        const QVariantMap gen = node(canvas, "gen");
+        QCOMPARE(gen.value("nodeWidth").toDouble(), 240.0);
+        const QList<QVariant> outputs = gen.value("outputs").toList();
+        for (int i = 0; i < outputs.size(); ++i) {
+            QCOMPARE(outputs[i].toMap().value("y").toDouble(), 44.0 + 24 * i);
+            QCOMPARE(outputs[i].toMap().value("rowTop").toDouble(), 32.0 + 24 * i);
+        }
+        // prompt is linked: a plain 24 px row. negative_prompt is an unlinked multiline: a 64 px
+        // row (16u), its port level with the middle of a normal row.
+        QCOMPARE(port(gen, "inputs", "prompt").value("y").toDouble(), 164.0);
+        QCOMPARE(port(gen, "inputs", "prompt").value("rowHeight").toDouble(), 24.0);
+        QCOMPARE(port(gen, "inputs", "negative_prompt").value("rowTop").toDouble(), 176.0);
+        QCOMPARE(port(gen, "inputs", "negative_prompt").value("rowHeight").toDouble(), 64.0);
+        QCOMPARE(port(gen, "inputs", "negative_prompt").value("y").toDouble(), 188.0);
+        QCOMPARE(port(gen, "inputs", "model").value("rowTop").toDouble(), 240.0);
+        // Text: header, padding, its output, its unlinked multiline input, 8 px under the last row.
+        QCOMPARE(node(canvas, "prompt").value("nodeHeight").toDouble(), 28.0 + 4 + 24 + 64 + 8);
+    }
+
+    void widgetsSayWhatTheyAre() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(threeNodes));
+        const QVariantMap gen = node(canvas, "gen");
+        QCOMPARE(port(gen, "inputs", "prompt").value("widgetKind").toString(), QString("multiline"));
+        QCOMPARE(port(gen, "inputs", "width").value("widgetKind").toString(), QString("spin"));
+        QCOMPARE(port(gen, "inputs", "seed").value("widgetKind").toString(), QString("seed"));
+        QCOMPARE(port(gen, "inputs", "seed").value("value").toString(), QString("random"));
+        QCOMPARE(port(gen, "inputs", "strength").value("widgetKind").toString(), QString("slider"));
+        // A slider's fill is its value's share of the range: 0.7 of 0 to 1.
+        QCOMPARE(port(gen, "inputs", "strength").value("share").toDouble(), 0.7);
+        // A resource input shows the model picker (spec 2.5, 6.2).
+        QCOMPARE(port(gen, "inputs", "model").value("widgetKind").toString(), QString("model"));
+        QVERIFY(port(gen, "inputs", "model").value("widget").toBool());
+        // Media inputs are wire-only.
+        QVERIFY(!port(gen, "inputs", "image").value("widget").toBool());
+        const QVariantMap save = node(canvas, "save");
+        QCOMPARE(port(save, "inputs", "format").value("widgetKind").toString(), QString("choice"));
+        QCOMPARE(port(save, "inputs", "folder").value("widgetKind").toString(), QString("folder"));
+    }
+
+    void aLinkIntoAMultilineInputShrinksItsRow() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(threeNodes));
+        QCOMPARE(port(node(canvas, "gen"), "inputs", "negative_prompt").value("rowHeight").toDouble(), 64.0);
+        const qreal before = node(canvas, "gen").value("nodeHeight").toDouble();
+        QVERIFY(canvas.connectPorts("prompt", "text", "gen", "negative_prompt"));
+        QCOMPARE(port(node(canvas, "gen"), "inputs", "negative_prompt").value("rowHeight").toDouble(), 24.0);
+        QCOMPARE(node(canvas, "gen").value("nodeHeight").toDouble(), before - 40);
+        // The wires into the rows below follow.
+        QCOMPARE(link(canvas, "gen.negative_prompt").value("y2").toDouble(), 80.0 + 188);
+    }
+
+    void aBackwardWireLoopsOutAndBack() {
+        // From prompt's output (240, 144) back to a node left of it: the tangents are
+        // 12u + a quarter of the run (at most 100u), so the wire leaves and enters horizontally.
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(R"({"fugue": 1, "graph": {"nodes": {
+            "prompt": {"type": "fugue/text", "version": "1.0.0", "inputs": {"text": "x"}},
+            "back": {"type": "fugue/text-concat", "version": "1.0.0", "inputs": {"a": {"from": "prompt.text"}}}}},
+            "layout": {"nodes": {"prompt": {"pos": [0, 100]}, "back": {"pos": [-200, 100]}}}})"));
+        const QVariantMap l = link(canvas, "back.a");
+        QCOMPARE(l.value("x1").toDouble(), 240.0);
+        QCOMPARE(l.value("x2").toDouble(), -200.0);
+        // |dx| is 440: 48 + min(440, 400) / 4 = 148.
+        QVERIFY2(l.value("path").toString().startsWith("M 240.0 144.0 C 388.0 144.0 -348.0 "),
+                 qPrintable(l.value("path").toString()));
+    }
+
+    void theWireUnderThePointerIsFound() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(threeNodes));
+        // On the prompt -> gen wire, halfway: (270, 194) on its cubic.
+        const QVariantMap hit = canvas.linkAt(270, 194, 6);
+        QCOMPARE(hit.value("toNode").toString(), QString("gen"));
+        QCOMPARE(hit.value("toPort").toString(), QString("prompt"));
+        QCOMPARE(hit.value("midX").toDouble(), 270.0);
+        QCOMPARE(hit.value("midY").toDouble(), 194.0);
+        QVERIFY(hit.contains("row"));
+        QVERIFY(canvas.linkAt(270, 230, 6).isEmpty());
+        QVERIFY(canvas.linkAt(-500, -500, 6).isEmpty());
     }
 
     void portsShowTheirTypeByColorAndShape() {
@@ -213,7 +303,7 @@ private slots:
         canvas.beginLinkDrag("gen", "image", true);
         QCOMPARE(dragChanged.count(), 1);
         QCOMPARE(canvas.linkDrag().value("node").toString(), QString("gen"));
-        QCOMPARE(canvas.linkDrag().value("x").toDouble(), 520.0);
+        QCOMPARE(canvas.linkDrag().value("x").toDouble(), 540.0);
         QCOMPARE(canvas.dragProblem("save", "image", false), QString());
         QVERIFY(!canvas.dragProblem("save", "name", false).isEmpty());
         QVERIFY(!canvas.dragProblem("prompt", "text", true).isEmpty()); // output to output
@@ -371,24 +461,25 @@ private slots:
             "gen": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"prompt": {"from": "a.text"}}},
             "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "gen.image"}}}}}})"));
         QCOMPARE(canvas.position("a"), QPointF(0, 0));
-        // Text is 26 + 2 rows * 22 + 6 = 76 high, and a stack leaves 40 between nodes.
-        QCOMPARE(canvas.position("b"), QPointF(0, 116));
-        QCOMPARE(canvas.position("gen"), QPointF(300, 0));
-        QCOMPARE(canvas.position("save"), QPointF(600, 0));
+        // Text is 28 + 4 + 24 + 64 (its multiline input) + 8 = 128 high, a stack leaves 40
+        // between nodes, and columns are a node's 240 and 80 apart.
+        QCOMPARE(canvas.position("b"), QPointF(0, 168));
+        QCOMPARE(canvas.position("gen"), QPointF(320, 0));
+        QCOMPARE(canvas.position("save"), QPointF(640, 0));
     }
 
     void hitTestsFindPortsAndNodes() {
         CanvasModel canvas(&m_registry);
         canvas.setDocument(document(threeNodes));
-        const QVariantMap hit = canvas.portAt(222, 139, 8);
+        const QVariantMap hit = canvas.portAt(242, 146, 8);
         QCOMPARE(hit.value("node").toString(), QString("prompt"));
         QCOMPARE(hit.value("port").toString(), QString("text"));
         QVERIFY(hit.value("output").toBool());
-        QVERIFY(canvas.portAt(110, 139, 8).isEmpty());
-        QCOMPARE(canvas.nodeAt(110, 139), QString("prompt"));
-        QCOMPARE(canvas.nodeAt(-10, 139), QString());
+        QVERIFY(canvas.portAt(110, 146, 8).isEmpty());
+        QCOMPARE(canvas.nodeAt(110, 146), QString("prompt"));
+        QCOMPARE(canvas.nodeAt(-10, 146), QString());
         QCOMPARE(canvas.nodesIn(QRectF(-10, 50, 600, 400)), (QStringList{"gen", "prompt"}));
-        // As in ComfyUI, a node the rectangle touches is in it: gen spans x 300 to 520.
+        // As in ComfyUI, a node the rectangle touches is in it: gen spans x 300 to 540.
         QCOMPARE(canvas.nodesIn(QRectF(500, 300, 100, 50)), QStringList{"gen"});
     }
 
@@ -397,13 +488,14 @@ private slots:
         canvas.setDocument(document(threeNodes));
         QSignalSpy nodesReset(canvas.nodes(), &QAbstractItemModel::modelReset);
         QSignalSpy linksReset(canvas.links(), &QAbstractItemModel::modelReset);
-        // At 15 px a row is 28 high (15 * 11 / 6, rounded) and the title 33 (15 * 13 / 6).
+        // At 15 px the unit is 5: a row is 30 high (6u), the title 35 (7u), a node 300 wide (60u).
         canvas.setTextSize(15);
-        QCOMPARE(canvas.rowHeight(), 28.0);
-        QCOMPARE(canvas.headerHeight(), 33.0);
+        QCOMPARE(canvas.rowHeight(), 30.0);
+        QCOMPARE(canvas.headerHeight(), 35.0);
+        QCOMPARE(node(canvas, "gen").value("nodeWidth").toDouble(), 300.0);
         QCOMPARE(nodesReset.count(), 1);
         QCOMPARE(linksReset.count(), 1);
-        QCOMPARE(link(canvas, "gen.prompt").value("y1").toDouble(), 100.0 + 33 + 14);
+        QCOMPARE(link(canvas, "gen.prompt").value("y1").toDouble(), 100.0 + 35 + 5 + 15);
         canvas.setTextSize(15);
         QCOMPARE(linksReset.count(), 1);
     }
@@ -427,8 +519,8 @@ private slots:
         layout.insert("nodes", nodes);
         doc.layout = layout;
         canvas.setDocument(doc);
-        QCOMPARE(node(canvas, "gen").value("nodeHeight").toDouble(), 26.0);
-        QCOMPARE(link(canvas, "gen.prompt").value("y2").toDouble(), 93.0);
+        QCOMPARE(node(canvas, "gen").value("nodeHeight").toDouble(), 28.0);
+        QCOMPARE(link(canvas, "gen.prompt").value("y2").toDouble(), 94.0);
     }
 
     void reroutePointsBendTheWire() {
@@ -440,6 +532,80 @@ private slots:
         canvas.setDocument(doc);
         QCOMPARE(link(canvas, "save.image").value("path").toString().count(" C "), 2);
         QCOMPARE(link(canvas, "gen.prompt").value("path").toString().count(" C "), 1);
+    }
+
+    void reroutePointsAndCommentsAreDrawnFromTheLayout() {
+        CanvasModel canvas(&m_registry);
+        Document doc = document(threeNodes);
+        QJsonObject layout = doc.layout;
+        layout.insert("links", QJsonObject{{"save.image", QJsonObject{{"points", QJsonArray{QJsonArray{580, 400}}}}}});
+        doc.layout = layout;
+        canvas.setDocument(doc);
+        QCOMPARE(canvas.reroutes().size(), 1);
+        const QVariantMap point = canvas.reroutes().first().toMap();
+        QCOMPARE(point.value("x").toDouble(), 580.0);
+        QCOMPARE(point.value("color").toString(), QString("image"));
+        QCOMPARE(canvas.comments().size(), 1);
+        QCOMPARE(canvas.comments().first().toMap().value("text").toString(), QString("keep me"));
+    }
+
+    // #19 fills these from a run; with no run they are empty, so a node never run shows no state.
+    void runStateIsEmptyUntilARunSetsIt() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(threeNodes));
+        QVariantMap gen = node(canvas, "gen");
+        QCOMPARE(gen.value("runState").toString(), QString());
+        QCOMPARE(gen.value("progress").toDouble(), -1.0);
+        QCOMPARE(gen.value("thumbnail").toString(), QString());
+        const qreal plain = gen.value("nodeHeight").toDouble();
+
+        QSignalSpy changed(canvas.nodes(), &QAbstractItemModel::dataChanged);
+        canvas.setRunState("gen", {{"state", "cached"}, {"seconds", 6.2}, {"thumbnail", "file:///tmp/x.png"},
+                                   {"thumbnailAspect", 0.5}, {"thumbnailInfo", "1024 × 512"},
+                                   {"values", QVariantMap{{"seed", "4818231"}}}, {"warnings", QStringList{"slow"}}});
+        QCOMPARE(changed.count(), 1);
+        gen = node(canvas, "gen");
+        QCOMPARE(gen.value("runState").toString(), QString("cached"));
+        QCOMPARE(gen.value("seconds").toDouble(), 6.2);
+        QCOMPARE(gen.value("warnings").toStringList(), QStringList{"slow"});
+        QCOMPARE(gen.value("thumbnailInfo").toString(), QString("1024 × 512"));
+        QCOMPARE(port(gen, "outputs", "seed").value("value").toString(), QString("4818231"));
+        // The thumbnail sits under the rows, 6 px in from each side, its height from its aspect.
+        QCOMPARE(gen.value("thumbnailRect").toRectF(), QRectF(6, plain - 8 + 4, 228, 114));
+        QCOMPARE(gen.value("nodeHeight").toDouble(), plain + 4 + 114);
+
+        // An edit of the node keeps it until the next run says otherwise.
+        canvas.select({"gen"});
+        canvas.toggleCollapsed();
+        canvas.toggleCollapsed();
+        QCOMPARE(node(canvas, "gen").value("runState").toString(), QString("cached"));
+        canvas.clearRunState();
+        QCOMPARE(node(canvas, "gen").value("runState").toString(), QString());
+        QCOMPARE(node(canvas, "gen").value("nodeHeight").toDouble(), plain);
+    }
+
+    void layoutColorAndPinShowOnTheNode() {
+        CanvasModel canvas(&m_registry);
+        Document doc = document(threeNodes);
+        QJsonObject layout = doc.layout;
+        QJsonObject nodes = layout.value("nodes").toObject();
+        nodes.insert("gen", QJsonObject{{"pos", QJsonArray{300, 80}}, {"color", "blue"}, {"pinned", true}});
+        layout.insert("nodes", nodes);
+        doc.layout = layout;
+        canvas.setDocument(doc);
+        QCOMPARE(node(canvas, "gen").value("color").toString(), QString("blue"));
+        QVERIFY(node(canvas, "gen").value("pinned").toBool());
+        QCOMPARE(node(canvas, "save").value("color").toString(), QString());
+    }
+
+    // Spec 3.5: a bypassed node passes each output the first input of the same type.
+    void aBypassedNodeShowsWhatPassesThrough() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(R"({"fugue": 1, "graph": {"nodes": {
+            "crop": {"type": "fugue/crop", "version": "1.0.0", "inputs": {}, "mode": "bypass"}}}})"));
+        const QVariantMap crop = node(canvas, "crop");
+        QCOMPARE(crop.value("mode").toString(), QString("bypass"));
+        QCOMPARE(port(crop, "outputs", "image").value("passFrom").toString(), QString("image"));
     }
 };
 

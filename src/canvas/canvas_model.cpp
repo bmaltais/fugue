@@ -19,17 +19,29 @@ using namespace canvas_detail;
 
 namespace {
 
-constexpr qreal bottomPadding = 6;
 constexpr qreal columnGap = 80;
 constexpr qreal stackGap = 40;
 
 QString number(qreal value) { return QString::number(value, 'f', 1); }
 
-// A horizontal-tangent cubic from p to q, as a node editor draws a wire.
-QString cubic(const QPointF &p, const QPointF &q) {
-    const qreal dx = std::max<qreal>(40, std::abs(q.x() - p.x()) * 0.5);
-    return QStringLiteral(" C %1 %2 %3 %4 %5 %6")
-        .arg(number(p.x() + dx), number(p.y()), number(q.x() - dx), number(q.y()), number(q.x()), number(q.y()));
+// A wire's cubic from p to q with horizontal tangents (docs/canvas-look.md 8.1): half the run
+// apart, between 6u and 40u; a backward link loops out and back, 12u plus a quarter of the run.
+std::array<QPointF, 4> cubic(const QPointF &p, const QPointF &q, qreal u) {
+    const qreal run = q.x() - p.x();
+    const qreal dx = run >= 6 * u ? std::clamp(run * 0.5, 6 * u, 40 * u) : 12 * u + std::min(std::abs(run), 100 * u) * 0.25;
+    return {p, QPointF(p.x() + dx, p.y()), QPointF(q.x() - dx, q.y()), q};
+}
+
+QPointF at(const std::array<QPointF, 4> &c, qreal t) {
+    const qreal s = 1 - t;
+    return s * s * s * c[0] + 3 * s * s * t * c[1] + 3 * s * t * t * c[2] + t * t * t * c[3];
+}
+
+qreal distanceToSegment(const QPointF &p, const QPointF &a, const QPointF &b) {
+    const QPointF ab = b - a;
+    const qreal length = QPointF::dotProduct(ab, ab);
+    const qreal t = length > 0 ? std::clamp(QPointF::dotProduct(p - a, ab) / length, 0.0, 1.0) : 0.0;
+    return QLineF(p, a + t * ab).length();
 }
 
 } // namespace
@@ -60,6 +72,20 @@ QVariant NodeList::data(const QModelIndex &index, int role) const {
     case Selected: return m_canvas->m_selected.contains(row.id);
     case Inputs: return m_canvas->portMaps(row, false);
     case Outputs: return m_canvas->portMaps(row, true);
+    case Color: return row.color;
+    case Pinned: return row.pinned;
+    case ThumbnailRect: return row.thumbnail;
+    default: break;
+    }
+    const CanvasModel::RunInfo run = m_canvas->m_run.value(row.id);
+    switch (role) {
+    case RunState: return run.state;
+    case Progress: return run.progress;
+    case Seconds: return run.seconds;
+    case Error: return run.error;
+    case Warnings: return run.warnings;
+    case Thumbnail: return run.thumbnail;
+    case ThumbnailInfo: return run.thumbnailInfo;
     default: return {};
     }
 }
@@ -67,7 +93,10 @@ QVariant NodeList::data(const QModelIndex &index, int role) const {
 QHash<int, QByteArray> NodeList::roleNames() const {
     return {{NodeId, "nodeId"}, {TypeId, "typeId"},   {Title, "title"},       {Missing, "missing"},
             {X, "posX"},        {Y, "posY"},          {Width, "nodeWidth"},   {Height, "nodeHeight"},
-            {Collapsed, "collapsed"}, {Mode, "mode"}, {Selected, "selected"}, {Inputs, "inputs"}, {Outputs, "outputs"}};
+            {Collapsed, "collapsed"}, {Mode, "mode"}, {Selected, "selected"}, {Inputs, "inputs"}, {Outputs, "outputs"},
+            {Color, "color"}, {Pinned, "pinned"}, {RunState, "runState"}, {Progress, "progress"},
+            {Seconds, "seconds"}, {Error, "error"}, {Warnings, "warnings"}, {Thumbnail, "thumbnail"},
+            {ThumbnailInfo, "thumbnailInfo"}, {ThumbnailRect, "thumbnailRect"}};
 }
 
 LinkList::LinkList(CanvasModel *canvas) : QAbstractListModel(canvas), m_canvas(canvas) {}
@@ -92,6 +121,7 @@ QVariant LinkList::data(const QModelIndex &index, int role) const {
     case X2: return link.b.x();
     case Y2: return link.b.y();
     case Path: return link.path;
+    case Muted: return m_canvas->m_document.graph.nodes.value(link.from.node).mode == NodeMode::Mute;
     default: return {};
     }
 }
@@ -99,7 +129,7 @@ QVariant LinkList::data(const QModelIndex &index, int role) const {
 QHash<int, QByteArray> LinkList::roleNames() const {
     return {{FromNode, "fromNode"}, {FromPort, "fromPort"}, {ToNode, "toNode"}, {ToPort, "toPort"},
             {Item, "item"},         {Color, "color"},       {X1, "x1"},         {Y1, "y1"},
-            {X2, "x2"},             {Y2, "y2"},             {Path, "path"}};
+            {X2, "x2"},             {Y2, "y2"},             {Path, "path"},     {Muted, "muted"}};
 }
 
 // --- the canvas model --------------------------------------------------------
@@ -170,6 +200,7 @@ void CanvasModel::setDocument(const Document &document) {
     m_nodeList->endResetModel();
     m_linkList->endResetModel();
     emit framesChanged();
+    emit reroutesChanged();
     emit linkDragChanged();
     emit documentReset();
 }
@@ -217,6 +248,31 @@ QVariantList CanvasModel::frames() const {
     return frames;
 }
 
+QVariantList CanvasModel::comments() const {
+    QVariantList comments;
+    for (const QJsonValue &value : m_document.layout.value("comments").toArray()) {
+        const QJsonObject comment = value.toObject();
+        const auto pos = point(comment.value("pos"));
+        if (!pos)
+            continue;
+        const qreal width = comment.value("size").toArray().at(0).toDouble();
+        comments.append(QVariantMap{{"id", comment.value("id").toString()},
+                                    {"text", comment.value("text").toString()},
+                                    {"x", pos->x()},
+                                    {"y", pos->y()},
+                                    {"width", width > 0 ? width : 58 * unit()}});
+    }
+    return comments;
+}
+
+QVariantList CanvasModel::reroutes() const {
+    QVariantList points;
+    for (const LinkRow &link : m_links)
+        for (size_t i = 1; i < link.curves.size(); ++i)
+            points.append(QVariantMap{{"x", link.curves[i][0].x()}, {"y", link.curves[i][0].y()}, {"color", link.color}});
+    return points;
+}
+
 QVariantMap CanvasModel::view() const { return m_view; }
 
 void CanvasModel::setView(qreal centerX, qreal centerY, qreal zoom) {
@@ -229,10 +285,18 @@ void CanvasModel::setTextSize(int size) {
     m_nodeList->beginResetModel();
     m_linkList->beginResetModel();
     m_textSize = size;
-    m_headerHeight = qRound(size * 13 / 6.0);
-    m_rowHeight = qRound(size * 11 / 6.0);
-    for (NodeRow &row : m_rows)
+    const qreal u = size / 3.0;
+    m_headerHeight = qRound(7 * u);
+    m_rowHeight = qRound(6 * u);
+    m_tallRowHeight = qRound(16 * u);
+    m_padTop = qRound(u);
+    m_padBottom = qRound(2 * u);
+    m_defaultWidth = qRound(60 * u);
+    for (NodeRow &row : m_rows) {
+        if (!row.sized)
+            row.width = m_defaultWidth;
         layOut(row);
+    }
     for (int i = 0; i < int(m_links.size()); ++i)
         refreshLinkEnds(i);
     m_nodeList->endResetModel();
@@ -257,6 +321,7 @@ CanvasModel::NodeRow CanvasModel::makeRow(const QString &id) const {
             Port port;
             port.name = port.label = it.key();
             port.widget = linksIn(it.value()).isEmpty();
+            port.widgetKind = QStringLiteral("line");
             row.inputs.push_back(port);
         }
     }
@@ -280,9 +345,11 @@ CanvasModel::NodeRow CanvasModel::makeRow(const QString &id) const {
     if (!title.isEmpty())
         row.title = title;
     const QJsonArray size = layout.value("size").toArray();
-    if (size.size() == 2 && size[0].toDouble() > 0)
-        row.width = size[0].toDouble();
+    row.sized = size.size() == 2 && size[0].toDouble() > 0;
+    row.width = row.sized ? size[0].toDouble() : m_defaultWidth;
     row.collapsed = layout.value("collapsed").toBool();
+    row.color = layout.value("color").toString();
+    row.pinned = layout.value("pinned").toBool();
     layOut(row);
     return row;
 }
@@ -294,9 +361,12 @@ void CanvasModel::portsFromType(NodeRow &row, const Node &node) const {
         port.label = label.isEmpty() ? (spec.label.isEmpty() ? spec.name : spec.label) : label;
         port.type = spec.type;
         port.kind = m_registry ? m_registry->portKind(spec.type.type) : PortKind::Unknown;
-        port.widget = !spec.widget().isEmpty();
+        port.widgetKind = port.kind == PortKind::Resource ? QStringLiteral("model") : spec.widget();
+        port.widget = !port.widgetKind.isEmpty() && !spec.type.list;
         port.required = spec.required();
         port.defaultValue = spec.defaultValue;
+        port.min = spec.min;
+        port.max = spec.max;
         return port;
     };
     auto fromOutput = [this](const OutputSpec &spec, const QString &name) {
@@ -356,29 +426,44 @@ void CanvasModel::portsFromType(NodeRow &row, const Node &node) const {
     row.missing = true;
 }
 
-// Slots first, as in ComfyUI: wire-only inputs down the left and outputs down the right,
-// side by side; then one row per value input (a port and its value).
+// Outputs first, then inputs in their order, one row each, as in Blender (docs/canvas-look.md
+// 4.3): nothing shares a row, so a widget can span the node. An unlinked multiline input is a
+// tall row; its port stays level with a normal row's middle. The run's thumbnail goes under.
 void CanvasModel::layOut(NodeRow &row) const {
+    row.thumbnail = {};
     if (row.collapsed) {
         for (Port &port : row.inputs)
-            port.y = m_headerHeight / 2;
+            port.y = port.rowTop = m_headerHeight / 2;
         for (Port &port : row.outputs)
-            port.y = m_headerHeight / 2;
+            port.y = port.rowTop = m_headerHeight / 2;
         row.height = m_headerHeight;
         return;
     }
-    auto at = [this](int line) { return m_headerHeight + line * m_rowHeight + m_rowHeight / 2; };
-    int slotCount = 0;
-    for (Port &port : row.inputs)
-        if (!port.widget)
-            port.y = at(slotCount++);
-    int band = std::max(slotCount, int(row.outputs.size()));
-    for (int i = 0; i < int(row.outputs.size()); ++i)
-        row.outputs[size_t(i)].y = at(i);
-    for (Port &port : row.inputs)
-        if (port.widget)
-            port.y = at(band++);
-    row.height = m_headerHeight + band * m_rowHeight + bottomPadding;
+    const Node node = m_document.graph.nodes.value(row.id);
+    qreal top = m_headerHeight + m_padTop;
+    auto place = [&](Port &port, qreal height) {
+        port.rowTop = top;
+        port.rowHeight = height;
+        port.y = top + m_rowHeight / 2;
+        top += height;
+    };
+    for (Port &port : row.outputs)
+        place(port, m_rowHeight);
+    for (Port &port : row.inputs) {
+        const bool tall = port.widgetKind == QLatin1String("multiline") && port.widget
+                          && linksIn(node.inputs.value(port.name)).isEmpty();
+        place(port, tall ? m_tallRowHeight : m_rowHeight);
+    }
+    const auto run = m_run.constFind(row.id);
+    if (run != m_run.constEnd() && !run->thumbnail.isEmpty()) {
+        // 1.5u in from the sides, 1u under the rows, its height from its aspect (0.5 to 1.5).
+        const qreal inset = qRound(1.5 * unit());
+        const qreal width = row.width - 2 * inset;
+        const qreal height = qRound(width * std::clamp(run->thumbnailAspect, 0.5, 1.5));
+        row.thumbnail = QRectF(inset, top + m_padTop, width, height);
+        top = row.thumbnail.bottom();
+    }
+    row.height = top + m_padBottom;
 }
 
 // Columns by depth: a node sits one column right of the deepest node it reads from.
@@ -420,7 +505,7 @@ void CanvasModel::autoPlace(const QSet<QString> &unplaced) {
         QSet<QString> visiting;
         const int column = depthOf(row.id, visiting);
         const qreal y = columnBottom.value(column, origin.y());
-        row.pos = QPointF(origin.x() + column * (defaultWidth + columnGap), y);
+        row.pos = QPointF(origin.x() + column * (m_defaultWidth + columnGap), y);
         columnBottom.insert(column, y + row.height + stackGap);
     }
 }
@@ -441,13 +526,34 @@ QVariantMap CanvasModel::portMap(const NodeRow &row, const Port &port) const {
                     {"shape", shape(port.type, port.kind)},
                     {"color", colorKey(port.type, port.kind)},
                     {"y", port.y},
+                    {"rowTop", port.rowTop},
+                    {"rowHeight", port.rowHeight},
                     {"wired", isWired(row.id, port.name, port.output)},
                     {"widget", port.widget},
+                    {"widgetKind", port.widgetKind},
                     {"required", port.required}};
+    const Node &node = m_document.graph.nodes.value(row.id);
     if (port.widget) {
         bool isDefault = false;
-        map.insert("value", displayValue(m_document.graph.nodes.value(row.id).inputs.value(port.name), port, &isDefault));
+        const InputValue value = node.inputs.value(port.name);
+        map.insert("value", displayValue(value, port, &isDefault));
         map.insert("isDefault", isDefault);
+        // A slider fills its value's share of its range.
+        const QJsonValue number = value.isEmpty() ? port.defaultValue
+                                  : value.kind() == InputValue::Kind::Literal ? value.literal() : QJsonValue();
+        if (port.min && port.max && *port.max > *port.min && number.isDouble())
+            map.insert("share", std::clamp((number.toDouble() - *port.min) / (*port.max - *port.min), 0.0, 1.0));
+    }
+    if (port.output) {
+        // Bypassed (3.5), the output takes the first input of its type.
+        for (const Port &input : row.inputs)
+            if (port.type && input.type && input.type->type == port.type->type) {
+                map.insert("passFrom", input.name);
+                break;
+            }
+        const auto run = m_run.constFind(row.id);
+        if (run != m_run.constEnd() && run->values.contains(port.name))
+            map.insert("value", run->values.value(port.name).toString());
     }
     return map;
 }
@@ -556,8 +662,20 @@ void CanvasModel::refreshLinkEnds(int index) {
             points.append(*at);
     points.append(link.b);
     QString path = QStringLiteral("M %1 %2").arg(number(link.a.x()), number(link.a.y()));
-    for (int i = 1; i < points.size(); ++i)
-        path += cubic(points[i - 1], points[i]);
+    link.curves.clear();
+    QPointF low = link.a, high = link.a;
+    for (int i = 1; i < points.size(); ++i) {
+        const auto c = cubic(points[i - 1], points[i], unit());
+        link.curves.push_back(c);
+        for (const QPointF &p : c) {
+            low = QPointF(std::min(low.x(), p.x()), std::min(low.y(), p.y()));
+            high = QPointF(std::max(high.x(), p.x()), std::max(high.y(), p.y()));
+        }
+        path += QStringLiteral(" C %1 %2 %3 %4 %5 %6")
+                    .arg(number(c[1].x()), number(c[1].y()), number(c[2].x()), number(c[2].y()), number(c[3].x()),
+                         number(c[3].y()));
+    }
+    link.bounds = QRectF(low, high); // the control points hold the curve
     link.path = path;
 }
 
@@ -869,6 +987,33 @@ QString CanvasModel::nodeAt(qreal x, qreal y) const {
     return {};
 }
 
+QVariantMap CanvasModel::linkAt(qreal x, qreal y, qreal radius) const {
+    const QPointF p(x, y);
+    QVariantMap best;
+    qreal bestDistance = radius;
+    for (int i = 0; i < int(m_links.size()); ++i) {
+        const LinkRow &link = m_links[size_t(i)];
+        if (link.curves.empty() || !link.bounds.adjusted(-radius, -radius, radius, radius).contains(p))
+            continue;
+        for (const auto &curve : link.curves) {
+            QPointF previous = curve[0];
+            for (int step = 1; step <= 16; ++step) {
+                const QPointF next = at(curve, step / 16.0);
+                const qreal d = distanceToSegment(p, previous, next);
+                if (d <= bestDistance) {
+                    bestDistance = d;
+                    const QPointF mid = at(link.curves[link.curves.size() / 2], link.curves.size() % 2 ? 0.5 : 0.0);
+                    best = {{"row", i},          {"fromNode", link.from.node}, {"fromPort", link.from.port},
+                            {"toNode", link.toNode}, {"toPort", link.toInput}, {"item", link.item},
+                            {"midX", mid.x()},   {"midY", mid.y()}};
+                }
+                previous = next;
+            }
+        }
+    }
+    return best;
+}
+
 QStringList CanvasModel::nodesIn(const QRectF &rect) const {
     QStringList ids;
     const QRectF area = rect.normalized();
@@ -968,6 +1113,39 @@ void CanvasModel::select(const QStringList &ids, const QString &mode) {
         m_selected = given;
     for (const QString &id : (before - m_selected) + (m_selected - before))
         emitNodeChanged(rowOf(id), {NodeList::Selected});
+}
+
+void CanvasModel::setRunState(const QString &node, const QVariantMap &state) {
+    const int r = rowOf(node);
+    if (r < 0)
+        return;
+    RunInfo run;
+    run.state = state.value("state").toString();
+    run.progress = state.value("progress", -1).toReal();
+    run.seconds = state.value("seconds", -1).toReal();
+    run.error = state.value("error").toString();
+    run.warnings = state.value("warnings").toStringList();
+    run.thumbnail = state.value("thumbnail").toString();
+    run.thumbnailAspect = state.value("thumbnailAspect", 1).toReal();
+    run.thumbnailInfo = state.value("thumbnailInfo").toString();
+    run.values = state.value("values").toMap();
+    m_run.insert(node, run);
+    NodeRow &row = m_rows[size_t(r)];
+    const qreal height = row.height;
+    layOut(row);
+    QList<int> roles{NodeList::RunState, NodeList::Progress,  NodeList::Seconds,       NodeList::Error,
+                     NodeList::Warnings, NodeList::Thumbnail, NodeList::ThumbnailInfo, NodeList::ThumbnailRect,
+                     NodeList::Outputs};
+    if (row.height != height)
+        roles << NodeList::Height;
+    emitNodeChanged(r, roles);
+}
+
+void CanvasModel::clearRunState() {
+    const QStringList ids = m_run.keys();
+    for (const QString &id : ids)
+        setRunState(id, {});
+    m_run.clear();
 }
 
 QStringList CanvasModel::selectedIds() const {

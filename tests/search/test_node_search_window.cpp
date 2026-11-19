@@ -231,8 +231,8 @@ private slots:
     void aLinkLetGoOnEmptyCanvasOpensFilteredSearchAndAcceptingLinksIt() {
         App app;
         QVERIFY(app.open());
-        // The prompt's text output (240, 137) dragged to empty canvas.
-        const QPoint from = app.screen(240, 137), to = app.screen(300, 600);
+        // The prompt's text output (260, 144: 20 + 240 wide, 100 + 28 + 4 + 12) dragged to empty canvas.
+        const QPoint from = app.screen(260, 144), to = app.screen(300, 600);
         QTest::mousePress(app.window, Qt::LeftButton, {}, from);
         for (int i = 1; i <= 8; ++i)
             QTest::mouseMove(app.window, from + (to - from) * i / 8);

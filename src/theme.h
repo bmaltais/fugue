@@ -9,6 +9,8 @@
 #include <QTimer>
 #include <QVariantMap>
 
+#include "look.h"
+
 // Follows the Omarchy theme live: its whole palette, whether it is light or
 // dark, Hyprland's window rounding as radius, and the desktop text size.
 //
@@ -27,6 +29,9 @@
 //                         derive other sizes from it, e.g. textSize * 1.2
 //   light                 true on a light theme
 //   colors                the raw palette (red, green, selection, ...)
+//   look                  the canvas look (look.h): node, wire, popup and overlay
+//                         colors, sizes and shadows, for the canvas, node search
+//                         and the `?` overlay
 class Theme : public QObject {
     Q_OBJECT
     Q_PROPERTY(QColor accent READ accent NOTIFY changed)
@@ -43,6 +48,7 @@ class Theme : public QObject {
     Q_PROPERTY(QColor muted READ muted NOTIFY changed)
     Q_PROPERTY(QColor error READ error NOTIFY changed)
     Q_PROPERTY(QVariantMap portColors READ portColors NOTIFY changed)
+    Q_PROPERTY(CanvasLook *look READ look CONSTANT)
 
 public:
     // Tests pass a temp directory, a fake hyprctl, and their own event socket.
@@ -64,7 +70,12 @@ public:
     QColor muted() const;
     QColor error() const { return color("red"); }
     QVariantMap portColors() const;
+    // A port type's color: the theme's, made distinct from the others and readable on a node
+    // (docs/canvas-look.md 6.2).
     Q_INVOKABLE QColor portColor(const QString &type) const;
+    CanvasLook *look() const { return m_look; }
+    // A straight sRGB blend, `toB` of the way from a to b.
+    static QColor mix(const QColor &a, const QColor &b, double toB);
 
     struct Palette {
         QHash<QString, QColor> colors;
@@ -81,6 +92,7 @@ private:
     QColor color(const QString &key) const;
     void reload();
     void refreshRounding();
+    void refreshLook();
 
     QString m_directory;
     QString m_shellFile;
@@ -96,4 +108,5 @@ private:
     QTimer m_roundingTimeout;
     QLocalSocket m_events;
     QTimer m_reconnect;
+    CanvasLook *m_look;
 };
