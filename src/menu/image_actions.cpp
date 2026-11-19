@@ -4,7 +4,6 @@
 #include <QClipboard>
 #include <QCoreApplication>
 #include <QCryptographicHash>
-#include <QDebug>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFile>
@@ -30,23 +29,6 @@ namespace fugue {
 namespace {
 
 QString say(const char *text) { return QCoreApplication::translate("ImageActions", text); }
-
-struct Row {
-    const char *id;
-    const char *description;
-    const char *label;
-};
-
-QList<Row> rows() {
-    return {
-        {"node.open-image", QT_TRANSLATE_NOOP("Command", "Open the node's image in the default viewer"),
-         QT_TRANSLATE_NOOP("Command", "Open Image")},
-        {"node.copy-image", QT_TRANSLATE_NOOP("Command", "Copy the node's image to the clipboard"),
-         QT_TRANSLATE_NOOP("Command", "Copy Image")},
-        {"node.save-image", QT_TRANSLATE_NOOP("Command", "Save the node's image to a file"),
-         QT_TRANSLATE_NOOP("Command", "Save Image…")},
-    };
-}
 
 // The whole file, refused when it is not an image Fugue knows or is absurdly big.
 Result<QByteArray> readImage(const QString &path, ImageFormat &format) {
@@ -91,20 +73,9 @@ ImageActions::ImageActions(CommandRegistry &commands, CanvasModel &canvas, Canva
     : QObject(parent), m_commands(commands), m_canvas(canvas), m_runs(runs), m_opener(std::move(opener)) {
     if (!m_opener)
         m_opener = [](const QUrl &url) { return QDesktopServices::openUrl(url); };
-    for (const Row &row : rows()) {
-        const QString id = QString::fromLatin1(row.id);
-        if (!commands.contains(id)) {
-            CommandSpec spec;
-            spec.id = id;
-            spec.description = QString::fromUtf8(row.description);
-            spec.label = QString::fromUtf8(row.label);
-            spec.context = QStringLiteral("canvas");
-            spec.versus = QStringLiteral("same");
-            if (const QString problem = commands.add(spec); !problem.isEmpty())
-                qCritical().noquote() << "image command:" << problem;
-        }
-        commands.setEnabledWhen(id, [this] { return !m_runs.imageFile(node()).isEmpty(); });
-    }
+    // The commands are registered with the menus' (menu_commands.cpp), not available until here.
+    for (const char *id : {"node.open-image", "node.copy-image", "node.save-image"})
+        commands.setEnabledWhen(QString::fromLatin1(id), [this] { return !m_runs.imageFile(node()).isEmpty(); });
     commands.setHandler("node.open-image", [this] { open(); });
     commands.setHandler("node.copy-image", [this] { copy(); });
     commands.setHandler("node.save-image", [this] { save(); });
