@@ -1,13 +1,13 @@
 #include "embed.h"
 
 #include <QFile>
-#include <QJsonDocument>
 #include <QtEndian>
 
 #include <array>
 
 #include <glib.h>
 
+#include "engine/json.h"
 #include "engine/vips.h"
 
 namespace fugue {
@@ -179,10 +179,14 @@ Result<QJsonObject> readEmbeddedWorkflow(const QString &path) {
     } else {
         return makeError(QStringLiteral("media_unreadable"), QStringLiteral("%1 is neither a PNG nor a WebP file.").arg(path));
     }
-    const QJsonDocument document = QJsonDocument::fromJson(text);
-    if (text.isEmpty() || !document.isObject())
+    if (text.isEmpty())
         return makeError(QStringLiteral("invalid_document"), QStringLiteral("%1 holds no Fugue workflow.").arg(path));
-    return document.object();
+    const Result<QJsonDocument> document = parseJson(text, QStringLiteral("The workflow in %1").arg(path));
+    if (!document)
+        return makeError(QStringLiteral("invalid_document"), document.error().message);
+    if (!document->isObject())
+        return makeError(QStringLiteral("invalid_document"), QStringLiteral("The workflow in %1 is not a JSON object.").arg(path));
+    return document->object();
 }
 
 } // namespace fugue
