@@ -204,6 +204,14 @@ foreach(test_source ${fugue_cli_tests})
   add_test(NAME ${test_name} COMMAND ${test_name})
 endforeach()
 
+# No test reads or writes the owner's settings, providers or keymap: every test starts with
+# XDG_CONFIG_HOME on an empty folder of its own (a test may still set its own).
+get_property(fugue_all_tests DIRECTORY PROPERTY TESTS)
+foreach(test_name ${fugue_all_tests})
+  set_property(TEST ${test_name} APPEND PROPERTY ENVIRONMENT
+               XDG_CONFIG_HOME=${CMAKE_BINARY_DIR}/test-config/${test_name})
+endforeach()
+
 # `cmake --install build --prefix ~/.local` puts the app in the launcher
 # before it is packaged; a package installs the same files under /usr.
 include(GNUInstallDirs)

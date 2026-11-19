@@ -4,6 +4,8 @@
 #include <QFileInfo>
 #include <QStandardPaths>
 
+#include "engine/settings.h"
+
 namespace fugue {
 
 namespace {
@@ -19,12 +21,18 @@ QString stateDir() { return under(QStandardPaths::GenericStateLocation); }
 QString cacheDir() { return under(QStandardPaths::GenericCacheLocation); }
 
 QString outputDir() {
+    if (const QString chosen = currentSettings().outputFolder; !chosen.isEmpty())
+        return QDir::cleanPath(expandHome(chosen));
     const QString pictures = qEnvironmentVariable("XDG_PICTURES_DIR");
     return (pictures.isEmpty() ? QStandardPaths::writableLocation(QStandardPaths::PicturesLocation) : pictures) +
            QStringLiteral("/Fugue");
 }
 
-QString inputsDir() { return outputDir() + QStringLiteral("/inputs"); }
+QString inputsDir() {
+    if (const QString chosen = currentSettings().inputsFolder; !chosen.isEmpty())
+        return QDir::cleanPath(expandHome(chosen));
+    return outputDir() + QStringLiteral("/inputs");
+}
 
 QString inputsDirBeside(const QString &workflowPath) {
     return QFileInfo(workflowPath).absoluteDir().filePath(QStringLiteral("inputs"));

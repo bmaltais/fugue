@@ -124,4 +124,25 @@ Result<bool> PartialFile::commit(const QString &target, Overwrite overwrite) {
     return true;
 }
 
+Errors replaceFile(const QString &path, const QByteArray &bytes, const QString &what, FileMode mode) {
+    const QFileInfo info(path);
+    if (Errors errors = makeFolder(info.absolutePath()); !errors.isEmpty())
+        return errors;
+    PartialFile partial(info.absolutePath(), info.fileName());
+    if (mode == FileMode::OwnerOnly) {
+        // Made 0600 before anything is in it, so the content is never readable by others.
+        const QByteArray name = QFile::encodeName(partial.path());
+        const int fd = ::open(name.constData(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+        if (fd < 0)
+            return {writeFailed(what, errno)};
+        ::close(fd);
+    }
+    if (Errors errors = partial.write(bytes, what); !errors.isEmpty())
+        return errors;
+    const Result<bool> committed = partial.commit(path, Overwrite::Replace);
+    if (!committed)
+        return committed.errors();
+    return {};
+}
+
 } // namespace fugue
