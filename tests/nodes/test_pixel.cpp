@@ -12,7 +12,9 @@
 //              lanczos through comfy/utils.py lanczos = PIL Image.resize LANCZOS).
 //   - Crop:    comfy_extras/nodes_images.py ImageCrop.execute.
 //   - Blend:   comfy_extras/nodes_post_processing.py Blend (ImageBlend), and
-//              node_helpers.py image_alpha_fix.
+//              node_helpers.py image_alpha_fix. ComfyUI's "difference" is base - top,
+//              clamped: Fugue calls that `subtract`, and its `difference` is |base - top|
+//              (Photoshop, GIMP, CSS mix-blend-mode), checked against worked numbers.
 //   - Text concat: comfy_extras/nodes_string.py StringConcatenate.
 //   - Brightness and contrast: ComfyUI core has no such node. The reference is the
 //     mid-gray-pivot form used by GIMP's legacy tool and the CSS/libvips idiom,
@@ -35,7 +37,9 @@
 #include <cmath>
 #include <vector>
 
+#include "engine/registry.h"
 #include "engine/vips.h"
+#include "nodes/builtin.h"
 #include "nodes/kernels.h"
 
 using namespace fugue;
@@ -224,7 +228,11 @@ float blendMode(const QString &mode, float a, float b) {
         return a <= 0.5f ? 2 * a * b : 1 - 2 * (1 - a) * (1 - b);
     if (mode == "soft_light")
         return b <= 0.5f ? a - (1 - 2 * b) * a * (1 - a) : a + (2 * b - 1) * (g(a) - a);
-    return a - b; // difference: ComfyUI does not take the absolute value; the clamp does the rest
+    if (mode == "difference")
+        return std::fabs(a - b);
+    if (mode == "subtract")
+        return a - b; // ComfyUI's "difference": signed; the clamp does the rest
+    qFatal("no reference for blend mode %s", qPrintable(mode));
 }
 
 Img blendRef(const Img &base, Img top, const QString &mode, float opacity) {
@@ -448,7 +456,7 @@ private slots:
         QTest::addColumn<int>("baseChannels");
         QTest::addColumn<int>("topChannels");
         QTest::addColumn<double>("opacity");
-        for (const char *m : {"normal", "multiply", "screen", "overlay", "soft_light", "difference"}) {
+        for (const char *m : {"normal", "multiply", "screen", "overlay", "soft_light", "difference", "subtract"}) {
             QTest::addRow("%s rgb rgb 0.7", m) << m << 3 << 3 << 0.7;
             QTest::addRow("%s rgba rgba 1", m) << m << 4 << 4 << 1.0;
             QTest::addRow("%s rgba rgb 0.4", m) << m << 4 << 3 << 0.4;
@@ -482,7 +490,8 @@ private slots:
         QVERIFY(maxDiff(imgOf(r.value()), blendRef(base, top, "screen", 0.6f)) < 1e-5f);
     }
 
-    void blendDifferenceIsNotAbsoluteLikeComfy() {
+    // Photoshop's, GIMP's and CSS's difference: the absolute value.
+    void blendDifferenceIsTheAbsoluteDifference() {
         Img base{1, 1, 3, {0.2f, 0.8f, 0.5f}};
         Img top{1, 1, 3, {0.5f, 0.5f, 0.5f}};
         const Result<MediaHandle> r = run("fugue/blend", {{"base", handleOf(base)},
@@ -490,7 +499,28 @@ private slots:
                                                           {"mode", "difference"},
                                                           {"opacity", 1.0}});
         QVERIFY(r.ok());
+        QVERIFY(maxDiff(imgOf(r.value()), Img{1, 1, 3, {0.3f, 0.3f, 0.0f}}) < 1e-6f);
+    }
+
+    // ComfyUI's "difference" under its true name.
+    void blendSubtractIsComfysDifference() {
+        Img base{1, 1, 3, {0.2f, 0.8f, 0.5f}};
+        Img top{1, 1, 3, {0.5f, 0.5f, 0.5f}};
+        const Result<MediaHandle> r = run("fugue/blend", {{"base", handleOf(base)},
+                                                          {"top", handleOf(top)},
+                                                          {"mode", "subtract"},
+                                                          {"opacity", 1.0}});
+        QVERIFY(r.ok());
         QVERIFY(maxDiff(imgOf(r.value()), Img{1, 1, 3, {0.0f, 0.3f, 0.0f}}) < 1e-6f); // base - top, clamped at 0
+    }
+
+    void blendOffersEveryModeItComputes() {
+        Registry registry;
+        nodes::addBuiltinNodeTypes(registry);
+        const InputSpec *mode = registry.nodeType("fugue/blend")->input("mode");
+        QVERIFY(mode && mode->choices);
+        QCOMPARE(*mode->choices,
+                 QStringList({"normal", "multiply", "screen", "overlay", "soft_light", "difference", "subtract"}));
     }
 
     // ---- the real binary ----

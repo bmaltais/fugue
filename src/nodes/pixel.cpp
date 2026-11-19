@@ -332,7 +332,9 @@ public:
             else if (mode == "soft_light")
                 mixed = b <= 0.5f ? a - (1 - 2 * b) * a * (1 - a) : a + (2 * b - 1) * (softLightG(a) - a);
             else if (mode == "difference")
-                mixed = a - b; // ComfyUI: signed, then clamped (no absolute value)
+                mixed = std::fabs(a - b); // Photoshop, GIMP, CSS
+            else if (mode == "subtract")
+                mixed = a - b; // ComfyUI's "difference": signed, then clamped
             else
                 mixed = b; // normal
             out.d[i] = a * (1 - opacity) + mixed * opacity;

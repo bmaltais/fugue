@@ -1720,7 +1720,7 @@ merged, its `node.json` is the source of truth.
 | `fugue/resize` | `image`, `width`, `height`, `fit` (stretch, contain, cover), `method` (nearest, bilinear, bicubic, lanczos, area) | `image` | libvips. |
 | `fugue/crop` | `image`, `x`, `y`, `width`, `height` | `image` | |
 | `fugue/brightness-contrast` | `image`, `brightness`, `contrast` | `image` | |
-| `fugue/blend` | `base`, `top`, `mode`, `opacity` | `image` | Modes at least: normal, multiply, screen, overlay, soft light, difference. |
+| `fugue/blend` | `base`, `top`, `mode`, `opacity` | `image` | Modes at least: normal, multiply, screen, overlay, soft light, difference. Difference is \|base − top\| as in Photoshop, GIMP and CSS; subtract is base − top clamped, which ComfyUI calls difference. |
 | `fugue/text-concat` | `a`, `b`, `separator` | `text` | |
 
 Pixel nodes run on libvips (C++ API, dynamically linked, CPU). Each has a parity test against
