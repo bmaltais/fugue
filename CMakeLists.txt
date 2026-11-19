@@ -25,11 +25,13 @@ target_compile_options(fugue_engine PUBLIC -Wall -Wextra)
 # Everything else but main.cpp, shared by the app and the tests, so each source
 # compiles once and a new file in src/ needs no line here.
 file(GLOB fugue_sources CONFIGURE_DEPENDS src/*.cpp src/*.h src/canvas/*.cpp src/canvas/*.h
-     src/commands/*.cpp src/commands/*.h src/search/*.cpp src/search/*.h src/workflow/*.cpp src/workflow/*.h)
+     src/commands/*.cpp src/commands/*.h src/search/*.cpp src/search/*.h src/workflow/*.cpp src/workflow/*.h
+     src/run/*.cpp src/run/*.h)
 list(REMOVE_ITEM fugue_sources ${CMAKE_SOURCE_DIR}/src/main.cpp)
 add_library(fugue_core STATIC ${fugue_sources})
 target_include_directories(fugue_core PUBLIC src)
-target_link_libraries(fugue_core PUBLIC fugue_engine
+# The window's runs (src/run) start and queue them as the CLI does, with its code.
+target_link_libraries(fugue_core PUBLIC fugue_engine fugue_cli
   Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::DBus)
 target_compile_options(fugue_core PUBLIC -Wall -Wextra)
 
@@ -149,6 +151,7 @@ foreach(test_source ${fugue_canvas_tests})
   get_filename_component(test_name ${test_source} NAME_WE)
   add_executable(${test_name} ${test_source} src/resources.qrc)
   target_link_libraries(${test_name} PRIVATE fugue_core fugue_nodes Qt6::Test)
+  target_compile_definitions(${test_name} PRIVATE FUGUE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
   add_test(NAME ${test_name} COMMAND ${test_name})
   set_tests_properties(${test_name} PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
 endforeach()

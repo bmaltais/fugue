@@ -1194,7 +1194,12 @@ void CanvasModel::setRunState(const QString &node, const QVariantMap &state) {
     run.thumbnail = state.value("thumbnail").toString();
     run.thumbnailAspect = state.value("thumbnailAspect", 1).toReal();
     run.thumbnailInfo = state.value("thumbnailInfo").toString();
+    run.thumbnailSize = state.value("thumbnailSize").toSizeF();
     run.values = state.value("values").toMap();
+    const RunInfo before = m_run.value(node);
+    const bool previewChanged = before.thumbnail.isEmpty() != run.thumbnail.isEmpty()
+                                || before.thumbnailSize != run.thumbnailSize
+                                || before.thumbnailAspect != run.thumbnailAspect;
     m_run.insert(node, run);
     NodeRow &row = m_rows[size_t(r)];
     const qreal height = row.height;
@@ -1205,6 +1210,27 @@ void CanvasModel::setRunState(const QString &node, const QVariantMap &state) {
     if (row.height != height)
         roles << NodeList::Height;
     emitNodeChanged(r, roles);
+    if (previewChanged)
+        emit previewSizeChanged(node);
+}
+
+void CanvasModel::setRunProgress(const QString &node, qreal progress) {
+    const int r = rowOf(node);
+    const auto run = m_run.find(node);
+    if (r < 0 || run == m_run.end() || run->progress == progress)
+        return;
+    run->progress = progress;
+    emitNodeChanged(r, {NodeList::Progress});
+}
+
+QString CanvasModel::nodeTitle(const QString &node) const {
+    const int r = rowOf(node);
+    return r < 0 ? QString() : m_rows[size_t(r)].title;
+}
+
+QSizeF CanvasModel::previewSize(const QString &node) const {
+    const auto run = m_run.constFind(node);
+    return run == m_run.constEnd() || run->thumbnail.isEmpty() ? QSizeF() : run->thumbnailSize;
 }
 
 void CanvasModel::clearRunState() {

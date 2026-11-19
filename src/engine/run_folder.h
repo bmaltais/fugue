@@ -77,6 +77,11 @@ public:
     // What whoever queues the run writes (9.8): run.json with the status `queued`, and
     // the workflow's path when there is one, then the run.queued event.
     bool queued(const QString &workflow = {}) const;
+    // A cancel asked of a run whose process runs it itself (the window, 9.8), which no
+    // signal reaches: `fugue runs cancel` leaves the file `cancel` in the folder, and that
+    // process looks for it while the run is active.
+    bool requestCancel() const;
+    bool cancelRequested() const;
     // Ends the run: run.json keeps what it holds and gets `status` and `ended`, then
     // run.done is appended with the errors. Returns that event as it was given to
     // appendEvent, for a caller that also tells listeners. Every way a run ends goes

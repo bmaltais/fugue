@@ -69,6 +69,7 @@
 #include <QObject>
 #include <QPointF>
 #include <QRectF>
+#include <QSizeF>
 #include <QSet>
 #include <QVariantList>
 #include <QVariantMap>
@@ -290,6 +291,14 @@ public:
     // name -> the last value as text)}. Missing keys are empty. Kept across edits of the node.
     Q_INVOKABLE void setRunState(const QString &node, const QVariantMap &state);
     Q_INVOKABLE void clearRunState();
+    // Only a running node's progress (0 to 1): one role, no layout, for a run's frequent updates.
+    void setRunProgress(const QString &node, qreal progress);
+    // The node's title as the canvas shows it; empty when there is no such node.
+    QString nodeTitle(const QString &node) const;
+    // The seam for #49 (node size): the pixel size of the node's last image (setRunState's
+    // `thumbnailSize`), empty without one. previewSizeChanged(node) fires when a thumbnail
+    // comes, goes or changes size, after the node's rows were laid out again with it.
+    QSizeF previewSize(const QString &node) const;
 
     // --- clipboard ---
 
@@ -391,6 +400,7 @@ signals:
     // included.
     void edited();
     void undoChanged();
+    void previewSizeChanged(const QString &node);
     void zoomRequested(qreal factor);
     void fitRequested();
 
@@ -458,6 +468,7 @@ private:
         QStringList warnings;
         QString thumbnail;
         qreal thumbnailAspect = 1;
+        QSizeF thumbnailSize;
         QString thumbnailInfo;
         QVariantMap values;
     };
