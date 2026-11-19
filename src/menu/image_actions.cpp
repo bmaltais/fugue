@@ -4,6 +4,7 @@
 #include <QClipboard>
 #include <QCoreApplication>
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFile>
@@ -70,6 +71,43 @@ bool hasExtension(const QString &path, const QString &extension) {
            || (extension == QLatin1String("tif") && suffix == QLatin1String("tiff"));
 }
 
+// A copy of `path` named with `extension` for a viewer, in a folder of the owner's alone
+// (`fugue-view` in the runtime folder, 0700), named by the path, size and modification time so
+// a changed file gets a fresh copy. Empty when it could not be made.
+QString viewCopy(const QString &path, const QString &extension) {
+    QString runtime = qEnvironmentVariable("XDG_RUNTIME_DIR");
+    if (runtime.isEmpty() || !QFileInfo(runtime).isDir())
+        runtime = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
+    if (runtime.isEmpty())
+        return {};
+    const QString dir = runtime + QStringLiteral("/fugue-view");
+    if (!QDir().mkpath(dir)
+        || !QFile::setPermissions(dir, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner))
+        return {};
+    const QFileInfo info(path);
+    const QByteArray identity = path.toUtf8() + '\n' + QByteArray::number(info.size()) + '\n'
+                                + QByteArray::number(info.lastModified().toMSecsSinceEpoch());
+    const QString key = QString::fromLatin1(QCryptographicHash::hash(identity, QCryptographicHash::Sha256).toHex().left(32));
+    const QString shown = dir + '/' + key + '.' + extension;
+    if (QFileInfo(shown).isFile() && QFileInfo(shown).size() == info.size())
+        return shown;
+    QFile source(path);
+    if (!source.open(QIODevice::ReadOnly))
+        return {};
+    PartialFile partial(dir, key + '.' + extension);
+    QFile out(partial.path());
+    if (!out.open(QIODevice::WriteOnly))
+        return {};
+    while (!source.atEnd()) {
+        const QByteArray chunk = source.read(1 << 20);
+        if (chunk.isEmpty() || out.write(chunk) != chunk.size())
+            return {};
+    }
+    out.close();
+    const Result<bool> committed = partial.commit(shown, Overwrite::Replace);
+    return committed && *committed ? shown : QString();
+}
+
 QString suggestedFolder() {
     for (const QString &dir : {outputDir(), QStandardPaths::writableLocation(QStandardPaths::PicturesLocation)})
         if (!dir.isEmpty() && QFileInfo(dir).isDir())
@@ -110,26 +148,31 @@ void ImageActions::open() {
     const QString path = m_runs.imageFile(node());
     if (path.isEmpty())
         return;
-    QString shown = path;
     const auto format = formatOf(path);
-    // A viewer picks the program by the extension: a cache file has none, or a wrong one.
-    if (format && !hasExtension(path, format->extension)) {
-        const QString key = QString::fromLatin1(QCryptographicHash::hash(path.toUtf8(), QCryptographicHash::Sha256).toHex().left(16));
-        const QString dir = QDir::tempPath() + QStringLiteral("/fugue-view");
-        shown = dir + '/' + key + '.' + format->extension;
-        if (!QFileInfo::exists(shown)) {
-            QDir().mkpath(dir);
-            const QString part = shown + QStringLiteral(".part");
-            QFile::remove(part);
-            if (!QFile::copy(path, part) || !QFile::rename(part, shown)) {
-                QFile::remove(part);
-                emit message(say("Could not prepare the image to open it."));
-                return;
-            }
-        }
+    if (!format) {
+        emit message(say("The file is not an image Fugue can use."));
+        return;
     }
-    if (!m_opener(QUrl::fromLocalFile(shown)))
-        emit message(say("Could not open the image: no program is set to show it."));
+    if (hasExtension(path, format->extension)) {
+        if (!m_opener(QUrl::fromLocalFile(path)))
+            emit message(say("Could not open the image: no program is set to show it."));
+        return;
+    }
+    // A viewer picks the program by the extension: a cache file has none, or a wrong one, so
+    // a copy under the right one is made off the UI thread.
+    const QString extension = format->extension;
+    QPointer<ImageActions> self(this);
+    m_workers.start([self, path, extension] {
+        const QString shown = viewCopy(path, extension);
+        QMetaObject::invokeMethod(qApp, [self, shown] {
+            if (!self)
+                return;
+            if (shown.isEmpty())
+                emit self->message(say("Could not prepare the image to open it."));
+            else if (!self->m_opener(QUrl::fromLocalFile(shown)))
+                emit self->message(say("Could not open the image: no program is set to show it."));
+        }, Qt::QueuedConnection);
+    });
 }
 
 void ImageActions::copy() {

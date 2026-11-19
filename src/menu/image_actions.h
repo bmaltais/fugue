@@ -9,7 +9,9 @@
 //
 //   node.open-image  the system's default viewer, through `opener` (QDesktopServices). A file
 //                    whose name does not carry its real format's extension (a cache file) is
-//                    copied to a temporary name that does, so the viewer recognizes it.
+//                    copied, off the UI thread, to a name that does, so the viewer recognizes
+//                    it: in `fugue-view` in the runtime folder (0700), keyed by path, size and
+//                    time. A file whose bytes are not an image is refused with a notice.
 //   node.copy-image  the clipboard gets the file's own bytes under their real MIME type (png,
 //                    jpeg, webp...), and a PNG of the picture too when the file is not one, so
 //                    another app takes the original and a Fugue paste (image_inputs.h) stores

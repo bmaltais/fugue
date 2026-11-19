@@ -193,8 +193,14 @@ struct ActionApp : RunApp {
 class TestImageActions : public QObject {
     Q_OBJECT
 
+    // The runtime folder Open's copies go to, never the owner's own.
+    QTemporaryDir runtime;
+
 private slots:
-    void initTestCase() { QQuickStyle::setStyle("Material"); }
+    void initTestCase() {
+        QQuickStyle::setStyle("Material");
+        qputenv("XDG_RUNTIME_DIR", runtime.path().toUtf8());
+    }
 
     // The three commands are on a node's menu and are enabled only when it has an image.
     void theMenuOffersThemOnlyForANodeWithAnImage() {
@@ -389,6 +395,40 @@ private slots:
         QCOMPARE(signals_, 0);
     }
 
+    // The copy Open makes for the viewer is in a folder of the owner's alone (the runtime
+    // folder, not a shared /tmp name), is made again when the file changes, and a file that is
+    // not an image is never handed to a viewer.
+    void openMakesAPrivateFreshCopyAndRefusesWhatIsNoImage() {
+        ActionApp r(kLoadImage);
+        QVERIFY(r.app.open());
+        const QString file = r.app.dir.filePath("photo.png");
+        QImage image(64, 48, QImage::Format_RGB32);
+        image.fill(Qt::red);
+        QVERIFY(image.save(file, "JPEG"));
+        QVERIFY(r.app.model.widgets()->setText("src", "file", file).isEmpty());
+        QTRY_VERIFY(r.app.commands.isEnabled("node.open-image", {{"node", "src"}}));
+        r.app.model.select({"src"});
+        QVERIFY(r.app.commands.trigger("node.open-image"));
+        QTRY_COMPARE(r.opened.size(), 1);
+        const QString shown = r.opened.first().toLocalFile();
+        QVERIFY2(shown.startsWith(runtime.path() + "/"), qPrintable(shown));
+        QCOMPARE(QFileInfo(QFileInfo(shown).absolutePath()).permissions() & 0x0077, QFileDevice::Permissions());
+        // Another picture at the same path is shown as itself, not the first copy.
+        QImage other(80, 20, QImage::Format_RGB32);
+        other.fill(Qt::blue);
+        QVERIFY(QFile::remove(file) && other.save(file, "JPEG"));
+        QVERIFY(r.app.commands.trigger("node.open-image"));
+        QTRY_COMPARE(r.opened.size(), 2);
+        QCOMPARE(QImage(r.opened.last().toLocalFile()).size(), QSize(80, 20));
+        // Text where the image was: refused with a notice.
+        QFile text(file);
+        QVERIFY(text.open(QIODevice::WriteOnly | QIODevice::Truncate) && text.write("#!/bin/sh\n") > 0);
+        text.close();
+        QVERIFY(r.app.commands.trigger("node.open-image"));
+        QTRY_COMPARE(r.messages.size(), 1);
+        QCOMPARE(r.opened.size(), 2);
+    }
+
     // Open gives the viewer a file URL of the full picture, with the right extension.
     void openGivesTheViewerTheFullFile() {
         ActionApp r(kSinks);
@@ -397,7 +437,7 @@ private slots:
         r.runWithPicture(picture);
         r.app.model.select({"show"});
         QVERIFY(r.app.commands.trigger("node.open-image"));
-        QCOMPARE(r.opened.size(), 1);
+        QTRY_COMPARE(r.opened.size(), 1);
         QVERIFY(r.opened.first().isLocalFile());
         const QString path = r.opened.first().toLocalFile();
         QVERIFY2(path.endsWith(".png"), qPrintable(path));
@@ -422,7 +462,7 @@ private slots:
         QCOMPARE(r.runs->imageFile("src"), file);
         r.app.model.select({"src"});
         QVERIFY(r.app.commands.trigger("node.open-image"));
-        QCOMPARE(r.opened.size(), 1);
+        QTRY_COMPARE(r.opened.size(), 1);
         const QString shown = r.opened.first().toLocalFile();
         QVERIFY2(shown.endsWith(".jpg") && shown != file, qPrintable(shown));
         QFile a(file), b(shown);
