@@ -95,6 +95,9 @@ public:
     // model must have, and the model input's handle (empty for "any ready
     // model", 8.4). Pins are the scheduler's; leave them empty. Called on the
     // scheduler's thread before the cache lookup, so it must be quick.
+    // Under validate (checkGraph) nothing has run, so `inputs` may lack the inputs
+    // that are not known yet: a random seed, or a link to a node that has not run.
+    // Do not assume that every required input is present.
     virtual Requirement requirement(const NodeType &type, const Values &inputs) const = 0;
 
     // The job to submit to the provider chosen. `outputDir` is set by the
