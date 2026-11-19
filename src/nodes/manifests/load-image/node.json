@@ -1,0 +1,19 @@
+{
+  "manifest": 1,
+  "id": "fugue/load-image",
+  "version": "1.0.0",
+  "name": "Load Image",
+  "description": "Reads an image file from disk.",
+  "category": "Basic",
+  "keywords": ["open", "file", "input", "png", "jpeg", "webp"],
+  "runtime": {"kind": "builtin"},
+  "needs": {"files": true},
+  "inputs": [
+    {"name": "file", "type": "text", "label": "File", "widget": "file"}
+  ],
+  "outputs": [
+    {"name": "image", "type": "image", "label": "Image"},
+    {"name": "width", "type": "number", "label": "Width"},
+    {"name": "height", "type": "number", "label": "Height"}
+  ]
+}
