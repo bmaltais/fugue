@@ -337,8 +337,6 @@ Reply execute(const Command &command, Context &context) {
         return workflowNew(command, context);
     if (name == "workflow.describe")
         return workflowDescribe(command, context);
-    if (name == "workflow.export")
-        return Reply::failure(makeError("internal", "Exporting a share copy is not built yet."));
     if (name == "__worker") {
         Reply reply;
         reply.streamed = true;

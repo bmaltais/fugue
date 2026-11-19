@@ -416,10 +416,12 @@ private slots:
         QCOMPARE(data.value("links").toArray().size(), 1);
     }
 
-    void workflowExportIsNotBuiltYet() {
+    // Export is M2: it parses, and says so the way every later-milestone command does.
+    void workflowExportIsNotAvailableYet() {
         const Outcome o = fugue({"workflow", "export", workflow(), "--share", "--no-prompts", "--no-layout", "--json"});
         QCOMPARE(o.exitCode, 1);
-        QCOMPARE(o.firstCode(), QString("internal"));
+        QCOMPARE(o.firstCode(), QString("usage"));
+        QVERIFY(o.firstMessage().contains("not available in this version"));
     }
 
     // --- later milestones ---
