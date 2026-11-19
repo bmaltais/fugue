@@ -2,6 +2,7 @@
 
 #include "engine/canonical.h"
 #include "engine/ids.h"
+#include "engine/suggest.h"
 
 #include <QJsonArray>
 #include <QSet>
@@ -21,37 +22,6 @@ QString shown(const QJsonValue &value) {
     if (value.isUndefined())
         return QStringLiteral("nothing");
     return QString::fromUtf8(canonicalJson(value).value_or("?"));
-}
-
-int distance(const QString &a, const QString &b) {
-    QList<int> row(b.size() + 1);
-    for (qsizetype j = 0; j <= b.size(); ++j)
-        row[j] = int(j);
-    for (qsizetype i = 1; i <= a.size(); ++i) {
-        int diagonal = row[0];
-        row[0] = int(i);
-        for (qsizetype j = 1; j <= b.size(); ++j) {
-            const int above = row[j];
-            row[j] = std::min({row[j] + 1, row[j - 1] + 1,
-                               diagonal + (a.at(i - 1) == b.at(j - 1) ? 0 : 1)});
-            diagonal = above;
-        }
-    }
-    return row[b.size()];
-}
-
-// The closest choice to a near miss, or nothing.
-QString nearest(const QString &value, const QStringList &choices) {
-    QString best;
-    int bestDistance = 3; // more than two edits is not a near miss
-    for (const QString &choice : choices) {
-        const int d = choice.compare(value, Qt::CaseInsensitive) == 0 ? 0 : distance(value, choice);
-        if (d < bestDistance && d < value.size()) {
-            best = choice;
-            bestDistance = d;
-        }
-    }
-    return best;
 }
 
 Error literalError(const QString &code, const InputSpec &input, const QString &message) {
