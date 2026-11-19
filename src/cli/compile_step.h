@@ -11,6 +11,7 @@
 #include "engine/document.h"
 #include "engine/providers.h"
 #include "engine/registry.h"
+#include "engine/scheduler.h"
 
 namespace fugue::cli {
 
@@ -26,16 +27,9 @@ struct CompileSettings {
 Compilation compileDocument(const Document &document, const Registry &registry, const CompileSettings &settings = {});
 
 // What validate reports: the compiler's errors and warnings, and when the graph
-// compiles, warnings from asking the providers whether each node could run (8.5).
-// This talks to the configured providers when some node asks for a capability.
-Errors validateDocument(const Document &document, const Registry &registry);
-
-// The provider side of validate, as a pure function over descriptions already
-// fetched: each node whose type lists a capability is run through selectProvider(),
-// and every failure becomes a warning on that node (a missing model, a model not
-// running, no provider for the capability, an unreachable provider). Validate
-// executes nothing, so none of these is an error there; a run that reaches the node
-// reports it as one.
-Errors providerWarnings(const CompiledGraph &graph, const Registry &registry, const QList<Candidate> &candidates);
+// compiles, the scheduler's checkGraph() warnings (a missing model, a frozen result
+// that is gone, 8.5 and 10.4). Nothing runs. checkGraph() asks the providers to
+// describe themselves only when some node needs one.
+Errors validateDocument(const Document &document, const Registry &registry, const RunEnvironment &environment);
 
 } // namespace fugue::cli

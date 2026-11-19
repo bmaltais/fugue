@@ -213,8 +213,6 @@ private slots:
         QCOMPARE(fugue({"run", m_dir.filePath("good.fugue"), "--to", "nope", "--json"}).firstCode(), QString("usage"));
         QCOMPARE(fugue({"run", m_dir.filePath("good.fugue"), "--provider", "ghost", "--json"}).firstCode(),
                  QString("unknown_provider"));
-        QCOMPARE(fugue({"run", m_dir.filePath("good.fugue"), "--to", "a", "--provider", "This machine", "--json"}).firstCode(),
-                 QString("internal"));
     }
 
     void workflowDescribeReportsSinksAndWhatIsMissing() {
@@ -382,19 +380,6 @@ private slots:
     void workflowValidateIsTheSameCommand() {
         QCOMPARE(fugue({"workflow", "validate", workflow(), "--json"}).out,
                  fugue({"validate", workflow(), "--json"}).out);
-    }
-
-    void runIsNotBuiltYet() {
-        for (const QStringList &args : QList<QStringList>{
-                 {"run", workflow()},
-                 {"run", m_dir.filePath("good.fugue"), "--wait", "--first", "--to", "a", "--provider", "This machine", "--set", "a.x=1", "--set", "b.y=2"},
-                 {"workflow", "run", workflow()},
-             }) {
-            const Outcome o = fugue(args + QStringList{"--json"});
-            QVERIFY2(o.exitCode == 1, qPrintable(args.join(' ')));
-            QVERIFY2(o.firstCode() == "internal", qPrintable(args.join(' ')));
-            QVERIFY2(o.firstMessage().contains("not built yet"), qPrintable(args.join(' ')));
-        }
     }
 
     void workflowNewWritesAnEmptyDocumentAndRefusesToOverwrite() {

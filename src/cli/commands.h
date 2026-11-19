@@ -5,6 +5,7 @@
 
 #include "cli/args.h"
 #include "engine/error.h"
+#include "engine/node_kernel.h"
 #include "engine/registry.h"
 
 namespace fugue::cli {
@@ -35,7 +36,10 @@ struct Reply {
 // printed by cli.cpp.
 struct Context {
     Registry registry;
+    Kernels kernels;
     QString runsRoot;
+    QString queueDir;
+    QString lockPath;
     void (*line)(const QByteArray &) = nullptr; // one stdout line, flushed
     void (*log)(const QString &) = nullptr;     // one stderr diagnostic
 };
