@@ -67,7 +67,7 @@ Menu {
     }
     // Where it fits, in `anchor`'s coordinates; the rows must be in already.
     function fitted(anchor, x, y, gapX, gapY) {
-        contentItem.forceLayout()
+        (contentItem as ListView).forceLayout()
         return Placement.fit(anchor, overlay, x, y, implicitWidth, implicitHeight, gapX, gapY)
     }
     // As wide as its widest row wants, so names and keys never elide.
