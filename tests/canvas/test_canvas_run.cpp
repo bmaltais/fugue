@@ -87,6 +87,10 @@ public:
     void describe(fugue::Reply<fugue::Description> reply) override {
         QTimer::singleShot(300, this, [this, reply = std::move(reply)]() mutable { FakeProvider::describe(std::move(reply)); });
     }
+    // A cancel is answered from the event loop, as over HTTP, never inside the call.
+    void cancel(const QString &job, fugue::Reply<QString> reply) override {
+        QTimer::singleShot(0, this, [this, job, reply = std::move(reply)]() mutable { FakeProvider::cancel(job, std::move(reply)); });
+    }
 };
 
 // The window with its runs. The fake provider is made on the run thread, where providers
@@ -125,8 +129,12 @@ struct RunApp {
         runs->registerCommands(app.commands);
         app.runs = runs.get();
     }
-    ~RunApp() {
-        // The window goes before the runs it shows, as in main(), which makes its engine last.
+    ~RunApp() { close(); }
+    // The window goes before the runs it shows, as in main(), which makes its engine last.
+    // The test's folder stays until the RunApp goes.
+    void close() {
+        if (!service)
+            return;
         qDeleteAll(app.engine.rootObjects());
         runs.reset();
         service.reset(); // stops the run thread before the fake goes
@@ -608,12 +616,29 @@ private slots:
         r.reset();
     }
 
-    // Closing the window while a node runs cancels the run, which reports its end as it goes.
+    // Closing the window while a node runs cancels the run, which ends as cancelled: its
+    // folder says so (run.done, `ended`), the queue is empty (`fugue runs` lists nothing) and
+    // the file-hash memo is saved.
     void closingDuringARunIsClean() {
         auto r = std::make_unique<RunApp>(kGraph, true);
         QVERIFY(r->app.open());
         r->app.key(Qt::Key_Return, Qt::ControlModifier);
         QTRY_COMPARE(r->state("gen"), QStringLiteral("running"));
+        const QString run = r->runs->runs().value(0);
+        QVERIFY(!run.isEmpty());
+        const QString root = r->app.dir.path();
+        r->close();
+
+        const fugue::Result<fugue::RunFolder> folder = fugue::RunFolder::open(root + "/runs", run);
+        QVERIFY(folder.ok());
+        QCOMPARE(fugue::runStatusName(folder->status()), QStringLiteral("cancelled"));
+        QVERIFY(folder->state().contains("ended"));
+        QCOMPARE(folder->state().value("status").toString(), QStringLiteral("cancelled"));
+        const QList<QJsonObject> events = folder->events();
+        QVERIFY(std::any_of(events.cbegin(), events.cend(),
+                            [](const QJsonObject &e) { return e.value("event") == QLatin1String("run.done"); }));
+        QVERIFY(fugue::Queue(root + "/queue").entries().isEmpty());
+        QVERIFY(QFileInfo::exists(root + "/hashes.json"));
         r.reset();
     }
 

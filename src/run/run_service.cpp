@@ -3,6 +3,7 @@
 #include <QCryptographicHash>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QEventLoop>
 #include <QFileInfo>
 #include <QImage>
 #include <QImageReader>
@@ -29,6 +30,8 @@ namespace fugue {
 namespace {
 
 constexpr int kThumbnailWidth = 512;
+// How long a closing window waits for its active run to end after cancelling it.
+constexpr int kShutdownWaitMs = 5000;
 
 QDateTime now() { return QDateTime::currentDateTimeUtc(); }
 
@@ -145,11 +148,32 @@ public:
             if (queue().remove(waiting.folder.id()))
                 waiting.folder.finish(RunStatus::Cancelled, {}, now());
         m_waiting.clear();
-        if (m_active) {
-            m_active.reset(); // cancels and waits for its kernels
-            queue().remove(m_activeId);
-        }
+        if (m_active)
+            endActiveRun();
         m_lock.reset();
+    }
+
+    // The active run, cancelled as the window closes: given kShutdownWaitMs to end as a run
+    // does (its provider jobs cancelled, run.done written, the file-hash memo saved), else
+    // deleted (which waits for its kernels) and ended here, so its folder never stays
+    // "running" with no one left to end it.
+    void endActiveRun() {
+        if (!m_active->isFinished()) {
+            QEventLoop loop;
+            connect(m_active.get(), &Run::finished, &loop, &QEventLoop::quit);
+            QTimer::singleShot(kShutdownWaitMs, &loop, &QEventLoop::quit);
+            m_active->cancel();
+            if (!m_active->isFinished())
+                loop.exec();
+        }
+        const bool finished = m_active->isFinished();
+        m_active.reset();
+        if (!finished) {
+            if (m_activeFolder && !isTerminal(m_activeFolder->status()))
+                m_activeFolder->finish(RunStatus::Cancelled, {}, now());
+            m_process->hashes.save();
+        }
+        queue().remove(m_activeId);
     }
 
     // On the run thread once its event loop has ended (QThread::finished), so no check is
@@ -355,8 +379,8 @@ private:
         m_active.reset(new Run(waiting.graph, waiting.folder, m_process->environment, waiting.options));
         connect(m_active.get(), &Run::emitted, this, [this, id](const QJsonObject &e) { emit event(id, withThumbnails(e)); });
         connect(m_active.get(), &Run::finished, this, [this, id] {
-            // shutdown() deletes the run, which cancels it and finishes on the way: shutdown
-            // clears up after it, and m_active is already empty.
+            // A run that ends while the window closes (endActiveRun waits for this) is
+            // cleared up there.
             if (m_quitting)
                 return;
             queue().remove(id);

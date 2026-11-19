@@ -156,7 +156,9 @@ struct RunOutcome {
 
 // One run. start() returns at once; finished() comes later from the event
 // loop, after run.done has been written. Destroying a Run that has not
-// finished cancels it and waits for its running kernels to return.
+// finished cancels it and waits for its running kernels to return, but ends
+// nothing: no run.done, no final status, no hash memo saved. Whoever destroys
+// a Run early ends its folder (RunFolder::finish).
 class Run : public QObject {
     Q_OBJECT
 

@@ -90,7 +90,8 @@ class RunService : public QObject {
 
 public:
     explicit RunService(RunSetup setup, QObject *parent = nullptr);
-    // Cancels what is running, waits for it, and stops the run thread.
+    // Cancels what is running, waits for it to end (at most a few seconds, then ends its
+    // folder as cancelled), and stops the run thread.
     ~RunService() override;
 
     // Starts a run and returns its id at once; everything else happens on the run thread.
