@@ -1,0 +1,461 @@
+// The scheduler's provider side (spec 8.3 to 8.5, 9.2, 9.3, 9.6) and
+// checkGraph (9.1, 10.3).
+//
+// Seams: Run, runGraph() and checkGraph() again, with FakeProvider instances
+// whose jobs move only when the test moves them, and the ResidentModels of
+// the environment.
+
+#include <QSemaphore>
+#include <QtTest>
+
+#include "engine/hash.h"
+#include "scheduler_support.h"
+
+using namespace fugue;
+using namespace fugue::test;
+
+namespace {
+
+QJsonObject node(const QString &type, const QJsonObject &inputs) {
+    return QJsonObject{{"type", type}, {"inputs", inputs}};
+}
+
+QJsonObject from(const QString &port) { return QJsonObject{{"from", port}}; }
+
+QJsonObject model(const QString &name) { return QJsonObject{{"resource", "fugue/image-model"}, {"name", name}}; }
+
+// g -> s: one provider node and a sink.
+QJsonObject generateGraph(const QString &prompt, const QJsonObject &modelHandle = {}) {
+    QJsonObject inputs{{"prompt", prompt}};
+    if (!modelHandle.isEmpty())
+        inputs.insert("model", modelHandle);
+    return QJsonObject{{"g", node("fugue/generate", inputs)}, {"s", node("fugue/save", {{"value", from("g.text")}})}};
+}
+
+const QMap<QString, QByteArray> picture{{"result.txt", "a picture"}};
+
+} // namespace
+
+class TestSchedulerProviders : public QObject {
+    Q_OBJECT
+
+private slots:
+    // --- provider nodes (8.3, 8.11) ---
+
+    void aProviderNodeRunsAsAJobOnTheProviderSelected() {
+        World world;
+        const auto provider = world.provider("This machine", {"flux"});
+        const CompiledGraph graph = world.graph(generateGraph("a cat"));
+
+        const RunFolder folder = world.folder();
+        Run run(graph, folder, world.environment());
+        run.start();
+        QTRY_COMPARE(provider->jobs().size(), 1);
+        const QString job = provider->jobs().first();
+        const JobRequest sent = provider->submitted(job);
+        QCOMPARE(sent.capability, QStringLiteral("image.generate"));
+        QCOMPARE(sent.params.value("prompt").toString(), QStringLiteral("a cat"));
+        QCOMPARE(sent.model.value("name").toString(), QStringLiteral("flux"));
+        QCOMPARE(sent.outputDir, folder.path() + "/nodes/g");
+
+        provider->progress(job, 0.5, "sampling");
+        provider->finish(job, picture);
+        QTRY_VERIFY(run.isFinished());
+
+        const RunOutcome outcome = run.outcome();
+        QCOMPARE(outcome.status, QStringLiteral("ok"));
+        QCOMPARE(outcome.outputs.value("g").value("text").text(), QStringLiteral("a picture"));
+        QCOMPARE(outcome.outputs.value("g").value("model").text(), QStringLiteral("flux"));
+        const QList<QJsonObject> events = folder.events();
+        QCOMPARE(trace(events), (QStringList{"run.started", "node.running g", "node.done g", "node.running s",
+                                             "node.done s", "run.done ok"}));
+        QJsonObject progress;
+        for (const QJsonObject &event : events)
+            if (event.value("event").toString() == QLatin1String("node.progress"))
+                progress = event;
+        QCOMPARE(progress.value("node").toString(), QStringLiteral("g"));
+        QCOMPARE(progress.value("value").toDouble(), 0.5);
+        QCOMPARE(progress.value("stage").toString(), QStringLiteral("sampling"));
+
+        // run.json says which provider, engine and model served the node.
+        const QJsonObject served = folder.state().value("providers").toObject().value("g").toObject();
+        QCOMPARE(served.value("instance").toString(), QStringLiteral("This machine"));
+        QCOMPARE(served.value("engine").toString(), QStringLiteral("fake"));
+        QCOMPARE(served.value("model").toObject().value("name").toString(), QStringLiteral("flux"));
+
+        // The same graph again is a cache hit: no second job.
+        const Ran again = world.run(graph);
+        QCOMPARE(again.outcome.status, QStringLiteral("ok"));
+        QCOMPARE(provider->jobs().size(), 1);
+        QCOMPARE(trace(again.events), (QStringList{"run.started", "node.cached g", "node.cached s", "run.done ok"}));
+    }
+
+    void theKeyUsesTheEngineAndModelNotTheInstance() {
+        World world;
+        const auto first = world.provider("This machine", {"flux"});
+        const CompiledGraph graph = world.graph(generateGraph("a cat"));
+        {
+            Run run(graph, world.folder(), world.environment());
+            run.start();
+            QTRY_COMPARE(first->jobs().size(), 1);
+            first->finish(first->jobs().first(), picture);
+            QTRY_VERIFY(run.isFinished());
+        }
+
+        // The same engine and model at another address: the same key.
+        world.providers.clear();
+        const auto elsewhere = world.provider("Studio box", {"flux"}, "https://studio.example.ts.net");
+        const Ran hit = world.run(graph);
+        QCOMPARE(trace(hit.events), (QStringList{"run.started", "node.cached g", "node.cached s", "run.done ok"}));
+        QVERIFY(elsewhere->jobs().isEmpty());
+
+        // Another engine is another key, so the node runs.
+        world.providers.clear();
+        const auto other = world.provider("Other engine", {"flux"});
+        other->setDescription(imageDescription({"flux"}, "other"));
+        Run run(graph, world.folder(), world.environment());
+        run.start();
+        QTRY_COMPARE(other->jobs().size(), 1);
+        other->finish(other->jobs().first(), picture);
+        QTRY_VERIFY(run.isFinished());
+        QCOMPARE(run.outcome().ran, QStringList{"g"});
+    }
+
+    void aPinnedNodeGoesToItsInstance() {
+        World world;
+        const auto first = world.provider("This machine", {"flux"});
+        const auto second = world.provider("Studio box", {"flux"}, "https://studio.example.ts.net");
+        QJsonObject nodes = generateGraph("a cat");
+        QJsonObject g = nodes.value("g").toObject();
+        g.insert("provider", "Studio box");
+        nodes.insert("g", g);
+
+        Run run(world.graph(nodes), world.folder(), world.environment());
+        run.start();
+        QTRY_COMPARE(second->jobs().size(), 1);
+        QVERIFY(first->jobs().isEmpty());
+        second->finish(second->jobs().first(), picture);
+        QTRY_VERIFY(run.isFinished());
+        QCOMPARE(run.outcome().status, QStringLiteral("ok"));
+    }
+
+    void aMissingModelIsAnErrorOnTheNodeWhenTheRunReachesIt() {
+        World world;
+        const auto provider = world.provider("This machine", {"flux"});
+        QJsonObject nodes = generateGraph("a cat", model("no-such-model"));
+        nodes.insert("d", node("fugue/text", {{"text", "beside"}}));
+        nodes.insert("t", node("fugue/save", {{"value", from("d.text")}}));
+
+        const Ran ran = world.run(world.graph(nodes));
+        QCOMPARE(ran.outcome.status, QStringLiteral("failed"));
+        QCOMPARE(ran.outcome.errors.size(), 1);
+        QCOMPARE(ran.outcome.errors.first().code, QStringLiteral("model_missing"));
+        QCOMPARE(ran.outcome.errors.first().severity, Error::Severity::Error);
+        QCOMPARE(ran.outcome.errors.first().node, QStringLiteral("g"));
+        QCOMPARE(traceOf(ran.events, {"g", "s"}),
+                 (QStringList{"node.error g model_missing", "node.skipped s upstream_failed"}));
+        QCOMPARE(ran.outcome.states.value("t"), NodeState::Cached);
+        QVERIFY(provider->jobs().isEmpty());
+    }
+
+    void aFailedJobIsTheNodesError() {
+        World world;
+        const auto provider = world.provider("This machine", {"flux"});
+        const RunFolder folder = world.folder();
+        Run run(world.graph(generateGraph("a cat")), folder, world.environment());
+        run.start();
+        QTRY_COMPARE(provider->jobs().size(), 1);
+        provider->fail(provider->jobs().first(), makeError("provider_unreachable", "The server went away."));
+        QTRY_VERIFY(run.isFinished());
+        QCOMPARE(run.outcome().status, QStringLiteral("failed"));
+        QCOMPARE(run.outcome().errors.first().code, QStringLiteral("provider_unreachable"));
+        QCOMPARE(run.outcome().errors.first().node, QStringLiteral("g"));
+        QCOMPARE(traceOf(folder.events(), {"g", "s"}),
+                 (QStringList{"node.running g", "node.error g provider_unreachable", "node.skipped s upstream_failed"}));
+    }
+
+    // --- lanes (9.2) ---
+
+    void aProviderInstanceRunsOneJobAtATime() {
+        World world;
+        const auto provider = world.provider("Studio box", {"flux"}, "https://studio.example.ts.net");
+        const QJsonObject nodes{{"g1", node("fugue/generate", {{"prompt", "one"}})},
+                                {"g2", node("fugue/generate", {{"prompt", "two"}})},
+                                {"s1", node("fugue/save", {{"value", from("g1.text")}})},
+                                {"s2", node("fugue/save", {{"value", from("g2.text")}})}};
+        const RunFolder folder = world.folder();
+        Run run(world.graph(nodes), folder, world.environment());
+        run.start();
+        QTRY_COMPARE(provider->jobs().size(), 1);
+        // Both were ready in the same pass, and only one was started.
+        QCOMPARE(traceOf(folder.events(), {"g1", "g2"}), QStringList{"node.running g1"});
+        provider->finish(provider->jobs().at(0), picture);
+        QTRY_COMPARE(provider->jobs().size(), 2);
+        provider->finish(provider->jobs().at(1), {{"result.txt", "another"}});
+        QTRY_VERIFY(run.isFinished());
+        QCOMPARE(traceOf(folder.events(), {"g1", "g2"}),
+                 (QStringList{"node.running g1", "node.done g1", "node.running g2", "node.done g2"}));
+    }
+
+    void twoInstancesRunTheirJobsSideBySide() {
+        World world;
+        const auto first = world.provider("Studio box", {"flux"}, "https://studio.example.ts.net");
+        const auto second = world.provider("Other box", {"flux"}, "https://other.example.ts.net");
+        QJsonObject pinned = node("fugue/generate", {{"prompt", "two"}});
+        pinned.insert("provider", "Other box");
+        const QJsonObject nodes{{"g1", node("fugue/generate", {{"prompt", "one"}})},
+                                {"g2", pinned},
+                                {"s1", node("fugue/save", {{"value", from("g1.text")}})},
+                                {"s2", node("fugue/save", {{"value", from("g2.text")}})}};
+        Run run(world.graph(nodes), world.folder(), world.environment());
+        run.start();
+        QTRY_COMPARE(first->jobs().size(), 1);
+        QTRY_COMPARE(second->jobs().size(), 1);
+        first->finish(first->jobs().first(), picture);
+        second->finish(second->jobs().first(), picture);
+        QTRY_VERIFY(run.isFinished());
+        QCOMPARE(run.outcome().status, QStringLiteral("ok"));
+    }
+
+    void aJobOnThisMachineTakesTheGpuLane() {
+        World world;
+        const auto provider = world.provider("This machine", {"flux"});
+        QSemaphore entered;
+        QSemaphore released;
+        world.kernel("fugue/gpu", [&](const NodeContext &context) -> Result<Values> {
+            entered.release();
+            released.acquire();
+            return Values{{"text", context.input("text")}};
+        });
+        const QJsonObject nodes{{"a", node("fugue/gpu", {{"text", "x"}})},
+                                {"g", node("fugue/generate", {{"prompt", "one"}})},
+                                {"s", node("fugue/save", {{"value", from("a.text")}})},
+                                {"t", node("fugue/save", {{"value", from("g.text")}})}};
+        const RunFolder folder = world.folder();
+        Run run(world.graph(nodes), folder, world.environment());
+        run.start();
+        QTRY_VERIFY(entered.available() > 0);
+        // The GPU node holds the lane, so the local job has not been started.
+        QCOMPARE(traceOf(folder.events(), {"a", "g"}), QStringList{"node.running a"});
+        released.release();
+        QTRY_COMPARE(provider->jobs().size(), 1);
+        provider->finish(provider->jobs().first(), picture);
+        QTRY_VERIFY(run.isFinished());
+        QCOMPARE(traceOf(folder.events(), {"a", "g"}),
+                 (QStringList{"node.running a", "node.done a", "node.running g", "node.done g"}));
+    }
+
+    void aJobOnARemoteInstanceDoesNotTakeTheGpuLane() {
+        World world;
+        const auto provider = world.provider("Studio box", {"flux"}, "https://studio.example.ts.net");
+        QSemaphore released;
+        world.kernel("fugue/gpu", [&](const NodeContext &context) -> Result<Values> {
+            released.acquire();
+            return Values{{"text", context.input("text")}};
+        });
+        const QJsonObject nodes{{"a", node("fugue/gpu", {{"text", "x"}})},
+                                {"g", node("fugue/generate", {{"prompt", "one"}})},
+                                {"s", node("fugue/save", {{"value", from("a.text")}})},
+                                {"t", node("fugue/save", {{"value", from("g.text")}})}};
+        Run run(world.graph(nodes), world.folder(), world.environment());
+        run.start();
+        // The job is submitted while the GPU node is still running.
+        QTRY_COMPARE(provider->jobs().size(), 1);
+        provider->finish(provider->jobs().first(), picture);
+        released.release();
+        QTRY_VERIFY(run.isFinished());
+        QCOMPARE(run.outcome().status, QStringLiteral("ok"));
+    }
+
+    // --- cancel (9.6) ---
+
+    void cancelCancelsTheProviderJobAndWaitsForIt() {
+        World world;
+        const auto provider = world.provider("This machine", {"flux"});
+        QStringList states;
+        connect(provider.get(), &Provider::statusChanged, this,
+                [&](const QString &, const JobStatus &status) { states.append(status.state); });
+        const RunFolder folder = world.folder();
+        Run run(world.graph(generateGraph("a cat")), folder, world.environment());
+        run.start();
+        QTRY_COMPARE(provider->jobs().size(), 1);
+        run.cancel();
+        QTRY_VERIFY(run.isFinished());
+        QCOMPARE(states, QStringList{"cancelled"});
+        QCOMPARE(run.outcome().status, QStringLiteral("cancelled"));
+        QVERIFY(run.outcome().errors.isEmpty());
+        QCOMPARE(trace(folder.events()),
+                 (QStringList{"run.started", "node.running g", "node.skipped g cancelled", "node.skipped s cancelled",
+                              "run.done cancelled"}));
+    }
+
+    // --- residency (9.3) ---
+
+    void aNodeThatReusesTheLoadedModelGoesFirst() {
+        World world;
+        const auto provider = world.provider("This machine", {"flux", "sdxl"});
+        const QJsonObject nodes{{"g1", node("fugue/generate", {{"prompt", "one"}, {"model", model("flux")}})},
+                                {"g2", node("fugue/generate", {{"prompt", "two"}, {"model", model("sdxl")}})},
+                                {"g3", node("fugue/generate", {{"prompt", "three"}, {"model", model("flux")}})},
+                                {"s1", node("fugue/save", {{"value", from("g1.text")}})},
+                                {"s2", node("fugue/save", {{"value", from("g2.text")}})},
+                                {"s3", node("fugue/save", {{"value", from("g3.text")}})}};
+        Run run(world.graph(nodes), world.folder(), world.environment());
+        run.start();
+        QStringList served;
+        for (int i = 0; i < 3; ++i) {
+            QTRY_COMPARE(provider->jobs().size(), i + 1);
+            const QString job = provider->jobs().at(i);
+            served.append(provider->submitted(job).model.value("name").toString());
+            provider->finish(job, {{"result.txt", QByteArray::number(i)}});
+        }
+        QTRY_VERIFY(run.isFinished());
+        // In path order sdxl would be second; flux is loaded, so g3 goes before g2.
+        QCOMPARE(served, (QStringList{"flux", "flux", "sdxl"}));
+        QCOMPARE(run.outcome().ran.mid(0, 1), QStringList{"g1"});
+        QVERIFY(run.outcome().ran.indexOf("g3") < run.outcome().ran.indexOf("g2"));
+    }
+
+    void outOfMemoryDropsTheLeastRecentlyUsedModelAndTriesAgain() {
+        World world;
+        const QJsonObject lora{{"resource", "fugue/lora"}, {"hash", sha256Of("lora")}, {"name", "detail.safetensors"}};
+        const QString own = resourceIdentity(lora);
+        std::atomic<int> attempts{0};
+        world.kernel("fugue/gpu-model", [&](const NodeContext &) -> Result<Values> {
+            if (++attempts == 1)
+                return makeError("out_of_memory", "The GPU ran out of memory.");
+            return Values{{"text", "loaded"}};
+        });
+        world.models.put("old");
+        world.models.put(own);
+        world.models.put("recent");
+
+        const QJsonObject nodes{{"a", node("fugue/gpu-model", {{"model", lora}})},
+                                {"s", node("fugue/save", {{"value", from("a.text")}})}};
+        const Ran ran = world.run(world.graph(nodes));
+        QCOMPARE(ran.outcome.status, QStringLiteral("ok"));
+        QCOMPARE(attempts.load(), 2);
+        // Only the least recently used went, and the node's own model was used.
+        QCOMPARE(world.models.keys(), (QStringList{"recent", own}));
+        QCOMPARE(traceOf(ran.events, {"a"}), (QStringList{"node.running a", "node.running a", "node.done a"}));
+    }
+
+    void outOfMemoryWithNothingToDropIsTheNodesError() {
+        World world;
+        const QJsonObject lora{{"resource", "fugue/lora"}, {"hash", sha256Of("lora")}, {"name", "detail.safetensors"}};
+        world.kernel("fugue/gpu-model", [](const NodeContext &) -> Result<Values> {
+            return makeError("out_of_memory", "The GPU ran out of memory.");
+        });
+        world.models.put(resourceIdentity(lora)); // the node's own model is never the one dropped
+
+        const QJsonObject nodes{{"a", node("fugue/gpu-model", {{"model", lora}})},
+                                {"s", node("fugue/save", {{"value", from("a.text")}})}};
+        const Ran ran = world.run(world.graph(nodes));
+        QCOMPARE(ran.outcome.status, QStringLiteral("failed"));
+        QCOMPARE(ran.outcome.errors.first().code, QStringLiteral("out_of_memory"));
+        QCOMPARE(world.calls.count("a"), 1);
+        QCOMPARE(world.models.keys().size(), 1);
+    }
+
+    // --- checkGraph: what validate shows (9.1, 10.3, 8.5) ---
+
+    void checkTellsCachedFromStaleAndRunsNothing() {
+        World world;
+        const char *graph = "{'a': {'type': 'fugue/text', 'inputs': {'text': 'fox'}},"
+                            " 'b': {'type': 'fugue/join', 'inputs': {'a': {'from': 'a.text'}, 'b': '%1'}},"
+                            " 's': {'type': 'fugue/save', 'inputs': {'value': {'from': 'b.text'}}}}";
+        const CompiledGraph ranGraph = world.graph(QString::fromLatin1(graph).arg("!").toUtf8());
+
+        GraphCheck check = checkGraph(ranGraph, world.environment());
+        QCOMPARE(check.states.value("a"), NodeState::Stale);
+        QCOMPARE(check.states.value("s"), NodeState::Stale);
+        QCOMPARE(world.calls.total(), 0);
+        QVERIFY(!QDir(world.dir.filePath("runs")).exists());
+
+        const Ran ran = world.run(ranGraph);
+        const QList<CacheEntry> before = world.cache->entries();
+        world.clock.advance(3600);
+
+        check = checkGraph(ranGraph, world.environment());
+        QCOMPARE(check.states.value("a"), NodeState::Cached);
+        QCOMPARE(check.states.value("b"), NodeState::Cached);
+        QCOMPARE(check.states.value("s"), NodeState::Cached);
+        QCOMPARE(check.keys, ran.outcome.keys);
+        QVERIFY(check.warnings.isEmpty());
+
+        check = checkGraph(world.graph(QString::fromLatin1(graph).arg("?").toUtf8()), world.environment());
+        QCOMPARE(check.states.value("a"), NodeState::Cached);
+        QCOMPARE(check.states.value("b"), NodeState::Stale);
+        QCOMPARE(check.states.value("s"), NodeState::Stale);
+
+        // Looking is not using: nothing ran and no last-used time moved.
+        QCOMPARE(world.calls.total(), 3);
+        const QList<CacheEntry> after = world.cache->entries();
+        QCOMPARE(after.size(), before.size());
+        for (int i = 0; i < after.size(); ++i)
+            QCOMPARE(after.at(i).lastUsed, before.at(i).lastUsed);
+        QCOMPARE(QDir(world.dir.filePath("runs")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).size(), 1);
+    }
+
+    void checkShowsFrozenNodesAndWarnsWhenTheResultIsGone() {
+        World world;
+        const QJsonObject plain{{"a", node("fugue/text", {{"text", "fox"}})},
+                                {"s", node("fugue/save", {{"value", from("a.text")}})}};
+        const Ran ran = world.run(world.graph(plain));
+        const QString key = ran.outcome.keys.value("a");
+        QVERIFY(world.cache->freeze(key));
+
+        QJsonObject a = node("fugue/text", {{"text", "owl"}});
+        a.insert("frozen", key);
+        QJsonObject frozen = plain;
+        frozen.insert("a", a);
+        GraphCheck check = checkGraph(world.graph(frozen), world.environment());
+        QCOMPARE(check.states.value("a"), NodeState::Frozen);
+        QCOMPARE(check.states.value("s"), NodeState::Cached);
+        QVERIFY(check.warnings.isEmpty());
+
+        world.cache->unfreeze(key);
+        world.cache->clear();
+        check = checkGraph(world.graph(frozen), world.environment());
+        QCOMPARE(check.states.value("a"), NodeState::Stale);
+        QCOMPARE(check.warnings.size(), 1);
+        QCOMPARE(check.warnings.first().code, QStringLiteral("frozen_result_missing"));
+        QCOMPARE(check.warnings.first().severity, Error::Severity::Warning);
+        QCOMPARE(check.warnings.first().node, QStringLiteral("a"));
+    }
+
+    void checkCallsARandomizedSeedStale() {
+        World world;
+        const QJsonObject nodes{{"a", node("fugue/seeded", {{"seed", QJsonObject{{"auto", "random"}}}})},
+                                {"s", node("fugue/save", {{"value", from("a.text")}})}};
+        world.run(world.graph(nodes));
+        const GraphCheck check = checkGraph(world.graph(nodes), world.environment());
+        QCOMPARE(check.states.value("a"), NodeState::Stale);
+        QCOMPARE(check.states.value("s"), NodeState::Stale);
+        QCOMPARE(world.nextSeed, qint64(1001)); // checking drew no seed
+    }
+
+    void checkReportsAMissingModelAsAWarning() {
+        World world;
+        const auto provider = world.provider("This machine", {"flux"});
+        const GraphCheck check =
+            checkGraph(world.graph(generateGraph("a cat", model("no-such-model"))), world.environment());
+        QCOMPARE(check.states.value("g"), NodeState::Stale);
+        QCOMPARE(check.warnings.size(), 1);
+        QCOMPARE(check.warnings.first().code, QStringLiteral("model_missing"));
+        QCOMPARE(check.warnings.first().severity, Error::Severity::Warning);
+        QCOMPARE(check.warnings.first().node, QStringLiteral("g"));
+        QVERIFY(provider->jobs().isEmpty());
+
+        // A model that is there gives no warning; the node would run.
+        const GraphCheck fine = checkGraph(world.graph(generateGraph("a cat", model("flux"))), world.environment());
+        QVERIFY(fine.warnings.isEmpty());
+        QCOMPARE(fine.states.value("g"), NodeState::Stale);
+    }
+
+private:
+    static QString sha256Of(const QByteArray &bytes) { return sha256(bytes); }
+};
+
+QTEST_GUILESS_MAIN(TestSchedulerProviders)
+#include "test_scheduler_providers.moc"
