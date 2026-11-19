@@ -10,14 +10,25 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickControls2 DBus Test)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(VIPS REQUIRED IMPORTED_TARGET vips-cpp)
 
-# Everything but main.cpp, shared by the app and the tests, so each source
+# The engine: documents, compiler, scheduler, cache, providers. It runs with
+# no display (the CLI and tests use it headless), so it never links Gui or
+# Quick. A new file in src/engine/ needs no line here.
+file(GLOB fugue_engine_sources CONFIGURE_DEPENDS src/engine/*.cpp src/engine/*.h)
+add_library(fugue_engine STATIC ${fugue_engine_sources})
+target_include_directories(fugue_engine PUBLIC src)
+target_link_libraries(fugue_engine PUBLIC Qt6::Core Qt6::Network PkgConfig::VIPS)
+target_compile_options(fugue_engine PUBLIC -Wall -Wextra)
+
+# Everything else but main.cpp, shared by the app and the tests, so each source
 # compiles once and a new file in src/ needs no line here.
 file(GLOB fugue_sources CONFIGURE_DEPENDS src/*.cpp src/*.h)
 list(REMOVE_ITEM fugue_sources ${CMAKE_SOURCE_DIR}/src/main.cpp)
 add_library(fugue_core STATIC ${fugue_sources})
 target_include_directories(fugue_core PUBLIC src)
-target_link_libraries(fugue_core PUBLIC
+target_link_libraries(fugue_core PUBLIC fugue_engine
   Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::DBus)
 target_compile_options(fugue_core PUBLIC -Wall -Wextra)
 
@@ -30,6 +41,16 @@ add_executable(fugue_tests tests/fugue_tests.cpp src/resources.qrc)
 target_link_libraries(fugue_tests PRIVATE fugue_core Qt6::Test)
 add_test(NAME fugue_tests COMMAND fugue_tests)
 set_tests_properties(fugue_tests PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+
+# Engine tests: each tests/engine/<name>.cpp is its own QtTest executable, so
+# parts can be tested (and fail) independently. They link only the engine.
+file(GLOB fugue_engine_tests CONFIGURE_DEPENDS tests/engine/*.cpp)
+foreach(test_source ${fugue_engine_tests})
+  get_filename_component(test_name ${test_source} NAME_WE)
+  add_executable(${test_name} ${test_source})
+  target_link_libraries(${test_name} PRIVATE fugue_engine Qt6::Test)
+  add_test(NAME ${test_name} COMMAND ${test_name})
+endforeach()
 
 # `cmake --install build --prefix ~/.local` puts the app in the launcher
 # before it is packaged; a package installs the same files under /usr.
