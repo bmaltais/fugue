@@ -549,10 +549,10 @@ private slots:
 
         fugue::Document document = r.app.model.document();
         document.graph.nodes["subject"].frozen = key;
-        QSignalSpy checked(r.runs.get(), &CanvasRuns::checkApplied);
         r.app.model.setDocument(document);
-        QTRY_VERIFY(checked.size() >= 1);
-        QCOMPARE(r.state("subject"), QStringLiteral("frozen"));
+        // The check of the new document says so. (A check due from before may land first with
+        // the old states, so wait for the state, not for any check.)
+        QTRY_COMPARE(r.state("subject"), QStringLiteral("frozen"));
         r.app.key(Qt::Key_Return, Qt::ControlModifier);
         QTRY_COMPARE(finished.size(), 2);
         QCOMPARE(r.state("subject"), QStringLiteral("frozen"));
