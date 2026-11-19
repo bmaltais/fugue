@@ -6,6 +6,7 @@
 #include <QJsonDocument>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QPointer>
 #include <QUrl>
 
 namespace fugue {
@@ -77,7 +78,131 @@ QJsonObject limitsOf(const QJsonObject &capabilities) {
 
 } // namespace
 
-struct OmarchyProvider::Job {};
+struct OmarchyProvider::Job {
+    Server server;
+    QString serverId; // the sd-server's job id
+    JobRequest request;
+    QJsonObject model; // the handle of the model that runs it
+    JobStatus status;
+    JobResult result;
+    bool asking = false; // a poll is in flight
+    int failures = 0;    // polls in a row that got no answer
+};
+
+namespace {
+
+// Polls in a row without an answer before the job counts as lost.
+constexpr int kMaxPollFailures = 3;
+
+// A server's error text: {"error": "..."} or {"error": {"message": "..."}}.
+QString serverMessage(const QJsonObject &body) {
+    const QJsonValue error = body.value("error");
+    return error.isObject() ? error.toObject().value("message").toString() : error.toString();
+}
+
+Error jobError(const QString &message) {
+    const bool memory = message.contains(QLatin1String("out of memory"), Qt::CaseInsensitive);
+    return providerError(memory ? QStringLiteral("out_of_memory") : QStringLiteral("node_failed"),
+                         message.isEmpty() ? QStringLiteral("The model server failed the job.") : message,
+                         memory ? QStringLiteral("Stop other models to free memory, or ask for a smaller image.")
+                                : QString());
+}
+
+// One sd-server job (async_jobs.cpp make_async_job_json) as a status (8.8). A completed job is
+// reported as running until its result is on disk; finishJob() then makes it done.
+JobStatus statusOf(const QJsonObject &job) {
+    JobStatus status;
+    const QString state = job.value("status").toString();
+    const QJsonObject progress = job.value("progress").toObject();
+    status.stage = progress.value("stage").toString();
+    if (state == QLatin1String("queued")) {
+        status.state = QStringLiteral("queued");
+    } else if (state == QLatin1String("generating") || state == QLatin1String("completed")) {
+        status.state = QStringLiteral("running");
+        // Per sampling pass, not the whole job (api.md "Job Model").
+        const double total = progress.value("total").toDouble();
+        if (progress.value("unit").toString() == QLatin1String("steps") && total > 0)
+            status.progress = progress.value("completed").toDouble() / total;
+        const QString preview = job.value("preview").toObject().value("b64_json").toString();
+        if (!preview.isEmpty())
+            status.preview = QByteArray::fromBase64(preview.toLatin1());
+    } else if (state == QLatin1String("cancelled")) {
+        status.state = QStringLiteral("cancelled");
+    } else {
+        status.state = QStringLiteral("error");
+        status.error = jobError(job.value("error").toObject().value("message").toString());
+    }
+    return status;
+}
+
+bool sameStatus(const JobStatus &a, const JobStatus &b) {
+    return a.state == b.state && a.progress == b.progress && a.stage == b.stage &&
+           a.preview == b.preview && a.error.code == b.error.code;
+}
+
+// The file's bytes as base64, which every sd-server image field accepts (api.md "Image
+// Encoding Rules"). The servers have no network and no shared filesystem.
+bool encodeInput(const QJsonValue &input, QString *encoded, Errors *errors) {
+    const QString path = input.toObject().value("path").toString();
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        errors->append(providerError(QStringLiteral("file_not_found"),
+                                     QStringLiteral("Cannot read the input image %1.").arg(path)));
+        return false;
+    }
+    *encoded = QString::fromLatin1(file.readAll().toBase64());
+    return true;
+}
+
+// The img_gen body for the standard parameters of 8.1 (api.md "Request Body"). Parameters
+// left out get the server's defaults.
+QJsonObject imgGenBody(const JobRequest &request, Errors *errors) {
+    const QJsonObject &params = request.params;
+    QJsonObject body{{"prompt", params.value("prompt").toString()},
+                     {"seed", params.contains("seed") ? params.value("seed") : QJsonValue(-1)},
+                     {"batch_count", 1},
+                     {"output_format", "png"},
+                     {"preview", "proj"},
+                     {"preview_interval", 1}};
+    for (const char *key : {"negative_prompt", "width", "height"})
+        if (params.contains(QLatin1String(key)))
+            body.insert(QLatin1String(key), params.value(QLatin1String(key)));
+    QJsonObject sample;
+    if (params.contains("steps"))
+        sample.insert("sample_steps", params.value("steps"));
+    if (params.contains("guidance"))
+        sample.insert("guidance", QJsonObject{{"txt_cfg", params.value("guidance")}});
+    if (!sample.isEmpty())
+        body.insert("sample_params", sample);
+
+    QString encoded;
+    if (request.capability == QLatin1String("image.edit")) {
+        QJsonArray refs;
+        for (const QJsonValue &image : request.inputs.value("images").toArray())
+            if (encodeInput(image, &encoded, errors))
+                refs.append(encoded);
+        body.insert("ref_images", refs);
+    } else if (request.inputs.contains("image")) {
+        if (encodeInput(request.inputs.value("image"), &encoded, errors))
+            body.insert("init_image", encoded);
+        if (params.contains("strength"))
+            body.insert("strength", params.value("strength"));
+    }
+    return body;
+}
+
+// A seed in generation_info is a decimal string (generation_metadata.md "Reproduction
+// parameters"); accept a number too.
+QJsonValue seedOf(const QJsonValue &seed) {
+    if (seed.isString()) {
+        bool ok = false;
+        const qint64 value = seed.toString().toLongLong(&ok);
+        return ok ? QJsonValue(value) : QJsonValue();
+    }
+    return seed.isDouble() ? seed : QJsonValue();
+}
+
+} // namespace
 
 OmarchyPaths OmarchyPaths::standard() {
     return OmarchyPaths{QDir::home().filePath(QStringLiteral(".local/state/omarchy/agent-local")),
@@ -262,28 +387,225 @@ void OmarchyProvider::describe(Reply<Description> reply) {
     });
 }
 
-void OmarchyProvider::submit(const JobRequest &, Reply<QString> reply) {
-    later(std::move(reply), Outcome<QString>{{}, {providerError("internal", "Not built yet.")}});
+void OmarchyProvider::submit(const JobRequest &request, Reply<QString> reply) {
+    QPointer<OmarchyProvider> self(this);
+    discover([self, request, reply = std::move(reply)](const Outcome<Discovery> &found) {
+        if (!self)
+            return;
+        if (!found.ok())
+            return reply(Outcome<QString>{{}, found.errors});
+        if (request.capability != QLatin1String("image.generate") &&
+            request.capability != QLatin1String("image.edit"))
+            return reply(Outcome<QString>{
+                {}, {providerError(QStringLiteral("capability_unavailable"),
+                                   QStringLiteral("The omarchy provider does not offer %1.").arg(request.capability))}});
+        // The same rules as choosing among instances (8.3, 8.4), within this one.
+        Requirement requirement;
+        requirement.capability = request.capability;
+        requirement.model = request.model;
+        requirement.nodePin = self->m_instance.name;
+        const auto chosen = selectProvider({Candidate{self->m_instance, {found.value.description, {}}}}, requirement);
+        if (!chosen.ok())
+            return reply(Outcome<QString>{{}, chosen.errors});
+        Errors errors;
+        const QJsonObject body = imgGenBody(request, &errors);
+        if (hasErrors(errors))
+            return reply(Outcome<QString>{{}, errors});
+
+        const QJsonObject model = chosen.value.model.handle;
+        const Server server = found.value.servers.value(model.value("name").toString());
+        QNetworkReply *posted = self->send(server, "POST", QStringLiteral("/sdcpp/v1/img_gen"),
+                                           QJsonDocument(body).toJson(QJsonDocument::Compact));
+        connect(posted, &QNetworkReply::finished, self, [self, posted, server, request, model, reply] {
+            posted->deleteLater();
+            const int code = httpStatus(posted);
+            const QJsonObject answer = jsonBody(posted);
+            const QString serverId = answer.value("id").toString();
+            if ((code == 202 || code == 200) && !serverId.isEmpty()) {
+                auto job = std::make_shared<Job>();
+                job->server = server;
+                job->serverId = serverId;
+                job->request = request;
+                job->model = model;
+                job->status.state = QStringLiteral("queued");
+                const QString id = server.recipe + QLatin1Char('/') + serverId;
+                self->m_jobs.insert(id, job);
+                if (!self->m_poll.isActive())
+                    self->m_poll.start();
+                return reply(Outcome<QString>{id, {}});
+            }
+            Error error;
+            if (code == 0)
+                error = providerError(QStringLiteral("provider_unreachable"),
+                                      QStringLiteral("%1 is not answering at %2.").arg(server.recipe, server.base),
+                                      QStringLiteral("Check that it is running: omarchy-agent-local status."));
+            else if (code == 401 || code == 403)
+                error = providerError(QStringLiteral("provider_unreachable"),
+                                      QStringLiteral("%1 refused the key.").arg(server.recipe),
+                                      QStringLiteral("Check the key, or pair again."));
+            else if (code == 503)
+                error = providerError(QStringLiteral("model_not_running"),
+                                      QStringLiteral("%1 has no model loaded yet.").arg(server.recipe),
+                                      QStringLiteral("Wait for it to finish loading."));
+            else
+                error = jobError(QStringLiteral("%1 refused the job: %2")
+                                     .arg(server.recipe, serverMessage(answer).isEmpty()
+                                                             ? QStringLiteral("HTTP %1").arg(code)
+                                                             : serverMessage(answer)));
+            reply(Outcome<QString>{{}, {error}});
+        });
+    });
 }
 
-void OmarchyProvider::status(const QString &, Reply<JobStatus> reply) {
-    later(std::move(reply), Outcome<JobStatus>{{}, {providerError("internal", "Not built yet.")}});
+void OmarchyProvider::status(const QString &job, Reply<JobStatus> reply) {
+    const auto found = m_jobs.value(job);
+    if (!found)
+        return later(std::move(reply), Outcome<JobStatus>{{}, {providerError("internal", "No job " + job + ".")}});
+    later(std::move(reply), Outcome<JobStatus>{found->status, {}});
 }
 
-void OmarchyProvider::cancel(const QString &, Reply<QString> reply) {
-    later(std::move(reply), Outcome<QString>{{}, {providerError("internal", "Not built yet.")}});
+void OmarchyProvider::cancel(const QString &job, Reply<QString> reply) {
+    const auto found = m_jobs.value(job);
+    if (!found)
+        return later(std::move(reply), Outcome<QString>{{}, {providerError("internal", "No job " + job + ".")}});
+    if (found->status.isTerminal())
+        return later(std::move(reply), Outcome<QString>{found->status.state, {}});
+    // Cooperative (api.md "POST /sdcpp/v1/jobs/{id}/cancel"): a generating job stays generating
+    // until a checkpoint, so the poller keeps following it to its terminal state (9.6).
+    QNetworkReply *posted = send(found->server, "POST", QStringLiteral("/sdcpp/v1/jobs/%1/cancel").arg(found->serverId));
+    connect(posted, &QNetworkReply::finished, this, [this, posted, job, found, reply] {
+        posted->deleteLater();
+        const int code = httpStatus(posted);
+        if (code == 0)
+            return reply(Outcome<QString>{
+                {}, {providerError(QStringLiteral("provider_unreachable"),
+                                   QStringLiteral("%1 is not answering at %2.").arg(found->server.recipe, found->server.base))}});
+        const QJsonObject answer = jsonBody(posted);
+        if (code == 200 && answer.value("status").toString() == QLatin1String("cancelled") && !found->status.isTerminal())
+            change(job, statusOf(answer));
+        reply(Outcome<QString>{found->status.state, {}});
+    });
 }
 
-void OmarchyProvider::result(const QString &, Reply<JobResult> reply) {
-    later(std::move(reply), Outcome<JobResult>{{}, {providerError("internal", "Not built yet.")}});
+void OmarchyProvider::result(const QString &job, Reply<JobResult> reply) {
+    const auto found = m_jobs.value(job);
+    if (!found)
+        return later(std::move(reply), Outcome<JobResult>{{}, {providerError("internal", "No job " + job + ".")}});
+    if (found->status.state != QLatin1String("done"))
+        return later(std::move(reply),
+                     Outcome<JobResult>{{}, {providerError("internal", QStringLiteral("Job %1 is %2, not done.")
+                                                                           .arg(job, found->status.state))}});
+    later(std::move(reply), Outcome<JobResult>{found->result, {}});
 }
 
-void OmarchyProvider::poll() {}
+void OmarchyProvider::poll() {
+    bool active = false;
+    for (auto it = m_jobs.begin(); it != m_jobs.end(); ++it) {
+        if (it.value()->status.isTerminal())
+            continue;
+        active = true;
+        if (!it.value()->asking)
+            pollJob(it.key());
+    }
+    if (!active)
+        m_poll.stop();
+}
 
-void OmarchyProvider::pollJob(const QString &) {}
+void OmarchyProvider::pollJob(const QString &id) {
+    const auto job = m_jobs.value(id);
+    job->asking = true;
+    QNetworkReply *reply = send(job->server, "GET", QStringLiteral("/sdcpp/v1/jobs/%1").arg(job->serverId));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, id, job] {
+        reply->deleteLater();
+        job->asking = false;
+        if (job->status.isTerminal())
+            return;
+        const int code = httpStatus(reply);
+        if (code == 0) {
+            if (++job->failures >= kMaxPollFailures) {
+                JobStatus lost;
+                lost.state = QStringLiteral("error");
+                lost.error = providerError(QStringLiteral("provider_unreachable"),
+                                           QStringLiteral("%1 stopped answering during the job.").arg(job->server.recipe));
+                change(id, lost);
+            }
+            return;
+        }
+        job->failures = 0;
+        if (code != 200) {
+            // 404 or 410: the server no longer has the job, so its result is lost.
+            JobStatus gone;
+            gone.state = QStringLiteral("error");
+            gone.error = providerError(QStringLiteral("node_failed"),
+                                       QStringLiteral("%1 no longer has the job (HTTP %2).").arg(job->server.recipe).arg(code),
+                                       QStringLiteral("Run the node again."));
+            return change(id, gone);
+        }
+        const QJsonObject answer = jsonBody(reply);
+        if (answer.value("status").toString() == QLatin1String("completed"))
+            return finishJob(id, answer);
+        change(id, statusOf(answer));
+    });
+}
 
-void OmarchyProvider::finishJob(const QString &, const QJsonObject &) {}
+void OmarchyProvider::finishJob(const QString &id, const QJsonObject &answer) {
+    // The result is inline in the completed job (api.md "Completion Result") and expires with it
+    // (--completed-ttl-seconds, 600 by default), so it is written out now (8.6).
+    const auto job = m_jobs.value(id);
+    const QJsonObject result = answer.value("result").toObject();
+    const QString format = result.value("output_format").toString(QStringLiteral("png"));
+    const QJsonArray images = result.value("images").toArray();
+    const QDir dir(job->request.outputDir);
+    JobStatus status;
+    if (images.isEmpty()) {
+        status.state = QStringLiteral("error");
+        status.error = jobError(QStringLiteral("%1 finished without an image.").arg(job->server.recipe));
+        return change(id, status);
+    }
+    const QJsonObject first = images.first().toObject();
+    const QString path = dir.absoluteFilePath(QStringLiteral("image.") + format);
+    QFile file(path);
+    const QByteArray bytes = QByteArray::fromBase64(first.value("b64_json").toString().toLatin1());
+    if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size()) {
+        status.state = QStringLiteral("error");
+        status.error = providerError(QStringLiteral("internal"), QStringLiteral("Cannot write %1.").arg(path));
+        return change(id, status);
+    }
+    file.close();
 
-void OmarchyProvider::change(const QString &, const JobStatus &) {}
+    // The values actually used (8.1) come from the server's generation record; a value it does
+    // not report is the one that was asked for.
+    const QJsonObject info = first.value("generation_info").toObject();
+    const QJsonObject &params = job->request.params;
+    QJsonObject used{{"model", job->model}, {"engine", kEngine}};
+    const QJsonValue seed = seedOf(info.value("seed"));
+    if (!seed.isUndefined())
+        used.insert("seed", seed);
+    else if (params.contains("seed"))
+        used.insert("seed", params.value("seed"));
+    for (const char *key : {"width", "height"}) {
+        const QJsonValue value = info.contains(QLatin1String(key)) ? info.value(QLatin1String(key)) : params.value(QLatin1String(key));
+        if (!value.isUndefined())
+            used.insert(QLatin1String(key), value);
+    }
+    const QJsonValue steps = info.value("sample_params").toObject().value("sample_steps");
+    if (!steps.isUndefined())
+        used.insert("steps", steps);
+    else if (params.contains("steps"))
+        used.insert("steps", params.value("steps"));
+
+    job->result = JobResult{QJsonObject{{"image", QJsonObject{{"path", path}, {"format", format}}}}, used};
+    status.state = QStringLiteral("done");
+    status.progress = 1;
+    change(id, status);
+}
+
+void OmarchyProvider::change(const QString &id, const JobStatus &status) {
+    const auto job = m_jobs.value(id);
+    if (!job || sameStatus(job->status, status))
+        return;
+    job->status = status;
+    emit statusChanged(id, status);
+}
 
 } // namespace fugue

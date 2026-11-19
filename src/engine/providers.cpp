@@ -1,5 +1,7 @@
 #include "providers.h"
 
+#include "omarchy_provider.h"
+
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -221,6 +223,18 @@ QList<ProviderInstance> defaultProviderInstances() {
     local.name = QStringLiteral("This machine");
     local.type = QStringLiteral("omarchy");
     return {local};
+}
+
+Outcome<std::shared_ptr<Provider>> createProvider(const ProviderInstance &instance) {
+    if (instance.type == QLatin1String("omarchy"))
+        return Outcome<std::shared_ptr<Provider>>{
+            std::make_shared<OmarchyProvider>(instance, OmarchyPaths::standard()), {}};
+    Error error = providerError(
+        QStringLiteral("unknown_provider"),
+        QStringLiteral("%1 has the provider type %2, which this Fugue does not have.").arg(instance.name, instance.type),
+        QStringLiteral("Change its type in %1.").arg(kProvidersFile));
+    error.valid = QJsonArray{"omarchy"};
+    return Outcome<std::shared_ptr<Provider>>{nullptr, {error}};
 }
 
 bool sameModel(const QJsonObject &requested, const QJsonObject &offered) {

@@ -38,6 +38,10 @@ Outcome<QList<ProviderInstance>> loadProviderInstances(const QString &path);
 // What a machine with no providers.json gets: [{"name": "This machine", "type": "omarchy"}].
 QList<ProviderInstance> defaultProviderInstances();
 
+// Makes the provider an instance is a use of. M0 compiles in only omarchy (8.7); any other type
+// is unknown_provider until provider modules arrive (M4).
+Outcome<std::shared_ptr<Provider>> createProvider(const ProviderInstance &instance);
+
 // An instance with the outcome of its describe(). A disabled instance need not be described.
 struct Candidate {
     ProviderInstance instance;

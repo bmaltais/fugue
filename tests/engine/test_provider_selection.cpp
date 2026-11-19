@@ -116,6 +116,22 @@ private slots:
         QCOMPARE(loaded.errors.first().code, QStringLiteral("invalid_json"));
     }
 
+    void anOmarchyInstanceMakesTheOmarchyProvider() {
+        ProviderInstance instance;
+        instance.name = QStringLiteral("This machine");
+        instance.type = QStringLiteral("omarchy");
+        const auto made = createProvider(instance);
+        QVERIFY(made.ok());
+        QVERIFY(made.value);
+
+        instance.type = QStringLiteral("io.example.engine");
+        const auto unknown = createProvider(instance);
+        QVERIFY(!unknown.ok());
+        QVERIFY(!unknown.value);
+        QCOMPARE(unknown.errors.first().code, QStringLiteral("unknown_provider"));
+        QCOMPARE(strings(unknown.errors.first().valid), QStringList{"omarchy"});
+    }
+
     void autoTakesTheFirstEnabledReadyInstanceInTheUsersOrder() {
         Candidate unreachable = candidate("Down", {generate({model("a")})});
         unreachable.description.errors = {providerError("provider_unreachable", "Down does not answer.")};

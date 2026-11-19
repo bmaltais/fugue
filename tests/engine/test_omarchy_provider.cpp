@@ -100,10 +100,95 @@ public:
         return std::make_unique<OmarchyProvider>(instance, paths);
     }
 
+    // Klein (an edit model) running on the fake server.
+    void runKlein() {
+        QJsonObject klein = row(kKlein, "image", "active", endpoint());
+        klein.insert("edit", true);
+        writeStatus(QJsonObject{{kKlein, klein}});
+    }
+
+    // img_gen answers 202 with this job id (api.md "POST /sdcpp/v1/img_gen").
+    void acceptJobs(const QByteArray &id) {
+        server.on("POST", "/sdcpp/v1/img_gen", [id](const HttpRequest &) {
+            return HttpResponse{202, json(QJsonObject{{"id", QString::fromLatin1(id)}, {"kind", "img_gen"},
+                                                      {"status", "queued"}, {"created", qint64(1775401200000)},
+                                                      {"poll_url", "/sdcpp/v1/jobs/" + QString::fromLatin1(id)}})};
+        });
+    }
+
+    // Polls of the job get these answers in turn; after the last, 410 Gone as the server does
+    // once a finished job has expired (api.md "GET /sdcpp/v1/jobs/{id}").
+    void scriptJob(const QByteArray &id, QList<QJsonObject> answers) {
+        auto queue = std::make_shared<QList<QJsonObject>>(std::move(answers));
+        server.on("GET", "/sdcpp/v1/jobs/" + id, [queue](const HttpRequest &) {
+            if (queue->isEmpty())
+                return HttpResponse{410, "{\"error\":\"gone\"}"};
+            return HttpResponse{200, json(queue->takeFirst())};
+        });
+    }
+
+    JobRequest request(const QString &capability, const QJsonObject &params, const QJsonObject &inputs = {}) {
+        JobRequest job;
+        job.capability = capability;
+        job.params = params;
+        job.inputs = inputs;
+        job.outputDir = home.filePath("out");
+        QDir().mkpath(job.outputDir);
+        return job;
+    }
+
+    QString writeInput(const QString &name, const QByteArray &bytes) {
+        const QString path = home.filePath(name);
+        writeFile(path, bytes);
+        return path;
+    }
+
     QTemporaryDir home;
     OmarchyPaths paths;
     FakeHttpServer server;
 };
+
+// A job as make_async_job_json writes it (async_jobs.cpp).
+QJsonObject job(const QString &status, const QJsonObject &extra = {}) {
+    QJsonObject object{{"id", "job_1"}, {"kind", "img_gen"}, {"status", status},
+                       {"created", qint64(1775401200000)}, {"queue_position", 0},
+                       {"result", QJsonValue::Null}, {"error", QJsonValue::Null},
+                       {"progress", QJsonObject{{"stage", status == "queued" ? "queued" : "preparing"},
+                                                {"detail", ""}, {"pass", 0},
+                                                {"completed", QJsonValue::Null}, {"total", QJsonValue::Null},
+                                                {"unit", QJsonValue::Null}}}};
+    for (auto it = extra.begin(); it != extra.end(); ++it)
+        object.insert(it.key(), it.value());
+    return object;
+}
+
+QJsonObject sampling(int completed, int total, const QByteArray &preview = {}) {
+    QJsonObject extra{{"progress", QJsonObject{{"stage", "sampling"}, {"detail", ""}, {"pass", 1},
+                                               {"completed", completed}, {"total", total}, {"unit", "steps"}}}};
+    if (!preview.isEmpty())
+        extra.insert("preview", QJsonObject{{"pass", 1}, {"step", completed}, {"total_steps", total},
+                                            {"b64_json", QString::fromLatin1(preview.toBase64())}});
+    return job("generating", extra);
+}
+
+QJsonObject completed(const QByteArray &png, const QJsonObject &generationInfo) {
+    return job("completed",
+               {{"result", QJsonObject{{"output_format", "png"},
+                                       {"images", QJsonArray{QJsonObject{
+                                                      {"index", 0},
+                                                      {"b64_json", QString::fromLatin1(png.toBase64())},
+                                                      {"generation_info", generationInfo}}}}}}});
+}
+
+QJsonObject requestBody(const FakeHttpServer &server) {
+    const auto posts = server.requestsTo("POST", "/sdcpp/v1/img_gen");
+    return posts.isEmpty() ? QJsonObject{} : QJsonDocument::fromJson(posts.last().body).object();
+}
+
+QByteArray readAll(const QString &path) {
+    QFile file(path);
+    return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray{};
+}
 
 } // namespace
 
@@ -284,6 +369,226 @@ private slots:
         QVERIFY(!described.ok());
         QCOMPARE(described.errors.first().code, QStringLiteral("provider_unreachable"));
         QVERIFY(described.errors.first().hint.contains("omarchy-agent-local pair studio"));
+    }
+
+    void generateWritesTheImageTheMomentTheJobFinishes() {
+        Fixture fixture;
+        fixture.runKlein();
+        fixture.acceptJobs("job_1");
+        const QJsonObject info{{"seed", "123456789012"}, {"width", 1024}, {"height", 768},
+                               {"sample_params", QJsonObject{{"sample_steps", 4}}}};
+        // After the completed answer the job is gone (410): the image must already be on disk.
+        fixture.scriptJob("job_1", {job("queued"), sampling(2, 4, "PREVIEW"), completed("PNGDATA", info)});
+        auto provider = fixture.provider();
+        QList<JobStatus> stream;
+        connect(provider.get(), &Provider::statusChanged, this,
+                [&](const QString &, const JobStatus &status) { stream.append(status); });
+
+        const JobRequest request = fixture.request(
+            "image.generate", {{"prompt", "a lighthouse"}, {"negative_prompt", "blurry"}, {"width", 1024},
+                               {"height", 768}, {"steps", 4}, {"guidance", 1.0}, {"seed", -1}});
+        const auto submitted = await<QString>([&](auto reply) { provider->submit(request, reply); });
+        QVERIFY2(submitted.ok(), qPrintable(submitted.errors.value(0).message));
+        const QString id = submitted.value;
+
+        const QJsonObject body = requestBody(fixture.server);
+        QCOMPARE(body.value("prompt").toString(), QStringLiteral("a lighthouse"));
+        QCOMPARE(body.value("negative_prompt").toString(), QStringLiteral("blurry"));
+        QCOMPARE(body.value("width").toInt(), 1024);
+        QCOMPARE(body.value("height").toInt(), 768);
+        QCOMPARE(body.value("seed").toInt(), -1);
+        QCOMPARE(body.value("sample_params").toObject().value("sample_steps").toInt(), 4);
+        QCOMPARE(body.value("sample_params").toObject().value("guidance").toObject().value("txt_cfg").toDouble(), 1.0);
+        QCOMPARE(body.value("batch_count").toInt(), 1);
+        QCOMPARE(body.value("output_format").toString(), QStringLiteral("png"));
+        QCOMPARE(body.value("preview").toString(), QStringLiteral("proj"));
+        QVERIFY(!body.contains("init_image"));
+        QCOMPARE(fixture.server.requestsTo("POST", "/sdcpp/v1/img_gen").first().headers.value("authorization"),
+                 "Bearer " + kKey);
+
+        QTRY_VERIFY(!stream.isEmpty() && stream.last().isTerminal());
+        QCOMPARE(stream.last().state, QStringLiteral("done"));
+        bool sawSampling = false;
+        for (const JobStatus &status : stream)
+            if (status.stage == QLatin1String("sampling")) {
+                sawSampling = true;
+                QCOMPARE(status.state, QStringLiteral("running"));
+                QCOMPARE(status.progress, 0.5);
+                QCOMPARE(status.preview, QByteArray("PREVIEW"));
+            }
+        QVERIFY(sawSampling);
+
+        QTest::qWait(50); // a provider that kept polling would hit the 410 now
+        QCOMPARE(fixture.server.requestsTo("GET", "/sdcpp/v1/jobs/job_1").size(), 3);
+        const auto result = await<JobResult>([&](auto reply) { provider->result(id, reply); });
+        QVERIFY(result.ok());
+        const QJsonObject image = result.value.outputs.value("image").toObject();
+        QCOMPARE(image.value("path").toString(), QDir(request.outputDir).filePath("image.png"));
+        QCOMPARE(image.value("format").toString(), QStringLiteral("png"));
+        QCOMPARE(readAll(image.value("path").toString()), QByteArray("PNGDATA"));
+        const QJsonObject used = result.value.used;
+        QCOMPARE(used.value("seed").toInteger(), Q_INT64_C(123456789012));
+        QCOMPARE(used.value("width").toInt(), 1024);
+        QCOMPARE(used.value("height").toInt(), 768);
+        QCOMPARE(used.value("steps").toInt(), 4);
+        QCOMPARE(used.value("engine").toString(), QStringLiteral("sdcpp"));
+        QCOMPARE(used.value("model").toObject().value("name").toString(), kKlein);
+    }
+
+    void startAndReferenceImagesTravelAsBase64() {
+        Fixture fixture;
+        fixture.runKlein();
+        fixture.acceptJobs("job_1");
+        fixture.scriptJob("job_1", {});
+        auto provider = fixture.provider();
+        const QString start = fixture.writeInput("start.png", "START");
+        const QString a = fixture.writeInput("a.png", "AAA");
+        const QString b = fixture.writeInput("b.png", "BBB");
+
+        auto generate = fixture.request("image.generate", {{"prompt", "redraw"}, {"strength", 0.6}},
+                                        {{"image", QJsonObject{{"path", start}}}});
+        QVERIFY(await<QString>([&](auto reply) { provider->submit(generate, reply); }).ok());
+        QJsonObject body = requestBody(fixture.server);
+        QCOMPARE(QByteArray::fromBase64(body.value("init_image").toString().toLatin1()), QByteArray("START"));
+        QCOMPARE(body.value("strength").toDouble(), 0.6);
+
+        auto edit = fixture.request("image.edit", {{"prompt", "make it night"}},
+                                    {{"images", QJsonArray{QJsonObject{{"path", a}}, QJsonObject{{"path", b}}}}});
+        edit.model = QJsonObject{{"resource", "fugue/image-model"}, {"name", kKlein}};
+        QVERIFY(await<QString>([&](auto reply) { provider->submit(edit, reply); }).ok());
+        body = requestBody(fixture.server);
+        const QJsonArray refs = body.value("ref_images").toArray();
+        QCOMPARE(refs.size(), 2);
+        QCOMPARE(QByteArray::fromBase64(refs.at(0).toString().toLatin1()), QByteArray("AAA"));
+        QCOMPARE(QByteArray::fromBase64(refs.at(1).toString().toLatin1()), QByteArray("BBB"));
+        QVERIFY(!body.contains("init_image"));
+    }
+
+    void aMissingInputFileIsFileNotFound() {
+        Fixture fixture;
+        fixture.runKlein();
+        auto provider = fixture.provider();
+        auto edit = fixture.request("image.edit", {{"prompt", "x"}},
+                                    {{"images", QJsonArray{QJsonObject{{"path", fixture.home.filePath("nope.png")}}}}});
+        const auto submitted = await<QString>([&](auto reply) { provider->submit(edit, reply); });
+        QVERIFY(!submitted.ok());
+        QCOMPARE(submitted.errors.first().code, QStringLiteral("file_not_found"));
+        QVERIFY(fixture.server.requestsTo("POST", "/sdcpp/v1/img_gen").isEmpty());
+    }
+
+    void aRequestedModelGoesToItsOwnServer() {
+        Fixture fixture;
+        FakeHttpServer other;
+        QVERIFY(other.listen());
+        other.on("GET", "/sdcpp/v1/capabilities",
+                 [](const HttpRequest &) { return HttpResponse{200, json(capabilities())}; });
+        other.on("POST", "/sdcpp/v1/img_gen", [](const HttpRequest &) {
+            return HttpResponse{202, json(QJsonObject{{"id", "job_9"}, {"status", "queued"}})};
+        });
+        QJsonObject klein = row(kKlein, "image", "active", fixture.endpoint());
+        klein.insert("edit", true);
+        fixture.writeStatus(QJsonObject{
+            {kKlein, klein},
+            {kZImage, row(kZImage, "image", "active", QString::fromLatin1(other.origin()) + "/v1")}});
+        auto provider = fixture.provider();
+        auto request = fixture.request("image.generate", {{"prompt", "x"}});
+        request.model = QJsonObject{{"resource", "fugue/image-model"}, {"name", kZImage}};
+        const auto submitted = await<QString>([&](auto reply) { provider->submit(request, reply); });
+        QVERIFY(submitted.ok());
+        QCOMPARE(other.requestsTo("POST", "/sdcpp/v1/img_gen").size(), 1);
+        QVERIFY(fixture.server.requestsTo("POST", "/sdcpp/v1/img_gen").isEmpty());
+    }
+
+    void aRequestedModelThatIsStoppedIsModelNotRunning() {
+        Fixture fixture;
+        fixture.writeStatus(QJsonObject{{kZImage, row(kZImage, "image", "inactive", fixture.endpoint())}});
+        auto provider = fixture.provider();
+        auto request = fixture.request("image.generate", {{"prompt", "x"}});
+        request.model = QJsonObject{{"resource", "fugue/image-model"}, {"name", kZImage}};
+        const auto submitted = await<QString>([&](auto reply) { provider->submit(request, reply); });
+        QVERIFY(!submitted.ok());
+        QCOMPARE(submitted.errors.first().code, QStringLiteral("model_not_running"));
+        QVERIFY(submitted.errors.first().hint.contains("omarchy-agent-local start " + kZImage));
+    }
+
+    void aRefusedSubmissionSaysWhy() {
+        Fixture fixture;
+        fixture.runKlein();
+        fixture.server.on("POST", "/sdcpp/v1/img_gen", [](const HttpRequest &) {
+            return HttpResponse{400, "{\"error\":\"width must be a multiple of 16\"}"};
+        });
+        auto provider = fixture.provider();
+        auto request = fixture.request("image.generate", {{"prompt", "x"}, {"width", 1000}});
+        const auto submitted = await<QString>([&](auto reply) { provider->submit(request, reply); });
+        QVERIFY(!submitted.ok());
+        QCOMPARE(submitted.errors.first().code, QStringLiteral("node_failed"));
+        QVERIFY(submitted.errors.first().message.contains("multiple of 16"));
+    }
+
+    void cancelKeepsFollowingUntilTheServerSaysCancelled() {
+        Fixture fixture;
+        fixture.runKlein();
+        fixture.acceptJobs("job_1");
+        // Cooperative cancel (api.md "POST /sdcpp/v1/jobs/{id}/cancel"): still generating once
+        // after the request, then cancelled.
+        auto cancelled = std::make_shared<bool>(false);
+        auto afterCancel = std::make_shared<int>(0);
+        fixture.server.on("GET", "/sdcpp/v1/jobs/job_1", [cancelled, afterCancel](const HttpRequest &) {
+            if (!*cancelled)
+                return HttpResponse{200, json(sampling(1, 4))};
+            return HttpResponse{200, json(++*afterCancel < 2 ? sampling(2, 4)
+                                                             : job("cancelled", {{"error", QJsonObject{{"code", "cancelled"}, {"message", "job cancelled by client"}}}}))};
+        });
+        fixture.server.on("POST", "/sdcpp/v1/jobs/job_1/cancel", [cancelled](const HttpRequest &) {
+            *cancelled = true;
+            QJsonObject answer = sampling(1, 4);
+            answer.insert("cancel_requested", true);
+            return HttpResponse{200, json(answer)};
+        });
+        auto provider = fixture.provider();
+        QList<JobStatus> stream;
+        connect(provider.get(), &Provider::statusChanged, this,
+                [&](const QString &, const JobStatus &status) { stream.append(status); });
+        auto request = fixture.request("image.generate", {{"prompt", "x"}});
+        const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value;
+        QTRY_VERIFY(!stream.isEmpty() && stream.last().state == QLatin1String("running"));
+
+        const auto asked = await<QString>([&](auto reply) { provider->cancel(id, reply); });
+        QVERIFY(asked.ok());
+        QCOMPARE(asked.value, QStringLiteral("running"));
+        QTRY_COMPARE(stream.last().state, QStringLiteral("cancelled"));
+        QVERIFY(*afterCancel >= 2);
+        QVERIFY(!await<JobResult>([&](auto reply) { provider->result(id, reply); }).ok());
+    }
+
+    void aFailedJobIsAnErrorAndOutOfMemoryIsItsOwnCode() {
+        Fixture fixture;
+        fixture.runKlein();
+        fixture.acceptJobs("job_1");
+        fixture.scriptJob("job_1", {job("failed", {{"error", QJsonObject{{"code", "generation_failed"},
+                                                                         {"message", "CUDA error: out of memory"}}}})});
+        auto provider = fixture.provider();
+        auto request = fixture.request("image.generate", {{"prompt", "x"}});
+        const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value;
+        JobStatus status;
+        QTRY_VERIFY((status = await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value).isTerminal());
+        QCOMPARE(status.state, QStringLiteral("error"));
+        QCOMPARE(status.error.code, QStringLiteral("out_of_memory"));
+        QVERIFY(status.error.message.contains("out of memory"));
+    }
+
+    void aJobTheServerDroppedIsAnError() {
+        Fixture fixture;
+        fixture.runKlein();
+        fixture.acceptJobs("job_1");
+        fixture.scriptJob("job_1", {});
+        auto provider = fixture.provider();
+        auto request = fixture.request("image.generate", {{"prompt", "x"}});
+        const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value;
+        JobStatus status;
+        QTRY_VERIFY((status = await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value).isTerminal());
+        QCOMPARE(status.state, QStringLiteral("error"));
+        QCOMPARE(status.error.code, QStringLiteral("node_failed"));
     }
 };
 
