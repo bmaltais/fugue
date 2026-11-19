@@ -158,6 +158,36 @@ private slots:
         QVERIFY(!app.error() || !app.error()->isVisible());
     }
 
+    // While a run is going Escape cancels it (12.4), but not from a field being typed into:
+    // there Escape puts the value back (spin, line) or ends the edit (multiline).
+    void escapeInAFieldDuringARunIsTheFields() {
+        WidgetApp app;
+        int cancels = 0;
+        app.commands.setHandler("run.cancel", [&cancels] { ++cancels; });
+        app.commands.setContextActive("run", true);
+        QVERIFY(app.open());
+        app.click(app.in("all", "count"));
+        QTRY_VERIFY(app.typing());
+        app.type("12");
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!app.typing());
+        QCOMPARE(app.stored("all", "count"), QJsonValue(7));
+        QCOMPARE(cancels, 0);
+
+        app.click(app.in("all", "notes"));
+        QTRY_VERIFY(app.typing());
+        app.type("fox");
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!app.typing());
+        QCOMPARE(app.stored("all", "notes"), QJsonValue("fox"));
+        QCOMPARE(cancels, 0);
+
+        // On the canvas Escape is the run's again.
+        app.key(Qt::Key_Escape);
+        QCOMPARE(cancels, 1);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void spinChevronsStepAndADragScrubs() {
         WidgetApp app;
         QVERIFY(app.open());

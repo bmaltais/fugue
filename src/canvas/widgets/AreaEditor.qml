@@ -50,6 +50,8 @@ Rectangle {
                 else if (cursorRectangle.y + cursorRectangle.height > flick.contentY + flick.height)
                     flick.contentY = cursorRectangle.y + cursorRectangle.height - flick.height
             }
+            // Escape is the field's, before any shortcut on it (run.cancel while a run is going).
+            Keys.onShortcutOverride: event => event.accepted = event.key === Qt.Key_Escape
             Keys.onEscapePressed: area.done(true)
             Keys.onTabPressed: event => area.next(event.modifiers & Qt.ShiftModifier ? -1 : 1)
             Keys.onBacktabPressed: area.next(-1)

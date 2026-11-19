@@ -39,6 +39,8 @@ Rectangle {
         onTextEdited: field.host.error = field.host.edits.preview(text)
         Keys.onReturnPressed: field.enter()
         Keys.onEnterPressed: field.enter()
+        // Escape is the field's, before any shortcut on it (run.cancel while a run is going).
+        Keys.onShortcutOverride: event => event.accepted = event.key === Qt.Key_Escape
         Keys.onEscapePressed: field.done(false, true)
         Keys.onTabPressed: event => field.next(event.modifiers & Qt.ShiftModifier ? -1 : 1)
         Keys.onBacktabPressed: field.next(-1)
