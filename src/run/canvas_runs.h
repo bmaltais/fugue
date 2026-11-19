@@ -127,6 +127,7 @@ private:
     void show(const QString &tab, const QString &node);
     void flushProgress();
     void setContext();
+    void updateRunning();
     QString nodeTitle(const QString &tab, const QString &path) const;
     static QString aggregate(const NodeView &view);
 
@@ -145,6 +146,7 @@ private:
     QTimer m_checkTimer;
     QTimer m_progressTimer;
     QHash<QString, qreal> m_pendingProgress; // canvas node id -> progress, of the shown tab
+    QStringList m_running; // runningNodes() as last announced
     QHash<QString, QVariantMap> m_shown;     // what each node of the shown tab was last given
     int m_ticket = 0;
     struct Ticket {

@@ -176,6 +176,7 @@ void CanvasRuns::showTab() {
     const TabRuns runs = m_tabs.value(m_shownTab);
     for (auto it = runs.nodes.cbegin(); it != runs.nodes.cend(); ++it)
         show(m_shownTab, it.key());
+    m_running = runningNodes();
     emit runningNodesChanged();
     emit errorsChanged();
     scheduleCheck(false);
@@ -263,7 +264,7 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
         emit changed();
         if (tab == m_shownTab) {
             emit errorsChanged();
-            emit runningNodesChanged();
+            updateRunning();
         }
         emit finished(run, status);
         return;
@@ -285,8 +286,6 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
         m_activeNode = nodeTitle(tab, path);
         m_activeProgress = -1;
         emit progressChanged();
-        if (tab == m_shownTab)
-            emit runningNodesChanged();
     } else if (kind == QLatin1String("node.progress")) {
         view.progress = event.value("value").toDouble();
         if (path == m_activeNodePath)
@@ -304,7 +303,7 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
         view.thumbnailWidth = thumbnail.value("width").toInt();
         view.thumbnailHeight = thumbnail.value("height").toInt();
     } else if (kind == QLatin1String("node.done") || kind == QLatin1String("node.cached")) {
-        setState(QStringLiteral("cached"));
+        setState(event.value("frozen").toBool() ? QStringLiteral("frozen") : QStringLiteral("cached"));
         view.progress = -1;
         if (kind == QLatin1String("node.done")) {
             const qreal seconds = event.value("seconds").toDouble();
@@ -348,8 +347,8 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
     } else {
         return;
     }
-    if (kind != QLatin1String("node.running") && tab == m_shownTab)
-        emit runningNodesChanged();
+    if (tab == m_shownTab)
+        updateRunning();
     show(tab, top);
 }
 
@@ -438,6 +437,15 @@ QStringList CanvasRuns::runningNodes() const {
         if (aggregate(it.value()) == QLatin1String("running"))
             list << it.key();
     return list;
+}
+
+// Only when the set changes: the dots' Repeater is remade from it.
+void CanvasRuns::updateRunning() {
+    const QStringList running = runningNodes();
+    if (running == m_running)
+        return;
+    m_running = running;
+    emit runningNodesChanged();
 }
 
 QVariantList CanvasRuns::runningWires() const {

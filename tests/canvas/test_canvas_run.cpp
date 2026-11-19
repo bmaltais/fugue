@@ -7,11 +7,15 @@
 
 #include <QBuffer>
 #include <QImage>
+#include <QElapsedTimer>
+#include <QJsonDocument>
+#include <QTimer>
 #include <QtTest>
 
 #include "canvas_app.h"
 #include "engine/fake_provider.h"
 #include "engine/queue.h"
+#include "engine/run_folder.h"
 #include "run/canvas_runs.h"
 #include "run/run_service.h"
 
@@ -71,6 +75,16 @@ fugue::Description imageDescription() {
     return description;
 }
 
+// A provider whose description takes a while, as a real one over HTTP does: checkGraph waits
+// for it on an event loop of its own.
+class SlowProvider : public FakeProvider {
+public:
+    using FakeProvider::FakeProvider;
+    void describe(fugue::Reply<fugue::Description> reply) override {
+        QTimer::singleShot(300, this, [this, reply = std::move(reply)]() mutable { FakeProvider::describe(std::move(reply)); });
+    }
+};
+
 // The window with its runs. The fake provider is made on the run thread, where providers
 // live, and stays the same one for every run.
 struct RunApp {
@@ -79,14 +93,15 @@ struct RunApp {
     std::unique_ptr<RunService> service;
     std::unique_ptr<CanvasRuns> runs;
 
-    explicit RunApp(const QByteArray &graph) : app(load(graph)) {
+    explicit RunApp(const QByteArray &graph, bool slow = false) : app(load(graph)) {
         RunSetup setup;
         setup.addNodeTypes = fugue::nodes::addBuiltinNodeTypes;
         setup.addKernels = fugue::nodes::addBuiltinKernels;
         auto *self = this;
-        setup.registerProviders = [self](fugue::Registry &registry) {
+        setup.registerProviders = [self, slow](fugue::Registry &registry) {
             if (!self->fake)
-                self->fake = std::make_shared<FakeProvider>(imageDescription());
+                self->fake = slow ? std::make_shared<SlowProvider>(imageDescription())
+                                  : std::make_shared<FakeProvider>(imageDescription());
             fugue::ProviderInstance instance;
             instance.name = QStringLiteral("This machine");
             instance.type = QStringLiteral("fake");
@@ -300,6 +315,129 @@ private slots:
         QTRY_COMPARE(r.jobs().size(), 1);
         r.runs->cancel();
         QTRY_VERIFY(!r.runs->busy());
+    }
+
+    // A run started while a check waits on a slow provider waits for the check, then runs.
+    void aRunStartedDuringACheckRunsAfterIt() {
+        RunApp r(kGraph, true);
+        QVERIFY(r.app.open());
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        r.runs->checkNow();
+        QTest::qWait(50); // the check is waiting on describe
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE_WITH_TIMEOUT(r.jobs().size(), 1, 10000);
+        r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(0), {{"image.png", png(64, 64)}}); });
+        QTRY_COMPARE_WITH_TIMEOUT(r.jobs().size(), 2, 10000);
+        r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(1), {{"image.png", png(64, 64)}}); });
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 10000);
+        QCOMPARE(finished.first().at(1).toString(), QStringLiteral("ok"));
+    }
+
+    // Closing the window while a check waits on a provider neither hangs nor crashes.
+    void closingDuringACheckIsClean() {
+        auto r = std::make_unique<RunApp>(kGraph, true);
+        QVERIFY(r->app.open());
+        r->runs->checkNow();
+        QTest::qWait(50);
+        r.reset();
+    }
+
+    // Escape cancels a run only when nothing else wants it: open node search takes it first.
+    void escapeClosesSearchBeforeItCancelsTheRun() {
+        RunApp r(kGraph);
+        QVERIFY(r.app.open());
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(r.state("gen"), QStringLiteral("running"));
+        QObject *popup = r.app.engine.rootObjects().first()->findChild<QObject *>("nodeSearch");
+        QVERIFY(popup);
+        QTest::mouseMove(r.app.window, r.app.screen(100, 500));
+        r.app.key(Qt::Key_Tab);
+        QTRY_VERIFY(popup->property("opened").toBool());
+        r.app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!popup->property("opened").toBool());
+        QTest::qWait(100);
+        QVERIFY(r.runs->running());
+        QCOMPARE(r.state("gen"), QStringLiteral("running"));
+        r.app.key(Qt::Key_Escape); // now it is the run's
+        QTRY_VERIFY(!r.runs->busy());
+    }
+
+    // A frozen node (10.4) shows frozen, between runs and after one.
+    void aFrozenNodeShowsFrozen() {
+        QFile file(QStringLiteral(FUGUE_SOURCE_DIR "/examples/demo.fugue"));
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        RunApp r(file.readAll());
+        QVERIFY(r.app.open());
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(finished.size(), 1);
+        const QString run = finished.first().at(0).toString();
+        const fugue::Result<fugue::RunFolder> folder = fugue::RunFolder::open(r.app.dir.path() + "/runs", run);
+        QVERIFY(folder.ok());
+        const QString key = folder->state().value("nodes").toObject().value("subject").toObject().value("key").toString();
+        QVERIFY(!key.isEmpty());
+
+        fugue::Document document = r.app.model.document();
+        document.graph.nodes["subject"].frozen = key;
+        QSignalSpy checked(r.runs.get(), &CanvasRuns::checkApplied);
+        r.app.model.setDocument(document);
+        QTRY_VERIFY(checked.size() >= 1);
+        QCOMPARE(r.state("subject"), QStringLiteral("frozen"));
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(finished.size(), 2);
+        QCOMPARE(r.state("subject"), QStringLiteral("frozen"));
+        QCOMPARE(r.state("prompt"), QStringLiteral("cached"));
+    }
+
+    // Run first (Ctrl+Shift+Enter) goes ahead of the waiting runs, the CLI's included.
+    void runFirstGoesAheadOfTheWaitingRuns() {
+        RunApp r(kGraph);
+        QVERIFY(r.app.open());
+        const fugue::Queue queue(r.app.dir.path() + "/queue");
+        QVERIFY(queue.enqueue("cli-active", "/w/a.fugue", false));
+        QVERIFY(queue.activate("cli-active"));
+        fugue::Lock worker(r.app.dir.path() + "/engine.lock");
+        QVERIFY(worker.tryAcquire());
+        QVERIFY(queue.enqueue("cli-waiting", "/w/b.fugue", false));
+
+        r.app.key(Qt::Key_Return, Qt::ControlModifier | Qt::ShiftModifier);
+        QTRY_COMPARE(queue.entries().size(), 3);
+        const QList<fugue::QueueEntry> entries = queue.entries();
+        QCOMPARE(entries.at(0).run, QStringLiteral("cli-active"));
+        QCOMPARE(entries.at(1).run, r.runs->runs().value(0));
+        QCOMPARE(entries.at(2).run, QStringLiteral("cli-waiting"));
+        r.runs->cancel();
+        QTRY_VERIFY(!r.runs->busy());
+    }
+
+    // 300 nodes take their states from one check without holding the window up: the UI
+    // thread only applies them, and only to nodes whose state changed.
+    void threeHundredNodesTakeTheirStatesQuickly() {
+        QJsonObject nodes, layout;
+        for (int i = 0; i < 150; ++i) {
+            const QString n = QStringLiteral("n%1").arg(i), p = QStringLiteral("p%1").arg(i);
+            nodes.insert(n, QJsonObject{{"type", "fugue/number"}, {"version", "1.0.0"}, {"inputs", QJsonObject{{"value", i}}}});
+            nodes.insert(p, QJsonObject{{"type", "fugue/preview"}, {"version", "1.0.0"},
+                                        {"inputs", QJsonObject{{"value", QJsonObject{{"from", n + ".value"}}}}}});
+            layout.insert(n, QJsonObject{{"pos", QJsonArray{(i % 10) * 600, (i / 10) * 200}}});
+            layout.insert(p, QJsonObject{{"pos", QJsonArray{(i % 10) * 600 + 300, (i / 10) * 200}}});
+        }
+        const QJsonObject document{{"fugue", 1}, {"graph", QJsonObject{{"nodes", nodes}}},
+                                   {"layout", QJsonObject{{"nodes", layout}}}};
+        RunApp r(QJsonDocument(document).toJson());
+        QVERIFY(r.app.open());
+        QSignalSpy checked(r.runs.get(), &CanvasRuns::checkApplied);
+        QElapsedTimer timer;
+        timer.start();
+        r.runs->checkNow();
+        QTRY_COMPARE(checked.size(), 1);
+        const qint64 first = timer.elapsed();
+        QCOMPARE(r.state("p149"), QStringLiteral("stale"));
+        timer.restart();
+        r.runs->checkNow(); // the same states again: nothing to lay out
+        QTRY_COMPARE(checked.size(), 2);
+        qInfo("first check of 300 nodes applied in %lld ms, the same again in %lld ms", first, timer.elapsed());
+        QVERIFY(first < 1500);
     }
 
     // The demo workflow that ships (examples/demo.fugue) runs from the window: CPU nodes only.

@@ -1199,7 +1199,7 @@ Per-node events go to the canvas and, as JSON lines, to the CLI:
 | `node.running` | `node` |
 | `node.progress` | `node`, `value` (0 to 1), `stage`, `message` |
 | `node.preview` | `node`, `image` |
-| `node.cached` | `node`, `outputs`, `shown` (a sink with no outputs) |
+| `node.cached` | `node`, `outputs`, `shown` (a sink with no outputs), `frozen` (true when it is the node's frozen result, 10.4) |
 | `node.done` | `node`, `outputs`, `seconds`, `shown` (a sink with no outputs) |
 | `node.skipped` | `node`, `reason` (`muted`, `upstream_muted`, `upstream_failed`, `upstream_empty`, `cancelled`) |
 | `node.error` | `node`, `error` |

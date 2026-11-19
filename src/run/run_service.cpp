@@ -2,6 +2,7 @@
 
 #include <QCryptographicHash>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFileInfo>
 #include <QImage>
 #include <QImageReader>
@@ -11,6 +12,7 @@
 #include <QUrl>
 
 #include <memory>
+#include <utility>
 
 #include "cli/process.h"
 #include "cli/runs.h"
@@ -51,7 +53,11 @@ QJsonObject thumbnailOf(const QJsonObject &handle, const QString &dir) {
     int height = handle.value("height").toInt(size.height());
     if (width <= 0 || height <= 0)
         return {};
-    if (!QFileInfo::exists(file)) {
+    if (QFile existing(file); existing.exists()) {
+        // In use again: kept from pruning for another 7 days.
+        if (existing.open(QIODevice::ReadWrite))
+            existing.setFileTime(QDateTime::currentDateTime(), QFileDevice::FileModificationTime);
+    } else {
         if (size.isValid() && size.width() > kThumbnailWidth)
             reader.setScaledSize(QSize(kThumbnailWidth, qMax(1, size.height() * kThumbnailWidth / size.width())));
         const QImage image = reader.read();
@@ -107,8 +113,14 @@ public:
         connect(m_poll, &QTimer::timeout, this, &RunThread::poll);
     }
 
+    // Called while the thread still runs, maybe inside checkGraph's own event loop: ends the
+    // runs, and leaves what a check may still be using to teardown().
     void shutdown() {
+        m_quitting = true;
         m_poll->stop();
+        for (const Parked &parked : std::as_const(m_parked))
+            emit event(parked.id, {{"event", "run.done"}, {"status", runStatusName(RunStatus::Cancelled)}});
+        m_parked.clear();
         for (const Waiting &waiting : std::as_const(m_waiting))
             if (queue().remove(waiting.folder.id()))
                 waiting.folder.finish(RunStatus::Cancelled, {}, now());
@@ -120,7 +132,24 @@ public:
         m_lock.reset();
     }
 
+    // On the run thread once its event loop has ended (QThread::finished), so no check is
+    // under way: the providers go with the thread they belong to.
+    void teardown() {
+        m_context.registry.setProviders({});
+        m_compileRegistry.setProviders({});
+        m_process.reset();
+    }
+
     void start(const QString &id, const RunRequest &request) {
+        if (m_quitting)
+            return;
+        // checkGraph waits on providers with an event loop of its own, which delivers what is
+        // queued here meanwhile: a start then waits for the check to end (compiling would
+        // replace the providers the check is using).
+        if (m_checking) {
+            m_parked.append({id, request});
+            return;
+        }
         const Compilation compilation = compileRequest(request);
         if (!compilation.ok()) {
             emit event(id, {{"event", "run.done"}, {"status", runStatusName(RunStatus::Failed)},
@@ -159,6 +188,13 @@ public:
     }
 
     void cancel(const QString &id) {
+        for (int i = 0; i < m_parked.size(); ++i) {
+            if (m_parked.at(i).id == id) {
+                m_parked.removeAt(i);
+                emit event(id, {{"event", "run.done"}, {"status", runStatusName(RunStatus::Cancelled)}});
+                return;
+            }
+        }
         if (m_active && m_activeId == id) {
             m_active->cancel();
             return;
@@ -180,7 +216,7 @@ public:
     void check(const RunRequest &request, int ticket) {
         m_check = request;
         m_checkTicket = ticket;
-        if (!m_active)
+        if (!m_active && !m_checking)
             QTimer::singleShot(0, this, &RunThread::checkNow);
     }
 
@@ -220,6 +256,8 @@ private:
     }
 
     void poll() {
+        if (m_checking)
+            return; // its turn is looked at again once the check is over
         if (m_active) {
             if (!m_cancelAsked && m_activeFolder && m_activeFolder->cancelRequested()) {
                 m_cancelAsked = true;
@@ -259,8 +297,10 @@ private:
             m_lock->release();
             return;
         }
-        if (m_setup.collectGarbage)
+        if (m_setup.collectGarbage) {
             cli::collectGarbageIfDue(m_context, *m_process);
+            pruneThumbnails();
+        }
         waiting.options.warnings += providerProblems;
         m_activeId = id;
         m_activeFolder = waiting.folder;
@@ -279,13 +319,29 @@ private:
         m_active->start();
     }
 
+    // Thumbnails are copies, made again when a result is shown and its copy is gone, so the
+    // ones not made for 7 days go, at most once an hour.
+    void pruneThumbnails() {
+        if (m_pruned.isValid() && m_pruned.elapsed() < 3600 * 1000)
+            return;
+        m_pruned.start();
+        const QDateTime before = QDateTime::currentDateTime().addDays(-7);
+        const QFileInfoList files = QDir(m_thumbnails).entryInfoList(QDir::Files);
+        for (const QFileInfo &file : files)
+            if (file.lastModified() < before)
+                QFile::remove(file.filePath());
+    }
+
     QJsonObject withThumbnails(QJsonObject e) {
         const QString kind = e.value("event").toString();
         QJsonObject thumbnails;
         if (kind == QLatin1String("node.preview")) {
             QJsonObject image = e.value("image").toObject();
             image.insert("type", "image");
-            if (const QJsonObject t = thumbnailOf(image, m_thumbnails); !t.isEmpty())
+            // A preview frame has no content hash and comes many times a run: its copies go in
+            // the run folder, which is collected with the run (10.5).
+            const QString dir = m_activeFolder ? m_activeFolder->path() + QStringLiteral("/previews") : m_thumbnails;
+            if (const QJsonObject t = thumbnailOf(image, dir); !t.isEmpty())
                 thumbnails.insert("preview", t);
         } else if (kind == QLatin1String("node.done") || kind == QLatin1String("node.cached")) {
             const QJsonObject outputs = e.value("outputs").toObject();
@@ -305,8 +361,9 @@ private:
     }
 
     void checkNow() {
-        if (m_active || m_checkTicket < 0)
+        if (m_active || m_checking || m_quitting || m_checkTicket < 0)
             return;
+        m_checking = true;
         const int ticket = m_checkTicket;
         m_checkTicket = -1;
         const Compilation compilation = compileRequest(m_check);
@@ -324,7 +381,18 @@ private:
             for (auto it = compilation->skipped.begin(); it != compilation->skipped.end(); ++it)
                 nodes.insert(it.key(), QJsonObject{{"state", nodeStateName(NodeState::Skipped)}, {"reason", it.value()}});
         }
+        m_checking = false;
+        if (m_quitting)
+            return;
         emit checked(ticket, nodes, toJson(problems));
+        // What waited for the check: runs started meanwhile, a newer check, the queue.
+        const QList<Parked> parked = std::exchange(m_parked, {});
+        for (const Parked &p : parked)
+            start(p.id, p.request);
+        if (m_checkTicket >= 0 && !m_active)
+            QTimer::singleShot(0, this, &RunThread::checkNow);
+        if (!m_waiting.isEmpty())
+            poll();
     }
 
     RunSetup m_setup;
@@ -340,6 +408,14 @@ private:
     QString m_activeId;
     std::optional<RunFolder> m_activeFolder;
     bool m_cancelAsked = false;
+    struct Parked {
+        QString id;
+        RunRequest request;
+    };
+    QList<Parked> m_parked; // started while a check was under way
+    bool m_checking = false;
+    QElapsedTimer m_pruned;
+    bool m_quitting = false;
     RunRequest m_check;
     int m_checkTicket = -1;
 };
@@ -356,7 +432,10 @@ RunService::RunService(RunSetup setup, QObject *parent)
 }
 
 RunService::~RunService() {
-    QMetaObject::invokeMethod(m_worker, [w = m_worker] { w->shutdown(); delete w; }, Qt::BlockingQueuedConnection);
+    QMetaObject::invokeMethod(m_worker, [w = m_worker] { w->shutdown(); }, Qt::BlockingQueuedConnection);
+    // quit() also ends a check's own event loop; the worker goes on its thread once that is
+    // over (finished, connected directly, comes from the run thread itself).
+    connect(m_thread, &QThread::finished, m_worker, [w = m_worker] { w->teardown(); delete w; }, Qt::DirectConnection);
     m_thread->quit();
     m_thread->wait();
 }

@@ -1135,7 +1135,10 @@ private:
         n.state = state;
         n.outputs = outputs;
         n.shown = shownBy(n);
-        emitEvent(withShown({{"event", "node.cached"}, {"node", n.path}, {"outputs", valuesJson(outputs)}}, n.shown));
+        QJsonObject event{{"event", "node.cached"}, {"node", n.path}, {"outputs", valuesJson(outputs)}};
+        if (state == NodeState::Frozen)
+            event.insert("frozen", true); // its frozen result (10.4), so the canvas shows it frozen
+        emitEvent(withShown(event, n.shown));
     }
 
     void finish() {
