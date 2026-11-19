@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <exception>
+#include <new>
 
 #include <QCoreApplication>
 #include <QEventLoop>
@@ -12,8 +13,6 @@
 #include <QSet>
 #include <QRandomGenerator>
 #include <QThread>
-
-#include <new>
 #include <QThreadPool>
 #include <QTimer>
 #include <QUrl>
