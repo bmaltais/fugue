@@ -537,8 +537,9 @@ private slots:
         r.app.key(Qt::Key_Tab);
         QTRY_VERIFY(popup->property("opened").toBool());
         r.app.key(Qt::Key_Escape);
-        QTRY_VERIFY(!popup->property("opened").toBool());
-        QTest::qWait(100);
+        // Closed, its 90 ms fade (docs/canvas-look.md 15) done: keys during the fade are still
+        // the popup's, and a busy machine stretched a fixed 100 ms wait past it.
+        QTRY_VERIFY(!popup->property("visible").toBool());
         QVERIFY(r.runs->running());
         QCOMPARE(r.state("gen"), QStringLiteral("running"));
         r.app.key(Qt::Key_Escape); // now it is the run's
