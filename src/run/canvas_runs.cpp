@@ -195,7 +195,8 @@ void CanvasRuns::show(const QString &tab, const QString &node) {
         state.insert("thumbnail", url);
         state.insert("thumbnailAspect", qreal(height) / width);
         state.insert("thumbnailSize", QSizeF(width, height));
-        state.insert("thumbnailInfo", file.isEmpty() ? size : file + QStringLiteral(" \u00b7 ") + size);
+        state.insert("thumbnailInfo", size);
+        state.insert("thumbnailFile", file);
     };
     const auto text = [&](const QString &shown, qreal aspect, bool dim) {
         state.insert("thumbnail", QString::fromLatin1(kBlank));
@@ -394,7 +395,7 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
             view.thumbnail = thumbnail.value("url").toString();
             view.thumbnailWidth = thumbnail.value("width").toInt();
             view.thumbnailHeight = thumbnail.value("height").toInt();
-            view.thumbnailFile = m_nodeInfo.value(top).showsResult ? thumbnail.value("file").toString() : QString();
+            view.thumbnailFile = m_nodeInfo.value(top).savesFile ? thumbnail.value("file").toString() : QString();
             view.text = thumbnail.value("label").toString();
             view.textAspect = view.thumbnailWidth > 0 && view.thumbnail.isEmpty()
                                   ? qreal(view.thumbnailHeight) / view.thumbnailWidth : 0.5;
@@ -567,6 +568,7 @@ void CanvasRuns::readNodes() {
     const Document document = m_canvas->document();
     for (auto it = document.graph.nodes.cbegin(); it != document.graph.nodes.cend(); ++it) {
         NodeInfo info;
+        info.savesFile = it->type == QLatin1String("fugue/save-image");
         info.showsResult = it->type == QLatin1String("fugue/preview") || it->type == QLatin1String("fugue/save-image");
         if (const NodeType *type = m_registry->nodeType(it->type)) {
             for (const InputSpec &input : type->inputs) {
