@@ -31,6 +31,16 @@ struct PortType {
     bool operator!=(const PortType &other) const { return !(*this == other); }
 };
 
+// What values of a port type are (2.1, 2.2). The registry knows the kind of a
+// declared type.
+enum class PortKind {
+    Builtin,  // text, number, boolean (literals) or image, video, audio (links only)
+    Any,      // the wildcard of built-in utility inputs
+    Resource, // values are resource handles (2.5); a handle may be a literal
+    Data,     // values are files a node produced (2.6); links only
+    Unknown,  // a declared type nobody registered
+};
+
 // The type of one input or output, with the list modifier (2.3).
 struct PortSpec {
     PortType type;
