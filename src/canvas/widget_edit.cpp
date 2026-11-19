@@ -9,6 +9,7 @@
 #include <QJsonArray>
 #include <QPointer>
 #include <QRandomGenerator>
+#include <QRegularExpression>
 #include <QTimer>
 #include <QUrl>
 
@@ -222,9 +223,14 @@ QString WidgetEdit::parse(const Target &t, const QString &text, QJsonValue *valu
             *unsetIt = true;
             return {};
         }
-        // A comma is the decimal separator in many languages; there is no grouping here.
-        if (number.contains(',') && !number.contains('.'))
-            number.replace(',', '.');
+        // A comma is the decimal separator in many languages; there is no grouping here. A
+        // comma before exactly three digits (1,000) or two separators (1.000,5) reads as
+        // grouping in some language, so it is refused rather than taken for another number.
+        static const QRegularExpression grouped(QStringLiteral("^[+-]?\\d+,\\d{3}$"));
+        if (number.count(',') + number.count('.') > 1 || grouped.match(number).hasMatch())
+            return tr("%1 has a thousands separator or two decimal separators; type it without grouping, "
+                      "as 1000 or 0.5.").arg(number);
+        number.replace(',', '.');
         bool ok = false;
         const double d = number.toDouble(&ok);
         if (!ok || !std::isfinite(d))

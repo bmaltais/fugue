@@ -3,6 +3,7 @@
   "%1 cannot be read, so nothing here can change until it is fixed: %2": "%1 cannot be read, so nothing here can change until it is fixed: %2",
   "%1 cannot feed %2: the types differ, and Fugue does not convert between them.": "%1 cannot feed %2: the types differ, and Fugue does not convert between them.",
   "%1 errors": "%1 errors",
+  "%1 has a thousands separator or two decimal separators; type it without grouping, as 1000 or 0.5.": "%1 has a thousands separator or two decimal separators; type it without grouping, as 1000 or 0.5.",
   "%1 has no setting %2.": "%1 has no setting %2.",
   "%1 is linked; take the link out to type a value.": "%1 is linked; take the link out to type a value.",
   "%1 is not a color.": "%1 is not a color.",

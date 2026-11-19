@@ -97,6 +97,14 @@ private slots:
         // A comma works as the decimal separator too; spaces around do not matter.
         QCOMPARE(f.edits.setText("all", "amount", " 0,25 "), QString());
         QCOMPARE(f.stored("all", "amount"), QJsonValue(0.25));
+        // A comma before three digits reads as a thousands separator, so it is refused, not
+        // taken for 1; so is a number with both separators.
+        for (const char *grouped : {"1,000", "12,500", "1.000,5", "1,000.5"}) {
+            const QString why = f.edits.setText("all", "count", grouped);
+            QVERIFY2(why.contains("separator"), qPrintable(QString::fromLatin1(grouped) + ": " + why));
+        }
+        QCOMPARE(f.stored("all", "count"), QJsonValue(12));
+        QCOMPARE(f.edits.check("all", "amount", "0,5"), QString());
         // The same value again is no step.
         QCOMPARE(f.edits.setText("all", "amount", "0.25"), QString());
         QCOMPARE(f.steps(), 2);
