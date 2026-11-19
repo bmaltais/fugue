@@ -74,6 +74,23 @@ QStringList inputFiles() { return QDir(inputsDir()).entryList(QDir::Files, QDir:
 
 void putOnClipboard(QMimeData *data) { QGuiApplication::clipboard()->setMimeData(data); }
 
+// Load Image's file widget (InputWidget.qml) in the window.
+QQuickItem *fileWidget(const App &app, const QString &node) {
+    QList<QQuickItem *> todo{app.window->contentItem()};
+    while (!todo.isEmpty()) {
+        QQuickItem *at = todo.takeFirst();
+        if (at->objectName() == "inputWidget" && at->property("nodeId").toString() == node
+            && at->property("name").toString() == "file")
+            return at;
+        todo << at->childItems();
+    }
+    return nullptr;
+}
+
+QRectF sceneRect(const QQuickItem *item) { return item->mapRectToScene(QRectF(0, 0, item->width(), item->height())); }
+
+QString rectText(const QRectF &r) { return QStringLiteral("%1,%2 %3x%4").arg(r.x()).arg(r.y()).arg(r.width()).arg(r.height()); }
+
 } // namespace
 
 class TestCanvasImages : public QObject {
@@ -262,6 +279,80 @@ private slots:
         putOnClipboard(new QMimeData);
         QVERIFY(!app.model.widgets()->pasteImage("src"));
         QVERIFY(app.workflows.notice().contains("no image"));
+    }
+
+    // A board of Load Image's Paste button and its picker's recent inputs, cheap like the other
+    // boards: the geometry is checked on every run (the button inside its node and the window,
+    // the menu inside the window with a row per recent image); the pictures are written only
+    // with FUGUE_INPUT_SHOTS set to a folder, e.g.
+    //   FUGUE_INPUT_SHOTS=/tmp/shots QT_QUICK_BACKEND=rhi build/test_canvas_images pasteAndRecentInputsBoard
+    void pasteAndRecentInputsBoard_data() {
+        QTest::addColumn<QString>("theme");
+        QTest::addColumn<int>("radius");
+        QTest::newRow("default") << QString() << -1;
+        QTest::newRow("ethereal r0") << "ethereal" << 0;
+        QTest::newRow("flexoki-light r8") << "flexoki-light" << 8;
+    }
+    void pasteAndRecentInputsBoard() {
+        QFETCH(QString, theme);
+        QFETCH(int, radius);
+        if (!theme.isEmpty() && !QFile::exists("/usr/share/omarchy/themes/" + theme))
+            QSKIP("Omarchy's themes are not installed here");
+        App app(load(oneLoadImage), {}, canvas_test::Look{theme, radius});
+        if (radius >= 0)
+            QTRY_COMPARE(app.theme.radius(), radius);
+        QVERIFY(app.open());
+        app.window->resize(900, 640);
+        QTRY_COMPARE(app.window->contentItem()->width(), 900.0);
+        for (const QColor color : {QColor(Qt::red), QColor(Qt::darkGreen), QColor(Qt::blue)}) {
+            auto *data = new QMimeData;
+            data->setData("image/png", encoded(picture(color), "PNG"));
+            putOnClipboard(data);
+            QVERIFY(app.model.widgets()->pasteImage("src"));
+        }
+        const QString out = qEnvironmentVariable("FUGUE_INPUT_SHOTS");
+        const QString name = QStringLiteral("%1/inputs-%2").arg(out, theme.isEmpty() ? QStringLiteral("default") : theme);
+
+        QQuickItem *widget = fileWidget(app, "src");
+        QVERIFY(widget);
+        QQuickItem *paste = canvas_test::item(widget, "pasteImageButton");
+        QQuickItem *card = canvas_test::item(app.window->contentItem(), "node-src");
+        QVERIFY(paste && paste->isVisible() && card);
+        const QRectF window(0, 0, app.window->width(), app.window->height());
+        QVERIFY2(sceneRect(widget).adjusted(-0.5, -0.5, 0.5, 0.5).contains(sceneRect(paste)), qPrintable(rectText(sceneRect(paste))));
+        QVERIFY2(sceneRect(card).contains(sceneRect(paste)) && window.contains(sceneRect(paste)), qPrintable(rectText(sceneRect(paste))));
+        QVERIFY(paste->width() > 0 && paste->height() > 0);
+        if (!out.isEmpty())
+            QVERIFY(test_support::grab(app.window).save(name + "-paste.png"));
+
+        // The picker glyph is just left of the Paste button.
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, widget->mapToScene(QPointF(paste->x() - 6, widget->height() / 2)).toPoint());
+        const auto openMenu = [widget]() -> QObject * {
+            auto *pickers = widget->property("pickers").value<QObject *>();
+            QObject *found = pickers ? pickers->findChild<QObject *>("widgetMenu") : nullptr;
+            return found && found->property("opened").toBool() ? found : nullptr;
+        };
+        QTRY_VERIFY(openMenu());
+        QObject *menu = openMenu();
+        const QVariantList entries = menu->property("entries").toList();
+        QCOMPARE(entries.size(), 4); // Browse files…, then the three images
+        QVERIFY(entries.at(1).toMap().contains("thumbnail"));
+        auto *parent = menu->property("parent").value<QQuickItem *>();
+        const QRectF rect(parent->mapToScene(QPointF(menu->property("x").toReal(), menu->property("y").toReal())),
+                          QSizeF(menu->property("width").toReal(), menu->property("height").toReal()));
+        QVERIFY2(window.contains(rect), qPrintable(rectText(rect)));
+        // Under the widget (or above it, where there is no room below), as wide as it at least.
+        const QRectF well = sceneRect(widget);
+        QVERIFY2(rect.top() >= well.bottom() - 1 || rect.bottom() <= well.top() + 1,
+                 qPrintable(rectText(rect) + " for the widget at " + rectText(well)));
+        QVERIFY2(qAbs(rect.left() - well.left()) <= 1, qPrintable(rectText(rect) + " for the widget at " + rectText(well)));
+        QVERIFY(rect.height() > 3 * menu->property("thumbHeight").toReal()); // the thumbnail rows show
+        QTest::qWait(200); // the thumbnails decode
+        if (!out.isEmpty())
+            QVERIFY(test_support::grab(app.window).save(name + "-recent.png"));
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!openMenu());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
     void savingCopiesTheInputsNextToTheWorkflowAndItReloads() {
