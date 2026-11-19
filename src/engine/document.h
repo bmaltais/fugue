@@ -77,11 +77,15 @@ public:
     bool operator==(const InputValue &other) const { return m_json == other.m_json; }
     bool operator!=(const InputValue &other) const { return !(*this == other); }
 
-    InputValue() = default; // the literal false; QMap needs a default
+    // Empty: not a value, and not written on save (Qt drops an undefined
+    // value from an object). It exists because QMap needs a default.
+    InputValue() = default;
+    bool isEmpty() const { return m_json.isUndefined(); }
+
 private:
     InputValue(Kind kind, const QJsonValue &json) : m_kind(kind), m_json(json) {}
     Kind m_kind = Kind::Literal;
-    QJsonValue m_json = false;
+    QJsonValue m_json = QJsonValue::Undefined;
 };
 
 enum class NodeMode { Normal, Bypass, Mute };

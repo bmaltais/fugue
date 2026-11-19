@@ -195,6 +195,11 @@ private slots:
                                     "  }\n"
                                     "}\n";
         QCOMPARE(document.save(), expected);
+
+        // Reading a missing input through operator[] adds an empty value,
+        // which is not written.
+        QVERIFY(document.graph.nodes["prompt"].inputs["absent"].isEmpty());
+        QCOMPARE(document.save(), expected);
     }
 
     void shapeErrorsAreAllReported() {
