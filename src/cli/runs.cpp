@@ -219,7 +219,7 @@ Reply cancelRun(const RunFolder &folder, const std::optional<QueueEntry> &seen, 
     // Active (or about to be): the worker ends the run when it is told to. Only a process
     // that really is this run's worker is signalled; a pid may have been reused.
     const qint64 pid = entry && entry->pid > 0 ? entry->pid : qint64(folder.state().value("pid").toDouble());
-    if (isRunWorker(pid, id) && ::kill(pid_t(pid), SIGTERM) == 0)
+    if (signalRunWorker(pid, id, SIGTERM))
         // Not a run status: the worker has been told, and the run is cancelled once it ends.
         return Reply::success(QJsonObject{{"id", id}, {"status", "cancelling"}, {"cancelled", true}},
                               QStringLiteral("Cancelling %1.").arg(id));

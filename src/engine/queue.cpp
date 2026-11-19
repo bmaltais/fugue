@@ -7,8 +7,10 @@
 #include <QRegularExpression>
 
 #include <cerrno>
+#include <ctime>
 #include <fcntl.h>
 #include <sys/file.h>
+#include <sys/pidfd.h>
 #include <unistd.h>
 
 #include "engine/json.h"
@@ -17,6 +19,14 @@
 namespace fugue {
 
 namespace {
+
+// The time on CLOCK_BOOTTIME, in milliseconds: one clock for every process, not moved by
+// changes to the wall clock, and counting time suspended. It starts again at each boot.
+qint64 bootMs() {
+    timespec now{};
+    ::clock_gettime(CLOCK_BOOTTIME, &now);
+    return qint64(now.tv_sec) * 1000 + now.tv_nsec / 1000000;
+}
 
 QString fileName(int queueClass, qint64 millis, const QString &run) {
     return QStringLiteral("%1-%2-%3").arg(queueClass).arg(millis, 14, 10, QLatin1Char('0')).arg(run);
@@ -37,6 +47,7 @@ QueueEntry parse(const QString &file, const QString &dir) {
         entry.run = json->value("run").toString();
         entry.pid = qint64(json->value("pid").toDouble());
         entry.workflow = json->value("workflow").toString();
+        entry.queuedBootMs = qint64(json->value("queued_boottime_ms").toDouble());
     }
     if (entry.run.isEmpty()) // unreadable: the name's last part still says which run
         entry.run = file.section('-', 2);
@@ -77,7 +88,7 @@ bool Queue::write(const QString &file, const QJsonObject &content) const {
 bool Queue::enqueue(const QString &run, const QString &workflow, bool first) const {
     const Guard guard(m_dir);
     return write(fileName(first ? 3 : 5, QDateTime::currentMSecsSinceEpoch(), run),
-                 QJsonObject{{"run", run}, {"pid", 0}, {"workflow", workflow}});
+                 QJsonObject{{"run", run}, {"pid", 0}, {"queued_boottime_ms", double(bootMs())}, {"workflow", workflow}});
 }
 
 QList<QueueEntry> Queue::entries() const {
@@ -107,7 +118,11 @@ bool Queue::setPid(const QString &run, qint64 pid) const {
     // gone. The guard keeps a removal from slipping in between the check and the write.
     if (!find(run, &entry))
         return false;
-    return write(entry.file, QJsonObject{{"run", run}, {"pid", double(pid)}, {"workflow", entry.workflow}});
+    // Only the pid changes; what else the entry holds (the time it was queued) stays.
+    const Result<QJsonObject> read = readJsonObject(m_dir + '/' + entry.file);
+    QJsonObject content = read ? read.value() : QJsonObject{{"run", run}, {"workflow", entry.workflow}};
+    content.insert("pid", double(pid));
+    return write(entry.file, content);
 }
 
 bool Queue::activate(const QString &run) const {
@@ -140,9 +155,15 @@ QStringList Queue::discardDead(Lock &engineLock) const {
         bool dead = false;
         if (entry.pid > 0) {
             dead = !isRunWorker(entry.pid, entry.run);
-        } else {
+        } else if (entry.queuedBootMs > 0) {
             // A worker records its pid as soon as it runs; an entry that never got one
-            // is from a worker that did not start.
+            // is from a worker that did not start. Its age is on the boot clock, so a jump
+            // of the wall clock cannot discard a worker that is still starting; a time
+            // later than now was taken before the machine restarted.
+            const qint64 now = bootMs();
+            dead = now < entry.queuedBootMs || now - entry.queuedBootMs > 30000;
+        } else {
+            // An entry from before the boot time was recorded: the file's time.
             dead = QFileInfo(m_dir + '/' + entry.file).lastModified().secsTo(QDateTime::currentDateTime()) > 30;
         }
         if (dead && remove(entry))
@@ -170,6 +191,19 @@ bool isRunWorker(qint64 pid, const QString &run) {
     const QList<QByteArray> arguments = file.readAll().split('\0');
     const qsizetype at = arguments.indexOf("__worker");
     return at >= 0 && at + 1 < arguments.size() && arguments.at(at + 1) == run.toUtf8();
+}
+
+bool signalRunWorker(qint64 pid, const QString &run, int signal) {
+    if (pid <= 0)
+        return false;
+    // While the pidfd is open the id cannot pass to another process, so the command line
+    // read next is this process's. If it died meanwhile, the send fails (ESRCH).
+    const int process = ::pidfd_open(pid_t(pid), 0);
+    if (process < 0)
+        return false; // no such process
+    const bool sent = isRunWorker(pid, run) && ::pidfd_send_signal(process, signal, nullptr, 0) == 0;
+    ::close(process);
+    return sent;
 }
 
 Lock::Lock(const QString &path) {

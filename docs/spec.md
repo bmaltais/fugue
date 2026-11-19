@@ -1261,7 +1261,9 @@ run worker, prints the run id and returns; `--wait` stays attached and streams e
 - A run's `run.json` and `run.done` have one writer at a time: `fugue run` until it has started
   the worker, then nobody while the run waits, then the worker once it has made its entry
   active. Whoever takes a waiting entry out of the queue (a cancel, or a process that found it
-  dead) ends that run. `run.done` decides a run's status once it is there.
+  dead) ends that run. `run.done` decides a run's status once it is there. A run ends once:
+  two processes that both find its worker gone may both try to end it, so ending takes a lock on
+  `events.jsonl`, and an end that finds `run.done` already there changes nothing.
 
 ### 9.9 Not in v0.1
 

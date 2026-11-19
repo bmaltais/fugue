@@ -12,7 +12,10 @@
 #include <QSet>
 #include <QTemporaryDir>
 #include <QTimeZone>
+#include <QThread>
 #include <QtTest>
+
+#include <atomic>
 
 #include "engine/json.h"
 #include "engine/run_folder.h"
@@ -21,6 +24,13 @@ using namespace fugue;
 
 class TestRunFolder : public QObject {
     Q_OBJECT
+
+    static int runDones(const RunFolder &folder) {
+        int count = 0;
+        for (const QJsonObject &event : folder.events())
+            count += event.value("event").toString() == QLatin1String("run.done") ? 1 : 0;
+        return count;
+    }
 
 private slots:
     void runIdsAreOpaqueUniqueAndSortByStartTime() {
@@ -153,6 +163,63 @@ private slots:
         QCOMPARE(done.value("status"), last.value("status"));
         QCOMPARE(done.value("errors"), last.value("errors"));
         QCOMPARE(folder.status(), RunStatus::Failed);
+    }
+
+    // A run is ended once: a second finish (a follower and a canceller that both found
+    // the worker gone) leaves the first end as it is and hands back its run.done.
+    void aSecondFinishLeavesTheFirstEndAlone() {
+        QTemporaryDir root;
+        const RunFolder folder = RunFolder::create(root.path()).value();
+        QVERIFY(folder.queued("/w/fox.fugue"));
+        const QDateTime first(QDate(2026, 11, 19), QTime(12, 0), QTimeZone::UTC);
+        const QJsonObject done = folder.finish(RunStatus::Cancelled, {}, first);
+        const QJsonObject again =
+            RunFolder::open(root.path(), folder.id())
+                ->finish(RunStatus::Failed, {makeError("internal", "The run's worker is gone.")}, first.addSecs(5));
+
+        QCOMPARE(runDones(folder), 1);
+        QCOMPARE(folder.state().value("status").toString(), QStringLiteral("cancelled"));
+        QCOMPARE(folder.state().value("ended").toString(), QStringLiteral("2026-11-19T12:00:00.000Z"));
+        QCOMPARE(again.value("status").toString(), QStringLiteral("cancelled"));
+        QCOMPARE(again.value("errors"), done.value("errors"));
+        QCOMPARE(folder.status(), RunStatus::Cancelled);
+    }
+
+    // Finishers that race: each RunFolder opens its own files, as another process would.
+    // Whatever the interleaving, every run has one run.done and run.json agrees with it.
+    void finishersThatRaceEndARunOnce() {
+        QTemporaryDir root;
+        constexpr int runs = 40;
+        constexpr int finishers = 4;
+        QStringList ids;
+        for (int i = 0; i < runs; ++i) {
+            const RunFolder folder = RunFolder::create(root.path()).value();
+            QVERIFY(folder.queued());
+            ids << folder.id();
+        }
+        std::atomic<int> ready{0};
+        QList<QThread *> threads;
+        for (int f = 0; f < finishers; ++f) {
+            const RunStatus status = f % 2 ? RunStatus::Failed : RunStatus::Cancelled;
+            threads << QThread::create([&, status] {
+                ++ready;
+                while (ready.load() < finishers) {
+                }
+                for (const QString &id : std::as_const(ids))
+                    RunFolder::open(root.path(), id)->finish(status, {}, QDateTime::currentDateTimeUtc());
+            });
+        }
+        for (QThread *thread : std::as_const(threads))
+            thread->start();
+        for (QThread *thread : std::as_const(threads)) {
+            QVERIFY(thread->wait());
+            delete thread;
+        }
+        for (const QString &id : std::as_const(ids)) {
+            const RunFolder folder = RunFolder::open(root.path(), id).value();
+            QCOMPARE(runDones(folder), 1);
+            QCOMPARE(folder.state().value("status").toString(), runStatusName(folder.status()));
+        }
     }
 
     void theStatusIsRunDonesOnceTheRunHasEnded() {

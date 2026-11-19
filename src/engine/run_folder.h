@@ -66,6 +66,8 @@ public:
     // run.done is appended with the errors. Returns that event as it was given to
     // appendEvent, for a caller that also tells listeners. Every way a run ends goes
     // through here: the scheduler's, a cancel of a run that never ran, a dead worker's.
+    // A run ends once, across processes: a finish after run.done is there changes nothing
+    // and returns that run.done instead.
     QJsonObject finish(RunStatus status, const Errors &errors, const QDateTime &now) const;
     // The run's status: run.done's when the run has ended (it is appended once, by
     // whoever ended it, while run.json is rewritten as the run goes), else run.json's,
