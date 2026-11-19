@@ -365,6 +365,21 @@ private slots:
         QCOMPARE(sent->params.value("strength").toDouble(), 0.4);
     }
 
+    // A photo with an EXIF orientation is upright: its shape sets the size, the way it is seen.
+    void aRotatedStartImageIsSizedUpright() {
+        Bench bench;
+        const QString photo = bench.file("turned.jpg");
+        vips::VImage pixels = (vips::VImage::black(1024, 512, vips::VImage::option()->set("bands", 3)) + 90).cast(VIPS_FORMAT_UCHAR).copy();
+        pixels.set("orientation", 6); // seen as 512 x 1024
+        pixels.jpegsave(photo.toUtf8().constData());
+        const Result<JobRequest> sent = bench.request(kGenerate, {{"prompt", "a cat"}, {"image", bench.image(photo)}});
+        QVERIFY2(sent.ok(), qPrintable(sent.ok() ? QString() : sent.error().message));
+        // Nearest a megapixel in steps of 64 for 1:2 is 704 x 1472 (fitMegapixel).
+        QCOMPARE(sent->params.value("width").toInt(), 704);
+        QCOMPARE(sent->params.value("height").toInt(), 1472);
+        QCOMPARE(sizeOf(sent->inputs.value("image").toObject().value("path").toString()), QSize(704, 1472));
+    }
+
     // A size set on the node wins: the start image is fitted to it.
     void aSetSizeFitsTheStartImageToIt() {
         Bench bench;

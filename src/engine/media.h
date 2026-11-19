@@ -11,7 +11,9 @@
 //   - audio: a file.
 //
 // The metadata fields (width, fps, duration, ...) always describe the file at
-// path(), as read from it; pending edits are separate, and the effective*()
+// path(), as read from it; an image is upright everywhere: an EXIF orientation is
+// applied, so width and height are the size it is seen at, and image() is turned
+// to match (a file sent on as it is keeps its tag). Pending edits are separate, and the effective*()
 // accessors give the size and length once they are applied. A video handle's
 // identity is therefore its hash plus its edits, not its hash alone.
 
@@ -94,7 +96,7 @@ public:
     bool hasFile() const { return !m_path.isEmpty(); }
     bool hasImage() const { return m_image.has_value(); }
 
-    // The decoded image: the one held, or else the file opened through
+    // The decoded image, upright: the one held, or else the file opened through
     // libvips, which decodes pixels only as they are read. Images only.
     Result<vips::VImage> image() const;
 

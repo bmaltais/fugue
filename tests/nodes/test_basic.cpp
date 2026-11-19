@@ -283,6 +283,28 @@ private slots:
         QCOMPARE(changed.outcome.outputs.value("l").value("width").number(), 15.0);
     }
 
+    // A photo with an EXIF orientation is upright everywhere (as Fantasi's prepareBase): Load
+    // Image reports the size it is seen at, and Save Image writes it that way up.
+    void aRotatedPhotoIsUprightWhenLoadedAndSaved() {
+        QVERIFY(QDir().mkpath(path("fixtures")));
+        const QString photo = path("fixtures/turned.jpg");
+        vips::VImage pixels = (vips::VImage::black(18, 6, vips::VImage::option()->set("bands", 3)) + 90).cast(VIPS_FORMAT_UCHAR).copy();
+        pixels.set("orientation", 6); // to be turned 90 degrees clockwise when shown
+        pixels.jpegsave(photo.toUtf8().constData());
+        const Ran ran = run(QByteArray("{'l': {'type': 'fugue/load-image', 'inputs': {'file': '") + photo.toUtf8() + "'}},"
+                            " 's': {'type': 'fugue/save-image', 'inputs': {'image': {'from': 'l.image'}, 'name': 'upright',"
+                            " 'embed': 'none', 'folder': '" + outDir().toUtf8() + "'}}}");
+        QVERIFY2(ran.error.isEmpty(), qPrintable(ran.error));
+        const Values loaded = ran.outcome.outputs.value("l");
+        QCOMPARE(loaded.value("width").number(), 6.0);
+        QCOMPARE(loaded.value("height").number(), 18.0);
+        QCOMPARE(loaded.value("image").media().width(), 6);
+        const vips::VImage saved = vips::VImage::new_from_file((outDir() + "/upright.png").toUtf8().constData());
+        QCOMPARE(saved.width(), 6);
+        QCOMPARE(saved.height(), 18);
+        QVERIFY(saved.get_typeof("orientation") == 0 || saved.get_int("orientation") == 1);
+    }
+
     // --- Save Image ---
 
     // load -> save, with the given inputs of the save node (JSON object text without braces).
