@@ -966,6 +966,14 @@ A provider instance is a configured use of a provider module, stored in
 - Fields: `name` (unique), `type` (a provider module id), `address`, `key`, `enabled`, plus
   settings the module declares.
 - The list order is the user's preference order.
+- **No file, the default.** Without `providers.json` Fugue uses: `This machine` (type `omarchy`,
+  no address), then one `omarchy` instance per host omarchy-local-ai's `network.json` says this
+  machine is paired with, named after the host (`gx10-f5f4`), with the address
+  `https://<its dns name>`, in name order. A paired host that is offline is kept (its models show
+  as offline, and a pin on it stays valid); a host that is not paired is not used. The default is
+  read again wherever the file is read (the CLI, each window run, each time a model picker opens),
+  and nothing is written: the file is made only when the user changes a provider in the settings.
+  A file that exists wins entirely; nothing is added to it.
 - **Local or remote is only the address.** It is never a property of a graph.
 - Keys live only here. They are never written into a workflow, an export or an embedded graph.
 
@@ -987,10 +995,21 @@ A provider instance is a configured use of a provider module, stored in
   used is an output, so the result is reproducible.
 - A handle that does not match what is running is a clear error with an offer to start the right
   model. Fugue never substitutes another model silently.
+- The model picker of a provider node lists the models every enabled instance that describes
+  itself offers for the node type's capabilities (Generate Image: `image.generate`; Edit Image:
+  `image.edit`, so only models that edit), grouped under each instance's name in the user's order,
+  by the name the provider gives them (`FLUX.2 Klein 4B`, display only: the handle keeps the
+  served name). "Any ready model" (unset) comes first. A model that is not ready says so (`not
+  running`, `loading`) with why and how to fix it under its name; until Fugue can start a model
+  with the user's confirmation ([13.6](#136-safety)) that is the `omarchy-agent-local` command to
+  run. With no model the picker says so: "No image model available: start one in
+  omarchy-local-ai or add a provider".
 
 ### 8.5 When nothing can serve a capability
 
-The node shows what is missing and how to fix it (start a model, add a provider, enable one).
+The node shows what is missing and how to fix it (start a model, add a provider, enable one):
+before a run the canvas check's warning is a chip under the node, and a run's error of these codes
+carries its fix.
 Error codes: `capability_unavailable`, `model_not_running`, `model_missing`,
 `provider_unreachable`. `fugue validate` reports a missing model as a warning; a run that reaches
 the node reports it as an error.
@@ -1968,7 +1987,7 @@ Building M2 made these further choices.
 | Numbers: a dot or a comma as the decimal point; empty text unsets an input with a default or an optional one, and is refused for a required number with none. Chevrons and Up/Down step by `step` (1 for whole numbers, else 0.1), held in `min`..`max` and rounded to the step; a drag on a spin scrubs a step per 6 units, a drag on a slider sets the value by position, and a click (no drag) types, as Blender does | 6.2 | medium |
 | Text: empty is the empty text, except an optional input with no default (a file, a folder), where it unsets | 6.2 | medium |
 | Seed modes: randomize stores `{"auto": "random"}`; increment keeps a number and lists the input in `layout.nodes.<id>.increment`, so the file keeps the choice and a run sees a number; going from randomize to a number takes the seed of the result the node shows (the run's value on the output of the same name, "Seed used"), else draws one. The canvas adds one to each incrementing seed after a run it starts (wrapping to `min` past `max`), as one undo step | 6.2, 4.5 | medium |
-| The model picker lists, when it opens, the models every enabled provider instance offers of the input's resource type, with their state; models on disk (8.9) join it in M5. A typed name is stored as a handle served by that name; an optional model input can go back to "Any ready model" (unset, 8.4) | 2.5, 8.4 | medium |
+| The model picker lists, when it opens, the models every enabled provider instance offers of the input's resource type (for the node type's capabilities, 8.4), with their state; models on disk (8.9) join it in M5. A typed name is stored as a handle served by that name; an optional model input can go back to "Any ready model" (unset, 8.4) | 2.5, 8.4 | medium |
 | A linked value input shows its source ("Prompt · Text") in place of the widget. List inputs keep a read-only row (`[n]`); a placeholder's inputs show their value read-only | 3.2, 3.6 | medium-high |
 | File and folder widgets store the path the portal returns as it is, or the path typed; the canvas checks no file roots (see the #19 row on canvas runs and roots) | 6.2, 13.6 | medium |
 | Text-field focus (12.4): widget fields are text inputs, so while one has focus its keys are the field's; a press on the canvas or on another widget takes the focus from the field first, ending its edit. Menus are modal, so the window's keys sleep while one is open | 12.4 | high |
@@ -1999,6 +2018,9 @@ Building M2 made these further choices.
 | Node and Frame colors: one command per theme role, `node.color.<role>` for none, accent, muted, red, orange, yellow, green, cyan, blue and magenta, in Edit > Colors and the context menus; the selection's nodes, or the Frame the menu was opened on, take it in one undo step. A swatch shows the theme's color; the node header shows `tint-<role>`. No `error` role (it is the palette's red). ComfyUI's presets are fixed dark colors (red, brown, green, blue, pale blue, cyan, purple, yellow, black) lightened for light themes; theme roles follow every palette. A color wheel and hex colors are #52 | 4.5 | medium |
 | Frames are not selectable until #26, so a Frame's color comes only from its own context menu | 5.1 | medium |
 | The `?` overlay lists the commands that have a key; the rest (colors, exports, help links) are in the menus and appear in the overlay once the keymap file binds them | 12.5 | medium |
+| No providers.json: the default instances are this machine and every host omarchy-local-ai's `network.json` says is paired, by host name at `https://<dns>`, the address the omarchy provider already matches a paired host's models by (so a file the settings write later holds the same entries). Offline paired hosts are kept, so their models show as offline and pins stay valid. Read wherever providers.json is read, never written; a file that exists wins entirely | 8.2 | medium-high |
+| The model picker lists models by instance for the node type's capabilities, titled by the provider's display name; a model that is not ready stays choosable (a run then says it is not running, 8.4) and shows why and the command that starts it; Up and Down skip the instance headings | 8.4, 2.5 | medium-high |
+| A paired host with no model to offer says why (offline, unreachable, or nothing shared running) instead of "not paired" | 8.7 | high |
 | Menu items and gaps from ComfyUI: export a share copy and the compiled graph (11.5, #54), Clear workflow, the help links and About are commands; templates, Clipspace, refresh node definitions, unload models, focus mode, theme switching, node shapes, properties panels and the Manager are not planned (Fugue has no Python node definitions, follows the Omarchy theme, and installs packs per 6.6); rename and pin (#55), the side panels (#56), a node's image actions (#57), align and distribute (#58) and the tab menu (#59) are later tickets | 12.5 | medium |
 
 ## Appendix B: issue to section map
