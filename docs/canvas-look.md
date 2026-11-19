@@ -1,7 +1,7 @@
 # Canvas look
 
-Issue #47. Date: 2026-11-19. Status: **approved** by the owner, with section 18's questions
-answered as recommended; step 2 built it (what differs is in [spec Appendix A](spec.md#appendix-a-choices-made-in-this-document)).
+Issue #47. Date: 2026-11-19. Status: **approved** by the owner; step 2 built it, with section
+18's questions as recommended (what differs is in [spec Appendix A](spec.md#appendix-a-choices-made-in-this-document)).
 
 [spec 12](spec.md#12-canvas) fixes how the canvas behaves, and its feel is approved. This document
 fixes how it looks: every size, color, state and motion the restyle (#47 step 2, on top of #16)
@@ -547,8 +547,9 @@ labels and batch with them; an SVG `Image` would need a separate texture per col
 Most of it is in #16's files, which step 2 restyles once #16 lands:
 
 - `src/theme.cpp`, `theme.h`: the canvas tokens of 6.1 as properties (or one `canvas` map), the
-  port color resolution of 6.2, the shadow image provider. Tests: the tokens and port colors
-  against `derive.py`'s values for a light, a dark and a monochrome theme.
+  port color resolution of 6.2, the shadow images (built in `src/look.cpp`, as `data:` URLs).
+  Tests: the tokens and port colors against `derive.py`'s values for a light, a dark and a
+  monochrome theme.
 - `canvas_model.cpp`: header 7u and rows 6u from `textSize` instead of the fixed 26 and 22;
   outputs before inputs in port `y`; the multiline widget's taller row; wire hover hit-testing.
 - `CanvasNode.qml`, `PortDot.qml`, `FugueCanvas.qml`: anatomy, states, wells, thumbnails, the
@@ -563,7 +564,8 @@ the target stays 12.1's.
 
 ## 18. Questions for the owner
 
-Answered 2026-11-19: all five as recommended (step 2 builds them so).
+Step 2 builds all five as recommended. The owner confirmed question 3 (`Theme::muted` stays as
+it is); 1, 2, 4 and 5 are not yet recorded in the owner's own words.
 
 1. **Port colors that collide.** Repair them in `Theme::portColor` as 6.2 describes (keep theme
    colors that are distinct, replace only the colliding ones), or always use the theme's colors

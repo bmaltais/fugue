@@ -669,21 +669,32 @@ FocusScope {
             }
         }
 
-        // The valid target under a dragged link: a 2 px accent ring outside the port's grown
-        // mark and its 2 px body ring (docs/canvas-look.md 5).
+        // The valid target under a dragged link: a 2 px accent ring outside a 2 px body gap
+        // around the port's grown mark (docs/canvas-look.md 5), 14 px filled or 10 hollow.
         Rectangle {
+            id: targetRing
             readonly property string shape: canvas.hoverPort.shape || "circle"
+            readonly property bool round: shape === "circle" || shape === "ring"
+            readonly property int mark: canvas.hoverPort.wired && shape !== "ring" ? 14 : 10
             visible: canvas.dragging && canvas.hoverPort.node !== undefined && canvas.hoverProblem === ""
             x: (canvas.hoverPort.x || 0) - width / 2
             y: (canvas.hoverPort.y || 0) - height / 2
-            width: 14 * 1.4 + 4
+            width: Math.round(mark * 1.4) + 8
             height: width
-            radius: shape === "circle" || shape === "ring" ? width / 2 : Math.min(canvas.look.corner, 2) + 4
+            radius: round ? width / 2 : Math.min(canvas.look.corner, 2) + 4
             rotation: shape === "diamond" ? 45 : 0
             scale: shape === "diamond" ? 0.8 : 1
             color: "transparent"
             border.width: 2
             border.color: canvas.look.accent
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: 2
+                radius: targetRing.round ? width / 2 : Math.max(0, targetRing.radius - 2)
+                color: "transparent"
+                border.width: 2
+                border.color: canvas.look.body
+            }
         }
 
         // The link being dragged, over the nodes: from its port to the pointer, or snapped to

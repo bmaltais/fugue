@@ -1026,6 +1026,10 @@ QVariantMap CanvasModel::portAt(qreal x, qreal y, qreal radius) const {
             }
         }
     }
+    // Filled or hollow: the drag's target ring fits the mark (docs/canvas-look.md 5).
+    if (!best.isEmpty())
+        best.insert("wired", isWired(best.value("node").toString(), best.value("port").toString(),
+                                     best.value("output").toBool()));
     return best;
 }
 

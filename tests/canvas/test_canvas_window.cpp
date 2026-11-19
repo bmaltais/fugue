@@ -278,10 +278,11 @@ private slots:
     // 600 wires, every node's rows made), before the canvas look (#47): pan 60.5 fps, drag
     // 60.1, pan zoomed out 60.5; worst gap 21 to 22 ms (one late frame at most); render thread
     // 2.1 ms a frame on average while dragging, under 0.5 ms while panning.
-    // After it, two runs: pan 60.1 to 60.3 fps, drag 59.9 to 60.2, zoomed out 60.5 to 60.8;
-    // worst gap 19 to 27 ms; render 0.3 to 1.7 ms panning, 2.1 to 2.5 ms dragging, 0.15 ms
-    // zoomed out. The shadows cost 0.45 ms at most (drag 2.54 on, 2.08 off; the other run
-    // 2.31 on, 2.41 off), inside docs/canvas-look.md 7's 1 ms, so nodes at rest keep theirs.
+    // After it, three runs: pan 60.0 to 60.3 fps, drag 59.9 to 60.2, zoomed out 60.4 to 60.8;
+    // worst gap 19 to 27 ms; render 0.3 to 1.7 ms panning, 2.1 to 2.5 ms dragging, 0.15 to
+    // 0.33 ms zoomed out. The shadows cost 0.45 ms at most (drag 2.54 on, 2.08 off; the other
+    // runs 2.31 and 2.41, 2.39 and 2.28), inside docs/canvas-look.md 7's 1 ms, so nodes at rest
+    // keep theirs.
     void benchmark() {
         if (!qEnvironmentVariableIsSet("FUGUE_CANVAS_BENCH"))
             QSKIP("set FUGUE_CANVAS_BENCH=1 and run on a real display");
