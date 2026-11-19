@@ -231,6 +231,7 @@ private slots:
         QTRY_COMPARE(r.state("gen"), QString("error"));
         QVERIFY(r.role("gen", NodeList::Error).toString().contains("add a provider"));
         QVERIFY(!item(card, "noticeChip")->isVisible()); // the error chip says it now
+        QCOMPARE(r.role("gen", NodeList::Notice).toString(), QString());
         QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
     }
 

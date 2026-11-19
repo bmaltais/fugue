@@ -333,6 +333,9 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
         return;
 
     NodeView &view = runs.nodes[top];
+    // A run that reaches the node knows better than the last check: it runs, or its error
+    // says what is missing.
+    view.notice.clear();
     auto setState = [&](const QString &state) {
         if (inner)
             view.inner.insert(path, state);
