@@ -3,6 +3,7 @@
 
 #include <QBuffer>
 #include <QClipboard>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QGuiApplication>
 #include <QImage>
@@ -110,6 +111,35 @@ private slots:
         // Other bytes are another file.
         QVERIFY(storeImage(encoded(picture(Qt::blue), "PNG"), p.inputs(), roots, "holiday photo.png").ok());
         QCOMPARE(names(p.inputs()).size(), 2);
+    }
+
+    // A file is reused only when its bytes are the image's, not by its name and size: a run's
+    // Save Image (or anyone) may have planted a file named after the hash of a known image.
+    // A symbolic link is never reused, and a planted file is never replaced.
+    void aFileNamedByTheHashIsReusedOnlyWithTheSameBytes() {
+        Pictures p;
+        QTemporaryDir other;
+        const QByteArray png = encoded(picture(), "PNG");
+        const QString hash = QString::fromLatin1(QCryptographicHash::hash(png, QCryptographicHash::Sha256).toHex().left(10));
+        QByteArray fake = png;
+        fake[fake.size() - 5] = char(fake.at(fake.size() - 5) ^ 1); // same size, other bytes
+        QVERIFY(QDir().mkpath(p.inputs()));
+        const QString planted = p.inputs() + "/a-" + hash + ".png";
+        QVERIFY(write(planted, fake));
+        QVERIFY(write(p.inputs() + "/cat-" + hash + ".png", fake)); // the name the store would write
+        QVERIFY(write(other.filePath("real.png"), png));
+        QVERIFY(QFile::link(other.filePath("real.png"), p.inputs() + "/b-" + hash + ".png"));
+        const FileRoots roots = FileRoots::forInputs();
+        const Result<QString> stored = storeImage(png, p.inputs(), roots, "cat.png");
+        QVERIFY2(stored.ok(), qPrintable(stored.error().message));
+        QCOMPARE(read(stored.value()), png);
+        QVERIFY(!QFileInfo(stored.value()).isSymLink());
+        QCOMPARE(QFileInfo(stored.value()).absolutePath(), canonicalPath(p.inputs()));
+        QCOMPARE(read(planted), fake);
+        QCOMPARE(read(p.inputs() + "/cat-" + hash + ".png"), fake);
+        // The real one is reused from now on, and a dropped file finds it too.
+        QCOMPARE(storeImage(png, p.inputs(), roots).value(), stored.value());
+        QCOMPARE(storeImageFile(other.filePath("real.png"), p.inputs(), roots).value(), stored.value());
     }
 
     void hostileNamesBecomePlainStems() {

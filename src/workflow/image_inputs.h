@@ -54,7 +54,9 @@ QString safeStem(const QString &name);
 
 // Checks the bytes are an image Fugue can read and not an absurd one, then writes them as
 // <folder>/<stem>-<first 10 hex of the SHA-256>.<extension of the real format> (atomic) and
-// returns that path. The same bytes again, under whatever stem, are the file already there.
+// returns that path. The same bytes again, under whatever stem, are the file already there: a
+// regular file (not a link) whose whole content is these bytes, never one judged by name and
+// size. A different file under the name stays; the name takes `-2`, `-3` before the extension.
 // `stem` is made safe by safeStem; empty names it "pasted-YYYYMMDD-HHMMSS". `roots` must allow
 // writing the folder. The errors are worded for the person who pasted.
 Result<QString> storeImage(const QByteArray &bytes, const QString &folder, const FileRoots &roots,

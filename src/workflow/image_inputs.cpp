@@ -54,24 +54,55 @@ Result<QSize> readableSize(const QByteArray &bytes, const ImageFormat &format) {
     }
 }
 
+// Whether `path` is a regular file (not a link) whose content is exactly `bytes`.
+bool holdsBytes(const QString &path, const QByteArray &bytes) {
+    const QFileInfo info(path);
+    if (info.isSymLink() || !info.isFile() || info.size() != bytes.size())
+        return false;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return false;
+    constexpr qint64 chunk = 1 << 20;
+    for (qint64 at = 0; at < bytes.size(); at += chunk)
+        if (file.read(chunk) != QByteArrayView(bytes).sliced(at, std::min(chunk, bytes.size() - at)))
+            return false;
+    return file.atEnd();
+}
+
+// Writes `bytes` as <folder>/<name>, or finds them there already. A file there with other
+// bytes (or a link) is never replaced: the name takes `-2`, `-3`, ... before the extension.
 Errors writeWhole(const QByteArray &bytes, const QString &folder, const QString &name, const FileRoots &roots,
                   QString *path) {
-    const Result<QString> allowed = roots.checkWrite(QDir(folder).filePath(name), QStringLiteral("file"));
-    if (!allowed)
-        return allowed.errors();
-    *path = allowed.value();
-    if (QFileInfo(*path).absolutePath() != canonicalPath(folder))
-        return {makeError(QStringLiteral("permission_denied"), QStringLiteral("%1 is not a name Fugue can store.").arg(name))};
-    if (const Errors made = makeFolder(folder); hasErrors(made))
-        return made;
-    // The same bytes again are the same file: nothing to write.
-    if (QFileInfo info(*path); info.isFile() && info.size() == bytes.size())
-        return {};
-    PartialFile partial(folder, name);
-    if (const Errors written = partial.write(bytes, QStringLiteral("the image")); hasErrors(written))
-        return written;
-    const Result<bool> committed = partial.commit(*path, Overwrite::Replace);
-    return committed ? Errors() : committed.errors();
+    const QFileInfo named(name);
+    for (int n = 1;; ++n) {
+        const QString candidate =
+            n == 1 ? name : QStringLiteral("%1-%2.%3").arg(named.completeBaseName()).arg(n).arg(named.suffix());
+        const QString there = QDir(folder).filePath(candidate);
+        if (QFileInfo(there).isSymLink())
+            continue;
+        const Result<QString> allowed = roots.checkWrite(there, QStringLiteral("file"));
+        if (!allowed)
+            return allowed.errors();
+        *path = allowed.value();
+        if (QFileInfo(*path).absolutePath() != canonicalPath(folder))
+            return {makeError(QStringLiteral("permission_denied"),
+                              QStringLiteral("%1 is not a name Fugue can store.").arg(candidate))};
+        if (const Errors made = makeFolder(folder); hasErrors(made))
+            return made;
+        // The same bytes again are the same file: nothing to write.
+        if (holdsBytes(*path, bytes))
+            return {};
+        if (QFileInfo::exists(*path))
+            continue;
+        PartialFile partial(folder, candidate);
+        if (const Errors written = partial.write(bytes, QStringLiteral("the image")); hasErrors(written))
+            return written;
+        const Result<bool> committed = partial.commit(*path, Overwrite::Never);
+        if (!committed)
+            return committed.errors();
+        if (*committed || holdsBytes(*path, bytes))
+            return {};
+    }
 }
 
 } // namespace
@@ -129,10 +160,12 @@ Result<QString> storeImage(const QByteArray &bytes, const QString &folder, const
                          QStringLiteral("The image is %1 x %2 pixels; Fugue takes at most %3 million.")
                              .arg(size->width()).arg(size->height()).arg(maxImagePixels / 1000000));
     const QString hash = sha256(bytes).mid(QStringLiteral("sha256:").size()).left(10);
-    // The same bytes are the file already there, whatever it was called.
+    // The same bytes are the file already there, whatever it was called: only a regular file
+    // whose whole content is these bytes, so a planted name of the right size is not reused.
     const QString tail = QStringLiteral("-%1.%2").arg(hash, format->extension);
-    for (const QFileInfo &same : QDir(folder).entryInfoList({QStringLiteral("*") + tail}, QDir::Files))
-        if (same.size() == bytes.size()) {
+    const QStringList patterns{QStringLiteral("*") + tail, QStringLiteral("*-%1-*.%2").arg(hash, format->extension)};
+    for (const QFileInfo &same : QDir(folder).entryInfoList(patterns, QDir::Files | QDir::NoSymLinks, QDir::Name))
+        if (holdsBytes(same.absoluteFilePath(), bytes)) {
             const Result<QString> allowed = roots.checkRead(same.absoluteFilePath(), QStringLiteral("file"));
             return allowed ? Result<QString>(allowed.value()) : Result<QString>(allowed.errors());
         }
