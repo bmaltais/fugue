@@ -126,6 +126,8 @@ public:
     bool isTrusted(const QString &packId, const QString &version) const;
 
     Q_INVOKABLE void dismissNotice();
+    // A line for the banner from outside (the image actions, #57).
+    void notify(const QString &text) { setNotice(text); }
 
 signals:
     void tabsChanged();
