@@ -37,7 +37,11 @@ Kind kindOfGroupInput(const Context &context, const QJsonObject &group, const QS
         const QJsonObject object = exposed.toObject();
         if (object.value("name").toString() != input)
             continue;
-        const QString target = object.value("targets").toArray().first().toString();
+        // An exposed input that drives nothing yet is plain (QJsonArray::first() wants one).
+        const QJsonArray targets = object.value("targets").toArray();
+        if (targets.isEmpty())
+            return Kind::Plain;
+        const QString target = targets.at(0).toString();
         const qsizetype dot = target.indexOf(QLatin1Char('.'));
         if (dot <= 0)
             return Kind::Plain;

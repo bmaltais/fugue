@@ -137,6 +137,21 @@ private slots:
         QCOMPARE(group.value("inputs").toArray().at(0).toObject().value("default").toString(), QString("d.png"));
         QCOMPARE(group.value("inputs").toArray().at(1).toObject().value("default").toString(), QString());
     }
+
+    // A document from elsewhere may have an exposed input that drives nothing yet: it is plain.
+    void anExposedInputWithNoTargetsIsLeftAsItIs() {
+        const QJsonObject document = json(
+            "{'fugue': 1, 'graph': {'nodes': {"
+            " 'g': {'type': 'local/empty', 'version': '1.0.0', 'inputs': {'file': '/home/me/a.png', 'other': '/home/me/b.png'}}}},"
+            " 'groups': {'local/empty': {'version': '1.0.0', 'name': 'Empty',"
+            "   'inputs': [{'name': 'file', 'targets': [], 'default': '/home/me/d.png'}, {'name': 'other'}],"
+            "   'outputs': [], 'nodes': {}}}}");
+        const QJsonObject copy = shareCopy(document, m_registry);
+        QCOMPARE(input(copy, "g", "file").toString(), QString("/home/me/a.png"));
+        QCOMPARE(input(copy, "g", "other").toString(), QString("/home/me/b.png"));
+        const QJsonObject group = copy.value("groups").toObject().value("local/empty").toObject();
+        QCOMPARE(group.value("inputs").toArray().at(0).toObject().value("default").toString(), QString("/home/me/d.png"));
+    }
 };
 
 QTEST_GUILESS_MAIN(TestShareCopy)
