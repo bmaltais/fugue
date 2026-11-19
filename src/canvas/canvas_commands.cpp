@@ -2,6 +2,7 @@
 
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
+#include "workflow/image_inputs.h"
 
 #include <QClipboard>
 #include <QGuiApplication>
@@ -29,7 +30,11 @@ void pasteFromClipboard(CanvasModel &canvas, bool connected) {
     const QString type = QString::fromLatin1(canvasClipboardType);
     // Plain text works too, when it is a workflow; paste() ignores anything else.
     const QString text = data->hasFormat(type) ? QString::fromUtf8(data->data(type)) : data->text();
-    canvas.paste(text, connected);
+    // Workflow data first; when there is none, an image goes into a Load Image node.
+    if (!canvas.paste(text, connected).isEmpty())
+        return;
+    if (canvas.images())
+        canvas.images()->paste(*data);
 }
 
 } // namespace

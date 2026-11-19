@@ -1,4 +1,5 @@
 #include "canvas/widget_edit.h"
+#include "workflow/image_inputs.h"
 
 #include "canvas/canvas_model.h"
 #include "canvas/input_links.h"
@@ -321,6 +322,22 @@ QString WidgetEdit::setColor(const QString &node, const QString &input, const QC
     if (color.alpha() != 255) // HexArgb is #aarrggbb; 6.2 wants the alpha last
         text += color.name(QColor::HexArgb).mid(1, 2);
     return setText(node, input, text);
+}
+
+bool WidgetEdit::canPasteImage(const QString &node, const QString &input) const {
+    return m_canvas->images() && m_canvas->images()->accepts(node, input);
+}
+
+bool WidgetEdit::pasteImage(const QString &node) {
+    return m_canvas->images() && m_canvas->images()->pasteInto(node);
+}
+
+QVariantList WidgetEdit::recentInputs() const {
+    return m_canvas->images() ? m_canvas->images()->recent() : QVariantList();
+}
+
+bool WidgetEdit::useInput(const QString &node, const QString &path) {
+    return m_canvas->images() && m_canvas->images()->use(node, path);
 }
 
 void WidgetEdit::unset(const QString &node, const QString &input) {

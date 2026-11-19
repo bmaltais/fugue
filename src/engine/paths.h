@@ -13,6 +13,14 @@ QString cacheDir();  // $XDG_CACHE_HOME/fugue   (~/.cache/fugue)
 // ($XDG_PICTURES_DIR, else the desktop's setting, else ~/Pictures): ~/Pictures/Fugue.
 QString outputDir();
 
+// Where pasted and dropped images are kept (spec 1.4, 14.1): one folder for every workflow,
+// outputDir()/inputs (~/Pictures/Fugue/inputs, so it follows the output folder
+// wherever the pictures folder is, and is visible to the user). Files in it are named by content hash, so the same image is one file.
+QString inputsDir();
+// The `inputs` folder beside a saved workflow file, where a save copies the images it uses
+// so the workflow stays portable.
+QString inputsDirBeside(const QString &workflowPath);
+
 // "~" and "~/..." as the home folder (the file picker's paths and hand-written workflows
 // both use them); any other text as it is. The scheduler applies it to every literal of a
 // `file` or `folder` input before the node sees it or its key is made (10.1).

@@ -94,6 +94,7 @@ XDG variables are honored; the defaults are shown.
 | `~/.cache/fugue/runs/<run-id>/` | Run folders ([9.7](#97-run-folder)). |
 | `~/Documents/Fugue/` | Suggested place for workflows. Not required. |
 | `~/Pictures/Fugue/` | Default output folder for Save nodes. A setting. |
+| `~/Pictures/Fugue/inputs/` | Images pasted or dropped into Load Image, named by content hash ([14.1](#141-m1-the-first-twelve)). Follows the output folder. |
 
 ### 1.5 Hashes and canonical JSON
 

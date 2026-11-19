@@ -77,10 +77,19 @@ bool isInside(const QString &path, const QString &root) {
     return path == root || path.startsWith(root + QLatin1Char('/'));
 }
 
-FileRoots FileRoots::defaults(const QString &workingDirectory) {
+FileRoots FileRoots::defaults(const QString &workingDirectory, const QString &workflowPath) {
     FileRoots roots;
-    roots.read = {QDir::homePath()};
+    roots.read = {QDir::homePath(), inputsDir()};
+    if (!workflowPath.isEmpty())
+        roots.read.append(inputsDirBeside(workflowPath));
     roots.write = {workingDirectory, outputDir(), QDir::homePath() + QStringLiteral("/Documents/Fugue")};
+    return roots;
+}
+
+FileRoots FileRoots::forInputs() {
+    FileRoots roots;
+    roots.read = {inputsDir()};
+    roots.write = roots.read;
     return roots;
 }
 

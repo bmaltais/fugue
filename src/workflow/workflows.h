@@ -20,6 +20,7 @@
 #include "commands/command_registry.h"
 #include "engine/document.h"
 #include "engine/registry.h"
+#include "workflow/image_inputs.h"
 #include "workflow/recovery_store.h"
 #include "workflow/trust_store.h"
 
@@ -72,6 +73,8 @@ public:
     QString notice() const { return m_notice; }
     QUrl suggestedFolder() const;
     QString pathOf(int index) const;
+    // Pasting and dropping images into the canvas (workflow/image_inputs.h).
+    ImageInputs *images() const { return m_images; }
 
     // --- opening ---
 
@@ -82,6 +85,11 @@ public:
     Q_INVOKABLE bool openPath(const QString &pathOrUrl);
     // Drag and drop: file URLs (or paths), each opened; others are skipped with a notice.
     Q_INVOKABLE void openUrls(const QVariantList &urls);
+    // Files dropped on the window at a point of the canvas (world coordinates): images go into
+    // Load Image nodes (into the one at the point, when there is one), and a .fugue or an
+    // output with its workflow embedded opens as a workflow, as openUrls does. Dropped on a
+    // Load Image, an image always replaces its image, even one that has a workflow in it.
+    Q_INVOKABLE void dropUrls(const QVariantList &urls, qreal x, qreal y);
     // JSON text, as pasted: a workflow document, opened as a new tab with no file.
     Q_INVOKABLE bool openText(const QString &text);
     Q_INVOKABLE bool openClipboard();
@@ -159,6 +167,7 @@ private:
     static QString toPath(const QString &pathOrUrl);
 
     CanvasModel *m_canvas;
+    ImageInputs *m_images;
     const Registry *m_registry;
     CommandRegistry *m_commands;
     RecoveryStore m_recovery;

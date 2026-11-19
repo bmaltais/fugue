@@ -79,6 +79,7 @@
 #include <vector>
 
 namespace fugue {
+class ImageInputs;
 class Registry;
 }
 
@@ -196,6 +197,10 @@ public:
     LinkList *links() const { return m_linkList; }
     fugue::NodeSearch *search() const { return m_search; }
     WidgetEdit *widgets() const { return m_widgets; }
+    // Pasting and dropping images (workflow/image_inputs.h): set by Workflows; the paste command
+    // and the Paste button of Load Image go through it. Null without one.
+    fugue::ImageInputs *images() const { return m_images; }
+    void setImages(fugue::ImageInputs *images) { m_images = images; }
 
     void setDocument(const fugue::Document &document);
     // The document with the canvas's positions and viewport in its layout.
@@ -531,6 +536,7 @@ private:
     LinkList *m_linkList;
     fugue::NodeSearch *m_search;
     WidgetEdit *m_widgets;
+    fugue::ImageInputs *m_images = nullptr;
     std::vector<NodeRow> m_rows;
     QHash<QString, int> m_rowOf;
     std::vector<LinkRow> m_links;

@@ -28,7 +28,13 @@ struct FileRoots {
 
     // 13.6's defaults: read under the home folder; write under `workingDirectory` (where
     // `fugue run` was started), the output folder (paths.h) and ~/Documents/Fugue.
-    static FileRoots defaults(const QString &workingDirectory);
+    // The inputs folder (paths.h inputsDir, under the output folder) is writable as part of it,
+    // and readable always, as XDG_PICTURES_DIR may put it outside the home folder. With `workflowPath`
+    // (the file a run was started from), the `inputs` folder beside it is readable too.
+    static FileRoots defaults(const QString &workingDirectory, const QString &workflowPath = {});
+
+    // The roots for storing an image: read and write the inputs folder, and nothing else.
+    static FileRoots forInputs();
 
     bool allowsRead(const QString &path) const;
     bool allowsWrite(const QString &path) const;

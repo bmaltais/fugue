@@ -14,6 +14,8 @@ Item {
 
     readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
     readonly property var look: theme.look
+    // The canvas, to turn a drop point into world coordinates.
+    property Item canvasView
     property alias closeQuestion: closeAsk
     property alias trustQuestion: trustAsk
     property alias recoveryQuestion: recoverAsk
@@ -53,11 +55,20 @@ Item {
         }
     }
 
-    // A file dropped on the window: a .fugue, or an output with its workflow embedded.
+    // Files dropped on the window: a .fugue or an output with its workflow embedded opens; an
+    // image goes into a Load Image node, the one under the pointer when there is one.
     DropArea {
+        id: dropArea
+        objectName: "windowDropArea"
         anchors.fill: parent
         keys: ["text/uri-list"]
-        onDropped: (drop) => { if (drop.hasUrls) workflows.openUrls(drop.urls) }
+        onDropped: (drop) => {
+            if (!drop.hasUrls)
+                return
+            const p = root.canvasView ? root.canvasView.mapFromItem(dropArea, drop.x, drop.y) : Qt.point(0, 0)
+            const w = root.canvasView ? root.canvasView.toWorld(p.x, p.y) : p
+            workflows.dropUrls(drop.urls, w.x, w.y)
+        }
     }
 
     // What went wrong, or what the opened workflow lacks.
