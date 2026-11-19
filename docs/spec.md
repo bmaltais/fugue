@@ -988,8 +988,8 @@ Servers drop finished jobs (the Omarchy image server after 600 seconds).
 | --- | --- | --- |
 | `omarchy` | The model servers omarchy-local-ai runs, on this machine or a paired host. | M0 |
 | `http` | A generic endpoint: OpenAI-compatible images and text, and the stable-diffusion.cpp native API. | M4 |
-| `fugue-helper` | Fugue's own out-of-process generation helper and a Fugue-managed server, started on demand ([8.10](#810-gpu-memory-and-the-helper)). | M5, if the spike passes |
-| `comfyui` | Optional, off by default. Talks HTTP and websocket to a ComfyUI server the user installs and runs. Fugue bundles none of its code or node schemas and never starts it. | M5 fallback |
+| `fugue-helper` | Fugue's own out-of-process generation helper and a Fugue-managed server, started on demand ([8.10](#810-gpu-memory-and-the-helper)). | M5 |
+| `comfyui` | Optional, off by default. Talks HTTP and websocket to a ComfyUI server the user installs and runs. Fugue bundles none of its code or node schemas and never starts it. | after v0.1 |
 
 The shipped providers are not special: they sit behind the same interface and registry as a
 third-party module ([8.11](#811-the-provider-interface)).
@@ -1091,7 +1091,8 @@ reference. A new inference runtime is a new provider module.
   servers, only with confirmation. It never kills another application.
 - Out of memory is a typed error on the node (`out_of_memory`). A helper crash kills only the helper.
 - The component-level helper is based on stable-diffusion.cpp with separate encode, sample and
-  decode steps, C++ only. It ships only if the M0 spike passes ([15](#15-milestones)).
+  decode steps, C++ only. The M0 spike showed the split works
+  ([spikes/02](spikes/02-sdcpp-split.md)).
 
 ### 8.11 The provider interface
 
@@ -1671,7 +1672,7 @@ Edit Image is Fugue's starting choice, raised if a provider reports a higher lim
 
 ### 14.3 M5: component level
 
-Only if the spike passes: model pickers, Text Encode, Empty Latent, Sampler, VAE Decode and
+The spike passed ([spikes/02](spikes/02-sdcpp-split.md)): model pickers, Text Encode, Empty Latent, Sampler, VAE Decode and
 Encode, LoRA load and apply (strength, stacking; the result is a derived handle,
 [2.5](#25-resource-handles)). Then ControlNet, upscale with a model, hires fix as a group, inpaint
 models. A coarse Generate Image can later be rebuilt as a group of these.
@@ -1688,7 +1689,7 @@ models. A coarse Generate Image can later be rebuilt as a group of these.
 | **M2** canvas | The canvas of [section 12](#12-canvas) on the M0 engine: wires, search, copy and paste, undo, run, per-node state, save, open, recovery, import, tabs, keymap, theme. | #16 to #22 |
 | **M3** extension | Manifests and the loader, the command-node protocol, pack install and trust, groups, user docs with a five-minute tutorial and an example pack. | #23 to #27 |
 | **M4** rest of v0.1 | Video, song and text nodes, more pixel and mask nodes, the agent skill, providers as modules. | #28 to #31 |
-| **M5** component level | Only if the M0 spike passes: the helper and the component nodes. If it fails: the optional ComfyUI provider, and component nodes follow when an engine is ready. | #32, #33 |
+| **M5** component level | The helper and the component nodes. The M0 spike passed ([spikes/02](spikes/02-sdcpp-split.md)), so these are in v0.1. The optional ComfyUI provider is no longer needed as a fallback and moves after v0.1. | #32, #33 |
 
 After v0.1: an MCP server, a live control channel, a node catalog, a minimap, loops and batches,
 regional prompting, conditioning math, ComfyUI workflow import, model downloads, a sandbox for
@@ -1722,7 +1723,7 @@ To measure or confirm before the part that depends on each is built. None blocks
 | Item | Blocks | Tracked |
 | --- | --- | --- |
 | Frame rate with 300 nodes, and the wire renderer | [12.2](#122-construction) | #5 |
-| Component-level generation go or no-go | M5, [8.10](#810-gpu-memory-and-the-helper) | #2 |
+| Whether stable-diffusion.cpp upstream will take stage entry points in its C API (the spike passed with a local patch) | the helper's upkeep, [8.10](#810-gpu-memory-and-the-helper) | owner posts the question |
 | libvips speed on 1 to 4 megapixel images, thread and cache settings | [14.1](#141-m1-the-first-twelve) pixel nodes | #3 |
 | Offscreen GPU compute, Vulkan device enumeration, free-memory measurement, CUDA terms | [8.10](#810-gpu-memory-and-the-helper) | #4 |
 | Plugin-interface prior art | freezing [6.9](#69-native-tier) | #6 |

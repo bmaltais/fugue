@@ -1,0 +1,354 @@
+diff --git i/src/pipeline/fugue_spike.h w/src/pipeline/fugue_spike.h
+new file mode 100644
+index 0000000..db53f3a
+--- /dev/null
++++ w/src/pipeline/fugue_spike.h
+@@ -0,0 +1,210 @@
++// Fugue spike (throwaway): save and load conditioning and latents at the stage seams of
++// generate_image, as safetensors-format files, driven by environment variables.
++//
++//   FUGUE_SAVE_COND=path     write the conditioning after the text-encode stage
++//   FUGUE_LOAD_COND=path     skip the text-encode stage and read conditioning from the file
++//   FUGUE_SAVE_LATENT=path   write the sampled latent(s)
++//   FUGUE_LOAD_LATENT=path   skip sampling and read the latent(s) from the file
++//   FUGUE_STOP_AFTER=cond|sample   return right after that stage (no image is produced)
++#ifndef __SD_PIPELINE_FUGUE_SPIKE_H__
++#define __SD_PIPELINE_FUGUE_SPIKE_H__
++
++#include <cstdint>
++#include <cstdlib>
++#include <cstring>
++#include <fstream>
++#include <map>
++#include <string>
++#include <vector>
++
++#include "conditioning/conditioner.hpp"
++#include "core/tensor.hpp"
++#include "json.hpp"
++
++namespace fugue_spike {
++
++    inline const char* env(const char* name) {
++        const char* v = std::getenv(name);
++        return (v != nullptr && v[0] != '\0') ? v : nullptr;
++    }
++
++    inline bool stop_after(const char* stage) {
++        const char* v = env("FUGUE_STOP_AFTER");
++        return v != nullptr && std::strcmp(v, stage) == 0;
++    }
++
++    struct Blob {
++        std::string dtype;  // "F32" or "I32"
++        std::vector<int64_t> shape;
++        std::vector<uint8_t> bytes;
++    };
++    using Blobs = std::map<std::string, Blob>;
++
++    template <typename T>
++    inline void put(Blobs& blobs, const std::string& name, const sd::Tensor<T>& t, const char* dtype) {
++        if (t.empty()) {
++            return;
++        }
++        Blob b;
++        b.dtype = dtype;
++        b.shape = t.shape();
++        b.bytes.resize(static_cast<size_t>(t.numel()) * sizeof(T));
++        std::memcpy(b.bytes.data(), t.data(), b.bytes.size());
++        blobs[name] = std::move(b);
++    }
++    inline void put(Blobs& blobs, const std::string& name, const sd::Tensor<float>& t) {
++        put(blobs, name, t, "F32");
++    }
++    inline void put(Blobs& blobs, const std::string& name, const sd::Tensor<int32_t>& t) {
++        put(blobs, name, t, "I32");
++    }
++
++    template <typename T>
++    inline void get(const Blobs& blobs, const std::string& name, sd::Tensor<T>& out) {
++        auto it = blobs.find(name);
++        if (it == blobs.end()) {
++            return;
++        }
++        std::vector<T> data(it->second.bytes.size() / sizeof(T));
++        std::memcpy(data.data(), it->second.bytes.data(), it->second.bytes.size());
++        out = sd::Tensor<T>(it->second.shape, std::move(data));
++    }
++
++    inline bool write_file(const std::string& path, const Blobs& blobs, const nlohmann::json& meta) {
++        nlohmann::json header = nlohmann::json::object();
++        nlohmann::json md     = nlohmann::json::object();
++        for (auto it = meta.begin(); it != meta.end(); ++it) {
++            md[it.key()] = it.value().is_string() ? it.value().get<std::string>() : it.value().dump();
++        }
++        header["__metadata__"] = md;
++        uint64_t offset        = 0;
++        for (const auto& [name, b] : blobs) {
++            header[name] = {{"dtype", b.dtype}, {"shape", b.shape}, {"data_offsets", {offset, offset + b.bytes.size()}}};
++            offset += b.bytes.size();
++        }
++        std::string head = header.dump();
++        while (head.size() % 8 != 0) {
++            head.push_back(' ');
++        }
++        std::ofstream out(path, std::ios::binary | std::ios::trunc);
++        if (!out) {
++            return false;
++        }
++        uint64_t n = head.size();
++        out.write(reinterpret_cast<const char*>(&n), 8);
++        out.write(head.data(), static_cast<std::streamsize>(head.size()));
++        for (const auto& [name, b] : blobs) {
++            out.write(reinterpret_cast<const char*>(b.bytes.data()), static_cast<std::streamsize>(b.bytes.size()));
++        }
++        return static_cast<bool>(out);
++    }
++
++    inline bool read_file(const std::string& path, Blobs& blobs, nlohmann::json* meta = nullptr) {
++        std::ifstream in(path, std::ios::binary);
++        if (!in) {
++            return false;
++        }
++        uint64_t n = 0;
++        in.read(reinterpret_cast<char*>(&n), 8);
++        if (!in || n == 0 || n > (64u << 20)) {
++            return false;
++        }
++        std::string head(n, '\0');
++        in.read(head.data(), static_cast<std::streamsize>(n));
++        nlohmann::json header = nlohmann::json::parse(head, nullptr, false);
++        if (header.is_discarded()) {
++            return false;
++        }
++        std::streamoff base = 8 + static_cast<std::streamoff>(n);
++        for (auto it = header.begin(); it != header.end(); ++it) {
++            if (it.key() == "__metadata__") {
++                if (meta != nullptr) {
++                    *meta = it.value();
++                }
++                continue;
++            }
++            Blob b;
++            b.dtype      = it.value()["dtype"].get<std::string>();
++            b.shape      = it.value()["shape"].get<std::vector<int64_t>>();
++            uint64_t beg = it.value()["data_offsets"][0].get<uint64_t>();
++            uint64_t end = it.value()["data_offsets"][1].get<uint64_t>();
++            b.bytes.resize(end - beg);
++            in.seekg(base + static_cast<std::streamoff>(beg));
++            in.read(reinterpret_cast<char*>(b.bytes.data()), static_cast<std::streamsize>(b.bytes.size()));
++            if (!in) {
++                return false;
++            }
++            blobs[it.key()] = std::move(b);
++        }
++        return true;
++    }
++
++    // Fields not covered by the spike: c_ref_audios and c_reference_blocks (MiniMax H3 only).
++    inline bool cond_supported(const SDCondition& c) {
++        return c.c_ref_audios.empty() && c.c_reference_blocks.empty();
++    }
++
++    inline void put_cond(Blobs& blobs, const std::string& p, const SDCondition& c) {
++        put(blobs, p + ".c_crossattn", c.c_crossattn);
++        put(blobs, p + ".c_vector", c.c_vector);
++        put(blobs, p + ".c_concat", c.c_concat);
++        put(blobs, p + ".c_t5_ids", c.c_t5_ids);
++        put(blobs, p + ".c_t5_weights", c.c_t5_weights);
++        put(blobs, p + ".c_input_ids", c.c_input_ids);
++        put(blobs, p + ".c_position_ids", c.c_position_ids);
++        put(blobs, p + ".c_token_types", c.c_token_types);
++        put(blobs, p + ".c_vinput_mask", c.c_vinput_mask);
++        for (size_t i = 0; i < c.c_image_embeds.size(); i++) {
++            put(blobs, p + ".c_image_embeds." + std::to_string(i) + "." + std::to_string(c.c_image_embeds[i].first), c.c_image_embeds[i].second);
++        }
++        for (size_t i = 0; i < c.c_ref_images.size(); i++) {
++            put(blobs, p + ".c_ref_images." + std::to_string(i), c.c_ref_images[i]);
++        }
++        for (size_t i = 0; i < c.extra_c_crossattns.size(); i++) {
++            put(blobs, p + ".extra_c_crossattns." + std::to_string(i), c.extra_c_crossattns[i]);
++        }
++    }
++
++    inline void get_cond(const Blobs& blobs, const std::string& p, SDCondition& c) {
++        get(blobs, p + ".c_crossattn", c.c_crossattn);
++        get(blobs, p + ".c_vector", c.c_vector);
++        get(blobs, p + ".c_concat", c.c_concat);
++        get(blobs, p + ".c_t5_ids", c.c_t5_ids);
++        get(blobs, p + ".c_t5_weights", c.c_t5_weights);
++        get(blobs, p + ".c_input_ids", c.c_input_ids);
++        get(blobs, p + ".c_position_ids", c.c_position_ids);
++        get(blobs, p + ".c_token_types", c.c_token_types);
++        get(blobs, p + ".c_vinput_mask", c.c_vinput_mask);
++        for (size_t i = 0;; i++) {
++            const std::string prefix = p + ".c_image_embeds." + std::to_string(i) + ".";
++            auto it                  = blobs.lower_bound(prefix);
++            if (it == blobs.end() || it->first.compare(0, prefix.size(), prefix) != 0) {
++                break;
++            }
++            sd::Tensor<float> t;
++            get(blobs, it->first, t);
++            c.c_image_embeds.emplace_back(std::stoi(it->first.substr(prefix.size())), std::move(t));
++        }
++        for (size_t i = 0;; i++) {
++            const std::string name = p + ".c_ref_images." + std::to_string(i);
++            if (blobs.find(name) == blobs.end()) {
++                break;
++            }
++            sd::Tensor<float> t;
++            get(blobs, name, t);
++            c.c_ref_images.push_back(std::move(t));
++        }
++        for (size_t i = 0;; i++) {
++            const std::string name = p + ".extra_c_crossattns." + std::to_string(i);
++            if (blobs.find(name) == blobs.end()) {
++                break;
++            }
++            sd::Tensor<float> t;
++            get(blobs, name, t);
++            c.extra_c_crossattns.push_back(std::move(t));
++        }
++    }
++
++}  // namespace fugue_spike
++
++#endif  // __SD_PIPELINE_FUGUE_SPIKE_H__
+diff --git i/src/pipeline/image.cpp w/src/pipeline/image.cpp
+index f2cdcea..b5a3c7c 100644
+--- i/src/pipeline/image.cpp
++++ w/src/pipeline/image.cpp
+@@ -10,6 +10,7 @@
+ 
+ #include "core/rng.hpp"
+ #include "diffusion_engine.h"
++#include "fugue_spike.h"
+ #include "model/vae/vae.hpp"
+ #include "pipeline/image_upscale.h"
+ #include "request.h"
+@@ -974,20 +975,91 @@ namespace sd::pipeline {
+             return false;
+         }
+         ImageGenerationLatents latents = std::move(*latents_opt);
++        if (const char* init_out = fugue_spike::env("FUGUE_SAVE_INIT_LATENT")) {
++            fugue_spike::Blobs blobs;
++            fugue_spike::put(blobs, "latent.0", latents.init_latent);
++            fugue_spike::write_file(init_out, blobs, {{"kind", "fugue/latent"}});
++            LOG_INFO("fugue spike: saved init latent");
++        }
++        if (const char* init_in = fugue_spike::env("FUGUE_LOAD_INIT_LATENT")) {
++            fugue_spike::Blobs blobs;
++            sd::Tensor<float> t;
++            if (fugue_spike::read_file(init_in, blobs)) {
++                fugue_spike::get(blobs, "latent.0", t);
++            }
++            if (t.empty() || t.shape() != latents.init_latent.shape()) {
++                LOG_ERROR("fugue spike: init latent '%s' missing or wrong shape", init_in);
++                return false;
++            }
++            latents.init_latent = std::move(t);
++            LOG_INFO("fugue spike: replaced init latent from file");
++        }
+ 
+-        auto embeds_opt = prepare_image_generation_embeds(sd,
+-                                                          sd_img_gen_params,
+-                                                          &request,
+-                                                          &plan,
+-                                                          &latents,
+-                                                          ref_image_params);
+-        if (!embeds_opt.has_value()) {
+-            return false;
++        ImageGenerationEmbeds embeds;
++        if (const char* cond_in = fugue_spike::env("FUGUE_LOAD_COND")) {
++            int64_t ts = ggml_time_ms();
++            fugue_spike::Blobs blobs;
++            if (!fugue_spike::read_file(cond_in, blobs)) {
++                LOG_ERROR("fugue spike: cannot read conditioning '%s'", cond_in);
++                return false;
++            }
++            fugue_spike::get_cond(blobs, "cond", embeds.cond);
++            fugue_spike::get_cond(blobs, "uncond", embeds.uncond);
++            fugue_spike::get_cond(blobs, "img_uncond", embeds.img_uncond);
++            LOG_INFO("fugue spike: loaded conditioning (%zu tensors) in %.3fs", blobs.size(), (ggml_time_ms() - ts) / 1000.0);
++        } else if (fugue_spike::env("FUGUE_LOAD_LATENT") == nullptr) {
++            auto embeds_opt = prepare_image_generation_embeds(sd,
++                                                              sd_img_gen_params,
++                                                              &request,
++                                                              &plan,
++                                                              &latents,
++                                                              ref_image_params);
++            if (!embeds_opt.has_value()) {
++                return false;
++            }
++            embeds = std::move(*embeds_opt);
++        }
++        if (const char* cond_out = fugue_spike::env("FUGUE_SAVE_COND")) {
++            int64_t ts = ggml_time_ms();
++            if (!fugue_spike::cond_supported(embeds.cond) || !fugue_spike::cond_supported(embeds.uncond)) {
++                LOG_ERROR("fugue spike: conditioning has fields the spike does not serialize");
++                return false;
++            }
++            fugue_spike::Blobs blobs;
++            fugue_spike::put_cond(blobs, "cond", embeds.cond);
++            fugue_spike::put_cond(blobs, "uncond", embeds.uncond);
++            fugue_spike::put_cond(blobs, "img_uncond", embeds.img_uncond);
++            nlohmann::json meta = {{"kind", "fugue/conditioning"}, {"version", sd_version_name(sd->version)}, {"prompt", request.prompt}};
++            if (!fugue_spike::write_file(cond_out, blobs, meta)) {
++                LOG_ERROR("fugue spike: cannot write conditioning '%s'", cond_out);
++                return false;
++            }
++            LOG_INFO("fugue spike: saved conditioning (%zu tensors) in %.3fs", blobs.size(), (ggml_time_ms() - ts) / 1000.0);
++        }
++        if (fugue_spike::stop_after("cond")) {
++            LOG_INFO("fugue spike: stopping after conditioning");
++            return true;
+         }
+-        ImageGenerationEmbeds embeds = std::move(*embeds_opt);
+         std::vector<sd::Tensor<float>> final_latents;
++        if (const char* latent_in = fugue_spike::env("FUGUE_LOAD_LATENT")) {
++            int64_t ts = ggml_time_ms();
++            fugue_spike::Blobs blobs;
++            if (!fugue_spike::read_file(latent_in, blobs)) {
++                LOG_ERROR("fugue spike: cannot read latent '%s'", latent_in);
++                return false;
++            }
++            for (int b = 0;; b++) {
++                sd::Tensor<float> t;
++                fugue_spike::get(blobs, "latent." + std::to_string(b), t);
++                if (t.empty()) {
++                    break;
++                }
++                final_latents.push_back(std::move(t));
++            }
++            LOG_INFO("fugue spike: loaded %zu latent(s) in %.3fs", final_latents.size(), (ggml_time_ms() - ts) / 1000.0);
++        }
+         int64_t denoise_start = ggml_time_ms();
+-        for (int b = 0; b < request.batch_count; b++) {
++        for (int b = 0; b < request.batch_count && fugue_spike::env("FUGUE_LOAD_LATENT") == nullptr; b++) {
+             sd_cancel_mode_t cancel = sd->get_cancel_flag();
+             if (cancel == SD_CANCEL_ALL) {
+                 LOG_ERROR("cancelling generation");
+@@ -1054,6 +1126,23 @@ namespace sd::pipeline {
+             LOG_ERROR("no latent images generated");
+             return false;
+         }
++        if (const char* latent_out = fugue_spike::env("FUGUE_SAVE_LATENT")) {
++            int64_t ts = ggml_time_ms();
++            fugue_spike::Blobs blobs;
++            for (size_t b = 0; b < final_latents.size(); b++) {
++                fugue_spike::put(blobs, "latent." + std::to_string(b), final_latents[b]);
++            }
++            nlohmann::json meta = {{"kind", "fugue/latent"}, {"version", sd_version_name(sd->version)}, {"width", request.width}, {"height", request.height}};
++            if (!fugue_spike::write_file(latent_out, blobs, meta)) {
++                LOG_ERROR("fugue spike: cannot write latent '%s'", latent_out);
++                return false;
++            }
++            LOG_INFO("fugue spike: saved %zu latent(s) in %.3fs", final_latents.size(), (ggml_time_ms() - ts) / 1000.0);
++        }
++        if (fugue_spike::stop_after("sample")) {
++            LOG_INFO("fugue spike: stopping after sampling");
++            return true;
++        }
+ 
+         if (request.hires.enabled && request.hires.target_width > 0) {
+             if (sd->get_cancel_flag() == SD_CANCEL_ALL) {
