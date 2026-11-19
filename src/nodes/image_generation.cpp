@@ -67,7 +67,6 @@ QSize ownSize(const MediaHandle &image) {
 Result<QString> prepared(const MediaHandle &image, QSize size, const QString &path) {
     if (image.width() == size.width() && image.height() == size.height() && worksAsItIs(image))
         return image.path();
-    initVips();
     const auto options = [&] {
         return vips::VImage::option()
             ->set("height", size.height())
@@ -103,6 +102,10 @@ public:
     }
 
     Result<JobRequest> request(const NodeContext &context, const Selection &selection) override {
+        // Before anything reads an image header: an input from the result cache was never
+        // probed, so this may be the process's first use of libvips.
+        if (!initVips())
+            return vipsUnavailable();
         JobRequest request;
         request.capability = m_capability;
         request.model = selection.model.handle;
