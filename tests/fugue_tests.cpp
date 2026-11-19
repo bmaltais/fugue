@@ -371,9 +371,10 @@ private slots:
         const bool rtl = language == "ar";
         const QImage shot = window->grabWindow();
         QVERIFY(!shot.isNull());
-        // The window's own surface is the theme's background, and the text
-        // follows the desktop size.
-        QCOMPARE(QColor(shot.pixel(4, 4)), theme.background());
+        // The canvas fills the window: the theme's background on a dark theme, a shade
+        // darker on a light one (docs/canvas-look.md 6.1). The text follows the desktop size.
+        QCOMPARE(QColor(shot.pixel(4, 4)).name(), theme.look()->tokens().canvas.name());
+        QCOMPARE(theme.look()->tokens().canvas == theme.background(), !light);
         QCOMPARE(window->property("font").value<QFont>().pixelSize(), 16);
         QCOMPARE(QGuiApplication::layoutDirection(), rtl ? Qt::RightToLeft : Qt::LeftToRight);
 

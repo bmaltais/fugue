@@ -9,7 +9,7 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickControls2 DBus Test)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickControls2 DBus Test ShaderTools)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(VIPS REQUIRED IMPORTED_TARGET vips-cpp)
 
@@ -42,6 +42,10 @@ foreach(qml ${fugue_canvas_qml})
   list(APPEND fugue_canvas_qml_files src/canvas/${qml})
 endforeach()
 qt_add_resources(fugue_core fugue_canvas_qml PREFIX /canvas FILES ${fugue_canvas_qml_files})
+# Its shaders (docs/canvas-look.md: the dot grid and rounded thumbnails), compiled to .qsb with
+# Qt's shader tools, under qrc:/canvas/shaders/<name>.qsb.
+file(GLOB fugue_canvas_shaders CONFIGURE_DEPENDS src/canvas/shaders/*.frag)
+qt_add_shaders(fugue_core fugue_canvas_shaders PREFIX /canvas BASE src/canvas FILES ${fugue_canvas_shaders})
 
 # Node search (spec 12.8): its QML in src/search/, compiled in under qrc:/search.
 file(GLOB fugue_search_qml CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/src/search src/search/*.qml)

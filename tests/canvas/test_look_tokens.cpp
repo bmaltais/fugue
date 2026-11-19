@@ -203,6 +203,14 @@ private slots:
         QVERIFY(look->property("shadow1").toString().startsWith("data:image/png;base64,"));
         QVERIFY(look->property("shadow1").toString() != look->property("shadow2").toString());
         QVERIFY(look->property("shadowMargins").toList().size() == 3);
+        // Glyphs come from the bundled Lucide subset (16).
+        QCOMPARE(look->property("iconFont").toString(), QString("lucide"));
+        QCOMPARE(look->glyph("check"), QString(QChar(0xe070)));
+        QCOMPARE(look->glyph("triangle-alert"), QString(QChar(0xe193)));
+        QCOMPARE(look->glyph("no-such-glyph"), QString());
+        // The grid and thumbnail shaders are compiled in (qt_add_shaders on fugue_core).
+        QVERIFY(QFile::exists(":/canvas/shaders/grid.frag.qsb"));
+        QVERIFY(QFile::exists(":/canvas/shaders/thumbnail.frag.qsb"));
     }
 
     // On every shipped Omarchy theme: labels read at 4.5:1 on all their surfaces, port marks at

@@ -175,6 +175,10 @@ class CanvasModel : public QObject {
     Q_PROPERTY(QString undoText READ undoText NOTIFY undoChanged)
     Q_PROPERTY(QString redoText READ redoText NOTIFY undoChanged)
     Q_PROPERTY(QVariant pointer READ pointer WRITE setPointer)
+    // `L` (view.toggle-links): the wires are hidden; the view's choice, not an edit.
+    Q_PROPERTY(bool linksHidden READ linksHidden WRITE setLinksHidden NOTIFY linksHiddenChanged)
+    // The selected node ids, in drawing order.
+    Q_PROPERTY(QStringList selection READ selectedIds NOTIFY selectionChanged)
 
 public:
     explicit CanvasModel(const fugue::Registry *registry, QObject *parent = nullptr);
@@ -206,7 +210,8 @@ public:
 
     // --- hit tests, in world coordinates ---
 
-    // The port within `radius` of the point, nearest first: {node, port, output}, or empty.
+    // The port within `radius` of the point, nearest first: {node, port, output, x, y, shape}
+    // (x and y: its center), or empty.
     Q_INVOKABLE QVariantMap portAt(qreal x, qreal y, qreal radius) const;
     // The topmost node under the point, or empty.
     Q_INVOKABLE QString nodeAt(qreal x, qreal y) const;
@@ -331,6 +336,13 @@ public:
     // Ask the canvas to zoom by the factor at its center, or to fit (fitRequested).
     void requestZoom(qreal factor) { emit zoomRequested(factor); }
     void requestFit() { emit fitRequested(); }
+    bool linksHidden() const { return m_linksHidden; }
+    void setLinksHidden(bool hidden) {
+        if (hidden != m_linksHidden) {
+            m_linksHidden = hidden;
+            emit linksHiddenChanged();
+        }
+    }
     static constexpr qreal minZoom = 0.1;
     static constexpr qreal maxZoom = 4;
 
@@ -346,6 +358,8 @@ public:
     // mode: "replace", "add", "subtract" or "toggle".
     Q_INVOKABLE void select(const QStringList &ids, const QString &mode = QStringLiteral("replace"));
     Q_INVOKABLE QStringList selectedIds() const;
+    // The link rows into or out of these nodes (the wires a selection highlights).
+    Q_INVOKABLE QList<int> linkRows(const QStringList &nodes) const;
     Q_INVOKABLE void selectAll();
 
     // A port type's color and shape (12.6). The color is a key for the theme's portColor()
@@ -360,6 +374,8 @@ signals:
     void reroutesChanged();
     void metricsChanged();
     void linkDragChanged();
+    void selectionChanged();
+    void linksHiddenChanged();
     // An edit changed the document (not a selection or a viewport change), undo and redo
     // included.
     void edited();
@@ -498,4 +514,5 @@ private:
     int m_editDepth = 0;
     Snapshot m_editBefore;
     std::optional<QPointF> m_pointer;
+    bool m_linksHidden = false;
 };

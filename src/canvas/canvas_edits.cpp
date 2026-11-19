@@ -82,6 +82,7 @@ void CanvasModel::restore(const Snapshot &target, bool selectAdded) {
     const QJsonObject newEntries = doc.layout.value("nodes").toObject();
     QSet<QString> affected, moved;
     QStringList added;
+    bool selectionLost = false;
 
     // Nodes that are gone.
     for (int r = int(m_rows.size()) - 1; r >= 0; --r) {
@@ -89,7 +90,8 @@ void CanvasModel::restore(const Snapshot &target, bool selectAdded) {
         if (doc.graph.nodes.contains(id))
             continue;
         affected.insert(id);
-        m_selected.remove(id);
+        if (m_selected.remove(id))
+            selectionLost = true;
         m_nodeList->beginRemoveRows({}, r, r);
         m_rows.erase(m_rows.begin() + r);
         m_rowOf.clear();
@@ -177,6 +179,8 @@ void CanvasModel::restore(const Snapshot &target, bool selectAdded) {
         emit framesChanged();
     if (selectAdded && !added.isEmpty())
         select(added, QStringLiteral("replace"));
+    else if (selectionLost)
+        emit selectionChanged();
 }
 
 // Remakes the link rows into and out of these nodes; ports at either end show their new state.

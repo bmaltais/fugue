@@ -50,5 +50,6 @@ void registerCanvasCommands(fugue::CommandRegistry &commands, CanvasModel &canva
     commands.setHandler("view.fit", [model] { model->requestFit(); });
     commands.setHandler("view.zoom-in", [model] { model->requestZoom(zoomStep); });
     commands.setHandler("view.zoom-out", [model] { model->requestZoom(1 / zoomStep); });
+    commands.setHandler("view.toggle-links", [model] { model->setLinksHidden(!model->linksHidden()); });
     commands.setContextActive(QStringLiteral("canvas"), true);
 }

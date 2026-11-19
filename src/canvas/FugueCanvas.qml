@@ -20,6 +20,13 @@ import QtQuick.Shapes
 // Each edit is one step on the model's undo stack. The keys (copy, paste, delete, undo...)
 // are commands (canvas_commands.h); zoom and fit commands arrive as the model's
 // zoomRequested and fitRequested.
+//
+// The look is docs/canvas-look.md, from theme.look (look.h). Layers, back to front: the dot
+// grid (one shader), frames, comments, wires, the highlighted wires' casings, reroute points,
+// node shadows (one shared 9-slice texture, its own Repeater so it batches), nodes, frame
+// titles when zoomed out, the dragged link; then, in screen space, the cut handle, the
+// marquee, the reason chip and the zoom pill. Detail follows the zoom tier (`tier`), never
+// the zoom itself, so a wheel step wakes nothing until a tier changes.
 FocusScope {
     id: canvas
 
@@ -51,8 +58,67 @@ FocusScope {
     property int pressModifiers: 0
     property string hoverProblem: ""
     readonly property var linkDrag: model.linkDrag
+    readonly property bool dragging: linkDrag.node !== undefined
     // Below this zoom node text is too small to read and is not drawn.
     readonly property real readableZoom: 0.5
+    // The zoom tier (docs/canvas-look.md 14): 0 full detail, 1 the map (from half the
+    // readable zoom), 2 the overview.
+    readonly property int tier: world.scale >= readableZoom ? 0 : world.scale >= readableZoom / 2 ? 1 : 2
+
+    // What the pointer is over, worked out by the model as it moves (no handlers per item).
+    property string hoveredNode: ""
+    property var hoverPort: ({})
+    property var hoverLink: ({})
+    function updateHover(px, py) {
+        const w = toWorld(px, py)
+        const n = gesture === "" ? model.nodeAt(w.x, w.y) : ""
+        if (n !== hoveredNode)
+            hoveredNode = n
+        const p = tier === 0 && (gesture === "" || gesture === "link")
+            ? model.portAt(w.x, w.y, Math.max(8, 10 / world.scale)) : ({})
+        if (p.node !== hoverPort.node || p.port !== hoverPort.port || p.output !== hoverPort.output)
+            hoverPort = p
+        const l = tier === 0 && gesture === "" && n === "" && p.node === undefined && !model.linksHidden
+            ? model.linkAt(w.x, w.y, 6 / world.scale) : ({})
+        if (l.row !== hoverLink.row) {
+            hoverLink = l
+            refreshHighlights()
+        }
+    }
+    function clearHover() {
+        hoveredNode = ""
+        hoverPort = ({})
+        if (hoverLink.row !== undefined) {
+            hoverLink = ({})
+            refreshHighlights()
+        }
+    }
+
+    // The wires drawn on top with a casing: the selection's and the hovered one (8.2). Worked
+    // out once per event loop pass however many rows changed, and only for a selection of a
+    // reasonable size: lighting every wire of a select-all shows nothing and costs a Shape each.
+    readonly property int maxHighlights: 64
+    property var highlightRows: []
+    function refreshHighlights() { Qt.callLater(canvas.computeHighlights) }
+    function computeHighlights() {
+        let rows = model.linkRows(model.selection)
+        if (rows.length > maxHighlights)
+            rows = []
+        if (hoverLink.row !== undefined && rows.indexOf(hoverLink.row) < 0)
+            rows.push(hoverLink.row)
+        if (rows.length !== highlightRows.length || rows.some((r, i) => r !== highlightRows[i]))
+            highlightRows = rows
+    }
+    Connections {
+        target: canvas.model
+        function onSelectionChanged() { canvas.refreshHighlights() }
+    }
+    Connections {
+        target: canvas.model.links
+        function onRowsInserted() { canvas.refreshHighlights() }
+        function onRowsRemoved() { canvas.highlightRows = []; canvas.refreshHighlights() }
+        function onModelReset() { canvas.hoverLink = ({}); canvas.highlightRows = []; canvas.refreshHighlights() }
+    }
 
     // The world area on screen, and the padded area nodes draw their detail in. The padded
     // one moves only when the view leaves it, so a pan does not wake every node each frame.
@@ -78,7 +144,11 @@ FocusScope {
         const p = hover.hovered ? hover.point.position : Qt.point(width / 2, height / 2)
         return toWorld(p.x, p.y)
     }
-    HoverHandler { id: hover }
+    HoverHandler {
+        id: hover
+        onPointChanged: if (canvas.gesture === "") canvas.updateHover(point.position.x, point.position.y)
+        onHoveredChanged: if (!hovered) canvas.clearHover()
+    }
     // A paste lands at the pointer, wherever the view has moved since it stopped.
     Binding {
         target: canvas.model
@@ -109,40 +179,19 @@ FocusScope {
         world.x = width / 2 - c[0] * world.scale
         world.y = height / 2 - c[1] * world.scale
     }
-    // The theme as nodes need it (theme.h's names), worked out once: its maps would be
-    // converted again on every read.
-    readonly property var look: ({
-        ports: theme.portColors,
-        palette: theme.colors,
-        text: theme.text,
-        muted: theme.muted,
-        background: theme.background,
-        panel: theme.panel,
-        header: Qt.tint(theme.panel, Qt.alpha(theme.text, 0.05)),
-        border: theme.border,
-        accent: theme.accent,
-        error: theme.error,
-        corner: Math.min(theme.radius, 8),
-        textSize: theme.textSize,
-        smallText: Math.round(theme.textSize * 0.9)
-    })
+    // The look (look.h), and the port colors as a JS object, converted once per theme change.
+    readonly property var look: theme.look
+    readonly property var ports: theme.look.ports
+    readonly property var shadowMargins: theme.look.shadowMargins
     // A port color key from the model (CanvasModel::colorKey).
     function portColor(key) {
-        if (key === "any")
-            return look.text
-        if (key === "unknown")
-            return look.muted
-        const c = look.ports[key]
-        return c !== undefined ? c : look.ports.declared
+        const c = ports[key]
+        return c !== undefined ? c : ports.declared
     }
-    // A layout color (4.5) is a theme role: a semantic name, else a palette name.
-    function roleColor(role) {
-        const semantic = { accent: look.accent, muted: look.muted, text: look.text, error: look.error,
-                           border: look.border, panel: look.panel }
-        if (semantic[role] !== undefined)
-            return semantic[role]
-        const c = look.palette[role]
-        return c !== undefined ? c : look.muted
+    // A wire's tangent length (8.1), the same rule as the model's.
+    function bend(ax, bx) {
+        const u = look.unit, run = bx - ax
+        return run >= 6 * u ? Math.max(6 * u, Math.min(40 * u, run * 0.5)) : 12 * u + Math.min(Math.abs(run), 100 * u) * 0.25
     }
 
     // Nodes follow the desktop text size.
@@ -192,7 +241,25 @@ FocusScope {
 
     Rectangle {
         anchors.fill: parent
-        color: theme.background
+        color: canvas.look.canvas
+    }
+    // The dot grid (11): a dot every 6u in world space, a major one every fifth, in one draw.
+    // Minor dots fade out between zoom 0.5 and 0.35. The software renderer has no shaders.
+    Loader {
+        anchors.fill: parent
+        active: GraphicsInfo.api !== GraphicsInfo.Software
+        sourceComponent: ShaderEffect {
+            readonly property size size: Qt.size(width, height)
+            readonly property point origin: Qt.point(world.x, world.y)
+            readonly property real zoom: world.scale
+            readonly property real spacing: 6 * canvas.look.unit
+            readonly property real minorAlpha: Math.max(0, Math.min(1, (world.scale - 0.35) / 0.15))
+            readonly property real minorRadius: 0.9
+            readonly property real majorRadius: 1.2
+            readonly property color dotColor: canvas.look.dot
+            readonly property color majorColor: canvas.look.dotMajor
+            fragmentShader: "qrc:/canvas/shaders/grid.frag.qsb"
+        }
     }
 
     MouseArea {
@@ -217,6 +284,14 @@ FocusScope {
                 canvas.startPan()
                 return
             }
+            // The hovered wire's cut handle removes its link (8.2).
+            if (cutHandle.visible && Math.hypot(mouse.x - cutHandle.cx, mouse.y - cutHandle.cy) <= cutHandle.width / 2) {
+                const l = canvas.hoverLink
+                canvas.clearHover()
+                canvas.model.disconnectInput(l.toNode, l.toPort, l.item)
+                return
+            }
+            canvas.clearHover()
             const port = canvas.portUnder(mouse.x, mouse.y)
             if (port.node !== undefined) {
                 if ((mouse.modifiers & Qt.ControlModifier) && (mouse.modifiers & Qt.AltModifier)) {
@@ -276,6 +351,7 @@ FocusScope {
                 const port = canvas.portUnder(mouse.x, mouse.y)
                 canvas.hoverProblem = port.node !== undefined
                     ? canvas.model.dragProblem(port.node, port.port, port.output) : ""
+                canvas.updateHover(mouse.x, mouse.y)
                 break
             }
             }
@@ -315,6 +391,7 @@ FocusScope {
     function finishGesture(px, py, modifiers) {
         const g = gesture
         gesture = ""
+        hoverPort = ({})
         switch (g) {
         case "pan":
             // A left click on empty canvas, not a drag, clears the selection.
@@ -375,45 +452,171 @@ FocusScope {
         objectName: "world"
         transformOrigin: Item.TopLeft
 
+        // Frames (5.1, 10): flat regions in a role's tint, no shadow, no header bar.
         Repeater {
             model: canvas.model.frames
             delegate: Rectangle {
                 required property var modelData
+                readonly property var role: canvas.look.role(modelData.color || "muted")
                 x: modelData.x
                 y: modelData.y
                 width: modelData.width
                 height: modelData.height
                 radius: canvas.look.corner
-                color: Qt.alpha(canvas.roleColor(modelData.color), 0.12)
+                color: role.frame
                 border.width: 1
-                border.color: Qt.alpha(canvas.roleColor(modelData.color), 0.5)
+                border.color: role.frameEdge
                 Text {
-                    x: 10
-                    y: 6
-                    width: parent.width - 20
+                    // Zoomed out, the title is drawn above the nodes instead (below).
+                    visible: canvas.tier === 0
+                    x: 3 * canvas.look.unit
+                    y: 2 * canvas.look.unit
+                    width: parent.width - 6 * canvas.look.unit
                     text: parent.modelData.title
                     elide: Text.ElideRight
-                    color: canvas.look.text
-                    font.pixelSize: Math.round(canvas.look.textSize * 1.2)
-                    font.bold: true
+                    textFormat: Text.PlainText
+                    color: parent.role.frameTitle
+                    // Below zoom 1 it keeps its size on screen, so the frames become the map.
+                    font.pixelSize: canvas.look.frameTitleSize / Math.min(1, world.scale)
+                    font.weight: Font.DemiBold
                 }
             }
         }
 
+        // Comments (10): text and a rule, nothing more.
         Repeater {
-            id: wires
-            objectName: "wires"
-            model: canvas.model.links
-            delegate: Shape {
-                id: wire
-                required property string path
-                required property string color
-                ShapePath {
-                    strokeWidth: 2.5
-                    strokeColor: canvas.portColor(wire.color)
-                    fillColor: "transparent"
-                    capStyle: ShapePath.RoundCap
-                    PathSvg { path: wire.path }
+            model: canvas.tier === 0 ? canvas.model.comments : []
+            delegate: Item {
+                required property var modelData
+                x: modelData.x
+                y: modelData.y
+                width: Math.min(modelData.width, 58 * canvas.look.unit)
+                height: commentText.height + 4
+                Rectangle {
+                    width: 2
+                    height: parent.height
+                    color: canvas.look.hairlineStrong
+                }
+                Text {
+                    id: commentText
+                    x: 2 + 2.5 * canvas.look.unit
+                    y: 2
+                    width: parent.width - x
+                    text: parent.modelData.text
+                    textFormat: Text.PlainText
+                    wrapMode: Text.Wrap
+                    lineHeightMode: Text.FixedHeight
+                    lineHeight: 16
+                    color: canvas.look.label
+                    font.pixelSize: canvas.look.textSize
+                }
+            }
+        }
+
+        // Wires (8): one Shape each, constant at rest; a state changes only opacity, and the
+        // casing layer above draws the highlighted ones again. Dimmed while a link is dragged.
+        Item {
+            id: wireLayer
+            visible: !canvas.model.linksHidden
+            opacity: canvas.dragging ? 0.3125 : 1 // with each wire's 0.8: 0.25
+
+            Repeater {
+                id: wires
+                objectName: "wires"
+                model: canvas.model.links
+                delegate: Shape {
+                    id: wire
+                    required property string path
+                    required property string color
+                    required property bool muted
+                    opacity: muted ? 0.4 : 0.8
+                    ShapePath {
+                        // Width changes only with the zoom tier: 4 px in the overview.
+                        strokeWidth: canvas.tier === 2 ? 4 : 2
+                        strokeColor: canvas.portColor(wire.color)
+                        fillColor: "transparent"
+                        capStyle: ShapePath.RoundCap
+                        PathSvg { path: wire.path }
+                    }
+                }
+            }
+
+            // The selection's wires and the hovered one: a 6 px casing in the canvas color
+            // under a 2.5 px stroke. At rest this layer has no items.
+            Repeater {
+                model: canvas.tier === 0 ? canvas.highlightRows : []
+                delegate: Shape {
+                    id: lit
+                    required property int modelData
+                    readonly property Item wire: wires.itemAt(modelData)
+                    visible: wire !== null
+                    ShapePath {
+                        strokeWidth: 6
+                        strokeColor: canvas.look.canvas
+                        fillColor: "transparent"
+                        capStyle: ShapePath.RoundCap
+                        PathSvg { path: lit.wire ? lit.wire.path : "" }
+                    }
+                    ShapePath {
+                        strokeWidth: 2.5
+                        strokeColor: lit.wire ? canvas.portColor(lit.wire.color) : "transparent"
+                        fillColor: "transparent"
+                        capStyle: ShapePath.RoundCap
+                        PathSvg { path: lit.wire ? lit.wire.path : "" }
+                    }
+                }
+            }
+
+            // Reroute points: a 10 px dot in the wire's color with a 2 px canvas ring.
+            Repeater {
+                model: canvas.tier <= 1 ? canvas.model.reroutes : []
+                delegate: Rectangle {
+                    required property var modelData
+                    x: modelData.x - 7
+                    y: modelData.y - 7
+                    width: 14
+                    height: 14
+                    radius: 7
+                    color: canvas.look.canvas
+                    Rectangle {
+                        x: 2
+                        y: 2
+                        width: 10
+                        height: 10
+                        radius: 5
+                        color: canvas.portColor(parent.modelData.color)
+                    }
+                }
+            }
+        }
+
+        // Node shadows (7): one pre-painted 9-slice texture per level, shared by every node,
+        // in their own layer so they draw in one batch; off below the readable zoom.
+        Item {
+            visible: canvas.tier === 0
+            Repeater {
+                model: canvas.model.nodes
+                delegate: BorderImage {
+                    required property real posX
+                    required property real posY
+                    required property real nodeWidth
+                    required property real nodeHeight
+                    required property bool selected
+                    required property string mode
+                    readonly property int level: selected ? 2 : 1
+                    readonly property int reach: canvas.shadowMargins[level - 1]
+                    readonly property int edge: reach + canvas.look.corner + 1
+                    x: posX - reach
+                    y: posY - reach
+                    width: nodeWidth + 2 * reach
+                    height: nodeHeight + 2 * reach
+                    opacity: mode === "mute" ? 0.4 : 1
+                    source: level === 2 ? canvas.look.shadow2 : canvas.look.shadow1
+                    border.left: edge
+                    border.top: edge
+                    border.right: edge
+                    border.bottom: edge
+                    smooth: true
                 }
             }
         }
@@ -424,39 +627,132 @@ FocusScope {
             model: canvas.model.nodes
             delegate: CanvasNode {
                 canvasModel: canvas.model
-                linkDrag: canvas.linkDrag
-                headerHeight: canvas.model.headerHeight
-                rowHeight: canvas.model.rowHeight
-                look: canvas.look
                 canvasView: canvas
+                look: canvas.look
+                linkDrag: canvas.linkDrag
                 detailArea: canvas.detailArea
-                readable: world.scale >= canvas.readableZoom
+                tier: canvas.tier
+                hovered: canvas.hoveredNode === nodeId
+                hoverKey: canvas.hoverPort.node === nodeId ? (canvas.hoverPort.output ? "o:" : "i:") + canvas.hoverPort.port : ""
             }
         }
 
-        // The link being dragged, from its port to the pointer.
-        Shape {
-            id: draggedLink
-            visible: canvas.linkDrag.node !== undefined
-            readonly property point end: canvas.toWorld(canvas.pointer.x, canvas.pointer.y)
-            readonly property real bend: Math.max(40, Math.abs(end.x - (canvas.linkDrag.x || 0)) * 0.5)
-                                         * (canvas.linkDrag.output ? 1 : -1)
-            ShapePath {
-                strokeWidth: 2.5
-                strokeColor: canvas.portColor(canvas.linkDrag.color || "any")
-                strokeStyle: ShapePath.DashLine
-                fillColor: "transparent"
-                startX: canvas.linkDrag.x || 0
-                startY: canvas.linkDrag.y || 0
-                PathCubic {
-                    x: draggedLink.end.x
-                    y: draggedLink.end.y
-                    control1X: (canvas.linkDrag.x || 0) + draggedLink.bend
-                    control1Y: canvas.linkDrag.y || 0
-                    control2X: draggedLink.end.x - draggedLink.bend
-                    control2Y: draggedLink.end.y
+        // Zoomed out, frame titles sit above the nodes on their frame's fill, at a constant
+        // size on screen, so the frames become the map.
+        Repeater {
+            model: canvas.tier > 0 ? canvas.model.frames : []
+            delegate: Rectangle {
+                required property var modelData
+                readonly property var role: canvas.look.role(modelData.color || "muted")
+                readonly property real s: 1 / world.scale
+                x: modelData.x + 3 * canvas.look.unit
+                y: modelData.y + 2 * canvas.look.unit
+                width: Math.min(titleText.implicitWidth + 4 * s, modelData.width - 6 * canvas.look.unit)
+                height: titleText.implicitHeight
+                color: role.frame
+                Text {
+                    id: titleText
+                    x: 2 * parent.s
+                    width: parent.width - 4 * parent.s
+                    text: parent.modelData.title
+                    elide: Text.ElideRight
+                    textFormat: Text.PlainText
+                    color: parent.role.frameTitle
+                    font.pixelSize: canvas.look.frameTitleSize * parent.s
+                    font.weight: Font.DemiBold
                 }
             }
+        }
+
+        // The valid target under a dragged link: a 2 px accent ring outside the port's grown
+        // mark and its 2 px body ring (docs/canvas-look.md 5).
+        Rectangle {
+            readonly property string shape: canvas.hoverPort.shape || "circle"
+            visible: canvas.dragging && canvas.hoverPort.node !== undefined && canvas.hoverProblem === ""
+            x: (canvas.hoverPort.x || 0) - width / 2
+            y: (canvas.hoverPort.y || 0) - height / 2
+            width: 14 * 1.4 + 4
+            height: width
+            radius: shape === "circle" || shape === "ring" ? width / 2 : Math.min(canvas.look.corner, 2) + 4
+            rotation: shape === "diamond" ? 45 : 0
+            scale: shape === "diamond" ? 0.8 : 1
+            color: "transparent"
+            border.width: 2
+            border.color: canvas.look.accent
+        }
+
+        // The link being dragged, over the nodes: from its port to the pointer, or snapped to
+        // the port under it when that can take it; dashed in the error color when it cannot.
+        Shape {
+            id: draggedLink
+            visible: canvas.dragging
+            readonly property bool invalid: canvas.hoverProblem !== ""
+            readonly property bool snapped: canvas.hoverPort.node !== undefined && !invalid
+            readonly property point end: snapped ? Qt.point(canvas.hoverPort.x, canvas.hoverPort.y)
+                                                 : canvas.toWorld(canvas.pointer.x, canvas.pointer.y)
+            readonly property point start: Qt.point(canvas.linkDrag.x || 0, canvas.linkDrag.y || 0)
+            // Always drawn from the output side to the input side.
+            readonly property point a: canvas.linkDrag.output ? start : end
+            readonly property point b: canvas.linkDrag.output ? end : start
+            readonly property real dx: canvas.bend(a.x, b.x)
+            ShapePath {
+                strokeWidth: draggedLink.invalid ? 0 : 6
+                strokeColor: draggedLink.invalid ? "transparent" : canvas.look.canvas
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                startX: draggedLink.a.x
+                startY: draggedLink.a.y
+                PathCubic {
+                    x: draggedLink.b.x
+                    y: draggedLink.b.y
+                    control1X: draggedLink.a.x + draggedLink.dx
+                    control1Y: draggedLink.a.y
+                    control2X: draggedLink.b.x - draggedLink.dx
+                    control2Y: draggedLink.b.y
+                }
+            }
+            ShapePath {
+                strokeWidth: 2.5
+                strokeColor: draggedLink.invalid ? canvas.look.error : canvas.portColor(canvas.linkDrag.color || "any")
+                strokeStyle: draggedLink.invalid ? ShapePath.DashLine : ShapePath.SolidLine
+                dashPattern: [2.4, 2]
+                fillColor: "transparent"
+                capStyle: ShapePath.FlatCap
+                startX: draggedLink.a.x
+                startY: draggedLink.a.y
+                PathCubic {
+                    x: draggedLink.b.x
+                    y: draggedLink.b.y
+                    control1X: draggedLink.a.x + draggedLink.dx
+                    control1Y: draggedLink.a.y
+                    control2X: draggedLink.b.x - draggedLink.dx
+                    control2Y: draggedLink.b.y
+                }
+            }
+        }
+    }
+
+    // The hovered wire's cut handle at its midpoint: a click removes the link.
+    Rectangle {
+        id: cutHandle
+        objectName: "cutHandle"
+        readonly property real cx: world.x + (canvas.hoverLink.midX || 0) * world.scale
+        readonly property real cy: world.y + (canvas.hoverLink.midY || 0) * world.scale
+        visible: canvas.hoverLink.row !== undefined && canvas.gesture === "" && canvas.tier === 0
+        x: cx - width / 2
+        y: cy - height / 2
+        width: 18
+        height: 18
+        radius: 9
+        color: canvas.look.popup
+        border.width: 1
+        border.color: canvas.look.hairlineStrong
+        Glyph {
+            anchors.centerIn: parent
+            name: "x"
+            look: canvas.look
+            color: canvas.look.text
+            font.pixelSize: 12
         }
     }
 
@@ -467,32 +763,80 @@ FocusScope {
         y: Math.min(canvas.pressAt.y, canvas.pointer.y)
         width: Math.abs(canvas.pointer.x - canvas.pressAt.x)
         height: Math.abs(canvas.pointer.y - canvas.pressAt.y)
-        color: Qt.alpha(canvas.look.accent, 0.12)
+        color: Qt.alpha(canvas.look.accent, 0.1)
         border.width: 1
         border.color: canvas.look.accent
     }
 
-    // Why the port under a dragged link cannot take it (12.6).
-    Rectangle {
+    // Why the port under a dragged link cannot take it (12.6, docs/canvas-look.md 8.2).
+    Item {
+        id: reason
         objectName: "linkProblem"
         visible: canvas.gesture === "link" && canvas.hoverProblem !== ""
-        x: Math.min(canvas.pointer.x + 16, canvas.width - width - 8)
-        y: Math.min(canvas.pointer.y + 16, canvas.height - height - 8)
-        width: Math.min(problemText.implicitWidth + 16, 360)
-        height: problemText.implicitHeight + 10
-        radius: Math.min(canvas.look.corner, 6)
-        color: canvas.look.panel
-        border.width: 1
-        border.color: canvas.look.error
-        Text {
-            id: problemText
-            x: 8
-            y: 5
-            width: parent.width - 16
-            text: canvas.hoverProblem
-            wrapMode: Text.Wrap
-            color: canvas.look.text
-            font.pixelSize: canvas.look.textSize
+        x: Math.min(canvas.pointer.x + 14, canvas.width - width - 8)
+        y: Math.min(canvas.pointer.y + 14, canvas.height - height - 8)
+        width: Math.min(problemText.implicitWidth + 14 + 3.5 * canvas.look.unit + 2, 380)
+        height: Math.max(problemText.implicitHeight, 14) + 2.5 * canvas.look.unit + 2
+        Shadow {
+            target: reasonBox
+            level: 3
+            look: canvas.look
+        }
+        Rectangle {
+            id: reasonBox
+            anchors.fill: parent
+            radius: Math.min(canvas.look.popupCorner, 6)
+            color: canvas.look.popup
+            border.width: 1
+            border.color: canvas.look.error
+            Glyph {
+                x: 1.75 * canvas.look.unit
+                anchors.verticalCenter: parent.verticalCenter
+                name: "circle-x"
+                look: canvas.look
+                color: canvas.look.error
+            }
+            Text {
+                id: problemText
+                x: 1.75 * canvas.look.unit + 14 + 1.5 * canvas.look.unit
+                anchors.verticalCenter: parent.verticalCenter
+                width: Math.min(implicitWidth, 380 - x - 2.25 * canvas.look.unit)
+                text: canvas.hoverProblem
+                textFormat: Text.PlainText
+                wrapMode: Text.Wrap
+                color: canvas.look.text
+                font.pixelSize: canvas.look.labelSize
+            }
+        }
+    }
+
+    // The zoom, bottom left (11).
+    Item {
+        objectName: "zoomPill"
+        x: 4 * canvas.look.unit
+        y: canvas.height - height - 4 * canvas.look.unit
+        width: zoomText.implicitWidth + 6 * canvas.look.unit
+        height: 7 * canvas.look.unit
+        Shadow {
+            target: zoomBox
+            level: 2
+            look: canvas.look
+        }
+        Rectangle {
+            id: zoomBox
+            anchors.fill: parent
+            radius: Math.min(canvas.look.popupCorner, 14)
+            color: canvas.look.popup
+            border.width: 1
+            border.color: canvas.look.hairline
+            Text {
+                id: zoomText
+                anchors.centerIn: parent
+                text: Math.round(world.scale * 100) + "%"
+                color: canvas.look.label
+                font.pixelSize: canvas.look.textSize
+                font.features: { "tnum": 1 }
+            }
         }
     }
 }

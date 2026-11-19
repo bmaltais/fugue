@@ -1,0 +1,33 @@
+# lucide-fugue.ttf: a subset of Lucide's icon font (lucide-static 0.460.0, ISC, see LICENSE.lucide)
+# with the glyphs the canvas draws (docs/canvas-look.md 16). Name, then code point; QML asks
+# for a glyph by name (theme.look.glyph("check")), read from this file. To add one: take its code point from
+# lucide-static's font/info.json and run, with every code point below plus the new one:
+#   uvx --from fonttools pyftsubset lucide.ttf --unicodes=U+e070,... --output-file=lucide-fugue.ttf --no-hinting
+check e070
+refresh-cw e149
+loader-circle e10e
+snowflake e169
+triangle-alert e193
+corner-down-right e0a6
+ban e055
+skip-forward e164
+circle-help e082
+pin e259
+layers e104
+dices e2c5
+chevron-down e071
+chevron-left e072
+chevron-right e073
+chevron-up e074
+folder e0dc
+box e065
+search e155
+circle-x e088
+x e1b2
+play e140
+plus e141
+arrow-up e04e
+arrow-down e046
+corner-down-left e0a5
+file e0c4
+palette e1dd

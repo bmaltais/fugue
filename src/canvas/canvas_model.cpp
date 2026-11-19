@@ -121,7 +121,10 @@ QVariant LinkList::data(const QModelIndex &index, int role) const {
     case X2: return link.b.x();
     case Y2: return link.b.y();
     case Path: return link.path;
-    case Muted: return m_canvas->m_document.graph.nodes.value(link.from.node).mode == NodeMode::Mute;
+    case Muted: {
+        const auto from = m_canvas->m_document.graph.nodes.constFind(link.from.node);
+        return from != m_canvas->m_document.graph.nodes.constEnd() && from->mode == NodeMode::Mute;
+    }
     default: return {};
     }
 }
@@ -202,6 +205,7 @@ void CanvasModel::setDocument(const Document &document) {
     emit framesChanged();
     emit reroutesChanged();
     emit linkDragChanged();
+    emit selectionChanged();
     emit documentReset();
 }
 
@@ -543,6 +547,9 @@ QVariantMap CanvasModel::portMap(const NodeRow &row, const Port &port) const {
                                   : value.kind() == InputValue::Kind::Literal ? value.literal() : QJsonValue();
         if (port.min && port.max && *port.max > *port.min && number.isDouble())
             map.insert("share", std::clamp((number.toDouble() - *port.min) / (*port.max - *port.min), 0.0, 1.0));
+        // A toggle shows its state as a switch.
+        if (number.isBool())
+            map.insert("on", number.toBool());
     }
     if (port.output) {
         // Bypassed (3.5), the output takes the first input of its type.
@@ -972,7 +979,8 @@ QVariantMap CanvasModel::portAt(qreal x, qreal y, qreal radius) const {
                 const qreal d = QLineF(p, at).length();
                 if (d <= bestDistance) {
                     bestDistance = d;
-                    best = {{"node", row.id}, {"port", port.name}, {"output", output}};
+                    best = {{"node", row.id}, {"port", port.name}, {"output", output},
+                            {"x", p.x()},       {"y", p.y()},          {"shape", shape(port.type, port.kind)}};
                 }
             }
         }
@@ -1111,8 +1119,21 @@ void CanvasModel::select(const QStringList &ids, const QString &mode) {
             m_selected.contains(id) ? void(m_selected.remove(id)) : void(m_selected.insert(id));
     else
         m_selected = given;
-    for (const QString &id : (before - m_selected) + (m_selected - before))
+    const QSet<QString> changed = (before - m_selected) + (m_selected - before);
+    for (const QString &id : changed)
         emitNodeChanged(rowOf(id), {NodeList::Selected});
+    if (!changed.isEmpty())
+        emit selectionChanged();
+}
+
+QList<int> CanvasModel::linkRows(const QStringList &nodes) const {
+    QList<int> rows;
+    for (const QString &id : nodes)
+        for (const int row : m_linksOf.value(id))
+            if (!rows.contains(row))
+                rows << row;
+    std::sort(rows.begin(), rows.end());
+    return rows;
 }
 
 void CanvasModel::setRunState(const QString &node, const QVariantMap &state) {

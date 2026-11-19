@@ -1,6 +1,9 @@
 #include "look.h"
 
 #include <QBuffer>
+#include <QFile>
+#include <QFontDatabase>
+#include <QGuiApplication>
 #include <QPainter>
 #include <QPainterPath>
 
@@ -349,6 +352,43 @@ QString dataUrl(const QImage &image) {
 QColor blackOrWhiteOn(const QColor &c) { return fugue::look::luminance(c) > .179 ? QColor(Qt::black) : QColor(Qt::white); }
 
 } // namespace
+
+namespace {
+
+// The icon font, loaded once per process; its glyph names from the map beside it.
+struct Icons {
+    QString family;
+    QHash<QString, QString> glyphs;
+};
+
+const Icons &icons() {
+    static const Icons loaded = [] {
+        Icons icons;
+        if (qobject_cast<QGuiApplication *>(QCoreApplication::instance())) {
+            const int id = QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/lucide.ttf"));
+            if (id >= 0)
+                icons.family = QFontDatabase::applicationFontFamilies(id).value(0);
+        }
+        QFile map(QStringLiteral(":/fonts/lucide.txt"));
+        if (map.open(QIODevice::ReadOnly)) {
+            for (const QByteArray &line : map.readAll().split('\n')) {
+                const QList<QByteArray> parts = line.trimmed().split(' ');
+                if (parts.size() == 2 && !line.startsWith('#'))
+                    icons.glyphs.insert(QString::fromLatin1(parts[0]), QChar(char16_t(parts[1].toUInt(nullptr, 16))));
+            }
+        }
+        return icons;
+    }();
+    return loaded;
+}
+
+} // namespace
+
+CanvasLook::CanvasLook(QObject *parent) : QObject(parent) { icons(); }
+
+QString CanvasLook::iconFont() const { return icons().family; }
+
+QString CanvasLook::glyph(const QString &name) const { return icons().glyphs.value(name); }
 
 void CanvasLook::update(const QHash<QString, QColor> &colors, bool light, int radius, int textSize) {
     using namespace fugue::look;

@@ -226,10 +226,17 @@ private slots:
         QVERIFY(!node("n19")->property("rowsMade").toBool());
         app.wheel({500, 300}, {0, 0}, {-4600, 0}); // a trackpad swipe to the right end
         QTRY_VERIFY(node("n19")->property("rowsMade").toBool());
-        QVERIFY(node("n19")->property("readable").toBool());
+        QCOMPARE(node("n19")->property("tier").toInt(), 0);
+        // Zoomed out the nodes shed detail by tier (docs/canvas-look.md 14): the map below
+        // 0.5, the overview below 0.25.
         for (int i = 0; i < 10; ++i)
             app.wheel({500, 300}, {0, -120});
-        QVERIFY(!node("n19")->property("readable").toBool());
+        QVERIFY(app.zoom() < 0.5 && app.zoom() >= 0.25);
+        QCOMPARE(node("n19")->property("tier").toInt(), 1);
+        for (int i = 0; i < 8; ++i)
+            app.wheel({500, 300}, {0, -120});
+        QVERIFY(app.zoom() < 0.25);
+        QCOMPARE(node("n19")->property("tier").toInt(), 2);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 

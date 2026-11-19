@@ -123,8 +123,12 @@ class CanvasLook : public QObject {
     Q_PROPERTY(QString shadow3 MEMBER m_shadow3 NOTIFY changed)
     Q_PROPERTY(QVariantList shadowMargins MEMBER m_shadowMargins NOTIFY changed)
 
+    // Glyphs (16): Lucide icons as a font, drawn with Text { font.family: theme.look.iconFont;
+    // text: theme.look.glyph("check") }, so they recolor and batch with labels.
+    Q_PROPERTY(QString iconFont READ iconFont CONSTANT)
+
 public:
-    explicit CanvasLook(QObject *parent = nullptr) : QObject(parent) {}
+    explicit CanvasLook(QObject *parent = nullptr);
 
     // Recomputes everything; `colors` has Theme's fallbacks applied.
     void update(const QHash<QString, QColor> &colors, bool light, int radius, int textSize);
@@ -136,6 +140,9 @@ public:
     // The color a port color key stands for: the type colors, "any" (the label color) and
     // "unknown" (a placeholder's port: the label color too).
     Q_INVOKABLE QColor port(const QString &key) const;
+    // The character of a Lucide glyph by its name ("check", "triangle-alert", ...), or empty.
+    Q_INVOKABLE QString glyph(const QString &name) const;
+    QString iconFont() const;
 
     const fugue::look::Tokens &tokens() const { return m_tokens; }
     QColor portColor(const QString &key) const { return m_portColors.value(key, m_portColors.value("declared")); }
