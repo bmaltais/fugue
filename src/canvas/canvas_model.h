@@ -63,6 +63,7 @@
 
 #include "canvas/widget_edit.h"
 #include "engine/document.h"
+#include "engine/node_type.h"
 #include "engine/port_type.h"
 #include "search/node_search.h"
 
@@ -78,6 +79,7 @@
 #include <QtQmlIntegration/qqmlintegration.h>
 
 #include <array>
+#include <map>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -506,6 +508,9 @@ private:
         QRectF thumbnail;   // where the run's thumbnail goes, empty without one
         std::vector<Port> inputs;
         std::vector<Port> outputs;
+        // A group instance's exposed inputs as the group narrows them (compiler.h's
+        // exposedInputSpec), what its widgets offer and check.
+        std::map<QString, fugue::InputSpec> exposed;
     };
     struct LinkRow {
         fugue::PortRef from;

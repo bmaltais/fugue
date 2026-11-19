@@ -2,6 +2,7 @@
 #include "canvas/input_links.h"
 #include "canvas/node_size.h"
 
+#include "engine/compiler.h"
 #include "engine/node_type.h"
 #include "engine/registry.h"
 #include "search/node_search.h"
@@ -426,9 +427,16 @@ void CanvasModel::portsFromType(NodeRow &row, const Node &node) const {
         for (const GroupInput &exposed : group->inputs) {
             const PortRef target = exposed.targets.value(0);
             const NodeType *type = innerType(target.node);
-            const InputSpec *spec = type ? type->input(target.port) : nullptr;
-            if (spec) {
-                row.inputs.push_back(fromInput(*spec, exposed.name, exposed.label));
+            const InputSpec *inner = type ? type->input(target.port) : nullptr;
+            if (inner) {
+                // Narrowed as the compiler checks it (4.4); unset with no group default, the
+                // instance falls back to the inner input's own value, so the face shows that.
+                InputSpec spec = exposedInputSpec(*inner, exposed);
+                const InputValue own = group->nodes.value(target.node).inputs.value(target.port);
+                if (!exposed.defaultValue && own.kind() == InputValue::Kind::Literal)
+                    spec.defaultValue = own.literal();
+                row.exposed.insert_or_assign(exposed.name, spec);
+                row.inputs.push_back(fromInput(spec, exposed.name, exposed.label));
             } else {
                 Port port;
                 port.name = port.label = exposed.name;
@@ -779,14 +787,12 @@ const InputSpec *CanvasModel::inputSpec(const QString &node, const QString &inpu
     const QString type = m_document.graph.nodes.value(node).type;
     if (const NodeType *installed = m_registry->nodeType(type))
         return installed->input(input);
-    if (const GroupDefinition *group = m_document.group(type)) {
-        for (const GroupInput &exposed : group->inputs) {
-            if (exposed.name != input)
-                continue;
-            const PortRef target = exposed.targets.value(0);
-            const NodeType *inner = m_registry->nodeType(group->nodes.value(target.node).type);
-            return inner ? inner->input(target.port) : nullptr;
-        }
+    // A group instance's input as the group narrows it, kept with the row (valid until the
+    // row is made again: callers use it before they edit).
+    if (const int r = rowOf(node); r >= 0) {
+        const auto &exposed = m_rows[size_t(r)].exposed;
+        if (const auto it = exposed.find(input); it != exposed.end())
+            return &it->second;
     }
     return nullptr;
 }

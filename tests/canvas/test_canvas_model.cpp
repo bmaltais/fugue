@@ -454,6 +454,34 @@ private slots:
         QCOMPARE(port(g, "outputs", "image").value("shape").toString(), QString("square"));
     }
 
+    // Spec 4.4: an exposed input narrows its target's constraints and may set a default; the
+    // face and its widget follow the group, as the run's checks do (compiler.cpp).
+    void aGroupInputTakesTheGroupsNarrowedConstraintsAndDefault() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(R"({"fugue": 1, "graph": {"nodes": {
+            "g": {"type": "local/two-pass", "version": "1.0.0", "inputs": {}}}},
+          "groups": {"local/two-pass": {"version": "1.0.0", "name": "Two-pass",
+            "inputs": [{"name": "steps", "targets": ["second.steps"], "min": 1, "max": 12, "default": 6},
+                       {"name": "format", "targets": ["save.format"], "choices": ["png"]},
+                       {"name": "fit", "targets": ["size.fit"]}],
+            "outputs": [{"name": "image", "from": "second.image"}],
+            "nodes": {"second": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {}},
+                      "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {}},
+                      "size": {"type": "fugue/resize", "version": "1.0.0", "inputs": {"fit": "cover"}}}}}})"));
+        WidgetEdit *edits = canvas.widgets();
+        const QVariantMap steps = edits->spec("g", "steps");
+        QCOMPARE(steps.value("max").toDouble(), 12.0);
+        QCOMPARE(steps.value("default").toDouble(), 6.0);
+        QVERIFY(!edits->check("g", "steps", "50").isEmpty());
+        QVERIFY(edits->check("g", "steps", "12").isEmpty());
+        QCOMPARE(edits->stepped("g", "steps", 12, 1), 12.0);
+        const QVariantMap g = node(canvas, "g");
+        QCOMPARE(port(g, "inputs", "steps").value("value").toString(), QString("6"));
+        QCOMPARE(edits->spec("g", "format").value("choices").toStringList(), QStringList{"png"});
+        QVERIFY(!edits->check("g", "format", "webp").isEmpty());
+        // Unset on the instance and without a group default: the inner node's own value.
+        QCOMPARE(port(g, "inputs", "fit").value("value").toString(), QString("cover"));
+    }
 
     // Inputs a type does not define (a placeholder's, or one the installed version lacks)
     // show their value but cannot be typed into: there is no spec to check it against.

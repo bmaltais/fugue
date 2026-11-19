@@ -133,6 +133,12 @@ struct CompileOptions {
 // problems() is all that was reported either way, in a stable order.
 using Compilation = Result<CompiledGraph>;
 
+// An exposed input of a group (spec 4.4) as the group's face shows it: `inner`, the spec of
+// the input it leads to, narrowed by the group's min, max and choices, under the exposed
+// name, with the group's default when it has one. The compiler checks a group instance's
+// values against this; the canvas's widgets offer and check the same.
+InputSpec exposedInputSpec(const InputSpec &inner, const GroupInput &exposed);
+
 // The one entry point for `fugue validate`, `fugue compile` and every run.
 Compilation compile(const Document &document, const Registry &registry, const CompileOptions &options = {});
 
