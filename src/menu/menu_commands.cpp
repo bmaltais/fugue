@@ -140,6 +140,17 @@ void bindMenuCommands(CommandRegistry &registry, CanvasModel &canvas, std::funct
         registry.setEnabledWhen(QStringLiteral("node.color.") + role, [model, &registry] {
             return !model->selectedIds().isEmpty() || !registry.target().value("frame").toString().isEmpty();
         });
+    // A toggle names what it will do to the selection: it undoes the state only when every
+    // selected node has it, as the command itself does (spec 12.4).
+    const auto toggleLabel = [model, &registry](const char *id, const char *state, const char *undo) {
+        registry.setLabelWhen(QString::fromLatin1(id), [model, state, undo] {
+            return model->selectionAll(QString::fromLatin1(state)) ? QString::fromUtf8(undo) : QString();
+        });
+    };
+    toggleLabel("node.bypass", "bypass", QT_TRANSLATE_NOOP("Command", "Remove bypass"));
+    toggleLabel("node.mute", "mute", QT_TRANSLATE_NOOP("Command", "Unmute"));
+    toggleLabel("node.collapse", "collapsed", QT_TRANSLATE_NOOP("Command", "Expand"));
+    toggleLabel("node.pin", "pinned", QT_TRANSLATE_NOOP("Command", "Unpin"));
     registry.setCheckedWhen("view.toggle-links", [model] { return !model->linksHidden(); });
 }
 
