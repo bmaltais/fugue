@@ -67,7 +67,7 @@ endforeach()
 qt_add_resources(fugue_core fugue_search_qml PREFIX /search FILES ${fugue_search_qml_files})
 
 # The menu bar and the context menus (#50): their QML in src/menu/, under qrc:/menu.
-file(GLOB fugue_menu_qml CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/src/menu src/menu/*.qml)
+file(GLOB fugue_menu_qml CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/src/menu src/menu/*.qml src/menu/*.js)
 set(fugue_menu_qml_files)
 foreach(qml ${fugue_menu_qml})
   set_source_files_properties(src/menu/${qml} PROPERTIES QT_RESOURCE_ALIAS ${qml})

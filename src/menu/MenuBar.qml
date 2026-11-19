@@ -86,9 +86,10 @@ Rectangle {
         if (dropdown.shown) {
             // Moving along the bar: the same popup, refilled and moved under the next title.
             dropdown.items = commands.menu("bar")[index].items
+            const at = dropdown.fitted(anchor, 0, anchor.height, anchor.width, anchor.height)
             dropdown.parent = anchor
-            dropdown.x = 0
-            dropdown.y = anchor.height
+            dropdown.x = at.x
+            dropdown.y = at.y
             dropdown.currentIndex = byKey ? dropdown.firstEnabled() : -1
             // The row that had the keys is gone: the new current row, or the list, takes them.
             const row = dropdown.itemAt(dropdown.currentIndex)
@@ -100,7 +101,7 @@ Rectangle {
         }
         dropdown.items = commands.menu("bar")[index].items
         dropdown.byKey = byKey
-        dropdown.popup(anchor, 0, anchor.height)
+        dropdown.popupFit(anchor, 0, anchor.height, anchor.width, anchor.height)
     }
     function openEverything(byKey) {
         bar.makeMenus()
@@ -109,7 +110,7 @@ Rectangle {
         bar.current = -1
         everything.items = commands.menu("bar")
         everything.byKey = byKey
-        everything.popup(hamburger, 0, hamburger.height)
+        everything.popupFit(hamburger, 0, hamburger.height, hamburger.width, hamburger.height)
     }
 
     Connections {

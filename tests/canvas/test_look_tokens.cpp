@@ -252,8 +252,9 @@ private slots:
         for (auto it = read.colors.begin(); it != read.colors.end(); ++it)
             colors.insert(it.key(), it.value());
         const look::Tokens t = look::tokens(colors, read.light);
-        for (const QColor &surface : {t.body, t.header, t.well, t.popup, t.selectedRow, t.canvas})
+        for (const QColor &surface : {t.body, t.header, t.well, t.popup, t.selectedRow, t.menuRow, t.canvas})
             QVERIFY2(look::contrast(t.label, surface) >= 4.5, qPrintable(surface.name()));
+        QVERIFY(look::contrast(colors.value("foreground"), t.menuRow) >= 4.5);
         for (const QColor &port : look::portColors(colors, read.light, t)) {
             QVERIFY2(look::contrast(port, t.body) >= 2.99, qPrintable(port.name()));
             QVERIFY2(look::contrast(port, t.canvas) >= 2.99, qPrintable(port.name()));

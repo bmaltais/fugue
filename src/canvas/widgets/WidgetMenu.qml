@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import ".."
+import "../../menu/placement.js" as Placement
 
 // The list a choice, seed or model widget opens: entries of {text, value, detail, note,
 // checked, enabled, heading}. A `heading` names the group of entries below it; a `note` is a
@@ -24,7 +25,20 @@ Popup {
     // No transitions: the next click on the canvas must not land on a menu still closing.
     enter: null
     exit: null
-    height: Math.min(list.contentHeight, rowHeight * 12) + 2 * padding
+    // The widget's height: where it opens, below it, or above it when there is no room.
+    property real anchorHeight: 0
+    readonly property Item overlay: Overlay.overlay
+    margins: Placement.margin
+    height: Math.min(Math.min(list.contentHeight, rowHeight * 12) + 2 * padding,
+                     overlay ? Placement.maxExtent(overlay.height) : Infinity)
+    // Flipped above the widget, or shifted, so it stays inside the window (placement.js).
+    onAboutToShow: {
+        if (!overlay)
+            return
+        const p = Placement.fit(overlay, overlay, x, y, width, height, 0, anchorHeight)
+        x = p.x
+        y = p.y
+    }
 
     // A level 3 surface (docs/canvas-look.md 7), like node search.
     background: PopupSurface { look: menu.look }
@@ -37,6 +51,8 @@ Popup {
         clip: true
         keyNavigationEnabled: true
         boundsBehavior: Flickable.StopAtBounds
+        // Up and Down keep the current entry in view when the list is capped and scrolls.
+        onCurrentIndexChanged: if (currentIndex >= 0) positionViewAtIndex(currentIndex, ListView.Contain)
         currentIndex: {
             for (let i = 0; i < menu.entries.length; ++i)
                 if (menu.entries[i].checked)
@@ -56,7 +72,7 @@ Popup {
                   : note !== "" ? menu.rowHeight + noteText.implicitHeight
                   : menu.rowHeight
             radius: Math.max(0, menu.look.popupCorner - 2)
-            color: ListView.isCurrentItem && usable ? menu.look.selectedRow : "transparent"
+            color: ListView.isCurrentItem && usable ? menu.look.menuRow : "transparent"
             Glyph {
                 id: check
                 x: 8

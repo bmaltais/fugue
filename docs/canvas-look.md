@@ -241,6 +241,7 @@ light design tools lay cards on a gray table.
 | `well` | `mix(background, text, .035)` | `mix(body, text, .05)` | widget fields, value chips |
 | `label` | `mix(body, text, k)`, k from .80, stepping up by .02 until it reads at 4.5:1 on `body`, `header`, `well`, `popup`, `selected-row` and `canvas` | the same from .87 | port and widget labels, captions, categories, comments |
 | `popup` | `mix(background, text, .09)` | `body` | search, overlay, chips, pills |
+| `menu-row` | `mix(popup, accent, k)`, k from .32 stepping down until the text reads at 4.5:1 | the same | the current row of a menu: hovered or on by key, one at a time, a submenu parent while open; menus stay inside the window (flip, shift, scroll when taller) |
 | `error-header` | `mix(header, red, .20)` | `mix(header, red, .14)` | a node in error |
 | `error-chip` | `mix(body, red, .14)` | `mix(body, red, .10)` | the error chip |
 | `selected-row` | `mix(body, accent, .16)` | `mix(body, accent, .12)` | search highlight |

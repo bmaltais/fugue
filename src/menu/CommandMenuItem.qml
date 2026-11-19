@@ -8,6 +8,8 @@ import QtQuick.Controls
 MenuItem {
     id: row
 
+    // Hover moves the menu's current row, as the keys do (Menu: currentIndex).
+    hoverEnabled: true
     property var entry
     property var target: ({})
 
@@ -43,7 +45,7 @@ MenuItem {
     arrow: null
     background: Rectangle {
         radius: Math.max(0, row.look.popupCorner - 1.5 * row.u)
-        color: row.highlighted && row.enabled ? row.look.selectedRow : "transparent"
+        color: (row.highlighted || (!!row.subMenu && row.subMenu.visible)) && row.enabled ? row.look.menuRow : "transparent"
     }
     contentItem: Item {
         implicitHeight: label.implicitHeight
