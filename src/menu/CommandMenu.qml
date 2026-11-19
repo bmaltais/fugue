@@ -45,7 +45,7 @@ Menu {
         return count > 0 ? 0 : -1
     }
     // The current row opens a submenu.
-    readonly property bool onSubMenuRow: currentIndex >= 0 && !!itemAt(currentIndex) && !!itemAt(currentIndex).subMenu
+    readonly property bool onSubMenuRow: currentIndex >= 0 && !!(itemAt(currentIndex) as MenuItem)?.subMenu
     onClosed: byKey = false
     // Open, or opening; false as soon as it starts to close (`visible` stays true through the
     // closing fade, `opened` is false through the opening one).

@@ -7,8 +7,8 @@ import "canvas"
 
 // Everything the command registry shows or listens to in the window (spec 12.4, 12.5): one
 // shortcut for each key that has an owner, the `?` overlay, the unsaved-work question on
-// quit, and the notice when the keymap file could not be used. Needs the `commands` and
-// `theme` context properties.
+// quit, and the notice when the keymap file could not be used. Reads App.commands and
+// App.theme.
 Item {
     id: root
     objectName: "commandUi"
@@ -31,18 +31,19 @@ Item {
     // it opened; Ctrl+Q quits from the question), and the window's set sleeps meanwhile so
     // that a key never fires twice.
     component KeyShortcuts: Instantiator {
-        property bool active: true
+        id: keys
+        property bool awake: true
         model: App.commands.activeKeys
         delegate: Shortcut {
             required property string modelData
             sequence: modelData
-            enabled: active && !(App.commands.textFieldFocus && App.commands.belongsToTextField(modelData))
+            enabled: keys.awake && !(App.commands.textFieldFocus && App.commands.belongsToTextField(modelData))
             onActivated: App.commands.triggerKey(modelData)
         }
     }
 
     // While a menu is open its rows and mnemonics own the keys (#50).
-    KeyShortcuts { active: !help.visible && !quitAsk.visible && !App.commands.menuOpen }
+    KeyShortcuts { awake: !help.visible && !quitAsk.visible && !App.commands.menuOpen }
 
     Connections {
         target: App.commands
@@ -90,7 +91,7 @@ Item {
         background: PopupSurface { look: root.look }
         ColumnLayout {
             spacing: 4 * root.u
-            KeyShortcuts { active: quitAsk.opened }
+            KeyShortcuts { awake: quitAsk.opened }
             LayoutMirroring.enabled: root.rightToLeft
             LayoutMirroring.childrenInherit: true
             Label {
@@ -185,7 +186,7 @@ Item {
 
         contentItem: ColumnLayout {
             spacing: 0
-            KeyShortcuts { active: help.opened }
+            KeyShortcuts { awake: help.opened }
             LayoutMirroring.enabled: root.rightToLeft
             LayoutMirroring.childrenInherit: true
 

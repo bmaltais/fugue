@@ -15,7 +15,7 @@
 // Follows the Omarchy theme live: its whole palette, whether it is light or
 // dark, Hyprland's window rounding as radius, and the desktop text size.
 //
-// Exposed to QML as the context property `theme`. For all QML (the canvas
+// QML reads it as App.theme (qml_app.h). For all QML (the canvas
 // included), use only these names and never a literal color or size:
 //   background, panel, border, text, muted, accent, accentForeground, error
 //                         semantic colors (panel is a surface raised from

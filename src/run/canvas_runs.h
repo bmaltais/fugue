@@ -1,6 +1,6 @@
 #pragma once
 
-// Runs from the canvas (spec 12.4, 12.7, 10.3): the window's `runs` (a QML context property).
+// Runs from the canvas (spec 12.4, 12.7, 10.3): the window's runs, App.runs in QML.
 //
 // It starts runs of the workflow on the canvas through RunService (run/run_service.h) and
 // shows what they do on the nodes, through CanvasModel::setRunState and setRunProgress:

@@ -7,13 +7,13 @@ import "../canvas"
 // Node search (spec 12.8, docs/canvas-look.md 12): a query field over a list of results, each
 // with its category, ports and version. Every decision (ranking, filtering by the dragged
 // link's port, what accepting does) is in NodeSearch (node_search.h); this only shows it.
-// Needs the `canvasModel` and `theme` context properties, and the canvas, to open where the
-// node will go.
+// Reads App.canvasModel's search and App.theme, and needs the canvas, to open where the node
+// will go.
 Popup {
     id: root
     objectName: "nodeSearch"
 
-    property Item canvas // the FugueCanvas, to put the popup's corner at the search point
+    property FugueCanvas canvas // to put the popup's corner at the search point
     readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
     readonly property var search: App.canvasModel.search
     readonly property var look: App.theme.look

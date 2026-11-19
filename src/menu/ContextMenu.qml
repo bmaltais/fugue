@@ -1,6 +1,5 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
 import Fugue
 
 // The canvas's context menus (#50, spec 12.3: right-click opens it): on a node the "node"

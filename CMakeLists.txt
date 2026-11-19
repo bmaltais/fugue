@@ -36,68 +36,46 @@ target_link_libraries(fugue_core PUBLIC fugue_engine fugue_cli
 target_compile_options(fugue_core PUBLIC -Wall -Wextra)
 # Its C++ types are the QML module Fugue (qml_app.h): QML reads the window's objects as the
 # typed App singleton, so qmllint can check them. The QML files stay plain resources below.
-# The module's qmldir and qmltypes land in build/qml/Fugue, where qmllint looks (tests/qmllint).
+# The module's qmldir and qmltypes land in build/qml/Fugue, where the qmllint test looks.
 qt_add_qml_module(fugue_core URI Fugue VERSION 1.0 NO_PLUGIN RESOURCE_PREFIX /qt/qml
   OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/qml/Fugue)
 
-# The canvas (spec 12): its QML files in src/canvas/, compiled in under qrc:/canvas, where
-# Main.qml imports them. A new .qml file there needs no line here.
-file(GLOB fugue_canvas_qml CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/src/canvas src/canvas/*.qml)
-set(fugue_canvas_qml_files)
-foreach(qml ${fugue_canvas_qml})
-  set_source_files_properties(src/canvas/${qml} PROPERTIES QT_RESOURCE_ALIAS ${qml})
-  list(APPEND fugue_canvas_qml_files src/canvas/${qml})
-endforeach()
-qt_add_resources(fugue_core fugue_canvas_qml PREFIX /canvas FILES ${fugue_canvas_qml_files})
-# The widgets on a node's face (spec 6.2), in src/canvas/widgets/, under qrc:/canvas/widgets.
-file(GLOB fugue_widget_qml CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/src/canvas/widgets src/canvas/widgets/*.qml)
-set(fugue_widget_qml_files)
-foreach(qml ${fugue_widget_qml})
-  set_source_files_properties(src/canvas/widgets/${qml} PROPERTIES QT_RESOURCE_ALIAS ${qml})
-  list(APPEND fugue_widget_qml_files src/canvas/widgets/${qml})
-endforeach()
-qt_add_resources(fugue_core fugue_widget_qml PREFIX /canvas/widgets FILES ${fugue_widget_qml_files})
+# A folder of the window's QML: its .qml files compiled in under qrc:<prefix>, where the
+# others import them by folder. A new .qml file there needs no line here. The same files are
+# written as build/qmllint/<name>.qrc too, so the qmllint test reads them where the app does.
+set(fugue_qmllint_resources --resource ${CMAKE_SOURCE_DIR}/src/resources.qrc)
+function(fugue_add_qml name folder prefix)
+  file(GLOB names CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/${folder} ${folder}/*.qml)
+  set(files)
+  set(qrc "<RCC>\n  <qresource prefix=\"${prefix}\">\n")
+  foreach(qml ${names})
+    set_source_files_properties(${folder}/${qml} PROPERTIES QT_RESOURCE_ALIAS ${qml})
+    list(APPEND files ${folder}/${qml})
+    string(APPEND qrc "    <file alias=\"${qml}\">${CMAKE_SOURCE_DIR}/${folder}/${qml}</file>\n")
+  endforeach()
+  string(APPEND qrc "  </qresource>\n</RCC>\n")
+  qt_add_resources(fugue_core ${name} PREFIX ${prefix} FILES ${files})
+  file(WRITE ${CMAKE_BINARY_DIR}/qmllint/${name}.qrc "${qrc}")
+  set(fugue_qmllint_resources ${fugue_qmllint_resources}
+      --resource ${CMAKE_BINARY_DIR}/qmllint/${name}.qrc PARENT_SCOPE)
+endfunction()
+
+# The canvas (spec 12), in src/canvas/, where Main.qml imports it.
+fugue_add_qml(fugue_canvas_qml src/canvas /canvas)
+# The widgets on a node's face (spec 6.2), in src/canvas/widgets/.
+fugue_add_qml(fugue_widget_qml src/canvas/widgets /canvas/widgets)
 # Its shaders (docs/canvas-look.md: the dot grid and rounded thumbnails), compiled to .qsb with
 # Qt's shader tools, under qrc:/canvas/shaders/<name>.qsb.
 file(GLOB fugue_canvas_shaders CONFIGURE_DEPENDS src/canvas/shaders/*.frag)
 qt_add_shaders(fugue_core fugue_canvas_shaders PREFIX /canvas BASE src/canvas FILES ${fugue_canvas_shaders})
-
-# Node search (spec 12.8): its QML in src/search/, compiled in under qrc:/search.
-file(GLOB fugue_search_qml CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/src/search src/search/*.qml)
-set(fugue_search_qml_files)
-foreach(qml ${fugue_search_qml})
-  set_source_files_properties(src/search/${qml} PROPERTIES QT_RESOURCE_ALIAS ${qml})
-  list(APPEND fugue_search_qml_files src/search/${qml})
-endforeach()
-qt_add_resources(fugue_core fugue_search_qml PREFIX /search FILES ${fugue_search_qml_files})
-
-# The menu bar and the context menus (#50): their QML in src/menu/, under qrc:/menu.
-file(GLOB fugue_menu_qml CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/src/menu src/menu/*.qml)
-set(fugue_menu_qml_files)
-foreach(qml ${fugue_menu_qml})
-  set_source_files_properties(src/menu/${qml} PROPERTIES QT_RESOURCE_ALIAS ${qml})
-  list(APPEND fugue_menu_qml_files src/menu/${qml})
-endforeach()
-qt_add_resources(fugue_core fugue_menu_qml PREFIX /menu FILES ${fugue_menu_qml_files})
-
-# The settings panel (#51): its QML in src/settings/, under qrc:/settings.
-file(GLOB fugue_settings_qml CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/src/settings src/settings/*.qml)
-set(fugue_settings_qml_files)
-foreach(qml ${fugue_settings_qml})
-  set_source_files_properties(src/settings/${qml} PROPERTIES QT_RESOURCE_ALIAS ${qml})
-  list(APPEND fugue_settings_qml_files src/settings/${qml})
-endforeach()
-qt_add_resources(fugue_core fugue_settings_qml PREFIX /settings FILES ${fugue_settings_qml_files})
-
-# The workflows (spec 11, 12.10): tabs, open, save, recovery and import, with their QML in
-# src/workflow/, compiled in under qrc:/workflow. A new .qml file there needs no line here.
-file(GLOB fugue_workflow_qml CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/src/workflow src/workflow/*.qml)
-set(fugue_workflow_qml_files)
-foreach(qml ${fugue_workflow_qml})
-  set_source_files_properties(src/workflow/${qml} PROPERTIES QT_RESOURCE_ALIAS ${qml})
-  list(APPEND fugue_workflow_qml_files src/workflow/${qml})
-endforeach()
-qt_add_resources(fugue_core fugue_workflow_qml PREFIX /workflow FILES ${fugue_workflow_qml_files})
+# Node search (spec 12.8).
+fugue_add_qml(fugue_search_qml src/search /search)
+# The menu bar and the context menus (#50).
+fugue_add_qml(fugue_menu_qml src/menu /menu)
+# The settings panel (#51).
+fugue_add_qml(fugue_settings_qml src/settings /settings)
+# The workflows (spec 11, 12.10): tabs, open, save, recovery and import.
+fugue_add_qml(fugue_workflow_qml src/workflow /workflow)
 
 # The command line (spec 13): the same `fugue` binary, but it needs nothing
 # beyond the engine, so it is its own library with no Gui, Quick or QML. main.cpp
@@ -201,6 +179,14 @@ foreach(test_source ${fugue_workflow_tests})
   add_test(NAME ${test_name} COMMAND ${test_name})
   set_tests_properties(${test_name} PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
 endforeach()
+
+# qmllint over every QML file in src/, with the Fugue module's types and the resource layout
+# the app loads them in: any warning fails it (tests/qmllint.cmake), so `bin/test` keeps the
+# QML lint-clean.
+file(GLOB_RECURSE fugue_qml_files CONFIGURE_DEPENDS src/*.qml)
+add_test(NAME qmllint COMMAND ${CMAKE_COMMAND} "-DQMLLINT=$<TARGET_FILE:Qt6::qmllint>"
+         "-DARGS=-I;${CMAKE_BINARY_DIR}/qml;${fugue_qmllint_resources}" "-DFILES=${fugue_qml_files}"
+         -P ${CMAKE_SOURCE_DIR}/tests/qmllint.cmake)
 
 # A test-only `fugue` with fake node kernels (tests/cli_support): the real CLI, queue and
 # worker, but nodes that do fake work. Not installed.

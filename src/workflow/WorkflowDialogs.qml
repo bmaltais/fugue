@@ -8,8 +8,8 @@ import "../canvas"
 
 // Everything the workflows show besides the tabs (spec 11): the file pickers (the desktop
 // portal when there is one), the save/discard/cancel question, the trust question, the offer
-// to recover, the banner for what went wrong, and the drop area for files. Needs the
-// `workflows` and `theme` context properties. Styled from theme.look (docs/canvas-look.md):
+// to recover, the banner for what went wrong, and the drop area for files. Reads
+// App.workflows and App.theme. Styled from theme.look (docs/canvas-look.md):
 // dialogs are level 3 surfaces over the scrim, notices sit on the popup fill.
 Item {
     id: root

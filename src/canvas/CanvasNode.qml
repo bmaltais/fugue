@@ -194,7 +194,7 @@ Item {
                 Text {
                     visible: face.full
                     x: kind.visible ? kind.x + kind.width + 1.5 * face.u : 3 * face.u - 1
-                    width: parent.width - x - (decor.item ? decor.item.metaWidth + 1.5 * face.u : 0) - 2.5 * face.u
+                    width: parent.width - x - (decor.item ? decor.metaWidth + 1.5 * face.u : 0) - 2.5 * face.u
                     anchors.verticalCenter: parent.verticalCenter
                     text: node.title
                     elide: Text.ElideRight
@@ -228,7 +228,7 @@ Item {
                         anchors.right: parent.right
                         anchors.rightMargin: 3 * face.u
                         anchors.verticalCenter: parent.verticalCenter
-                        width: Math.min(implicitWidth, parent.width - 6 * face.u - (chip.item ? chip.item.width + 2 * face.u : 0))
+                        width: Math.min(implicitWidth, parent.width - 6 * face.u - (chip.item ? (chip.item as Item).width + 2 * face.u : 0))
                         text: output.modelData.label
                         elide: Text.ElideLeft
                         textFormat: Text.PlainText
@@ -300,7 +300,7 @@ Item {
                         active: input.hasWidget
                         visible: face.full
                         // Under the label, except while typed into.
-                        z: item && item.editingText ? 1 : -1
+                        z: item && (item as InputWidget).editingText ? 1 : -1
                         x: 3 * face.u
                         y: Math.round(0.5 * face.u)
                         width: node.width - 6 * face.u
@@ -400,8 +400,12 @@ Item {
                 active: face.stateGlyph !== "" || face.caption !== "" || node.warnings.length > 0 || node.pinned
                         || face.dashed || node.collapsed
                 anchors.fill: parent
+                // The width its meta text takes from the title, set by the item while it is there.
+                property real metaWidth: 0
                 sourceComponent: Item {
-                    readonly property real metaWidth: meta.visible ? meta.width : 0
+                    Binding {
+                        decor.metaWidth: meta.visible ? meta.width : 0
+                    }
 
                     // Collapsed: every input meets at the header's left end and every output at its
                     // right (docs/canvas-look.md 5), one mark a side in the first port's shape and color.

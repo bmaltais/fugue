@@ -6,8 +6,8 @@ import Fugue
 import "../canvas"
 
 // The tab bar (spec 12.10): one tab per open workflow, a dot on the ones with unsaved
-// content, a close button on each and a button for a new workflow. Needs the `workflows` and
-// `theme` context properties. docs/canvas-look.md has no section for it: it takes the same
+// content, a close button on each and a button for a new workflow. Reads App.workflows and
+// App.theme. docs/canvas-look.md has no section for it: it takes the same
 // tokens, a recessed strip with the current tab raised in the node body's fill, marked by
 // the accent along its top.
 Rectangle {
