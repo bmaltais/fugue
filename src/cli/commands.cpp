@@ -11,6 +11,7 @@
 #include <QThread>
 
 #include "cli/compile_step.h"
+#include "engine/compiler.h"
 #include "engine/document.h"
 #include "engine/json.h"
 #include "engine/run_folder.h"
@@ -24,6 +25,12 @@ QString compact(const QJsonObject &object) {
 }
 
 // ---- nodes ----
+
+QString humanProblem(const Error &error) {
+    return QStringLiteral("%1 %2%3: %4")
+        .arg(error.severity == Error::Severity::Warning ? "warning" : "error", error.code,
+             error.node.isEmpty() ? QString() : " (" + error.node + ")", error.message);
+}
 
 QJsonObject nodeSummary(const NodeType &type) {
     QJsonObject summary{{"id", type.id}, {"version", type.version.toString()}, {"name", type.name},
@@ -94,11 +101,13 @@ Reply validate(const Command &command, Context &context) {
     errors = validateDocument(*document, context.registry);
     if (hasErrors(errors))
         return Reply::failure(errors);
-    QJsonArray warnings;
-    for (const Error &warning : errors)
-        warnings.append(warning.toJson());
-    return Reply::success(QJsonObject{{"valid", true}, {"warnings", warnings}},
-                          QStringLiteral("%1 is valid.").arg(command.positionals.at(0)));
+    Reply reply = Reply::success(QJsonObject{{"valid", true}}, QStringLiteral("%1 is valid.").arg(command.positionals.at(0)));
+    reply.errors = errors; // warnings only
+    return reply;
+}
+
+CompileSettings settingsOf(const Command &command) {
+    return {command.value("to"), command.value("provider")};
 }
 
 Reply compile(const Command &command, Context &context) {
@@ -106,10 +115,13 @@ Reply compile(const Command &command, Context &context) {
     const std::optional<Document> document = Document::loadFile(command.positionals.at(0), errors);
     if (!document)
         return loadFailed(errors);
-    const Result<QJsonObject> compiled = compileDocument(*document, context.registry);
-    if (!compiled)
-        return Reply::failure(compiled.errors());
-    return Reply::success(compiled.value(), QString::fromUtf8(writeJson(compiled.value())));
+    const Compilation compilation = compileDocument(*document, context.registry);
+    if (!compilation.ok())
+        return Reply::failure(compilation.errors);
+    const QJsonObject compiled = compilation.graph->toJson();
+    Reply reply = Reply::success(compiled, QString::fromUtf8(writeJson(compiled)));
+    reply.errors = compilation.errors; // warnings only
+    return reply;
 }
 
 Reply runWorkflow(const Command &command, Context &context) {
@@ -117,10 +129,10 @@ Reply runWorkflow(const Command &command, Context &context) {
     const std::optional<Document> document = Document::loadFile(command.positionals.at(0), errors);
     if (!document)
         return loadFailed(errors);
-    // Phase 2: compile, queue (9.8), start the worker, print the run id; --wait streams events.
-    const Result<QJsonObject> compiled = compileDocument(*document, context.registry);
-    if (!compiled)
-        return Reply::failure(compiled.errors());
+    // --set is phase 2b's. Phase 2b: queue (9.8), start the worker, print the run id; --wait streams events.
+    const Compilation compilation = compileDocument(*document, context.registry, settingsOf(command));
+    if (!compilation.ok())
+        return Reply::failure(compilation.errors);
     return Reply::failure(makeError("internal", "Running is not built yet.", "The scheduler arrives with issue #9."));
 }
 
@@ -150,8 +162,6 @@ Reply workflowDescribe(const Command &command, Context &context) {
                                                                       : it->mode == NodeMode::Bypass ? "bypass" : "normal"}};
         // A group id is not a node type, so only a missing type outside groups counts.
         node.insert("known", type != nullptr || document->group(it->type) != nullptr);
-        if (type && type->sink)
-            node.insert("sink", true);
         nodes.append(node);
         lines << QStringLiteral("node %1: %2").arg(it.key(), it->type);
         for (auto input = it->inputs.cbegin(); input != it->inputs.cend(); ++input) {
@@ -162,7 +172,28 @@ Reply workflowDescribe(const Command &command, Context &context) {
             }
         }
     }
-    return Reply::success(QJsonObject{{"nodes", nodes}, {"links", links}}, lines.join('\n'));
+    // What the compiler finds: sinks when it compiles, and every problem that keeps it from
+    // compiling. `missing` is the part about things that are not there.
+    const Compilation compilation = compileDocument(*document, context.registry);
+    QJsonArray sinks;
+    QJsonArray missing;
+    QJsonArray problems;
+    if (compilation.ok())
+        for (const QString &sink : compilation.graph->sinks())
+            sinks.append(sink);
+    static const QSet<QString> missingCodes{"missing_input", "unknown_node_type", "unknown_link_source", "unknown_output",
+                                            "unknown_input"};
+    for (const Error &error : compilation.errors) {
+        problems.append(error.toJson());
+        lines << humanProblem(error);
+        if (missingCodes.contains(error.code))
+            missing.append(error.toJson());
+    }
+    for (const QJsonValue &sink : sinks)
+        lines << QStringLiteral("sink %1").arg(sink.toString());
+    return Reply::success(QJsonObject{{"nodes", nodes}, {"links", links}, {"sinks", sinks}, {"missing", missing},
+                                      {"problems", problems}},
+                          lines.join('\n'));
 }
 
 // ---- runs ----
@@ -256,14 +287,28 @@ Reply runsResult(const Command &command, Context &context) {
     if (!folder)
         return Reply::failure(folder.errors());
     const QList<QJsonObject> events = folder->events();
-    // Every node's outputs for now; phase 2 narrows it to sinks with compiled.json.
+    // The sinks of the compiled graph that ran (a "run to here" graph has its target
+    // instead); with no readable compiled.json, every node's outputs.
+    QSet<QString> wanted;
+    bool filter = false;
+    if (const QJsonObject json = folder->compiled(); !json.isEmpty()) {
+        Errors ignored;
+        if (const auto graph = CompiledGraph::fromJson(json, ignored)) {
+            filter = true;
+            for (const QString &sink : graph->sinks())
+                wanted.insert(sink);
+            if (wanted.isEmpty() && !graph->target.isEmpty())
+                wanted.insert(graph->target);
+        }
+    }
     QJsonObject outputs;
     QJsonArray errors;
     for (const QJsonObject &event : events) {
         const QString kind = event.value("event").toString();
-        if (kind == "node.done" || kind == "node.cached")
-            outputs.insert(event.value("node").toString(), event.value("outputs"));
-        else if (kind == "run.done")
+        if (kind == "node.done" || kind == "node.cached") {
+            if (!filter || wanted.contains(event.value("node").toString()))
+                outputs.insert(event.value("node").toString(), event.value("outputs"));
+        } else if (kind == "run.done")
             errors = event.value("errors").toArray();
     }
     QJsonObject data{{"id", folder->id()}, {"status", runStatus(*folder, events)}, {"outputs", outputs}};

@@ -1,7 +1,9 @@
 #include "cli/cli.h"
 
 #include <QCoreApplication>
+#include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonObject>
 
 #include <cstdio>
 
@@ -94,7 +96,15 @@ int run(int argc, char **argv) {
     for (const Error &warning : reply.errors)
         logLine(humanError(warning));
     if (json) {
-        writeLine(QJsonDocument(okEnvelope(reply.data)).toJson(QJsonDocument::Compact));
+        // 13.2's envelope plus an additive `warnings`, only when there are some.
+        QJsonObject envelope = okEnvelope(reply.data);
+        if (!reply.errors.isEmpty()) {
+            QJsonArray warnings;
+            for (const Error &warning : reply.errors)
+                warnings.append(warning.toJson());
+            envelope.insert("warnings", warnings);
+        }
+        writeLine(QJsonDocument(envelope).toJson(QJsonDocument::Compact));
     } else if (!reply.text.isEmpty()) {
         writeLine(reply.text.toUtf8());
     }
