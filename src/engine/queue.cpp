@@ -4,9 +4,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QJsonDocument>
 #include <QRegularExpression>
-#include <QSaveFile>
 #include <QStandardPaths>
 
 #include <cerrno>
@@ -39,14 +37,12 @@ QueueEntry parse(const QString &file, const QString &dir) {
     QueueEntry entry;
     entry.file = file;
     entry.active = file.startsWith(QLatin1String("0-"));
-    QFile handle(dir + '/' + file);
-    if (handle.open(QIODevice::ReadOnly)) {
-        const QJsonObject json = QJsonDocument::fromJson(handle.readAll()).object();
-        entry.run = json.value("run").toString();
-        entry.pid = qint64(json.value("pid").toDouble());
-        entry.workflow = json.value("workflow").toString();
+    if (const Result<QJsonObject> json = readJsonObject(dir + '/' + file)) {
+        entry.run = json->value("run").toString();
+        entry.pid = qint64(json->value("pid").toDouble());
+        entry.workflow = json->value("workflow").toString();
     }
-    if (entry.run.isEmpty()) // fall back to the name's last part
+    if (entry.run.isEmpty()) // unreadable: the name's last part still says which run
         entry.run = file.section('-', 2);
     return entry;
 }
@@ -79,17 +75,7 @@ QString Queue::defaultLockPath() { return stateRoot() + QStringLiteral("/engine.
 
 // The on-disk form of 4.6, replaced atomically so a reader never sees half an entry.
 bool Queue::write(const QString &file, const QJsonObject &content) const {
-    if (!QDir().mkpath(m_dir))
-        return false;
-    QSaveFile out(m_dir + '/' + file);
-    if (!out.open(QIODevice::WriteOnly))
-        return false;
-    const QByteArray bytes = writeJson(content);
-    if (out.write(bytes) != bytes.size()) {
-        out.cancelWriting();
-        return false;
-    }
-    return out.commit();
+    return QDir().mkpath(m_dir) && writeJsonFile(m_dir + '/' + file, content).isEmpty();
 }
 
 bool Queue::enqueue(const QString &run, const QString &workflow, bool first) const {

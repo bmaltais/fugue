@@ -16,7 +16,6 @@
 
 #include <QDirIterator>
 #include <QFile>
-#include <QJsonDocument>
 #include <QJsonObject>
 #include <QThread>
 
@@ -24,6 +23,7 @@
 
 #include "cli/args.h"
 #include "cli/cli.h"
+#include "engine/json.h"
 
 using namespace fugue;
 
@@ -62,13 +62,8 @@ void addManifestFolder(Registry &registry, const QString &folder) {
         files << it.next();
     files.sort();
     for (const QString &path : files) {
-        QFile file(path);
-        const QJsonDocument document = file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll()) : QJsonDocument();
-        Errors errors;
-        if (document.isObject())
-            errors = registry.addManifest(document.object());
-        else
-            errors << makeError("invalid_json", QStringLiteral("%1 is not a JSON object.").arg(path));
+        const Result<QJsonObject> manifest = readJsonObject(path);
+        const Errors errors = manifest ? registry.addManifest(manifest.value()) : manifest.errors();
         for (const Error &error : errors)
             std::fprintf(stderr, "%s: %s: %s\n", qPrintable(path), qPrintable(error.code), qPrintable(error.message));
     }

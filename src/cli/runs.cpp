@@ -81,10 +81,7 @@ void endUnrun(const RunFolder &folder, const QString &status, const Errors &erro
     state.insert("status", status);
     state.insert("ended", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
     folder.writeState(state);
-    QJsonArray list;
-    for (const Error &error : errors)
-        list.append(error.toJson());
-    folder.appendEvent(QJsonObject{{"event", "run.done"}, {"status", status}, {"errors", list}});
+    folder.appendEvent(QJsonObject{{"event", "run.done"}, {"status", status}, {"errors", toJson(errors)}});
 }
 
 namespace {

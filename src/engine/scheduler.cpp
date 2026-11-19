@@ -354,10 +354,7 @@ private:
         state.insert("auto", autos);
         state.insert("providers", providers);
         state.insert("nodes", nodes);
-        QJsonArray errors;
-        for (const Error &error : std::as_const(m_outcome.errors))
-            errors.append(error.toJson());
-        state.insert("errors", errors);
+        state.insert("errors", toJson(m_outcome.errors));
         m_folder->writeState(state);
     }
 
@@ -1017,10 +1014,7 @@ private:
         m_finished = true;
         if (!m_dry) {
             writeState(m_outcome.status);
-            QJsonArray errors;
-            for (const Error &error : std::as_const(m_outcome.errors))
-                errors.append(error.toJson());
-            emitEvent({{"event", "run.done"}, {"status", m_outcome.status}, {"errors", errors}});
+            emitEvent({{"event", "run.done"}, {"status", m_outcome.status}, {"errors", toJson(m_outcome.errors)}});
             m_env.hashes->save();
             m_env.cache->evict();
         }

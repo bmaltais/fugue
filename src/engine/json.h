@@ -11,6 +11,7 @@
 // (RFC 8785) is engine/canonical.h.
 
 #include <QByteArray>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QString>
@@ -22,9 +23,13 @@ namespace fugue {
 QByteArray writeJson(const QJsonValue &value);
 
 // Writes `value` to a file in that form, replacing the file atomically: a reader sees
-// the old content or the new, never half of it. The folder is made if needed. Empty
+// the old content or the new, never half of it. The folder must exist. Empty
 // when done; else one permission_denied error that names the file and the reason.
 Errors writeJsonFile(const QString &path, const QJsonValue &value);
+
+// Parses JSON text; a leading byte order mark is skipped. The one error is invalid_json,
+// with the line and column; `what` names the text in it ("The file", or a path).
+Result<QJsonDocument> parseJson(const QByteArray &bytes, const QString &what);
 
 // Reads a file that holds one JSON object; a leading byte order mark is skipped.
 // Errors, each naming the file: file_not_found (no such file, or a folder),

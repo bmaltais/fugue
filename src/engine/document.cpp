@@ -827,22 +827,12 @@ const GroupDefinition *Document::group(const QString &id) const {
 }
 
 std::optional<Document> Document::load(const QByteArray &bytes, Errors &errors) {
-    const QByteArray text = bytes.startsWith("\xef\xbb\xbf") ? bytes.mid(3) : bytes;
-    QJsonParseError parseError;
-    const QJsonDocument json = QJsonDocument::fromJson(text, &parseError);
-    if (parseError.error != QJsonParseError::NoError) {
-        const QByteArray before = text.left(parseError.offset);
-        const qsizetype line = before.count('\n') + 1;
-        const qsizetype column = parseError.offset - (before.lastIndexOf('\n') + 1) + 1;
-        Error error;
-        error.code = QStringLiteral("invalid_json");
-        error.message = QStringLiteral("The file is not valid JSON: %1 at line %2, column %3.")
-                            .arg(parseError.errorString())
-                            .arg(line)
-                            .arg(column);
-        errors << error;
+    const Result<QJsonDocument> parsed = parseJson(bytes, QStringLiteral("The file"));
+    if (!parsed) {
+        errors << parsed.error();
         return std::nullopt;
     }
+    const QJsonDocument &json = parsed.value();
     Checker c(errors);
     if (!json.isObject()) {
         c.fail(QStringLiteral("A workflow must be a JSON object."));
@@ -982,22 +972,9 @@ QByteArray Document::save() const {
 }
 
 bool Document::saveFile(const QString &path, Errors &errors) const {
-    QSaveFile file(path);
-    const auto fail = [&]() {
-        Error error;
-        error.code = QStringLiteral("permission_denied");
-        error.message = QStringLiteral("%1 cannot be written: %2.").arg(path, file.errorString());
-        errors << error;
-        return false;
-    };
-    if (!file.open(QIODevice::WriteOnly))
-        return fail();
-    const QByteArray bytes = save();
-    if (file.write(bytes) != bytes.size())
-        return fail();
-    if (!file.commit())
-        return fail();
-    return true;
+    const Errors failed = writeJsonFile(path, toJson());
+    errors << failed;
+    return failed.isEmpty();
 }
 
 QString Document::sourceHash() const {

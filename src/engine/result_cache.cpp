@@ -9,7 +9,6 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QMap>
-#include <QSaveFile>
 #include <QSet>
 #include <QStandardPaths>
 #include <QTimeZone>
@@ -143,26 +142,19 @@ QDateTime ResultCache::now() const {
 }
 
 std::optional<ResultCache::Record> ResultCache::read(const QString &key) const {
-    QFile file(keyPath(key));
-    if (!file.open(QIODevice::ReadOnly))
+    // A record that is missing or corrupt is no record: the node runs again and
+    // writes a good one.
+    const Result<QJsonObject> object = readJsonObject(keyPath(key));
+    if (!object)
         return std::nullopt;
-    const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
-    if (!document.isObject())
-        return std::nullopt;
-    Record record = Record::fromJson(document.object());
+    Record record = Record::fromJson(object.value());
     if (record.key.isEmpty())
         return std::nullopt;
     return record;
 }
 
 bool ResultCache::write(const Record &record) const {
-    if (!QDir().mkpath(m_root + QStringLiteral("/keys")))
-        return false;
-    QSaveFile file(keyPath(record.key));
-    if (!file.open(QIODevice::WriteOnly))
-        return false;
-    file.write(writeJson(record.toJson()));
-    return file.commit();
+    return QDir().mkpath(m_root + QStringLiteral("/keys")) && writeJsonFile(keyPath(record.key), record.toJson()).isEmpty();
 }
 
 QList<ResultCache::Record> ResultCache::records() const {
@@ -503,10 +495,10 @@ QStringList removeEndedRunFolders(const QString &runsRoot, const QDateTime &now,
     QStringList removed;
     const QDir root(runsRoot);
     for (const QString &id : root.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
-        QFile file(root.filePath(id) + QStringLiteral("/run.json"));
-        if (!file.open(QIODevice::ReadOnly))
+        const Result<QJsonObject> state = readJsonObject(root.filePath(id) + QStringLiteral("/run.json"));
+        if (!state)
             continue;
-        const QDateTime ended = parseTime(QJsonDocument::fromJson(file.readAll()).object().value("ended").toString());
+        const QDateTime ended = parseTime(state->value("ended").toString());
         if (!ended.isValid() || ended.addSecs(graceSeconds) >= now)
             continue;
         if (QDir(root.filePath(id)).removeRecursively())

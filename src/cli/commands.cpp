@@ -171,14 +171,13 @@ Reply workflowDescribe(const Command &command, Context &context) {
     const Compilation compilation = compileDocument(*document, context.registry);
     QJsonArray sinks;
     QJsonArray missing;
-    QJsonArray problems;
+    const QJsonArray problems = toJson(compilation.errors);
     if (compilation.ok())
         for (const QString &sink : compilation.graph->sinks())
             sinks.append(sink);
     static const QSet<QString> missingCodes{"missing_input", "unknown_node_type", "unknown_link_source", "unknown_output",
                                             "unknown_input"};
     for (const Error &error : compilation.errors) {
-        problems.append(error.toJson());
         lines << humanProblem(error);
         if (missingCodes.contains(error.code))
             missing.append(error.toJson());

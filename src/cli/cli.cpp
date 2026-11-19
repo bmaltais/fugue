@@ -118,12 +118,8 @@ int run(int argc, char **argv, const Hooks &hooks) {
     if (json) {
         // 13.2's envelope plus an additive `warnings`, only when there are some.
         QJsonObject envelope = okEnvelope(reply.data);
-        if (!reply.errors.isEmpty()) {
-            QJsonArray warnings;
-            for (const Error &warning : reply.errors)
-                warnings.append(warning.toJson());
-            envelope.insert("warnings", warnings);
-        }
+        if (!reply.errors.isEmpty())
+            envelope.insert("warnings", toJson(reply.errors));
         writeLine(QJsonDocument(envelope).toJson(QJsonDocument::Compact));
     } else if (!reply.text.isEmpty()) {
         writeLine(reply.text.toUtf8());

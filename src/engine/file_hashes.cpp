@@ -11,7 +11,6 @@
 #include <QJsonObject>
 #include <QLockFile>
 #include <QMutexLocker>
-#include <QSaveFile>
 #include <QStandardPaths>
 
 #include "engine/hash.h"
@@ -46,10 +45,9 @@ QString key(const QString &path) {
 } // namespace
 
 FileHashes::FileHashes(QString storePath) : m_storePath(std::move(storePath)) {
-    QFile file(m_storePath);
-    if (!file.open(QIODevice::ReadOnly))
-        return;
-    const QJsonObject root = QJsonDocument::fromJson(file.readAll()).object();
+    // A memo: one that is missing, corrupt or of another version is simply started again.
+    const Result<QJsonObject> read = readJsonObject(m_storePath);
+    const QJsonObject root = read ? read.value() : QJsonObject();
     if (root.value("fugue-hashes").toInt() != storeVersion)
         return;
     const QJsonObject files = root.value("files").toObject();
@@ -117,11 +115,7 @@ bool FileHashes::save() {
         files.insert(it.key(), QJsonObject{{"size", it->size}, {"mtime_ns", it->mtimeNs}, {"hash", it->hash}});
     }
 
-    QSaveFile file(m_storePath);
-    if (!file.open(QIODevice::WriteOnly))
-        return false;
-    file.write(writeJson(QJsonObject{{"fugue-hashes", storeVersion}, {"files", files}}));
-    return file.commit();
+    return writeJsonFile(m_storePath, QJsonObject{{"fugue-hashes", storeVersion}, {"files", files}}).isEmpty();
 }
 
 } // namespace fugue

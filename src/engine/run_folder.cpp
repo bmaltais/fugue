@@ -11,7 +11,6 @@
 #include <QMutexLocker>
 #include <QRandomGenerator>
 #include <QRegularExpression>
-#include <QSaveFile>
 #include <QStandardPaths>
 #include <QTimeZone>
 
@@ -31,19 +30,11 @@ bool isNodeId(const QString &id) {
     return form.match(id).hasMatch();
 }
 
-bool writeAtomically(const QString &path, const QByteArray &bytes) {
-    QSaveFile file(path);
-    if (!file.open(QIODevice::WriteOnly))
-        return false;
-    file.write(bytes);
-    return file.commit();
-}
-
+// run.json and compiled.json are read while a run goes; one that is missing or cannot be
+// read is an empty object to the reader, who then knows nothing about the run yet.
 QJsonObject readObject(const QString &path) {
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly))
-        return {};
-    return QJsonDocument::fromJson(file.readAll()).object();
+    const Result<QJsonObject> object = readJsonObject(path);
+    return object ? object.value() : QJsonObject();
 }
 
 QString nowIso() {
@@ -122,7 +113,7 @@ QString RunFolder::eventsPath() const {
 }
 
 bool RunFolder::writeState(const QJsonObject &state) const {
-    return writeAtomically(runJsonPath(), writeJson(state));
+    return writeJsonFile(runJsonPath(), state).isEmpty();
 }
 
 QJsonObject RunFolder::state() const {
@@ -130,7 +121,7 @@ QJsonObject RunFolder::state() const {
 }
 
 bool RunFolder::writeCompiled(const QJsonObject &compiled) const {
-    return writeAtomically(compiledJsonPath(), writeJson(compiled));
+    return writeJsonFile(compiledJsonPath(), compiled).isEmpty();
 }
 
 QJsonObject RunFolder::compiled() const {

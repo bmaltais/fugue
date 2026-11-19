@@ -40,7 +40,8 @@ private slots:
 
     void aJsonFileIsWrittenAtomicallyInTheOnDiskFormAndReadBack() {
         QTemporaryDir dir;
-        const QString path = dir.filePath("a/b/state.json"); // the folder is made
+        QVERIFY(QDir().mkpath(dir.filePath("a/b")));
+        const QString path = dir.filePath("a/b/state.json");
         const QJsonObject value{{"b", 1}, {"a", QJsonArray{true}}};
         QVERIFY(writeJsonFile(path, value).isEmpty());
         QFile file(path);
@@ -55,10 +56,7 @@ private slots:
 
     void aJsonFileThatCannotBeWrittenSaysSo() {
         QTemporaryDir dir;
-        QFile blocker(dir.filePath("file"));
-        QVERIFY(blocker.open(QIODevice::WriteOnly));
-        blocker.close();
-        const Errors errors = writeJsonFile(dir.filePath("file/inside.json"), QJsonObject{}); // a file is in the way
+        const Errors errors = writeJsonFile(dir.filePath("no/such/folder/inside.json"), QJsonObject{});
         QCOMPARE(errors.size(), 1);
         QCOMPARE(errors.first().code, QStringLiteral("permission_denied"));
         QVERIFY(errors.first().message.contains("inside.json"));

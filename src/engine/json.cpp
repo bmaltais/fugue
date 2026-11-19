@@ -2,7 +2,6 @@
 
 #include <algorithm>
 
-#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -72,7 +71,7 @@ Errors writeJsonFile(const QString &path, const QJsonValue &value) {
         return Errors{makeError(QStringLiteral("permission_denied"),
                                 QStringLiteral("%1 cannot be written: %2.").arg(path, file.errorString()))};
     };
-    if (!QDir().mkpath(QFileInfo(path).path()) || !file.open(QIODevice::WriteOnly))
+    if (!file.open(QIODevice::WriteOnly))
         return failed();
     const QByteArray bytes = writeJson(value);
     if (file.write(bytes) != bytes.size()) {
@@ -82,6 +81,22 @@ Errors writeJsonFile(const QString &path, const QJsonValue &value) {
     if (!file.commit())
         return failed();
     return {};
+}
+
+Result<QJsonDocument> parseJson(const QByteArray &bytes, const QString &what) {
+    const QByteArray text = bytes.startsWith("\xef\xbb\xbf") ? bytes.mid(3) : bytes;
+    QJsonParseError parseError;
+    const QJsonDocument json = QJsonDocument::fromJson(text, &parseError);
+    if (parseError.error == QJsonParseError::NoError)
+        return json;
+    const QByteArray before = text.left(parseError.offset);
+    const qsizetype line = before.count('\n') + 1;
+    const qsizetype column = parseError.offset - (before.lastIndexOf('\n') + 1) + 1;
+    return makeError(QStringLiteral("invalid_json"),
+                     QStringLiteral("%1 is not valid JSON: %2 at line %3, column %4.")
+                         .arg(what, parseError.errorString())
+                         .arg(line)
+                         .arg(column));
 }
 
 Result<QJsonObject> readJsonObject(const QString &path) {
@@ -94,24 +109,12 @@ Result<QJsonObject> readJsonObject(const QString &path) {
     if (!file.open(QIODevice::ReadOnly))
         return makeError(QStringLiteral("permission_denied"),
                          QStringLiteral("%1 cannot be read: %2.").arg(path, file.errorString()));
-    QByteArray text = file.readAll();
-    if (text.startsWith("\xef\xbb\xbf"))
-        text = text.mid(3);
-    QJsonParseError parseError;
-    const QJsonDocument json = QJsonDocument::fromJson(text, &parseError);
-    if (parseError.error != QJsonParseError::NoError) {
-        const QByteArray before = text.left(parseError.offset);
-        const qsizetype line = before.count('\n') + 1;
-        const qsizetype column = parseError.offset - (before.lastIndexOf('\n') + 1) + 1;
-        return makeError(QStringLiteral("invalid_json"),
-                         QStringLiteral("%1 is not valid JSON: %2 at line %3, column %4.")
-                             .arg(path, parseError.errorString())
-                             .arg(line)
-                             .arg(column));
-    }
-    if (!json.isObject())
+    const Result<QJsonDocument> json = parseJson(file.readAll(), path);
+    if (!json)
+        return json.error();
+    if (!json->isObject())
         return makeError(QStringLiteral("invalid_json"), QStringLiteral("%1 does not hold a JSON object.").arg(path));
-    return json.object();
+    return json->object();
 }
 
 QByteArray writeJson(const QJsonValue &value) {

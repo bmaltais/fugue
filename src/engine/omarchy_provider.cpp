@@ -1,5 +1,7 @@
 #include "omarchy_provider.h"
 
+#include "engine/json.h"
+
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -21,11 +23,6 @@ constexpr int kDefaultPollMs = 500;
 const QString kEngine = QStringLiteral("sdcpp");
 const QString kModelResource = QStringLiteral("fugue/image-model");
 
-QJsonObject readObject(const QString &path, bool *exists) {
-    QFile file(path);
-    *exists = file.open(QIODevice::ReadOnly);
-    return *exists ? QJsonDocument::fromJson(file.readAll()).object() : QJsonObject{};
-}
 
 QByteArray readKey(const QString &path) {
     QFile file(path);
@@ -249,14 +246,16 @@ void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> do
     QList<QJsonObject> rows;
     QByteArray key = m_instance.key.toUtf8();
     if (!remote) {
-        bool exists = false;
-        const QJsonObject status = readObject(state.filePath("status.json"), &exists);
-        if (!exists)
+        const Result<QJsonObject> status = readJsonObject(state.filePath("status.json"));
+        if (!status && status.error().code == QLatin1String("file_not_found"))
             return fail(QStringLiteral("Omarchy's local models are not set up on this machine (no %1).")
                             .arg(state.filePath("status.json")),
                         QStringLiteral("Install omarchy-local-ai, then set up an image model: "
                                        "omarchy-agent-local use <recipe>."));
-        const QJsonObject models = status.value("models").toObject();
+        // There but unreadable is not "no models": say so, and it is usually worth another try.
+        if (!status)
+            return fail(status.error().message, QStringLiteral("Try again; omarchy-agent-local may be rewriting it."));
+        const QJsonObject models = status->value("models").toObject();
         for (auto it = models.begin(); it != models.end(); ++it)
             rows.append(it.value().toObject());
         if (key.isEmpty())
@@ -266,9 +265,11 @@ void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> do
                         QStringLiteral("Set up a model with omarchy-agent-local, which writes the key, "
                                        "or set this provider's key in ~/.config/fugue/providers.json."));
     } else {
-        bool exists = false;
-        const QJsonObject network = readObject(state.filePath("network.json"), &exists);
-        const QJsonObject models = network.value("models").toObject();
+        // No network.json means no paired host; one that cannot be read is said as such.
+        const Result<QJsonObject> network = readJsonObject(state.filePath("network.json"));
+        if (!network && network.error().code != QLatin1String("file_not_found"))
+            return fail(network.error().message, QStringLiteral("Try again; omarchy-agent-local may be rewriting it."));
+        const QJsonObject models = network ? network->value("models").toObject() : QJsonObject();
         for (auto it = models.begin(); it != models.end(); ++it) {
             const QJsonObject row = it.value().toObject();
             if (row.value("dns").toString() == dns && row.value("paired").toBool())
