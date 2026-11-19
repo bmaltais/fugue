@@ -418,6 +418,22 @@ private slots:
         QTRY_VERIFY(app.typing());
     }
 
+    void collapsingTheNodeEndsTheEdit() {
+        WidgetApp app;
+        QVERIFY(app.open());
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, app.screen(60, 30)); // select the node
+        app.click(app.in("all", "name"));
+        QTRY_VERIFY(app.typing());
+        app.type("owl");
+        app.key(Qt::Key_C, Qt::AltModifier); // node.collapse is not a field's key
+        QTRY_VERIFY(!app.typing());
+        QCOMPARE(app.stored("all", "name"), QJsonValue("owl"));
+        QCOMPARE(app.steps(), 1);
+        // Nothing is left open: the next edit is a step of its own.
+        app.model.widgets()->setValue("all", "flag", true);
+        QCOMPARE(app.steps(), 2);
+    }
+
     void anotherTabEndsTheEditWithoutWritingIntoIt() {
         WidgetApp app;
         QVERIFY(app.open());

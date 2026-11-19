@@ -57,7 +57,15 @@ Rectangle {
         }
     }
 
+    // Zoomed out past reading, or the node collapsed: the edit ends and keeps what is valid.
+    onVisibleChanged: if (!visible) area.done(true)
+
+    // The row can go while the field is open (the node collapsed): the edit still ends.
+    property var sessionEdits: null
+    Component.onDestruction: if (!closing && sessionEdits) sessionEdits.finish()
+
     Component.onCompleted: {
+        sessionEdits = host.edits
         host.edits.begin(host.nodeId, host.name)
         edit.text = host.startText()
         edit.selectAll()

@@ -295,9 +295,11 @@ void CanvasModel::portsFromType(NodeRow &row, const Node &node) const {
         port.label = label.isEmpty() ? (spec.label.isEmpty() ? spec.name : spec.label) : label;
         port.type = spec.type;
         port.kind = m_registry ? m_registry->portKind(spec.type.type) : PortKind::Unknown;
-        // A resource input is a value row too: unwired, it shows the model picker (2.5).
-        port.widgetType = port.kind == PortKind::Resource && !spec.type.list ? QStringLiteral("model") : spec.widget();
-        port.widget = !port.widgetType.isEmpty();
+        // A resource input is a value row too: unwired, it shows the model picker (2.5). A list
+        // keeps its row but has no widget to edit it with (its value shows as "[n]").
+        if (!spec.type.list)
+            port.widgetType = port.kind == PortKind::Resource ? QStringLiteral("model") : spec.widget();
+        port.widget = !port.widgetType.isEmpty() || (spec.type.list && !spec.widget().isEmpty());
         port.required = spec.required();
         port.defaultValue = spec.defaultValue;
         return port;

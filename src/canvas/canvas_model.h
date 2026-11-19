@@ -41,6 +41,10 @@
 //   undo step; the canvas emits searchRequested (double-click on empty canvas) and
 //   linkReleased (a dragged link let go on empty canvas) with the world point and the
 //   dragged port, for search filtered by port type.
+// - #48 widgets (done): WidgetEdit (canvas/widget_edit.h), owned here as `widgets`, edits an
+//   input's value from the widget on the node face; each port map carries `widgetType` and
+//   the stored `literal` for it. A resource input is a value row (the model picker). When a
+//   run starts, #19 calls widgets->advanceSeeds() for the seeds set to increment.
 // - #19 run state: add roles to NodeList (state, progress, last output values); a node's
 //   row is found by id in O(1) (rowOf).
 // - The window's commands (edit.*, node.bypass, node.mute, node.collapse, view.*) call the
