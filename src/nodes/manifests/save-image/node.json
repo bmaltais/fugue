@@ -1,0 +1,25 @@
+{
+  "manifest": 1,
+  "id": "fugue/save-image",
+  "version": "1.0.0",
+  "name": "Save Image",
+  "description": "Writes an image to the output folder, with the workflow embedded so the file can be dropped back onto Fugue.",
+  "category": "Basic",
+  "keywords": ["write", "export", "output", "png", "webp", "workflow"],
+  "sink": true,
+  "runtime": {"kind": "builtin"},
+  "needs": {"files": true},
+  "inputs": [
+    {"name": "image", "type": "image", "label": "Image"},
+    {"name": "name", "type": "text", "label": "Name", "default": "fugue", "widget": "line"},
+    {"name": "format", "type": "text", "label": "Format", "default": "png", "choices": ["png", "webp"]},
+    {"name": "embed", "type": "text", "label": "Embed workflow", "default": "full",
+     "choices": ["full", "no-prompts", "none"],
+     "description": "full: the whole workflow. no-prompts: the workflow with its prompts blanked. none: nothing. Local file paths are never embedded."},
+    {"name": "folder", "type": "text", "label": "Folder", "optional": true, "widget": "folder",
+     "description": "Where to write. Empty means the output folder (~/Pictures/Fugue)."}
+  ],
+  "outputs": [
+    {"name": "file", "type": "image", "label": "File", "description": "The image as written."}
+  ]
+}

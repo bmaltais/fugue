@@ -110,39 +110,47 @@ RunStatus streamEvents(const RunFolder &folder, Context &context) {
 namespace {
 
 // What `fugue run <file>` is to run: the file compiled, or the file itself when it
-// already is a compiled graph (4.8).
-Compilation graphToRun(const Command &command, Context &context) {
+// already is a compiled graph (4.8). `document` is the workflow as compiled (after
+// `--set`), empty for a compiled graph.
+struct Plan {
+    Compilation compilation;
+    QJsonObject document;
+};
+
+Plan graphToRun(const Command &command, Context &context) {
     const QString file = command.positionals.at(0);
     const Result<QJsonObject> json = readJsonObject(file);
     if (json && json->contains("fugue-compiled")) {
         // Nothing is compiled, so what changes a compile has nothing to act on.
         for (const char *option : {"set", "to", "provider"})
             if (command.has(option))
-                return makeError("usage", QStringLiteral("--%1 cannot be used with a compiled graph.").arg(option),
-                                 "Run the workflow file itself with this option.");
+                return {makeError("usage", QStringLiteral("--%1 cannot be used with a compiled graph.").arg(option),
+                                  "Run the workflow file itself with this option."), {}};
         const Errors providerProblems = registerProviders(context.registry);
         if (hasErrors(providerProblems))
-            return Compilation(providerProblems);
+            return {Compilation(providerProblems), {}};
         const Result<CompiledGraph> graph = CompiledGraph::fromJson(*json);
         const Errors problems = providerProblems + graph.problems();
-        return graph ? Compilation(graph.value(), problems) : Compilation(problems);
+        return {graph ? Compilation(graph.value(), problems) : Compilation(problems), {}};
     }
     // Not a compiled graph: a workflow document, whose loader reports what is wrong
     // with the file in a workflow's terms.
     Result<Document> document = Document::loadFile(file);
     if (!document)
-        return Compilation(document.errors());
+        return {Compilation(document.errors()), {}};
     const Errors setErrors = applyOverrides(*document, command.options.value("set"));
     if (!setErrors.isEmpty())
-        return Compilation(setErrors);
-    return compileDocument(*document, context.registry, {command.value("to"), command.value("provider")});
+        return {Compilation(setErrors), {}};
+    return {compileDocument(*document, context.registry, {command.value("to"), command.value("provider")}),
+            document->toJson()};
 }
 
 } // namespace
 
 Reply startRun(const Command &command, Context &context) {
     const QString file = command.positionals.at(0);
-    const Compilation compilation = graphToRun(command, context);
+    const Plan plan = graphToRun(command, context);
+    const Compilation &compilation = plan.compilation;
     if (!compilation.ok())
         return Reply::failure(compilation.errors());
 
@@ -151,6 +159,8 @@ Reply startRun(const Command &command, Context &context) {
         return Reply::failure(folder.errors());
     const QString workflow = QFileInfo(file).absoluteFilePath();
     folder->writeCompiled(compilation->toJson());
+    if (!plan.document.isEmpty())
+        folder->writeWorkflow(plan.document);
     folder->queued(workflow);
 
     const Queue queue(context.queueDir);
@@ -292,6 +302,7 @@ int work(const QString &runId, Context &context) {
     RunOptions options;
     options.warnings = providerProblems;
     options.workflow = folder->state().value("workflow").toObject().value("path").toString();
+    options.document = folder->workflow();
     const RunOutcome outcome = runGraph(*graph, *folder, process.environment, options, &g_cancel);
     queue.remove(runId);
     return outcome.status == RunStatus::Ok ? 0 : 1;

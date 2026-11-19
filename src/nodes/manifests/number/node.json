@@ -1,0 +1,16 @@
+{
+  "manifest": 1,
+  "id": "fugue/number",
+  "version": "1.0.0",
+  "name": "Number",
+  "description": "A number, typed in the node.",
+  "category": "Basic",
+  "keywords": ["value", "integer", "float", "constant"],
+  "runtime": {"kind": "builtin"},
+  "inputs": [
+    {"name": "value", "type": "number", "label": "Value", "default": 0, "widget": "spin"}
+  ],
+  "outputs": [
+    {"name": "value", "type": "number", "label": "Value"}
+  ]
+}

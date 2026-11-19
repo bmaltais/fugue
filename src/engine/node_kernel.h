@@ -40,6 +40,7 @@
 // Kernels must be thread-safe: one kernel object may run several nodes at
 // once, so per-run state belongs in locals, not members.
 
+#include <QJsonObject>
 #include <QString>
 
 #include <functional>
@@ -55,6 +56,7 @@
 namespace fugue {
 
 class FileHashes;
+class Registry;
 class ResidentModels;
 
 struct NodeContext {
@@ -76,6 +78,21 @@ struct NodeContext {
     // The resident-model cache (9.3), or null. A kernel that loads a model
     // keeps it here under resourceIdentity(handle) so the next node reuses it.
     ResidentModels *models = nullptr;
+
+    // The registry the run was compiled against: node types, for a kernel that reads the
+    // document (share_copy.h).
+    const Registry *registry = nullptr;
+    // The workflow being run, in Document::toJson() form, exactly as the run was
+    // started (after `--set` overrides), or empty when the run did not start from a
+    // document (a compiled graph). For a node that writes the workflow into its
+    // output (Save Image, 11.7); never an input to anything, so it is not in the cache key.
+    QJsonObject document;
+    // What was used to make this node's inputs, from what the scheduler records in
+    // run.json: {"<path id>": {"auto": {<input>: <value>}, "engine": <id>,
+    // "model": <handle>}} for this node and every node upstream of it that has any
+    // (a randomized input made concrete; a provider node's engine and model).
+    // Same purpose as `document`, and likewise not in the cache key.
+    QJsonObject used;
 
     // The input's value, or an Empty value when it has none.
     Value input(const QString &name) const { return inputs.value(name); }

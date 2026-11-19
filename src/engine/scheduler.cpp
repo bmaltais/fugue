@@ -9,6 +9,7 @@
 #include <QHash>
 #include <QJsonArray>
 #include <QPointer>
+#include <QSet>
 #include <QRandomGenerator>
 #include <QThread>
 #include <QThreadPool>
@@ -61,6 +62,9 @@ struct NodeRun {
 
     Values inputs;
     Values outputs;
+    // A sink with no outputs (Preview): its resolved inputs, which are what it shows
+    // (events and run.json carry them as `shown`).
+    QJsonObject shown;
     QJsonObject autoValues; // input -> the value a randomized input got
     QString key;
     QStringList models; // what it would keep resident (9.3)
@@ -345,6 +349,8 @@ private:
                 node.insert("key", n.key);
             if (!n.outputs.isEmpty())
                 node.insert("outputs", valuesJson(n.outputs));
+            if (!n.shown.isEmpty())
+                node.insert("shown", n.shown);
             if (!n.reason.isEmpty())
                 node.insert("reason", n.reason);
             if (n.state == NodeState::Error)
@@ -728,6 +734,34 @@ private:
                 break;
     }
 
+    // The values used by the node and everything upstream of it (NodeContext::used),
+    // from the same records run.json is written from. Upstream nodes have finished,
+    // so their randomized inputs and selected providers are settled.
+    QJsonObject usedUpstream(const NodeRun &n) const {
+        QJsonObject used;
+        QStringList pending{n.path};
+        QSet<QString> seen;
+        while (!pending.isEmpty()) {
+            const QString path = pending.takeLast();
+            if (seen.contains(path))
+                continue;
+            seen.insert(path);
+            const auto found = m_nodes.constFind(path);
+            const NodeRun &node = found.value();
+            QJsonObject entry;
+            if (!node.autoValues.isEmpty())
+                entry.insert("auto", node.autoValues);
+            if (node.selection) {
+                entry.insert("engine", node.selection->engine);
+                entry.insert("model", node.selection->model.handle);
+            }
+            if (!entry.isEmpty())
+                used.insert(path, entry);
+            pending.append(node.dependencies);
+        }
+        return used;
+    }
+
     NodeContext contextFor(const NodeRun &n) {
         NodeContext context;
         context.node = n.path;
@@ -737,6 +771,9 @@ private:
         context.workDir = n.workDir;
         context.hashes = m_env.hashes;
         context.models = m_env.models;
+        context.registry = m_env.registry;
+        context.document = m_options.document;
+        context.used = usedUpstream(n);
         const QString path = n.path;
         context.progress = [this, path](double value, const QString &stage, const QString &message) {
             later([this, path, value, stage, message] { progress(path, value, stage, message); });
@@ -924,10 +961,20 @@ private:
         n.phase = Phase::Finished;
         n.state = NodeState::Cached;
         n.outputs = stored.value();
+        n.shown = shownBy(n);
         m_outcome.ran.append(n.path);
         const double seconds = n.started.msecsTo(now()) / 1000.0;
-        emitEvent({{"event", "node.done"}, {"node", n.path}, {"outputs", valuesJson(n.outputs)}, {"seconds", seconds}});
+        QJsonObject done{{"event", "node.done"}, {"node", n.path}, {"outputs", valuesJson(n.outputs)}, {"seconds", seconds}};
+        if (!n.shown.isEmpty())
+            done.insert("shown", n.shown);
+        emitEvent(done);
         advance();
+    }
+
+    // What a sink with no outputs shows: its inputs as resolved. Other nodes show
+    // nothing of their own (their outputs are what they have).
+    static QJsonObject shownBy(const NodeRun &n) {
+        return n.type && n.type->sink && n.type->outputs.isEmpty() ? valuesJson(n.inputs) : QJsonObject();
     }
 
     bool checkOutputs(const NodeRun &n, Values &outputs, Error &bad) const {
@@ -1003,7 +1050,11 @@ private:
         n.phase = Phase::Finished;
         n.state = state;
         n.outputs = outputs;
-        emitEvent({{"event", "node.cached"}, {"node", n.path}, {"outputs", valuesJson(outputs)}});
+        n.shown = shownBy(n);
+        QJsonObject cached{{"event", "node.cached"}, {"node", n.path}, {"outputs", valuesJson(outputs)}};
+        if (!n.shown.isEmpty())
+            cached.insert("shown", n.shown);
+        emitEvent(cached);
     }
 
     void finish() {

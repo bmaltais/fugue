@@ -281,8 +281,15 @@ Reply runsResult(const Command &command, Context &context) {
     for (const QJsonObject &event : events) {
         const QString kind = event.value("event").toString();
         if (kind == "node.done" || kind == "node.cached") {
-            if (!filter || wanted.contains(event.value("node").toString()))
-                outputs.insert(event.value("node").toString(), event.value("outputs"));
+            if (!filter || wanted.contains(event.value("node").toString())) {
+                // A sink with no outputs (Preview) reports what it shows as `shown`: its inputs
+                // are its result.
+                QJsonObject values = event.value("outputs").toObject();
+                const QJsonObject shown = event.value("shown").toObject();
+                for (auto it = shown.begin(); it != shown.end(); ++it)
+                    values.insert(it.key(), it.value());
+                outputs.insert(event.value("node").toString(), values);
+            }
         } else if (kind == "run.done")
             errors = event.value("errors").toArray();
     }
