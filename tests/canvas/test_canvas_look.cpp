@@ -212,6 +212,49 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // Bypassed reads at a glance, as in ComfyUI: the whole node tinted magenta; muted is faded
+    // toward the canvas and not tinted. On a dark and a light theme, square and round.
+    void bypassedAndMutedAreDistinct_data() {
+        QTest::addColumn<QString>("theme");
+        QTest::addColumn<int>("radius");
+        QTest::addRow("dark, round") << "ethereal" << 8;
+        QTest::addRow("light, square") << "flexoki-light" << 0;
+        QTest::addRow("fallback palette") << "" << -1;
+    }
+
+    void bypassedAndMutedAreDistinct() {
+        QFETCH(QString, theme);
+        QFETCH(int, radius);
+        if (!theme.isEmpty() && !QFileInfo::exists("/usr/share/omarchy/themes/" + theme))
+            QSKIP("Omarchy's themes are not installed here");
+        App app(statesBoard(), {}, Look{theme, radius});
+        QVERIFY(openAt(app));
+        setStates(app, writeScene(app.dir.filePath("scene.png"), 512, 288));
+        QTest::qWait(200);
+        const QImage shot = app.window->grabWindow();
+        const fugue::look::Tokens &t = app.theme.look()->tokens();
+        // The board's nodes: cached at (56, 60), bypassed at (560, 360), muted at (812, 360).
+        auto header = [&](qreal x, qreal y) { return shot.pixelColor(app.screen(x + 120, y + 6)); };
+        auto body = [&](qreal x, qreal y) { return shot.pixelColor(app.screen(x + 100, y + 28 + 4 + 24 + 12 + 2)); };
+        auto near = [](const QColor &a, const QColor &b) {
+            return qAbs(a.red() - b.red()) <= 2 && qAbs(a.green() - b.green()) <= 2 && qAbs(a.blue() - b.blue()) <= 2;
+        };
+        QVERIFY2(near(header(560, 360), t.bypassHeader), qPrintable(header(560, 360).name() + " vs " + t.bypassHeader.name()));
+        QVERIFY2(near(body(560, 360), t.bypassBody), qPrintable(body(560, 360).name() + " vs " + t.bypassBody.name()));
+        // The tint is a visible step from the plain node, not a hair.
+        QVERIFY(fugue::look::deltaE(body(560, 360), body(56, 60)) > 0.02);
+        QVERIFY(fugue::look::deltaE(header(560, 360), header(56, 60)) > 0.03);
+        // Muted: the plain colors faded toward the canvas (its shadow darkens that a little), so
+        // neither tinted nor plain: nearer the canvas than the body.
+        const QColor faded = body(812, 360);
+        QVERIFY2(fugue::look::deltaE(faded, t.canvas) < fugue::look::deltaE(faded, t.body), qPrintable(faded.name()));
+        QVERIFY(fugue::look::deltaE(faded, t.canvas) > 0.005);
+        QVERIFY(fugue::look::deltaE(body(812, 360), body(560, 360)) > 0.02);
+        if (const QString out = qEnvironmentVariable("FUGUE_LOOK_SHOTS"); !out.isEmpty())
+            QVERIFY(shot.save(QStringLiteral("%1/bypass-%2-r%3.png").arg(out, theme.isEmpty() ? "default" : theme).arg(radius)));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void screenshots_data() {
         QTest::addColumn<QString>("board");
         QTest::addColumn<QString>("theme");

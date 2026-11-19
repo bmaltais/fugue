@@ -160,6 +160,21 @@ Tokens tokens(const QHash<QString, QColor> &colors, bool light) {
         if (std::all_of(surfaces.begin(), surfaces.end(), [&](const QColor &s) { return contrast(t.label, s) >= 4.5; }))
             break;
     }
+    // A bypassed node: ComfyUI's magenta, from the palette so it follows the theme. Each tint
+    // steps down until the text (and the label, where the plain body allows it) reads on it.
+    const QColor magenta = colors.value("magenta", accent);
+    const double labelNeed = std::min(4.5, contrast(t.label, t.body));
+    for (const double k : {.26, .22, .18, .14, .10, .06}) {
+        t.bypassBody = mix(t.body, magenta, k);
+        if (contrast(fg, t.bypassBody) >= 4.5 && contrast(t.label, t.bypassBody) >= labelNeed)
+            break;
+    }
+    for (const double k : {.40, .34, .28, .22, .16, .10}) {
+        t.bypassHeader = mix(t.header, magenta, k);
+        if (contrast(fg, t.bypassHeader) >= 4.5)
+            break;
+    }
+    t.bypassEdge = lift(magenta, t.canvas, 3.0);
     return t;
 }
 
@@ -411,6 +426,9 @@ void CanvasLook::update(const QHash<QString, QColor> &colors, bool light, int ra
     m_selectedRow = t.selectedRow;
     m_bevel = t.bevel;
     m_scrim = t.scrim;
+    m_bypassBody = t.bypassBody;
+    m_bypassHeader = t.bypassHeader;
+    m_bypassEdge = t.bypassEdge;
     m_text = colors.value("foreground");
     m_accent = colors.value("accent");
     m_accentForeground = blackOrWhiteOn(m_accent);

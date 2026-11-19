@@ -98,6 +98,7 @@ Item {
             readonly property bool frozen: node.runState === "frozen" && !bypassed && !muted
             readonly property bool dashed: bypassed || node.missing
             readonly property color headerFill: failed ? node.look.errorHeader
+                                               : bypassed ? node.look.bypassHeader
                                                : node.color !== "" ? node.look.role(node.color).tint : node.look.header
             readonly property color edge: failed ? node.look.error
                                         : running ? node.look.accent
@@ -149,7 +150,7 @@ Item {
             Rectangle {
                 anchors.fill: parent
                 radius: face.corner
-                color: node.look.body
+                color: face.bypassed ? node.look.bypassBody : node.look.body
                 border.width: face.dashed ? 0 : 1
                 border.color: face.edge
             }
@@ -198,7 +199,6 @@ Item {
                     elide: Text.ElideRight
                     textFormat: Text.PlainText
                     color: node.missing ? node.look.error : node.look.text
-                    opacity: face.bypassed ? 0.55 : 1
                     font.pixelSize: node.look.textSize
                     font.weight: Font.DemiBold
                 }
@@ -233,7 +233,6 @@ Item {
                         textFormat: Text.PlainText
                         color: node.look.label
                         font.pixelSize: node.look.labelSize
-                        opacity: face.bypassed ? 0.55 : 1
                     }
                     // The last value, as a chip left of the label.
                     Loader {
@@ -305,7 +304,6 @@ Item {
                         y: Math.round(0.5 * face.u)
                         width: node.width - 6 * face.u
                         height: input.height - 2 * Math.round(0.5 * face.u)
-                        opacity: face.bypassed ? 0.55 : 1
                         sourceComponent: InputWidget {
                             edits: node.canvasModel.widgets
                             nodeId: node.nodeId
@@ -329,7 +327,6 @@ Item {
                         textFormat: Text.PlainText
                         color: node.look.label
                         font.pixelSize: node.look.labelSize
-                        opacity: face.bypassed ? 0.55 : 1
                     }
                     // An unlinked widget input shows its mark only on hover or to a compatible link.
                     PortDot {
@@ -444,7 +441,7 @@ Item {
                         anchors.fill: parent
                         ShapePath {
                             strokeWidth: 1
-                            strokeColor: node.missing ? node.look.error : node.look.hairlineStrong
+                            strokeColor: node.missing ? node.look.error : node.look.bypassEdge
                             strokeStyle: ShapePath.DashLine
                             dashPattern: [4, 3]
                             fillColor: "transparent"

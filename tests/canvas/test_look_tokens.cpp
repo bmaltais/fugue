@@ -100,6 +100,24 @@ private slots:
         COMPARE_COLOR(muted.tint, "#453c42");
     }
 
+    void aBypassedNodeIsTintedWithTheMagentaAndKeepsItsTextReadable() {
+        for (const bool light : {false, true}) {
+            const QHash<QString, QColor> &colors = light ? flexokiLight : ethereal;
+            const look::Tokens t = look::tokens(colors, light);
+            const QColor fg = colors.value("foreground");
+            // Visibly not the plain node, toward the magenta.
+            QVERIFY(look::deltaE(t.bypassBody, t.body) > 0.02);
+            QVERIFY(look::deltaE(t.bypassHeader, t.header) > 0.03);
+            QVERIFY(look::deltaE(t.bypassBody, colors.value("magenta"))
+                    < look::deltaE(t.body, colors.value("magenta")));
+            // The title, the labels and the edge read.
+            QVERIFY(look::contrast(fg, t.bypassBody) >= 4.5);
+            QVERIFY(look::contrast(fg, t.bypassHeader) >= 4.5);
+            QVERIFY(look::contrast(t.label, t.bypassBody) >= 4.5);
+            QVERIFY(look::contrast(t.bypassEdge, t.canvas) >= 3.0);
+        }
+    }
+
     void lightThemeTokens() {
         const look::Tokens t = look::tokens(flexokiLight, true);
         COMPARE_COLOR(t.canvas, "#f4f1e6");
@@ -241,6 +259,9 @@ private slots:
             QVERIFY2(look::contrast(port, t.canvas) >= 2.99, qPrintable(port.name()));
         }
         const QColor text = colors.value("foreground");
+        QVERIFY(look::contrast(text, t.bypassBody) >= 4.5);
+        QVERIFY(look::contrast(text, t.bypassHeader) >= 4.5);
+        QVERIFY(look::contrast(t.label, t.bypassBody) >= 4.5);
         for (const char *role : {"blue", "green", "magenta", "orange"}) {
             const look::RoleTokens r = look::roleTokens(t, colors.value(role), text, read.light);
             QVERIFY2(look::contrast(text, r.tint) >= 4.5, qPrintable(role));

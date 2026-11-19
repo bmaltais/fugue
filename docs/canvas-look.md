@@ -420,14 +420,35 @@ Glyphs are [Lucide](https://lucide.dev) icons (ISC license), bundled as a subset
 | Running | `accent`, its opacity pulsing 1 to 0.45 | progress bar | `loader-circle`, rotating | percent | 1 | dots travel the incoming wires |
 | Frozen | `hairline` | | `snowflake`, `text` | "Frozen" | 1 | |
 | Error | 1 px `error` | `error-header` | `triangle-alert`, `error` | | 1 | error chip under the node (4.7) |
-| Bypassed | dashed `hairline-strong` | title at 55% | `corner-down-right` | "Bypassed" | body 55% | a dashed line in the type color from the input to the output it feeds (spec 3.5) |
-| Muted | `hairline` | | `ban` | "Muted" | 0.4 | its outgoing wires 0.4 |
+| Bypassed | dashed `bypass-edge` | `bypass-header` | `corner-down-right` | "Bypassed" | 1 (body `bypass-body`) | the node tinted magenta; a dashed line in the type color from the input to the output it feeds (spec 3.5) |
+| Muted | `hairline` | | `ban` | "Muted" | 0.4 | the whole node faded, untinted; its outgoing wires 0.4 |
 | Skipped | `hairline` | | `skip-forward` | "Skipped" | 0.6 | an upstream node is muted |
 | Missing type | dashed `error` | title in `error`: the type id | `circle-help` | | 1 | ports kept from the file; a body line "Not installed. Find it in packs…" (spec 11.6) |
 | Warning | | | `triangle-alert`, `label`, with a count | | 1 | the warnings in a tooltip |
 | Pinned | | | `pin`, `label` | | 1 | |
 | Collapsed | | header only, corner `r` all round | | | 1 | width fits the title plus 24u (kind mark, meta, padding), at most 60u; one port mark at each end |
 | Group (a node type) | `hairline` | layers glyph for the kind mark | `layers` | | 1 | a second card offset (1u, 1u) behind it; a caption row "4 nodes · Tab to enter" |
+
+**Bypassed and muted** (owner feedback 2026-11-19). ComfyUI's litegraph draws a bypassed node
+(mode 4) in magenta (`#FF00FF`) at alpha 0.2 and a muted one (mode 2, "Never") at alpha 0.4, so
+bypass is "see-through magenta" and mute is "faded". Fugue keeps the two apart the same way and
+adds legibility: the whole node is **tinted** with the theme palette's `magenta` (so it follows
+light and dark themes and any radius) and mute only fades.
+
+- `bypass-body` = `body` mixed toward magenta, 26% stepping down to 6%; `bypass-header` = `header`
+  mixed toward magenta, 40% stepping down to 10%. The share is the first that keeps the text at
+  4.5:1 on it (the labels too, where the plain body allows it), so the title and labels stay at
+  full opacity; the old 55% fade is gone because it failed that rule. `bypass-edge` = the magenta
+  lifted to 3:1 against the canvas, as the 1 px dashed edge. Computed in `look::tokens`.
+- It costs nothing extra: two fill colors and the dashed edge the state already had (the `decor`
+  Loader); no overlay item, no opacity layer, no per-node effect. Muted is the node's `opacity`
+  (0.4), as before.
+- The dashed pass-through line in the type color stays: it reads on the tint and says where the
+  value goes, which ComfyUI's plain wires do not.
+- Distinct from the rest: mute has no tint and a solid edge; an error is red with a solid edge;
+  a missing type is a dashed red edge with a note row.
+- Menu names follow the state (spec 12.4): the bypassed node's menu says "Remove bypass" (ComfyUI's
+  "Remove Bypass"), a muted one "Unmute", a collapsed one "Expand", a pinned one "Unpin".
 
 A dashed edge in QML is a `Shape` with `strokeStyle: ShapePath.DashLine` around a `PathRectangle`
 (with `radius`), created only for nodes in those states.
