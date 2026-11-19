@@ -34,6 +34,10 @@ public:
     Errors write(const QString &id, const Document &document, const QString &originalPath, const QString &title);
     // Removes the copy of `id`; fine when there is none.
     void remove(const QString &id);
+    // Moves the copy of `id` (one that cannot be read) into the `unreadable` folder inside the
+    // recovery folder, where it is no longer offered but stays for the person to look at.
+    // That folder's path, or empty when the copy could not be moved (it then stays in place).
+    QString setAside(const QString &id);
     // Every copy, newest first. Also cleans partial files a dead writer left.
     QList<RecoveryEntry> list() const;
     Result<Document> read(const QString &id) const;

@@ -298,6 +298,23 @@ private slots:
         QCOMPARE(Document::loadFile(f.file("a.fugue"))->graph.nodes.size(), 2);
     }
 
+    // A copy that cannot be read is kept aside, never deleted: it may be the only one.
+    void anUnreadableRecoveryCopyIsKeptAside() {
+        Fixture f;
+        QVERIFY(QDir().mkpath(f.locations.recoveryDir));
+        QVERIFY(write(f.locations.recoveryDir + "/lost.fugue", "not json"));
+        CanvasModel again(&f.registry);
+        auto next = f.restart(again);
+        QCOMPARE(next->recoverable().size(), 1);
+        next->recover();
+        QVERIFY2(next->notice().contains("could not be read"), qPrintable(next->notice()));
+        QVERIFY(!QFileInfo::exists(f.locations.recoveryDir + "/lost.fugue"));
+        QCOMPARE(read(f.locations.recoveryDir + "/unreadable/lost.fugue"), QByteArray("not json"));
+        QVERIFY2(next->notice().contains(f.locations.recoveryDir + "/unreadable"), qPrintable(next->notice()));
+        CanvasModel third(&f.registry);
+        QVERIFY(f.restart(third)->recoverable().isEmpty());
+    }
+
     void discardingTheOfferDeletesTheCopies() {
         Fixture f;
         f.canvas.addNode("fugue/text", 0, 0);

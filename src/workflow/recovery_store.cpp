@@ -52,6 +52,22 @@ void RecoveryStore::remove(const QString &id) {
     QFile::remove(metaPath(id));
 }
 
+QString RecoveryStore::setAside(const QString &id) {
+    if (!validId(id))
+        return {};
+    const QString aside = m_dir + "/unreadable";
+    if (!makeFolder(aside).isEmpty())
+        return {};
+    // A copy set aside before under the same id keeps its place: this one takes another name.
+    QString name = id + ".fugue";
+    for (int n = 2; QFileInfo::exists(aside + "/" + name); ++n)
+        name = QStringLiteral("%1-%2.fugue").arg(id).arg(n);
+    if (!QFile::rename(copyPath(id), aside + "/" + name))
+        return {};
+    QFile::remove(metaPath(id));
+    return aside;
+}
+
 QList<RecoveryEntry> RecoveryStore::list() const {
     QList<RecoveryEntry> entries;
     if (!QFileInfo(m_dir).isDir())

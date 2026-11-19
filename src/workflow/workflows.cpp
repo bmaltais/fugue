@@ -501,13 +501,16 @@ void Workflows::recover() {
     m_recoverable.clear();
     emit recoverableChanged();
     QStringList failed;
+    QString aside;
     for (const QVariant &value : entries) {
         const QVariantMap entry = value.toMap();
         const QString id = entry.value("id").toString();
         const Result<Document> document = m_recovery.read(id);
         if (!document.ok()) {
+            // Never deleted: it may be the only copy of the work, readable by a later version.
             failed << entry.value("title").toString();
-            m_recovery.remove(id);
+            if (const QString folder = m_recovery.setAside(id); !folder.isEmpty())
+                aside = folder;
             continue;
         }
         // The copy keeps its id, so the next 30-second write replaces it in place.
@@ -515,7 +518,9 @@ void Workflows::recover() {
         analyze(document.value(), m_tabs[size_t(m_current)].title);
     }
     if (!failed.isEmpty())
-        setNotice(tr("These recovery copies could not be read and were removed: %1").arg(failed.join(", ")));
+        setNotice(aside.isEmpty()
+                      ? tr("These recovery copies could not be read: %1").arg(failed.join(", "))
+                      : tr("These recovery copies could not be read and were kept in %1: %2").arg(aside, failed.join(", ")));
 }
 
 void Workflows::discardRecovery() {
