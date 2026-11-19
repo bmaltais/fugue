@@ -650,7 +650,7 @@ search, versions, groups, caching, the canvas and workflows treat all tiers alik
 | --- | --- | --- |
 | `command` | `entry` (program path relative to the node folder), `mode` (`oneshot` default, or `persistent`), `idle_timeout_s` (default 300), `timeout_s` (optional) | Ships in M3. |
 | `group` | `definition` (a file holding a group definition, [4.4](#44-groups-section)) | Ships in M3. |
-| `native` | `entry` (a shared library), `abi` | Defined, ships after the first command nodes ([6.9](#69-native-tier)). |
+| `native` | `entry` (a shared library), `abi` (`"<major>.<min_host_minor>"`, [6.9](#69-native-tier)) | Defined, ships after the first command nodes ([6.9](#69-native-tier)). |
 | `script` | | Reserved, not in v0.1 ([6.10](#610-script-tier)). |
 | `builtin` | | Only for the `fugue` pack: implemented in the kernel. |
 
@@ -788,8 +788,20 @@ environment, so packs cannot conflict with one another.
 - `runtime.kind: "native"` is part of the manifest now.
 - The plugin interface is a plain C ABI: a versioned table of function pointers, with no C++ or
   Qt types across the boundary and a thin C++ header wrapper for authors.
-- It is frozen only after the prior-art research (OBS, VST3, LV2 and similar) and after the first
-  command nodes have proved the node model. Built-in nodes are the candidates to dogfood it.
+- Its shape comes from the prior-art research ([spikes/06](spikes/06-plugin-abi.md): OBS, VST3,
+  LV2, CLAP, OpenFX, Vulkan, SQLite, Node-API). The rules: one exported function,
+  `fugue_plugin_entry(host)`; every table starts with a `struct_size` set by the side that builds
+  it, and a slot is read only if it lies inside that size; tables are append-only; optional
+  features are extensions found by a string id (`fugue.$NAME/$REV`) that never changes; values are
+  opaque handles and images are views (8-bit, 16-bit or float32), so no libvips or Qt type
+  crosses; errors use the codes of [7.2](#72-one-shot-mode-default) and [9.5](#95-errors); no C
+  enum and no C++ exception crosses the boundary.
+- `runtime.abi` in `node.json` is `"<major>.<min_host_minor>"`. The registry checks it when it
+  indexes manifests, before loading any code; the plugin checks the host again at load.
+- The slot list is frozen only after the first command nodes have proved the node model and two
+  built-in nodes (a pixel node and one that keeps state across runs) use the header.
+- Cancel is cooperative only: an in-process node cannot be killed, so a timeout ([7.4](#74-cancel-and-timeouts)) cannot be
+  enforced for it. A node that must be killable uses the command tier.
 - Native plugins run in-process and are not sandboxed. The trust prompt applies and the docs say so.
 
 ### 6.10 Script tier
@@ -1739,7 +1751,7 @@ To measure or confirm before the part that depends on each is built. None blocks
 | ~~Frame rate with 300 nodes, and the wire renderer~~ Done: a Shape per wire ([spikes/05](spikes/05-canvas.md)) | [12.2](#122-construction) | #5 |
 | ~~libvips speed on 1 to 4 megapixel images, thread and cache settings~~ Done: keep libvips ([spikes/03](spikes/03-libvips.md)) | [14.1](#141-m1-the-first-twelve) pixel nodes | #3 |
 | ~~Offscreen GPU compute, Vulkan device enumeration, free-memory measurement, CUDA terms~~ Done ([spikes/04](spikes/04-gpu.md)); AMD free memory unmeasured | [8.10](#810-gpu-memory-and-the-helper) | #4 |
-| Plugin-interface prior art | freezing [6.9](#69-native-tier) | #6 |
+| ~~Plugin-interface prior art~~ Done: rules in [6.9](#69-native-tier) ([spikes/06](spikes/06-plugin-abi.md)); the slot list freezes after two built-in nodes use it | freezing [6.9](#69-native-tier) | #6 |
 | Whether talking to a separate ComfyUI process, bundling none of its code, is acceptable for an MIT app | the `comfyui` provider | owner decision |
 | How pairing with a remote Omarchy host works beyond reading its key file | remote `omarchy` instances | with #11 |
 | Whether Omarchy's engine runs on a discrete NVIDIA card | local use on such machines | with #11 |
