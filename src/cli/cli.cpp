@@ -1,0 +1,104 @@
+#include "cli/cli.h"
+
+#include <QCoreApplication>
+#include <QJsonDocument>
+
+#include <cstdio>
+
+#include "cli/args.h"
+#include "cli/commands.h"
+#include "engine/run_folder.h"
+
+namespace fugue::cli {
+
+namespace {
+
+void writeOut(const QByteArray &bytes) {
+    std::fwrite(bytes.constData(), 1, size_t(bytes.size()), stdout);
+    std::fflush(stdout);
+}
+
+void writeLine(const QByteArray &line) { writeOut(line + '\n'); }
+
+void logLine(const QString &text) {
+    const QByteArray bytes = text.toUtf8() + '\n';
+    std::fwrite(bytes.constData(), 1, size_t(bytes.size()), stderr);
+    std::fflush(stderr);
+}
+
+// One error as a person reads it (stderr, or stdout text without --json).
+QString humanError(const Error &error) {
+    QString text = QStringLiteral("%1[%2]: %3")
+                       .arg(error.severity == Error::Severity::Warning ? "warning" : "error", error.code, error.message);
+    if (!error.node.isEmpty())
+        text += QStringLiteral(" (node %1)").arg(error.node);
+    if (!error.hint.isEmpty())
+        text += QStringLiteral("\n  hint: %1").arg(error.hint);
+    return text;
+}
+
+const char *helpText =
+    "usage: fugue <command> [--json]\n"
+    "  run <file> [--wait] [--first] [--to <node>] [--provider <name>] [--set <node>.<input>=<value>]\n"
+    "  validate <file> | compile <file>\n"
+    "  workflow new|describe|export|run|validate|compile <file>\n"
+    "  runs list | runs status|events|result|cancel <run-id>\n"
+    "  node list [--type <port type>] | node describe <type id>...\n"
+    "  pack, provider, model, cache, command, skill (later releases)\n"
+    "With no command, fugue opens the window.\n";
+
+} // namespace
+
+int run(int argc, char **argv) {
+    QCoreApplication app(argc, argv);
+    QCoreApplication::setApplicationName("fugue");
+    QCoreApplication::setApplicationVersion("0.1.0");
+
+    const QStringList args = app.arguments().mid(1);
+    if (args.value(0) == "--help" || args.value(0) == "-h") {
+        writeOut(helpText);
+        return 0;
+    }
+    if (args.value(0) == "--version") {
+        writeLine(QCoreApplication::applicationVersion().toUtf8());
+        return 0;
+    }
+
+    const bool json = args.contains("--json");
+    auto fail = [json](const Errors &errors) {
+        if (json) {
+            writeLine(QJsonDocument(errorEnvelope(errors)).toJson(QJsonDocument::Compact));
+        } else {
+            for (const Error &error : errors)
+                logLine(humanError(error));
+        }
+        return 1;
+    };
+
+    const Result<Command> command = parseArguments(args);
+    if (!command)
+        return fail(command.errors());
+
+    Context context;
+    context.runsRoot = RunFolder::defaultRoot();
+    context.line = writeLine;
+    context.log = logLine;
+    loadManifestFolder(context.registry, qEnvironmentVariable("FUGUE_NODE_MANIFESTS"), logLine);
+
+    const Reply reply = execute(*command, context);
+    if (reply.streamed)
+        return reply.exitCode;
+    if (reply.failed())
+        return fail(reply.errors);
+    // Warnings that did not fail the command are diagnostics.
+    for (const Error &warning : reply.errors)
+        logLine(humanError(warning));
+    if (json) {
+        writeLine(QJsonDocument(okEnvelope(reply.data)).toJson(QJsonDocument::Compact));
+    } else if (!reply.text.isEmpty()) {
+        writeLine(reply.text.toUtf8());
+    }
+    return 0;
+}
+
+} // namespace fugue::cli
