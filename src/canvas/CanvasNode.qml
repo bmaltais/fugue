@@ -36,6 +36,7 @@ Item {
     required property string notice // why it cannot run now, and the fix (8.5), from a check
     required property string thumbnail
     required property string thumbnailInfo
+    required property string thumbnailFile
     required property rect thumbnailRect
     required property string thumbnailText // in the image's place (a shown text, a label)
     required property bool thumbnailDim    // a placeholder: no result yet
@@ -357,6 +358,7 @@ Item {
                 sourceComponent: Thumbnail {
                     source: node.thumbnail
                     info: node.thumbnailInfo
+                    file: node.thumbnailFile
                     text: node.thumbnailText
                     look: node.look
                     full: face.full
