@@ -252,6 +252,21 @@ private slots:
         QCOMPARE(read(file), jpeg);
     }
 
+    // The picker's thumbnails are file URLs made from the path: #, ? and % are the name.
+    void recentInputsCarryAFileUrlOfTheirPath() {
+        Pictures p;
+        QVERIFY(QDir().mkpath(p.inputs()));
+        const QString path = p.inputs() + "/c#1 %41?.png";
+        QVERIFY(write(path, encoded(picture(), "PNG")));
+        Registry registry;
+        nodes::addBuiltinNodeTypes(registry);
+        CanvasModel canvas(&registry);
+        ImageInputs inputs(&canvas, &registry);
+        const QVariantList recent = inputs.recent();
+        QCOMPARE(recent.size(), 1);
+        QCOMPARE(recent.first().toMap().value("url").toUrl().toLocalFile(), path);
+    }
+
     void recentInputsAreNewestFirstAndCapped() {
         Pictures p;
         const FileRoots roots = FileRoots::forInputs();

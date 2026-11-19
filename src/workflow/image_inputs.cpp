@@ -390,7 +390,10 @@ ImageInputs::ImageInputs(CanvasModel *canvas, const Registry *registry, QObject 
 QVariantList ImageInputs::recent() const {
     QVariantList list;
     for (const RecentInput &input : recentInputs(recentLimit))
-        list.append(QVariantMap{{"path", input.path}, {"name", input.name}, {"modified", input.modified}});
+        list.append(QVariantMap{{"path", input.path},
+                                {"url", QUrl::fromLocalFile(input.path)},
+                                {"name", input.name},
+                                {"modified", input.modified}});
     return list;
 }
 

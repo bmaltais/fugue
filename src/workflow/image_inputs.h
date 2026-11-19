@@ -125,7 +125,8 @@ public:
     // message. True when any image was placed.
     bool dropFiles(const QStringList &paths, QPointF at, const QString &onNode = {});
 
-    // The "Recent inputs" of the file picker: {path, name, modified}, newest first, at most 48.
+    // The "Recent inputs" of the file picker: {path, url (a file URL made from the path), name,
+    // modified}, newest first, at most 48.
     Q_INVOKABLE QVariantList recent() const;
     // Points a Load Image's file at one of them (or any file in the inputs folder): one undo step.
     Q_INVOKABLE bool use(const QString &node, const QString &path);
