@@ -22,6 +22,7 @@
 #include "commands/command_registry.h"
 #include "engine/document.h"
 #include "engine/registry.h"
+#include "menu/menu_commands.h"
 #include "nodes/builtin.h"
 #include "search/node_search.h"
 #include "theme.h"
@@ -86,6 +87,7 @@ struct App {
     fugue::Workflows workflows{&model, &registry, &commands, {dir.path() + "/recovery", dir.path() + "/trust.json"}};
     QQmlApplicationEngine engine;
     QStringList warnings;
+    QList<QUrl> openedUrls; // what help.docs and help.report-issue opened
     QQuickWindow *window = nullptr;
     QQuickItem *canvas = nullptr;
     QQuickItem *world = nullptr;
@@ -99,9 +101,11 @@ struct App {
         if (addTypes)
             addTypes(registry);
         fugue::registerDefaultCommands(commands);
+        fugue::registerMenuCommands(commands);
         fugue::registerFileCommands(commands, workflows);
         model.search()->registerCommands(commands);
         registerCanvasCommands(commands, model);
+        fugue::bindMenuCommands(commands, model, [this](const QUrl &url) { openedUrls << url; });
         // Opened as a file is: one tab, nothing unsaved.
         workflows.openText(QString::fromUtf8(document.save()));
         QObject::connect(&engine, &QQmlEngine::warnings, [this](const QList<QQmlError> &errors) {
@@ -132,6 +136,8 @@ struct App {
     }
 
     qreal zoom() const { return world->scale(); }
+    // A point of the canvas (its own coordinates) in window coordinates: the menu bar is above it.
+    QPoint at(qreal x, qreal y) const { return canvas->mapToScene(QPointF(x, y)).toPoint(); }
     QPointF pan() const { return world->position(); }
     // A world point in window coordinates.
     QPoint screen(qreal x, qreal y) const {

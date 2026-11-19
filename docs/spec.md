@@ -1515,6 +1515,11 @@ and the `?` overlay marks each one.
 | `view.zoom-in`, `view.zoom-out` | Zoom | Alt+=, Alt+-, Ctrl+=, Ctrl+- | Ctrl added |
 | `view.toggle-links` | Hide or show links | L | same |
 | `panel.nodes`, `panel.workflows` | Toggle the node library, the workflows panel | N, W | same |
+| `app.menu-bar` | Open the menu bar | F10 | added |
+| `app.context-menu` | Open the context menu | Shift+F10, Menu | added |
+
+Commands with no default key (the colors `node.color.<role>`, `edit.clear`, the exports, the help
+links) are in the menus, and the keymap file can bind any of them.
 
 Tab enters a group when exactly one group is selected and opens node search otherwise, inside a
 group too. A command states the context it applies in, and the more specific context owns the key.
@@ -1535,6 +1540,9 @@ belong to the field. Hence the Ctrl and F1 alternatives for quit and the overlay
   settings panel and the CLI's listing all read the same registry.
 - Each key has one owner at a time in a given context (canvas, a selected group, a text field,
   a run in progress). Contexts belong to commands, not to the keymap file.
+- The menu bar and the context menus list command ids; each item's name, key and enabled
+  state come from the registry when the menu opens, and a command not built yet shows as
+  unavailable. Alt+letter opens a top menu where 12.4 binds nothing to it.
 - The user's keymap is a diff against the defaults at `~/.config/fugue/keybindings.json`:
 
 ```json
@@ -1983,6 +1991,15 @@ Building M2 made these further choices.
 | Images in (#53), file roots. The inputs folder is under the output folder, so the default write roots cover it; it is also a default read root (the pictures folder may be set outside the home), and `fugue run` adds the `inputs` folder beside the workflow file it runs as a read root. Storing an image checks the write against roots of just the inputs folder, never wider. A dropped file the user chose is read without a roots check (an explicit gesture, as the file picker is) but must be a regular file | 13.6 | medium |
 | Images in (#53), saving. Save and Save As copy every file the workflow's `file` inputs name under the inputs folder into `inputs` beside the .fugue (same names), repoint those inputs and write, as one step: always, with no question (a question per save would be noise, and a portable file is what a saved workflow should be; the cost is a duplicate file, never a loss). The original stays. If a copy fails the save fails with the reason and nothing is rewritten. The repoint is an undo step ("Move images"). A shared copy (11.5) still replaces the absolute path by the bare file name, so a receiver needs the `inputs` folder beside the file; relative `file` paths are not resolved against the workflow yet | 11.2, 11.5, 14.1 | medium |
 | Images in (#53), the picker. A Load Image's file input has a Paste button (always shown, takes the clipboard into that node) and its picker glyph opens "Browse files…" followed by the newest 48 images of the inputs folder with thumbnails; the thumbnails are decoded small, only for rows that scroll into view. The list reads the folder's names and times when it opens; picking one is one undo step and only a file inside the inputs folder is accepted | 6.2, 14.1 | medium-high |
+| Menus (#50) are built from the command registry: a menu lists command ids (`src/menu/menus.cpp`) and takes each one's name, first key and state from the registry when it opens, so a menu, the `?` overlay and the keymap never disagree. A command with no handler is listed, off and at half opacity; the ticket that owns a command says when it can run (`setEnabledWhen`) and whether a toggle is on | 12.5 | high |
+| Six top menus, File, Edit, View, Node, Run and Help, where ComfyUI has one "Comfy" menu (Workflow/File, Edit, View, Help) and keeps node and run commands in context menus and the action bar: every command is reachable from the keyboard and the mouse in one place. Alt+F, E, V, N, R, H open them (none is bound in 12.4); F10 opens the first (`app.menu-bar`, added); Left and Right move along the bar | 12.4, 12.5 | medium-high |
+| A narrow window (the titles do not fit, as with a large text size or a long translation) shows one menu button in their place, with the menus as submenus; Alt+letter still opens each one under it | 12.5 | medium |
+| While a menu is open the window's shortcuts sleep, so bare letters (Q, L) reach the menu, not quit or links | 12.4 | high |
+| Context menus: right-click on a node, a Frame or empty canvas (on release; a right-drag still does nothing); Shift+F10 or the Menu key (`app.context-menu`, added) opens the selection's or the pointer's. A right-click on a node outside the selection selects it first (ComfyUI); inside, the selection stays | 12.3 | high |
+| Node and Frame colors: one command per theme role, `node.color.<role>` for none, accent, muted, red, orange, yellow, green, cyan, blue and magenta, in Edit > Colors and the context menus; the selection's nodes, or the Frame the menu was opened on, take it in one undo step. A swatch shows the theme's color; the node header shows `tint-<role>`. No `error` role (it is the palette's red). ComfyUI's presets are fixed dark colors (red, brown, green, blue, pale blue, cyan, purple, yellow, black) lightened for light themes; theme roles follow every palette. A color wheel and hex colors are #52 | 4.5 | medium |
+| Frames are not selectable until #26, so a Frame's color comes only from its own context menu | 5.1 | medium |
+| The `?` overlay lists the commands that have a key; the rest (colors, exports, help links) are in the menus and appear in the overlay once the keymap file binds them | 12.5 | medium |
+| Menu items and gaps from ComfyUI: export a share copy and the compiled graph (11.5, #54), Clear workflow, the help links and About are commands; templates, Clipspace, refresh node definitions, unload models, focus mode, theme switching, node shapes, properties panels and the Manager are not planned (Fugue has no Python node definitions, follows the Omarchy theme, and installs packs per 6.6); rename and pin (#55), the side panels (#56), a node's image actions (#57), align and distribute (#58) and the tab menu (#59) are later tickets | 12.5 | medium |
 
 ## Appendix B: issue to section map
 

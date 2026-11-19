@@ -13,6 +13,7 @@
 #include <algorithm>
 
 #include "engine/paths.h"
+#include "menu/menus.h"
 
 namespace fugue {
 
@@ -55,7 +56,7 @@ QString CommandRegistry::add(const CommandSpec &spec, Handler handler) {
         return QStringLiteral("%1 has no description").arg(spec.id);
     if (!kContexts.contains(spec.context))
         return QStringLiteral("%1: unknown context \"%2\"").arg(spec.id, spec.context);
-    Entry entry{spec, std::move(handler), {}, {}};
+    Entry entry{spec, std::move(handler), {}, {}, {}, {}};
     entry.spec.keys.clear();
     for (const QString &key : spec.keys) {
         QString problem;
@@ -77,6 +78,31 @@ bool CommandRegistry::setHandler(const QString &id, Handler handler) {
         return false;
     m_entries[*it].handler = std::move(handler);
     emit changed();
+    return true;
+}
+
+bool CommandRegistry::setLabel(const QString &id, const QString &label) {
+    const auto it = m_index.constFind(id);
+    if (it == m_index.constEnd())
+        return false;
+    m_entries[*it].spec.label = label;
+    emit changed();
+    return true;
+}
+
+bool CommandRegistry::setEnabledWhen(const QString &id, Check check) {
+    const auto it = m_index.constFind(id);
+    if (it == m_index.constEnd())
+        return false;
+    m_entries[*it].enabledWhen = std::move(check);
+    return true;
+}
+
+bool CommandRegistry::setCheckedWhen(const QString &id, Check check) {
+    const auto it = m_index.constFind(id);
+    if (it == m_index.constEnd())
+        return false;
+    m_entries[*it].checkedWhen = std::move(check);
     return true;
 }
 
@@ -111,6 +137,32 @@ bool CommandRegistry::run(const QString &id) {
     const Handler handler = m_entries[*it].handler;
     handler();
     return true;
+}
+
+bool CommandRegistry::isEnabled(const QString &id) const {
+    const auto it = m_index.constFind(id);
+    if (it == m_index.constEnd())
+        return false;
+    const Entry &entry = m_entries[*it];
+    return entry.handler && m_activeContexts.contains(entry.spec.context) && (!entry.enabledWhen || entry.enabledWhen());
+}
+
+bool CommandRegistry::trigger(const QString &id) { return triggerOn(id, {}); }
+
+bool CommandRegistry::triggerOn(const QString &id, const QVariantMap &target) {
+    if (!isEnabled(id, target))
+        return false;
+    const QVariantMap previous = std::exchange(m_target, target);
+    run(id);
+    m_target = previous;
+    return true;
+}
+
+bool CommandRegistry::isEnabled(const QString &id, const QVariantMap &target) const {
+    const QVariantMap previous = std::exchange(m_target, target);
+    const bool enabled = isEnabled(id);
+    m_target = previous;
+    return enabled;
 }
 
 QString CommandRegistry::ownerOf(const QString &key) const {
@@ -333,6 +385,13 @@ void CommandRegistry::setWorkflowOpen(bool open) {
         emit changed();
 }
 
+void CommandRegistry::menuShown(bool shown) {
+    const bool wasOpen = menuOpen();
+    m_openMenus = std::max(0, m_openMenus + (shown ? 1 : -1));
+    if (menuOpen() != wasOpen)
+        emit menuOpenChanged();
+}
+
 void CommandRegistry::quitNow() { QCoreApplication::quit(); }
 
 void CommandRegistry::requestQuit() {
@@ -364,6 +423,50 @@ QVariantList CommandRegistry::list() const {
         });
     }
     return list;
+}
+
+QVariantMap CommandRegistry::entry(const QString &id, const QVariantMap &target) const {
+    const auto it = m_index.constFind(id);
+    if (it == m_index.constEnd())
+        return {};
+    const Entry &entry = m_entries[*it];
+    const QVariantMap previous = std::exchange(m_target, target);
+    const QString description = QCoreApplication::translate("Command", entry.spec.description.toUtf8().constData());
+    QVariantMap map{
+        {"command", entry.spec.id},
+        {"label", entry.spec.label.isEmpty() ? description
+                                             : QCoreApplication::translate("Command", entry.spec.label.toUtf8().constData())},
+        {"description", description},
+        {"keys", entry.keys},
+        {"available", bool(entry.handler)},
+        {"enabled", isEnabled(id)},
+        {"checkable", bool(entry.checkedWhen)},
+        {"checked", entry.checkedWhen && entry.checkedWhen()},
+    };
+    m_target = previous;
+    return map;
+}
+
+QVariantList CommandRegistry::resolve(const QVariantList &items, const QVariantMap &target) const {
+    QVariantList resolved;
+    for (const QVariant &value : items) {
+        QVariantMap item = value.toMap();
+        if (item.contains("items")) {
+            item.insert("title", QCoreApplication::translate("Menu", item.value("title").toString().toUtf8().constData()));
+            item.insert("items", resolve(item.value("items").toList(), target));
+        } else if (item.contains("command")) {
+            const QVariantMap state = entry(item.value("command").toString(), target);
+            if (state.isEmpty())
+                continue; // not registered (a ticket that is not in this build)
+            item.insert(state);
+        }
+        resolved.append(item);
+    }
+    return resolved;
+}
+
+QVariantList CommandRegistry::menu(const QString &name, const QVariantMap &target) const {
+    return resolve(menus::tree(name), target);
 }
 
 } // namespace fugue

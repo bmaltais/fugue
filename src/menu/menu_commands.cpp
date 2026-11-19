@@ -1,0 +1,172 @@
+#include "menu/menu_commands.h"
+
+#include <QClipboard>
+#include <QCoreApplication>
+#include <QDebug>
+#include <QDesktopServices>
+#include <QGuiApplication>
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QMimeData>
+
+#include "canvas/canvas_commands.h"
+#include "canvas/canvas_model.h"
+#include "commands/command_registry.h"
+#include "menu/menus.h"
+
+namespace fugue {
+
+namespace {
+
+const char *const docsUrl = "https://github.com/bmaltais/fugue#readme";
+const char *const issuesUrl = "https://github.com/bmaltais/fugue/issues/new";
+
+struct Row {
+    const char *id;
+    const char *description;
+    const char *label;
+    QStringList keys;
+    const char *context;
+    const char *versus;
+};
+
+QList<Row> menuRows() {
+    return {
+        // Also registered by registerFileCommands (workflows.h) when this has not run.
+        {"file.open-clipboard", QT_TRANSLATE_NOOP("Command", "Open the workflow on the clipboard"),
+         QT_TRANSLATE_NOOP("Command", "Open from clipboard"), {}, "app", "added"},
+        {"file.export-share", QT_TRANSLATE_NOOP("Command", "Export a share copy (local paths removed)"),
+         QT_TRANSLATE_NOOP("Command", "Export share copy…"), {}, "app", "same"},
+        {"file.export-compiled", QT_TRANSLATE_NOOP("Command", "Export the compiled graph, for the CLI"),
+         QT_TRANSLATE_NOOP("Command", "Export compiled graph…"), {}, "app", "same"},
+        {"edit.clear", QT_TRANSLATE_NOOP("Command", "Clear the workflow (remove every node)"),
+         QT_TRANSLATE_NOOP("Command", "Clear workflow"), {}, "canvas", "same"},
+        {"node.color.none", QT_TRANSLATE_NOOP("Command", "Color: none"), QT_TRANSLATE_NOOP("Command", "No color"), {}, "canvas", "same"},
+        {"node.color.accent", QT_TRANSLATE_NOOP("Command", "Color: accent"), QT_TRANSLATE_NOOP("Command", "Accent"), {}, "canvas", "same"},
+        {"node.color.muted", QT_TRANSLATE_NOOP("Command", "Color: muted"), QT_TRANSLATE_NOOP("Command", "Muted"), {}, "canvas", "same"},
+        {"node.color.red", QT_TRANSLATE_NOOP("Command", "Color: red"), QT_TRANSLATE_NOOP("Command", "Red"), {}, "canvas", "same"},
+        {"node.color.orange", QT_TRANSLATE_NOOP("Command", "Color: orange"), QT_TRANSLATE_NOOP("Command", "Orange"), {}, "canvas", "same"},
+        {"node.color.yellow", QT_TRANSLATE_NOOP("Command", "Color: yellow"), QT_TRANSLATE_NOOP("Command", "Yellow"), {}, "canvas", "same"},
+        {"node.color.green", QT_TRANSLATE_NOOP("Command", "Color: green"), QT_TRANSLATE_NOOP("Command", "Green"), {}, "canvas", "same"},
+        {"node.color.cyan", QT_TRANSLATE_NOOP("Command", "Color: cyan"), QT_TRANSLATE_NOOP("Command", "Cyan"), {}, "canvas", "same"},
+        {"node.color.blue", QT_TRANSLATE_NOOP("Command", "Color: blue"), QT_TRANSLATE_NOOP("Command", "Blue"), {}, "canvas", "same"},
+        {"node.color.magenta", QT_TRANSLATE_NOOP("Command", "Color: magenta"), QT_TRANSLATE_NOOP("Command", "Magenta"), {}, "canvas", "same"},
+        {"help.docs", QT_TRANSLATE_NOOP("Command", "Open the documentation"), QT_TRANSLATE_NOOP("Command", "Documentation"), {}, "app", "same"},
+        {"help.report-issue", QT_TRANSLATE_NOOP("Command", "Report an issue"), nullptr, {}, "app", "same"},
+        {"help.about", QT_TRANSLATE_NOOP("Command", "About Fugue"), nullptr, {}, "app", "same"},
+        {"app.menu-bar", QT_TRANSLATE_NOOP("Command", "Open the menu bar"), nullptr, {"F10"}, "app", "added"},
+        {"app.context-menu", QT_TRANSLATE_NOOP("Command", "Open the context menu"), nullptr, {"Shift+F10", "Menu"}, "canvas", "added"},
+    };
+}
+
+// Shorter names for the menus than the keymap table's descriptions.
+QList<QPair<const char *, const char *>> menuLabels() {
+    return {
+        {"file.close", QT_TRANSLATE_NOOP("Command", "Close workflow")},
+        {"file.open", QT_TRANSLATE_NOOP("Command", "Open…")},
+        {"file.save-as", QT_TRANSLATE_NOOP("Command", "Save as…")},
+        {"app.quit", QT_TRANSLATE_NOOP("Command", "Quit")},
+        {"app.shortcuts", QT_TRANSLATE_NOOP("Command", "Keyboard shortcuts")},
+        {"app.settings", QT_TRANSLATE_NOOP("Command", "Settings…")},
+        {"node.search", QT_TRANSLATE_NOOP("Command", "Add node…")},
+        {"node.pin", QT_TRANSLATE_NOOP("Command", "Pin")},
+        {"frame.make", QT_TRANSLATE_NOOP("Command", "Frame selection")},
+        {"group.enter", QT_TRANSLATE_NOOP("Command", "Enter group")},
+        {"group.leave", QT_TRANSLATE_NOOP("Command", "Leave group")},
+        {"view.toggle-links", QT_TRANSLATE_NOOP("Command", "Show links")},
+        {"run.start-first", QT_TRANSLATE_NOOP("Command", "Run first in the queue")},
+        {"run.to-here", QT_TRANSLATE_NOOP("Command", "Run to here")},
+        {"run.cancel", QT_TRANSLATE_NOOP("Command", "Cancel run")},
+    };
+}
+
+} // namespace
+
+void registerMenuCommands(CommandRegistry &registry) {
+    for (const Row &row : menuRows()) {
+        if (registry.contains(QString::fromLatin1(row.id)))
+            continue;
+        CommandSpec spec;
+        spec.id = QString::fromLatin1(row.id);
+        spec.description = QString::fromUtf8(row.description);
+        if (row.label)
+            spec.label = QString::fromUtf8(row.label);
+        spec.keys = row.keys;
+        spec.context = QString::fromLatin1(row.context);
+        spec.versus = QString::fromLatin1(row.versus);
+        if (const QString problem = registry.add(spec); !problem.isEmpty())
+            qCritical().noquote() << "menu command:" << problem;
+    }
+    for (const auto &[id, label] : menuLabels())
+        registry.setLabel(QString::fromLatin1(id), QString::fromUtf8(label));
+    for (const char *id : {"app.menu-bar", "app.context-menu", "help.about"})
+        registry.setHandler(QString::fromLatin1(id), [&registry, id] { emit registry.windowRequested(QString::fromLatin1(id)); });
+}
+
+void bindMenuCommands(CommandRegistry &registry, CanvasModel &canvas, std::function<void(const QUrl &)> openUrl) {
+    CanvasModel *model = &canvas;
+    if (!openUrl)
+        openUrl = [](const QUrl &url) { QDesktopServices::openUrl(url); };
+    registry.setHandler("help.docs", [openUrl] { openUrl(QUrl(QString::fromLatin1(docsUrl))); });
+    registry.setHandler("help.report-issue", [openUrl] { openUrl(QUrl(QString::fromLatin1(issuesUrl))); });
+
+    registry.setHandler("edit.clear", [model] {
+        model->beginEdit();
+        model->selectAll();
+        model->deleteSelection();
+        model->endEdit(QCoreApplication::translate("Menu", "Clear workflow"));
+    });
+    for (const QString &role : menus::colorRoles())
+        registry.setHandler(QStringLiteral("node.color.") + role, [model, &registry, role] {
+            applyLayoutColor(*model, role, registry.target().value("frame").toString());
+        });
+
+    const auto selected = [model] { return !model->selectedIds().isEmpty(); };
+    const auto hasNodes = [model] { return model->nodes()->rowCount() > 0; };
+    registry.setEnabledWhen("edit.undo", [model] { return model->canUndo(); });
+    registry.setEnabledWhen("edit.redo", [model] { return model->canRedo(); });
+    for (const char *id : {"edit.copy", "edit.clone", "edit.delete", "edit.rename", "node.bypass", "node.mute",
+                           "node.collapse", "node.pin", "frame.make", "group.make", "run.to-here"})
+        registry.setEnabledWhen(QString::fromLatin1(id), selected);
+    for (const char *id : {"edit.select-all", "edit.clear", "view.fit"})
+        registry.setEnabledWhen(QString::fromLatin1(id), hasNodes);
+    const auto pasteable = [] {
+        const QMimeData *data = QGuiApplication::clipboard()->mimeData();
+        return data && (data->hasFormat(QString::fromLatin1(canvasClipboardType)) || !data->text().trimmed().isEmpty());
+    };
+    registry.setEnabledWhen("edit.paste", pasteable);
+    registry.setEnabledWhen("edit.paste-connected", pasteable);
+    for (const QString &role : menus::colorRoles())
+        registry.setEnabledWhen(QStringLiteral("node.color.") + role, [model, &registry] {
+            return !model->selectedIds().isEmpty() || !registry.target().value("frame").toString().isEmpty();
+        });
+    registry.setCheckedWhen("view.toggle-links", [model] { return !model->linksHidden(); });
+}
+
+void applyLayoutColor(CanvasModel &canvas, const QString &role, const QString &frame) {
+    Document document = canvas.document();
+    QJsonObject nodes = document.layout.value("nodes").toObject();
+    const auto paint = [&role](QJsonObject entry) {
+        if (role == QLatin1String("none"))
+            entry.remove("color");
+        else
+            entry.insert("color", role);
+        return entry;
+    };
+    const QStringList selected = canvas.selectedIds();
+    for (const QString &id : selected)
+        nodes.insert(id, paint(nodes.value(id).toObject()));
+    if (!selected.isEmpty())
+        document.layout.insert("nodes", nodes);
+    if (!frame.isEmpty()) {
+        QJsonArray frames = document.layout.value("frames").toArray();
+        for (qsizetype i = 0; i < frames.size(); ++i)
+            if (frames.at(i).toObject().value("id").toString() == frame)
+                frames.replace(i, paint(frames.at(i).toObject()));
+        document.layout.insert("frames", frames);
+    }
+    document.present.layout = true;
+    canvas.commit(document, QCoreApplication::translate("Menu", "Color"));
+}
+
+} // namespace fugue

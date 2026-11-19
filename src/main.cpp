@@ -18,6 +18,7 @@
 #include "commands/command_registry.h"
 #include "cli/args.h"
 #include "cli/cli.h"
+#include "menu/menu_commands.h"
 #include "engine/registry.h"
 #include "nodes/builtin.h"
 #include "run/canvas_runs.h"
@@ -54,6 +55,7 @@ int main(int argc, char *argv[]) {
     // The command registry: the default keymap, then the user's changes to it (spec 12.5).
     fugue::CommandRegistry commands;
     fugue::registerDefaultCommands(commands);
+    fugue::registerMenuCommands(commands);
     commands.loadKeymap(fugue::CommandRegistry::keymapPath());
 
     // The canvas reads node types from the same registry the CLI fills (built-ins now,
@@ -70,6 +72,8 @@ int main(int argc, char *argv[]) {
     commands.setContextActive("canvas", true);
     // The canvas's edit, node and view commands; each edit is one step on its undo stack.
     registerCanvasCommands(commands, canvasModel);
+    // The menus' commands that need the canvas, and when each can run (#50).
+    fugue::bindMenuCommands(commands, canvasModel);
     // The window runs its own runs (spec 9.8) on a thread of their own, queued with the CLI's.
     fugue::RunSetup runSetup;
     runSetup.addNodeTypes = fugue::nodes::addBuiltinNodeTypes;

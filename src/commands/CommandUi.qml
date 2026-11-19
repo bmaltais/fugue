@@ -40,7 +40,8 @@ Item {
         }
     }
 
-    KeyShortcuts { active: !help.visible && !quitAsk.visible }
+    // While a menu is open its rows and mnemonics own the keys (#50).
+    KeyShortcuts { active: !help.visible && !quitAsk.visible && !commands.menuOpen }
 
     Connections {
         target: commands
@@ -148,7 +149,8 @@ Item {
                                          {gestures: true, title: qsTr("Mouse")}],
                                         [{prefixes: ["file", "app.quit", "app.settings"], title: qsTr("File")},
                                          {prefixes: ["edit"], title: qsTr("Edit")},
-                                         {prefixes: ["view", "app.shortcuts"], title: qsTr("View")},
+                                         {prefixes: ["view", "app.shortcuts", "app.menu-bar", "app.context-menu"],
+                                          title: qsTr("View")},
                                          {prefixes: ["panel"], title: qsTr("Panels")}]]
         function rowsOf(group) {
             const f = filter.toLowerCase()
@@ -157,6 +159,10 @@ Item {
                 const keys = group.gestures ? e.gestures : e.keys
                 if (group.gestures ? e.gestures.length === 0
                                    : !group.prefixes.some(p => e.id === p || e.id.startsWith(p + ".")))
+                    continue
+                // Shortcuts only: a command with no key (a color, an export) is in the menus,
+                // and shows here once the keymap file binds it (#50).
+                if (!group.gestures && e.keys.length === 0)
                     continue
                 for (const key of group.gestures ? keys : [keys.length > 0 ? keys[0] : ""]) {
                     const row = {description: e.description, key: key, allKeys: group.gestures ? [key] : keys,

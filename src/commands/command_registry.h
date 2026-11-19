@@ -22,6 +22,7 @@ namespace fugue {
 struct CommandSpec {
     QString id;          // `group.name`, lowercase letters, digits and `-`
     QString description; // English; translated when listed
+    QString label;       // the menu's shorter name ("Quit"); empty: the description
     QStringList keys;    // default key bindings, as QKeySequence portable text ("Ctrl+S")
     QStringList gestures; // bindings that are not keys, shown but not rebindable ("Alt+drag")
     // Where the keys apply: app (everywhere), canvas, group-selected, group (inside one) or
@@ -46,9 +47,13 @@ class CommandRegistry : public QObject {
     // Where the keymap file is (the last one loaded, else the default), with the home folder
     // as ~, for the `?` overlay's footer.
     Q_PROPERTY(QString keymapFile READ keymapFile NOTIFY changed)
+    // True while a menu is open: its rows and mnemonics own the keys, so the window's
+    // shortcuts (bare letters such as Q) sleep.
+    Q_PROPERTY(bool menuOpen READ menuOpen NOTIFY menuOpenChanged)
 
 public:
     using Handler = std::function<void()>;
+    using Check = std::function<bool()>;
 
     explicit CommandRegistry(QObject *parent = nullptr);
 
@@ -59,6 +64,13 @@ public:
     // Sets or (with an empty handler) removes the handler of a registered command. False
     // when the id is not registered.
     bool setHandler(const QString &id, Handler handler);
+    // Sets the menu's name of a registered command (English, translated when listed).
+    bool setLabel(const QString &id, const QString &label);
+    // The ticket that owns a command says when it can run (something is selected, there is
+    // something to undo) and, for a toggle, whether it is on. Asked each time a menu opens.
+    // False when the id is not registered.
+    bool setEnabledWhen(const QString &id, Check check);
+    bool setCheckedWhen(const QString &id, Check check);
 
     bool contains(const QString &id) const { return m_index.contains(id); }
     QStringList ids() const;
@@ -70,6 +82,17 @@ public:
 
     // Runs the handler of the command, whatever its context. False when there is none.
     bool run(const QString &id);
+    // True when it has a handler, its context is active and its owner's check allows it.
+    bool isEnabled(const QString &id) const;
+    // The same, with the check seeing this target (see triggerOn).
+    bool isEnabled(const QString &id, const QVariantMap &target) const;
+    // What a menu does: runs the command only when it is enabled. False when it did not run.
+    Q_INVOKABLE bool trigger(const QString &id);
+    // The same, for a context menu: while the command checks and runs, target() is what the
+    // menu was opened on ({frame: id} on a Frame, {x, y} in world coordinates on the canvas).
+    Q_INVOKABLE bool triggerOn(const QString &id, const QVariantMap &target);
+    // What the running command was triggered on; empty from a key or the menu bar.
+    Q_INVOKABLE QVariantMap target() const { return m_target; }
     // The command that owns the key in the active contexts, when it has a handler; empty
     // when none does. Among commands bound to one key, the most specific context wins, and
     // the user's own binding wins over a default in the same context.
@@ -102,6 +125,13 @@ public:
     // Every command, in the order registered (the keymap table's, spec 12.5), as maps for QML: id, description (translated), keys,
     // gestures, context, versus, deviates, available.
     Q_INVOKABLE QVariantList list() const;
+    // One command as a menu shows it, its state worked out now (for that target): command,
+    // label and description (translated), keys, available (has a handler), enabled,
+    // checkable, checked. Empty for an unknown id. A menu asks again each time it opens.
+    Q_INVOKABLE QVariantMap entry(const QString &id, const QVariantMap &target = {}) const;
+    // A menu tree of menus.h (bar, canvas, node, frame), each command item merged with its
+    // entry() and titles translated; commands not registered are left out.
+    Q_INVOKABLE QVariantList menu(const QString &name, const QVariantMap &target = {}) const;
 
     QStringList activeKeys() const;
     bool textFieldFocus() const { return m_textFieldFocus; }
@@ -111,6 +141,9 @@ public:
     bool workflowOpen() const { return m_workflowOpen; }
     void setWorkflowOpen(bool open);
     QStringList problems() const;
+    bool menuOpen() const { return m_openMenus > 0; }
+    // A menu says it opened (true) or closed (false); submenus count too.
+    Q_INVOKABLE void menuShown(bool shown);
 
     // The app-level commands. Quit asks first when there is unsaved work; close closes the
     // open workflow, or quits the same way when none is open.
@@ -126,11 +159,16 @@ signals:
     void quitConfirmationRequested();
     // Close was asked with a workflow open: the window (or the workflows panel) closes it.
     void closeWorkflowRequested();
+    // A command whose work is the window's (open the menu bar, a context menu, About): the
+    // QML that owns it listens for its id.
+    void windowRequested(const QString &id);
+    void menuOpenChanged();
 
 private:
     struct Entry {
         CommandSpec spec;
         Handler handler;
+        Check enabledWhen, checkedWhen;
         QStringList keys; // effective, canonical
         QStringList userKeys; // the subset the user added
     };
@@ -140,6 +178,7 @@ private:
 
     static QString canonicalKey(const QString &key, QString *problem = nullptr);
     void rebuild();
+    QVariantList resolve(const QVariantList &items, const QVariantMap &target) const;
 
     QList<Entry> m_entries;
     QHash<QString, int> m_index;
@@ -147,6 +186,8 @@ private:
     QList<Edit> m_adds, m_unsets;
     QStringList m_fileProblems, m_keymapProblems;
     QString m_keymapFile;
+    mutable QVariantMap m_target; // set while a context menu's command checks or runs
+    int m_openMenus = 0;
     bool m_textFieldFocus = false;
     bool m_unsavedWork = false;
     bool m_workflowOpen = false;

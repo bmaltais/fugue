@@ -130,10 +130,28 @@ QMap<QString, bool> translatables(const QString &folder, QStringList *problems) 
                     ++i;
                 const QString word = code.mid(start, i - start);
                 skipSpace();
-                if ((word != "qsTr" && word != "tr") || i >= code.size() || code[i] != '(')
+                // qsTr("text") and tr("text"); QT_TRANSLATE_NOOP("Context", "text") and
+                // translate("Context", "text"), which C++ uses for strings listed in tables
+                // (command names, menu titles) and translated when shown.
+                const bool withContext = word == "QT_TRANSLATE_NOOP" || word == "translate";
+                if ((word != "qsTr" && word != "tr" && !withContext) || i >= code.size() || code[i] != '(')
                     continue;
                 ++i;
                 skipSpace();
+                if (withContext) {
+                    // translate() with a text that is not a literal looks up one listed elsewhere.
+                    if (i >= code.size() || code[i] != '"')
+                        continue;
+                    QString context;
+                    literal(&context);
+                    skipSpace();
+                    if (i >= code.size() || code[i] != ',')
+                        continue;
+                    ++i;
+                    skipSpace();
+                    if (i >= code.size() || code[i] != '"')
+                        continue;
+                }
                 if (i >= code.size() || (code[i] != '"' && code[i] != '\'')) {
                     *problems << info.fileName() + ": not a literal: " + code.mid(start, 40);
                     continue;
@@ -371,9 +389,16 @@ private slots:
         const bool rtl = language == "ar";
         const QImage shot = window->grabWindow();
         QVERIFY(!shot.isNull());
-        // The canvas fills the window: the theme's background on a dark theme, a shade
-        // darker on a light one (docs/canvas-look.md 6.1). The text follows the desktop size.
-        QCOMPARE(QColor(shot.pixel(4, 4)).name(), theme.look()->tokens().canvas.name());
+        // The menu bar along the top in the recessed fill, then the canvas: the theme's
+        // background on a dark theme, a shade darker on a light one (docs/canvas-look.md 6.1).
+        // The text follows the desktop size.
+        QCOMPARE(QColor(shot.pixel(4, 4)).name(), theme.look()->tokens().well.name());
+        QCOMPARE(QColor(shot.pixel(4, shot.height() - 4)).name(), theme.look()->tokens().canvas.name());
+        // Mirrored, the menu titles start at the right.
+        auto *file = item(window->contentItem(), "menuTitle-0");
+        QVERIFY(file);
+        const qreal fileX = file->mapToScene(QPointF(file->width() / 2, 0)).x();
+        QVERIFY2(rtl ? fileX > window->width() / 2 : fileX < window->width() / 2, qPrintable(QString::number(fileX)));
         QCOMPARE(theme.look()->tokens().canvas == theme.background(), !light);
         QCOMPARE(window->property("font").value<QFont>().pixelSize(), 16);
         QCOMPARE(QGuiApplication::layoutDirection(), rtl ? Qt::RightToLeft : Qt::LeftToRight);
