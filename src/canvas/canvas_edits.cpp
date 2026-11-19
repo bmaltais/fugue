@@ -108,7 +108,9 @@ void CanvasModel::restore(const Snapshot &target, bool selectAdded) {
         NodeRow &row = m_rows[size_t(r)];
         const QPointF pos = point(newEntries.value(row.id).toObject().value("pos")).value_or(row.pos);
         if (!sameNode(oldNodes.value(row.id), doc.graph.nodes.value(row.id))
-            || withoutPos(oldEntries.value(row.id).toObject()) != withoutPos(newEntries.value(row.id).toObject())) {
+            || withoutPos(oldEntries.value(row.id).toObject()) != withoutPos(newEntries.value(row.id).toObject())
+            || pinnedSize(newEntries.value(row.id).toObject())
+                   != std::pair<qreal, qreal>{row.sized ? row.width : 0, row.pinnedHeight}) {
             NodeRow fresh = makeRow(row.id);
             fresh.pos = pos;
             row = std::move(fresh);
@@ -279,6 +281,8 @@ void CanvasModel::finishGestures() {
     m_widgets->endSession();
     if (!m_drag.isEmpty())
         endLinkDrag();
+    if (m_resizeOpen)
+        endResize();
     if (m_moveOpen || m_cloneOpen)
         endMove();
     while (m_editDepth > 0)
