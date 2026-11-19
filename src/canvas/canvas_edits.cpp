@@ -45,6 +45,12 @@ public:
     EditCommand(CanvasModel *canvas, CanvasModel::Snapshot before, CanvasModel::Snapshot after, const QString &text)
         : QUndoCommand(text), m_canvas(canvas), m_before(std::move(before)), m_after(std::move(after)) {}
 
+    // CanvasModel::rewriteDocuments.
+    void rewrite(const std::function<void(Document &)> &change) {
+        change(m_before.document);
+        change(m_after.document);
+    }
+
     void undo() override { apply(m_before); }
     void redo() override {
         if (m_pushed) {
@@ -279,6 +285,19 @@ void CanvasModel::commit(const Document &document, const QString &text) {
         order << row.id;
     restore({document, order}, false);
     endEdit(text);
+}
+
+void CanvasModel::rewriteDocuments(const std::function<void(Document &)> &rewrite) {
+    // QUndoStack hands its commands out as const; every one it holds here is an EditCommand.
+    for (int i = 0; i < m_undo->count(); ++i)
+        if (auto *step = dynamic_cast<const EditCommand *>(m_undo->command(i)))
+            const_cast<EditCommand *>(step)->rewrite(rewrite);
+    Document document = m_document;
+    rewrite(document);
+    QStringList order;
+    for (const NodeRow &row : m_rows)
+        order << row.id;
+    restore({document, order}, false);
 }
 
 void CanvasModel::endMouseGestures() {

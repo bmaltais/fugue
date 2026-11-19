@@ -193,8 +193,14 @@ struct ActionApp : RunApp {
 class TestImageActions : public QObject {
     Q_OBJECT
 
+    // The runtime folder Open's copies go to, never the owner's own.
+    QTemporaryDir runtime;
+
 private slots:
-    void initTestCase() { QQuickStyle::setStyle("Material"); }
+    void initTestCase() {
+        QQuickStyle::setStyle("Material");
+        qputenv("XDG_RUNTIME_DIR", runtime.path().toUtf8());
+    }
 
     // The three commands are on a node's menu and are enabled only when it has an image.
     void theMenuOffersThemOnlyForANodeWithAnImage() {
@@ -211,8 +217,9 @@ private slots:
         QVERIFY(r.app.warnings.isEmpty());
     }
 
-    // Copy puts the full picture on the clipboard, and the file's own bytes under their MIME
-    // type, which a Fugue paste then stores as they are.
+    // Copy puts the file's own bytes on the clipboard under their MIME type, which another app
+    // and a Fugue paste then take as they are. No decoded image: on Wayland it would be what
+    // every image/* request gets, re-encoded (QWaylandMimeHelper::getByteArray).
     void copyPutsTheFullImageAndItsBytesOnTheClipboard() {
         ActionApp r(kSinks);
         QVERIFY(r.app.open());
@@ -226,13 +233,46 @@ private slots:
         QTest::mouseClick(r.app.window, Qt::LeftButton, {}, item->mapToScene(QPointF(item->width() / 2, item->height() / 2)).toPoint());
         QTRY_COMPARE(copied.size(), 1);
         const QMimeData *data = QGuiApplication::clipboard()->mimeData();
-        QVERIFY(data->hasImage());
-        QCOMPARE(qvariant_cast<QImage>(data->imageData()).size(), QSize(1200, 800));
+        QVERIFY(!data->hasImage());
+        QCOMPARE(data->formats(), QStringList{"image/png"});
         QCOMPARE(data->data("image/png"), picture);
         QVERIFY(fugue::clipboardHasImage(*data));
         const auto bytes = fugue::clipboardImageBytes(*data);
         QVERIFY(bytes.ok());
         QCOMPARE(*bytes, picture);
+        QVERIFY(r.messages.isEmpty());
+    }
+
+    // A JPEG goes on the clipboard as itself, with a PNG of the same picture beside it for
+    // apps that take only PNG.
+    void copyOfAJpegKeepsItsBytesAndAddsAPng() {
+        ActionApp r(kLoadImage);
+        QVERIFY(r.app.open());
+        const QString file = r.app.dir.filePath("photo.jpg");
+        QImage image(64, 48, QImage::Format_RGB32);
+        image.fill(Qt::red);
+        QVERIFY(image.save(file, "JPEG"));
+        QFile original(file);
+        QVERIFY(original.open(QIODevice::Append));
+        original.write("EXTRA"); // trailing bytes a re-encode would lose
+        original.close();
+        QVERIFY(r.app.model.widgets()->setText("src", "file", file).isEmpty());
+        QTRY_VERIFY(r.app.commands.isEnabled("node.copy-image", {{"node", "src"}}));
+        QGuiApplication::clipboard()->clear();
+        QSignalSpy copied(&r.actions, &fugue::ImageActions::copied);
+        r.app.model.select({"src"});
+        QVERIFY(r.app.commands.trigger("node.copy-image"));
+        QTRY_COMPARE(copied.size(), 1);
+        const QMimeData *data = QGuiApplication::clipboard()->mimeData();
+        QVERIFY(!data->hasImage());
+        QVERIFY(original.open(QIODevice::ReadOnly));
+        const QByteArray bytes = original.readAll();
+        QCOMPARE(data->data("image/jpeg"), bytes);
+        QImage png;
+        QVERIFY(png.loadFromData(data->data("image/png"), "PNG"));
+        QCOMPARE(png.size(), QSize(64, 48));
+        // A Fugue paste takes the original, not the PNG made for others.
+        QCOMPARE(fugue::clipboardImageBytes(*data).value(), bytes);
         QVERIFY(r.messages.isEmpty());
     }
 
@@ -270,6 +310,125 @@ private slots:
         QVERIFY(!QFileInfo::exists(r.app.dir.filePath("never.png")));
     }
 
+    // A name typed without an extension gets the real one, and a file already at that name is
+    // never replaced: the dialog only asked about the name as typed. The dialog itself offers
+    // the real format's suffix and filter, so the portal can ask about the full name.
+    void aNameWithoutExtensionNeverReplacesAnExistingFile() {
+        ActionApp r(kSinks);
+        QVERIFY(r.app.open());
+        const QByteArray picture = png(1200, 800);
+        r.runWithPicture(picture);
+        QVERIFY(QDir().mkpath(r.app.dir.filePath("out")));
+        QFile existing(r.app.dir.filePath("out/cat.png"));
+        QVERIFY(existing.open(QIODevice::WriteOnly) && existing.write("mine") == 4);
+        existing.close();
+        QSignalSpy saved(&r.actions, &fugue::ImageActions::saved);
+        r.app.model.select({"show"});
+        QVERIFY(r.app.commands.trigger("node.save-image"));
+        QObject *dialog = r.app.window->findChild<QObject *>("imageSaveDialog");
+        QVERIFY(dialog);
+        QCOMPARE(dialog->property("defaultSuffix").toString(), QStringLiteral("png"));
+        QVERIFY2(dialog->property("nameFilters").toStringList().join(' ').contains("*.png"),
+                 qPrintable(dialog->property("nameFilters").toStringList().join(' ')));
+        r.actions.saveTo(QUrl::fromLocalFile(r.app.dir.filePath("out/cat")).toString());
+        QTRY_COMPARE(r.messages.size(), 1);
+        QVERIFY2(r.messages.first().contains("cat.png") && r.messages.first().contains("exists"),
+                 qPrintable(r.messages.first()));
+        QVERIFY(saved.isEmpty());
+        QVERIFY(existing.open(QIODevice::ReadOnly));
+        QCOMPARE(existing.readAll(), QByteArray("mine"));
+        QCOMPARE(QDir(r.app.dir.filePath("out")).entryList(QDir::Files | QDir::Hidden | QDir::NoDotAndDotDot), QStringList{"cat.png"});
+        QVERIFY(r.app.warnings.isEmpty());
+    }
+
+    // The suggested file reaches the dialog as a file URL made from the path, so a name with
+    // #, ? or % in it is the name, not a fragment or a query.
+    void theSuggestedNameKeepsItsOddCharacters() {
+        ActionApp r(kLoadImage);
+        QVERIFY(r.app.open());
+        const QString file = r.app.dir.filePath("c#1 %41?.png");
+        {
+            QFile out(file);
+            QVERIFY(out.open(QIODevice::WriteOnly));
+            out.write(png(8, 8));
+        }
+        QVERIFY(r.app.model.widgets()->setText("src", "file", file).isEmpty());
+        QTRY_VERIFY(r.app.commands.isEnabled("node.save-image", {{"node", "src"}}));
+        QSignalSpy requested(&r.actions, &fugue::ImageActions::saveRequested);
+        r.app.model.select({"src"});
+        QVERIFY(r.app.commands.trigger("node.save-image"));
+        QCOMPARE(requested.size(), 1);
+        QCOMPARE(QFileInfo(requested.first().at(1).toUrl().toLocalFile()).fileName(), QStringLiteral("c#1 %41?.png"));
+        QObject *dialog = r.app.window->findChild<QObject *>("imageSaveDialog");
+        QVERIFY(dialog);
+        QCOMPARE(QFileInfo(dialog->property("selectedFile").toUrl().toLocalFile()).fileName(), QStringLiteral("c#1 %41?.png"));
+        QMetaObject::invokeMethod(dialog, "close");
+        r.actions.cancelSave();
+        QVERIFY(r.app.warnings.isEmpty());
+    }
+
+    // The window may close while a big image is read: the actions wait for their work as they
+    // go, so a save has finished by then and nothing reaches them afterwards.
+    void closingWhileABigImageIsWorkedOnWaitsForIt() {
+        ActionApp r(kLoadImage);
+        QVERIFY(r.app.open());
+        const QString file = r.app.dir.filePath("big.bmp");
+        QImage image(4000, 3000, QImage::Format_RGB32);
+        image.fill(Qt::magenta);
+        QVERIFY(image.save(file, "BMP"));
+        QVERIFY(r.app.model.widgets()->setText("src", "file", file).isEmpty());
+        QTRY_VERIFY(r.app.commands.isEnabled("node.save-image", {{"node", "src"}}));
+        r.app.model.select({"src"});
+        auto *late = new fugue::ImageActions(r.app.commands, r.app.model, *r.runs, [](const QUrl &) { return true; });
+        int signals_ = 0;
+        QObject::connect(late, &fugue::ImageActions::saved, [&] { ++signals_; });
+        QObject::connect(late, &fugue::ImageActions::copied, [&] { ++signals_; });
+        QObject::connect(late, &fugue::ImageActions::message, [&] { ++signals_; });
+        QVERIFY(r.app.commands.trigger("node.save-image"));
+        late->saveTo(r.app.dir.filePath("copy.bmp"));
+        QVERIFY(r.app.commands.trigger("node.copy-image"));
+        delete late;
+        // The handlers were the deleted object's: put the window's back before anything else.
+        fugue::ImageActions again(r.app.commands, r.app.model, *r.runs, [](const QUrl &) { return true; });
+        QCOMPARE(QFileInfo(r.app.dir.filePath("copy.bmp")).size(), QFileInfo(file).size());
+        QTest::qWait(300);
+        QCOMPARE(signals_, 0);
+    }
+
+    // The copy Open makes for the viewer is in a folder of the owner's alone (the runtime
+    // folder, not a shared /tmp name), is made again when the file changes, and a file that is
+    // not an image is never handed to a viewer.
+    void openMakesAPrivateFreshCopyAndRefusesWhatIsNoImage() {
+        ActionApp r(kLoadImage);
+        QVERIFY(r.app.open());
+        const QString file = r.app.dir.filePath("photo.png");
+        QImage image(64, 48, QImage::Format_RGB32);
+        image.fill(Qt::red);
+        QVERIFY(image.save(file, "JPEG"));
+        QVERIFY(r.app.model.widgets()->setText("src", "file", file).isEmpty());
+        QTRY_VERIFY(r.app.commands.isEnabled("node.open-image", {{"node", "src"}}));
+        r.app.model.select({"src"});
+        QVERIFY(r.app.commands.trigger("node.open-image"));
+        QTRY_COMPARE(r.opened.size(), 1);
+        const QString shown = r.opened.first().toLocalFile();
+        QVERIFY2(shown.startsWith(runtime.path() + "/"), qPrintable(shown));
+        QCOMPARE(QFileInfo(QFileInfo(shown).absolutePath()).permissions() & 0x0077, QFileDevice::Permissions());
+        // Another picture at the same path is shown as itself, not the first copy.
+        QImage other(80, 20, QImage::Format_RGB32);
+        other.fill(Qt::blue);
+        QVERIFY(QFile::remove(file) && other.save(file, "JPEG"));
+        QVERIFY(r.app.commands.trigger("node.open-image"));
+        QTRY_COMPARE(r.opened.size(), 2);
+        QCOMPARE(QImage(r.opened.last().toLocalFile()).size(), QSize(80, 20));
+        // Text where the image was: refused with a notice.
+        QFile text(file);
+        QVERIFY(text.open(QIODevice::WriteOnly | QIODevice::Truncate) && text.write("#!/bin/sh\n") > 0);
+        text.close();
+        QVERIFY(r.app.commands.trigger("node.open-image"));
+        QTRY_COMPARE(r.messages.size(), 1);
+        QCOMPARE(r.opened.size(), 2);
+    }
+
     // Open gives the viewer a file URL of the full picture, with the right extension.
     void openGivesTheViewerTheFullFile() {
         ActionApp r(kSinks);
@@ -278,7 +437,7 @@ private slots:
         r.runWithPicture(picture);
         r.app.model.select({"show"});
         QVERIFY(r.app.commands.trigger("node.open-image"));
-        QCOMPARE(r.opened.size(), 1);
+        QTRY_COMPARE(r.opened.size(), 1);
         QVERIFY(r.opened.first().isLocalFile());
         const QString path = r.opened.first().toLocalFile();
         QVERIFY2(path.endsWith(".png"), qPrintable(path));
@@ -303,7 +462,7 @@ private slots:
         QCOMPARE(r.runs->imageFile("src"), file);
         r.app.model.select({"src"});
         QVERIFY(r.app.commands.trigger("node.open-image"));
-        QCOMPARE(r.opened.size(), 1);
+        QTRY_COMPARE(r.opened.size(), 1);
         const QString shown = r.opened.first().toLocalFile();
         QVERIFY2(shown.endsWith(".jpg") && shown != file, qPrintable(shown));
         QFile a(file), b(shown);

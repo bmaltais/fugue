@@ -1,10 +1,13 @@
 // Save, open, recovery, import, trust and tabs (spec 11, 12.10, 6.7), on the real Workflows
 // with a canvas model and the built-in node types, and the window that shows them.
 
+#include <QBuffer>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QImage>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QProcess>
 #include <QQmlApplicationEngine>
 #include <QQuickItem>
 #include <QQuickStyle>
@@ -12,6 +15,8 @@
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest>
+
+#include <sys/stat.h>
 
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
@@ -207,12 +212,98 @@ private slots:
         QVERIFY(!f.workflows->unsaved());
     }
 
+    // Undo after a Save As to another folder names the same files as before it: the steps
+    // kept from before hold the old folder's relative paths made absolute, so they do not
+    // resolve in the new folder to another image of the same name.
+    void undoAfterSaveAsElsewhereKeepsNamingTheSameFiles() {
+        Fixture f;
+        QImage red(4, 4, QImage::Format_RGB32), blue(4, 4, QImage::Format_RGB32);
+        red.fill(Qt::red);
+        blue.fill(Qt::blue);
+        QVERIFY(QDir().mkpath(f.file("a/inputs")) && QDir().mkpath(f.file("b/inputs")));
+        QVERIFY(red.save(f.file("a/inputs/cat.png")) && blue.save(f.file("b/inputs/cat.png")));
+        QVERIFY(write(f.file("a/w.fugue"), R"({"fugue": 1, "graph": {"nodes": {
+            "src": {"type": "fugue/load-image", "version": "1.0.0", "inputs": {"file": "inputs/cat.png"}}}}})"));
+        QVERIFY(f.workflows->openPath(f.file("a/w.fugue")));
+        const auto file = [&] {
+            return f.canvas.document().graph.nodes.value("src").inputs.value("file").literal().toString();
+        };
+        f.canvas.addNode("fugue/text", 300, 0); // a step from before the save
+        QVERIFY(f.workflows->saveAs(f.file("b/w2.fugue")));
+        QCOMPARE(file(), QString("inputs/cat-2.png"));
+        QCOMPARE(read(f.file("b/inputs/cat-2.png")), read(f.file("a/inputs/cat.png")));
+        const QString original = QFileInfo(f.file("a/inputs/cat.png")).canonicalFilePath();
+        f.canvas.undo(); // Move images
+        QCOMPARE(file(), original);
+        f.canvas.undo(); // the added node
+        QCOMPARE(file(), original);
+        QCOMPARE(f.canvas.document().graph.nodes.size(), 1);
+        f.canvas.redo();
+        f.canvas.redo();
+        QCOMPARE(file(), QString("inputs/cat-2.png"));
+    }
+
+    // The dialog asked about "mine", not "mine.fugue": a file already there is never replaced.
+    void anAddedExtensionNeverReplacesAnExistingFile() {
+        Fixture f;
+        QVERIFY(write(f.file("mine.fugue"), textNode));
+        f.canvas.addNode("fugue/number", 0, 0);
+        QVERIFY(!f.workflows->saveAs(QUrl::fromLocalFile(f.file("mine")).toString()));
+        QCOMPARE(read(f.file("mine.fugue")), QByteArray(textNode));
+        QVERIFY2(f.workflows->notice().contains("mine.fugue") && f.workflows->notice().contains("exists"),
+                 qPrintable(f.workflows->notice()));
+        QVERIFY(f.workflows->unsaved());
+        QVERIFY(f.workflows->pathOf(0).isEmpty());
+        // A name typed in full was asked about by the dialog: it replaces.
+        QVERIFY(f.workflows->saveAs(f.file("mine.fugue")));
+        QCOMPARE(Document::loadFile(f.file("mine.fugue"))->graph.nodes.size(), 1);
+    }
+
     void aFailedSaveKeepsTheWorkAndSaysWhy() {
         Fixture f;
         f.canvas.addNode("fugue/text", 0, 0);
         QVERIFY(!f.workflows->saveAs(f.file("no-such-folder/x.fugue")));
         QVERIFY(f.workflows->unsaved());
         QVERIFY(f.workflows->notice().contains("Could not save"));
+    }
+
+    // Open and drop read only regular files, and only what a workflow needs: a pipe is never
+    // opened (it would wait for a writer forever), a huge file is refused before it is read,
+    // and a picture's workflow is found without reading the picture whole.
+    void opensOnlyRegularFilesAndReadsOnlyTheWorkflow() {
+        Fixture f;
+        QVERIFY(::mkfifo(QFile::encodeName(f.file("pipe")).constData(), 0600) == 0);
+        QVERIFY(!f.workflows->openPath(f.file("pipe")));
+        QVERIFY2(f.workflows->notice().contains("not a file"), qPrintable(f.workflows->notice()));
+        f.workflows->dismissNotice();
+        f.workflows->dropUrls({QUrl::fromLocalFile(f.file("pipe"))}, 0, 0);
+        QVERIFY2(f.workflows->notice().contains("not a file"), qPrintable(f.workflows->notice()));
+
+        QFile video(f.file("video.mp4"));
+        QVERIFY(video.open(QIODevice::WriteOnly) && video.resize(qint64(3) << 30)); // sparse
+        video.close();
+        QElapsedTimer timer;
+        timer.start();
+        QVERIFY(!f.workflows->openPath(f.file("video.mp4")));
+        QVERIFY2(f.workflows->notice().contains("too big"), qPrintable(f.workflows->notice()));
+
+        QImage image(4, 4, QImage::Format_RGB32);
+        image.fill(Qt::red);
+        QByteArray png;
+        QBuffer buffer(&png);
+        buffer.open(QIODevice::WriteOnly);
+        QVERIFY(image.save(&buffer, "PNG"));
+        const Result<QByteArray> withFlow = pngWithWorkflow(png, textNode);
+        QVERIFY(withFlow.ok());
+        QFile picture(f.file("out.png"));
+        QVERIFY(picture.open(QIODevice::WriteOnly) && picture.write(*withFlow) == withFlow->size());
+        QVERIFY(picture.resize(qint64(3) << 30)); // a long tail after IEND
+        picture.close();
+        QVERIFY(f.workflows->openPath(f.file("out.png")));
+        QCOMPARE(f.canvas.nodes()->rowCount(), 1);
+        f.workflows->dropUrls({QUrl::fromLocalFile(f.file("out.png"))}, 0, 0);
+        QCOMPARE(f.canvas.nodes()->rowCount(), 1);
+        QVERIFY2(timer.elapsed() < 1500, qPrintable(QString::number(timer.elapsed())));
     }
 
     void anUnreadableFileIsANoticeNotACrash() {
@@ -259,6 +350,7 @@ private slots:
         const QByteArray before = read(f.file("a.fugue"));
 
         // The app dies; the next start finds two copies.
+        f.workflows.reset();
         CanvasModel again(&f.registry);
         auto next = f.restart(again);
         QCOMPARE(next->recoverable().size(), 2);
@@ -282,10 +374,92 @@ private slots:
         QCOMPARE(Document::loadFile(f.file("a.fugue"))->graph.nodes.size(), 2);
     }
 
+    // A second Fugue never offers (so never discards or duplicates) the copies of one still
+    // running; the copies of one that ended, or died and left its lock, are offered to one
+    // start only.
+    void aRunningFuguesCopiesAreNotAnothersToOffer() {
+        QTemporaryDir dir;
+        const QString folder = dir.filePath("recovery");
+        const Document document = Document::load(textNode).value();
+        const auto ids = [](const QList<RecoveryEntry> &entries) {
+            QStringList list;
+            for (const RecoveryEntry &entry : entries)
+                list << entry.id;
+            list.sort();
+            return list;
+        };
+        QString lockPath;
+        QByteArray lock;
+        {
+            RecoveryStore first(folder);
+            QVERIFY(first.write("one", document, {}, "One").isEmpty());
+            RecoveryStore second(folder);
+            QVERIFY(second.list().isEmpty());
+            QVERIFY(second.write("two", document, {}, "Two").isEmpty());
+            QVERIFY(RecoveryStore(folder).list().isEmpty());
+            lockPath = folder + "/owner-" + first.owner() + ".lock";
+            lock = read(lockPath);
+            QVERIFY(!lock.isEmpty());
+        }
+        // The first one died: its lock is still there, naming a process that is gone.
+        QProcess gone;
+        gone.start("true");
+        QVERIFY(gone.waitForStarted());
+        const qint64 pid = gone.processId();
+        QVERIFY(gone.waitForFinished());
+        QList<QByteArray> lines = lock.split('\n');
+        lines[0] = QByteArray::number(pid);
+        QVERIFY(write(lockPath, lines.join('\n')));
+
+        RecoveryStore third(folder);
+        QCOMPARE(ids(third.list()), (QStringList{"one", "two"}));
+        // They are the third one's now: a fourth start does not offer them too.
+        RecoveryStore fourth(folder);
+        QVERIFY(fourth.list().isEmpty());
+    }
+
+    // A copy that cannot be read is kept aside, never deleted: it may be the only one.
+    void anUnreadableRecoveryCopyIsKeptAside() {
+        Fixture f;
+        QVERIFY(QDir().mkpath(f.locations.recoveryDir));
+        QVERIFY(write(f.locations.recoveryDir + "/lost.fugue", "not json"));
+        CanvasModel again(&f.registry);
+        auto next = f.restart(again);
+        QCOMPARE(next->recoverable().size(), 1);
+        next->recover();
+        QVERIFY2(next->notice().contains("could not be read"), qPrintable(next->notice()));
+        QVERIFY(!QFileInfo::exists(f.locations.recoveryDir + "/lost.fugue"));
+        QCOMPARE(read(f.locations.recoveryDir + "/unreadable/lost.fugue"), QByteArray("not json"));
+        QVERIFY2(next->notice().contains(f.locations.recoveryDir + "/unreadable"), qPrintable(next->notice()));
+        CanvasModel third(&f.registry);
+        QVERIFY(f.restart(third)->recoverable().isEmpty());
+    }
+
+    // Recovery copies and trust.json are the owner's alone (0600), whatever the umask.
+    void recoveryCopiesAndTrustAreTheOwnersAlone() {
+        Fixture f;
+        const QFileDevice::Permissions owner = QFileDevice::ReadOwner | QFileDevice::WriteOwner;
+        const auto ownerOnly = [&](const QString &path) {
+            QFile file(path);
+            return file.exists() && (file.permissions() & ~(owner | QFileDevice::ReadUser | QFileDevice::WriteUser)) == 0;
+        };
+        f.canvas.addNode("fugue/text", 0, 0);
+        f.workflows->writeRecoveryCopies();
+        const QStringList copies = QDir(f.locations.recoveryDir).entryList({"*.fugue", "*.json"}, QDir::Files);
+        QCOMPARE(copies.size(), 2); // the copy and its note
+        for (const QString &name : copies)
+            QVERIFY2(ownerOnly(f.locations.recoveryDir + "/" + name), qPrintable(name));
+        QVERIFY(write(f.file("odd.fugue"), withMissingNode));
+        QVERIFY(f.workflows->openPath(f.file("odd.fugue")));
+        f.workflows->allowPendingTrust();
+        QVERIFY(ownerOnly(f.locations.trustPath));
+    }
+
     void discardingTheOfferDeletesTheCopies() {
         Fixture f;
         f.canvas.addNode("fugue/text", 0, 0);
         f.workflows->writeRecoveryCopies();
+        f.workflows.reset();
         CanvasModel again(&f.registry);
         auto next = f.restart(again);
         QCOMPARE(next->recoverable().size(), 1);

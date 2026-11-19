@@ -21,6 +21,9 @@ Result<ImportedWorkflow> readWorkflowFile(const QString &path) {
         return makeError(QStringLiteral("file_not_found"),
                          info.isDir() ? QStringLiteral("%1 is a folder, not a workflow file.").arg(path)
                                       : QStringLiteral("There is no file %1.").arg(path));
+    // A pipe, socket or device is never opened: opening a pipe waits for a writer forever.
+    if (!info.isFile())
+        return makeError(QStringLiteral("file_not_found"), QStringLiteral("%1 is not a file.").arg(path));
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly))
         return makeError(QStringLiteral("permission_denied"),
@@ -38,8 +41,15 @@ Result<ImportedWorkflow> readWorkflowFile(const QString &path) {
         imported.document = document.value();
         return imported;
     }
+    // Refused before it is read: a video dropped by mistake is not loaded whole.
+    if (info.size() > maxEmbeddedWorkflowBytes)
+        return makeError(QStringLiteral("invalid_document"),
+                         QStringLiteral("%1 is too big to be a workflow (%2 MB; at most %3 MB).")
+                             .arg(info.fileName())
+                             .arg(info.size() / (1024 * 1024))
+                             .arg(maxEmbeddedWorkflowBytes / (1024 * 1024)));
     file.seek(0);
-    Result<Document> document = Document::load(file.readAll());
+    Result<Document> document = Document::load(file.read(maxEmbeddedWorkflowBytes));
     if (!document.ok())
         return document.errors();
     imported.document = document.value();

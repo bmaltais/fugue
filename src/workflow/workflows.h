@@ -103,7 +103,9 @@ public:
 
     // Saves the current tab: asks for a place first (saveAsRequested) when it has none.
     Q_INVOKABLE bool save();
-    // Saves the tab under a path or file URL; ".fugue" is added when the name has no extension.
+    // Saves the tab under a path or file URL; ".fugue" is added when the name has no extension,
+    // and that name never replaces a file already there (the dialog asked about the name as
+    // typed): a notice says so instead.
     Q_INVOKABLE bool saveAs(const QString &pathOrUrl);
     // Closes a tab, asking first (closeConfirmationRequested) when it has unsaved content.
     Q_INVOKABLE void closeTab(int index);
@@ -161,7 +163,8 @@ private:
                bool replacePristine, const QString &id = {});
     void removeTab(int index);
     Document documentOf(int index) const;
-    bool saveTab(int index, const QString &path);
+    // `replace`: a file at `path` may be replaced (the dialog asked, or it is the tab's own).
+    bool saveTab(int index, const QString &path, bool replace = true);
     void snapshotCurrent();
     void refreshUnsaved();
     void refreshRegistry();

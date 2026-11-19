@@ -7,6 +7,7 @@
 #include "engine/vips.h"
 
 #include <QBuffer>
+#include <cerrno>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -54,24 +55,55 @@ Result<QSize> readableSize(const QByteArray &bytes, const ImageFormat &format) {
     }
 }
 
+// Whether `path` is a regular file (not a link) whose content is exactly `bytes`.
+bool holdsBytes(const QString &path, const QByteArray &bytes) {
+    const QFileInfo info(path);
+    if (info.isSymLink() || !info.isFile() || info.size() != bytes.size())
+        return false;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return false;
+    constexpr qint64 chunk = 1 << 20;
+    for (qint64 at = 0; at < bytes.size(); at += chunk)
+        if (file.read(chunk) != QByteArrayView(bytes).sliced(at, std::min(chunk, bytes.size() - at)))
+            return false;
+    return file.atEnd();
+}
+
+// Writes `bytes` as <folder>/<name>, or finds them there already. A file there with other
+// bytes (or a link) is never replaced: the name takes `-2`, `-3`, ... before the extension.
 Errors writeWhole(const QByteArray &bytes, const QString &folder, const QString &name, const FileRoots &roots,
                   QString *path) {
-    const Result<QString> allowed = roots.checkWrite(QDir(folder).filePath(name), QStringLiteral("file"));
-    if (!allowed)
-        return allowed.errors();
-    *path = allowed.value();
-    if (QFileInfo(*path).absolutePath() != canonicalPath(folder))
-        return {makeError(QStringLiteral("permission_denied"), QStringLiteral("%1 is not a name Fugue can store.").arg(name))};
-    if (const Errors made = makeFolder(folder); hasErrors(made))
-        return made;
-    // The same bytes again are the same file: nothing to write.
-    if (QFileInfo info(*path); info.isFile() && info.size() == bytes.size())
-        return {};
-    PartialFile partial(folder, name);
-    if (const Errors written = partial.write(bytes, QStringLiteral("the image")); hasErrors(written))
-        return written;
-    const Result<bool> committed = partial.commit(*path, Overwrite::Replace);
-    return committed ? Errors() : committed.errors();
+    const QFileInfo named(name);
+    for (int n = 1;; ++n) {
+        const QString candidate =
+            n == 1 ? name : QStringLiteral("%1-%2.%3").arg(named.completeBaseName()).arg(n).arg(named.suffix());
+        const QString there = QDir(folder).filePath(candidate);
+        if (QFileInfo(there).isSymLink())
+            continue;
+        const Result<QString> allowed = roots.checkWrite(there, QStringLiteral("file"));
+        if (!allowed)
+            return allowed.errors();
+        *path = allowed.value();
+        if (QFileInfo(*path).absolutePath() != canonicalPath(folder))
+            return {makeError(QStringLiteral("permission_denied"),
+                              QStringLiteral("%1 is not a name Fugue can store.").arg(candidate))};
+        if (const Errors made = makeFolder(folder); hasErrors(made))
+            return made;
+        // The same bytes again are the same file: nothing to write.
+        if (holdsBytes(*path, bytes))
+            return {};
+        if (QFileInfo::exists(*path))
+            continue;
+        PartialFile partial(folder, candidate);
+        if (const Errors written = partial.write(bytes, QStringLiteral("the image")); hasErrors(written))
+            return written;
+        const Result<bool> committed = partial.commit(*path, Overwrite::Never);
+        if (!committed)
+            return committed.errors();
+        if (*committed || holdsBytes(*path, bytes))
+            return {};
+    }
 }
 
 } // namespace
@@ -129,10 +161,12 @@ Result<QString> storeImage(const QByteArray &bytes, const QString &folder, const
                          QStringLiteral("The image is %1 x %2 pixels; Fugue takes at most %3 million.")
                              .arg(size->width()).arg(size->height()).arg(maxImagePixels / 1000000));
     const QString hash = sha256(bytes).mid(QStringLiteral("sha256:").size()).left(10);
-    // The same bytes are the file already there, whatever it was called.
+    // The same bytes are the file already there, whatever it was called: only a regular file
+    // whose whole content is these bytes, so a planted name of the right size is not reused.
     const QString tail = QStringLiteral("-%1.%2").arg(hash, format->extension);
-    for (const QFileInfo &same : QDir(folder).entryInfoList({QStringLiteral("*") + tail}, QDir::Files))
-        if (same.size() == bytes.size()) {
+    const QStringList patterns{QStringLiteral("*") + tail, QStringLiteral("*-%1-*.%2").arg(hash, format->extension)};
+    for (const QFileInfo &same : QDir(folder).entryInfoList(patterns, QDir::Files | QDir::NoSymLinks, QDir::Name))
+        if (holdsBytes(same.absoluteFilePath(), bytes)) {
             const Result<QString> allowed = roots.checkRead(same.absoluteFilePath(), QStringLiteral("file"));
             return allowed ? Result<QString>(allowed.value()) : Result<QString>(allowed.errors());
         }
@@ -170,8 +204,12 @@ QStringList clipboardFiles(const QMimeData &data) {
     return files;
 }
 
-Result<QByteArray> clipboardImageBytes(const QMimeData &data) {
-    for (const QString &type : imageTypes) {
+Result<QByteArray> clipboardImageBytes(const QMimeData &data, bool pixels) {
+    // Fugue's own Copy Image names the type of the original among the ones it offers.
+    QStringList types = imageTypes;
+    if (const QString original = QString::fromLatin1(data.data(clipboardOriginalType)); types.contains(original))
+        types.prepend(original);
+    for (const QString &type : std::as_const(types)) {
         if (!data.hasFormat(type))
             continue;
         const QByteArray bytes = data.data(type);
@@ -179,7 +217,7 @@ Result<QByteArray> clipboardImageBytes(const QMimeData &data) {
         if (sniffImage(bytes))
             return bytes;
     }
-    if (data.hasImage()) {
+    if (pixels && data.hasImage()) {
         const QImage image = qvariant_cast<QImage>(data.imageData());
         if (!image.isNull()) {
             QByteArray png;
@@ -204,6 +242,8 @@ bool clipboardHasImage(const QMimeData &data) {
 namespace {
 
 bool sameBytes(const QString &a, const QString &b) {
+    if (QFileInfo(a).isSymLink())
+        return false;
     QFile one(a);
     QFile two(b);
     if (one.size() != two.size() || !one.open(QIODevice::ReadOnly) || !two.open(QIODevice::ReadOnly))
@@ -212,6 +252,30 @@ bool sameBytes(const QString &a, const QString &b) {
         if (one.read(1 << 16) != two.read(1 << 16))
             return false;
     return true;
+}
+
+// Copies the rest of `from` into a new file at `to`, a megabyte at a time, so a big image is
+// never held whole in memory.
+Errors copyInto(QFile &from, const QString &to) {
+    QFile out(to);
+    errno = 0;
+    if (!out.open(QIODevice::WriteOnly))
+        return {makeError(writeFailureCode(errno != 0 ? errno : EIO),
+                          QStringLiteral("Cannot write the image: %1.").arg(out.errorString()))};
+    while (!from.atEnd()) {
+        const QByteArray chunk = from.read(1 << 20);
+        if (chunk.isEmpty())
+            return {makeError(QStringLiteral("file_not_found"),
+                              QStringLiteral("Cannot read %1: %2.").arg(QFileInfo(from.fileName()).fileName(), from.errorString()))};
+        errno = 0;
+        if (out.write(chunk) != chunk.size())
+            return {makeError(writeFailureCode(errno != 0 ? errno : EIO),
+                              QStringLiteral("Cannot write the image: %1.").arg(out.errorString()))};
+    }
+    if (!out.flush())
+        return {makeError(writeFailureCode(errno != 0 ? errno : EIO),
+                          QStringLiteral("Cannot write the image: %1.").arg(out.errorString()))};
+    return {};
 }
 
 // The name `source` takes in `folder`: its own, else `<stem>-2.<ext>`, `-3`, ...; a file there
@@ -228,7 +292,9 @@ QString nameIn(const QString &folder, const QString &source, QHash<QString, QStr
             continue;
         }
         const QString there = QDir(folder).filePath(name);
-        if (!QFileInfo::exists(there) || sameBytes(there, source)) {
+        const QFileInfo found(there);
+        // A link (even one that leads nowhere) holds its name: it is never reused or replaced.
+        if (!found.isSymLink() && (!found.exists() || sameBytes(there, source))) {
             claimed.insert(name, source);
             return name;
         }
@@ -303,7 +369,7 @@ Errors relocateInputs(Document &document, const Registry &registry, const QStrin
             return made;
         const QString name = change.literal.mid(7);
         const QString destination = QDir(target).filePath(name);
-        if (QFileInfo::exists(destination))
+        if (QFileInfo(destination).isFile() && !QFileInfo(destination).isSymLink())
             continue; // the same bytes (nameIn)
         QFile file(change.copy);
         if (!file.open(QIODevice::ReadOnly))
@@ -311,14 +377,49 @@ Errors relocateInputs(Document &document, const Registry &registry, const QStrin
                               QStringLiteral("The image %1 is gone, so the workflow's inputs cannot be moved: %2.")
                                   .arg(QFileInfo(change.copy).fileName(), file.errorString()))};
         PartialFile partial(target, name);
-        if (const Errors written = partial.write(file.readAll(), QStringLiteral("the image")); hasErrors(written))
+        if (const Errors written = copyInto(file, partial.path()); hasErrors(written))
             return written;
-        if (const Result<bool> committed = partial.commit(destination, Overwrite::Never); !committed)
+        const Result<bool> committed = partial.commit(destination, Overwrite::Never);
+        if (!committed)
             return committed.errors();
+        // Something took the name since it was chosen: the node must not point at it.
+        if (!*committed && !sameBytes(destination, change.copy))
+            return {makeError(QStringLiteral("node_failed"),
+                              QStringLiteral("Another file appeared at %1 while the workflow's inputs were copied; "
+                                             "save again.").arg(destination))};
     }
     for (const Change &change : std::as_const(changes))
         (*change.nodes)[change.node].inputs.insert(change.input, InputValue::literal(change.literal));
     return {};
+}
+
+void makeInputsAbsolute(Document &document, const Registry &registry, const QString &from) {
+    if (from.isEmpty())
+        return;
+    const auto scan = [&](Nodes &nodes) {
+        for (auto it = nodes.begin(); it != nodes.end(); ++it) {
+            const NodeType *type = registry.nodeType(it->type);
+            if (!type)
+                continue;
+            for (auto in = it->inputs.begin(); in != it->inputs.end(); ++in) {
+                const InputSpec *spec = type->input(in.key());
+                if (!spec || spec->widget() != QLatin1String("file") || in->kind() != InputValue::Kind::Literal
+                    || !in->literal().isString())
+                    continue;
+                const QString text = in->literal().toString();
+                if (text.trimmed().isEmpty() || QDir::isAbsolutePath(expandHome(text.trimmed())))
+                    continue;
+                const Result<QString> located = inputFilePath(text, from, in.key());
+                if (!located || located->isEmpty())
+                    continue;
+                const QString canonical = canonicalPath(located.value());
+                *in = InputValue::literal(canonical.isEmpty() ? located.value() : canonical);
+            }
+        }
+    };
+    scan(document.graph.nodes);
+    for (auto group = document.groups.begin(); group != document.groups.end(); ++group)
+        scan(group->nodes);
 }
 
 QList<RecentInput> recentInputs(int limit) {
@@ -343,7 +444,10 @@ ImageInputs::ImageInputs(CanvasModel *canvas, const Registry *registry, QObject 
 QVariantList ImageInputs::recent() const {
     QVariantList list;
     for (const RecentInput &input : recentInputs(recentLimit))
-        list.append(QVariantMap{{"path", input.path}, {"name", input.name}, {"modified", input.modified}});
+        list.append(QVariantMap{{"path", input.path},
+                                {"url", QUrl::fromLocalFile(input.path)},
+                                {"name", input.name},
+                                {"modified", input.modified}});
     return list;
 }
 
@@ -379,20 +483,23 @@ QPointF ImageInputs::pastePoint() const {
 }
 
 QStringList ImageInputs::storeClipboard(const QMimeData &data) {
-    const FileRoots roots = FileRoots::forInputs();
-    const Result<QByteArray> bytes = clipboardImageBytes(data);
-    if (bytes) {
-        const Result<QString> stored = storeImage(bytes.value(), inputsDir(), roots);
-        if (stored)
-            return {stored.value()};
-        emit message(tr("Could not paste the image: %1").arg(stored.error().message));
+    // Encoded bytes first, then a file manager's copy (the files themselves, which its decoded
+    // pixels would lose), and only then the pixels (Appendix A).
+    Result<QByteArray> bytes = clipboardImageBytes(data, false);
+    if (!bytes) {
+        if (const QStringList files = clipboardFiles(data); !files.isEmpty())
+            return storeFiles(files);
+        bytes = clipboardImageBytes(data);
+    }
+    if (!bytes) {
+        emit message(tr("Could not paste the image: %1").arg(bytes.error().message));
         return {};
     }
-    // No image data: a file manager's copy offers the files themselves.
-    const QStringList files = clipboardFiles(data);
-    if (files.isEmpty())
-        emit message(tr("Could not paste the image: %1").arg(bytes.error().message));
-    return storeFiles(files);
+    const Result<QString> stored = storeImage(bytes.value(), inputsDir(), FileRoots::forInputs());
+    if (stored)
+        return {stored.value()};
+    emit message(tr("Could not paste the image: %1").arg(stored.error().message));
+    return {};
 }
 
 QStringList ImageInputs::storeFiles(const QStringList &paths) {

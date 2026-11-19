@@ -3,6 +3,7 @@
 
 #include <QBuffer>
 #include <QClipboard>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QGuiApplication>
 #include <QImage>
@@ -112,6 +113,35 @@ private slots:
         QCOMPARE(names(p.inputs()).size(), 2);
     }
 
+    // A file is reused only when its bytes are the image's, not by its name and size: a run's
+    // Save Image (or anyone) may have planted a file named after the hash of a known image.
+    // A symbolic link is never reused, and a planted file is never replaced.
+    void aFileNamedByTheHashIsReusedOnlyWithTheSameBytes() {
+        Pictures p;
+        QTemporaryDir other;
+        const QByteArray png = encoded(picture(), "PNG");
+        const QString hash = QString::fromLatin1(QCryptographicHash::hash(png, QCryptographicHash::Sha256).toHex().left(10));
+        QByteArray fake = png;
+        fake[fake.size() - 5] = char(fake.at(fake.size() - 5) ^ 1); // same size, other bytes
+        QVERIFY(QDir().mkpath(p.inputs()));
+        const QString planted = p.inputs() + "/a-" + hash + ".png";
+        QVERIFY(write(planted, fake));
+        QVERIFY(write(p.inputs() + "/cat-" + hash + ".png", fake)); // the name the store would write
+        QVERIFY(write(other.filePath("real.png"), png));
+        QVERIFY(QFile::link(other.filePath("real.png"), p.inputs() + "/b-" + hash + ".png"));
+        const FileRoots roots = FileRoots::forInputs();
+        const Result<QString> stored = storeImage(png, p.inputs(), roots, "cat.png");
+        QVERIFY2(stored.ok(), qPrintable(stored.error().message));
+        QCOMPARE(read(stored.value()), png);
+        QVERIFY(!QFileInfo(stored.value()).isSymLink());
+        QCOMPARE(QFileInfo(stored.value()).absolutePath(), canonicalPath(p.inputs()));
+        QCOMPARE(read(planted), fake);
+        QCOMPARE(read(p.inputs() + "/cat-" + hash + ".png"), fake);
+        // The real one is reused from now on, and a dropped file finds it too.
+        QCOMPARE(storeImage(png, p.inputs(), roots).value(), stored.value());
+        QCOMPARE(storeImageFile(other.filePath("real.png"), p.inputs(), roots).value(), stored.value());
+    }
+
     void hostileNamesBecomePlainStems() {
         QCOMPARE(safeStem("../../etc/passwd.png"), QString("passwd"));
         QCOMPARE(safeStem("..\\..\\win\\evil.png"), QString("evil"));
@@ -173,6 +203,68 @@ private slots:
         QCOMPARE(sniffImage(fromPixels.value())->extension, QString("png")); // lossless
         QVERIFY(!clipboardImageBytes(QMimeData()).ok());
         QVERIFY(!clipboardHasImage(QMimeData()));
+    }
+
+    // Moving a workflow's inputs never points a node at a name it did not write: a symbolic
+    // link (even one that leads nowhere) holds the name, so the copy takes another.
+    void movingInputsNeverTakesANameALinkHolds() {
+        Pictures p;
+        QTemporaryDir place;
+        const QByteArray png = encoded(picture(), "PNG");
+        const Result<QString> stored = storeImage(png, p.inputs(), FileRoots::forInputs(), "cat.png");
+        QVERIFY(stored.ok());
+        const QString name = QFileInfo(stored.value()).fileName();
+        QVERIFY(QDir().mkpath(place.filePath("inputs")));
+        QVERIFY(QFile::link(place.filePath("nowhere.png"), place.filePath("inputs/" + name)));
+        Registry registry;
+        nodes::addBuiltinNodeTypes(registry);
+        Document document = Document::load(QStringLiteral(R"({"fugue": 1, "graph": {"nodes": {
+            "src": {"type": "fugue/load-image", "version": "1.0.0", "inputs": {"file": "%1"}}}}})")
+                                               .arg(stored.value()).toUtf8()).value();
+        const Errors errors = relocateInputs(document, registry, {}, place.filePath("flow.fugue"));
+        QVERIFY2(!hasErrors(errors), qPrintable(errors.isEmpty() ? QString() : errors.first().message));
+        const QString literal = document.graph.nodes.value("src").inputs.value("file").literal().toString();
+        QVERIFY2(literal.startsWith("inputs/") && literal != "inputs/" + name, qPrintable(literal));
+        QVERIFY(!QFileInfo(place.filePath(literal)).isSymLink());
+        QCOMPARE(read(place.filePath(literal)), png);
+        QVERIFY(QFileInfo(place.filePath("inputs/" + name)).isSymLink());
+    }
+
+    // A file manager's copy also offers decoded pixels: the file, byte for byte, is taken
+    // before them (Appendix A: encoded bytes, then files, then pixels).
+    void aCopiedFileIsTakenBeforeDecodedPixels() {
+        Pictures p;
+        QTemporaryDir other;
+        const QByteArray jpeg = encoded(picture(), "JPEG") + "EXTRA";
+        QVERIFY(write(other.filePath("photo.jpg"), jpeg));
+        Registry registry;
+        nodes::addBuiltinNodeTypes(registry);
+        CanvasModel canvas(&registry);
+        ImageInputs inputs(&canvas, &registry);
+        QMimeData data;
+        data.setImageData(picture(Qt::blue));
+        data.setUrls({QUrl::fromLocalFile(other.filePath("photo.jpg"))});
+        QVERIFY(inputs.paste(data));
+        const Nodes nodes = canvas.document().graph.nodes;
+        QCOMPARE(nodes.size(), 1);
+        const QString file = nodes.cbegin()->inputs.value("file").literal().toString();
+        QVERIFY2(file.endsWith(".jpg"), qPrintable(file));
+        QCOMPARE(read(file), jpeg);
+    }
+
+    // The picker's thumbnails are file URLs made from the path: #, ? and % are the name.
+    void recentInputsCarryAFileUrlOfTheirPath() {
+        Pictures p;
+        QVERIFY(QDir().mkpath(p.inputs()));
+        const QString path = p.inputs() + "/c#1 %41?.png";
+        QVERIFY(write(path, encoded(picture(), "PNG")));
+        Registry registry;
+        nodes::addBuiltinNodeTypes(registry);
+        CanvasModel canvas(&registry);
+        ImageInputs inputs(&canvas, &registry);
+        const QVariantList recent = inputs.recent();
+        QCOMPARE(recent.size(), 1);
+        QCOMPARE(recent.first().toMap().value("url").toUrl().toLocalFile(), path);
     }
 
     void recentInputsAreNewestFirstAndCapped() {

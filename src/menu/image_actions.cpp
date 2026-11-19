@@ -4,6 +4,7 @@
 #include <QClipboard>
 #include <QCoreApplication>
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFile>
@@ -53,10 +54,58 @@ std::optional<ImageFormat> formatOf(const QString &path) {
     return sniffImage(file.read(64));
 }
 
+// Writes `bytes` as a new file at `path`: false, and nothing written, when a file is there.
+Result<bool> writeNew(const QString &path, const QByteArray &bytes) {
+    const QFileInfo info(path);
+    if (const Errors made = makeFolder(info.absolutePath()); !made.isEmpty())
+        return made;
+    PartialFile partial(info.absolutePath(), info.fileName());
+    if (const Errors errors = partial.write(bytes, info.fileName()); !errors.isEmpty())
+        return errors;
+    return partial.commit(path, Overwrite::Never);
+}
+
 bool hasExtension(const QString &path, const QString &extension) {
     const QString suffix = QFileInfo(path).suffix().toLower();
     return suffix == extension || (extension == QLatin1String("jpg") && suffix == QLatin1String("jpeg"))
            || (extension == QLatin1String("tif") && suffix == QLatin1String("tiff"));
+}
+
+// A copy of `path` named with `extension` for a viewer, in a folder of the owner's alone
+// (`fugue-view` in the runtime folder, 0700), named by the path, size and modification time so
+// a changed file gets a fresh copy. Empty when it could not be made.
+QString viewCopy(const QString &path, const QString &extension) {
+    QString runtime = qEnvironmentVariable("XDG_RUNTIME_DIR");
+    if (runtime.isEmpty() || !QFileInfo(runtime).isDir())
+        runtime = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
+    if (runtime.isEmpty())
+        return {};
+    const QString dir = runtime + QStringLiteral("/fugue-view");
+    if (!QDir().mkpath(dir)
+        || !QFile::setPermissions(dir, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner))
+        return {};
+    const QFileInfo info(path);
+    const QByteArray identity = path.toUtf8() + '\n' + QByteArray::number(info.size()) + '\n'
+                                + QByteArray::number(info.lastModified().toMSecsSinceEpoch());
+    const QString key = QString::fromLatin1(QCryptographicHash::hash(identity, QCryptographicHash::Sha256).toHex().left(32));
+    const QString shown = dir + '/' + key + '.' + extension;
+    if (QFileInfo(shown).isFile() && QFileInfo(shown).size() == info.size())
+        return shown;
+    QFile source(path);
+    if (!source.open(QIODevice::ReadOnly))
+        return {};
+    PartialFile partial(dir, key + '.' + extension);
+    QFile out(partial.path());
+    if (!out.open(QIODevice::WriteOnly))
+        return {};
+    while (!source.atEnd()) {
+        const QByteArray chunk = source.read(1 << 20);
+        if (chunk.isEmpty() || out.write(chunk) != chunk.size())
+            return {};
+    }
+    out.close();
+    const Result<bool> committed = partial.commit(shown, Overwrite::Replace);
+    return committed && *committed ? shown : QString();
 }
 
 QString suggestedFolder() {
@@ -81,6 +130,12 @@ ImageActions::ImageActions(CommandRegistry &commands, CanvasModel &canvas, Canva
     commands.setHandler("node.save-image", [this] { save(); });
 }
 
+ImageActions::~ImageActions() {
+    // A read or write under way finishes first, so no worker outlives the window's objects
+    // and a save the person asked for is never cut short.
+    m_workers.waitForDone();
+}
+
 QString ImageActions::node() const {
     const QString target = m_commands.target().value("node").toString();
     if (!target.isEmpty())
@@ -93,26 +148,31 @@ void ImageActions::open() {
     const QString path = m_runs.imageFile(node());
     if (path.isEmpty())
         return;
-    QString shown = path;
     const auto format = formatOf(path);
-    // A viewer picks the program by the extension: a cache file has none, or a wrong one.
-    if (format && !hasExtension(path, format->extension)) {
-        const QString key = QString::fromLatin1(QCryptographicHash::hash(path.toUtf8(), QCryptographicHash::Sha256).toHex().left(16));
-        const QString dir = QDir::tempPath() + QStringLiteral("/fugue-view");
-        shown = dir + '/' + key + '.' + format->extension;
-        if (!QFileInfo::exists(shown)) {
-            QDir().mkpath(dir);
-            const QString part = shown + QStringLiteral(".part");
-            QFile::remove(part);
-            if (!QFile::copy(path, part) || !QFile::rename(part, shown)) {
-                QFile::remove(part);
-                emit message(say("Could not prepare the image to open it."));
-                return;
-            }
-        }
+    if (!format) {
+        emit message(say("The file is not an image Fugue can use."));
+        return;
     }
-    if (!m_opener(QUrl::fromLocalFile(shown)))
-        emit message(say("Could not open the image: no program is set to show it."));
+    if (hasExtension(path, format->extension)) {
+        if (!m_opener(QUrl::fromLocalFile(path)))
+            emit message(say("Could not open the image: no program is set to show it."));
+        return;
+    }
+    // A viewer picks the program by the extension: a cache file has none, or a wrong one, so
+    // a copy under the right one is made off the UI thread.
+    const QString extension = format->extension;
+    QPointer<ImageActions> self(this);
+    m_workers.start([self, path, extension] {
+        const QString shown = viewCopy(path, extension);
+        QMetaObject::invokeMethod(qApp, [self, shown] {
+            if (!self)
+                return;
+            if (shown.isEmpty())
+                emit self->message(say("Could not prepare the image to open it."));
+            else if (!self->m_opener(QUrl::fromLocalFile(shown)))
+                emit self->message(say("Could not open the image: no program is set to show it."));
+        }, Qt::QueuedConnection);
+    });
 }
 
 void ImageActions::copy() {
@@ -120,33 +180,44 @@ void ImageActions::copy() {
     if (path.isEmpty())
         return;
     QPointer<ImageActions> self(this);
-    QThreadPool::globalInstance()->start([self, path] {
+    m_workers.start([self, path] {
         ImageFormat format;
         const Result<QByteArray> bytes = readImage(path, format);
-        QImage image;
-        if (bytes) {
+        // A PNG of the picture beside the original, for apps that take only PNG; a PNG is
+        // already that.
+        QByteArray png;
+        if (bytes && format.mime != QLatin1String("image/png")) {
             QByteArray content = *bytes;
             QBuffer source(&content);
             source.open(QIODevice::ReadOnly);
             QImageReader reader(&source);
             reader.setAutoTransform(true);
             const QSize size = reader.size();
-            if (size.isValid() && qint64(size.width()) * size.height() <= maxImagePixels)
-                image = reader.read();
+            if (size.isValid() && qint64(size.width()) * size.height() <= maxImagePixels) {
+                const QImage image = reader.read();
+                QBuffer out(&png);
+                out.open(QIODevice::WriteOnly);
+                if (image.isNull() || !image.save(&out, "PNG"))
+                    png.clear();
+            }
         }
-        if (!self)
-            return;
-        QMetaObject::invokeMethod(self.data(), [self, bytes, format, image] {
+        // `self` is only looked at on the UI thread, where the object lives and dies.
+        QMetaObject::invokeMethod(qApp, [self, bytes, format, png] {
             if (!self)
                 return;
             if (!bytes) {
                 emit self->message(bytes.error().message);
                 return;
             }
+            // Bytes only, never setImageData: with a decoded image in the data, qtwayland
+            // answers every image/* request by encoding that image (QWaylandMimeHelper), so
+            // another app would get a re-encoded copy without the embedded workflow or EXIF.
             auto *data = new QMimeData;
-            if (!image.isNull())
-                data->setImageData(image);
             data->setData(format.mime, *bytes);
+            if (!png.isEmpty()) {
+                data->setData(QStringLiteral("image/png"), png);
+                data->setData(QString::fromLatin1(clipboardOriginalType), format.mime.toLatin1());
+            }
             QGuiApplication::clipboard()->setMimeData(data);
             emit self->copied();
         }, Qt::QueuedConnection);
@@ -164,7 +235,9 @@ void ImageActions::save() {
         const auto format = formatOf(path);
         name = safeStem(m_canvas.nodeTitle(node())) + '.' + (format ? format->extension : QStringLiteral("png"));
     }
-    emit saveRequested(QUrl::fromLocalFile(suggestedFolder()), name);
+    const QString folder = suggestedFolder();
+    emit saveRequested(QUrl::fromLocalFile(folder), QUrl::fromLocalFile(QDir(folder).filePath(name)),
+                       QFileInfo(name).suffix().toLower());
 }
 
 void ImageActions::saveTo(const QString &target) {
@@ -173,7 +246,7 @@ void ImageActions::saveTo(const QString &target) {
     if (source.isEmpty() || destination.isEmpty())
         return;
     QPointer<ImageActions> self(this);
-    QThreadPool::globalInstance()->start([self, source, destination] {
+    m_workers.start([self, source, destination] {
         ImageFormat format;
         const Result<QByteArray> bytes = readImage(source, format);
         QString failure;
@@ -182,16 +255,26 @@ void ImageActions::saveTo(const QString &target) {
             failure = bytes.error().message;
         } else {
             // A name typed without an extension gets the real one, so the file opens anywhere.
-            if (QFileInfo(path).suffix().isEmpty())
+            // The dialog asked about the name as typed, not this one: a file there stays.
+            const bool appended = QFileInfo(path).suffix().isEmpty();
+            if (appended)
                 path += '.' + format.extension;
-            // The dialog has asked about an existing file by now.
-            const Errors errors = replaceFile(path, *bytes, QFileInfo(path).fileName());
+            Errors errors;
+            bool taken = false;
+            if (!appended) {
+                errors = replaceFile(path, *bytes, QFileInfo(path).fileName());
+            } else if (const Result<bool> written = writeNew(path, *bytes); !written) {
+                errors = written.errors();
+            } else {
+                taken = !*written;
+            }
             if (!errors.isEmpty())
                 failure = say("The image was not saved: %1").arg(errors.first().message);
+            else if (taken)
+                failure = say("%1 already exists, so the image was not saved; choose another name.")
+                              .arg(QFileInfo(path).fileName());
         }
-        if (!self)
-            return;
-        QMetaObject::invokeMethod(self.data(), [self, failure, path] {
+        QMetaObject::invokeMethod(qApp, [self, failure, path] {
             if (!self)
                 return;
             if (failure.isEmpty())

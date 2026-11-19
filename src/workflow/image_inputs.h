@@ -54,7 +54,9 @@ QString safeStem(const QString &name);
 
 // Checks the bytes are an image Fugue can read and not an absurd one, then writes them as
 // <folder>/<stem>-<first 10 hex of the SHA-256>.<extension of the real format> (atomic) and
-// returns that path. The same bytes again, under whatever stem, are the file already there.
+// returns that path. The same bytes again, under whatever stem, are the file already there: a
+// regular file (not a link) whose whole content is these bytes, never one judged by name and
+// size. A different file under the name stays; the name takes `-2`, `-3` before the extension.
 // `stem` is made safe by safeStem; empty names it "pasted-YYYYMMDD-HHMMSS". `roots` must allow
 // writing the folder. The errors are worded for the person who pasted.
 Result<QString> storeImage(const QByteArray &bytes, const QString &folder, const FileRoots &roots,
@@ -65,9 +67,13 @@ Result<QString> storeImageFile(const QString &path, const QString &folder, const
 
 // The MIME types taken from the clipboard, best first.
 QStringList clipboardImageTypes();
-// What an image paste would store: the encoded bytes of the first of those types whose bytes
-// really are an image, else the decoded pixels as PNG. Not ok when the data holds no image.
-Result<QByteArray> clipboardImageBytes(const QMimeData &data);
+// Holds the MIME type of the original image when Fugue's Copy Image offers it beside a PNG made
+// for other apps: a paste takes that type first.
+inline constexpr const char *clipboardOriginalType = "application/x-fugue-image-type";
+// The encoded bytes of the first of those types whose bytes really are an image, else (with
+// `pixels`) the decoded pixels as PNG. Not ok when the data holds no such image. A paste tries
+// a `text/uri-list`'s files between the two.
+Result<QByteArray> clipboardImageBytes(const QMimeData &data, bool pixels = true);
 // True when the data offers an image to paste: encoded, decoded, or as local image files.
 bool clipboardHasImage(const QMimeData &data);
 // The local files of a `text/uri-list` (a file manager's copy).
@@ -82,6 +88,11 @@ QStringList clipboardFiles(const QMimeData &data);
 // new one. Copies, never moves: other workflows may use the file. The document is changed only
 // when every copy worked.
 Errors relocateInputs(Document &document, const Registry &registry, const QString &from, const QString &to);
+
+// Makes every relative `file` input literal the full path it names from `from`'s folder (a
+// workflow file), so the document names the same files from any folder. Nothing when `from`
+// is empty: a relative path in an unsaved workflow names nothing.
+void makeInputsAbsolute(Document &document, const Registry &registry, const QString &from);
 
 // One image in the inputs folder, for the "Recent inputs" list.
 struct RecentInput {
@@ -119,7 +130,8 @@ public:
     // message. True when any image was placed.
     bool dropFiles(const QStringList &paths, QPointF at, const QString &onNode = {});
 
-    // The "Recent inputs" of the file picker: {path, name, modified}, newest first, at most 48.
+    // The "Recent inputs" of the file picker: {path, url (a file URL made from the path), name,
+    // modified}, newest first, at most 48.
     Q_INVOKABLE QVariantList recent() const;
     // Points a Load Image's file at one of them (or any file in the inputs folder): one undo step.
     Q_INVOKABLE bool use(const QString &node, const QString &path);
