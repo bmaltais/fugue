@@ -45,7 +45,9 @@ double luminance(const QColor &c) {
 
 Theme::Theme(const QString &directory, QObject *parent, const QString &hyprctl, const QString &hyprlandEvents)
     : QObject(parent),
-      m_directory(directory.isEmpty() ? QDir::homePath() + "/.local/state/omarchy/current" : directory) {
+      m_directory(directory.isEmpty() ? QDir::homePath() + "/.local/state/omarchy/current" : directory),
+      // The user's own shell.toml; tests keep theirs in the directory they pass.
+      m_shellFile(directory.isEmpty() ? QDir::homePath() + "/.config/omarchy/shell.toml" : directory + "/shell.toml") {
     m_debounce.setSingleShot(true);
     m_debounce.setInterval(80);
     connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this, [this] { m_debounce.start(); });
@@ -166,6 +168,25 @@ Theme::Palette Theme::readThemeColors(const QString &path) {
     return palette;
 }
 
+int Theme::readTextSize(const QString &path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return 0;
+    static const QRegularExpression section(R"(^\s*\[([^\]]*)\])");
+    static const QRegularExpression size(R"(^\s*base-size\s*=\s*([0-9]+)(?:\.[0-9]+)?\s*(?:#.*)?$)");
+    bool inFont = false;
+    for (const QByteArray &raw : file.readAll().split('\n')) {
+        const QString line = QString::fromUtf8(raw).trimmed();
+        if (const auto match = section.match(line); match.hasMatch())
+            inFont = match.captured(1).trimmed() == "font";
+        else if (const auto match = size.match(line); inFont && match.hasMatch()) {
+            const int value = match.captured(1).toInt();
+            return value >= 6 && value <= 72 ? value : 0;
+        }
+    }
+    return 0;
+}
+
 QColor Theme::color(const QString &key) const {
     if (const auto it = m_colors.constFind(key); it != m_colors.constEnd())
         return *it;
@@ -198,17 +219,65 @@ void Theme::reload() {
     while (!QFileInfo::exists(ancestor) && ancestor != "/")
         ancestor = QFileInfo(ancestor).absolutePath();
     QStringList candidates{ancestor, QFileInfo(ancestor).absolutePath(), m_directory,
-                           m_directory + "/theme", m_directory + "/theme/colors.toml"};
+                           m_directory + "/theme", m_directory + "/theme/colors.toml",
+                           m_directory + "/theme/shell.toml", m_shellFile};
+    // The user's config directory, so a shell.toml created later is seen.
+    QString configDirectory = QFileInfo(m_shellFile).absolutePath();
+    while (!QFileInfo::exists(configDirectory) && configDirectory != "/")
+        configDirectory = QFileInfo(configDirectory).absolutePath();
+    candidates << configDirectory;
     candidates.removeDuplicates();
     for (const auto &path : candidates)
         if (QFileInfo::exists(path))
             m_watcher.addPath(path);
 
+    // The user's shell.toml sits over the theme's own, as Omarchy layers them.
+    int textSize = readTextSize(m_shellFile);
+    if (!textSize)
+        textSize = readTextSize(m_directory + "/theme/shell.toml");
+    if (!textSize)
+        textSize = 12;
+    const bool sizeChanged = textSize != m_textSize;
+    m_textSize = textSize;
+
     const Palette palette = readThemeColors(m_directory + "/theme/colors.toml");
     const bool light = palette.colors.isEmpty() ? false : palette.light;
-    if (palette.colors != m_colors || light != m_light) {
+    if (palette.colors != m_colors || light != m_light || sizeChanged) {
         m_colors = palette.colors;
         m_light = light;
         emit changed();
     }
+}
+
+namespace {
+QColor mix(const QColor &a, const QColor &b, double toB) {
+    return QColor::fromRgbF(a.redF() + (b.redF() - a.redF()) * toB, a.greenF() + (b.greenF() - a.greenF()) * toB,
+                            a.blueF() + (b.blueF() - a.blueF()) * toB);
+}
+} // namespace
+
+// A surface a step toward the text color, so it lifts off the background on
+// dark and light themes alike.
+QColor Theme::panel() const { return mix(background(), foreground(), .07); }
+
+QColor Theme::border() const { return mix(background(), foreground(), .25); }
+
+// Secondary text: the theme's own muted gray is often too faint to read, so
+// take a fixed share of the text color instead.
+QColor Theme::muted() const { return mix(background(), foreground(), .65); }
+
+QColor Theme::portColor(const QString &type) const {
+    static const QHash<QString, QString> names{
+        {"text", "green"},    {"number", "blue"},  {"boolean", "orange"},
+        {"image", "magenta"}, {"video", "cyan"},   {"audio", "yellow"},
+    };
+    const auto it = names.constFind(type);
+    return it == names.constEnd() ? accent() : color(*it);
+}
+
+QVariantMap Theme::portColors() const {
+    QVariantMap colors;
+    for (const QString &type : QStringList{"text", "number", "boolean", "image", "video", "audio", "declared"})
+        colors.insert(type, portColor(type));
+    return colors;
 }

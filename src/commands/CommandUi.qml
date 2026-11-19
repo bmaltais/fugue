@@ -171,6 +171,7 @@ Item {
                     Label {
                         Layout.preferredWidth: 220
                         Layout.alignment: Qt.AlignTop
+                        objectName: "helpKeys"
                         wrapMode: Text.Wrap
                         text: modelData.keys.concat(modelData.gestures).join(", ")
                         color: theme.accent
