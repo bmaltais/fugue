@@ -510,11 +510,24 @@ private slots:
                  QString("/x/a.png"));
     }
 
-    void runsCancelIsNotBuiltYetForALiveRun() {
+    // run.done is appended once by whoever ended the run; run.json is rewritten as the run
+    // goes, so a late write there must not bring an ended run back to life.
+    void runDoneDecidesTheStatusWhateverRunJsonSays() {
+        makeRun("20261122-100000-000-eeee", "running", false);
+        auto folder = RunFolder::open(runsRoot(), "20261122-100000-000-eeee");
+        folder->appendEvent(QJsonObject{{"event", "run.done"}, {"status", "cancelled"}, {"errors", QJsonArray()}});
+        const Outcome o = fugue({"runs", "status", "20261122-100000-000-eeee", "--json"});
+        QCOMPARE(o.json().value("data").toObject().value("status").toString(), QString("cancelled"));
+    }
+
+    void runsCancelOfARunWithNoWorkerMarksItFailed() {
         makeRun("20261120-100000-000-cccc", "running", false);
         const Outcome o = fugue({"runs", "cancel", "20261120-100000-000-cccc", "--json"});
         QCOMPARE(o.exitCode, 1);
         QCOMPARE(o.firstCode(), QString("internal"));
+        const Outcome status = fugue({"runs", "status", "20261120-100000-000-cccc", "--json"});
+        QCOMPARE(status.json().value("data").toObject().value("status").toString(), QString("failed"));
+        QVERIFY(!status.json().value("data").toObject().value("ended").toString().isEmpty());
     }
 
     void runsResultKeepsOnlyTheSinksOfTheCompiledGraph() {

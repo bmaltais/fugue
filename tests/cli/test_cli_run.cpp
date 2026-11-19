@@ -22,7 +22,11 @@
 #include <QtTest>
 
 #include <csignal>
+#include <sys/wait.h>
+#include <unistd.h>
 
+#include "cli/queue.h"
+#include "cli/runs.h"
 #include "engine/run_folder.h"
 
 using namespace fugue;
@@ -122,6 +126,49 @@ class TestCliRun : public QObject {
         return folder.ok() ? folder->state().value("status").toString() : QString();
     }
 
+    // Whether a worker of any run of this test is still a process (it exits just after it
+    // removes its queue entry).
+    bool anyWorkerAlive() const {
+        const QStringList runs = QDir(runsRoot()).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+        for (const QString &pid : QDir("/proc").entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+            QFile file("/proc/" + pid + "/cmdline");
+            if (!pid.at(0).isDigit() || !file.open(QIODevice::ReadOnly))
+                continue;
+            const QList<QByteArray> arguments = file.readAll().split('\0');
+            const qsizetype at = arguments.indexOf("__worker");
+            if (at >= 0 && at + 1 < arguments.size() && runs.contains(QString::fromUtf8(arguments.at(at + 1))))
+                return true;
+        }
+        return false;
+    }
+
+    // A process id that is certainly free: a child that has exited and been reaped.
+    static qint64 deadPid() {
+        const pid_t child = ::fork();
+        if (child == 0)
+            ::_exit(0);
+        int status = 0;
+        ::waitpid(child, &status, 0);
+        return child;
+    }
+
+    void fabricateRun(const QString &id, const QString &status, const QString &entryClass, qint64 pid) const {
+        auto folder = RunFolder::create(runsRoot(), id);
+        QVERIFY(folder.ok());
+        folder->writeState(QJsonObject{{"status", status}});
+        write(queueDir() + "/" + entryClass + "-00000000000001-" + id,
+              QJsonDocument(QJsonObject{{"run", id}, {"pid", double(pid)}}).toJson());
+    }
+
+    // For the parts of the CLI a test calls in-process.
+    cli::Context context() const {
+        cli::Context context;
+        context.runsRoot = runsRoot();
+        context.queueDir = queueDir();
+        context.lockPath = path("state/fugue/engine.lock");
+        return context;
+    }
+
     QStringList queued() const { return QDir(queueDir()).entryList(QDir::Files | QDir::NoDotAndDotDot, QDir::Name); }
 
 private slots:
@@ -143,8 +190,9 @@ private slots:
 
     void cleanup() {
         // Let any worker finish before its folders go away.
+        // The real condition, not a pause: the queue is empty and every worker has exited.
         QVERIFY2(QFile(gate()).open(QIODevice::WriteOnly), "gate");
-        QTest::qWait(300);
+        QTRY_VERIFY_WITH_TIMEOUT(queued().isEmpty() && !anyWorkerAlive(), 30000);
         delete m_dir;
         m_dir = nullptr;
     }
@@ -263,6 +311,12 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(statusOf(a), QString("running"), 15000);
         const QString b = start("hold.fugue");
         QCOMPARE(queued().size(), 2);
+        // While a run waits, `fugue run` wrote its run.json once and nobody writes it again:
+        // the worker's pid is in the queue entry, not patched into run.json.
+        QVERIFY(!RunFolder::open(runsRoot(), b)->state().contains("pid"));
+        cli::QueueEntry entry;
+        QVERIFY(cli::Queue(queueDir()).find(b, &entry));
+        QTRY_VERIFY_WITH_TIMEOUT(cli::Queue(queueDir()).find(b, &entry) && cli::isRunWorker(entry.pid, b), 10000);
         const Outcome o = fugue({"runs", "cancel", b, "--json"});
         QCOMPARE(o.exitCode, 0);
         QCOMPARE(statusOf(b), QString("cancelled"));
@@ -273,20 +327,95 @@ private slots:
         QCOMPARE(statusOf(b), QString("cancelled")); // its worker did not run it
     }
 
+    // 9.8: `runs cancel` reads the queue, then acts. The worker may activate the entry in
+    // between; the cancel must then reach the worker, not delete the entry of a live run.
+    void aCancelThatSawTheRunWaitingStillStopsItOnceItHasStarted() {
+        const QString id = start("hold.fugue");
+        QTRY_COMPARE_WITH_TIMEOUT(statusOf(id), QString("running"), 15000);
+        const cli::Queue queue(queueDir());
+        cli::QueueEntry seen;
+        QVERIFY(queue.find(id, &seen));
+        QVERIFY(seen.active);
+        // The entry as it was just before the worker renamed it to the active class.
+        seen.active = false;
+        seen.file = "5" + seen.file.mid(1);
+
+        const cli::Reply reply = cli::cancelRun(*RunFolder::open(runsRoot(), id), seen, context());
+        QVERIFY(!reply.failed());
+        QCOMPARE(reply.data.toObject().value("status").toString(), QString("cancelling"));
+        QTRY_COMPARE_WITH_TIMEOUT(statusOf(id), QString("cancelled"), 15000);
+        QTRY_VERIFY_WITH_TIMEOUT(queued().isEmpty(), 10000); // the worker removed its own entry
+        // The worker ended the run, once: it skipped the node and wrote the one run.done.
+        int done = 0;
+        bool nodeEnded = false;
+        for (const QJsonObject &event : RunFolder::open(runsRoot(), id)->events()) {
+            done += event.value("event").toString() == "run.done";
+            nodeEnded = nodeEnded || (event.value("node").toString() == "h"
+                                      && event.value("event").toString() == "node.skipped");
+        }
+        QCOMPARE(done, 1);
+        QVERIFY(nodeEnded);
+    }
+
     void anEntryWhoseProcessIsGoneIsDiscarded() {
-        const qint64 dead = 4194303;
-        if (::kill(pid_t(dead), 0) == 0)
-            QSKIP("pid 4194303 exists on this machine");
         // A crashed worker left itself first in the queue, and its run unfinished.
-        auto folder = RunFolder::create(runsRoot(), "20260101-000000-000-dead");
-        QVERIFY(folder.ok());
-        folder->writeState(QJsonObject{{"status", "running"}});
-        write(path("state/fugue/queue/0-00000000000001-20260101-000000-000-dead"),
-              QJsonDocument(QJsonObject{{"run", "20260101-000000-000-dead"}, {"pid", double(dead)}}).toJson());
+        const QString dead = "20260101-000000-000-dead";
+        fabricateRun(dead, "running", "0", deadPid());
         const Outcome o = fugue({"run", path("flow.fugue"), "--wait"});
         QCOMPARE(o.exitCode, 0);
-        QCOMPARE(statusOf("20260101-000000-000-dead"), QString("failed"));
+        QCOMPARE(statusOf(dead), QString("failed"));
+        // It has an end, so the run folder can be collected 7 days later (10.5).
+        QVERIFY(!RunFolder::open(runsRoot(), dead)->state().value("ended").toString().isEmpty());
         QVERIFY(queued().isEmpty());
+    }
+
+    // A process id proves nothing: the dead worker's may belong to someone else by now.
+    void aWaitingEntryWhoseWorkersPidWasReusedDoesNotBlockTheQueue() {
+        const QString dead = "20260101-000000-000-gone";
+        fabricateRun(dead, "queued", "3", QCoreApplication::applicationPid()); // alive, but not that worker
+        const Outcome o = fugue({"run", path("flow.fugue"), "--wait"});
+        QCOMPARE(o.exitCode, 0);
+        QCOMPARE(statusOf(dead), QString("failed"));
+        QVERIFY(queued().isEmpty());
+    }
+
+    void followingARunWhoseWorkerWasKilledEndsInsteadOfHanging() {
+        const QString id = start("hold.fugue");
+        QTRY_COMPARE_WITH_TIMEOUT(statusOf(id), QString("running"), 15000);
+        const qint64 worker = qint64(RunFolder::open(runsRoot(), id)->state().value("pid").toDouble());
+        QVERIFY(worker > 0);
+        QCOMPARE(::kill(pid_t(worker), SIGKILL), 0);
+
+        const Outcome o = fugue({"runs", "events", id, "--follow"});
+        QCOMPARE(o.exitCode, 1);
+        QCOMPARE(o.lines().last().value("event").toString(), QString("run.done"));
+        QCOMPARE(o.lines().last().value("status").toString(), QString("failed"));
+        QCOMPARE(statusOf(id), QString("failed"));
+        QVERIFY(!RunFolder::open(runsRoot(), id)->state().value("ended").toString().isEmpty());
+        QVERIFY(queued().isEmpty());
+        QCOMPARE(fugue({"runs", "status", id, "--json"}).data().value("status").toString(), QString("failed"));
+    }
+
+    void cancelNeverSignalsAProcessThatIsNotTheRunsWorker() {
+        // The active entry's pid now belongs to a bystander: `cat`, which runs until its
+        // input closes.
+        QProcess bystander;
+        bystander.start("cat", QStringList());
+        QVERIFY(bystander.waitForStarted());
+        const QString id = "20260101-000000-000-reused";
+        fabricateRun(id, "running", "0", bystander.processId());
+
+        const Outcome o = fugue({"runs", "cancel", id, "--json"});
+        QCOMPARE(o.exitCode, 1);
+        QCOMPARE(o.firstCode(), QString("internal"));
+        QCOMPARE(statusOf(id), QString("failed"));
+        QVERIFY(queued().isEmpty());
+
+        // A signal sent by the cancel would be delivered before the end of input is read.
+        bystander.closeWriteChannel();
+        QVERIFY(bystander.waitForFinished());
+        QCOMPARE(bystander.exitStatus(), QProcess::NormalExit);
+        QCOMPARE(bystander.exitCode(), 0);
     }
 
     void validateWarnsWhenNoProviderCanServeANode() {

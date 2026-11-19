@@ -190,7 +190,15 @@ Result<RunFolder> openRun(const Command &command, Context &context) {
     return RunFolder::open(context.runsRoot, command.positionals.at(0));
 }
 
+// A run whose worker died is ended before it is shown, so it does not read as running
+// for ever.
+void endDeadRuns(const Context &context) {
+    Lock lock(context.lockPath);
+    endDeadRuns(context, lock);
+}
+
 Reply runsList(const Command &, Context &context) {
+    endDeadRuns(context);
     QJsonArray runs;
     QStringList lines;
     QMap<QString, int> positions; // 0 is the run that is going, then the waiting ones in order
@@ -245,6 +253,7 @@ Reply runsStatus(const Command &command, Context &context) {
     const Result<RunFolder> folder = openRun(command, context);
     if (!folder)
         return Reply::failure(folder.errors());
+    endDeadRuns(context);
     const QList<QJsonObject> events = folder->events();
     QJsonObject data = folder->state();
     data.insert("id", folder->id());
