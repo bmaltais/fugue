@@ -11,7 +11,7 @@ import QtQuick.Shapes
 // model, so the node delegates carry no input handlers. Navigation follows 12.3: the legacy
 // preset (ComfyUI's default) pans with a left-drag on empty canvas and zooms with the wheel;
 // the standard preset selects with a left-drag and pans with the wheel. In both, middle-drag
-// and Space+drag pan, a touchpad (a wheel event with a scroll phase, or from a touchpad device;
+// and Space+drag pan, a touchpad (a wheel event with a scroll phase;
 // never told by pixelDelta, which a mouse wheel can carry too) pans and a pinch zooms, and
 // right-drag does nothing.
 //
@@ -420,10 +420,11 @@ FocusScope {
         }
 
         onWheel: wheel => {
-            // A touchpad is told by its scroll phase or its device, never by pixelDelta: a mouse
-            // wheel can carry one too (Wayland, libinput high-resolution wheels).
+            // A touchpad is told by its scroll phase alone. Never by the device type (Qt on
+            // Wayland calls an ordinary mouse a "touchpad": seen on the owner's machine, type
+            // TouchPad, phase none, angle 120, pixel 15) and never by pixelDelta (a mouse wheel
+            // can carry one, and a high-resolution wheel sends fractions of a notch).
             const trackpad = wheel.phase !== Qt.NoScrollPhase
-                || (wheel.device && wheel.device.type === PointerDevice.TouchPad)
             const pixels = wheel.pixelDelta.x !== 0 || wheel.pixelDelta.y !== 0
             const zooms = (wheel.modifiers & Qt.ControlModifier)
                 || (!trackpad && canvas.navigation === "legacy")

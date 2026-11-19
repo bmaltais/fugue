@@ -441,6 +441,17 @@ private slots:
         QVERIFY(qAbs(app.zoom() - 1.1 * qPow(1.1, -0.5)) < 1e-9);
     }
 
+    // The owner's mouse as Qt reports it on Wayland: whole notch, pixel = angle / 8, no phase.
+    // Its device calls itself a touchpad, which must not matter.
+    void aWholeNotchWithPixelsZoomsInLegacy() {
+        App app(load(small));
+        QVERIFY(app.open());
+        app.wheel({500, 300}, {0, -120}, {0, -15});
+        QVERIFY(qAbs(app.zoom() - 1.0 / 1.1) < 1e-9);
+        app.wheel({500, 300}, {0, 240}, {0, 30}); // two notches in one event
+        QVERIFY(qAbs(app.zoom() - 1.1) < 1e-9);
+    }
+
     void aTouchpadScrollPansInBothPresetsAndCtrlZooms() {
         for (const char *preset : {"legacy", "standard"}) {
             App app(load(small));

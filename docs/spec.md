@@ -1485,7 +1485,7 @@ Two presets, chosen in settings:
 | Zoom | wheel | Ctrl+wheel |
 
 In both: middle-drag and Space+drag pan. A touchpad is told from a mouse wheel by its scroll
-phase (anything but `NoScrollPhase`) or its device type, never by `pixelDelta`, which a mouse wheel
+phase (anything but `NoScrollPhase`) alone, never by the device type (Qt on Wayland reports an ordinary mouse as a touchpad) and never by `pixelDelta`, which a mouse wheel
 can carry too (Wayland, libinput high-resolution wheels). A mouse wheel zooms by 1.1x per 120
 units at the pointer (legacy) or pans (standard). On a touchpad, scrolling pans and a pinch zooms.
 A wheel over an open multiline field scrolls the field when it has more text than shows. Right-click opens the context menu; right-drag does
@@ -1963,7 +1963,7 @@ Building M2 made these further choices.
 | Positions are written to `layout.nodes.<id>.pos` as whole numbers, the viewport to `layout.view` (center whole, zoom to three decimals) | 4.5, 4.6 | medium-high |
 | Zoom runs 0.1 to 4, 1.1 per wheel step (ComfyUI's step); below 0.5 node text and ports are not drawn, and a press there is on the node, not a port (ComfyUI draws a low-detail node below about 0.6) | 12.1, 12.3 | medium-high |
 | A node's port rows are made the first time it is in view at a readable zoom, so a 300-node file opens at the cost of what is on screen | 12.1 | high |
-| A touchpad is a wheel event with a scroll phase or a touchpad device, never judged by `pixelDelta` (a mouse wheel can carry one); it pans in both presets; Ctrl+wheel zooms in both; a pinch arrives as a native zoom gesture. A real touchpad on Wayland reports phases (not testable here: offscreen sends synthetic events) | 12.3 | high for mouse, medium for touchpad hardware |
+| A touchpad is a wheel event with a scroll phase, never judged by the device type (the owner's mouse reports `touchpad`: angle 120, pixel 15, phase none) or by `pixelDelta`; it pans in both presets; Ctrl+wheel zooms in both; a pinch arrives as a native zoom gesture. A real touchpad on Wayland reports phases (not testable here: offscreen sends synthetic events) | 12.3 | high for mouse, medium for touchpad hardware |
 | Space+drag pans with the left button held; Space and a move with no button does nothing (ComfyUI pans on that too) | 12.3 | medium |
 | The canvas is never mirrored in right-to-left languages: a graph's direction and its saved positions are geometry | 12.11 | medium-high |
 | A click selects a node, Shift or Ctrl+click adds, dragging a selected node moves the selection, and a click on empty canvas clears it (legacy). A marquee selects every node it touches, as ComfyUI's does | 12.3, 12.4 | high |
