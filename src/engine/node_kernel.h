@@ -92,7 +92,7 @@ struct NodeContext {
     // "model": <handle>}} for this node and every node upstream of it that has any
     // (a randomized input made concrete; a provider node's engine and model).
     // Same purpose as `document`, and likewise not in the cache key.
-    QJsonObject used;
+    QJsonObject usedUpstream;
 
     // The input's value, or an Empty value when it has none.
     Value input(const QString &name) const { return inputs.value(name); }

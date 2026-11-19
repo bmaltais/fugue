@@ -36,7 +36,7 @@ private slots:
         world.type("fugue/spy", "'sink': true, 'inputs': [{'name': 'text', 'type': 'text'}], 'outputs': []",
                    [seen](const NodeContext &context) -> Result<Values> {
                        seen->document = context.document;
-                       seen->used = context.used;
+                       seen->used = context.usedUpstream;
                        seen->registry = context.registry;
                        return Values{};
                    });
@@ -64,7 +64,7 @@ private slots:
         auto seen = std::make_shared<Seen>();
         world.type("fugue/spy", "'sink': true, 'inputs': [{'name': 'text', 'type': 'text'}], 'outputs': []",
                    [seen](const NodeContext &context) -> Result<Values> {
-                       seen->used = context.used;
+                       seen->used = context.usedUpstream;
                        return Values{};
                    });
         const CompiledGraph graph = world.graph(QJsonObject{

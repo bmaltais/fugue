@@ -62,7 +62,7 @@ QByteArray workflowToEmbed(const NodeContext &context, const QString &embed) {
     ShareOptions options;
     options.withoutPrompts = embed == QLatin1String("no-prompts");
     QJsonObject document = shareCopy(context.document, *context.registry, options);
-    document.insert("run", QJsonObject{{"nodes", context.used}});
+    document.insert("run", QJsonObject{{"nodes", context.usedUpstream}});
     return compactJson(document);
 }
 

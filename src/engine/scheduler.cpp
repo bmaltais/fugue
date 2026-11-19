@@ -773,7 +773,7 @@ private:
         context.models = m_env.models;
         context.registry = m_env.registry;
         context.document = m_options.document;
-        context.used = usedUpstream(n);
+        context.usedUpstream = usedUpstream(n);
         const QString path = n.path;
         context.progress = [this, path](double value, const QString &stage, const QString &message) {
             later([this, path, value, stage, message] { progress(path, value, stage, message); });
