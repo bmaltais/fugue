@@ -3,11 +3,11 @@
 
 #include "media.h"
 
-#include <cstdio>
 
 #include <QDir>
 #include <QFile>
 
+#include "engine/atomic_file.h"
 #include "engine/file_hashes.h"
 #include "engine/vips.h"
 
@@ -131,22 +131,20 @@ Result<MediaHandle> MediaHandle::savedImage(const QString &dir, const QString &n
     // partial file. No metadata and a fixed compression level: the same
     // pixels always give the same bytes, so an unchanged result keeps its
     // hash and stays a cache hit (spec 10.1).
+    // The same pixels make the same file, so one already at the name is replaced.
     const QString path = QDir(dir).filePath(name + QStringLiteral(".png"));
-    const QString partial = QDir(dir).filePath(QStringLiteral(".") + name + QStringLiteral(".png.part"));
+    PartialFile partial(dir, name + QStringLiteral(".png"));
     try {
-        VImage(ready->first).pngsave(fileName(partial).constData(),
+        VImage(ready->first).pngsave(fileName(partial.path()).constData(),
                                      VImage::option()
                                          ->set("compression", 6)
                                          ->set("bitdepth", ready->second)
                                          ->set("keep", VIPS_FOREIGN_KEEP_NONE));
     } catch (const vips::VError &error) {
-        QFile::remove(partial);
         return vipsError(error);
     }
-    if (std::rename(fileName(partial).constData(), fileName(path).constData()) != 0) {
-        QFile::remove(partial);
-        return makeError(QStringLiteral("permission_denied"), QStringLiteral("Cannot write %1.").arg(path));
-    }
+    if (const Result<bool> committed = partial.commit(path, Overwrite::Replace); !committed)
+        return committed.errors();
 
     MediaHandle handle = *this;
     handle.m_path = path;
