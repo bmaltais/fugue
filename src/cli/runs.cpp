@@ -249,7 +249,9 @@ Reply cancelRun(const RunFolder &folder, const std::optional<QueueEntry> &seen, 
                                     "Start the run again with `fugue run`."));
 }
 
-int runWorker(const QString &runId, Context &context) {
+namespace {
+
+int work(const QString &runId, Context &context) {
     const Result<RunFolder> folder = RunFolder::open(context.runsRoot, runId);
     if (!folder)
         return 1;
@@ -305,6 +307,15 @@ int runWorker(const QString &runId, Context &context) {
     const RunOutcome outcome = runGraph(*graph, *folder, process.environment, options, &g_cancel);
     queue.remove(runId);
     return outcome.status == RunStatus::Ok ? 0 : 1;
+}
+
+} // namespace
+
+Reply runWorker(const Command &command, Context &context) {
+    Reply reply;
+    reply.streamed = true;
+    reply.exitCode = work(command.positionals.at(0), context);
+    return reply;
 }
 
 } // namespace fugue::cli

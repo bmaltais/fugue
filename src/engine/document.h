@@ -89,6 +89,10 @@ private:
 };
 
 enum class NodeMode { Normal, Bypass, Mute };
+// "normal", "bypass", "mute". A document writes `mode` only for the last two (4.2).
+QString nodeModeName(NodeMode mode);
+// Nothing for a word that is not one of the three.
+std::optional<NodeMode> parseNodeMode(const QString &text);
 
 // A node in `graph.nodes` or in a group definition's `nodes`.
 struct Node {

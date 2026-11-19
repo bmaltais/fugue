@@ -190,15 +190,14 @@ std::optional<Node> readNode(Checker &c, const QString &prefix, const QString &i
                  .arg(shown(o.value("version"))));
 
     if (o.contains("mode")) {
-        const QString mode = o.value("mode").toString();
-        if (mode == "bypass")
-            node.mode = NodeMode::Bypass;
-        else if (mode == "mute")
-            node.mode = NodeMode::Mute;
+        // "normal" is the absence of `mode`, never written.
+        const std::optional<NodeMode> mode = parseNodeMode(o.value("mode").toString());
+        if (mode && *mode != NodeMode::Normal)
+            node.mode = *mode;
         else
             fail(QStringLiteral("\"mode\" must be \"bypass\" or \"mute\", not %1; leave it out for normal.")
                      .arg(shown(o.value("mode"))),
-                 QJsonArray{"bypass", "mute"});
+                 QJsonArray{nodeModeName(NodeMode::Bypass), nodeModeName(NodeMode::Mute)});
     }
     for (const auto &[key, out] : {std::pair<const char *, QString *>{"provider", &node.provider},
                                    std::pair<const char *, QString *>{"frozen", &node.frozen}}) {
@@ -589,10 +588,8 @@ QJsonObject nodeJson(const Node &node) {
     for (auto it = node.inputs.begin(); it != node.inputs.end(); ++it)
         inputs.insert(it.key(), it.value().toJson());
     o.insert("inputs", inputs);
-    if (node.mode == NodeMode::Bypass)
-        o.insert("mode", "bypass");
-    else if (node.mode == NodeMode::Mute)
-        o.insert("mode", "mute");
+    if (node.mode != NodeMode::Normal)
+        o.insert("mode", nodeModeName(node.mode));
     if (!node.provider.isEmpty())
         o.insert("provider", node.provider);
     if (!node.frozen.isEmpty())
@@ -817,6 +814,25 @@ QString newNodeId(const Nodes &taken) {
         if (!taken.contains(id))
             return id;
     }
+}
+
+QString nodeModeName(NodeMode mode) {
+    switch (mode) {
+    case NodeMode::Bypass:
+        return QStringLiteral("bypass");
+    case NodeMode::Mute:
+        return QStringLiteral("mute");
+    case NodeMode::Normal:
+        break;
+    }
+    return QStringLiteral("normal");
+}
+
+std::optional<NodeMode> parseNodeMode(const QString &text) {
+    for (const NodeMode mode : {NodeMode::Normal, NodeMode::Bypass, NodeMode::Mute})
+        if (text == nodeModeName(mode))
+            return mode;
+    return std::nullopt;
 }
 
 // --- Document -----------------------------------------------------------------

@@ -1,7 +1,8 @@
 #pragma once
 
-// Argument parsing for the command table of spec 13.1. It only turns argv into
-// a Command; it knows nothing about running one.
+// The command table of spec 13.1 and argument parsing against it. Each command is
+// in the table once, with the arguments it takes and the handler that runs it
+// (commands.h), so there is no second list of commands to keep in step.
 
 #include <QMap>
 #include <QString>
@@ -10,6 +11,13 @@
 #include "engine/result.h"
 
 namespace fugue::cli {
+
+struct Command;
+struct Context;
+struct Reply;
+
+// What runs a command (commands.h).
+using Handler = Reply (*)(const Command &command, Context &context);
 
 struct Command {
     // The canonical name: "run", "validate", "compile", "workflow.new",
@@ -20,9 +28,9 @@ struct Command {
     // Option values by name without dashes; a flag has one empty entry.
     QMap<QString, QStringList> options;
     bool json = false;
-    // True for commands that belong to later milestones: they parse, but
-    // there is nothing to run yet.
-    bool later = false;
+    // From the table. Null for a command that belongs to a later milestone: it
+    // parses, but there is nothing to run yet.
+    Handler handler = nullptr;
 
     bool has(const QString &option) const { return options.contains(option); }
     QString value(const QString &option) const { return options.value(option).value(0); }

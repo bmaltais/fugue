@@ -22,7 +22,7 @@ namespace fugue::cli {
 
 namespace {
 
-// ---- nodes ----
+// ---- helpers ----
 
 QString humanProblem(const Error &error) {
     return QStringLiteral("%1 %2%3: %4")
@@ -35,6 +35,52 @@ QJsonObject nodeSummary(const NodeType &type) {
                         {"category", type.category}, {"description", type.description}, {"sink", type.sink}};
     return summary;
 }
+
+Reply loadFailed(const Errors &errors) {
+    Errors list = errors;
+    if (list.isEmpty())
+        list << makeError("internal", "The document could not be loaded.");
+    return Reply::failure(list);
+}
+
+Result<RunFolder> openRun(const Command &command, Context &context) {
+    return RunFolder::open(context.runsRoot, command.positionals.at(0));
+}
+
+// A run whose worker died is ended before it is shown, so it does not read as running
+// for ever.
+void endDeadRuns(const Context &context) {
+    Lock lock(context.lockPath);
+    endDeadRuns(context, lock);
+}
+
+// Per-node state from the events (9.4).
+QJsonObject foldNodes(const QList<QJsonObject> &events) {
+    QJsonObject nodes;
+    for (const QJsonObject &event : events) {
+        const QString node = event.value("node").toString();
+        const QString kind = event.value("event").toString();
+        if (node.isEmpty() || !kind.startsWith("node.") || kind == "node.preview")
+            continue;
+        QJsonObject entry = nodes.value(node).toObject();
+        entry.insert("state", kind == "node.progress" ? QStringLiteral("running") : kind.mid(5));
+        if (kind == "node.progress") {
+            for (const char *key : {"value", "stage", "message"})
+                if (event.contains(key))
+                    entry.insert(key, event.value(key));
+        } else if (kind == "node.skipped") {
+            entry.insert("reason", event.value("reason"));
+        } else if (kind == "node.error") {
+            entry.insert("error", event.value("error"));
+        }
+        if (kind == "node.done" || kind == "node.cached")
+            entry.remove("value");
+        nodes.insert(node, entry);
+    }
+    return nodes;
+}
+
+} // namespace
 
 Reply nodeList(const Command &command, Context &context) {
     std::optional<PortType> filter;
@@ -82,16 +128,7 @@ Reply nodeDescribe(const Command &command, Context &context) {
     return Reply::success(QJsonObject{{"nodes", nodes}}, QString::fromUtf8(writeJson(nodes)));
 }
 
-// ---- workflows ----
-
-Reply loadFailed(const Errors &errors) {
-    Errors list = errors;
-    if (list.isEmpty())
-        list << makeError("internal", "The document could not be loaded.");
-    return Reply::failure(list);
-}
-
-Reply validate(const Command &command, Context &context) {
+Reply validateWorkflow(const Command &command, Context &context) {
     Errors errors;
     const std::optional<Document> document = Document::loadFile(command.positionals.at(0), errors);
     if (!document)
@@ -112,7 +149,7 @@ Reply validate(const Command &command, Context &context) {
     return reply;
 }
 
-Reply compile(const Command &command, Context &context) {
+Reply compileWorkflow(const Command &command, Context &context) {
     Errors errors;
     const std::optional<Document> document = Document::loadFile(command.positionals.at(0), errors);
     if (!document)
@@ -148,8 +185,7 @@ Reply workflowDescribe(const Command &command, Context &context) {
     const Nodes &all = document->graph.nodes;
     for (auto it = all.cbegin(); it != all.cend(); ++it) {
         const NodeType *type = context.registry.nodeType(it->type);
-        QJsonObject node{{"id", it.key()}, {"type", it->type}, {"mode", it->mode == NodeMode::Mute ? "mute"
-                                                                      : it->mode == NodeMode::Bypass ? "bypass" : "normal"}};
+        QJsonObject node{{"id", it.key()}, {"type", it->type}, {"mode", nodeModeName(it->mode)}};
         // A group id is not a node type, so only a missing type outside groups counts.
         node.insert("known", type != nullptr || document->group(it->type) != nullptr);
         nodes.append(node);
@@ -185,19 +221,6 @@ Reply workflowDescribe(const Command &command, Context &context) {
                           lines.join('\n'));
 }
 
-// ---- runs ----
-
-Result<RunFolder> openRun(const Command &command, Context &context) {
-    return RunFolder::open(context.runsRoot, command.positionals.at(0));
-}
-
-// A run whose worker died is ended before it is shown, so it does not read as running
-// for ever.
-void endDeadRuns(const Context &context) {
-    Lock lock(context.lockPath);
-    endDeadRuns(context, lock);
-}
-
 Reply runsList(const Command &, Context &context) {
     endDeadRuns(context);
     QJsonArray runs;
@@ -223,32 +246,6 @@ Reply runsList(const Command &, Context &context) {
         lines << QStringLiteral("%1  %2").arg(id, run.value("status").toString());
     }
     return Reply::success(QJsonObject{{"runs", runs}}, lines.join('\n'));
-}
-
-// Per-node state from the events (9.4).
-QJsonObject foldNodes(const QList<QJsonObject> &events) {
-    QJsonObject nodes;
-    for (const QJsonObject &event : events) {
-        const QString node = event.value("node").toString();
-        const QString kind = event.value("event").toString();
-        if (node.isEmpty() || !kind.startsWith("node.") || kind == "node.preview")
-            continue;
-        QJsonObject entry = nodes.value(node).toObject();
-        entry.insert("state", kind == "node.progress" ? QStringLiteral("running") : kind.mid(5));
-        if (kind == "node.progress") {
-            for (const char *key : {"value", "stage", "message"})
-                if (event.contains(key))
-                    entry.insert(key, event.value(key));
-        } else if (kind == "node.skipped") {
-            entry.insert("reason", event.value("reason"));
-        } else if (kind == "node.error") {
-            entry.insert("error", event.value("error"));
-        }
-        if (kind == "node.done" || kind == "node.cached")
-            entry.remove("value");
-        nodes.insert(node, entry);
-    }
-    return nodes;
 }
 
 Reply runsStatus(const Command &command, Context &context) {
@@ -319,44 +316,11 @@ Reply runsEvents(const Command &command, Context &context) {
     return Reply::success(QJsonObject{{"events", array}}, lines.join('\n'));
 }
 
-} // namespace
-
 Reply execute(const Command &command, Context &context) {
-    if (command.later)
+    if (!command.handler)
         return Reply::failure(makeError("usage", QStringLiteral("`fugue %1` is not available in this version.").arg(QString(command.name).replace('.', ' ')),
                                         "It arrives in a later release."));
-    const QString &name = command.name;
-    if (name == "node.list")
-        return nodeList(command, context);
-    if (name == "node.describe")
-        return nodeDescribe(command, context);
-    if (name == "validate")
-        return validate(command, context);
-    if (name == "compile")
-        return compile(command, context);
-    if (name == "run")
-        return startRun(command, context);
-    if (name == "workflow.new")
-        return workflowNew(command, context);
-    if (name == "workflow.describe")
-        return workflowDescribe(command, context);
-    if (name == "__worker") {
-        Reply reply;
-        reply.streamed = true;
-        reply.exitCode = runWorker(command.positionals.at(0), context);
-        return reply;
-    }
-    if (name == "runs.list")
-        return runsList(command, context);
-    if (name == "runs.status")
-        return runsStatus(command, context);
-    if (name == "runs.events")
-        return runsEvents(command, context);
-    if (name == "runs.result")
-        return runsResult(command, context);
-    if (name == "runs.cancel")
-        return cancelRun(command, context);
-    return Reply::failure(makeError("internal", QStringLiteral("Command %1 has no handler.").arg(name)));
+    return command.handler(command, context);
 }
 
 } // namespace fugue::cli

@@ -1,5 +1,8 @@
 #include "cli/args.h"
 
+#include "cli/commands.h"
+#include "cli/runs.h"
+
 #include <QJsonArray>
 
 namespace fugue::cli {
@@ -8,59 +11,54 @@ namespace {
 
 struct Spec {
     int minPositionals = 0;
-    int maxPositionals = 0;       // -1: no limit
-    QStringList valueOptions;     // --name <value> or --name=<value>
-    QStringList flagOptions;      // --name
-    bool later = false;           // a later milestone: parsed, not run
+    int maxPositionals = 0;   // -1: no limit
+    QStringList valueOptions; // --name <value> or --name=<value>
+    QStringList flagOptions;  // --name
+    Handler handler = nullptr; // null: a later milestone, parsed but not run
 };
 
-struct Group {
-    QString command; // canonical name when the group has no subcommands
-    QMap<QString, Spec> subs;
-};
-
-const Spec runSpec{1, 1, {"to", "provider", "set"}, {"wait", "first"}, false};
-const Spec fileSpec{1, 1, {}, {}, false};
+const Spec runSpec{1, 1, {"to", "provider", "set"}, {"wait", "first"}, startRun};
+const Spec validateSpec{1, 1, {}, {}, validateWorkflow};
+const Spec compileSpec{1, 1, {}, {}, compileWorkflow};
 
 // The commands of 13.1 by the first word. A group with an empty-named entry in
 // `subs` takes no subcommand.
 const QMap<QString, QMap<QString, Spec>> &table() {
     static const QMap<QString, QMap<QString, Spec>> commands{
         {"run", {{"", runSpec}}},
-        {"validate", {{"", fileSpec}}},
-        {"compile", {{"", fileSpec}}},
+        {"validate", {{"", validateSpec}}},
+        {"compile", {{"", compileSpec}}},
         {"workflow",
-         {{"new", fileSpec},
-          {"describe", fileSpec},
-          {"export", {1, 1, {}, {"share", "no-prompts", "no-layout"}, true}}, // M2
+         {{"new", {1, 1, {}, {}, workflowNew}},
+          {"describe", {1, 1, {}, {}, workflowDescribe}},
+          {"export", {1, 1, {}, {"share", "no-prompts", "no-layout"}, nullptr}}, // M2
           {"run", runSpec},
-          {"validate", fileSpec},
-          {"compile", fileSpec}}},
+          {"validate", validateSpec},
+          {"compile", compileSpec}}},
         {"runs",
-         {{"list", {0, 0, {}, {}, false}},
-          {"status", {1, 1, {}, {}, false}},
-          {"events", {1, 1, {}, {"follow"}, false}},
-          {"result", {1, 1, {}, {}, false}},
-          {"cancel", {1, 1, {}, {}, false}}}},
+         {{"list", {0, 0, {}, {}, runsList}},
+          {"status", {1, 1, {}, {}, runsStatus}},
+          {"events", {1, 1, {}, {"follow"}, runsEvents}},
+          {"result", {1, 1, {}, {}, runsResult}},
+          {"cancel", {1, 1, {}, {}, cancelRun}}}},
         {"node",
-         {{"list", {0, 0, {"type"}, {}, false}},
-          {"describe", {1, -1, {}, {}, false}},
-          {"new", {1, 1, {}, {}, true}},
-          {"test", {1, 1, {}, {}, true}}}},
+         {{"list", {0, 0, {"type"}, {}, nodeList}},
+          {"describe", {1, -1, {}, {}, nodeDescribe}},
+          {"new", {1, 1, {}, {}, nullptr}},
+          {"test", {1, 1, {}, {}, nullptr}}}},
         {"pack",
-         {{"list", {0, 0, {}, {}, true}},
-          {"add", {1, 1, {}, {}, true}},
-          {"remove", {1, 1, {}, {}, true}},
-          {"update", {0, 1, {}, {}, true}},
-          {"trust", {1, 1, {}, {}, true}}}},
-        {"provider", {{"list", {0, 0, {}, {}, true}}}},
-        {"model", {{"list", {0, 0, {"type"}, {}, true}}}},
-        {"cache",
-         {{"status", {0, 0, {}, {}, true}}, {"clear", {0, 0, {"workflow", "node"}, {}, true}}}},
-        {"command", {{"list", {0, 0, {}, {}, true}}}},
-        {"skill", {{"install", {0, 0, {}, {}, true}}}},
+         {{"list", {0, 0, {}, {}, nullptr}},
+          {"add", {1, 1, {}, {}, nullptr}},
+          {"remove", {1, 1, {}, {}, nullptr}},
+          {"update", {0, 1, {}, {}, nullptr}},
+          {"trust", {1, 1, {}, {}, nullptr}}}},
+        {"provider", {{"list", {0, 0, {}, {}, nullptr}}}},
+        {"model", {{"list", {0, 0, {"type"}, {}, nullptr}}}},
+        {"cache", {{"status", {0, 0, {}, {}, nullptr}}, {"clear", {0, 0, {"workflow", "node"}, {}, nullptr}}}},
+        {"command", {{"list", {0, 0, {}, {}, nullptr}}}},
+        {"skill", {{"install", {0, 0, {}, {}, nullptr}}}},
         // Not for people: what `fugue run` starts, detached, to run one queued run.
-        {"__worker", {{"", {1, 1, {}, {}, false}}}},
+        {"__worker", {{"", {1, 1, {}, {}, runWorker}}}},
     };
     return commands;
 }
@@ -115,7 +113,7 @@ Result<Command> parseArguments(const QStringList &rawArgs) {
     command.name = group == "workflow" && (sub == "run" || sub == "validate" || sub == "compile")
                        ? sub
                        : (sub.isEmpty() ? group : group + "." + sub);
-    command.later = spec.later;
+    command.handler = spec.handler;
 
     bool optionsDone = false;
     for (int i = 0; i < args.size(); ++i) {

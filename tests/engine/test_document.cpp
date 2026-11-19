@@ -63,6 +63,13 @@ class TestDocument : public QObject {
     Q_OBJECT
 
 private slots:
+    void aNodeModeHasANameAndIsReadBack() {
+        for (const NodeMode mode : {NodeMode::Normal, NodeMode::Bypass, NodeMode::Mute})
+            QCOMPARE(parseNodeMode(nodeModeName(mode)), std::optional<NodeMode>(mode));
+        QCOMPARE(nodeModeName(NodeMode::Bypass), QStringLiteral("bypass"));
+        QVERIFY(!parseNodeMode("muted"));
+    }
+
     void portRefs() {
         QCOMPARE(PortRef::parse("gen.image"), (std::optional<PortRef>(PortRef{"gen", "image"})));
         QCOMPARE((PortRef{"g7/first", "image"}.toString()), QStringLiteral("g7/first.image"));

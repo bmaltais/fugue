@@ -38,8 +38,9 @@ Reply cancelRun(const Command &command, Context &context);
 // exact file; when that file is gone the worker has activated it, and is signalled.
 Reply cancelRun(const RunFolder &folder, const std::optional<QueueEntry> &seen, const Context &context);
 
-// The hidden `__worker` command. Returns the process exit code.
-int runWorker(const QString &runId, Context &context);
+// The hidden `__worker <run id>` command: waits for the run's turn, runs it, and gives
+// the process exit code as the reply's.
+Reply runWorker(const Command &command, Context &context);
 
 // Ends, as failed, every run whose worker died (9.8): the dead entries leave the queue
 // (Queue::discardDead) and each of their runs gets its status, `ended` and run.done.
