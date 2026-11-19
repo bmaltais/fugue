@@ -11,6 +11,7 @@
   "%1 of %2": "%1 of %2",
   "%1 s": "%1 s",
   "%1 uses nodes that are not installed (%2). They open as placeholders and keep their inputs.": "%1 uses nodes that are not installed (%2). They open as placeholders and keep their inputs.",
+  "%1, unsaved": "%1, unsaved",
   "A command node is a program that runs as you, with no sandbox. Nothing from these packs runs until you allow it.": "A command node is a program that runs as you, with no sandbox. Nothing from these packs runs until you allow it.",
   "A list of %1 cannot feed an input that takes one.": "A list of %1 cannot feed an input that takes one.",
   "A node cannot feed itself.": "A node cannot feed itself.",

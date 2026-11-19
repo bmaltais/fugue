@@ -2,15 +2,18 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
+import "../canvas"
 
 // Everything the workflows show besides the tabs (spec 11): the file pickers (the desktop
 // portal when there is one), the save/discard/cancel question, the trust question, the offer
 // to recover, the banner for what went wrong, and the drop area for files. Needs the
-// `workflows` and `theme` context properties. Plain controls; a design pass restyles them.
+// `workflows` and `theme` context properties. Styled from theme.look (docs/canvas-look.md):
+// dialogs are level 3 surfaces over the scrim, notices sit on the popup fill.
 Item {
     id: root
 
     readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
+    readonly property var look: theme.look
     property alias closeQuestion: closeAsk
     property alias trustQuestion: trustAsk
     property alias recoveryQuestion: recoverAsk
@@ -64,8 +67,8 @@ Item {
         visible: workflows.notice.length > 0
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
         height: visible ? noticeRow.implicitHeight + 16 : 0
-        color: theme.panel
-        border.color: theme.border
+        color: root.look.popup
+        border.color: root.look.hairline
         RowLayout {
             id: noticeRow
             anchors { fill: parent; margins: 8 }
@@ -74,7 +77,7 @@ Item {
             Label {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
-                color: theme.foreground
+                color: root.look.text
                 text: workflows.notice
             }
             ToolButton {
@@ -90,13 +93,10 @@ Item {
         anchors.centerIn: Overlay.overlay
         modal: true
         focus: true
-        padding: 24
-        width: Math.min(root.width - 48, 520)
-        background: Rectangle {
-            color: theme.background
-            border.color: theme.colors.selection
-            radius: theme.radius
-        }
+        padding: 6 * root.look.unit
+        width: Math.min(root.width - 12 * root.look.unit, 520)
+        Overlay.modal: Rectangle { color: root.look.scrim }
+        background: PopupSurface { look: root.look }
     }
 
     Question {
