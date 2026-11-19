@@ -34,6 +34,37 @@ QJsonObject generateGraph(const QString &prompt, const QJsonObject &modelHandle 
 
 const QMap<QString, QByteArray> picture{{"result.txt", "a picture"}};
 
+// A provider whose one job reports a preview frame and then finishes.
+class PreviewingProvider : public Provider {
+public:
+    void describe(Reply<Description> reply) override { later(std::move(reply), Result<Description>(imageDescription({"flux"}))); }
+    void submit(const JobRequest &request, Reply<QString> reply) override {
+        m_request = request;
+        later(std::move(reply), Result<QString>(QStringLiteral("job-1")));
+    }
+    void status(const QString &, Reply<JobStatus> reply) override { later(std::move(reply), Result<JobStatus>(m_status)); }
+    void cancel(const QString &, Reply<QString> reply) override { later(std::move(reply), Result<QString>(m_status.state)); }
+    void result(const QString &, Reply<JobResult> reply) override {
+        const QString path = m_request.outputDir + "/result.txt";
+        QFile file(path);
+        if (file.open(QIODevice::WriteOnly))
+            file.write("a picture");
+        later(std::move(reply), Result<JobResult>(JobResult{{{"result", QJsonObject{{"path", path}}}}, {}}));
+    }
+
+    bool submitted() const { return !m_request.outputDir.isEmpty(); }
+    void report(const QString &state, const QByteArray &preview) {
+        m_status.state = state;
+        m_status.progress = 0.25;
+        m_status.preview = preview;
+        emit statusChanged(QStringLiteral("job-1"), m_status);
+    }
+
+private:
+    JobRequest m_request;
+    JobStatus m_status;
+};
+
 } // namespace
 
 class TestSchedulerProviders : public QObject {
@@ -156,6 +187,35 @@ private slots:
                  (QStringList{"node.error g model_missing", "node.skipped s upstream_failed"}));
         QCOMPARE(ran.outcome.states.value("t"), NodeState::Cached);
         QVERIFY(provider->jobs().isEmpty());
+    }
+
+    void aJobsPreviewFrameBecomesAnEvent() {
+        World world;
+        auto provider = std::make_shared<PreviewingProvider>();
+        ProviderInstance instance;
+        instance.name = QStringLiteral("This machine");
+        instance.type = QStringLiteral("fake");
+        world.providers.append(ProviderEntry{instance, provider});
+
+        const RunFolder folder = world.folder();
+        Run run(world.graph(generateGraph("a cat")), folder, world.environment());
+        run.start();
+        QTRY_VERIFY(provider->submitted());
+        // The status may come before the reply that carries the job id.
+        provider->report("running", "png bytes");
+        QTRY_VERIFY(!trace(folder.events(), true).filter("node.progress").isEmpty());
+        provider->report("done", {});
+        QTRY_VERIFY(run.isFinished());
+        QCOMPARE(run.outcome().status, QStringLiteral("ok"));
+
+        QJsonObject preview;
+        for (const QJsonObject &event : folder.events())
+            if (event.value("event").toString() == QLatin1String("node.preview"))
+                preview = event;
+        QCOMPARE(preview.value("node").toString(), QStringLiteral("g"));
+        QFile file(preview.value("image").toObject().value("path").toString());
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QCOMPARE(file.readAll(), QByteArray("png bytes"));
     }
 
     void aFailedJobIsTheNodesError() {
@@ -355,6 +415,27 @@ private slots:
         QCOMPARE(ran.outcome.errors.first().code, QStringLiteral("out_of_memory"));
         QCOMPARE(world.calls.count("a"), 1);
         QCOMPARE(world.models.keys().size(), 1);
+    }
+
+    void beforeGpuWorkModelsAreDroppedWhileMemoryIsShort() {
+        World world;
+        world.type("fugue/gpu-big",
+                   "'needs': {'gpu': {'api': 'any', 'vram_mb': 4000}},"
+                   "'inputs': [{'name': 'text', 'type': 'text'}], 'outputs': [{'name': 'text', 'type': 'text'}]",
+                   [](const NodeContext &context) -> Result<Values> { return Values{{"text", context.input("text")}}; });
+        world.models.put("oldest");
+        world.models.put("older");
+        world.models.put("newest");
+        RunEnvironment environment = world.environment();
+        // 8 GB in all, and each loaded model holds 3 GB.
+        environment.freeGpuMemoryMb = [&world] { return qint64(8000 - 3000 * world.models.keys().size()); };
+
+        const QJsonObject nodes{{"a", node("fugue/gpu-big", {{"text", "x"}})},
+                                {"s", node("fugue/save", {{"value", from("a.text")}})}};
+        const RunOutcome outcome = runGraph(world.graph(nodes), world.folder(), environment);
+        QCOMPARE(outcome.status, QStringLiteral("ok"));
+        // 4 GB were needed: two models had to go, least recently used first.
+        QCOMPARE(world.models.keys(), QStringList{"newest"});
     }
 
     // --- checkGraph: what validate shows (9.1, 10.3, 8.5) ---

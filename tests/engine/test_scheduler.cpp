@@ -337,6 +337,19 @@ private slots:
         QCOMPARE(ran.outcome.states.value("t"), NodeState::Cached);
     }
 
+    void whatTheCompilerLeftOutForAMuteIsToldAsSkipped() {
+        World world;
+        const Ran ran = world.run(world.graph("{'a': {'type': 'fugue/text', 'mode': 'mute', 'inputs': {'text': 'x'}},"
+                                              " 'b': {'type': 'fugue/join', 'inputs': {'a': {'from': 'a.text'}}},"
+                                              " 's': {'type': 'fugue/save', 'inputs': {'value': {'from': 'b.text'}}},"
+                                              " 'd': {'type': 'fugue/text', 'inputs': {'text': 'beside'}},"
+                                              " 't': {'type': 'fugue/save', 'inputs': {'value': {'from': 'd.text'}}}}"));
+        QCOMPARE(ran.outcome.status, QStringLiteral("ok"));
+        QCOMPARE(traceOf(ran.events, {"a", "b", "s"}),
+                 (QStringList{"node.skipped a muted", "node.skipped b upstream_muted", "node.skipped s upstream_muted"}));
+        QCOMPARE(world.calls.all(), (QStringList{"d", "t"}));
+    }
+
     // --- lanes (9.2) ---
 
     void cpuNodesRunAtTheSameTime() {
@@ -573,6 +586,8 @@ private slots:
         QCOMPARE(ran.outcome.status, QStringLiteral("ok"));
         const MediaHandle image = ran.outcome.outputs.value("p").value("image").media();
         QCOMPARE(image.width(), 8);
+        // The pixels are let go once nothing more will read them; the file stays.
+        QVERIFY(!image.hasImage());
         QVERIFY(image.path().startsWith(world.cache->root() + "/blobs/"));
         QVERIFY(image.path().endsWith(".png"));
         QCOMPARE(inode(ran.path + "/nodes/p/image.png"), inode(image.path()));

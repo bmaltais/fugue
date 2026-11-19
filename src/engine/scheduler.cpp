@@ -47,6 +47,9 @@ enum class Phase { Waiting, Ready, Running, Finished };
 struct NodeRun {
     QString path;
     const CompiledNode *node = nullptr;
+    QStringList dependencies; // the path ids it reads from
+    int readers = 0;          // nodes that read from it and have not finished
+    bool settled = false;     // its finish has been counted for its dependencies
     const NodeType *type = nullptr;
     std::shared_ptr<NodeKernel> kernel;
     std::shared_ptr<ProviderKernel> providerKernel;
@@ -166,6 +169,28 @@ bool fits(const Value &value, const PortType &type) {
     return !value.isList();
 }
 
+// The same values with no decoded image held: media handles keep their file
+// only. A finished node's pixels stay in memory just as long as a node that
+// reads them may still run.
+Value fileOnly(const Value &value) {
+    if (value.isMedia() && value.media().hasImage() && value.media().hasFile()) {
+        const Result<MediaHandle> plain = MediaHandle::fromJson(value.media().toJson());
+        return plain ? Value(plain.value()) : value;
+    }
+    if (value.isList()) {
+        QList<Value> items;
+        for (const Value &item : value.items())
+            items.append(fileOnly(item));
+        return Value::list(items);
+    }
+    return value;
+}
+
+void dropImages(Values &values) {
+    for (auto it = values.begin(); it != values.end(); ++it)
+        it.value() = fileOnly(it.value());
+}
+
 QJsonObject valuesJson(const Values &values) {
     QJsonObject json;
     for (auto it = values.begin(); it != values.end(); ++it)
@@ -221,6 +246,7 @@ public:
             NodeRun n;
             n.path = path;
             n.node = &*m_graph.nodes.constFind(path);
+            n.dependencies = m_graph.dependencies(path);
             n.type = m_env.registry ? m_env.registry->nodeType(n.node->type) : nullptr;
             if (n.type && m_env.kernels) {
                 n.kernel = m_env.kernels->node(n.type->id);
@@ -229,6 +255,9 @@ public:
             needsProviders = needsProviders || n.providerKernel;
             m_nodes.insert(path, n);
         }
+        for (const NodeRun &n : std::as_const(m_nodes))
+            for (const QString &dep : n.dependencies)
+                ++m_nodes[dep].readers;
 
         if (!m_dry) {
             m_folder->writeCompiled(m_graph.toJson());
@@ -372,6 +401,7 @@ private:
             startReady();
         } while (m_again);
         m_advancing = false;
+        releaseImages();
         for (const NodeRun &n : std::as_const(m_nodes)) {
             if (n.phase != Phase::Finished) {
                 writeState(QStringLiteral("running"));
@@ -379,6 +409,21 @@ private:
             }
         }
         finish();
+    }
+
+    // Once every node that reads from a node has finished, its decoded
+    // images are let go; the files stay.
+    void releaseImages() {
+        for (NodeRun &n : m_nodes) {
+            if (n.phase != Phase::Finished || n.settled)
+                continue;
+            n.settled = true;
+            if (n.readers == 0)
+                dropImages(n.outputs);
+            for (const QString &dep : std::as_const(n.dependencies))
+                if (--m_nodes[dep].readers == 0 && m_nodes[dep].settled)
+                    dropImages(m_nodes[dep].outputs);
+        }
     }
 
     // Looks at every node whose dependencies have finished, in dependency
@@ -395,7 +440,7 @@ private:
             if (n.phase == Phase::Ready)
                 continue;
             bool depsDone = true;
-            for (const QString &dep : m_graph.dependencies(path))
+            for (const QString &dep : std::as_const(n.dependencies))
                 depsDone = depsDone && m_nodes[dep].phase == Phase::Finished;
             if (depsDone)
                 prepare(n);
@@ -403,7 +448,7 @@ private:
     }
 
     void prepare(NodeRun &n) {
-        for (const QString &dep : m_graph.dependencies(n.path)) {
+        for (const QString &dep : std::as_const(n.dependencies)) {
             const NodeRun &d = m_nodes[dep];
             if (d.state == NodeState::Error ||
                 (d.state == NodeState::Skipped && d.reason == QLatin1String("upstream_failed")))
@@ -641,9 +686,24 @@ private:
             if (gpu) {
                 m_gpuBusy = true;
                 n->holdsGpu = true;
+                makeRoom(*n);
             }
             startNode(*n);
         }
+    }
+
+    // 8.10: before GPU work starts, free memory is measured against what the
+    // node declares. While it is short, the least recently used resident
+    // model the node does not need is dropped (9.3). The node starts either
+    // way: estimates are declared, not trusted, and a real shortage comes
+    // back as out_of_memory.
+    void makeRoom(const NodeRun &n) {
+        if (!m_env.freeGpuMemoryMb || !m_env.models || n.providerKernel)
+            return;
+        const qint64 needed = qint64(n.type->needs.value("gpu").toObject().value("vram_mb").toDouble());
+        while (needed > 0 && m_env.freeGpuMemoryMb() < needed)
+            if (m_env.models->evictLeastRecentlyUsed(n.models).isEmpty())
+                break;
     }
 
     NodeContext contextFor(const NodeRun &n) {

@@ -26,7 +26,9 @@
 //     instance, one whose model is already resident goes first. When a node
 //     of those lanes fails with out_of_memory, the least recently used
 //     resident model it does not need is dropped and the node runs again; it
-//     fails only when nothing is left to drop.
+//     fails only when nothing is left to drop. Before a GPU node starts,
+//     free GPU memory (RunEnvironment::freeGpuMemoryMb, 8.10) is compared
+//     with its `needs.gpu.vram_mb` and models are dropped the same way.
 //   - Errors are per node (9.5): the node gets node.error, every node
 //     downstream is skipped with `upstream_failed`, other branches carry on.
 //   - A node whose required input is linked to an output that came back
@@ -102,6 +104,12 @@ struct RunEnvironment {
     // Optional. Shared by the runs of a process so a model stays loaded
     // between them. Without it there is no residency preference.
     ResidentModels *models = nullptr;
+
+    // Free GPU memory in MB, measured as 8.10 says (by Vulkan device type);
+    // unset means it is not measured. Before a GPU node that declares
+    // `needs.gpu.vram_mb` starts, resident models are dropped, least recently
+    // used first, while this is short of it.
+    std::function<qint64()> freeGpuMemoryMb;
 
     // How many CPU nodes run at once; 0 means the number of cores minus one,
     // at least one (9.2).
