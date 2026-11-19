@@ -29,8 +29,6 @@ struct Pixels {
     float at(int x, int y, int ch) const { return d[(size_t(y) * w + x) * c + ch]; }
 };
 
-Error failure(const QString &message) { return makeError("node_failed", message); }
-
 Result<Pixels> pixelsOf(const Value &value, const QString &input) {
     if (!value.isMedia())
         return Result<Pixels>(Errors{makeError("missing_input", QStringLiteral("Input %1 has no image.").arg(input))});
@@ -77,7 +75,9 @@ Result<Pixels> pixelsOf(const Value &value, const QString &input) {
                 v = float(v / divisor);
         return pixels;
     } catch (const vips::VError &error) {
-        return Result<Pixels>(Errors{failure(QString::fromUtf8(error.what()))});
+        Error unreadable = vipsError(error, QStringLiteral("media_unreadable"));
+        unreadable.input = input;
+        return unreadable;
     }
 }
 
@@ -93,7 +93,7 @@ Result<Values> imageOutput(Pixels pixels) {
             return Result<Values>(handle.errors());
         return Values{{"image", Value(handle.value())}};
     } catch (const vips::VError &error) {
-        return Result<Values>(Errors{failure(QString::fromUtf8(error.what()))});
+        return vipsError(error);
     }
 }
 

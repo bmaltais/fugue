@@ -131,7 +131,7 @@ Result<QByteArray> pngWithWorkflow(const QByteArray &png, const QByteArray &work
 
 Errors writeWebpWithWorkflow(const vips::VImage &image, const QString &path, const QByteArray &workflowJson) {
     if (!initVips())
-        return {makeError(QStringLiteral("internal"), QStringLiteral("libvips could not be started."))};
+        return {vipsUnavailable()};
     // The partial file is written beside the final name and renamed over it.
     const QString partial = path + QStringLiteral(".part");
     try {
@@ -155,7 +155,7 @@ Errors writeWebpWithWorkflow(const vips::VImage &image, const QString &path, con
                             ->set("keep", workflowJson.isEmpty() ? VIPS_FOREIGN_KEEP_NONE : VIPS_FOREIGN_KEEP_XMP));
     } catch (const vips::VError &error) {
         QFile::remove(partial);
-        return {makeError(QStringLiteral("internal"), QString::fromUtf8(error.what()).trimmed())};
+        return {vipsError(error)};
     }
     QFile::remove(path);
     if (!QFile::rename(partial, path)) {

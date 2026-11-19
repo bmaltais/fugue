@@ -45,7 +45,7 @@ public:
                              QStringLiteral("Pick the file again in the node."));
         const Result<MediaHandle> image = MediaHandle::probe(MediaType::Image, file, *context.hashes);
         if (!image)
-            return image.error();
+            return image.errors();
         return Values{{"image", Value(image.value())},
                       {"width", Value(image->width())},
                       {"height", Value(image->height())}};
@@ -105,13 +105,13 @@ public:
         // file is never the one read and written.
         const Result<vips::VImage> pixels = context.input("image").media().image();
         if (!pixels)
-            return pixels.error();
+            return pixels.errors();
         const Result<MediaHandle> memory = MediaHandle::fromImage(pixels.value());
         if (!memory)
-            return memory.error();
+            return memory.errors();
         const Result<MediaHandle> scratch = memory->saved(context.workDir, QStringLiteral("source"), *context.hashes);
         if (!scratch)
-            return scratch.error();
+            return scratch.errors();
 
         const QByteArray workflow = workflowToEmbed(context, embed);
         const QDir dir(folder);
@@ -122,13 +122,13 @@ public:
             // From the PNG just written, so 16-bit and float images take the same road to 8 bits.
             const Result<MediaHandle> png = MediaHandle::probe(MediaType::Image, scratch->path(), *context.hashes);
             if (!png)
-                return png.error();
+                return png.errors();
             const Result<vips::VImage> decoded = png->image();
             if (!decoded)
-                return decoded.error();
+                return decoded.errors();
             const Errors written = writeWebpWithWorkflow(decoded.value(), target, workflow);
             if (hasErrors(written))
-                return written.first();
+                return written;
         } else {
             QFile source(scratch->path());
             if (!source.open(QIODevice::ReadOnly))
@@ -138,7 +138,7 @@ public:
             if (!workflow.isEmpty()) {
                 const Result<QByteArray> embedded = pngWithWorkflow(bytes, workflow);
                 if (!embedded)
-                    return embedded.error();
+                    return embedded.errors();
                 bytes = embedded.value();
             }
             QFile out(dir.filePath(QStringLiteral(".") + fileName + QStringLiteral(".part")));
@@ -156,7 +156,7 @@ public:
 
         const Result<MediaHandle> file = MediaHandle::probe(MediaType::Image, target, *context.hashes);
         if (!file)
-            return file.error();
+            return file.errors();
         return Values{{"file", Value(file.value())}};
     }
 };

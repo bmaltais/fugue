@@ -17,14 +17,6 @@ namespace {
 
 using vips::VImage;
 
-Error vipsUnavailable() {
-    return makeError(QStringLiteral("internal"), QStringLiteral("libvips could not be started."));
-}
-
-Error vipsFailed(const vips::VError &error, const QString &code = QStringLiteral("internal")) {
-    return makeError(code, QString::fromUtf8(error.what()).trimmed());
-}
-
 QByteArray fileName(const QString &path) {
     return QFile::encodeName(path);
 }
@@ -79,7 +71,7 @@ Result<MediaHandle> MediaHandle::fromImage(const VImage &image) {
     try {
         handle.m_image = image.copy_memory();
     } catch (const vips::VError &error) {
-        return vipsFailed(error);
+        return vipsError(error);
     }
     handle.m_width = handle.m_image->width();
     handle.m_height = handle.m_image->height();
@@ -100,7 +92,7 @@ Result<vips::VImage> MediaHandle::image() const {
     try {
         return VImage::new_from_file(fileName(m_path).constData());
     } catch (const vips::VError &error) {
-        return vipsFailed(error, QStringLiteral("media_unreadable"));
+        return vipsError(error, QStringLiteral("media_unreadable"));
     }
 }
 
@@ -149,7 +141,7 @@ Result<MediaHandle> MediaHandle::savedImage(const QString &dir, const QString &n
                                          ->set("keep", VIPS_FOREIGN_KEEP_NONE));
     } catch (const vips::VError &error) {
         QFile::remove(partial);
-        return vipsFailed(error);
+        return vipsError(error);
     }
     if (std::rename(fileName(partial).constData(), fileName(path).constData()) != 0) {
         QFile::remove(partial);

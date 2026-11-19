@@ -121,8 +121,9 @@ public:
         try {
             size = editing() ? references(context, selection, request) : startImage(context, request);
         } catch (const vips::VError &error) {
-            return makeError(QStringLiteral("media_unreadable"),
-                             QStringLiteral("Cannot prepare an input image: %1").arg(QString::fromUtf8(error.what()).trimmed()));
+            Error unreadable = vipsError(error, QStringLiteral("media_unreadable"));
+            unreadable.message = QStringLiteral("Cannot prepare an input image: %1").arg(unreadable.message);
+            return unreadable;
         }
         if (!size)
             return size.errors();
