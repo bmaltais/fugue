@@ -43,12 +43,15 @@ FocusScope {
     // canvas (`from` is the dragged port: {node, port, output}), at a world point.
     signal searchRequested(real x, real y)
     signal linkReleased(var from, real x, real y)
+    // A right-click, in canvas coordinates: the window opens the context menu (#50).
+    signal contextMenuRequested(real x, real y)
 
     property bool spaceHeld: false
     // "pan", "move", "link", "marquee", or "alt" (a press with Alt on a node, not yet a drag)
     // while a button is down
     property string gesture: ""
     property point pressAt        // where the gesture began, in canvas coordinates
+    property point rightPressAt   // where the right button went down
     property point panStart       // world.x, world.y when a pan began
     property point pressWorld     // the press in world coordinates
     property point pointer        // the pointer in canvas coordinates during a gesture
@@ -277,8 +280,10 @@ FocusScope {
                 canvas.Window.activeFocusItem.focus = false
             canvas.forceActiveFocus()
             canvas.gesture = ""
-            if (mouse.button === Qt.RightButton)
-                return // the context menu comes later; right-drag does nothing
+            if (mouse.button === Qt.RightButton) {
+                canvas.rightPressAt = Qt.point(mouse.x, mouse.y) // a click opens the menu on release
+                return
+            }
             canvas.pressAt = Qt.point(mouse.x, mouse.y)
             canvas.pointer = canvas.pressAt
             canvas.pressWorld = canvas.toWorld(mouse.x, mouse.y)
@@ -361,7 +366,16 @@ FocusScope {
             }
         }
 
-        onReleased: mouse => canvas.finishGesture(mouse.x, mouse.y, mouse.modifiers)
+        onReleased: mouse => {
+            // A right-click opens the context menu; a right-drag does nothing (12.3).
+            if (mouse.button === Qt.RightButton) {
+                if (Math.hypot(mouse.x - canvas.rightPressAt.x, mouse.y - canvas.rightPressAt.y)
+                        < Application.styleHints.startDragDistance)
+                    canvas.contextMenuRequested(mouse.x, mouse.y)
+                return
+            }
+            canvas.finishGesture(mouse.x, mouse.y, mouse.modifiers)
+        }
         onCanceled: canvas.finishGesture(canvas.pointer.x, canvas.pointer.y, 0)
 
         onDoubleClicked: mouse => {

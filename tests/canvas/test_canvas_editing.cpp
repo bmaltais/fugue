@@ -294,7 +294,7 @@ private slots:
         QVERIFY(app.open());
         const qreal width = app.canvas->width(), height = app.canvas->height();
         const QPoint middle = app.canvas->mapToScene(QPointF(width / 2, height / 2)).toPoint();
-        const QPointF centre((middle.x() - app.pan().x()) / app.zoom(), (middle.y() - app.pan().y()) / app.zoom());
+        const QPointF centre((width / 2 - app.pan().x()) / app.zoom(), (height / 2 - app.pan().y()) / app.zoom());
         app.key(Qt::Key_Equal, Qt::ControlModifier);
         QVERIFY(qAbs(app.zoom() - 1.1) < 1e-9);
         // At the canvas's center, which stays where it was.

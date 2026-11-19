@@ -40,7 +40,8 @@ Item {
         }
     }
 
-    KeyShortcuts { active: !help.visible && !quitAsk.visible }
+    // While a menu is open its rows and mnemonics own the keys (#50).
+    KeyShortcuts { active: !help.visible && !quitAsk.visible && !commands.menuOpen }
 
     Connections {
         target: commands

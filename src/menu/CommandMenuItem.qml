@@ -1,0 +1,108 @@
+import QtQuick
+import QtQuick.Controls
+
+// One row of a CommandMenu: a command as the registry shows it (`entry`: label, keys,
+// available, enabled, checkable, checked, and swatch on a color), or the row that opens a
+// submenu. A left gutter holds the check of a toggle or a color's swatch; the first key is
+// at the right in `label`. A command not built yet is at half opacity (the overlay's rule).
+MenuItem {
+    id: row
+
+    property var entry
+    property var target: ({})
+
+    readonly property var look: theme.look
+    readonly property real u: look.unit
+    readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
+    readonly property bool available: entry === undefined || entry.available
+
+    objectName: entry !== undefined ? "menuItem-" + entry.command : subMenu ? "subMenu-" + subMenu.title.replace("&", "") : ""
+    text: entry !== undefined ? entry.label : subMenu ? subMenu.title : ""
+    enabled: entry === undefined || entry.enabled
+    checkable: entry !== undefined && entry.checkable
+    checked: entry !== undefined && entry.checked
+    opacity: available ? 1 : 0.5
+    implicitWidth: leftPadding + rightPadding + gutter.width + label.implicitWidth
+                   + (keys.text !== "" ? keys.implicitWidth + 6 * u : 0) + (subMenu ? 4 * u : 0)
+    implicitHeight: 7 * u
+    leftPadding: 2 * u
+    rightPadding: 2.5 * u
+    Accessible.name: text.replace("&", "")
+    Accessible.description: entry !== undefined && !entry.available ? qsTr("Not available yet") : ""
+
+    onTriggered: {
+        if (entry === undefined)
+            return
+        // From a canvas context menu, a paste lands where the menu was opened.
+        if (target.x !== undefined)
+            canvasModel.pointer = Qt.point(target.x, target.y)
+        commands.triggerOn(entry.command, target)
+    }
+
+    indicator: null
+    arrow: null
+    background: Rectangle {
+        radius: Math.max(0, row.look.popupCorner - 1.5 * row.u)
+        color: row.highlighted && row.enabled ? row.look.selectedRow : "transparent"
+    }
+    contentItem: Item {
+        implicitHeight: label.implicitHeight
+        LayoutMirroring.enabled: row.rightToLeft
+        LayoutMirroring.childrenInherit: true
+        Item {
+            id: gutter
+            width: 5 * row.u
+            height: parent.height
+            Rectangle {
+                visible: row.entry !== undefined && row.entry.swatch !== undefined
+                anchors.verticalCenter: parent.verticalCenter
+                width: 3 * row.u
+                height: width
+                radius: Math.min(row.look.smallCorner, 2)
+                readonly property var role: visible && row.entry.swatch !== "none" ? row.look.role(row.entry.swatch) : null
+                color: role ? role.frameEdge : "transparent"
+                border.width: 1
+                border.color: role ? Qt.darker(role.frameEdge, row.look.light ? 1.15 : 0.85) : row.look.hairlineStrong
+            }
+            Text {
+                visible: row.checkable && row.checked
+                anchors.verticalCenter: parent.verticalCenter
+                text: row.look.glyph("check")
+                font.family: row.look.iconFont
+                font.pixelSize: 12
+                color: row.look.text
+            }
+        }
+        Text {
+            id: label
+            anchors.left: gutter.right
+            anchors.right: keys.left
+            anchors.rightMargin: 4 * row.u
+            anchors.verticalCenter: parent.verticalCenter
+            text: row.text.replace("&", "")
+            textFormat: Text.PlainText
+            elide: Text.ElideRight
+            font.pixelSize: row.look.textSize
+            color: row.enabled ? row.look.text : row.look.label
+        }
+        Text {
+            id: keys
+            anchors.right: chevron.visible ? chevron.left : parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            text: row.entry !== undefined && row.entry.keys.length > 0 ? row.entry.keys[0] : ""
+            font.pixelSize: row.look.labelSize
+            font.features: {"tnum": 1}
+            color: row.look.label
+        }
+        Text {
+            id: chevron
+            visible: !!row.subMenu
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            text: row.look.glyph(row.rightToLeft ? "chevron-left" : "chevron-right")
+            font.family: row.look.iconFont
+            font.pixelSize: 12
+            color: row.look.label
+        }
+    }
+}

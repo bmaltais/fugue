@@ -179,6 +179,8 @@ struct App {
 
     qreal zoom() const { return world->scale(); }
     QPointF pan() const { return world->position(); }
+    // A point of the canvas (its own coordinates) in window coordinates: the menu bar is above it.
+    QPoint at(qreal x, qreal y) const { return canvas->mapToScene(QPointF(x, y)).toPoint(); }
     // A world point in window coordinates.
     QPoint screen(qreal x, qreal y) const {
         return canvas->mapToScene(QPointF(world->x() + x * zoom(), world->y() + y * zoom())).toPoint();
@@ -330,7 +332,7 @@ private slots:
         // Make every node's rows first (a swipe across the whole grid), the worst case.
         app.canvas->setProperty("navigation", "legacy");
         for (int i = 0; i < 6; ++i)
-            app.wheel({0, 0}, {0, -120}); // zoom 0.56
+            app.wheel(app.at(0, 0), {0, -120}); // zoom 0.56
         for (int x = 0; x < 6000; x += 400)
             for (int y = 0; y < 2600; y += 400) {
                 app.world->setPosition(QPointF(-x * app.zoom(), -y * app.zoom()));
@@ -357,7 +359,7 @@ private slots:
         }
         shadows->setOpacity(1);
         for (int i = 0; i < 14; ++i)
-            app.wheel({0, 0}, {0, -120}); // zoom 0.15: the whole grid, without text
+            app.wheel(app.at(0, 0), {0, -120}); // zoom 0.15: the whole grid, without text
         measure("pan zoomed out to 0.15", [&](qreal t) {
             app.world->setX(-300 * std::sin(t * M_PI));
         });
@@ -383,7 +385,7 @@ private slots:
         App app(load(small));
         QVERIFY(app.open());
         for (int i = 0; i < 20; ++i)
-            app.wheel({0, 0}, {0, -120}); // zoom 0.15: ports are not drawn
+            app.wheel(app.at(0, 0), {0, -120}); // zoom 0.15: ports are not drawn
         QVERIFY(app.zoom() < 0.2);
         // 40 world units from Text's input port, inside the node.
         app.drag(Qt::LeftButton, app.screen(60, 140), app.screen(60, 140) + QPoint(30, 0));
@@ -402,7 +404,7 @@ private slots:
     void theWheelZoomsAtThePointer() {
         App app(load(small));
         QVERIFY(app.open());
-        const QPoint at(500, 300);
+        const QPoint at = app.at(500, 300);
         app.wheel(at, {0, 120});
         QVERIFY(qAbs(app.zoom() - 1.1) < 1e-9);
         // The world point under the pointer stays under it.
@@ -499,7 +501,7 @@ private slots:
     void draggingANodeMovesItAtAnyZoom() {
         App app(load(small));
         QVERIFY(app.open());
-        app.wheel({0, 0}, {0, 120 * 7}); // zoom 1.1^7 at the window's corner
+        app.wheel(app.at(0, 0), {0, 120 * 7}); // zoom 1.1^7 at the canvas's corner
         app.drag(Qt::LeftButton, app.screen(100, 110), app.screen(150, 130));
         const QPointF moved = app.model.position("prompt");
         QVERIFY2(qAbs(moved.x() - 70) < 1 && qAbs(moved.y() - 120) < 1,

@@ -385,6 +385,13 @@ void CommandRegistry::setWorkflowOpen(bool open) {
         emit changed();
 }
 
+void CommandRegistry::menuShown(bool shown) {
+    const bool wasOpen = menuOpen();
+    m_openMenus = std::max(0, m_openMenus + (shown ? 1 : -1));
+    if (menuOpen() != wasOpen)
+        emit menuOpenChanged();
+}
+
 void CommandRegistry::quitNow() { QCoreApplication::quit(); }
 
 void CommandRegistry::requestQuit() {

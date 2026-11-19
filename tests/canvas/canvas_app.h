@@ -136,6 +136,8 @@ struct App {
     }
 
     qreal zoom() const { return world->scale(); }
+    // A point of the canvas (its own coordinates) in window coordinates: the menu bar is above it.
+    QPoint at(qreal x, qreal y) const { return canvas->mapToScene(QPointF(x, y)).toPoint(); }
     QPointF pan() const { return world->position(); }
     // A world point in window coordinates.
     QPoint screen(qreal x, qreal y) const {

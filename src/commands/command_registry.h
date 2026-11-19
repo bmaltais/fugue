@@ -47,6 +47,9 @@ class CommandRegistry : public QObject {
     // Where the keymap file is (the last one loaded, else the default), with the home folder
     // as ~, for the `?` overlay's footer.
     Q_PROPERTY(QString keymapFile READ keymapFile NOTIFY changed)
+    // True while a menu is open: its rows and mnemonics own the keys, so the window's
+    // shortcuts (bare letters such as Q) sleep.
+    Q_PROPERTY(bool menuOpen READ menuOpen NOTIFY menuOpenChanged)
 
 public:
     using Handler = std::function<void()>;
@@ -138,6 +141,9 @@ public:
     bool workflowOpen() const { return m_workflowOpen; }
     void setWorkflowOpen(bool open);
     QStringList problems() const;
+    bool menuOpen() const { return m_openMenus > 0; }
+    // A menu says it opened (true) or closed (false); submenus count too.
+    Q_INVOKABLE void menuShown(bool shown);
 
     // The app-level commands. Quit asks first when there is unsaved work; close closes the
     // open workflow, or quits the same way when none is open.
@@ -156,6 +162,7 @@ signals:
     // A command whose work is the window's (open the menu bar, a context menu, About): the
     // QML that owns it listens for its id.
     void windowRequested(const QString &id);
+    void menuOpenChanged();
 
 private:
     struct Entry {
@@ -180,6 +187,7 @@ private:
     QStringList m_fileProblems, m_keymapProblems;
     QString m_keymapFile;
     mutable QVariantMap m_target; // set while a context menu's command checks or runs
+    int m_openMenus = 0;
     bool m_textFieldFocus = false;
     bool m_unsavedWork = false;
     bool m_workflowOpen = false;
