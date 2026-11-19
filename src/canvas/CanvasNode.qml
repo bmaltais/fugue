@@ -1,5 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import "widgets"
 
 // One node on the canvas: a NodeList row (canvas_model.h). Its ports sit where the model
 // says (each port's `y`), so wires and hit tests agree with what is drawn. It takes no input
@@ -99,10 +100,11 @@ Item {
             readonly property var modelData: node.inputs[index]
             readonly property bool dim: node.dragging
                 && node.canvasModel.dragProblem(node.nodeId, modelData.name, false) !== ""
-            readonly property bool showsValue: modelData.widget && !modelData.wired
+            // A value input's row has its widget (widgets/InputWidget.qml) under the label.
+            readonly property bool hasWidget: modelData.widget
             x: 12
             y: modelData.y - node.rowHeight / 2
-            width: showsValue ? node.width * 0.45 : node.width - 24
+            width: hasWidget ? node.width * 0.45 : node.width - 24
             height: node.rowHeight
             visible: node.readable
             opacity: dim ? 0.25 : 1
@@ -121,18 +123,23 @@ Item {
                 edge: node.look.background
                 list: input.modelData.list
             }
-            Text {
-                visible: input.showsValue
-                x: input.width + 6
-                width: node.width - 22 - x
-                height: input.height
-                verticalAlignment: Text.AlignVCenter
-                horizontalAlignment: Text.AlignRight
-                text: input.modelData.value !== undefined ? input.modelData.value : ""
-                elide: Text.ElideRight
-                textFormat: Text.PlainText
-                color: input.modelData.isDefault ? node.look.muted : node.look.text
-                font.pixelSize: node.look.smallText
+            Loader {
+                objectName: "widgetLoader"
+                active: input.hasWidget
+                // Under the label, except while typed into.
+                z: item && item.editingText ? 1 : -1
+                y: 1
+                width: node.width - 24
+                height: input.height - 2
+                sourceComponent: InputWidget {
+                    edits: node.canvasModel.widgets
+                    nodeId: node.nodeId
+                    port: input.modelData
+                    look: node.look
+                    canvasView: node.canvasView
+                    nodeItem: node
+                    row: input
+                }
             }
         }
     }

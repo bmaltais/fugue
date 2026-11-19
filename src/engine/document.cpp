@@ -471,6 +471,7 @@ public:
                 field(n, at, "pinned", isBool, "true or false");
                 field(n, at, "color", isString, "a theme role name");
                 field(n, at, "title", isString, "a string");
+                field(n, at, "increment", isStrings, "a list of input names");
             }
         }
         if (o.contains("frames") && list(o.value("frames"), path + ".frames")) {

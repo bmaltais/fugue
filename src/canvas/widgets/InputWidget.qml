@@ -1,0 +1,322 @@
+pragma ComponentBehavior: Bound
+import QtQuick
+
+// One value input on a node's face, as a widget (spec 6.2, 3.2, 2.5; canvas-look 4.4): a
+// recessed well across the row with the value at its right; the row itself (CanvasNode.qml)
+// draws the label over it. A linked input shows where its value comes from instead.
+// Everything that decides (constraints, parsing, checks, the undo step) is WidgetEdit's
+// (canvas/widget_edit.h); this file draws and forwards.
+//
+// At rest a widget is the well, one text and a mouse area, so a big graph stays cheap (12.1).
+// A slider's fill, a toggle's switch and a color's swatch are made only for those widgets,
+// spin chevrons on the first hover, and what a widget needs only while it is used (the text
+// editor, a menu, a file or color picker) on the first click, dropped after. Typed fields are
+// QQuickTextInput or QQuickTextEdit, so while one has focus the keys of 12.4 belong to it.
+Rectangle {
+    id: root
+    objectName: "inputWidget"
+
+    required property var edits // CanvasModel.widgets
+    required property string nodeId
+    required property var port  // CanvasModel::portMap
+    required property var look  // FugueCanvas.look
+    property Item canvasView    // takes the focus back when an edit ends
+    property Item nodeItem      // its rows, for Tab
+    property Item row           // raised while the multiline editor covers the rows below
+
+    readonly property string name: port.name
+    readonly property string kind: port.widgetType !== undefined ? port.widgetType : ""
+    readonly property bool linked: port.wired
+    readonly property bool editable: kind !== "" && !linked
+    // Fields typed into; Tab moves between them.
+    readonly property bool typed: ["spin", "slider", "seed", "line", "multiline", "file", "folder", "color"]
+                                  .indexOf(kind) >= 0
+    readonly property var literal: port.literal
+    readonly property bool isDefault: port.isDefault === true
+    property Item editor: null
+    readonly property bool editingText: editor !== null
+    // Why the text being typed is not a value; shown under the field.
+    property string error: ""
+
+    // canvas-look 6.1's tokens, until the theme carries them (#47).
+    readonly property color wellColor: look.well !== undefined ? look.well
+        : theme.light ? Qt.tint(look.panel, Qt.alpha(look.text, 0.05))
+                      : Qt.tint(look.background, Qt.alpha(look.text, 0.035))
+    readonly property int smallCorner: Math.min(look.corner, 4)
+    readonly property int pad: Math.round(look.textSize * 2 / 3) // 2u
+    readonly property int glyphZone: Math.round(look.textSize * 1.5)
+    // The room a toggle's switch or a color's swatch takes at the right end.
+    readonly property int decorWidth: !editable ? 0 : kind === "toggle" ? 26 : kind === "color" ? glyphZone : 0
+    // A toggle's state, the default when unset.
+    readonly property bool on: kind === "toggle"
+        && (literal !== undefined ? literal === true : edits.spec(nodeId, name)["default"] === true)
+
+    // The number shown, or the default when unset.
+    readonly property real number: typeof literal === "number" ? literal
+                                   : port.value !== undefined && port.value !== "" && !isNaN(Number(port.value))
+                                     ? Number(port.value) : 0
+    readonly property string valueText: {
+        if (linked)
+            return edits.source(nodeId, name)
+        if (kind === "model" && (port.value === undefined || port.value === ""))
+            return port.required ? qsTr("Choose a model") : qsTr("Any ready model")
+        return port.value !== undefined ? port.value : ""
+    }
+    // The glyph after the value: what a click at the right end opens.
+    readonly property string glyph: !editable ? ""
+        : kind === "choice" || kind === "model" ? "  \u25be"
+        : kind === "seed" ? "  \u2684"
+        : kind === "file" || kind === "folder" ? "  \u2026" : ""
+    // A 6.2 color (#rrggbb, #rrggbbaa) as QML reads one (#aarrggbb), or `otherwise`.
+    function colorOf(text, otherwise) {
+        if (!/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(text))
+            return otherwise
+        return text.length === 9 ? "#" + text.substr(7, 2) + text.substr(1, 6) : text
+    }
+    // The text an editor starts from: the whole stored value, not the face's first line.
+    function startText() {
+        if (kind === "model")
+            return literal !== undefined && literal.name !== undefined ? literal.name : ""
+        if (typeof literal === "number")
+            return edits.numberText(literal)
+        if (typeof literal === "string")
+            return literal
+        if (literal === undefined && port.value !== undefined)
+            return port.value
+        return ""
+    }
+
+    radius: smallCorner
+    color: editable ? wellColor : "transparent"
+
+    // A slider's share of its range (canvas-look 4.4).
+    Rectangle {
+        visible: root.kind === "slider" && root.editable
+        height: root.height
+        width: visible ? root.width * root.edits.fraction(root.nodeId, root.name, root.number) : 0
+        radius: root.smallCorner
+        color: Qt.alpha(root.look.accent, 0.22)
+    }
+
+    Text {
+        id: valueLabel
+        objectName: "widgetValue"
+        visible: !root.editingText
+        x: root.width * 0.45
+        z: 1
+        width: root.width - x - root.pad - root.decorWidth
+        height: root.height
+        verticalAlignment: Text.AlignVCenter
+        horizontalAlignment: Text.AlignRight
+        text: root.valueText + root.glyph
+        elide: root.kind === "file" || root.kind === "folder" ? Text.ElideMiddle : Text.ElideRight
+        textFormat: Text.PlainText
+        color: root.linked || root.isDefault || root.kind === "model" && root.literal === undefined
+               ? root.look.muted : root.look.text
+        font.pixelSize: root.look.smallText
+        font.weight: Font.Medium
+        font.italic: root.linked
+        font.features: { "tnum": 1 }
+    }
+
+    // Made once, only for the widgets that have one.
+    function make(file, properties) {
+        return Qt.createComponent(file).createObject(root, Object.assign({ host: root }, properties || {}))
+    }
+    Component.onCompleted: {
+        if (!editable)
+            return
+        if (kind === "toggle")
+            make("ToggleSwitch.qml")
+        else if (kind === "color")
+            make("ColorSwatch.qml")
+    }
+    property bool chevronsMade: false
+
+    MouseArea {
+        id: mouse
+        objectName: "widgetMouse"
+        anchors.fill: parent
+        enabled: root.editable && !root.editingText
+        hoverEnabled: root.kind === "spin"
+        preventStealing: true
+        cursorShape: root.kind === "spin" || root.kind === "slider" ? Qt.SizeHorCursor
+                   : root.typed ? Qt.IBeamCursor : Qt.PointingHandCursor
+        property real pressX: 0
+        property real startNumber: 0
+        property bool dragging: false
+
+        onContainsMouseChanged: {
+            if (containsMouse && !root.chevronsMade) {
+                root.chevronsMade = true
+                root.make("SpinChevrons.qml", { mouse: mouse })
+            }
+        }
+        onPressed: event => {
+            // Any edit in progress ends first, as a press on the canvas would end it.
+            root.giveFocusBack()
+            pressX = event.x
+            startNumber = root.number
+            dragging = false
+        }
+        onPositionChanged: event => {
+            if (!pressed || (root.kind !== "spin" && root.kind !== "slider"))
+                return
+            if (!dragging && Math.abs(event.x - pressX) < Application.styleHints.startDragDistance)
+                return
+            if (!dragging) {
+                dragging = true
+                root.edits.begin(root.nodeId, root.name)
+            }
+            if (root.kind === "spin") // scrub: a step per 6 units
+                root.edits.previewValue(root.edits.stepped(root.nodeId, root.name, startNumber,
+                                                           Math.round((event.x - pressX) / 6)))
+            else
+                root.edits.previewValue(root.edits.valueAt(root.nodeId, root.name, event.x / root.width))
+        }
+        onReleased: event => {
+            if (dragging) {
+                dragging = false
+                root.edits.finish()
+                return
+            }
+            root.clicked(event.x)
+        }
+        onCanceled: {
+            if (dragging)
+                root.edits.finish()
+            dragging = false
+        }
+    }
+
+    function clicked(x) {
+        const atEnd = x > width - glyphZone
+        switch (kind) {
+        case "spin":
+            if (x < glyphZone)
+                return edits.setValue(nodeId, name, edits.stepped(nodeId, name, number, -1))
+            if (atEnd)
+                return edits.setValue(nodeId, name, edits.stepped(nodeId, name, number, 1))
+            return openEditor()
+        case "toggle":
+            return edits.setValue(nodeId, name, !on)
+        case "choice":
+            return openMenu(choiceEntries())
+        case "seed":
+            return atEnd ? openMenu(seedEntries()) : openEditor()
+        case "model":
+            edits.requestModels(nodeId, name)
+            return openMenu(null)
+        case "file":
+        case "folder":
+        case "color":
+            return atEnd ? openDialog() : openEditor()
+        default:
+            return openEditor()
+        }
+    }
+
+    // --- typing ---
+
+    function openEditor() {
+        if (editor)
+            return
+        error = ""
+        // The multiline editor opens over the rows below: lift this row above them.
+        if (row)
+            row.z = 2
+        editor = make(kind === "multiline" ? "AreaEditor.qml" : "FieldEditor.qml")
+    }
+    function closeEditor() {
+        error = ""
+        const closing = editor
+        editor = null
+        if (row)
+            row.z = 0
+        if (closing)
+            closing.destroy()
+    }
+    // Tab and Shift+Tab: the next or previous typed field of this node.
+    function focusNeighbour(step) {
+        if (!nodeItem)
+            return false
+        const fields = []
+        for (const r of nodeItem.children)
+            for (const c of r.children)
+                if (c.objectName === "widgetLoader" && c.item && c.item.typed && c.item.editable)
+                    fields.push(c.item)
+        fields.sort((a, b) => a.port.y - b.port.y)
+        const at = fields.indexOf(root)
+        if (fields.length < 2 || at < 0)
+            return false
+        fields[(at + step + fields.length) % fields.length].openEditor()
+        return true
+    }
+    // The focus goes back to the canvas. A field still holding it gives it up first: the
+    // canvas is its focus scope, so forceActiveFocus alone would hand focus back to the field.
+    function giveFocusBack() {
+        if (Window.activeFocusItem)
+            Window.activeFocusItem.focus = false
+        if (canvasView)
+            canvasView.forceActiveFocus()
+    }
+
+    // --- menus ---
+
+    function choiceEntries() {
+        const spec = edits.spec(nodeId, name)
+        const current = typeof literal === "string" ? literal : spec["default"]
+        return (spec.choices || []).map(c => ({ text: c, value: c, checked: c === current }))
+    }
+    function seedEntries() {
+        const mode = edits.seedMode(nodeId, name)
+        return [{ text: qsTr("Fixed"), value: "fixed", checked: mode === "fixed" },
+                { text: qsTr("Randomize each run"), value: "random", checked: mode === "random" },
+                { text: qsTr("Increment after each run"), value: "increment", checked: mode === "increment" }]
+    }
+    function modelEntries() {
+        const entries = []
+        const spec = edits.spec(nodeId, name)
+        const current = literal !== undefined ? literal.name : undefined
+        if (spec.optional)
+            entries.push({ text: qsTr("Any ready model"), value: { unset: true }, checked: current === undefined })
+        const listed = edits.models(nodeId, name)
+        for (const m of listed) {
+            const status = m.status === "ready" ? "" : m.status === "loading" ? qsTr("loading") : qsTr("unavailable")
+            entries.push({ text: status === "" ? m.name : qsTr("%1 (%2)").arg(m.name).arg(status),
+                           detail: m.provider, value: { handle: m.handle }, checked: m.name === current })
+        }
+        if (edits.modelsLoading(nodeId, name))
+            entries.push({ text: qsTr("Looking for models…"), enabled: false })
+        else if (listed.length === 0)
+            entries.push({ text: qsTr("No models found"), enabled: false })
+        entries.push({ text: qsTr("Type a name…"), value: { typeName: true } })
+        return entries
+    }
+    function picked(value) {
+        switch (kind) {
+        case "choice":
+            return edits.setValue(nodeId, name, value)
+        case "seed":
+            return edits.setSeedMode(nodeId, name, value)
+        case "model":
+            if (value.unset)
+                return edits.unset(nodeId, name)
+            if (value.typeName)
+                return openEditor()
+            return edits.setModel(nodeId, name, value.handle)
+        }
+    }
+
+    // Menus and pickers live in WidgetPicker.qml, loaded on the first use: they need Qt Quick
+    // Controls and Dialogs, which a widget at rest should not pay for.
+    property Item pickers: null
+    function picker() {
+        if (!pickers)
+            pickers = Qt.createComponent("WidgetPicker.qml").createObject(root, { host: root })
+        return pickers
+    }
+    // `entries` null: the model list, kept current while models arrive.
+    function openMenu(entries) { picker().openMenu(entries) }
+    function openDialog() { picker().openDialog() }
+}

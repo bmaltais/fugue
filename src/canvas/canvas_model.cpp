@@ -106,7 +106,8 @@ QHash<int, QByteArray> LinkList::roleNames() const {
 
 CanvasModel::CanvasModel(const Registry *registry, QObject *parent)
     : QObject(parent), m_registry(registry), m_nodeList(new NodeList(this)), m_linkList(new LinkList(this)),
-      m_search(new NodeSearch(registry, this, this)), m_undo(makeUndoStack()) {
+      m_search(new NodeSearch(registry, this, this)), m_widgets(new WidgetEdit(registry, this, this)),
+      m_undo(makeUndoStack()) {
     watchUndoStack();
 }
 
@@ -294,7 +295,9 @@ void CanvasModel::portsFromType(NodeRow &row, const Node &node) const {
         port.label = label.isEmpty() ? (spec.label.isEmpty() ? spec.name : spec.label) : label;
         port.type = spec.type;
         port.kind = m_registry ? m_registry->portKind(spec.type.type) : PortKind::Unknown;
-        port.widget = !spec.widget().isEmpty();
+        // A resource input is a value row too: unwired, it shows the model picker (2.5).
+        port.widgetType = port.kind == PortKind::Resource && !spec.type.list ? QStringLiteral("model") : spec.widget();
+        port.widget = !port.widgetType.isEmpty();
         port.required = spec.required();
         port.defaultValue = spec.defaultValue;
         return port;
@@ -443,11 +446,15 @@ QVariantMap CanvasModel::portMap(const NodeRow &row, const Port &port) const {
                     {"y", port.y},
                     {"wired", isWired(row.id, port.name, port.output)},
                     {"widget", port.widget},
+                    {"widgetType", port.widgetType},
                     {"required", port.required}};
     if (port.widget) {
         bool isDefault = false;
-        map.insert("value", displayValue(m_document.graph.nodes.value(row.id).inputs.value(port.name), port, &isDefault));
+        const InputValue value = m_document.graph.nodes.value(row.id).inputs.value(port.name);
+        map.insert("value", displayValue(value, port, &isDefault));
         map.insert("isDefault", isDefault);
+        // The stored value as it is, for the widget (undefined when unset).
+        map.insert("literal", value.toJson().toVariant());
     }
     return map;
 }
@@ -487,6 +494,24 @@ bool CanvasModel::isWired(const QString &node, const QString &port, bool output)
             return true;
     }
     return false;
+}
+
+const InputSpec *CanvasModel::inputSpec(const QString &node, const QString &input) const {
+    if (!m_registry || !m_document.graph.nodes.contains(node))
+        return nullptr;
+    const QString type = m_document.graph.nodes.value(node).type;
+    if (const NodeType *installed = m_registry->nodeType(type))
+        return installed->input(input);
+    if (const GroupDefinition *group = m_document.group(type)) {
+        for (const GroupInput &exposed : group->inputs) {
+            if (exposed.name != input)
+                continue;
+            const PortRef target = exposed.targets.value(0);
+            const NodeType *inner = m_registry->nodeType(group->nodes.value(target.node).type);
+            return inner ? inner->input(target.port) : nullptr;
+        }
+    }
+    return nullptr;
 }
 
 const CanvasModel::Port *CanvasModel::findPort(const QString &node, const QString &port, bool output) const {

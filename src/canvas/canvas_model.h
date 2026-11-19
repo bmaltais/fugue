@@ -47,6 +47,7 @@
 //   edits below; canvas_commands.h registers them.
 // - Text size: FugueCanvas binds textSize to the theme's; rows and titles follow it.
 
+#include "canvas/widget_edit.h"
 #include "engine/document.h"
 #include "engine/port_type.h"
 #include "search/node_search.h"
@@ -141,6 +142,8 @@ class CanvasModel : public QObject {
     Q_PROPERTY(QVariantMap view READ view NOTIFY documentReset)
     // Node search (src/search/node_search.h): it adds nodes through addNode() and connectPorts().
     Q_PROPERTY(fugue::NodeSearch *search READ search CONSTANT)
+    // Editing input values in place (canvas/widget_edit.h), for the widgets on the node face.
+    Q_PROPERTY(WidgetEdit *widgets READ widgets CONSTANT)
     // The base text size in px (theme.textSize); a node's title and rows are sized from it.
     Q_PROPERTY(int textSize READ textSize WRITE setTextSize NOTIFY metricsChanged)
     Q_PROPERTY(qreal headerHeight READ headerHeight NOTIFY metricsChanged)
@@ -161,6 +164,7 @@ public:
     NodeList *nodes() const { return m_nodeList; }
     LinkList *links() const { return m_linkList; }
     fugue::NodeSearch *search() const { return m_search; }
+    WidgetEdit *widgets() const { return m_widgets; }
 
     void setDocument(const fugue::Document &document);
     // The document with the canvas's positions and viewport in its layout.
@@ -332,6 +336,7 @@ private:
     friend class NodeList;
     friend class LinkList;
     friend class EditCommand;
+    friend class WidgetEdit;
 
     // The document with positions folded in, and the nodes in drawing order.
     struct Snapshot {
@@ -346,6 +351,7 @@ private:
         std::optional<fugue::PortSpec> type; // none: unknown (a placeholder's port)
         fugue::PortKind kind = fugue::PortKind::Unknown;
         bool widget = false; // a value input, shown in the widget band
+        QString widgetType;  // its 6.2 widget, or "model" for a resource input (2.5)
         bool required = false;
         QJsonValue defaultValue = QJsonValue::Undefined;
         qreal y = 0; // from the node's top
@@ -397,6 +403,9 @@ private:
     QVariantList portMaps(const NodeRow &row, bool outputs) const;
     QVariantMap portMap(const NodeRow &row, const Port &port) const;
     const Port *findPort(const QString &node, const QString &port, bool output) const;
+    // The spec of a node's input: its type's, or for a group instance the inner input an
+    // exposed input leads to. None for a placeholder or an unknown name.
+    const fugue::InputSpec *inputSpec(const QString &node, const QString &input) const;
     QString problem(const QString &fromNode, const QString &output, const QString &toNode, const QString &input,
                     bool useDrag) const;
     QSet<QString> upstreamOf(const QString &node) const;
@@ -410,6 +419,7 @@ private:
     NodeList *m_nodeList;
     LinkList *m_linkList;
     fugue::NodeSearch *m_search;
+    WidgetEdit *m_widgets;
     std::vector<NodeRow> m_rows;
     QHash<QString, int> m_rowOf;
     std::vector<LinkRow> m_links;
