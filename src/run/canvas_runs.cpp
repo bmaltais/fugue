@@ -160,12 +160,18 @@ void CanvasRuns::show(const QString &tab, const QString &node) {
         state.insert("thumbnailInfo", QStringLiteral("%1 × %2").arg(view.thumbnailWidth).arg(view.thumbnailHeight));
     }
     m_pendingProgress.remove(node);
+    // A check after each edit restates every node; only the ones that changed are laid out.
+    auto shown = m_shown.find(node);
+    if (shown != m_shown.end() && shown.value() == state)
+        return;
+    m_shown.insert(node, state);
     m_canvas->setRunState(node, state);
 }
 
 void CanvasRuns::showTab() {
     m_shownTab = currentTab();
     m_pendingProgress.clear();
+    m_shown.clear();
     m_canvas->clearRunState();
     const TabRuns runs = m_tabs.value(m_shownTab);
     for (auto it = runs.nodes.cbegin(); it != runs.nodes.cend(); ++it)
@@ -176,8 +182,11 @@ void CanvasRuns::showTab() {
 }
 
 void CanvasRuns::flushProgress() {
-    for (auto it = m_pendingProgress.cbegin(); it != m_pendingProgress.cend(); ++it)
+    for (auto it = m_pendingProgress.cbegin(); it != m_pendingProgress.cend(); ++it) {
         m_canvas->setRunProgress(it.key(), it.value());
+        if (auto shown = m_shown.find(it.key()); shown != m_shown.end())
+            shown->insert("progress", it.value());
+    }
     m_pendingProgress.clear();
     emit progressChanged();
 }

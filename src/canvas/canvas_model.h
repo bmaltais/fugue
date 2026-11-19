@@ -45,9 +45,11 @@
 //   input's value from the widget on the node face; each port map carries `widgetType` and
 //   the stored `literal` for it. A resource input is a value row (the model picker). When a
 //   run starts, #19 calls widgets->advanceSeeds() for the seeds set to increment.
-// - #19 run state (done as a seam by #47): setRunState(node, {...}) fills the NodeList roles a
-//   run shows (runState, progress, seconds, error, warnings, thumbnail, output values);
-//   clearRunState() empties them. With no run they are empty and a node shows no state.
+// - #19 run state (done; run/canvas_runs.h fills it): setRunState(node, {...}) fills the
+//   NodeList roles a run shows (runState, progress, seconds, error, warnings, thumbnail, output
+//   values); setRunProgress() changes the progress alone; clearRunState() empties them. With no
+//   run they are empty and a node shows no state. previewSize()/previewSizeChanged() are the
+//   seam for node sizing (#49): the last image's pixel size, signalled after the re-layout.
 //   A node's row is found by id in O(1) (rowOf).
 // - #47 look (docs/canvas-look.md): the geometry here is the spec's. u = textSize / 3; a node is
 //   60u wide by default, its header 7u, then 1u of padding, outputs first and then inputs in

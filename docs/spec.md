@@ -1251,7 +1251,8 @@ Each run has a folder `~/.cache/fugue/runs/<run-id>/`:
 
 ### 9.8 Runs across processes
 
-v0.1 has no daemon. The window runs its own runs. `fugue run` from the CLI starts a detached
+v0.1 has no daemon. The window runs its own runs, in its own process, and its queue entries are
+live while that process lives (Appendix A). `fugue run` from the CLI starts a detached
 run worker, prints the run id and returns; `--wait` stays attached and streams events.
 
 - `fugue runs status|events|result|cancel <run-id>` read the run folder; cancel signals the worker.
@@ -1706,8 +1707,8 @@ authoring, validating, running and fetching results.
   home folder; write under the current directory, the output folder and `~/Documents/Fugue`.
   Outside them is `permission_denied`. "The current directory" is the one `fugue run` was started
   in; `fugue run` records the roots in the run folder for the worker. Paths are judged after `..`
-  and symbolic links are resolved. A run started without roots (the canvas, for now) is not
-  limited.
+  and symbolic links are resolved. A run started without roots is not limited; the canvas
+  starts its runs without them (Appendix A).
 - This is a guard against mistakes and prompt injection, not a security boundary: anything with
   a shell as the user can edit Fugue's files. The docs say so.
 
@@ -1957,12 +1958,20 @@ Building M2 made these further choices.
 | One undo step per field visit: each valid text is in the document as it is typed (so a save meanwhile has it), and Enter, Tab or leaving the field ends the step, as does any other edit that begins meanwhile (a command such as Ctrl+B, an undo), so the two stay separate steps; Escape puts a one-line field back, while in a multiline field (Enter is a new line there) it ends the edit and keeps the text, so a prompt is never lost to a key. A drag (spin scrub, slider) is one step; a chevron, toggle, choice or picked file is one each | 6.2, 12.11 | medium-high |
 | Numbers: a dot or a comma as the decimal point; empty text unsets an input with a default or an optional one, and is refused for a required number with none. Chevrons and Up/Down step by `step` (1 for whole numbers, else 0.1), held in `min`..`max` and rounded to the step; a drag on a spin scrubs a step per 6 units, a drag on a slider sets the value by position, and a click (no drag) types, as Blender does | 6.2 | medium |
 | Text: empty is the empty text, except an optional input with no default (a file, a folder), where it unsets | 6.2 | medium |
-| Seed modes: randomize stores `{"auto": "random"}`; increment keeps a number and lists the input in `layout.nodes.<id>.increment`, so the file keeps the choice and a run sees a number; going from randomize to a number draws one. The canvas adds one to each incrementing seed after a run it starts (wrapping to `min` past `max`), as one undo step | 6.2, 4.5 | medium |
+| Seed modes: randomize stores `{"auto": "random"}`; increment keeps a number and lists the input in `layout.nodes.<id>.increment`, so the file keeps the choice and a run sees a number; going from randomize to a number takes the seed of the result the node shows (the run's value on the output of the same name, "Seed used"), else draws one. The canvas adds one to each incrementing seed after a run it starts (wrapping to `min` past `max`), as one undo step | 6.2, 4.5 | medium |
 | The model picker lists, when it opens, the models every enabled provider instance offers of the input's resource type, with their state; models on disk (8.9) join it in M5. A typed name is stored as a handle served by that name; an optional model input can go back to "Any ready model" (unset, 8.4) | 2.5, 8.4 | medium |
 | A linked value input shows its source ("Prompt · Text") in place of the widget. List inputs keep a read-only row (`[n]`); a placeholder's inputs show their value read-only | 3.2, 3.6 | medium-high |
-| File and folder widgets store the path the portal returns as it is, or the path typed; the canvas checks no file roots (that waits for #19) | 6.2, 13.6 | medium |
+| File and folder widgets store the path the portal returns as it is, or the path typed; the canvas checks no file roots (see the #19 row on canvas runs and roots) | 6.2, 13.6 | medium |
 | Text-field focus (12.4): widget fields are text inputs, so while one has focus its keys are the field's; a press on the canvas or on another widget takes the focus from the field first, ending its edit. Menus are modal, so the window's keys sleep while one is open | 12.4 | high |
 | Widgets are made with a node's rows (in view at a readable zoom); at rest a widget is a well, a text and a mouse area, and editors, menus and pickers are made on first use | 12.1 | high |
+| Canvas runs (#19) run in the window's process (9.8: no daemon) on a thread of their own that owns everything a run touches: its own registry (node types, and providers.json read again at each run's turn, as a worker does), the kernels, the result cache and the Run objects. The UI thread hands over a copy of the document and gets the events back, so compiling, hashing, moving outputs and waiting for providers or the queue never block it. A run goes through `fugue run`'s steps and code: compile (run to here is the compiler's target), run folder, an entry in the shared queue, its turn, the scheduler. A run that does not compile gets no folder, as with `fugue run` | 9.8, 12.1 | high |
+| The window's queue entries record `"owner": "window"`, its pid and that process's start time (`/proc/<pid>/stat`, field 22); such an entry is live while that very process lives, whoever looks, and a process never discards its own entries, so the window can look for dead ones while it holds the lock. `fugue runs cancel` of an active window run leaves the file `cancel` in its run folder, which the window looks for every 50 ms; a waiting one is cancelled by taking its entry, as for a worker's | 9.8, 9.6 | medium-high |
+| Canvas runs carry no file roots (13.6): the roots guard against agents and scripts writing where nobody looked, while on the canvas a person sets every path on the node face, often through the portal, which can be anywhere (a USB disk, `/mnt`); limiting them would refuse the user's own choice. A workflow opened from elsewhere shows its paths on its nodes before anything runs. Revisit if the canvas ever runs workflows an agent wrote without the user looking (11.8) | 13.6 | medium |
+| A node added on the canvas starts its seeds on randomize, as ComfyUI's control-after-generate does by default: Run makes a new picture each time, the loop people come from ComfyUI with. The manifests keep `0` as the default, so `fugue run` and agents stay reproducible without asking, and no manifest default needs `{"auto": "random"}`. Leaving randomize keeps the seed of the result shown, so a liked image can be iterated on downstream from the cache | 6.2, 10.1, 14.1 | medium |
+| Per-node state on the canvas (10.3): between runs it is `fugue validate`'s (checkGraph on the run thread, 300 ms after the last edit and when a workflow is shown, only while no run is active); during a run it follows the events. A node's error stays until the workflow is edited or run again; its last values (time, output values, thumbnail) stay through edits, at 50% while it runs again. A node inside a group shows on the group's node, its error with the inner path id (`g7/first: ...`), and every error of the run is listed by path id from the run pill | 10.3, 12.7, 9.5 | medium-high |
+| Thumbnails: the run thread writes each image result once as a PNG at most 512 px wide under `~/.cache/fugue/thumbnails/<content hash>-512.png` and the node shows that file (`file://`), not the result: no image provider to register in each engine (as with the shadows), no full-size decode on the canvas, and the cost per node stays one small asynchronous image. `CanvasModel::previewSize(node)` and `previewSizeChanged(node)` give the result's pixel size to node sizing (#49) | 12.7, 12.1 | medium-high |
+| Each workflow tab keeps what its runs showed and shows it again when it comes back; a run started in one tab never paints another. Progress reaches the canvas at most once per node every 33 ms, through a path that changes one role and lays nothing out | 12.10, 12.1 | medium-high |
+| Run first (Ctrl+Shift+Enter) queues ahead of every waiting run, the CLI's included (9.8's class 3), never ahead of the active one. Cancel (Ctrl+Alt+Enter, Escape while a run is waiting or going) takes the window's active run, else its last waiting one | 9.2, 12.4 | medium |
 
 ## Appendix B: issue to section map
 

@@ -145,6 +145,7 @@ private:
     QTimer m_checkTimer;
     QTimer m_progressTimer;
     QHash<QString, qreal> m_pendingProgress; // canvas node id -> progress, of the shown tab
+    QHash<QString, QVariantMap> m_shown;     // what each node of the shown tab was last given
     int m_ticket = 0;
     struct Ticket {
         QString tab;

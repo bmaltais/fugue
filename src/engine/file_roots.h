@@ -5,7 +5,7 @@
 //
 // `fugue run` sets them, from the folder it was started in, and the run folder carries
 // them to the worker (roots.json, RunFolder::writeRoots). A run without them (the canvas,
-// in-process tests) is not limited; the canvas decides for itself (#19).
+// in-process tests) is not limited; the canvas starts its runs without them (spec Appendix A).
 //
 // Paths are compared in canonical form, resolved one component at a time the way the
 // kernel resolves them: a link is followed where it stands, so `link/..` is the folder above
