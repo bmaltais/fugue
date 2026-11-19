@@ -1,9 +1,10 @@
 import QtQuick
+import Fugue
 
 // A Lucide glyph (docs/canvas-look.md 16) by name, from the bundled icon font: it recolors
 // through `color` and batches with the labels around it.
 Text {
-    required property var look // theme.look
+    required property CanvasLook look // theme.look
     property string name
 
     text: name !== "" ? look.glyph(name) : ""

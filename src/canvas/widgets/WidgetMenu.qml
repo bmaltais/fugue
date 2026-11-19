@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
+import Fugue
 import ".."
 
 // The list a choice, seed or model widget opens: entries of {text, value, detail, note,
@@ -10,7 +11,7 @@ import ".."
 Popup {
     id: menu
     objectName: "widgetMenu"
-    required property var look
+    required property CanvasLook look
     property var entries: []
     signal picked(var value)
 

@@ -1,11 +1,12 @@
 import QtQuick
+import Fugue
 
 // The surface of a popup, the `?` overlay and a dialog (docs/canvas-look.md 7, level 3): the
 // popup fill, a hairline edge, the theme's corner, and the level 3 shadow. Use it as a
 // Popup's background.
 Item {
     id: surface
-    required property var look // theme.look
+    required property CanvasLook look // theme.look
 
     Shadow {
         target: box

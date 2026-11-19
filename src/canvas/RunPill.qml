@@ -1,5 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import Fugue
 
 // The run pill, top right of the canvas (docs/canvas-look.md 11): while a run of the window
 // is waiting or going, a spinner, "Running", the node and its percent, and "1 of 3" when
@@ -8,8 +9,8 @@ import QtQuick
 // selects the node it shows on.
 Item {
     id: pill
-    required property var look
-    required property var runs // CanvasRuns
+    required property CanvasLook look
+    required property CanvasRuns runs
     readonly property real u: look.unit
     readonly property int errorCount: runs.errors.length
     property bool listOpen: false

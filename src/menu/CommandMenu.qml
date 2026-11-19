@@ -22,7 +22,7 @@ Menu {
     // Left or Right on one of its rows: the menu bar moves to the neighbouring menu.
     signal stepRequested(int delta)
 
-    readonly property var look: App.theme.look
+    readonly property CanvasLook look: App.theme.look
     readonly property real u: look.unit
     readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
 

@@ -1,4 +1,5 @@
 import QtQuick
+import Fugue
 
 // The shadow under a raised surface (docs/canvas-look.md 7): one of theme.look's three
 // pre-painted 9-slice textures, stretched around `target`, a sibling placed after it. Level 1
@@ -6,7 +7,7 @@ import QtQuick
 // corner, 3 the popup corner.
 BorderImage {
     required property Item target
-    required property var look // theme.look
+    required property CanvasLook look // theme.look
     property int level: 3
 
     readonly property int reach: look.shadowMargins[level - 1]

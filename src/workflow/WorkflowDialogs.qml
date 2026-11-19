@@ -15,7 +15,7 @@ Item {
     id: root
 
     readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
-    readonly property var look: App.theme.look
+    readonly property CanvasLook look: App.theme.look
     // The canvas, to turn a drop point into world coordinates.
     property FugueCanvas canvasView
     property alias closeQuestion: closeAsk

@@ -20,7 +20,7 @@ Rectangle {
     color: look.well
 
     readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
-    readonly property var look: App.theme.look
+    readonly property CanvasLook look: App.theme.look
 
     Rectangle {
         anchors.bottom: parent.bottom

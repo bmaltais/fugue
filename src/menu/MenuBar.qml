@@ -15,7 +15,7 @@ Rectangle {
     id: bar
     objectName: "menuBar"
 
-    readonly property var look: App.theme.look
+    readonly property CanvasLook look: App.theme.look
     readonly property real u: look.unit
     readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
 

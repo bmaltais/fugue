@@ -1,5 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import Fugue
 import ".."
 
 // One value input on a node's face, as a widget (spec 6.2, 3.2, 2.5; canvas-look 4.4): a
@@ -17,10 +18,10 @@ Rectangle {
     id: root
     objectName: "inputWidget"
 
-    required property var edits // CanvasModel.widgets
+    required property WidgetEdit edits // CanvasModel.widgets
     required property string nodeId
     required property var port  // CanvasModel::portMap
-    required property var look  // theme.look (look.h)
+    required property CanvasLook look  // theme.look (look.h)
     property Item canvasView    // takes the focus back when an edit ends
     property Item nodeItem      // its rows, for Tab
     property Item row           // raised while the multiline editor covers the rows below

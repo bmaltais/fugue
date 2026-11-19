@@ -32,7 +32,7 @@ import Fugue
 FocusScope {
     id: canvas
 
-    required property var model
+    required property CanvasModel model
     // "legacy" or "standard" (12.3): settings.json's navigation, bound in Main.qml.
     property string navigation: "legacy"
     readonly property real minZoom: 0.1
@@ -194,7 +194,7 @@ FocusScope {
         world.y = height / 2 - c[1] * world.scale
     }
     // The look (look.h), and the port colors as a JS object, converted once per theme change.
-    readonly property var look: App.theme.look
+    readonly property CanvasLook look: App.theme.look
     // The window's runs (#19, run/canvas_runs.h), when the app gives them: a window made
     // without them (most tests) draws no run pill and no running dots.
     readonly property CanvasRuns windowRuns: App.runs

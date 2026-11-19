@@ -97,7 +97,7 @@ class NodeSearch : public QObject {
     QML_UNCREATABLE("made in C++, read through App")
     Q_PROPERTY(bool active READ active NOTIFY activeChanged)
     Q_PROPERTY(QString query READ query WRITE setQuery NOTIFY queryChanged)
-    Q_PROPERTY(SearchResults *results READ results CONSTANT)
+    Q_PROPERTY(fugue::SearchResults *results READ results CONSTANT)
     Q_PROPERTY(int count READ count NOTIFY resultsChanged)
     // The dragged link this search was opened from, or empty: {node, port, output, type}.
     Q_PROPERTY(QVariantMap link READ link NOTIFY activeChanged)

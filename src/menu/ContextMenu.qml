@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import Fugue
+import "../canvas"
 
 // The canvas's context menus (#50, spec 12.3: right-click opens it): on a node the "node"
 // menu, on a Frame the "frame" one, elsewhere the "canvas" one, from the command registry's
@@ -14,7 +15,7 @@ Item {
     id: root
     objectName: "contextMenu"
 
-    required property var canvas // FugueCanvas
+    required property FugueCanvas canvas
     property string kind: ""     // canvas, node or frame, the last one opened
     // Made from the file the first time it opens, so opening the window does not compile Menu's QML.
     property var menu: null

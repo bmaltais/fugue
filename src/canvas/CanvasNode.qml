@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Shapes
+import Fugue
 import "widgets"
 
 // One node on the canvas: a NodeList row (canvas_model.h), drawn as docs/canvas-look.md says
@@ -41,9 +42,9 @@ Item {
     required property bool thumbnailDim    // a placeholder: no result yet
 
     // Set by the canvas.
-    property var canvasModel
+    property CanvasModel canvasModel
     property var canvasView // the FugueCanvas: port colors
-    property var look       // theme.look
+    property CanvasLook look       // theme.look
     property var linkDrag: ({})
     property rect detailArea
     // 0: full detail; 1: the map (boxes, headers, port marks, thumbnails); 2: the overview

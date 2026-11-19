@@ -13,9 +13,9 @@ import "../canvas"
 Popup {
     id: panel
     objectName: "settingsPanel"
-    required property var model // a fugue::SettingsModel
+    required property SettingsModel model
 
-    readonly property var look: App.theme.look
+    readonly property CanvasLook look: App.theme.look
     readonly property real u: look.unit
     readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
     property int page: 0

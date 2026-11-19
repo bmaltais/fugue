@@ -10,9 +10,9 @@ import Fugue
 ColumnLayout {
     id: page
     required property var host // the SettingsPanel: its model and apply()
-    readonly property var look: App.theme.look
+    readonly property CanvasLook look: App.theme.look
     readonly property real u: look.unit
-    readonly property var model: host.model
+    readonly property SettingsModel model: host.model
     spacing: 4 * u
 
     SettingsParts.Setting {

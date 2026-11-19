@@ -12,7 +12,7 @@ MenuItem {
     property var entry
     property var target: ({})
 
-    readonly property var look: App.theme.look
+    readonly property CanvasLook look: App.theme.look
     readonly property real u: look.unit
     readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
     readonly property bool available: entry === undefined || entry.available
