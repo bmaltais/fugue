@@ -25,7 +25,8 @@
 //   with its item index; a move by beginMove/moveBy/endMove back), so an undo command can
 //   wrap them. endMove() marks one finished drag. Selection is the `selected` role and
 //   select()/selectedIds(); the marquee and Shift/Ctrl+click already use it.
-// - #18 search: addNode(type, x, y); the canvas emits searchRequested (double-click on
+// - #18 search (done): NodeSearch, owned here as `search`, calls addNode(type, x, y) and
+//   connectPorts, so #17 wraps those; the canvas emits searchRequested (double-click on
 //   empty canvas) and linkReleased (a dragged link let go on empty canvas) with the
 //   world point and the dragged port, for search filtered by port type.
 // - #19 run state: add roles to NodeList (state, progress, last output values); a node's
@@ -36,6 +37,7 @@
 
 #include "engine/document.h"
 #include "engine/port_type.h"
+#include "search/node_search.h"
 
 #include <QAbstractListModel>
 #include <QHash>
@@ -120,6 +122,8 @@ class CanvasModel : public QObject {
     Q_PROPERTY(LinkList *links READ links CONSTANT)
     Q_PROPERTY(QVariantList frames READ frames NOTIFY framesChanged)
     Q_PROPERTY(QVariantMap view READ view NOTIFY documentReset)
+    // Node search (src/search/node_search.h): it adds nodes through addNode() and connectPorts().
+    Q_PROPERTY(fugue::NodeSearch *search READ search CONSTANT)
     // The base text size in px (theme.textSize); a node's title and rows are sized from it.
     Q_PROPERTY(int textSize READ textSize WRITE setTextSize NOTIFY metricsChanged)
     Q_PROPERTY(qreal headerHeight READ headerHeight NOTIFY metricsChanged)
@@ -134,6 +138,7 @@ public:
 
     NodeList *nodes() const { return m_nodeList; }
     LinkList *links() const { return m_linkList; }
+    fugue::NodeSearch *search() const { return m_search; }
 
     void setDocument(const fugue::Document &document);
     // The document with the canvas's positions and viewport in its layout.
@@ -184,6 +189,11 @@ public:
     Q_INVOKABLE QString dragProblem(const QString &node, const QString &port, bool output) const;
     // Ends the drag on a port (connecting when allowed), or anywhere else with an empty node.
     Q_INVOKABLE bool endLinkDrag(const QString &node = {}, const QString &port = {}, bool output = false);
+
+    // The type of a port of a node on the canvas, or nothing when the node or port is not
+    // there or its type is not known (a placeholder's port). Node search uses it to filter
+    // by the port a link was dragged from.
+    std::optional<fugue::PortSpec> portType(const QString &node, const QString &port, bool output) const;
 
     // --- nodes ---
 
@@ -278,6 +288,7 @@ private:
     fugue::Document m_document;
     NodeList *m_nodeList;
     LinkList *m_linkList;
+    fugue::NodeSearch *m_search;
     std::vector<NodeRow> m_rows;
     QHash<QString, int> m_rowOf;
     std::vector<LinkRow> m_links;

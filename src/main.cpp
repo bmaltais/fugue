@@ -12,6 +12,7 @@
 
 #include "backend.h"
 #include "canvas/canvas_model.h"
+#include "search/node_search.h"
 #include "commands/command_registry.h"
 #include "cli/args.h"
 #include "cli/cli.h"
@@ -55,6 +56,9 @@ int main(int argc, char *argv[]) {
     fugue::Registry registry;
     fugue::nodes::addBuiltinNodeTypes(registry);
     CanvasModel canvasModel(&registry);
+    canvasModel.search()->registerCommands(commands);
+    // The canvas is always there for now; Tab and Shift+A reach node.search through it.
+    commands.setContextActive("canvas", true);
 
     QQmlApplicationEngine engine;
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);

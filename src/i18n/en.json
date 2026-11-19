@@ -18,5 +18,7 @@
   "Your keymap file has problems; the default keys apply where it could not be used. Press ? to see them.": "Your keymap file has problems; the default keys apply where it could not be used. Press ? to see them.",
   "off": "off",
   "on": "on",
-  "random": "random"
+  "random": "random",
+  "Search nodes": "Search nodes",
+  "No node matches": "No node matches"
 }

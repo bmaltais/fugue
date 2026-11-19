@@ -1935,6 +1935,7 @@ Building M2 made these further choices.
 | The canvas is never mirrored in right-to-left languages: a graph's direction and its saved positions are geometry | 12.11 | medium-high |
 | A click selects a node, Shift or Ctrl+click adds, dragging a selected node moves the selection, and a click on empty canvas clears it (legacy). A marquee selects every node it touches, as ComfyUI's does | 12.3, 12.4 | high |
 | Furniture (12.9) in #16 is drawn from the layout only (collapsed nodes, Frames, reroute points); making and editing it waits for the command registry and undo (#17, #21) | 12.9 | medium |
+| Node search ranks by name, then keywords, category and description, with letters-in-order as the last resort; every word of the query must match. A dragged link keeps the node types with a compatible port (the engine's rules) and links the first such port; a node dropped from an input goes left of the point so its output faces it | 12.8, 12.4 | medium-high |
 
 ## Appendix B: issue to section map
 
