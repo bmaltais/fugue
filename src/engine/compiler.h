@@ -87,8 +87,8 @@ struct CompiledGraph {
 
     // --- dependencies, for the scheduler ---
 
-    // The path ids of the sinks, sorted. Empty for a "run to here" graph,
-    // whose end point is target.
+    // The path ids of the nodes with `sink` set, sorted. A "run to here"
+    // graph has none unless its target is a sink; its end point is target.
     QStringList sinks() const;
     // The path ids a node reads from, sorted, each once.
     QStringList dependencies(const QString &path) const;
