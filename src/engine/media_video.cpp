@@ -4,10 +4,8 @@
 #include "media.h"
 
 #include <cmath>
-#include <cstdio>
 
 #include <QDir>
-#include <QFile>
 #include <QFileInfo>
 #include <QHash>
 #include <QJsonArray>
@@ -15,6 +13,7 @@
 #include <QMutex>
 #include <QMutexLocker>
 
+#include "engine/atomic_file.h"
 #include "engine/ffmpeg.h"
 #include "engine/file_hashes.h"
 
@@ -178,7 +177,8 @@ Result<MediaHandle> MediaHandle::withEditsApplied(const QString &dir, const QStr
         if (found != appliedEdits().constEnd() && found->source == source && hashes.hash(path) == found->result.hash())
             return found->result;
     }
-    const QString partial = QDir(dir).filePath(QStringLiteral(".") + name + QStringLiteral(".mkv.part"));
+    // The same source and edits make the same file, so one already at the name is replaced.
+    PartialFile partial(dir, name + QStringLiteral(".mkv"));
 
     // Re-encoded losslessly (FFV1 video, FLAC audio, in Matroska): trims must
     // be exact to the frame, which a stream copy is not, and a lossless copy
@@ -188,16 +188,12 @@ Result<MediaHandle> MediaHandle::withEditsApplied(const QString &dir, const QStr
     const QString crop = ffmpeg::cropFilter(m_edits);
     if (!crop.isEmpty())
         args << "-vf" << crop;
-    args << "-c:v" << "ffv1" << "-c:a" << "flac" << "-f" << "matroska" << partial;
+    args << "-c:v" << "ffv1" << "-c:a" << "flac" << "-f" << "matroska" << partial.path();
     const Result<QByteArray> done = ffmpeg::run(QStringLiteral("ffmpeg"), args, QStringLiteral("media_unreadable"));
-    if (!done) {
-        QFile::remove(partial);
-        return done.error();
-    }
-    if (std::rename(QFile::encodeName(partial).constData(), QFile::encodeName(path).constData()) != 0) {
-        QFile::remove(partial);
-        return makeError(QStringLiteral("permission_denied"), QStringLiteral("Cannot write %1.").arg(path));
-    }
+    if (!done)
+        return done.errors();
+    if (const Result<bool> committed = partial.commit(path, Overwrite::Replace); !committed)
+        return committed.errors();
     const Result<MediaHandle> made = probeWithFfprobe(MediaType::Video, path, hashes);
     if (made) {
         const QMutexLocker lock(&appliedMutex);

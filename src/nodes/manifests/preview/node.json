@@ -1,0 +1,15 @@
+{
+  "manifest": 1,
+  "id": "fugue/preview",
+  "version": "1.0.0",
+  "name": "Preview",
+  "description": "Shows a value on the node. From the command line it appears in the run result.",
+  "category": "Basic",
+  "keywords": ["show", "display", "debug", "view"],
+  "sink": true,
+  "runtime": {"kind": "builtin"},
+  "inputs": [
+    {"name": "value", "type": "any", "label": "Value"}
+  ],
+  "outputs": []
+}

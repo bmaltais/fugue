@@ -1,0 +1,39 @@
+{
+  "manifest": 1,
+  "id": "fugue/generate-image",
+  "version": "1.0.0",
+  "name": "Generate Image",
+  "description": "Makes an image from a prompt on an image model, optionally starting from an image.",
+  "category": "Generate",
+  "keywords": ["text to image", "txt2img", "img2img", "diffusion", "prompt"],
+  "runtime": {"kind": "builtin"},
+  "capabilities": ["image.generate"],
+  "inputs": [
+    {"name": "prompt", "type": "text", "label": "Prompt", "widget": "multiline"},
+    {"name": "negative_prompt", "type": "text", "label": "Negative prompt", "default": "", "widget": "multiline",
+     "description": "What the image should not show. Models that take none ignore it."},
+    {"name": "model", "type": "fugue/image-model", "label": "Model", "optional": true,
+     "description": "Unset: any ready image model."},
+    {"name": "width", "type": "number", "label": "Width", "optional": true, "integer": true, "min": 64, "max": 8192,
+     "step": 64, "description": "Unset: the start image's size, else the model's default."},
+    {"name": "height", "type": "number", "label": "Height", "optional": true, "integer": true, "min": 64, "max": 8192,
+     "step": 64, "description": "Unset: the start image's size, else the model's default."},
+    {"name": "steps", "type": "number", "label": "Steps", "optional": true, "integer": true, "min": 1, "max": 200,
+     "advanced": true, "description": "Unset: the model's default."},
+    {"name": "guidance", "type": "number", "label": "Guidance", "optional": true, "min": 0, "max": 30, "step": 0.1,
+     "advanced": true, "description": "Unset: the model's default."},
+    {"name": "seed", "type": "number", "label": "Seed", "default": 0, "integer": true, "min": 0,
+     "max": 9007199254740991, "widget": "seed"},
+    {"name": "image", "type": "image", "label": "Start image", "optional": true,
+     "description": "Redrawn from instead of from noise. Fitted to the size by covering it and cutting the middle."},
+    {"name": "strength", "type": "number", "label": "Strength", "default": 0.7, "min": 0, "max": 1, "step": 0.05,
+     "widget": "slider", "description": "How far to move from the start image: 0 keeps it, 1 ignores it."}
+  ],
+  "outputs": [
+    {"name": "image", "type": "image", "label": "Image"},
+    {"name": "seed", "type": "number", "label": "Seed used"},
+    {"name": "width", "type": "number", "label": "Width used"},
+    {"name": "height", "type": "number", "label": "Height used"},
+    {"name": "model", "type": "fugue/image-model", "label": "Model used"}
+  ]
+}

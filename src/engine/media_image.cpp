@@ -3,11 +3,11 @@
 
 #include "media.h"
 
-#include <cstdio>
 
 #include <QDir>
 #include <QFile>
 
+#include "engine/atomic_file.h"
 #include "engine/file_hashes.h"
 #include "engine/vips.h"
 
@@ -16,14 +16,6 @@ namespace fugue {
 namespace {
 
 using vips::VImage;
-
-Error vipsUnavailable() {
-    return makeError(QStringLiteral("internal"), QStringLiteral("libvips could not be started."));
-}
-
-Error vipsFailed(const vips::VError &error, const QString &code = QStringLiteral("internal")) {
-    return makeError(code, QString::fromUtf8(error.what()).trimmed());
-}
 
 QByteArray fileName(const QString &path) {
     return QFile::encodeName(path);
@@ -34,6 +26,12 @@ QString formatOf(const VImage &image) {
     QString loader = QString::fromUtf8(const_cast<VImage &>(image).get_string("vips-loader"));
     const qsizetype load = loader.indexOf(QLatin1String("load"));
     return load > 0 ? loader.left(load) : loader;
+}
+
+// The EXIF orientation (1 to 8) a file's image says it is to be shown at; 1 when it has none.
+int orientationOf(const VImage &image) {
+    VImage &header = const_cast<VImage &>(image);
+    return header.get_typeof("orientation") == 0 ? 1 : header.get_int("orientation");
 }
 
 // The image as PNG can hold it without loss, and the bit depth to write.
@@ -79,7 +77,7 @@ Result<MediaHandle> MediaHandle::fromImage(const VImage &image) {
     try {
         handle.m_image = image.copy_memory();
     } catch (const vips::VError &error) {
-        return vipsFailed(error);
+        return vipsError(error);
     }
     handle.m_width = handle.m_image->width();
     handle.m_height = handle.m_image->height();
@@ -98,9 +96,11 @@ Result<vips::VImage> MediaHandle::image() const {
     if (!initVips())
         return vipsUnavailable();
     try {
-        return VImage::new_from_file(fileName(m_path).constData());
+        // Upright, as the orientation tag says it is seen (the size probe() reported).
+        const VImage image = VImage::new_from_file(fileName(m_path).constData());
+        return orientationOf(image) == 1 ? image : image.autorot();
     } catch (const vips::VError &error) {
-        return vipsFailed(error, QStringLiteral("media_unreadable"));
+        return vipsError(error, QStringLiteral("media_unreadable"));
     }
 }
 
@@ -113,8 +113,10 @@ Result<MediaHandle> MediaHandle::probeImage(const QString &path, FileHashes &has
     try {
         // Opening reads the header only; pixels are decoded when read.
         const VImage image = VImage::new_from_file(fileName(path).constData());
-        handle.m_width = image.width();
-        handle.m_height = image.height();
+        // The size it is seen at: orientations 5 to 8 turn it a quarter.
+        const bool turned = orientationOf(image) >= 5 && orientationOf(image) <= 8;
+        handle.m_width = turned ? image.height() : image.width();
+        handle.m_height = turned ? image.width() : image.height();
         handle.m_channels = image.bands();
         handle.m_format = formatOf(image);
     } catch (const vips::VError &) {
@@ -139,22 +141,20 @@ Result<MediaHandle> MediaHandle::savedImage(const QString &dir, const QString &n
     // partial file. No metadata and a fixed compression level: the same
     // pixels always give the same bytes, so an unchanged result keeps its
     // hash and stays a cache hit (spec 10.1).
+    // The same pixels make the same file, so one already at the name is replaced.
     const QString path = QDir(dir).filePath(name + QStringLiteral(".png"));
-    const QString partial = QDir(dir).filePath(QStringLiteral(".") + name + QStringLiteral(".png.part"));
+    PartialFile partial(dir, name + QStringLiteral(".png"));
     try {
-        VImage(ready->first).pngsave(fileName(partial).constData(),
+        VImage(ready->first).pngsave(fileName(partial.path()).constData(),
                                      VImage::option()
                                          ->set("compression", 6)
                                          ->set("bitdepth", ready->second)
                                          ->set("keep", VIPS_FOREIGN_KEEP_NONE));
     } catch (const vips::VError &error) {
-        QFile::remove(partial);
-        return vipsFailed(error);
+        return vipsError(error);
     }
-    if (std::rename(fileName(partial).constData(), fileName(path).constData()) != 0) {
-        QFile::remove(partial);
-        return makeError(QStringLiteral("permission_denied"), QStringLiteral("Cannot write %1.").arg(path));
-    }
+    if (const Result<bool> committed = partial.commit(path, Overwrite::Replace); !committed)
+        return committed.errors();
 
     MediaHandle handle = *this;
     handle.m_path = path;

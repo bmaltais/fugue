@@ -13,6 +13,7 @@
 #include "backend.h"
 #include "cli/args.h"
 #include "cli/cli.h"
+#include "nodes/builtin.h"
 #include "theme.h"
 #include "translator.h"
 
@@ -20,7 +21,7 @@ int main(int argc, char *argv[]) {
     // `fugue <command>` is the command line (spec 13): no QGuiApplication, no
     // display, no QML. It must be decided before any application object exists.
     if (fugue::cli::wantsCli(argc, argv))
-        return fugue::cli::run(argc, argv);
+        return fugue::cli::run(argc, argv, {fugue::nodes::addBuiltinNodeTypes, fugue::nodes::addBuiltinKernels});
 
     QGuiApplication app(argc, argv);
     app.setApplicationName("fugue");

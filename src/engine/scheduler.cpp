@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <exception>
+#include <new>
 
 #include <QCoreApplication>
 #include <QEventLoop>
@@ -9,6 +10,7 @@
 #include <QHash>
 #include <QJsonArray>
 #include <QPointer>
+#include <QSet>
 #include <QRandomGenerator>
 #include <QThread>
 #include <QThreadPool>
@@ -17,6 +19,7 @@
 
 #include "engine/file_hashes.h"
 #include "engine/ids.h"
+#include "engine/paths.h"
 
 namespace fugue {
 
@@ -61,6 +64,9 @@ struct NodeRun {
 
     Values inputs;
     Values outputs;
+    // A sink with no outputs (Preview): its resolved inputs, which are what it shows
+    // (events and run.json carry them as `shown`).
+    QJsonObject shown;
     QJsonObject autoValues; // input -> the value a randomized input got
     QString key;
     QStringList models; // what it would keep resident (9.3)
@@ -91,15 +97,28 @@ Error nodeError(const QString &code, const QString &message, const QString &hint
     return makeError(code, message, hint);
 }
 
-// Runs kernel code, turning an exception into node_failed (libvips throws).
+// Runs kernel code, turning an exception into node_failed (libvips throws), and running
+// out of memory into out_of_memory.
 template <typename T, typename Call> Result<T> guarded(Call call) {
     try {
         return call();
+    } catch (const std::bad_alloc &) {
+        // Memory ran out (a huge image): its own code (9.5), so a resident model can be freed
+        // and the node tried again.
+        return nodeError(QStringLiteral("out_of_memory"), QStringLiteral("The node ran out of memory."));
     } catch (const std::exception &thrown) {
         return nodeError(QStringLiteral("node_failed"), QString::fromUtf8(thrown.what()));
     } catch (...) {
         return nodeError(QStringLiteral("node_failed"), QStringLiteral("The node threw an unknown exception."));
     }
+}
+
+// `record` (a node's run.json entry, its node.done or node.cached event) with `shown`, what
+// a sink with no outputs shows, when it shows anything.
+QJsonObject withShown(QJsonObject record, const QJsonObject &shown) {
+    if (!shown.isEmpty())
+        record.insert("shown", shown);
+    return record;
 }
 
 // Gives every output a file and a hash, on the worker thread: an image held
@@ -149,6 +168,17 @@ Result<Values> withFiles(const Values &outputs, const QString &workDir, FileHash
         out.insert(it.key(), made.value());
     }
     return out;
+}
+
+// The kernel's outputs given files and hashes (withFiles), keeping the warnings the kernel
+// returned beside them.
+Result<Values> filed(const Result<Values> &made, const QString &workDir, FileHashes &hashes) {
+    if (!made)
+        return made;
+    const Result<Values> withFile = guarded<Values>([&] { return withFiles(made.value(), workDir, hashes); });
+    if (!withFile || made.warnings().isEmpty())
+        return withFile;
+    return Result<Values>(withFile.value(), made.warnings() + withFile.warnings());
 }
 
 // Whether one item fits a port type. Only the built-in types are checked;
@@ -345,6 +375,7 @@ private:
                 node.insert("key", n.key);
             if (!n.outputs.isEmpty())
                 node.insert("outputs", valuesJson(n.outputs));
+            node = withShown(node, n.shown);
             if (!n.reason.isEmpty())
                 node.insert("reason", n.reason);
             if (n.state == NodeState::Error)
@@ -609,6 +640,37 @@ private:
         std::optional<Error> problem; // the node fails
     };
 
+    // What is wrong with a linked value for `spec`: a list's item count (min_items,
+    // max_items, which the compiler cannot count through a link), and for a built-in type
+    // (text, number, boolean) the rules checkLiteral applies to a literal, item by item.
+    Errors linkedValueProblems(const InputSpec &spec, const Value &value) const {
+        if (spec.type.list && value.isList()) {
+            Errors counted = checkItemCount(spec, value.items().size());
+            if (!counted.isEmpty()) {
+                for (Error &error : counted)
+                    error.hint = QStringLiteral("The list comes by a link: change it where it is made.");
+                return counted;
+            }
+        }
+        if (!m_env.registry || m_env.registry->portKind(spec.type.type) != PortKind::Builtin)
+            return {};
+        const QList<Value> items = value.isList() ? value.items() : QList<Value>{value};
+        for (const Value &item : items) {
+            if (item.kind() != Value::Kind::Json)
+                continue;
+            Errors errors = checkLiteral(spec, item.json(), PortKind::Builtin);
+            if (errors.isEmpty())
+                continue;
+            for (Error &error : errors) {
+                error.input = spec.name;
+                if (error.hint.isEmpty())
+                    error.hint = QStringLiteral("The value comes by a link: change it where it is made.");
+            }
+            return errors;
+        }
+        return {};
+    }
+
     // Fills n.inputs from what the graph has written, the defaults and the
     // upstream outputs.
     ResolvedInputs resolveInputs(NodeRun &n) {
@@ -647,9 +709,34 @@ private:
             } else if (empty) {
                 continue;
             }
+            // The compiler checked what was typed in; a value that came by link meets the
+            // same rules (range, whole number, choices) before the kernel trusts it.
+            if (linked) {
+                if (const Errors bad = linkedValueProblems(spec, value); !bad.isEmpty()) {
+                    resolved.problem = bad.first();
+                    return resolved;
+                }
+            }
+            const bool pathLiteral = (spec.widget() == QLatin1String("file") || spec.widget() == QLatin1String("folder")) &&
+                                     value.kind() == Value::Kind::Json && value.json().isString();
+            // Trimmed and "~" expanded here, once: the node reads, the key names and the share
+            // copy judges (share_copy.h) the same path.
+            if (pathLiteral)
+                value = Value(expandHome(value.text().trimmed()));
             n.inputs.insert(spec.name, value);
-            // A file read by path is keyed by its content, not its path (10.1).
-            if (spec.widget() == QLatin1String("file") && value.kind() == Value::Kind::Json && value.json().isString()) {
+            // A file read by path is keyed by its content, not its path (10.1). Hashing reads
+            // it, so the read roots (13.6) are checked first, cached result or not.
+            if (pathLiteral && spec.widget() == QLatin1String("file") && m_options.roots) {
+                const Result<QString> readable = m_options.roots->checkRead(value.text(), spec.name);
+                if (!readable) {
+                    resolved.problem = readable.error();
+                    return resolved;
+                }
+                // The node reads, and the key names, the path that was checked.
+                value = Value(readable.value());
+                n.inputs.insert(spec.name, value);
+            }
+            if (pathLiteral && spec.widget() == QLatin1String("file")) {
                 const QString hash = m_env.hashes->hash(value.text());
                 if (!hash.isEmpty()) {
                     resolved.keyInputs.insert(spec.name, QJsonObject{{"file", hash}});
@@ -728,6 +815,34 @@ private:
                 break;
     }
 
+    // The values used by the node and everything upstream of it (NodeContext::used),
+    // from the same records run.json is written from. Upstream nodes have finished,
+    // so their randomized inputs and selected providers are settled.
+    QJsonObject usedUpstream(const NodeRun &n) const {
+        QJsonObject used;
+        QStringList pending{n.path};
+        QSet<QString> seen;
+        while (!pending.isEmpty()) {
+            const QString path = pending.takeLast();
+            if (seen.contains(path))
+                continue;
+            seen.insert(path);
+            const auto found = m_nodes.constFind(path);
+            const NodeRun &node = found.value();
+            QJsonObject entry;
+            if (!node.autoValues.isEmpty())
+                entry.insert("auto", node.autoValues);
+            if (node.selection) {
+                entry.insert("engine", node.selection->engine);
+                entry.insert("model", node.selection->model.handle);
+            }
+            if (!entry.isEmpty())
+                used.insert(path, entry);
+            pending.append(node.dependencies);
+        }
+        return used;
+    }
+
     NodeContext contextFor(const NodeRun &n) {
         NodeContext context;
         context.node = n.path;
@@ -737,6 +852,10 @@ private:
         context.workDir = n.workDir;
         context.hashes = m_env.hashes;
         context.models = m_env.models;
+        context.registry = m_env.registry;
+        context.document = m_options.document;
+        context.usedUpstream = usedUpstream(n);
+        context.roots = m_options.roots;
         const QString path = n.path;
         context.progress = [this, path](double value, const QString &stage, const QString &message) {
             later([this, path, value, stage, message] { progress(path, value, stage, message); });
@@ -771,9 +890,8 @@ private:
         }
         const auto kernel = n.kernel;
         m_pool.start([this, kernel, context, path, hashes] {
-            Result<Values> result = guarded<Values>([&] { return kernel->run(context); });
-            if (result)
-                result = guarded<Values>([&] { return withFiles(result.value(), context.workDir, *hashes); });
+            const Result<Values> result =
+                filed(guarded<Values>([&] { return kernel->run(context); }), context.workDir, *hashes);
             later([this, path, result] { returned(path, result); });
         });
     }
@@ -871,9 +989,8 @@ private:
         const JobResult job = result.value();
         FileHashes *hashes = m_env.hashes;
         m_pool.start([this, kernel, context, selection, job, path, hashes] {
-            Result<Values> outputs = guarded<Values>([&] { return kernel->outputs(context, selection, job); });
-            if (outputs)
-                outputs = guarded<Values>([&] { return withFiles(outputs.value(), context.workDir, *hashes); });
+            const Result<Values> outputs = filed(guarded<Values>([&] { return kernel->outputs(context, selection, job); }),
+                                                 context.workDir, *hashes);
             later([this, path, outputs] { returned(path, outputs); });
         });
     }
@@ -895,6 +1012,12 @@ private:
         NodeRun &n = m_nodes[path];
         if (!result)
             return failed(n, result.error());
+        // A kernel's warnings are the run's, on this node (run.done, run.json).
+        for (Error warning : result.warnings()) {
+            warning.severity = Error::Severity::Warning;
+            warning.node = n.path;
+            m_outcome.errors.append(warning);
+        }
 
         Values outputs = result.value();
         // A randomized input is also a "value used" output (10.1): when the
@@ -924,10 +1047,18 @@ private:
         n.phase = Phase::Finished;
         n.state = NodeState::Cached;
         n.outputs = stored.value();
+        n.shown = shownBy(n);
         m_outcome.ran.append(n.path);
         const double seconds = n.started.msecsTo(now()) / 1000.0;
-        emitEvent({{"event", "node.done"}, {"node", n.path}, {"outputs", valuesJson(n.outputs)}, {"seconds", seconds}});
+        emitEvent(withShown({{"event", "node.done"}, {"node", n.path}, {"outputs", valuesJson(n.outputs)}, {"seconds", seconds}},
+                            n.shown));
         advance();
+    }
+
+    // What a sink with no outputs shows: its inputs as resolved. Other nodes show
+    // nothing of their own (their outputs are what they have).
+    static QJsonObject shownBy(const NodeRun &n) {
+        return n.type && n.type->sink && n.type->outputs.isEmpty() ? valuesJson(n.inputs) : QJsonObject();
     }
 
     bool checkOutputs(const NodeRun &n, Values &outputs, Error &bad) const {
@@ -1003,7 +1134,8 @@ private:
         n.phase = Phase::Finished;
         n.state = state;
         n.outputs = outputs;
-        emitEvent({{"event", "node.cached"}, {"node", n.path}, {"outputs", valuesJson(outputs)}});
+        n.shown = shownBy(n);
+        emitEvent(withShown({{"event", "node.cached"}, {"node", n.path}, {"outputs", valuesJson(outputs)}}, n.shown));
     }
 
     void finish() {

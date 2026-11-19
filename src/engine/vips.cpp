@@ -2,8 +2,6 @@
 
 #include <mutex>
 
-#include <vips/vips8>
-
 namespace fugue {
 
 bool initVips() {
@@ -17,6 +15,14 @@ bool initVips() {
         }
     });
     return ok;
+}
+
+Error vipsUnavailable() {
+    return makeError(QStringLiteral("internal"), QStringLiteral("libvips could not be started."));
+}
+
+Error vipsError(const vips::VError &error, const QString &code) {
+    return makeError(code, QString::fromUtf8(error.what()).trimmed());
 }
 
 } // namespace fugue

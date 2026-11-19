@@ -1,0 +1,16 @@
+{
+  "manifest": 1,
+  "id": "fugue/text",
+  "version": "1.0.0",
+  "name": "Text",
+  "description": "A piece of text, typed in the node.",
+  "category": "Basic",
+  "keywords": ["string", "prompt"],
+  "runtime": {"kind": "builtin"},
+  "inputs": [
+    {"name": "text", "type": "text", "label": "Text", "default": "", "widget": "multiline"}
+  ],
+  "outputs": [
+    {"name": "text", "type": "text", "label": "Text"}
+  ]
+}

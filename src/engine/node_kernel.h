@@ -32,6 +32,10 @@
 // left where it is. A data handle needs "data" and "path"; the scheduler adds
 // its "hash".
 //
+// Warnings: a kernel may return them beside its outputs (Result(values, warnings)); the
+// scheduler gives each the node's path id and puts it among the run's warnings (run.done's
+// `errors`, run.json). A cached result does not repeat them.
+//
 // Errors: return an Error with a code of 13.3 (node_failed when none fits,
 // out_of_memory when memory ran out so the scheduler can free a resident
 // model and try again). `node` is filled in by the scheduler. An exception
@@ -40,12 +44,14 @@
 // Kernels must be thread-safe: one kernel object may run several nodes at
 // once, so per-run state belongs in locals, not members.
 
+#include <QJsonObject>
 #include <QString>
 
 #include <functional>
 #include <map>
 #include <memory>
 
+#include "engine/file_roots.h"
 #include "engine/node_type.h"
 #include "engine/provider.h"
 #include "engine/providers.h"
@@ -55,6 +61,7 @@
 namespace fugue {
 
 class FileHashes;
+class Registry;
 class ResidentModels;
 
 struct NodeContext {
@@ -76,6 +83,24 @@ struct NodeContext {
     // The resident-model cache (9.3), or null. A kernel that loads a model
     // keeps it here under resourceIdentity(handle) so the next node reuses it.
     ResidentModels *models = nullptr;
+
+    // The registry the run was compiled against: node types, for a kernel that reads the
+    // document (share_copy.h).
+    const Registry *registry = nullptr;
+    // The workflow being run, in Document::toJson() form, exactly as the run was
+    // started (after `--set` overrides), or empty when the run did not start from a
+    // document (a compiled graph). For a node that writes the workflow into its
+    // output (Save Image, 11.7); never an input to anything, so it is not in the cache key.
+    QJsonObject document;
+    // What was used to make this node's inputs, from what the scheduler records in
+    // run.json: {"<path id>": {"auto": {<input>: <value>}, "engine": <id>,
+    // "model": <handle>}} for this node and every node upstream of it that has any
+    // (a randomized input made concrete; a provider node's engine and model).
+    // Same purpose as `document`, and likewise not in the cache key.
+    QJsonObject usedUpstream;
+    // The folders a node that reads or writes files by path may use (13.6), from
+    // RunOptions::roots; none means not limited. Load Image and Save Image check them.
+    std::optional<FileRoots> roots;
 
     // The input's value, or an Empty value when it has none.
     Value input(const QString &name) const { return inputs.value(name); }

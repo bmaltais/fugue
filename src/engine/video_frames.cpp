@@ -155,7 +155,7 @@ std::optional<vips::VImage> VideoFrames::next() {
                                                   VIPS_FORMAT_UCHAR)
             .copy(vips::VImage::option()->set("interpretation", VIPS_INTERPRETATION_sRGB));
     } catch (const vips::VError &error) {
-        m_error = makeError(QStringLiteral("internal"), QString::fromUtf8(error.what()).trimmed());
+        m_error = vipsError(error);
         stop();
         return std::nullopt;
     }

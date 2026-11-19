@@ -52,6 +52,53 @@ class TestScheduler : public QObject {
 private slots:
     // --- running a graph (9.2, 9.4, 9.7) ---
 
+    // A list that arrives by link has as many items as it has, which the compiler cannot
+    // count: the item limits are checked when the node is about to run, as for one value (R1).
+    void aLinkedListOutsideTheItemLimitsFailsTheNode() {
+        World world;
+        world.type("fugue/many", "'inputs': [], 'outputs': [{'name': 'items', 'type': 'text', 'list': true}]",
+                   [](const NodeContext &) -> Result<Values> {
+                       return Values{{"items", Value::list({Value(QString("a")), Value(QString("b")), Value(QString("c"))})}};
+                   });
+        const auto taker = [](const NodeContext &) -> Result<Values> { return Values{{"text", Value(QString("took"))}}; };
+        world.type("fugue/two",
+                   "'inputs': [{'name': 'items', 'type': 'text', 'list': true, 'max_items': 2}], 'outputs': [{'name': 'text', 'type': 'text'}]",
+                   taker);
+        world.type("fugue/four",
+                   "'inputs': [{'name': 'items', 'type': 'text', 'list': true, 'min_items': 4}], 'outputs': [{'name': 'text', 'type': 'text'}]",
+                   taker);
+        world.type("fugue/three",
+                   "'inputs': [{'name': 'items', 'type': 'text', 'list': true, 'min_items': 1, 'max_items': 3}], 'outputs': [{'name': 'text', 'type': 'text'}]",
+                   taker);
+        for (const char *type : {"fugue/two", "fugue/four", "fugue/three"}) {
+            const Ran ran = world.run(world.graph(QByteArray("{'m': {'type': 'fugue/many'},"
+                                                             " 't': {'type': '") + type + "', 'inputs': {'items': {'from': 'm.items'}}},"
+                                                             " 's': {'type': 'fugue/save', 'inputs': {'value': {'from': 't.text'}}}}"));
+            if (QByteArray(type) == "fugue/three") {
+                QCOMPARE(ran.outcome.status, RunStatus::Ok);
+                continue;
+            }
+            QCOMPARE(ran.outcome.status, RunStatus::Failed);
+            QCOMPARE(ran.outcome.errors.first().code, QStringLiteral("value_out_of_range"));
+            QCOMPARE(ran.outcome.errors.first().node, QStringLiteral("t"));
+            QCOMPARE(ran.outcome.errors.first().input, QStringLiteral("items"));
+            QVERIFY(!world.calls.all().contains("t"));
+        }
+    }
+
+    // A kernel that runs out of memory (a huge Resize: std::bad_alloc) is out_of_memory, so
+    // the canvas can offer the right fix (9.5), not a crash or a plain failure.
+    void aKernelThatRunsOutOfMemoryIsOutOfMemory() {
+        World world;
+        world.type("fugue/hungry", "'inputs': [], 'outputs': [{'name': 'text', 'type': 'text'}]",
+                   [](const NodeContext &) -> Result<Values> { throw std::bad_alloc(); });
+        const Ran ran = world.run(world.graph("{'h': {'type': 'fugue/hungry'},"
+                                              " 's': {'type': 'fugue/save', 'inputs': {'value': {'from': 'h.text'}}}}"));
+        QCOMPARE(ran.outcome.status, RunStatus::Failed);
+        QCOMPARE(ran.outcome.errors.first().code, QStringLiteral("out_of_memory"));
+        QCOMPARE(ran.outcome.errors.first().node, QStringLiteral("h"));
+    }
+
     void aChainRunsInDependencyOrder() {
         World world;
         world.cpuSlots = 1;

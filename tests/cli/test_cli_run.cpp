@@ -508,7 +508,7 @@ private slots:
         QVERIFY(QDir(runsRoot() + "/20260101-000000-000-old2").exists()); // too soon to collect again
     }
 
-    void theShippedBinaryHasNoNodeTypesYetSoNothingCompiles() {
+    void theShippedBinaryDoesNotKnowTheTestFakes() {
         const Outcome o = fugue({"run", path("flow.fugue"), "--wait", "--json"}, FUGUE_BINARY);
         QCOMPARE(o.exitCode, 1);
         QCOMPARE(o.firstCode(), QString("unknown_node_type"));

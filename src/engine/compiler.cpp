@@ -717,21 +717,10 @@ void Compiler::checkValue(Flat &flat, const InputSpec &base, const Bound &bound)
         return;
     }
     const QList<InputValue> items = value.items();
-    const auto count = [&](const QString &message) {
-        Error error = nodeError(QStringLiteral("value_out_of_range"), flat.path, message);
-        error.input = spec.name;
+    for (Error error : checkItemCount(spec, items.size())) {
+        error.node = flat.path;
         fail(error);
-    };
-    if (spec.minItems && items.size() < *spec.minItems)
-        count(QStringLiteral("Input %1 of %2 takes at least %3 items, not %4.")
-                  .arg(spec.name, flat.path)
-                  .arg(*spec.minItems)
-                  .arg(items.size()));
-    if (spec.maxItems && items.size() > *spec.maxItems)
-        count(QStringLiteral("Input %1 of %2 takes at most %3 items, not %4.")
-                  .arg(spec.name, flat.path)
-                  .arg(*spec.maxItems)
-                  .arg(items.size()));
+    }
     QList<InputValue> resolved;
     bool complete = true;
     for (int i = 0; i < items.size(); ++i) {

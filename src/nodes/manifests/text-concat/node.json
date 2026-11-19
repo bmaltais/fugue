@@ -1,0 +1,18 @@
+{
+  "manifest": 1,
+  "id": "fugue/text-concat",
+  "version": "1.0.0",
+  "name": "Text Concat",
+  "description": "Join two pieces of text with a separator between them.",
+  "category": "Text",
+  "keywords": ["join", "combine", "append", "merge", "string"],
+  "runtime": {"kind": "builtin"},
+  "inputs": [
+    {"name": "a", "type": "text", "label": "A", "default": "", "widget": "multiline"},
+    {"name": "b", "type": "text", "label": "B", "default": "", "widget": "multiline"},
+    {"name": "separator", "type": "text", "label": "Separator", "default": ""}
+  ],
+  "outputs": [
+    {"name": "text", "type": "text", "label": "Text"}
+  ]
+}

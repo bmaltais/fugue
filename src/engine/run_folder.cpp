@@ -10,6 +10,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QMutex>
 #include <QMutexLocker>
@@ -151,6 +152,29 @@ bool RunFolder::writeCompiled(const QJsonObject &compiled) const {
 
 QJsonObject RunFolder::compiled() const {
     return readObject(compiledJsonPath());
+}
+
+Errors RunFolder::writeWorkflow(const QJsonObject &document) const {
+    return writeJsonFile(m_path + QStringLiteral("/workflow.json"), document);
+}
+
+QJsonObject RunFolder::workflow() const {
+    return readObject(m_path + QStringLiteral("/workflow.json"));
+}
+
+Errors RunFolder::writeRoots(const FileRoots &roots) const {
+    return writeJsonFile(m_path + QStringLiteral("/roots.json"), roots.toJson());
+}
+
+std::optional<FileRoots> RunFolder::roots() const {
+    const QString file = m_path + QStringLiteral("/roots.json");
+    if (!QFileInfo::exists(file))
+        return std::nullopt;
+    const Result<QJsonObject> json = readJsonObject(file);
+    if (!json)
+        return FileRoots{}; // unreadable: allow nothing rather than everything
+    const Result<FileRoots> roots = FileRoots::fromJson(*json);
+    return roots ? roots.value() : FileRoots{};
 }
 
 bool RunFolder::queued(const QString &workflow) const {

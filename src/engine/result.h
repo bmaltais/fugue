@@ -68,6 +68,13 @@ inline Error makeError(const QString &code, const QString &message, const QStrin
     return error;
 }
 
+// An error about one input of a node (`input` set), as kernels and checks report it.
+inline Error makeInputError(const QString &code, const QString &input, const QString &message, const QString &hint = {}) {
+    Error error = makeError(code, message, hint);
+    error.input = input;
+    return error;
+}
+
 // The Result of code that gathered `problems` while it made, or failed to make, a value.
 template <typename T>
 Result<T> collected(std::optional<T> value, Errors problems) {

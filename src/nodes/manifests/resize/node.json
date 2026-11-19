@@ -1,0 +1,20 @@
+{
+  "manifest": 1,
+  "id": "fugue/resize",
+  "version": "1.0.0",
+  "name": "Resize",
+  "description": "Change an image's size. A width or height of 0 follows the other side; both 0 leave it as it is. Stretch fills the box exactly, cover fills it and trims the overflow from the center, contain fits inside it and keeps the aspect, without padding, so one side can be smaller than the box.",
+  "category": "Image/Transform",
+  "keywords": ["scale", "upscale", "downscale", "zoom", "size"],
+  "runtime": {"kind": "builtin"},
+  "inputs": [
+    {"name": "image", "type": "image", "label": "Image"},
+    {"name": "width", "type": "number", "label": "Width", "default": 512, "min": 0, "max": 16384, "step": 1, "integer": true},
+    {"name": "height", "type": "number", "label": "Height", "default": 512, "min": 0, "max": 16384, "step": 1, "integer": true},
+    {"name": "fit", "type": "text", "label": "Fit", "default": "stretch", "choices": ["stretch", "contain", "cover"]},
+    {"name": "method", "type": "text", "label": "Method", "default": "bicubic", "choices": ["nearest", "bilinear", "bicubic", "lanczos", "area"]}
+  ],
+  "outputs": [
+    {"name": "image", "type": "image", "label": "Image"}
+  ]
+}

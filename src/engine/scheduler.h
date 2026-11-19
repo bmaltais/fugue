@@ -121,10 +121,16 @@ struct RunOptions {
     // The workflow file the graph came from, absolute, or empty. It goes
     // into run.json and into the cache's `used_by`.
     QString workflow;
+    // The workflow document as the run was started (Document::toJson()), or empty
+    // for a run that did not start from one. Handed to kernels as
+    // NodeContext::document.
+    QJsonObject document;
     // What the caller wants said with the run though no node caused it, such as a
     // provider instance that could not be made. They join run.done's `errors` and the
     // outcome with severity warning; they do not fail the run.
     Errors warnings;
+    // The folders nodes may read and write under (13.6), or none: not limited.
+    std::optional<FileRoots> roots;
 };
 
 // The state of a node (10.3).

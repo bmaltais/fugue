@@ -2,8 +2,8 @@
 //
 // Seam: the built `fugue` executable run as a subprocess with no display
 // (QT_QPA_PLATFORM, DISPLAY and WAYLAND_DISPLAY unset). Tests assert on what a
-// caller sees: the JSON on stdout, stderr, and the exit code. The shipped binary
-// has no node types until M1, so most tests drive fugue_with_fakes: the same
+// caller sees: the JSON on stdout, stderr, and the exit code. Most tests drive
+// fugue_with_fakes, not the shipped binary (which has the built-in nodes): the same
 // command line, whose test-only main() seeds the registry from the folder of
 // node.json files that FUGUE_NODE_MANIFESTS names (through cli::Hooks). Run folders are made with RunFolder under a temporary
 // XDG_CACHE_HOME, the same files a worker writes.
@@ -387,7 +387,21 @@ private slots:
     void theShippedBinaryLoadsNoNodeTypesFromTheEnvironment() {
         const Outcome o = fugue({"node", "list", "--json"}, FUGUE_BINARY); // FUGUE_NODE_MANIFESTS is set
         QCOMPARE(o.exitCode, 0);
-        QCOMPARE(o.json().value("data").toObject().value("nodes").toArray().size(), 0);
+        const QStringList listed = ids(o.json().value("data").toObject().value("nodes").toArray());
+        QVERIFY(!listed.contains("fugue/shout")); // a test fake, from the folder
+        QVERIFY(!listed.contains("io.github.alice.tools/sharpen"));
+    }
+
+    // The built-in manifests are compiled into the binary as resources: the real `fugue`
+    // knows fugue/text, so a workflow using it has no unknown_node_type.
+    void theShippedBinaryKnowsTheBuiltInNodes() {
+        write(m_dir.filePath("text.fugue"), flow("\"t\": {\"type\": \"fugue/text\", \"version\": \"1.0.0\", "
+                                       "\"inputs\": {\"text\": \"hello\"}}"));
+        const Outcome o = fugue({"validate", m_dir.filePath("text.fugue"), "--json"}, FUGUE_BINARY);
+        QVERIFY2(!o.out.contains("unknown_node_type"), o.out.constData());
+        const Outcome list = fugue({"node", "list", "--json"}, FUGUE_BINARY);
+        QVERIFY2(ids(list.json().value("data").toObject().value("nodes").toArray()).contains("fugue/text"),
+                 list.out.constData());
     }
 
     // --- workflows ---
