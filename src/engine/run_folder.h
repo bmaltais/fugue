@@ -3,6 +3,7 @@
 // The run folder (spec 9.7): ~/.cache/fugue/runs/<run-id>/ holding
 //   run.json       the run's state (its contents belong to the scheduler)
 //   compiled.json  the compiled graph that ran
+//   workflow.json  the workflow document it was compiled from, when there was one
 //   events.jsonl   every event, one compact JSON object per line
 //   nodes/<path id>/  each node's working folder; a path id's groups become
 //                  nested folders, so g7/first is nodes/g7/first/.
@@ -58,6 +59,11 @@ public:
     QJsonObject state() const;
     bool writeCompiled(const QJsonObject &compiled) const;
     QJsonObject compiled() const;
+    // The workflow document the run started from (Document::toJson()), kept so the worker
+    // can hand it to kernels that embed it (RunOptions::document); the file's later edits
+    // do not reach it. Empty when the run did not start from a document.
+    bool writeWorkflow(const QJsonObject &document) const;
+    QJsonObject workflow() const;
 
     // What whoever queues the run writes (9.8): run.json with the status `queued`, and
     // the workflow's path when there is one, then the run.queued event.

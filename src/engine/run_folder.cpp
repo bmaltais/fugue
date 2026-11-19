@@ -153,6 +153,14 @@ QJsonObject RunFolder::compiled() const {
     return readObject(compiledJsonPath());
 }
 
+bool RunFolder::writeWorkflow(const QJsonObject &document) const {
+    return writeJsonFile(m_path + QStringLiteral("/workflow.json"), document).isEmpty();
+}
+
+QJsonObject RunFolder::workflow() const {
+    return readObject(m_path + QStringLiteral("/workflow.json"));
+}
+
 bool RunFolder::queued(const QString &workflow) const {
     QJsonObject state{{"status", runStatusName(RunStatus::Queued)}};
     if (!workflow.isEmpty())
