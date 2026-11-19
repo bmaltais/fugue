@@ -329,16 +329,24 @@ Rectangle {
         const current = literal !== undefined ? literal.name : undefined
         if (spec.optional)
             entries.push({ text: qsTr("Any ready model"), value: { unset: true }, checked: current === undefined })
+        // Grouped by provider instance (this machine, a paired host), each under its name. A
+        // model that is not ready says so, and its note says how to make it ready: Fugue never
+        // starts one by itself (8.4).
         const listed = edits.models(nodeId, name)
+        let group = null
         for (const m of listed) {
-            const status = m.status === "ready" ? "" : m.status === "loading" ? qsTr("loading") : qsTr("unavailable")
-            entries.push({ text: status === "" ? m.name : qsTr("%1 (%2)").arg(m.name).arg(status),
-                           detail: m.provider, value: { handle: m.handle }, checked: m.name === current })
+            if (m.provider !== group) {
+                group = m.provider
+                entries.push({ text: m.provider, heading: true, enabled: false })
+            }
+            const status = m.status === "ready" ? "" : m.status === "loading" ? qsTr("loading") : qsTr("not running")
+            entries.push({ text: m.title, detail: status, note: m.note, value: { handle: m.handle },
+                           checked: m.name === current })
         }
         if (edits.modelsLoading(nodeId, name))
             entries.push({ text: qsTr("Looking for models…"), enabled: false })
         else if (listed.length === 0)
-            entries.push({ text: qsTr("No models found"), enabled: false })
+            entries.push({ text: edits.modelsEmptyText(nodeId, name), enabled: false, note: "" })
         entries.push({ text: qsTr("Type a name…"), value: { typeName: true } })
         return entries
     }

@@ -96,6 +96,8 @@ class TestCliRun : public QObject {
         env.insert("XDG_CACHE_HOME", path("cache"));
         env.insert("XDG_STATE_HOME", path("state"));
         env.insert("XDG_CONFIG_HOME", path("config"));
+        // Not the developer's Omarchy state: its paired hosts would be instances (8.2).
+        env.insert("HOME", path("home"));
         env.insert("FUGUE_NODE_MANIFESTS", path("manifests"));
         env.insert("FUGUE_TEST_GATE", gate());
         QProcess process;

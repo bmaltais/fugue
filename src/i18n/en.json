@@ -1,5 +1,4 @@
 {
-  "%1 (%2)": "%1 (%2)",
   "%1 cannot be edited here.": "%1 cannot be edited here.",
   "%1 cannot feed %2: the types differ, and Fugue does not convert between them.": "%1 cannot feed %2: the types differ, and Fugue does not convert between them.",
   "%1 errors": "%1 errors",
@@ -123,7 +122,8 @@
   "Muted": "Muted",
   "New workflow": "New workflow",
   "No color": "No color",
-  "No models found": "No models found",
+  "No image model available: start one in omarchy-local-ai or add a provider": "No image model available: start one in omarchy-local-ai or add a provider",
+  "No model available: start one in omarchy-local-ai or add a provider": "No model available: start one in omarchy-local-ai or add a provider",
   "No node matches": "No node matches",
   "No node matches “%1”.": "No node matches “%1”.",
   "No result yet": "No result yet",
@@ -211,10 +211,10 @@
   "Zoom out": "Zoom out",
   "auto": "auto",
   "loading": "loading",
+  "not running": "not running",
   "off": "off",
   "on": "on",
   "or": "or",
   "random": "random",
-  "to close": "to close",
-  "unavailable": "unavailable"
+  "to close": "to close"
 }

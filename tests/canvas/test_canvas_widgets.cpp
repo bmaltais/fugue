@@ -12,6 +12,7 @@
 #include "canvas/widget_edit.h"
 #include "canvas_app.h"
 #include "widget_fixture.h"
+#include "../engine/omarchy_fixture.h"
 
 using namespace fugue;
 using canvas_test::App;
@@ -35,7 +36,7 @@ const char *fixture = R"({
 
 struct WidgetApp : App {
     int quits = 0, fits = 0, searches = 0;
-    WidgetApp() : App(load(fixture), widget_test::addWidgetType) {
+    explicit WidgetApp(const char *graph = fixture) : App(load(graph), widget_test::addWidgetType) {
         // Commands whose keys a field must keep: count them instead of acting.
         commands.setHandler("app.quit", [this] { ++quits; });
         commands.setHandler("view.fit", [this] { ++fits; });
@@ -367,10 +368,11 @@ private slots:
     void theModelPickerListsModelsAndTakesAName() {
         WidgetApp app;
         const QJsonObject zimage{{"resource", "fugue/image-model"}, {"name", "z-image-turbo"}};
-        app.model.widgets()->setModelSource([&](const QString &, std::function<void(QList<WidgetEdit::Model>)> done) {
-            done({{"z-image-turbo", zimage, "ready", "This machine"},
+        app.model.widgets()->setModelSource([&](const QString &, const QStringList &,
+                                                std::function<void(QList<WidgetEdit::Model>)> done) {
+            done({{"z-image-turbo", zimage, "ready", "This machine", "Z-Image Turbo", ""},
                   {"flux2-klein", QJsonObject{{"resource", "fugue/image-model"}, {"name", "flux2-klein"}}, "loading",
-                   "gx10"}});
+                   "gx10", "", "flux2-klein is starting. Wait for it to finish loading."}});
         });
         QVERIFY(app.open());
         QCOMPARE(canvas_test::item(app.widget("all", "model"), "widgetValue")->property("text").toString(),
@@ -378,15 +380,15 @@ private slots:
         QCOMPARE(app.widget("all", "model")->property("glyph").toString(), QString("chevron-down"));
         app.click(app.in("all", "model"));
         QTRY_VERIFY2(app.menuOpen(), qPrintable(app.warnings.join('\n')));
-        // Any ready model, the two models, Type a name.
-        QCOMPARE(app.popup("widgetMenu")->property("entries").toList().size(), 4);
-        app.key(Qt::Key_Down);
+        // Any ready model, each instance's name over its model, Type a name.
+        QCOMPARE(app.popup("widgetMenu")->property("entries").toList().size(), 6);
+        app.key(Qt::Key_Down); // the heading cannot be chosen: straight to z-image-turbo
         app.key(Qt::Key_Return);
         QCOMPARE(app.stored("all", "model"), QJsonValue(zimage));
 
         app.click(app.in("all", "model"));
         QTRY_VERIFY2(app.menuOpen(), qPrintable(app.warnings.join('\n')));
-        app.key(Qt::Key_Down); // from z-image-turbo, past flux2-klein
+        app.key(Qt::Key_Down); // from z-image-turbo, past gx10's heading, to flux2-klein
         app.key(Qt::Key_Down);
         app.key(Qt::Key_Return); // Type a name…
         QTRY_VERIFY(app.typing());
@@ -401,6 +403,69 @@ private slots:
         app.key(Qt::Key_Return); // Any ready model: nothing listed is chosen, so it is first
         QCOMPARE(app.stored("all", "model"), QJsonValue(QJsonValue::Undefined));
         QCOMPARE(app.steps(), 3);
+    }
+
+    void onFirstRunThePickerListsThePairedHostsModelsByHost() {
+        // No providers.json, this machine with only text models, studio paired and running
+        // two image models, lab paired and offline (spec 8.2's default): the real model
+        // source, in the real window.
+        test::PairedHome home;
+        WidgetApp app(R"({"fugue": 1,
+          "graph": {"nodes": {"generate": {"type": "fugue/generate-image", "version": "1.0.0",
+                                           "inputs": {"prompt": "a lighthouse"}}}},
+          "layout": {"nodes": {"generate": {"pos": [20, 20]}}, "view": {"center": [480, 340], "zoom": 1}}})");
+        QVERIFY(app.open());
+        app.click(app.in("generate", "model"));
+        QTRY_VERIFY2(app.menuOpen(), qPrintable(app.warnings.join('\n')));
+        QObject *menu = app.popup("widgetMenu");
+        QTRY_VERIFY(menu->property("entries").toList().size() == 7);
+        QStringList rows;
+        for (const QVariant &entry : menu->property("entries").toList()) {
+            const QVariantMap e = entry.toMap();
+            rows << (e.value("heading").toBool() ? "# " : "") + e.value("text").toString()
+                        + (e.value("detail").toString().isEmpty() ? QString() : " | " + e.value("detail").toString());
+        }
+        QCOMPARE(rows, (QStringList{"Any ready model", "# lab", "Z-Image Turbo | not running", "# studio",
+                                    "FLUX.2 Klein 4B", "Z-Image Turbo", "Type a name…"}));
+        // What a model that is not ready needs, under its name.
+        QVERIFY(menu->property("entries").toList().at(2).toMap().value("note").toString().contains("Turn on lab"));
+        bool noteShown = false;
+        QList<QQuickItem *> todo{menu->property("contentItem").value<QQuickItem *>()};
+        while (!todo.isEmpty()) {
+            QQuickItem *at = todo.takeFirst();
+            if (at->objectName() == "widgetMenuNote" && at->isVisible() && at->height() > 0
+                && at->property("text").toString().contains("Turn on lab"))
+                noteShown = true;
+            todo << at->childItems();
+        }
+        QVERIFY(noteShown);
+        // Down skips the headings: lab's model, then studio's first.
+        app.key(Qt::Key_Down);
+        app.key(Qt::Key_Down);
+        app.key(Qt::Key_Return);
+        QCOMPARE(app.stored("generate", "model"),
+                 QJsonValue(QJsonObject{{"resource", "fugue/image-model"}, {"name", "flux2-klein-4b-sdcpp-cuda"}}));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    void withNoModelThePickerSaysHowToGetOne() {
+        WidgetApp app(R"({"fugue": 1,
+          "graph": {"nodes": {"edit": {"type": "fugue/edit-image", "version": "1.0.0", "inputs": {"instruction": "x"}}}},
+          "layout": {"nodes": {"edit": {"pos": [20, 20]}}, "view": {"center": [480, 340], "zoom": 1}}})");
+        app.model.widgets()->setModelSource([](const QString &, const QStringList &capabilities,
+                                               std::function<void(QList<WidgetEdit::Model>)> done) {
+            QCOMPARE(capabilities, QStringList{"image.edit"});
+            done({});
+        });
+        QVERIFY(app.open());
+        app.click(app.in("edit", "model"));
+        QTRY_VERIFY2(app.menuOpen(), qPrintable(app.warnings.join('\n')));
+        QStringList rows;
+        for (const QVariant &entry : app.popup("widgetMenu")->property("entries").toList())
+            rows << entry.toMap().value("text").toString();
+        QCOMPARE(rows, (QStringList{"Any ready model",
+                                    "No image model available: start one in omarchy-local-ai or add a provider",
+                                    "Type a name…"}));
     }
 
     void aLinkedInputShowsItsSourceAndTakesNoTyping() {

@@ -139,6 +139,7 @@ foreach(test_source ${fugue_engine_tests})
   get_filename_component(test_name ${test_source} NAME_WE)
   add_executable(${test_name} ${test_source})
   target_link_libraries(${test_name} PRIVATE fugue_engine Qt6::Test)
+  target_compile_definitions(${test_name} PRIVATE FUGUE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
   add_test(NAME ${test_name} COMMAND ${test_name})
 endforeach()
 
@@ -199,7 +200,8 @@ foreach(test_source ${fugue_cli_tests})
   add_executable(${test_name} ${test_source})
   target_link_libraries(${test_name} PRIVATE fugue_cli Qt6::Test)
   target_compile_definitions(${test_name} PRIVATE FUGUE_BINARY="$<TARGET_FILE:fugue>"
-                             FUGUE_FAKE_BINARY="$<TARGET_FILE:fugue_with_fakes>")
+                             FUGUE_FAKE_BINARY="$<TARGET_FILE:fugue_with_fakes>"
+                             FUGUE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
   add_dependencies(${test_name} fugue fugue_with_fakes)
   add_test(NAME ${test_name} COMMAND ${test_name})
 endforeach()
