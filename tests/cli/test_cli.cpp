@@ -17,6 +17,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "cli/args.h"
 #include "engine/document.h"
 #include "engine/run_folder.h"
 
@@ -318,6 +319,30 @@ private slots:
     void helpAndVersionPrintAndExitZero() {
         QVERIFY(fugue({"--help"}, FUGUE_BINARY).out.contains("usage: fugue"));
         QCOMPARE(fugue({"--version"}, FUGUE_BINARY).exitCode, 0);
+    }
+
+    void aFileArgumentOpensTheWindowAndACommandWordStaysTheCommandLine() {
+        const auto wants = [](QList<QByteArray> words) {
+            std::vector<char *> argv;
+            for (QByteArray &word : words)
+                argv.push_back(word.data());
+            return fugue::cli::wantsCli(int(argv.size()), argv.data());
+        };
+        QVERIFY(!wants({"fugue"}));
+        QVERIFY(!wants({"fugue", "demo.fugue"}));
+        QVERIFY(!wants({"fugue", "DEMO.FUGUE"}));
+        QVERIFY(!wants({"fugue", "/some/where/a.fugue"}));
+        QVERIFY(!wants({"fugue", "-platform", "offscreen"}));
+        QVERIFY(wants({"fugue", "run", "demo.fugue"}));
+        QVERIFY(wants({"fugue", "nodes", "list"}));
+        QVERIFY(wants({"fugue", "--help"}));
+        QVERIFY(wants({"fugue", "--json"}));
+        QVERIFY(wants({"fugue", "frobnicate"})); // an unknown word is still a usage error
+        // An existing file with another name opens too, but never one named like a command.
+        QTemporaryDir dir;
+        QFile file(dir.filePath("picture.png"));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QVERIFY(!wants({"fugue", dir.filePath("picture.png").toLocal8Bit()}));
     }
 
     void noDisplayNeeded() {

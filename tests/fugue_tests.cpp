@@ -19,6 +19,7 @@
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
 #include "theme.h"
+#include "workflow/workflows.h"
 #include "translator.h"
 
 namespace {
@@ -344,6 +345,8 @@ private slots:
         Backend backend;
         CanvasModel canvasModel(nullptr);
         fugue::CommandRegistry commands;
+        fugue::Workflows workflows(&canvasModel, nullptr, &commands,
+                                   {dir.path() + "/recovery", dir.path() + "/trust.json"});
         fugue::registerDefaultCommands(commands);
 
         QQmlApplicationEngine engine;
@@ -357,6 +360,7 @@ private slots:
         engine.rootContext()->setContextProperty("backend", &backend);
         engine.rootContext()->setContextProperty("canvasModel", &canvasModel);
         engine.rootContext()->setContextProperty("commands", &commands);
+        engine.rootContext()->setContextProperty("workflows", &workflows);
         engine.load(QUrl("qrc:/Main.qml"));
         QVERIFY(!engine.rootObjects().isEmpty());
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
@@ -517,6 +521,8 @@ private slots:
         Backend backend;
         CanvasModel canvasModel(nullptr);
         fugue::CommandRegistry commands;
+        fugue::Workflows workflows(&canvasModel, nullptr, &commands,
+                                   {dir.path() + "/recovery", dir.path() + "/trust.json"});
         fugue::registerDefaultCommands(commands);
 
         QQmlApplicationEngine engine;
@@ -530,6 +536,7 @@ private slots:
         engine.rootContext()->setContextProperty("backend", &backend);
         engine.rootContext()->setContextProperty("canvasModel", &canvasModel);
         engine.rootContext()->setContextProperty("commands", &commands);
+        engine.rootContext()->setContextProperty("workflows", &workflows);
         engine.load(QUrl("qrc:/Main.qml"));
         QVERIFY(!engine.rootObjects().isEmpty());
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());

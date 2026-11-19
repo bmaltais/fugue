@@ -14,6 +14,7 @@
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
 #include "theme.h"
+#include "workflow/workflows.h"
 #include "translator.h"
 
 using fugue::CommandRegistry;
@@ -250,6 +251,8 @@ private slots:
         CommandRegistry commands;
         fugue::registerDefaultCommands(commands);
         commands.applyKeymap("not json");
+        fugue::Workflows workflows(&canvasModel, nullptr, &commands,
+                                   {dir.path() + "/recovery", dir.path() + "/trust.json"});
 
         QQmlApplicationEngine engine;
         QStringList warnings;
@@ -262,6 +265,7 @@ private slots:
         engine.rootContext()->setContextProperty("backend", &backend);
         engine.rootContext()->setContextProperty("canvasModel", &canvasModel);
         engine.rootContext()->setContextProperty("commands", &commands);
+        engine.rootContext()->setContextProperty("workflows", &workflows);
         engine.load(QUrl("qrc:/Main.qml"));
         QVERIFY(!engine.rootObjects().isEmpty());
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());

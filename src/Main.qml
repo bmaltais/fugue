@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Layouts
 import "canvas"
+import "workflow"
 
 ApplicationWindow {
     id: win
@@ -11,7 +12,7 @@ ApplicationWindow {
     minimumWidth: 640
     minimumHeight: 460
     visible: true
-    title: "Fugue"
+    title: workflows.windowTitle
     color: theme.background
     font.pixelSize: theme.textSize
 
@@ -29,11 +30,24 @@ ApplicationWindow {
         LayoutMirroring.enabled: win.rightToLeft
         LayoutMirroring.childrenInherit: true
 
-        FugueCanvas {
-            objectName: "canvas"
+        ColumnLayout {
             anchors.fill: parent
-            model: canvasModel
+            spacing: 0
+
+            WorkflowTabs {
+                Layout.fillWidth: true
+                Layout.preferredHeight: implicitHeight
+            }
+            FugueCanvas {
+                objectName: "canvas"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                model: canvasModel
+            }
         }
+
+        // The file pickers, the save and trust and recovery questions, the drop area.
+        WorkflowDialogs { anchors.fill: parent }
     }
 
     // The command registry's shortcuts, the `?` overlay and the quit question.

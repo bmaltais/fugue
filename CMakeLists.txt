@@ -25,7 +25,7 @@ target_compile_options(fugue_engine PUBLIC -Wall -Wextra)
 # Everything else but main.cpp, shared by the app and the tests, so each source
 # compiles once and a new file in src/ needs no line here.
 file(GLOB fugue_sources CONFIGURE_DEPENDS src/*.cpp src/*.h src/canvas/*.cpp src/canvas/*.h
-     src/commands/*.cpp src/commands/*.h)
+     src/commands/*.cpp src/commands/*.h src/workflow/*.cpp src/workflow/*.h)
 list(REMOVE_ITEM fugue_sources ${CMAKE_SOURCE_DIR}/src/main.cpp)
 add_library(fugue_core STATIC ${fugue_sources})
 target_include_directories(fugue_core PUBLIC src)
@@ -42,6 +42,16 @@ foreach(qml ${fugue_canvas_qml})
   list(APPEND fugue_canvas_qml_files src/canvas/${qml})
 endforeach()
 qt_add_resources(fugue_core fugue_canvas_qml PREFIX /canvas FILES ${fugue_canvas_qml_files})
+
+# The workflows (spec 11, 12.10): tabs, open, save, recovery and import, with their QML in
+# src/workflow/, compiled in under qrc:/workflow. A new .qml file there needs no line here.
+file(GLOB fugue_workflow_qml CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/src/workflow src/workflow/*.qml)
+set(fugue_workflow_qml_files)
+foreach(qml ${fugue_workflow_qml})
+  set_source_files_properties(src/workflow/${qml} PROPERTIES QT_RESOURCE_ALIAS ${qml})
+  list(APPEND fugue_workflow_qml_files src/workflow/${qml})
+endforeach()
+qt_add_resources(fugue_core fugue_workflow_qml PREFIX /workflow FILES ${fugue_workflow_qml_files})
 
 # The command line (spec 13): the same `fugue` binary, but it needs nothing
 # beyond the engine, so it is its own library with no Gui, Quick or QML. main.cpp
@@ -122,6 +132,18 @@ foreach(test_source ${fugue_canvas_tests})
   set_tests_properties(${test_name} PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
 endforeach()
 
+# Workflow tests: each tests/workflow/<name>.cpp is its own QtTest executable with the app's
+# code, the real Main.qml and the built-in node types. FUGUE_SOURCE_DIR finds examples/.
+file(GLOB fugue_workflow_tests CONFIGURE_DEPENDS tests/workflow/*.cpp)
+foreach(test_source ${fugue_workflow_tests})
+  get_filename_component(test_name ${test_source} NAME_WE)
+  add_executable(${test_name} ${test_source} src/resources.qrc)
+  target_link_libraries(${test_name} PRIVATE fugue_core fugue_nodes Qt6::Test)
+  target_compile_definitions(${test_name} PRIVATE FUGUE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+  add_test(NAME ${test_name} COMMAND ${test_name})
+  set_tests_properties(${test_name} PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+endforeach()
+
 # A test-only `fugue` with fake node kernels (tests/cli_support): the real CLI, queue and
 # worker, but nodes that do fake work. Not installed.
 add_executable(fugue_with_fakes tests/cli_support/fugue_with_fakes.cpp)
@@ -145,4 +167,5 @@ include(GNUInstallDirs)
 install(TARGETS fugue RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES share/fugue.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 install(FILES share/fugue.svg DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
+install(FILES examples/demo.fugue DESTINATION ${CMAKE_INSTALL_DATADIR}/fugue/examples)
 install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/fugue)

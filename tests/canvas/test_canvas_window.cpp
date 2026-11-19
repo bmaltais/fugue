@@ -23,6 +23,7 @@
 #include "engine/registry.h"
 #include "nodes/builtin.h"
 #include "theme.h"
+#include "workflow/workflows.h"
 #include "translator.h"
 
 using namespace fugue;
@@ -105,6 +106,7 @@ struct App {
     Registry registry;
     CanvasModel model{&registry};
     CommandRegistry commands;
+    Workflows workflows{&model, &registry, &commands, {dir.path() + "/recovery", dir.path() + "/trust.json"}};
     QQmlApplicationEngine engine;
     QStringList warnings;
     QQuickWindow *window = nullptr;
@@ -126,6 +128,7 @@ struct App {
         engine.rootContext()->setContextProperty("backend", &backend);
         engine.rootContext()->setContextProperty("canvasModel", &model);
         engine.rootContext()->setContextProperty("commands", &commands);
+        engine.rootContext()->setContextProperty("workflows", &workflows);
     }
 
     bool open() {

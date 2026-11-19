@@ -1,5 +1,6 @@
 // fugue — one line on what it does.
 
+#include <QCommandLineParser>
 #include <QGuiApplication>
 #include <QIcon>
 #include <QKeySequence>
@@ -18,6 +19,7 @@
 #include "engine/registry.h"
 #include "nodes/builtin.h"
 #include "theme.h"
+#include "workflow/workflows.h"
 #include "translator.h"
 
 int main(int argc, char *argv[]) {
@@ -55,6 +57,10 @@ int main(int argc, char *argv[]) {
     fugue::Registry registry;
     fugue::nodes::addBuiltinNodeTypes(registry);
     CanvasModel canvasModel(&registry);
+    // The open workflows: tabs, open, save, recovery, import (spec 11). It starts with one
+    // empty workflow and has the previous session's recovery copies ready to offer.
+    fugue::Workflows workflows(&canvasModel, &registry, &commands);
+    fugue::registerFileCommands(commands, workflows);
 
     QQmlApplicationEngine engine;
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
@@ -63,9 +69,17 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("backend", &backend);
     engine.rootContext()->setContextProperty("canvasModel", &canvasModel);
     engine.rootContext()->setContextProperty("commands", &commands);
+    engine.rootContext()->setContextProperty("workflows", &workflows);
     engine.load(QUrl("qrc:/Main.qml"));
     if (engine.rootObjects().isEmpty())
         return 1;
+
+    // `fugue path.fugue` opens that file (an image with a workflow in it works too). Qt has
+    // already taken its own options (-platform, ...) off the arguments.
+    QCommandLineParser parser;
+    parser.addPositionalArgument("file", "A workflow to open.", "[file...]");
+    parser.parse(app.arguments());
+    workflows.openStartup(parser.positionalArguments());
 
     // `omarchy agent look app` runs the app offscreen with these set, to see
     // the window without a display: size it to OMARCHY_LOOK_SIZE when given,
