@@ -56,6 +56,28 @@ QString manifest(const QString &id, const QString &name, const QString &inType, 
     return QString::fromUtf8(QJsonDocument(json).toJson());
 }
 
+QString plainManifest(const QString &id, bool sink, bool hasInput, bool hasOutput) {
+    QJsonObject json{
+        {"manifest", 1},
+        {"id", id},
+        {"version", "1.0.0"},
+        {"name", id},
+        {"runtime", QJsonObject{{"kind", "builtin"}}},
+        {"inputs", hasInput ? QJsonArray{QJsonObject{{"name", "text"}, {"type", "text"}}} : QJsonArray()},
+        {"outputs", hasOutput ? QJsonArray{QJsonObject{{"name", "text"}, {"type", "text"}}} : QJsonArray()},
+    };
+    if (sink)
+        json.insert("sink", true);
+    return QString::fromUtf8(QJsonDocument(json).toJson());
+}
+
+QByteArray flow(const char *nodes) {
+    QByteArray bytes = "{\"fugue\": 1, \"graph\": {\"nodes\": {";
+    bytes += nodes;
+    bytes += "}}}";
+    return bytes;
+}
+
 } // namespace
 
 class TestCli : public QObject {
@@ -139,6 +161,77 @@ private slots:
               manifest("io.github.alice.tools/sharpen", "Sharpen", "image", "image").toUtf8());
         write(m_dir.filePath("manifests/shout/node.json"),
               manifest("fugue/shout", "Shout", "text", "text").toUtf8());
+        write(m_dir.filePath("manifests/note/node.json"), plainManifest("fugue/note", false, false, true).toUtf8());
+        write(m_dir.filePath("manifests/show/node.json"), plainManifest("fugue/show", true, true, false).toUtf8());
+        // note -> show, and a stray shout that feeds nothing.
+        write(m_dir.filePath("good.fugue"),
+              flow("\"a\": {\"type\": \"fugue/note\", \"version\": \"1.0.0\"},"
+                   "\"b\": {\"type\": \"fugue/show\", \"version\": \"1.0.0\", \"inputs\": {\"text\": {\"from\": \"a.text\"}}},"
+                   "\"c\": {\"type\": \"fugue/shout\", \"version\": \"1.0.0\", \"inputs\": {\"in\": \"hi\"}}"));
+        write(m_dir.filePath("broken.fugue"),
+              flow("\"b\": {\"type\": \"fugue/show\", \"version\": \"1.0.0\"},"
+                   "\"x\": {\"type\": \"fugue/nope\", \"version\": \"1.0.0\"}"));
+    }
+
+    // --- the compiler behind validate, compile and run ---
+
+    void validateRunsTheCompiler() {
+        const Outcome o = fugue({"validate", m_dir.filePath("broken.fugue"), "--json"});
+        QCOMPARE(o.exitCode, 1);
+        QStringList codes;
+        for (const QJsonValue &error : o.json().value("errors").toArray())
+            codes << error.toObject().value("code").toString();
+        QVERIFY(codes.contains("unknown_node_type"));
+        QVERIFY(codes.contains("missing_input"));
+    }
+
+    void validateAndCompilePrintWarningsOnSuccess() {
+        for (const char *command : {"validate", "compile"}) {
+            const Outcome o = fugue({QString(command), m_dir.filePath("good.fugue"), "--json"});
+            QVERIFY2(o.exitCode == 0, qPrintable(command));
+            const QJsonObject json = o.json();
+            QVERIFY2(json.value("ok").toBool(), qPrintable(command));
+            const QJsonArray warnings = json.value("warnings").toArray();
+            QVERIFY2(warnings.size() == 1, qPrintable(command));
+            QCOMPARE(warnings.at(0).toObject().value("code").toString(), QString("not_part_of_output"));
+            QCOMPARE(warnings.at(0).toObject().value("node").toString(), QString("c"));
+            QVERIFY2(o.err.contains("not_part_of_output"), qPrintable(command));
+        }
+    }
+
+    void compilePrintsTheCompiledGraph() {
+        const Outcome o = fugue({"compile", m_dir.filePath("good.fugue"), "--json"});
+        const QJsonObject data = o.json().value("data").toObject();
+        QCOMPARE(data.value("fugue-compiled").toInt(), 1);
+        QCOMPARE(data.value("nodes").toObject().keys(), (QStringList{"a", "b"}));
+        QCOMPARE(data.value("nodes").toObject().value("b").toObject().value("sink").toBool(), true);
+    }
+
+    void runCompilesWithTargetAndProviderOptions() {
+        // Compile errors come first; then the options are checked against the graph.
+        QCOMPARE(fugue({"run", m_dir.filePath("broken.fugue"), "--json"}).firstCode(), QString("unknown_node_type"));
+        QCOMPARE(fugue({"run", m_dir.filePath("good.fugue"), "--to", "nope", "--json"}).firstCode(), QString("usage"));
+        QCOMPARE(fugue({"run", m_dir.filePath("good.fugue"), "--provider", "ghost", "--json"}).firstCode(),
+                 QString("unknown_provider"));
+        QCOMPARE(fugue({"run", m_dir.filePath("good.fugue"), "--to", "a", "--provider", "This machine", "--json"}).firstCode(),
+                 QString("internal"));
+    }
+
+    void workflowDescribeReportsSinksAndWhatIsMissing() {
+        Outcome o = fugue({"workflow", "describe", m_dir.filePath("good.fugue"), "--json"});
+        QCOMPARE(o.exitCode, 0);
+        QJsonObject data = o.json().value("data").toObject();
+        QCOMPARE(data.value("sinks").toArray().at(0).toString(), QString("b"));
+        QCOMPARE(data.value("missing").toArray().size(), 0);
+
+        o = fugue({"workflow", "describe", m_dir.filePath("broken.fugue"), "--json"});
+        QCOMPARE(o.exitCode, 0); // describing is not failing
+        data = o.json().value("data").toObject();
+        QStringList missing;
+        for (const QJsonValue &item : data.value("missing").toArray())
+            missing << item.toObject().value("code").toString() + ":" + item.toObject().value("node").toString();
+        QVERIFY(missing.contains("missing_input:b"));
+        QVERIFY(missing.contains("unknown_node_type:x"));
     }
 
     // --- arguments and the envelope ---
@@ -212,8 +305,8 @@ private slots:
         QCOMPARE(o.exitCode, 0);
         const QJsonObject data = o.json().value("data").toObject();
         QCOMPARE(ids(data.value("nodes").toArray()),
-                 (QStringList{"fugue/shout", "io.github.alice.tools/sharpen"}));
-        const QJsonObject first = data.value("nodes").toArray().at(1).toObject();
+                 (QStringList{"fugue/note", "fugue/shout", "fugue/show", "io.github.alice.tools/sharpen"}));
+        const QJsonObject first = data.value("nodes").toArray().at(3).toObject();
         QCOMPARE(first.value("name").toString(), QString("Sharpen"));
         QCOMPARE(first.value("version").toString(), QString("1.0.0"));
     }
@@ -283,6 +376,7 @@ private slots:
         QCOMPARE(o.exitCode, 0);
         QCOMPARE(o.json().value("ok").toBool(), true);
         QCOMPARE(o.json().value("data").toObject().value("valid").toBool(), true);
+        QVERIFY(!o.json().contains("warnings")); // none to report
     }
 
     void workflowValidateIsTheSameCommand() {
@@ -290,12 +384,10 @@ private slots:
                  fugue({"validate", workflow(), "--json"}).out);
     }
 
-    void compileAndRunAreNotBuiltYet() {
+    void runIsNotBuiltYet() {
         for (const QStringList &args : QList<QStringList>{
-                 {"compile", workflow()},
-                 {"workflow", "compile", workflow()},
                  {"run", workflow()},
-                 {"run", workflow(), "--wait", "--first", "--to", "a", "--provider", "p", "--set", "a.x=1", "--set", "b.y=2"},
+                 {"run", m_dir.filePath("good.fugue"), "--wait", "--first", "--to", "a", "--provider", "This machine", "--set", "a.x=1", "--set", "b.y=2"},
                  {"workflow", "run", workflow()},
              }) {
             const Outcome o = fugue(args + QStringList{"--json"});
@@ -438,6 +530,23 @@ private slots:
         const Outcome o = fugue({"runs", "cancel", "20261120-100000-000-cccc", "--json"});
         QCOMPARE(o.exitCode, 1);
         QCOMPARE(o.firstCode(), QString("internal"));
+    }
+
+    void runsResultKeepsOnlyTheSinksOfTheCompiledGraph() {
+        auto folder = RunFolder::create(runsRoot(), "20261121-100000-000-dddd");
+        QVERIFY(folder.ok());
+        folder->writeState(QJsonObject{{"status", "ok"}});
+        const QJsonObject node{{"type", "fugue/show"}, {"version", "1.0.0"}, {"inputs", QJsonObject()}};
+        QJsonObject sink = node;
+        sink.insert("sink", true);
+        folder->writeCompiled(QJsonObject{{"fugue-compiled", 1}, {"source", "sha256:" + QString(64, '0')},
+                                          {"nodes", QJsonObject{{"a", node}, {"b", sink}}}, {"skipped", QJsonObject()}});
+        for (const char *id : {"a", "b"})
+            folder->appendEvent(QJsonObject{{"event", "node.done"}, {"node", QString(id)},
+                                            {"outputs", QJsonObject{{"text", QString(id)}}}, {"seconds", 0.1}});
+        const Outcome o = fugue({"runs", "result", "20261121-100000-000-dddd", "--json"});
+        QCOMPARE(o.exitCode, 0);
+        QCOMPARE(o.json().value("data").toObject().value("outputs").toObject().keys(), (QStringList{"b"}));
     }
 };
 
