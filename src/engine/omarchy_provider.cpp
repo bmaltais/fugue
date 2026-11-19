@@ -323,7 +323,9 @@ void OmarchyProvider::discover(std::function<void(const Outcome<Discovery> &)> d
             model.status = QStringLiteral("unavailable");
             model.reason = QStringLiteral("%1 is %2.").arg(host, offline);
             model.hint = QStringLiteral("Turn on %1, or check its tailnet connection.").arg(host);
-        } else if (unit == QLatin1String("active")) {
+        } else if (unit == QLatin1String("active") || remote) {
+            // A paired host's unit in network.json is only as fresh as the agents panel's last
+            // survey, so the server's own answer to the probe below decides.
             model.status = QStringLiteral("ready");
         } else if (unit == QLatin1String("activating")) {
             model.status = QStringLiteral("loading");
@@ -351,7 +353,7 @@ void OmarchyProvider::discover(std::function<void(const Outcome<Discovery> &)> d
 
         ++pending->waiting;
         QNetworkReply *reply = send(server, "GET", QStringLiteral("/sdcpp/v1/capabilities"));
-        connect(reply, &QNetworkReply::finished, this, [pending, reply, index, recipe, server, assemble, this] {
+        connect(reply, &QNetworkReply::finished, this, [pending, reply, index, recipe, server, assemble, where, command, this] {
             reply->deleteLater();
             OfferedModel &model = pending->models[index];
             const int code = httpStatus(reply);
@@ -369,11 +371,17 @@ void OmarchyProvider::discover(std::function<void(const Outcome<Discovery> &)> d
                 model.hint = m_instance.key.isEmpty()
                                  ? QStringLiteral("Check Omarchy's key file, or pair again.")
                                  : QStringLiteral("Check this provider's key in ~/.config/fugue/providers.json.");
+            } else if (code == 502 || code == 404) {
+                // The share proxy's answers for a model whose port refuses (stopped) or that is not
+                // shared (agent_local.py make_share_proxy _forward).
+                model.status = QStringLiteral("unavailable");
+                model.reason = QStringLiteral("%1 is not running%2.").arg(recipe, where);
+                model.hint = QStringLiteral("Start it%1: %2").arg(where, command);
             } else {
                 model.status = QStringLiteral("unavailable");
                 model.reason = code == 0 ? QStringLiteral("%1 is not answering at %2.").arg(recipe, server.base)
                                          : QStringLiteral("%1 answered HTTP %2.").arg(recipe).arg(code);
-                model.hint = QStringLiteral("Restart it: omarchy-agent-local stop %1, then start %1.").arg(recipe);
+                model.hint = QStringLiteral("Restart it%1: omarchy-agent-local stop %2, then start %2.").arg(where, recipe);
             }
             if (--pending->waiting == 0)
                 assemble();

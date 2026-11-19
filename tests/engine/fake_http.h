@@ -41,6 +41,8 @@ public:
     }
 
     bool listen() { return m_server.listen(QHostAddress::LocalHost, 0); }
+    // Stops listening, so new connections are refused, as by a server that died.
+    void close() { m_server.close(); }
     quint16 port() const { return m_server.serverPort(); }
     QByteArray origin() const { return "http://127.0.0.1:" + QByteArray::number(port()); }
 

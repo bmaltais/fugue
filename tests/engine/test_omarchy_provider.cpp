@@ -347,12 +347,20 @@ private slots:
             model.insert("input", QJsonArray{"text"});
             return model;
         };
+        // network.json is rewritten only while the agents panel is open, so its unit can be
+        // stale: a model started since says inactive. The server's own answer decides.
+        QJsonObject started = remote(kKlein, true, "");
+        started.insert("unit", "inactive");
+        // The share proxy answers 502 when the model's port refuses: it is stopped.
+        fixture.server.on("GET", "/local-ai/stopped-sdcpp/sdcpp/v1/capabilities",
+                          [](const HttpRequest &) { return HttpResponse{502, ""}; });
         QJsonObject other = remote("other-sdcpp", true, "");
         other.insert("dns", "other.tail1234.ts.net");
         writeFile(QDir(fixture.paths.stateDir).filePath("network.json"),
                   json(QJsonObject{{"schema", 1},
                                    {"models", QJsonObject{
-                                                  {"studio/" + kKlein, remote(kKlein, true, "")},
+                                                  {"studio/" + kKlein, started},
+                                                  {"studio/stopped-sdcpp", remote("stopped-sdcpp", true, "")},
                                                   {"studio/" + kZImage, remote(kZImage, true, "offline")},
                                                   {"studio/unpaired-sdcpp", remote("unpaired-sdcpp", false, "")},
                                                   {"other/other-sdcpp", other},
@@ -364,12 +372,15 @@ private slots:
 
         const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
         QVERIFY(described.ok());
-        QCOMPARE(described.value.offer("image.generate")->models.size(), 2);
+        QCOMPARE(described.value.offer("image.generate")->models.size(), 3);
         QCOMPARE(findModel(described.value, "image.generate", kKlein)->status, QStringLiteral("ready"));
         QCOMPARE(findModel(described.value, "image.edit", kKlein)->defaults.value("steps").toInt(), 4);
         const OfferedModel *offline = findModel(described.value, "image.generate", kZImage);
         QCOMPARE(offline->status, QStringLiteral("unavailable"));
         QVERIFY(offline->reason.contains("offline"));
+        const OfferedModel *stopped = findModel(described.value, "image.generate", "stopped-sdcpp");
+        QCOMPARE(stopped->status, QStringLiteral("unavailable"));
+        QVERIFY(stopped->hint.contains("on studio: omarchy-agent-local start stopped-sdcpp"));
     }
 
     void anUnpairedHostSaysHowToPair() {
@@ -588,6 +599,20 @@ private slots:
         QCOMPARE(status.state, QStringLiteral("error"));
         QCOMPARE(status.error.code, QStringLiteral("out_of_memory"));
         QVERIFY(status.error.message.contains("out of memory"));
+    }
+
+    void aServerThatDiesDuringTheJobIsUnreachable() {
+        Fixture fixture;
+        fixture.runKlein();
+        fixture.acceptJobs("job_1");
+        auto provider = fixture.provider();
+        auto request = fixture.request("image.generate", {{"prompt", "x"}});
+        const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value;
+        fixture.server.close();
+        JobStatus status;
+        QTRY_VERIFY((status = await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value).isTerminal());
+        QCOMPARE(status.state, QStringLiteral("error"));
+        QCOMPARE(status.error.code, QStringLiteral("provider_unreachable"));
     }
 
     void aJobTheServerDroppedIsAnError() {
