@@ -607,6 +607,40 @@ private slots:
         QCOMPARE(finished.first().at(1).toString(), QStringLiteral("ok"));
     }
 
+    // A window run whose entry goes just as its turn comes (a `fugue runs cancel` between the
+    // window reading the queue and activating its entry) leaves the engine lock free: here
+    // the entry cannot be activated at all.
+    void aTurnThatCannotBeTakenLeavesTheEngineLockFree() {
+        RunApp r(kGraph);
+        QVERIFY(r.app.open());
+        const QString queueDir = r.app.dir.path() + "/queue";
+        const fugue::Queue queue(queueDir);
+        QVERIFY(queue.enqueue("cli-run", "/w/a.fugue", false));
+        QVERIFY(queue.activate("cli-run"));
+        fugue::Lock worker(r.app.dir.path() + "/engine.lock");
+        QVERIFY(worker.tryAcquire());
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(queue.entries().size(), 2);
+        QVERIFY(queue.remove(QStringLiteral("cli-run")));
+        // No entry in the folder can be renamed (activated) from now on.
+        const QFileDevice::Permissions was = QFile::permissions(queueDir);
+        QVERIFY(QFile::setPermissions(queueDir, QFileDevice::ReadOwner | QFileDevice::ExeOwner));
+        worker.release();
+        QTest::qWait(200); // the window has tried its turn a few times
+        bool free = false;
+        for (int i = 0; i < 20 && !free; ++i) {
+            free = worker.tryAcquire();
+            if (!free)
+                QTest::qWait(20);
+        }
+        worker.release();
+        QVERIFY(QFile::setPermissions(queueDir, was));
+        QVERIFY(free);
+        QVERIFY(r.jobs().isEmpty());
+        r.runs->cancel();
+        QTRY_VERIFY(!r.runs->busy());
+    }
+
     // Closing the window while a check waits on a provider neither hangs nor crashes.
     void closingDuringACheckIsClean() {
         auto r = std::make_unique<RunApp>(kGraph, true);

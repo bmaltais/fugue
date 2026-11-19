@@ -353,8 +353,14 @@ private:
         const QString first = entries.first().run;
         const auto mine = std::find_if(m_waiting.begin(), m_waiting.end(),
                                        [&](const Waiting &w) { return w.folder.id() == first; });
-        if (mine == m_waiting.end() || !m_lock->tryAcquire() || !queue().activate(first))
+        if (mine == m_waiting.end() || !m_lock->tryAcquire())
             return;
+        if (!queue().activate(first)) {
+            // Its entry went meanwhile (a `fugue runs cancel`): the lock goes back at once, or
+            // every worker would wait on a window that runs nothing. The next poll ends the run.
+            m_lock->release();
+            return;
+        }
         begin(m_waiting.takeAt(int(mine - m_waiting.begin())));
     }
 
