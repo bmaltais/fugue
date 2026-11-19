@@ -266,6 +266,20 @@ private slots:
         QVERIFY(error.hint.contains("omarchy-agent-local start klein"));
     }
 
+    // 8.5: the error always says how to fix it, also when the model itself gives no hint.
+    void aPinnedInstanceWithOnlyAStoppedModelThatHasNoHintStillSaysWhatToDo() {
+        OfferedModel stopped = model("flux", QStringLiteral("stopped"));
+        stopped.hint.clear();
+        Requirement requirement = wants("image.generate");
+        requirement.nodePin = QStringLiteral("Studio");
+        const auto selection = selectProvider({candidate("Studio", {generate({stopped})})}, requirement);
+        QVERIFY(!selection.ok());
+        QCOMPARE(selection.error().code, QStringLiteral("capability_unavailable"));
+        QVERIFY2(selection.error().hint.contains("flux") && selection.error().hint.contains("Studio"),
+                 qPrintable(selection.error().hint));
+        QVERIFY(selection.error().hint.contains("pin"));
+    }
+
     void aRequestedModelThatIsNotRunningIsModelNotRunning() {
         const QList<Candidate> candidates{
             candidate("This machine", {generate({model("klein", "unavailable"), model("z-image")})}),

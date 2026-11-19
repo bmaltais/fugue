@@ -146,6 +146,14 @@ Result<Selection> choose(const QList<const Candidate *> &usable, const Requireme
     } else {
         message = QStringLiteral("The pinned provider %1 cannot serve %2 right now.")
                       .arg(pinned, requirement.capability);
+        // A model that is not ready may give no hint of its own; the error still says
+        // how to fix it (8.5).
+        if (fixes.isEmpty()) {
+            QStringList names;
+            for (const Match &match : fitting)
+                appendUnique(names, modelName(match.model->handle));
+            fixes.append(QStringLiteral("Start %1 on %2, or remove the pin.").arg(either(names), pinned));
+        }
     }
     for (const Match &match : fitting)
         if (!match.model->reason.isEmpty() && !message.contains(match.model->reason))
