@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 #include <vector>
 
 #include "engine/vips.h"
@@ -23,10 +24,17 @@ namespace fugue::nodes {
 namespace {
 
 struct Pixels {
-    int w = 0, h = 0, c = 0; // c is 3 (RGB) or 4 (RGBA)
-    std::vector<float> d;
-    float &at(int x, int y, int ch) { return d[(size_t(y) * w + x) * c + ch]; }
-    float at(int x, int y, int ch) const { return d[(size_t(y) * w + x) * c + ch]; }
+    int width = 0;
+    int height = 0;
+    int channels = 0; // 3 (RGB) or 4 (RGBA)
+    std::vector<float> data;
+
+    Pixels() = default;
+    Pixels(int width, int height, int channels, float fill = 0.0f)
+        : width(width), height(height), channels(channels), data(size_t(width) * height * channels, fill) {}
+
+    float &at(int x, int y, int channel) { return data[(size_t(y) * width + x) * channels + channel]; }
+    float at(int x, int y, int channel) const { return data[(size_t(y) * width + x) * channels + channel]; }
 };
 
 Result<Pixels> pixelsOf(const Value &value, const QString &input) {
@@ -64,14 +72,14 @@ Result<Pixels> pixelsOf(const Value &value, const QString &input) {
         size_t size = 0;
         void *memory = image.write_to_memory(&size);
         Pixels pixels;
-        pixels.w = image.width();
-        pixels.h = image.height();
-        pixels.c = image.bands();
+        pixels.width = image.width();
+        pixels.height = image.height();
+        pixels.channels = image.bands();
         const float *begin = static_cast<const float *>(memory);
-        pixels.d.assign(begin, begin + size / sizeof(float));
+        pixels.data.assign(begin, begin + size / sizeof(float));
         g_free(memory);
         if (divisor != 1.0)
-            for (float &v : pixels.d)
+            for (float &v : pixels.data)
                 v = float(v / divisor);
         return pixels;
     } catch (const vips::VError &error) {
@@ -82,12 +90,13 @@ Result<Pixels> pixelsOf(const Value &value, const QString &input) {
 }
 
 Result<Values> imageOutput(Pixels pixels) {
-    for (float &v : pixels.d)
+    for (float &v : pixels.data)
         v = std::min(1.0f, std::max(0.0f, v));
     try {
         initVips();
-        const vips::VImage image = vips::VImage::new_from_memory_copy(
-            pixels.d.data(), pixels.d.size() * sizeof(float), pixels.w, pixels.h, pixels.c, VIPS_FORMAT_FLOAT);
+        const vips::VImage image =
+            vips::VImage::new_from_memory_copy(pixels.data.data(), pixels.data.size() * sizeof(float), pixels.width,
+                                               pixels.height, pixels.channels, VIPS_FORMAT_FLOAT);
         const Result<MediaHandle> handle = MediaHandle::fromImage(image);
         if (!handle.ok())
             return Result<Values>(handle.errors());
@@ -99,7 +108,38 @@ Result<Values> imageOutput(Pixels pixels) {
 
 int toInt(const Value &value) { return int(std::lround(value.number())); }
 
+// `side` scaled by to / from, rounded half to even (Python's round()), and at least 1.
+int scaled(int side, int to, int from) { return std::max(1, int(std::nearbyint(double(side) * to / from))); }
+
+// The width x height part of `in` whose top left corner is (x, y); it lies inside `in`.
+Pixels region(const Pixels &in, int x, int y, int width, int height) {
+    Pixels out(width, height, in.channels);
+    for (int j = 0; j < height; ++j)
+        for (int i = 0; i < width; ++i)
+            for (int ch = 0; ch < in.channels; ++ch)
+                out.at(i, j, ch) = in.at(i + x, j + y, ch);
+    return out;
+}
+
+// A choice input (the compiler has already checked it is one of the manifest's) as its enum.
+template <typename Enum, size_t N>
+Result<Enum> choice(const NodeContext &context, const QString &input, const std::pair<const char *, Enum> (&names)[N]) {
+    const QString text = context.input(input).text();
+    for (const auto &[name, value] : names)
+        if (text == QLatin1String(name))
+            return value;
+    return makeInputError(QStringLiteral("value_not_in_choices"), input,
+                          QStringLiteral("\"%1\" is not a %2 this node knows.").arg(text, input));
+}
+
 // ---- resampling: torch.nn.functional.interpolate and PIL, per axis -----------
+
+enum class ResizeMethod { Nearest, Bilinear, Bicubic, Lanczos, Area };
+
+constexpr std::pair<const char *, ResizeMethod> kResizeMethods[] = {
+    {"nearest", ResizeMethod::Nearest}, {"bilinear", ResizeMethod::Bilinear}, {"bicubic", ResizeMethod::Bicubic},
+    {"lanczos", ResizeMethod::Lanczos}, {"area", ResizeMethod::Area},
+};
 
 struct Tap {
     int index;
@@ -112,19 +152,23 @@ double sinc(double x) { return x == 0 ? 1.0 : std::sin(M_PI * x) / (M_PI * x); }
 double lanczos3(double x) { return (x > -3 && x < 3) ? sinc(x) * sinc(x / 3) : 0.0; }
 
 // The source pixels and weights of output index `o` along an axis of `in` pixels resized to `out`.
-std::vector<Tap> tapsFor(const QString &method, int in, int out, int o) {
+std::vector<Tap> tapsFor(ResizeMethod method, int in, int out, int o) {
     const double scale = double(in) / out;
     std::vector<Tap> taps;
-    if (method == "nearest") { // "nearest-exact"
+    switch (method) {
+    case ResizeMethod::Nearest: // "nearest-exact"
         taps.push_back({std::min(int(std::floor((o + 0.5) * scale)), in - 1), 1.0f});
-    } else if (method == "bilinear") { // align_corners=False
+        break;
+    case ResizeMethod::Bilinear: { // align_corners=False
         const double src = std::max(scale * (o + 0.5) - 0.5, 0.0);
         const int i0 = int(std::floor(src));
         const int i1 = i0 + (i0 < in - 1 ? 1 : 0);
         const double l = src - i0;
         taps.push_back({i0, float(1 - l)});
         taps.push_back({i1, float(l)});
-    } else if (method == "bicubic") { // A = -0.75, indices clamped at the edges
+        break;
+    }
+    case ResizeMethod::Bicubic: { // A = -0.75, indices clamped at the edges
         const double src = scale * (o + 0.5) - 0.5;
         const int i0 = int(std::floor(src));
         const double f = src - i0;
@@ -132,12 +176,16 @@ std::vector<Tap> tapsFor(const QString &method, int in, int out, int o) {
                              cubicFar(2 - f, -0.75)};
         for (int k = 0; k < 4; ++k)
             taps.push_back({std::clamp(i0 - 1 + k, 0, in - 1), float(w[k])});
-    } else if (method == "area") { // adaptive_avg_pool2d
+        break;
+    }
+    case ResizeMethod::Area: { // adaptive_avg_pool2d
         const int start = int(std::floor(double(o) * in / out));
         const int end = int(std::ceil(double(o + 1) * in / out));
         for (int i = start; i < end; ++i)
             taps.push_back({i, 1.0f / float(end - start)});
-    } else { // lanczos: PIL's LANCZOS (a = 3), support widened when shrinking
+        break;
+    }
+    case ResizeMethod::Lanczos: { // PIL's LANCZOS (a = 3), support widened when shrinking
         const double filterScale = std::max(scale, 1.0);
         const double support = 3.0 * filterScale;
         const double center = (o + 0.5) * scale;
@@ -151,41 +199,43 @@ std::vector<Tap> tapsFor(const QString &method, int in, int out, int o) {
         }
         for (int i = lo; i < hi; ++i)
             taps.push_back({i, float(weights[size_t(i - lo)] / sum)});
+        break;
+    }
     }
     return taps;
 }
 
-Pixels resample(const Pixels &in, int width, int height, const QString &method) {
+Pixels resample(const Pixels &in, int width, int height, ResizeMethod method) {
     Pixels src = in;
     // PIL resizes RGBA with premultiplied color, so lanczos does too.
-    const bool premultiply = method == "lanczos" && in.c == 4;
+    const bool premultiply = method == ResizeMethod::Lanczos && in.channels == 4;
     if (premultiply)
-        for (int y = 0; y < in.h; ++y)
-            for (int x = 0; x < in.w; ++x)
+        for (int y = 0; y < in.height; ++y)
+            for (int x = 0; x < in.width; ++x)
                 for (int ch = 0; ch < 3; ++ch)
                     src.at(x, y, ch) *= in.at(x, y, 3);
 
     std::vector<std::vector<Tap>> columns(static_cast<size_t>(width));
     std::vector<std::vector<Tap>> rows(static_cast<size_t>(height));
     for (int x = 0; x < width; ++x)
-        columns[size_t(x)] = tapsFor(method, in.w, width, x);
+        columns[size_t(x)] = tapsFor(method, in.width, width, x);
     for (int y = 0; y < height; ++y)
-        rows[size_t(y)] = tapsFor(method, in.h, height, y);
+        rows[size_t(y)] = tapsFor(method, in.height, height, y);
 
     // Horizontal pass, then vertical: the filters are separable.
-    Pixels mid{width, in.h, in.c, std::vector<float>(size_t(width) * in.h * in.c)};
-    for (int y = 0; y < in.h; ++y)
+    Pixels mid(width, in.height, in.channels);
+    for (int y = 0; y < in.height; ++y)
         for (int x = 0; x < width; ++x)
-            for (int ch = 0; ch < in.c; ++ch) {
+            for (int ch = 0; ch < in.channels; ++ch) {
                 float acc = 0;
                 for (const Tap &t : columns[size_t(x)])
                     acc += t.weight * src.at(t.index, y, ch);
                 mid.at(x, y, ch) = acc;
             }
-    Pixels out{width, height, in.c, std::vector<float>(size_t(width) * height * in.c)};
+    Pixels out(width, height, in.channels);
     for (int y = 0; y < height; ++y)
         for (int x = 0; x < width; ++x) {
-            for (int ch = 0; ch < in.c; ++ch) {
+            for (int ch = 0; ch < in.channels; ++ch) {
                 float acc = 0;
                 for (const Tap &t : rows[size_t(y)])
                     acc += t.weight * mid.at(x, t.index, ch);
@@ -203,20 +253,14 @@ Pixels resample(const Pixels &in, int width, int height, const QString &method) 
 // common_upscale(crop="center"): trim the long side to the target aspect. Python's round()
 // goes half to even, which is what nearbyint does in the default rounding mode.
 Pixels centerCrop(const Pixels &in, int width, int height) {
-    const double oldAspect = double(in.w) / in.h;
+    const double oldAspect = double(in.width) / in.height;
     const double newAspect = double(width) / height;
     int x = 0, y = 0;
     if (oldAspect > newAspect)
-        x = int(std::nearbyint((in.w - in.w * (newAspect / oldAspect)) / 2));
+        x = int(std::nearbyint((in.width - in.width * (newAspect / oldAspect)) / 2));
     else if (oldAspect < newAspect)
-        y = int(std::nearbyint((in.h - in.h * (oldAspect / newAspect)) / 2));
-    Pixels out{in.w - 2 * x, in.h - 2 * y, in.c, {}};
-    out.d.resize(size_t(out.w) * out.h * out.c);
-    for (int j = 0; j < out.h; ++j)
-        for (int i = 0; i < out.w; ++i)
-            for (int ch = 0; ch < in.c; ++ch)
-                out.at(i, j, ch) = in.at(i + x, j + y, ch);
-    return out;
+        y = int(std::nearbyint((in.height - in.height * (oldAspect / newAspect)) / 2));
+    return region(in, x, y, in.width - 2 * x, in.height - 2 * y);
 }
 
 // ---- kernels ---------------------------------------------------------------------
@@ -227,29 +271,31 @@ public:
         const Result<Pixels> loaded = pixelsOf(context.input("image"), "image");
         if (!loaded.ok())
             return Result<Values>(loaded.errors());
+        const Result<ResizeMethod> method = choice(context, QStringLiteral("method"), kResizeMethods);
+        if (!method)
+            return method.errors();
         const Pixels &in = loaded.value();
         int width = toInt(context.input("width"));
         int height = toInt(context.input("height"));
         const QString fit = context.input("fit").text();
-        const QString method = context.input("method").text();
         if (width == 0 && height == 0)
             return Values{{"image", context.input("image")}};
         if (width == 0)
-            width = std::max(1, int(std::nearbyint(double(in.w) * height / in.h)));
+            width = scaled(in.width, height, in.height);
         else if (height == 0)
-            height = std::max(1, int(std::nearbyint(double(in.h) * width / in.w)));
+            height = scaled(in.height, width, in.width);
 
         if (fit == "contain") {
             // Fit inside the box: the side that limits takes the box's size exactly.
-            if (double(width) / in.w <= double(height) / in.h)
-                height = std::min(height, std::max(1, int(std::nearbyint(double(in.h) * width / in.w))));
+            if (double(width) / in.width <= double(height) / in.height)
+                height = std::min(height, scaled(in.height, width, in.width));
             else
-                width = std::min(width, std::max(1, int(std::nearbyint(double(in.w) * height / in.h))));
-            return imageOutput(resample(in, width, height, method));
+                width = std::min(width, scaled(in.width, height, in.height));
+            return imageOutput(resample(in, width, height, *method));
         }
         if (fit == "cover")
-            return imageOutput(resample(centerCrop(in, width, height), width, height, method));
-        return imageOutput(resample(in, width, height, method));
+            return imageOutput(resample(centerCrop(in, width, height), width, height, *method));
+        return imageOutput(resample(in, width, height, *method));
     }
 };
 
@@ -261,16 +307,11 @@ public:
             return Result<Values>(loaded.errors());
         const Pixels &in = loaded.value();
         // ComfyUI ImageCrop: the origin is held inside the image, the far edge is a Python slice.
-        const int x = std::min(toInt(context.input("x")), in.w - 1);
-        const int y = std::min(toInt(context.input("y")), in.h - 1);
-        const int width = std::min(std::max(toInt(context.input("width")), 1), in.w - x);
-        const int height = std::min(std::max(toInt(context.input("height")), 1), in.h - y);
-        Pixels out{width, height, in.c, std::vector<float>(size_t(width) * height * in.c)};
-        for (int j = 0; j < height; ++j)
-            for (int i = 0; i < width; ++i)
-                for (int ch = 0; ch < in.c; ++ch)
-                    out.at(i, j, ch) = in.at(i + x, j + y, ch);
-        return imageOutput(std::move(out));
+        const int x = std::min(toInt(context.input("x")), in.width - 1);
+        const int y = std::min(toInt(context.input("y")), in.height - 1);
+        const int width = std::min(std::max(toInt(context.input("width")), 1), in.width - x);
+        const int height = std::min(std::max(toInt(context.input("height")), 1), in.height - y);
+        return imageOutput(region(in, x, y, width, height));
     }
 };
 
@@ -283,15 +324,51 @@ public:
         Pixels pixels = std::move(loaded.value());
         const float brightness = float(context.input("brightness").number());
         const float contrast = float(context.input("contrast").number());
-        const size_t colors = pixels.c == 4 ? 3 : size_t(pixels.c);
-        for (size_t i = 0; i < pixels.d.size(); ++i)
-            if (i % size_t(pixels.c) < colors)
-                pixels.d[i] = (pixels.d[i] - 0.5f) * contrast + 0.5f + brightness;
+        const size_t colors = pixels.channels == 4 ? 3 : size_t(pixels.channels);
+        for (size_t i = 0; i < pixels.data.size(); ++i)
+            if (i % size_t(pixels.channels) < colors)
+                pixels.data[i] = (pixels.data[i] - 0.5f) * contrast + 0.5f + brightness;
         return imageOutput(std::move(pixels));
     }
 };
 
+// ---- blending ---------------------------------------------------------------------
+
+enum class BlendMode { Normal, Multiply, Screen, Overlay, SoftLight, Difference, Subtract };
+
+constexpr std::pair<const char *, BlendMode> kBlendModes[] = {
+    {"normal", BlendMode::Normal},         {"multiply", BlendMode::Multiply},     {"screen", BlendMode::Screen},
+    {"overlay", BlendMode::Overlay},       {"soft_light", BlendMode::SoftLight},  {"difference", BlendMode::Difference},
+    {"subtract", BlendMode::Subtract},
+};
+
 float softLightG(float x) { return x <= 0.25f ? ((16 * x - 12) * x + 4) * x : std::sqrt(x); }
+
+using Mix = float (*)(float base, float top);
+
+// ComfyUI's blend formulas, but for difference: Photoshop's, GIMP's and CSS's |base - top|.
+// ComfyUI's "difference" (signed, then clamped) is subtract.
+Mix mixFor(BlendMode mode) {
+    switch (mode) {
+    case BlendMode::Normal:
+        break;
+    case BlendMode::Multiply:
+        return [](float a, float b) { return a * b; };
+    case BlendMode::Screen:
+        return [](float a, float b) { return 1 - (1 - a) * (1 - b); };
+    case BlendMode::Overlay:
+        return [](float a, float b) { return a <= 0.5f ? 2 * a * b : 1 - 2 * (1 - a) * (1 - b); };
+    case BlendMode::SoftLight:
+        return [](float a, float b) {
+            return b <= 0.5f ? a - (1 - 2 * b) * a * (1 - a) : a + (2 * b - 1) * (softLightG(a) - a);
+        };
+    case BlendMode::Difference:
+        return [](float a, float b) { return std::fabs(a - b); };
+    case BlendMode::Subtract:
+        return [](float a, float b) { return a - b; };
+    }
+    return [](float, float b) { return b; };
+}
 
 class BlendKernel : public NodeKernel {
 public:
@@ -302,46 +379,34 @@ public:
         Result<Pixels> topLoaded = pixelsOf(context.input("top"), "top");
         if (!topLoaded.ok())
             return Result<Values>(topLoaded.errors());
+        const Result<BlendMode> mode = choice(context, QStringLiteral("mode"), kBlendModes);
+        if (!mode)
+            return mode.errors();
         const Pixels base = std::move(baseLoaded.value());
         Pixels top = std::move(topLoaded.value());
-        const QString mode = context.input("mode").text();
+        const Mix mix = mixFor(*mode);
         const float opacity = float(context.input("opacity").number());
 
         // node_helpers.image_alpha_fix: the top takes the base's channel count; a missing alpha is 1.
-        if (top.c != base.c) {
-            Pixels fixed{top.w, top.h, base.c, std::vector<float>(size_t(top.w) * top.h * base.c, 1.0f)};
-            for (int y = 0; y < top.h; ++y)
-                for (int x = 0; x < top.w; ++x)
-                    for (int ch = 0; ch < std::min(top.c, base.c); ++ch)
+        if (top.channels != base.channels) {
+            Pixels fixed(top.width, top.height, base.channels, 1.0f);
+            for (int y = 0; y < top.height; ++y)
+                for (int x = 0; x < top.width; ++x)
+                    for (int ch = 0; ch < std::min(top.channels, base.channels); ++ch)
                         fixed.at(x, y, ch) = top.at(x, y, ch);
             top = std::move(fixed);
         }
-        if (top.w != base.w || top.h != base.h)
-            top = resample(centerCrop(top, base.w, base.h), base.w, base.h, "bicubic");
+        if (top.width != base.width || top.height != base.height)
+            top = resample(centerCrop(top, base.width, base.height), base.width, base.height, ResizeMethod::Bicubic);
 
         Pixels out = base;
-        for (size_t i = 0; i < out.d.size(); ++i) {
-            const float a = base.d[i], b = top.d[i];
-            float mixed;
-            if (mode == "multiply")
-                mixed = a * b;
-            else if (mode == "screen")
-                mixed = 1 - (1 - a) * (1 - b);
-            else if (mode == "overlay")
-                mixed = a <= 0.5f ? 2 * a * b : 1 - 2 * (1 - a) * (1 - b);
-            else if (mode == "soft_light")
-                mixed = b <= 0.5f ? a - (1 - 2 * b) * a * (1 - a) : a + (2 * b - 1) * (softLightG(a) - a);
-            else if (mode == "difference")
-                mixed = std::fabs(a - b); // Photoshop, GIMP, CSS
-            else if (mode == "subtract")
-                mixed = a - b; // ComfyUI's "difference": signed, then clamped
-            else
-                mixed = b; // normal
-            out.d[i] = a * (1 - opacity) + mixed * opacity;
+        for (size_t i = 0; i < out.data.size(); ++i) {
+            const float a = base.data[i];
+            out.data[i] = a * (1 - opacity) + mix(a, top.data[i]) * opacity;
         }
-        if (base.c == 4) // alpha stores transparency, not color
-            for (int y = 0; y < base.h; ++y)
-                for (int x = 0; x < base.w; ++x)
+        if (base.channels == 4) // alpha stores transparency, not color
+            for (int y = 0; y < base.height; ++y)
+                for (int x = 0; x < base.width; ++x)
                     out.at(x, y, 3) = base.at(x, y, 3);
         return imageOutput(std::move(out));
     }
