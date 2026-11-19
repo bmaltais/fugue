@@ -86,11 +86,12 @@ int run(int argc, char **argv, const Hooks &hooks) {
     context.runsRoot = RunFolder::defaultRoot();
     context.queueDir = Queue::defaultDir();
     context.lockPath = Queue::defaultLockPath();
+    if (hooks.addNodeTypes)
+        hooks.addNodeTypes(context.registry);
     if (hooks.addKernels)
         hooks.addKernels(context.kernels);
     context.line = writeLine;
     context.log = logLine;
-    loadManifestFolder(context.registry, qEnvironmentVariable("FUGUE_NODE_MANIFESTS"), logLine);
 
     const Reply reply = execute(*command, context);
     if (reply.streamed)

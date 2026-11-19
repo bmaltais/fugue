@@ -1,7 +1,6 @@
 #include "cli/commands.h"
 
 #include <QDir>
-#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -318,28 +317,6 @@ Reply runsEvents(const Command &command, Context &context) {
 }
 
 } // namespace
-
-void loadManifestFolder(Registry &registry, const QString &folder, void (*log)(const QString &)) {
-    if (folder.isEmpty())
-        return;
-    QStringList files;
-    QDirIterator it(folder, {"node.json"}, QDir::Files, QDirIterator::Subdirectories);
-    while (it.hasNext())
-        files << it.next();
-    files.sort();
-    for (const QString &path : files) {
-        QFile file(path);
-        const QJsonDocument document = file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll()) : QJsonDocument();
-        Errors errors;
-        if (document.isObject())
-            errors = registry.addManifest(document.object());
-        else
-            errors << makeError("invalid_json", QStringLiteral("%1 is not a JSON object.").arg(path));
-        for (const Error &error : errors)
-            if (log)
-                log(QStringLiteral("%1: %2: %3").arg(path, error.code, error.message));
-    }
-}
 
 Reply execute(const Command &command, Context &context) {
     if (command.later)

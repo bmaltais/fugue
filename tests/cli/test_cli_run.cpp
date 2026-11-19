@@ -3,11 +3,11 @@
 //
 // Seam: the `fugue` command line as a subprocess, with no display. The binary is
 // fugue_with_fakes: the same CLI, queue, lock and worker code as `fugue`, with fake node
-// kernels registered through cli::Hooks. That is the more honest choice here. The
-// production binary has no kernels until M1, so through it a run can only fail with "no
-// kernel"; a fake kernel table behind an env var would ship test code in the app, and
-// testing only the no-kernel failure would leave the worker, queue order and cancel
-// untested. One test still drives the real `fugue` to pin the no-kernel failure.
+// kernels and node types registered through cli::Hooks (the node types from the
+// node.json files under $FUGUE_NODE_MANIFESTS, read by that binary's own main()). That
+// is the more honest choice here. The production binary has no node types or kernels
+// until M1, so through it nothing compiles; fake tables behind an env var would ship
+// test code in the app. One test still drives the real `fugue` to pin that.
 // Nothing sleeps for a fixed time: the `hold` kernel waits on a gate file, and tests wait
 // for observable states in the run folder.
 
@@ -444,13 +444,11 @@ private slots:
         QVERIFY(QDir(runsRoot() + "/20260101-000000-000-old2").exists()); // too soon to collect again
     }
 
-    void theShippedBinaryHasNoKernelsYetSoARunFailsWithInternal() {
+    void theShippedBinaryHasNoNodeTypesYetSoNothingCompiles() {
         const Outcome o = fugue({"run", path("flow.fugue"), "--wait", "--json"}, FUGUE_BINARY);
         QCOMPARE(o.exitCode, 1);
-        const QList<QJsonObject> lines = o.lines();
-        QCOMPARE(lines.last().value("event").toString(), QString("run.done"));
-        QCOMPARE(lines.last().value("status").toString(), QString("failed"));
-        QVERIFY(QString::fromUtf8(o.out).contains("\"code\":\"internal\""));
+        QCOMPARE(o.firstCode(), QString("unknown_node_type"));
+        QVERIFY(queued().isEmpty());
     }
 };
 

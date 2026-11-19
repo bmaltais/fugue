@@ -2,9 +2,10 @@
 //
 // Seam: the built `fugue` executable run as a subprocess with no display
 // (QT_QPA_PLATFORM, DISPLAY and WAYLAND_DISPLAY unset). Tests assert on what a
-// caller sees: the JSON on stdout, stderr, and the exit code. Registry content
-// comes in through the FUGUE_NODE_MANIFESTS hook (a folder of node.json
-// files); run folders are made with RunFolder under a temporary
+// caller sees: the JSON on stdout, stderr, and the exit code. The shipped binary
+// has no node types until M1, so most tests drive fugue_with_fakes: the same
+// command line, whose test-only main() seeds the registry from the folder of
+// node.json files that FUGUE_NODE_MANIFESTS names (through cli::Hooks). Run folders are made with RunFolder under a temporary
 // XDG_CACHE_HOME, the same files a worker writes.
 
 #include <QFile>
@@ -94,7 +95,7 @@ class TestCli : public QObject {
         file.write(bytes);
     }
 
-    Outcome fugue(const QStringList &args) const {
+    Outcome fugue(const QStringList &args, const QString &binary = FUGUE_FAKE_BINARY) const {
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
         env.remove("QT_QPA_PLATFORM");
         env.remove("DISPLAY");
@@ -104,7 +105,7 @@ class TestCli : public QObject {
         env.insert("FUGUE_NODE_MANIFESTS", m_dir.filePath("manifests"));
         QProcess process;
         process.setProcessEnvironment(env);
-        process.start(FUGUE_BINARY, args);
+        process.start(binary, args);
         Outcome outcome;
         if (!process.waitForFinished(20000)) {
             process.kill();
@@ -285,13 +286,13 @@ private slots:
     }
 
     void helpAndVersionPrintAndExitZero() {
-        QVERIFY(fugue({"--help"}).out.contains("usage: fugue"));
-        QCOMPARE(fugue({"--version"}).exitCode, 0);
+        QVERIFY(fugue({"--help"}, FUGUE_BINARY).out.contains("usage: fugue"));
+        QCOMPARE(fugue({"--version"}, FUGUE_BINARY).exitCode, 0);
     }
 
     void noDisplayNeeded() {
         // initTestCase's env has no display and no QT_QPA_PLATFORM; this must not abort.
-        const Outcome o = fugue({"node", "list", "--json"});
+        const Outcome o = fugue({"node", "list", "--json"}, FUGUE_BINARY);
         QCOMPARE(o.exitCode, 0);
         QVERIFY2(!o.err.contains("xcb") && !o.err.contains("platform plugin"), o.err.constData());
     }
@@ -346,10 +347,17 @@ private slots:
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
         env.insert("FUGUE_NODE_MANIFESTS", m_dir.filePath("nowhere"));
         process.setProcessEnvironment(env);
-        process.start(FUGUE_BINARY, {"node", "list", "--json"});
+        process.start(FUGUE_FAKE_BINARY, {"node", "list", "--json"});
         QVERIFY(process.waitForFinished(20000));
         const QJsonObject json = QJsonDocument::fromJson(process.readAllStandardOutput()).object();
         QCOMPARE(json.value("data").toObject().value("nodes").toArray().size(), 0);
+    }
+
+    // The manifest folder is a test hook; the app people install does not have it.
+    void theShippedBinaryLoadsNoNodeTypesFromTheEnvironment() {
+        const Outcome o = fugue({"node", "list", "--json"}, FUGUE_BINARY); // FUGUE_NODE_MANIFESTS is set
+        QCOMPARE(o.exitCode, 0);
+        QCOMPARE(o.json().value("data").toObject().value("nodes").toArray().size(), 0);
     }
 
     // --- workflows ---

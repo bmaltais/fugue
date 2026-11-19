@@ -10,13 +10,16 @@
 #include <functional>
 
 #include "engine/node_kernel.h"
+#include "engine/registry.h"
 
 namespace fugue::cli {
 
 // What the process adds to the CLI. Production passes nothing: the built-in nodes
-// register their kernels here when they exist (M1). A test binary passes fake kernels,
-// so the real run path, queue and worker can be driven without shipping test code.
+// register their types and kernels here when they exist (M1). A test binary passes fake
+// ones, so the real run path, queue and worker can be driven without shipping test code:
+// the shipped binary has no test hook of its own, in the environment or elsewhere.
 struct Hooks {
+    std::function<void(Registry &)> addNodeTypes;
     std::function<void(Kernels &)> addKernels;
 };
 

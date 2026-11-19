@@ -46,9 +46,4 @@ struct Context {
 
 Reply execute(const Command &command, Context &context);
 
-// The node types in the folder $FUGUE_NODE_MANIFESTS names (every node.json
-// under it). This is the hook that lets tests, and a developer, seed the
-// registry before built-in node types exist; a missing folder is an empty registry.
-void loadManifestFolder(Registry &registry, const QString &folder, void (*log)(const QString &));
-
 } // namespace fugue::cli
