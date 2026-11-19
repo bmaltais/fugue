@@ -361,6 +361,41 @@ private slots:
         QVERIFY(QFileInfo::exists(outDir() + "/once.png"));
     }
 
+    // Save nodes run in parallel: several with one name and folder each get a name of their
+    // own, and none overwrites another's file.
+    void parallelSavesWithOneNameNeverOverwriteEachOther_data() {
+        QTest::addColumn<QString>("format");
+        QTest::addRow("png") << "png";
+        QTest::addRow("webp") << "webp";
+    }
+    void parallelSavesWithOneNameNeverOverwriteEachOther() {
+        QFETCH(QString, format);
+        const QString folder = path("race-" + format);
+        QByteArray nodes = "{";
+        const int saves = 8;
+        for (int i = 0; i < saves; ++i) {
+            const QString source = makePng(QString("src-race-%1-%2").arg(format).arg(i), 10 + i, 3);
+            nodes += QString("'l%1': {'type': 'fugue/load-image', 'inputs': {'file': '%2'}},"
+                             " 's%1': {'type': 'fugue/save-image', 'inputs': {'image': {'from': 'l%1.image'},"
+                             " 'name': 'race', 'format': '%3', 'embed': 'none', 'folder': '%4'}}%5")
+                         .arg(i)
+                         .arg(source, format, folder, i + 1 < saves ? "," : "}")
+                         .toUtf8();
+        }
+        const Ran ran = run(nodes);
+        QVERIFY2(ran.error.isEmpty(), qPrintable(ran.error));
+        QSet<QString> files;
+        QSet<int> widths;
+        for (int i = 0; i < saves; ++i) {
+            const QString file = ran.outcome.outputs.value(QString("s%1").arg(i)).value("file").media().path();
+            files.insert(file);
+            widths.insert(vips::VImage::new_from_file(file.toUtf8().constData()).width());
+        }
+        QCOMPARE(files.size(), saves);
+        QCOMPARE(widths.size(), saves); // every source's pixels are in a file of their own
+        QCOMPARE(QDir(folder).entryList(QDir::Files | QDir::Hidden).size(), saves); // no partial file left
+    }
+
     void saveImageRefusesANameThatIsAPath() {
         const QString source = makePng("src-bad", 4, 4);
         const Ran ran = run(saveFlow(source, "'name': '../escape', 'folder': '" + outDir() + "'"));

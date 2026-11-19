@@ -129,11 +129,9 @@ Result<QByteArray> pngWithWorkflow(const QByteArray &png, const QByteArray &work
     return out;
 }
 
-Errors writeWebpWithWorkflow(const vips::VImage &image, const QString &path, const QByteArray &workflowJson) {
+Result<QByteArray> webpWithWorkflow(const vips::VImage &image, const QByteArray &workflowJson) {
     if (!initVips())
-        return {vipsUnavailable()};
-    // The partial file is written beside the final name and renamed over it.
-    const QString partial = path + QStringLiteral(".part");
+        return vipsUnavailable();
     try {
         vips::VImage pixels = image;
         if (pixels.format() == VIPS_FORMAT_USHORT)
@@ -149,20 +147,18 @@ Errors writeWebpWithWorkflow(const vips::VImage &image, const QString &path, con
             void *copy = g_memdup2(packet.constData(), gsize(packet.size()));
             pixels.set("xmp-data", [](void *data, void *) -> int { g_free(data); return 0; }, copy, size_t(packet.size()));
         }
-        pixels.webpsave(QFile::encodeName(partial).constData(),
-                        vips::VImage::option()
-                            ->set("lossless", true)
-                            ->set("keep", workflowJson.isEmpty() ? VIPS_FOREIGN_KEEP_NONE : VIPS_FOREIGN_KEEP_XMP));
+        VipsBlob *blob = pixels.webpsave_buffer(
+            vips::VImage::option()
+                ->set("lossless", true)
+                ->set("keep", workflowJson.isEmpty() ? VIPS_FOREIGN_KEEP_NONE : VIPS_FOREIGN_KEEP_XMP));
+        size_t size = 0;
+        const void *data = vips_blob_get(blob, &size);
+        const QByteArray bytes(static_cast<const char *>(data), qsizetype(size));
+        vips_area_unref(VIPS_AREA(blob));
+        return bytes;
     } catch (const vips::VError &error) {
-        QFile::remove(partial);
-        return {vipsError(error)};
+        return vipsError(error);
     }
-    QFile::remove(path);
-    if (!QFile::rename(partial, path)) {
-        QFile::remove(partial);
-        return {makeError(QStringLiteral("permission_denied"), QStringLiteral("Cannot write %1.").arg(path))};
-    }
-    return {};
 }
 
 Result<QJsonObject> readEmbeddedWorkflow(const QString &path) {

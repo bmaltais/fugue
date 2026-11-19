@@ -10,7 +10,7 @@
 //     `<fugue:workflow>` element holds the JSON, XML-escaped.
 //
 // What goes in is the share copy with its `run` section (Save Image makes it); this file
-// only moves bytes.
+// only makes bytes; writing them is the caller's (atomic_file.h).
 
 #include <QByteArray>
 #include <QJsonObject>
@@ -26,9 +26,9 @@ namespace fugue {
 // replaced. `media_unreadable` when the bytes are not a PNG.
 Result<QByteArray> pngWithWorkflow(const QByteArray &png, const QByteArray &workflowJson);
 
-// Writes `image` as a lossless WebP at `path` (the file is written whole or not at
-// all). A non-empty `workflowJson` goes in the XMP chunk; empty writes none.
-Errors writeWebpWithWorkflow(const vips::VImage &image, const QString &path, const QByteArray &workflowJson);
+// `image` as the bytes of a lossless 8-bit WebP. A non-empty `workflowJson` goes in the XMP
+// chunk; empty writes none.
+Result<QByteArray> webpWithWorkflow(const vips::VImage &image, const QByteArray &workflowJson);
 
 // The workflow embedded in a PNG or WebP file, as the document JSON. `file_not_found`,
 // `media_unreadable` (neither format), or `invalid_document` when the file holds no

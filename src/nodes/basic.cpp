@@ -4,6 +4,7 @@
 #include <QFile>
 #include <QFileInfo>
 
+#include "engine/atomic_file.h"
 #include "engine/embed.h"
 #include "engine/file_hashes.h"
 #include "engine/json.h"
@@ -65,13 +66,29 @@ QByteArray workflowToEmbed(const NodeContext &context, const QString &embed) {
     return compactJson(document);
 }
 
-// A file name that is free in `dir`: `<name>.<ext>`, else `<name>-2.<ext>`, `-3`, ... A save
-// never overwrites a file (it may be the user's).
-QString freeName(const QDir &dir, const QString &name, const QString &extension) {
-    QString candidate = QStringLiteral("%1.%2").arg(name, extension);
-    for (int n = 2; dir.exists(candidate); ++n)
-        candidate = QStringLiteral("%1-%2.%3").arg(name).arg(n).arg(extension);
-    return candidate;
+// The file names a save tries in turn: `<name>.<ext>`, then `<name>-2.<ext>`, `-3`, ...
+QString numberedName(const QString &name, int n, const QString &extension) {
+    return n == 1 ? QStringLiteral("%1.%2").arg(name, extension) : QStringLiteral("%1-%2.%3").arg(name).arg(n).arg(extension);
+}
+
+// Writes `bytes` under the first free numbered name in `folder` and returns its path. The
+// name is claimed in the same step as the file appears, so a save never overwrites a file
+// (it may be the user's), not even one another Save node wrote a moment before.
+Result<QString> saveAsNew(const QString &folder, const QString &name, const QString &extension, const QByteArray &bytes) {
+    PartialFile partial(folder, numberedName(name, 1, extension));
+    if (const Errors written = partial.write(bytes, QDir(folder).filePath(numberedName(name, 1, extension)));
+        hasErrors(written))
+        return written;
+    for (int n = 1; n <= 100000; ++n) {
+        const QString target = QDir(folder).filePath(numberedName(name, n, extension));
+        const Result<bool> committed = partial.commit(target, Overwrite::Never);
+        if (!committed)
+            return committed.errors();
+        if (*committed)
+            return target;
+    }
+    return makeError(QStringLiteral("permission_denied"), QStringLiteral("No free name for %1 in %2.").arg(name, folder),
+                     QStringLiteral("Pick another name or folder in the node."));
 }
 
 class SaveImageKernel : public NodeKernel {
@@ -109,10 +126,7 @@ public:
             return scratch.errors();
 
         const QByteArray workflow = workflowToEmbed(context, embed);
-        const QDir dir(folder);
-        const QString fileName = freeName(dir, name, format);
-        const QString target = dir.filePath(fileName);
-
+        QByteArray bytes;
         if (format == QLatin1String("webp")) {
             // From the PNG just written, so 16-bit and float images take the same road to 8 bits.
             const Result<MediaHandle> png = MediaHandle::probe(MediaType::Image, scratch->path(), *context.hashes);
@@ -121,14 +135,15 @@ public:
             const Result<vips::VImage> decoded = png->image();
             if (!decoded)
                 return decoded.errors();
-            const Errors written = writeWebpWithWorkflow(decoded.value(), target, workflow);
-            if (hasErrors(written))
-                return written;
+            const Result<QByteArray> webp = webpWithWorkflow(decoded.value(), workflow);
+            if (!webp)
+                return webp.errors();
+            bytes = webp.value();
         } else {
             QFile source(scratch->path());
             if (!source.open(QIODevice::ReadOnly))
                 return makeError(QStringLiteral("internal"), QStringLiteral("Cannot read back %1.").arg(scratch->path()));
-            QByteArray bytes = source.readAll();
+            bytes = source.readAll();
             source.close();
             if (!workflow.isEmpty()) {
                 const Result<QByteArray> embedded = pngWithWorkflow(bytes, workflow);
@@ -136,20 +151,13 @@ public:
                     return embedded.errors();
                 bytes = embedded.value();
             }
-            QFile out(dir.filePath(QStringLiteral(".") + fileName + QStringLiteral(".part")));
-            if (!out.open(QIODevice::WriteOnly) || out.write(bytes) != bytes.size()) {
-                out.remove();
-                return makeError(QStringLiteral("permission_denied"), QStringLiteral("Cannot write %1.").arg(target));
-            }
-            out.close();
-            if (!out.rename(target)) {
-                out.remove();
-                return makeError(QStringLiteral("permission_denied"), QStringLiteral("Cannot write %1.").arg(target));
-            }
         }
         QFile::remove(scratch->path());
+        const Result<QString> target = saveAsNew(folder, name, format, bytes);
+        if (!target)
+            return target.errors();
 
-        const Result<MediaHandle> file = MediaHandle::probe(MediaType::Image, target, *context.hashes);
+        const Result<MediaHandle> file = MediaHandle::probe(MediaType::Image, *target, *context.hashes);
         if (!file)
             return file.errors();
         return Values{{"file", Value(file.value())}};

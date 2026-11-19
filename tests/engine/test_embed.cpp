@@ -27,6 +27,17 @@ struct Chunk {
     QByteArray data;
 };
 
+// The WebP bytes webpWithWorkflow() makes, written to `path`.
+Errors writeWebp(const vips::VImage &image, const QString &path, const QByteArray &workflow) {
+    const Result<QByteArray> bytes = webpWithWorkflow(image, workflow);
+    if (!bytes)
+        return bytes.errors();
+    QFile out(path);
+    if (!out.open(QIODevice::WriteOnly) || out.write(*bytes) != bytes->size())
+        return {makeError("permission_denied", "cannot write " + path)};
+    return {};
+}
+
 QList<Chunk> pngChunks(const QByteArray &bytes) {
     QList<Chunk> chunks;
     qsizetype at = 8;
@@ -154,7 +165,7 @@ private slots:
     }
 
     void aWebpGetsAnXmpChunkHoldingTheWorkflow() {
-        const Errors errors = writeWebpWithWorkflow(pixels(6, 5), path("out.webp"), workflowText());
+        const Errors errors = writeWebp(pixels(6, 5), path("out.webp"), workflowText());
         QVERIFY2(!hasErrors(errors), qPrintable(errors.value(0).message));
         const QByteArray bytes = readAll(path("out.webp"));
         QVERIFY(bytes.startsWith("RIFF") && bytes.mid(8, 4) == "WEBP");
@@ -176,13 +187,13 @@ private slots:
     }
 
     void aWebpWithoutAWorkflowHasNoXmp() {
-        QVERIFY(!hasErrors(writeWebpWithWorkflow(pixels(4, 4), path("plain.webp"), {})));
+        QVERIFY(!hasErrors(writeWebp(pixels(4, 4), path("plain.webp"), {})));
         for (const Chunk &chunk : webpChunks(readAll(path("plain.webp"))))
             QVERIFY(chunk.type != "XMP ");
     }
 
     void aWebpWithAlphaKeepsItAndItsWorkflow() {
-        QVERIFY(!hasErrors(writeWebpWithWorkflow(pixels(4, 4, 4), path("alpha.webp"), "{\"k\":1}")));
+        QVERIFY(!hasErrors(writeWebp(pixels(4, 4, 4), path("alpha.webp"), "{\"k\":1}")));
         const vips::VImage decoded = vips::VImage::new_from_file(path("alpha.webp").toUtf8().constData());
         QCOMPARE(decoded.bands(), 4);
         QCOMPARE(readEmbeddedWorkflow(path("alpha.webp")).value().value("k").toInt(), 1);
@@ -194,7 +205,7 @@ private slots:
         QVERIFY(out.open(QIODevice::WriteOnly));
         out.write(pngWithWorkflow(readAll(png.path()), workflowText()).value());
         out.close();
-        QVERIFY(!hasErrors(writeWebpWithWorkflow(pixels(3, 3), path("rd.webp"), workflowText())));
+        QVERIFY(!hasErrors(writeWebp(pixels(3, 3), path("rd.webp"), workflowText())));
         const QJsonObject expected = QJsonDocument::fromJson(workflowText()).object();
         QCOMPARE(readEmbeddedWorkflow(path("rd.png")).value(), expected);
         QCOMPARE(readEmbeddedWorkflow(path("rd.webp")).value(), expected);
