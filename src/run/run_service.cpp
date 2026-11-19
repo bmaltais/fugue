@@ -73,7 +73,8 @@ QJsonObject thumbnailOf(const QJsonObject &handle, const QString &dir) {
                 return {};
         }
     }
-    return {{"url", QUrl::fromLocalFile(file).toString()}, {"width", width}, {"height", height}};
+    // "source" is the full image, the one Open, Copy and Save Image act on.
+    return {{"url", QUrl::fromLocalFile(file).toString()}, {"width", width}, {"height", height}, {"source", path}};
 }
 
 // What stands in for a thumbnail of a video or audio result: a label, and a video's shape.
@@ -348,6 +349,10 @@ private:
         m_active.reset(new Run(waiting.graph, waiting.folder, m_process->environment, waiting.options));
         connect(m_active.get(), &Run::emitted, this, [this, id](const QJsonObject &e) { emit event(id, withThumbnails(e)); });
         connect(m_active.get(), &Run::finished, this, [this, id] {
+            // shutdown() deletes the run, which cancels it and finishes on the way: shutdown
+            // clears up after it, and m_active is already empty.
+            if (m_quitting)
+                return;
             queue().remove(id);
             m_active.release()->deleteLater();
             m_activeId.clear();

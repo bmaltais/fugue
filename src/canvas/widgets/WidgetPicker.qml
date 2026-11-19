@@ -8,7 +8,7 @@ import QtQuick.Dialogs
 // InputWidget makes one the first time it needs it.
 Item {
     id: picker
-    required property Item host
+    required property InputWidget host
 
     // `entries` null: the host's model list, kept current while models arrive.
     function openMenu(entries) {
@@ -18,7 +18,7 @@ Item {
         const menu = menuComponent.createObject(picker, {
             x: at.x, y: at.y, width: Math.max(end.x - at.x, 120),
             entries: entries !== null ? entries : host.modelEntries(), followModels: entries === null
-        })
+        }) as WidgetMenu
         menu.open()
     }
     Component {
@@ -40,8 +40,12 @@ Item {
 
     function openDialog() {
         const kind = host.kind
-        const component = kind === "color" ? colorDialog : kind === "folder" ? folderDialog : fileDialog
-        component.createObject(picker).open()
+        if (kind === "color")
+            (colorDialog.createObject(picker) as ColorDialog).open()
+        else if (kind === "folder")
+            (folderDialog.createObject(picker) as FolderDialog).open()
+        else
+            (fileDialog.createObject(picker) as FileDialog).open()
     }
     Component {
         id: fileDialog

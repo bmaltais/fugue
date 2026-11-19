@@ -75,6 +75,7 @@
 #include <QSet>
 #include <QVariantList>
 #include <QVariantMap>
+#include <QtQmlIntegration/qqmlintegration.h>
 
 #include <array>
 #include <memory>
@@ -92,6 +93,8 @@ class QUndoStack;
 // One row per node, in drawing order (later rows on top).
 class NodeList : public QAbstractListModel {
     Q_OBJECT
+    QML_ELEMENT
+    QML_UNCREATABLE("made in C++, read through App")
 
 public:
     enum Role {
@@ -118,6 +121,7 @@ public:
         Warnings,  // list of warning messages
         Thumbnail, // the last image or video frame, as a URL
         ThumbnailInfo, // its info chip ("1024 × 1024")
+        ThumbnailFile, // the file a Save Image wrote, shown beside the size
         ThumbnailRect, // where it sits in the node, from the node's top left
         ThumbnailText, // text in the thumbnail's place: a shown text or number, a label ("Video · 0:04")
         ThumbnailDim,  // the slot is a placeholder ("No result yet"): drawn dimmed
@@ -137,6 +141,8 @@ private:
 // One row per link, a list input's items each their own.
 class LinkList : public QAbstractListModel {
     Q_OBJECT
+    QML_ELEMENT
+    QML_UNCREATABLE("made in C++, read through App")
 
 public:
     enum Role {
@@ -166,6 +172,8 @@ private:
 
 class CanvasModel : public QObject {
     Q_OBJECT
+    QML_ELEMENT
+    QML_UNCREATABLE("made in C++, read through App")
     Q_PROPERTY(NodeList *nodes READ nodes CONSTANT)
     Q_PROPERTY(LinkList *links READ links CONSTANT)
     Q_PROPERTY(QVariantList frames READ frames NOTIFY framesChanged)
@@ -516,6 +524,7 @@ private:
         qreal thumbnailAspect = 1;
         QSizeF thumbnailSize;
         QString thumbnailInfo;
+        QString thumbnailFile;
         QString thumbnailText;
         bool thumbnailDim = false;
         QVariantMap values;

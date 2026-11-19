@@ -4,7 +4,7 @@ import QtQuick
 Rectangle {
     id: bubble
     objectName: "widgetError"
-    required property Item host
+    required property InputWidget host
 
     visible: host.error !== ""
     z: 3

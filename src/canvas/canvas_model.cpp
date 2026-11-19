@@ -90,6 +90,7 @@ QVariant NodeList::data(const QModelIndex &index, int role) const {
     case Warnings: return run.warnings;
     case Thumbnail: return run.thumbnail;
     case ThumbnailInfo: return run.thumbnailInfo;
+    case ThumbnailFile: return run.thumbnailFile;
     case ThumbnailText: return run.thumbnailText;
     case ThumbnailDim: return run.thumbnailDim;
     case Notice: return run.notice;
@@ -103,7 +104,7 @@ QHash<int, QByteArray> NodeList::roleNames() const {
             {Collapsed, "collapsed"}, {Mode, "mode"}, {Selected, "selected"}, {Inputs, "inputs"}, {Outputs, "outputs"},
             {Color, "color"}, {Pinned, "pinned"}, {RunState, "runState"}, {Progress, "progress"},
             {Seconds, "seconds"}, {Error, "error"}, {Warnings, "warnings"}, {Thumbnail, "thumbnail"},
-            {ThumbnailInfo, "thumbnailInfo"}, {ThumbnailRect, "thumbnailRect"}, {ThumbnailText, "thumbnailText"}, {ThumbnailDim, "thumbnailDim"},
+            {ThumbnailInfo, "thumbnailInfo"}, {ThumbnailFile, "thumbnailFile"}, {ThumbnailRect, "thumbnailRect"}, {ThumbnailText, "thumbnailText"}, {ThumbnailDim, "thumbnailDim"},
             {Notice, "notice"}};
 }
 
@@ -1441,6 +1442,7 @@ void CanvasModel::setRunState(const QString &node, const QVariantMap &state) {
     run.thumbnail = state.value("thumbnail").toString();
     run.thumbnailAspect = state.value("thumbnailAspect", 1).toReal();
     run.thumbnailInfo = state.value("thumbnailInfo").toString();
+    run.thumbnailFile = state.value("thumbnailFile").toString();
     run.thumbnailSize = state.value("thumbnailSize").toSizeF();
     run.thumbnailText = state.value("thumbnailText").toString();
     run.thumbnailDim = state.value("thumbnailDim").toBool();
@@ -1452,7 +1454,7 @@ void CanvasModel::setRunState(const QString &node, const QVariantMap &state) {
                                 || before.thumbnailAspect != run.thumbnailAspect;
     m_run.insert(node, run);
     relayOut(r, {NodeList::RunState, NodeList::Progress, NodeList::Seconds, NodeList::Error, NodeList::Warnings,
-                 NodeList::Thumbnail, NodeList::ThumbnailInfo, NodeList::ThumbnailText, NodeList::ThumbnailDim,
+                 NodeList::Thumbnail, NodeList::ThumbnailInfo, NodeList::ThumbnailFile, NodeList::ThumbnailText, NodeList::ThumbnailDim,
                  NodeList::Outputs, NodeList::Notice});
     if (previewChanged)
         emit previewSizeChanged(node);

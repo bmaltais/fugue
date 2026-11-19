@@ -1,6 +1,6 @@
 #pragma once
 
-// Runs from the canvas (spec 12.4, 12.7, 10.3): the window's `runs` (a QML context property).
+// Runs from the canvas (spec 12.4, 12.7, 10.3): the window's runs, App.runs in QML.
 //
 // It starts runs of the workflow on the canvas through RunService (run/run_service.h) and
 // shows what they do on the nodes, through CanvasModel::setRunState and setRunProgress:
@@ -31,6 +31,7 @@
 #include <QStringList>
 #include <QTimer>
 #include <QVariantList>
+#include <QtQmlIntegration/qqmlintegration.h>
 
 #include <memory>
 
@@ -45,6 +46,8 @@ class Workflows;
 
 class CanvasRuns : public QObject {
     Q_OBJECT
+    QML_ELEMENT
+    QML_UNCREATABLE("made in C++, read through App")
     // The run pill (docs/canvas-look.md 11): any run of the window waiting or active.
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
     Q_PROPERTY(bool running READ running NOTIFY changed)      // one is active
@@ -87,6 +90,10 @@ public:
     Q_INVOKABLE void cancel();
     // A check now rather than after the edit pause (tests).
     Q_INVOKABLE void checkNow();
+    // The full image file of the node's picture slot (its last result, else the file its input
+    // names), for Open, Copy and Save Image; empty when it shows none or the file is gone.
+    // Never the thumbnail, which is a 512 px copy.
+    Q_INVOKABLE QString imageFile(const QString &node) const;
     // Selects the canvas node an error is shown on and puts it in view (the error list).
     Q_INVOKABLE void showError(const QString &node);
 
@@ -112,6 +119,7 @@ private:
         int thumbnailHeight = 0;
         QVariantMap values;
         QString thumbnailFile; // the file a sink wrote, named under its picture
+        QString imagePath;     // the full image behind `thumbnail`, for Open, Copy and Save Image
         QString text;          // a text, number or media label shown in the slot
         qreal textAspect = 0.5;
         QString inputThumbnail; // the image of the node's input file, before it runs
@@ -152,6 +160,7 @@ private:
     const Registry *m_registry;
     struct NodeInfo {
         bool showsResult = false; // Preview, Save Image: a placeholder until a result comes
+        bool savesFile = false;   // Save Image: its chip names the file it wrote
         QString imageFile;        // the image file its file input names
     };
     QHash<QString, NodeInfo> m_nodeInfo; // of the shown workflow

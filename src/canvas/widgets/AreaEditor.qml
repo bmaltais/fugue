@@ -6,7 +6,7 @@ import QtQuick
 // key), as one undo step. Each change is in the document as it is typed.
 Rectangle {
     id: area
-    required property Item host
+    required property InputWidget host
     readonly property real rowHeight: host.height
     width: host.width
     z: 2

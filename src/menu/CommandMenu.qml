@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
+import Fugue
 import "../canvas"
 
 // A menu built from a menu tree of the command registry (menus.h, CommandRegistry::menu): a
@@ -21,9 +22,9 @@ Menu {
     // Left or Right on one of its rows: the menu bar moves to the neighbouring menu.
     signal stepRequested(int delta)
 
-    readonly property var look: theme.look
+    readonly property CanvasLook look: App.theme.look
     readonly property real u: look.unit
-    readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
+    readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
 
     // Not modal, so a press on another menu title or on the canvas both closes it and lands
     // there; while it is open the window's shortcuts sleep (CommandRegistry::menuOpen), so
@@ -44,7 +45,7 @@ Menu {
         return count > 0 ? 0 : -1
     }
     // The current row opens a submenu.
-    readonly property bool onSubMenuRow: currentIndex >= 0 && !!itemAt(currentIndex) && !!itemAt(currentIndex).subMenu
+    readonly property bool onSubMenuRow: currentIndex >= 0 && !!(itemAt(currentIndex) as MenuItem)?.subMenu
     onClosed: byKey = false
     // Closes at once, as desktop menus do (docs/canvas-look.md 15). Material's closing fade
     // (220 ms) kept the menu on screen taking the next keys, and popup() on it then did nothing:
@@ -52,9 +53,9 @@ Menu {
     exit: null
     // Open, or opening; false as soon as it closes (`opened` is false through the opening fade).
     property bool shown: false
-    onAboutToShow: { shown = true; commands.menuShown(true) }
-    onAboutToHide: { shown = false; commands.menuShown(false) }
-    Component.onDestruction: if (shown) commands.menuShown(false)
+    onAboutToShow: { shown = true; App.commands.menuShown(true) }
+    onAboutToHide: { shown = false; App.commands.menuShown(false) }
+    Component.onDestruction: if (shown) App.commands.menuShown(false)
     padding: 1.5 * u
     // As wide as its widest row wants, so names and keys never elide.
     property real widest: 0
@@ -101,7 +102,7 @@ Menu {
                     menu.subMenuComponent = Qt.createComponent("CommandMenu.qml")
                 const sub = menu.subMenuComponent.createObject(menu, {title: entry.title, items: entry.items,
                                                                       target: menu.target, sub: true,
-                                                                      cascade: true, overlap: menu.u})
+                                                                      cascade: true, overlap: menu.u}) as Menu
                 sub.aboutToShow.connect(() => menu.subOpen = true)
                 sub.aboutToHide.connect(() => menu.subOpen = false)
                 menu.addMenu(sub)

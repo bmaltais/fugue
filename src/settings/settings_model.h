@@ -16,6 +16,7 @@
 #include <QStringList>
 #include <QUrl>
 #include <QVariantList>
+#include <QtQmlIntegration/qqmlintegration.h>
 #include <functional>
 
 #include "engine/providers.h"
@@ -30,6 +31,8 @@ class CommandRegistry;
 
 class SettingsModel : public QObject {
     Q_OBJECT
+    QML_ELEMENT
+    QML_UNCREATABLE("made in C++, read through App")
     Q_PROPERTY(QString path READ path CONSTANT)
     Q_PROPERTY(QString navigation READ navigation NOTIFY changed)
     Q_PROPERTY(QString language READ language NOTIFY changed) // empty: follow Omarchy

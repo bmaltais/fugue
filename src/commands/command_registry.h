@@ -15,6 +15,7 @@
 #include <QObject>
 #include <QStringList>
 #include <QVariantList>
+#include <QtQmlIntegration/qqmlintegration.h>
 #include <functional>
 
 namespace fugue {
@@ -36,6 +37,8 @@ struct CommandSpec {
 
 class CommandRegistry : public QObject {
     Q_OBJECT
+    QML_ELEMENT
+    QML_UNCREATABLE("made in C++, read through App")
     // The keys that have an owner right now. The window binds one shortcut to each.
     Q_PROPERTY(QStringList activeKeys READ activeKeys NOTIFY changed)
     // True while a text field has focus: it owns bare-letter and Shift-only keys (12.4).

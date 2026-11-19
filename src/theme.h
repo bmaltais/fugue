@@ -8,13 +8,14 @@
 #include <QProcess>
 #include <QTimer>
 #include <QVariantMap>
+#include <QtQmlIntegration/qqmlintegration.h>
 
 #include "look.h"
 
 // Follows the Omarchy theme live: its whole palette, whether it is light or
 // dark, Hyprland's window rounding as radius, and the desktop text size.
 //
-// Exposed to QML as the context property `theme`. For all QML (the canvas
+// QML reads it as App.theme (qml_app.h). For all QML (the canvas
 // included), use only these names and never a literal color or size:
 //   background, panel, border, text, muted, accent, accentForeground, error
 //                         semantic colors (panel is a surface raised from
@@ -34,6 +35,8 @@
 //                         and the `?` overlay
 class Theme : public QObject {
     Q_OBJECT
+    QML_ELEMENT
+    QML_UNCREATABLE("made in C++, read through App")
     Q_PROPERTY(QColor accent READ accent NOTIFY changed)
     Q_PROPERTY(QColor accentForeground READ accentForeground NOTIFY changed)
     Q_PROPERTY(QColor background READ background NOTIFY changed)

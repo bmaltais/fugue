@@ -5,7 +5,7 @@ import ".."
 // a click there steps the value. Made on the first hover.
 Item {
     id: chevrons
-    required property Item host
+    required property InputWidget host
     required property MouseArea mouse
     anchors.fill: parent
     visible: mouse.containsMouse && !host.editingText

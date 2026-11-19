@@ -3,20 +3,19 @@
 // and Escape leaves the graph alone (spec 12.8, 12.4).
 
 #include <QQmlApplicationEngine>
-#include <QQmlContext>
 #include <QQuickItem>
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QTemporaryDir>
 #include <QtTest>
 
-#include "backend.h"
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
 #include "engine/document.h"
 #include "engine/registry.h"
 #include "nodes/builtin.h"
 #include "search/node_search.h"
+#include "qml_app.h"
 #include "theme.h"
 #include "translator.h"
 #include "workflow/workflows.h"
@@ -54,7 +53,6 @@ struct App {
     QTemporaryDir dir;
     Translator translator{dir.path() + "/language"};
     Theme theme{dir.path()};
-    Backend backend;
     Registry registry;
     CanvasModel model{&registry};
     CommandRegistry commands;
@@ -78,12 +76,7 @@ struct App {
             for (const auto &error : errors)
                 warnings << error.toString();
         });
-        engine.rootContext()->setContextProperty("translator", &translator);
-        engine.rootContext()->setContextProperty("theme", &theme);
-        engine.rootContext()->setContextProperty("backend", &backend);
-        engine.rootContext()->setContextProperty("canvasModel", &model);
-        engine.rootContext()->setContextProperty("commands", &commands);
-        engine.rootContext()->setContextProperty("workflows", &workflows);
+        fugue::exposeToQml(engine, {&translator, &theme, &commands, &model, &workflows});
     }
 
     bool open() {

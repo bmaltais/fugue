@@ -7,7 +7,6 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QQmlApplicationEngine>
-#include <QQmlContext>
 #include <QQuickItem>
 #include <QQuickWindow>
 #include <QTemporaryDir>
@@ -16,7 +15,6 @@
 
 #include <functional>
 
-#include "backend.h"
 #include "canvas/canvas_commands.h"
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
@@ -24,6 +22,7 @@
 #include "engine/registry.h"
 #include "menu/menu_commands.h"
 #include "nodes/builtin.h"
+#include "qml_app.h"
 #include "search/node_search.h"
 #include "settings/settings_model.h"
 #include "theme.h"
@@ -83,13 +82,15 @@ struct App {
     QString hyprctl;
     Translator translator{dir.path() + "/language"};
     Theme theme;
-    Backend backend;
     fugue::Registry registry;
     CanvasModel model{&registry};
     fugue::CommandRegistry commands;
     fugue::Workflows workflows{&model, &registry, &commands, {dir.path() + "/recovery", dir.path() + "/trust.json"}};
     // settings.json and providers.json in the test's own folder, never the owner's.
     fugue::SettingsModel settings{dir.path() + "/config/fugue/settings.json", dir.path() + "/config/fugue/providers.json"};
+    // A test's own runs (test_canvas_run), set before open(); the window runs without them.
+    fugue::CanvasRuns *runs = nullptr;
+    fugue::ImageActions *imageActions = nullptr; // likewise (test_canvas_image_actions)
     QQmlApplicationEngine engine;
     QStringList warnings;
     QList<QUrl> openedUrls; // what help.docs and help.report-issue opened
@@ -119,16 +120,10 @@ struct App {
             for (const auto &error : errors)
                 warnings << error.toString();
         });
-        engine.rootContext()->setContextProperty("translator", &translator);
-        engine.rootContext()->setContextProperty("theme", &theme);
-        engine.rootContext()->setContextProperty("backend", &backend);
-        engine.rootContext()->setContextProperty("canvasModel", &model);
-        engine.rootContext()->setContextProperty("commands", &commands);
-        engine.rootContext()->setContextProperty("workflows", &workflows);
-        engine.rootContext()->setContextProperty("appSettings", &settings);
     }
 
     bool open() {
+        fugue::exposeToQml(engine, {&translator, &theme, &commands, &model, &workflows, &settings, runs, imageActions});
         engine.load(QUrl("qrc:/Main.qml"));
         if (engine.rootObjects().isEmpty())
             return false;

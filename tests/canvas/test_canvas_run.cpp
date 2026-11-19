@@ -123,9 +123,11 @@ struct RunApp {
         service = std::make_unique<RunService>(setup);
         runs = std::make_unique<CanvasRuns>(&app.model, &app.workflows, service.get(), &app.registry);
         runs->registerCommands(app.commands);
-        app.engine.rootContext()->setContextProperty("runs", runs.get());
+        app.runs = runs.get();
     }
     ~RunApp() {
+        // The window goes before the runs it shows, as in main(), which makes its engine last.
+        qDeleteAll(app.engine.rootObjects());
         runs.reset();
         service.reset(); // stops the run thread before the fake goes
     }
@@ -292,11 +294,14 @@ private slots:
         QTRY_COMPARE(finished.size(), 1);
         QCOMPARE(finished.first().at(1).toString(), QStringLiteral("ok"));
         QVERIFY(r.role("show", NodeList::Thumbnail).toString().startsWith("file://"));
+        QCOMPARE(r.role("show", NodeList::ThumbnailInfo).toString(), QStringLiteral("320 \u00d7 240")); // never a cache name
         QCOMPARE(r.role("show", NodeList::ThumbnailText).toString(), QString());
         QVERIFY(!r.role("show", NodeList::ThumbnailDim).toBool());
         QVERIFY(r.role("save", NodeList::Thumbnail).toString().startsWith("file://"));
         const QString info = r.role("save", NodeList::ThumbnailInfo).toString();
-        QVERIFY2(info.startsWith("cat") && info.endsWith("320 \u00d7 240"), qPrintable(info));
+        QCOMPARE(info, QStringLiteral("320 \u00d7 240"));
+        QVERIFY(r.role("save", NodeList::ThumbnailFile).toString().startsWith("cat"));
+        QVERIFY(r.role("show", NodeList::ThumbnailFile).toString().isEmpty());
         QCOMPARE(r.role("show-size", NodeList::ThumbnailText).toString(), QStringLiteral("768"));
         QVERIFY(r.app.warnings.isEmpty());
     }
@@ -495,6 +500,15 @@ private slots:
         QVERIFY(r->app.open());
         r->runs->checkNow();
         QTest::qWait(50);
+        r.reset();
+    }
+
+    // Closing the window while a node runs cancels the run, which reports its end as it goes.
+    void closingDuringARunIsClean() {
+        auto r = std::make_unique<RunApp>(kGraph, true);
+        QVERIFY(r->app.open());
+        r->app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(r->state("gen"), QStringLiteral("running"));
         r.reset();
     }
 

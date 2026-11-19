@@ -29,6 +29,7 @@
 #include <QUrl>
 #include <QTimer>
 #include <QVariantList>
+#include <QtQmlIntegration/qqmlintegration.h>
 
 #include <memory>
 
@@ -43,6 +44,8 @@ struct WorkflowLocations {
 
 class Workflows : public QObject {
     Q_OBJECT
+    QML_ELEMENT
+    QML_UNCREATABLE("made in C++, read through App")
     // One map per tab: id, title, path, unsaved, current.
     Q_PROPERTY(QVariantList tabs READ tabs NOTIFY tabsChanged)
     Q_PROPERTY(int current READ current WRITE setCurrent NOTIFY currentChanged)
@@ -126,6 +129,8 @@ public:
     bool isTrusted(const QString &packId, const QString &version) const;
 
     Q_INVOKABLE void dismissNotice();
+    // A line for the banner from outside (the image actions, #57).
+    void notify(const QString &text) { setNotice(text); }
 
 signals:
     void tabsChanged();
