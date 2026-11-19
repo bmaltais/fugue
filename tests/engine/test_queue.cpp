@@ -12,6 +12,8 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include <csignal>
+
 #include "engine/json.h"
 #include "engine/queue.h"
 
@@ -163,6 +165,30 @@ private slots:
         worker.closeWriteChannel();
         QVERIFY(worker.waitForFinished());
         QVERIFY(!isRunWorker(worker.processId(), "run-a"));
+    }
+
+    // A cancel signals the worker it checked, never a process that got its id since:
+    // the signal goes through a pidfd opened before the check. (The reuse window itself
+    // cannot be produced in a test; this pins down what the call promises.)
+    void onlyTheRunsWorkerIsSignalled() {
+        QVERIFY(!signalRunWorker(0, "run-a", SIGTERM));
+        QProcess other; // alive, but the worker of another run
+        other.start("sh", {"-c", "read line", "__worker", "run-b"});
+        QVERIFY(other.waitForStarted());
+        QTRY_VERIFY(isRunWorker(other.processId(), "run-b"));
+        QVERIFY(!signalRunWorker(other.processId(), "run-a", SIGTERM));
+        other.closeWriteChannel();
+        QVERIFY(other.waitForFinished());
+        QCOMPARE(other.exitStatus(), QProcess::NormalExit); // it was not signalled
+
+        QProcess worker;
+        worker.start("sh", {"-c", "read line", "__worker", "run-a"});
+        QVERIFY(worker.waitForStarted());
+        QTRY_VERIFY(isRunWorker(worker.processId(), "run-a"));
+        QVERIFY(signalRunWorker(worker.processId(), "run-a", SIGTERM));
+        QVERIFY(worker.waitForFinished());
+        QCOMPARE(worker.exitStatus(), QProcess::CrashExit); // ended by the signal
+        QVERIFY(!signalRunWorker(worker.processId(), "run-a", SIGTERM)); // gone
     }
 };
 

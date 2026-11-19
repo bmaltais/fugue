@@ -95,4 +95,11 @@ private:
 // recorded it itself (Queue::setPid from the worker), never one a parent got from spawning.
 bool isRunWorker(qint64 pid, const QString &run);
 
+// Sends `signal` to process `pid` only if it is the worker of `run`, and returns whether
+// it was sent. The process is pinned by a pidfd before its command line is checked, and
+// the signal goes through that pidfd, so it reaches the process that was checked or
+// nobody: never one that got the id after the worker died. Every signal to a run's worker
+// goes through here, not kill().
+bool signalRunWorker(qint64 pid, const QString &run, int signal);
+
 } // namespace fugue

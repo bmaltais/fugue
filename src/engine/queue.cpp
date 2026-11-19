@@ -9,6 +9,7 @@
 #include <cerrno>
 #include <fcntl.h>
 #include <sys/file.h>
+#include <sys/pidfd.h>
 #include <unistd.h>
 
 #include "engine/json.h"
@@ -170,6 +171,19 @@ bool isRunWorker(qint64 pid, const QString &run) {
     const QList<QByteArray> arguments = file.readAll().split('\0');
     const qsizetype at = arguments.indexOf("__worker");
     return at >= 0 && at + 1 < arguments.size() && arguments.at(at + 1) == run.toUtf8();
+}
+
+bool signalRunWorker(qint64 pid, const QString &run, int signal) {
+    if (pid <= 0)
+        return false;
+    // While the pidfd is open the id cannot pass to another process, so the command line
+    // read next is this process's. If it died meanwhile, the send fails (ESRCH).
+    const int process = ::pidfd_open(pid_t(pid), 0);
+    if (process < 0)
+        return false; // no such process
+    const bool sent = isRunWorker(pid, run) && ::pidfd_send_signal(process, signal, nullptr, 0) == 0;
+    ::close(process);
+    return sent;
 }
 
 Lock::Lock(const QString &path) {
