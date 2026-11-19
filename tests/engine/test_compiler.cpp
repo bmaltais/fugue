@@ -173,6 +173,7 @@ private slots:
     void aliasesCompileToTheInstalledType();
     void groupRecursionIsReportedAndDoesNotHang();
     void cyclesAreReported();
+    void everyKindOfErrorIsReportedTogether();
     void exposedInputsNarrowConstraintsAndSupplyDefaults();
     void bypassCarriesALiteralThrough();
     void bypassRewiresLinksToTheFirstInputOfTheSameType();
@@ -347,7 +348,8 @@ void TestCompiler::groupFaceProblemsAreReportedOnTheInstance() {
         QByteArray(twoPassGroup) +
             ",'local/broken': {'version': '1.0.0', 'name': 'Broken',"
             " 'inputs': [{'name': 'what', 'targets': ['ghost.text']},"
-            "            {'name': 'mixed', 'targets': ['t.text', 'g.steps']}],"
+            "            {'name': 'mixed', 'targets': ['t.text', 'g.steps']},"
+            "            {'name': 'typo', 'targets': ['t.txt'], 'default': 'x'}],"
             " 'outputs': [{'name': 'image', 'from': 'g.picture'}],"
             " 'nodes': {'t': {'type': 'fugue/text', 'version': '1.0.0', 'inputs': {'text': 'x'}},"
             "           'g': {'type': 'fugue/generate-image', 'version': '1.0.0', 'inputs': {'prompt': {'from': 't.text'}}}}}"));
@@ -361,14 +363,15 @@ void TestCompiler::groupFaceProblemsAreReportedOnTheInstance() {
     QCOMPARE(seen, (QStringList{
                        "unknown_input b what",          // target names no inner node
                        "type_mismatch b mixed",         // targets of different types
+                       "unknown_input b typo",          // once: not again on b/t for its default
                        "unknown_output b image",        // the group output leads nowhere
                        "unknown_input g7 sed",          // not an exposed input
                        "unknown_link_source g7 prompt", // written on g7, reported once
                        "unknown_output save image",     // g7 has no output picture
                    }));
-    QCOMPARE(result.errors[3].valid, (QJsonArray{"prompt", "seed", "steps"}));
-    QCOMPARE(result.errors[3].hint, QString("Did you mean \"seed\"?"));
-    QCOMPARE(result.errors[5].valid, QJsonArray{"image"});
+    QCOMPARE(result.errors[4].valid, (QJsonArray{"prompt", "seed", "steps"}));
+    QCOMPARE(result.errors[4].hint, QString("Did you mean \"seed\"?"));
+    QCOMPARE(result.errors[6].valid, QJsonArray{"image"});
 }
 
 void TestCompiler::missingInputsNameTheExposedInputToSet() {
@@ -477,6 +480,20 @@ void TestCompiler::cyclesAreReported() {
     QCOMPARE(seen, (QStringList{QString("cycle ") + dump(QJsonArray{"a", "b"}),
                                 QString("cycle ") + dump(QJsonArray{"g/s"}),
                                 QString("cycle ") + dump(QJsonArray{"self"})}));
+}
+
+void TestCompiler::everyKindOfErrorIsReportedTogether() {
+    const Document doc = document(
+        "{'fugue': 1, 'graph': {'nodes': {"
+        " 'a': {'type': 'io.example.tools/shrink', 'version': '1.2.0',"
+        "       'inputs': {'image': {'from': 'b.image'}, 'method': 'cubic'}},"
+        " 'b': {'type': 'io.example.tools/shrink', 'version': '1.2.0', 'inputs': {'image': {'from': 'a.image'}}},"
+        " 'c': {'type': 'io.example.gone/thing', 'version': '1.0.0', 'inputs': {}},"
+        " 'save': {'type': 'fugue/save-image', 'version': '1.0.0', 'inputs': {'image': {'from': 'c.image'}}}"
+        "}}}");
+    const Compilation result = compile(doc, registry());
+    QVERIFY(!result.ok());
+    QCOMPARE(codes(result.errors), (QStringList{"unknown_node_type", "value_not_in_choices", "cycle"}));
 }
 
 void TestCompiler::exposedInputsNarrowConstraintsAndSupplyDefaults() {

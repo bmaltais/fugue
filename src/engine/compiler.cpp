@@ -755,7 +755,9 @@ void Compiler::checkNode(Scope *scope, const QString &id, Flat &flat, bool face)
 
     if (!face) {
         for (auto it = values.constBegin(); it != values.constEnd(); ++it) {
-            if (type.input(it.key()))
+            // A value that came through a group's face and names an input the
+            // node lacks is a bad target, already reported on the instance.
+            if (type.input(it.key()) || !it->narrowing.isEmpty())
                 continue;
             Error error = nodeError(QStringLiteral("unknown_input"), flat.path, {});
             error.input = it.key();
@@ -1038,8 +1040,11 @@ Compilation Compiler::run() {
     checkProviders();
     checkTarget();
 
+    // Cycles are looked for even when there are other errors: links that did
+    // not resolve are not in the flattened graph, so what is there is sound.
+    const bool cyclic = findCycles();
     Compilation result;
-    if (!hasErrors(m_errors) && !findCycles()) {
+    if (!hasErrors(m_errors) && !cyclic) {
         CompiledGraph graph = shape();
         if (!hasErrors(m_errors))
             result.graph = std::move(graph);
