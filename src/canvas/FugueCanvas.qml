@@ -337,13 +337,15 @@ FocusScope {
             break
         case "link": {
             const from = { node: linkDrag.node, port: linkDrag.port, output: linkDrag.output }
+            // Links being moved (Shift+drag) let go on nothing stay as they were: no search.
+            const moving = linkDrag.targets !== undefined
             const port = portUnder(px, py)
             if (port.node !== undefined) {
                 model.endLinkDrag(port.node, port.port, port.output)
             } else {
                 model.endLinkDrag()
                 const w = toWorld(px, py)
-                if (travelled && model.nodeAt(w.x, w.y) === "")
+                if (travelled && !moving && model.nodeAt(w.x, w.y) === "")
                     linkReleased(from, w.x, w.y)
             }
             hoverProblem = ""

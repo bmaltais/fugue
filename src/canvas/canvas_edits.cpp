@@ -276,6 +276,13 @@ void CanvasModel::finishGestures() {
 
 void CanvasModel::contentChanged() { emit edited(); }
 
+std::unique_ptr<QUndoStack> CanvasModel::makeUndoStack() {
+    auto stack = std::make_unique<QUndoStack>();
+    // ComfyUI's change tracker keeps 50 steps too; each step holds two documents.
+    stack->setUndoLimit(undoLimit);
+    return stack;
+}
+
 void CanvasModel::watchUndoStack() {
     connect(m_undo.get(), &QUndoStack::indexChanged, this, &CanvasModel::undoChanged);
     connect(m_undo.get(), &QUndoStack::canUndoChanged, this, &CanvasModel::undoChanged);
@@ -286,7 +293,7 @@ std::unique_ptr<QUndoStack> CanvasModel::takeUndoStack() {
     finishGestures();
     std::unique_ptr<QUndoStack> taken = std::move(m_undo);
     taken->disconnect(this);
-    m_undo = std::make_unique<QUndoStack>();
+    m_undo = makeUndoStack();
     watchUndoStack();
     emit undoChanged();
     return taken;

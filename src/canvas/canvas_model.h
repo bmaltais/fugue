@@ -279,6 +279,8 @@ public:
     bool canRedo() const;
     QString undoText() const;
     QString redoText() const;
+    // Steps kept per stack; the oldest go first.
+    static constexpr int undoLimit = 50;
     // A gesture still in progress is finished first.
     Q_INVOKABLE void undo();
     Q_INVOKABLE void redo();
@@ -376,6 +378,7 @@ private:
     void relink(const QSet<QString> &nodes);
     void finishGestures();
     void contentChanged();
+    static std::unique_ptr<QUndoStack> makeUndoStack();
     void watchUndoStack();
     // Adds a copy's nodes with new ids, its top left at topLeft, as one edit; selects them.
     QStringList insertCopy(const fugue::Document &copy, QPointF topLeft, bool connected, const QString &text,

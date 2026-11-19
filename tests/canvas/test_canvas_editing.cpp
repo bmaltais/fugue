@@ -227,9 +227,10 @@ private slots:
         app.drag(Qt::LeftButton, app.screen(240, 137), app.screen(240, 437), Qt::ShiftModifier);
         QCOMPARE(from(app, "gen", "prompt"), QString("other.text"));
         QCOMPARE(app.model.links()->rowCount(), 2);
-        // Let go on empty canvas: the links stay where they are.
+        // Let go on empty canvas: the links stay where they are, and search does not open.
         app.drag(Qt::LeftButton, app.screen(240, 437), app.screen(500, 600), Qt::ShiftModifier);
         QCOMPARE(from(app, "gen", "prompt"), QString("other.text"));
+        QVERIFY(!app.model.search()->active());
         QCOMPARE(app.model.undoStack()->count(), 1);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
@@ -246,15 +247,19 @@ private slots:
         app.key(Qt::Key_Z, Qt::ControlModifier);
         QCOMPARE(app.model.links()->rowCount(), 600);
         const qint64 undone = timer.restart();
-        // One node moved in a full graph touches only that node and its wires.
+        // Undoing a move in a full graph touches only what moved and its wires.
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, app.screen(100, 10));
+        QCOMPARE(app.model.selectedIds(), QStringList{"n0"});
         app.drag(Qt::LeftButton, app.screen(100, 10), app.screen(100, 40));
+        QCOMPARE(app.model.position("n0"), QPointF(0, 30));
+        timer.restart();
         app.key(Qt::Key_Z, Qt::ControlModifier);
         const qint64 moved = timer.elapsed();
-        qInfo("302 nodes: delete all %lld ms, undo it %lld ms, drag one and undo %lld ms", deleted, undone, moved);
+        qInfo("302 nodes: delete all %lld ms, undo it %lld ms, undo a move %lld ms", deleted, undone, moved);
         QCOMPARE(app.model.position("n0"), QPointF(0, 0));
         // Generous bounds for a slow CI machine; a whole-graph rebuild per edit would blow them.
         QVERIFY2(deleted < 1000 && undone < 1000, qPrintable(QStringLiteral("%1 %2").arg(deleted).arg(undone)));
-        QVERIFY2(moved < 300, qPrintable(QString::number(moved)));
+        QVERIFY2(moved < 200, qPrintable(QString::number(moved)));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 

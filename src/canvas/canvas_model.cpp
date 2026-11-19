@@ -106,7 +106,7 @@ QHash<int, QByteArray> LinkList::roleNames() const {
 
 CanvasModel::CanvasModel(const Registry *registry, QObject *parent)
     : QObject(parent), m_registry(registry), m_nodeList(new NodeList(this)), m_linkList(new LinkList(this)),
-      m_search(new NodeSearch(registry, this, this)), m_undo(std::make_unique<QUndoStack>()) {
+      m_search(new NodeSearch(registry, this, this)), m_undo(makeUndoStack()) {
     watchUndoStack();
 }
 

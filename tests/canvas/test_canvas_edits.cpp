@@ -375,6 +375,22 @@ private slots:
         QCOMPARE(canvas.undoStack()->count(), 1);
     }
 
+    void theUndoStackKeepsTheLastFiftySteps() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(chain));
+        for (int i = 1; i <= 60; ++i) {
+            canvas.beginMove("gen");
+            canvas.moveBy(i, 0);
+            canvas.endMove();
+        }
+        QCOMPARE(canvas.undoStack()->count(), 50);
+        while (canvas.canUndo())
+            canvas.undo();
+        QCOMPARE(canvas.position("gen"), QPointF(355, 80)); // after the tenth move: 300 + 1 + 2 + ... + 10
+        QCOMPARE(canvas.takeUndoStack()->undoLimit(), 50);
+        QCOMPARE(canvas.undoStack()->undoLimit(), 50);
+    }
+
     void anUndoStackCanBeHandedOverAndBack() {
         CanvasModel canvas(&m_registry);
         canvas.setDocument(document(chain));
