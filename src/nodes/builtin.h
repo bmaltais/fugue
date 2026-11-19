@@ -9,7 +9,12 @@
 
 namespace fugue::nodes {
 
-// Registers every compiled-in manifest. A manifest that fails is reported on
+// Registers the port types the fugue pack declares (2.2): the resource type
+// fugue/image-model that image nodes take as their `model` (8.4). Call it once
+// per registry, before any manifest that uses them; addBuiltinNodeTypes does.
+void addBuiltinPortTypes(Registry &registry);
+
+// Registers the built-in port types, then every compiled-in manifest. A manifest that fails is reported on
 // stderr and skipped; tests/nodes/test_builtin.cpp makes that a hard failure.
 void addBuiltinNodeTypes(Registry &registry);
 

@@ -12,7 +12,16 @@
 
 namespace fugue::nodes {
 
+void addBuiltinPortTypes(Registry &registry) {
+    const Errors errors = registry.add(
+        DeclaredPortType{*PortType::parse(QStringLiteral("fugue/image-model")), PortKind::Resource,
+                         QStringLiteral("Image model"), {}});
+    for (const Error &error : errors)
+        std::fprintf(stderr, "fugue/image-model: %s: %s\n", qPrintable(error.code), qPrintable(error.message));
+}
+
 void addBuiltinNodeTypes(Registry &registry) {
+    addBuiltinPortTypes(registry);
     QStringList paths;
     QDirIterator it(QStringLiteral(":/fugue/nodes"), {QStringLiteral("node.json")}, QDir::Files,
                     QDirIterator::Subdirectories);

@@ -34,6 +34,7 @@ private slots:
             const Result<QJsonObject> manifest = readJsonObject(path);
             QVERIFY2(manifest.ok(), qPrintable(path));
             Registry registry;
+            nodes::addBuiltinPortTypes(registry);
             const Errors errors = registry.addManifest(manifest.value());
             QVERIFY2(!hasErrors(errors), qPrintable(path + ": " + errors.value(0).message));
             const QString id = manifest.value().value("id").toString();
