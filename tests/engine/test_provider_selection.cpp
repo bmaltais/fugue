@@ -1,0 +1,296 @@
+// Provider instances (spec 8.2) and choosing one for a capability (8.3 to 8.5).
+
+#include <QFile>
+#include <QJsonArray>
+#include <QTemporaryDir>
+#include <QtTest>
+
+#include "engine/providers.h"
+
+using namespace fugue;
+
+namespace {
+
+QJsonObject handle(const QString &name) {
+    return QJsonObject{{"resource", "fugue/image-model"}, {"name", name}};
+}
+
+OfferedModel model(const QString &name, const QString &status = QStringLiteral("ready"),
+                   const QJsonObject &properties = {}) {
+    OfferedModel offered;
+    offered.handle = handle(name);
+    offered.status = status;
+    offered.properties = properties;
+    if (status != QLatin1String("ready")) {
+        offered.reason = QStringLiteral("%1 is stopped.").arg(name);
+        offered.hint = QStringLiteral("Start it: omarchy-agent-local start %1").arg(name);
+    }
+    return offered;
+}
+
+Candidate candidate(const QString &name, QList<CapabilityOffer> offers, bool enabled = true) {
+    Candidate result;
+    result.instance.name = name;
+    result.instance.type = QStringLiteral("fake");
+    result.instance.enabled = enabled;
+    result.description.value().engine = QStringLiteral("sdcpp");
+    result.description.value().capabilities = std::move(offers);
+    return result;
+}
+
+CapabilityOffer generate(QList<OfferedModel> models) {
+    return CapabilityOffer{QStringLiteral("image.generate"), std::move(models)};
+}
+
+Requirement wants(const QString &capability) {
+    Requirement requirement;
+    requirement.capability = capability;
+    return requirement;
+}
+
+QStringList strings(const QJsonArray &array) {
+    QStringList list;
+    for (const QJsonValue &value : array)
+        list.append(value.toString());
+    return list;
+}
+
+} // namespace
+
+class TestProviderSelection : public QObject {
+    Q_OBJECT
+
+private slots:
+    void instancesKeepTheUsersOrderAndTheirSettings() {
+        // The example of spec 8.2, plus a module setting and a disabled instance.
+        const QJsonArray providers{
+            QJsonObject{{"name", "This machine"}, {"type", "omarchy"}},
+            QJsonObject{{"name", "Studio box"}, {"type", "omarchy"},
+                        {"address", "https://studio.example.ts.net"}, {"enabled", false}, {"poll_ms", 250}},
+            QJsonObject{{"name", "My endpoint"}, {"type", "http"},
+                        {"address", "https://api.example.com/v1"}, {"key", "k"}},
+        };
+        const auto parsed = parseProviderInstances(QJsonObject{{"providers", providers}});
+        QVERIFY(parsed.ok());
+        QCOMPARE(parsed.value().size(), 3);
+        QCOMPARE(parsed.value().at(0).name, QStringLiteral("This machine"));
+        QVERIFY(parsed.value().at(0).enabled);
+        QVERIFY(parsed.value().at(0).address.isEmpty());
+        QCOMPARE(parsed.value().at(1).address, QStringLiteral("https://studio.example.ts.net"));
+        QVERIFY(!parsed.value().at(1).enabled);
+        QCOMPARE(parsed.value().at(1).settings.value("poll_ms").toInt(), 250);
+        QCOMPARE(parsed.value().at(2).key, QStringLiteral("k"));
+        QVERIFY(!parsed.value().at(2).settings.contains("key"));
+    }
+
+    void instancesNeedAUniqueNameAndAType() {
+        const QJsonArray providers{
+            QJsonObject{{"name", "A"}, {"type", "omarchy"}},
+            QJsonObject{{"name", "A"}, {"type", "omarchy"}},
+            QJsonObject{{"name", "B"}},
+        };
+        const auto parsed = parseProviderInstances(QJsonObject{{"providers", providers}});
+        QVERIFY(!parsed.ok());
+        QCOMPARE(parsed.errors().size(), 2);
+        for (const Error &error : parsed.errors())
+            QCOMPARE(error.code, QStringLiteral("invalid_document"));
+    }
+
+    void withoutAProvidersFileThisMachineIsTheOnlyInstance() {
+        QTemporaryDir dir;
+        const auto loaded = loadProviderInstances(dir.filePath("providers.json"));
+        QVERIFY(loaded.ok());
+        QCOMPARE(loaded.value().size(), 1);
+        QCOMPARE(loaded.value().first().name, QStringLiteral("This machine"));
+        QCOMPARE(loaded.value().first().type, QStringLiteral("omarchy"));
+    }
+
+    void aProvidersFileThatIsNotJsonIsAnError() {
+        QTemporaryDir dir;
+        QFile file(dir.filePath("providers.json"));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("{nope");
+        file.close();
+        const auto loaded = loadProviderInstances(file.fileName());
+        QVERIFY(!loaded.ok());
+        QCOMPARE(loaded.errors().first().code, QStringLiteral("invalid_json"));
+    }
+
+    void anOmarchyInstanceMakesTheOmarchyProvider() {
+        ProviderInstance instance;
+        instance.name = QStringLiteral("This machine");
+        instance.type = QStringLiteral("omarchy");
+        const auto made = createProvider(instance);
+        QVERIFY(made.ok());
+        QVERIFY(made.value());
+
+        instance.type = QStringLiteral("io.example.engine");
+        const auto unknown = createProvider(instance);
+        QVERIFY(!unknown.ok());
+        QVERIFY(!unknown.value());
+        QCOMPARE(unknown.errors().first().code, QStringLiteral("unknown_provider"));
+        QCOMPARE(strings(unknown.errors().first().valid), QStringList{"omarchy"});
+    }
+
+    void autoTakesTheFirstEnabledReadyInstanceInTheUsersOrder() {
+        Candidate unreachable = candidate("Down", {generate({model("a")})});
+        unreachable.description = Result<Description>(Errors{makeError("provider_unreachable", "Down does not answer.")});
+        const QList<Candidate> candidates{
+            candidate("Off", {generate({model("a")})}, false),
+            unreachable,
+            candidate("Loading", {generate({model("b", "loading")})}),
+            candidate("Ready", {generate({model("c")})}),
+            candidate("Later", {generate({model("d")})}),
+        };
+        const auto chosen = selectProvider(candidates, wants("image.generate"));
+        QVERIFY(chosen.ok());
+        QCOMPARE(chosen.value().instance, QStringLiteral("Ready"));
+        QCOMPARE(chosen.value().engine, QStringLiteral("sdcpp"));
+        QCOMPARE(chosen.value().model.handle.value("name").toString(), QStringLiteral("c"));
+    }
+
+    void autoNeedsTheRequiredProperties() {
+        const QList<Candidate> candidates{
+            candidate("A", {generate({model("plain", "ready", {{"input", QJsonArray{"text"}}})})}),
+            candidate("B", {generate({model("vision", "ready",
+                                            {{"input", QJsonArray{"text", "image"}}, {"edit", true}})})}),
+        };
+        Requirement requirement = wants("image.generate");
+        requirement.properties = QJsonObject{{"input", QJsonArray{"image"}}, {"edit", true}};
+        const auto chosen = selectProvider(candidates, requirement);
+        QVERIFY(chosen.ok());
+        QCOMPARE(chosen.value().instance, QStringLiteral("B"));
+    }
+
+    void aRequestedModelIsFoundByNameOrByHash() {
+        OfferedModel hashed = model("other-name");
+        hashed.handle.insert("hash", "sha256:" + QString(64, 'a'));
+        const QList<Candidate> candidates{
+            candidate("A", {generate({model("klein")})}),
+            candidate("B", {generate({model("z-image"), hashed})}),
+        };
+        Requirement byName = wants("image.generate");
+        byName.model = handle("z-image");
+        QCOMPARE(selectProvider(candidates, byName).value().instance, QStringLiteral("B"));
+
+        Requirement byHash = wants("image.generate");
+        byHash.model = QJsonObject{{"resource", "fugue/image-model"}, {"hash", "sha256:" + QString(64, 'a')},
+                                   {"name", "renamed.gguf"}};
+        const auto chosen = selectProvider(candidates, byHash);
+        QVERIFY(chosen.ok());
+        QCOMPARE(chosen.value().model.handle.value("name").toString(), QStringLiteral("other-name"));
+    }
+
+    void aNodePinBeatsTheWorkflowPinWhichBeatsAuto() {
+        const QList<Candidate> candidates{
+            candidate("First", {generate({model("a")})}),
+            candidate("Second", {generate({model("b")})}),
+            candidate("Third", {generate({model("c")})}),
+        };
+        Requirement requirement = wants("image.generate");
+        requirement.workflowPin = QStringLiteral("Second");
+        QCOMPARE(selectProvider(candidates, requirement).value().instance, QStringLiteral("Second"));
+        requirement.nodePin = QStringLiteral("Third");
+        QCOMPARE(selectProvider(candidates, requirement).value().instance, QStringLiteral("Third"));
+    }
+
+    void aPinThatIsNotConfiguredIsUnknownProvider() {
+        const QList<Candidate> candidates{candidate("This machine", {generate({model("a")})}),
+                                          candidate("Studio box", {generate({model("b")})})};
+        Requirement requirement = wants("image.generate");
+        requirement.nodePin = QStringLiteral("Studio");
+        const auto chosen = selectProvider(candidates, requirement);
+        QVERIFY(!chosen.ok());
+        const Error error = chosen.errors().first();
+        QCOMPARE(error.code, QStringLiteral("unknown_provider"));
+        QCOMPARE(strings(error.valid), (QStringList{"This machine", "Studio box"}));
+        QVERIFY(!error.hint.isEmpty());
+    }
+
+    void aPinnedInstanceThatCannotServeNeverFallsBackToAuto() {
+        const QList<Candidate> candidates{
+            candidate("Pinned", {CapabilityOffer{"image.edit", {model("klein")}}}),
+            candidate("Other", {generate({model("a")})}),
+        };
+        Requirement requirement = wants("image.generate");
+        requirement.workflowPin = QStringLiteral("Pinned");
+        const auto chosen = selectProvider(candidates, requirement);
+        QVERIFY(!chosen.ok());
+        QCOMPARE(chosen.errors().first().code, QStringLiteral("capability_unavailable"));
+        QVERIFY(chosen.errors().first().message.contains("Pinned"));
+    }
+
+    void aPinnedDisabledInstanceSaysToEnableIt() {
+        const QList<Candidate> candidates{candidate("Studio box", {generate({model("a")})}, false)};
+        Requirement requirement = wants("image.generate");
+        requirement.nodePin = QStringLiteral("Studio box");
+        const auto chosen = selectProvider(candidates, requirement);
+        QCOMPARE(chosen.errors().first().code, QStringLiteral("capability_unavailable"));
+        QVERIFY(chosen.errors().first().hint.contains("Enable"));
+        QVERIFY(chosen.errors().first().hint.contains("Studio box"));
+    }
+
+    void aPinnedUnreachableInstanceReportsWhy() {
+        Candidate down = candidate("Studio box", {});
+        down.description = Result<Description>(Errors{
+            makeError("provider_unreachable", "Studio box does not answer.", "Turn it on.")});
+        Requirement requirement = wants("image.generate");
+        requirement.nodePin = QStringLiteral("Studio box");
+        const auto chosen = selectProvider({down}, requirement);
+        QCOMPARE(chosen.errors().first().code, QStringLiteral("provider_unreachable"));
+        QCOMPARE(chosen.errors().first().hint, QStringLiteral("Turn it on."));
+    }
+
+    void nothingOfferingTheCapabilitySaysHowToFixIt() {
+        const QList<Candidate> candidates{
+            candidate("This machine", {CapabilityOffer{"image.edit", {model("klein")}}}),
+            candidate("Studio box", {generate({model("a")})}, false),
+        };
+        const auto chosen = selectProvider(candidates, wants("image.generate"));
+        QVERIFY(!chosen.ok());
+        const Error error = chosen.errors().first();
+        QCOMPARE(error.code, QStringLiteral("capability_unavailable"));
+        QVERIFY(error.message.contains("image.generate"));
+        QVERIFY(error.hint.contains("Start a model"));
+        QVERIFY(error.hint.contains("providers.json"));
+        QVERIFY(error.hint.contains("Enable Studio box"));
+    }
+
+    void onlyStoppedModelsSayWhichToStart() {
+        const QList<Candidate> candidates{
+            candidate("This machine", {generate({model("klein", "unavailable")})}),
+        };
+        const auto chosen = selectProvider(candidates, wants("image.generate"));
+        const Error error = chosen.errors().first();
+        QCOMPARE(error.code, QStringLiteral("capability_unavailable"));
+        QVERIFY(error.hint.contains("omarchy-agent-local start klein"));
+    }
+
+    void aRequestedModelThatIsNotRunningIsModelNotRunning() {
+        const QList<Candidate> candidates{
+            candidate("This machine", {generate({model("klein", "unavailable"), model("z-image")})}),
+        };
+        Requirement requirement = wants("image.generate");
+        requirement.model = handle("klein");
+        const auto chosen = selectProvider(candidates, requirement);
+        QVERIFY(!chosen.ok());
+        const Error error = chosen.errors().first();
+        QCOMPARE(error.code, QStringLiteral("model_not_running"));
+        QVERIFY(error.message.contains("klein"));
+        QVERIFY(error.hint.contains("omarchy-agent-local start klein"));
+        QCOMPARE(strings(error.valid), QStringList{"z-image"});
+    }
+
+    void aRequestedModelNobodyHasIsModelMissing() {
+        const QList<Candidate> candidates{candidate("This machine", {generate({model("z-image")})})};
+        Requirement requirement = wants("image.generate");
+        requirement.model = handle("klein");
+        const auto chosen = selectProvider(candidates, requirement);
+        QCOMPARE(chosen.errors().first().code, QStringLiteral("model_missing"));
+        QCOMPARE(chosen.errors().first().severity, Error::Severity::Error);
+        QCOMPARE(strings(chosen.errors().first().valid), QStringList{"z-image"});
+    }
+};
+
+QTEST_GUILESS_MAIN(TestProviderSelection)
+#include "test_provider_selection.moc"
