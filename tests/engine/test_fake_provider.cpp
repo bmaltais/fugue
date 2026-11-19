@@ -16,7 +16,7 @@ namespace {
 Description imageDescription() {
     OfferedModel model;
     model.handle = QJsonObject{{"resource", "fugue/image-model"}, {"name", "fake-model"}};
-    model.status = QStringLiteral("ready");
+    model.status = ModelStatus::Ready;
     Description description;
     description.engine = QStringLiteral("fake");
     description.capabilities.append(CapabilityOffer{QStringLiteral("image.generate"), {model}});
@@ -29,6 +29,14 @@ class TestFakeProvider : public QObject {
     Q_OBJECT
 
 private slots:
+    void aModelStatusHasANameAndAnythingElseReadsAsUnavailable() {
+        for (const ModelStatus status : {ModelStatus::Ready, ModelStatus::Loading, ModelStatus::Unavailable})
+            QCOMPARE(parseModelStatus(modelStatusName(status)), status);
+        QCOMPARE(modelStatusName(ModelStatus::Loading), QStringLiteral("loading"));
+        QCOMPARE(parseModelStatus("stopped"), ModelStatus::Unavailable);
+        QCOMPARE(OfferedModel().status, ModelStatus::Unavailable);
+    }
+
     void describeAnswersWithItsDescription() {
         FakeProvider provider(imageDescription());
         const auto described = await<Description>([&](auto reply) { provider.describe(reply); });
@@ -36,7 +44,7 @@ private slots:
         QCOMPARE(described.value().engine, QStringLiteral("fake"));
         QVERIFY(described.value().offer("image.generate"));
         QVERIFY(!described.value().offer("image.edit"));
-        QCOMPARE(described.value().offer("image.generate")->status(), QStringLiteral("ready"));
+        QCOMPARE(described.value().offer("image.generate")->status(), ModelStatus::Ready);
     }
 
     void repliesNeverArriveInsideTheCall() {

@@ -1,7 +1,6 @@
 #include "cli/commands.h"
 
 #include <QDir>
-#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -12,7 +11,7 @@
 
 #include "cli/compile_step.h"
 #include "cli/process.h"
-#include "cli/queue.h"
+#include "engine/queue.h"
 #include "cli/runs.h"
 #include "engine/compiler.h"
 #include "engine/document.h"
@@ -23,11 +22,7 @@ namespace fugue::cli {
 
 namespace {
 
-QString compact(const QJsonObject &object) {
-    return QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact));
-}
-
-// ---- nodes ----
+// ---- helpers ----
 
 QString humanProblem(const Error &error) {
     return QStringLiteral("%1 %2%3: %4")
@@ -40,6 +35,52 @@ QJsonObject nodeSummary(const NodeType &type) {
                         {"category", type.category}, {"description", type.description}, {"sink", type.sink}};
     return summary;
 }
+
+Reply loadFailed(const Errors &errors) {
+    Errors list = errors;
+    if (list.isEmpty())
+        list << makeError("internal", "The document could not be loaded.");
+    return Reply::failure(list);
+}
+
+Result<RunFolder> openRun(const Command &command, Context &context) {
+    return RunFolder::open(context.runsRoot, command.positionals.at(0));
+}
+
+// A run whose worker died is ended before it is shown, so it does not read as running
+// for ever.
+void endDeadRuns(const Context &context) {
+    Lock lock(context.lockPath);
+    endDeadRuns(context, lock);
+}
+
+// Per-node state from the events (9.4).
+QJsonObject foldNodes(const QList<QJsonObject> &events) {
+    QJsonObject nodes;
+    for (const QJsonObject &event : events) {
+        const QString node = event.value("node").toString();
+        const QString kind = event.value("event").toString();
+        if (node.isEmpty() || !kind.startsWith("node.") || kind == "node.preview")
+            continue;
+        QJsonObject entry = nodes.value(node).toObject();
+        entry.insert("state", kind == "node.progress" ? QStringLiteral("running") : kind.mid(5));
+        if (kind == "node.progress") {
+            for (const char *key : {"value", "stage", "message"})
+                if (event.contains(key))
+                    entry.insert(key, event.value(key));
+        } else if (kind == "node.skipped") {
+            entry.insert("reason", event.value("reason"));
+        } else if (kind == "node.error") {
+            entry.insert("error", event.value("error"));
+        }
+        if (kind == "node.done" || kind == "node.cached")
+            entry.remove("value");
+        nodes.insert(node, entry);
+    }
+    return nodes;
+}
+
+} // namespace
 
 Reply nodeList(const Command &command, Context &context) {
     std::optional<PortType> filter;
@@ -87,40 +128,36 @@ Reply nodeDescribe(const Command &command, Context &context) {
     return Reply::success(QJsonObject{{"nodes", nodes}}, QString::fromUtf8(writeJson(nodes)));
 }
 
-// ---- workflows ----
-
-Reply loadFailed(const Errors &errors) {
-    Errors list = errors;
-    if (list.isEmpty())
-        list << makeError("internal", "The document could not be loaded.");
-    return Reply::failure(list);
-}
-
-Reply validate(const Command &command, Context &context) {
-    Errors errors;
-    const std::optional<Document> document = Document::loadFile(command.positionals.at(0), errors);
+Reply validateWorkflow(const Command &command, Context &context) {
+    const Result<Document> document = Document::loadFile(command.positionals.at(0));
     if (!document)
-        return loadFailed(errors);
-    Process process(context);
-    errors = validateDocument(*document, context.registry, process.environment);
-    if (hasErrors(errors))
-        return Reply::failure(errors);
-    Reply reply = Reply::success(QJsonObject{{"valid", true}}, QStringLiteral("%1 is valid.").arg(command.positionals.at(0)));
-    reply.errors = errors; // warnings only
+        return loadFailed(document.errors());
+    const Validation validation = validateDocument(*document, context);
+    if (hasErrors(validation.errors))
+        return Reply::failure(validation.errors);
+    // The state of every node (10.3), for people too.
+    QStringList lines{QStringLiteral("%1 is valid.").arg(command.positionals.at(0))};
+    for (auto it = validation.nodes.begin(); it != validation.nodes.end(); ++it) {
+        const QJsonObject node = it.value().toObject();
+        const QString reason = node.value("reason").toString();
+        lines << QStringLiteral("  %1  %2%3").arg(it.key(), node.value("state").toString(),
+                                                  reason.isEmpty() ? QString() : " (" + reason + ")");
+    }
+    Reply reply = Reply::success(QJsonObject{{"valid", true}, {"nodes", validation.nodes}}, lines.join('\n'));
+    reply.errors = validation.errors; // warnings only
     return reply;
 }
 
-Reply compile(const Command &command, Context &context) {
-    Errors errors;
-    const std::optional<Document> document = Document::loadFile(command.positionals.at(0), errors);
+Reply compileWorkflow(const Command &command, Context &context) {
+    const Result<Document> document = Document::loadFile(command.positionals.at(0));
     if (!document)
-        return loadFailed(errors);
+        return loadFailed(document.errors());
     const Compilation compilation = compileDocument(*document, context.registry);
     if (!compilation.ok())
-        return Reply::failure(compilation.errors);
-    const QJsonObject compiled = compilation.graph->toJson();
+        return Reply::failure(compilation.errors());
+    const QJsonObject compiled = compilation->toJson();
     Reply reply = Reply::success(compiled, QString::fromUtf8(writeJson(compiled)));
-    reply.errors = compilation.errors; // warnings only
+    reply.errors = compilation.warnings();
     return reply;
 }
 
@@ -129,25 +166,23 @@ Reply workflowNew(const Command &command, Context &) {
     if (QFileInfo::exists(path))
         return Reply::failure(makeError("usage", QStringLiteral("%1 already exists.").arg(path),
                                         "Choose a new file name; fugue does not overwrite."));
-    Errors errors;
-    if (!Document().saveFile(path, errors))
+    const Errors errors = Document().saveFile(path);
+    if (hasErrors(errors))
         return loadFailed(errors);
     return Reply::success(QJsonObject{{"file", path}}, QStringLiteral("Wrote %1.").arg(path));
 }
 
 Reply workflowDescribe(const Command &command, Context &context) {
-    Errors errors;
-    const std::optional<Document> document = Document::loadFile(command.positionals.at(0), errors);
+    const Result<Document> document = Document::loadFile(command.positionals.at(0));
     if (!document)
-        return loadFailed(errors);
+        return loadFailed(document.errors());
     QJsonArray nodes;
     QJsonArray links;
     QStringList lines;
     const Nodes &all = document->graph.nodes;
     for (auto it = all.cbegin(); it != all.cend(); ++it) {
         const NodeType *type = context.registry.nodeType(it->type);
-        QJsonObject node{{"id", it.key()}, {"type", it->type}, {"mode", it->mode == NodeMode::Mute ? "mute"
-                                                                      : it->mode == NodeMode::Bypass ? "bypass" : "normal"}};
+        QJsonObject node{{"id", it.key()}, {"type", it->type}, {"mode", nodeModeName(it->mode)}};
         // A group id is not a node type, so only a missing type outside groups counts.
         node.insert("known", type != nullptr || document->group(it->type) != nullptr);
         nodes.append(node);
@@ -165,14 +200,13 @@ Reply workflowDescribe(const Command &command, Context &context) {
     const Compilation compilation = compileDocument(*document, context.registry);
     QJsonArray sinks;
     QJsonArray missing;
-    QJsonArray problems;
+    const QJsonArray problems = toJson(compilation.problems());
     if (compilation.ok())
-        for (const QString &sink : compilation.graph->sinks())
+        for (const QString &sink : compilation->sinks())
             sinks.append(sink);
     static const QSet<QString> missingCodes{"missing_input", "unknown_node_type", "unknown_link_source", "unknown_output",
                                             "unknown_input"};
-    for (const Error &error : compilation.errors) {
-        problems.append(error.toJson());
+    for (const Error &error : compilation.problems()) {
         lines << humanProblem(error);
         if (missingCodes.contains(error.code))
             missing.append(error.toJson());
@@ -184,13 +218,8 @@ Reply workflowDescribe(const Command &command, Context &context) {
                           lines.join('\n'));
 }
 
-// ---- runs ----
-
-Result<RunFolder> openRun(const Command &command, Context &context) {
-    return RunFolder::open(context.runsRoot, command.positionals.at(0));
-}
-
 Reply runsList(const Command &, Context &context) {
+    endDeadRuns(context);
     QJsonArray runs;
     QStringList lines;
     QMap<QString, int> positions; // 0 is the run that is going, then the waiting ones in order
@@ -203,11 +232,12 @@ Reply runsList(const Command &, Context &context) {
         if (!folder)
             continue;
         const QJsonObject state = folder->state();
-        QJsonObject run{{"id", id}, {"status", runStatus(*folder, folder->events())}};
+        const RunStatus status = folder->status();
+        QJsonObject run{{"id", id}, {"status", runStatusName(status)}};
         for (const char *key : {"workflow", "started", "ended"})
             if (state.contains(key))
                 run.insert(key, state.value(key));
-        if (positions.contains(id) && !isTerminal(run.value("status").toString()))
+        if (positions.contains(id) && !isTerminal(status))
             run.insert("position", positions.value(id));
         runs.append(run);
         lines << QStringLiteral("%1  %2").arg(id, run.value("status").toString());
@@ -215,40 +245,15 @@ Reply runsList(const Command &, Context &context) {
     return Reply::success(QJsonObject{{"runs", runs}}, lines.join('\n'));
 }
 
-// Per-node state from the events (9.4).
-QJsonObject foldNodes(const QList<QJsonObject> &events) {
-    QJsonObject nodes;
-    for (const QJsonObject &event : events) {
-        const QString node = event.value("node").toString();
-        const QString kind = event.value("event").toString();
-        if (node.isEmpty() || !kind.startsWith("node.") || kind == "node.preview")
-            continue;
-        QJsonObject entry = nodes.value(node).toObject();
-        entry.insert("state", kind == "node.progress" ? QStringLiteral("running") : kind.mid(5));
-        if (kind == "node.progress") {
-            for (const char *key : {"value", "stage", "message"})
-                if (event.contains(key))
-                    entry.insert(key, event.value(key));
-        } else if (kind == "node.skipped") {
-            entry.insert("reason", event.value("reason"));
-        } else if (kind == "node.error") {
-            entry.insert("error", event.value("error"));
-        }
-        if (kind == "node.done" || kind == "node.cached")
-            entry.remove("value");
-        nodes.insert(node, entry);
-    }
-    return nodes;
-}
-
 Reply runsStatus(const Command &command, Context &context) {
     const Result<RunFolder> folder = openRun(command, context);
     if (!folder)
         return Reply::failure(folder.errors());
+    endDeadRuns(context);
     const QList<QJsonObject> events = folder->events();
     QJsonObject data = folder->state();
     data.insert("id", folder->id());
-    data.insert("status", runStatus(*folder, events));
+    data.insert("status", runStatusName(folder->status(events)));
     data.insert("nodes", foldNodes(events));
     return Reply::success(data, QStringLiteral("%1  %2").arg(folder->id(), data.value("status").toString()));
 }
@@ -263,8 +268,7 @@ Reply runsResult(const Command &command, Context &context) {
     QSet<QString> wanted;
     bool filter = false;
     if (const QJsonObject json = folder->compiled(); !json.isEmpty()) {
-        Errors ignored;
-        if (const auto graph = CompiledGraph::fromJson(json, ignored)) {
+        if (const Result<CompiledGraph> graph = CompiledGraph::fromJson(json)) {
             filter = true;
             for (const QString &sink : graph->sinks())
                 wanted.insert(sink);
@@ -282,7 +286,7 @@ Reply runsResult(const Command &command, Context &context) {
         } else if (kind == "run.done")
             errors = event.value("errors").toArray();
     }
-    QJsonObject data{{"id", folder->id()}, {"status", runStatus(*folder, events)}, {"outputs", outputs}};
+    QJsonObject data{{"id", folder->id()}, {"status", runStatusName(folder->status(events))}, {"outputs", outputs}};
     if (!errors.isEmpty())
         data.insert("errors", errors);
     return Reply::success(data, QString::fromUtf8(writeJson(outputs)));
@@ -295,7 +299,7 @@ Reply runsEvents(const Command &command, Context &context) {
     if (command.has("follow")) {
         Reply reply;
         reply.streamed = true;
-        reply.exitCode = streamEvents(*folder, context) == "ok" ? 0 : 1;
+        reply.exitCode = streamEvents(*folder, context) == RunStatus::Ok ? 0 : 1;
         return reply;
     }
     const QList<QJsonObject> events = folder->events();
@@ -303,73 +307,16 @@ Reply runsEvents(const Command &command, Context &context) {
     QStringList lines;
     for (const QJsonObject &event : events) {
         array.append(event);
-        lines << compact(event);
+        lines << QString::fromUtf8(compactJson(event));
     }
     return Reply::success(QJsonObject{{"events", array}}, lines.join('\n'));
 }
 
-} // namespace
-
-void loadManifestFolder(Registry &registry, const QString &folder, void (*log)(const QString &)) {
-    if (folder.isEmpty())
-        return;
-    QStringList files;
-    QDirIterator it(folder, {"node.json"}, QDir::Files, QDirIterator::Subdirectories);
-    while (it.hasNext())
-        files << it.next();
-    files.sort();
-    for (const QString &path : files) {
-        QFile file(path);
-        const QJsonDocument document = file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll()) : QJsonDocument();
-        Errors errors;
-        if (document.isObject())
-            errors = registry.addManifest(document.object());
-        else
-            errors << makeError("invalid_json", QStringLiteral("%1 is not a JSON object.").arg(path));
-        for (const Error &error : errors)
-            if (log)
-                log(QStringLiteral("%1: %2: %3").arg(path, error.code, error.message));
-    }
-}
-
 Reply execute(const Command &command, Context &context) {
-    if (command.later)
+    if (!command.handler)
         return Reply::failure(makeError("usage", QStringLiteral("`fugue %1` is not available in this version.").arg(QString(command.name).replace('.', ' ')),
                                         "It arrives in a later release."));
-    const QString &name = command.name;
-    if (name == "node.list")
-        return nodeList(command, context);
-    if (name == "node.describe")
-        return nodeDescribe(command, context);
-    if (name == "validate")
-        return validate(command, context);
-    if (name == "compile")
-        return compile(command, context);
-    if (name == "run")
-        return startRun(command, context);
-    if (name == "workflow.new")
-        return workflowNew(command, context);
-    if (name == "workflow.describe")
-        return workflowDescribe(command, context);
-    if (name == "workflow.export")
-        return Reply::failure(makeError("internal", "Exporting a share copy is not built yet."));
-    if (name == "__worker") {
-        Reply reply;
-        reply.streamed = true;
-        reply.exitCode = runWorker(command.positionals.at(0), context);
-        return reply;
-    }
-    if (name == "runs.list")
-        return runsList(command, context);
-    if (name == "runs.status")
-        return runsStatus(command, context);
-    if (name == "runs.events")
-        return runsEvents(command, context);
-    if (name == "runs.result")
-        return runsResult(command, context);
-    if (name == "runs.cancel")
-        return cancelRun(command, context);
-    return Reply::failure(makeError("internal", QStringLiteral("Command %1 has no handler.").arg(name)));
+    return command.handler(command, context);
 }
 
 } // namespace fugue::cli

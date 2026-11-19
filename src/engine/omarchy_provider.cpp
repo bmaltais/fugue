@@ -1,5 +1,8 @@
 #include "omarchy_provider.h"
 
+#include "engine/json.h"
+
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -20,11 +23,6 @@ constexpr int kDefaultPollMs = 500;
 const QString kEngine = QStringLiteral("sdcpp");
 const QString kModelResource = QStringLiteral("fugue/image-model");
 
-QJsonObject readObject(const QString &path, bool *exists) {
-    QFile file(path);
-    *exists = file.open(QIODevice::ReadOnly);
-    return *exists ? QJsonDocument::fromJson(file.readAll()).object() : QJsonObject{};
-}
 
 QByteArray readKey(const QString &path) {
     QFile file(path);
@@ -87,12 +85,17 @@ struct OmarchyProvider::Job {
     JobResult result;
     bool asking = false; // a poll is in flight
     int failures = 0;    // polls in a row that got no answer
+    qint64 endedAt = 0;  // when it reached a terminal state, in ms
 };
 
 namespace {
 
 // Polls in a row without an answer before the job counts as lost.
 constexpr int kMaxPollFailures = 3;
+
+// How long a finished job is kept when nobody takes its result: as long as the server
+// keeps its own (--completed-ttl-seconds, 8.6).
+constexpr qint64 kFinishedJobTtlMs = 600 * 1000;
 
 // A server's error text: {"error": "..."} or {"error": {"message": "..."}}.
 QString serverMessage(const QJsonObject &body) {
@@ -243,14 +246,16 @@ void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> do
     QList<QJsonObject> rows;
     QByteArray key = m_instance.key.toUtf8();
     if (!remote) {
-        bool exists = false;
-        const QJsonObject status = readObject(state.filePath("status.json"), &exists);
-        if (!exists)
+        const Result<QJsonObject> status = readJsonObject(state.filePath("status.json"));
+        if (!status && status.error().code == QLatin1String("file_not_found"))
             return fail(QStringLiteral("Omarchy's local models are not set up on this machine (no %1).")
                             .arg(state.filePath("status.json")),
                         QStringLiteral("Install omarchy-local-ai, then set up an image model: "
                                        "omarchy-agent-local use <recipe>."));
-        const QJsonObject models = status.value("models").toObject();
+        // There but unreadable is not "no models": say so, and it is usually worth another try.
+        if (!status)
+            return fail(status.error().message, QStringLiteral("Try again; omarchy-agent-local may be rewriting it."));
+        const QJsonObject models = status->value("models").toObject();
         for (auto it = models.begin(); it != models.end(); ++it)
             rows.append(it.value().toObject());
         if (key.isEmpty())
@@ -260,9 +265,11 @@ void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> do
                         QStringLiteral("Set up a model with omarchy-agent-local, which writes the key, "
                                        "or set this provider's key in ~/.config/fugue/providers.json."));
     } else {
-        bool exists = false;
-        const QJsonObject network = readObject(state.filePath("network.json"), &exists);
-        const QJsonObject models = network.value("models").toObject();
+        // No network.json means no paired host; one that cannot be read is said as such.
+        const Result<QJsonObject> network = readJsonObject(state.filePath("network.json"));
+        if (!network && network.error().code != QLatin1String("file_not_found"))
+            return fail(network.error().message, QStringLiteral("Try again; omarchy-agent-local may be rewriting it."));
+        const QJsonObject models = network ? network->value("models").toObject() : QJsonObject();
         for (auto it = models.begin(); it != models.end(); ++it) {
             const QJsonObject row = it.value().toObject();
             if (row.value("dns").toString() == dns && row.value("paired").toBool())
@@ -320,23 +327,23 @@ void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> do
         const QString command = QStringLiteral("omarchy-agent-local start ") + recipe;
         const QString offline = row.value("offline").toString();
         if (!offline.isEmpty()) {
-            model.status = QStringLiteral("unavailable");
+            model.status = ModelStatus::Unavailable;
             model.reason = QStringLiteral("%1 is %2.").arg(host, offline);
             model.hint = QStringLiteral("Turn on %1, or check its tailnet connection.").arg(host);
         } else if (unit == QLatin1String("active") || remote) {
             // A paired host's unit in network.json is only as fresh as the agents panel's last
             // survey, so the server's own answer to the probe below decides.
-            model.status = QStringLiteral("ready");
+            model.status = ModelStatus::Ready;
         } else if (unit == QLatin1String("activating")) {
-            model.status = QStringLiteral("loading");
+            model.status = ModelStatus::Loading;
             model.reason = QStringLiteral("%1 is starting.").arg(recipe);
             model.hint = QStringLiteral("Wait for %1 to finish loading.").arg(recipe);
         } else if (unit == QLatin1String("installing")) {
-            model.status = QStringLiteral("unavailable");
+            model.status = ModelStatus::Unavailable;
             model.reason = QStringLiteral("%1 is still being set up.").arg(recipe);
             model.hint = QStringLiteral("Wait for its setup to finish, then start it.");
         } else {
-            model.status = QStringLiteral("unavailable");
+            model.status = ModelStatus::Unavailable;
             const QString error = row.value("error").toString();
             const QString fit = row.value("fits").toBool(true) ? QString() : row.value("fit_reason").toString();
             model.reason = !error.isEmpty() ? error
@@ -348,7 +355,7 @@ void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> do
         const qsizetype index = pending->models.size();
         pending->models.append(model);
         pending->edits.append(row.value("edit").toBool());
-        if (model.status != QLatin1String("ready"))
+        if (model.status != ModelStatus::Ready)
             continue;
 
         ++pending->waiting;
@@ -362,11 +369,11 @@ void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> do
                 model.defaults = defaultsOf(body);
                 model.limits = limitsOf(body);
             } else if (code == 503 && body.value("code").toString() == QLatin1String("model_loading")) {
-                model.status = QStringLiteral("loading");
+                model.status = ModelStatus::Loading;
                 model.reason = QStringLiteral("%1 is loading its model.").arg(recipe);
                 model.hint = QStringLiteral("Wait for %1 to finish loading.").arg(recipe);
             } else if (code == 401 || code == 403) {
-                model.status = QStringLiteral("unavailable");
+                model.status = ModelStatus::Unavailable;
                 model.reason = QStringLiteral("%1 refused the key.").arg(recipe);
                 model.hint = m_instance.key.isEmpty()
                                  ? QStringLiteral("Check Omarchy's key file, or pair again.")
@@ -374,11 +381,11 @@ void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> do
             } else if (code == 502 || code == 404) {
                 // The share proxy's answers for a model whose port refuses (stopped) or that is not
                 // shared (agent_local.py make_share_proxy _forward).
-                model.status = QStringLiteral("unavailable");
+                model.status = ModelStatus::Unavailable;
                 model.reason = QStringLiteral("%1 is not running%2.").arg(recipe, where);
                 model.hint = QStringLiteral("Start it%1: %2").arg(where, command);
             } else {
-                model.status = QStringLiteral("unavailable");
+                model.status = ModelStatus::Unavailable;
                 model.reason = code == 0 ? QStringLiteral("%1 is not answering at %2.").arg(recipe, server.base)
                                          : QStringLiteral("%1 answered HTTP %2.").arg(recipe).arg(code);
                 model.hint = QStringLiteral("Restart it%1: omarchy-agent-local stop %2, then start %2.").arg(where, recipe);
@@ -397,7 +404,24 @@ void OmarchyProvider::describe(Reply<Description> reply) {
     });
 }
 
+qint64 OmarchyProvider::now() const {
+    return m_clock ? m_clock() : QDateTime::currentMSecsSinceEpoch();
+}
+
+// A job leaves m_jobs when its result is taken (result()). One that ended with nothing
+// to take, or whose result nobody asked for, leaves here once it is old.
+void OmarchyProvider::forgetOldJobs() {
+    const qint64 oldest = now() - kFinishedJobTtlMs;
+    for (auto it = m_jobs.begin(); it != m_jobs.end();) {
+        if (it.value()->status.isTerminal() && it.value()->endedAt < oldest)
+            it = m_jobs.erase(it);
+        else
+            ++it;
+    }
+}
+
 void OmarchyProvider::submit(const JobRequest &request, Reply<QString> reply) {
+    forgetOldJobs();
     QPointer<OmarchyProvider> self(this);
     discover([self, request, reply = std::move(reply)](const Result<Discovery> &found) {
         if (!self)
@@ -467,6 +491,7 @@ void OmarchyProvider::submit(const JobRequest &request, Reply<QString> reply) {
 }
 
 void OmarchyProvider::status(const QString &job, Reply<JobStatus> reply) {
+    forgetOldJobs();
     const auto found = m_jobs.value(job);
     if (!found)
         return later(std::move(reply), Result<JobStatus>(makeError("internal", "No job " + job + ".")));
@@ -503,6 +528,9 @@ void OmarchyProvider::result(const QString &job, Reply<JobResult> reply) {
         return later(std::move(reply),
                      Result<JobResult>(makeError("internal", QStringLiteral("Job %1 is %2, not done.")
                                                                  .arg(job, found->status.state))));
+    // Handed over once: the files are in the caller's outputDir, and nothing else is
+    // kept for a job that is over.
+    m_jobs.remove(job);
     later(std::move(reply), Result<JobResult>(found->result));
 }
 
@@ -613,6 +641,8 @@ void OmarchyProvider::change(const QString &id, const JobStatus &status) {
     if (!job || sameStatus(job->status, status))
         return;
     job->status = status;
+    if (status.isTerminal())
+        job->endedAt = now();
     emit statusChanged(id, status);
 }
 

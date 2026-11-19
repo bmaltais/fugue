@@ -1,9 +1,11 @@
 #include "providers.h"
 
+#include "engine/json.h"
+#include "engine/paths.h"
 #include "omarchy_provider.h"
 
 #include <QDir>
-#include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QSet>
@@ -79,7 +81,7 @@ Result<Selection> choose(const QList<const Candidate *> &usable, const Requireme
                 fitting.append(Match{candidate, &model});
     }
     const auto isReady = [](const Match &match) {
-        return match.model->status == QLatin1String("ready");
+        return match.model->status == ModelStatus::Ready;
     };
     QJsonArray readyNames;
     for (const Match &match : fitting)
@@ -145,6 +147,14 @@ Result<Selection> choose(const QList<const Candidate *> &usable, const Requireme
     } else {
         message = QStringLiteral("The pinned provider %1 cannot serve %2 right now.")
                       .arg(pinned, requirement.capability);
+        // A model that is not ready may give no hint of its own; the error still says
+        // how to fix it (8.5).
+        if (fixes.isEmpty()) {
+            QStringList names;
+            for (const Match &match : fitting)
+                appendUnique(names, modelName(match.model->handle));
+            fixes.append(QStringLiteral("Start %1 on %2, or remove the pin.").arg(either(names), pinned));
+        }
     }
     for (const Match &match : fitting)
         if (!match.model->reason.isEmpty() && !message.contains(match.model->reason))
@@ -156,7 +166,8 @@ Result<Selection> choose(const QList<const Candidate *> &usable, const Requireme
 } // namespace
 
 QString providersPath() {
-    return QDir::home().filePath(QStringLiteral(".config/fugue/providers.json"));
+    // $XDG_CONFIG_HOME is honored (1.4), as for every other path of Fugue's own.
+    return configDir() + QStringLiteral("/providers.json");
 }
 
 Result<QList<ProviderInstance>> parseProviderInstances(const QJsonObject &document) {
@@ -200,20 +211,16 @@ Result<QList<ProviderInstance>> parseProviderInstances(const QJsonObject &docume
 }
 
 Result<QList<ProviderInstance>> loadProviderInstances(const QString &path) {
-    QFile file(path);
-    if (!file.exists())
+    const Result<QJsonObject> document = readJsonObject(path);
+    if (document)
+        return parseProviderInstances(document.value());
+    if (document.error().code == QLatin1String("file_not_found") && !QFileInfo::exists(path))
         return Result<QList<ProviderInstance>>(defaultProviderInstances());
-    if (!file.open(QIODevice::ReadOnly))
-        return Result<QList<ProviderInstance>>(
-            makeError(QStringLiteral("permission_denied"), QStringLiteral("Cannot read %1.").arg(path)));
-    QJsonParseError parseError;
-    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
-    if (parseError.error != QJsonParseError::NoError || !document.isObject())
-        return Result<QList<ProviderInstance>>(
-            makeError(QStringLiteral("invalid_json"),
-                      QStringLiteral("%1 is not valid JSON: %2.").arg(path, parseError.errorString()),
-                      QStringLiteral("Fix the file, or remove it to use this machine only.")));
-    return parseProviderInstances(document.object());
+    // Unreadable or corrupt is never taken for missing: the user's instances and keys
+    // are in there.
+    Error error = document.error();
+    error.hint = QStringLiteral("Fix the file, or remove it to use this machine only.");
+    return Result<QList<ProviderInstance>>(error);
 }
 
 QList<ProviderInstance> defaultProviderInstances() {

@@ -531,7 +531,8 @@ only ever execute this form, and `fugue compile` prints it.
 - Sinks inside a group are dropped ([5.5](#55-sinks-inside-a-group)).
 - Nodes with no sink downstream are dropped, unless the run is "run to here".
 - `auto` values are kept; the engine resolves them when the run starts.
-- A compiled graph can be run directly: `fugue run compiled.json`.
+- A compiled graph can be run directly: `fugue run compiled.json`. `--set`, `--to` and
+  `--provider` change a compile, so with a compiled graph they are `usage` errors.
 
 ---
 
@@ -822,7 +823,10 @@ manifest plus something that can execute it. Packs on disk are one way in (M3); 
 pack and test fakes register through the same registry in code. M0 therefore builds the
 registry, the manifest data model for inputs and outputs ([6.1](#61-nodejson)) and its
 validation, and registers fake node types and a fake provider in tests; loading packs from disk
-is added in M3 without changing the compiler or the engine.
+is added in M3 without changing the compiler or the engine. The provider entries are the
+configured instances ([8.2](#82-provider-instances)) in the user's order, each with the provider
+made for it. What a provider offers is not kept in the registry: it changes while the app runs,
+so each run asks again.
 
 ---
 
@@ -1006,17 +1010,23 @@ Servers drop finished jobs (the Omarchy image server after 600 seconds).
 The shipped providers are not special: they sit behind the same interface and registry as a
 third-party module ([8.11](#811-the-provider-interface)).
 
-**The `omarchy` provider** (from reading omarchy-local-ai and Fantasi's source; to be confirmed
-against a running engine):
+**The `omarchy` provider** (from reading omarchy-local-ai and Fantasi's source, checked against
+omarchy-local-ai at commit 703ae0c when the provider was built):
 
 - Discovery: `~/.local/state/omarchy/agent-local/status.json`. Each model row gives `kind`
-  (`text`, `image`, `video`, `music`), `edit`, `input`, `endpoint` and `unit`. Fugue routes by
-  these fields. It does not copy Fantasi's "model in use" routing.
+  (one of `text`, `image`, `video` or `music`), `edit`, `endpoint` and `unit`. A local row has
+  no `input` field. Only the rows of a paired host have one, in the tailnet `models.json` and in
+  `network.json`, and `["text"]` is the default. Fugue routes by these fields. It does not copy
+  Fantasi's "model in use" routing.
+- A paired host is read from `network.json` in the same folder, with its own key in
+  `~/.config/omarchy/agent-local/remotes/<host>.key`. Pairing itself is done with
+  `omarchy-agent-local pair <host>`.
 - One preloaded model per server. Changing models goes through `omarchy-agent-local`, only with
   the user's confirmation.
 - Auth: a bearer key read from `~/.config/omarchy/agent-local/key`.
 - Fantasi is Omarchy's simple image app; Fugue reuses its way of talking to these servers.
-- Images and video: the native `/sdcpp/v1` job API on the endpoint's origin: submit, poll, fetch
+- Images and video: the native `/sdcpp/v1` job API. Its root is the endpoint minus its trailing
+  `/v1`, not the endpoint's origin, because a paired host's endpoint has a path. Submit, poll, fetch
   at once, cancel and keep polling until the server reports a terminal state. Defaults (steps,
   guidance, size) come from the server's capabilities. Progress is per sampling pass. Step
   previews are requested for images.
@@ -1102,6 +1112,9 @@ reference. A new inference runtime is a new provider module.
   `MemAvailable` from `/proc/meminfo`, capped at the heap size (on the GB10 nvidia-smi reports no
   memory figures and the Vulkan budget does not see other processes). CPU devices are skipped.
   omarchy-local-ai does not model a discrete NVIDIA card, so its figures are not relied on.
+  M0 builds the `MemAvailable` reading only, and nothing uses it yet: telling the device type,
+  the cap at the heap size and the discrete card's figure need Vulkan, which the engine first
+  links with the helper (#32). Until then free GPU memory is not measured before a node starts.
 - GPU work in the engine and the CLI uses Vulkan compute directly or runs in the helper, never
   Qt RHI: Qt's `offscreen` platform gives neither a Vulkan instance nor a GL context. Fugue links
   no CUDA and bundles no NVIDIA files; the helper builds against the system CUDA package.
@@ -1187,9 +1200,13 @@ Per-node events go to the canvas and, as JSON lines, to the CLI:
 | `node.preview` | `node`, `image` |
 | `node.cached` | `node`, `outputs` |
 | `node.done` | `node`, `outputs`, `seconds` |
-| `node.skipped` | `node`, `reason` (`muted`, `upstream_failed`, `upstream_empty`, `cancelled`) |
+| `node.skipped` | `node`, `reason` (`muted`, `upstream_muted`, `upstream_failed`, `upstream_empty`, `cancelled`) |
 | `node.error` | `node`, `error` |
 | `run.done` | `status` (`ok`, `failed`, `cancelled`), `errors` |
+
+The compiler's reason for leaving a node out ([4.8](#48-the-compiled-graph)) is passed through
+as it is, so a node downstream of a muted one is `upstream_muted`. A node that is only
+`not_part_of_output` gets no event: it is not part of the run.
 
 Clients must ignore events and fields they do not know. Sampling previews stream from providers
 that offer them.
@@ -1237,7 +1254,14 @@ run worker, prints the run id and returns; `--wait` stays attached and streams e
   sorting gives the order. A process starts its run only when its entry sorts first and it holds
   the advisory lock `~/.local/state/fugue/engine.lock`. "Run first" writes an entry that sorts
   ahead of the waiting ones; removing a queued run deletes its entry. An entry whose process is
-  gone is discarded.
+  gone is discarded, and its run is ended as `failed`.
+- A process that holds the lock is alive, so an active entry is dead exactly when someone else
+  can take the lock. A waiting entry is dead when the process id it records is not that run's
+  worker; a process id alone is not trusted, because ids are reused.
+- A run's `run.json` and `run.done` have one writer at a time: `fugue run` until it has started
+  the worker, then nobody while the run waits, then the worker once it has made its entry
+  active. Whoever takes a waiting entry out of the queue (a cancel, or a process that found it
+  dead) ends that run. `run.done` decides a run's status once it is there.
 
 ### 9.9 Not in v0.1
 
@@ -1293,7 +1317,9 @@ write a duplicate.
 ### 10.3 Per-node state
 
 The canvas and `fugue validate --json` show one of these per node: `cached`, `stale` (would
-run), `running`, `frozen`, `error`, `skipped`. A size view shows what the cache holds per
+run), `running`, `frozen`, `error`, `skipped`. `fugue validate --json` gives them in `data` as
+`nodes`, keyed by path id: `{"state": "stale"}`, and for a node the compiler left out
+`{"state": "skipped", "reason": "muted"}`. Without `--json` it prints one line per node. A size view shows what the cache holds per
 workflow and per node.
 
 ### 10.4 Freeze
@@ -1586,12 +1612,23 @@ Exit codes: 0 for success, 1 for any failure. A run that ends `failed` or `cance
 With `--json`, stdout carries exactly one JSON object:
 
 ```json
-{"ok": true, "data": {"run": "20261118-153012-k3f9", "status": "queued"}}
+{"ok": true, "data": {"run": "20261118-153012-123-k3f9", "status": "queued"}}
+```
+
+A command that succeeds with warnings adds a top-level `warnings` array beside `ok` and `data`.
+It is present only when there are warnings, and each entry has the form of an error
+([13.3](#133-errors)) with severity `warning`:
+
+```json
+{"ok": true, "data": {"valid": true, "nodes": {"old": {"state": "skipped", "reason": "not_part_of_output"}}},
+ "warnings": [{"code": "not_part_of_output", "severity": "warning", "node": "old",
+               "message": "Node old is not part of any output: no sink depends on it."}]}
 ```
 
 Streaming commands (`run --wait`, `runs events --follow`) instead write one event per line
 ([9.4](#94-events)), ending with `run.done`. Without `--json` the same information is printed
-for people. Logs and diagnostics go to stderr.
+for people: an error keeps its node, input or output, its valid options and its hint. Logs and
+diagnostics go to stderr.
 
 ### 13.3 Errors
 
@@ -1621,7 +1658,7 @@ Codes in v0.1:
 
 | Area | Codes |
 | --- | --- |
-| Files | `file_not_found`, `invalid_json`, `invalid_document`, `unsupported_format_version`, `permission_denied` |
+| Files | `file_not_found`, `invalid_json`, `invalid_document`, `unsupported_format_version`, `permission_denied`, `media_unreadable` |
 | Graph | `unknown_node_type`, `node_version_mismatch`, `unknown_input`, `missing_input`, `unknown_link_source`, `unknown_output`, `type_mismatch`, `value_out_of_range`, `value_not_in_choices`, `cycle`, `group_recursion`, `unknown_provider` |
 | Warnings | `not_part_of_output`, `model_missing`, `frozen_result_missing`, `pack_update_available` |
 | Trust | `pack_untrusted`, `needs_confirmation` |
@@ -1753,11 +1790,11 @@ To measure or confirm before the part that depends on each is built. None blocks
 | ~~Offscreen GPU compute, Vulkan device enumeration, free-memory measurement, CUDA terms~~ Done ([spikes/04](spikes/04-gpu.md)); AMD free memory unmeasured | [8.10](#810-gpu-memory-and-the-helper) | #4 |
 | ~~Plugin-interface prior art~~ Done: rules in [6.9](#69-native-tier) ([spikes/06](spikes/06-plugin-abi.md)); the slot list freezes after two built-in nodes use it | freezing [6.9](#69-native-tier) | #6 |
 | Whether talking to a separate ComfyUI process, bundling none of its code, is acceptable for an MIT app | the `comfyui` provider | owner decision |
-| How pairing with a remote Omarchy host works beyond reading its key file | remote `omarchy` instances | with #11 |
-| Whether Omarchy's engine runs on a discrete NVIDIA card | local use on such machines | with #11 |
+| ~~How pairing with a remote Omarchy host works beyond reading its key file~~ Done: pairing goes through `omarchy-agent-local pair` and the `remotes/<host>.key` files, and the `omarchy` provider uses it ([8.7](#87-shipped-providers)). Still open: a model shared after the last `network.json` write stays invisible until that file is rewritten | remote `omarchy` instances | #11 |
+| ~~Whether Omarchy's engine runs on a discrete NVIDIA card~~ Answered: no. At omarchy-local-ai 703ae0c the engine detects no discrete NVIDIA card and has no sd-server runtime for one; the `omarchy` provider reports `capability_unavailable` with how to fix it. Local use on such machines waits for the helper | local use on such machines | #11, #32 |
 | The exact WebP container field for the embedded workflow | [11.7](#117-embedding-in-outputs) | with #13 |
 | Whether Alt shortcuts clash with the window manager's bindings | [12.4](#124-default-keymap) | with #17 |
-| An existing package named `fugue` | packaging | #34 |
+| ~~An existing package named `fugue`~~ None: the AUR has no package named `fugue` (checked 2026-11-19) | packaging | #34 |
 
 ---
 
@@ -1810,6 +1847,27 @@ Each has a confidence and can be overruled; say so on the issue that builds it.
 | Tabs and import of outputs are in M2 (the design tickets disagreed; the issues decide) | 12.10, 15 | medium |
 | Pack converters as programs declared in `pack.json` | 11.9 | medium |
 | The registry is built in M0 and packs on disk plug into it in M3 | 6.12 | high |
+
+Building M0 made these further choices. Each changes or pins down what a section above says.
+
+| Choice made in M0 | Section | Confidence |
+| --- | --- | --- |
+| A run id is `YYYYMMDD-HHMMSS-mmm-xxxx`: the UTC start time to the millisecond and four random characters | 9.7 | medium-high |
+| A queue entry is named `<class>-<enqueue time in ms, 14 digits>-<run id>`, with class 0 active, 3 "run first" and 5 waiting | 9.8 | medium-high |
+| The run worker is the hidden command `fugue __worker <run id>`; a waiting entry's process is checked by that command line, an active one by the engine lock | 9.8 | medium-high |
+| One writer per run at a time, and `run.done` decides the status | 9.7, 9.8 | medium-high |
+| The model input of image nodes uses the resource id `fugue/image-model`; M1's nodes must use it or no `omarchy` model matches | 2.5, 8.4 | medium |
+| Status, properties, limits and defaults in a provider's description are per model, not per capability: one instance can run several servers | 8.8 | medium-high |
+| `fugue validate` reports every provider problem of 8.5 as a warning, not only a missing model, and a provider instance that cannot be made is a warning too | 8.5, 9.1 | medium-high |
+| The success envelope has a top-level `warnings` array | 13.2 | high |
+| A frozen node serves its result even when a node upstream of it failed | 10.4 | medium-high |
+| A video's pending edits stay pending in handles and cache records, and are applied (lossless FFV1 and FLAC in Matroska) only for a node that needs a plain file | 2.4 | medium |
+| A new error code, `media_unreadable`, for a file that is not the image, video or audio its port says | 13.3 | high |
+| The cache key's pack part is the type id's namespace with no pack version until packs exist | 10.1 | medium |
+| Garbage is collected by a run worker, at most once an hour | 10.5 | medium |
+| Load-time errors inside a group definition name the inner node id and start "Group <id>:", because no instance path exists at load; compile errors name path ids | 13.3 | medium |
+| Free GPU memory: only the `MemAvailable` reading is built; the device type and the discrete figure wait for the helper | 8.10 | medium |
+| Omarchy's own folders are built from the home folder, as omarchy-local-ai builds them, not from XDG variables | 1.4, 8.7 | medium-high |
 
 ## Appendix B: issue to section map
 

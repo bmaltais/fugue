@@ -10,6 +10,10 @@ namespace fugue {
 // [a-z][a-z0-9_-]{0,31}. No '.' or '/', which are separators.
 bool isNodeId(const QString &text);
 
+// A path id (4.8): node ids joined with '/', the group instances from the outside in and
+// then the node, such as "save" or "g7/inner3/s2".
+bool isPathId(const QString &text);
+
 // A node type, group or declared port type id (3.1, 2.2): "<namespace>/<name>".
 // The namespace is lowercase reverse-DNS (at least two labels) or one of the
 // reserved words "fugue" and "local"; the name matches [a-z][a-z0-9-]*.

@@ -59,7 +59,7 @@ private slots:
                                               " 'b': {'type': 'fugue/join', 'inputs': {'a': {'from': 'a.text'}, 'b': '!'}},"
                                               " 's': {'type': 'fugue/save', 'inputs': {'value': {'from': 'b.text'}}}}"));
 
-        QCOMPARE(ran.outcome.status, QStringLiteral("ok"));
+        QCOMPARE(ran.outcome.status, RunStatus::Ok);
         QVERIFY(ran.outcome.errors.isEmpty());
         QCOMPARE(trace(ran.events, true),
                  (QStringList{"run.started", "node.queued a", "node.queued b", "node.queued s", "node.running a",
@@ -113,7 +113,7 @@ private slots:
         QCOMPARE(world.calls.total(), 5);
 
         const Ran second = world.run(graph);
-        QCOMPARE(second.outcome.status, QStringLiteral("ok"));
+        QCOMPARE(second.outcome.status, RunStatus::Ok);
         QCOMPARE(world.calls.total(), 5);
         QVERIFY(second.outcome.ran.isEmpty());
         QCOMPARE(trace(second.events),
@@ -232,7 +232,7 @@ private slots:
                                               " 'd': {'type': 'fugue/text', 'inputs': {'text': 'beside'}},"
                                               " 't': {'type': 'fugue/save', 'inputs': {'value': {'from': 'd.text'}}}}"));
 
-        QCOMPARE(ran.outcome.status, QStringLiteral("failed"));
+        QCOMPARE(ran.outcome.status, RunStatus::Failed);
         QCOMPARE(traceOf(ran.events, {"a", "b", "s"}),
                  (QStringList{"node.running a", "node.error a node_failed", "node.skipped b upstream_failed",
                               "node.skipped s upstream_failed"}));
@@ -260,20 +260,18 @@ private slots:
 
     void anErrorInsideAGroupNamesThePathId() {
         World world;
-        Errors errors;
         const auto document = Document::fromJson(
             json("{'fugue': 1, 'graph': {'nodes': {"
                  " 'g7': {'type': 'local/broken', 'version': '1.0.0', 'inputs': {}},"
                  " 's': {'type': 'fugue/save', 'version': '1.0.0', 'inputs': {'value': {'from': 'g7.text'}}}}},"
                  " 'groups': {'local/broken': {'version': '1.0.0', 'name': 'Broken', 'inputs': [],"
                  "   'outputs': [{'name': 'text', 'from': 'inner.text'}],"
-                 "   'nodes': {'inner': {'type': 'fugue/fail', 'version': '1.0.0', 'inputs': {'text': 'x'}}}}}}"),
-            errors);
-        QVERIFY2(document.has_value(), qPrintable(World::dump(errors)));
+                 "   'nodes': {'inner': {'type': 'fugue/fail', 'version': '1.0.0', 'inputs': {'text': 'x'}}}}}}"));
+        QVERIFY2(document.ok(), qPrintable(World::dump(document.errors())));
         const Compilation compiled = compile(*document, world.registry);
-        QVERIFY2(compiled.ok(), qPrintable(World::dump(compiled.errors)));
+        QVERIFY2(compiled.ok(), qPrintable(World::dump(compiled.errors())));
 
-        const Ran ran = world.run(*compiled.graph);
+        const Ran ran = world.run(*compiled);
         QCOMPARE(ran.outcome.errors.size(), 1);
         QCOMPARE(ran.outcome.errors.first().node, QStringLiteral("g7/inner"));
         QVERIFY(QDir(ran.path + "/nodes/g7/inner").exists());
@@ -305,7 +303,7 @@ private slots:
         world.kernel("fugue/text", [](const NodeContext &) -> Result<Values> { throw std::runtime_error("vips broke"); });
         const Ran ran = world.run(world.graph("{'a': {'type': 'fugue/text', 'inputs': {'text': 'x'}},"
                                               " 's': {'type': 'fugue/save', 'inputs': {'value': {'from': 'a.text'}}}}"));
-        QCOMPARE(ran.outcome.status, QStringLiteral("failed"));
+        QCOMPARE(ran.outcome.status, RunStatus::Failed);
         QCOMPARE(ran.outcome.errors.first().code, QStringLiteral("node_failed"));
         QCOMPARE(ran.outcome.errors.first().message, QStringLiteral("vips broke"));
     }
@@ -329,7 +327,7 @@ private slots:
                                               " 's': {'type': 'fugue/save', 'inputs': {'value': {'from': 'b.text'}}},"
                                               " 'c': {'type': 'fugue/join', 'inputs': {'a': 'kept', 'b': {'from': 'a.text'}}},"
                                               " 't': {'type': 'fugue/save', 'inputs': {'value': {'from': 'c.text'}}}}"));
-        QCOMPARE(ran.outcome.status, QStringLiteral("ok"));
+        QCOMPARE(ran.outcome.status, RunStatus::Ok);
         QCOMPARE(traceOf(ran.events, {"b", "s"}),
                  (QStringList{"node.skipped b upstream_empty", "node.skipped s upstream_empty"}));
         // An optional input treats it as absent.
@@ -344,7 +342,7 @@ private slots:
                                               " 's': {'type': 'fugue/save', 'inputs': {'value': {'from': 'b.text'}}},"
                                               " 'd': {'type': 'fugue/text', 'inputs': {'text': 'beside'}},"
                                               " 't': {'type': 'fugue/save', 'inputs': {'value': {'from': 'd.text'}}}}"));
-        QCOMPARE(ran.outcome.status, QStringLiteral("ok"));
+        QCOMPARE(ran.outcome.status, RunStatus::Ok);
         QCOMPARE(traceOf(ran.events, {"a", "b", "s"}),
                  (QStringList{"node.skipped a muted", "node.skipped b upstream_muted", "node.skipped s upstream_muted"}));
         QCOMPARE(world.calls.all(), (QStringList{"d", "t"}));
@@ -375,7 +373,7 @@ private slots:
                                               " 'b': {'type': 'fugue/text', 'inputs': {'text': 'y'}},"
                                               " 's': {'type': 'fugue/save', 'inputs': {'value': {'from': 'a.text'}}},"
                                               " 't': {'type': 'fugue/save', 'inputs': {'value': {'from': 'b.text'}}}}"));
-        QCOMPARE(ran.outcome.status, QStringLiteral("ok"));
+        QCOMPARE(ran.outcome.status, RunStatus::Ok);
     }
 
     void noMoreCpuNodesRunThanThereAreSlots() {
@@ -400,7 +398,7 @@ private slots:
                                               " 't': {'type': 'fugue/save', 'inputs': {'value': {'from': 'b.text'}}},"
                                               " 'u': {'type': 'fugue/save', 'inputs': {'value': {'from': 'c.text'}}},"
                                               " 'v': {'type': 'fugue/save', 'inputs': {'value': {'from': 'p.text'}}}}"));
-        QCOMPARE(ran.outcome.status, QStringLiteral("ok"));
+        QCOMPARE(ran.outcome.status, RunStatus::Ok);
         // All four are ready at once and started in one pass: the CPU node
         // starts beside the first GPU node, the other GPU nodes wait their turn.
         QCOMPARE(traceOf(ran.events, {"a", "b", "c"}),
@@ -445,7 +443,7 @@ private slots:
         released.release();
         QTRY_VERIFY(run.isFinished());
 
-        QCOMPARE(outcome.status, QStringLiteral("cancelled"));
+        QCOMPARE(outcome.status, RunStatus::Cancelled);
         QCOMPARE(trace(folder.events()),
                  (QStringList{"run.started", "node.running a", "node.done a", "node.running b", "node.skipped d cancelled",
                               "node.skipped s cancelled", "node.skipped t cancelled", "node.skipped b cancelled",
@@ -458,7 +456,7 @@ private slots:
         // What finished before the cancel stays cached.
         released.release();
         const Ran again = world.run(graph);
-        QCOMPARE(again.outcome.status, QStringLiteral("ok"));
+        QCOMPARE(again.outcome.status, RunStatus::Ok);
         QCOMPARE(world.calls.count("a"), 1);
         QCOMPARE(traceOf(again.events, {"a"}), QStringList{"node.cached a"});
     }
@@ -492,7 +490,7 @@ private slots:
         std::atomic<bool> cancel{true};
         const RunFolder folder = world.folder();
         const RunOutcome outcome = runGraph(world.graph(branches("fox", "!")), folder, world.environment(), {}, &cancel);
-        QCOMPARE(outcome.status, QStringLiteral("cancelled"));
+        QCOMPARE(outcome.status, RunStatus::Cancelled);
         QCOMPARE(world.calls.total(), 0);
         QCOMPARE(trace(folder.events()).last(), QStringLiteral("run.done cancelled"));
     }
@@ -541,7 +539,7 @@ private slots:
         const Ran ran = world.run(world.graph("{'r': {'type': 'fugue/render', 'inputs': {'text': 'pixels'}},"
                                               " 'm': {'type': 'fugue/read', 'inputs': {'latent': {'from': 'r.latent'}}},"
                                               " 's': {'type': 'fugue/save', 'inputs': {'value': {'from': 'm.text'}}}}"));
-        QCOMPARE(ran.outcome.status, QStringLiteral("ok"));
+        QCOMPARE(ran.outcome.status, RunStatus::Ok);
         // The next node read the file at the store's path.
         QCOMPARE(ran.outcome.outputs.value("m").value("text").text(), QStringLiteral("pixels"));
         const QString passed = ran.outcome.outputs.value("m").value("path").text();
@@ -583,7 +581,7 @@ private slots:
         const CompiledGraph graph = world.graph("{'p': {'type': 'fugue/picture'},"
                                                 " 's': {'type': 'fugue/save', 'inputs': {'value': {'from': 'p.image'}}}}");
         const Ran ran = world.run(graph);
-        QCOMPARE(ran.outcome.status, QStringLiteral("ok"));
+        QCOMPARE(ran.outcome.status, RunStatus::Ok);
         const MediaHandle image = ran.outcome.outputs.value("p").value("image").media();
         QCOMPARE(image.width(), 8);
         // The pixels are let go once nothing more will read them; the file stays.
@@ -631,7 +629,7 @@ private slots:
         b.insert("frozen", key);
         nodes.insert("b", b);
         const Ran ran = world.run(world.graph(nodes));
-        QCOMPARE(ran.outcome.status, QStringLiteral("ok"));
+        QCOMPARE(ran.outcome.status, RunStatus::Ok);
         QCOMPARE(ran.outcome.states.value("b"), NodeState::Frozen);
         QCOMPARE(ran.outcome.outputs.value("b").value("text").text(), QStringLiteral("fox!"));
         QCOMPARE(world.calls.count("b"), 1);
@@ -642,6 +640,44 @@ private slots:
                  QStringLiteral("frozen"));
     }
 
+    // 10.4: "never invalidated by upstream changes", a failure upstream included.
+    void aFrozenNodeServesItsResultEvenWhenItsUpstreamFails() {
+        World world;
+        const Ran first = world.run(world.graph(branches("fox", "!")));
+        const QString key = first.outcome.keys.value("b");
+        QVERIFY(world.cache->freeze(key));
+
+        QJsonObject nodes = json(branches("owl", "!"));
+        QJsonObject b = nodes.value("b").toObject();
+        b.insert("frozen", key);
+        nodes.insert("b", b);
+        world.kernel("fugue/text", [](const NodeContext &) -> Result<Values> {
+            return makeError("node_failed", "The upstream node broke.");
+        });
+        const Ran ran = world.run(world.graph(nodes));
+        QCOMPARE(ran.outcome.states.value("a"), NodeState::Error);
+        QCOMPARE(ran.outcome.states.value("b"), NodeState::Frozen);
+        QCOMPARE(ran.outcome.outputs.value("b").value("text").text(), QStringLiteral("fox!"));
+        QCOMPARE(traceOf(ran.events, {"b", "s"}), (QStringList{"node.cached b", "node.cached s"}));
+        QCOMPARE(ran.outcome.status, RunStatus::Failed); // a's error is still the run's
+    }
+
+    void warningsGivenWithTheRunAreReportedAndDoNotFailIt() {
+        World world;
+        RunOptions options;
+        options.warnings = {makeError("unknown_provider", "Cloud has a provider type this Fugue does not have.")};
+        const Ran ran = world.run(world.graph("{'a': {'type': 'fugue/text', 'inputs': {'text': 'fox'}},"
+                                              " 's': {'type': 'fugue/save', 'inputs': {'value': {'from': 'a.text'}}}}"),
+                                  options);
+        QCOMPARE(ran.outcome.status, RunStatus::Ok);
+        QCOMPARE(ran.outcome.errors.size(), 1);
+        QCOMPARE(ran.outcome.errors.first().severity, Error::Severity::Warning);
+        const QJsonArray told = ran.events.last().value("errors").toArray();
+        QCOMPARE(told.size(), 1);
+        QCOMPARE(told.at(0).toObject().value("code").toString(), QStringLiteral("unknown_provider"));
+        QCOMPARE(told.at(0).toObject().value("severity").toString(), QStringLiteral("warning"));
+    }
+
     void aMissingFrozenResultWarnsAndTheNodeRuns() {
         World world;
         QJsonObject nodes = json(branches("fox", "!"));
@@ -650,7 +686,7 @@ private slots:
         nodes.insert("b", b);
         const Ran ran = world.run(world.graph(nodes));
 
-        QCOMPARE(ran.outcome.status, QStringLiteral("ok"));
+        QCOMPARE(ran.outcome.status, RunStatus::Ok);
         QCOMPARE(ran.outcome.states.value("b"), NodeState::Cached);
         QCOMPARE(world.calls.count("b"), 1);
         QCOMPARE(ran.outcome.errors.size(), 1);

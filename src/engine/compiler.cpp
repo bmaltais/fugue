@@ -29,10 +29,8 @@ QString joined(const QStringList &items) {
 }
 
 Error nodeError(const QString &code, const QString &node, const QString &message) {
-    Error error;
-    error.code = code;
+    Error error = makeError(code, message);
     error.node = node;
-    error.message = message;
     return error;
 }
 
@@ -135,6 +133,7 @@ struct Flat {
     QString provider;
     QString frozen;
     QMap<QString, InputValue> inputs; // links by path id
+    QMap<QString, InputSpec> checkedAs; // each input as its value was checked: narrowed by group faces
     bool emptied = false;             // a required input lost its value to a bypass
 
     const NodeType &spec() const { return face ? *face : *type; }
@@ -202,6 +201,7 @@ private:
     CompiledGraph shape();
     InputValue bypassValue(const QString &path, const QString &port, int depth) const;
     InputValue rewire(const InputValue &value, int depth) const;
+    void checkCarried(const Flat &flat, const QString &input, const InputValue &written);
 
     const Document &m_doc;
     const Registry &m_registry;
@@ -261,13 +261,12 @@ void Compiler::checkRecursion() {
             return;
         for (const QString &id : component)
             m_recursive.insert(id);
-        Error error;
-        error.code = QStringLiteral("group_recursion");
-        error.message = selfLoop ? QStringLiteral("Group %1 contains an instance of itself.").arg(group)
-                                 : QStringLiteral("Groups %1 contain each other.").arg(joined(component));
+        Error error = makeError(QStringLiteral("group_recursion"),
+                                selfLoop ? QStringLiteral("Group %1 contains an instance of itself.").arg(group)
+                                         : QStringLiteral("Groups %1 contain each other.").arg(joined(component)),
+                                QStringLiteral("A group cannot contain itself, directly or through another group; "
+                                               "remove the inner instance that closes the loop."));
         error.valid = QJsonArray::fromStringList(component);
-        error.hint = QStringLiteral("A group cannot contain itself, directly or through another group; "
-                                    "remove the inner instance that closes the loop.");
         fail(error);
     };
     for (auto it = uses.constBegin(); it != uses.constEnd(); ++it)
@@ -310,11 +309,10 @@ void Compiler::checkTarget() {
     for (const Flat &flat : m_flat)
         if (!flat.hidden && flat.mode != NodeMode::Bypass)
             paths << flat.path;
-    Error error;
-    error.code = QStringLiteral("usage");
-    error.message = it == m_flat.constEnd()
-                        ? QStringLiteral("There is no node %1 to run to.").arg(m_options.target)
-                        : QStringLiteral("Node %1 is bypassed, so a run cannot stop at it.").arg(m_options.target);
+    Error error = makeError(QStringLiteral("usage"),
+                            it == m_flat.constEnd()
+                                ? QStringLiteral("There is no node %1 to run to.").arg(m_options.target)
+                                : QStringLiteral("Node %1 is bypassed, so a run cannot stop at it.").arg(m_options.target));
     error.valid = QJsonArray::fromStringList(paths);
     addHint(error, m_options.target, paths);
     fail(error);
@@ -703,6 +701,7 @@ std::optional<InputValue> Compiler::resolveItem(const Flat &flat, const InputSpe
 
 void Compiler::checkValue(Flat &flat, const InputSpec &base, const Bound &bound) {
     const InputSpec spec = narrowed(base, bound.narrowing);
+    flat.checkedAs[spec.name] = spec;
     const InputValue &value = bound.value;
     if (value.kind() != InputValue::Kind::List) {
         if (std::optional<InputValue> resolved = resolveItem(flat, spec, bound, value, -1))
@@ -926,6 +925,42 @@ InputValue Compiler::rewire(const InputValue &value, int depth) const {
     return InputValue::list(items);
 }
 
+// A link into a bypassed node was checked as a link: its type fits. When the bypass turns
+// it into the literal behind it, that literal is checked against the input it now sits
+// in, with its limits and choices (9.1), like one written there.
+void Compiler::checkCarried(const Flat &flat, const QString &input, const InputValue &written) {
+    const auto spec = flat.checkedAs.constFind(input);
+    if (spec == flat.checkedAs.constEnd())
+        return;
+    const auto one = [&](const InputValue &item) {
+        if (item.kind() != InputValue::Kind::Link)
+            return;
+        const QString through = item.from().node;
+        const auto source = m_flat.constFind(through);
+        if (source == m_flat.constEnd() || source->mode != NodeMode::Bypass)
+            return;
+        const InputValue carried = rewire(item, 0);
+        const QList<InputValue> values =
+            carried.kind() == InputValue::Kind::List ? carried.items() : QList<InputValue>{carried};
+        for (const InputValue &value : values) {
+            if (value.isEmpty() || value.kind() == InputValue::Kind::Link)
+                continue;
+            for (Error error : checkLiteral(*spec, value.toJson(), m_registry.portKind(spec->type.type))) {
+                error.node = flat.path;
+                error.input = input;
+                error.message += QStringLiteral(" The value comes through the bypassed node %1.").arg(through);
+                fail(error);
+            }
+        }
+    };
+    if (written.kind() == InputValue::Kind::List) {
+        for (const InputValue &item : written.items())
+            one(item);
+    } else {
+        one(written);
+    }
+}
+
 // Bypass, mute, sinks inside groups, and what no sink needs (4.8).
 CompiledGraph Compiler::shape() {
     CompiledGraph graph;
@@ -940,6 +975,7 @@ CompiledGraph Compiler::shape() {
     for (Flat &flat : live) {
         QMap<QString, InputValue> rewired;
         for (auto it = flat.inputs.constBegin(); it != flat.inputs.constEnd(); ++it) {
+            checkCarried(flat, it.key(), *it);
             const InputValue value = rewire(*it, 0);
             const bool emptiedList = value.kind() == InputValue::Kind::List && value.items().isEmpty() &&
                                      !it->items().isEmpty();
@@ -1043,24 +1079,15 @@ Compilation Compiler::run() {
     // Cycles are looked for even when there are other errors: links that did
     // not resolve are not in the flattened graph, so what is there is sound.
     const bool cyclic = findCycles();
-    Compilation result;
     if (!hasErrors(m_errors) && !cyclic) {
         CompiledGraph graph = shape();
         if (!hasErrors(m_errors))
-            result.graph = std::move(graph);
+            return Compilation(std::move(graph), m_errors); // warnings only
     }
-    result.errors = m_errors;
-    return result;
+    return Compilation(m_errors);
 }
 
 // --- reading compiled.json ---------------------------------------------------
-
-bool isPathId(const QString &text) {
-    for (const QString &segment : text.split(QLatin1Char('/')))
-        if (!isNodeId(segment))
-            return false;
-    return true;
-}
 
 bool isValueJson(const QJsonValue &value, bool allowList) {
     if (value.isString() || value.isDouble() || value.isBool())
@@ -1177,7 +1204,9 @@ QJsonObject CompiledGraph::toJson() const {
     return result;
 }
 
-std::optional<CompiledGraph> CompiledGraph::fromJson(const QJsonObject &json, Errors &errors) {
+namespace {
+
+std::optional<CompiledGraph> readCompiled(const QJsonObject &json, Errors &errors) {
     const qsizetype before = errors.size();
     const auto fail = [&](const QString &message, const QString &node = {}, const QString &input = {}) {
         Error error = makeError(QStringLiteral("invalid_document"), message);
@@ -1186,16 +1215,16 @@ std::optional<CompiledGraph> CompiledGraph::fromJson(const QJsonObject &json, Er
         errors << error;
     };
     const QJsonValue formatValue = json.value("fugue-compiled");
-    if (formatValue.isDouble() && formatValue.toDouble() > format) {
+    if (formatValue.isDouble() && formatValue.toDouble() > CompiledGraph::format) {
         errors << makeError(QStringLiteral("unsupported_format_version"),
                             QStringLiteral("This compiled graph has format %1; this Fugue reads format %2.")
                                 .arg(shown(formatValue))
-                                .arg(format),
+                                .arg(CompiledGraph::format),
                             QStringLiteral("Update Fugue, or compile the workflow again with this version."));
         return std::nullopt;
     }
-    if (formatValue != QJsonValue(format))
-        fail(QStringLiteral("\"fugue-compiled\" must be %1, not %2.").arg(format).arg(shown(formatValue)));
+    if (formatValue != QJsonValue(CompiledGraph::format))
+        fail(QStringLiteral("\"fugue-compiled\" must be %1, not %2.").arg(CompiledGraph::format).arg(shown(formatValue)));
 
     CompiledGraph graph;
     if (!json.value("source").isString())
@@ -1267,6 +1296,14 @@ std::optional<CompiledGraph> CompiledGraph::fromJson(const QJsonObject &json, Er
     if (errors.size() > before)
         return std::nullopt;
     return graph;
+}
+
+} // namespace
+
+Result<CompiledGraph> CompiledGraph::fromJson(const QJsonObject &json) {
+    Errors problems;
+    std::optional<CompiledGraph> graph = readCompiled(json, problems);
+    return collected(std::move(graph), std::move(problems));
 }
 
 Compilation compile(const Document &document, const Registry &registry, const CompileOptions &options) {

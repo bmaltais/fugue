@@ -90,10 +90,9 @@ Registry registry() {
 }
 
 Document document(const QByteArray &text) {
-    Errors errors;
-    const std::optional<Document> doc = Document::fromJson(json(text.constData()), errors);
+    const Result<Document> doc = Document::fromJson(json(text.constData()));
     if (!doc)
-        qFatal("bad test document: %s", qPrintable(dump(errors)));
+        qFatal("bad test document: %s", qPrintable(dump(doc.errors())));
     return *doc;
 }
 
@@ -109,7 +108,7 @@ const char *foxGraph =
 
 
 QJsonObject nodesOf(const Compilation &result) {
-    return result.graph ? result.graph->toJson().value("nodes").toObject() : QJsonObject();
+    return result.ok() ? result->toJson().value("nodes").toObject() : QJsonObject();
 }
 
 QStringList codes(const Errors &errors) {
@@ -176,6 +175,7 @@ private slots:
     void everyKindOfErrorIsReportedTogether();
     void exposedInputsNarrowConstraintsAndSupplyDefaults();
     void bypassCarriesALiteralThrough();
+    void aLiteralCarriedThroughABypassIsCheckedAgainstTheInputItReaches();
     void bypassRewiresLinksToTheFirstInputOfTheSameType();
     void bypassWithNoMatchingInputEmptiesTheOutput();
     void bypassedGroupPassesItsExposedInputThrough();
@@ -194,8 +194,8 @@ private slots:
 void TestCompiler::flatGraphCompilesToTheCompiledForm() {
     const Document doc = document(foxGraph);
     const Compilation result = compile(doc, registry());
-    QVERIFY2(result.ok(), qPrintable(dump(result.errors)));
-    QVERIFY2(result.errors.isEmpty(), qPrintable(dump(result.errors)));
+    QVERIFY2(result.ok(), qPrintable(dump(result.problems())));
+    QVERIFY2(result.problems().isEmpty(), qPrintable(dump(result.problems())));
 
     const QJsonObject expected = json(
         "{'fugue-compiled': 1, 'nodes': {"
@@ -206,7 +206,7 @@ void TestCompiler::flatGraphCompilesToTheCompiledForm() {
         " 'save': {'type': 'fugue/save-image', 'version': '1.0.0', 'sink': true,"
         "          'inputs': {'image': {'from': 'gen.image'}, 'name': 'fox'}}},"
         " 'skipped': {}}");
-    QJsonObject actual = result.graph->toJson();
+    QJsonObject actual = result->toJson();
     QCOMPARE(actual.take("source").toString(), doc.sourceHash());
     QCOMPARE(dump(actual), dump(expected));
 }
@@ -219,7 +219,7 @@ void TestCompiler::groupsFlattenToPathIds() {
         "'save': {'type': 'fugue/save-image', 'version': '1.0.0', 'inputs': {'image': {'from': 'g7.image'}}}",
         twoPassGroup));
     const Compilation result = compile(doc, registry());
-    QVERIFY2(result.ok(), qPrintable(dump(result.errors)));
+    QVERIFY2(result.ok(), qPrintable(dump(result.problems())));
     QCOMPARE(dump(nodesOf(result)),
              dump(json("{"
                        " 'prompt': {'type': 'fugue/text', 'version': '1.0.0', 'inputs': {'text': 'a fox'}},"
@@ -234,7 +234,7 @@ void TestCompiler::groupsFlattenToPathIds() {
 
 void TestCompiler::nestedGroupsFlattenThroughEveryLevel() {
     const Compilation result = compile(document(withGroups(nestedGraph, nestedGroups)), registry());
-    QVERIFY2(result.ok(), qPrintable(dump(result.errors)));
+    QVERIFY2(result.ok(), qPrintable(dump(result.problems())));
     QCOMPARE(dump(nodesOf(result)),
              dump(json("{"
                        " 'prompt': {'type': 'fugue/text', 'version': '1.0.0', 'inputs': {'text': 'a fox'}},"
@@ -247,7 +247,7 @@ void TestCompiler::nestedGroupsFlattenThroughEveryLevel() {
                        "          'inputs': {'image': {'from': 'g7/inner3/s2.image'}}}}")));
 
     // What the scheduler reads.
-    const CompiledGraph &graph = *result.graph;
+    const CompiledGraph &graph = *result;
     QCOMPARE(graph.sinks(), QStringList{"save"});
     QCOMPARE(graph.dependencies("g7/inner3/s2"), QStringList{"g7/gen"});
     QCOMPARE(graph.consumers("g7/gen").size(), 1);
@@ -263,8 +263,8 @@ void TestCompiler::valuesAreCheckedOnTheInnerNodeTheyReach() {
     graph.replace("'method': 'lanczos'", "'method': 'lancos'");
     const Compilation result = compile(document(withGroups(graph, nestedGroups)), registry());
     QVERIFY(!result.ok());
-    QCOMPARE(result.errors.size(), 1);
-    const Error &error = result.errors.first();
+    QCOMPARE(result.problems().size(), 1);
+    const Error &error = result.problems().first();
     QCOMPARE(error.code, QString("value_not_in_choices"));
     QCOMPARE(error.node, QString("g7/inner3/s2"));
     QCOMPARE(error.input, QString("method"));
@@ -283,12 +283,12 @@ void TestCompiler::unknownTypesAreReportedWithoutFollowOnErrors() {
         " 'nodes': {'x': {'type': 'io.example.gone/thing', 'version': '1.0.0', 'inputs': {}}}}"));
     const Compilation result = compile(doc, registry());
     QVERIFY(!result.ok());
-    QCOMPARE(codes(result.errors), (QStringList{"unknown_node_type", "unknown_node_type"}));
+    QCOMPARE(codes(result.problems()), (QStringList{"unknown_node_type", "unknown_node_type"}));
 
-    const Error &inner = result.errors[0];
+    const Error &inner = result.problems()[0];
     QCOMPARE(inner.node, QString("g7/x"));
     QVERIFY(inner.message.contains("io.example.gone/thing"));
-    const Error &top = result.errors[1];
+    const Error &top = result.problems()[1];
     QCOMPARE(top.node, QString("gen"));
     QCOMPARE(top.hint, QString("Did you mean \"fugue/generate-image\"?"));
     // Every known type, in full: the registry's and the workflow's groups.
@@ -311,27 +311,27 @@ void TestCompiler::invalidLinksAreAllReported() {
         "}}}");
     const Compilation result = compile(doc, registry());
     QVERIFY(!result.ok());
-    QCOMPARE(result.errors.size(), 4);
+    QCOMPARE(result.problems().size(), 4);
 
     // In path id order of the node the link is written on.
-    const Error &source = result.errors[0];
+    const Error &source = result.problems()[0];
     QCOMPARE(source.code, QString("unknown_link_source"));
     QCOMPARE(source.node, QString("gen"));
     QCOMPARE(source.input, QString("prompt"));
     QCOMPARE(source.valid, (QJsonArray{"batch", "gen", "many", "merge", "out", "prompt", "save"}));
     QCOMPARE(source.hint, QString("Did you mean \"prompt\"?"));
 
-    const Error &mismatch = result.errors[1];
+    const Error &mismatch = result.problems()[1];
     QCOMPARE(mismatch.code, QString("type_mismatch"));
     QCOMPARE(mismatch.node, QString("gen"));
     QCOMPARE(mismatch.input, QString("image"));
 
-    const Error &list = result.errors[2];
+    const Error &list = result.problems()[2];
     QCOMPARE(list.code, QString("type_mismatch"));
     QCOMPARE(list.node, QString("many"));
     QVERIFY2(list.message.contains("list"), qPrintable(list.message));
 
-    const Error &output = result.errors[3];
+    const Error &output = result.problems()[3];
     QCOMPARE(output.code, QString("unknown_output"));
     QCOMPARE(output.node, QString("save"));
     QCOMPARE(output.input, QString("image"));
@@ -357,7 +357,7 @@ void TestCompiler::groupFaceProblemsAreReportedOnTheInstance() {
     QVERIFY(!result.ok());
 
     QStringList seen;
-    for (const Error &error : result.errors)
+    for (const Error &error : result.problems())
         seen << QStringLiteral("%1 %2 %3%4").arg(error.code, error.node, error.input, error.output);
     // The bad outer link reaches two inner nodes but is reported once, where it is written.
     QCOMPARE(seen, (QStringList{
@@ -369,9 +369,9 @@ void TestCompiler::groupFaceProblemsAreReportedOnTheInstance() {
                        "unknown_link_source g7 prompt", // written on g7, reported once
                        "unknown_output save image",     // g7 has no output picture
                    }));
-    QCOMPARE(result.errors[4].valid, (QJsonArray{"prompt", "seed", "steps"}));
-    QCOMPARE(result.errors[4].hint, QString("Did you mean \"seed\"?"));
-    QCOMPARE(result.errors[6].valid, QJsonArray{"image"});
+    QCOMPARE(result.problems()[4].valid, (QJsonArray{"prompt", "seed", "steps"}));
+    QCOMPARE(result.problems()[4].hint, QString("Did you mean \"seed\"?"));
+    QCOMPARE(result.problems()[6].valid, QJsonArray{"image"});
 }
 
 void TestCompiler::missingInputsNameTheExposedInputToSet() {
@@ -383,11 +383,11 @@ void TestCompiler::missingInputsNameTheExposedInputToSet() {
         twoPassGroup));
     const Compilation result = compile(doc, registry());
     QStringList seen;
-    for (const Error &error : result.errors)
+    for (const Error &error : result.problems())
         seen << QStringLiteral("%1 %2 %3").arg(error.code, error.node, error.input);
     QCOMPARE(seen, (QStringList{"missing_input g7/first prompt", "missing_input g7/second prompt",
                                 "missing_input gen prompt"}));
-    QCOMPARE(result.errors[0].hint, QString("Set exposed input prompt on g7."));
+    QCOMPARE(result.problems()[0].hint, QString("Set exposed input prompt on g7."));
 }
 
 void TestCompiler::majorVersionMismatchNeedsReview() {
@@ -397,8 +397,8 @@ void TestCompiler::majorVersionMismatchNeedsReview() {
         " 'save': {'type': 'fugue/save-image', 'version': '1.0.0', 'inputs': {'image': {'from': 'old.renamed'}}}"
         "}}}");
     const Compilation result = compile(doc, registry());
-    QCOMPARE(result.errors.size(), 1); // nothing about its inputs or outputs, which may have changed
-    const Error &error = result.errors.first();
+    QCOMPARE(result.problems().size(), 1); // nothing about its inputs or outputs, which may have changed
+    const Error &error = result.problems().first();
     QCOMPARE(error.code, QString("node_version_mismatch"));
     QCOMPARE(error.node, QString("old"));
     QCOMPARE(error.valid, QJsonArray{"1.2.0"});
@@ -416,9 +416,9 @@ void TestCompiler::olderMinorVersionWarnsAndDropsUnknownInputs() {
         " 'save': {'type': 'fugue/save-image', 'version': '1.0.0', 'inputs': {'image': {'from': 'shrink.image'}}}"
         "}}}");
     const Compilation result = compile(doc, registry());
-    QVERIFY2(result.ok(), qPrintable(dump(result.errors)));
-    QCOMPARE(result.errors.size(), 1);
-    const Error &warning = result.errors.first();
+    QVERIFY2(result.ok(), qPrintable(dump(result.problems())));
+    QCOMPARE(result.problems().size(), 1);
+    const Error &warning = result.problems().first();
     QCOMPARE(warning.severity, Error::Severity::Warning);
     QCOMPARE(warning.code, QString("unknown_input"));
     QCOMPARE(warning.node, QString("shrink"));
@@ -436,8 +436,8 @@ void TestCompiler::aliasesCompileToTheInstalledType() {
         " 'save': {'type': 'fugue/save-image', 'version': '1.0.0', 'inputs': {'image': {'from': 'resize.image'}}}"
         "}}}");
     const Compilation result = compile(doc, registry());
-    QVERIFY2(result.ok(), qPrintable(dump(result.errors)));
-    QVERIFY2(result.errors.isEmpty(), qPrintable(dump(result.errors)));
+    QVERIFY2(result.ok(), qPrintable(dump(result.problems())));
+    QVERIFY2(result.problems().isEmpty(), qPrintable(dump(result.problems())));
     const QJsonObject resize = nodesOf(result).value("resize").toObject();
     QCOMPARE(resize.value("type").toString(), QString("io.example.tools/shrink"));
     QCOMPARE(resize.value("version").toString(), QString("1.2.0"));
@@ -457,9 +457,9 @@ void TestCompiler::groupRecursionIsReportedAndDoesNotHang() {
         "'local/holder': {'version': '1.0.0', 'name': 'Holder', 'inputs': [], 'outputs': [],"
         " 'nodes': {'h': {'type': 'local/ping', 'version': '1.0.0', 'inputs': {}}}}"));
     const Compilation result = compile(doc, registry());
-    QCOMPARE(codes(result.errors), (QStringList{"group_recursion", "group_recursion"}));
-    QCOMPARE(result.errors[0].valid, (QJsonArray{"local/ping", "local/pong"}));
-    QCOMPARE(result.errors[1].valid, QJsonArray{"local/self"});
+    QCOMPARE(codes(result.problems()), (QStringList{"group_recursion", "group_recursion"}));
+    QCOMPARE(result.problems()[0].valid, (QJsonArray{"local/ping", "local/pong"}));
+    QCOMPARE(result.problems()[1].valid, QJsonArray{"local/self"});
 }
 
 void TestCompiler::cyclesAreReported() {
@@ -475,7 +475,7 @@ void TestCompiler::cyclesAreReported() {
     const Compilation result = compile(doc, registry());
     QVERIFY(!result.ok());
     QStringList seen;
-    for (const Error &error : result.errors)
+    for (const Error &error : result.problems())
         seen << QStringLiteral("%1 %2").arg(error.code, dump(error.valid));
     QCOMPARE(seen, (QStringList{QString("cycle ") + dump(QJsonArray{"a", "b"}),
                                 QString("cycle ") + dump(QJsonArray{"g/s"}),
@@ -493,7 +493,7 @@ void TestCompiler::everyKindOfErrorIsReportedTogether() {
         "}}}");
     const Compilation result = compile(doc, registry());
     QVERIFY(!result.ok());
-    QCOMPARE(codes(result.errors), (QStringList{"unknown_node_type", "value_not_in_choices", "cycle"}));
+    QCOMPARE(codes(result.problems()), (QStringList{"unknown_node_type", "value_not_in_choices", "cycle"}));
 }
 
 void TestCompiler::exposedInputsNarrowConstraintsAndSupplyDefaults() {
@@ -505,15 +505,15 @@ void TestCompiler::exposedInputsNarrowConstraintsAndSupplyDefaults() {
         "'save': {'type': 'fugue/save-image', 'version': '1.0.0', 'inputs': {'image': {'from': 'g7.image'}}}";
     Compilation result = compile(document(withGroups(graph, groups.constData())), registry());
     // fugue/generate-image allows 50 steps; the group narrows it to 12.
-    QCOMPARE(result.errors.size(), 1);
-    QCOMPARE(result.errors.first().code, QString("value_out_of_range"));
-    QCOMPARE(result.errors.first().node, QString("g7/second"));
-    QCOMPARE(result.errors.first().input, QString("steps"));
+    QCOMPARE(result.problems().size(), 1);
+    QCOMPARE(result.problems().first().code, QString("value_out_of_range"));
+    QCOMPARE(result.problems().first().node, QString("g7/second"));
+    QCOMPARE(result.problems().first().input, QString("steps"));
 
     QByteArray fixed(graph);
     fixed.replace("'steps': 20", "'steps': 12");
     result = compile(document(withGroups(fixed.constData(), groups.constData())), registry());
-    QVERIFY2(result.ok(), qPrintable(dump(result.errors)));
+    QVERIFY2(result.ok(), qPrintable(dump(result.problems())));
     const QJsonObject first = nodesOf(result).value("g7/first").toObject().value("inputs").toObject();
     QCOMPARE(first.value("seed").toInt(), 7); // the group's default
     QCOMPARE(first.value("prompt").toString(), QString("a fox"));
@@ -528,8 +528,33 @@ void TestCompiler::bypassCarriesALiteralThrough() {
         " 'save': {'type': 'fugue/save-image', 'version': '1.0.0', 'inputs': {'image': {'from': 'gen.image'}}}"
         "}}}");
     const Compilation result = compile(doc, registry());
-    QVERIFY2(result.ok(), qPrintable(dump(result.errors)));
+    QVERIFY2(result.ok(), qPrintable(dump(result.problems())));
     QCOMPARE(dump(nodesOf(result).value("gen").toObject().value("inputs")), dump(json("{'prompt': 'a fox'}")));
+}
+
+// A link is only type-checked (text into text); once a bypass turns it into the literal
+// behind it, that literal must fit the limits of the input it now sits in (9.1).
+void TestCompiler::aLiteralCarriedThroughABypassIsCheckedAgainstTheInputItReaches() {
+    const char *graph =
+        "{'fugue': 1, 'graph': {'nodes': {"
+        " 'how': {'type': 'fugue/text', 'version': '1.0.0', 'mode': 'bypass', 'inputs': {'text': '%1'}},"
+        " 'gen': {'type': 'fugue/generate-image', 'version': '1.0.0', 'inputs': {'prompt': 'a fox'}},"
+        " 'small': {'type': 'io.example.tools/shrink', 'version': '1.2.0',"
+        "           'inputs': {'image': {'from': 'gen.image'}, 'method': {'from': 'how.text'}}},"
+        " 'save': {'type': 'fugue/save-image', 'version': '1.0.0', 'inputs': {'image': {'from': 'small.image'}}}}}}";
+    const Compilation bad = compile(document(QString::fromLatin1(graph).arg("cubic").toUtf8()), registry());
+    QVERIFY(!bad.ok());
+    QCOMPARE(bad.problems().size(), 1);
+    const Error error = bad.problems().first();
+    QCOMPARE(error.code, QStringLiteral("value_not_in_choices"));
+    QCOMPARE(error.node, QStringLiteral("small"));
+    QCOMPARE(error.input, QStringLiteral("method"));
+    QVERIFY(error.valid.contains("lanczos"));
+    QVERIFY2(error.message.contains("how"), qPrintable(error.message)); // where the value comes from
+
+    const Compilation good = compile(document(QString::fromLatin1(graph).arg("lanczos").toUtf8()), registry());
+    QVERIFY2(good.ok(), qPrintable(dump(good.problems())));
+    QCOMPARE(good->nodes.value("small").inputs.value("method").literal().toString(), QStringLiteral("lanczos"));
 }
 
 void TestCompiler::bypassRewiresLinksToTheFirstInputOfTheSameType() {
@@ -543,12 +568,12 @@ void TestCompiler::bypassRewiresLinksToTheFirstInputOfTheSameType() {
         " 'save': {'type': 'fugue/save-image', 'version': '1.0.0', 'inputs': {'image': {'from': 'b.image'}}}"
         "}}}");
     const Compilation result = compile(doc, registry());
-    QVERIFY2(result.ok(), qPrintable(dump(result.errors)));
-    QVERIFY2(result.errors.isEmpty(), qPrintable(dump(result.errors)));
+    QVERIFY2(result.ok(), qPrintable(dump(result.problems())));
+    QVERIFY2(result.problems().isEmpty(), qPrintable(dump(result.problems())));
     const QJsonObject nodes = nodesOf(result);
     QCOMPARE(nodes.keys(), (QStringList{"gen", "save"}));
     QCOMPARE(dump(nodes.value("save").toObject().value("inputs")), dump(json("{'image': {'from': 'gen.image'}}")));
-    QVERIFY(result.graph->skipped.isEmpty()); // bypassed nodes are not listed
+    QVERIFY(result->skipped.isEmpty()); // bypassed nodes are not listed
 }
 
 void TestCompiler::bypassWithNoMatchingInputEmptiesTheOutput() {
@@ -560,10 +585,10 @@ void TestCompiler::bypassWithNoMatchingInputEmptiesTheOutput() {
         " 'save2': {'type': 'fugue/save-image', 'version': '1.0.0', 'inputs': {'image': {'from': 'after.image'}}}"
         "}}}");
     const Compilation result = compile(doc, registry());
-    QVERIFY2(result.ok(), qPrintable(dump(result.errors)));
+    QVERIFY2(result.ok(), qPrintable(dump(result.problems())));
     // gen's first image input, `image`, is unset and has no default: its image output is empty.
     QVERIFY(nodesOf(result).isEmpty());
-    QCOMPARE(result.graph->skipped,
+    QCOMPARE(result->skipped,
              (QMap<QString, QString>{{"after", "upstream_empty"}, {"save", "upstream_empty"}, {"save2", "upstream_empty"}}));
 }
 
@@ -572,9 +597,9 @@ void TestCompiler::bypassedGroupPassesItsExposedInputThrough() {
     graph.replace("'type': 'local/outer', 'version': '1.0.0',", "'type': 'local/outer', 'version': '1.0.0', 'mode': 'bypass',");
     // local/outer exposes no image input, so a bypassed instance's image output is empty...
     Compilation result = compile(document(withGroups(graph, nestedGroups)), registry());
-    QVERIFY2(result.ok(), qPrintable(dump(result.errors)));
-    QCOMPARE(result.graph->skipped.value("save"), QString("upstream_empty"));
-    QVERIFY(!result.graph->nodes.contains("g7/gen")); // nothing inside a bypassed group runs
+    QVERIFY2(result.ok(), qPrintable(dump(result.problems())));
+    QCOMPARE(result->skipped.value("save"), QString("upstream_empty"));
+    QVERIFY(!result->nodes.contains("g7/gen")); // nothing inside a bypassed group runs
 
     // ...while a bypassed local/inner hands its exposed image input straight on.
     const Document inner = document(withGroups(
@@ -583,9 +608,9 @@ void TestCompiler::bypassedGroupPassesItsExposedInputThrough() {
         "'save': {'type': 'fugue/save-image', 'version': '1.0.0', 'inputs': {'image': {'from': 'i.image'}}}",
         nestedGroups));
     result = compile(inner, registry());
-    QVERIFY2(result.ok(), qPrintable(dump(result.errors)));
-    QCOMPARE(result.graph->nodes.keys(), (QStringList{"gen", "save"}));
-    QCOMPARE(result.graph->dependencies("save"), QStringList{"gen"});
+    QVERIFY2(result.ok(), qPrintable(dump(result.problems())));
+    QCOMPARE(result->nodes.keys(), (QStringList{"gen", "save"}));
+    QCOMPARE(result->dependencies("save"), QStringList{"gen"});
 }
 
 void TestCompiler::mutedNodesAndTheirDependentsAreSkipped() {
@@ -599,19 +624,19 @@ void TestCompiler::mutedNodesAndTheirDependentsAreSkipped() {
         " 'keep': {'type': 'fugue/save-image', 'version': '1.0.0', 'inputs': {'image': {'from': 'gen.image'}}}"
         "}}}");
     const Compilation result = compile(doc, registry());
-    QVERIFY2(result.ok(), qPrintable(dump(result.errors)));
-    QCOMPARE(result.graph->nodes.keys(), (QStringList{"gen", "keep"}));
-    QCOMPARE(result.graph->skipped,
+    QVERIFY2(result.ok(), qPrintable(dump(result.problems())));
+    QCOMPARE(result->nodes.keys(), (QStringList{"gen", "keep"}));
+    QCOMPARE(result->skipped,
              (QMap<QString, QString>{{"old-branch", "muted"}, {"after", "upstream_muted"}, {"save", "upstream_muted"}}));
-    QVERIFY2(result.errors.isEmpty(), qPrintable(dump(result.errors)));
+    QVERIFY2(result.problems().isEmpty(), qPrintable(dump(result.problems())));
 }
 
 void TestCompiler::mutedGroupSkipsEveryInnerNode() {
     QByteArray graph(nestedGraph);
     graph.replace("'type': 'local/outer', 'version': '1.0.0',", "'type': 'local/outer', 'version': '1.0.0', 'mode': 'mute',");
     const Compilation result = compile(document(withGroups(graph, nestedGroups)), registry());
-    QVERIFY2(result.ok(), qPrintable(dump(result.errors)));
-    QCOMPARE(result.graph->skipped, (QMap<QString, QString>{{"g7/gen", "muted"},
+    QVERIFY2(result.ok(), qPrintable(dump(result.problems())));
+    QCOMPARE(result->skipped, (QMap<QString, QString>{{"g7/gen", "muted"},
                                                           {"g7/inner3/s2", "muted"},
                                                           {"prompt", "not_part_of_output"},
                                                           {"save", "upstream_muted"}}));
@@ -625,13 +650,13 @@ void TestCompiler::nodesNoSinkNeedsAreSkippedWithAWarning() {
         " 'lonely': {'type': 'fugue/text', 'version': '1.0.0', 'inputs': {'text': 'unused'}}"
         "}}}");
     const Compilation result = compile(doc, registry());
-    QVERIFY2(result.ok(), qPrintable(dump(result.errors)));
-    QCOMPARE(result.graph->skipped, (QMap<QString, QString>{{"lonely", "not_part_of_output"}}));
-    QCOMPARE(result.errors.size(), 1);
-    QCOMPARE(result.errors.first().code, QString("not_part_of_output"));
-    QCOMPARE(result.errors.first().severity, Error::Severity::Warning);
-    QCOMPARE(result.errors.first().node, QString("lonely"));
-    QVERIFY(!hasErrors(result.errors));
+    QVERIFY2(result.ok(), qPrintable(dump(result.problems())));
+    QCOMPARE(result->skipped, (QMap<QString, QString>{{"lonely", "not_part_of_output"}}));
+    QCOMPARE(result.problems().size(), 1);
+    QCOMPARE(result.problems().first().code, QString("not_part_of_output"));
+    QCOMPARE(result.problems().first().severity, Error::Severity::Warning);
+    QCOMPARE(result.problems().first().node, QString("lonely"));
+    QVERIFY(!hasErrors(result.problems()));
 }
 
 void TestCompiler::sinksInsideGroupsAreDropped() {
@@ -644,23 +669,23 @@ void TestCompiler::sinksInsideGroupsAreDropped() {
         "           'inner-save': {'type': 'fugue/save-image', 'version': '1.0.0',"
         "                          'inputs': {'image': {'from': 'gen.image'}}}}}"));
     const Compilation result = compile(doc, registry());
-    QVERIFY2(result.ok(), qPrintable(dump(result.errors)));
-    QCOMPARE(result.graph->nodes.keys(), (QStringList{"g/gen", "save"}));
-    QVERIFY(result.graph->skipped.isEmpty());
-    QCOMPARE(result.graph->sinks(), QStringList{"save"});
+    QVERIFY2(result.ok(), qPrintable(dump(result.problems())));
+    QCOMPARE(result->nodes.keys(), (QStringList{"g/gen", "save"}));
+    QVERIFY(result->skipped.isEmpty());
+    QCOMPARE(result->sinks(), QStringList{"save"});
 }
 
 void TestCompiler::runToHereKeepsOnlyWhatTheTargetNeeds() {
     CompileOptions options;
     options.target = "g7/gen";
     const Compilation result = compile(document(withGroups(nestedGraph, nestedGroups)), registry(), options);
-    QVERIFY2(result.ok(), qPrintable(dump(result.errors)));
-    QVERIFY2(result.errors.isEmpty(), qPrintable(dump(result.errors))); // no warnings for the rest
-    QCOMPARE(result.graph->nodes.keys(), (QStringList{"g7/gen", "prompt"}));
-    QCOMPARE(result.graph->target, QString("g7/gen"));
-    QCOMPARE(result.graph->toJson().value("target").toString(), QString("g7/gen"));
-    QCOMPARE(result.graph->skipped.value("save"), QString("not_part_of_output"));
-    QVERIFY(result.graph->sinks().isEmpty());
+    QVERIFY2(result.ok(), qPrintable(dump(result.problems())));
+    QVERIFY2(result.problems().isEmpty(), qPrintable(dump(result.problems()))); // no warnings for the rest
+    QCOMPARE(result->nodes.keys(), (QStringList{"g7/gen", "prompt"}));
+    QCOMPARE(result->target, QString("g7/gen"));
+    QCOMPARE(result->toJson().value("target").toString(), QString("g7/gen"));
+    QCOMPARE(result->skipped.value("save"), QString("not_part_of_output"));
+    QVERIFY(result->sinks().isEmpty());
 }
 
 void TestCompiler::unknownTargetIsAUsageError() {
@@ -668,10 +693,10 @@ void TestCompiler::unknownTargetIsAUsageError() {
     options.target = "g7/gem";
     const Compilation result = compile(document(withGroups(nestedGraph, nestedGroups)), registry(), options);
     QVERIFY(!result.ok());
-    QCOMPARE(result.errors.size(), 1);
-    QCOMPARE(result.errors.first().code, QString("usage"));
-    QCOMPARE(result.errors.first().valid, (QJsonArray{"g7/gen", "g7/inner3/s2", "prompt", "save"}));
-    QCOMPARE(result.errors.first().hint, QString("Did you mean \"g7/gen\"?"));
+    QCOMPARE(result.problems().size(), 1);
+    QCOMPARE(result.problems().first().code, QString("usage"));
+    QCOMPARE(result.problems().first().valid, (QJsonArray{"g7/gen", "g7/inner3/s2", "prompt", "save"}));
+    QCOMPARE(result.problems().first().hint, QString("Did you mean \"g7/gen\"?"));
 }
 
 void TestCompiler::providerPinsAreResolvedAndChecked() {
@@ -687,10 +712,10 @@ void TestCompiler::providerPinsAreResolvedAndChecked() {
 
     // Not checked when the caller does not say which instances exist.
     Compilation result = compile(doc, registry());
-    QVERIFY2(result.ok(), qPrintable(dump(result.errors)));
-    QCOMPARE(result.graph->nodes.value("g7/first").provider, QString("Studio")); // the instance's pin
-    QCOMPARE(result.graph->nodes.value("gen").provider, QString("This machine")); // the workflow's
-    QCOMPARE(result.graph->nodes.value("save2").provider, QString("Laptop"));     // its own
+    QVERIFY2(result.ok(), qPrintable(dump(result.problems())));
+    QCOMPARE(result->nodes.value("g7/first").provider, QString("Studio")); // the instance's pin
+    QCOMPARE(result->nodes.value("gen").provider, QString("This machine")); // the workflow's
+    QCOMPARE(result->nodes.value("save2").provider, QString("Laptop"));     // its own
     QCOMPARE(nodesOf(result).value("gen").toObject().value("provider").toString(), QString("This machine"));
 
     CompileOptions options;
@@ -698,16 +723,16 @@ void TestCompiler::providerPinsAreResolvedAndChecked() {
     options.providers = QStringList{"This machine", "Studio"};
     result = compile(doc, registry(), options);
     QVERIFY(!result.ok());
-    QCOMPARE(result.errors.size(), 1);
-    const Error &error = result.errors.first();
+    QCOMPARE(result.problems().size(), 1);
+    const Error &error = result.problems().first();
     QCOMPARE(error.code, QString("unknown_provider"));
     QCOMPARE(error.node, QString("save2"));
     QCOMPARE(error.valid, (QJsonArray{"This machine", "Studio"}));
 
     options.providers = QStringList{"This machine", "Studio", "Laptop"};
     result = compile(doc, registry(), options);
-    QVERIFY2(result.ok(), qPrintable(dump(result.errors)));
-    QCOMPARE(result.graph->nodes.value("gen").provider, QString("Studio"));
+    QVERIFY2(result.ok(), qPrintable(dump(result.problems())));
+    QCOMPARE(result->nodes.value("gen").provider, QString("Studio"));
 }
 
 void TestCompiler::listInputsTakeItemsAndCheckTheirCount() {
@@ -722,11 +747,11 @@ void TestCompiler::listInputsTakeItemsAndCheckTheirCount() {
         " 'save2': {'type': 'fugue/save-image', 'version': '1.0.0', 'inputs': {'image': {'from': 'two.image'}}}"
         "}}}");
     Compilation result = compile(doc, registry());
-    QVERIFY2(result.ok(), qPrintable(dump(result.errors)));
-    const QList<CompiledLink> links = result.graph->nodes.value("two").links();
+    QVERIFY2(result.ok(), qPrintable(dump(result.problems())));
+    const QList<CompiledLink> links = result->nodes.value("two").links();
     QCOMPARE(links.size(), 2);
     QVERIFY(links[1] == (CompiledLink{"images", 1, PortRef{"batch", "images"}}));
-    QCOMPARE(result.graph->dependencies("two"), (QStringList{"batch", "gen"}));
+    QCOMPARE(result->dependencies("two"), (QStringList{"batch", "gen"}));
 
     const Document bad = document(
         "{'fugue': 1, 'graph': {'nodes': {"
@@ -739,7 +764,7 @@ void TestCompiler::listInputsTakeItemsAndCheckTheirCount() {
         "}}}");
     result = compile(bad, registry());
     QStringList seen;
-    for (const Error &error : result.errors)
+    for (const Error &error : result.problems())
         seen << QStringLiteral("%1 %2 %3").arg(error.code, error.node, error.input);
     QCOMPARE(seen, (QStringList{"value_out_of_range many images", "value_out_of_range none images",
                                 "type_mismatch single image", "type_mismatch text images"}));
@@ -749,31 +774,31 @@ void TestCompiler::compiledGraphRoundTripsThroughJson() {
     CompileOptions options;
     options.target = "g7/inner3/s2";
     const Compilation result = compile(document(withGroups(nestedGraph, nestedGroups)), registry(), options);
-    QVERIFY2(result.ok(), qPrintable(dump(result.errors)));
-    CompiledGraph graph = *result.graph;
+    QVERIFY2(result.ok(), qPrintable(dump(result.problems())));
+    CompiledGraph graph = *result;
     graph.nodes["g7/gen"].frozen = "sha256:00";
     graph.nodes["g7/gen"].inputs["seed"] = InputValue::autoRandom();
     graph.nodes["g7/gen"].inputs["model"] = InputValue::resource(QJsonObject{{"resource", "fugue/lora"}, {"name", "x"}});
 
-    Errors errors;
-    const std::optional<CompiledGraph> back = CompiledGraph::fromJson(graph.toJson(), errors);
-    QVERIFY2(back, qPrintable(dump(errors)));
+    const Result<CompiledGraph> back = CompiledGraph::fromJson(graph.toJson());
+    QVERIFY2(back.ok(), qPrintable(dump(back.errors())));
     QCOMPARE(dump(back->toJson()), dump(graph.toJson()));
     QCOMPARE(back->order(), graph.order());
 }
 
 void TestCompiler::compiledGraphJsonIsChecked() {
     Errors errors;
-    QVERIFY(!CompiledGraph::fromJson(json("{'fugue-compiled': 2, 'source': 'x', 'nodes': {}}"), errors));
+    errors += CompiledGraph::fromJson(json("{'fugue-compiled': 2, 'source': 'x', 'nodes': {}}")).errors();
+    QVERIFY(hasErrors(errors));
     QCOMPARE(codes(errors), QStringList{"unsupported_format_version"});
 
     errors.clear();
-    QVERIFY(!CompiledGraph::fromJson(
+    errors += CompiledGraph::fromJson(
         json("{'fugue-compiled': 1, 'source': 'x', 'nodes': {"
              " 'g7/a': {'type': 'fugue/text', 'version': '1.0', 'inputs': {'text': null}},"
              " 'B': {'type': 'fugue/text', 'version': '1.0.0', 'inputs': {}}},"
-             " 'skipped': {'c': 'tired'}}"),
-        errors));
+             " 'skipped': {'c': 'tired'}}")).errors();
+    QVERIFY(hasErrors(errors));
     QStringList seen;
     for (const Error &error : errors)
         seen << QStringLiteral("%1 %2 %3").arg(error.code, error.node, error.input);

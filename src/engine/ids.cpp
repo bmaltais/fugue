@@ -17,6 +17,13 @@ bool isNodeId(const QString &text) {
     return matches(form, text);
 }
 
+bool isPathId(const QString &text) {
+    for (const QString &segment : text.split(QLatin1Char('/')))
+        if (!isNodeId(segment))
+            return false;
+    return true;
+}
+
 bool isTypeId(const QString &text) {
     static const QRegularExpression form(QStringLiteral(
         "^(fugue|local|[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+)"

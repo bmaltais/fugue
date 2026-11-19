@@ -104,7 +104,7 @@ public:
 inline OfferedModel offeredModel(const QString &name) {
     OfferedModel model;
     model.handle = QJsonObject{{"resource", "fugue/image-model"}, {"name", name}};
-    model.status = QStringLiteral("ready");
+    model.status = ModelStatus::Ready;
     return model;
 }
 
@@ -291,7 +291,7 @@ public:
         env.kernels = &kernels;
         env.cache = cache.get();
         env.hashes = hashes.get();
-        env.providers = providers;
+        must(registry.setProviders(providers));
         env.models = &models;
         env.cpuSlots = cpuSlots;
         env.clock = [this] { return clock.now(); };
@@ -311,14 +311,13 @@ public:
                 node.insert("inputs", QJsonObject());
             it.value() = node;
         }
-        Errors errors;
-        const auto document = Document::fromJson(QJsonObject{{"fugue", 1}, {"graph", QJsonObject{{"nodes", nodes}}}}, errors);
+        const Result<Document> document = Document::fromJson(QJsonObject{{"fugue", 1}, {"graph", QJsonObject{{"nodes", nodes}}}});
         if (!document)
-            qFatal("bad test document: %s", qPrintable(dump(errors)));
+            qFatal("bad test document: %s", qPrintable(dump(document.errors())));
         const Compilation compiled = compile(*document, registry);
         if (!compiled.ok())
-            qFatal("test graph does not compile: %s", qPrintable(dump(compiled.errors)));
-        return *compiled.graph;
+            qFatal("test graph does not compile: %s", qPrintable(dump(compiled.errors())));
+        return *compiled;
     }
 
     RunFolder folder() {
@@ -349,7 +348,7 @@ public:
     std::unique_ptr<FileHashes> hashes;
     std::unique_ptr<ResultCache> cache;
     ResidentModels models;
-    QList<ProviderEntry> providers;
+    QList<ProviderEntry> providers; // go into the registry when environment() is called
     FakeClock clock;
     Calls calls;
     int cpuSlots = 4;

@@ -32,6 +32,9 @@ using Errors = QList<Error>;
 // True when any entry has severity error (warnings alone are not a failure).
 bool hasErrors(const Errors &errors);
 
+// The list as it goes into an envelope, run.json or a run.done event.
+QJsonArray toJson(const Errors &errors);
+
 // {"ok": true, "data": data}
 QJsonObject okEnvelope(const QJsonValue &data);
 // {"ok": false, "errors": [...]}

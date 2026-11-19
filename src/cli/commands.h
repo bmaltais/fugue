@@ -44,11 +44,21 @@ struct Context {
     void (*log)(const QString &) = nullptr;     // one stderr diagnostic
 };
 
+// Runs the command with its handler from the table; a command of a later milestone
+// (no handler) is a usage error, "not available in this version".
 Reply execute(const Command &command, Context &context);
 
-// The node types in the folder $FUGUE_NODE_MANIFESTS names (every node.json
-// under it). This is the hook that lets tests, and a developer, seed the
-// registry before built-in node types exist; a missing folder is an empty registry.
-void loadManifestFolder(Registry &registry, const QString &folder, void (*log)(const QString &));
+// The handlers the command table (args.cpp) names. Those of `run`, `runs cancel` and
+// the worker are in runs.h.
+Reply nodeList(const Command &command, Context &context);
+Reply nodeDescribe(const Command &command, Context &context);
+Reply validateWorkflow(const Command &command, Context &context);
+Reply compileWorkflow(const Command &command, Context &context);
+Reply workflowNew(const Command &command, Context &context);
+Reply workflowDescribe(const Command &command, Context &context);
+Reply runsList(const Command &command, Context &context);
+Reply runsStatus(const Command &command, Context &context);
+Reply runsEvents(const Command &command, Context &context);
+Reply runsResult(const Command &command, Context &context);
 
 } // namespace fugue::cli

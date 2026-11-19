@@ -6,6 +6,7 @@
 #include <QJsonObject>
 #include <QtTest>
 
+#include "engine/fake_provider.h"
 #include "engine/node_type.h"
 #include "engine/registry.h"
 #include "engine/version.h"
@@ -97,10 +98,9 @@ private slots:
     }
 
     void manifestParses() {
-        Errors errors;
-        const std::optional<NodeType> type = NodeType::fromJson(object(sharpen), errors);
-        QVERIFY2(type, qPrintable(dump(errors)));
-        QVERIFY2(errors.isEmpty(), qPrintable(dump(errors)));
+        const Result<NodeType> type = NodeType::fromJson(object(sharpen));
+        QVERIFY2(type.ok(), qPrintable(dump(type.errors())));
+        QVERIFY2(type.warnings().isEmpty(), qPrintable(dump(type.warnings())));
         QCOMPARE(type->id, QStringLiteral("io.github.alice.tools/sharpen"));
         QCOMPARE(type->version, *Version::parse("1.2.0"));
         QCOMPARE(type->inputs.size(), 2);
@@ -124,9 +124,8 @@ private slots:
     }
 
     void manifestWritesBackAsData() {
-        Errors errors;
         const QJsonObject manifest = object(sharpen);
-        QCOMPARE(NodeType::fromJson(manifest, errors)->toJson(), manifest);
+        QCOMPARE(NodeType::fromJson(manifest)->toJson(), manifest);
     }
 
     void defaultWidgetsFollowTheType() {
@@ -163,7 +162,8 @@ private slots:
             " \"outputs\": [{\"name\": \"out\", \"type\": \"any\"}, {\"type\": \"text\"}]"
             "}");
         Errors errors;
-        QVERIFY(!NodeType::fromJson(manifest, errors));
+        errors += NodeType::fromJson(manifest).errors();
+        QVERIFY(hasErrors(errors));
 
         const QStringList found = codes(errors);
         QVERIFY2(found.count("invalid_document") >= 10, qPrintable(dump(errors)));
@@ -196,9 +196,9 @@ private slots:
         manifest["inputs"] = inputs;
         manifest["homepage"] = "https://example.org";
 
-        Errors errors;
-        const std::optional<NodeType> type = NodeType::fromJson(manifest, errors);
-        QVERIFY2(type, qPrintable(dump(errors)));
+        const Result<NodeType> type = NodeType::fromJson(manifest);
+        QVERIFY2(type.ok(), qPrintable(dump(type.errors())));
+        const Errors errors = type.warnings(); // a manifest that parses carries its warnings
         QCOMPARE(errors.size(), 2);
         QVERIFY(!hasErrors(errors));
         QVERIFY(type->input("amount"));
@@ -208,19 +208,22 @@ private slots:
         Errors errors;
         QJsonObject manifest = object(sharpen);
         manifest["outputs"] = QJsonArray{QJsonObject{{"name", "out"}, {"type", "any"}}};
-        QVERIFY(!NodeType::fromJson(manifest, errors));
+        errors += NodeType::fromJson(manifest).errors();
+        QVERIFY(hasErrors(errors));
     }
 
     void newerManifestFormatIsRefused() {
         QJsonObject manifest = object(sharpen);
         manifest["manifest"] = 2;
         Errors errors;
-        QVERIFY(!NodeType::fromJson(manifest, errors));
+        errors += NodeType::fromJson(manifest).errors();
+        QVERIFY(hasErrors(errors));
         QCOMPARE(codes(errors), QStringList{"unsupported_format_version"});
 
         manifest["manifest"] = 1.5;
         errors.clear();
-        QVERIFY(!NodeType::fromJson(manifest, errors));
+        errors += NodeType::fromJson(manifest).errors();
+        QVERIFY(hasErrors(errors));
         QCOMPARE(codes(errors), QStringList{"invalid_document"});
     }
 
@@ -373,6 +376,43 @@ private slots:
         Registry registry;
         QVERIFY(registry.add(preview).isEmpty());
         QVERIFY(hasErrors(registry.add(packPreview)));
+    }
+
+    // 6.12: one registry of node types, port types and providers.
+    void theRegistryHoldsTheConfiguredProvidersInTheUsersOrder() {
+        Registry registry;
+        QVERIFY(registry.providers().isEmpty());
+        ProviderInstance studio;
+        studio.name = "Studio";
+        studio.type = "fake";
+        ProviderInstance local;
+        local.name = "This machine";
+        local.type = "fake";
+        local.enabled = false;
+        const auto provider = std::make_shared<FakeProvider>(Description{});
+        QVERIFY(registry.setProviders({ProviderEntry{studio, provider}, ProviderEntry{local, nullptr}}).isEmpty());
+        QCOMPARE(registry.providerNames(), (QStringList{"Studio", "This machine"}));
+        QCOMPARE(registry.providers().at(0).provider.get(), provider.get());
+        QVERIFY(!registry.providers().at(1).instance.enabled);
+
+        // Setting them again replaces the list (providers.json was edited).
+        QVERIFY(registry.setProviders({ProviderEntry{local, nullptr}}).isEmpty());
+        QCOMPARE(registry.providerNames(), (QStringList{"This machine"}));
+    }
+
+    void providerNamesMustBeUniqueAndSet() {
+        Registry registry;
+        ProviderInstance one;
+        one.name = "Studio";
+        one.type = "fake";
+        QVERIFY(registry.setProviders({ProviderEntry{one, nullptr}}).isEmpty());
+        const Errors twice = registry.setProviders({ProviderEntry{one, nullptr}, ProviderEntry{one, nullptr}});
+        QCOMPARE(twice.size(), 1);
+        QCOMPARE(twice.first().code, QString("invalid_document"));
+        ProviderInstance nameless;
+        nameless.type = "fake";
+        QVERIFY(hasErrors(registry.setProviders({ProviderEntry{nameless, nullptr}})));
+        QCOMPARE(registry.providerNames(), (QStringList{"Studio"})); // unchanged by a refused list
     }
 
     void aliasesAnswerOnlyWhenNoTypeHasTheId() {

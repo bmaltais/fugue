@@ -3,11 +3,11 @@
 // The scheduler (spec 9): runs a compiled graph to the end.
 //
 // The one entry point for a worker process is runGraph(): given a compiled
-// graph, a run folder and a RunEnvironment (registry, kernels, result cache,
-// providers), it runs every node, writes run.json, compiled.json and
+// graph, a run folder and a RunEnvironment (the registry with its node types
+// and providers, kernels, result cache), it runs every node, writes run.json, compiled.json and
 // events.jsonl into the run folder, and returns the outcome. Run is the same
 // thing without blocking, for a caller that has its own event loop (the
-// canvas, RunQueue). checkGraph() is the part `fugue validate` needs: the
+// canvas). checkGraph() is the part `fugue validate` needs: the
 // state of every node and the warnings a run would give, with nothing run.
 //
 // What a run does:
@@ -40,12 +40,13 @@
 //     into the store, a hard link stays in the node's folder, and the handles
 //     passed on carry the store's path (9.7).
 //   - A frozen node (10.4) takes the result of its frozen key whatever its
-//     inputs are. If that result is gone, the run warns
+//     inputs are and whatever happened upstream: a node that failed upstream
+//     does not make it skipped. If that result is gone, the run warns
 //     (frozen_result_missing) and the node runs normally.
 //
 // Events (9.4) are appended to the run folder as they happen and emitted by
-// Run::emitted. run.queued belongs to whoever queues the run: RunQueue writes
-// it, and a worker waiting in the cross-process queue (9.8) writes its own.
+// Run::emitted. run.queued belongs to whoever queues the run in the queue the
+// window and the workers share (9.8, engine/queue.h).
 // A run writes run.started, the node events and run.done. Warnings travel in
 // run.done's `errors` with severity warning.
 //
@@ -85,28 +86,22 @@ namespace fugue {
 
 class FileHashes;
 
-// A configured provider instance and the provider made for it
-// (loadProviderInstances + createProvider).
-struct ProviderEntry {
-    ProviderInstance instance;
-    std::shared_ptr<Provider> provider; // may be null for a disabled instance
-};
-
 // What a process needs to run graphs. Everything pointed at must outlive the
 // runs that use it. One environment serves every run of a process.
 struct RunEnvironment {
+    // Node types, and the provider instances in the user's order (8.3); there
+    // may be none when no node needs a provider.
     const Registry *registry = nullptr;
     const Kernels *kernels = nullptr;
     ResultCache *cache = nullptr;
     FileHashes *hashes = nullptr;
-    // In the user's order (8.3). May be empty when no node needs a provider.
-    QList<ProviderEntry> providers;
     // Optional. Shared by the runs of a process so a model stays loaded
     // between them. Without it there is no residency preference.
     ResidentModels *models = nullptr;
 
-    // Free GPU memory in MB, measured as 8.10 says (by Vulkan device type);
-    // unset means it is not measured. Before a GPU node that declares
+    // Free GPU memory in MB, measured as 8.10 says (by Vulkan device type;
+    // gpu_memory.h has the unified-memory figure); unset means it is not
+    // measured, which is the case until the helper (#32) can tell the device. Before a GPU node that declares
     // `needs.gpu.vram_mb` starts, resident models are dropped, least recently
     // used first, while this is short of it.
     std::function<qint64()> freeGpuMemoryMb;
@@ -116,7 +111,7 @@ struct RunEnvironment {
     int cpuSlots = 0;
     // Time for `seconds` in node.done and the times in run.json; the system
     // clock when unset. (Event times are RunFolder's.)
-    std::function<QDateTime()> clock;
+    Clock clock;
     // A randomized seed (`{"auto": "random"}`) within min..max, both
     // included; a random generator when unset.
     std::function<qint64(qint64 min, qint64 max)> randomSeed;
@@ -126,6 +121,10 @@ struct RunOptions {
     // The workflow file the graph came from, absolute, or empty. It goes
     // into run.json and into the cache's `used_by`.
     QString workflow;
+    // What the caller wants said with the run though no node caused it, such as a
+    // provider instance that could not be made. They join run.done's `errors` and the
+    // outcome with severity warning; they do not fail the run.
+    Errors warnings;
 };
 
 // The state of a node (10.3).
@@ -140,7 +139,7 @@ enum class NodeState {
 QString nodeStateName(NodeState state); // "cached", "stale", ...
 
 struct RunOutcome {
-    QString status; // ok, failed or cancelled
+    RunStatus status = RunStatus::Unknown; // ok, failed or cancelled once the run is over
     // Every node error, each naming its node by path id, plus warnings.
     Errors errors;
     QMap<QString, NodeState> states;  // by path id

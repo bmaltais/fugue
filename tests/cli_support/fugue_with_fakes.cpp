@@ -1,7 +1,10 @@
-// A test-only `fugue`: the real command line, with fake node kernels registered through
-// cli::Hooks. The run path, queue, lock and worker (which re-runs this same binary) are
-// the production code; only what the nodes do is fake. It is built for tests and never
-// installed.
+// A test-only `fugue`: the real command line, with fake node types and kernels registered
+// through cli::Hooks. The run path, queue, lock and worker (which re-runs this same
+// binary) are the production code; only what the nodes are and do is fake. It is built
+// for tests and never installed.
+//
+// Node types: every node.json under the folder $FUGUE_NODE_MANIFESTS names, which the
+// tests write. A missing folder is an empty registry.
 //
 // Kernels (the matching manifests are written by the tests):
 //   fugue/note   -> text "hello"
@@ -11,11 +14,16 @@
 //   fugue/boom   -> fails with node_failed
 //   fugue/gen    -> a provider node (capability image.generate), never reached by a run
 
+#include <QDirIterator>
 #include <QFile>
+#include <QJsonObject>
 #include <QThread>
+
+#include <cstdio>
 
 #include "cli/args.h"
 #include "cli/cli.h"
+#include "engine/json.h"
 
 using namespace fugue;
 
@@ -45,10 +53,29 @@ public:
     }
 };
 
+void addManifestFolder(Registry &registry, const QString &folder) {
+    if (folder.isEmpty())
+        return;
+    QStringList files;
+    QDirIterator it(folder, {"node.json"}, QDir::Files, QDirIterator::Subdirectories);
+    while (it.hasNext())
+        files << it.next();
+    files.sort();
+    for (const QString &path : files) {
+        const Result<QJsonObject> manifest = readJsonObject(path);
+        const Errors errors = manifest ? registry.addManifest(manifest.value()) : manifest.errors();
+        for (const Error &error : errors)
+            std::fprintf(stderr, "%s: %s: %s\n", qPrintable(path), qPrintable(error.code), qPrintable(error.message));
+    }
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
     cli::Hooks hooks;
+    hooks.addNodeTypes = [](Registry &registry) {
+        addManifestFolder(registry, qEnvironmentVariable("FUGUE_NODE_MANIFESTS"));
+    };
     hooks.addKernels = [](Kernels &kernels) {
         kernels.add("fugue/note", std::make_shared<Fn>([](const NodeContext &) -> Result<Values> {
                         return Values{{"text", "hello"}};

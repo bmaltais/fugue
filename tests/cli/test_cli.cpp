@@ -2,9 +2,10 @@
 //
 // Seam: the built `fugue` executable run as a subprocess with no display
 // (QT_QPA_PLATFORM, DISPLAY and WAYLAND_DISPLAY unset). Tests assert on what a
-// caller sees: the JSON on stdout, stderr, and the exit code. Registry content
-// comes in through the FUGUE_NODE_MANIFESTS hook (a folder of node.json
-// files); run folders are made with RunFolder under a temporary
+// caller sees: the JSON on stdout, stderr, and the exit code. The shipped binary
+// has no node types until M1, so most tests drive fugue_with_fakes: the same
+// command line, whose test-only main() seeds the registry from the folder of
+// node.json files that FUGUE_NODE_MANIFESTS names (through cli::Hooks). Run folders are made with RunFolder under a temporary
 // XDG_CACHE_HOME, the same files a worker writes.
 
 #include <QFile>
@@ -94,17 +95,18 @@ class TestCli : public QObject {
         file.write(bytes);
     }
 
-    Outcome fugue(const QStringList &args) const {
+    Outcome fugue(const QStringList &args, const QString &binary = FUGUE_FAKE_BINARY) const {
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
         env.remove("QT_QPA_PLATFORM");
         env.remove("DISPLAY");
         env.remove("WAYLAND_DISPLAY");
         env.insert("XDG_CACHE_HOME", cache());
         env.insert("XDG_STATE_HOME", m_dir.filePath("state"));
+        env.insert("XDG_CONFIG_HOME", m_dir.filePath("config")); // not the developer's providers.json
         env.insert("FUGUE_NODE_MANIFESTS", m_dir.filePath("manifests"));
         QProcess process;
         process.setProcessEnvironment(env);
-        process.start(FUGUE_BINARY, args);
+        process.start(binary, args);
         Outcome outcome;
         if (!process.waitForFinished(20000)) {
             process.kill();
@@ -121,9 +123,7 @@ class TestCli : public QObject {
     QString workflow(const QString &name = "flow.fugue") const {
         const QString path = m_dir.filePath(name);
         if (!QFile::exists(path)) {
-            Errors errors;
-            Document document;
-            if (!document.saveFile(path, errors))
+            if (hasErrors(Document().saveFile(path)))
                 qFatal("cannot write the fixture workflow");
         }
         return path;
@@ -183,6 +183,37 @@ private slots:
             codes << error.toObject().value("code").toString();
         QVERIFY(codes.contains("unknown_node_type"));
         QVERIFY(codes.contains("missing_input"));
+    }
+
+    // 10.3: validate shows the state of every node.
+    void validateShowsTheStateOfEveryNode() {
+        const Outcome o = fugue({"validate", m_dir.filePath("good.fugue"), "--json"});
+        QCOMPARE(o.exitCode, 0);
+        const QJsonObject data = o.json().value("data").toObject();
+        QCOMPARE(data.value("valid").toBool(), true);
+        const QJsonObject nodes = data.value("nodes").toObject();
+        QCOMPARE(nodes.keys(), (QStringList{"a", "b", "c"}));
+        QCOMPARE(nodes.value("a").toObject().value("state").toString(), QString("stale")); // would run
+        QCOMPARE(nodes.value("b").toObject().value("state").toString(), QString("stale"));
+        QCOMPARE(nodes.value("c").toObject().value("state").toString(), QString("skipped"));
+        QCOMPARE(nodes.value("c").toObject().value("reason").toString(), QString("not_part_of_output"));
+
+        // People get the same information (13.2).
+        const Outcome human = fugue({"validate", m_dir.filePath("good.fugue")});
+        QCOMPARE(human.exitCode, 0);
+        QVERIFY2(human.out.contains("a  stale") && human.out.contains("c  skipped (not_part_of_output)"),
+                 human.out.constData());
+    }
+
+    // 13.2: without --json an error still says which input and what the valid options are.
+    void humanErrorsKeepTheInputAndTheValidOptions() {
+        const Outcome missing = fugue({"validate", m_dir.filePath("broken.fugue")});
+        QCOMPARE(missing.exitCode, 1);
+        QVERIFY2(missing.err.contains("node b, input text"), missing.err.constData());
+        const Outcome unknown = fugue({"nonsense"});
+        QCOMPARE(unknown.exitCode, 1);
+        QVERIFY2(unknown.err.contains("valid: ") && unknown.err.contains("validate") && unknown.err.contains("workflow"),
+                 unknown.err.constData());
     }
 
     void validateAndCompilePrintWarningsOnSuccess() {
@@ -285,13 +316,13 @@ private slots:
     }
 
     void helpAndVersionPrintAndExitZero() {
-        QVERIFY(fugue({"--help"}).out.contains("usage: fugue"));
-        QCOMPARE(fugue({"--version"}).exitCode, 0);
+        QVERIFY(fugue({"--help"}, FUGUE_BINARY).out.contains("usage: fugue"));
+        QCOMPARE(fugue({"--version"}, FUGUE_BINARY).exitCode, 0);
     }
 
     void noDisplayNeeded() {
         // initTestCase's env has no display and no QT_QPA_PLATFORM; this must not abort.
-        const Outcome o = fugue({"node", "list", "--json"});
+        const Outcome o = fugue({"node", "list", "--json"}, FUGUE_BINARY);
         QCOMPARE(o.exitCode, 0);
         QVERIFY2(!o.err.contains("xcb") && !o.err.contains("platform plugin"), o.err.constData());
     }
@@ -346,10 +377,17 @@ private slots:
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
         env.insert("FUGUE_NODE_MANIFESTS", m_dir.filePath("nowhere"));
         process.setProcessEnvironment(env);
-        process.start(FUGUE_BINARY, {"node", "list", "--json"});
+        process.start(FUGUE_FAKE_BINARY, {"node", "list", "--json"});
         QVERIFY(process.waitForFinished(20000));
         const QJsonObject json = QJsonDocument::fromJson(process.readAllStandardOutput()).object();
         QCOMPARE(json.value("data").toObject().value("nodes").toArray().size(), 0);
+    }
+
+    // The manifest folder is a test hook; the app people install does not have it.
+    void theShippedBinaryLoadsNoNodeTypesFromTheEnvironment() {
+        const Outcome o = fugue({"node", "list", "--json"}, FUGUE_BINARY); // FUGUE_NODE_MANIFESTS is set
+        QCOMPARE(o.exitCode, 0);
+        QCOMPARE(o.json().value("data").toObject().value("nodes").toArray().size(), 0);
     }
 
     // --- workflows ---
@@ -408,10 +446,12 @@ private slots:
         QCOMPARE(data.value("links").toArray().size(), 1);
     }
 
-    void workflowExportIsNotBuiltYet() {
+    // Export is M2: it parses, and says so the way every later-milestone command does.
+    void workflowExportIsNotAvailableYet() {
         const Outcome o = fugue({"workflow", "export", workflow(), "--share", "--no-prompts", "--no-layout", "--json"});
         QCOMPARE(o.exitCode, 1);
-        QCOMPARE(o.firstCode(), QString("internal"));
+        QCOMPARE(o.firstCode(), QString("usage"));
+        QVERIFY(o.firstMessage().contains("not available in this version"));
     }
 
     // --- later milestones ---
@@ -510,11 +550,24 @@ private slots:
                  QString("/x/a.png"));
     }
 
-    void runsCancelIsNotBuiltYetForALiveRun() {
+    // run.done is appended once by whoever ended the run; run.json is rewritten as the run
+    // goes, so a late write there must not bring an ended run back to life.
+    void runDoneDecidesTheStatusWhateverRunJsonSays() {
+        makeRun("20261122-100000-000-eeee", "running", false);
+        auto folder = RunFolder::open(runsRoot(), "20261122-100000-000-eeee");
+        folder->appendEvent(QJsonObject{{"event", "run.done"}, {"status", "cancelled"}, {"errors", QJsonArray()}});
+        const Outcome o = fugue({"runs", "status", "20261122-100000-000-eeee", "--json"});
+        QCOMPARE(o.json().value("data").toObject().value("status").toString(), QString("cancelled"));
+    }
+
+    void runsCancelOfARunWithNoWorkerMarksItFailed() {
         makeRun("20261120-100000-000-cccc", "running", false);
         const Outcome o = fugue({"runs", "cancel", "20261120-100000-000-cccc", "--json"});
         QCOMPARE(o.exitCode, 1);
         QCOMPARE(o.firstCode(), QString("internal"));
+        const Outcome status = fugue({"runs", "status", "20261120-100000-000-cccc", "--json"});
+        QCOMPARE(status.json().value("data").toObject().value("status").toString(), QString("failed"));
+        QVERIFY(!status.json().value("data").toObject().value("ended").toString().isEmpty());
     }
 
     void runsResultKeepsOnlyTheSinksOfTheCompiledGraph() {

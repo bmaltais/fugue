@@ -29,6 +29,8 @@
 // are built (M4). A served model is named by its recipe, with no content hash.
 
 #include <QHash>
+
+#include <functional>
 #include <QNetworkAccessManager>
 #include <QTimer>
 
@@ -42,7 +44,9 @@ struct OmarchyPaths {
     QString stateDir;  // holds status.json and network.json
     QString configDir; // holds key and remotes/<host>.key
 
-    // ~/.local/state/omarchy/agent-local and ~/.config/omarchy/agent-local.
+    // ~/.local/state/omarchy/agent-local and ~/.config/omarchy/agent-local. These are
+    // omarchy-local-ai's folders, and it builds them from $HOME with no XDG variable, so
+    // neither does this.
     static OmarchyPaths standard();
 };
 
@@ -59,6 +63,10 @@ public:
     void status(const QString &job, Reply<JobStatus> reply) override;
     void cancel(const QString &job, Reply<QString> reply) override;
     void result(const QString &job, Reply<JobResult> reply) override;
+
+    // The time in milliseconds that finished jobs are aged by; the system clock when
+    // unset. For tests.
+    void setClock(std::function<qint64()> msecs) { m_clock = std::move(msecs); }
 
 private:
     // One model server: where it is and how to reach it.
@@ -80,12 +88,17 @@ private:
     void pollJob(const QString &id);
     void finishJob(const QString &id, const QJsonObject &job);
     void change(const QString &id, const JobStatus &status);
+    qint64 now() const;
+    void forgetOldJobs();
 
     ProviderInstance m_instance;
     OmarchyPaths m_paths;
     QNetworkAccessManager m_network;
     QTimer m_poll;
+    // Jobs from submit until their result is taken, or until 600 seconds after they
+    // ended when nobody takes one (forgetOldJobs).
     QHash<QString, std::shared_ptr<Job>> m_jobs;
+    std::function<qint64()> m_clock;
 };
 
 } // namespace fugue

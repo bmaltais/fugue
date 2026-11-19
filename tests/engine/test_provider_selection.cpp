@@ -15,13 +15,13 @@ QJsonObject handle(const QString &name) {
     return QJsonObject{{"resource", "fugue/image-model"}, {"name", name}};
 }
 
-OfferedModel model(const QString &name, const QString &status = QStringLiteral("ready"),
+OfferedModel model(const QString &name, ModelStatus status = ModelStatus::Ready,
                    const QJsonObject &properties = {}) {
     OfferedModel offered;
     offered.handle = handle(name);
     offered.status = status;
     offered.properties = properties;
-    if (status != QLatin1String("ready")) {
+    if (status != ModelStatus::Ready) {
         offered.reason = QStringLiteral("%1 is stopped.").arg(name);
         offered.hint = QStringLiteral("Start it: omarchy-agent-local start %1").arg(name);
     }
@@ -138,7 +138,7 @@ private slots:
         const QList<Candidate> candidates{
             candidate("Off", {generate({model("a")})}, false),
             unreachable,
-            candidate("Loading", {generate({model("b", "loading")})}),
+            candidate("Loading", {generate({model("b", ModelStatus::Loading)})}),
             candidate("Ready", {generate({model("c")})}),
             candidate("Later", {generate({model("d")})}),
         };
@@ -151,8 +151,8 @@ private slots:
 
     void autoNeedsTheRequiredProperties() {
         const QList<Candidate> candidates{
-            candidate("A", {generate({model("plain", "ready", {{"input", QJsonArray{"text"}}})})}),
-            candidate("B", {generate({model("vision", "ready",
+            candidate("A", {generate({model("plain", ModelStatus::Ready, {{"input", QJsonArray{"text"}}})})}),
+            candidate("B", {generate({model("vision", ModelStatus::Ready,
                                             {{"input", QJsonArray{"text", "image"}}, {"edit", true}})})}),
         };
         Requirement requirement = wants("image.generate");
@@ -258,7 +258,7 @@ private slots:
 
     void onlyStoppedModelsSayWhichToStart() {
         const QList<Candidate> candidates{
-            candidate("This machine", {generate({model("klein", "unavailable")})}),
+            candidate("This machine", {generate({model("klein", ModelStatus::Unavailable)})}),
         };
         const auto chosen = selectProvider(candidates, wants("image.generate"));
         const Error error = chosen.errors().first();
@@ -266,9 +266,23 @@ private slots:
         QVERIFY(error.hint.contains("omarchy-agent-local start klein"));
     }
 
+    // 8.5: the error always says how to fix it, also when the model itself gives no hint.
+    void aPinnedInstanceWithOnlyAStoppedModelThatHasNoHintStillSaysWhatToDo() {
+        OfferedModel stopped = model("flux", ModelStatus::Unavailable);
+        stopped.hint.clear();
+        Requirement requirement = wants("image.generate");
+        requirement.nodePin = QStringLiteral("Studio");
+        const auto selection = selectProvider({candidate("Studio", {generate({stopped})})}, requirement);
+        QVERIFY(!selection.ok());
+        QCOMPARE(selection.error().code, QStringLiteral("capability_unavailable"));
+        QVERIFY2(selection.error().hint.contains("flux") && selection.error().hint.contains("Studio"),
+                 qPrintable(selection.error().hint));
+        QVERIFY(selection.error().hint.contains("pin"));
+    }
+
     void aRequestedModelThatIsNotRunningIsModelNotRunning() {
         const QList<Candidate> candidates{
-            candidate("This machine", {generate({model("klein", "unavailable"), model("z-image")})}),
+            candidate("This machine", {generate({model("klein", ModelStatus::Unavailable), model("z-image")})}),
         };
         Requirement requirement = wants("image.generate");
         requirement.model = handle("klein");

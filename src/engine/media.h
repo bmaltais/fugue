@@ -108,7 +108,9 @@ public:
 
     // Like saved(), but with nothing pending: a video's edits are applied
     // into a new file, <dir>/<name>.mkv. This is what a command or provider
-    // node receives (spec 7.2), so `path` alone is the whole value.
+    // node receives (spec 7.2), so `path` alone is the whole value. The same
+    // edit of the same video into the same file is encoded once per process:
+    // a later call gets the file the first one wrote.
     Result<MediaHandle> plainFile(const QString &dir, const QString &name, FileHashes &hashes) const;
 
     // Size and length with the pending edits applied (videos); otherwise the

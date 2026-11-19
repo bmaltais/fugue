@@ -26,6 +26,7 @@
 #include <functional>
 #include <optional>
 
+#include "engine/clock.h"
 #include "engine/result.h"
 #include "engine/value.h"
 #include "engine/version.h"
@@ -81,7 +82,7 @@ public:
         qint64 limitBytes = defaultLimit;
         // The time source for last-used times and grace periods; the system
         // clock when unset. Tests pass a fake one.
-        std::function<QDateTime()> clock;
+        Clock clock;
     };
 
     // $XDG_CACHE_HOME/fugue/results (~/.cache/fugue/results).

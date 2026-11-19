@@ -9,7 +9,8 @@
 
 #include "cli/args.h"
 #include "cli/commands.h"
-#include "cli/queue.h"
+#include "engine/queue.h"
+#include "engine/json.h"
 #include "engine/run_folder.h"
 
 namespace fugue::cli {
@@ -33,8 +34,22 @@ void logLine(const QString &text) {
 QString humanError(const Error &error) {
     QString text = QStringLiteral("%1[%2]: %3")
                        .arg(error.severity == Error::Severity::Warning ? "warning" : "error", error.code, error.message);
+    // The same information as the JSON form (13.2): where, and what would be valid.
+    QStringList where;
     if (!error.node.isEmpty())
-        text += QStringLiteral(" (node %1)").arg(error.node);
+        where << QStringLiteral("node %1").arg(error.node);
+    if (!error.input.isEmpty())
+        where << QStringLiteral("input %1").arg(error.input);
+    if (!error.output.isEmpty())
+        where << QStringLiteral("output %1").arg(error.output);
+    if (!where.isEmpty())
+        text += QStringLiteral(" (%1)").arg(where.join(", "));
+    if (!error.valid.isEmpty()) {
+        QStringList valid;
+        for (const QJsonValue &option : error.valid)
+            valid << option.toVariant().toString();
+        text += QStringLiteral("\n  valid: %1").arg(valid.join(", "));
+    }
     if (!error.hint.isEmpty())
         text += QStringLiteral("\n  hint: %1").arg(error.hint);
     return text;
@@ -70,7 +85,7 @@ int run(int argc, char **argv, const Hooks &hooks) {
     const bool json = args.contains("--json");
     auto fail = [json](const Errors &errors) {
         if (json) {
-            writeLine(QJsonDocument(errorEnvelope(errors)).toJson(QJsonDocument::Compact));
+            writeLine(compactJson(errorEnvelope(errors)));
         } else {
             for (const Error &error : errors)
                 logLine(humanError(error));
@@ -86,11 +101,12 @@ int run(int argc, char **argv, const Hooks &hooks) {
     context.runsRoot = RunFolder::defaultRoot();
     context.queueDir = Queue::defaultDir();
     context.lockPath = Queue::defaultLockPath();
+    if (hooks.addNodeTypes)
+        hooks.addNodeTypes(context.registry);
     if (hooks.addKernels)
         hooks.addKernels(context.kernels);
     context.line = writeLine;
     context.log = logLine;
-    loadManifestFolder(context.registry, qEnvironmentVariable("FUGUE_NODE_MANIFESTS"), logLine);
 
     const Reply reply = execute(*command, context);
     if (reply.streamed)
@@ -103,13 +119,9 @@ int run(int argc, char **argv, const Hooks &hooks) {
     if (json) {
         // 13.2's envelope plus an additive `warnings`, only when there are some.
         QJsonObject envelope = okEnvelope(reply.data);
-        if (!reply.errors.isEmpty()) {
-            QJsonArray warnings;
-            for (const Error &warning : reply.errors)
-                warnings.append(warning.toJson());
-            envelope.insert("warnings", warnings);
-        }
-        writeLine(QJsonDocument(envelope).toJson(QJsonDocument::Compact));
+        if (!reply.errors.isEmpty())
+            envelope.insert("warnings", toJson(reply.errors));
+        writeLine(compactJson(envelope));
     } else if (!reply.text.isEmpty()) {
         writeLine(reply.text.toUtf8());
     }

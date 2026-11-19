@@ -214,12 +214,13 @@ public:
     Scheduler(const CompiledGraph &graph, std::optional<RunFolder> folder, const RunEnvironment &environment,
               const RunOptions &options, bool dry)
         : m_graph(graph), m_folder(std::move(folder)), m_env(environment), m_options(options), m_dry(dry),
+          m_providers(environment.registry ? environment.registry->providers() : QList<ProviderEntry>()),
           m_cancel(std::make_shared<std::atomic<bool>>(false)) {
         m_cpuSlots = m_env.cpuSlots > 0 ? m_env.cpuSlots : qMax(1, QThread::idealThreadCount() - 1);
         // Every lane can be full at once: the CPU slots, the GPU lane, and
         // one job's translation per provider instance.
-        m_pool.setMaxThreadCount(m_cpuSlots + 1 + int(m_env.providers.size()));
-        m_busy.fill(false, m_env.providers.size());
+        m_pool.setMaxThreadCount(m_cpuSlots + 1 + int(m_providers.size()));
+        m_busy.fill(false, m_providers.size());
     }
 
     ~Scheduler() override {
@@ -240,6 +241,10 @@ public:
             return;
         m_startedRun = true;
         m_startTime = now();
+        for (Error warning : m_options.warnings) {
+            warning.severity = Error::Severity::Warning;
+            m_outcome.errors.append(warning);
+        }
         m_order = m_graph.order();
         bool needsProviders = false;
         for (const QString &path : std::as_const(m_order)) {
@@ -261,7 +266,7 @@ public:
 
         if (!m_dry) {
             m_folder->writeCompiled(m_graph.toJson());
-            writeState(QStringLiteral("running"));
+            writeState();
             emitEvent({{"event", "run.started"}});
             for (const QString &path : std::as_const(m_order))
                 emitEvent({{"event", "node.queued"}, {"node", path}});
@@ -273,7 +278,7 @@ public:
                     emitEvent({{"event", "node.skipped"}, {"node", it.key()}, {"reason", it.value()}});
         }
 
-        for (const ProviderEntry &entry : std::as_const(m_env.providers)) {
+        for (const ProviderEntry &entry : std::as_const(m_providers)) {
             Candidate candidate;
             candidate.instance = entry.instance;
             if (!entry.provider)
@@ -297,7 +302,7 @@ public:
 private:
     // --- small helpers ---
 
-    QDateTime now() const { return m_env.clock ? m_env.clock().toUTC() : QDateTime::currentDateTimeUtc(); }
+    QDateTime now() const { return utcNow(m_env.clock); }
 
     void later(std::function<void()> call) { QMetaObject::invokeMethod(this, std::move(call), Qt::QueuedConnection); }
 
@@ -313,15 +318,15 @@ private:
 
     QString runId() const { return m_folder ? m_folder->id() : QString(); }
 
-    void writeState(const QString &status) {
+    // run.json while the run goes. Its end (the final status, `ended`, run.done) is
+    // RunFolder::finish's, in finish() below.
+    void writeState() {
         if (m_dry)
             return;
-        QJsonObject state{{"status", status},
+        QJsonObject state{{"status", runStatusName(RunStatus::Running)},
                           {"pid", QCoreApplication::applicationPid()},
-                          {"started", m_startTime.toString(Qt::ISODateWithMs)},
+                          {"started", isoTime(m_startTime)},
                           {"workflow", QJsonObject{{"path", m_options.workflow}, {"hash", m_graph.source}}}};
-        if (m_finished || status != QLatin1String("running"))
-            state.insert("ended", now().toString(Qt::ISODateWithMs));
         QJsonObject autos;
         QJsonObject providers;
         QJsonObject nodes;
@@ -349,18 +354,15 @@ private:
         state.insert("auto", autos);
         state.insert("providers", providers);
         state.insert("nodes", nodes);
-        QJsonArray errors;
-        for (const Error &error : std::as_const(m_outcome.errors))
-            errors.append(error.toJson());
-        state.insert("errors", errors);
+        state.insert("errors", toJson(m_outcome.errors));
         m_folder->writeState(state);
     }
 
     // --- providers ---
 
     void describeProviders() {
-        for (int i = 0; i < m_env.providers.size(); ++i) {
-            const ProviderEntry &entry = m_env.providers.at(i);
+        for (int i = 0; i < m_providers.size(); ++i) {
+            const ProviderEntry &entry = m_providers.at(i);
             if (!entry.provider || !entry.instance.enabled)
                 continue;
             connect(entry.provider.get(), &Provider::statusChanged, this,
@@ -380,7 +382,7 @@ private:
     void cancelJobs() {
         for (NodeRun &n : m_nodes)
             if (n.phase == Phase::Running && !n.job.isEmpty() && !n.jobOver)
-                m_env.providers.at(n.instance).provider->cancel(n.job, [](const Result<QString> &) {});
+                m_providers.at(n.instance).provider->cancel(n.job, [](const Result<QString> &) {});
     }
 
     // --- the loop ---
@@ -404,7 +406,7 @@ private:
         releaseImages();
         for (const NodeRun &n : std::as_const(m_nodes)) {
             if (n.phase != Phase::Finished) {
-                writeState(QStringLiteral("running"));
+                writeState();
                 return;
             }
         }
@@ -448,19 +450,8 @@ private:
     }
 
     void prepare(NodeRun &n) {
-        for (const QString &dep : std::as_const(n.dependencies)) {
-            const NodeRun &d = m_nodes[dep];
-            if (d.state == NodeState::Error ||
-                (d.state == NodeState::Skipped && d.reason == QLatin1String("upstream_failed")))
-                return skip(n, QStringLiteral("upstream_failed"));
-            if (d.state == NodeState::Skipped && d.reason == QLatin1String("cancelled"))
-                return skip(n, QStringLiteral("cancelled"));
-        }
-        if (!n.type)
-            return fail(n, nodeError(QStringLiteral("unknown_node_type"),
-                                     QStringLiteral("Node type %1 is not installed.").arg(n.node->type)));
-
-        // Freeze (10.4): the frozen key's result, whatever the inputs are now.
+        // Freeze (10.4) comes first: the frozen key's result is served whatever the
+        // inputs are now and whatever happened upstream, a failure included.
         if (!n.node->frozen.isEmpty()) {
             const std::optional<Values> frozen = m_dry ? m_env.cache->peek(n.node->frozen, *m_env.hashes)
                                                        : m_env.cache->lookup(n.node->frozen, usedBy(n), *m_env.hashes);
@@ -476,17 +467,30 @@ private:
             m_outcome.errors.append(warning);
         }
 
-        bool unknown = false; // a value that only a run can settle
-        QString skipReason;
-        KeyParts parts;
-        Error problem;
-        if (!resolveInputs(n, parts.inputs, unknown, skipReason, problem))
-            return fail(n, problem);
-        if (!skipReason.isEmpty())
-            return skip(n, skipReason);
-        if (unknown)
-            return stale(n);
+        for (const QString &dep : std::as_const(n.dependencies)) {
+            const NodeRun &d = m_nodes[dep];
+            if (d.state == NodeState::Error ||
+                (d.state == NodeState::Skipped && d.reason == QLatin1String("upstream_failed")))
+                return skip(n, QStringLiteral("upstream_failed"));
+            if (d.state == NodeState::Skipped && d.reason == QLatin1String("cancelled"))
+                return skip(n, QStringLiteral("cancelled"));
+        }
+        if (!n.type)
+            return fail(n, nodeError(QStringLiteral("unknown_node_type"),
+                                     QStringLiteral("Node type %1 is not installed.").arg(n.node->type)));
 
+        const ResolvedInputs resolved = resolveInputs(n);
+        if (resolved.problem)
+            return fail(n, *resolved.problem);
+        if (!resolved.skipReason.isEmpty())
+            return skip(n, resolved.skipReason);
+        const bool unknown = resolved.unknown;
+        KeyParts parts;
+        parts.inputs = resolved.keyInputs;
+
+        // The provider checks come before anything that depends on every input being
+        // known, so that validate reports them (8.5) for a node with a randomized seed
+        // or an input linked to a node that has not run.
         if (n.providerKernel) {
             Requirement requirement = n.providerKernel->requirement(*n.type, n.inputs);
             requirement.nodePin = n.node->provider;
@@ -505,8 +509,8 @@ private:
                 return stale(n);
             }
             n.selection = selection.value();
-            for (int i = 0; i < m_env.providers.size(); ++i)
-                if (m_env.providers.at(i).instance.name == n.selection->instance)
+            for (int i = 0; i < m_providers.size(); ++i)
+                if (m_providers.at(i).instance.name == n.selection->instance)
                     n.instance = i;
             if (n.instance < 0)
                 return fail(n, nodeError(QStringLiteral("internal"),
@@ -518,7 +522,10 @@ private:
         } else if (n.kernel) {
             for (const Value &value : std::as_const(n.inputs))
                 collectModels(value, n.models);
-        } else if (!m_dry) {
+        }
+        if (unknown)
+            return stale(n);
+        if (!n.providerKernel && !n.kernel && !m_dry) {
             return fail(n, nodeError(QStringLiteral("internal"),
                                      QStringLiteral("No kernel is registered for node type %1.").arg(n.type->id)));
         }
@@ -593,35 +600,50 @@ private:
         return {};
     }
 
-    // Fills n.inputs and the key's `inputs`. Returns false with `problem`
-    // set for an error; sets `skipReason` when the node is to be skipped.
-    bool resolveInputs(NodeRun &n, QJsonObject &keyInputs, bool &unknown, QString &skipReason, Error &problem) {
+    // What resolving a node's inputs came to. At most one of `problem` and
+    // `skipReason` is set; with either, the rest is not to be used.
+    struct ResolvedInputs {
+        QJsonObject keyInputs;        // the `inputs` part of the cache key
+        bool unknown = false;         // some value only a run can settle (validate)
+        QString skipReason;           // the node is to be skipped, and why
+        std::optional<Error> problem; // the node fails
+    };
+
+    // Fills n.inputs from what the graph has written, the defaults and the
+    // upstream outputs.
+    ResolvedInputs resolveInputs(NodeRun &n) {
+        ResolvedInputs resolved;
         n.inputs.clear();
         for (const InputSpec &spec : n.type->inputs) {
             const auto written = n.node->inputs.constFind(spec.name);
             Value value;
             bool linked = false;
+            bool thisUnknown = false;
             if (written != n.node->inputs.constEnd() && !written->isEmpty()) {
                 linked = hasLink(*written);
-                value = resolveValue(n, spec, *written, unknown);
+                value = resolveValue(n, spec, *written, thisUnknown);
                 if (spec.type.list && !value.isList() && !value.isEmpty())
                     value = Value::list({value});
             }
-            if (unknown)
+            if (thisUnknown) {
+                // Left out; the inputs that are known still reach the provider checks.
+                resolved.unknown = true;
                 continue;
+            }
             const bool empty = value.isEmpty() || (value.isList() && value.items().isEmpty() && linked);
             if (empty && !spec.defaultValue.isUndefined()) {
                 value = Value(spec.defaultValue);
             } else if (empty && spec.required()) {
                 if (linked) {
                     // Linked to an output that came back empty (3.3).
-                    skipReason = QStringLiteral("upstream_empty");
-                    return true;
+                    resolved.skipReason = QStringLiteral("upstream_empty");
+                    return resolved;
                 }
-                problem = nodeError(QStringLiteral("missing_input"),
-                                    QStringLiteral("Input %1 has no value.").arg(spec.name));
+                Error problem = nodeError(QStringLiteral("missing_input"),
+                                          QStringLiteral("Input %1 has no value.").arg(spec.name));
                 problem.input = spec.name;
-                return false;
+                resolved.problem = problem;
+                return resolved;
             } else if (empty) {
                 continue;
             }
@@ -630,13 +652,13 @@ private:
             if (spec.widget() == QLatin1String("file") && value.kind() == Value::Kind::Json && value.json().isString()) {
                 const QString hash = m_env.hashes->hash(value.text());
                 if (!hash.isEmpty()) {
-                    keyInputs.insert(spec.name, QJsonObject{{"file", hash}});
+                    resolved.keyInputs.insert(spec.name, QJsonObject{{"file", hash}});
                     continue;
                 }
             }
-            keyInputs.insert(spec.name, value.identity());
+            resolved.keyInputs.insert(spec.name, value.identity());
         }
-        return true;
+        return resolved;
     }
 
     // --- starting ---
@@ -652,7 +674,7 @@ private:
 
     bool usesGpuLane(const NodeRun &n) const {
         if (n.providerKernel)
-            return isLocal(m_env.providers.at(n.instance).instance);
+            return isLocal(m_providers.at(n.instance).instance);
         const QJsonValue gpu = n.type->needs.value("gpu");
         return gpu.isObject() && !gpu.toObject().value("parallel").toBool();
     }
@@ -777,7 +799,7 @@ private:
         JobRequest request = made.value();
         request.outputDir = n.workDir;
         const QPointer<Scheduler> self(this);
-        m_env.providers.at(n.instance).provider->submit(request, [self, path](const Result<QString> &job) {
+        m_providers.at(n.instance).provider->submit(request, [self, path](const Result<QString> &job) {
             if (self)
                 self->submitted(path, job);
         });
@@ -791,7 +813,7 @@ private:
         const QString id = jobId(n.instance, n.job);
         m_jobs.insert(id, path);
         if (m_cancel->load())
-            m_env.providers.at(n.instance).provider->cancel(n.job, [](const Result<QString> &) {});
+            m_providers.at(n.instance).provider->cancel(n.job, [](const Result<QString> &) {});
         // A status that came before the job id did.
         if (m_early.contains(id))
             jobStatus(n.instance, n.job, m_early.take(id));
@@ -833,7 +855,7 @@ private:
         if (status.state == QLatin1String("cancelled"))
             return failed(n, nodeError(QStringLiteral("cancelled"), QStringLiteral("The provider's job was cancelled.")));
         const QPointer<Scheduler> self(this);
-        m_env.providers.at(instance).provider->result(job, [self, path](const Result<JobResult> &result) {
+        m_providers.at(instance).provider->result(job, [self, path](const Result<JobResult> &result) {
             if (self)
                 self->jobResult(path, result);
         });
@@ -997,16 +1019,13 @@ private:
             anyError = anyError || n.state == NodeState::Error;
             anyCancelled = anyCancelled || (n.state == NodeState::Skipped && n.reason == QLatin1String("cancelled"));
         }
-        m_outcome.status = anyCancelled ? QStringLiteral("cancelled")
-                           : anyError   ? QStringLiteral("failed")
-                                        : QStringLiteral("ok");
+        m_outcome.status = anyCancelled ? RunStatus::Cancelled : anyError ? RunStatus::Failed : RunStatus::Ok;
         m_finished = true;
         if (!m_dry) {
-            writeState(m_outcome.status);
-            QJsonArray errors;
-            for (const Error &error : std::as_const(m_outcome.errors))
-                errors.append(error.toJson());
-            emitEvent({{"event", "run.done"}, {"status", m_outcome.status}, {"errors", errors}});
+            writeState(); // every node's last state
+            const QJsonObject done = m_folder->finish(m_outcome.status, m_outcome.errors, now());
+            if (onEvent)
+                onEvent(done);
             m_env.hashes->save();
             m_env.cache->evict();
         }
@@ -1019,6 +1038,7 @@ private:
     const RunEnvironment m_env;
     const RunOptions m_options;
     const bool m_dry;
+    const QList<ProviderEntry> m_providers; // the registry's, as they were when the run was made
 
     std::shared_ptr<std::atomic<bool>> m_cancel;
     QThreadPool m_pool;

@@ -18,7 +18,7 @@
 // that form and saving it gives the same bytes, and saving twice gives
 // identical bytes. Every node is written with its `inputs`, even when empty.
 
-#include "engine/error.h"
+#include "engine/result.h"
 #include "engine/version.h"
 
 #include <QByteArray>
@@ -89,6 +89,10 @@ private:
 };
 
 enum class NodeMode { Normal, Bypass, Mute };
+// "normal", "bypass", "mute". A document writes `mode` only for the last two (4.2).
+QString nodeModeName(NodeMode mode);
+// Nothing for a word that is not one of the three.
+std::optional<NodeMode> parseNodeMode(const QString &text);
 
 // A node in `graph.nodes` or in a group definition's `nodes`.
 struct Node {
@@ -172,18 +176,19 @@ struct Document {
     // id and, for an input, `input`. Inside a group definition, `node` is the
     // inner id and the message starts "Group <id>"; an error about an exposed
     // input or output of a group sets `input` or `output` to its name. When
-    // there is any error, nothing is returned. A UTF-8 byte order mark is
+    // there is any error, there is no document. A UTF-8 byte order mark is
     // accepted. Text that is not valid Unicode (a lone UTF-16 surrogate)
     // is an error naming its path, such as graph.nodes.a.inputs.text.
-    static std::optional<Document> load(const QByteArray &bytes, Errors &errors);
-    static std::optional<Document> fromJson(const QJsonObject &json, Errors &errors);
+    static Result<Document> load(const QByteArray &bytes);
+    static Result<Document> fromJson(const QJsonObject &json);
     // Adds `file_not_found` or `permission_denied` to the above.
-    static std::optional<Document> loadFile(const QString &path, Errors &errors);
+    static Result<Document> loadFile(const QString &path);
 
     QJsonObject toJson() const;
     QByteArray save() const; // writeJson(toJson())
-    // Writes atomically. A failure is `permission_denied` with the reason.
-    bool saveFile(const QString &path, Errors &errors) const;
+    // Writes atomically. Empty when written; a failure is `permission_denied`
+    // with the reason.
+    Errors saveFile(const QString &path) const;
 
     // The `source` of the compiled graph (4.8): canonicalHash() of
     // {"graph": <graph>, "groups": <groups>}, with `groups` as {} when the

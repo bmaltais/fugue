@@ -46,12 +46,10 @@ public:
     explicit Checker(Errors &errors) : m_errors(errors) {}
 
     void fail(const Place &place, const QString &message, const QJsonArray &valid = {}) {
-        Error error;
-        error.code = invalidDocument;
+        Error error = makeError(invalidDocument, message);
         error.node = place.node;
         error.input = place.input;
         error.output = place.output;
-        error.message = message;
         error.valid = valid;
         m_errors << error;
         m_failed = true;
@@ -190,15 +188,14 @@ std::optional<Node> readNode(Checker &c, const QString &prefix, const QString &i
                  .arg(shown(o.value("version"))));
 
     if (o.contains("mode")) {
-        const QString mode = o.value("mode").toString();
-        if (mode == "bypass")
-            node.mode = NodeMode::Bypass;
-        else if (mode == "mute")
-            node.mode = NodeMode::Mute;
+        // "normal" is the absence of `mode`, never written.
+        const std::optional<NodeMode> mode = parseNodeMode(o.value("mode").toString());
+        if (mode && *mode != NodeMode::Normal)
+            node.mode = *mode;
         else
             fail(QStringLiteral("\"mode\" must be \"bypass\" or \"mute\", not %1; leave it out for normal.")
                      .arg(shown(o.value("mode"))),
-                 QJsonArray{"bypass", "mute"});
+                 QJsonArray{nodeModeName(NodeMode::Bypass), nodeModeName(NodeMode::Mute)});
     }
     for (const auto &[key, out] : {std::pair<const char *, QString *>{"provider", &node.provider},
                                    std::pair<const char *, QString *>{"frozen", &node.frozen}}) {
@@ -589,10 +586,8 @@ QJsonObject nodeJson(const Node &node) {
     for (auto it = node.inputs.begin(); it != node.inputs.end(); ++it)
         inputs.insert(it.key(), it.value().toJson());
     o.insert("inputs", inputs);
-    if (node.mode == NodeMode::Bypass)
-        o.insert("mode", "bypass");
-    else if (node.mode == NodeMode::Mute)
-        o.insert("mode", "mute");
+    if (node.mode != NodeMode::Normal)
+        o.insert("mode", nodeModeName(node.mode));
     if (!node.provider.isEmpty())
         o.insert("provider", node.provider);
     if (!node.frozen.isEmpty())
@@ -674,10 +669,8 @@ bool validUnicode(const QString &text) {
 // Every place in `v` that holds a lone surrogate, as a dotted path.
 void findLoneSurrogates(const QJsonValue &v, const QString &path, Errors &errors) {
     const auto report = [&](const QString &where) {
-        Error error;
-        error.code = invalidDocument;
-        error.message = QStringLiteral("The text at %1 is not valid Unicode (a lone UTF-16 surrogate).").arg(where);
-        errors << error;
+        errors << makeError(invalidDocument,
+                            QStringLiteral("The text at %1 is not valid Unicode (a lone UTF-16 surrogate).").arg(where));
     };
     if (v.isString() && !validUnicode(v.toString())) {
         report(path);
@@ -819,6 +812,25 @@ QString newNodeId(const Nodes &taken) {
     }
 }
 
+QString nodeModeName(NodeMode mode) {
+    switch (mode) {
+    case NodeMode::Bypass:
+        return QStringLiteral("bypass");
+    case NodeMode::Mute:
+        return QStringLiteral("mute");
+    case NodeMode::Normal:
+        break;
+    }
+    return QStringLiteral("normal");
+}
+
+std::optional<NodeMode> parseNodeMode(const QString &text) {
+    for (const NodeMode mode : {NodeMode::Normal, NodeMode::Bypass, NodeMode::Mute})
+        if (text == nodeModeName(mode))
+            return mode;
+    return std::nullopt;
+}
+
 // --- Document -----------------------------------------------------------------
 
 const GroupDefinition *Document::group(const QString &id) const {
@@ -826,30 +838,25 @@ const GroupDefinition *Document::group(const QString &id) const {
     return found == groups.constEnd() ? nullptr : &found.value();
 }
 
-std::optional<Document> Document::load(const QByteArray &bytes, Errors &errors) {
-    const QByteArray text = bytes.startsWith("\xef\xbb\xbf") ? bytes.mid(3) : bytes;
-    QJsonParseError parseError;
-    const QJsonDocument json = QJsonDocument::fromJson(text, &parseError);
-    if (parseError.error != QJsonParseError::NoError) {
-        const QByteArray before = text.left(parseError.offset);
-        const qsizetype line = before.count('\n') + 1;
-        const qsizetype column = parseError.offset - (before.lastIndexOf('\n') + 1) + 1;
-        Error error;
-        error.code = QStringLiteral("invalid_json");
-        error.message = QStringLiteral("The file is not valid JSON: %1 at line %2, column %3.")
-                            .arg(parseError.errorString())
-                            .arg(line)
-                            .arg(column);
-        errors << error;
+// The collectors behind load() and fromJson(): they gather every problem as they go.
+namespace {
+
+std::optional<Document> documentFromJson(const QJsonObject &json, Errors &errors);
+
+std::optional<Document> documentFromBytes(const QByteArray &bytes, Errors &errors) {
+    const Result<QJsonDocument> parsed = parseJson(bytes, QStringLiteral("The file"));
+    if (!parsed) {
+        errors << parsed.error();
         return std::nullopt;
     }
+    const QJsonDocument &json = parsed.value();
     Checker c(errors);
     if (!json.isObject()) {
         c.fail(QStringLiteral("A workflow must be a JSON object."));
         return std::nullopt;
     }
     const qsizetype before = errors.size();
-    std::optional<Document> document = fromJson(json.object(), errors);
+    std::optional<Document> document = documentFromJson(json.object(), errors);
     for (qsizetype i = before; i < errors.size(); ++i)
         if (errors.at(i).code == QLatin1String("unsupported_format_version"))
             return std::nullopt;
@@ -861,18 +868,15 @@ std::optional<Document> Document::load(const QByteArray &bytes, Errors &errors) 
     return std::nullopt;
 }
 
-std::optional<Document> Document::fromJson(const QJsonObject &json, Errors &errors) {
+std::optional<Document> documentFromJson(const QJsonObject &json, Errors &errors) {
     Checker c(errors);
     Document document;
 
     const QJsonValue format = json.value("fugue");
     if (isWhole(format) && format.toDouble() > 1) {
-        Error error;
-        error.code = QStringLiteral("unsupported_format_version");
-        error.message = QStringLiteral("This workflow uses format %1; this Fugue reads format 1.")
-                            .arg(shown(format));
-        error.hint = QStringLiteral("Open it with a newer Fugue.");
-        errors << error;
+        errors << makeError(QStringLiteral("unsupported_format_version"),
+                            QStringLiteral("This workflow uses format %1; this Fugue reads format 1.").arg(shown(format)),
+                            QStringLiteral("Open it with a newer Fugue."));
         return std::nullopt;
     }
     if (format != QJsonValue(1))
@@ -941,25 +945,31 @@ std::optional<Document> Document::fromJson(const QJsonObject &json, Errors &erro
     return document;
 }
 
-std::optional<Document> Document::loadFile(const QString &path, Errors &errors) {
+} // namespace
+
+Result<Document> Document::load(const QByteArray &bytes) {
+    Errors problems;
+    std::optional<Document> document = documentFromBytes(bytes, problems);
+    return collected(std::move(document), std::move(problems));
+}
+
+Result<Document> Document::fromJson(const QJsonObject &json) {
+    Errors problems;
+    std::optional<Document> document = documentFromJson(json, problems);
+    return collected(std::move(document), std::move(problems));
+}
+
+Result<Document> Document::loadFile(const QString &path) {
     const QFileInfo info(path);
-    if (!info.exists() || info.isDir()) {
-        Error error;
-        error.code = QStringLiteral("file_not_found");
-        error.message = info.isDir() ? QStringLiteral("%1 is a folder, not a workflow file.").arg(path)
-                                     : QStringLiteral("There is no file %1.").arg(path);
-        errors << error;
-        return std::nullopt;
-    }
+    if (!info.exists() || info.isDir())
+        return makeError(QStringLiteral("file_not_found"),
+                         info.isDir() ? QStringLiteral("%1 is a folder, not a workflow file.").arg(path)
+                                      : QStringLiteral("There is no file %1.").arg(path));
     QFile file(path);
-    if (!file.open(QIODevice::ReadOnly)) {
-        Error error;
-        error.code = QStringLiteral("permission_denied");
-        error.message = QStringLiteral("%1 cannot be read: %2.").arg(path, file.errorString());
-        errors << error;
-        return std::nullopt;
-    }
-    return load(file.readAll(), errors);
+    if (!file.open(QIODevice::ReadOnly))
+        return makeError(QStringLiteral("permission_denied"),
+                         QStringLiteral("%1 cannot be read: %2.").arg(path, file.errorString()));
+    return load(file.readAll());
 }
 
 QJsonObject Document::toJson() const {
@@ -981,23 +991,8 @@ QByteArray Document::save() const {
     return writeJson(toJson());
 }
 
-bool Document::saveFile(const QString &path, Errors &errors) const {
-    QSaveFile file(path);
-    const auto fail = [&]() {
-        Error error;
-        error.code = QStringLiteral("permission_denied");
-        error.message = QStringLiteral("%1 cannot be written: %2.").arg(path, file.errorString());
-        errors << error;
-        return false;
-    };
-    if (!file.open(QIODevice::WriteOnly))
-        return fail();
-    const QByteArray bytes = save();
-    if (file.write(bytes) != bytes.size())
-        return fail();
-    if (!file.commit())
-        return fail();
-    return true;
+Errors Document::saveFile(const QString &path) const {
+    return writeJsonFile(path, toJson());
 }
 
 QString Document::sourceHash() const {

@@ -8,7 +8,7 @@
 // be checked without a registry (names, types, constraints, widgets,
 // defaults). The registry (engine/registry.h) adds the checks that need it.
 
-#include "engine/error.h"
+#include "engine/result.h"
 #include "engine/port_type.h"
 #include "engine/version.h"
 
@@ -75,12 +75,12 @@ struct NodeType {
     const InputSpec *input(const QString &name) const;
     const OutputSpec *output(const QString &name) const;
 
-    // Parses a node.json manifest. Every problem found is appended to
-    // `errors` (the code is `invalid_document`, or the literal codes for a
-    // default that breaks its own constraints, or
-    // `unsupported_format_version`), each message naming the type id. An
-    // unknown field is a warning. Returns nothing when there is an error.
-    static std::optional<NodeType> fromJson(const QJsonObject &manifest, Errors &errors);
+    // Parses a node.json manifest. Every problem found is reported (the
+    // code is `invalid_document`, or the literal codes for a default that
+    // breaks its own constraints, or `unsupported_format_version`), each
+    // message naming the type id. An unknown field is a warning, which a
+    // manifest that parses carries in warnings(). No type when there is an error.
+    static Result<NodeType> fromJson(const QJsonObject &manifest);
 
     // The manifest as data (`fugue node describe`), with only the fields that
     // are set. fromJson(toJson()) gives the same type back.
