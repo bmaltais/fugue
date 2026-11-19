@@ -206,15 +206,23 @@ foreach(test_source ${fugue_cli_tests})
   add_test(NAME ${test_name} COMMAND ${test_name})
 endforeach()
 
-# No test reads or writes the owner's settings, providers or keymap: every test starts with
-# XDG_CONFIG_HOME on an empty folder of its own (a test may still set its own). No test
+# No test reads or writes the owner's files: every test has a home of its own (HOME, so
+# Omarchy's state under ~/.local/state/omarchy is the test's, OmarchyPaths::standard()) and
+# its own XDG folders (settings, providers and keymap; the queue; caches; data), a test
+# may still set its own. tests/engine/test_isolation.cpp fails when that is not so. No test
 # reaches the owner's desktop either: the generic platform theme, so a FileDialog is Qt's own
 # and never the portal's picker on the owner's screen, and no session bus (the GUI tests also
 # set these themselves, tests/test_environment.cpp, for runs outside ctest).
 get_property(fugue_all_tests DIRECTORY PROPERTY TESTS)
 foreach(test_name ${fugue_all_tests})
+  set(test_home ${CMAKE_BINARY_DIR}/test-home/${test_name})
+  file(MAKE_DIRECTORY ${test_home})
   set_property(TEST ${test_name} APPEND PROPERTY ENVIRONMENT
+               HOME=${test_home}
                XDG_CONFIG_HOME=${CMAKE_BINARY_DIR}/test-config/${test_name}
+               XDG_STATE_HOME=${test_home}/.local/state
+               XDG_DATA_HOME=${test_home}/.local/share
+               XDG_CACHE_HOME=${test_home}/.cache
                QT_QPA_PLATFORMTHEME=generic
                QT_NO_XDG_DESKTOP_PORTAL=1
                DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent/fugue-tests-have-no-session-bus)
