@@ -108,7 +108,7 @@ QList<RecoveryEntry> RecoveryStore::list() {
         entry.modified = info.lastModified();
         QFile meta(metaPath(entry.id));
         if (meta.open(QIODevice::ReadOnly)) {
-            const QJsonObject object = QJsonDocument::fromJson(meta.readAll()).object();
+            const QJsonObject object = QJsonDocument::fromJson(meta.read(1 << 20)).object();
             entry.originalPath = object.value("path").toString();
             entry.title = object.value("title").toString();
             // Another running Fugue's live copy is not ours to offer. A copy without an owner

@@ -1,7 +1,9 @@
 // Save, open, recovery, import, trust and tabs (spec 11, 12.10, 6.7), on the real Workflows
 // with a canvas model and the built-in node types, and the window that shows them.
 
+#include <QBuffer>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QImage>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -13,6 +15,8 @@
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest>
+
+#include <sys/stat.h>
 
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
@@ -261,6 +265,45 @@ private slots:
         QVERIFY(!f.workflows->saveAs(f.file("no-such-folder/x.fugue")));
         QVERIFY(f.workflows->unsaved());
         QVERIFY(f.workflows->notice().contains("Could not save"));
+    }
+
+    // Open and drop read only regular files, and only what a workflow needs: a pipe is never
+    // opened (it would wait for a writer forever), a huge file is refused before it is read,
+    // and a picture's workflow is found without reading the picture whole.
+    void opensOnlyRegularFilesAndReadsOnlyTheWorkflow() {
+        Fixture f;
+        QVERIFY(::mkfifo(QFile::encodeName(f.file("pipe")).constData(), 0600) == 0);
+        QVERIFY(!f.workflows->openPath(f.file("pipe")));
+        QVERIFY2(f.workflows->notice().contains("not a file"), qPrintable(f.workflows->notice()));
+        f.workflows->dismissNotice();
+        f.workflows->dropUrls({QUrl::fromLocalFile(f.file("pipe"))}, 0, 0);
+        QVERIFY2(f.workflows->notice().contains("not a file"), qPrintable(f.workflows->notice()));
+
+        QFile video(f.file("video.mp4"));
+        QVERIFY(video.open(QIODevice::WriteOnly) && video.resize(qint64(3) << 30)); // sparse
+        video.close();
+        QElapsedTimer timer;
+        timer.start();
+        QVERIFY(!f.workflows->openPath(f.file("video.mp4")));
+        QVERIFY2(f.workflows->notice().contains("too big"), qPrintable(f.workflows->notice()));
+
+        QImage image(4, 4, QImage::Format_RGB32);
+        image.fill(Qt::red);
+        QByteArray png;
+        QBuffer buffer(&png);
+        buffer.open(QIODevice::WriteOnly);
+        QVERIFY(image.save(&buffer, "PNG"));
+        const Result<QByteArray> withFlow = pngWithWorkflow(png, textNode);
+        QVERIFY(withFlow.ok());
+        QFile picture(f.file("out.png"));
+        QVERIFY(picture.open(QIODevice::WriteOnly) && picture.write(*withFlow) == withFlow->size());
+        QVERIFY(picture.resize(qint64(3) << 30)); // a long tail after IEND
+        picture.close();
+        QVERIFY(f.workflows->openPath(f.file("out.png")));
+        QCOMPARE(f.canvas.nodes()->rowCount(), 1);
+        f.workflows->dropUrls({QUrl::fromLocalFile(f.file("out.png"))}, 0, 0);
+        QCOMPARE(f.canvas.nodes()->rowCount(), 1);
+        QVERIFY2(timer.elapsed() < 1500, qPrintable(QString::number(timer.elapsed())));
     }
 
     void anUnreadableFileIsANoticeNotACrash() {

@@ -84,6 +84,7 @@
   "Copy the node's image to the clipboard": "Copy the node's image to the clipboard",
   "Corner radius": "Corner radius",
   "Could not open %1: %2": "Could not open %1: %2",
+  "Could not open %1: it is not a file.": "Could not open %1: it is not a file.",
   "Could not paste the image: %1": "Could not paste the image: %1",
   "Could not remember your choice: %1": "Could not remember your choice: %1",
   "Could not save %1: %2": "Could not save %1: %2",

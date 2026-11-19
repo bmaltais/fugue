@@ -337,8 +337,13 @@ void Workflows::dropUrls(const QVariantList &urls, qreal x, qreal y) {
             setNotice(tr("Only files can be opened, not %1.").arg(text));
             continue;
         }
+        // Only a regular file is opened at all: a pipe would wait for a writer forever.
+        if (const QFileInfo info(path); info.exists() && !info.isFile() && !info.isDir()) {
+            setNotice(tr("Could not open %1: it is not a file.").arg(QFileInfo(path).fileName()));
+            continue;
+        }
         QFile file(path);
-        const bool image = QFileInfo(path).isFile() && file.open(QIODevice::ReadOnly) && sniffImage(file.read(16));
+        const bool image = file.open(QIODevice::ReadOnly) && sniffImage(file.read(16));
         file.close();
         // A picture with a workflow in it opens as that workflow, except onto a Load Image.
         if (image && (onLoadImage || !readEmbeddedWorkflow(path).ok()))

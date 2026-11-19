@@ -30,9 +30,14 @@ Result<QByteArray> pngWithWorkflow(const QByteArray &png, const QByteArray &work
 // chunk; empty writes none.
 Result<QByteArray> webpWithWorkflow(const vips::VImage &image, const QByteArray &workflowJson);
 
+// The most bytes a workflow may have, in a .fugue file or inside an image; anything bigger
+// is refused before it is read.
+inline constexpr qint64 maxEmbeddedWorkflowBytes = 64 * 1024 * 1024;
+
 // The workflow embedded in a PNG or WebP file, as the document JSON. `file_not_found`,
 // `media_unreadable` (neither format), or `invalid_document` when the file holds no
-// workflow or one that is not a JSON object.
+// workflow or one that is not a JSON object. Only the chunk headers and the workflow's own
+// chunk are read, never the image data; only a regular file is opened.
 Result<QJsonObject> readEmbeddedWorkflow(const QString &path);
 
 } // namespace fugue
