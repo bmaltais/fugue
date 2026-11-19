@@ -492,6 +492,10 @@ private:
         qreal width = 0;
         bool sized = false; // the layout pins the width (a manual resize, layout.nodes.<id>.size)
         qreal pinnedHeight = 0; // the height the layout pins, 0: automatic (never below the content's)
+        // The tallest content the pinned height has stood over since it was pinned or read: when
+        // the content is shorter again and nothing can take the room, the room was only spare
+        // and the node is its content's height (Appendix A). Not saved.
+        qreal pinnedOver = 0;
         qreal height = 0;
         bool collapsed = false;
         qreal collapsedWidth = 0; // the header alone: fits the title (docs/canvas-look.md 9)

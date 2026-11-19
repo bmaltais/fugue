@@ -194,9 +194,10 @@ private slots:
         QCOMPARE(thumb->width(), 328.0);
         QCOMPARE(thumb->height(), 164.0);
         QCOMPARE(nodeItem(app, "save")->height(), plain + 4 + 164);
-        // A pinned height stays when the result goes; auto-size gives it back.
+        // When the result goes, the pinned height was only room for it: the node is its
+        // content's height again (Appendix A). Auto-size then only unpins it.
         app.model.clearRunState();
-        QCOMPARE(nodeItem(app, "save")->height(), plain + 4 + 164);
+        QCOMPARE(nodeItem(app, "save")->height(), plain);
         QVERIFY(app.model.autoSize("save"));
         QCOMPARE(nodeItem(app, "save")->height(), plain);
     }

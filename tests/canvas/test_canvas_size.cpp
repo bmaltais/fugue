@@ -260,6 +260,39 @@ private slots:
         QVERIFY(!canvas.refreshSize("save")); // nothing changed since
     }
 
+    // A pinned height that is only spare room above the content shrinks back to the content
+    // when the content shrinks (a thumbnail clears), never below it; the pin is kept, so the
+    // picture has its room again when it comes back. Room pinned over the content as it is
+    // stays (Appendix A).
+    void aPinnedHeightShrinksBackToTheContentWhenTheThumbnailClears() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(workflow(placed)));
+        const qreal plain = node(canvas, "save").value("nodeHeight").toDouble();
+        const QVariantMap picture{{"state", "cached"}, {"thumbnail", "file:///x.png"}, {"thumbnailAspect", 0.5}};
+        canvas.setRunState("save", picture);
+        canvas.beginResize("save");
+        canvas.resizeBy(0, 100);
+        canvas.endResize();
+        const qreal pinned = plain + 4 + 114 + 100;
+        QCOMPARE(node(canvas, "save").value("nodeHeight").toDouble(), pinned);
+
+        canvas.setRunState("save", {{"state", "stale"}}); // an edit dropped the result
+        QCOMPARE(node(canvas, "save").value("nodeHeight").toDouble(), plain);
+        QCOMPARE(canvas.document().layout.value("nodes").toObject().value("save").toObject().value("size").toArray(),
+                 (QJsonArray{240, pinned}));
+        canvas.setRunState("save", picture);
+        QCOMPARE(node(canvas, "save").value("nodeHeight").toDouble(), pinned);
+        QCOMPARE(node(canvas, "save").value("thumbnailRect").toRectF().height(), 214.0);
+
+        // Blank room pinned on purpose, over content that has not shrunk, stays.
+        const qreal gen = node(canvas, "gen").value("nodeHeight").toDouble();
+        canvas.beginResize("gen");
+        canvas.resizeBy(0, 50);
+        canvas.endResize();
+        canvas.setRunState("gen", {{"state", "stale"}});
+        QCOMPARE(node(canvas, "gen").value("nodeHeight").toDouble(), gen + 50);
+    }
+
     void anOptionalNumberWithNoValueShowsAutoDimmed() {
         CanvasModel canvas(&m_registry);
         canvas.setDocument(document(workflow(placed)));

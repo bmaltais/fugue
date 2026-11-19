@@ -499,6 +499,7 @@ void CanvasModel::layOut(NodeRow &row) const {
     const bool hasThumbnail = run != m_run.constEnd() && !run->thumbnail.isEmpty();
     const qreal maxTall = qRound(40 * unit());
     const qreal textWidth = row.width - 10 * unit(); // the well's inset and padding, both sides
+    bool canGrow = hasThumbnail; // an item takes what a pinned height adds
     // One pass; `extra` is what a pinned height adds to the item that grows.
     auto build = [&](qreal extra) {
         qreal top = m_headerHeight + m_padTop;
@@ -522,6 +523,7 @@ void CanvasModel::layOut(NodeRow &row) const {
                                             node_size::wrappedLines(value.literal().toString(), textWidth, m_textSize), m_textSize),
                                         m_tallRowHeight, std::max(maxTall, m_tallRowHeight));
                 grows = &port;
+                canGrow = true;
             }
             place(port, height);
             if (tall && !hasThumbnail && extra > 0)
@@ -552,8 +554,15 @@ void CanvasModel::layOut(NodeRow &row) const {
         row.height = top + m_padBottom + (hasThumbnail || grows ? 0 : extra);
     };
     build(0);
-    if (row.pinnedHeight > row.height + 0.5)
-        build(row.pinnedHeight - row.height);
+    const qreal content = row.height;
+    if (row.pinnedHeight <= 0)
+        return;
+    // Room that nothing takes, over content that has shrunk since (a thumbnail cleared), was
+    // only spare: the node is its content's height, the pin kept for when the content is back.
+    const bool spareOnly = !canGrow && content < row.pinnedOver - 0.5;
+    row.pinnedOver = std::max(row.pinnedOver, content);
+    if (row.pinnedHeight > content + 0.5 && !spareOnly)
+        build(row.pinnedHeight - content);
 }
 
 bool CanvasModel::relayOut(int r, QList<int> roles, bool resized) {
@@ -1318,6 +1327,7 @@ void CanvasModel::resizeBy(qreal dx, qreal dy) {
         row.width = std::round(std::clamp(m_resizeStart.width() + dx, minWidth(), maxWidth()));
         row.pinnedHeight = std::round(m_resizeStart.height() + dy);
     }
+    row.pinnedOver = 0; // pinned over the content as it is now
     relayOut(r, {}, true);
     if (row.pinnedHeight > 0)
         row.pinnedHeight = std::round(row.height); // never stored below what the content needs
