@@ -233,8 +233,10 @@ void OmarchyProvider::discover(std::function<void(const Outcome<Discovery> &)> d
     const bool remote = !m_instance.address.isEmpty();
     const QString dns = QUrl(m_instance.address).host();
     const QString host = dns.section(QLatin1Char('.'), 0, 0);
-    const auto fail = [&](const QString &message, const QString &hint) {
-        done(Outcome<Discovery>{{}, {providerError(QStringLiteral("provider_unreachable"), message, hint)}});
+    // Replies come from the event loop, never inside the call (provider.h).
+    const auto fail = [this, &done](const QString &message, const QString &hint) {
+        const Error error = providerError(QStringLiteral("provider_unreachable"), message, hint);
+        QTimer::singleShot(0, this, [done = std::move(done), error] { done(Outcome<Discovery>{{}, {error}}); });
     };
 
     // The rows to serve from, and the key for them.

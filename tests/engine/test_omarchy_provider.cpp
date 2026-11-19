@@ -285,6 +285,19 @@ private slots:
         QVERIFY(described.errors.first().hint.contains("omarchy-agent-local"));
     }
 
+    void evenAnImmediateFailureRepliesFromTheEventLoop() {
+        Fixture fixture;
+        auto provider = fixture.provider();
+        bool described = false;
+        bool submitted = false;
+        provider->describe([&](const Outcome<Description> &) { described = true; });
+        provider->submit(fixture.request("image.generate", {{"prompt", "x"}}),
+                         [&](const Outcome<QString> &) { submitted = true; });
+        QVERIFY(!described);
+        QVERIFY(!submitted);
+        QTRY_VERIFY(described && submitted);
+    }
+
     void withoutAKeyNothingCanBeAsked() {
         Fixture fixture;
         QFile::remove(QDir(fixture.paths.configDir).filePath("key"));
