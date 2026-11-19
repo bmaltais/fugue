@@ -32,8 +32,16 @@ target_link_libraries(fugue_core PUBLIC fugue_engine
   Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::DBus)
 target_compile_options(fugue_core PUBLIC -Wall -Wextra)
 
+# The command line (spec 13): the same `fugue` binary, but it needs nothing
+# beyond the engine, so it is its own library with no Gui, Quick or QML. main.cpp
+# hands over to it before it creates a QGuiApplication.
+file(GLOB fugue_cli_sources CONFIGURE_DEPENDS src/cli/*.cpp src/cli/*.h)
+add_library(fugue_cli STATIC ${fugue_cli_sources})
+target_include_directories(fugue_cli PUBLIC src)
+target_link_libraries(fugue_cli PUBLIC fugue_engine)
+
 add_executable(fugue src/main.cpp src/resources.qrc)
-target_link_libraries(fugue PRIVATE fugue_core)
+target_link_libraries(fugue PRIVATE fugue_core fugue_cli)
 
 # The tests load the real Main.qml, so they carry the resources too.
 enable_testing()
@@ -49,6 +57,17 @@ foreach(test_source ${fugue_engine_tests})
   get_filename_component(test_name ${test_source} NAME_WE)
   add_executable(${test_name} ${test_source})
   target_link_libraries(${test_name} PRIVATE fugue_engine Qt6::Test)
+  add_test(NAME ${test_name} COMMAND ${test_name})
+endforeach()
+
+# CLI tests drive the built `fugue` binary as a subprocess with no display.
+file(GLOB fugue_cli_tests CONFIGURE_DEPENDS tests/cli/*.cpp)
+foreach(test_source ${fugue_cli_tests})
+  get_filename_component(test_name ${test_source} NAME_WE)
+  add_executable(${test_name} ${test_source})
+  target_link_libraries(${test_name} PRIVATE fugue_engine Qt6::Test)
+  target_compile_definitions(${test_name} PRIVATE FUGUE_BINARY="$<TARGET_FILE:fugue>")
+  add_dependencies(${test_name} fugue)
   add_test(NAME ${test_name} COMMAND ${test_name})
 endforeach()
 
