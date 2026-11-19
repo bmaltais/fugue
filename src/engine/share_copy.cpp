@@ -86,7 +86,8 @@ QJsonValue rewrite(const QJsonValue &value, Kind kind, const ShareOptions &optio
     if (!value.isString())
         return value;
     const QString text = value.toString();
-    const QJsonValue stripped = isLocalAbsolutePath(text) ? QJsonValue(bareName(text)) : value;
+    // Trimmed, as Save Image and the scheduler trim a path before using it.
+    const QJsonValue stripped = isLocalAbsolutePath(text) ? QJsonValue(bareName(text.trimmed())) : value;
     switch (kind) {
     case Kind::Path:
     case Kind::UnknownType: // only what is certainly a path
@@ -221,7 +222,7 @@ bool isLocalAbsolutePath(const QString &text) {
     // A root (`/`, `~/`, `C:\`) and then a name: a lone separator, a bare `~` or a drive
     // alone name nothing of anyone's, and a separator is common text (Text Concat).
     static const QRegularExpression path(QStringLiteral("^(?:/+|~/+|[A-Za-z]:[\\\\/]+)[^/\\\\]"));
-    return path.match(text).hasMatch();
+    return path.match(text.trimmed()).hasMatch();
 }
 
 QJsonObject shareCopy(const QJsonObject &document, const Registry &registry, const ShareOptions &options) {

@@ -360,6 +360,16 @@ private slots:
         QCOMPARE(nodes.value("t").toObject().value("inputs").toObject().value("text").toString(), QString("src-linked.png"));
     }
 
+    // The folder is trimmed before it is used, and before it is judged a local path.
+    void aFolderWithSpacesAroundItIsNotEmbedded() {
+        const QString source = makePng("src-spaced", 5, 3);
+        const Ran ran = run(saveFlow(source, "'name': 'spaced', 'folder': '  " + outDir() + " '"));
+        QVERIFY2(ran.error.isEmpty(), qPrintable(ran.error));
+        const QByteArray text = pngWorkflowText(outDir() + "/spaced.png");
+        QVERIFY(!text.isEmpty());
+        QVERIFY2(!text.contains(m_dir.path().toUtf8()), text.constData());
+    }
+
     void embedNoPromptsBlanksTheTextButKeepsTheGraph() {
         const QString source = makePng("src-np", 4, 4);
         const Ran ran = run(saveFlow(source, "'name': 'np', 'embed': 'no-prompts', 'folder': '" + outDir() + "'"));

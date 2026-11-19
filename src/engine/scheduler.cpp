@@ -704,9 +704,10 @@ private:
             }
             const bool pathLiteral = (spec.widget() == QLatin1String("file") || spec.widget() == QLatin1String("folder")) &&
                                      value.kind() == Value::Kind::Json && value.json().isString();
-            // "~" is expanded here, once: the node reads, and the key names, the same file.
+            // Trimmed and "~" expanded here, once: the node reads, the key names and the share
+            // copy judges (share_copy.h) the same path.
             if (pathLiteral)
-                value = Value(expandHome(value.text()));
+                value = Value(expandHome(value.text().trimmed()));
             n.inputs.insert(spec.name, value);
             // A file read by path is keyed by its content, not its path (10.1).
             if (pathLiteral && spec.widget() == QLatin1String("file")) {

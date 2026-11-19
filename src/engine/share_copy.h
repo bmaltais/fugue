@@ -36,6 +36,7 @@ QJsonObject shareCopy(const QJsonObject &document, const Registry &registry, con
 
 // Whether the text is an absolute local path that names something: `/`, `~/` or a Windows
 // drive (`C:\`) followed by a name. A lone separator, `~` and `C:\` alone are not.
+// Spaces around the text are ignored, as Save Image ignores them.
 bool isLocalAbsolutePath(const QString &text);
 
 } // namespace fugue

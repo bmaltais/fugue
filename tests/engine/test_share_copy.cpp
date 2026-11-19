@@ -77,6 +77,18 @@ private slots:
     // Only a path that names something is a path: a lone separator (Text Concat's "/" feeding a
     // folder) or a bare "~" names no one's files and stays. A folder path ending in a separator
     // keeps its last name.
+    // Save Image trims its folder, so a path with spaces around it is the same path, and goes.
+    void aPathWithSpacesAroundItIsStillAPath() {
+        const QJsonObject copy = shareCopy(
+            json("{'fugue': 1, 'graph': {'nodes': {"
+                 " 'a': {'type': 'fugue/loader', 'version': '1.0.0', 'inputs': {'file': '  /home/me/a.png ', 'dir': ' ~/out\\t'}}"
+                 "}}}"),
+            m_registry);
+        QCOMPARE(input(copy, "a", "file").toString(), QString("a.png"));
+        QCOMPARE(input(copy, "a", "dir").toString(), QString("out"));
+        QVERIFY(isLocalAbsolutePath(" /home"));
+    }
+
     void aSeparatorAloneIsNotAPath() {
         const QJsonObject copy = shareCopy(
             json("{'fugue': 1, 'graph': {'nodes': {"
