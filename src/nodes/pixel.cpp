@@ -106,7 +106,15 @@ Result<Values> imageOutput(Pixels pixels) {
     }
 }
 
-int toInt(const Value &value) { return int(std::lround(value.number())); }
+// A number input as a whole number, held within plus or minus a billion so a huge value cannot
+// wrap around (lround past the int range is undefined); not a number is 0.
+int toInt(const Value &value) {
+    const double rounded = std::round(value.number());
+    return std::isfinite(rounded) ? int(std::clamp(rounded, -1e9, 1e9)) : 0;
+}
+
+// The largest side Resize makes, as its manifest's `max` (the scheduler checks that first).
+constexpr int kMaxSide = 16384;
 
 // `side` scaled by to / from, rounded half to even (Python's round()), and at least 1.
 int scaled(int side, int to, int from) { return std::max(1, int(std::nearbyint(double(side) * to / from))); }
@@ -277,6 +285,10 @@ public:
         const Pixels &in = loaded.value();
         int width = toInt(context.input("width"));
         int height = toInt(context.input("height"));
+        for (const auto &[side, value] : {std::pair{"width", width}, std::pair{"height", height}})
+            if (value < 0 || value > kMaxSide)
+                return makeInputError(QStringLiteral("value_out_of_range"), QString::fromLatin1(side),
+                                      QStringLiteral("A %1 of %2 is outside 0 to %3.").arg(QString::fromLatin1(side)).arg(value).arg(kMaxSide));
         const QString fit = context.input("fit").text();
         if (width == 0 && height == 0)
             return Values{{"image", context.input("image")}};
@@ -307,8 +319,9 @@ public:
             return Result<Values>(loaded.errors());
         const Pixels &in = loaded.value();
         // ComfyUI ImageCrop: the origin is held inside the image, the far edge is a Python slice.
-        const int x = std::min(toInt(context.input("x")), in.width - 1);
-        const int y = std::min(toInt(context.input("y")), in.height - 1);
+        // Also held at 0, which the manifest's minimum already asks for.
+        const int x = std::clamp(toInt(context.input("x")), 0, in.width - 1);
+        const int y = std::clamp(toInt(context.input("y")), 0, in.height - 1);
         const int width = std::min(std::max(toInt(context.input("width")), 1), in.width - x);
         const int height = std::min(std::max(toInt(context.input("height")), 1), in.height - y);
         return imageOutput(region(in, x, y, width, height));

@@ -427,6 +427,35 @@ private slots:
         QCOMPARE(out.at(0, 0, 2), in.at(6, 4, 2));
     }
 
+    // The scheduler refuses values outside an input's range; the kernels still never read
+    // outside the image when handed one directly (defence in depth).
+    void cropHeldInsideTheImageWhateverItIsGiven() {
+        const Img in = synthetic(7, 5, 3, 9);
+        const Result<MediaHandle> negative =
+            run("fugue/crop", {{"image", handleOf(in)}, {"x", -100000}, {"y", -3}, {"width", 2}, {"height", 2}});
+        QVERIFY(negative.ok());
+        const Img corner = imgOf(negative.value());
+        QCOMPARE(corner.w, 2);
+        QCOMPARE(corner.h, 2);
+        QCOMPARE(corner.at(1, 1, 0), in.at(1, 1, 0));
+        const Result<MediaHandle> huge =
+            run("fugue/crop", {{"image", handleOf(in)}, {"x", 1e300}, {"y", 0}, {"width", 1e300}, {"height", -1e300}});
+        QVERIFY(huge.ok());
+        QCOMPARE(imgOf(huge.value()).w, 1);
+        QCOMPARE(imgOf(huge.value()).h, 1);
+    }
+
+    void resizeRefusesANegativeOrHugeSize() {
+        const Img in = synthetic(4, 4, 3, 10);
+        for (const double width : {-5.0, 1e300}) {
+            const Result<MediaHandle> r = run("fugue/resize", {{"image", handleOf(in)}, {"width", width}, {"height", 4},
+                                                               {"fit", "stretch"}, {"method", "nearest"}});
+            QVERIFY(!r.ok());
+            QCOMPARE(r.error().code, QString("value_out_of_range"));
+            QCOMPARE(r.error().input, QString("width"));
+        }
+    }
+
     // ---- brightness and contrast ----
 
     void brightnessContrastPivotsOnMidGrayAndKeepsAlpha() {

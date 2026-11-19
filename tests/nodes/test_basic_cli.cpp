@@ -203,6 +203,60 @@ private slots:
         }
     }
 
+    // A value that arrives by link meets the same input rules as one typed in: a Number below
+    // Crop's minimum fails that node on that input, instead of reading outside the image.
+    void aLinkedNumberOutsideTheInputsRangeFailsTheNode_data() {
+        QTest::addColumn<double>("x");
+        QTest::addRow("just below") << -3.0;
+        QTest::addRow("far below") << -100000.0;
+        QTest::addRow("not whole") << 1.5;
+    }
+    void aLinkedNumberOutsideTheInputsRangeFailsTheNode() {
+        QFETCH(double, x);
+        FileHashes hashes(path("hashes-r1.json"));
+        const vips::VImage pixels = (vips::VImage::black(10, 8, vips::VImage::option()->set("bands", 3)) + 30).cast(VIPS_FORMAT_UCHAR);
+        const MediaHandle fixture = MediaHandle::fromImage(pixels).value().saved(path("in-r1"), "src", hashes).value();
+        write(path("crop.fugue"),
+              QByteArray("{\"fugue\": 1, \"graph\": {\"nodes\": {"
+                         "\"load\": {\"type\": \"fugue/load-image\", \"version\": \"1.0.0\", \"inputs\": {\"file\": \"") +
+                  fixture.path().toUtf8() + "\"}},"
+                  "\"n\": {\"type\": \"fugue/number\", \"version\": \"1.0.0\", \"inputs\": {\"value\": " + QByteArray::number(x) + "}},"
+                  "\"crop\": {\"type\": \"fugue/crop\", \"version\": \"1.0.0\", \"inputs\": {\"image\": {\"from\": \"load.image\"},"
+                  " \"x\": {\"from\": \"n.value\"}, \"y\": 0, \"width\": 4, \"height\": 4}},"
+                  "\"look\": {\"type\": \"fugue/preview\", \"version\": \"1.0.0\", \"inputs\": {\"value\": {\"from\": \"crop.image\"}}}}}}");
+        const Outcome ran = fugue({"run", path("crop.fugue"), "--wait", "--json"});
+        QCOMPARE(ran.exitCode, 1);
+        const QJsonObject done = ran.lines().last();
+        QCOMPARE(done.value("status").toString(), QString("failed"));
+        const QJsonObject error = done.value("errors").toArray().at(0).toObject();
+        QCOMPARE(error.value("code").toString(), QString("value_out_of_range"));
+        QCOMPARE(error.value("node").toString(), QString("crop"));
+        QCOMPARE(error.value("input").toString(), QString("x"));
+    }
+
+    // A linked Text that is not one of the input's choices fails the node: Save Image never
+    // writes PNG bytes under a .jpg name.
+    void aLinkedTextOutsideTheChoicesFailsTheNode() {
+        FileHashes hashes(path("hashes-r1b.json"));
+        const vips::VImage pixels = (vips::VImage::black(6, 6, vips::VImage::option()->set("bands", 3)) + 40).cast(VIPS_FORMAT_UCHAR);
+        const MediaHandle fixture = MediaHandle::fromImage(pixels).value().saved(path("in-r1b"), "src", hashes).value();
+        const QString out = path("out-r1b");
+        write(path("format.fugue"),
+              QByteArray("{\"fugue\": 1, \"graph\": {\"nodes\": {"
+                         "\"load\": {\"type\": \"fugue/load-image\", \"version\": \"1.0.0\", \"inputs\": {\"file\": \"") +
+                  fixture.path().toUtf8() + "\"}},"
+                  "\"f\": {\"type\": \"fugue/text\", \"version\": \"1.0.0\", \"inputs\": {\"text\": \"jpg\"}},"
+                  "\"save\": {\"type\": \"fugue/save-image\", \"version\": \"1.0.0\", \"inputs\": {\"image\": {\"from\": \"load.image\"},"
+                  " \"name\": \"shot\", \"format\": {\"from\": \"f.text\"}, \"folder\": \"" + out.toUtf8() + "\"}}}}}");
+        const Outcome ran = fugue({"run", path("format.fugue"), "--wait", "--json"});
+        QCOMPARE(ran.exitCode, 1);
+        const QJsonObject error = ran.lines().last().value("errors").toArray().at(0).toObject();
+        QCOMPARE(error.value("code").toString(), QString("value_not_in_choices"));
+        QCOMPARE(error.value("node").toString(), QString("save"));
+        QCOMPARE(error.value("input").toString(), QString("format"));
+        QVERIFY(!QFileInfo::exists(out + "/shot.jpg"));
+    }
+
     // Number gives what was typed in it, and a Preview of it shows that in the run result.
     void aNumberRunsFromTheCommandLine() {
         write(path("number.fugue"),

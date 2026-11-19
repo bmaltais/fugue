@@ -636,6 +636,28 @@ private:
 
     // Fills n.inputs from what the graph has written, the defaults and the
     // upstream outputs.
+    // What is wrong with a linked value of a built-in type (text, number, boolean) for
+    // `spec`, by the rules checkLiteral applies to a literal; one item at a time for a list.
+    Errors linkedValueProblems(const InputSpec &spec, const Value &value) const {
+        if (!m_env.registry || m_env.registry->portKind(spec.type.type) != PortKind::Builtin)
+            return {};
+        const QList<Value> items = value.isList() ? value.items() : QList<Value>{value};
+        for (const Value &item : items) {
+            if (item.kind() != Value::Kind::Json)
+                continue;
+            Errors errors = checkLiteral(spec, item.json(), PortKind::Builtin);
+            if (errors.isEmpty())
+                continue;
+            for (Error &error : errors) {
+                error.input = spec.name;
+                if (error.hint.isEmpty())
+                    error.hint = QStringLiteral("The value comes by a link: change it where it is made.");
+            }
+            return errors;
+        }
+        return {};
+    }
+
     ResolvedInputs resolveInputs(NodeRun &n) {
         ResolvedInputs resolved;
         n.inputs.clear();
@@ -671,6 +693,14 @@ private:
                 return resolved;
             } else if (empty) {
                 continue;
+            }
+            // The compiler checked what was typed in; a value that came by link meets the
+            // same rules (range, whole number, choices) before the kernel trusts it.
+            if (linked) {
+                if (const Errors bad = linkedValueProblems(spec, value); !bad.isEmpty()) {
+                    resolved.problem = bad.first();
+                    return resolved;
+                }
             }
             const bool pathLiteral = (spec.widget() == QLatin1String("file") || spec.widget() == QLatin1String("folder")) &&
                                      value.kind() == Value::Kind::Json && value.json().isString();
