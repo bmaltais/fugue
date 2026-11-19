@@ -1,4 +1,5 @@
 #include "canvas/canvas_model.h"
+#include "canvas/input_links.h"
 
 #include "engine/node_type.h"
 #include "engine/registry.h"
@@ -6,12 +7,14 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QLineF>
+#include <QUndoStack>
 
 #include <algorithm>
 #include <cmath>
 #include <functional>
 
 using namespace fugue;
+using namespace canvas_detail;
 
 namespace {
 
@@ -19,28 +22,7 @@ constexpr qreal bottomPadding = 6;
 constexpr qreal columnGap = 80;
 constexpr qreal stackGap = 40;
 
-// Every link in an input value, with the list item it fills (-1: the whole value).
-QList<std::pair<PortRef, int>> linksIn(const InputValue &value) {
-    QList<std::pair<PortRef, int>> found;
-    if (value.kind() == InputValue::Kind::Link) {
-        found.append({value.from(), -1});
-    } else if (value.kind() == InputValue::Kind::List) {
-        const QList<InputValue> items = value.items();
-        for (int i = 0; i < items.size(); ++i)
-            if (items[i].kind() == InputValue::Kind::Link)
-                found.append({items[i].from(), i});
-    }
-    return found;
-}
-
 QString number(qreal value) { return QString::number(value, 'f', 1); }
-
-std::optional<QPointF> point(const QJsonValue &value) {
-    const QJsonArray pair = value.toArray();
-    if (pair.size() != 2 || !pair[0].isDouble() || !pair[1].isDouble())
-        return std::nullopt;
-    return QPointF(pair[0].toDouble(), pair[1].toDouble());
-}
 
 // A horizontal-tangent cubic from p to q, as a node editor draws a wire.
 QString cubic(const QPointF &p, const QPointF &q) {
@@ -73,6 +55,7 @@ QVariant NodeList::data(const QModelIndex &index, int role) const {
     case Width: return row.width;
     case Height: return row.height;
     case Collapsed: return row.collapsed;
+    case Mode: return nodeModeName(m_canvas->m_document.graph.nodes.value(row.id).mode);
     case Selected: return m_canvas->m_selected.contains(row.id);
     case Inputs: return m_canvas->portMaps(row, false);
     case Outputs: return m_canvas->portMaps(row, true);
@@ -83,7 +66,7 @@ QVariant NodeList::data(const QModelIndex &index, int role) const {
 QHash<int, QByteArray> NodeList::roleNames() const {
     return {{NodeId, "nodeId"}, {TypeId, "typeId"},   {Title, "title"},       {Missing, "missing"},
             {X, "posX"},        {Y, "posY"},          {Width, "nodeWidth"},   {Height, "nodeHeight"},
-            {Collapsed, "collapsed"}, {Selected, "selected"}, {Inputs, "inputs"}, {Outputs, "outputs"}};
+            {Collapsed, "collapsed"}, {Mode, "mode"}, {Selected, "selected"}, {Inputs, "inputs"}, {Outputs, "outputs"}};
 }
 
 LinkList::LinkList(CanvasModel *canvas) : QAbstractListModel(canvas), m_canvas(canvas) {}
@@ -121,7 +104,13 @@ QHash<int, QByteArray> LinkList::roleNames() const {
 // --- the canvas model --------------------------------------------------------
 
 CanvasModel::CanvasModel(const Registry *registry, QObject *parent)
-    : QObject(parent), m_registry(registry), m_nodeList(new NodeList(this)), m_linkList(new LinkList(this)) {}
+    : QObject(parent), m_registry(registry), m_nodeList(new NodeList(this)), m_linkList(new LinkList(this)),
+      m_undo(new QUndoStack(this)) {
+    connect(m_undo, &QUndoStack::indexChanged, this, &CanvasModel::undoChanged);
+    connect(m_undo, &QUndoStack::canUndoChanged, this, &CanvasModel::undoChanged);
+    connect(m_undo, &QUndoStack::canRedoChanged, this, &CanvasModel::undoChanged);
+    m_savedHash = contentHash();
+}
 
 CanvasModel::~CanvasModel() = default;
 
@@ -155,6 +144,9 @@ void CanvasModel::setDocument(const Document &document) {
     m_dragUnreachable.clear();
     m_moving.clear();
     m_moveStart.clear();
+    m_moveOpen = m_cloneOpen = m_dragOpen = false;
+    m_editDepth = 0;
+    m_undo->clear();
 
     const QJsonObject layoutNodes = m_document.layout.value("nodes").toObject();
     QSet<QString> unplaced;
@@ -182,6 +174,8 @@ void CanvasModel::setDocument(const Document &document) {
     emit framesChanged();
     emit linkDragChanged();
     emit documentReset();
+    m_hash.clear();
+    markSaved();
 }
 
 Document CanvasModel::document() const {
@@ -638,50 +632,16 @@ QString CanvasModel::linkProblem(const QString &fromNode, const QString &output,
     return problem(fromNode, output, toNode, input, false);
 }
 
-void CanvasModel::insertLink(const LinkRow &link) {
-    const int at = int(m_links.size());
-    m_linkList->beginInsertRows({}, at, at);
-    m_links.push_back(link);
-    m_linksOf[link.from.node].append(at);
-    if (link.toNode != link.from.node)
-        m_linksOf[link.toNode].append(at);
-    const Port *out = findPort(link.from.node, link.from.port, true);
-    m_links.back().color = out ? colorKey(out->type, out->kind) : QStringLiteral("unknown");
-    refreshLinkEnds(at);
-    m_linkList->endInsertRows();
-}
-
-// Removes the link rows into the input (all items with -1), keeping the rest in order.
-void CanvasModel::removeLinksInto(const QString &node, const QString &input, int item) {
-    for (int i = int(m_links.size()) - 1; i >= 0; --i) {
-        const LinkRow &link = m_links[size_t(i)];
-        if (link.toNode != node || link.toInput != input || (item >= 0 && link.item != item))
-            continue;
-        m_linkList->beginRemoveRows({}, i, i);
-        m_links.erase(m_links.begin() + i);
-        m_linkList->endRemoveRows();
-    }
-    m_linksOf.clear();
-    for (int i = 0; i < int(m_links.size()); ++i) {
-        const LinkRow &link = m_links[size_t(i)];
-        m_linksOf[link.from.node].append(i);
-        if (link.toNode != link.from.node)
-            m_linksOf[link.toNode].append(i);
-    }
-}
-
 bool CanvasModel::connectPorts(const QString &fromNode, const QString &output, const QString &toNode,
                                const QString &input, int item) {
     if (!problem(fromNode, output, toNode, input, false).isEmpty())
         return false;
     const Port *in = findPort(toNode, input, false);
-    Node &node = m_document.graph.nodes[toNode];
+    Document document = this->document();
+    Node &node = document.graph.nodes[toNode];
     const InputValue link = InputValue::link({fromNode, output});
     const InputValue old = node.inputs.value(input);
-    QSet<QString> formerSources;
-    for (const auto &[from, i] : linksIn(old))
-        formerSources.insert(from.node);
-
+    // Into a list input a link adds an item; anything else it replaces, a literal included.
     if (in->type->list && !old.isEmpty()) {
         QList<InputValue> items = old.kind() == InputValue::Kind::List ? old.items() : QList<InputValue>{old};
         items.insert(item < 0 || item > items.size() ? items.size() : item, link);
@@ -689,70 +649,32 @@ bool CanvasModel::connectPorts(const QString &fromNode, const QString &output, c
     } else {
         node.inputs.insert(input, link);
     }
-
-    removeLinksInto(toNode, input, -1);
-    for (const auto &[from, i] : linksIn(node.inputs.value(input))) {
-        LinkRow row;
-        row.from = from;
-        row.toNode = toNode;
-        row.toInput = input;
-        row.item = i;
-        if (rowOf(from.node) >= 0)
-            insertLink(row);
-    }
-    formerSources.insert(fromNode);
-    for (const QString &id : formerSources)
-        refreshPorts(id);
-    refreshPorts(toNode);
-    emit edited();
+    commit(document, tr("Connect"));
     return true;
 }
 
 bool CanvasModel::disconnectInput(const QString &nodeId, const QString &input, int item) {
     if (!m_document.graph.nodes.contains(nodeId))
         return false;
-    Node &node = m_document.graph.nodes[nodeId];
-    const InputValue old = node.inputs.value(input);
+    const InputValue old = m_document.graph.nodes.value(nodeId).inputs.value(input);
     const auto links = linksIn(old);
-    if (links.isEmpty())
+    if (std::none_of(links.begin(), links.end(), [&](const auto &link) { return item < 0 || link.second == item; }))
         return false;
-    QSet<QString> sources;
+    Document document = this->document();
+    Node &node = document.graph.nodes[nodeId];
     if (old.kind() == InputValue::Kind::List) {
         QList<InputValue> items = old.items();
-        bool removed = false;
-        for (int i = int(items.size()) - 1; i >= 0; --i) {
-            if (items[i].kind() == InputValue::Kind::Link && (item < 0 || item == i)) {
-                sources.insert(items[i].from().node);
+        for (int i = int(items.size()) - 1; i >= 0; --i)
+            if (items[i].kind() == InputValue::Kind::Link && (item < 0 || item == i))
                 items.removeAt(i);
-                removed = true;
-            }
-        }
-        if (!removed)
-            return false;
         if (items.isEmpty())
             node.inputs.remove(input);
         else
             node.inputs.insert(input, InputValue::list(items));
     } else {
-        if (item >= 0)
-            return false;
-        sources.insert(old.from().node);
         node.inputs.remove(input);
     }
-    removeLinksInto(nodeId, input, -1);
-    for (const auto &[from, i] : linksIn(node.inputs.value(input))) {
-        LinkRow row;
-        row.from = from;
-        row.toNode = nodeId;
-        row.toInput = input;
-        row.item = i;
-        if (rowOf(from.node) >= 0)
-            insertLink(row);
-    }
-    for (const QString &id : sources)
-        refreshPorts(id);
-    refreshPorts(nodeId);
-    emit edited();
+    commit(document, tr("Disconnect"));
     return true;
 }
 
@@ -771,6 +693,11 @@ void CanvasModel::beginLinkDrag(const QString &node, const QString &port, bool o
     const Port *p = findPort(node, port, output);
     if (!p)
         return;
+    if (!m_drag.isEmpty())
+        endLinkDrag();
+    // Picking a link up and putting it down is one edit.
+    beginEdit();
+    m_dragOpen = true;
     QString startNode = node, startPort = port;
     bool startOutput = output;
     if (!output && !(p->type && p->type->list)) {
@@ -803,6 +730,13 @@ QString CanvasModel::dragProblem(const QString &node, const QString &port, bool 
     const bool fromOutput = m_drag.value("output").toBool();
     if (output == fromOutput)
         return fromOutput ? tr("Connect an output to an input.") : tr("Connect an input to an output.");
+    // Links being moved (Shift+drag): the output must feed every input they lead to.
+    for (const QVariant &target : m_drag.value("targets").toList()) {
+        const QVariantMap t = target.toMap();
+        if (const QString why = problem(node, port, t.value("node").toString(), t.value("port").toString(), true);
+            !why.isEmpty())
+            return why;
+    }
     const QString dragNode = m_drag.value("node").toString(), dragPort = m_drag.value("port").toString();
     return fromOutput ? problem(dragNode, dragPort, node, port, true) : problem(node, port, dragNode, dragPort, true);
 }
@@ -812,12 +746,96 @@ bool CanvasModel::endLinkDrag(const QString &node, const QString &port, bool out
         return false;
     const bool fromOutput = m_drag.value("output").toBool();
     const QString dragNode = m_drag.value("node").toString(), dragPort = m_drag.value("port").toString();
+    const QVariantList targets = m_drag.value("targets").toList();
+    const bool allowed = !node.isEmpty() && output != fromOutput && dragProblem(node, port, output).isEmpty();
+    const QVariantMap source = m_drag.value("source").toMap();
     m_drag.clear();
     m_dragUnreachable.clear();
     emit linkDragChanged();
-    if (node.isEmpty() || output == fromOutput)
+    bool connected = false;
+    if (!targets.isEmpty()) {
+        // Moving an output's links: each one now comes from the new output.
+        if (allowed) {
+            const PortRef old{source.value("node").toString(), source.value("port").toString()};
+            Document document = this->document();
+            for (const QVariant &target : targets) {
+                const QVariantMap t = target.toMap();
+                Node &into = document.graph.nodes[t.value("node").toString()];
+                const QString input = t.value("port").toString();
+                const InputValue value = into.inputs.value(input);
+                const InputValue link = InputValue::link({node, port});
+                if (value.kind() == InputValue::Kind::Link && value.from() == old) {
+                    into.inputs.insert(input, link);
+                } else if (value.kind() == InputValue::Kind::List) {
+                    QList<InputValue> items = value.items();
+                    for (InputValue &each : items)
+                        if (each.kind() == InputValue::Kind::Link && each.from() == old)
+                            each = link;
+                    into.inputs.insert(input, InputValue::list(items));
+                }
+            }
+            commit(document, tr("Move links"));
+            connected = true;
+        }
+    } else if (allowed) {
+        connected = fromOutput ? connectPorts(dragNode, dragPort, node, port) : connectPorts(node, port, dragNode, dragPort);
+    }
+    if (m_dragOpen) {
+        m_dragOpen = false;
+        endEdit(connected ? tr("Connect") : tr("Disconnect"));
+    }
+    return connected;
+}
+
+void CanvasModel::beginLinksMove(const QString &node, const QString &output) {
+    if (!findPort(node, output, true))
+        return;
+    QVariantList targets;
+    for (const LinkRow &link : m_links)
+        if (link.from.node == node && link.from.port == output)
+            targets.append(QVariantMap{{"node", link.toNode}, {"port", link.toInput}, {"item", link.item}});
+    if (targets.isEmpty()) {
+        beginLinkDrag(node, output, true);
+        return;
+    }
+    if (!m_drag.isEmpty())
+        endLinkDrag();
+    beginEdit();
+    m_dragOpen = true;
+    // The drag holds the inputs' ends, so it looks for an output, and an output downstream
+    // of any of them would close a cycle.
+    m_dragUnreachable.clear();
+    for (const QVariant &target : targets)
+        m_dragUnreachable.unite(downstreamOf(target.toMap().value("node").toString()));
+    const QVariantMap first = targets.first().toMap();
+    const QString toNode = first.value("node").toString(), toInput = first.value("port").toString();
+    const NodeRow &row = m_rows[size_t(rowOf(toNode))];
+    const Port *in = findPort(toNode, toInput, false);
+    const Port *out = findPort(node, output, true);
+    m_drag = {{"node", toNode},
+              {"port", toInput},
+              {"output", false},
+              {"color", colorKey(out->type, out->kind)},
+              {"x", row.pos.x()},
+              {"y", row.pos.y() + (in ? in->y : 0)},
+              {"targets", targets},
+              {"source", QVariantMap{{"node", node}, {"port", output}}}};
+    emit linkDragChanged();
+}
+
+bool CanvasModel::disconnectPort(const QString &nodeId, const QString &port, bool output) {
+    if (!findPort(nodeId, port, output))
         return false;
-    return fromOutput ? connectPorts(dragNode, dragPort, node, port) : connectPorts(node, port, dragNode, dragPort);
+    if (!output)
+        return disconnectInput(nodeId, port);
+    const PortRef source{nodeId, port};
+    Document document = this->document();
+    bool any = false;
+    for (Node &node : document.graph.nodes)
+        any |= stripLinks(node, [&](const PortRef &from) { return from == source; });
+    if (any)
+        commit(document, tr("Disconnect"));
+    return any;
 }
 
 // --- hit tests ---------------------------------------------------------------
@@ -865,27 +883,29 @@ QString CanvasModel::addNode(const QString &typeId, qreal x, qreal y) {
     const NodeType *type = m_registry ? m_registry->nodeType(typeId) : nullptr;
     if (!type)
         return {};
-    const QString id = newNodeId(m_document.graph.nodes);
+    Document document = this->document();
+    const QString id = newNodeId(document.graph.nodes);
     Node node;
     node.type = type->id;
     node.version = type->version;
-    m_document.graph.nodes.insert(id, node);
-    NodeRow row = makeRow(id);
-    row.pos = QPointF(x, y);
-    const int at = int(m_rows.size());
-    m_nodeList->beginInsertRows({}, at, at);
-    m_rowOf.insert(id, at);
-    m_rows.push_back(std::move(row));
-    m_nodeList->endInsertRows();
-    emit edited();
+    document.graph.nodes.insert(id, node);
+    QJsonObject layoutNodes = document.layout.value("nodes").toObject();
+    layoutNodes.insert(id, QJsonObject{{"pos", QJsonArray{x, y}}});
+    document.layout.insert("nodes", layoutNodes);
+    commit(document, tr("Add node"));
     return id;
 }
 
 void CanvasModel::beginMove(const QString &node) {
+    if (m_moveOpen)
+        endMove();
     m_moving.clear();
     m_moveStart.clear();
     if (rowOf(node) < 0)
         return;
+    // The whole drag is one edit, however many steps it takes.
+    beginEdit();
+    m_moveOpen = true;
     const QStringList ids = m_selected.contains(node) ? selectedIds() : QStringList{node};
     for (const QString &id : ids) {
         m_moving << id;
@@ -910,17 +930,21 @@ void CanvasModel::moveBy(qreal dx, qreal dy) {
         emit m_linkList->dataChanged(index, index,
                                      {LinkList::X1, LinkList::Y1, LinkList::X2, LinkList::Y2, LinkList::Path});
     }
+    if (!m_moving.isEmpty())
+        m_hash.clear();
 }
 
 void CanvasModel::endMove() {
-    const bool moved = std::any_of(m_moving.begin(), m_moving.end(), [&](const QString &id) {
-        const int i = int(m_moving.indexOf(id));
-        return m_rows[size_t(rowOf(id))].pos != m_moveStart[size_t(i)];
-    });
     m_moving.clear();
     m_moveStart.clear();
-    if (moved)
-        emit edited();
+    if (m_moveOpen) {
+        m_moveOpen = false;
+        endEdit(tr("Move"));
+    }
+    if (m_cloneOpen) {
+        m_cloneOpen = false;
+        endEdit(tr("Clone"));
+    }
 }
 
 QPointF CanvasModel::position(const QString &node) const {

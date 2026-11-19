@@ -1935,6 +1935,16 @@ Building M2 made these further choices.
 | The canvas is never mirrored in right-to-left languages: a graph's direction and its saved positions are geometry | 12.11 | medium-high |
 | A click selects a node, Shift or Ctrl+click adds, dragging a selected node moves the selection, and a click on empty canvas clears it (legacy). A marquee selects every node it touches, as ComfyUI's does | 12.3, 12.4 | high |
 | Furniture (12.9) in #16 is drawn from the layout only (collapsed nodes, Frames, reroute points); making and editing it waits for the command registry and undo (#17, #21) | 12.9 | medium |
+| Undo: one `QUndoStack` per workflow, in the canvas model. Each step keeps the whole document before and after it, and undo or redo makes the canvas match by node id, remaking only what differs. A gesture is one step: a drag, a dragged link (one picked up included), an Alt+drag clone with its move, a Shift+drag of links. An edit that changes nothing is no step; the viewport and the selection are not edits | 12.11 | high |
+| Unsaved is the content hash of the document without `layout.view`, compared with the hash at the last save (ComfyUI's change tracker likewise ignores the canvas offset and zoom) | 11.2 | medium-high |
+| The clipboard holds a `.fugue` document of the selection (its nodes, their layout and the group definitions they use) as `application/x-fugue` and as plain text, so any workflow text pastes. A paste gets new ids, puts the copy's top left at the pointer (else the view's center) and selects it. A plain paste keeps the links between the pasted nodes; Ctrl+Shift+V also keeps links from nodes still in the workflow that pass the link checks | 12.4 | medium-high |
+| Clone keeps no links from outside, as ComfyUI's does. Ctrl+D puts the copy 20 units right and down; Alt+drag clones the node, or the selection when the node is in it, where it is and drags the copy. Alt+click with no drag takes the node out of the selection | 12.4 | medium |
+| Shift or Ctrl+click on a node already selected, with no drag, takes it out of the selection (litegraph's toggle); dragging it still moves the selection | 12.4 | medium-high |
+| Bypass, mute and collapse on a mixed selection: every node takes the state, unless all have it already, and then all lose it (ComfyUI flips each node, which leaves a mixed selection mixed) | 12.4 | medium |
+| Delete removes the nodes, every link into or out of them, and their layout: entries, reroute points into them and their places in Frames | 12.4, 4.5 | high |
+| Shift+drag from an output lets go on another output that can feed every one of its inputs to move them all, and anywhere else to leave them be. Ctrl+Alt+click on an input removes its links (every list item), on an output every link out of it | 12.4 | medium |
+| Zoom keys step 1.1 at the canvas's center (ComfyUI). Fit (`.`, Home) frames the selection, or every node when none is selected, in three quarters of the canvas, within the zoom range | 12.4 | medium-high |
+| Until the design pass (#47): a bypassed node takes the palette's magenta (ComfyUI's purple), a muted one fades to half | 3.5, 12.6 | medium |
 
 ## Appendix B: issue to section map
 

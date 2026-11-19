@@ -11,6 +11,7 @@
 #include <QUrl>
 
 #include "backend.h"
+#include "canvas/canvas_commands.h"
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
 #include "cli/args.h"
@@ -55,6 +56,8 @@ int main(int argc, char *argv[]) {
     fugue::Registry registry;
     fugue::nodes::addBuiltinNodeTypes(registry);
     CanvasModel canvasModel(&registry);
+    // The canvas's edit, node and view commands; each edit is one step on its undo stack.
+    registerCanvasCommands(commands, canvasModel);
 
     QQmlApplicationEngine engine;
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);

@@ -13,6 +13,13 @@ import QtQuick.Shapes
 // the standard preset selects with a left-drag and pans with the wheel. In both, middle-drag
 // and Space+drag pan, a trackpad (a wheel event with pixelDelta) pans and a pinch zooms, and
 // right-drag does nothing.
+//
+// Editing (12.4): Shift or Ctrl+click adds a node to the selection, or takes one already in
+// it out; Alt+drag clones what it drags and Alt+click takes the node out of the selection;
+// Ctrl+Alt+click on a port disconnects it; Shift+drag from an output moves all its links.
+// Each edit is one step on the model's undo stack. The keys (copy, paste, delete, undo...)
+// are commands (canvas_commands.h); zoom and fit commands arrive as the model's
+// zoomRequested and fitRequested.
 FocusScope {
     id: canvas
 
@@ -31,13 +38,16 @@ FocusScope {
     signal linkReleased(var from, real x, real y)
 
     property bool spaceHeld: false
-    property string gesture: ""  // "pan", "move", "link" or "marquee" while a button is down
+    // "pan", "move", "link", "marquee", or "alt" (a press with Alt on a node, not yet a drag)
+    // while a button is down
+    property string gesture: ""
     property point pressAt        // where the gesture began, in canvas coordinates
     property point panStart       // world.x, world.y when a pan began
     property point pressWorld     // the press in world coordinates
     property point pointer        // the pointer in canvas coordinates during a gesture
     property bool travelled: false
     property string pressedNode: ""
+    property bool pressedWasSelected: false
     property int pressModifiers: 0
     property string hoverProblem: ""
     readonly property var linkDrag: model.linkDrag
@@ -144,6 +154,11 @@ FocusScope {
     Connections {
         target: canvas.model
         function onDocumentReset() { canvas.applyView() }
+        function onZoomRequested(factor) { canvas.zoomAt(canvas.width / 2, canvas.height / 2, factor) }
+        function onFitRequested() {
+            if (canvas.model.fitView(canvas.width, canvas.height))
+                canvas.applyView()
+        }
     }
 
     Keys.onPressed: event => {
@@ -172,6 +187,9 @@ FocusScope {
         objectName: "canvasInput"
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
+        // The pointer is followed with no button down too: a paste lands where it is.
+        hoverEnabled: true
+        onExited: canvas.model.clearPointer()
         cursorShape: canvas.gesture === "pan" ? Qt.ClosedHandCursor
                    : canvas.spaceHeld ? Qt.OpenHandCursor : Qt.ArrowCursor
 
@@ -191,17 +209,29 @@ FocusScope {
             }
             const port = canvas.portUnder(mouse.x, mouse.y)
             if (port.node !== undefined) {
+                if ((mouse.modifiers & Qt.ControlModifier) && (mouse.modifiers & Qt.AltModifier)) {
+                    canvas.model.disconnectPort(port.node, port.port, port.output)
+                    return
+                }
                 canvas.gesture = "link"
                 canvas.hoverProblem = ""
-                canvas.model.beginLinkDrag(port.node, port.port, port.output)
+                if (port.output && (mouse.modifiers & Qt.ShiftModifier))
+                    canvas.model.beginLinksMove(port.node, port.port)
+                else
+                    canvas.model.beginLinkDrag(port.node, port.port, port.output)
                 return
             }
             const hit = canvas.model.nodeAt(canvas.pressWorld.x, canvas.pressWorld.y)
             if (hit !== "") {
                 canvas.pressedNode = hit
+                canvas.pressedWasSelected = canvas.model.selectedIds().indexOf(hit) >= 0
+                if ((mouse.modifiers & Qt.AltModifier) && !(mouse.modifiers & Qt.ControlModifier)) {
+                    canvas.gesture = "alt" // a clone once it travels
+                    return
+                }
                 if (mouse.modifiers & (Qt.ShiftModifier | Qt.ControlModifier))
                     canvas.model.select([hit], "add")
-                else if (canvas.model.selectedIds().indexOf(hit) < 0)
+                else if (!canvas.pressedWasSelected)
                     canvas.model.select([hit], "replace")
                 canvas.gesture = "move"
                 canvas.model.beginMove(hit)
@@ -215,20 +245,26 @@ FocusScope {
         }
 
         onPositionChanged: mouse => {
+            const w = canvas.toWorld(mouse.x, mouse.y)
+            canvas.model.setPointer(w.x, w.y)
+            if (canvas.gesture === "")
+                return
             canvas.pointer = Qt.point(mouse.x, mouse.y)
             if (!canvas.travelled && Math.hypot(mouse.x - canvas.pressAt.x, mouse.y - canvas.pressAt.y)
-                    >= Qt.styleHints.startDragDistance)
+                    >= Application.styleHints.startDragDistance)
                 canvas.travelled = true
+            if (canvas.gesture === "alt" && canvas.travelled) {
+                canvas.model.beginCloneMove(canvas.pressedNode)
+                canvas.gesture = "move"
+            }
             switch (canvas.gesture) {
             case "pan":
                 world.x = canvas.panStart.x + mouse.x - canvas.pressAt.x
                 world.y = canvas.panStart.y + mouse.y - canvas.pressAt.y
                 break
-            case "move": {
-                const w = canvas.toWorld(mouse.x, mouse.y)
+            case "move":
                 canvas.model.moveBy(w.x - canvas.pressWorld.x, w.y - canvas.pressWorld.y)
                 break
-            }
             case "link": {
                 const port = canvas.portUnder(mouse.x, mouse.y)
                 canvas.hoverProblem = port.node !== undefined
@@ -281,8 +317,16 @@ FocusScope {
             break
         case "move":
             model.endMove()
-            if (!travelled && !(pressModifiers & (Qt.ShiftModifier | Qt.ControlModifier)))
-                model.select([pressedNode], "replace")
+            if (!travelled) {
+                if (!(pressModifiers & (Qt.ShiftModifier | Qt.ControlModifier)))
+                    model.select([pressedNode], "replace")
+                else if (pressedWasSelected)
+                    model.select([pressedNode], "subtract")
+            }
+            break
+        case "alt":
+            // Alt+click, not a drag: the node leaves the selection.
+            model.select([pressedNode], "subtract")
             break
         case "link": {
             const from = { node: linkDrag.node, port: linkDrag.port, output: linkDrag.output }

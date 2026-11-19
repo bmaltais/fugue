@@ -15,6 +15,7 @@ Item {
     required property real nodeWidth
     required property real nodeHeight
     required property bool collapsed
+    required property string mode // "normal", "bypass" or "mute"
     required property bool selected
     required property var inputs
     required property var outputs
@@ -49,11 +50,14 @@ Item {
     y: posY
     width: nodeWidth
     height: nodeHeight
+    // A muted node fades; a bypassed one takes ComfyUI's purple (the palette's magenta).
+    opacity: mode === "mute" ? 0.5 : 1
 
     Rectangle {
         anchors.fill: parent
         radius: node.corner
-        color: node.look.panel
+        color: node.mode === "bypass" ? Qt.tint(node.look.panel, Qt.alpha(node.look.palette.magenta, 0.35))
+                                      : node.look.panel
         border.width: node.selected ? 2 : 1
         border.color: node.selected ? node.look.accent : node.missing ? node.look.error : node.look.border
     }
