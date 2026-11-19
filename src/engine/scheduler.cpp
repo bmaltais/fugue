@@ -479,14 +479,14 @@ private:
             return fail(n, nodeError(QStringLiteral("unknown_node_type"),
                                      QStringLiteral("Node type %1 is not installed.").arg(n.node->type)));
 
-        bool unknown = false; // a value that only a run can settle
-        QString skipReason;
+        const ResolvedInputs resolved = resolveInputs(n);
+        if (resolved.problem)
+            return fail(n, *resolved.problem);
+        if (!resolved.skipReason.isEmpty())
+            return skip(n, resolved.skipReason);
+        const bool unknown = resolved.unknown;
         KeyParts parts;
-        Error problem;
-        if (!resolveInputs(n, parts.inputs, unknown, skipReason, problem))
-            return fail(n, problem);
-        if (!skipReason.isEmpty())
-            return skip(n, skipReason);
+        parts.inputs = resolved.keyInputs;
 
         // The provider checks come before anything that depends on every input being
         // known, so that validate reports them (8.5) for a node with a randomized seed
@@ -600,9 +600,19 @@ private:
         return {};
     }
 
-    // Fills n.inputs and the key's `inputs`. Returns false with `problem`
-    // set for an error; sets `skipReason` when the node is to be skipped.
-    bool resolveInputs(NodeRun &n, QJsonObject &keyInputs, bool &unknown, QString &skipReason, Error &problem) {
+    // What resolving a node's inputs came to. At most one of `problem` and
+    // `skipReason` is set; with either, the rest is not to be used.
+    struct ResolvedInputs {
+        QJsonObject keyInputs;        // the `inputs` part of the cache key
+        bool unknown = false;         // some value only a run can settle (validate)
+        QString skipReason;           // the node is to be skipped, and why
+        std::optional<Error> problem; // the node fails
+    };
+
+    // Fills n.inputs from what the graph has written, the defaults and the
+    // upstream outputs.
+    ResolvedInputs resolveInputs(NodeRun &n) {
+        ResolvedInputs resolved;
         n.inputs.clear();
         for (const InputSpec &spec : n.type->inputs) {
             const auto written = n.node->inputs.constFind(spec.name);
@@ -617,7 +627,7 @@ private:
             }
             if (thisUnknown) {
                 // Left out; the inputs that are known still reach the provider checks.
-                unknown = true;
+                resolved.unknown = true;
                 continue;
             }
             const bool empty = value.isEmpty() || (value.isList() && value.items().isEmpty() && linked);
@@ -626,13 +636,14 @@ private:
             } else if (empty && spec.required()) {
                 if (linked) {
                     // Linked to an output that came back empty (3.3).
-                    skipReason = QStringLiteral("upstream_empty");
-                    return true;
+                    resolved.skipReason = QStringLiteral("upstream_empty");
+                    return resolved;
                 }
-                problem = nodeError(QStringLiteral("missing_input"),
-                                    QStringLiteral("Input %1 has no value.").arg(spec.name));
+                Error problem = nodeError(QStringLiteral("missing_input"),
+                                          QStringLiteral("Input %1 has no value.").arg(spec.name));
                 problem.input = spec.name;
-                return false;
+                resolved.problem = problem;
+                return resolved;
             } else if (empty) {
                 continue;
             }
@@ -641,13 +652,13 @@ private:
             if (spec.widget() == QLatin1String("file") && value.kind() == Value::Kind::Json && value.json().isString()) {
                 const QString hash = m_env.hashes->hash(value.text());
                 if (!hash.isEmpty()) {
-                    keyInputs.insert(spec.name, QJsonObject{{"file", hash}});
+                    resolved.keyInputs.insert(spec.name, QJsonObject{{"file", hash}});
                     continue;
                 }
             }
-            keyInputs.insert(spec.name, value.identity());
+            resolved.keyInputs.insert(spec.name, value.identity());
         }
-        return true;
+        return resolved;
     }
 
     // --- starting ---
