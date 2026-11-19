@@ -8,6 +8,7 @@
 #include <QStringList>
 #include <QTimer>
 #include <QTranslator>
+#include <QtQmlIntegration/qqmlintegration.h>
 
 // Follows the language picked under Omarchy's Setup > Language. Catalogs are
 // flat JSON objects from English source text to translation, one per Omarchy
@@ -17,6 +18,8 @@
 // CLDR category ({"one": "%n klip", "other": "%n klip"}).
 class Translator : public QTranslator {
     Q_OBJECT
+    QML_ELEMENT
+    QML_UNCREATABLE("made in C++, read through App")
     Q_PROPERTY(QString language READ language NOTIFY changed)
 
 public:

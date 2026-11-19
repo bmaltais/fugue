@@ -6,7 +6,6 @@
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QQmlApplicationEngine>
-#include <QQmlContext>
 #include <QQuickItem>
 #include <QQuickStyle>
 #include <QQuickWindow>
@@ -15,9 +14,9 @@
 #include <QtTest>
 #include <cmath>
 
-#include "backend.h"
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
+#include "qml_app.h"
 #include "theme.h"
 #include "workflow/workflows.h"
 #include "translator.h"
@@ -195,12 +194,6 @@ class FugueTests : public QObject {
 private slots:
     void initTestCase() { QQuickStyle::setStyle("Material"); }
 
-    void primaryActionCounts() {
-        Backend backend;
-        backend.primaryAction();
-        QCOMPARE(backend.count(), 1);
-    }
-
     void themeFallsBack() {
         QTemporaryDir dir;
         Theme theme(dir.path());
@@ -360,7 +353,6 @@ private slots:
         Translator translator(dir.path() + "/language", dir.path());
         QCoreApplication::installTranslator(&translator);
         Theme theme(dir.path());
-        Backend backend;
         CanvasModel canvasModel(nullptr);
         fugue::CommandRegistry commands;
         fugue::Workflows workflows(&canvasModel, nullptr, &commands,
@@ -373,12 +365,7 @@ private slots:
             for (const auto &error : errors)
                 warnings << error.toString();
         });
-        engine.rootContext()->setContextProperty("translator", &translator);
-        engine.rootContext()->setContextProperty("theme", &theme);
-        engine.rootContext()->setContextProperty("backend", &backend);
-        engine.rootContext()->setContextProperty("canvasModel", &canvasModel);
-        engine.rootContext()->setContextProperty("commands", &commands);
-        engine.rootContext()->setContextProperty("workflows", &workflows);
+        fugue::exposeToQml(engine, {&translator, &theme, &commands, &canvasModel, &workflows});
         engine.load(QUrl("qrc:/Main.qml"));
         QVERIFY(!engine.rootObjects().isEmpty());
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
@@ -547,7 +534,6 @@ private slots:
         Translator translator(dir.path() + "/language");
         QCoreApplication::installTranslator(&translator);
         Theme theme(dir.path());
-        Backend backend;
         CanvasModel canvasModel(nullptr);
         fugue::CommandRegistry commands;
         fugue::Workflows workflows(&canvasModel, nullptr, &commands,
@@ -560,12 +546,7 @@ private slots:
             for (const auto &error : errors)
                 warnings << error.toString();
         });
-        engine.rootContext()->setContextProperty("translator", &translator);
-        engine.rootContext()->setContextProperty("theme", &theme);
-        engine.rootContext()->setContextProperty("backend", &backend);
-        engine.rootContext()->setContextProperty("canvasModel", &canvasModel);
-        engine.rootContext()->setContextProperty("commands", &commands);
-        engine.rootContext()->setContextProperty("workflows", &workflows);
+        fugue::exposeToQml(engine, {&translator, &theme, &commands, &canvasModel, &workflows});
         engine.load(QUrl("qrc:/Main.qml"));
         QVERIFY(!engine.rootObjects().isEmpty());
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());

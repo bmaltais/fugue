@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
+import Fugue
 import "../canvas"
 
 // The menu bar (#50): File, Edit, View, Node, Run and Help, built from the command
@@ -14,15 +15,15 @@ Rectangle {
     id: bar
     objectName: "menuBar"
 
-    readonly property var look: theme.look
+    readonly property CanvasLook look: App.theme.look
     readonly property real u: look.unit
-    readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
+    readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
 
     // The top menus; read again when the language changes.
-    property var tree: commands.menu("bar")
+    property var tree: App.commands.menu("bar")
     Connections {
-        target: translator
-        function onChanged() { bar.tree = commands.menu("bar") }
+        target: App.translator
+        function onChanged() { bar.tree = App.commands.menu("bar") }
     }
     // The open top menu's index, or -1.
     property int current: -1
@@ -85,7 +86,7 @@ Rectangle {
         const anchor = bar.narrow ? hamburger : titleRepeater.itemAt(index)
         if (dropdown.shown) {
             // Moving along the bar: the same popup, refilled and moved under the next title.
-            dropdown.items = commands.menu("bar")[index].items
+            dropdown.items = App.commands.menu("bar")[index].items
             const at = dropdown.fitted(anchor, 0, anchor.height, anchor.width, anchor.height)
             dropdown.parent = anchor
             dropdown.x = at.x
@@ -99,7 +100,7 @@ Rectangle {
                 dropdown.contentItem.forceActiveFocus(Qt.TabFocusReason)
             return
         }
-        dropdown.items = commands.menu("bar")[index].items
+        dropdown.items = App.commands.menu("bar")[index].items
         dropdown.byKey = byKey
         dropdown.popupFit(anchor, 0, anchor.height, anchor.width, anchor.height)
     }
@@ -108,13 +109,13 @@ Rectangle {
         const everything = bar.everything
         bar.dropdown.close()
         bar.current = -1
-        everything.items = commands.menu("bar")
+        everything.items = App.commands.menu("bar")
         everything.byKey = byKey
         everything.popupFit(hamburger, 0, hamburger.height, hamburger.width, hamburger.height)
     }
 
     Connections {
-        target: commands
+        target: App.commands
         function onWindowRequested(id) {
             if (id === "help.about") {
                 if (!bar.about)

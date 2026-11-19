@@ -1,5 +1,7 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
+import Fugue
 
 // A node's last image (docs/canvas-look.md 4.6): fitted on the well color, a 1 px outline
 // inside, its size in a chip at the bottom left. Loaded off the main thread at no more than
@@ -12,7 +14,7 @@ Item {
     property string info
     property string file // the file a Save Image wrote; empty for any other node
     property string text // shown in the image's place: a text or number result, a label
-    required property var look
+    required property CanvasLook look
     property bool full: true // the info chip only at the full zoom tier
 
     readonly property bool rounded: look.thumbCorner > 0 && GraphicsInfo.api !== GraphicsInfo.Software

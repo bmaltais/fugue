@@ -88,9 +88,11 @@ struct RunApp {
         service = std::make_unique<RunService>(setup);
         runs = std::make_unique<CanvasRuns>(&app.model, &app.workflows, service.get(), &app.registry);
         runs->registerCommands(app.commands);
-        app.engine.rootContext()->setContextProperty("runs", runs.get());
+        app.runs = runs.get();
     }
     ~RunApp() {
+        // The window goes before the runs it shows, as in main(), which makes its engine last.
+        qDeleteAll(app.engine.rootObjects());
         runs.reset();
         service.reset(); // stops the run thread before the fake goes
     }
@@ -148,7 +150,7 @@ struct ActionApp : RunApp {
               return true;
           }) {
         QObject::connect(&actions, &fugue::ImageActions::message, [this](const QString &text) { messages << text; });
-        app.engine.rootContext()->setContextProperty("imageActions", &actions);
+        app.imageActions = &actions;
     }
 
     // Runs the graph and gives the Generate Image a picture too big for a thumbnail.

@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
+import Fugue
 import "../canvas"
 import "placement.js" as Placement
 
@@ -22,9 +23,9 @@ Menu {
     // Left or Right on one of its rows: the menu bar moves to the neighbouring menu.
     signal stepRequested(int delta)
 
-    readonly property var look: theme.look
+    readonly property CanvasLook look: App.theme.look
     readonly property real u: look.unit
-    readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
+    readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
 
     // Not modal, so a press on another menu title or on the canvas both closes it and lands
     // there; while it is open the window's shortcuts sleep (CommandRegistry::menuOpen), so
@@ -45,14 +46,14 @@ Menu {
         return count > 0 ? 0 : -1
     }
     // The current row opens a submenu.
-    readonly property bool onSubMenuRow: currentIndex >= 0 && !!itemAt(currentIndex) && !!itemAt(currentIndex).subMenu
+    readonly property bool onSubMenuRow: currentIndex >= 0 && !!(itemAt(currentIndex) as MenuItem)?.subMenu
     onClosed: byKey = false
     // Open, or opening; false as soon as it starts to close (`visible` stays true through the
     // closing fade, `opened` is false through the opening one).
     property bool shown: false
-    onAboutToShow: { shown = true; commands.menuShown(true) }
-    onAboutToHide: { shown = false; commands.menuShown(false) }
-    Component.onDestruction: if (shown) commands.menuShown(false)
+    onAboutToShow: { shown = true; App.commands.menuShown(true) }
+    onAboutToHide: { shown = false; App.commands.menuShown(false) }
+    Component.onDestruction: if (shown) App.commands.menuShown(false)
     padding: 1.5 * u
     // Wholly inside the window: no taller than it (the rows scroll then), and opened through
     // popupFit, which flips or shifts it (placement.js). Qt's own clamp is the backstop.
@@ -116,7 +117,7 @@ Menu {
                     menu.subMenuComponent = Qt.createComponent("CommandMenu.qml")
                 const sub = menu.subMenuComponent.createObject(menu, {title: entry.title, items: entry.items,
                                                                       target: menu.target, sub: true,
-                                                                      cascade: true, overlap: menu.u})
+                                                                      cascade: true, overlap: menu.u}) as Menu
                 sub.aboutToShow.connect(() => menu.subOpen = true)
                 sub.aboutToHide.connect(() => menu.subOpen = false)
                 menu.addMenu(sub)

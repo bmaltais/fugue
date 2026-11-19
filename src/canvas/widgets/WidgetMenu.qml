@@ -1,5 +1,7 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
+import Fugue
 import ".."
 import "../../menu/placement.js" as Placement
 
@@ -10,7 +12,7 @@ import "../../menu/placement.js" as Placement
 Popup {
     id: menu
     objectName: "widgetMenu"
-    required property var look
+    required property CanvasLook look
     property var entries: []
     signal picked(var value)
 

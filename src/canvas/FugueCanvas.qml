@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Shapes
+import Fugue
 
 // The canvas (spec 12): nodes as items and wires as one Shape each, under one item that is
 // moved and scaled to pan and zoom (12.2, spike 05). The model is a CanvasModel
@@ -31,7 +32,7 @@ import QtQuick.Shapes
 FocusScope {
     id: canvas
 
-    required property var model
+    required property CanvasModel model
     // "legacy" or "standard" (12.3): settings.json's navigation, bound in Main.qml.
     property string navigation: "legacy"
     readonly property real minZoom: 0.1
@@ -193,12 +194,12 @@ FocusScope {
         world.y = height / 2 - c[1] * world.scale
     }
     // The look (look.h), and the port colors as a JS object, converted once per theme change.
-    readonly property var look: theme.look
+    readonly property CanvasLook look: App.theme.look
     // The window's runs (#19, run/canvas_runs.h), when the app gives them: a window made
     // without them (most tests) draws no run pill and no running dots.
-    readonly property var windowRuns: typeof runs === "undefined" ? null : runs
-    readonly property var ports: theme.look.ports
-    readonly property var shadowMargins: theme.look.shadowMargins
+    readonly property CanvasRuns windowRuns: App.runs
+    readonly property var ports: App.theme.look.ports
+    readonly property var shadowMargins: App.theme.look.shadowMargins
     // A port color key from the model (CanvasModel::colorKey).
     function portColor(key) {
         const c = ports[key]
@@ -211,7 +212,7 @@ FocusScope {
     }
 
     // Nodes follow the desktop text size.
-    Binding { target: canvas.model; property: "textSize"; value: theme.textSize }
+    Binding { target: canvas.model; property: "textSize"; value: App.theme.textSize }
 
     // A port is hit within 10 pixels on screen, and never less than its own size. Zoomed out
     // past readableZoom ports are not drawn, so a press there is on the node.
@@ -607,7 +608,8 @@ FocusScope {
                 delegate: Shape {
                     id: lit
                     required property int modelData
-                    readonly property Item wire: wires.itemAt(modelData)
+                    // The wires delegate (an inline Shape with path and color), so not a type to name.
+                    readonly property var wire: wires.itemAt(modelData)
                     visible: wire !== null
                     ShapePath {
                         strokeWidth: 6

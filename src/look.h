@@ -18,6 +18,7 @@
 #include <QString>
 #include <QVariantList>
 #include <QVariantMap>
+#include <QtQmlIntegration/qqmlintegration.h>
 
 namespace fugue::look {
 
@@ -80,6 +81,8 @@ QImage shadowImage(int level, int corner, bool light, int *margin);
 // `theme.look` in QML. Its properties change together, on `changed`.
 class CanvasLook : public QObject {
     Q_OBJECT
+    QML_ELEMENT
+    QML_UNCREATABLE("made in C++, read through App")
     // Colors (docs/canvas-look.md 6.1).
     Q_PROPERTY(QColor canvas MEMBER m_canvas NOTIFY changed)
     Q_PROPERTY(QColor dot MEMBER m_dot NOTIFY changed)

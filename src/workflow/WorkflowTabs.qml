@@ -1,11 +1,13 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import Fugue
 import "../canvas"
 
 // The tab bar (spec 12.10): one tab per open workflow, a dot on the ones with unsaved
-// content, a close button on each and a button for a new workflow. Needs the `workflows` and
-// `theme` context properties. docs/canvas-look.md has no section for it: it takes the same
+// content, a close button on each and a button for a new workflow. Reads App.workflows and
+// App.theme. docs/canvas-look.md has no section for it: it takes the same
 // tokens, a recessed strip with the current tab raised in the node body's fill, marked by
 // the accent along its top.
 Rectangle {
@@ -13,12 +15,12 @@ Rectangle {
     objectName: "workflowTabs"
     // Shown from the second workflow on; one workflow needs no tabs, and the window title
     // carries its name and unsaved mark.
-    visible: workflows.tabs.length > 1
+    visible: App.workflows.tabs.length > 1
     implicitHeight: visible ? 9 * look.unit : 0
     color: look.well
 
-    readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
-    readonly property var look: theme.look
+    readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
+    readonly property CanvasLook look: App.theme.look
 
     Rectangle {
         anchors.bottom: parent.bottom
@@ -34,7 +36,7 @@ Rectangle {
         LayoutMirroring.childrenInherit: true
 
         Repeater {
-            model: workflows.tabs
+            model: App.workflows.tabs
             delegate: AbstractButton {
                 id: tabButton
                 required property var modelData
@@ -45,7 +47,7 @@ Rectangle {
                 hoverEnabled: true
                 implicitWidth: 44 * root.look.unit
                 Layout.fillHeight: true
-                onClicked: workflows.current = index
+                onClicked: App.workflows.current = index
                 background: Rectangle {
                     color: tabButton.modelData.current ? root.look.body
                          : tabButton.hovered ? Qt.tint(root.look.well, Qt.alpha(root.look.text, 0.04)) : "transparent"
@@ -68,8 +70,8 @@ Rectangle {
                         // Unsaved: a small dot before the title.
                         visible: tabButton.modelData.unsaved
                         Layout.leftMargin: 3 * root.look.unit
-                        width: 6
-                        height: 6
+                        implicitWidth: 6
+                        implicitHeight: 6
                         radius: 3
                         color: root.look.accent
                     }
@@ -94,7 +96,7 @@ Rectangle {
                         focusPolicy: Qt.NoFocus
                         flat: true
                         Accessible.name: qsTr("Close %1").arg(tabButton.modelData.title)
-                        onClicked: workflows.closeTab(tabButton.index)
+                        onClicked: App.workflows.closeTab(tabButton.index)
                         contentItem: Glyph {
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
@@ -116,7 +118,7 @@ Rectangle {
             focusPolicy: Qt.NoFocus
             flat: true
             Accessible.name: qsTr("New workflow")
-            onClicked: workflows.newWorkflow()
+            onClicked: App.workflows.newWorkflow()
             contentItem: Glyph {
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter

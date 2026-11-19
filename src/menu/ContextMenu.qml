@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Controls
+import Fugue
+import "../canvas"
 
 // The canvas's context menus (#50, spec 12.3: right-click opens it): on a node the "node"
 // menu, on a Frame the "frame" one, elsewhere the "canvas" one, from the command registry's
@@ -14,14 +15,14 @@ Item {
     id: root
     objectName: "contextMenu"
 
-    required property var canvas // FugueCanvas
+    required property FugueCanvas canvas
     property string kind: ""     // canvas, node or frame, the last one opened
     // Made from the file the first time it opens, so opening the window does not compile Menu's QML.
     property var menu: null
 
     // The topmost Frame under a world point, or "".
     function frameAt(x, y) {
-        const frames = canvasModel.frames
+        const frames = App.canvasModel.frames
         for (let i = frames.length - 1; i >= 0; --i) {
             const f = frames[i]
             if (x >= f.x && x <= f.x + f.width && y >= f.y && y <= f.y + f.height)
@@ -36,11 +37,11 @@ Item {
             root.menu = Qt.createComponent("CommandMenu.qml").createObject(root, {objectName: "contextMenuPopup"})
         const menu = root.menu
         const w = canvas.toWorld(px, py)
-        const node = canvasModel.nodeAt(w.x, w.y)
+        const node = App.canvasModel.nodeAt(w.x, w.y)
         const target = {x: w.x, y: w.y}
         if (node !== "") {
-            if (canvasModel.selection.indexOf(node) < 0)
-                canvasModel.select([node], "replace")
+            if (App.canvasModel.selection.indexOf(node) < 0)
+                App.canvasModel.select([node], "replace")
             kind = "node"
             target.node = node
         } else {
@@ -51,22 +52,22 @@ Item {
         }
         menu.close()
         menu.target = target
-        menu.items = commands.menu(kind, target)
+        menu.items = App.commands.menu(kind, target)
         const p = canvas.mapToItem(root, px, py)
         menu.byKey = byKey
         menu.popupFit(root, p.x, p.y, 0, 0)
     }
 
     Connections {
-        target: commands
+        target: App.commands
         function onWindowRequested(id) {
             if (id !== "app.context-menu")
                 return
-            const selection = canvasModel.selection
+            const selection = App.canvasModel.selection
             let p
             if (selection.length > 0) {
                 // Just inside the first selected node's header.
-                const n = canvasModel.position(selection[0])
+                const n = App.canvasModel.position(selection[0])
                 p = Qt.point(root.canvas.panX + (n.x + 8) * root.canvas.zoom,
                              root.canvas.panY + (n.y + 8) * root.canvas.zoom)
             } else {

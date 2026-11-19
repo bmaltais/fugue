@@ -23,6 +23,7 @@
 #include <QObject>
 #include <QString>
 #include <QUrl>
+#include <QtQmlIntegration/qqmlintegration.h>
 #include <functional>
 
 class CanvasModel;
@@ -34,6 +35,8 @@ class CommandRegistry;
 
 class ImageActions : public QObject {
     Q_OBJECT
+    QML_ELEMENT
+    QML_UNCREATABLE("made in C++, read through App")
 
 public:
     ImageActions(CommandRegistry &commands, CanvasModel &canvas, CanvasRuns &runs,

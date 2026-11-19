@@ -6,13 +6,11 @@
 #include <QIcon>
 #include <QKeySequence>
 #include <QQmlApplicationEngine>
-#include <QQmlContext>
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QTimer>
 #include <QUrl>
 
-#include "backend.h"
 #include "canvas/canvas_commands.h"
 #include "canvas/canvas_model.h"
 #include "search/node_search.h"
@@ -23,6 +21,7 @@
 #include "menu/menu_commands.h"
 #include "engine/registry.h"
 #include "nodes/builtin.h"
+#include "qml_app.h"
 #include "run/canvas_runs.h"
 #include "run/run_service.h"
 #include "settings/settings_model.h"
@@ -54,7 +53,6 @@ int main(int argc, char *argv[]) {
     app.installTranslator(&translator);
 
     Theme theme;
-    Backend backend;
     // The command registry: the default keymap, then the user's changes to it (spec 12.5).
     fugue::CommandRegistry commands;
     fugue::registerDefaultCommands(commands);
@@ -95,15 +93,7 @@ int main(int argc, char *argv[]) {
 
     QQmlApplicationEngine engine;
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
-    engine.rootContext()->setContextProperty("translator", &translator);
-    engine.rootContext()->setContextProperty("theme", &theme);
-    engine.rootContext()->setContextProperty("backend", &backend);
-    engine.rootContext()->setContextProperty("canvasModel", &canvasModel);
-    engine.rootContext()->setContextProperty("commands", &commands);
-    engine.rootContext()->setContextProperty("workflows", &workflows);
-    engine.rootContext()->setContextProperty("runs", &runs);
-    engine.rootContext()->setContextProperty("imageActions", &imageActions);
-    engine.rootContext()->setContextProperty("appSettings", &appSettings);
+    fugue::exposeToQml(engine, {&translator, &theme, &commands, &canvasModel, &workflows, &appSettings, &runs, &imageActions});
     engine.load(QUrl("qrc:/Main.qml"));
     if (engine.rootObjects().isEmpty())
         return 1;

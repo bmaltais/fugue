@@ -1,11 +1,12 @@
 import QtQuick
 import QtQuick.Dialogs
+import Fugue
 
-// The Save Image picker (#57): asked for by `imageActions` (node.save-image), which then
-// writes the chosen file. Harnesses without `imageActions` get no dialog.
+// The Save Image picker (#57): asked for by App.imageActions (node.save-image), which then
+// writes the chosen file. Harnesses without imageActions get no dialog.
 Item {
     id: root
-    readonly property var actions: typeof imageActions === "undefined" ? null : imageActions
+    readonly property ImageActions actions: App.imageActions
 
     FileDialog {
         id: dialog
