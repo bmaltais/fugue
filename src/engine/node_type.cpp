@@ -85,7 +85,7 @@ public:
         error.message = m_id + QStringLiteral(": ") + message;
         m_errors << error;
         if (severity == Error::Severity::Error)
-            m_failed = true;
+            ++m_errorCount;
     }
 
     void addPrefixed(const Errors &errors) {
@@ -93,11 +93,13 @@ public:
             error.message = m_id + QStringLiteral(": the default of input ") + error.input +
                             QStringLiteral(" is invalid: ") + error.message;
             m_errors << error;
-            m_failed = true;
+            ++m_errorCount;
         }
     }
 
-    bool failed() const { return m_failed; }
+    bool failed() const { return m_errorCount > 0; }
+    // Errors added so far, not counting warnings.
+    int count() const { return m_errorCount; }
 
     // Field readers: absent leaves `out` unchanged; a wrong JSON type fails.
     void string(const QJsonObject &o, const char *key, QString &out, const QString &where,
@@ -175,7 +177,7 @@ public:
 private:
     QString m_id;
     Errors &m_errors;
-    bool m_failed = false;
+    int m_errorCount = 0;
 };
 
 bool widgetFits(const QString &widget, const InputSpec &input) {
@@ -200,7 +202,7 @@ std::optional<InputSpec> readInput(Reader &r, const QJsonValue &value, int index
         return std::nullopt;
     }
     const QJsonObject o = value.toObject();
-    const bool failedBefore = r.failed();
+    const int before = r.count();
     bool bad = false;
 
     const QJsonValue name = o.value("name");
@@ -288,7 +290,7 @@ std::optional<InputSpec> readInput(Reader &r, const QJsonValue &value, int index
         }
     }
 
-    if (bad || r.failed() != failedBefore)
+    if (bad || r.count() != before)
         return std::nullopt;
     return input;
 }
@@ -301,7 +303,7 @@ std::optional<OutputSpec> readOutput(Reader &r, const QJsonValue &value, int ind
         return std::nullopt;
     }
     const QJsonObject o = value.toObject();
-    const bool failedBefore = r.failed();
+    const int before = r.count();
     bool bad = false;
 
     const QJsonValue name = o.value("name");
@@ -332,7 +334,7 @@ std::optional<OutputSpec> readOutput(Reader &r, const QJsonValue &value, int ind
     r.boolean(o, "optional", output.optional, where, {}, n);
     r.unknownFields(o, {"name", "type", "label", "description", "list", "optional"}, where, {}, n);
 
-    if (bad || r.failed() != failedBefore)
+    if (bad || r.count() != before)
         return std::nullopt;
     return output;
 }

@@ -187,6 +187,23 @@ private slots:
             QVERIFY2(error.message.contains("io.github.alice.tools/broken"), qPrintable(error.message));
     }
 
+    void anUnknownFieldOnlyWarns() {
+        QJsonObject manifest = object(sharpen);
+        QJsonArray inputs = manifest["inputs"].toArray();
+        QJsonObject amount = inputs[1].toObject();
+        amount["defualt"] = 2;
+        inputs[1] = amount;
+        manifest["inputs"] = inputs;
+        manifest["homepage"] = "https://example.org";
+
+        Errors errors;
+        const std::optional<NodeType> type = NodeType::fromJson(manifest, errors);
+        QVERIFY2(type, qPrintable(dump(errors)));
+        QCOMPARE(errors.size(), 2);
+        QVERIFY(!hasErrors(errors));
+        QVERIFY(type->input("amount"));
+    }
+
     void outputsCannotBeAny() {
         Errors errors;
         QJsonObject manifest = object(sharpen);

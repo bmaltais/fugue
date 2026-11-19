@@ -1,0 +1,252 @@
+{
+  "fugue": 1,
+  "graph": {
+    "nodes": {
+      "gen": {
+        "inputs": {
+          "height": 1024,
+          "lora": {
+            "hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            "name": "detail-tweaker.safetensors",
+            "resource": "fugue/lora"
+          },
+          "prompt": {
+            "from": "prompt.text"
+          },
+          "seed": {
+            "auto": "random"
+          },
+          "strength": 0.4,
+          "width": 1024
+        },
+        "provider": "omarchy-local",
+        "type": "fugue/generate-image",
+        "version": "1.0.0"
+      },
+      "merge": {
+        "inputs": {
+          "images": [
+            {
+              "from": "gen.image"
+            },
+            {
+              "from": "two.image"
+            }
+          ]
+        },
+        "mode": "bypass",
+        "type": "io.github.alice.tools/merge",
+        "version": "1.2.0",
+        "x-note": "kept"
+      },
+      "prompt": {
+        "inputs": {
+          "text": "a red fox in fresh snow"
+        },
+        "type": "fugue/text",
+        "version": "1.0.0"
+      },
+      "save": {
+        "frozen": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+        "inputs": {
+          "image": {
+            "from": "merge.image"
+          },
+          "name": "fox",
+          "overwrite": false
+        },
+        "type": "fugue/save-image",
+        "version": "1.0.0"
+      },
+      "two": {
+        "inputs": {
+          "prompt": {
+            "from": "prompt.text"
+          },
+          "seed": 42
+        },
+        "mode": "mute",
+        "type": "local/two-pass",
+        "version": "1.0.0"
+      }
+    },
+    "provider": "omarchy-local",
+    "x-graph": true
+  },
+  "groups": {
+    "local/two-pass": {
+      "category": "Generate",
+      "description": "Generate, then refine.",
+      "inputs": [
+        {
+          "name": "prompt",
+          "targets": [
+            "first.prompt",
+            "second.prompt"
+          ]
+        },
+        {
+          "label": "Seed",
+          "name": "seed",
+          "targets": [
+            "first.seed"
+          ]
+        },
+        {
+          "choices": [
+            "fast",
+            "fine"
+          ],
+          "default": "fast",
+          "name": "quality",
+          "targets": [
+            "second.quality"
+          ]
+        },
+        {
+          "max": 12,
+          "min": 1,
+          "name": "steps",
+          "section": "Advanced",
+          "targets": [
+            "second.steps"
+          ],
+          "x-hint": "kept"
+        }
+      ],
+      "name": "Two-pass generate",
+      "nodes": {
+        "first": {
+          "inputs": {},
+          "type": "fugue/generate-image",
+          "version": "1.0.0"
+        },
+        "second": {
+          "inputs": {
+            "image": {
+              "from": "first.image"
+            },
+            "strength": 0.4
+          },
+          "type": "fugue/generate-image",
+          "version": "1.1.0"
+        }
+      },
+      "outputs": [
+        {
+          "from": "second.image",
+          "name": "image",
+          "x-out": 1
+        }
+      ],
+      "version": "1.0.0",
+      "x-group": 1
+    }
+  },
+  "layout": {
+    "comments": [
+      {
+        "id": "c1",
+        "pos": [
+          0,
+          320
+        ],
+        "size": [
+          240,
+          80
+        ],
+        "text": "Try 8 steps"
+      }
+    ],
+    "frames": [
+      {
+        "color": "muted",
+        "id": "f1",
+        "nodes": [
+          "prompt"
+        ],
+        "rect": [
+          0,
+          0,
+          380,
+          300
+        ],
+        "title": "Inputs"
+      }
+    ],
+    "groups": {
+      "local/two-pass": {
+        "frames": [],
+        "links": {},
+        "nodes": {
+          "first": {
+            "pos": [
+              10,
+              20
+            ]
+          }
+        }
+      }
+    },
+    "links": {
+      "merge.images#1": {
+        "points": [
+          [
+            700,
+            200
+          ]
+        ]
+      }
+    },
+    "nodes": {
+      "gen": {
+        "collapsed": false,
+        "color": "accent",
+        "pinned": true,
+        "pos": [
+          420,
+          160
+        ],
+        "size": [
+          280,
+          0
+        ],
+        "title": "Fox"
+      }
+    },
+    "view": {
+      "center": [
+        400,
+        200
+      ],
+      "zoom": 1.5
+    }
+  },
+  "requires": {
+    "fugue": "0.1.0",
+    "models": [
+      {
+        "hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "name": "detail-tweaker.safetensors",
+        "resource": "fugue/lora",
+        "source": "https://example.org/detail-tweaker"
+      }
+    ],
+    "nodes": {
+      "fugue/generate-image": "1.1.0",
+      "fugue/save-image": "1.0.0",
+      "fugue/text": "1.0.0",
+      "io.github.alice.tools/merge": "1.2.0"
+    },
+    "packs": {
+      "io.github.alice.tools": {
+        "source": "https://github.com/alice/fugue-tools",
+        "version": "1.2.0"
+      }
+    }
+  },
+  "run": {
+    "seed": 7
+  },
+  "x-top": "kept"
+}

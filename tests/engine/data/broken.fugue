@@ -1,0 +1,35 @@
+{
+  "fugue": 1,
+  "graph": {
+    "nodes": {
+      "Bad.Id": {"type": "fugue/text", "version": "1.0.0"},
+      "a": {"version": "1.0.0", "inputs": {"text": null}},
+      "b": {"type": "fugue/Text", "version": "1.0", "mode": "off", "inputs": {"Bad": 1}},
+      "c": {"type": "fugue/x", "version": "1.0.0", "provider": "",
+            "inputs": {
+              "nested": [[1]],
+              "half": {"from": "a"},
+              "extra": {"from": "a.text", "strength": 1},
+              "shapeless": {"value": 3},
+              "fixed": {"auto": "fixed"},
+              "located": {"resource": "fugue/lora", "path": "/models/x.safetensors"},
+              "hashed": {"resource": "fugue/lora", "hash": "md5:abc"},
+              "builtin": {"resource": "image"},
+              "nulls": [1, null]
+            }},
+      "d": "not an object"
+    },
+    "provider": 3
+  },
+  "groups": {
+    "local/g": {
+      "version": "1.0.0",
+      "inputs": [{"name": "x", "targets": ["nodot"]}, {"name": "x", "targets": []}],
+      "outputs": [{"name": "y", "from": "bad"}],
+      "nodes": {"inner": {"type": "fugue/x", "version": "x"}}
+    },
+    "NotAnId": {"version": "1.0.0", "name": "N", "inputs": [], "outputs": [], "nodes": {}}
+  },
+  "layout": {"nodes": {"a": {"pos": [1]}}, "view": {"zoom": "big"}, "frames": {}},
+  "requires": {"nodes": {"fugue/x": 1}}
+}
