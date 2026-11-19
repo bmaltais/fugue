@@ -1,0 +1,54 @@
+# Maintainer: Bernard Maltais <bmaltais@users.noreply.github.com>
+#
+# CI (.github/workflows/test.yml) reads this file for the dependency lists, so
+# a new dependency goes here and nowhere else. Once a recipe lives in
+# omarchy-pkgs, move it there and point the workflow back at it.
+
+pkgname=fugue
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Node-based workflows for local AI'
+arch=('x86_64' 'aarch64')
+url='https://github.com/bmaltais/fugue'
+license=('MIT')
+options=('!debug')
+depends=(
+  'ffmpeg'
+  'hicolor-icon-theme'
+  'libvips'
+  'qt6-base'
+  'qt6-declarative'
+  'qt6-wayland'
+)
+makedepends=(
+  'cmake'
+  'gcc'
+  'git'
+  'make'
+  'pkgconf'
+)
+checkdepends=(
+  'noto-fonts'
+)
+source=("$pkgname::git+$url.git")
+sha256sums=('SKIP')
+
+pkgver() {
+  cd "$srcdir/$pkgname"
+  printf '0.1.0.r%s.g%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+build() {
+  cd "$srcdir/$pkgname"
+  ./bin/build
+}
+
+check() {
+  cd "$srcdir/$pkgname"
+  QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure --no-tests=error
+}
+
+package() {
+  cd "$srcdir/$pkgname"
+  DESTDIR="$pkgdir" cmake --install build --prefix /usr
+}
