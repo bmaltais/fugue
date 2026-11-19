@@ -339,13 +339,13 @@ CanvasModel::NodeRow CanvasModel::makeRow(const QString &id) const {
 
     // Inputs the document sets but the face lacks (an older or newer minor version, or a
     // placeholder), and outputs other nodes link from: kept as ports of unknown type, so
-    // every link has its ends and nothing in the file is hidden.
+    // every link has its ends and nothing in the file is hidden. Such an input shows its
+    // value read-only: with no spec there is nothing to check a typed value against.
     for (auto it = node.inputs.cbegin(); it != node.inputs.cend(); ++it) {
         if (std::none_of(row.inputs.begin(), row.inputs.end(), [&](const Port &p) { return p.name == it.key(); })) {
             Port port;
             port.name = port.label = it.key();
             port.widget = linksIn(it.value()).isEmpty();
-            port.widgetType = QStringLiteral("line");
             row.inputs.push_back(port);
         }
     }

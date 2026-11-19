@@ -8,6 +8,7 @@
 #include <QtTest>
 
 #include "canvas/canvas_model.h"
+#include "canvas/widget_edit.h"
 #include "engine/document.h"
 #include "engine/registry.h"
 #include "nodes/builtin.h"
@@ -452,6 +453,22 @@ private slots:
         QCOMPARE(port(g, "inputs", "prompt").value("type").toString(), QString("text"));
         QCOMPARE(port(g, "outputs", "image").value("shape").toString(), QString("square"));
     }
+
+
+    // Inputs a type does not define (a placeholder's, or one the installed version lacks)
+    // show their value but cannot be typed into: there is no spec to check it against.
+    void inputsWithoutASpecAreReadOnly() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(R"({"fugue": 1, "graph": {"nodes": {
+            "odd": {"type": "io.example.tools/sharpen", "version": "2.0.0", "inputs": {"amount": 3}},
+            "text": {"type": "fugue/text", "version": "1.0.0", "inputs": {"text": "x", "extra": "kept"}}}}})"));
+        const QVariantMap amount = port(node(canvas, "odd"), "inputs", "amount");
+        QCOMPARE(amount.value("value").toString(), QString("3"));
+        QCOMPARE(amount.value("widgetType").toString(), QString());
+        QCOMPARE(port(node(canvas, "text"), "inputs", "extra").value("widgetType").toString(), QString());
+        QCOMPARE(port(node(canvas, "text"), "inputs", "extra").value("value").toString(), QString("kept"));
+    }
+
 
     void nodesTheLayoutDoesNotPlaceGoInColumns() {
         CanvasModel canvas(&m_registry);
