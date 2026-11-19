@@ -9,19 +9,26 @@
 //
 //   node.open-image  the system's default viewer, through `opener` (QDesktopServices). A file
 //                    whose name does not carry its real format's extension (a cache file) is
-//                    copied to a temporary name that does, so the viewer recognizes it.
-//   node.copy-image  the clipboard gets the decoded QImage and the file's own bytes under their
-//                    real MIME type (png, jpeg, webp...), so another app takes the original and
-//                    a Fugue paste (image_inputs.h) stores it as it is. Reading and decoding
-//                    happen on a worker thread: a big image never holds the window.
+//                    copied, off the UI thread, to a name that does, so the viewer recognizes
+//                    it: in `fugue-view` in the runtime folder (0700), keyed by path, size and
+//                    time. A file whose bytes are not an image is refused with a notice.
+//   node.copy-image  the clipboard gets the file's own bytes under their real MIME type (png,
+//                    jpeg, webp...), and a PNG of the picture too when the file is not one, so
+//                    another app takes the original and a Fugue paste (image_inputs.h) stores
+//                    it as it is. No decoded QImage: qtwayland would serve every image/* type
+//                    by re-encoding it. Reading and decoding happen on a worker thread: a big
+//                    image never holds the window.
 //   node.save-image  asks the window for a save dialog (`saveRequested`); the answer comes to
 //                    saveTo, which copies the original bytes (the embedded workflow stays)
-//                    atomically. The dialog has already asked about an existing file.
+//                    atomically. The dialog has already asked about an existing file; a name
+//                    typed without an extension gets the real one and never replaces a file
+//                    already at that name (a notice instead), since the dialog did not ask.
 //
 // A failure is a `message` for the window banner (Workflows notice).
 
 #include <QObject>
 #include <QString>
+#include <QThreadPool>
 #include <QUrl>
 #include <QtQmlIntegration/qqmlintegration.h>
 #include <functional>
@@ -41,6 +48,8 @@ class ImageActions : public QObject {
 public:
     ImageActions(CommandRegistry &commands, CanvasModel &canvas, CanvasRuns &runs,
                  std::function<bool(const QUrl &)> opener = {}, QObject *parent = nullptr);
+    // Waits for the copies and saves under way.
+    ~ImageActions() override;
 
     // The node the commands act on now.
     QString node() const;
@@ -52,8 +61,10 @@ public:
     Q_INVOKABLE void cancelSave() { m_pendingSource.clear(); }
 
 signals:
-    // The window should ask where to save: the folder to start in and the suggested file name.
-    void saveRequested(const QUrl &folder, const QString &name);
+    // The window should ask where to save: the folder to start in, the suggested file in it
+    // (file URLs made from paths, so any name survives) and the extension of the image's real
+    // format (the dialog's default suffix and filter).
+    void saveRequested(const QUrl &folder, const QUrl &file, const QString &suffix);
     void saved(const QString &path);
     // The image reached the clipboard.
     void copied();
@@ -69,6 +80,9 @@ private:
     CanvasRuns &m_runs;
     std::function<bool(const QUrl &)> m_opener;
     QString m_pendingSource;
+    // The readers and writers of Copy and Save; their results come back through the
+    // application object and look at a QPointer to this on the UI thread.
+    QThreadPool m_workers;
 };
 
 } // namespace fugue

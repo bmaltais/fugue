@@ -355,7 +355,7 @@ Rectangle {
     function inputEntries() {
         const entries = [{ text: qsTr("Browse files…"), value: { browse: true } }]
         for (const input of edits.recentInputs())
-            entries.push({ text: input.name, thumbnail: "file://" + encodeURI(input.path), value: { recent: input.path } })
+            entries.push({ text: input.name, thumbnail: input.url, value: { recent: input.path } })
         return entries
     }
     function picked(value) {

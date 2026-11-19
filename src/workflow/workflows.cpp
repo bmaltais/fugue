@@ -1,6 +1,8 @@
 #include "workflow/workflows.h"
 
+#include "engine/atomic_file.h"
 #include "engine/embed.h"
+#include "engine/json.h"
 #include "engine/paths.h"
 #include "workflow/content_hash.h"
 #include "workflow/workflow_io.h"
@@ -39,6 +41,20 @@ QStringList missingTypes(const Document &document, const Registry &registry) {
     QStringList list(missing.begin(), missing.end());
     list.sort();
     return list;
+}
+
+// Writes the workflow file atomically. Without `replace`, false and nothing written when a
+// file is already at `path`.
+Result<bool> writeWorkflow(const Document &document, const QString &path, bool replace) {
+    if (replace) {
+        const Errors errors = document.saveFile(path);
+        return hasErrors(errors) ? Result<bool>(errors) : Result<bool>(true);
+    }
+    const QFileInfo info(path);
+    PartialFile partial(info.absolutePath(), info.fileName());
+    if (const Errors errors = partial.write(writeJson(document.toJson()), info.fileName()); hasErrors(errors))
+        return errors;
+    return partial.commit(path, Overwrite::Never);
 }
 
 QString firstMessage(const Errors &errors) {
@@ -321,8 +337,13 @@ void Workflows::dropUrls(const QVariantList &urls, qreal x, qreal y) {
             setNotice(tr("Only files can be opened, not %1.").arg(text));
             continue;
         }
+        // Only a regular file is opened at all: a pipe would wait for a writer forever.
+        if (const QFileInfo info(path); info.exists() && !info.isFile() && !info.isDir()) {
+            setNotice(tr("Could not open %1: it is not a file.").arg(QFileInfo(path).fileName()));
+            continue;
+        }
         QFile file(path);
-        const bool image = QFileInfo(path).isFile() && file.open(QIODevice::ReadOnly) && sniffImage(file.read(16));
+        const bool image = file.open(QIODevice::ReadOnly) && sniffImage(file.read(16));
         file.close();
         // A picture with a workflow in it opens as that workflow, except onto a Load Image.
         if (image && (onLoadImage || !readEmbeddedWorkflow(path).ok()))
@@ -379,7 +400,19 @@ void Workflows::analyze(const Document &document, const QString &title) {
 
 // --- save and close ---
 
-bool Workflows::saveTab(int index, const QString &path) {
+bool Workflows::saveTab(int index, const QString &path, bool replace) {
+    const QString taken = tr("Could not save %1: a file of that name already exists; choose another name.")
+                              .arg(QFileInfo(path).fileName());
+    if (!replace && QFileInfo::exists(path)) {
+        setNotice(taken);
+        return false;
+    }
+    // Into another folder, the relative paths the tab and its undo steps hold would name other
+    // files: they become the full paths they name now, as no step, before the inputs move.
+    const QString from = pathOf(index);
+    if (index == m_current && !from.isEmpty()
+        && canonicalPath(QFileInfo(from).absolutePath()) != canonicalPath(QFileInfo(path).absolutePath()))
+        m_canvas->rewriteDocuments([this, from](Document &document) { makeInputsAbsolute(document, *m_registry, from); });
     Document document = documentOf(index);
     // A saved workflow stays portable: the images it takes from Fugue's inputs folder are copied
     // into an `inputs` folder beside it, and its nodes point there (Appendix A, always, no question).
@@ -392,8 +425,12 @@ bool Workflows::saveTab(int index, const QString &path) {
     const bool moved = contentHash(document) != contentHash(before);
     const Document relocated = document;
     document.refreshRequirements(appVersion());
-    const Errors errors = document.saveFile(path);
-    if (hasErrors(errors)) {
+    const Result<bool> written = writeWorkflow(document, path, replace);
+    if (written && !*written) {
+        setNotice(taken);
+        return false;
+    }
+    if (const Errors errors = written.errors(); hasErrors(errors)) {
         setNotice(tr("Could not save %1: %2").arg(QFileInfo(path).fileName(), firstMessage(errors)));
         return false;
     }
@@ -431,10 +468,11 @@ bool Workflows::saveAs(const QString &pathOrUrl) {
     QString path = toPath(pathOrUrl);
     if (path.isEmpty())
         return false;
-    if (QFileInfo(path).suffix().isEmpty())
+    const bool appended = QFileInfo(path).suffix().isEmpty();
+    if (appended)
         path += QStringLiteral(".fugue");
     const QString id = m_tabs[size_t(m_current)].id;
-    if (!saveTab(m_current, path))
+    if (!saveTab(m_current, path, !appended))
         return false;
     if (m_closeAfterSave == id) {
         m_closeAfterSave.clear();
@@ -474,13 +512,16 @@ void Workflows::recover() {
     m_recoverable.clear();
     emit recoverableChanged();
     QStringList failed;
+    QString aside;
     for (const QVariant &value : entries) {
         const QVariantMap entry = value.toMap();
         const QString id = entry.value("id").toString();
         const Result<Document> document = m_recovery.read(id);
         if (!document.ok()) {
+            // Never deleted: it may be the only copy of the work, readable by a later version.
             failed << entry.value("title").toString();
-            m_recovery.remove(id);
+            if (const QString folder = m_recovery.setAside(id); !folder.isEmpty())
+                aside = folder;
             continue;
         }
         // The copy keeps its id, so the next 30-second write replaces it in place.
@@ -488,7 +529,9 @@ void Workflows::recover() {
         analyze(document.value(), m_tabs[size_t(m_current)].title);
     }
     if (!failed.isEmpty())
-        setNotice(tr("These recovery copies could not be read and were removed: %1").arg(failed.join(", ")));
+        setNotice(aside.isEmpty()
+                      ? tr("These recovery copies could not be read: %1").arg(failed.join(", "))
+                      : tr("These recovery copies could not be read and were kept in %1: %2").arg(aside, failed.join(", ")));
 }
 
 void Workflows::discardRecovery() {

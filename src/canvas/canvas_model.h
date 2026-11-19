@@ -67,6 +67,7 @@
 #include "search/node_search.h"
 
 #include <QAbstractListModel>
+#include <functional>
 #include <QHash>
 #include <QObject>
 #include <QPointF>
@@ -373,6 +374,11 @@ public:
     // (every edit here ends in it; a reload from outside, 11.8, can use it too). Start from
     // document(), which has the positions on screen.
     void commit(const fugue::Document &document, const QString &text);
+    // Rewrites the document on the canvas and every document the undo steps keep, as no step
+    // of its own: for a change that names the same things another way, such as relative file
+    // paths made absolute before a Save As to another folder (workflows.cpp), so an undo
+    // afterwards still names the files it named before.
+    void rewriteDocuments(const std::function<void(fugue::Document &)> &rewrite);
     bool canUndo() const;
     bool canRedo() const;
     QString undoText() const;
