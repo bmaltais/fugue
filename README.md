@@ -13,9 +13,12 @@ the work is tracked in the [issues](https://github.com/bmaltais/fugue/issues) by
 ## Build
 
 ```sh
-bin/build
-bin/test
+bin/build        # the app and the tests
+bin/test         # builds, then runs every test (arguments go to ctest)
+bin/build fugue  # only the app; any CMake target works, e.g. bin/build test_menus
 ```
+
+The app is `build/fugue`.
 
 ## License
 
