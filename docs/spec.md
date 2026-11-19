@@ -1198,11 +1198,15 @@ Per-node events go to the canvas and, as JSON lines, to the CLI:
 | `node.running` | `node` |
 | `node.progress` | `node`, `value` (0 to 1), `stage`, `message` |
 | `node.preview` | `node`, `image` |
-| `node.cached` | `node`, `outputs` |
-| `node.done` | `node`, `outputs`, `seconds` |
+| `node.cached` | `node`, `outputs`, `shown` (a sink with no outputs) |
+| `node.done` | `node`, `outputs`, `seconds`, `shown` (a sink with no outputs) |
 | `node.skipped` | `node`, `reason` (`muted`, `upstream_muted`, `upstream_failed`, `upstream_empty`, `cancelled`) |
 | `node.error` | `node`, `error` |
 | `run.done` | `status` (`ok`, `failed`, `cancelled`), `errors` |
+
+A sink whose type has no outputs (Preview) has nothing in `outputs`; `shown` holds its inputs as
+resolved (`{"value": ...}`), on `node.done` and `node.cached` and in the node's entry in run.json,
+so what it shows reaches the CLI (`runs result`) for a cached sink too.
 
 The compiler's reason for leaving a node out ([4.8](#48-the-compiled-graph)) is passed through
 as it is, so a node downstream of a muted one is `upstream_muted`. A node that is only
@@ -1388,12 +1392,15 @@ opening or editing.
 
 - Save Image embeds the workflow in PNG and WebP by default, so dragging an output back onto
   Fugue reloads its graph.
-- Absolute local paths are never embedded: they are replaced as in a share copy. Layout is
+- Absolute local paths are never embedded: they are replaced as in a share copy, including a path
+  typed into a node whose output reaches a file or folder input through links. Layout is
   embedded, so the graph comes back as it looked. A `run` section is added with the values used
   per node (seed, model, engine), so a randomized result can be reproduced.
 - Each Save node has a visible setting: full, without prompts, or none. A global setting decides
   what new Save nodes start with.
 - A first-run notice says the workflow is embedded.
+- A run from a compiled graph has no workflow document, so its images hold none; Save Image says so
+  with a `workflow_not_embedded` warning on the node.
 - Container detail: a PNG `iTXt` chunk with the keyword `fugue`; in WebP, the XMP chunk.
 
 ### 11.8 Editing from outside
@@ -1712,20 +1719,22 @@ merged, its `node.json` is the source of truth.
 | --- | --- | --- | --- |
 | `fugue/text` | `text` (multiline) | `text` | |
 | `fugue/number` | `value` | `value` | |
-| `fugue/load-image` | `file` (file picker) | `image`, `width`, `height` | Keyed by the file's content hash. |
-| `fugue/save-image` | `image`, `name`, `format` (png, webp), `embed` (full, no-prompts, none), `folder` (optional) | `file` | Sink. Writes to the output folder. [11.7](#117-embedding-in-outputs). |
+| `fugue/load-image` | `file` (file picker) | `image`, `width`, `height` | Keyed by the file's content hash. The image is upright: an EXIF orientation is applied, and `width`, `height` are the size it is seen at. |
+| `fugue/save-image` | `image`, `name`, `format` (png, webp), `embed` (full, no-prompts, none), `folder` (optional) | `file` | Sink. Writes to the output folder. Never overwrites a file: `<name>.png`, else `<name>-2.png`, `-3`, and so on, also when several Save nodes write one name at once. [11.7](#117-embedding-in-outputs). |
 | `fugue/preview` | `value` (any) | none | Sink. Shows the value on the node; from the CLI it is in the run result. |
-| `fugue/generate-image` | `prompt`, `negative_prompt`, `model` (optional), `width`, `height`, `steps` (optional), `guidance` (optional), `seed`, `image` (optional start image), `strength` | `image`, `seed`, `width`, `height`, `model` | Capability `image.generate`. Unset optional inputs use the model's defaults. |
-| `fugue/edit-image` | `instruction`, `images` (list, 1 to 4), `model` (optional), `steps` (optional), `seed` | `image`, `seed`, `width`, `height`, `model` | Capability `image.edit`; `instruction` is sent as its `prompt`. |
-| `fugue/resize` | `image`, `width`, `height`, `fit` (stretch, contain, cover), `method` (nearest, bilinear, bicubic, lanczos, area) | `image` | libvips. |
+| `fugue/generate-image` | `prompt`, `negative_prompt`, `model` (optional), `width` (optional), `height` (optional), `steps` (optional), `guidance` (optional), `seed`, `image` (optional start image), `strength` | `image`, `seed`, `width`, `height`, `model` | Capability `image.generate`. Unset optional inputs use the model's defaults; an unset size is the start image's, else the model's default. |
+| `fugue/edit-image` | `instruction`, `images` (list, 1 to the model's limit, else 4), `model` (optional), `steps` (optional), `seed` | `image`, `seed`, `width`, `height`, `model` | Capability `image.edit`; `instruction` is sent as its `prompt`. |
+| `fugue/resize` | `image`, `width`, `height`, `fit` (stretch, contain, cover), `method` (nearest, bilinear, bicubic, lanczos, area) | `image` | ComfyUI's resampling. `contain` fits inside the box without padding, so the result can be smaller than the box on one side. |
 | `fugue/crop` | `image`, `x`, `y`, `width`, `height` | `image` | |
 | `fugue/brightness-contrast` | `image`, `brightness`, `contrast` | `image` | |
-| `fugue/blend` | `base`, `top`, `mode`, `opacity` | `image` | Modes at least: normal, multiply, screen, overlay, soft light, difference. Difference is \|base − top\| as in Photoshop, GIMP and CSS; subtract is base − top clamped, which ComfyUI calls difference. |
+| `fugue/blend` | `base`, `top`, `mode`, `opacity` | `image` | Modes at least: normal, multiply, screen, overlay, soft light, difference. Difference is \|base - top\| as in Photoshop, GIMP and CSS; subtract is base - top clamped, which ComfyUI calls difference. |
 | `fugue/text-concat` | `a`, `b`, `separator` | `text` | |
 
-Pixel nodes run on libvips (C++ API, dynamically linked, CPU). Each has a parity test against
-ComfyUI's formula for the same operation, written before the node. The four-reference limit on
-Edit Image is Fugue's starting choice, raised if a provider reports a higher limit.
+Pixel nodes decode and hold images with libvips (C++ API, dynamically linked, CPU); their
+arithmetic is plain C++ over float buffers, because libvips' own resize kernels do not give
+ComfyUI's pixels (Appendix A). Each has a parity test against ComfyUI's formula for the same
+operation, written before the node. The four-reference limit on Edit Image is Fugue's starting
+choice; a limit the provider reports for the model replaces it, higher or lower.
 
 ### 14.2 M4: the rest of v0.1
 
@@ -1870,6 +1879,36 @@ Building M0 made these further choices. Each changes or pins down what a section
 | Load-time errors inside a group definition name the inner node id and start "Group <id>:", because no instance path exists at load; compile errors name path ids | 13.3 | medium |
 | Free GPU memory: only the `MemAvailable` reading is built; the device type and the discrete figure wait for the helper | 8.10 | medium |
 | Omarchy's own folders are built from the home folder, as omarchy-local-ai builds them, not from XDG variables | 1.4, 8.7 | medium-high |
+
+Building M1 made these further choices.
+
+| Choice made in M1 | Section | Confidence |
+| --- | --- | --- |
+| Pixel arithmetic is plain C++ over float32 0..1 buffers that libvips decodes and holds, not libvips operations: libvips' resize kernels give other pixels than torch and PIL (spike 03), and crop, blend and brightness-contrast share the buffers so every pixel node reads and writes one form | 14.1 | medium-high |
+| Resize is ComfyUI's: torch nearest-exact, bilinear, bicubic (A = -0.75), area, and PIL lanczos (a = 3, premultiplied RGBA), without PIL's uint8 rounding in lanczos (up to about 2/255) | 14.1 | high |
+| Resize `fit`: stretch is ComfyUI's crop "disabled", cover its crop "center"; a width or height of 0 follows the other side, both 0 pass the image through | 14.1 | high |
+| Resize `contain` fits inside the box keeping the aspect and never pads, so one side can be smaller than the box (padding is the M4 Pad node) | 14.1 | medium |
+| Image nodes clamp their output to 0..1 and return float32 RGB or RGBA; gray input becomes RGB | 14.1 | high |
+| Crop is ComfyUI's ImageCrop: x and y are held inside the image, the far edge is cut at the image's edge | 14.1 | high |
+| Brightness/Contrast (no ComfyUI core node) is clamp((v - 0.5) * contrast + 0.5 + brightness) with alpha untouched: a mid-gray pivot, so contrast does not brighten (spike 03's form did) | 14.1 | medium |
+| Blend: `difference` is \|base - top\| (Photoshop, GIMP, CSS) and `subtract` is base - top clamped, which ComfyUI calls difference; opacity is ComfyUI's blend_factor, the top is resized to the base (bicubic, center crop), the result keeps the base's alpha | 14.1 | medium-high |
+| Text Concat is ComfyUI's StringConcatenate: a + separator + b | 14.1 | high |
+| Images are upright everywhere: an EXIF orientation is applied when an image is probed and read (Fantasi's choice) | 2.4, 14.1 | medium-high |
+| A sink with no outputs reports its resolved inputs as `shown` on node.done, node.cached and in run.json | 9.4 | high |
+| Save Image's `file` output is an image handle to the file written, so the cache can check it still exists | 14.1, 10.2 | medium |
+| Save Image never overwrites: the name is claimed in the same step as the file appears, and taken names go to `-2`, `-3`; a name may not hold `/` or `\` or start with `.`; a relative folder is under the output folder; WebP is lossless | 14.1 | medium |
+| The embedded `run` section is `{"nodes": {<path id>: {"auto", "engine", "model"}}}` for the saving node and everything upstream | 11.7 | high |
+| A "prompt" is the literal of a `text` input with the `multiline` widget; a "path" is an absolute literal of a `file` or `folder` input, or of any node upstream of one | 11.5, 11.7 | medium |
+| A run from a compiled graph embeds nothing and warns `workflow_not_embedded`; a kernel's warnings go to run.done on its node | 11.7, 13.3 | medium-high |
+| `~` in a file or folder literal is expanded before the node runs and before its key is made, so `~/x.png` is keyed by content | 10.1 | high |
+| A cached Save Image does not rewrite its file when only the layout or an unrelated node changed, so the embedded copy can lag the canvas | 10.2, 11.7 | medium |
+| Generate Image's width and height are optional: unset is the start image's size, else the model's default | 14.1 | high |
+| Size precedence for Generate Image: set on the node, then the start image's fitted size, then the model's default; with one side set, the other follows the start image's shape in steps of 64 | 14.1 | medium-high |
+| Input pictures go as they are when they are an upright PNG in steps of 64 at 0.4 to 1.6 MP; else they are fitted near 1 MP in steps of 64 and written as RGB PNG (Fantasi's prepareBase) | 14.1 | medium-high |
+| Edit Image has no size inputs: it sends the first reference's prepared size | 14.1 | medium |
+| Edit Image's reference limit is the model's `max_reference_images` when it reports one, higher or lower, else 4; it is checked when the job is made, not under validate | 14.1 | medium |
+| Seeds default to 0; `strength` defaults to 0.7 and is sent only with a start image; an empty negative prompt is not sent | 14.1 | medium |
+| Unset steps, guidance and size are filled from the model's defaults in the request, so the job is fully specified | 8.1 | medium-high |
 
 ## Appendix B: issue to section map
 

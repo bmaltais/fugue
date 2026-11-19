@@ -11,7 +11,7 @@
   "inputs": [
     {"name": "instruction", "type": "text", "label": "Instruction", "widget": "multiline"},
     {"name": "images", "type": "image", "label": "Images", "list": true, "min_items": 1,
-     "description": "One to four references (more when the model allows). The result takes the first one's shape, near a megapixel."},
+     "description": "One or more references, up to the model's limit (four when it reports none). The result takes the first one's shape, near a megapixel."},
     {"name": "model", "type": "fugue/image-model", "label": "Model", "optional": true,
      "description": "Unset: any ready model that edits."},
     {"name": "steps", "type": "number", "label": "Steps", "optional": true, "integer": true, "min": 1, "max": 200,

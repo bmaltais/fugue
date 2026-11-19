@@ -3,7 +3,7 @@
   "id": "fugue/resize",
   "version": "1.0.0",
   "name": "Resize",
-  "description": "Change an image's size. A width or height of 0 follows the other side; both 0 leave it as it is. Stretch fills the box exactly, cover fills it and trims the overflow from the center, contain fits inside it and keeps the aspect.",
+  "description": "Change an image's size. A width or height of 0 follows the other side; both 0 leave it as it is. Stretch fills the box exactly, cover fills it and trims the overflow from the center, contain fits inside it and keeps the aspect, without padding, so one side can be smaller than the box.",
   "category": "Image/Transform",
   "keywords": ["scale", "upscale", "downscale", "zoom", "size"],
   "runtime": {"kind": "builtin"},

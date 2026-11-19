@@ -84,6 +84,13 @@ Max absolute difference from a scalar C++ reference of ComfyUI's formulas, float
   differences; the node's parity test should set a tolerance per method and record it. This is
   left to the node ticket.
 - Brightness/contrast has no ComfyUI core node, so the formula is Fugue's own: `out = clamp(in * contrast + brightness)`.
+  - (2026-11-19, M1) The node uses `out = clamp((in - 0.5) * contrast + 0.5 + brightness)` instead:
+    with the pivot at 0, raising the contrast also brightens every pixel; a mid-gray pivot keeps
+    mid-gray where it is, as GIMP's legacy tool and the usual CSS form do. Alpha is untouched.
+  - (2026-11-19, M1) ComfyUI's blend "difference" measured above is base - top, clamped. The node
+    calls that `subtract` and makes `difference` the absolute value (spec 14.1).
+  - (2026-11-19, M1) Resize did not use libvips kernels: the node ports ComfyUI's torch and PIL
+    resampling to C++ (spec Appendix A).
 
 ## Threads and cache
 
