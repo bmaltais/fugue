@@ -21,6 +21,7 @@
 #include "theme.h"
 #include "workflow/workflows.h"
 #include "translator.h"
+#include "window_grab.h"
 
 namespace {
 
@@ -387,16 +388,26 @@ private slots:
         QTest::qWait(100);
 
         const bool rtl = language == "ar";
-        const QImage shot = window->grabWindow();
+        const QImage shot = test_support::grab(window);
         QVERIFY(!shot.isNull());
         // The menu bar along the top in the recessed fill, then the canvas: the theme's
         // background on a dark theme, a shade darker on a light one (docs/canvas-look.md 6.1).
-        // The text follows the desktop size.
-        QCOMPARE(QColor(shot.pixel(4, 4)).name(), theme.look()->tokens().well.name());
-        QCOMPARE(QColor(shot.pixel(4, shot.height() - 4)).name(), theme.look()->tokens().canvas.name());
-        // Mirrored, the menu titles start at the right.
+        // Each is read where nothing is drawn on it, in either direction: the bar's middle,
+        // past its titles, and the canvas's bottom-right corner (the zoom pill sits bottom
+        // left, the run pill top right). The text follows the desktop size.
+        auto *bar = item(window->contentItem(), "menuBar");
+        auto *canvas = item(window->contentItem(), "canvas");
+        QVERIFY(bar && canvas);
         auto *file = item(window->contentItem(), "menuTitle-0");
-        QVERIFY(file);
+        auto *last = item(window->contentItem(), "menuTitle-5");
+        QVERIFY(file && last);
+        const QPoint inBar = bar->mapToScene(QPointF(bar->width() / 2, bar->height() / 2)).toPoint();
+        const QRectF titles = file->mapRectToScene(file->boundingRect()).united(last->mapRectToScene(last->boundingRect()));
+        QVERIFY2(!titles.contains(inBar), qPrintable(QStringLiteral("%1 %2").arg(inBar.x()).arg(titles.right())));
+        QCOMPARE(QColor(shot.pixel(inBar)).name(), theme.look()->tokens().well.name());
+        const QPoint inCanvas = canvas->mapToScene(QPointF(canvas->width() - 4, canvas->height() - 4)).toPoint();
+        QCOMPARE(QColor(shot.pixel(inCanvas)).name(), theme.look()->tokens().canvas.name());
+        // Mirrored, the menu titles start at the right.
         const qreal fileX = file->mapToScene(QPointF(file->width() / 2, 0)).x();
         QVERIFY2(rtl ? fileX > window->width() / 2 : fileX < window->width() / 2, qPrintable(QString::number(fileX)));
         QCOMPARE(theme.look()->tokens().canvas == theme.background(), !light);
@@ -416,7 +427,7 @@ private slots:
         const QPointF at = keys->mapToItem(content, QPointF(0, 0));
         QVERIFY2(rtl ? at.x() > middle : at.x() < middle, qPrintable(QStringLiteral("%1 %2").arg(at.x()).arg(middle)));
         QTest::qWait(300);
-        const QImage popup = window->grabWindow();
+        const QImage popup = test_support::grab(window);
         QVERIFY(!popup.isNull());
         if (const QString out = qEnvironmentVariable("FUGUE_SHOTS"); !out.isEmpty())
             QVERIFY(popup.save(QString("%1/%2-%3.png").arg(out, light ? "light" : "dark", rtl ? "rtl" : "ltr")));

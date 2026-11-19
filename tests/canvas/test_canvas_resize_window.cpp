@@ -104,7 +104,7 @@ private slots:
         QVERIFY(app.open());
         QTest::mouseMove(app.window, grip(app, "g"));
         QTest::qWait(200);
-        QVERIFY(app.window->grabWindow().save(out));
+        QVERIFY(test_support::grab(app.window).save(out));
     }
 
     void aPressOnTheBodyStillMovesTheNode() {

@@ -230,7 +230,7 @@ private slots:
         for (int page = 0; page < 6; ++page) {
             click(app, NEED(QStringLiteral("settingsPage-%1").arg(page)));
             QTest::qWait(300);
-            QVERIFY(app.window->grabWindow().save(QStringLiteral("%1/settings-%2.png").arg(out).arg(page)));
+            QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/settings-%2.png").arg(out).arg(page)));
         }
     }
 };

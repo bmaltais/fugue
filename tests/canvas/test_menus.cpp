@@ -424,7 +424,7 @@ private slots:
         QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("subMenu-Colors")));
         QTRY_VERIFY(find(app.window, "menuItem-node.color.red"));
         QTest::qWait(400);
-        QVERIFY(app.window->grabWindow().save(name + "-edit.png"));
+        QVERIFY(test_support::grab(app.window).save(name + "-edit.png"));
         app.key(Qt::Key_Escape);
         app.key(Qt::Key_Escape);
         QTRY_VERIFY(allClosed(app.window));
@@ -432,7 +432,7 @@ private slots:
         QTRY_VERIFY(isOpen(app.window, "contextMenuPopup"));
         QTest::mouseMove(app.window, centerOf(NEED("menuItem-node.mute")));
         QTest::qWait(400);
-        QVERIFY(app.window->grabWindow().save(name + "-node.png"));
+        QVERIFY(test_support::grab(app.window).save(name + "-node.png"));
     }
 
     void shiftF10OpensTheContextMenuFromTheKeys() {

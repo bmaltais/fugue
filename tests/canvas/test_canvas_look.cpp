@@ -198,7 +198,7 @@ private slots:
         QVERIFY(openAt(app));
         setStates(app, writeScene(app.dir.filePath("scene.png"), 512, 288));
         QTest::qWait(200);
-        const QImage shot = app.window->grabWindow();
+        const QImage shot = test_support::grab(app.window);
         const CanvasLook *look = app.theme.look();
         auto at = [&](qreal x, qreal y) { return QColor(shot.pixel(app.screen(x, y))).name(); };
         // The canvas between nodes, a node's body, its header, an error's header (cached sits at
@@ -231,7 +231,7 @@ private slots:
         QVERIFY(openAt(app));
         setStates(app, writeScene(app.dir.filePath("scene.png"), 512, 288));
         QTest::qWait(200);
-        const QImage shot = app.window->grabWindow();
+        const QImage shot = test_support::grab(app.window);
         const fugue::look::Tokens &t = app.theme.look()->tokens();
         // The board's nodes: cached at (56, 60), bypassed at (560, 360), muted at (812, 360).
         auto header = [&](qreal x, qreal y) { return shot.pixelColor(app.screen(x + 120, y + 6)); };
@@ -308,7 +308,7 @@ private slots:
         if (board == "states")
             app.canvas->setProperty("hoveredNode", "hover");
         QTest::qWait(50);
-        const QImage shot = app.window->grabWindow();
+        const QImage shot = test_support::grab(app.window);
         QVERIFY(shot.save(QStringLiteral("%1/%2-%3-r%4.png").arg(out, board, theme).arg(radius)));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
@@ -358,7 +358,7 @@ private slots:
             QTest::mouseMove(app.window, start + (end - start) * i / 8);
         QTRY_VERIFY(app.canvas->property("dragging").toBool());
         QTest::qWait(100);
-        const QImage shot = app.window->grabWindow();
+        const QImage shot = test_support::grab(app.window);
         const QColor want = app.theme.look()->property("ports").toMap().value("text").value<QColor>();
         int right = 0;
         const QRect box = hover ? QRect(app.screen(262, 130), app.screen(338, 230)) : QRect(app.screen(100, 260), app.screen(335, 470));
