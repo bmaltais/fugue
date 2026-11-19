@@ -634,8 +634,6 @@ private:
         std::optional<Error> problem; // the node fails
     };
 
-    // Fills n.inputs from what the graph has written, the defaults and the
-    // upstream outputs.
     // What is wrong with a linked value of a built-in type (text, number, boolean) for
     // `spec`, by the rules checkLiteral applies to a literal; one item at a time for a list.
     Errors linkedValueProblems(const InputSpec &spec, const Value &value) const {
@@ -658,6 +656,8 @@ private:
         return {};
     }
 
+    // Fills n.inputs from what the graph has written, the defaults and the
+    // upstream outputs.
     ResolvedInputs resolveInputs(NodeRun &n) {
         ResolvedInputs resolved;
         n.inputs.clear();
