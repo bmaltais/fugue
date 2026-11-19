@@ -26,6 +26,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QThreadPool>
 #include <QUrl>
 #include <QtQmlIntegration/qqmlintegration.h>
 #include <functional>
@@ -45,6 +46,8 @@ class ImageActions : public QObject {
 public:
     ImageActions(CommandRegistry &commands, CanvasModel &canvas, CanvasRuns &runs,
                  std::function<bool(const QUrl &)> opener = {}, QObject *parent = nullptr);
+    // Waits for the copies and saves under way.
+    ~ImageActions() override;
 
     // The node the commands act on now.
     QString node() const;
@@ -75,6 +78,9 @@ private:
     CanvasRuns &m_runs;
     std::function<bool(const QUrl &)> m_opener;
     QString m_pendingSource;
+    // The readers and writers of Copy and Save; their results come back through the
+    // application object and look at a QPointer to this on the UI thread.
+    QThreadPool m_workers;
 };
 
 } // namespace fugue

@@ -361,6 +361,34 @@ private slots:
         QVERIFY(r.app.warnings.isEmpty());
     }
 
+    // The window may close while a big image is read: the actions wait for their work as they
+    // go, so a save has finished by then and nothing reaches them afterwards.
+    void closingWhileABigImageIsWorkedOnWaitsForIt() {
+        ActionApp r(kLoadImage);
+        QVERIFY(r.app.open());
+        const QString file = r.app.dir.filePath("big.bmp");
+        QImage image(4000, 3000, QImage::Format_RGB32);
+        image.fill(Qt::magenta);
+        QVERIFY(image.save(file, "BMP"));
+        QVERIFY(r.app.model.widgets()->setText("src", "file", file).isEmpty());
+        QTRY_VERIFY(r.app.commands.isEnabled("node.save-image", {{"node", "src"}}));
+        r.app.model.select({"src"});
+        auto *late = new fugue::ImageActions(r.app.commands, r.app.model, *r.runs, [](const QUrl &) { return true; });
+        int signals_ = 0;
+        QObject::connect(late, &fugue::ImageActions::saved, [&] { ++signals_; });
+        QObject::connect(late, &fugue::ImageActions::copied, [&] { ++signals_; });
+        QObject::connect(late, &fugue::ImageActions::message, [&] { ++signals_; });
+        QVERIFY(r.app.commands.trigger("node.save-image"));
+        late->saveTo(r.app.dir.filePath("copy.bmp"));
+        QVERIFY(r.app.commands.trigger("node.copy-image"));
+        delete late;
+        // The handlers were the deleted object's: put the window's back before anything else.
+        fugue::ImageActions again(r.app.commands, r.app.model, *r.runs, [](const QUrl &) { return true; });
+        QCOMPARE(QFileInfo(r.app.dir.filePath("copy.bmp")).size(), QFileInfo(file).size());
+        QTest::qWait(300);
+        QCOMPARE(signals_, 0);
+    }
+
     // Open gives the viewer a file URL of the full picture, with the right extension.
     void openGivesTheViewerTheFullFile() {
         ActionApp r(kSinks);

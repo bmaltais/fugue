@@ -92,6 +92,12 @@ ImageActions::ImageActions(CommandRegistry &commands, CanvasModel &canvas, Canva
     commands.setHandler("node.save-image", [this] { save(); });
 }
 
+ImageActions::~ImageActions() {
+    // A read or write under way finishes first, so no worker outlives the window's objects
+    // and a save the person asked for is never cut short.
+    m_workers.waitForDone();
+}
+
 QString ImageActions::node() const {
     const QString target = m_commands.target().value("node").toString();
     if (!target.isEmpty())
@@ -131,7 +137,7 @@ void ImageActions::copy() {
     if (path.isEmpty())
         return;
     QPointer<ImageActions> self(this);
-    QThreadPool::globalInstance()->start([self, path] {
+    m_workers.start([self, path] {
         ImageFormat format;
         const Result<QByteArray> bytes = readImage(path, format);
         // A PNG of the picture beside the original, for apps that take only PNG; a PNG is
@@ -152,8 +158,7 @@ void ImageActions::copy() {
                     png.clear();
             }
         }
-        if (!self)
-            return;
+        // `self` is only looked at on the UI thread, where the object lives and dies.
         QMetaObject::invokeMethod(qApp, [self, bytes, format, png] {
             if (!self)
                 return;
@@ -198,7 +203,7 @@ void ImageActions::saveTo(const QString &target) {
     if (source.isEmpty() || destination.isEmpty())
         return;
     QPointer<ImageActions> self(this);
-    QThreadPool::globalInstance()->start([self, source, destination] {
+    m_workers.start([self, source, destination] {
         ImageFormat format;
         const Result<QByteArray> bytes = readImage(source, format);
         QString failure;
@@ -226,9 +231,7 @@ void ImageActions::saveTo(const QString &target) {
                 failure = say("%1 already exists, so the image was not saved; choose another name.")
                               .arg(QFileInfo(path).fileName());
         }
-        if (!self)
-            return;
-        QMetaObject::invokeMethod(self.data(), [self, failure, path] {
+        QMetaObject::invokeMethod(qApp, [self, failure, path] {
             if (!self)
                 return;
             if (failure.isEmpty())
