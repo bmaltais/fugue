@@ -97,15 +97,16 @@ struct RunApp {
     std::unique_ptr<RunService> service;
     std::unique_ptr<CanvasRuns> runs;
 
-    explicit RunApp(const QByteArray &graph, bool slow = false) : app(load(graph)) {
+    explicit RunApp(const QByteArray &graph, bool slow = false, const fugue::Description &offers = imageDescription())
+        : app(load(graph)) {
         RunSetup setup;
         setup.addNodeTypes = fugue::nodes::addBuiltinNodeTypes;
         setup.addKernels = fugue::nodes::addBuiltinKernels;
         auto *self = this;
-        setup.registerProviders = [self, slow](fugue::Registry &registry) {
+        setup.registerProviders = [self, slow, offers](fugue::Registry &registry) {
             if (!self->fake)
-                self->fake = slow ? std::make_shared<SlowProvider>(imageDescription())
-                                  : std::make_shared<FakeProvider>(imageDescription());
+                self->fake = slow ? std::make_shared<SlowProvider>(offers)
+                                  : std::make_shared<FakeProvider>(offers);
             fugue::ProviderInstance instance;
             instance.name = QStringLiteral("This machine");
             instance.type = QStringLiteral("fake");
@@ -211,6 +212,26 @@ private slots:
         r.app.key(Qt::Key_Z, Qt::ControlModifier);
         QTRY_COMPARE(r.role("src", NodeList::Thumbnail).toString(), QString());
         QTRY_COMPARE(r.role("src", NodeList::Height).toReal(), height);
+        QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
+    }
+
+    // A node nothing can serve says so before any run, and how to fix it (8.5); a run that
+    // reaches it fails with the same words.
+    void aNodeNoProviderCanServeShowsWhatIsMissing() {
+        RunApp r(kGraph, false, fugue::Description{});
+        QVERIFY(r.app.open());
+        QTRY_VERIFY(r.role("gen", NodeList::Notice).toString().contains("Nothing can serve image.generate right now."));
+        QVERIFY(r.role("gen", NodeList::Notice).toString().contains("add a provider"));
+        QVERIFY(r.role("words", NodeList::Notice).toString().isEmpty());
+        QQuickItem *card = item(r.app.window->contentItem(), "node-gen");
+        QVERIFY(card);
+        QTRY_VERIFY(item(card, "noticeChip") && item(card, "noticeChip")->isVisible());
+
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(r.state("gen"), QString("error"));
+        QVERIFY(r.role("gen", NodeList::Error).toString().contains("add a provider"));
+        QVERIFY(!item(card, "noticeChip")->isVisible()); // the error chip says it now
+        QCOMPARE(r.role("gen", NodeList::Notice).toString(), QString());
         QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
     }
 

@@ -14,7 +14,9 @@
 #include <QtTest>
 
 #include "engine/omarchy_provider.h"
+#include "engine/providers.h"
 #include "fake_http.h"
+#include "omarchy_fixture.h"
 #include "provider_support.h"
 
 using namespace fugue;
@@ -384,6 +386,67 @@ private slots:
         const OfferedModel *stopped = findModel(described.value(), "image.generate", "stopped-sdcpp");
         QCOMPARE(stopped->status, ModelStatus::Unavailable);
         QVERIFY(stopped->hint.contains("on studio: omarchy-agent-local start stopped-sdcpp"));
+    }
+
+    void theDefaultInstancesOfPairedHostsServeTheirModels() {
+        // No providers.json: the instances of spec 8.2's default, on state as a real machine
+        // paired with a host has it.
+        QTemporaryDir home;
+        FakeHttpServer server;
+        server.listen();
+        const OmarchyPaths paths = test::writeOmarchyState(home.path(), QString::fromLatin1(server.origin()));
+        test::serveStudio(server);
+        const QList<ProviderInstance> instances = defaultProviderInstances(paths);
+        QCOMPARE(instances.size(), 3);
+
+        OmarchyProvider studio(instances.at(2), paths);
+        const auto described = await<Description>([&](auto reply) { studio.describe(reply); });
+        QVERIFY2(described.ok(), qPrintable(described.ok() ? QString() : described.error().message));
+        QCOMPARE(described.value().offer("image.generate")->models.size(), 2);
+        const OfferedModel *klein = findModel(described.value(), "image.generate", "flux2-klein-4b-sdcpp-cuda");
+        QCOMPARE(klein->status, ModelStatus::Ready);
+        QCOMPARE(klein->title, QStringLiteral("FLUX.2 Klein 4B"));
+        QVERIFY(!klein->handle.contains("title")); // display only: not part of the handle (2.5)
+        QCOMPARE(described.value().offer("image.edit")->models.size(), 1);
+        QVERIFY(findModel(described.value(), "image.edit", "flux2-klein-4b-sdcpp-cuda"));
+        QVERIFY(!described.value().offer("text.generate"));
+
+        // The offline host describes itself: its last-seen model, as unavailable and why.
+        OmarchyProvider lab(instances.at(1), paths);
+        const auto away = await<Description>([&](auto reply) { lab.describe(reply); });
+        QVERIFY(away.ok());
+        const OfferedModel *zimage = findModel(away.value(), "image.generate", "z-image-turbo-sdcpp-cuda");
+        QCOMPARE(zimage->status, ModelStatus::Unavailable);
+        QVERIFY(zimage->reason.contains("lab is offline"));
+    }
+
+    void aPairedHostWithNoModelSaysWhyNotThatItIsUnpaired() {
+        Fixture fixture;
+        writeFile(QDir(fixture.paths.configDir).filePath("remotes/studio.key"), "studio-key");
+        auto network = [&](const QString &state) {
+            writeFile(QDir(fixture.paths.stateDir).filePath("network.json"),
+                      json(QJsonObject{{"schema", 1},
+                                       {"hosts", QJsonObject{{"studio", QJsonObject{{"host", "studio"},
+                                                                                    {"dns", "studio.tail1234.ts.net"},
+                                                                                    {"paired", true},
+                                                                                    {"state", state}}}}},
+                                       {"models", QJsonObject{}}}));
+        };
+        ProviderInstance instance;
+        instance.name = QStringLiteral("studio");
+        instance.address = QStringLiteral("https://studio.tail1234.ts.net");
+        auto provider = fixture.provider(instance);
+
+        network("online");
+        auto described = await<Description>([&](auto reply) { provider->describe(reply); });
+        QVERIFY(!described.ok());
+        QCOMPARE(described.errors().first().code, QStringLiteral("provider_unreachable"));
+        QCOMPARE(described.errors().first().message, QStringLiteral("studio runs no model it shares with this machine."));
+        QVERIFY(described.errors().first().hint.contains("omarchy-agent-local share"));
+
+        network("offline");
+        described = await<Description>([&](auto reply) { provider->describe(reply); });
+        QCOMPARE(described.errors().first().message, QStringLiteral("studio is offline."));
     }
 
     void anUnpairedHostSaysHowToPair() {

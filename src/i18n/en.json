@@ -1,5 +1,4 @@
 {
-  "%1 (%2)": "%1 (%2)",
   "%1 cannot be edited here.": "%1 cannot be edited here.",
   "%1 cannot be read, so nothing here can change until it is fixed: %2": "%1 cannot be read, so nothing here can change until it is fixed: %2",
   "%1 cannot feed %2: the types differ, and Fugue does not convert between them.": "%1 cannot feed %2: the types differ, and Fugue does not convert between them.",
@@ -101,6 +100,7 @@
   "Enter group": "Enter group",
   "Enter the selected group": "Enter the selected group",
   "Esc to close": "Esc to close",
+  "Expand": "Expand",
   "Export a share copy (local paths removed)": "Export a share copy (local paths removed)",
   "Export compiled graph…": "Export compiled graph…",
   "Export share copy…": "Export share copy…",
@@ -169,7 +169,8 @@
   "New provider %1": "New provider %1",
   "New workflow": "New workflow",
   "No color": "No color",
-  "No models found": "No models found",
+  "No image model available: start one in omarchy-local-ai or add a provider": "No image model available: start one in omarchy-local-ai or add a provider",
+  "No model available: start one in omarchy-local-ai or add a provider": "No model available: start one in omarchy-local-ai or add a provider",
   "No node matches": "No node matches",
   "No node matches “%1”.": "No node matches “%1”.",
   "No problems.": "No problems.",
@@ -210,6 +211,7 @@
   "Redo": "Redo",
   "Reload": "Reload",
   "Remove %1": "Remove %1",
+  "Remove bypass": "Remove bypass",
   "Rename": "Rename",
   "Replace image": "Replace image",
   "Report an issue": "Report an issue",
@@ -267,6 +269,8 @@
   "Undo": "Undo",
   "Ungroup": "Ungroup",
   "Unknown type": "Unknown type",
+  "Unmute": "Unmute",
+  "Unpin": "Unpin",
   "Untitled": "Untitled",
   "Use %1": "Use %1",
   "Video": "Video",
@@ -285,10 +289,10 @@
   "default, not saved": "default, not saved",
   "enabled is on or off.": "enabled is on or off.",
   "loading": "loading",
+  "not running": "not running",
   "off": "off",
   "on": "on",
   "or": "or",
   "random": "random",
-  "to close": "to close",
-  "unavailable": "unavailable"
+  "to close": "to close"
 }

@@ -40,6 +40,7 @@ ModelStatus parseModelStatus(const QString &text);
 // several image servers at once with different defaults and edit support.
 struct OfferedModel {
     QJsonObject handle;     // a resource handle (2.5); served-by-name models have no hash
+    QString title;          // the name people know it by ("FLUX.2 Klein 4B"); display only, not in the handle
     ModelStatus status = ModelStatus::Unavailable;
     QString reason;         // why it is not ready, one sentence
     QString hint;           // how to make it ready, for the 8.5 error

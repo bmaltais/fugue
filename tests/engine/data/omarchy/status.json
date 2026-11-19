@@ -1,0 +1,34 @@
+{
+  "models": {
+    "qwen3.5-2b-tensorfold": {
+      "error": "",
+      "fits": false,
+      "fit_reason": "No nvidia-rtx3090 GPU on this machine (found: none)",
+      "shared": false,
+      "recipe": "qwen3.5-2b-tensorfold",
+      "kind": "text",
+      "edit": false,
+      "name": "Qwen3.5 2B",
+      "vendor": "qwen",
+      "runtime": "tensorfold-x86",
+      "image": "ghcr.io/example/tensorfold-x86@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "ctx": 131072,
+      "unit": "inactive",
+      "sub_state": "dead",
+      "result": "success",
+      "port": 11440,
+      "endpoint": "http://127.0.0.1:11440/v1",
+      "observed": {"load_seconds": 4.0, "ram_used_gib": 0.5, "gpu_used_gib": 8.2},
+      "ram_total_gib": 78.5,
+      "since_ms": null,
+      "expected_load_seconds": 4.0,
+      "expected_stop_seconds": 1.0,
+      "expected_remove_seconds": null
+    }
+  },
+  "share_error": "",
+  "last": "qwen3.5-2b-tensorfold",
+  "ram_total_gib": 78.4,
+  "best": null,
+  "link": {"state": "none"}
+}

@@ -79,15 +79,16 @@ void setIncrementing(Document &document, const QString &node, const QString &inp
 }
 
 // Asks each enabled provider instance to describe itself and lists the models it offers of
-// the resource type. The providers live until every reply is in.
+// the resource type for one of the capabilities, grouped by instance in the user's order.
+// The providers live until every reply is in.
 WidgetEdit::ModelSource providerModels() {
-    return [](const QString &type, std::function<void(QList<WidgetEdit::Model>)> done) {
+    return [](const QString &type, const QStringList &capabilities, std::function<void(QList<WidgetEdit::Model>)> done) {
         const Result<QList<ProviderInstance>> instances = loadProviderInstances(providersPath());
         if (!instances.ok())
             return done({});
         struct Pending {
             int left = 0;
-            QList<WidgetEdit::Model> models;
+            QList<QList<WidgetEdit::Model>> byInstance; // in the user's order
             std::function<void(QList<WidgetEdit::Model>)> done;
             std::vector<std::shared_ptr<Provider>> providers;
         };
@@ -104,28 +105,39 @@ WidgetEdit::ModelSource providerModels() {
             asked.append({made.value(), instance.name});
         }
         pending->left = int(asked.size());
+        pending->byInstance.resize(asked.size());
         if (asked.isEmpty())
             return pending->done({});
-        for (const auto &[provider, name] : asked) {
-            provider->describe([pending, type, name = name](const Result<Description> &description) {
+        for (qsizetype index = 0; index < asked.size(); ++index) {
+            const auto &[provider, name] = asked.at(index);
+            provider->describe([pending, type, capabilities, index, name = name](const Result<Description> &description) {
+                QList<WidgetEdit::Model> &models = pending->byInstance[index];
                 if (description.ok()) {
                     for (const CapabilityOffer &offer : description->capabilities) {
+                        if (!capabilities.isEmpty() && !capabilities.contains(offer.capability))
+                            continue;
                         for (const OfferedModel &model : offer.models) {
                             if (model.handle.value("resource").toString() != type)
                                 continue;
-                            const bool listed = std::any_of(
-                                pending->models.begin(), pending->models.end(), [&](const WidgetEdit::Model &m) {
-                                    return m.provider == name && sameModel(m.handle, model.handle);
-                                });
-                            if (!listed)
-                                pending->models.append({model.handle.value("name").toString(), model.handle,
-                                                        modelStatusName(model.status), name});
+                            const bool listed = std::any_of(models.begin(), models.end(), [&](const WidgetEdit::Model &m) {
+                                return sameModel(m.handle, model.handle);
+                            });
+                            if (listed)
+                                continue;
+                            const QString note = model.status == ModelStatus::Ready
+                                                     ? QString()
+                                                     : (model.reason + QLatin1Char(' ') + model.hint).trimmed();
+                            models.append({model.handle.value("name").toString(), model.handle,
+                                           modelStatusName(model.status), name, model.title, note});
                         }
                     }
                 }
                 if (--pending->left > 0)
                     return;
-                pending->done(pending->models);
+                QList<WidgetEdit::Model> all;
+                for (const QList<WidgetEdit::Model> &each : std::as_const(pending->byInstance))
+                    all += each;
+                pending->done(all);
                 // Not from inside a provider's own reply.
                 QTimer::singleShot(0, [pending] { pending->providers.clear(); });
             });
@@ -498,43 +510,83 @@ void WidgetEdit::advanceSeeds() {
 
 // --- the model picker ----------------------------------------------------------
 
-void WidgetEdit::requestModels(const QString &node, const QString &input) {
+QStringList WidgetEdit::capabilities(const QString &node, const QString &input) const {
+    if (!m_registry)
+        return {};
+    const Document &document = m_canvas->document();
+    QString type = document.graph.nodes.value(node).type;
+    if (!m_registry->nodeType(type)) {
+        // A group's exposed input: the node type of the inner input it drives.
+        const GroupDefinition *group = document.group(type);
+        if (!group)
+            return {};
+        for (const GroupInput &exposed : group->inputs)
+            if (exposed.name == input)
+                type = group->nodes.value(exposed.targets.value(0).node).type;
+    }
+    const NodeType *installed = m_registry->nodeType(type);
+    QStringList list;
+    if (installed)
+        for (const QJsonValue &capability : installed->capabilities.toArray())
+            list << capability.toString();
+    return list;
+}
+
+QString WidgetEdit::modelsKey(const QString &node, const QString &input) const {
     const Target t = target(node, input);
     if (t.widget != QLatin1String("model"))
+        return {};
+    return t.spec->type.type.toString() + QLatin1Char('\n') + capabilities(node, input).join(QLatin1Char(','));
+}
+
+void WidgetEdit::requestModels(const QString &node, const QString &input) {
+    const QString key = modelsKey(node, input);
+    if (key.isEmpty())
         return;
-    const QString type = t.spec->type.type.toString();
+    const QString type = target(node, input).spec->type.type.toString();
     if (!m_source)
         m_source = providerModels();
-    m_loading.insert(type);
+    m_loading.insert(key);
     ++m_modelsRevision;
     emit modelsChanged();
     QPointer<WidgetEdit> self(this);
-    m_source(type, [self, type](QList<Model> models) {
+    m_source(type, capabilities(node, input), [self, key](QList<Model> models) {
         if (!self)
             return;
-        self->m_models.insert(type, std::move(models));
-        self->m_loading.remove(type);
+        self->m_models.insert(key, std::move(models));
+        self->m_loading.remove(key);
         ++self->m_modelsRevision;
         emit self->modelsChanged();
     });
 }
 
 QVariantList WidgetEdit::models(const QString &node, const QString &input) const {
-    const Target t = target(node, input);
-    if (t.widget != QLatin1String("model"))
+    const QString key = modelsKey(node, input);
+    if (key.isEmpty())
         return {};
     QVariantList list;
-    for (const Model &model : m_models.value(t.spec->type.type.toString()))
+    for (const Model &model : m_models.value(key))
         list.append(QVariantMap{{"name", model.name},
+                                {"title", model.title.isEmpty() ? model.name : model.title},
                                 {"handle", model.handle.toVariantMap()},
                                 {"status", model.status},
-                                {"provider", model.provider}});
+                                {"provider", model.provider},
+                                {"note", model.note}});
     return list;
 }
 
 bool WidgetEdit::modelsLoading(const QString &node, const QString &input) const {
-    const Target t = target(node, input);
-    return t.widget == QLatin1String("model") && m_loading.contains(t.spec->type.type.toString());
+    const QString key = modelsKey(node, input);
+    return !key.isEmpty() && m_loading.contains(key);
+}
+
+QString WidgetEdit::modelsEmptyText(const QString &node, const QString &input) const {
+    const QStringList wanted = capabilities(node, input);
+    const bool image = std::any_of(wanted.begin(), wanted.end(), [](const QString &capability) {
+        return capability.startsWith(QLatin1String("image."));
+    });
+    return image ? tr("No image model available: start one in omarchy-local-ai or add a provider")
+                 : tr("No model available: start one in omarchy-local-ai or add a provider");
 }
 
 QString WidgetEdit::setModel(const QString &node, const QString &input, const QVariantMap &handle) {

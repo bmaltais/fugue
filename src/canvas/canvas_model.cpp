@@ -92,6 +92,7 @@ QVariant NodeList::data(const QModelIndex &index, int role) const {
     case ThumbnailInfo: return run.thumbnailInfo;
     case ThumbnailText: return run.thumbnailText;
     case ThumbnailDim: return run.thumbnailDim;
+    case Notice: return run.notice;
     default: return {};
     }
 }
@@ -102,7 +103,8 @@ QHash<int, QByteArray> NodeList::roleNames() const {
             {Collapsed, "collapsed"}, {Mode, "mode"}, {Selected, "selected"}, {Inputs, "inputs"}, {Outputs, "outputs"},
             {Color, "color"}, {Pinned, "pinned"}, {RunState, "runState"}, {Progress, "progress"},
             {Seconds, "seconds"}, {Error, "error"}, {Warnings, "warnings"}, {Thumbnail, "thumbnail"},
-            {ThumbnailInfo, "thumbnailInfo"}, {ThumbnailRect, "thumbnailRect"}, {ThumbnailText, "thumbnailText"}, {ThumbnailDim, "thumbnailDim"}};
+            {ThumbnailInfo, "thumbnailInfo"}, {ThumbnailRect, "thumbnailRect"}, {ThumbnailText, "thumbnailText"}, {ThumbnailDim, "thumbnailDim"},
+            {Notice, "notice"}};
 }
 
 LinkList::LinkList(CanvasModel *canvas) : QAbstractListModel(canvas), m_canvas(canvas) {}
@@ -1438,6 +1440,7 @@ void CanvasModel::setRunState(const QString &node, const QVariantMap &state) {
     run.thumbnailText = state.value("thumbnailText").toString();
     run.thumbnailDim = state.value("thumbnailDim").toBool();
     run.values = state.value("values").toMap();
+    run.notice = state.value("notice").toString();
     const RunInfo before = m_run.value(node);
     const bool previewChanged = before.thumbnail.isEmpty() != run.thumbnail.isEmpty()
                                 || before.thumbnailSize != run.thumbnailSize
@@ -1445,7 +1448,7 @@ void CanvasModel::setRunState(const QString &node, const QVariantMap &state) {
     m_run.insert(node, run);
     relayOut(r, {NodeList::RunState, NodeList::Progress, NodeList::Seconds, NodeList::Error, NodeList::Warnings,
                  NodeList::Thumbnail, NodeList::ThumbnailInfo, NodeList::ThumbnailText, NodeList::ThumbnailDim,
-                 NodeList::Outputs});
+                 NodeList::Outputs, NodeList::Notice});
     if (previewChanged)
         emit previewSizeChanged(node);
 }

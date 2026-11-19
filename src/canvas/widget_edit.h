@@ -25,10 +25,15 @@
 // the canvas starts its seeds on "random" (CanvasModel::addNode).
 //
 // Resource inputs show the model picker (2.5). Its list comes from a model source: by
-// default each enabled provider instance (providers.json) is asked to describe() itself when
-// a picker opens, and every model it offers of the input's resource type is listed. Models
-// on disk (8.9) are not listed yet: nothing finds them until the component pack (M5). A name
-// typed into the picker is stored as a handle served by name, {"resource": type, "name": …}.
+// default each enabled provider instance (providers.json, or spec 8.2's default without one:
+// this machine and each paired host) is asked to describe() itself when a picker opens, and
+// every model it offers of the input's resource type, for one of the node type's
+// capabilities (image.generate for Generate Image, image.edit for Edit Image; any capability
+// for a node type that names none), is listed in the instances' order, with how to make a
+// model that is not ready ready (8.4: Fugue never starts one by itself). An instance whose
+// describe() fails lists nothing. Models on disk (8.9) are not listed yet: nothing finds them
+// until the component pack (M5). A name typed into the picker is stored as a handle served by
+// name, {"resource": type, "name": …}.
 
 #include "engine/document.h"
 #include "engine/node_type.h"
@@ -128,21 +133,31 @@ public:
     Q_INVOKABLE void advanceSeeds();
 
     // --- the model picker ---
-    // One model: {name, handle, status ("ready", "loading", "unavailable"), provider}.
+    // One model: {name, handle, status ("ready", "loading", "unavailable"), provider, title,
+    // note}. `name` is the handle's; `title` the one people know it by (empty: the name);
+    // `note`, for a model that is not ready, why and how to make it ready.
     struct Model {
         QString name;
         QJsonObject handle;
         QString status;
         QString provider;
+        QString title;
+        QString note;
     };
-    using ModelSource = std::function<void(const QString &resourceType, std::function<void(QList<Model>)> done)>;
+    // Lists the models of a resource type that offer one of `capabilities` (all models of
+    // the type when it is empty), grouped by provider instance in the user's order.
+    using ModelSource = std::function<void(const QString &resourceType, const QStringList &capabilities,
+                                           std::function<void(QList<Model>)> done)>;
     // Replaces where models come from (tests pass a fixed list).
     void setModelSource(ModelSource source) { m_source = std::move(source); }
     // Asks the source for the models of the input's resource type; modelsChanged when they come.
     Q_INVOKABLE void requestModels(const QString &node, const QString &input);
-    // The models last listed for the input's type, as maps; empty before any arrive.
+    // The models last listed for the input, as maps {name, title, handle, status, provider,
+    // note}; empty before any arrive.
     Q_INVOKABLE QVariantList models(const QString &node, const QString &input) const;
     Q_INVOKABLE bool modelsLoading(const QString &node, const QString &input) const;
+    // What the picker says when no model is listed: what kind is missing and how to get one.
+    Q_INVOKABLE QString modelsEmptyText(const QString &node, const QString &input) const;
     int modelsRevision() const { return m_modelsRevision; }
     // Picks a listed model (its handle as a map), one undo step.
     Q_INVOKABLE QString setModel(const QString &node, const QString &input, const QVariantMap &handle);
@@ -170,6 +185,10 @@ private:
     void write(const QString &node, const QString &input, const QJsonValue &value, const QString &text);
     QString stepText(const QString &node, const QString &input) const;
     double randomSeed(const fugue::InputSpec &spec) const;
+    // The capabilities of the node type the input is on (a group's: its inner node's).
+    QStringList capabilities(const QString &node, const QString &input) const;
+    // Where the input's model list is kept: its resource type and capabilities.
+    QString modelsKey(const QString &node, const QString &input) const;
     // The seed the node's last result was made with, when a run showed one.
     std::optional<double> lastSeed(const QString &node, const QString &input) const;
 
@@ -182,7 +201,7 @@ private:
     } m_session;
     bool m_writing = false;
     ModelSource m_source;
-    QHash<QString, QList<Model>> m_models; // by resource type
+    QHash<QString, QList<Model>> m_models; // by modelsKey()
     QSet<QString> m_loading;
     int m_modelsRevision = 0;
 };

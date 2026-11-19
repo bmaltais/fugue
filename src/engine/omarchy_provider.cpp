@@ -276,6 +276,18 @@ void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> do
                 rows.append(row);
         }
         const QString pairHint = QStringLiteral("Pair with it: omarchy-agent-local pair %1").arg(host);
+        // A paired host with no model to offer is said as such, not as unpaired: its state
+        // is in `hosts` (agent_local.py survey_network), and an online host lists only the
+        // models it runs.
+        const QJsonObject hostRow = network ? network->value("hosts").toObject().value(host).toObject() : QJsonObject();
+        if (rows.isEmpty() && hostRow.value("paired").toBool()) {
+            const QString away = hostRow.value("state").toString();
+            if (away == QLatin1String("offline") || away == QLatin1String("unreachable"))
+                return fail(QStringLiteral("%1 is %2.").arg(host, away),
+                            QStringLiteral("Turn on %1, or check its tailnet connection.").arg(host));
+            return fail(QStringLiteral("%1 runs no model it shares with this machine.").arg(host),
+                        QStringLiteral("Start a model on %1 and share it there: omarchy-agent-local share <recipe>").arg(host));
+        }
         if (rows.isEmpty())
             return fail(QStringLiteral("This machine is not paired with %1.").arg(dns), pairHint);
         if (key.isEmpty())
@@ -321,6 +333,7 @@ void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> do
 
         OfferedModel model;
         model.handle = QJsonObject{{"resource", kModelResource}, {"name", recipe}};
+        model.title = row.value("name").toString();
         model.properties = QJsonObject{{"edit", row.value("edit").toBool()},
                                        {"input", row.value("input").isArray() ? row.value("input")
                                                                                : QJsonArray{"text"}}};

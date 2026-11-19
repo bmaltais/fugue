@@ -56,7 +56,7 @@ QString CommandRegistry::add(const CommandSpec &spec, Handler handler) {
         return QStringLiteral("%1 has no description").arg(spec.id);
     if (!kContexts.contains(spec.context))
         return QStringLiteral("%1: unknown context \"%2\"").arg(spec.id, spec.context);
-    Entry entry{spec, std::move(handler), {}, {}, {}, {}};
+    Entry entry{spec, std::move(handler), {}, {}, {}, {}, {}};
     entry.spec.keys.clear();
     for (const QString &key : spec.keys) {
         QString problem;
@@ -87,6 +87,14 @@ bool CommandRegistry::setLabel(const QString &id, const QString &label) {
         return false;
     m_entries[*it].spec.label = label;
     emit changed();
+    return true;
+}
+
+bool CommandRegistry::setLabelWhen(const QString &id, std::function<QString()> label) {
+    const auto it = m_index.constFind(id);
+    if (it == m_index.constEnd())
+        return false;
+    m_entries[*it].labelWhen = std::move(label);
     return true;
 }
 
@@ -432,10 +440,11 @@ QVariantMap CommandRegistry::entry(const QString &id, const QVariantMap &target)
     const Entry &entry = m_entries[*it];
     const QVariantMap previous = std::exchange(m_target, target);
     const QString description = QCoreApplication::translate("Command", entry.spec.description.toUtf8().constData());
+    const QString dynamic = entry.labelWhen ? entry.labelWhen() : QString();
+    const QString source = !dynamic.isEmpty() ? dynamic : entry.spec.label;
     QVariantMap map{
         {"command", entry.spec.id},
-        {"label", entry.spec.label.isEmpty() ? description
-                                             : QCoreApplication::translate("Command", entry.spec.label.toUtf8().constData())},
+        {"label", source.isEmpty() ? description : QCoreApplication::translate("Command", source.toUtf8().constData())},
         {"description", description},
         {"keys", entry.keys},
         {"available", bool(entry.handler)},

@@ -15,6 +15,7 @@
 #include "engine/registry.h"
 #include "nodes/builtin.h"
 #include "widget_fixture.h"
+#include "../engine/omarchy_fixture.h"
 
 using namespace fugue;
 
@@ -303,7 +304,7 @@ private slots:
         Fixture f;
         QString askedFor;
         std::function<void(QList<WidgetEdit::Model>)> answer;
-        f.edits.setModelSource([&](const QString &type, std::function<void(QList<WidgetEdit::Model>)> done) {
+        f.edits.setModelSource([&](const QString &type, const QStringList &, std::function<void(QList<WidgetEdit::Model>)> done) {
             askedFor = type;
             answer = std::move(done);
         });
@@ -312,7 +313,7 @@ private slots:
         QCOMPARE(askedFor, QString("fugue/image-model"));
         QVERIFY(f.edits.modelsLoading("all", "model"));
         const QJsonObject zimage{{"resource", "fugue/image-model"}, {"name", "z-image-turbo"}};
-        answer({{"z-image-turbo", zimage, "ready", "This machine"}});
+        answer({{"z-image-turbo", zimage, "ready", "This machine", "", ""}});
         QVERIFY(!f.edits.modelsLoading("all", "model"));
         QVERIFY(changed.count() >= 1);
         const QVariantList listed = f.edits.models("all", "model");
@@ -331,6 +332,59 @@ private slots:
         // Unset: any ready model (8.4).
         f.edits.unset("all", "model");
         QCOMPARE(f.stored("all", "model"), QJsonValue(QJsonValue::Undefined));
+    }
+
+    void withoutProvidersJsonThePickerListsThePairedHostsModelsForTheNodesCapability() {
+        // The owner's first run (spec 8.2): no providers.json, this machine sets up only text
+        // models, and a paired host runs two image models. The picker asks the default
+        // instances, and lists by instance what offers the node's capability.
+        test::PairedHome home;
+        Fixture f;
+        f.canvas.setDocument(document(R"({"fugue": 1, "graph": {"nodes": {
+            "generate": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"prompt": "a fox"}},
+            "edit": {"type": "fugue/edit-image", "version": "1.0.0", "inputs": {"instruction": "make it blue"}}}}})"));
+        f.edits.requestModels("generate", "model");
+        QVERIFY(f.edits.modelsLoading("generate", "model"));
+        QTRY_VERIFY(!f.edits.modelsLoading("generate", "model"));
+        const QVariantList listed = f.edits.models("generate", "model");
+        QStringList seen;
+        for (const QVariant &each : listed) {
+            const QVariantMap m = each.toMap();
+            seen << m.value("provider").toString() + ": " + m.value("title").toString() + " (" + m.value("status").toString() + ")";
+        }
+        // This machine offers no image model; lab is offline; neighbour is not paired.
+        QCOMPARE(seen, (QStringList{"lab: Z-Image Turbo (unavailable)", "studio: FLUX.2 Klein 4B (ready)",
+                                    "studio: Z-Image Turbo (ready)"}));
+        const QVariantMap klein = listed.at(1).toMap();
+        QCOMPARE(klein.value("name").toString(), QString("flux2-klein-4b-sdcpp-cuda"));
+        QCOMPARE(klein.value("note").toString(), QString());
+        QVERIFY(listed.at(0).toMap().value("note").toString().contains("lab is offline"));
+        // Picking stores the handle, never the title.
+        QCOMPARE(f.edits.setModel("generate", "model", klein.value("handle").toMap()), QString());
+        QCOMPARE(f.stored("generate", "model"),
+                 QJsonValue(QJsonObject{{"resource", "fugue/image-model"}, {"name", "flux2-klein-4b-sdcpp-cuda"}}));
+
+        // Edit Image asks for image.edit: only the model that edits.
+        f.edits.requestModels("edit", "model");
+        QTRY_VERIFY(!f.edits.modelsLoading("edit", "model"));
+        const QVariantList edits = f.edits.models("edit", "model");
+        QCOMPARE(edits.size(), 1);
+        QCOMPARE(edits.first().toMap().value("title").toString(), QString("FLUX.2 Klein 4B"));
+        QCOMPARE(edits.first().toMap().value("provider").toString(), QString("studio"));
+    }
+
+    void aProvidersFileWinsOverThePairedHosts() {
+        test::PairedHome home;
+        QVERIFY(test::writeFixtureFile(home.dir.filePath("config/fugue/providers.json"),
+                                       R"({"providers": [{"name": "This machine", "type": "omarchy"}]})"));
+        Fixture f;
+        f.canvas.setDocument(document(R"({"fugue": 1, "graph": {"nodes": {
+            "generate": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"prompt": "a fox"}}}}})"));
+        f.edits.requestModels("generate", "model");
+        QTRY_VERIFY(!f.edits.modelsLoading("generate", "model"));
+        QVERIFY(f.edits.models("generate", "model").isEmpty());
+        QCOMPARE(f.edits.modelsEmptyText("generate", "model"),
+                 QString("No image model available: start one in omarchy-local-ai or add a provider"));
     }
 
     void aLinkedInputShowsItsSource() {

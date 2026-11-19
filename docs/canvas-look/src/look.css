@@ -146,8 +146,11 @@ svg.wires.over { z-index: 30; }
 .node.error { border-color: var(--error); }
 .node.error .hd { background: var(--error-header); }
 .node.error .meta { color: var(--error); }
-.node.bypassed { border-style: dashed; border-color: var(--hairline-strong); }
-.node.bypassed .bd, .node.bypassed .hd .title { opacity: .55; }
+/* Bypassed, as ComfyUI draws it in magenta: body and header tinted with the palette's magenta
+   (the app steps the share down until the text reads at 4.5:1), a dashed edge in it. */
+.node.bypassed { background: color-mix(in srgb, var(--body), var(--role-magenta) 22%); border-style: dashed;
+  border-color: color-mix(in srgb, var(--canvas), var(--role-magenta) 85%); }
+.node.bypassed .hd { background: color-mix(in srgb, var(--header), var(--role-magenta) 34%); }
 .node.muted { opacity: .4; }
 .node.skipped { opacity: .6; }
 .node.missing { border: 1px dashed var(--error); }

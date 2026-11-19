@@ -33,6 +33,7 @@ Item {
     required property real seconds
     required property string error
     required property var warnings
+    required property string notice // why it cannot run now, and the fix (8.5), from a check
     required property string thumbnail
     required property string thumbnailInfo
     required property rect thumbnailRect
@@ -98,6 +99,7 @@ Item {
             readonly property bool frozen: node.runState === "frozen" && !bypassed && !muted
             readonly property bool dashed: bypassed || node.missing
             readonly property color headerFill: failed ? node.look.errorHeader
+                                               : bypassed ? node.look.bypassHeader
                                                : node.color !== "" ? node.look.role(node.color).tint : node.look.header
             readonly property color edge: failed ? node.look.error
                                         : running ? node.look.accent
@@ -149,7 +151,7 @@ Item {
             Rectangle {
                 anchors.fill: parent
                 radius: face.corner
-                color: node.look.body
+                color: face.bypassed ? node.look.bypassBody : node.look.body
                 border.width: face.dashed ? 0 : 1
                 border.color: face.edge
             }
@@ -198,7 +200,6 @@ Item {
                     elide: Text.ElideRight
                     textFormat: Text.PlainText
                     color: node.missing ? node.look.error : node.look.text
-                    opacity: face.bypassed ? 0.55 : 1
                     font.pixelSize: node.look.textSize
                     font.weight: Font.DemiBold
                 }
@@ -233,7 +234,6 @@ Item {
                         textFormat: Text.PlainText
                         color: node.look.label
                         font.pixelSize: node.look.labelSize
-                        opacity: face.bypassed ? 0.55 : 1
                     }
                     // The last value, as a chip left of the label.
                     Loader {
@@ -305,7 +305,6 @@ Item {
                         y: Math.round(0.5 * face.u)
                         width: node.width - 6 * face.u
                         height: input.height - 2 * Math.round(0.5 * face.u)
-                        opacity: face.bypassed ? 0.55 : 1
                         sourceComponent: InputWidget {
                             edits: node.canvasModel.widgets
                             nodeId: node.nodeId
@@ -329,7 +328,6 @@ Item {
                         textFormat: Text.PlainText
                         color: node.look.label
                         font.pixelSize: node.look.labelSize
-                        opacity: face.bypassed ? 0.55 : 1
                     }
                     // An unlinked widget input shows its mark only on hover or to a compatible link.
                     PortDot {
@@ -444,7 +442,7 @@ Item {
                         anchors.fill: parent
                         ShapePath {
                             strokeWidth: 1
-                            strokeColor: node.missing ? node.look.error : node.look.hairlineStrong
+                            strokeColor: node.missing ? node.look.error : node.look.bypassEdge
                             strokeStyle: ShapePath.DashLine
                             dashPattern: [4, 3]
                             fillColor: "transparent"
@@ -571,6 +569,45 @@ Item {
                         font.pixelSize: node.look.captionSize
                     }
 
+                    // Cannot run now (8.5): what is missing and how to fix it, in a chip under the
+                    // node in the label color, until a run says more.
+                    Rectangle {
+                        objectName: "noticeChip"
+                        visible: !face.failed && node.notice !== "" && face.full
+                        y: node.height + Math.round(1.5 * face.u)
+                        width: node.width
+                        height: noticeText.height + 3 * face.u
+                        radius: node.look.smallCorner
+                        color: node.look.well
+                        Rectangle {
+                            width: 2
+                            height: parent.height
+                            color: node.look.label
+                        }
+                        Glyph {
+                            x: 2 * face.u
+                            y: 1.5 * face.u
+                            name: "triangle-alert"
+                            look: node.look
+                            color: node.look.label
+                        }
+                        Text {
+                            id: noticeText
+                            x: 2 * face.u + 14 + 1.5 * face.u
+                            y: 1.5 * face.u
+                            width: parent.width - x - 2 * face.u
+                            text: node.notice
+                            wrapMode: Text.Wrap
+                            maximumLineCount: 4
+                            elide: Text.ElideRight
+                            textFormat: Text.PlainText
+                            lineHeightMode: Text.FixedHeight
+                            lineHeight: 15
+                            color: node.look.text
+                            font.pixelSize: node.look.labelSize
+                        }
+                    }
+
                     // In error: the message in a chip under the node (4.7).
                     Rectangle {
                         visible: face.failed && node.error !== "" && face.full
@@ -598,7 +635,7 @@ Item {
                             width: parent.width - x - 2 * face.u
                             text: node.error
                             wrapMode: Text.Wrap
-                            maximumLineCount: 2
+                            maximumLineCount: 4
                             elide: Text.ElideRight
                             textFormat: Text.PlainText
                             lineHeightMode: Text.FixedHeight

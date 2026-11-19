@@ -71,6 +71,10 @@ public:
     // False when the id is not registered.
     bool setEnabledWhen(const QString &id, Check check);
     bool setCheckedWhen(const QString &id, Check check);
+    // A toggle's menu name follows the state of its target ("Bypass", then "Remove bypass"):
+    // the check returns the English text of the name, or empty for the command's own label.
+    // Translated in the "Command" context; the description (the `?` overlay) stays neutral.
+    bool setLabelWhen(const QString &id, std::function<QString()> label);
 
     bool contains(const QString &id) const { return m_index.contains(id); }
     QStringList ids() const;
@@ -169,6 +173,7 @@ private:
         CommandSpec spec;
         Handler handler;
         Check enabledWhen, checkedWhen;
+        std::function<QString()> labelWhen;
         QStringList keys; // effective, canonical
         QStringList userKeys; // the subset the user added
     };

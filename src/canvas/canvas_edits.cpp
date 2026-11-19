@@ -403,6 +403,24 @@ void CanvasModel::toggleMode(const QString &modeName) {
     commit(document, *mode == NodeMode::Bypass ? tr("Bypass") : tr("Mute"));
 }
 
+bool CanvasModel::selectionAll(const QString &state) const {
+    const QStringList ids = selectedIds();
+    if (ids.isEmpty())
+        return false;
+    return std::all_of(ids.begin(), ids.end(), [&](const QString &id) {
+        const int r = rowOf(id);
+        if (r < 0)
+            return false;
+        const NodeRow &row = m_rows[size_t(r)];
+        if (state == QLatin1String("collapsed"))
+            return row.collapsed;
+        if (state == QLatin1String("pinned"))
+            return row.pinned;
+        const std::optional<NodeMode> mode = parseNodeMode(state);
+        return mode && document().graph.nodes.value(id).mode == *mode;
+    });
+}
+
 void CanvasModel::toggleCollapsed() {
     const QStringList ids = selectedIds();
     if (ids.isEmpty())

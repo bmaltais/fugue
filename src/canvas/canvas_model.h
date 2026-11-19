@@ -121,6 +121,7 @@ public:
         ThumbnailRect, // where it sits in the node, from the node's top left
         ThumbnailText, // text in the thumbnail's place: a shown text or number, a label ("Video · 0:04")
         ThumbnailDim,  // the slot is a placeholder ("No result yet"): drawn dimmed
+        Notice,        // why the node cannot run now and how to fix it (8.5), from a check
     };
 
     explicit NodeList(CanvasModel *canvas);
@@ -300,6 +301,9 @@ public:
     Q_INVOKABLE void toggleMode(const QString &mode);
     // Collapses the selection, or expands it when all of it is collapsed already.
     Q_INVOKABLE void toggleCollapsed();
+    // True when the selection is not empty and every selected node has the state the toggle
+    // commands act on: "bypass", "mute", "collapsed" or "pinned" (what they would remove).
+    bool selectionAll(const QString &state) const;
 
     // --- run state (#19) ---
 
@@ -511,6 +515,7 @@ private:
         QString thumbnailText;
         bool thumbnailDim = false;
         QVariantMap values;
+        QString notice;
     };
 
     Snapshot snapshot() const;

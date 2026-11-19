@@ -8,6 +8,7 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QMap>
 #include <QSet>
 
 namespace fugue {
@@ -211,11 +212,15 @@ Result<QList<ProviderInstance>> parseProviderInstances(const QJsonObject &docume
 }
 
 Result<QList<ProviderInstance>> loadProviderInstances(const QString &path) {
+    return loadProviderInstances(path, OmarchyPaths::standard());
+}
+
+Result<QList<ProviderInstance>> loadProviderInstances(const QString &path, const OmarchyPaths &omarchy) {
     const Result<QJsonObject> document = readJsonObject(path);
     if (document)
         return parseProviderInstances(document.value());
     if (document.error().code == QLatin1String("file_not_found") && !QFileInfo::exists(path))
-        return Result<QList<ProviderInstance>>(defaultProviderInstances());
+        return Result<QList<ProviderInstance>>(defaultProviderInstances(omarchy));
     // Unreadable or corrupt is never taken for missing: the user's instances and keys
     // are in there.
     Error error = document.error();
@@ -223,11 +228,44 @@ Result<QList<ProviderInstance>> loadProviderInstances(const QString &path) {
     return Result<QList<ProviderInstance>>(error);
 }
 
-QList<ProviderInstance> defaultProviderInstances() {
+QList<ProviderInstance> defaultProviderInstances() { return defaultProviderInstances(OmarchyPaths::standard()); }
+
+QList<ProviderInstance> defaultProviderInstances(const OmarchyPaths &omarchy) {
     ProviderInstance local;
     local.name = QStringLiteral("This machine");
     local.type = QStringLiteral("omarchy");
-    return {local};
+    QList<ProviderInstance> instances{local};
+
+    // network.json (omarchy-local-ai agent_local.py survey_network): `hosts` by name, each
+    // with `dns` and `paired`. Its models carry the same fields, for a file without hosts.
+    const Result<QJsonObject> network = readJsonObject(QDir(omarchy.stateDir).filePath("network.json"));
+    if (!network)
+        return instances;
+    QMap<QString, QString> paired; // host -> dns, in name order
+    const auto take = [&paired](const QJsonObject &row) {
+        const QString dns = row.value("dns").toString();
+        const QString host = row.value("host").toString(dns.section(QLatin1Char('.'), 0, 0));
+        if (row.value("paired").toBool() && !host.isEmpty() && !dns.isEmpty() && !paired.contains(host))
+            paired.insert(host, dns);
+    };
+    const QJsonObject hosts = network->value("hosts").toObject();
+    for (auto it = hosts.begin(); it != hosts.end(); ++it)
+        take(it.value().toObject());
+    if (hosts.isEmpty()) {
+        const QJsonObject models = network->value("models").toObject();
+        for (auto it = models.begin(); it != models.end(); ++it)
+            take(it.value().toObject());
+    }
+    for (auto it = paired.cbegin(); it != paired.cend(); ++it) {
+        if (it.key() == local.name)
+            continue;
+        ProviderInstance host;
+        host.name = it.key();
+        host.type = QStringLiteral("omarchy");
+        host.address = QStringLiteral("https://") + it.value();
+        instances.append(host);
+    }
+    return instances;
 }
 
 Result<std::shared_ptr<Provider>> createProvider(const ProviderInstance &instance) {

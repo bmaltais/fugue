@@ -104,6 +104,8 @@ class TestCli : public QObject {
         env.insert("XDG_CACHE_HOME", cache());
         env.insert("XDG_STATE_HOME", m_dir.filePath("state"));
         env.insert("XDG_CONFIG_HOME", m_dir.filePath("config")); // not the developer's providers.json
+        // Nor Omarchy's state: without providers.json its paired hosts are instances (8.2).
+        env.insert("HOME", m_dir.filePath("home"));
         env.insert("FUGUE_NODE_MANIFESTS", m_dir.filePath("manifests"));
         QProcess process;
         process.setProcessEnvironment(env);
