@@ -5,6 +5,7 @@
 #include <QJsonValue>
 #include <QLocale>
 #include <QReadWriteLock>
+#include <QStringList>
 #include <QTimer>
 #include <QTranslator>
 
@@ -28,6 +29,13 @@ public:
     QString translate(const char *context, const char *sourceText, const char *disambiguation = nullptr,
                       int n = -1) const override;
 
+    // A language chosen in Fugue's settings, used instead of Omarchy's; empty follows
+    // Omarchy again. Applied at once, as a change of Omarchy's language is.
+    void setLanguageOverride(const QString &code);
+    QString languageOverride() const { return m_override; }
+    // The language codes with a catalog in `catalogDirectory`, English first.
+    static QStringList catalogs(const QString &catalogDirectory = ":/i18n");
+
     static QString readLanguage(const QString &path);
     static QString pluralCategory(const QString &language, long long count);
     static QLocale formatLocale(const QString &language);
@@ -39,6 +47,7 @@ private:
     void reload();
 
     QString m_languageFile;
+    QString m_override;
     QString m_catalogDirectory;
     // A translation, and the language whose catalog it came from, so a
     // counted string falling back to English takes English plural rules.

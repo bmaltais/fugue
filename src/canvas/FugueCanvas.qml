@@ -32,7 +32,7 @@ FocusScope {
     id: canvas
 
     required property var model
-    // "legacy" or "standard" (12.3). Bound to the navigation setting; legacy when unset.
+    // "legacy" or "standard" (12.3): settings.json's navigation, bound in Main.qml.
     property string navigation: "legacy"
     readonly property real minZoom: 0.1
     readonly property real maxZoom: 4

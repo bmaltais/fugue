@@ -11,6 +11,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QLineF>
+#include <QRandomGenerator>
 #include <QUndoStack>
 
 #include <algorithm>
@@ -1213,6 +1214,20 @@ QStringList CanvasModel::nodesIn(const QRectF &rect) const {
 
 // --- nodes -------------------------------------------------------------------
 
+namespace {
+
+// A fixed seed a new node starts on: random within the input's bounds and 2^53 - 1 (2.1),
+// as WidgetEdit's randomize picks.
+double newFixedSeed(const InputSpec &spec) {
+    constexpr double maxSeed = 9007199254740991.0;
+    const double low = std::max(0.0, spec.min.value_or(0)), high = std::min(maxSeed, spec.max.value_or(maxSeed));
+    if (high <= low)
+        return low;
+    return low + double(QRandomGenerator::global()->bounded(quint64(high - low) + 1));
+}
+
+} // namespace
+
 QString CanvasModel::addNode(const QString &typeId, qreal x, qreal y) {
     const NodeType *type = m_registry ? m_registry->nodeType(typeId) : nullptr;
     if (!type)
@@ -1224,15 +1239,28 @@ QString CanvasModel::addNode(const QString &typeId, qreal x, qreal y) {
     node.version = type->version;
     // A seed starts on randomize, as ComfyUI's do: each run makes a new picture. The
     // manifest's own default (what the CLI and agents get) stays a number (spec Appendix A).
-    for (const InputSpec &input : type->inputs)
-        if (input.widget() == QLatin1String("seed"))
-            node.inputs.insert(input.name, InputValue::autoRandom());
+    // With new_seed "fixed" it starts on a random number that stays.
+    for (const InputSpec &input : type->inputs) {
+        if (input.widget() == QLatin1String("seed")) {
+            node.inputs.insert(input.name, m_newSeed == QLatin1String("fixed")
+                                               ? InputValue::literal(newFixedSeed(input))
+                                               : InputValue::autoRandom());
+        } else if (input.name == QLatin1String("embed") && input.choices && input.choices->contains(m_newEmbed)
+                   && QJsonValue(m_newEmbed) != input.defaultValue) {
+            node.inputs.insert(input.name, InputValue::literal(m_newEmbed));
+        }
+    }
     document.graph.nodes.insert(id, node);
     QJsonObject layoutNodes = document.layout.value("nodes").toObject();
     layoutNodes.insert(id, QJsonObject{{"pos", QJsonArray{x, y}}});
     document.layout.insert("nodes", layoutNodes);
     commit(document, tr("Add node"));
     return id;
+}
+
+void CanvasModel::setNewNodeOptions(const QString &seed, const QString &embed) {
+    m_newSeed = seed;
+    m_newEmbed = embed;
 }
 
 std::pair<qreal, qreal> CanvasModel::pinnedSize(const QJsonObject &entry) const {

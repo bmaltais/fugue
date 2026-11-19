@@ -26,7 +26,7 @@ target_compile_options(fugue_engine PUBLIC -Wall -Wextra)
 # compiles once and a new file in src/ needs no line here.
 file(GLOB fugue_sources CONFIGURE_DEPENDS src/*.cpp src/*.h src/canvas/*.cpp src/canvas/*.h
      src/commands/*.cpp src/commands/*.h src/menu/*.cpp src/menu/*.h src/search/*.cpp src/search/*.h
-     src/workflow/*.cpp src/workflow/*.h src/run/*.cpp src/run/*.h)
+     src/workflow/*.cpp src/workflow/*.h src/run/*.cpp src/run/*.h src/settings/*.cpp src/settings/*.h)
 list(REMOVE_ITEM fugue_sources ${CMAKE_SOURCE_DIR}/src/main.cpp)
 add_library(fugue_core STATIC ${fugue_sources})
 target_include_directories(fugue_core PUBLIC src)
@@ -74,6 +74,15 @@ foreach(qml ${fugue_menu_qml})
   list(APPEND fugue_menu_qml_files src/menu/${qml})
 endforeach()
 qt_add_resources(fugue_core fugue_menu_qml PREFIX /menu FILES ${fugue_menu_qml_files})
+
+# The settings panel (#51): its QML in src/settings/, under qrc:/settings.
+file(GLOB fugue_settings_qml CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/src/settings src/settings/*.qml)
+set(fugue_settings_qml_files)
+foreach(qml ${fugue_settings_qml})
+  set_source_files_properties(src/settings/${qml} PROPERTIES QT_RESOURCE_ALIAS ${qml})
+  list(APPEND fugue_settings_qml_files src/settings/${qml})
+endforeach()
+qt_add_resources(fugue_core fugue_settings_qml PREFIX /settings FILES ${fugue_settings_qml_files})
 
 # The workflows (spec 11, 12.10): tabs, open, save, recovery and import, with their QML in
 # src/workflow/, compiled in under qrc:/workflow. A new .qml file there needs no line here.
@@ -204,6 +213,14 @@ foreach(test_source ${fugue_cli_tests})
                              FUGUE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
   add_dependencies(${test_name} fugue fugue_with_fakes)
   add_test(NAME ${test_name} COMMAND ${test_name})
+endforeach()
+
+# No test reads or writes the owner's settings, providers or keymap: every test starts with
+# XDG_CONFIG_HOME on an empty folder of its own (a test may still set its own).
+get_property(fugue_all_tests DIRECTORY PROPERTY TESTS)
+foreach(test_name ${fugue_all_tests})
+  set_property(TEST ${test_name} APPEND PROPERTY ENVIRONMENT
+               XDG_CONFIG_HOME=${CMAKE_BINARY_DIR}/test-config/${test_name})
 endforeach()
 
 # `cmake --install build --prefix ~/.local` puts the app in the launcher

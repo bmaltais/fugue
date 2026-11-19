@@ -1,6 +1,7 @@
 // fugue — one line on what it does.
 
 #include <QCommandLineParser>
+#include <QDesktopServices>
 #include <QGuiApplication>
 #include <QIcon>
 #include <QKeySequence>
@@ -23,6 +24,7 @@
 #include "nodes/builtin.h"
 #include "run/canvas_runs.h"
 #include "run/run_service.h"
+#include "settings/settings_model.h"
 #include "theme.h"
 #include "workflow/workflows.h"
 #include "translator.h"
@@ -74,6 +76,11 @@ int main(int argc, char *argv[]) {
     registerCanvasCommands(commands, canvasModel);
     // The menus' commands that need the canvas, and when each can run (#50).
     fugue::bindMenuCommands(commands, canvasModel);
+    // settings.json and providers.json (#51): the language and what new nodes start with
+    // apply live from here; app.settings opens the panel.
+    fugue::SettingsModel appSettings;
+    appSettings.attach(&translator, &canvasModel);
+    appSettings.registerCommands(commands, [](const QUrl &url) { QDesktopServices::openUrl(url); });
     // The window runs its own runs (spec 9.8) on a thread of their own, queued with the CLI's.
     fugue::RunSetup runSetup;
     runSetup.addNodeTypes = fugue::nodes::addBuiltinNodeTypes;
@@ -91,6 +98,7 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("commands", &commands);
     engine.rootContext()->setContextProperty("workflows", &workflows);
     engine.rootContext()->setContextProperty("runs", &runs);
+    engine.rootContext()->setContextProperty("appSettings", &appSettings);
     engine.load(QUrl("qrc:/Main.qml"));
     if (engine.rootObjects().isEmpty())
         return 1;

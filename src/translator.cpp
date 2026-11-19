@@ -40,6 +40,22 @@ Translator::~Translator() {
         QCoreApplication::removeTranslator(this);
 }
 
+void Translator::setLanguageOverride(const QString &code) {
+    if (code == m_override)
+        return;
+    m_override = code;
+    reload();
+}
+
+QStringList Translator::catalogs(const QString &catalogDirectory) {
+    QStringList codes;
+    for (const QFileInfo &file : QDir(catalogDirectory).entryInfoList({"*.json"}, QDir::Files, QDir::Name))
+        codes << file.completeBaseName();
+    codes.removeAll("en");
+    codes.prepend("en");
+    return codes;
+}
+
 // One registry code on the first line; anything else, or no file, is English.
 QString Translator::readLanguage(const QString &path) {
     QFile file(path);
@@ -129,7 +145,7 @@ void Translator::reload() {
         m_watcher.addPath(m_languageFile);
 
     // Catalogs are compiled in, so only a different language needs a reload.
-    const QString language = readLanguage(m_languageFile);
+    const QString language = m_override.isEmpty() ? readLanguage(m_languageFile) : m_override;
     if (language == this->language())
         return;
 
