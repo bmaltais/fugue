@@ -368,6 +368,35 @@ Errors relocateInputs(Document &document, const Registry &registry, const QStrin
     return {};
 }
 
+void makeInputsAbsolute(Document &document, const Registry &registry, const QString &from) {
+    if (from.isEmpty())
+        return;
+    const auto scan = [&](Nodes &nodes) {
+        for (auto it = nodes.begin(); it != nodes.end(); ++it) {
+            const NodeType *type = registry.nodeType(it->type);
+            if (!type)
+                continue;
+            for (auto in = it->inputs.begin(); in != it->inputs.end(); ++in) {
+                const InputSpec *spec = type->input(in.key());
+                if (!spec || spec->widget() != QLatin1String("file") || in->kind() != InputValue::Kind::Literal
+                    || !in->literal().isString())
+                    continue;
+                const QString text = in->literal().toString();
+                if (text.trimmed().isEmpty() || QDir::isAbsolutePath(expandHome(text.trimmed())))
+                    continue;
+                const Result<QString> located = inputFilePath(text, from, in.key());
+                if (!located || located->isEmpty())
+                    continue;
+                const QString canonical = canonicalPath(located.value());
+                *in = InputValue::literal(canonical.isEmpty() ? located.value() : canonical);
+            }
+        }
+    };
+    scan(document.graph.nodes);
+    for (auto group = document.groups.begin(); group != document.groups.end(); ++group)
+        scan(group->nodes);
+}
+
 QList<RecentInput> recentInputs(int limit) {
     QList<RecentInput> list;
     const QFileInfoList files = QDir(inputsDir()).entryInfoList(QDir::Files, QDir::Time);

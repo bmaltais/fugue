@@ -402,6 +402,12 @@ bool Workflows::saveTab(int index, const QString &path, bool replace) {
         setNotice(taken);
         return false;
     }
+    // Into another folder, the relative paths the tab and its undo steps hold would name other
+    // files: they become the full paths they name now, as no step, before the inputs move.
+    const QString from = pathOf(index);
+    if (index == m_current && !from.isEmpty()
+        && canonicalPath(QFileInfo(from).absolutePath()) != canonicalPath(QFileInfo(path).absolutePath()))
+        m_canvas->rewriteDocuments([this, from](Document &document) { makeInputsAbsolute(document, *m_registry, from); });
     Document document = documentOf(index);
     // A saved workflow stays portable: the images it takes from Fugue's inputs folder are copied
     // into an `inputs` folder beside it, and its nodes point there (Appendix A, always, no question).

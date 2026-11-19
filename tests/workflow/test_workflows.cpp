@@ -207,6 +207,37 @@ private slots:
         QVERIFY(!f.workflows->unsaved());
     }
 
+    // Undo after a Save As to another folder names the same files as before it: the steps
+    // kept from before hold the old folder's relative paths made absolute, so they do not
+    // resolve in the new folder to another image of the same name.
+    void undoAfterSaveAsElsewhereKeepsNamingTheSameFiles() {
+        Fixture f;
+        QImage red(4, 4, QImage::Format_RGB32), blue(4, 4, QImage::Format_RGB32);
+        red.fill(Qt::red);
+        blue.fill(Qt::blue);
+        QVERIFY(QDir().mkpath(f.file("a/inputs")) && QDir().mkpath(f.file("b/inputs")));
+        QVERIFY(red.save(f.file("a/inputs/cat.png")) && blue.save(f.file("b/inputs/cat.png")));
+        QVERIFY(write(f.file("a/w.fugue"), R"({"fugue": 1, "graph": {"nodes": {
+            "src": {"type": "fugue/load-image", "version": "1.0.0", "inputs": {"file": "inputs/cat.png"}}}}})"));
+        QVERIFY(f.workflows->openPath(f.file("a/w.fugue")));
+        const auto file = [&] {
+            return f.canvas.document().graph.nodes.value("src").inputs.value("file").literal().toString();
+        };
+        f.canvas.addNode("fugue/text", 300, 0); // a step from before the save
+        QVERIFY(f.workflows->saveAs(f.file("b/w2.fugue")));
+        QCOMPARE(file(), QString("inputs/cat-2.png"));
+        QCOMPARE(read(f.file("b/inputs/cat-2.png")), read(f.file("a/inputs/cat.png")));
+        const QString original = QFileInfo(f.file("a/inputs/cat.png")).canonicalFilePath();
+        f.canvas.undo(); // Move images
+        QCOMPARE(file(), original);
+        f.canvas.undo(); // the added node
+        QCOMPARE(file(), original);
+        QCOMPARE(f.canvas.document().graph.nodes.size(), 1);
+        f.canvas.redo();
+        f.canvas.redo();
+        QCOMPARE(file(), QString("inputs/cat-2.png"));
+    }
+
     // The dialog asked about "mine", not "mine.fugue": a file already there is never replaced.
     void anAddedExtensionNeverReplacesAnExistingFile() {
         Fixture f;

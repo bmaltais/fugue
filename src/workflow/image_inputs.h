@@ -89,6 +89,11 @@ QStringList clipboardFiles(const QMimeData &data);
 // when every copy worked.
 Errors relocateInputs(Document &document, const Registry &registry, const QString &from, const QString &to);
 
+// Makes every relative `file` input literal the full path it names from `from`'s folder (a
+// workflow file), so the document names the same files from any folder. Nothing when `from`
+// is empty: a relative path in an unsaved workflow names nothing.
+void makeInputsAbsolute(Document &document, const Registry &registry, const QString &from);
+
 // One image in the inputs folder, for the "Recent inputs" list.
 struct RecentInput {
     QString path;
