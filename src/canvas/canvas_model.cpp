@@ -2,6 +2,7 @@
 
 #include "engine/node_type.h"
 #include "engine/registry.h"
+#include "search/node_search.h"
 
 #include <QJsonArray>
 #include <QJsonObject>
@@ -121,7 +122,8 @@ QHash<int, QByteArray> LinkList::roleNames() const {
 // --- the canvas model --------------------------------------------------------
 
 CanvasModel::CanvasModel(const Registry *registry, QObject *parent)
-    : QObject(parent), m_registry(registry), m_nodeList(new NodeList(this)), m_linkList(new LinkList(this)) {}
+    : QObject(parent), m_registry(registry), m_nodeList(new NodeList(this)), m_linkList(new LinkList(this)),
+      m_search(new NodeSearch(registry, this, this)) {}
 
 CanvasModel::~CanvasModel() = default;
 
@@ -507,6 +509,11 @@ const CanvasModel::Port *CanvasModel::findPort(const QString &node, const QStrin
         if (p.name == port)
             return &p;
     return nullptr;
+}
+
+std::optional<PortSpec> CanvasModel::portType(const QString &node, const QString &port, bool output) const {
+    const Port *found = findPort(node, port, output);
+    return found ? found->type : std::nullopt;
 }
 
 // --- links -------------------------------------------------------------------

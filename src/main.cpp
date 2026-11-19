@@ -13,6 +13,7 @@
 
 #include "backend.h"
 #include "canvas/canvas_model.h"
+#include "search/node_search.h"
 #include "commands/command_registry.h"
 #include "cli/args.h"
 #include "cli/cli.h"
@@ -61,6 +62,9 @@ int main(int argc, char *argv[]) {
     // empty workflow and has the previous session's recovery copies ready to offer.
     fugue::Workflows workflows(&canvasModel, &registry, &commands);
     fugue::registerFileCommands(commands, workflows);
+    canvasModel.search()->registerCommands(commands);
+    // The canvas is always there for now; Tab and Shift+A reach node.search through it.
+    commands.setContextActive("canvas", true);
 
     QQmlApplicationEngine engine;
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);

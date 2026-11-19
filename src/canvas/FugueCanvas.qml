@@ -62,6 +62,13 @@ FocusScope {
     function toWorld(px, py) {
         return Qt.point((px - world.x) / world.scale, (py - world.y) / world.scale)
     }
+    // Where the pointer is, in world coordinates; the middle of the view when it is outside.
+    // The `node.search` command (Tab, Shift+A) opens search here.
+    function pointerWorld() {
+        const p = hover.hovered ? hover.point.position : Qt.point(width / 2, height / 2)
+        return toWorld(p.x, p.y)
+    }
+    HoverHandler { id: hover }
     function zoomAt(px, py, factor) {
         const s = Math.max(minZoom, Math.min(maxZoom, world.scale * factor))
         const w = toWorld(px, py)

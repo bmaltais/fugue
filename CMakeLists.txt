@@ -25,7 +25,7 @@ target_compile_options(fugue_engine PUBLIC -Wall -Wextra)
 # Everything else but main.cpp, shared by the app and the tests, so each source
 # compiles once and a new file in src/ needs no line here.
 file(GLOB fugue_sources CONFIGURE_DEPENDS src/*.cpp src/*.h src/canvas/*.cpp src/canvas/*.h
-     src/commands/*.cpp src/commands/*.h src/workflow/*.cpp src/workflow/*.h)
+     src/commands/*.cpp src/commands/*.h src/search/*.cpp src/search/*.h src/workflow/*.cpp src/workflow/*.h)
 list(REMOVE_ITEM fugue_sources ${CMAKE_SOURCE_DIR}/src/main.cpp)
 add_library(fugue_core STATIC ${fugue_sources})
 target_include_directories(fugue_core PUBLIC src)
@@ -42,6 +42,15 @@ foreach(qml ${fugue_canvas_qml})
   list(APPEND fugue_canvas_qml_files src/canvas/${qml})
 endforeach()
 qt_add_resources(fugue_core fugue_canvas_qml PREFIX /canvas FILES ${fugue_canvas_qml_files})
+
+# Node search (spec 12.8): its QML in src/search/, compiled in under qrc:/search.
+file(GLOB fugue_search_qml CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/src/search src/search/*.qml)
+set(fugue_search_qml_files)
+foreach(qml ${fugue_search_qml})
+  set_source_files_properties(src/search/${qml} PROPERTIES QT_RESOURCE_ALIAS ${qml})
+  list(APPEND fugue_search_qml_files src/search/${qml})
+endforeach()
+qt_add_resources(fugue_core fugue_search_qml PREFIX /search FILES ${fugue_search_qml_files})
 
 # The workflows (spec 11, 12.10): tabs, open, save, recovery and import, with their QML in
 # src/workflow/, compiled in under qrc:/workflow. A new .qml file there needs no line here.
@@ -125,6 +134,16 @@ endforeach()
 # code, the real Main.qml and the built-in node types.
 file(GLOB fugue_canvas_tests CONFIGURE_DEPENDS tests/canvas/*.cpp)
 foreach(test_source ${fugue_canvas_tests})
+  get_filename_component(test_name ${test_source} NAME_WE)
+  add_executable(${test_name} ${test_source} src/resources.qrc)
+  target_link_libraries(${test_name} PRIVATE fugue_core fugue_nodes Qt6::Test)
+  add_test(NAME ${test_name} COMMAND ${test_name})
+  set_tests_properties(${test_name} PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+endforeach()
+
+# Search tests: each tests/search/<name>.cpp is its own QtTest executable, like the canvas ones.
+file(GLOB fugue_search_tests CONFIGURE_DEPENDS tests/search/*.cpp)
+foreach(test_source ${fugue_search_tests})
   get_filename_component(test_name ${test_source} NAME_WE)
   add_executable(${test_name} ${test_source} src/resources.qrc)
   target_link_libraries(${test_name} PRIVATE fugue_core fugue_nodes Qt6::Test)

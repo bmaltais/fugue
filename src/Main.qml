@@ -3,6 +3,7 @@ import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Layouts
 import "canvas"
+import "search"
 import "workflow"
 
 ApplicationWindow {
@@ -39,10 +40,22 @@ ApplicationWindow {
                 Layout.preferredHeight: implicitHeight
             }
             FugueCanvas {
+                id: canvas
                 objectName: "canvas"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 model: canvasModel
+                onSearchRequested: (x, y) => canvasModel.search.openAt(x, y)
+                onLinkReleased: (from, x, y) => canvasModel.search.openFromLink(from, x, y)
+
+                // Tab and Shift+A (`node.search`) open search where the pointer is.
+                Connections {
+                    target: canvasModel.search
+                    function onPointerSearchRequested() {
+                        const p = canvas.pointerWorld()
+                        canvasModel.search.openAt(p.x, p.y)
+                    }
+                }
             }
         }
 
@@ -52,4 +65,6 @@ ApplicationWindow {
 
     // The command registry's shortcuts, the `?` overlay and the quit question.
     CommandUi { anchors.fill: parent }
+
+    NodeSearchPopup { id: searchPopup }
 }
