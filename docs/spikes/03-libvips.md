@@ -10,10 +10,10 @@ executor ([spec 9.2](../spec.md#92-scheduling))?
 
 ## Answer
 
-- **Speed: yes.** Every M1 pixel node finishes a 4 MP image in under 100 ms (blur radius 31 in
-  177 ms), and most in under 50 ms. These are well below the cost of one generation step, so a
+- **Speed: yes.** Every M1 pixel node finishes a 4 MP image in about 105 ms or less (blur radius 31 in
+  177 ms is the slowest case), and most in under 50 ms. These are well below the cost of one generation step, so a
   pixel chain never gates a run.
-- **Parity: yes, to float rounding** (3e-8 to 9e-8) for resize-free nodes, when blur and sharpen
+- **Parity: yes, to float rounding** (3e-8 to 9e-8) for blend, blur and sharpen, when blur and sharpen
   use ComfyUI's own kernel (below). Resize methods are not bit-identical to torch; see Resize.
 - **Threads: libvips concurrency must be 1 per CPU node** while the executor runs CPU nodes in
   parallel. With eleven workers, concurrency 1 was fastest (9.2 jobs/s) and the default 12 was
@@ -105,9 +105,9 @@ its own result cache.
 
 1. **Keep libvips**, C++ API, dynamically linked, CPU. No node in M1 or M4 needs more.
 2. **At startup**: `vips_concurrency_set(1)` for nodes run by the parallel CPU executor
-   and `vips_cache_set_max(0)`. A lone CPU node (nothing else ready) may raise its concurrency to
-   the number of free cores: at 4 MP the first table (concurrency 12) vs the contention run suggests
-   that is a 3x to 10x gain for one node, but measure it with the first real node before wiring it.
+   and `vips_cache_set_max(0)`. A lone CPU node (nothing else ready) might raise its concurrency to
+   the number of free cores; that was not measured here (single-node runs used concurrency 12 only), so
+   measure it with the first real node before wiring it.
 3. **Materialise each node's output** into a memory image before it enters the result cache; do
    not chain lazy images between nodes.
 4. **Blur and sharpen use ComfyUI's exact kernel** (two 1D passes for blur) so saved workflows
