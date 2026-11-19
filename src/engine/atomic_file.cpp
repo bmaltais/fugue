@@ -5,10 +5,15 @@
 #include <cstdio>
 #include <cstring>
 #include <fcntl.h>
+#include <limits>
+#include <signal.h>
 #include <unistd.h>
 
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QRegularExpression>
 
 namespace fugue {
 
@@ -38,6 +43,24 @@ QString partialName(QString name) {
 } // namespace
 
 PartialFile::PartialFile(const QString &dir, const QString &name) : m_path(QDir(dir).filePath(partialName(name))) {}
+
+void PartialFile::removeStale(const QString &dir) {
+    static const QRegularExpression ours(QStringLiteral("^\\..*\\.(\\d+)-\\d+\\.part$"));
+    const QDateTime before = QDateTime::currentDateTimeUtc().addSecs(-600);
+    const QFileInfoList found = QDir(dir).entryInfoList({QStringLiteral(".*.part")}, QDir::Files | QDir::Hidden);
+    for (const QFileInfo &file : found) {
+        const QRegularExpressionMatch match = ours.match(file.fileName());
+        if (!match.hasMatch() || file.lastModified() > before)
+            continue;
+        bool number = false;
+        const qint64 pid = match.captured(1).toLongLong(&number);
+        if (!number || pid <= 0 || pid > std::numeric_limits<pid_t>::max())
+            continue;
+        if (::kill(pid_t(pid), 0) == 0 || errno != ESRCH)
+            continue; // its writer is alive (or not ours to ask)
+        QFile::remove(file.filePath());
+    }
+}
 
 PartialFile::~PartialFile() {
     if (!m_committed)

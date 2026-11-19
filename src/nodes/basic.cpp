@@ -75,6 +75,7 @@ QString numberedName(const QString &name, int n, const QString &extension) {
 // name is claimed in the same step as the file appears, so a save never overwrites a file
 // (it may be the user's), not even one another Save node wrote a moment before.
 Result<QString> saveAsNew(const QString &folder, const QString &name, const QString &extension, const QByteArray &bytes) {
+    PartialFile::removeStale(folder); // what a save that died here left behind
     PartialFile partial(folder, numberedName(name, 1, extension));
     if (const Errors written = partial.write(bytes, QDir(folder).filePath(numberedName(name, 1, extension)));
         hasErrors(written))

@@ -44,6 +44,11 @@ public:
     // the move itself fails.
     Result<bool> commit(const QString &target, Overwrite overwrite);
 
+    // Removes the partial files a writer left in `dir` when it died mid-write: names of this
+    // class's form whose process is gone, untouched for ten minutes. A live writer's file, a
+    // fresh one (a writer on another machine sharing the folder) and other files stay.
+    static void removeStale(const QString &dir);
+
 private:
     QString m_path;
     bool m_committed = false;

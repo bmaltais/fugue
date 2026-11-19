@@ -111,6 +111,31 @@ private slots:
         QVERIFY(a.path() != b.path());
     }
 
+    // A writer that died mid-save leaves its partial file; the next save to the folder removes
+    // it. Only ours, and only when its writer is gone and it is old: a live writer's file,
+    // a fresh one and anyone else's file stay.
+    void staleOnesAreRemovedAndNothingElse() {
+        const QDateTime old = QDateTime::currentDateTimeUtc().addSecs(-3600);
+        const auto make = [&](const QString &name, const QDateTime &time) {
+            writeAll(path(name), "x");
+            QFile file(path(name));
+            QVERIFY(file.open(QIODevice::ReadWrite));
+            QVERIFY(file.setFileTime(time, QFileDevice::FileModificationTime));
+        };
+        const QString live = QString::number(QCoreApplication::applicationPid());
+        make(".shot.png.999999999-3.part", old);                          // writer gone, old: stale
+        make(".shot.png.999999999-4.part", QDateTime::currentDateTimeUtc()); // writer gone, fresh
+        make(".shot.png." + live + "-5.part", old);                       // writer alive
+        make(".notes.part", old);                                          // not ours
+        make("shot.png", old);
+        PartialFile::removeStale(m_dir.path());
+        QStringList left = entries();
+        left.sort();
+        QStringList expected{".notes.part", ".shot.png." + live + "-5.part", ".shot.png.999999999-4.part", "shot.png"};
+        expected.sort();
+        QCOMPARE(left, expected);
+    }
+
     void aMissingFolderIsAnError() {
         PartialFile partial(path("no/such/folder"), "a.png");
         const Errors written = partial.write("x", path("no/such/folder/a.png"));
