@@ -271,6 +271,10 @@ public:
     // is, the last end pushes one command named `text` when the content changed.
     void beginEdit();
     void endEdit(const QString &text);
+    // Makes the document this one as one undo step named `text`, touching only what differs
+    // (every edit here ends in it; a reload from outside, 11.8, can use it too). Start from
+    // document(), which has the positions on screen.
+    void commit(const fugue::Document &document, const QString &text);
     bool canUndo() const;
     bool canRedo() const;
     QString undoText() const;
@@ -370,8 +374,6 @@ private:
     // With selectAdded, nodes that come back are selected (undo of a delete, redo of a paste).
     void restore(const Snapshot &target, bool selectAdded);
     void relink(const QSet<QString> &nodes);
-    // One edit: the document is document() changed by the caller.
-    void commit(const fugue::Document &document, const QString &text);
     void finishGestures();
     void contentChanged();
     void watchUndoStack();
