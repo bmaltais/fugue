@@ -69,11 +69,19 @@ FocusScope {
     property string hoveredNode: ""
     property var hoverPort: ({})
     property var hoverLink: ({})
+    // The node whose resize grip (its bottom right corner, 3u square) the pointer is on (#49).
+    property string hoverGrip: ""
+    function gripAt(w) {
+        return tier === 0 ? model.resizeGripAt(w.x, w.y, Math.max(3 * model.unit, 12 / world.scale)) : ""
+    }
     function updateHover(px, py) {
         const w = toWorld(px, py)
         const n = gesture === "" ? model.nodeAt(w.x, w.y) : ""
         if (n !== hoveredNode)
             hoveredNode = n
+        const grip = n !== "" ? gripAt(w) : ""
+        if (grip !== hoverGrip)
+            hoverGrip = grip
         const p = tier === 0 && (gesture === "" || gesture === "link")
             ? model.portAt(w.x, w.y, Math.max(8, 10 / world.scale)) : ({})
         if (p.node !== hoverPort.node || p.port !== hoverPort.port || p.output !== hoverPort.output)
@@ -87,6 +95,7 @@ FocusScope {
     }
     function clearHover() {
         hoveredNode = ""
+        hoverGrip = ""
         hoverPort = ({})
         if (hoverLink.row !== undefined) {
             hoverLink = ({})
@@ -267,7 +276,9 @@ FocusScope {
         objectName: "canvasInput"
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
-        cursorShape: canvas.gesture === "pan" ? Qt.ClosedHandCursor
+        cursorShape: canvas.gesture === "resize" || (canvas.gesture === "" && canvas.hoverGrip !== "")
+                     ? Qt.SizeFDiagCursor
+                   : canvas.gesture === "pan" ? Qt.ClosedHandCursor
                    : canvas.spaceHeld ? Qt.OpenHandCursor : Qt.ArrowCursor
 
         onPressed: mouse => {
@@ -295,7 +306,15 @@ FocusScope {
                 canvas.model.disconnectInput(l.toNode, l.toPort, l.item)
                 return
             }
+            // The grip at a node's bottom right corner resizes it.
+            const grip = mouse.button === Qt.LeftButton ? canvas.gripAt(canvas.pressWorld) : ""
             canvas.clearHover()
+            if (grip !== "") {
+                canvas.gesture = "resize"
+                canvas.pressedNode = grip
+                canvas.model.beginResize(grip)
+                return
+            }
             const port = canvas.portUnder(mouse.x, mouse.y)
             if (port.node !== undefined) {
                 if ((mouse.modifiers & Qt.ControlModifier) && (mouse.modifiers & Qt.AltModifier)) {
@@ -351,6 +370,9 @@ FocusScope {
             case "move":
                 canvas.model.moveBy(w.x - canvas.pressWorld.x, w.y - canvas.pressWorld.y)
                 break
+            case "resize":
+                canvas.model.resizeBy(w.x - canvas.pressWorld.x, w.y - canvas.pressWorld.y)
+                break
             case "link": {
                 const port = canvas.portUnder(mouse.x, mouse.y)
                 canvas.hoverProblem = port.node !== undefined
@@ -368,6 +390,13 @@ FocusScope {
             if (mouse.button !== Qt.LeftButton)
                 return
             const w = canvas.toWorld(mouse.x, mouse.y)
+            // A double click on the grip returns the node to auto-size.
+            const grip = canvas.gripAt(w)
+            if (grip !== "") {
+                canvas.model.endResize()
+                canvas.model.autoSize(grip)
+                return
+            }
             if (canvas.model.nodeAt(w.x, w.y) === "" && canvas.portUnder(mouse.x, mouse.y).node === undefined)
                 canvas.searchRequested(w.x, w.y)
         }
@@ -402,6 +431,9 @@ FocusScope {
             if (!travelled && !spaceHeld && navigation === "legacy")
                 model.select([], "replace")
             rememberView()
+            break
+        case "resize":
+            model.endResize()
             break
         case "move":
             model.endMove()
