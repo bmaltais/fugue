@@ -1,6 +1,7 @@
 #pragma once
 
-// The cross-process run queue of spec 9.8: a folder with one small JSON file per
+// The run queue of spec 9.8, shared by the window and every run worker because they
+// share the GPU: a folder with one small JSON file per
 // waiting or active run. The file name sorts into queue order:
 //   <class>-<enqueue time in ms, 14 digits>-<run id>
 // where class is 0 for the run that is active, 3 for a run queued with --first and
@@ -19,7 +20,7 @@
 #include <QList>
 #include <QString>
 
-namespace fugue::cli {
+namespace fugue {
 
 class Lock;
 
@@ -45,8 +46,8 @@ public:
     QList<QueueEntry> entries() const;
     // The entry of a run, if it has one.
     bool find(const QString &run, QueueEntry *out = nullptr) const;
-    // Records the worker's process id in the run's entry. An entry that is gone (a
-    // cancelled run) stays gone.
+    // Records the worker's process id in the run's entry; the worker calls it for itself.
+    // An entry that is gone (a cancelled run) stays gone.
     bool setPid(const QString &run, qint64 pid) const;
     // Moves the run's entry to the active class. False when the entry is gone.
     bool activate(const QString &run) const;
@@ -89,7 +90,9 @@ private:
 
 // Whether process `pid` is the worker of `run`: its command line holds `__worker <run>`
 // (read from /proc/<pid>/cmdline). A process id alone proves nothing, because ids are
-// reused; this cannot be fooled by another process that got the id.
+// reused; this cannot be fooled by another process that got the id. A process has no
+// command line for a moment while it starts, so a pid is only checked once the worker has
+// recorded it itself (Queue::setPid from the worker), never one a parent got from spawning.
 bool isRunWorker(qint64 pid, const QString &run);
 
-} // namespace fugue::cli
+} // namespace fugue

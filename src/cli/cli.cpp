@@ -9,7 +9,7 @@
 
 #include "cli/args.h"
 #include "cli/commands.h"
-#include "cli/queue.h"
+#include "engine/queue.h"
 #include "engine/run_folder.h"
 
 namespace fugue::cli {

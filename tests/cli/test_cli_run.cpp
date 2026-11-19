@@ -25,7 +25,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include "cli/queue.h"
+#include "engine/queue.h"
 #include "cli/runs.h"
 #include "engine/run_folder.h"
 
@@ -314,9 +314,9 @@ private slots:
         // While a run waits, `fugue run` wrote its run.json once and nobody writes it again:
         // the worker's pid is in the queue entry, not patched into run.json.
         QVERIFY(!RunFolder::open(runsRoot(), b)->state().contains("pid"));
-        cli::QueueEntry entry;
-        QVERIFY(cli::Queue(queueDir()).find(b, &entry));
-        QTRY_VERIFY_WITH_TIMEOUT(cli::Queue(queueDir()).find(b, &entry) && cli::isRunWorker(entry.pid, b), 10000);
+        QueueEntry entry;
+        QVERIFY(Queue(queueDir()).find(b, &entry));
+        QTRY_VERIFY_WITH_TIMEOUT(Queue(queueDir()).find(b, &entry) && isRunWorker(entry.pid, b), 10000);
         const Outcome o = fugue({"runs", "cancel", b, "--json"});
         QCOMPARE(o.exitCode, 0);
         QCOMPARE(statusOf(b), QString("cancelled"));
@@ -332,8 +332,8 @@ private slots:
     void aCancelThatSawTheRunWaitingStillStopsItOnceItHasStarted() {
         const QString id = start("hold.fugue");
         QTRY_COMPARE_WITH_TIMEOUT(statusOf(id), QString("running"), 15000);
-        const cli::Queue queue(queueDir());
-        cli::QueueEntry seen;
+        const Queue queue(queueDir());
+        QueueEntry seen;
         QVERIFY(queue.find(id, &seen));
         QVERIFY(seen.active);
         // The entry as it was just before the worker renamed it to the active class.

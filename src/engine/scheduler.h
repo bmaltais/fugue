@@ -7,7 +7,7 @@
 // providers), it runs every node, writes run.json, compiled.json and
 // events.jsonl into the run folder, and returns the outcome. Run is the same
 // thing without blocking, for a caller that has its own event loop (the
-// canvas, RunQueue). checkGraph() is the part `fugue validate` needs: the
+// canvas). checkGraph() is the part `fugue validate` needs: the
 // state of every node and the warnings a run would give, with nothing run.
 //
 // What a run does:
@@ -44,8 +44,8 @@
 //     (frozen_result_missing) and the node runs normally.
 //
 // Events (9.4) are appended to the run folder as they happen and emitted by
-// Run::emitted. run.queued belongs to whoever queues the run: RunQueue writes
-// it, and a worker waiting in the cross-process queue (9.8) writes its own.
+// Run::emitted. run.queued belongs to whoever queues the run in the queue the
+// window and the workers share (9.8, engine/queue.h).
 // A run writes run.started, the node events and run.done. Warnings travel in
 // run.done's `errors` with severity warning.
 //

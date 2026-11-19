@@ -12,7 +12,7 @@
 
 #include "cli/compile_step.h"
 #include "cli/process.h"
-#include "cli/queue.h"
+#include "engine/queue.h"
 #include "cli/runs.h"
 #include "engine/compiler.h"
 #include "engine/document.h"

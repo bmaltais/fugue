@@ -1,4 +1,4 @@
-#include "cli/queue.h"
+#include "engine/queue.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -16,7 +16,7 @@
 
 #include "engine/json.h"
 
-namespace fugue::cli {
+namespace fugue {
 
 namespace {
 
@@ -159,8 +159,8 @@ QStringList Queue::discardDead(Lock &engineLock) const {
         if (entry.pid > 0) {
             dead = !isRunWorker(entry.pid, entry.run);
         } else {
-            // The pid is recorded just after the worker is spawned; an entry that never
-            // got one is from a spawn that failed.
+            // A worker records its pid as soon as it runs; an entry that never got one
+            // is from a worker that did not start.
             dead = QFileInfo(m_dir + '/' + entry.file).lastModified().secsTo(QDateTime::currentDateTime()) > 30;
         }
         if (dead && remove(entry))
@@ -215,4 +215,4 @@ void Lock::release() {
     m_held = false;
 }
 
-} // namespace fugue::cli
+} // namespace fugue

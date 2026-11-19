@@ -14,7 +14,7 @@
 
 #include "cli/compile_step.h"
 #include "cli/process.h"
-#include "cli/queue.h"
+#include "engine/queue.h"
 #include "engine/document.h"
 
 namespace fugue::cli {
@@ -169,16 +169,15 @@ Reply startRun(const Command &command, Context &context) {
     worker.setStandardInputFile(QProcess::nullDevice());
     worker.setStandardOutputFile(QProcess::nullDevice());
     worker.setStandardErrorFile(QProcess::nullDevice());
-    qint64 pid = 0;
-    if (!worker.startDetached(&pid)) {
+    if (!worker.startDetached()) {
         queue.remove(folder->id());
         const Error error = makeError("internal", "The run worker could not be started.", worker.errorString());
         endUnrun(*folder, "failed", {error});
         return Reply::failure(error);
     }
-    // The pid goes into the queue entry, where a dead worker is looked for. run.json
-    // belongs to the worker from here on (runs.h); it records its own pid there.
-    queue.setPid(folder->id(), pid);
+    // The worker records its own pid, in its queue entry and later in run.json; both
+    // belong to it from here on (runs.h). Recording it from here would name a process
+    // that may not have its command line yet (isRunWorker).
 
     if (command.has("wait")) {
         Reply reply;
