@@ -46,8 +46,11 @@ Menu {
     // The current row opens a submenu.
     readonly property bool onSubMenuRow: currentIndex >= 0 && !!itemAt(currentIndex) && !!itemAt(currentIndex).subMenu
     onClosed: byKey = false
-    // Open, or opening; false as soon as it starts to close (`visible` stays true through the
-    // closing fade, `opened` is false through the opening one).
+    // Closes at once, as desktop menus do (docs/canvas-look.md 15). Material's closing fade
+    // (220 ms) kept the menu on screen taking the next keys, and popup() on it then did nothing:
+    // a right-click or title press just after a menu closed was lost.
+    exit: null
+    // Open, or opening; false as soon as it closes (`opened` is false through the opening fade).
     property bool shown: false
     onAboutToShow: { shown = true; commands.menuShown(true) }
     onAboutToHide: { shown = false; commands.menuShown(false) }

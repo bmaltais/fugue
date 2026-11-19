@@ -72,7 +72,7 @@ QString currentRow(QQuickWindow *window, const QString &name) {
     return item ? item->objectName() : QString();
 }
 
-// No menu is showing, its closing fade done (keys pressed during the fade are its own).
+// No menu is showing.
 bool allClosed(QQuickWindow *window) {
     return !isOpen(window, "menuDropdown") && !isOpen(window, "menuEverything") && !isOpen(window, "contextMenuPopup");
 }
@@ -301,6 +301,43 @@ private slots:
         QCOMPARE(app.model.selectedIds().size(), 2);
         app.key(Qt::Key_Escape);
         QTRY_VERIFY(!isOpen(app.window, "contextMenuPopup"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // A menu closes at once, so the next click or key is not lost to it: with Material's
+    // 220 ms closing fade, popup() on the closing menu did nothing and the fade then hid it,
+    // which lost a right-click made just after choosing a row (and made
+    // rightClickOpensTheMenuOfWhatIsUnderIt fail on a busy machine), and keys went to it.
+    void aMenuReopensRightAfterItCloses() {
+        App app(load(framed));
+        QVERIFY(app.open());
+        QTest::mouseClick(app.window, Qt::RightButton, {}, app.screen(620, 90));
+        QTRY_VERIFY(popup(app.window, "contextMenuPopup")->property("opened").toBool());
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("menuItem-node.bypass")));
+        QVERIFY(!popup(app.window, "contextMenuPopup")->property("opened").toBool());
+        QTest::mouseClick(app.window, Qt::RightButton, {}, app.screen(60, 90));
+        QTRY_VERIFY(popup(app.window, "contextMenuPopup")->property("opened").toBool());
+        QCOMPARE(popup(app.window, "contextMenu")->property("kind").toString(), QString("node"));
+        QVERIFY(find(app.window, "menuItem-node.bypass"));
+
+        // The menu bar: a press on the open title closes it, a press on the next one at once
+        // opens that one.
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(allClosed(app.window));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("menuTitle-0")));
+        QTRY_VERIFY(popup(app.window, "menuDropdown")->property("opened").toBool());
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("menuTitle-0")));
+        QVERIFY(!popup(app.window, "menuDropdown")->property("opened").toBool());
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("menuTitle-2")));
+        QTRY_VERIFY(popup(app.window, "menuDropdown")->property("opened").toBool());
+        QVERIFY(find(app.window, "menuItem-view.fit"));
+        // Keys too: Escape, then at once Alt+H opens Help.
+        app.key(Qt::Key_Escape);
+        QTest::keyClick(app.window, 'H', Qt::AltModifier);
+        QTRY_VERIFY(popup(app.window, "menuDropdown")->property("opened").toBool());
+        QTRY_VERIFY(find(app.window, "menuItem-app.shortcuts"));
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(allClosed(app.window));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 

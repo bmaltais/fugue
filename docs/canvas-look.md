@@ -548,6 +548,7 @@ a readable zoom, as #16 already does; keep that.
 | Widget port marks appear on hover | 120 ms | out-cubic | opacity |
 | Search and overlay open | 140 ms | `Easing.BezierSpline [0.2, 0, 0, 1, 1, 1]` | opacity 0 → 1, scale 0.97 → 1 from the pointer |
 | Search and overlay close | 90 ms | out-cubic | opacity |
+| Menu close (bar, context) | 0 ms | | instant, as desktop menus: a closing menu would take the next key or click |
 | Reason chip | 80 ms | linear | opacity |
 | New thumbnail | 150 ms | out-cubic | cross-fade |
 | Running edge pulse | 1600 ms per half cycle | in-out-sine, alternating | edge opacity |
