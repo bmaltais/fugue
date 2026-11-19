@@ -534,6 +534,50 @@ private slots:
         QCOMPARE(fine.states.value("g"), NodeState::Stale);
     }
 
+    // 8.5: the provider checks do not depend on the rest of the node's inputs being known.
+    void checkReportsAMissingModelWhenTheSeedIsRandomized() {
+        World world;
+        world.provider("This machine", {"flux"});
+        world.type("fugue/generate-seeded",
+                   "'inputs': [{'name': 'prompt', 'type': 'text'},"
+                   " {'name': 'seed', 'type': 'number', 'integer': true, 'widget': 'seed', 'min': 0, 'max': 9999},"
+                   " {'name': 'model', 'type': 'fugue/image-model', 'optional': true}],"
+                   "'outputs': [{'name': 'text', 'type': 'text'}, {'name': 'model', 'type': 'text'}]",
+                   nullptr);
+        world.kernels.add("fugue/generate-seeded", std::make_shared<FakeGenerateKernel>());
+        const QJsonObject nodes{{"g", node("fugue/generate-seeded", {{"prompt", "a cat"},
+                                                                     {"seed", QJsonObject{{"auto", "random"}}},
+                                                                     {"model", model("no-such-model")}})},
+                                {"s", node("fugue/save", {{"value", from("g.text")}})}};
+        const GraphCheck check = checkGraph(world.graph(nodes), world.environment());
+        QCOMPARE(check.states.value("g"), NodeState::Stale);
+        QCOMPARE(check.warnings.size(), 1);
+        QCOMPARE(check.warnings.first().code, QStringLiteral("model_missing"));
+        QCOMPARE(check.warnings.first().severity, Error::Severity::Warning);
+        QCOMPARE(check.warnings.first().node, QStringLiteral("g"));
+        QCOMPARE(world.nextSeed, qint64(1000)); // checking drew no seed
+    }
+
+    void checkReportsProviderProblemsWhenAnInputIsLinkedToANodeThatHasNotRun() {
+        World world; // no provider at all
+        QJsonObject nodes = generateGraph("unused", model("flux"));
+        nodes.insert("p", node("fugue/text", {{"text", "a cat"}}));
+        nodes.insert("g", node("fugue/generate", {{"prompt", from("p.text")}}));
+        GraphCheck check = checkGraph(world.graph(nodes), world.environment());
+        QCOMPARE(check.states.value("p"), NodeState::Stale);
+        QCOMPARE(check.states.value("g"), NodeState::Stale);
+        QCOMPARE(check.warnings.size(), 1);
+        QCOMPARE(check.warnings.first().code, QStringLiteral("capability_unavailable"));
+        QCOMPARE(check.warnings.first().node, QStringLiteral("g"));
+
+        // With a provider that lacks the model, the linked prompt does not hide model_missing.
+        nodes.insert("g", node("fugue/generate", {{"prompt", from("p.text")}, {"model", model("no-such-model")}}));
+        world.provider("This machine", {"flux"});
+        check = checkGraph(world.graph(nodes), world.environment());
+        QCOMPARE(check.warnings.size(), 1);
+        QCOMPARE(check.warnings.first().code, QStringLiteral("model_missing"));
+    }
+
 private:
     static QString sha256Of(const QByteArray &bytes) { return sha256(bytes); }
 };

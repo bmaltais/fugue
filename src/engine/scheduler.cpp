@@ -484,9 +484,10 @@ private:
             return fail(n, problem);
         if (!skipReason.isEmpty())
             return skip(n, skipReason);
-        if (unknown)
-            return stale(n);
 
+        // The provider checks come before anything that depends on every input being
+        // known, so that validate reports them (8.5) for a node with a randomized seed
+        // or an input linked to a node that has not run.
         if (n.providerKernel) {
             Requirement requirement = n.providerKernel->requirement(*n.type, n.inputs);
             requirement.nodePin = n.node->provider;
@@ -518,7 +519,10 @@ private:
         } else if (n.kernel) {
             for (const Value &value : std::as_const(n.inputs))
                 collectModels(value, n.models);
-        } else if (!m_dry) {
+        }
+        if (unknown)
+            return stale(n);
+        if (!n.providerKernel && !n.kernel && !m_dry) {
             return fail(n, nodeError(QStringLiteral("internal"),
                                      QStringLiteral("No kernel is registered for node type %1.").arg(n.type->id)));
         }
@@ -601,14 +605,18 @@ private:
             const auto written = n.node->inputs.constFind(spec.name);
             Value value;
             bool linked = false;
+            bool thisUnknown = false;
             if (written != n.node->inputs.constEnd() && !written->isEmpty()) {
                 linked = hasLink(*written);
-                value = resolveValue(n, spec, *written, unknown);
+                value = resolveValue(n, spec, *written, thisUnknown);
                 if (spec.type.list && !value.isList() && !value.isEmpty())
                     value = Value::list({value});
             }
-            if (unknown)
+            if (thisUnknown) {
+                // Left out; the inputs that are known still reach the provider checks.
+                unknown = true;
                 continue;
+            }
             const bool empty = value.isEmpty() || (value.isList() && value.items().isEmpty() && linked);
             if (empty && !spec.defaultValue.isUndefined()) {
                 value = Value(spec.defaultValue);
