@@ -122,12 +122,14 @@ FocusScope {
         return c !== undefined ? c : look.muted
     }
 
-    // Rows follow the desktop text size (22 and 26 px at the default 12).
-    Binding { target: canvas.model; property: "rowHeight"; value: Math.round(theme.textSize * 11 / 6) }
-    Binding { target: canvas.model; property: "headerHeight"; value: Math.round(theme.textSize * 13 / 6) }
+    // Nodes follow the desktop text size.
+    Binding { target: canvas.model; property: "textSize"; value: theme.textSize }
 
-    // A port is hit within 10 pixels on screen, and never less than its own size.
+    // A port is hit within 10 pixels on screen, and never less than its own size. Zoomed out
+    // past readableZoom ports are not drawn, so a press there is on the node.
     function portUnder(px, py) {
+        if (world.scale < readableZoom)
+            return ({})
         const w = toWorld(px, py)
         return model.portAt(w.x, w.y, Math.max(8, 10 / world.scale))
     }

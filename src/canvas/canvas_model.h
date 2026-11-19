@@ -32,8 +32,7 @@
 //   row is found by id in O(1) (rowOf).
 // - #20 save, open: setDocument() and document(); document() writes positions back into
 //   layout.nodes.<id>.pos and the viewport into layout.view, keeping every other layout key.
-// - Text size: FugueCanvas binds rowHeight and headerHeight to the theme's text size;
-//   either setter lays every node out again.
+// - Text size: FugueCanvas binds textSize to the theme's; rows and titles follow it.
 
 #include "engine/document.h"
 #include "engine/port_type.h"
@@ -121,8 +120,10 @@ class CanvasModel : public QObject {
     Q_PROPERTY(LinkList *links READ links CONSTANT)
     Q_PROPERTY(QVariantList frames READ frames NOTIFY framesChanged)
     Q_PROPERTY(QVariantMap view READ view NOTIFY documentReset)
-    Q_PROPERTY(qreal headerHeight READ headerHeight WRITE setHeaderHeight NOTIFY metricsChanged)
-    Q_PROPERTY(qreal rowHeight READ rowHeight WRITE setRowHeight NOTIFY metricsChanged)
+    // The base text size in px (theme.textSize); a node's title and rows are sized from it.
+    Q_PROPERTY(int textSize READ textSize WRITE setTextSize NOTIFY metricsChanged)
+    Q_PROPERTY(qreal headerHeight READ headerHeight NOTIFY metricsChanged)
+    Q_PROPERTY(qreal rowHeight READ rowHeight NOTIFY metricsChanged)
     // While a link is dragged: the port it started from ({node, port, output, color, x, y}),
     // else empty. Ports bind their dimming to this, so it changes at the start and end only.
     Q_PROPERTY(QVariantMap linkDrag READ linkDrag NOTIFY linkDragChanged)
@@ -143,10 +144,11 @@ public:
     QVariantMap view() const;
     Q_INVOKABLE void setView(qreal centerX, qreal centerY, qreal zoom);
 
+    int textSize() const { return m_textSize; }
+    // Lays every node and wire out again: one reset of each list.
+    void setTextSize(int size);
     qreal headerHeight() const { return m_headerHeight; }
     qreal rowHeight() const { return m_rowHeight; }
-    void setHeaderHeight(qreal height);
-    void setRowHeight(qreal height);
     static constexpr qreal defaultWidth = 220;
 
     // --- hit tests, in world coordinates ---
@@ -155,7 +157,7 @@ public:
     Q_INVOKABLE QVariantMap portAt(qreal x, qreal y, qreal radius) const;
     // The topmost node under the point, or empty.
     Q_INVOKABLE QString nodeAt(qreal x, qreal y) const;
-    // Every node that lies wholly inside the rectangle.
+    // Every node the rectangle touches, as ComfyUI's marquee selects.
     Q_INVOKABLE QStringList nodesIn(const QRectF &rect) const;
 
     // --- links ---
@@ -282,8 +284,9 @@ private:
     QHash<QString, QList<int>> m_linksOf; // node id -> link rows touching it
     QSet<QString> m_selected;
     QVariantMap m_view;
-    qreal m_headerHeight = 26;
-    qreal m_rowHeight = 22;
+    int m_textSize = 12;
+    qreal m_headerHeight = 26; // textSize * 13 / 6, rounded
+    qreal m_rowHeight = 22;    // textSize * 11 / 6, rounded
 
     QVariantMap m_drag;
     QSet<QString> m_dragUnreachable; // nodes the dragged link would make a cycle with

@@ -388,13 +388,24 @@ private slots:
         QCOMPARE(canvas.nodeAt(110, 139), QString("prompt"));
         QCOMPARE(canvas.nodeAt(-10, 139), QString());
         QCOMPARE(canvas.nodesIn(QRectF(-10, 50, 600, 400)), (QStringList{"gen", "prompt"}));
+        // As in ComfyUI, a node the rectangle touches is in it: gen spans x 300 to 520.
+        QCOMPARE(canvas.nodesIn(QRectF(500, 300, 100, 50)), QStringList{"gen"});
     }
 
-    void anotherRowHeightLaysEveryNodeOutAgain() {
+    void anotherTextSizeLaysEveryNodeAndWireOutAgain() {
         CanvasModel canvas(&m_registry);
         canvas.setDocument(document(threeNodes));
-        canvas.setRowHeight(30);
-        QCOMPARE(link(canvas, "gen.prompt").value("y1").toDouble(), 100.0 + 26 + 15);
+        QSignalSpy nodesReset(canvas.nodes(), &QAbstractItemModel::modelReset);
+        QSignalSpy linksReset(canvas.links(), &QAbstractItemModel::modelReset);
+        // At 15 px a row is 28 high (15 * 11 / 6, rounded) and the title 33 (15 * 13 / 6).
+        canvas.setTextSize(15);
+        QCOMPARE(canvas.rowHeight(), 28.0);
+        QCOMPARE(canvas.headerHeight(), 33.0);
+        QCOMPARE(nodesReset.count(), 1);
+        QCOMPARE(linksReset.count(), 1);
+        QCOMPARE(link(canvas, "gen.prompt").value("y1").toDouble(), 100.0 + 33 + 14);
+        canvas.setTextSize(15);
+        QCOMPARE(linksReset.count(), 1);
     }
 
     void framesComeFromTheLayout() {

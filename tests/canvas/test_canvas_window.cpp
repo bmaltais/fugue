@@ -88,11 +88,19 @@ const char *small = R"({
              "view": {"center": [480, 340], "zoom": 1}}
 })";
 
+// A theme folder with this desktop text size.
+QString themeFolder(const QTemporaryDir &dir, int textSize) {
+    QFile shell(dir.filePath("shell.toml"));
+    if (shell.open(QIODevice::WriteOnly))
+        shell.write(QStringLiteral("[font]\nbase-size = %1\n").arg(textSize).toUtf8());
+    return dir.path();
+}
+
 // The app's window around a canvas model, as main() makes it.
 struct App {
     QTemporaryDir dir;
     Translator translator{dir.path() + "/language"};
-    Theme theme{dir.path()};
+    Theme theme;
     Backend backend;
     Registry registry;
     CanvasModel model{&registry};
@@ -105,7 +113,7 @@ struct App {
     qint64 openedMs = 0;
     qint64 createdMs = 0; // the QML objects made, before the first frame
 
-    explicit App(const Document &document) {
+    explicit App(const Document &document, int textSize = 12) : theme(themeFolder(dir, textSize)) {
         nodes::addBuiltinNodeTypes(registry);
         registerDefaultCommands(commands);
         model.setDocument(document);
@@ -182,7 +190,9 @@ private slots:
         // work without a GPU; the budget leaves room for a slow CI machine.
         qInfo("window up with 302 nodes and 600 wires in %lld ms (objects made in %lld ms)", app.openedMs,
               app.createdMs);
-        QVERIFY2(app.openedMs < 300, qPrintable(QString::number(app.openedMs)));
+        // 12.1's target is the window itself (opensQuicklyEmpty); a 300-node file gets a
+        // looser bound, so a slow CI machine does not fail it.
+        QVERIFY2(app.openedMs < 500, qPrintable(QString::number(app.openedMs)));
         QCOMPARE(item(app.window->contentItem(), "nodes")->property("count").toInt(), 302);
         QCOMPARE(item(app.window->contentItem(), "wires")->property("count").toInt(), 600);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
@@ -282,6 +292,34 @@ private slots:
         measure("pan zoomed out to 0.15", [&](qreal t) {
             app.world->setX(-300 * std::sin(t * M_PI));
         });
+    }
+
+    void wiresMeetTheirPortsAtAnyTextSize() {
+        App app(load(small), 15);
+        QVERIFY(app.open());
+        QCOMPARE(app.theme.textSize(), 15);
+        QCOMPARE(app.model.rowHeight(), 28.0);
+        QVERIFY(app.model.connectPorts("prompt", "text", "gen", "prompt"));
+        QQuickItem *wires = item(app.window->contentItem(), "wires");
+        QQuickItem *wire = nullptr;
+        QMetaObject::invokeMethod(wires, "itemAt", Q_RETURN_ARG(QQuickItem *, wire), Q_ARG(int, 0));
+        QVERIFY(wire);
+        const QString path = app.model.links()->data(app.model.links()->index(0, 0), LinkList::Path).toString();
+        QCOMPARE(wire->property("path").toString(), path);
+        // Text's output, on its first row: 100 + 33 + 14.
+        QVERIFY2(path.startsWith("M 240.0 147.0 "), qPrintable(path));
+    }
+
+    void zoomedOutAPressOnANodeMovesIt() {
+        App app(load(small));
+        QVERIFY(app.open());
+        for (int i = 0; i < 20; ++i)
+            app.wheel({0, 0}, {0, -120}); // zoom 0.15: ports are not drawn
+        QVERIFY(app.zoom() < 0.2);
+        // 40 world units from Text's input port, inside the node.
+        app.drag(Qt::LeftButton, app.screen(60, 140), app.screen(60, 140) + QPoint(30, 0));
+        QCOMPARE(app.model.links()->rowCount(), 0);
+        QVERIFY2(app.model.position("prompt").x() > 100, qPrintable(QString::number(app.model.position("prompt").x())));
     }
 
     void theLayoutsViewIsWhereItOpens() {

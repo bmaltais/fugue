@@ -233,29 +233,20 @@ void CanvasModel::setView(qreal centerX, qreal centerY, qreal zoom) {
     m_view = {{"center", QVariantList{centerX, centerY}}, {"zoom", zoom}};
 }
 
-void CanvasModel::setHeaderHeight(qreal height) {
-    if (height <= 0 || qFuzzyCompare(height, m_headerHeight))
+void CanvasModel::setTextSize(int size) {
+    if (size <= 0 || size == m_textSize)
         return;
-    m_headerHeight = height;
+    m_nodeList->beginResetModel();
+    m_linkList->beginResetModel();
+    m_textSize = size;
+    m_headerHeight = qRound(size * 13 / 6.0);
+    m_rowHeight = qRound(size * 11 / 6.0);
     for (NodeRow &row : m_rows)
         layOut(row);
-    m_nodeList->beginResetModel();
-    m_nodeList->endResetModel();
     for (int i = 0; i < int(m_links.size()); ++i)
         refreshLinkEnds(i);
-    emit metricsChanged();
-}
-
-void CanvasModel::setRowHeight(qreal height) {
-    if (height <= 0 || qFuzzyCompare(height, m_rowHeight))
-        return;
-    m_rowHeight = height;
-    for (NodeRow &row : m_rows)
-        layOut(row);
-    m_nodeList->beginResetModel();
     m_nodeList->endResetModel();
-    for (int i = 0; i < int(m_links.size()); ++i)
-        refreshLinkEnds(i);
+    m_linkList->endResetModel();
     emit metricsChanged();
 }
 
@@ -863,7 +854,7 @@ QStringList CanvasModel::nodesIn(const QRectF &rect) const {
     QStringList ids;
     const QRectF area = rect.normalized();
     for (const NodeRow &row : m_rows)
-        if (area.contains(QRectF(row.pos, QSizeF(row.width, row.height))))
+        if (area.intersects(QRectF(row.pos, QSizeF(row.width, row.height))))
             ids << row.id;
     return ids;
 }
