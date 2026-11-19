@@ -2,6 +2,10 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
 
 #include <QDateTime>
 #include <QDir>
@@ -11,6 +15,7 @@
 #include <QMutexLocker>
 #include <QRandomGenerator>
 #include <QRegularExpression>
+#include <QScopeGuard>
 #include <QTimeZone>
 
 #include "engine/ids.h"
@@ -156,6 +161,23 @@ bool RunFolder::queued(const QString &workflow) const {
 }
 
 QJsonObject RunFolder::finish(RunStatus status, const Errors &errors, const QDateTime &now) const {
+    // Under a lock on events.jsonl (flock: it excludes other processes and other open
+    // files of this one), so of two finishers only the first writes; the second finds
+    // its run.done. run.done, not run.json's `ended`, says the run is over: a finisher
+    // that died between the two writes must not stop the next one.
+    const int lock = ::open(QFile::encodeName(eventsPath()).constData(), O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0666);
+    if (lock >= 0)
+        while (::flock(lock, LOCK_EX) != 0 && errno == EINTR) {
+        }
+    const auto unlock = qScopeGuard([lock] {
+        if (lock >= 0)
+            ::close(lock);
+    });
+    const QList<QJsonObject> written = events();
+    for (auto it = written.crbegin(); it != written.crend(); ++it)
+        if (it->value("event").toString() == QLatin1String("run.done"))
+            return *it;
+
     QJsonObject ended = state();
     ended.insert("status", runStatusName(status));
     ended.insert("ended", isoTime(now));
