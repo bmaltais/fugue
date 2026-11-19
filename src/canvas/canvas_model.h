@@ -287,7 +287,12 @@ public:
     // --- nodes ---
 
     // A new node of an installed type at the point; its id, or empty for an unknown type.
+    // Its seed widgets start as setNewNodeOptions says, and so does a Save node's embed.
     Q_INVOKABLE QString addNode(const QString &type, qreal x, qreal y);
+    // What new nodes start with (settings.json's new_seed and embed_workflow): seed widgets
+    // on "random" (randomize) or "fixed" (a random number kept), and an `embed` choice input
+    // (Save Image, 11.7) on that choice when the input offers it.
+    void setNewNodeOptions(const QString &seed, const QString &embed);
     // Removes the selected nodes and every link into or out of them.
     Q_INVOKABLE void deleteSelection();
     // Bypass or mute (3.5) the selection, `mode` being "bypass" or "mute": every selected
@@ -552,6 +557,8 @@ private:
     int rowOf(const QString &node) const { return m_rowOf.value(node, -1); }
 
     const fugue::Registry *m_registry;
+    QString m_newSeed = QStringLiteral("random");
+    QString m_newEmbed = QStringLiteral("full");
     fugue::Document m_document;
     NodeList *m_nodeList;
     LinkList *m_linkList;

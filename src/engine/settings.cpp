@@ -140,7 +140,9 @@ SettingsFile readSettings(const QString &path) {
 }
 
 Errors changeSetting(const QString &path, const QString &key, const QJsonValue &value) {
-    if (const QString reason = checkSetting(key, value); !reason.isEmpty())
+    if (!kKeys.contains(key))
+        return {makeError(QStringLiteral("usage"), checkSetting(key, value))};
+    if (const QString reason = value.isUndefined() ? QString() : checkSetting(key, value); !reason.isEmpty())
         return {makeError(QStringLiteral("usage"), reason)};
     QJsonObject document;
     if (QFileInfo::exists(path)) {
@@ -149,7 +151,14 @@ Errors changeSetting(const QString &path, const QString &key, const QJsonValue &
             return read.errors();
         document = read.value();
     }
-    if (value == settingDefault(key))
+    if (value.isUndefined() || value == settingDefault(key)) {
+        if (!document.contains(key))
+            return {}; // already the default: nothing to write
+        document.remove(key);
+    } else if (document.value(key) == value) {
+        return {};
+    }
+    if (value.isUndefined() || value == settingDefault(key))
         document.remove(key);
     else
         document.insert(key, value);

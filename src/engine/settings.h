@@ -62,7 +62,8 @@ SettingsFile readSettings(const QString &path);
 QString checkSetting(const QString &key, const QJsonValue &value);
 
 // Sets one key in the file and writes it whole, atomically (engine/atomic_file), making
-// the folder when needed. A value equal to the default removes the key. Errors: usage for
+// the folder when needed. A value equal to the default, or an undefined value, removes the
+// key; a change to nothing new writes nothing. Errors: usage for
 // a bad value (nothing is written), the read error for a file that is not a JSON object
 // (never overwritten), or the write's error.
 Errors changeSetting(const QString &path, const QString &key, const QJsonValue &value);
