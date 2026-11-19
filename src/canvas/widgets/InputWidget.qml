@@ -83,7 +83,7 @@ Rectangle {
             return edits.numberText(literal)
         if (typeof literal === "string")
             return literal
-        if (literal === undefined && port.value !== undefined)
+        if (literal === undefined && port.value !== undefined && port.placeholder !== true)
             return port.value
         return ""
     }
