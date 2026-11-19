@@ -372,6 +372,62 @@ private slots:
         QVERIFY2(right > 40, qPrintable(QStringLiteral("want %1: %2 pixels right").arg(want.name()).arg(right)));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
+
+    // Over a port that cannot take it, the dragged wire is dashed in the error color
+    // (docs/canvas-look.md): walked along its own curve, it is the error color in runs with
+    // gaps between them, not one solid line and not another color.
+    void aWireOverAnInvalidTargetIsDashedInTheErrorColor() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {
+            "prompt": {"type": "fugue/text", "version": "1.0.0", "inputs": {"text": "a red fox"}},
+            "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {}}}},
+          "layout": {"nodes": {"prompt": {"pos": [20, 100]}, "save": {"pos": [660, 300]}},
+                     "view": {"center": [480, 340], "zoom": 1}}})"));
+        QVERIFY(openAt(app, 1200, 800));
+        // Text's output into Save Image's image input (its first input, after one output).
+        const QPoint start = app.screen(260, 144), end = app.screen(660, 368);
+        QTest::mousePress(app.window, Qt::LeftButton, {}, start);
+        for (int i = 1; i <= 8; ++i)
+            QTest::mouseMove(app.window, start + (end - start) * i / 8);
+        QTRY_VERIFY(!app.canvas->property("hoverProblem").toString().isEmpty());
+        QQuickItem *wire = canvas_test::item(app.window->contentItem(), "draggedLink");
+        QVERIFY(wire && wire->isVisible() && wire->property("invalid").toBool());
+        QTest::qWait(100);
+        const QImage shot = test_support::grab(app.window);
+        const QPointF a = wire->property("a").toPointF(), b = wire->property("b").toPointF();
+        const qreal dx = wire->property("dx").toReal();
+        QTest::mouseRelease(app.window, Qt::LeftButton, {}, end);
+
+        const QColor want = app.theme.look()->property("error").value<QColor>();
+        const qreal ratio = shot.devicePixelRatio();
+        const auto onWire = [&](qreal t) {
+            const qreal u = 1 - t;
+            const QPointF c1(a.x() + dx, a.y()), c2(b.x() - dx, b.y());
+            const QPointF p = u * u * u * a + 3 * u * u * t * c1 + 3 * u * t * t * c2 + t * t * t * b;
+            const QPoint at = app.screen(p.x(), p.y());
+            int best = 1000;
+            for (int y = -1; y <= 1; ++y)
+                for (int x = -1; x <= 1; ++x) {
+                    const QColor c = shot.pixelColor(int((at.x() + x) * ratio), int((at.y() + y) * ratio));
+                    best = qMin(best, qAbs(c.red() - want.red()) + qAbs(c.green() - want.green()) + qAbs(c.blue() - want.blue()));
+                }
+            return best < 40;
+        };
+        // From a fifth to four fifths of the way: clear of the ports and the reason chip.
+        const int steps = 600;
+        int hits = 0, runs = 0;
+        bool last = false;
+        for (int i = 0; i <= steps; ++i) {
+            const bool hit = onWire(0.2 + 0.6 * i / steps);
+            hits += hit;
+            runs += hit && !last;
+            last = hit;
+        }
+        const QString seen = QStringLiteral("%1 of %2 samples %3, in %4 runs").arg(hits).arg(steps + 1).arg(want.name()).arg(runs);
+        QVERIFY2(hits > steps / 4, qPrintable(seen));   // in the error color
+        QVERIFY2(hits < steps * 9 / 10, qPrintable(seen)); // with gaps
+        QVERIFY2(runs >= 10, qPrintable(seen));          // many dashes, not one break
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
 };
 
 QTEST_MAIN(TestCanvasLook)
