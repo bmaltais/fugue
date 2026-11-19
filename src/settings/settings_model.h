@@ -124,12 +124,16 @@ private:
     void loadProviders();
     void pushLive();
     QString saveProviders(const QList<ProviderInstance> &instances);
+    QByteArray providersSnapshot() const;
 
     QString m_path;
     QString m_providersPath;
     SettingsFile m_file;
     QList<ProviderInstance> m_instances;
     bool m_providersSaved = false;
+    // What m_instances was read from (providersSnapshot()), to tell an edit made outside
+    // the panel since.
+    QByteArray m_providersSnapshot;
     QString m_providersProblem;
     Translator *m_translator = nullptr;
     CanvasModel *m_canvas = nullptr;

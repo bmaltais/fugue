@@ -11,6 +11,7 @@
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
 #include "engine/atomic_file.h"
+#include "engine/json.h"
 #include "engine/paths.h"
 #include "engine/providers_file.h"
 #include "translator.h"
@@ -94,9 +95,21 @@ void SettingsModel::registerCommands(CommandRegistry &registry, std::function<vo
 
 void SettingsModel::loadSettings() { m_file = readSettings(m_path); }
 
+// providers.json as it is now, or (without one) the defaults it stands for, which follow
+// Omarchy's paired hosts.
+QByteArray SettingsModel::providersSnapshot() const {
+    QFile file(m_providersPath);
+    if (file.open(QIODevice::ReadOnly))
+        return QByteArrayLiteral("file:") + file.readAll();
+    if (file.exists())
+        return QByteArrayLiteral("unreadable");
+    return QByteArrayLiteral("defaults:") + writeJson(QJsonObject{{"providers", providerInstancesJson(defaultProviderInstances())}});
+}
+
 void SettingsModel::loadProviders() {
     m_instances.clear();
     m_providersProblem.clear();
+    m_providersSnapshot = providersSnapshot();
     m_providersSaved = QFileInfo::exists(m_providersPath);
     const Result<QList<ProviderInstance>> loaded = loadProviderInstances(m_providersPath);
     if (loaded) {
@@ -227,6 +240,14 @@ QString SettingsModel::saveProviders(const QList<ProviderInstance> &instances) {
         if (const QString problem = pairedHostsProblem(); !problem.isEmpty())
             return tr("Nothing was saved: your paired hosts cannot be read now (%1). Try again in a moment.")
                 .arg(problem);
+    }
+    // A change is made to the list the panel shows; one edited outside since is not written
+    // over: the panel shows it instead, and the change can be made again.
+    if (providersSnapshot() != m_providersSnapshot) {
+        loadProviders();
+        emit providersChanged();
+        return tr("Nothing was saved: %1 changed outside the panel. It now shows the file as it is; make the change again.")
+            .arg(tilde(m_providersPath));
     }
     const Errors errors = saveProviderInstances(m_providersPath, instances);
     if (!errors.isEmpty())
