@@ -16,6 +16,8 @@ class Result {
 public:
     Result(T value) : m_value(std::move(value)) {}
     Result(Error error) : m_error(std::move(error)) {}
+    // A failure with several errors (say one per bad entry); not empty. error() is the first.
+    Result(Errors errors) : m_error(errors.value(0)), m_errors(std::move(errors)) {}
 
     bool ok() const { return m_value.has_value(); }
     explicit operator bool() const { return ok(); }
@@ -30,10 +32,17 @@ public:
 
     // Only when !ok().
     const Error &error() const { return m_error; }
+    // Every error of a failure (at least error()); empty when ok().
+    Errors errors() const {
+        if (ok())
+            return {};
+        return m_errors.isEmpty() ? Errors{m_error} : m_errors;
+    }
 
 private:
     std::optional<T> m_value;
     Error m_error;
+    Errors m_errors;
 };
 
 // An error with severity error, for the common case.
