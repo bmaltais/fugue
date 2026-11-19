@@ -1093,6 +1093,11 @@ reference. A new inference runtime is a new provider module.
 - The component-level helper is based on stable-diffusion.cpp with separate encode, sample and
   decode steps, C++ only. The M0 spike showed the split works
   ([spikes/02](spikes/02-sdcpp-split.md)).
+- Fugue carries the split as its own patch against a pinned stable-diffusion.cpp commit; it does
+  not depend on upstream adopting it. To keep that cheap: the patch stays as small as the spike's
+  (hooks at the existing stage seams, no change to sampling or model code); the pin moves only on
+  purpose; and every move of the pin must pass a test that the staged run gives the same pixels
+  as a single run of the same build.
 
 ### 8.11 The provider interface
 
@@ -1723,7 +1728,6 @@ To measure or confirm before the part that depends on each is built. None blocks
 | Item | Blocks | Tracked |
 | --- | --- | --- |
 | Frame rate with 300 nodes, and the wire renderer | [12.2](#122-construction) | #5 |
-| Whether stable-diffusion.cpp upstream will take stage entry points in its C API (the spike passed with a local patch) | the helper's upkeep, [8.10](#810-gpu-memory-and-the-helper) | owner posts the question |
 | libvips speed on 1 to 4 megapixel images, thread and cache settings | [14.1](#141-m1-the-first-twelve) pixel nodes | #3 |
 | Offscreen GPU compute, Vulkan device enumeration, free-memory measurement, CUDA terms | [8.10](#810-gpu-memory-and-the-helper) | #4 |
 | Plugin-interface prior art | freezing [6.9](#69-native-tier) | #6 |

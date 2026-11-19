@@ -125,9 +125,9 @@ follows the original path.
 
 - **Upstream churn is the real cost.** The patch hooks one function in a file that changes
   often, and the library's public header had 28 commits in the ten weeks before the pinned one. The helper must pin a
-  commit and move the pin on purpose. Upstream has not yet been asked whether it would take
-  stage entry points in its C API; a yes would remove this cost. The question is written and
-  will be posted with this result.
+  commit and move the pin on purpose. Decided 2026-11-18: Fugue carries this patch itself and
+  does not ask upstream for stage entry points (see
+  [spec 8.10](../spec.md#810-gpu-memory-and-the-helper)).
 - **One model family.** Only Z-Image Turbo was run. Its conditioning is one tensor per prompt.
   Models with CLIP encoders (SD 1.5, SDXL), reference-image editing (FLUX.2 Klein) and video
   fill more fields of `SDCondition`. The patch serializes all of its fields except two:
