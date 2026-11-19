@@ -351,10 +351,9 @@ void CommandRegistry::requestClose() {
 
 QVariantList CommandRegistry::list() const {
     QVariantList list;
-    for (const QString &id : ids()) {
-        const Entry &entry = m_entries[m_index.value(id)];
+    for (const Entry &entry : m_entries) {
         list.append(QVariantMap{
-            {"id", id},
+            {"id", entry.spec.id},
             {"description", QCoreApplication::translate("Command", entry.spec.description.toUtf8().constData())},
             {"keys", entry.keys},
             {"gestures", entry.spec.gestures},

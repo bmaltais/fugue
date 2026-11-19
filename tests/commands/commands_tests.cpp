@@ -95,6 +95,10 @@ private slots:
                                "group.enter", "group.leave", "view.fit", "view.zoom-in", "view.zoom-out",
                                "view.toggle-links", "panel.nodes", "panel.workflows"})
             QVERIFY2(registry.contains(id), id);
+        // The overlay lists them in the keymap table's order, Run before Cancel the run.
+        const QVariantList listed = registry.list();
+        QCOMPARE(listed.first().toMap().value("id").toString(), QString("run.start"));
+        QCOMPARE(listed.at(3).toMap().value("id").toString(), QString("run.cancel"));
         QCOMPARE(registry.keys("app.quit"), (QStringList{"Q", "Ctrl+Q"}));
         QCOMPARE(registry.keys("app.shortcuts"), (QStringList{"?", "F1", "Ctrl+?"}));
         QVERIFY(registry.spec("app.quit")->deviates());
@@ -158,6 +162,10 @@ private slots:
         QVERIFY(!registry.activeKeys().contains("Q"));
         // Applying a new diff starts from the defaults again.
         registry.applyKeymap("{}");
+        // The overlay lists them in the keymap table's order, Run before Cancel the run.
+        const QVariantList listed = registry.list();
+        QCOMPARE(listed.first().toMap().value("id").toString(), QString("run.start"));
+        QCOMPARE(listed.at(3).toMap().value("id").toString(), QString("run.cancel"));
         QCOMPARE(registry.keys("app.quit"), (QStringList{"Q", "Ctrl+Q"}));
         QCOMPARE(registry.keys("view.fit"), (QStringList{".", "Home"}));
     }
@@ -193,6 +201,10 @@ private slots:
         registry.applyKeymap(json);
         QVERIFY(!registry.problems().isEmpty());
         QCOMPARE(registry.keys("view.fit"), (QStringList{".", "Home"}));
+        // The overlay lists them in the keymap table's order, Run before Cancel the run.
+        const QVariantList listed = registry.list();
+        QCOMPARE(listed.first().toMap().value("id").toString(), QString("run.start"));
+        QCOMPARE(listed.at(3).toMap().value("id").toString(), QString("run.cancel"));
         QCOMPARE(registry.keys("app.quit"), (QStringList{"Q", "Ctrl+Q"}));
     }
 

@@ -428,6 +428,9 @@ private:
         bool sized = false; // the layout sets the width
         qreal height = 0;
         bool collapsed = false;
+        qreal collapsedWidth = 0; // the header alone: fits the title (docs/canvas-look.md 9)
+        // What the canvas shows and hit tests: the width, or the collapsed header's.
+        qreal shownWidth() const { return collapsed ? collapsedWidth : width; }
         QString color;      // layout color
         bool pinned = false;
         QRectF thumbnail;   // where the run's thumbnail goes, empty without one

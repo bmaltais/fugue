@@ -99,7 +99,7 @@ public:
     static QString keymapPath();
     QString keymapFile() const;
 
-    // Every command, ordered by id, as maps for QML: id, description (translated), keys,
+    // Every command, in the order registered (the keymap table's, spec 12.5), as maps for QML: id, description (translated), keys,
     // gestures, context, versus, deviates, available.
     Q_INVOKABLE QVariantList list() const;
 

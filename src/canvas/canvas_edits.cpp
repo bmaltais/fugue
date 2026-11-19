@@ -458,7 +458,7 @@ QRectF CanvasModel::boundsOf(const QStringList &ids) const {
     QRectF bounds;
     for (const QString &id : ids)
         if (const int r = rowOf(id); r >= 0)
-            bounds = bounds.united(QRectF(m_rows[size_t(r)].pos, QSizeF(m_rows[size_t(r)].width, m_rows[size_t(r)].height)));
+            bounds = bounds.united(QRectF(m_rows[size_t(r)].pos, QSizeF(m_rows[size_t(r)].shownWidth(), m_rows[size_t(r)].height)));
     return bounds;
 }
 

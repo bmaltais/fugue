@@ -198,6 +198,7 @@ Item {
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap
                         color: root.look.label
+                        font.pixelSize: root.look.textSize
                         text: qsTr("Matches ComfyUI except where marked. Greyed commands are not built yet.")
                     }
                 }
@@ -385,12 +386,19 @@ Item {
                 Layout.topMargin: 4 * root.u
                 spacing: root.u
                 Text {
-                    Layout.fillWidth: true
-                    elide: Text.ElideMiddle
                     color: root.look.label
                     font.pixelSize: root.look.labelSize
-                    textFormat: Text.StyledText
-                    text: qsTr("Change keys in %1").arg("<tt>" + commands.keymapFile.replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</tt>")
+                    text: qsTr("Change keys in")
+                }
+                // The path in the monospace face, elided in the middle when the card is narrow.
+                Text {
+                    Layout.fillWidth: true
+                    elide: Text.ElideMiddle
+                    color: root.look.text
+                    font.family: "monospace"
+                    font.pixelSize: root.look.labelSize
+                    textFormat: Text.PlainText
+                    text: commands.keymapFile
                 }
                 Keycap { look: root.look; text: "?" }
                 Text {

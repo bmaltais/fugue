@@ -355,7 +355,8 @@ Popup {
                         objectName: "resultVersion"
                         x: parent.width - width - 2.5 * root.u
                         anchors.verticalCenter: parent.verticalCenter
-                        text: "v" + row.version
+                        // Trailing zero parts dropped, as the mockup: 1.0.0 is "v1", 1.2.0 "v1.2".
+                        text: "v" + row.version.replace(/(\.0)+$/, "")
                         color: root.look.label
                         font.pixelSize: root.look.labelSize
                         font.features: { "tnum": 1 }

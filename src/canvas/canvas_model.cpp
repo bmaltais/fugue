@@ -5,6 +5,8 @@
 #include "engine/registry.h"
 #include "search/node_search.h"
 
+#include <QFontMetricsF>
+#include <QGuiApplication>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QLineF>
@@ -65,7 +67,7 @@ QVariant NodeList::data(const QModelIndex &index, int role) const {
     case Missing: return row.missing;
     case X: return row.pos.x();
     case Y: return row.pos.y();
-    case Width: return row.width;
+    case Width: return row.shownWidth();
     case Height: return row.height;
     case Collapsed: return row.collapsed;
     case Mode: return nodeModeName(m_canvas->m_document.graph.nodes.value(row.id).mode);
@@ -440,6 +442,14 @@ void CanvasModel::portsFromType(NodeRow &row, const Node &node) const {
 void CanvasModel::layOut(NodeRow &row) const {
     row.thumbnail = {};
     if (row.collapsed) {
+        // The title plus room for the kind mark, the meta and the padding, at most 60u and
+        // never wider than the node open (docs/canvas-look.md 9).
+        const qreal u = m_textSize / 3.0;
+        QFont font = qGuiApp ? QGuiApplication::font() : QFont();
+        font.setPixelSize(m_textSize);
+        font.setWeight(QFont::DemiBold);
+        const qreal title = QFontMetricsF(font).horizontalAdvance(row.title);
+        row.collapsedWidth = std::ceil(std::min({title + 24 * u, 60 * u, row.width}));
         for (Port &port : row.inputs)
             port.y = port.rowTop = m_headerHeight / 2;
         for (Port &port : row.outputs)
@@ -685,7 +695,7 @@ void CanvasModel::refreshLinkEnds(int index) {
         return;
     const NodeRow &a = m_rows[size_t(from)];
     const NodeRow &b = m_rows[size_t(to)];
-    link.a = a.pos + QPointF(a.width, out->y);
+    link.a = a.pos + QPointF(a.shownWidth(), out->y);
     link.b = b.pos + QPointF(0, in->y);
 
     // Through the reroute points of layout.links (4.5), keyed by the target.
@@ -872,7 +882,7 @@ void CanvasModel::beginLinkDrag(const QString &node, const QString &port, bool o
               {"port", startPort},
               {"output", startOutput},
               {"color", colorKey(start->type, start->kind)},
-              {"x", row.pos.x() + (startOutput ? row.width : 0)},
+              {"x", row.pos.x() + (startOutput ? row.shownWidth() : 0)},
               {"y", row.pos.y() + start->y}};
     emit linkDragChanged();
 }
@@ -1002,7 +1012,7 @@ QVariantMap CanvasModel::portAt(qreal x, qreal y, qreal radius) const {
             continue;
         for (const bool output : {false, true}) {
             for (const Port &port : output ? row.outputs : row.inputs) {
-                const QPointF p = row.pos + QPointF(output ? row.width : 0, port.y);
+                const QPointF p = row.pos + QPointF(output ? row.shownWidth() : 0, port.y);
                 const qreal d = QLineF(p, at).length();
                 if (d <= bestDistance) {
                     bestDistance = d;
@@ -1017,7 +1027,7 @@ QVariantMap CanvasModel::portAt(qreal x, qreal y, qreal radius) const {
 
 QString CanvasModel::nodeAt(qreal x, qreal y) const {
     for (auto it = m_rows.rbegin(); it != m_rows.rend(); ++it)
-        if (QRectF(it->pos, QSizeF(it->width, it->height)).contains(QPointF(x, y)))
+        if (QRectF(it->pos, QSizeF(it->shownWidth(), it->height)).contains(QPointF(x, y)))
             return it->id;
     return {};
 }
@@ -1053,7 +1063,7 @@ QStringList CanvasModel::nodesIn(const QRectF &rect) const {
     QStringList ids;
     const QRectF area = rect.normalized();
     for (const NodeRow &row : m_rows)
-        if (area.intersects(QRectF(row.pos, QSizeF(row.width, row.height))))
+        if (area.intersects(QRectF(row.pos, QSizeF(row.shownWidth(), row.height))))
             ids << row.id;
     return ids;
 }

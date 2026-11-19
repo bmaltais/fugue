@@ -266,7 +266,7 @@ private slots:
         QTRY_VERIFY(app.search()->count() >= 1);
         QTRY_VERIFY(app.inResults("resultCategory"));
         QCOMPARE(app.inResults("resultCategory")->property("text").toString(), QString("Image › Transform · fugue"));
-        QCOMPARE(app.inResults("resultVersion")->property("text").toString(), QString("v1.0.0"));
+        QCOMPARE(app.inResults("resultVersion")->property("text").toString(), QString("v1")); // 1.0.0, its zero parts dropped
         auto *ports = app.inResults("resultPorts");
         QVERIFY(ports);
         QVERIFY(ports->childItems().size() >= 4); // the image and size inputs, an output

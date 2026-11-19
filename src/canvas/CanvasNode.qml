@@ -180,6 +180,24 @@ Item {
         }
     }
 
+    // Collapsed: every input meets at the header's left end and every output at its right
+    // (docs/canvas-look.md 5), one mark a side in the first port's shape and color.
+    Repeater {
+        model: node.collapsed && node.tier <= 1 ? [node.inputs, node.outputs] : []
+        delegate: PortDot {
+            required property var modelData
+            required property int index
+            visible: modelData.length > 0
+            x: (index === 1 ? node.width : 0) - width / 2
+            y: node.height / 2 - height / 2
+            shape: modelData.length > 0 ? modelData[0].shape : "circle"
+            fill: modelData.length > 0 ? node.canvasView.portColor(modelData[0].color) : "transparent"
+            body: node.look.body
+            corner: node.corner
+            wired: modelData.some(p => p.wired)
+        }
+    }
+
     // One row per port, outputs first (docs/canvas-look.md 4.3).
     Repeater {
         model: node.collapsed || !node.rowsMade ? 0 : node.outputs.length

@@ -302,6 +302,14 @@ private slots:
         canvas.toggleCollapsed();
         QVERIFY(canvas.document().layout.value("nodes").toObject().value("gen").toObject().value("collapsed").toBool());
         QCOMPARE(link(canvas, "save.image").value("y1").toDouble(), 80 + canvas.headerHeight() / 2);
+        // Folded, the header fits its title, and the wire leaves from its right end.
+        QModelIndex gen;
+        for (int i = 0; i < canvas.nodes()->rowCount(); ++i)
+            if (canvas.nodes()->data(canvas.nodes()->index(i, 0), NodeList::NodeId).toString() == "gen")
+                gen = canvas.nodes()->index(i, 0);
+        const qreal folded = canvas.nodes()->data(gen, NodeList::Width).toDouble();
+        QVERIFY2(folded > 40 && folded < 60 * canvas.textSize() / 3.0, qPrintable(QString::number(folded)));
+        QCOMPARE(link(canvas, "save.image").value("x1").toDouble(), 300 + folded);
         canvas.toggleCollapsed();
         QCOMPARE(bytes(canvas), before); // expanded again, the key is gone
         canvas.undo();
