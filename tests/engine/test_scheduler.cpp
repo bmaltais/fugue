@@ -642,6 +642,28 @@ private slots:
                  QStringLiteral("frozen"));
     }
 
+    // 10.4: "never invalidated by upstream changes", a failure upstream included.
+    void aFrozenNodeServesItsResultEvenWhenItsUpstreamFails() {
+        World world;
+        const Ran first = world.run(world.graph(branches("fox", "!")));
+        const QString key = first.outcome.keys.value("b");
+        QVERIFY(world.cache->freeze(key));
+
+        QJsonObject nodes = json(branches("owl", "!"));
+        QJsonObject b = nodes.value("b").toObject();
+        b.insert("frozen", key);
+        nodes.insert("b", b);
+        world.kernel("fugue/text", [](const NodeContext &) -> Result<Values> {
+            return makeError("node_failed", "The upstream node broke.");
+        });
+        const Ran ran = world.run(world.graph(nodes));
+        QCOMPARE(ran.outcome.states.value("a"), NodeState::Error);
+        QCOMPARE(ran.outcome.states.value("b"), NodeState::Frozen);
+        QCOMPARE(ran.outcome.outputs.value("b").value("text").text(), QStringLiteral("fox!"));
+        QCOMPARE(traceOf(ran.events, {"b", "s"}), (QStringList{"node.cached b", "node.cached s"}));
+        QCOMPARE(ran.outcome.status, QStringLiteral("failed")); // a's error is still the run's
+    }
+
     void warningsGivenWithTheRunAreReportedAndDoNotFailIt() {
         World world;
         RunOptions options;

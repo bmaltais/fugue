@@ -40,7 +40,8 @@
 //     into the store, a hard link stays in the node's folder, and the handles
 //     passed on carry the store's path (9.7).
 //   - A frozen node (10.4) takes the result of its frozen key whatever its
-//     inputs are. If that result is gone, the run warns
+//     inputs are and whatever happened upstream: a node that failed upstream
+//     does not make it skipped. If that result is gone, the run warns
 //     (frozen_result_missing) and the node runs normally.
 //
 // Events (9.4) are appended to the run folder as they happen and emitted by

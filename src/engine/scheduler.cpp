@@ -453,19 +453,8 @@ private:
     }
 
     void prepare(NodeRun &n) {
-        for (const QString &dep : std::as_const(n.dependencies)) {
-            const NodeRun &d = m_nodes[dep];
-            if (d.state == NodeState::Error ||
-                (d.state == NodeState::Skipped && d.reason == QLatin1String("upstream_failed")))
-                return skip(n, QStringLiteral("upstream_failed"));
-            if (d.state == NodeState::Skipped && d.reason == QLatin1String("cancelled"))
-                return skip(n, QStringLiteral("cancelled"));
-        }
-        if (!n.type)
-            return fail(n, nodeError(QStringLiteral("unknown_node_type"),
-                                     QStringLiteral("Node type %1 is not installed.").arg(n.node->type)));
-
-        // Freeze (10.4): the frozen key's result, whatever the inputs are now.
+        // Freeze (10.4) comes first: the frozen key's result is served whatever the
+        // inputs are now and whatever happened upstream, a failure included.
         if (!n.node->frozen.isEmpty()) {
             const std::optional<Values> frozen = m_dry ? m_env.cache->peek(n.node->frozen, *m_env.hashes)
                                                        : m_env.cache->lookup(n.node->frozen, usedBy(n), *m_env.hashes);
@@ -480,6 +469,18 @@ private:
             warning.node = n.path;
             m_outcome.errors.append(warning);
         }
+
+        for (const QString &dep : std::as_const(n.dependencies)) {
+            const NodeRun &d = m_nodes[dep];
+            if (d.state == NodeState::Error ||
+                (d.state == NodeState::Skipped && d.reason == QLatin1String("upstream_failed")))
+                return skip(n, QStringLiteral("upstream_failed"));
+            if (d.state == NodeState::Skipped && d.reason == QLatin1String("cancelled"))
+                return skip(n, QStringLiteral("cancelled"));
+        }
+        if (!n.type)
+            return fail(n, nodeError(QStringLiteral("unknown_node_type"),
+                                     QStringLiteral("Node type %1 is not installed.").arg(n.node->type)));
 
         bool unknown = false; // a value that only a run can settle
         QString skipReason;
