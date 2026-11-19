@@ -2,5 +2,17 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-cmake -S "$root" -B "$root/build" -DCMAKE_BUILD_TYPE=Release >/dev/null
+launcher=()
+if command -v ccache >/dev/null; then
+  # Reuse compiled objects, also across git worktrees. Every worktree has its own
+  # absolute paths, so base_dir (the parent of all worktrees) makes ccache hash
+  # paths relative to it. Without ccache the build is unchanged.
+  export CCACHE_BASEDIR="${CCACHE_BASEDIR:-$(dirname "$root")}"
+  launcher=(-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache)
+else
+  # Clear a launcher an earlier configure cached, or a build/ made while ccache was
+  # installed fails once it is gone.
+  launcher=(-DCMAKE_C_COMPILER_LAUNCHER= -DCMAKE_CXX_COMPILER_LAUNCHER=)
+fi
+cmake -S "$root" -B "$root/build" -DCMAKE_BUILD_TYPE=Release "${launcher[@]}" >/dev/null
 cmake --build "$root/build" -j"$(nproc)"
