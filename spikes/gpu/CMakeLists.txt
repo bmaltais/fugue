@@ -1,0 +1,15 @@
+cmake_minimum_required(VERSION 3.21)
+project(fugue_gpu_spike CXX)
+set(CMAKE_CXX_STANDARD 20)
+# QRhi lives in GuiPrivate in Qt 6.12; the warning about private modules is expected here.
+set(QT_NO_PRIVATE_MODULE_WARNING ON)
+find_package(Qt6 REQUIRED COMPONENTS Gui GuiPrivate)
+add_executable(rhiprobe rhiprobe.cpp)
+target_link_libraries(rhiprobe PRIVATE Qt6::Gui Qt6::GuiPrivate)
+target_include_directories(rhiprobe PRIVATE ${VULKAN_HEADERS})
+target_compile_options(rhiprobe PRIVATE -Wall -Wextra)
+# vkprobe needs Vulkan headers; pass -DVULKAN_HEADERS=<dir> if they are not installed system-wide.
+add_executable(vkprobe vkprobe.cpp)
+target_include_directories(vkprobe PRIVATE ${VULKAN_HEADERS})
+target_link_libraries(vkprobe PRIVATE vulkan)
+target_compile_options(vkprobe PRIVATE -Wall -Wextra)

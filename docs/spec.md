@@ -1084,10 +1084,17 @@ reference. A new inference runtime is a new provider module.
 
 - Fugue starts its helper on demand, keeps it warm for an idle timeout, then stops it to give
   memory back.
-- Before starting GPU work Fugue measures free GPU memory itself (nvidia-smi, AMD sysfs, the
-  unified-memory equivalent) against what the nodes declare. omarchy-local-ai does not model a
-  discrete NVIDIA card, so its figures are not relied on.
-- If memory is short, Fugue names the processes holding it and offers to stop Omarchy's model
+- Before starting GPU work Fugue measures free GPU memory itself against what the nodes declare,
+  by Vulkan device type ([spikes/04](spikes/04-gpu.md)): on a discrete card the device-local
+  heap's budget minus usage (`VK_EXT_memory_budget`); on an integrated or unified-memory device
+  `MemAvailable` from `/proc/meminfo`, capped at the heap size (on the GB10 nvidia-smi reports no
+  memory figures and the Vulkan budget does not see other processes). CPU devices are skipped.
+  omarchy-local-ai does not model a discrete NVIDIA card, so its figures are not relied on.
+- GPU work in the engine and the CLI uses Vulkan compute directly or runs in the helper, never
+  Qt RHI: Qt's `offscreen` platform gives neither a Vulkan instance nor a GL context. Fugue links
+  no CUDA and bundles no NVIDIA files; the helper builds against the system CUDA package.
+- If memory is short, Fugue names the processes holding it (`nvidia-smi --query-compute-apps` on
+  NVIDIA, including the GB10) and offers to stop Omarchy's model
   servers, only with confirmation. It never kills another application.
 - Out of memory is a typed error on the node (`out_of_memory`). A helper crash kills only the helper.
 - The component-level helper is based on stable-diffusion.cpp with separate encode, sample and
@@ -1137,7 +1144,8 @@ not part of any output, missing models, untrusted packs, a frozen result that is
 
 - The engine keeps a ready queue in dependency order.
 - **CPU nodes** run in parallel, up to the number of cores minus one. libvips' own thread pool
-  and cache are capped so they do not fight the executor.
+  and cache are capped so they do not fight the executor: concurrency 1 per node and cache 0
+  ([spikes/03](spikes/03-libvips.md)).
 - **Local GPU work** (GPU nodes, and jobs on providers running on this machine) runs one at a
   time. A node opts into parallel GPU use with `needs.gpu.parallel`.
 - **Each provider instance** runs one job at a time. A remote instance does not occupy the local
@@ -1728,8 +1736,8 @@ To measure or confirm before the part that depends on each is built. None blocks
 | Item | Blocks | Tracked |
 | --- | --- | --- |
 | Frame rate with 300 nodes, and the wire renderer | [12.2](#122-construction) | #5 |
-| libvips speed on 1 to 4 megapixel images, thread and cache settings | [14.1](#141-m1-the-first-twelve) pixel nodes | #3 |
-| Offscreen GPU compute, Vulkan device enumeration, free-memory measurement, CUDA terms | [8.10](#810-gpu-memory-and-the-helper) | #4 |
+| ~~libvips speed on 1 to 4 megapixel images, thread and cache settings~~ Done: keep libvips ([spikes/03](spikes/03-libvips.md)) | [14.1](#141-m1-the-first-twelve) pixel nodes | #3 |
+| ~~Offscreen GPU compute, Vulkan device enumeration, free-memory measurement, CUDA terms~~ Done ([spikes/04](spikes/04-gpu.md)); AMD free memory unmeasured | [8.10](#810-gpu-memory-and-the-helper) | #4 |
 | Plugin-interface prior art | freezing [6.9](#69-native-tier) | #6 |
 | Whether talking to a separate ComfyUI process, bundling none of its code, is acceptable for an MIT app | the `comfyui` provider | owner decision |
 | How pairing with a remote Omarchy host works beyond reading its key file | remote `omarchy` instances | with #11 |
