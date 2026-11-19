@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import Fugue
 import "canvas"
 
 // Everything the command registry shows or listens to in the window (spec 12.4, 12.5): one
@@ -13,16 +14,16 @@ Item {
     objectName: "commandUi"
 
     readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
-    readonly property var look: theme.look
+    readonly property var look: App.theme.look
     readonly property real u: look.unit
     property alias overlay: help
     property alias quitDialog: quitAsk
 
     // A text field that has focus owns bare-letter and Shift-only keys.
     Binding {
-        target: commands
+        target: App.commands
         property: "textFieldFocus"
-        value: root.Window.window ? commands.isTextInput(root.Window.window.activeFocusItem) : false
+        value: root.Window.window ? App.commands.isTextInput(root.Window.window.activeFocusItem) : false
     }
 
     // One shortcut for each key that has an owner. Qt Quick turns a window's shortcuts off
@@ -31,20 +32,20 @@ Item {
     // that a key never fires twice.
     component KeyShortcuts: Instantiator {
         property bool active: true
-        model: commands.activeKeys
+        model: App.commands.activeKeys
         delegate: Shortcut {
             required property string modelData
             sequence: modelData
-            enabled: active && !(commands.textFieldFocus && commands.belongsToTextField(modelData))
-            onActivated: commands.triggerKey(modelData)
+            enabled: active && !(App.commands.textFieldFocus && App.commands.belongsToTextField(modelData))
+            onActivated: App.commands.triggerKey(modelData)
         }
     }
 
     // While a menu is open its rows and mnemonics own the keys (#50).
-    KeyShortcuts { active: !help.visible && !quitAsk.visible && !commands.menuOpen }
+    KeyShortcuts { active: !help.visible && !quitAsk.visible && !App.commands.menuOpen }
 
     Connections {
-        target: commands
+        target: App.commands
         function onShortcutsToggleRequested() { help.opened ? help.close() : help.open() }
         function onQuitConfirmationRequested() { quitAsk.open() }
     }
@@ -54,7 +55,7 @@ Item {
         id: notice
         objectName: "keymapNotice"
         property bool dismissed: false
-        visible: commands.problems.length > 0 && !dismissed
+        visible: App.commands.problems.length > 0 && !dismissed
         anchors { left: parent.left; right: parent.right; top: parent.top }
         height: visible ? noticeRow.implicitHeight + 16 : 0
         color: root.look.errorChip
@@ -103,7 +104,7 @@ Item {
                     objectName: "quitAnyway"
                     text: qsTr("Quit")
                     highlighted: true
-                    onClicked: commands.quitNow()
+                    onClicked: App.commands.quitNow()
                 }
             }
         }
@@ -137,7 +138,7 @@ Item {
         property var entries: []
         property string filter: ""
         onAboutToShow: {
-            entries = commands.list()
+            entries = App.commands.list()
             filter = ""
             filterField.text = ""
         }
@@ -252,7 +253,7 @@ Item {
                 }
             }
             Repeater {
-                model: commands.problems
+                model: App.commands.problems
                 delegate: Text {
                     required property string modelData
                     Layout.fillWidth: true
@@ -399,7 +400,7 @@ Item {
                     color: root.look.label
                     font.pixelSize: root.look.labelSize
                     textFormat: Text.RichText
-                    text: qsTr("Change keys in %1").arg("<tt>" + commands.keymapFile.replace(/&/g, "&amp;")
+                    text: qsTr("Change keys in %1").arg("<tt>" + App.commands.keymapFile.replace(/&/g, "&amp;")
                                                          .replace(/</g, "&lt;").replace(/>/g, "&gt;") + "</tt>")
                 }
                 Keycap { look: root.look; text: "?" }

@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
+import Fugue
 import "../canvas"
 
 // The settings panel (#51), opened by app.settings (Ctrl+,): six pages on the left, the
@@ -14,7 +15,7 @@ Popup {
     objectName: "settingsPanel"
     required property var model // a fugue::SettingsModel
 
-    readonly property var look: theme.look
+    readonly property var look: App.theme.look
     readonly property real u: look.unit
     readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
     property int page: 0
@@ -260,7 +261,7 @@ Popup {
                             spacing: 2 * panel.u
                             Text {
                                 objectName: "keymapPath"
-                                text: commands.keymapFile
+                                text: App.commands.keymapFile
                                 color: panel.look.text
                                 font.pixelSize: panel.look.textSize
                             }
@@ -278,13 +279,13 @@ Popup {
                                 }
                             }
                             Text {
-                                visible: commands.problems.length === 0
+                                visible: App.commands.problems.length === 0
                                 text: qsTr("No problems.")
                                 color: panel.look.label
                                 font.pixelSize: panel.look.labelSize
                             }
                             Repeater {
-                                model: commands.problems
+                                model: App.commands.problems
                                 delegate: Text {
                                     required property string modelData
                                     Layout.fillWidth: true
@@ -309,26 +310,26 @@ Popup {
                             rowSpacing: panel.u
                             Text { text: qsTr("Mode"); color: panel.look.label; font.pixelSize: panel.look.labelSize }
                             Text {
-                                text: theme.light ? qsTr("Light") : qsTr("Dark")
+                                text: App.theme.light ? qsTr("Light") : qsTr("Dark")
                                 color: panel.look.text
                                 font.pixelSize: panel.look.textSize
                             }
                             Text { text: qsTr("Corner radius"); color: panel.look.label; font.pixelSize: panel.look.labelSize }
-                            Text { text: theme.radius; color: panel.look.text; font.pixelSize: panel.look.textSize }
+                            Text { text: App.theme.radius; color: panel.look.text; font.pixelSize: panel.look.textSize }
                             Text { text: qsTr("Text size"); color: panel.look.label; font.pixelSize: panel.look.labelSize }
-                            Text { text: theme.textSize; color: panel.look.text; font.pixelSize: panel.look.textSize }
+                            Text { text: App.theme.textSize; color: panel.look.text; font.pixelSize: panel.look.textSize }
                             Text { text: qsTr("Colors"); color: panel.look.label; font.pixelSize: panel.look.labelSize }
                             Flow {
                                 Layout.fillWidth: true
                                 spacing: panel.u
                                 Repeater {
-                                    model: Object.keys(theme.colors)
+                                    model: Object.keys(App.theme.colors)
                                     delegate: Rectangle {
                                         required property string modelData
                                         width: 5 * panel.u
                                         height: 5 * panel.u
                                         radius: panel.look.smallCorner
-                                        color: theme.colors[modelData]
+                                        color: App.theme.colors[modelData]
                                         border.width: 1
                                         border.color: panel.look.hairline
                                         Accessible.name: modelData

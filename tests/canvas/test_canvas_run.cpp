@@ -123,7 +123,7 @@ struct RunApp {
         service = std::make_unique<RunService>(setup);
         runs = std::make_unique<CanvasRuns>(&app.model, &app.workflows, service.get(), &app.registry);
         runs->registerCommands(app.commands);
-        app.engine.rootContext()->setContextProperty("runs", runs.get());
+        app.runs = runs.get();
     }
     ~RunApp() {
         runs.reset();

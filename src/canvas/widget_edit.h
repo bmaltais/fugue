@@ -47,6 +47,7 @@
 #include <QVariant>
 #include <QVariantList>
 #include <QVariantMap>
+#include <QtQmlIntegration/qqmlintegration.h>
 
 #include <functional>
 #include <optional>
@@ -59,6 +60,8 @@ class Registry;
 
 class WidgetEdit : public QObject {
     Q_OBJECT
+    QML_ELEMENT
+    QML_UNCREATABLE("made in C++, read through App")
     // Bumped whenever a model list arrives, so the pickers re-read models().
     Q_PROPERTY(int modelsRevision READ modelsRevision NOTIFY modelsChanged)
 

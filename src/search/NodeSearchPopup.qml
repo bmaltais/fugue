@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
+import Fugue
 import "../canvas"
 
 // Node search (spec 12.8, docs/canvas-look.md 12): a query field over a list of results, each
@@ -14,8 +15,8 @@ Popup {
 
     property Item canvas // the FugueCanvas, to put the popup's corner at the search point
     readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
-    readonly property var search: canvasModel.search
-    readonly property var look: theme.look
+    readonly property var search: App.canvasModel.search
+    readonly property var look: App.theme.look
     readonly property real u: look.unit
     property alias queryField: field
     property alias resultList: list

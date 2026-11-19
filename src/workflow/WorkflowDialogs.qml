@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
+import Fugue
 import "../canvas"
 
 // Everything the workflows show besides the tabs (spec 11): the file pickers (the desktop
@@ -13,7 +14,7 @@ Item {
     id: root
 
     readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
-    readonly property var look: theme.look
+    readonly property var look: App.theme.look
     // The canvas, to turn a drop point into world coordinates.
     property Item canvasView
     property alias closeQuestion: closeAsk
@@ -27,9 +28,9 @@ Item {
         objectName: "openDialog"
         title: qsTr("Open a workflow")
         fileMode: FileDialog.OpenFiles
-        currentFolder: workflows.suggestedFolder
+        currentFolder: App.workflows.suggestedFolder
         nameFilters: [qsTr("Fugue workflows and images with one (*.fugue *.png *.webp)"), qsTr("All files (*)")]
-        onAccepted: workflows.openUrls(selectedFiles)
+        onAccepted: App.workflows.openUrls(selectedFiles)
     }
 
     FileDialog {
@@ -37,15 +38,15 @@ Item {
         objectName: "saveDialog"
         title: qsTr("Save the workflow")
         fileMode: FileDialog.SaveFile
-        currentFolder: workflows.suggestedFolder
+        currentFolder: App.workflows.suggestedFolder
         defaultSuffix: "fugue"
         nameFilters: [qsTr("Fugue workflows (*.fugue)")]
-        onAccepted: workflows.saveAs(selectedFile.toString())
-        onRejected: workflows.cancelPendingClose()
+        onAccepted: App.workflows.saveAs(selectedFile.toString())
+        onRejected: App.workflows.cancelPendingClose()
     }
 
     Connections {
-        target: workflows
+        target: App.workflows
         function onOpenDialogRequested() { openDialog.open() }
         function onSaveAsRequested() { saveDialog.open() }
         function onCloseConfirmationRequested(index, title) {
@@ -67,7 +68,7 @@ Item {
                 return
             const p = root.canvasView ? root.canvasView.mapFromItem(dropArea, drop.x, drop.y) : Qt.point(0, 0)
             const w = root.canvasView ? root.canvasView.toWorld(p.x, p.y) : p
-            workflows.dropUrls(drop.urls, w.x, w.y)
+            App.workflows.dropUrls(drop.urls, w.x, w.y)
         }
     }
 
@@ -75,7 +76,7 @@ Item {
     Rectangle {
         id: notice
         objectName: "workflowNotice"
-        visible: workflows.notice.length > 0
+        visible: App.workflows.notice.length > 0
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
         height: visible ? noticeRow.implicitHeight + 16 : 0
         color: root.look.popup
@@ -89,13 +90,13 @@ Item {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
                 color: root.look.text
-                text: workflows.notice
+                text: App.workflows.notice
             }
             ToolButton {
                 text: "×"
                 focusPolicy: Qt.NoFocus
                 Accessible.name: qsTr("Dismiss")
-                onClicked: workflows.dismissNotice()
+                onClicked: App.workflows.dismissNotice()
             }
         }
     }
@@ -131,13 +132,13 @@ Item {
                 Button {
                     objectName: "closeDiscard"
                     text: qsTr("Discard")
-                    onClicked: { closeAsk.close(); workflows.discardAndClose(closeAsk.index) }
+                    onClicked: { closeAsk.close(); App.workflows.discardAndClose(closeAsk.index) }
                 }
                 Button {
                     objectName: "closeSave"
                     text: qsTr("Save")
                     highlighted: true
-                    onClicked: { closeAsk.close(); workflows.saveAndClose(closeAsk.index) }
+                    onClicked: { closeAsk.close(); App.workflows.saveAndClose(closeAsk.index) }
                 }
             }
         }
@@ -146,7 +147,7 @@ Item {
     Question {
         id: trustAsk
         objectName: "trustAsk"
-        visible: workflows.pendingTrust.length > 0
+        visible: App.workflows.pendingTrust.length > 0
         closePolicy: Popup.NoAutoClose
         ColumnLayout {
             anchors.fill: parent
@@ -165,7 +166,7 @@ Item {
                 text: qsTr("A command node is a program that runs as you, with no sandbox. Nothing from these packs runs until you allow it.")
             }
             Repeater {
-                model: workflows.pendingTrust
+                model: App.workflows.pendingTrust
                 delegate: Label {
                     required property var modelData
                     Layout.fillWidth: true
@@ -180,13 +181,13 @@ Item {
                 Button {
                     objectName: "trustLater"
                     text: qsTr("Not now")
-                    onClicked: workflows.dismissPendingTrust()
+                    onClicked: App.workflows.dismissPendingTrust()
                 }
                 Button {
                     objectName: "trustAllow"
                     text: qsTr("Allow")
                     highlighted: true
-                    onClicked: workflows.allowPendingTrust()
+                    onClicked: App.workflows.allowPendingTrust()
                 }
             }
         }
@@ -195,7 +196,7 @@ Item {
     Question {
         id: recoverAsk
         objectName: "recoverAsk"
-        visible: workflows.recoverable.length > 0
+        visible: App.workflows.recoverable.length > 0
         closePolicy: Popup.NoAutoClose
         ColumnLayout {
             anchors.fill: parent
@@ -209,7 +210,7 @@ Item {
                 text: qsTr("Fugue closed with unsaved work. Recover it?")
             }
             Repeater {
-                model: workflows.recoverable
+                model: App.workflows.recoverable
                 delegate: Label {
                     required property var modelData
                     Layout.fillWidth: true
@@ -222,13 +223,13 @@ Item {
                 Button {
                     objectName: "recoverDiscard"
                     text: qsTr("Discard")
-                    onClicked: workflows.discardRecovery()
+                    onClicked: App.workflows.discardRecovery()
                 }
                 Button {
                     objectName: "recoverOpen"
                     text: qsTr("Recover")
                     highlighted: true
-                    onClicked: workflows.recover()
+                    onClicked: App.workflows.recover()
                 }
             }
         }

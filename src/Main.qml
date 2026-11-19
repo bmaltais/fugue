@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Layouts
+import Fugue
 import "canvas"
 import "menu"
 import "search"
@@ -16,18 +17,18 @@ ApplicationWindow {
     minimumWidth: 640
     minimumHeight: 460
     visible: true
-    title: workflows.windowTitle
-    color: theme.background
-    font.pixelSize: theme.textSize
+    title: App.workflows.windowTitle
+    color: App.theme.background
+    font.pixelSize: App.theme.textSize
 
-    Material.theme: theme.light ? Material.Light : Material.Dark
-    Material.accent: theme.accent
-    Material.background: theme.background
-    Material.foreground: theme.foreground
+    Material.theme: App.theme.light ? Material.Light : Material.Dark
+    Material.accent: App.theme.accent
+    Material.background: App.theme.background
+    Material.foreground: App.theme.foreground
 
     readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
     // The settings (settings/settings_model.h); a test window may run without them.
-    readonly property var appSettingsModel: typeof appSettings === "undefined" ? null : appSettings
+    readonly property SettingsModel appSettingsModel: App.settings
 
     // Right-to-left languages mirror the window; the Translator sets the
     // application's layout direction.
@@ -53,20 +54,20 @@ ApplicationWindow {
                 objectName: "canvas"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                model: canvasModel
+                model: App.canvasModel
                 navigation: win.appSettingsModel ? win.appSettingsModel.navigation : "legacy"
-                onSearchRequested: (x, y) => canvasModel.search.openAt(x, y)
-                onLinkReleased: (from, x, y) => canvasModel.search.openFromLink(from, x, y)
+                onSearchRequested: (x, y) => App.canvasModel.search.openAt(x, y)
+                onLinkReleased: (from, x, y) => App.canvasModel.search.openFromLink(from, x, y)
                 onContextMenuRequested: (x, y) => contextMenu.openAt(x, y, false)
 
                 // Tab and Shift+A (`node.search`) open search where the pointer is; Add node
                 // in the context menu, where it was opened.
                 Connections {
-                    target: canvasModel.search
+                    target: App.canvasModel.search
                     function onPointerSearchRequested() {
-                        const t = commands.target()
+                        const t = App.commands.target()
                         const p = t.x !== undefined ? Qt.point(t.x, t.y) : canvas.pointerWorld()
-                        canvasModel.search.openAt(p.x, p.y)
+                        App.canvasModel.search.openAt(p.x, p.y)
                     }
                 }
                 ContextMenu {
@@ -86,7 +87,7 @@ ApplicationWindow {
 
     // The settings panel (#51), made the first time app.settings (Ctrl+,) asks for it.
     Connections {
-        target: commands
+        target: App.commands
         function onWindowRequested(id) {
             if (id !== "app.settings" || !win.appSettingsModel)
                 return

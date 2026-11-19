@@ -8,6 +8,7 @@
 #include <QProcess>
 #include <QTimer>
 #include <QVariantMap>
+#include <QtQmlIntegration/qqmlintegration.h>
 
 #include "look.h"
 
@@ -34,6 +35,8 @@
 //                         and the `?` overlay
 class Theme : public QObject {
     Q_OBJECT
+    QML_ELEMENT
+    QML_UNCREATABLE("made in C++, read through App")
     Q_PROPERTY(QColor accent READ accent NOTIFY changed)
     Q_PROPERTY(QColor accentForeground READ accentForeground NOTIFY changed)
     Q_PROPERTY(QColor background READ background NOTIFY changed)

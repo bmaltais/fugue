@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import Fugue
 
 // One row of a CommandMenu: a command as the registry shows it (`entry`: label, keys,
 // available, enabled, checkable, checked, and swatch on a color), or the row that opens a
@@ -11,7 +12,7 @@ MenuItem {
     property var entry
     property var target: ({})
 
-    readonly property var look: theme.look
+    readonly property var look: App.theme.look
     readonly property real u: look.unit
     readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
     readonly property bool available: entry === undefined || entry.available
@@ -35,8 +36,8 @@ MenuItem {
             return
         // From a canvas context menu, a paste lands where the menu was opened.
         if (target.x !== undefined)
-            canvasModel.pointer = Qt.point(target.x, target.y)
-        commands.triggerOn(entry.command, target)
+            App.canvasModel.pointer = Qt.point(target.x, target.y)
+        App.commands.triggerOn(entry.command, target)
     }
 
     indicator: null
@@ -62,8 +63,8 @@ MenuItem {
                 // The theme's own color for the role, so the swatch names the hue plainly; on
                 // the node it becomes the gentler header tint (docs/canvas-look.md 6.1).
                 readonly property string role: visible ? row.entry.swatch : "none"
-                color: role === "none" ? "transparent" : role === "accent" ? theme.accent
-                     : role === "muted" ? row.look.label : (theme.colors[role] || row.look.label)
+                color: role === "none" ? "transparent" : role === "accent" ? App.theme.accent
+                     : role === "muted" ? row.look.label : (App.theme.colors[role] || row.look.label)
                 border.width: role === "none" ? 1 : 0
                 border.color: row.look.hairlineStrong
             }

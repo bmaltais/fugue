@@ -34,6 +34,11 @@ target_include_directories(fugue_core PUBLIC src)
 target_link_libraries(fugue_core PUBLIC fugue_engine fugue_cli
   Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::DBus)
 target_compile_options(fugue_core PUBLIC -Wall -Wextra)
+# Its C++ types are the QML module Fugue (qml_app.h): QML reads the window's objects as the
+# typed App singleton, so qmllint can check them. The QML files stay plain resources below.
+# The module's qmldir and qmltypes land in build/qml/Fugue, where qmllint looks (tests/qmllint).
+qt_add_qml_module(fugue_core URI Fugue VERSION 1.0 NO_PLUGIN RESOURCE_PREFIX /qt/qml
+  OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/qml/Fugue)
 
 # The canvas (spec 12): its QML files in src/canvas/, compiled in under qrc:/canvas, where
 # Main.qml imports them. A new .qml file there needs no line here.

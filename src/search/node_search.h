@@ -22,6 +22,7 @@
 #include <QString>
 #include <QVariantList>
 #include <QVariantMap>
+#include <QtQmlIntegration/qqmlintegration.h>
 
 #include <optional>
 #include <vector>
@@ -52,6 +53,8 @@ PortMatch compatiblePort(const NodeType &type, const PortSpec &dragged, bool dra
 // The ranked results as a list model for QML.
 class SearchResults : public QAbstractListModel {
     Q_OBJECT
+    QML_ELEMENT
+    QML_UNCREATABLE("made in C++, read through App")
 
 public:
     enum Role {
@@ -90,6 +93,8 @@ private:
 
 class NodeSearch : public QObject {
     Q_OBJECT
+    QML_ELEMENT
+    QML_UNCREATABLE("made in C++, read through App")
     Q_PROPERTY(bool active READ active NOTIFY activeChanged)
     Q_PROPERTY(QString query READ query WRITE setQuery NOTIFY queryChanged)
     Q_PROPERTY(SearchResults *results READ results CONSTANT)

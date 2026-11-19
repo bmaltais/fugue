@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import Fugue
 import "../canvas"
 
 // The tab bar (spec 12.10): one tab per open workflow, a dot on the ones with unsaved
@@ -13,12 +14,12 @@ Rectangle {
     objectName: "workflowTabs"
     // Shown from the second workflow on; one workflow needs no tabs, and the window title
     // carries its name and unsaved mark.
-    visible: workflows.tabs.length > 1
+    visible: App.workflows.tabs.length > 1
     implicitHeight: visible ? 9 * look.unit : 0
     color: look.well
 
     readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
-    readonly property var look: theme.look
+    readonly property var look: App.theme.look
 
     Rectangle {
         anchors.bottom: parent.bottom
@@ -34,7 +35,7 @@ Rectangle {
         LayoutMirroring.childrenInherit: true
 
         Repeater {
-            model: workflows.tabs
+            model: App.workflows.tabs
             delegate: AbstractButton {
                 id: tabButton
                 required property var modelData
@@ -45,7 +46,7 @@ Rectangle {
                 hoverEnabled: true
                 implicitWidth: 44 * root.look.unit
                 Layout.fillHeight: true
-                onClicked: workflows.current = index
+                onClicked: App.workflows.current = index
                 background: Rectangle {
                     color: tabButton.modelData.current ? root.look.body
                          : tabButton.hovered ? Qt.tint(root.look.well, Qt.alpha(root.look.text, 0.04)) : "transparent"
@@ -94,7 +95,7 @@ Rectangle {
                         focusPolicy: Qt.NoFocus
                         flat: true
                         Accessible.name: qsTr("Close %1").arg(tabButton.modelData.title)
-                        onClicked: workflows.closeTab(tabButton.index)
+                        onClicked: App.workflows.closeTab(tabButton.index)
                         contentItem: Glyph {
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
@@ -116,7 +117,7 @@ Rectangle {
             focusPolicy: Qt.NoFocus
             flat: true
             Accessible.name: qsTr("New workflow")
-            onClicked: workflows.newWorkflow()
+            onClicked: App.workflows.newWorkflow()
             contentItem: Glyph {
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter

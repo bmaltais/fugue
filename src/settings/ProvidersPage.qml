@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
+import Fugue
 
 // The Providers page of the settings panel (spec 8.2, 8.8): the instances in preference
 // order, as the runs and the model picker see them. Defaults (no providers.json yet) show as
@@ -9,7 +10,7 @@ import QtQuick.Layouts
 ColumnLayout {
     id: page
     required property var host // the SettingsPanel: its model and apply()
-    readonly property var look: theme.look
+    readonly property var look: App.theme.look
     readonly property real u: look.unit
     readonly property var model: host.model
     spacing: 4 * u

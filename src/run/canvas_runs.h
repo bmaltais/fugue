@@ -31,6 +31,7 @@
 #include <QStringList>
 #include <QTimer>
 #include <QVariantList>
+#include <QtQmlIntegration/qqmlintegration.h>
 
 #include <memory>
 
@@ -45,6 +46,8 @@ class Workflows;
 
 class CanvasRuns : public QObject {
     Q_OBJECT
+    QML_ELEMENT
+    QML_UNCREATABLE("made in C++, read through App")
     // The run pill (docs/canvas-look.md 11): any run of the window waiting or active.
     Q_PROPERTY(bool busy READ busy NOTIFY changed)
     Q_PROPERTY(bool running READ running NOTIFY changed)      // one is active

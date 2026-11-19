@@ -75,6 +75,7 @@
 #include <QSet>
 #include <QVariantList>
 #include <QVariantMap>
+#include <QtQmlIntegration/qqmlintegration.h>
 
 #include <array>
 #include <memory>
@@ -92,6 +93,8 @@ class QUndoStack;
 // One row per node, in drawing order (later rows on top).
 class NodeList : public QAbstractListModel {
     Q_OBJECT
+    QML_ELEMENT
+    QML_UNCREATABLE("made in C++, read through App")
 
 public:
     enum Role {
@@ -137,6 +140,8 @@ private:
 // One row per link, a list input's items each their own.
 class LinkList : public QAbstractListModel {
     Q_OBJECT
+    QML_ELEMENT
+    QML_UNCREATABLE("made in C++, read through App")
 
 public:
     enum Role {
@@ -166,6 +171,8 @@ private:
 
 class CanvasModel : public QObject {
     Q_OBJECT
+    QML_ELEMENT
+    QML_UNCREATABLE("made in C++, read through App")
     Q_PROPERTY(NodeList *nodes READ nodes CONSTANT)
     Q_PROPERTY(LinkList *links READ links CONSTANT)
     Q_PROPERTY(QVariantList frames READ frames NOTIFY framesChanged)

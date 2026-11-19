@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
+import Fugue
 import "../canvas"
 
 // A menu built from a menu tree of the command registry (menus.h, CommandRegistry::menu): a
@@ -21,7 +22,7 @@ Menu {
     // Left or Right on one of its rows: the menu bar moves to the neighbouring menu.
     signal stepRequested(int delta)
 
-    readonly property var look: theme.look
+    readonly property var look: App.theme.look
     readonly property real u: look.unit
     readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
 
@@ -49,9 +50,9 @@ Menu {
     // Open, or opening; false as soon as it starts to close (`visible` stays true through the
     // closing fade, `opened` is false through the opening one).
     property bool shown: false
-    onAboutToShow: { shown = true; commands.menuShown(true) }
-    onAboutToHide: { shown = false; commands.menuShown(false) }
-    Component.onDestruction: if (shown) commands.menuShown(false)
+    onAboutToShow: { shown = true; App.commands.menuShown(true) }
+    onAboutToHide: { shown = false; App.commands.menuShown(false) }
+    Component.onDestruction: if (shown) App.commands.menuShown(false)
     padding: 1.5 * u
     // As wide as its widest row wants, so names and keys never elide.
     property real widest: 0
