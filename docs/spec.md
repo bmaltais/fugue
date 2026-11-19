@@ -1,6 +1,7 @@
 # Fugue v0.1 spec
 
-Status: accepted design, nothing built yet. Written 2026-11-18 from the resolved design map.
+Status: accepted design, nothing built yet. Written 2026-11-18 from the project's design map
+(the private notes where each decision was researched and made).
 Terms are defined in [GLOSSARY.md](GLOSSARY.md); this document uses them exactly.
 
 How to read it:
@@ -245,7 +246,7 @@ A node is an instance of a node type. A node type has:
 - flags: `sink`, `deterministic`.
 - what it needs to run ([6.3](#63-the-needs-block)) and how it runs ([6.1](#61-nodejson)).
 
-The schema of every node type is data (`fugue node describe`), for the canvas, the CLI and
+The manifest of every node type is available as data (`fugue node describe`), for the canvas, the CLI and
 agents alike.
 
 ### 3.2 Inputs
@@ -296,7 +297,7 @@ A workflow records each node's type id and the version it was made with. On open
 | --- | --- |
 | same major, same or newer minor | Loads normally. |
 | same major, older minor | Loads; inputs the installed version lacks are kept and flagged. |
-| different major | The node opens in a "needs review" state that shows what changed. It does not run until the user accepts. |
+| different major | The node opens in a "needs review" state that shows what changed. It does not run until the user accepts; compiling reports `node_version_mismatch`. Accepting rewrites the node's `version` to the installed one, which is also how an agent accepts: by editing the file. |
 | type missing | A placeholder that keeps its inputs and links, so saving loses nothing. |
 
 A node type can declare `aliases`: old ids it answers to, so a rename does not break saved
@@ -329,15 +330,19 @@ A workflow is one UTF-8 JSON document, extension `.fugue`.
 | `groups` | no | Group definitions used by the graph ([4.4](#44-groups-section)). |
 | `layout` | no | Positions and everything visual. Removing it never changes what the graph does. |
 | `requires` | no | What the workflow needs. Written on save, informational on load. |
+| `run` | no | Only in a copy embedded in an output ([11.7](#117-embedding-in-outputs)): the values used. Never affects a run. |
 
 A reader must reject a document whose `fugue` is greater than it supports, with the error
 `unsupported_format_version`. Unknown keys are preserved on a round trip and otherwise ignored.
 
 ### 4.2 `graph`
 
-`graph.nodes` is an object keyed by node id.
+`graph.nodes` is an object keyed by node id. `graph.provider` is optional: the name of a
+provider instance pinned for every node of the workflow that does not pin its own
+([8.3](#83-selection)).
 
 ```json
+{
 "graph": {
   "nodes": {
     "prompt": {"type": "fugue/text", "version": "1.0.0",
@@ -349,6 +354,7 @@ A reader must reject a document whose `fugue` is greater than it supports, with 
     "save":   {"type": "fugue/save-image", "version": "1.0.0",
                "inputs": {"image": {"from": "gen.image"}, "name": "fox"}}
   }
+}
 }
 ```
 
@@ -364,7 +370,7 @@ is equally valid. Ids cannot contain `.` or `/`, which are separators.
 | `version` | yes | The version the node was made with. |
 | `inputs` | no | Input values by name. An absent input uses its default. |
 | `mode` | no | `"bypass"` or `"mute"`. Absent means normal. |
-| `provider` | no | Name of a provider instance to pin ([8.3](#83-selection)). Absent means `auto`. |
+| `provider` | no | Name of a provider instance to pin ([8.3](#83-selection)). Absent means the workflow's pin, or `auto`. |
 | `frozen` | no | A result-cache key the node's output is frozen to ([10.4](#104-freeze)). |
 
 **Input values**
@@ -382,6 +388,7 @@ An object is a link if and only if it has the key `from`. `null` is not a value;
 ### 4.3 `requires`
 
 ```json
+{
 "requires": {
   "fugue": "0.1.0",
   "nodes": {"fugue/text": "1.0.0", "io.github.alice.tools/sharpen": "1.2.0"},
@@ -389,6 +396,7 @@ An object is a link if and only if it has the key `from`. `null` is not a value;
                                       "source": "https://github.com/alice/fugue-tools"}},
   "models": [{"resource": "fugue/lora", "hash": "sha256:…",
               "name": "detail-tweaker.safetensors", "source": "https://…"}]
+}
 }
 ```
 
@@ -402,9 +410,10 @@ An object is a link if and only if it has the key `from`. `null` is not a value;
 ### 4.4 `groups` section
 
 `groups` is an object keyed by group id. Each value is one group definition; a workflow holds
-exactly one definition per group id.
+exactly one definition, at one version, per group id.
 
 ```json
+{
 "groups": {
   "local/two-pass": {
     "version": "1.0.0",
@@ -422,6 +431,7 @@ exactly one definition per group id.
                  "inputs": {"image": {"from": "first.image"}, "strength": 0.4}}
     }
   }
+}
 }
 ```
 
@@ -442,21 +452,26 @@ the group's `default`, then to the inner input's own value. Behavior is specifie
 ### 4.5 `layout`
 
 ```json
+{
 "layout": {
   "nodes": {"gen": {"pos": [420, 160], "size": [280, 0], "collapsed": false,
                     "color": "accent", "title": "Fox"}},
   "frames": [{"id": "f1", "title": "Inputs", "rect": [0, 0, 380, 300],
               "color": "muted", "nodes": ["prompt"]}],
   "links": {"save.image": {"points": [[700, 200]]}},
+  "comments": [{"id": "c1", "text": "Try 8 steps", "pos": [0, 320], "size": [240, 80]}],
   "view": {"center": [400, 200], "zoom": 1.0},
   "groups": {"local/two-pass": {"nodes": {}, "frames": [], "links": {}}}
+}
 }
 ```
 
 - `nodes`: per node id: position, size (0 means automatic), collapsed, color (a theme role, not
   a hex value), a display title, pinned.
 - `frames`: Frames ([5.1](#51-frame)).
-- `links`: reroute points, keyed by the target `<node id>.<input name>`.
+- `links`: reroute points, keyed by the target `<node id>.<input name>`, with `#<index>` added
+  for an item of a list input (`merge.images#1`).
+- `comments`: free text notes on the canvas.
 - `view`: the last viewport.
 - `groups`: the same structure for the inside of each group definition.
 
@@ -489,6 +504,9 @@ only ever execute this form, and `fugue compile` prints it.
     "prompt": {"type": "fugue/text", "version": "1.0.0", "inputs": {"text": "…"}},
     "g7/first": {"type": "fugue/generate-image", "version": "1.0.0",
                  "inputs": {"prompt": {"from": "prompt.text"}}},
+    "g7/second": {"type": "fugue/generate-image", "version": "1.0.0",
+                  "inputs": {"prompt": {"from": "prompt.text"},
+                             "image": {"from": "g7/first.image"}, "strength": 0.4}},
     "save": {"type": "fugue/save-image", "version": "1.0.0", "sink": true,
              "inputs": {"image": {"from": "g7/second.image"}}}
   },
@@ -496,10 +514,20 @@ only ever execute this form, and `fugue compile` prints it.
 }
 ```
 
+| Field | Meaning |
+| --- | --- |
+| `fugue-compiled` | Format version of the compiled graph. This spec defines 1. |
+| `source` | Hash of the canonical JSON of the workflow's `graph` and `groups`. |
+| `nodes` | Keyed by path id. Each has `type` and `version` (never a group), `inputs` (literals, `auto` values, handles, and links by path id), and, when set, `sink`, `provider` (the node's pin or else the workflow's) and `frozen`. `mode` is resolved and never appears. |
+| `skipped` | Path ids left out, each with the reason: `muted`, `upstream_muted`, `upstream_empty`, `not_part_of_output`. |
+| `target` | For "run to here": the path id the run stops at. |
+
 - Groups are flattened. An inner node gets a **path id**: the instance ids from the outside in,
   joined with `/`, for example `g7/first`, or `g7/inner3/s2` for a nested group.
-- Bypassed nodes are removed and their links rewired ([3.5](#35-bypass-and-mute)). Muted nodes
-  and their dependents are dropped and listed in `skipped` with the reason.
+- Bypassed nodes are removed and their links rewired ([3.5](#35-bypass-and-mute)). A link to a
+  bypassed output that has no matching input is removed: an optional input becomes unset, and a
+  node with a required input left that way is dropped as `upstream_empty`. Muted nodes and their
+  dependents are dropped and listed in `skipped` with the reason.
 - Sinks inside a group are dropped ([5.5](#55-sinks-inside-a-group)).
 - Nodes with no sink downstream are dropped, unless the run is "run to here".
 - `auto` values are kept; the engine resolves them when the run starts.
@@ -513,7 +541,7 @@ Two separate things, as in every mature node tool.
 
 ### 5.1 Frame
 
-A purely visual box with a color and a label. It moves and copies as one. It lives only in
+A purely visual box with a color and a title. It moves and copies as one. It lives only in
 `layout` and has no effect on a run. Made with Ctrl+G.
 
 ### 5.2 Group
@@ -523,8 +551,8 @@ with an id and a version, and it appears in node search.
 
 - **Make group** (Ctrl+Shift+E): Fugue creates the group's inputs and outputs from every link
   that crosses the selection boundary. The user can rename, reorder and add to them.
-- **Enter and leave**: Tab or double-click enters a group, with a breadcrumb trail; the same key
-  or Escape leaves it.
+- **Enter and leave**: Tab on a selected group, or a double-click on its body, enters it, with
+  a breadcrumb trail. Escape or the breadcrumb leaves it.
 - **Nesting** is allowed. **Recursion** is forbidden and checked when a group is made or
   edited, directly or through another group (error `group_recursion`).
 - **Ungroup** (Ctrl+Shift+G) puts the inner nodes back with their links and values.
@@ -539,9 +567,9 @@ with an id and a version, and it appears in node search.
   like any other. A pack can ship groups too ([6.1](#61-nodejson), `runtime.kind: "group"`).
 - A workflow always embeds the exact definition and version it used, so opening it never depends
   on the user's library.
-- Updates are explicit. When the library has a newer version the instance shows "update
-  available"; updating shows what changed under the rules of [3.6](#36-versions). Nothing changes
-  silently.
+- Updates are explicit. When the library has a newer version the group's instances show "update
+  available"; updating shows what changed under the rules of [3.6](#36-versions) and replaces the
+  workflow's definition, so every instance moves together. Nothing changes silently.
 
 ### 5.4 Exposed inputs and outputs
 
@@ -567,8 +595,8 @@ as a node. Whatever is wanted from it is exposed as an output and the sink sits 
 - The compiler flattens groups ([4.8](#48-the-compiled-graph)); the engine never sees one.
 - Each inner node is cached on its own, so changing one exposed value re-runs only the inner
   nodes it affects.
-- A group's face shows aggregate progress. An error on an inner node is reported with its full
-  path (group, then inner node) and highlights both.
+- A group's face shows aggregate progress. An error on an inner node is reported with its path id
+  and highlights both the group and the inner node.
 
 ---
 
@@ -663,12 +691,14 @@ follow the port type (image, video, audio, text, number).
 ### 6.3 The `needs` block
 
 ```json
+{
 "needs": {
   "gpu": {"api": "any", "vram_mb": 6000, "exclusive": false, "unified_ok": true},
   "memory_mb": 2000,
   "network": false,
   "files": false,
   "resources": ["fugue/upscale-model"]
+}
 }
 ```
 
@@ -716,6 +746,7 @@ holding that node's `node.json`.
 | `nodes` | yes | Subfolder names, each with a `node.json`. |
 | `types` | no | Declared port types ([2.2](#22-declared-types)): `id`, `version`, `kind` (`resource` or `data`), `name`, and for resources `extensions` (file extensions found in the models folder). |
 | `setup` | no | A command that prepares the pack's private environment ([6.8](#68-per-pack-environments)). |
+| `converters` | no | Import and export converters ([11.9](#119-converters)). |
 
 ### 6.5 Where packs live and how they load
 
@@ -772,6 +803,15 @@ it later needs no format change. Command nodes cover light logic.
 - `fugue node test <path>` runs a node against sample inputs and checks its outputs against the
   manifest.
 
+### 6.12 The registry
+
+The kernel has one registry of node types, port types and providers. An entry is the data of a
+manifest plus something that can execute it. Packs on disk are one way in (M3); the built-in
+pack and test fakes register through the same registry in code. M0 therefore builds the
+registry, the manifest data model for inputs and outputs ([6.1](#61-nodejson)) and its
+validation, and registers fake node types and a fake provider in tests; loading packs from disk
+is added in M3 without changing the compiler or the engine.
+
 ---
 
 ## 7. Command-node protocol
@@ -781,9 +821,10 @@ no library. All text is UTF-8. Each message is one JSON object on one line.
 
 ### 7.1 Process setup
 
-- Working directory: the node's own folder in the run folder ([9.7](#97-run-folder)).
+- Working directory: the node's own working folder inside the run folder
+  ([9.7](#97-run-folder)).
 - Environment: `FUGUE_PROTOCOL=1`, `FUGUE_NODE_DIR` (the folder holding `node.json`),
-  `FUGUE_RUN_DIR` (the working directory).
+  `FUGUE_WORK_DIR` (the working folder).
 - stdin and stdout carry protocol messages. stderr is the node's log.
 
 ### 7.2 One-shot mode (default)
@@ -793,14 +834,15 @@ Fugue starts the program for each execution, writes one request to stdin and clo
 Request:
 
 ```json
-{"fugue": 1, "op": "run", "id": "r1:sharpen",
+{"protocol": 1, "op": "run", "id": "r1:sharpen",
  "node": {"type": "io.github.alice.tools/sharpen", "version": "1.2.0"},
- "inputs": {"image": {"type": "image", "path": "/…/in/image.png", "hash": "sha256:…",
+ "inputs": {"image": {"type": "image", "path": "/…/results/blobs/3f9a….png", "hash": "sha256:…",
                       "width": 1024, "height": 1024, "channels": 3, "format": "png"},
             "amount": 1.5},
- "run_dir": "/…/runs/r1/nodes/sharpen"}
+ "work_dir": "/…/runs/r1/nodes/sharpen"}
 ```
 
+- `id` is an opaque name for this execution; persistent mode echoes it.
 - `text`, `number`, `boolean` inputs are JSON values. Media inputs are media handles with a
   `path` the program can read; pending video edits are applied to a file first, so a program
   only ever needs `path`. Resource handles get an added `path` to the resolved file. Data values
@@ -809,7 +851,7 @@ Request:
 
 The program writes zero or more progress lines and then exactly one result or error line to stdout:
 
-```json
+```jsonl
 {"op": "progress", "value": 0.4, "message": "pass 2 of 5"}
 {"op": "result", "outputs": {"image": {"path": "out.png"}}}
 ```
@@ -818,10 +860,12 @@ The program writes zero or more progress lines and then exactly one result or er
 {"op": "error", "code": "bad_input", "message": "image is smaller than the kernel"}
 ```
 
-- A line without `op` is read as a result, so the smallest node is one `echo`.
-- Media and data outputs are files the program wrote inside `run_dir`, returned as `{"path": …}`
-  (relative paths resolve against `run_dir`). A path outside `run_dir` is an error. Fugue reads
-  the file's metadata and hash itself.
+- `op` may be left out of the result line, so the smallest node is one `echo` of
+  `{"outputs": {…}}`.
+- Media and data outputs are files the program wrote inside `work_dir`, returned as
+  `{"path": …}` (relative paths resolve against `work_dir`). A path outside `work_dir` is an
+  error. Fugue reads the file's metadata and hash itself.
+- Input files are read-only to the node by convention: they are shared with the result cache.
 - Other outputs are JSON values. An optional output may be left out (empty).
 - `progress.value` is 0 to 1. Optional `{"op": "preview", "image": {"path": …}}` shows an
   intermediate image.
@@ -911,9 +955,12 @@ A provider instance is a configured use of a provider module, stored in
 
 - A node's provider is `auto` by default: the first enabled, ready instance, in the user's
   order, that offers the capability with the required properties and the requested model.
-- A node can pin an instance by name (`provider` in [4.2](#42-graph)). A workflow-wide pin is a
-  setting of the run, not of the file.
-- The provider and model actually used are reported as values used and are part of the cache key.
+- A node can pin an instance by name, and a workflow can pin one for all its nodes (`provider`
+  and `graph.provider` in [4.2](#42-graph)). `fugue run --provider <name>` pins one for a single
+  run. A pin is a name only; a pinned name that is not configured is the error `unknown_provider`.
+- The engine and model actually used are reported as values used and are part of the cache key
+  ([10.1](#101-keys)). The instance name is not: the same engine and model at another address
+  give the same key.
 
 ### 8.4 Model resolution
 
@@ -927,7 +974,8 @@ A provider instance is a configured use of a provider module, stored in
 
 The node shows what is missing and how to fix it (start a model, add a provider, enable one).
 Error codes: `capability_unavailable`, `model_not_running`, `model_missing`,
-`provider_unreachable`.
+`provider_unreachable`. `fugue validate` reports a missing model as a warning; a run that reaches
+the node reports it as an error.
 
 ### 8.6 Results
 
@@ -944,7 +992,7 @@ Servers drop finished jobs (the Omarchy image server after 600 seconds).
 | `comfyui` | Optional, off by default. Talks HTTP and websocket to a ComfyUI server the user installs and runs. Fugue bundles none of its code or node schemas and never starts it. | M5 fallback |
 
 The shipped providers are not special: they sit behind the same interface and registry as a
-third-party module ([8.8](#88-provider-modules)).
+third-party module ([8.11](#811-the-provider-interface)).
 
 **The `omarchy` provider** (from reading omarchy-local-ai and Fantasi's source; to be confirmed
 against a running engine):
@@ -955,6 +1003,7 @@ against a running engine):
 - One preloaded model per server. Changing models goes through `omarchy-agent-local`, only with
   the user's confirmation.
 - Auth: a bearer key read from `~/.config/omarchy/agent-local/key`.
+- Fantasi is Omarchy's simple image app; Fugue reuses its way of talking to these servers.
 - Images and video: the native `/sdcpp/v1` job API on the endpoint's origin: submit, poll, fetch
   at once, cancel and keep polling until the server reports a terminal state. Defaults (steps,
   guidance, size) come from the server's capabilities. Progress is per sampling pass. Step
@@ -1002,7 +1051,7 @@ bearer token. Over `stdio` each is one JSON line with `"op"` and an `"id"` echoe
 
 | Operation | Request | Reply |
 | --- | --- | --- |
-| `describe` | none | `protocol` (1), per capability: `models`, `properties`, `limits`, `defaults`, `status` (`ready`, `loading`, `unavailable`) and a `reason` |
+| `describe` | none | `protocol` (1), `engine` (a stable id of the inference engine, such as `sdcpp`), per capability: `models`, `properties`, `limits`, `defaults`, `status` (`ready`, `loading`, `unavailable`) and a `reason` |
 | `submit` | `capability`, `model`, `params`, `inputs` | `job` |
 | `status` | `job` | `state` (`queued`, `running`, `done`, `error`, `cancelled`), `progress` (0 to 1), `stage`, optional `preview`, `error` |
 | `cancel` | `job` | `state` |
@@ -1044,6 +1093,22 @@ reference. A new inference runtime is a new provider module.
 - The component-level helper is based on stable-diffusion.cpp with separate encode, sample and
   decode steps, C++ only. It ships only if the M0 spike passes ([15](#15-milestones)).
 
+### 8.11 The provider interface
+
+Inside the kernel a provider is one interface with exactly the operations of
+[8.8](#88-provider-modules): `describe`, `submit`, `status` (or a status stream), `cancel`,
+`result`, `shutdown`, with the same data in and out. The engine only ever talks to this
+interface.
+
+- M0 builds the interface, a fake provider for tests, and the `omarchy` provider as an adapter
+  compiled into Fugue: it implements the interface by calling the Omarchy servers' own HTTP
+  APIs. No inference code is linked into Fugue; the engine it talks to is still another process.
+- M4 adds the module adapter, which implements the same interface by speaking the protocol of
+  8.8 to a third-party program. From then on each shipped provider also has a `provider.json`,
+  so the registry lists shipped and third-party providers the same way.
+- `engine` from `describe` is the engine id used in cache keys and recorded in results. For
+  `omarchy` it is the server kind (`sdcpp` for images and video).
+
 ---
 
 ## 9. Execution
@@ -1072,7 +1137,7 @@ not part of any output, missing models, untrusted packs, a frozen result that is
 - **Each provider instance** runs one job at a time. A remote instance does not occupy the local
   GPU lane.
 - One run is active at a time. Further runs queue first in, first out, can be moved to the front
-  ("run first"), and can be removed or cancelled by id.
+  ("run first"), and can be removed or cancelled by id ([9.8](#98-runs-across-processes)).
 
 ### 9.3 Residency
 
@@ -1107,7 +1172,7 @@ that offer them.
 
 - Errors are per node. Independent branches keep running; nodes downstream of a failed node are
   skipped.
-- Every error names the node by its full path through groups.
+- Every error names the node by its path id, so a node inside groups is found at once.
 - Out of memory is its own code so the canvas can offer the right fix.
 
 ### 9.6 Cancel
@@ -1122,15 +1187,18 @@ Each run has a folder `~/.cache/fugue/runs/<run-id>/`:
 
 | Entry | Holds |
 | --- | --- |
-| `run.json` | The run's state: status, the worker's process id, start and end times, the workflow's path and hash, the resolved `auto` values. |
+| `run.json` | The run's state: status, the worker's process id, start and end times, the workflow's path and hash, the resolved `auto` values, providers and models, and the cache key of each node. |
 | `compiled.json` | The compiled graph that ran. |
 | `events.jsonl` | Every event, appended as it happens. |
 | `nodes/<path id>/` | Each node's working directory, where it writes its outputs. |
 
 - A run id is an opaque string of `[a-z0-9-]`, unique and sortable by start time.
 - When a node finishes, the engine records its outputs in the result cache
-  ([10](#10-result-cache)); media files are moved into the cache's store and linked back.
-- Run folders are removed by garbage collection ([10.5](#105-eviction-and-garbage-collection)).
+  ([10](#10-result-cache)): each media or data file is moved into the cache's store and a hard
+  link is left in the node's folder. Handles passed on to other nodes carry the store's path,
+  which stays valid after the run folder is gone.
+- Run folders are removed 7 days after the run ends
+  ([10.5](#105-eviction-and-garbage-collection)).
 
 ### 9.8 Runs across processes
 
@@ -1138,9 +1206,12 @@ v0.1 has no daemon. The window runs its own runs. `fugue run` from the CLI start
 run worker, prints the run id and returns; `--wait` stays attached and streams events.
 
 - `fugue runs status|events|result|cancel <run-id>` read the run folder; cancel signals the worker.
-- One advisory lock per user (`~/.local/state/fugue/engine.lock`) keeps a single run active at a
-  time across the window and all workers, because they share the GPU. A run that cannot take the
-  lock is `queued`.
+- The queue is shared by the window and all workers, because they share the GPU. It is a folder,
+  `~/.local/state/fugue/queue/`, with one small file per waiting or active run, named so that
+  sorting gives the order. A process starts its run only when its entry sorts first and it holds
+  the advisory lock `~/.local/state/fugue/engine.lock`. "Run first" writes an entry that sorts
+  ahead of the waiting ones; removing a queued run deletes its entry. An entry whose process is
+  gone is discarded.
 
 ### 9.9 Not in v0.1
 
@@ -1162,13 +1233,16 @@ A node's key is the SHA-256 of the canonical JSON of:
 - the pack id and version it came from;
 - every input: a literal's value, or for a link the content hash of the upstream output;
 - the identity hash of every resource handle ([2.5](#25-resource-handles));
-- for provider nodes, the engine id and the model identity the provider resolved;
+- for provider nodes, the engine id ([8.11](#811-the-provider-interface)) and the identity of
+  the model the provider resolved;
 - for a node with `deterministic: false`, the run id.
 
 Rules:
 
 - An `auto` value is resolved before keying: a randomized seed becomes a concrete seed, which is
   also recorded as a "values used" output. Every result is therefore reproducible.
+- A provider node's provider and model are resolved the same way, before keying. If nothing can
+  serve the node, it cannot be looked up and reports the provider error instead.
 - A file a node reads by path (Load Image) is keyed by its content hash, not its path.
 - A model file's identity is its content hash, so a checkpoint replaced under the same name
   invalidates correctly.
@@ -1180,8 +1254,11 @@ Rules:
 Under `~/.cache/fugue/results/`:
 
 - `keys/<key>.json`: a record mapping a key to its outputs (values, and media or data handles by
-  content hash), with the node type, sizes and last-used time.
-- `blobs/<hash>`: the files, stored once per content hash.
+  content hash), with the node type, sizes, last-used time, and `used_by`: the workflow paths
+  and node path ids that produced or reused it. `used_by` is what the per-workflow and per-node
+  views and clears read.
+- `blobs/<hex hash>.<extension>`: the files, stored once per content hash.
+- `frozen/<key>`: a marker for each frozen result ([10.4](#104-freeze)).
 
 Final outputs written by Save nodes go to the user's output folder and are never cache entries.
 A sink records what it wrote; with unchanged inputs and the file still present, it does not
@@ -1195,9 +1272,10 @@ workflow and per node.
 
 ### 10.4 Freeze
 
-Freezing a node pins its current result: it is kept, never evicted, and never invalidated by
+Freezing a node keeps its current result: it is kept, never evicted, and never invalidated by
 upstream changes until unfrozen. The node stores the frozen key (`frozen` in [4.2](#42-graph))
-and shows the frozen state. If the frozen result is missing (the file moved to another machine)
+and shows the frozen state; the cache holds a marker for that key, removed on unfreeze. The
+cache view lists frozen results so one left by a deleted workflow can be released. If the frozen result is missing (the file moved to another machine)
 validation warns and the node runs normally.
 
 ### 10.5 Eviction and garbage collection
@@ -1205,7 +1283,9 @@ validation warns and the node runs normally.
 - A size limit, default 20 GiB, configurable. Over the limit, the least recently used entries
   are evicted. Frozen entries are never evicted.
 - Clear all, per workflow or per node (`fugue cache clear`, and in the canvas).
-- Entries and run folders nothing references are garbage collected after a grace period of 7 days.
+- Garbage is collected after a grace period of 7 days: run folders whose run has ended, blobs no
+  key record refers to, and key records whose blobs are gone. A cached result is otherwise kept
+  until it is evicted for size or cleared; it does not expire with age.
 
 ---
 
@@ -1254,9 +1334,9 @@ opening or editing.
 
 - Save Image embeds the workflow in PNG and WebP by default, so dragging an output back onto
   Fugue reloads its graph.
-- What is embedded is always the share form: absolute local paths are never written. A `run`
-  section is added with the values used per node (seed, model, engine), so a randomized result
-  can be reproduced.
+- Absolute local paths are never embedded: they are replaced as in a share copy. Layout is
+  embedded, so the graph comes back as it looked. A `run` section is added with the values used
+  per node (seed, model, engine), so a randomized result can be reproduced.
 - Each Save node has a visible setting: full, without prompts, or none. A global setting decides
   what new Save nodes start with.
 - A first-run notice says the workflow is embedded.
@@ -1267,6 +1347,26 @@ opening or editing.
 An open window watches its file. When the file changes on disk (an agent, git, another editor):
 with no unsaved content the window reloads it as one undoable step; with unsaved content it asks
 which to keep. It never overwrites silently in either direction.
+
+### 11.9 Converters
+
+Import and export go through one converter interface in the kernel: detect a format from
+content, turn a foreign file into a workflow document, or turn a document into a foreign file.
+v0.1 ships the converters of [11.4](#114-import) and [11.5](#115-export) built in. A pack can
+declare converters so a new format needs no change to Fugue:
+
+```json
+{
+"converters": [{"name": "comfyui", "direction": "import", "extensions": ["json"],
+                "entry": "./import-comfyui"}]
+}
+```
+
+An import converter is a program given the file path as its argument that writes a `.fugue`
+document to stdout, or exits nonzero if the file is not its format. An export converter reads a
+document on stdin and writes the file named by its argument. Converters are trusted with their
+pack ([6.7](#67-trust)). No v0.1 milestone ships a pack converter; the interface exists so the
+first one (ComfyUI import, after v0.1) is a module.
 
 ---
 
@@ -1334,7 +1434,7 @@ and the `?` overlay marks each one.
 | `edit.clone` | Clone | Alt+drag, Ctrl+D | Ctrl+D added |
 | `edit.delete` | Delete | Delete, Backspace | same |
 | `edit.select-all` | Select all | Ctrl+A | same |
-| `edit.rename` | Rename | F2, double-click a title | F2 added |
+| `edit.rename` | Rename | F2, double-click a node's title | F2 added |
 | `node.bypass` | Bypass | Ctrl+B | same |
 | `node.mute` | Mute | Ctrl+M | same |
 | `node.collapse` | Collapse | Alt+C | same |
@@ -1343,13 +1443,15 @@ and the `?` overlay marks each one.
 | `frame.make` | Frame the selection | Ctrl+G | same |
 | `group.make` | Make a group | Ctrl+Shift+E | same |
 | `group.ungroup` | Ungroup | Ctrl+Shift+G | added |
-| `group.enter` | Enter or leave a group | Tab on a group, double-click; Escape leaves | Tab added |
+| `group.enter` | Enter the selected group | Tab, double-click the group's body | Tab added |
+| `group.leave` | Leave the group | Escape, the breadcrumb | same |
 | `view.fit` | Fit the view | `.`, Home | Home added |
 | `view.zoom-in`, `view.zoom-out` | Zoom | Alt+=, Alt+-, Ctrl+=, Ctrl+- | Ctrl added |
 | `view.toggle-links` | Hide or show links | L | same |
 | `panel.nodes`, `panel.workflows` | Toggle the node library, the workflows panel | N, W | same |
 
-Tab opens node search when no group is selected and enters the group when one is.
+Tab enters a group when exactly one group is selected and opens node search otherwise, inside a
+group too. A command states the context it applies in, and the more specific context owns the key.
 
 Mouse:
 
@@ -1365,7 +1467,8 @@ belong to the field. Hence the Ctrl and F1 alternatives for quit and the overlay
 
 - Every action is a command with a string id in one registry. Menus, the `?` overlay, the
   settings panel and the CLI's listing all read the same registry.
-- Each key has one owner at a time in a given focus context.
+- Each key has one owner at a time in a given context (canvas, a selected group, a text field,
+  a run in progress). Contexts belong to commands, not to the keymap file.
 - The user's keymap is a diff against the defaults at `~/.config/fugue/keybindings.json`:
 
 ```json
@@ -1383,7 +1486,7 @@ belong to the field. Hence the Ctrl and F1 alternatives for quit and the overlay
 
 On each node: the last value on each output port (thumbnail, number, text excerpt), time taken,
 cache state ([10.3](#103-per-node-state)), progress, and warnings in the title. Errors show on
-the node and in an error panel with the full path through groups.
+the node and in an error panel with the node's path id.
 
 ### 12.8 Node search
 
@@ -1421,12 +1524,13 @@ are never three implementations.
 
 ### 13.1 Commands
 
-Each command works with no display, never opens a dialog, and takes `--json`. A plural group
-name is an alias of the singular (`fugue nodes list` is `fugue node list`).
+Each command works with no display, never opens a dialog, and takes `--json`. For `node`,
+`pack`, `provider` and `model` the plural is an alias (`fugue nodes list` is `fugue node list`).
+`fugue run` starts a run and `fugue runs` manages runs; those two are different commands.
 
 | Command | Does |
 | --- | --- |
-| `fugue run <file> [--wait] [--to <node>[.<output>]] [--set <node>.<input>=<value>]` | Start a run. Prints a run id and returns; `--wait` streams events and exits when it ends. Short for `fugue workflow run`. |
+| `fugue run <file> [--wait] [--first] [--to <node>] [--provider <name>] [--set <node>.<input>=<value>]` | Start a run. Prints a run id and returns; `--wait` streams events and exits when it ends; `--first` queues it ahead of waiting runs. Short for `fugue workflow run`. |
 | `fugue validate <file>` | Compile and report errors and warnings; execute nothing. Short for `fugue workflow validate`. |
 | `fugue compile <file>` | Print the compiled graph. Short for `fugue workflow compile`. |
 | `fugue workflow new <file>` | Write an empty workflow. |
@@ -1469,10 +1573,10 @@ With `--json`, failures are structured, on stdout:
 ```json
 {"ok": false, "errors": [
   {"code": "value_not_in_choices", "severity": "error",
-   "node": "g7/second", "input": "sampler",
-   "message": "\"eulr\" is not a valid sampler.",
-   "valid": ["euler", "euler_a", "dpm++2m", "lcm"],
-   "hint": "Did you mean \"euler\"?"}
+   "node": "g7/shrink", "input": "method",
+   "message": "\"lancos\" is not a valid method.",
+   "valid": ["nearest", "bilinear", "bicubic", "lanczos", "area"],
+   "hint": "Did you mean \"lanczos\"?"}
 ]}
 ```
 
@@ -1503,7 +1607,7 @@ New codes may be added; existing ones do not change meaning.
 ### 13.4 Authoring by agents
 
 - JSON only in v0.1. An agent writes the `.fugue` document directly, using
-  `fugue node describe` for schemas and `fugue validate` as a dry run that returns per-node errors.
+  `fugue node describe` for manifests and `fugue validate` as a dry run that returns per-node errors.
 - `layout` may be left out; the canvas lays out nodes that have no position.
 - Live sharing is by file watch ([11.8](#118-editing-from-outside)): the agent edits the file
   and an open window shows it.
@@ -1546,7 +1650,7 @@ merged, its `node.json` is the source of truth.
 | `fugue/save-image` | `image`, `name`, `format` (png, webp), `embed` (full, no-prompts, none), `folder` (optional) | `file` | Sink. Writes to the output folder. [11.7](#117-embedding-in-outputs). |
 | `fugue/preview` | `value` (any) | none | Sink. Shows the value on the node; from the CLI it is in the run result. |
 | `fugue/generate-image` | `prompt`, `negative_prompt`, `model` (optional), `width`, `height`, `steps` (optional), `guidance` (optional), `seed`, `image` (optional start image), `strength` | `image`, `seed`, `width`, `height`, `model` | Capability `image.generate`. Unset optional inputs use the model's defaults. |
-| `fugue/edit-image` | `instruction`, `images` (list, 1 to 4), `model` (optional), `steps` (optional), `seed` | `image`, `seed`, `width`, `height`, `model` | Capability `image.edit`. |
+| `fugue/edit-image` | `instruction`, `images` (list, 1 to 4), `model` (optional), `steps` (optional), `seed` | `image`, `seed`, `width`, `height`, `model` | Capability `image.edit`; `instruction` is sent as its `prompt`. |
 | `fugue/resize` | `image`, `width`, `height`, `fit` (stretch, contain, cover), `method` (nearest, bilinear, bicubic, lanczos, area) | `image` | libvips. |
 | `fugue/crop` | `image`, `x`, `y`, `width`, `height` | `image` | |
 | `fugue/brightness-contrast` | `image`, `brightness`, `contrast` | `image` | |
@@ -1581,7 +1685,7 @@ models. A coarse Generate Image can later be rebuilt as a group of these.
 | Spec | This document. | #1 |
 | **M0** engine, CLI and spikes | Spikes first: component-level go or no-go, libvips benchmark, GPU checks, canvas frame rate, plugin-interface research. Then the document model, compiler, scheduler and result cache, run folder and media handles, the provider interface with the `omarchy` provider, and the CLI skeleton. Driven by tests with fake nodes; no canvas. | #2 to #12, #34 |
 | **M1** first nodes | The twelve nodes of [14.1](#141-m1-the-first-twelve). | #13 to #15 |
-| **M2** canvas | The canvas of [section 12](#12-canvas) on the M0 engine: wires, search, copy and paste, undo, run, per-node state, save, open, recovery, keymap, theme. | #16 to #22 |
+| **M2** canvas | The canvas of [section 12](#12-canvas) on the M0 engine: wires, search, copy and paste, undo, run, per-node state, save, open, recovery, import, tabs, keymap, theme. | #16 to #22 |
 | **M3** extension | Manifests and the loader, the command-node protocol, pack install and trust, groups, user docs with a five-minute tutorial and an example pack. | #23 to #27 |
 | **M4** rest of v0.1 | Video, song and text nodes, more pixel and mask nodes, the agent skill, providers as modules. | #28 to #31 |
 | **M5** component level | Only if the M0 spike passes: the helper and the component nodes. If it fails: the optional ComfyUI provider, and component nodes follow when an engine is ready. | #32, #33 |
@@ -1653,7 +1757,7 @@ Each has a confidence and can be overruled; say so on the issue that builds it.
 | Workflow-made groups are `local/<name>`; the library is the `local` pack | 5.3 | medium |
 | Nested groups allowed (recursion forbidden) | 5.2 | high |
 | Bypass maps each output to the first input of the same type | 3.5 | medium-high |
-| A node id must start with its pack's id; aliases never shadow an installed type | 6.1, 3.6 | high |
+| A node type id must start with its pack's id; aliases never shadow an installed type | 6.1, 3.6 | high |
 | Message shapes of the command protocol, `ready` and `shutdown`, the 5 second grace period, the 300 second idle timeout | 7 | medium-high |
 | The provider protocol's operations and media transfer | 8.8 | medium |
 | Standard parameter names for `image.generate` and `image.edit` | 8.1 | medium |
@@ -1670,6 +1774,16 @@ Each has a confidence and can be overruled; say so on the issue that builds it.
 | Command ids in the keymap; `run.to-here` on Shift+Enter; Tab enters a selected group | 12.4 | medium |
 | Embedded workflows carry a `run` section with the values used | 11.7 | medium-high |
 | Input and output lists of the twelve M1 nodes | 14.1 | medium |
+| The kernel provider interface has the module protocol's operations; `omarchy` is an adapter compiled in | 8.11 | medium-high |
+| The cache key uses the engine and model, not the provider instance | 8.3, 10.1 | medium-high |
+| A workflow-wide provider pin is `graph.provider` | 4.2 | medium-high |
+| The run queue is a folder of entries plus a lock | 9.8 | medium |
+| Cached results do not expire with age; only orphans and old run folders are collected after 7 days | 10.5 | medium-high |
+| Frozen results are held by markers in the cache | 10.2, 10.4 | medium |
+| Escape or the breadcrumb leaves a group; Tab is search unless one group is selected | 5.2, 12.4 | medium |
+| Tabs and import of outputs are in M2 (the design tickets disagreed; the issues decide) | 12.10, 15 | medium |
+| Pack converters as programs declared in `pack.json` | 11.9 | medium |
+| The registry is built in M0 and packs on disk plug into it in M3 | 6.12 | high |
 
 ## Appendix B: issue to section map
 
@@ -1680,23 +1794,23 @@ Each has a confidence and can be overruled; say so on the issue that builds it.
 | #4 GPU checks | 6.3, 8.10 |
 | #5 canvas measurement | 12.1, 12.2 |
 | #6 plugin-interface research | 6.9 |
-| #7 document model and JSON format | 4, 1.5 |
-| #8 compiler | 4.8, 3.4 to 3.6, 5.6, 9.1, 13.3 |
+| #7 document model and JSON format | 4, 1.5, 2.1 to 2.3, 6.1 (inputs and outputs), 6.12 |
+| #8 compiler | 4.8, 2.3, 3, 5.6, 6.12, 9.1, 13.3 |
 | #9 scheduler and result cache | 9, 10 |
 | #10 run folder and media handles | 2.4, 9.7 |
-| #11 provider interface and the omarchy provider | 8.1 to 8.7 |
+| #11 provider interface and the omarchy provider | 8.1 to 8.7, 8.11, the operations table of 8.8 |
 | #12 CLI skeleton | 13.1 to 13.3, 9.8 |
 | #13 basic nodes | 14.1, 11.7 |
 | #14 Generate Image and Edit Image | 14.1, 8.1, 8.4 |
 | #15 pixel nodes | 14.1 |
-| #16 canvas | 12.1 to 12.3, 12.6 |
+| #16 canvas | 12.1 to 12.3, 12.6, 12.9 |
 | #17 selection, clipboard, undo | 12.4, 12.11 |
 | #18 node search | 12.8, 12.4 |
 | #19 run and per-node state | 12.7, 9.4, 10.3, 3.4 |
-| #20 save, open, recovery, import | 11, 3.6, 6.7 |
+| #20 save, open, recovery, import | 11, 3.6, 6.7, 12.10 |
 | #21 command registry and keymap | 12.5, 12.4 |
 | #22 theme, text size, translations | 12.11 |
-| #23 manifests and the loader | 6.1 to 6.5 |
+| #23 manifests and the loader | 6.1 to 6.5, 2.2 |
 | #24 command-node protocol | 7 |
 | #25 pack install, trust, environments | 6.6 to 6.8, 13.6 |
 | #26 groups | 5, 4.4 |
@@ -1706,5 +1820,5 @@ Each has a confidence and can be overruled; say so on the issue that builds it.
 | #30 agent skill | 13.4, 13.5 |
 | #31 providers as modules | 8.8 |
 | #32 component-level helper | 8.10, 2.6 |
-| #33 component nodes | 14.3, 2.5, 2.6 |
+| #33 component nodes | 14.3, 2.5, 2.6, 8.9 |
 | #34 CI recipe | 17 |

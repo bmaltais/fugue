@@ -10,19 +10,23 @@ _Avoid_: block, module, operator
 
 **Node type**:
 The definition a node is made from: its id, version, named inputs and outputs, and what it needs to run. Built-in or supplied by a pack.
-_Avoid_: node class, plugin, widget
+_Avoid_: node class, plugin
+
+**Widget**:
+The control an unwired input shows for editing its value, chosen from a fixed set.
+_Avoid_: control type, editor
 
 **Input**:
 A named, typed slot on a node that takes either a literal value or a link from another node's output. There is no separate "parameter" kind.
-_Avoid_: parameter, widget, socket, pin
+_Avoid_: parameter, socket, pin
 
 **Output**:
 A named, typed slot on a node that carries a value it produced or used, such as the seed it actually ran with. May be optional.
 _Avoid_: result, return value
 
 **Port type**:
-What kind of value an input or output carries. Six are built in (Text, Number, Boolean, Image, Video, Audio); nodes and packs can declare more.
-_Avoid_: data type, socket type
+What kind of value an input or output carries. Six are built in (Text, Number, Boolean, Image, Video, Audio); packs can declare more, as resource types or data types.
+_Avoid_: socket type, value type
 
 **Resource type**:
 A port type declared by a pack whose values are handles to something loadable, such as a model, a LoRA or a ControlNet. Namespaced and versioned.
@@ -57,7 +61,7 @@ A saved document: a graph, its layout, and what it requires.
 _Avoid_: project, scene, patch
 
 **Layout**:
-The positions, sizes, colors, comments and group boxes of a workflow. Optional; removing it never changes what the graph does.
+The positions, sizes, colors, comments and frames of a workflow. Optional; removing it never changes what the graph does.
 _Avoid_: canvas state, UI state
 
 **Requirements**:
@@ -104,6 +108,14 @@ _Avoid_: plugin, extension, custom node folder
 The JSON file that describes a node type (`node.json`), a pack (`pack.json`) or a provider (`provider.json`).
 _Avoid_: schema, descriptor, config
 
+**Command node**:
+A node whose type runs as a separate program that speaks JSON over stdio.
+_Avoid_: script node, external node
+
+**Share copy**:
+An export of a workflow with local paths removed, and optionally prompts and layout.
+_Avoid_: clean export, public copy
+
 **Capability**:
 What a node asks a provider for, such as generating an image or encoding text, instead of naming a server.
 _Avoid_: endpoint, service
@@ -121,5 +133,5 @@ One configured use of a provider: a name, an address and a key. A node can pin o
 _Avoid_: connection, endpoint, server
 
 **Freeze**:
-Pin a node's current result so it is kept and reused until unfrozen, whatever changes upstream.
+Keep a node's current result so it is reused until unfrozen, whatever changes upstream.
 _Avoid_: lock, pin (that is the canvas action that fixes a node's position)
