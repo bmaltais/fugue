@@ -67,6 +67,9 @@ Result<QString> storeImageFile(const QString &path, const QString &folder, const
 
 // The MIME types taken from the clipboard, best first.
 QStringList clipboardImageTypes();
+// Holds the MIME type of the original image when Fugue's Copy Image offers it beside a PNG made
+// for other apps: a paste takes that type first.
+inline constexpr const char *clipboardOriginalType = "application/x-fugue-image-type";
 // The encoded bytes of the first of those types whose bytes really are an image, else (with
 // `pixels`) the decoded pixels as PNG. Not ok when the data holds no such image. A paste tries
 // a `text/uri-list`'s files between the two.

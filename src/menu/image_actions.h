@@ -10,10 +10,12 @@
 //   node.open-image  the system's default viewer, through `opener` (QDesktopServices). A file
 //                    whose name does not carry its real format's extension (a cache file) is
 //                    copied to a temporary name that does, so the viewer recognizes it.
-//   node.copy-image  the clipboard gets the decoded QImage and the file's own bytes under their
-//                    real MIME type (png, jpeg, webp...), so another app takes the original and
-//                    a Fugue paste (image_inputs.h) stores it as it is. Reading and decoding
-//                    happen on a worker thread: a big image never holds the window.
+//   node.copy-image  the clipboard gets the file's own bytes under their real MIME type (png,
+//                    jpeg, webp...), and a PNG of the picture too when the file is not one, so
+//                    another app takes the original and a Fugue paste (image_inputs.h) stores
+//                    it as it is. No decoded QImage: qtwayland would serve every image/* type
+//                    by re-encoding it. Reading and decoding happen on a worker thread: a big
+//                    image never holds the window.
 //   node.save-image  asks the window for a save dialog (`saveRequested`); the answer comes to
 //                    saveTo, which copies the original bytes (the embedded workflow stays)
 //                    atomically. The dialog has already asked about an existing file; a name

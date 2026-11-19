@@ -211,8 +211,9 @@ private slots:
         QVERIFY(r.app.warnings.isEmpty());
     }
 
-    // Copy puts the full picture on the clipboard, and the file's own bytes under their MIME
-    // type, which a Fugue paste then stores as they are.
+    // Copy puts the file's own bytes on the clipboard under their MIME type, which another app
+    // and a Fugue paste then take as they are. No decoded image: on Wayland it would be what
+    // every image/* request gets, re-encoded (QWaylandMimeHelper::getByteArray).
     void copyPutsTheFullImageAndItsBytesOnTheClipboard() {
         ActionApp r(kSinks);
         QVERIFY(r.app.open());
@@ -226,13 +227,46 @@ private slots:
         QTest::mouseClick(r.app.window, Qt::LeftButton, {}, item->mapToScene(QPointF(item->width() / 2, item->height() / 2)).toPoint());
         QTRY_COMPARE(copied.size(), 1);
         const QMimeData *data = QGuiApplication::clipboard()->mimeData();
-        QVERIFY(data->hasImage());
-        QCOMPARE(qvariant_cast<QImage>(data->imageData()).size(), QSize(1200, 800));
+        QVERIFY(!data->hasImage());
+        QCOMPARE(data->formats(), QStringList{"image/png"});
         QCOMPARE(data->data("image/png"), picture);
         QVERIFY(fugue::clipboardHasImage(*data));
         const auto bytes = fugue::clipboardImageBytes(*data);
         QVERIFY(bytes.ok());
         QCOMPARE(*bytes, picture);
+        QVERIFY(r.messages.isEmpty());
+    }
+
+    // A JPEG goes on the clipboard as itself, with a PNG of the same picture beside it for
+    // apps that take only PNG.
+    void copyOfAJpegKeepsItsBytesAndAddsAPng() {
+        ActionApp r(kLoadImage);
+        QVERIFY(r.app.open());
+        const QString file = r.app.dir.filePath("photo.jpg");
+        QImage image(64, 48, QImage::Format_RGB32);
+        image.fill(Qt::red);
+        QVERIFY(image.save(file, "JPEG"));
+        QFile original(file);
+        QVERIFY(original.open(QIODevice::Append));
+        original.write("EXTRA"); // trailing bytes a re-encode would lose
+        original.close();
+        QVERIFY(r.app.model.widgets()->setText("src", "file", file).isEmpty());
+        QTRY_VERIFY(r.app.commands.isEnabled("node.copy-image", {{"node", "src"}}));
+        QGuiApplication::clipboard()->clear();
+        QSignalSpy copied(&r.actions, &fugue::ImageActions::copied);
+        r.app.model.select({"src"});
+        QVERIFY(r.app.commands.trigger("node.copy-image"));
+        QTRY_COMPARE(copied.size(), 1);
+        const QMimeData *data = QGuiApplication::clipboard()->mimeData();
+        QVERIFY(!data->hasImage());
+        QVERIFY(original.open(QIODevice::ReadOnly));
+        const QByteArray bytes = original.readAll();
+        QCOMPARE(data->data("image/jpeg"), bytes);
+        QImage png;
+        QVERIFY(png.loadFromData(data->data("image/png"), "PNG"));
+        QCOMPARE(png.size(), QSize(64, 48));
+        // A Fugue paste takes the original, not the PNG made for others.
+        QCOMPARE(fugue::clipboardImageBytes(*data).value(), bytes);
         QVERIFY(r.messages.isEmpty());
     }
 

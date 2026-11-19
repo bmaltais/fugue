@@ -204,7 +204,11 @@ QStringList clipboardFiles(const QMimeData &data) {
 }
 
 Result<QByteArray> clipboardImageBytes(const QMimeData &data, bool pixels) {
-    for (const QString &type : imageTypes) {
+    // Fugue's own Copy Image names the type of the original among the ones it offers.
+    QStringList types = imageTypes;
+    if (const QString original = QString::fromLatin1(data.data(clipboardOriginalType)); types.contains(original))
+        types.prepend(original);
+    for (const QString &type : std::as_const(types)) {
         if (!data.hasFormat(type))
             continue;
         const QByteArray bytes = data.data(type);

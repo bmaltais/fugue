@@ -134,30 +134,42 @@ void ImageActions::copy() {
     QThreadPool::globalInstance()->start([self, path] {
         ImageFormat format;
         const Result<QByteArray> bytes = readImage(path, format);
-        QImage image;
-        if (bytes) {
+        // A PNG of the picture beside the original, for apps that take only PNG; a PNG is
+        // already that.
+        QByteArray png;
+        if (bytes && format.mime != QLatin1String("image/png")) {
             QByteArray content = *bytes;
             QBuffer source(&content);
             source.open(QIODevice::ReadOnly);
             QImageReader reader(&source);
             reader.setAutoTransform(true);
             const QSize size = reader.size();
-            if (size.isValid() && qint64(size.width()) * size.height() <= maxImagePixels)
-                image = reader.read();
+            if (size.isValid() && qint64(size.width()) * size.height() <= maxImagePixels) {
+                const QImage image = reader.read();
+                QBuffer out(&png);
+                out.open(QIODevice::WriteOnly);
+                if (image.isNull() || !image.save(&out, "PNG"))
+                    png.clear();
+            }
         }
         if (!self)
             return;
-        QMetaObject::invokeMethod(self.data(), [self, bytes, format, image] {
+        QMetaObject::invokeMethod(qApp, [self, bytes, format, png] {
             if (!self)
                 return;
             if (!bytes) {
                 emit self->message(bytes.error().message);
                 return;
             }
+            // Bytes only, never setImageData: with a decoded image in the data, qtwayland
+            // answers every image/* request by encoding that image (QWaylandMimeHelper), so
+            // another app would get a re-encoded copy without the embedded workflow or EXIF.
             auto *data = new QMimeData;
-            if (!image.isNull())
-                data->setImageData(image);
             data->setData(format.mime, *bytes);
+            if (!png.isEmpty()) {
+                data->setData(QStringLiteral("image/png"), png);
+                data->setData(QString::fromLatin1(clipboardOriginalType), format.mime.toLatin1());
+            }
             QGuiApplication::clipboard()->setMimeData(data);
             emit self->copied();
         }, Qt::QueuedConnection);
