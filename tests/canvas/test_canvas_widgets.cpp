@@ -291,6 +291,28 @@ private slots:
         QCOMPARE(app.stored("all", "flag"), QJsonValue(true));
     }
 
+    void aChoiceMenuNearTheWindowsBottomOpensAboveAndStaysInside() {
+        WidgetApp app;
+        QVERIFY(app.open());
+        QQuickItem *field = app.widget("all", "mode");
+        QVERIFY(field);
+        const int bottom = field->mapToScene(QPointF(0, field->height())).toPoint().y();
+        app.window->resize(app.window->width(), bottom + 20);
+        QTRY_COMPARE(app.window->height(), bottom + 20);
+        app.click(app.in("all", "mode"));
+        QTRY_VERIFY2(app.menuOpen(), qPrintable(app.warnings.join('\n')));
+        QObject *menu = app.popup("widgetMenu");
+        auto *parent = menu->property("parent").value<QQuickItem *>();
+        const QPointF at = parent->mapToScene(QPointF(menu->property("x").toReal(), menu->property("y").toReal()));
+        const QRectF rect(at, QSizeF(menu->property("width").toReal(), menu->property("height").toReal()));
+        QVERIFY2(QRectF(0, 0, app.window->width(), app.window->height()).contains(rect),
+                 qPrintable(QString("%1,%2 %3x%4").arg(rect.x()).arg(rect.y()).arg(rect.width()).arg(rect.height())));
+        QVERIFY(rect.bottom() <= field->mapToScene(QPointF(0, 0)).y() + 1); // above the field
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!app.popup("widgetMenu"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void aChoiceOpensItsMenu() {
         WidgetApp app;
         QVERIFY(app.open());

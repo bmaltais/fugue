@@ -44,7 +44,7 @@ QColor lift(const QColor &color, const QColor &against, double target = 3.0);
 
 struct Tokens {
     QColor canvas, dot, dotMajor, body, header, hairline, hairlineStrong, well, label, popup;
-    QColor errorHeader, errorChip, selectedRow;
+    QColor errorHeader, errorChip, selectedRow, menuRow;
     // A bypassed node (9): the body and the header tinted with the palette's magenta, and the
     // dashed edge in it, as ComfyUI draws a bypassed node in magenta. The tint steps down
     // until the text and the labels still read at 4.5:1 on it.
@@ -97,6 +97,7 @@ class CanvasLook : public QObject {
     Q_PROPERTY(QColor errorHeader MEMBER m_errorHeader NOTIFY changed)
     Q_PROPERTY(QColor errorChip MEMBER m_errorChip NOTIFY changed)
     Q_PROPERTY(QColor selectedRow MEMBER m_selectedRow NOTIFY changed)
+    Q_PROPERTY(QColor menuRow MEMBER m_menuRow NOTIFY changed)
     Q_PROPERTY(QColor bevel MEMBER m_bevel NOTIFY changed)
     Q_PROPERTY(QColor scrim MEMBER m_scrim NOTIFY changed)
     Q_PROPERTY(QColor bypassBody MEMBER m_bypassBody NOTIFY changed)
@@ -167,7 +168,7 @@ private:
     mutable QHash<QString, QVariantMap> m_roles;
 
     QColor m_canvas, m_dot, m_dotMajor, m_body, m_header, m_hairline, m_hairlineStrong, m_well, m_label, m_popup;
-    QColor m_errorHeader, m_errorChip, m_selectedRow, m_bevel, m_scrim, m_bypassBody, m_bypassHeader, m_bypassEdge;
+    QColor m_errorHeader, m_errorChip, m_selectedRow, m_menuRow, m_bevel, m_scrim, m_bypassBody, m_bypassHeader, m_bypassEdge;
     QColor m_text, m_accent, m_accentForeground, m_error;
     bool m_light = false;
     QVariantMap m_ports;

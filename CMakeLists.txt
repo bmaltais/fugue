@@ -45,7 +45,7 @@ qt_add_qml_module(fugue_core URI Fugue VERSION 1.0 NO_PLUGIN RESOURCE_PREFIX /qt
 # written as build/qmllint/<name>.qrc too, so the qmllint test reads them where the app does.
 set(fugue_qmllint_resources --resource ${CMAKE_SOURCE_DIR}/src/resources.qrc)
 function(fugue_add_qml name folder prefix)
-  file(GLOB names CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/${folder} ${folder}/*.qml)
+  file(GLOB names CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/${folder} ${folder}/*.qml ${folder}/*.js)
   set(files)
   set(qrc "<RCC>\n  <qresource prefix=\"${prefix}\">\n")
   foreach(qml ${names})

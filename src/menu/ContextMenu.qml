@@ -55,7 +55,7 @@ Item {
         menu.items = App.commands.menu(kind, target)
         const p = canvas.mapToItem(root, px, py)
         menu.byKey = byKey
-        menu.popup(p.x, p.y)
+        menu.popupFit(root, p.x, p.y, 0, 0)
     }
 
     Connections {

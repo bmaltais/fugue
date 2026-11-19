@@ -152,8 +152,15 @@ Tokens tokens(const QHash<QString, QColor> &colors, bool light) {
         t.selectedRow = mix(t.body, accent, .16);
         t.popup = mix(bg, fg, .09);
     }
+    // The current row of a menu (hovered or by key) on the popup surface: a clear accent fill,
+    // lessened until the text reads on it at 4.5:1.
+    for (const double k : {.32, .28, .24, .20, .16, .12, .08}) {
+        t.menuRow = mix(t.popup, accent, k);
+        if (contrast(fg, t.menuRow) >= 4.5)
+            break;
+    }
     // Labels sit on all of these: the share of text grows until the label reads at 4.5:1 on each.
-    const QList<QColor> surfaces{t.body, t.header, t.well, t.popup, t.selectedRow, t.canvas};
+    const QList<QColor> surfaces{t.body, t.header, t.well, t.popup, t.selectedRow, t.menuRow, t.canvas};
     for (int share = light ? 87 : 80; share <= 100; share += 2) {
         t.labelShare = share / 100.0;
         t.label = mix(t.body, fg, t.labelShare);
@@ -424,6 +431,7 @@ void CanvasLook::update(const QHash<QString, QColor> &colors, bool light, int ra
     m_errorHeader = t.errorHeader;
     m_errorChip = t.errorChip;
     m_selectedRow = t.selectedRow;
+    m_menuRow = t.menuRow;
     m_bevel = t.bevel;
     m_scrim = t.scrim;
     m_bypassBody = t.bypassBody;

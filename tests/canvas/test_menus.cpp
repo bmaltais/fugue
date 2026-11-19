@@ -34,6 +34,13 @@ const char *framed = R"({
              "view": {"center": [480, 300], "zoom": 1}}
 })";
 
+// One Text node, far to the lower right of the view's centre.
+const char *nearCorner = R"({
+  "fugue": 1,
+  "graph": {"nodes": {"c": {"type": "fugue/text", "version": "1.0.0", "inputs": {"text": "far"}}}},
+  "layout": {"nodes": {"c": {"pos": [640, 280]}}, "view": {"center": [480, 300], "zoom": 1}}
+})";
+
 // A visible item by name, in the window's items (the overlay where menus draw included).
 QQuickItem *visibleItem(QQuickItem *from, const QString &name) {
     for (QQuickItem *child : from->childItems()) {
@@ -75,6 +82,28 @@ QString currentRow(QQuickWindow *window, const QString &name) {
 // No menu is showing.
 bool allClosed(QQuickWindow *window) {
     return !isOpen(window, "menuDropdown") && !isOpen(window, "menuEverything") && !isOpen(window, "contextMenuPopup");
+}
+
+// A popup's rectangle in the window: its x, y, width and height in its parent.
+QRectF popupRect(QObject *menu) {
+    auto *parent = menu->property("parent").value<QQuickItem *>();
+    const QPointF at = parent->mapToScene(QPointF(menu->property("x").toReal(), menu->property("y").toReal()));
+    return QRectF(at, QSizeF(menu->property("width").toReal(), menu->property("height").toReal()));
+}
+
+QRectF sceneRect(QQuickItem *item) { return QRectF(item->mapToScene(QPointF(0, 0)), QSizeF(item->width(), item->height())); }
+
+QString rectText(const QRectF &r) { return QStringLiteral("%1,%2 %3x%4").arg(r.x()).arg(r.y()).arg(r.width()).arg(r.height()); }
+
+// The menu is wholly inside the window.
+bool insideWindow(QQuickWindow *window, QObject *menu) {
+    return QRectF(0, 0, window->width(), window->height()).contains(popupRect(menu));
+}
+
+QQuickItem *rowAt(QObject *menu, int index) {
+    QQuickItem *item = nullptr;
+    QMetaObject::invokeMethod(menu, "itemAt", Q_RETURN_ARG(QQuickItem *, item), Q_ARG(int, index));
+    return item;
 }
 
 // A visible item that must be there.
@@ -470,6 +499,187 @@ private slots:
         QTest::mouseMove(app.window, centerOf(NEED("menuItem-node.mute")));
         QTest::qWait(400);
         QVERIFY(test_support::grab(app.window).save(name + "-node.png"));
+    }
+
+    // Down from the first row to the last: each current row is wholly inside the window and
+    // inside the menu (a capped menu scrolls it into view).
+    static void everyRowIsReachable(App &app, const char *name) {
+        QObject *menu = popup(app.window, name);
+        const int count = menu->property("count").toInt();
+        QVERIFY(count > 2);
+        for (int step = 0; step < count + 2; ++step) {
+            const int at = menu->property("currentIndex").toInt();
+            if (at >= 0 && rowAt(menu, at)->isEnabled()) {
+                QQuickItem *row = rowAt(menu, at);
+                QQuickItem *content = menu->property("contentItem").value<QQuickItem *>();
+                QTRY_VERIFY2(QRectF(0, 0, app.window->width(), app.window->height()).contains(sceneRect(row)),
+                             qPrintable(row->objectName() + " " + rectText(sceneRect(row))));
+                QTRY_VERIFY2(sceneRect(content).adjusted(-1, -1, 1, 1).contains(sceneRect(row)),
+                             qPrintable(row->objectName() + " " + rectText(sceneRect(row)) + " in " + rectText(sceneRect(content))));
+            }
+            app.key(Qt::Key_Down);
+        }
+    }
+
+    void aContextMenuStaysInsideTheWindowAtEveryCorner() {
+        App app(load(framed));
+        QVERIFY(app.open());
+        app.window->resize(700, 400);
+        QTRY_COMPARE(app.window->width(), 700);
+        app.model.select({"c"});
+        const QPoint corners[] = {{4, 60}, {696, 60}, {4, 396}, {696, 396}, {350, 396}, {696, 200}};
+        for (const QPoint &corner : corners) {
+            QTest::mouseClick(app.window, Qt::RightButton, {}, corner);
+            QTRY_VERIFY(isOpen(app.window, "contextMenuPopup"));
+            QObject *menu = popup(app.window, "contextMenuPopup");
+            QTRY_VERIFY2(insideWindow(app.window, menu), qPrintable(rectText(popupRect(menu))));
+            // The menu never covers the point it opened at (it flips beside it) unless it had to shift.
+            app.key(Qt::Key_Down);
+            everyRowIsReachable(app, "contextMenuPopup");
+            app.key(Qt::Key_Escape);
+            QTRY_VERIFY(!isOpen(app.window, "contextMenuPopup"));
+        }
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    void aNodeMenuNearTheBottomRightKeepsDeleteInside() {
+        App app(load(nearCorner));
+        QVERIFY(app.open());
+        app.window->resize(700, 400);
+        QTRY_COMPARE(app.window->width(), 700);
+        const QPoint at = app.screen(650, 292);
+        QVERIFY2(at.x() > 600 && at.y() > 330 && at.x() < 700 && at.y() < 400, qPrintable(QString::number(at.x()) + "," + QString::number(at.y())));
+        QTest::mouseClick(app.window, Qt::RightButton, {}, at);
+        QTRY_VERIFY(isOpen(app.window, "contextMenuPopup"));
+        QObject *menu = popup(app.window, "contextMenuPopup");
+        QCOMPARE(popup(app.window, "contextMenu")->property("kind").toString(), QString("node"));
+        QTRY_VERIFY2(insideWindow(app.window, menu), qPrintable(rectText(popupRect(menu))));
+        QVERIFY(find(app.window, "menuItem-edit.delete"));
+        app.key(Qt::Key_Down);
+        everyRowIsReachable(app, "contextMenuPopup");
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    void aMenuTallerThanTheWindowIsCappedAndScrolls() {
+        App app(load(framed));
+        QVERIFY(app.open());
+        app.window->resize(700, 160);
+        QTRY_COMPARE(app.window->height(), 160);
+        app.model.select({"c"});
+        QTest::mouseClick(app.window, Qt::RightButton, {}, QPoint(600, 100));
+        QTRY_VERIFY(isOpen(app.window, "contextMenuPopup"));
+        QObject *menu = popup(app.window, "contextMenuPopup");
+        QTRY_VERIFY2(insideWindow(app.window, menu), qPrintable(rectText(popupRect(menu))));
+        QQuickItem *content = menu->property("contentItem").value<QQuickItem *>();
+        QVERIFY(content->property("contentHeight").toReal() > content->height()); // it scrolls
+        app.key(Qt::Key_Down);
+        everyRowIsReachable(app, "contextMenuPopup");
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    void theColorsSubmenuOpensLeftWhenThereIsNoRoomOnTheRight() {
+        App app(load(nearCorner));
+        QVERIFY(app.open());
+        app.window->resize(700, 400);
+        QTRY_COMPARE(app.window->width(), 700);
+        QTest::mouseClick(app.window, Qt::RightButton, {}, app.screen(650, 292));
+        QTRY_VERIFY(isOpen(app.window, "contextMenuPopup"));
+        QQuickItem *colors = NEED("subMenu-Colors");
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(colors));
+        QQuickItem *red = nullptr;
+        QTRY_VERIFY((red = find(app.window, "menuItem-node.color.red")));
+        QObject *parentMenu = popup(app.window, "contextMenuPopup");
+        QObject *sub = nullptr;
+        for (QObject *child : parentMenu->children())
+            if (child->property("sub").toBool() && child->property("visible").toBool())
+                sub = child;
+        QVERIFY(sub);
+        QTRY_VERIFY2(insideWindow(app.window, sub), qPrintable(rectText(popupRect(sub))));
+        QVERIFY(popupRect(sub).right() <= popupRect(parentMenu).right()); // beside it, on the left
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    void theBarMenusAndTheMenuButtonStayInsideANarrowWindow() {
+        App app(load(framed));
+        QVERIFY(app.open());
+        app.window->resize(260, 260);
+        QTRY_VERIFY(find(app.window, "menuButton"));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("menuButton")));
+        QTRY_VERIFY(isOpen(app.window, "menuEverything"));
+        QObject *menu = popup(app.window, "menuEverything");
+        QTRY_VERIFY2(insideWindow(app.window, menu), qPrintable(rectText(popupRect(menu))));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("subMenu-Help")));
+        QTRY_VERIFY(find(app.window, "menuItem-help.about"));
+        for (QObject *child : menu->children())
+            if (child->property("sub").toBool() && child->property("visible").toBool())
+                QTRY_VERIFY2(insideWindow(app.window, child), qPrintable(rectText(popupRect(child))));
+        for (int i = 0; i < 3 && !allClosed(app.window); ++i) {
+            app.key(Qt::Key_Escape);
+            QTest::qWait(300);
+        }
+        QTRY_VERIFY(allClosed(app.window));
+        // A bar menu opened with its key, in a window narrower than the menu.
+        QTest::keyClick(app.window, 'V', Qt::AltModifier);
+        QTRY_VERIFY(isOpen(app.window, "menuDropdown"));
+        QObject *dropdown = popup(app.window, "menuDropdown");
+        QTRY_VERIFY2(insideWindow(app.window, dropdown), qPrintable(rectText(popupRect(dropdown))));
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(allClosed(app.window));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // The row under the pointer, and the one the keys are on, take the menu-row fill; one
+    // current row at a time, a disabled one never, a submenu's parent while it is open.
+    void theCurrentRowIsFilledOnDarkAndLightThemes_data() {
+        QTest::addColumn<QString>("theme");
+        QTest::newRow("dark") << "ethereal";
+        QTest::newRow("light") << "flexoki-light";
+    }
+    void theCurrentRowIsFilledOnDarkAndLightThemes() {
+        QFETCH(QString, theme);
+        if (!QFile::exists("/usr/share/omarchy/themes/" + theme))
+            QSKIP("theme not installed here");
+        App app(load(framed), {}, canvas_test::Look{theme, 8});
+        QVERIFY(app.open());
+        auto *look = app.theme.property("look").value<QObject *>();
+        const QColor fill = look->property("menuRow").value<QColor>();
+        auto filled = [&](const QString &name) {
+            QQuickItem *row = find(app.window, name);
+            auto *bg = row ? row->property("background").value<QQuickItem *>() : nullptr;
+            return bg && bg->property("color").value<QColor>() == fill;
+        };
+        QTest::mouseClick(app.window, Qt::RightButton, {}, app.screen(620, 90));
+        QTRY_VERIFY(isOpen(app.window, "contextMenuPopup"));
+        QQuickItem *bypass = NEED("menuItem-node.bypass");
+        QQuickItem *mute = NEED("menuItem-node.mute");
+        QTest::mouseMove(app.window, centerOf(bypass) + QPoint(3, 2));
+        QTest::mouseMove(app.window, centerOf(bypass));
+        QTest::qWait(100);
+        QTRY_VERIFY(filled("menuItem-node.bypass"));
+        QVERIFY(!filled("menuItem-node.mute"));
+        QTest::mouseMove(app.window, centerOf(mute));
+        QTRY_VERIFY(filled("menuItem-node.mute"));
+        QVERIFY(!filled("menuItem-node.bypass"));
+        // The keys move the same highlight.
+        app.key(Qt::Key_Down);
+        QTRY_VERIFY(!filled("menuItem-node.mute"));
+        // A disabled row (not built yet and off) is not filled under the pointer.
+        for (const QVariant &entry : app.commands.menu("node", {}))
+            if (entry.toMap().contains("enabled") && !entry.toMap().value("enabled").toBool()) {
+                QQuickItem *off = find(app.window, "menuItem-" + entry.toMap().value("command").toString());
+                if (off) {
+                    QTest::mouseMove(app.window, centerOf(off));
+                    QTest::qWait(50);
+                    QVERIFY(!filled(off->objectName()));
+                }
+                break;
+            }
+        // The Colors row stays filled while its submenu is open.
+        QQuickItem *colors = NEED("subMenu-Colors");
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(colors));
+        QTRY_VERIFY(find(app.window, "menuItem-node.color.red"));
+        QTRY_VERIFY(filled("subMenu-Colors"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
     void shiftF10OpensTheContextMenuFromTheKeys() {

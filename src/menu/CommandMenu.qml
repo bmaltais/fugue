@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import Fugue
 import "../canvas"
+import "placement.js" as Placement
 
 // A menu built from a menu tree of the command registry (menus.h, CommandRegistry::menu): a
 // MenuItem per command with its name, keys and state as the registry gives them now, a
@@ -57,6 +58,21 @@ Menu {
     onAboutToHide: { shown = false; App.commands.menuShown(false) }
     Component.onDestruction: if (shown) App.commands.menuShown(false)
     padding: 1.5 * u
+    // Wholly inside the window: no taller than it (the rows scroll then), and opened through
+    // popupFit, which flips or shifts it (placement.js). Qt's own clamp is the backstop.
+    readonly property Item overlay: Overlay.overlay
+    margins: Placement.margin
+    height: Math.min(implicitHeight, overlay ? Placement.maxExtent(overlay.height) : implicitHeight)
+    // Opens at (x, y) of `anchor`; `gapX` and `gapY` are what the anchor takes beside that point.
+    function popupFit(anchor, x, y, gapX, gapY) {
+        const p = fitted(anchor, x, y, gapX, gapY)
+        popup(anchor, p.x, p.y)
+    }
+    // Where it fits, in `anchor`'s coordinates; the rows must be in already.
+    function fitted(anchor, x, y, gapX, gapY) {
+        (contentItem as ListView).forceLayout()
+        return Placement.fit(anchor, overlay, x, y, implicitWidth, implicitHeight, gapX, gapY)
+    }
     // As wide as its widest row wants, so names and keys never elide.
     property real widest: 0
     implicitWidth: Math.max(56 * u, widest + leftPadding + rightPadding)
@@ -74,6 +90,8 @@ Menu {
         focus: true
         keyNavigationEnabled: false // Up and Down are the menu's
         currentIndex: menu.currentIndex
+        // Up and Down keep the current row in view when the menu is capped and scrolls.
+        onCurrentIndexChanged: if (currentIndex >= 0) positionViewAtIndex(currentIndex, ListView.Contain)
         ScrollIndicator.vertical: ScrollIndicator {}
         Keys.onPressed: event => {
             if (menu.sub || menu.onSubMenuRow || (event.key !== Qt.Key_Left && event.key !== Qt.Key_Right))
