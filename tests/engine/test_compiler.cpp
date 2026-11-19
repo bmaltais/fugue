@@ -176,6 +176,7 @@ private slots:
     void everyKindOfErrorIsReportedTogether();
     void exposedInputsNarrowConstraintsAndSupplyDefaults();
     void bypassCarriesALiteralThrough();
+    void aLiteralCarriedThroughABypassIsCheckedAgainstTheInputItReaches();
     void bypassRewiresLinksToTheFirstInputOfTheSameType();
     void bypassWithNoMatchingInputEmptiesTheOutput();
     void bypassedGroupPassesItsExposedInputThrough();
@@ -530,6 +531,31 @@ void TestCompiler::bypassCarriesALiteralThrough() {
     const Compilation result = compile(doc, registry());
     QVERIFY2(result.ok(), qPrintable(dump(result.errors)));
     QCOMPARE(dump(nodesOf(result).value("gen").toObject().value("inputs")), dump(json("{'prompt': 'a fox'}")));
+}
+
+// A link is only type-checked (text into text); once a bypass turns it into the literal
+// behind it, that literal must fit the limits of the input it now sits in (9.1).
+void TestCompiler::aLiteralCarriedThroughABypassIsCheckedAgainstTheInputItReaches() {
+    const char *graph =
+        "{'fugue': 1, 'graph': {'nodes': {"
+        " 'how': {'type': 'fugue/text', 'version': '1.0.0', 'mode': 'bypass', 'inputs': {'text': '%1'}},"
+        " 'gen': {'type': 'fugue/generate-image', 'version': '1.0.0', 'inputs': {'prompt': 'a fox'}},"
+        " 'small': {'type': 'io.example.tools/shrink', 'version': '1.2.0',"
+        "           'inputs': {'image': {'from': 'gen.image'}, 'method': {'from': 'how.text'}}},"
+        " 'save': {'type': 'fugue/save-image', 'version': '1.0.0', 'inputs': {'image': {'from': 'small.image'}}}}}}";
+    const Compilation bad = compile(document(QString::fromLatin1(graph).arg("cubic").toUtf8()), registry());
+    QVERIFY(!bad.ok());
+    QCOMPARE(bad.errors.size(), 1);
+    const Error error = bad.errors.first();
+    QCOMPARE(error.code, QStringLiteral("value_not_in_choices"));
+    QCOMPARE(error.node, QStringLiteral("small"));
+    QCOMPARE(error.input, QStringLiteral("method"));
+    QVERIFY(error.valid.contains("lanczos"));
+    QVERIFY2(error.message.contains("how"), qPrintable(error.message)); // where the value comes from
+
+    const Compilation good = compile(document(QString::fromLatin1(graph).arg("lanczos").toUtf8()), registry());
+    QVERIFY2(good.ok(), qPrintable(dump(good.errors)));
+    QCOMPARE(good.graph->nodes.value("small").inputs.value("method").literal().toString(), QStringLiteral("lanczos"));
 }
 
 void TestCompiler::bypassRewiresLinksToTheFirstInputOfTheSameType() {

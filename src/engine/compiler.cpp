@@ -135,6 +135,7 @@ struct Flat {
     QString provider;
     QString frozen;
     QMap<QString, InputValue> inputs; // links by path id
+    QMap<QString, InputSpec> checkedAs; // each input as its value was checked: narrowed by group faces
     bool emptied = false;             // a required input lost its value to a bypass
 
     const NodeType &spec() const { return face ? *face : *type; }
@@ -202,6 +203,7 @@ private:
     CompiledGraph shape();
     InputValue bypassValue(const QString &path, const QString &port, int depth) const;
     InputValue rewire(const InputValue &value, int depth) const;
+    void checkCarried(const Flat &flat, const QString &input, const InputValue &written);
 
     const Document &m_doc;
     const Registry &m_registry;
@@ -703,6 +705,7 @@ std::optional<InputValue> Compiler::resolveItem(const Flat &flat, const InputSpe
 
 void Compiler::checkValue(Flat &flat, const InputSpec &base, const Bound &bound) {
     const InputSpec spec = narrowed(base, bound.narrowing);
+    flat.checkedAs[spec.name] = spec;
     const InputValue &value = bound.value;
     if (value.kind() != InputValue::Kind::List) {
         if (std::optional<InputValue> resolved = resolveItem(flat, spec, bound, value, -1))
@@ -926,6 +929,42 @@ InputValue Compiler::rewire(const InputValue &value, int depth) const {
     return InputValue::list(items);
 }
 
+// A link into a bypassed node was checked as a link: its type fits. When the bypass turns
+// it into the literal behind it, that literal is checked against the input it now sits
+// in, with its limits and choices (9.1), like one written there.
+void Compiler::checkCarried(const Flat &flat, const QString &input, const InputValue &written) {
+    const auto spec = flat.checkedAs.constFind(input);
+    if (spec == flat.checkedAs.constEnd())
+        return;
+    const auto one = [&](const InputValue &item) {
+        if (item.kind() != InputValue::Kind::Link)
+            return;
+        const QString through = item.from().node;
+        const auto source = m_flat.constFind(through);
+        if (source == m_flat.constEnd() || source->mode != NodeMode::Bypass)
+            return;
+        const InputValue carried = rewire(item, 0);
+        const QList<InputValue> values =
+            carried.kind() == InputValue::Kind::List ? carried.items() : QList<InputValue>{carried};
+        for (const InputValue &value : values) {
+            if (value.isEmpty() || value.kind() == InputValue::Kind::Link)
+                continue;
+            for (Error error : checkLiteral(*spec, value.toJson(), m_registry.portKind(spec->type.type))) {
+                error.node = flat.path;
+                error.input = input;
+                error.message += QStringLiteral(" The value comes through the bypassed node %1.").arg(through);
+                fail(error);
+            }
+        }
+    };
+    if (written.kind() == InputValue::Kind::List) {
+        for (const InputValue &item : written.items())
+            one(item);
+    } else {
+        one(written);
+    }
+}
+
 // Bypass, mute, sinks inside groups, and what no sink needs (4.8).
 CompiledGraph Compiler::shape() {
     CompiledGraph graph;
@@ -940,6 +979,7 @@ CompiledGraph Compiler::shape() {
     for (Flat &flat : live) {
         QMap<QString, InputValue> rewired;
         for (auto it = flat.inputs.constBegin(); it != flat.inputs.constEnd(); ++it) {
+            checkCarried(flat, it.key(), *it);
             const InputValue value = rewire(*it, 0);
             const bool emptiedList = value.kind() == InputValue::Kind::List && value.items().isEmpty() &&
                                      !it->items().isEmpty();
