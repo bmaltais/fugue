@@ -15,9 +15,19 @@
 #include <QList>
 #include <QString>
 
+#include "engine/clock.h"
 #include "engine/result.h"
 
 namespace fugue {
+
+// A run's status, as run.json and run.done write it (9.4, 9.7).
+enum class RunStatus { Unknown, Queued, Running, Ok, Failed, Cancelled };
+// "unknown", "queued", "running", "ok", "failed", "cancelled". (Not a free toString():
+// QtTest would take it for its own.)
+QString runStatusName(RunStatus status);
+RunStatus parseRunStatus(const QString &text); // Unknown for anything else
+// Ok, failed or cancelled: the run is over.
+bool isTerminal(RunStatus status);
 
 // A new run id: the UTC start time to the millisecond and four random
 // characters, e.g. "20261119-153012-123-k3f9". Opaque, of [a-z0-9-], and
@@ -48,6 +58,21 @@ public:
     QJsonObject state() const;
     bool writeCompiled(const QJsonObject &compiled) const;
     QJsonObject compiled() const;
+
+    // What whoever queues the run writes (9.8): run.json with the status `queued`, and
+    // the workflow's path when there is one, then the run.queued event.
+    bool queued(const QString &workflow = {}) const;
+    // Ends the run: run.json keeps what it holds and gets `status` and `ended`, then
+    // run.done is appended with the errors. Returns that event as it was given to
+    // appendEvent, for a caller that also tells listeners. Every way a run ends goes
+    // through here: the scheduler's, a cancel of a run that never ran, a dead worker's.
+    QJsonObject finish(RunStatus status, const Errors &errors, const QDateTime &now) const;
+    // The run's status: run.done's when the run has ended (it is appended once, by
+    // whoever ended it, while run.json is rewritten as the run goes), else run.json's,
+    // else what the events so far say, else unknown. The second form saves reading the
+    // events again.
+    RunStatus status() const;
+    RunStatus status(const QList<QJsonObject> &events) const;
 
     // Appends one event (9.4), adding "run" and "time" (ISO 8601 UTC with
     // milliseconds) when it lacks them. Safe to call from several threads.

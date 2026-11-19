@@ -22,6 +22,9 @@ namespace fugue {
 
 QByteArray writeJson(const QJsonValue &value);
 
+// One line with no spaces and no newline: an event in events.jsonl, an envelope on stdout.
+QByteArray compactJson(const QJsonObject &object);
+
 // Writes `value` to a file in that form, replacing the file atomically: a reader sees
 // the old content or the new, never half of it. The folder must exist. Empty
 // when done; else one permission_denied error that names the file and the reason.

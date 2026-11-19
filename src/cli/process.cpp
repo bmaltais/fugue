@@ -4,14 +4,15 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QStandardPaths>
+
+#include "engine/paths.h"
 
 namespace fugue::cli {
 
 namespace {
 
 QString stampPath() {
-    return QStandardPaths::writableLocation(QStandardPaths::GenericStateLocation) + QStringLiteral("/fugue/gc.stamp");
+    return stateDir() + QStringLiteral("/gc.stamp");
 }
 
 } // namespace

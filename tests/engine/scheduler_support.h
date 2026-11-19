@@ -104,7 +104,7 @@ public:
 inline OfferedModel offeredModel(const QString &name) {
     OfferedModel model;
     model.handle = QJsonObject{{"resource", "fugue/image-model"}, {"name", name}};
-    model.status = QStringLiteral("ready");
+    model.status = ModelStatus::Ready;
     return model;
 }
 

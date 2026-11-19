@@ -11,10 +11,10 @@
 #include <QJsonObject>
 #include <QLockFile>
 #include <QMutexLocker>
-#include <QStandardPaths>
 
 #include "engine/hash.h"
 #include "engine/json.h"
+#include "engine/paths.h"
 
 namespace fugue {
 
@@ -60,8 +60,7 @@ FileHashes::FileHashes(QString storePath) : m_storePath(std::move(storePath)) {
 }
 
 QString FileHashes::defaultPath() {
-    return QStandardPaths::writableLocation(QStandardPaths::GenericStateLocation) +
-           QStringLiteral("/fugue/hashes.json");
+    return stateDir() + QStringLiteral("/hashes.json");
 }
 
 QString FileHashes::hash(const QString &path) {

@@ -11,6 +11,7 @@
 #include <QRegularExpression>
 #include <QSet>
 #include <QTemporaryDir>
+#include <QTimeZone>
 #include <QtTest>
 
 #include "engine/json.h"
@@ -111,6 +112,60 @@ private slots:
         QCOMPARE(events.size(), 2);
         QCOMPARE(events.at(1).value("node").toString(), QStringLiteral("g7/first"));
         QCOMPARE(events.at(1).value("time").toString(), QStringLiteral("2026-11-19T10:00:00.000Z"));
+    }
+
+    void aRunStatusHasANameAndIsReadBack() {
+        for (const RunStatus status : {RunStatus::Queued, RunStatus::Running, RunStatus::Ok, RunStatus::Failed,
+                                       RunStatus::Cancelled, RunStatus::Unknown})
+            QCOMPARE(parseRunStatus(runStatusName(status)), status);
+        QCOMPARE(runStatusName(RunStatus::Cancelled), QStringLiteral("cancelled"));
+        QCOMPARE(parseRunStatus("finished"), RunStatus::Unknown);
+        QVERIFY(isTerminal(RunStatus::Ok) && isTerminal(RunStatus::Failed) && isTerminal(RunStatus::Cancelled));
+        QVERIFY(!isTerminal(RunStatus::Queued) && !isTerminal(RunStatus::Running) && !isTerminal(RunStatus::Unknown));
+    }
+
+    void aQueuedRunHasItsStatusItsWorkflowAndTheQueuedEvent() {
+        QTemporaryDir root;
+        const RunFolder folder = RunFolder::create(root.path()).value();
+        QCOMPARE(folder.status(), RunStatus::Unknown); // nothing written yet
+        QVERIFY(folder.queued("/w/fox.fugue"));
+        QCOMPARE(folder.state(), (QJsonObject{{"status", "queued"}, {"workflow", QJsonObject{{"path", "/w/fox.fugue"}}}}));
+        QCOMPARE(folder.events().size(), 1);
+        QCOMPARE(folder.events().first().value("event").toString(), QStringLiteral("run.queued"));
+        QCOMPARE(folder.status(), RunStatus::Queued);
+    }
+
+    void finishEndsARunKeepingWhatRunJsonHolds() {
+        QTemporaryDir root;
+        const RunFolder folder = RunFolder::create(root.path()).value();
+        QVERIFY(folder.queued("/w/fox.fugue"));
+        const QDateTime at(QDate(2026, 11, 19), QTime(12, 30, 1, 250), QTimeZone::UTC);
+        const QJsonObject done = folder.finish(RunStatus::Failed, {makeError("internal", "The run's worker is gone.")}, at);
+
+        const QJsonObject state = folder.state();
+        QCOMPARE(state.value("status").toString(), QStringLiteral("failed"));
+        QCOMPARE(state.value("ended").toString(), QStringLiteral("2026-11-19T12:30:01.250Z"));
+        QCOMPARE(state.value("workflow").toObject().value("path").toString(), QStringLiteral("/w/fox.fugue"));
+        const QJsonObject last = folder.events().last();
+        QCOMPARE(last.value("event").toString(), QStringLiteral("run.done"));
+        QCOMPARE(last.value("status").toString(), QStringLiteral("failed"));
+        QCOMPARE(last.value("errors").toArray().at(0).toObject().value("code").toString(), QStringLiteral("internal"));
+        QCOMPARE(done.value("status"), last.value("status"));
+        QCOMPARE(done.value("errors"), last.value("errors"));
+        QCOMPARE(folder.status(), RunStatus::Failed);
+    }
+
+    void theStatusIsRunDonesOnceTheRunHasEnded() {
+        QTemporaryDir root;
+        const RunFolder folder = RunFolder::create(root.path()).value();
+        folder.appendEvent(QJsonObject{{"event", "run.queued"}});
+        QCOMPARE(folder.status(), RunStatus::Queued); // from the events, before any run.json
+        folder.appendEvent(QJsonObject{{"event", "run.started"}});
+        QCOMPARE(folder.status(), RunStatus::Running);
+        folder.writeState(QJsonObject{{"status", "running"}});
+        folder.appendEvent(QJsonObject{{"event", "run.done"}, {"status", "cancelled"}});
+        // A run.json written late does not bring an ended run back.
+        QCOMPARE(folder.status(), RunStatus::Cancelled);
     }
 
     void aTornLastEventIsSkipped() {

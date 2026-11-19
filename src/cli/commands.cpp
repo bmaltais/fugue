@@ -22,10 +22,6 @@ namespace fugue::cli {
 
 namespace {
 
-QString compact(const QJsonObject &object) {
-    return QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact));
-}
-
 // ---- nodes ----
 
 QString humanProblem(const Error &error) {
@@ -216,11 +212,12 @@ Reply runsList(const Command &, Context &context) {
         if (!folder)
             continue;
         const QJsonObject state = folder->state();
-        QJsonObject run{{"id", id}, {"status", runStatus(*folder, folder->events())}};
+        const RunStatus status = folder->status();
+        QJsonObject run{{"id", id}, {"status", runStatusName(status)}};
         for (const char *key : {"workflow", "started", "ended"})
             if (state.contains(key))
                 run.insert(key, state.value(key));
-        if (positions.contains(id) && !isTerminal(run.value("status").toString()))
+        if (positions.contains(id) && !isTerminal(status))
             run.insert("position", positions.value(id));
         runs.append(run);
         lines << QStringLiteral("%1  %2").arg(id, run.value("status").toString());
@@ -262,7 +259,7 @@ Reply runsStatus(const Command &command, Context &context) {
     const QList<QJsonObject> events = folder->events();
     QJsonObject data = folder->state();
     data.insert("id", folder->id());
-    data.insert("status", runStatus(*folder, events));
+    data.insert("status", runStatusName(folder->status(events)));
     data.insert("nodes", foldNodes(events));
     return Reply::success(data, QStringLiteral("%1  %2").arg(folder->id(), data.value("status").toString()));
 }
@@ -296,7 +293,7 @@ Reply runsResult(const Command &command, Context &context) {
         } else if (kind == "run.done")
             errors = event.value("errors").toArray();
     }
-    QJsonObject data{{"id", folder->id()}, {"status", runStatus(*folder, events)}, {"outputs", outputs}};
+    QJsonObject data{{"id", folder->id()}, {"status", runStatusName(folder->status(events))}, {"outputs", outputs}};
     if (!errors.isEmpty())
         data.insert("errors", errors);
     return Reply::success(data, QString::fromUtf8(writeJson(outputs)));
@@ -309,7 +306,7 @@ Reply runsEvents(const Command &command, Context &context) {
     if (command.has("follow")) {
         Reply reply;
         reply.streamed = true;
-        reply.exitCode = streamEvents(*folder, context) == "ok" ? 0 : 1;
+        reply.exitCode = streamEvents(*folder, context) == RunStatus::Ok ? 0 : 1;
         return reply;
     }
     const QList<QJsonObject> events = folder->events();
@@ -317,7 +314,7 @@ Reply runsEvents(const Command &command, Context &context) {
     QStringList lines;
     for (const QJsonObject &event : events) {
         array.append(event);
-        lines << compact(event);
+        lines << QString::fromUtf8(compactJson(event));
     }
     return Reply::success(QJsonObject{{"events", array}}, lines.join('\n'));
 }

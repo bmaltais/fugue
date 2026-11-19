@@ -94,7 +94,7 @@ private slots:
         QTRY_VERIFY(run.isFinished());
 
         const RunOutcome outcome = run.outcome();
-        QCOMPARE(outcome.status, QStringLiteral("ok"));
+        QCOMPARE(outcome.status, RunStatus::Ok);
         QCOMPARE(outcome.outputs.value("g").value("text").text(), QStringLiteral("a picture"));
         QCOMPARE(outcome.outputs.value("g").value("model").text(), QStringLiteral("flux"));
         const QList<QJsonObject> events = folder.events();
@@ -116,7 +116,7 @@ private slots:
 
         // The same graph again is a cache hit: no second job.
         const Ran again = world.run(graph);
-        QCOMPARE(again.outcome.status, QStringLiteral("ok"));
+        QCOMPARE(again.outcome.status, RunStatus::Ok);
         QCOMPARE(provider->jobs().size(), 1);
         QCOMPARE(trace(again.events), (QStringList{"run.started", "node.cached g", "node.cached s", "run.done ok"}));
     }
@@ -167,7 +167,7 @@ private slots:
         QVERIFY(first->jobs().isEmpty());
         second->finish(second->jobs().first(), picture);
         QTRY_VERIFY(run.isFinished());
-        QCOMPARE(run.outcome().status, QStringLiteral("ok"));
+        QCOMPARE(run.outcome().status, RunStatus::Ok);
     }
 
     void aMissingModelIsAnErrorOnTheNodeWhenTheRunReachesIt() {
@@ -178,7 +178,7 @@ private slots:
         nodes.insert("t", node("fugue/save", {{"value", from("d.text")}}));
 
         const Ran ran = world.run(world.graph(nodes));
-        QCOMPARE(ran.outcome.status, QStringLiteral("failed"));
+        QCOMPARE(ran.outcome.status, RunStatus::Failed);
         QCOMPARE(ran.outcome.errors.size(), 1);
         QCOMPARE(ran.outcome.errors.first().code, QStringLiteral("model_missing"));
         QCOMPARE(ran.outcome.errors.first().severity, Error::Severity::Error);
@@ -206,7 +206,7 @@ private slots:
         QTRY_VERIFY(!trace(folder.events(), true).filter("node.progress").isEmpty());
         provider->report("done", {});
         QTRY_VERIFY(run.isFinished());
-        QCOMPARE(run.outcome().status, QStringLiteral("ok"));
+        QCOMPARE(run.outcome().status, RunStatus::Ok);
 
         QJsonObject preview;
         for (const QJsonObject &event : folder.events())
@@ -227,7 +227,7 @@ private slots:
         QTRY_COMPARE(provider->jobs().size(), 1);
         provider->fail(provider->jobs().first(), makeError("provider_unreachable", "The server went away."));
         QTRY_VERIFY(run.isFinished());
-        QCOMPARE(run.outcome().status, QStringLiteral("failed"));
+        QCOMPARE(run.outcome().status, RunStatus::Failed);
         QCOMPARE(run.outcome().errors.first().code, QStringLiteral("provider_unreachable"));
         QCOMPARE(run.outcome().errors.first().node, QStringLiteral("g"));
         QCOMPARE(traceOf(folder.events(), {"g", "s"}),
@@ -274,7 +274,7 @@ private slots:
         first->finish(first->jobs().first(), picture);
         second->finish(second->jobs().first(), picture);
         QTRY_VERIFY(run.isFinished());
-        QCOMPARE(run.outcome().status, QStringLiteral("ok"));
+        QCOMPARE(run.outcome().status, RunStatus::Ok);
     }
 
     void aJobOnThisMachineTakesTheGpuLane() {
@@ -324,7 +324,7 @@ private slots:
         provider->finish(provider->jobs().first(), picture);
         released.release();
         QTRY_VERIFY(run.isFinished());
-        QCOMPARE(run.outcome().status, QStringLiteral("ok"));
+        QCOMPARE(run.outcome().status, RunStatus::Ok);
     }
 
     // --- cancel (9.6) ---
@@ -342,7 +342,7 @@ private slots:
         run.cancel();
         QTRY_VERIFY(run.isFinished());
         QCOMPARE(states, QStringList{"cancelled"});
-        QCOMPARE(run.outcome().status, QStringLiteral("cancelled"));
+        QCOMPARE(run.outcome().status, RunStatus::Cancelled);
         QVERIFY(run.outcome().errors.isEmpty());
         QCOMPARE(trace(folder.events()),
                  (QStringList{"run.started", "node.running g", "node.skipped g cancelled", "node.skipped s cancelled",
@@ -393,7 +393,7 @@ private slots:
         const QJsonObject nodes{{"a", node("fugue/gpu-model", {{"model", lora}})},
                                 {"s", node("fugue/save", {{"value", from("a.text")}})}};
         const Ran ran = world.run(world.graph(nodes));
-        QCOMPARE(ran.outcome.status, QStringLiteral("ok"));
+        QCOMPARE(ran.outcome.status, RunStatus::Ok);
         QCOMPARE(attempts.load(), 2);
         // Only the least recently used went, and the node's own model was used.
         QCOMPARE(world.models.keys(), (QStringList{"recent", own}));
@@ -411,7 +411,7 @@ private slots:
         const QJsonObject nodes{{"a", node("fugue/gpu-model", {{"model", lora}})},
                                 {"s", node("fugue/save", {{"value", from("a.text")}})}};
         const Ran ran = world.run(world.graph(nodes));
-        QCOMPARE(ran.outcome.status, QStringLiteral("failed"));
+        QCOMPARE(ran.outcome.status, RunStatus::Failed);
         QCOMPARE(ran.outcome.errors.first().code, QStringLiteral("out_of_memory"));
         QCOMPARE(world.calls.count("a"), 1);
         QCOMPARE(world.models.keys().size(), 1);
@@ -433,7 +433,7 @@ private slots:
         const QJsonObject nodes{{"a", node("fugue/gpu-big", {{"text", "x"}})},
                                 {"s", node("fugue/save", {{"value", from("a.text")}})}};
         const RunOutcome outcome = runGraph(world.graph(nodes), world.folder(), environment);
-        QCOMPARE(outcome.status, QStringLiteral("ok"));
+        QCOMPARE(outcome.status, RunStatus::Ok);
         // 4 GB were needed: two models had to go, least recently used first.
         QCOMPARE(world.models.keys(), QStringList{"newest"});
     }

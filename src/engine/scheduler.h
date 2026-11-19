@@ -110,7 +110,7 @@ struct RunEnvironment {
     int cpuSlots = 0;
     // Time for `seconds` in node.done and the times in run.json; the system
     // clock when unset. (Event times are RunFolder's.)
-    std::function<QDateTime()> clock;
+    Clock clock;
     // A randomized seed (`{"auto": "random"}`) within min..max, both
     // included; a random generator when unset.
     std::function<qint64(qint64 min, qint64 max)> randomSeed;
@@ -138,7 +138,7 @@ enum class NodeState {
 QString nodeStateName(NodeState state); // "cached", "stale", ...
 
 struct RunOutcome {
-    QString status; // ok, failed or cancelled
+    RunStatus status = RunStatus::Unknown; // ok, failed or cancelled once the run is over
     // Every node error, each naming its node by path id, plus warnings.
     Errors errors;
     QMap<QString, NodeState> states;  // by path id

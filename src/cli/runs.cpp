@@ -26,10 +26,6 @@ std::atomic<bool> g_cancel{false};
 
 void onSignal(int) { g_cancel.store(true); }
 
-QString compact(const QJsonObject &object) {
-    return QString::fromUtf8(QJsonDocument(object).toJson(QJsonDocument::Compact));
-}
-
 // --set <node>.<input>=<value>: the value is JSON when it parses as one (a number, true,
 // "text"), else plain text. The input then holds that literal, replacing a link.
 Errors applyOverrides(Document &document, const QStringList &overrides) {
@@ -60,30 +56,6 @@ Errors applyOverrides(Document &document, const QStringList &overrides) {
 
 } // namespace
 
-QString runStatus(const RunFolder &folder, const QList<QJsonObject> &events) {
-    // run.done is the last word: it is appended once, by whoever ended the run, while
-    // run.json is rewritten as the run goes.
-    for (auto it = events.crbegin(); it != events.crend(); ++it)
-        if (it->value("event").toString() == "run.done")
-            return it->value("status").toString();
-    QString status = folder.state().value("status").toString();
-    if (status.isEmpty() && !events.isEmpty())
-        status = events.last().value("event").toString() == "run.queued" ? "queued" : "running";
-    return status.isEmpty() ? QStringLiteral("unknown") : status;
-}
-
-bool isTerminal(const QString &status) {
-    return status == "ok" || status == "failed" || status == "cancelled";
-}
-
-void endUnrun(const RunFolder &folder, const QString &status, const Errors &errors) {
-    QJsonObject state = folder.state();
-    state.insert("status", status);
-    state.insert("ended", QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs));
-    folder.writeState(state);
-    folder.appendEvent(QJsonObject{{"event", "run.done"}, {"status", status}, {"errors", toJson(errors)}});
-}
-
 namespace {
 
 Error workerGone() {
@@ -95,23 +67,23 @@ Error workerGone() {
 void endDeadRuns(const Context &context, Lock &lock) {
     for (const QString &gone : Queue(context.queueDir).discardDead(lock)) {
         const Result<RunFolder> folder = RunFolder::open(context.runsRoot, gone);
-        if (folder && !isTerminal(runStatus(*folder, folder->events())))
-            endUnrun(*folder, "failed", {workerGone()});
+        if (folder && !isTerminal(folder->status()))
+            folder->finish(RunStatus::Failed, {workerGone()}, utcNow());
     }
 }
 
-QString streamEvents(const RunFolder &folder, Context &context) {
+RunStatus streamEvents(const RunFolder &folder, Context &context) {
     int printed = 0;
     int settling = 0;
     int orphaned = 0;
     for (int pass = 0;; ++pass) {
         const QList<QJsonObject> events = folder.events();
         for (; printed < events.size(); ++printed)
-            context.line(compact(events.at(printed)).toUtf8());
+            context.line(compactJson(events.at(printed)));
         for (auto it = events.crbegin(); it != events.crend(); ++it)
             if (it->value("event").toString() == "run.done")
-                return it->value("status").toString();
-        const QString state = folder.state().value("status").toString();
+                return parseRunStatus(it->value("status").toString());
+        const RunStatus state = parseRunStatus(folder.state().value("status").toString());
         // run.json is written just before run.done, so the event is given a moment to
         // arrive; after that its writer is gone and the state is the answer.
         if (isTerminal(state) && ++settling > 20)
@@ -125,11 +97,11 @@ QString streamEvents(const RunFolder &folder, Context &context) {
             // once, so seeing this twice means nobody will (a starter or canceller that
             // was killed half way).
             const qint64 pid = qint64(folder.state().value("pid").toDouble());
-            const bool orphan = !isTerminal(runStatus(folder, folder.events()))
+            const bool orphan = !isTerminal(folder.status())
                                 && !Queue(context.queueDir).find(folder.id()) && !isRunWorker(pid, folder.id());
             orphaned = orphan ? orphaned + 1 : 0;
             if (orphaned >= 2)
-                endUnrun(folder, "failed", {workerGone()});
+                folder.finish(RunStatus::Failed, {workerGone()}, utcNow());
         }
         QThread::msleep(50);
     }
@@ -186,13 +158,12 @@ Reply startRun(const Command &command, Context &context) {
     if (!folder)
         return Reply::failure(folder.errors());
     const QString workflow = QFileInfo(file).absoluteFilePath();
-    folder->writeState(QJsonObject{{"status", "queued"}, {"workflow", QJsonObject{{"path", workflow}}}});
     folder->writeCompiled(compilation.graph->toJson());
-    folder->appendEvent(QJsonObject{{"event", "run.queued"}});
+    folder->queued(workflow);
 
     const Queue queue(context.queueDir);
     if (!queue.enqueue(folder->id(), workflow, command.has("first"))) {
-        endUnrun(*folder, "failed", {});
+        folder->finish(RunStatus::Failed, {}, utcNow());
         return Reply::failure(makeError("internal", "The run queue could not be written.", "Check " + context.queueDir));
     }
     QProcess worker;
@@ -204,7 +175,7 @@ Reply startRun(const Command &command, Context &context) {
     if (!worker.startDetached()) {
         queue.remove(folder->id());
         const Error error = makeError("internal", "The run worker could not be started.", worker.errorString());
-        endUnrun(*folder, "failed", {error});
+        folder->finish(RunStatus::Failed, {error}, utcNow());
         return Reply::failure(error);
     }
     // The worker records its own pid, in its queue entry and later in run.json; both
@@ -214,10 +185,10 @@ Reply startRun(const Command &command, Context &context) {
     if (command.has("wait")) {
         Reply reply;
         reply.streamed = true;
-        reply.exitCode = streamEvents(*folder, context) == "ok" ? 0 : 1;
+        reply.exitCode = streamEvents(*folder, context) == RunStatus::Ok ? 0 : 1;
         return reply;
     }
-    return Reply::success(QJsonObject{{"run", folder->id()}, {"status", "queued"}}, folder->id());
+    return Reply::success(QJsonObject{{"run", folder->id()}, {"status", runStatusName(RunStatus::Queued)}}, folder->id());
 }
 
 Reply cancelRun(const Command &command, Context &context) {
@@ -232,11 +203,11 @@ Reply cancelRun(const Command &command, Context &context) {
 
 Reply cancelRun(const RunFolder &folder, const std::optional<QueueEntry> &seen, const Context &context) {
     const QString id = folder.id();
-    const auto ended = [&](const QString &status) {
-        return Reply::success(QJsonObject{{"id", id}, {"status", status}, {"cancelled", false}},
-                              QStringLiteral("%1 had already ended (%2).").arg(id, status));
+    const auto ended = [&](RunStatus status) {
+        return Reply::success(QJsonObject{{"id", id}, {"status", runStatusName(status)}, {"cancelled", false}},
+                              QStringLiteral("%1 had already ended (%2).").arg(id, runStatusName(status)));
     };
-    QString status = runStatus(folder, folder.events());
+    RunStatus status = folder.status();
     if (isTerminal(status))
         return ended(status);
     const Queue queue(context.queueDir);
@@ -245,8 +216,8 @@ Reply cancelRun(const RunFolder &folder, const std::optional<QueueEntry> &seen, 
         // Waiting: take its entry out. Getting the file is what makes the run ours to end;
         // its worker finds the entry gone and exits.
         if (queue.remove(*entry)) {
-            endUnrun(folder, "cancelled", {});
-            return Reply::success(QJsonObject{{"id", id}, {"status", "cancelled"}, {"cancelled", true}},
+            folder.finish(RunStatus::Cancelled, {}, utcNow());
+            return Reply::success(QJsonObject{{"id", id}, {"status", runStatusName(RunStatus::Cancelled)}, {"cancelled", true}},
                                   QStringLiteral("Cancelled %1.").arg(id));
         }
         // The file is gone: its worker activated it meanwhile, or someone else removed it.
@@ -257,6 +228,7 @@ Reply cancelRun(const RunFolder &folder, const std::optional<QueueEntry> &seen, 
     // that really is this run's worker is signalled; a pid may have been reused.
     const qint64 pid = entry && entry->pid > 0 ? entry->pid : qint64(folder.state().value("pid").toDouble());
     if (isRunWorker(pid, id) && ::kill(pid_t(pid), SIGTERM) == 0)
+        // Not a run status: the worker has been told, and the run is cancelled once it ends.
         return Reply::success(QJsonObject{{"id", id}, {"status", "cancelling"}, {"cancelled", true}},
                               QStringLiteral("Cancelling %1.").arg(id));
     // No worker to signal. If it died, its entry is dead and the run is ended as failed.
@@ -264,14 +236,14 @@ Reply cancelRun(const RunFolder &folder, const std::optional<QueueEntry> &seen, 
         Lock lock(context.lockPath);
         endDeadRuns(context, lock);
     }
-    status = runStatus(folder, folder.events());
-    if (isTerminal(status) && status != QLatin1String("failed"))
+    status = folder.status();
+    if (isTerminal(status) && status != RunStatus::Failed)
         return ended(status); // it ended by itself meanwhile
     if (!isTerminal(status)) {
         if (queue.find(id))
             return Reply::failure(makeError("internal", QStringLiteral("The worker of %1 could not be signalled.").arg(id),
                                             "Try again in a moment."));
-        endUnrun(folder, "failed", {workerGone()}); // no entry and no worker: nothing will end it
+        folder.finish(RunStatus::Failed, {workerGone()}, utcNow()); // no entry and no worker: nothing will end it
     }
     return Reply::failure(makeError("internal", QStringLiteral("The worker of %1 is gone; the run is marked failed.").arg(id),
                                     "Start the run again with `fugue run`."));
@@ -300,7 +272,7 @@ int runWorker(const QString &runId, Context &context) {
             // Told to stop while waiting. The run is mine to end only if I am the one
             // who takes its entry out.
             if (queue.remove(mine))
-                endUnrun(*folder, "cancelled", {});
+                folder->finish(RunStatus::Cancelled, {}, utcNow());
             return 1;
         }
         endDeadRuns(context, lock);
@@ -321,7 +293,7 @@ int runWorker(const QString &runId, Context &context) {
     else
         graph = CompiledGraph::fromJson(folder->compiled(), errors);
     if (!graph) {
-        endUnrun(*folder, "failed", errors);
+        folder->finish(RunStatus::Failed, errors, utcNow());
         queue.remove(runId);
         return 1;
     }
@@ -332,7 +304,7 @@ int runWorker(const QString &runId, Context &context) {
     options.workflow = folder->state().value("workflow").toObject().value("path").toString();
     const RunOutcome outcome = runGraph(*graph, *folder, process.environment, options, &g_cancel);
     queue.remove(runId);
-    return outcome.status == "ok" ? 0 : 1;
+    return outcome.status == RunStatus::Ok ? 0 : 1;
 }
 
 } // namespace fugue::cli

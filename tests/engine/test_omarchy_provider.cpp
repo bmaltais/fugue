@@ -220,7 +220,7 @@ private slots:
 
         const OfferedModel *ready = findModel(described.value(), "image.generate", kKlein);
         QVERIFY(ready);
-        QCOMPARE(ready->status, QStringLiteral("ready"));
+        QCOMPARE(ready->status, ModelStatus::Ready);
         QCOMPARE(ready->handle, (QJsonObject{{"resource", "fugue/image-model"}, {"name", kKlein}}));
         QCOMPARE(ready->properties.value("edit").toBool(), true);
         QCOMPARE(ready->defaults.value("steps").toInt(), 4);
@@ -231,7 +231,7 @@ private slots:
 
         const OfferedModel *stopped = findModel(described.value(), "image.generate", kZImage);
         QVERIFY(stopped);
-        QCOMPARE(stopped->status, QStringLiteral("unavailable"));
+        QCOMPARE(stopped->status, ModelStatus::Unavailable);
         QVERIFY(stopped->reason.contains("13 GiB"));
         QVERIFY(stopped->hint.contains("omarchy-agent-local start " + kZImage));
         QVERIFY(!findModel(described.value(), "image.edit", kZImage));
@@ -246,8 +246,8 @@ private slots:
         fixture.writeStatus(QJsonObject{{kKlein, row(kKlein, "image", "activating", fixture.endpoint())}});
         auto provider = fixture.provider();
         const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
-        QCOMPARE(findModel(described.value(), "image.generate", kKlein)->status, QStringLiteral("loading"));
-        QCOMPARE(described.value().offer("image.generate")->status(), QStringLiteral("loading"));
+        QCOMPARE(findModel(described.value(), "image.generate", kKlein)->status, ModelStatus::Loading);
+        QCOMPARE(described.value().offer("image.generate")->status(), ModelStatus::Loading);
     }
 
     void aRunningServerStillLoadingItsModelIsLoading() {
@@ -258,7 +258,7 @@ private slots:
         fixture.writeStatus(QJsonObject{{kKlein, row(kKlein, "image", "active", fixture.endpoint())}});
         auto provider = fixture.provider();
         const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
-        QCOMPARE(findModel(described.value(), "image.generate", kKlein)->status, QStringLiteral("loading"));
+        QCOMPARE(findModel(described.value(), "image.generate", kKlein)->status, ModelStatus::Loading);
     }
 
     void aRunningServerThatDoesNotAnswerIsUnavailable() {
@@ -275,7 +275,7 @@ private slots:
         const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
         QVERIFY(described.ok());
         const OfferedModel *model = findModel(described.value(), "image.generate", kKlein);
-        QCOMPARE(model->status, QStringLiteral("unavailable"));
+        QCOMPARE(model->status, ModelStatus::Unavailable);
         QVERIFY(model->reason.contains("not answering"));
     }
 
@@ -320,7 +320,7 @@ private slots:
         auto provider = fixture.provider(instance);
         const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
         const OfferedModel *model = findModel(described.value(), "image.generate", kKlein);
-        QCOMPARE(model->status, QStringLiteral("unavailable"));
+        QCOMPARE(model->status, ModelStatus::Unavailable);
         QVERIFY(model->reason.contains("key"));
         QCOMPARE(fixture.server.requests().first().headers.value("authorization"), QByteArray("Bearer wrong-key"));
     }
@@ -376,13 +376,13 @@ private slots:
         const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
         QVERIFY(described.ok());
         QCOMPARE(described.value().offer("image.generate")->models.size(), 3);
-        QCOMPARE(findModel(described.value(), "image.generate", kKlein)->status, QStringLiteral("ready"));
+        QCOMPARE(findModel(described.value(), "image.generate", kKlein)->status, ModelStatus::Ready);
         QCOMPARE(findModel(described.value(), "image.edit", kKlein)->defaults.value("steps").toInt(), 4);
         const OfferedModel *offline = findModel(described.value(), "image.generate", kZImage);
-        QCOMPARE(offline->status, QStringLiteral("unavailable"));
+        QCOMPARE(offline->status, ModelStatus::Unavailable);
         QVERIFY(offline->reason.contains("offline"));
         const OfferedModel *stopped = findModel(described.value(), "image.generate", "stopped-sdcpp");
-        QCOMPARE(stopped->status, QStringLiteral("unavailable"));
+        QCOMPARE(stopped->status, ModelStatus::Unavailable);
         QVERIFY(stopped->hint.contains("on studio: omarchy-agent-local start stopped-sdcpp"));
     }
 

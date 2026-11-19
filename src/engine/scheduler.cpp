@@ -266,7 +266,7 @@ public:
 
         if (!m_dry) {
             m_folder->writeCompiled(m_graph.toJson());
-            writeState(QStringLiteral("running"));
+            writeState();
             emitEvent({{"event", "run.started"}});
             for (const QString &path : std::as_const(m_order))
                 emitEvent({{"event", "node.queued"}, {"node", path}});
@@ -302,7 +302,7 @@ public:
 private:
     // --- small helpers ---
 
-    QDateTime now() const { return m_env.clock ? m_env.clock().toUTC() : QDateTime::currentDateTimeUtc(); }
+    QDateTime now() const { return utcNow(m_env.clock); }
 
     void later(std::function<void()> call) { QMetaObject::invokeMethod(this, std::move(call), Qt::QueuedConnection); }
 
@@ -318,15 +318,15 @@ private:
 
     QString runId() const { return m_folder ? m_folder->id() : QString(); }
 
-    void writeState(const QString &status) {
+    // run.json while the run goes. Its end (the final status, `ended`, run.done) is
+    // RunFolder::finish's, in finish() below.
+    void writeState() {
         if (m_dry)
             return;
-        QJsonObject state{{"status", status},
+        QJsonObject state{{"status", runStatusName(RunStatus::Running)},
                           {"pid", QCoreApplication::applicationPid()},
-                          {"started", m_startTime.toString(Qt::ISODateWithMs)},
+                          {"started", isoTime(m_startTime)},
                           {"workflow", QJsonObject{{"path", m_options.workflow}, {"hash", m_graph.source}}}};
-        if (m_finished || status != QLatin1String("running"))
-            state.insert("ended", now().toString(Qt::ISODateWithMs));
         QJsonObject autos;
         QJsonObject providers;
         QJsonObject nodes;
@@ -406,7 +406,7 @@ private:
         releaseImages();
         for (const NodeRun &n : std::as_const(m_nodes)) {
             if (n.phase != Phase::Finished) {
-                writeState(QStringLiteral("running"));
+                writeState();
                 return;
             }
         }
@@ -1008,13 +1008,13 @@ private:
             anyError = anyError || n.state == NodeState::Error;
             anyCancelled = anyCancelled || (n.state == NodeState::Skipped && n.reason == QLatin1String("cancelled"));
         }
-        m_outcome.status = anyCancelled ? QStringLiteral("cancelled")
-                           : anyError   ? QStringLiteral("failed")
-                                        : QStringLiteral("ok");
+        m_outcome.status = anyCancelled ? RunStatus::Cancelled : anyError ? RunStatus::Failed : RunStatus::Ok;
         m_finished = true;
         if (!m_dry) {
-            writeState(m_outcome.status);
-            emitEvent({{"event", "run.done"}, {"status", m_outcome.status}, {"errors", toJson(m_outcome.errors)}});
+            writeState(); // every node's last state
+            const QJsonObject done = m_folder->finish(m_outcome.status, m_outcome.errors, now());
+            if (onEvent)
+                onEvent(done);
             m_env.hashes->save();
             m_env.cache->evict();
         }

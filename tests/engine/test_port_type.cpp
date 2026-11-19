@@ -32,6 +32,18 @@ private slots:
         QVERIFY(!isNodeId("g7/first"));
     }
 
+    void pathIds() {
+        QVERIFY(isPathId("save"));
+        QVERIFY(isPathId("g7/first"));
+        QVERIFY(isPathId("g7/inner3/s2"));
+        QVERIFY(!isPathId(""));
+        QVERIFY(!isPathId("g7/"));
+        QVERIFY(!isPathId("/first"));
+        QVERIFY(!isPathId("g7//first"));
+        QVERIFY(!isPathId("../outside"));
+        QVERIFY(!isPathId("g7.first"));
+    }
+
     void typeIds() {
         QVERIFY(isTypeId("fugue/text"));
         QVERIFY(isTypeId("local/two-pass"));

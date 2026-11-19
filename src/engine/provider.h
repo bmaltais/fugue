@@ -27,12 +27,20 @@ template <typename T> using Reply = std::function<void(const Result<T> &)>;
 // The value of an operation that returns nothing (shutdown).
 struct Nothing {};
 
+// Whether a model can take a job now (8.8). A module's own word for it is read with
+// parseModelStatus: anything that is not ready or loading is unavailable.
+enum class ModelStatus { Ready, Loading, Unavailable };
+// "ready", "loading", "unavailable". Not a free toString(): QtTest takes one found by
+// argument lookup for its own char *toString() and fails to compile QCOMPARE.
+QString modelStatusName(ModelStatus status);
+ModelStatus parseModelStatus(const QString &text);
+
 // One model a provider can serve for a capability. Status, properties, limits and defaults are
 // per model, not per capability as 8.8's table reads, because one omarchy instance can run
 // several image servers at once with different defaults and edit support.
 struct OfferedModel {
     QJsonObject handle;     // a resource handle (2.5); served-by-name models have no hash
-    QString status;         // ready, loading or unavailable
+    ModelStatus status = ModelStatus::Unavailable;
     QString reason;         // why it is not ready, one sentence
     QString hint;           // how to make it ready, for the 8.5 error
     QJsonObject properties; // for routing (8.1): e.g. {"edit": true, "input": ["text"]}
@@ -44,8 +52,8 @@ struct CapabilityOffer {
     QString capability; // an open id such as image.generate (8.1)
     QList<OfferedModel> models;
 
-    // ready when any model is, else loading when any is, else unavailable.
-    QString status() const;
+    // Ready when any model is, else loading when any is, else unavailable.
+    ModelStatus status() const;
 };
 
 // The reply of describe (8.8).

@@ -4,14 +4,33 @@
 
 namespace fugue {
 
-QString CapabilityOffer::status() const {
+QString modelStatusName(ModelStatus status) {
+    switch (status) {
+    case ModelStatus::Ready:
+        return QStringLiteral("ready");
+    case ModelStatus::Loading:
+        return QStringLiteral("loading");
+    case ModelStatus::Unavailable:
+        break;
+    }
+    return QStringLiteral("unavailable");
+}
+
+ModelStatus parseModelStatus(const QString &text) {
+    for (const ModelStatus status : {ModelStatus::Ready, ModelStatus::Loading})
+        if (text == modelStatusName(status))
+            return status;
+    return ModelStatus::Unavailable;
+}
+
+ModelStatus CapabilityOffer::status() const {
     bool loading = false;
     for (const OfferedModel &model : models) {
-        if (model.status == QLatin1String("ready"))
-            return QStringLiteral("ready");
-        loading = loading || model.status == QLatin1String("loading");
+        if (model.status == ModelStatus::Ready)
+            return ModelStatus::Ready;
+        loading = loading || model.status == ModelStatus::Loading;
     }
-    return loading ? QStringLiteral("loading") : QStringLiteral("unavailable");
+    return loading ? ModelStatus::Loading : ModelStatus::Unavailable;
 }
 
 const CapabilityOffer *Description::offer(const QString &capability) const {

@@ -41,19 +41,12 @@ Reply cancelRun(const RunFolder &folder, const std::optional<QueueEntry> &seen, 
 // The hidden `__worker` command. Returns the process exit code.
 int runWorker(const QString &runId, Context &context);
 
-// Ends a run that never ran (or whose worker is gone): run.json and run.done.
-void endUnrun(const RunFolder &folder, const QString &status, const Errors &errors);
-
 // Ends, as failed, every run whose worker died (9.8): the dead entries leave the queue
 // (Queue::discardDead) and each of their runs gets its status, `ended` and run.done.
 // `lock` is the engine lock, held or not; it is left as it was.
 void endDeadRuns(const Context &context, Lock &lock);
 
 // Writes events as JSON lines as they arrive until run.done; returns its status.
-QString streamEvents(const RunFolder &folder, Context &context);
-
-// The run's status: run.json's, else what the events say, else "unknown".
-QString runStatus(const RunFolder &folder, const QList<QJsonObject> &events);
-bool isTerminal(const QString &status);
+RunStatus streamEvents(const RunFolder &folder, Context &context);
 
 } // namespace fugue::cli

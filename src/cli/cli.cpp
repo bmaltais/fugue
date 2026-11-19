@@ -10,6 +10,7 @@
 #include "cli/args.h"
 #include "cli/commands.h"
 #include "engine/queue.h"
+#include "engine/json.h"
 #include "engine/run_folder.h"
 
 namespace fugue::cli {
@@ -84,7 +85,7 @@ int run(int argc, char **argv, const Hooks &hooks) {
     const bool json = args.contains("--json");
     auto fail = [json](const Errors &errors) {
         if (json) {
-            writeLine(QJsonDocument(errorEnvelope(errors)).toJson(QJsonDocument::Compact));
+            writeLine(compactJson(errorEnvelope(errors)));
         } else {
             for (const Error &error : errors)
                 logLine(humanError(error));
@@ -120,7 +121,7 @@ int run(int argc, char **argv, const Hooks &hooks) {
         QJsonObject envelope = okEnvelope(reply.data);
         if (!reply.errors.isEmpty())
             envelope.insert("warnings", toJson(reply.errors));
-        writeLine(QJsonDocument(envelope).toJson(QJsonDocument::Compact));
+        writeLine(compactJson(envelope));
     } else if (!reply.text.isEmpty()) {
         writeLine(reply.text.toUtf8());
     }

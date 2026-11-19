@@ -117,6 +117,10 @@ Result<QJsonObject> readJsonObject(const QString &path) {
     return json->object();
 }
 
+QByteArray compactJson(const QJsonObject &object) {
+    return QJsonDocument(object).toJson(QJsonDocument::Compact);
+}
+
 QByteArray writeJson(const QJsonValue &value) {
     QByteArray out;
     write(out, value, 0);

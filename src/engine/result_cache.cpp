@@ -10,7 +10,6 @@
 #include <QJsonDocument>
 #include <QMap>
 #include <QSet>
-#include <QStandardPaths>
 #include <QTimeZone>
 
 #include <unistd.h>
@@ -18,7 +17,9 @@
 #include "engine/canonical.h"
 #include "engine/file_hashes.h"
 #include "engine/hash.h"
+#include "engine/clock.h"
 #include "engine/json.h"
+#include "engine/paths.h"
 
 namespace fugue {
 
@@ -28,10 +29,6 @@ const QLatin1String hashPrefix("sha256:");
 
 QString hexOf(const QString &hash) {
     return hash.startsWith(hashPrefix) ? hash.mid(hashPrefix.size()) : hash;
-}
-
-QString isoTime(const QDateTime &time) {
-    return time.toUTC().toString(Qt::ISODateWithMs);
 }
 
 QDateTime parseTime(const QString &text) {
@@ -120,7 +117,7 @@ QString cacheKey(const KeyParts &parts) {
 }
 
 QString ResultCache::defaultRoot() {
-    return QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + QStringLiteral("/fugue/results");
+    return cacheDir() + QStringLiteral("/results");
 }
 
 ResultCache::ResultCache(QString root) : ResultCache(std::move(root), Options{}) {}
@@ -138,7 +135,7 @@ QString ResultCache::frozenPath(const QString &key) const {
 QString ResultCache::blobsDir() const { return m_root + QStringLiteral("/blobs"); }
 
 QDateTime ResultCache::now() const {
-    return m_options.clock ? m_options.clock().toUTC() : QDateTime::currentDateTimeUtc();
+    return utcNow(m_options.clock);
 }
 
 std::optional<ResultCache::Record> ResultCache::read(const QString &key) const {

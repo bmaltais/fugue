@@ -1,6 +1,7 @@
 #include "providers.h"
 
 #include "engine/json.h"
+#include "engine/paths.h"
 #include "omarchy_provider.h"
 
 #include <QDir>
@@ -8,7 +9,6 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QSet>
-#include <QStandardPaths>
 
 namespace fugue {
 
@@ -81,7 +81,7 @@ Result<Selection> choose(const QList<const Candidate *> &usable, const Requireme
                 fitting.append(Match{candidate, &model});
     }
     const auto isReady = [](const Match &match) {
-        return match.model->status == QLatin1String("ready");
+        return match.model->status == ModelStatus::Ready;
     };
     QJsonArray readyNames;
     for (const Match &match : fitting)
@@ -167,8 +167,7 @@ Result<Selection> choose(const QList<const Candidate *> &usable, const Requireme
 
 QString providersPath() {
     // $XDG_CONFIG_HOME is honored (1.4), as for every other path of Fugue's own.
-    return QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation) +
-           QStringLiteral("/fugue/providers.json");
+    return configDir() + QStringLiteral("/providers.json");
 }
 
 Result<QList<ProviderInstance>> parseProviderInstances(const QJsonObject &document) {

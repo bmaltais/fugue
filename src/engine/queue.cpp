@@ -5,7 +5,6 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QRegularExpression>
-#include <QStandardPaths>
 
 #include <cerrno>
 #include <fcntl.h>
@@ -13,14 +12,11 @@
 #include <unistd.h>
 
 #include "engine/json.h"
+#include "engine/paths.h"
 
 namespace fugue {
 
 namespace {
-
-QString stateRoot() {
-    return QStandardPaths::writableLocation(QStandardPaths::GenericStateLocation) + QStringLiteral("/fugue");
-}
 
 QString fileName(int queueClass, qint64 millis, const QString &run) {
     return QStringLiteral("%1-%2-%3").arg(queueClass).arg(millis, 14, 10, QLatin1Char('0')).arg(run);
@@ -70,8 +66,8 @@ private:
 
 } // namespace
 
-QString Queue::defaultDir() { return stateRoot() + QStringLiteral("/queue"); }
-QString Queue::defaultLockPath() { return stateRoot() + QStringLiteral("/engine.lock"); }
+QString Queue::defaultDir() { return stateDir() + QStringLiteral("/queue"); }
+QString Queue::defaultLockPath() { return stateDir() + QStringLiteral("/engine.lock"); }
 
 // The on-disk form of 4.6, replaced atomically so a reader never sees half an entry.
 bool Queue::write(const QString &file, const QJsonObject &content) const {

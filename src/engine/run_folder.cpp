@@ -11,10 +11,11 @@
 #include <QMutexLocker>
 #include <QRandomGenerator>
 #include <QRegularExpression>
-#include <QStandardPaths>
 #include <QTimeZone>
 
+#include "engine/ids.h"
 #include "engine/json.h"
+#include "engine/paths.h"
 
 namespace fugue {
 
@@ -25,20 +26,11 @@ bool isRunId(const QString &id) {
     return form.match(id).hasMatch();
 }
 
-bool isNodeId(const QString &id) {
-    static const QRegularExpression form(QStringLiteral("^[a-z][a-z0-9_-]{0,31}$"));
-    return form.match(id).hasMatch();
-}
-
 // run.json and compiled.json are read while a run goes; one that is missing or cannot be
 // read is an empty object to the reader, who then knows nothing about the run yet.
 QJsonObject readObject(const QString &path) {
     const Result<QJsonObject> object = readJsonObject(path);
     return object ? object.value() : QJsonObject();
-}
-
-QString nowIso() {
-    return QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyy-MM-ddTHH:mm:ss.zzzZ"));
 }
 
 QMutex &eventsMutex() {
@@ -47,6 +39,35 @@ QMutex &eventsMutex() {
 }
 
 } // namespace
+
+QString runStatusName(RunStatus status) {
+    switch (status) {
+    case RunStatus::Queued:
+        return QStringLiteral("queued");
+    case RunStatus::Running:
+        return QStringLiteral("running");
+    case RunStatus::Ok:
+        return QStringLiteral("ok");
+    case RunStatus::Failed:
+        return QStringLiteral("failed");
+    case RunStatus::Cancelled:
+        return QStringLiteral("cancelled");
+    case RunStatus::Unknown:
+        break;
+    }
+    return QStringLiteral("unknown");
+}
+
+RunStatus parseRunStatus(const QString &text) {
+    for (const RunStatus status : {RunStatus::Queued, RunStatus::Running, RunStatus::Ok, RunStatus::Failed, RunStatus::Cancelled})
+        if (text == runStatusName(status))
+            return status;
+    return RunStatus::Unknown;
+}
+
+bool isTerminal(RunStatus status) {
+    return status == RunStatus::Ok || status == RunStatus::Failed || status == RunStatus::Cancelled;
+}
 
 QString newRunId() {
     // Within one process each id gets a later millisecond than the last, so
@@ -67,8 +88,7 @@ QString newRunId() {
 }
 
 QString RunFolder::defaultRoot() {
-    return QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) +
-           QStringLiteral("/fugue/runs");
+    return cacheDir() + QStringLiteral("/runs");
 }
 
 Result<RunFolder> RunFolder::create(const QString &root, const QString &id) {
@@ -128,13 +148,42 @@ QJsonObject RunFolder::compiled() const {
     return readObject(compiledJsonPath());
 }
 
+bool RunFolder::queued(const QString &workflow) const {
+    QJsonObject state{{"status", runStatusName(RunStatus::Queued)}};
+    if (!workflow.isEmpty())
+        state.insert("workflow", QJsonObject{{"path", workflow}});
+    return writeState(state) && appendEvent(QJsonObject{{"event", "run.queued"}});
+}
+
+QJsonObject RunFolder::finish(RunStatus status, const Errors &errors, const QDateTime &now) const {
+    QJsonObject ended = state();
+    ended.insert("status", runStatusName(status));
+    ended.insert("ended", isoTime(now));
+    writeState(ended);
+    const QJsonObject done{{"event", "run.done"}, {"status", runStatusName(status)}, {"errors", toJson(errors)}};
+    appendEvent(done);
+    return done;
+}
+
+RunStatus RunFolder::status() const { return status(events()); }
+
+RunStatus RunFolder::status(const QList<QJsonObject> &events) const {
+    for (auto it = events.crbegin(); it != events.crend(); ++it)
+        if (it->value("event").toString() == QLatin1String("run.done"))
+            return parseRunStatus(it->value("status").toString());
+    const RunStatus written = parseRunStatus(state().value("status").toString());
+    if (written != RunStatus::Unknown || events.isEmpty())
+        return written;
+    return events.last().value("event").toString() == QLatin1String("run.queued") ? RunStatus::Queued : RunStatus::Running;
+}
+
 bool RunFolder::appendEvent(const QJsonObject &event) const {
     QJsonObject line = event;
     if (!line.contains("run"))
         line.insert("run", m_id);
     if (!line.contains("time"))
-        line.insert("time", nowIso());
-    const QByteArray bytes = QJsonDocument(line).toJson(QJsonDocument::Compact) + '\n';
+        line.insert("time", isoTime(utcNow()));
+    const QByteArray bytes = compactJson(line) + '\n';
 
     QMutexLocker lock(&eventsMutex());
     QFile file(eventsPath());
@@ -159,12 +208,8 @@ QList<QJsonObject> RunFolder::events() const {
 }
 
 Result<QString> RunFolder::nodeDir(const QString &pathId) const {
-    const QStringList segments = pathId.split(QLatin1Char('/'));
-    for (const QString &segment : segments) {
-        if (!isNodeId(segment))
-            return makeError(QStringLiteral("internal"),
-                             QStringLiteral("\"%1\" is not a path id.").arg(pathId));
-    }
+    if (!isPathId(pathId))
+        return makeError(QStringLiteral("internal"), QStringLiteral("\"%1\" is not a path id.").arg(pathId));
     const QString path = m_path + QStringLiteral("/nodes/") + pathId;
     if (!QDir().mkpath(path))
         return makeError(QStringLiteral("permission_denied"), QStringLiteral("Cannot create %1.").arg(path));

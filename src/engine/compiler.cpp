@@ -1095,13 +1095,6 @@ Compilation Compiler::run() {
 
 // --- reading compiled.json ---------------------------------------------------
 
-bool isPathId(const QString &text) {
-    for (const QString &segment : text.split(QLatin1Char('/')))
-        if (!isNodeId(segment))
-            return false;
-    return true;
-}
-
 bool isValueJson(const QJsonValue &value, bool allowList) {
     if (value.isString() || value.isDouble() || value.isBool())
         return true;
