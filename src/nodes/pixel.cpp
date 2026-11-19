@@ -31,7 +31,7 @@ struct Pixels {
 
 Result<Pixels> pixelsOf(const Value &value, const QString &input) {
     if (!value.isMedia())
-        return Result<Pixels>(Errors{makeError("missing_input", QStringLiteral("Input %1 has no image.").arg(input))});
+        return makeInputError(QStringLiteral("missing_input"), input, QStringLiteral("Input %1 has no image.").arg(input));
     const Result<vips::VImage> loaded = value.media().image();
     if (!loaded.ok())
         return Result<Pixels>(loaded.errors());

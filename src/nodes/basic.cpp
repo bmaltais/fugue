@@ -65,12 +65,6 @@ QByteArray workflowToEmbed(const NodeContext &context, const QString &embed) {
     return compactJson(document);
 }
 
-Error badInput(const QString &input, const QString &message, const QString &hint = {}) {
-    Error error = makeError(QStringLiteral("node_failed"), message, hint);
-    error.input = input;
-    return error;
-}
-
 // A file name that is free in `dir`: `<name>.<ext>`, else `<name>-2.<ext>`, `-3`, ... A save
 // never overwrites a file (it may be the user's).
 QString freeName(const QDir &dir, const QString &name, const QString &extension) {
@@ -85,8 +79,9 @@ public:
     Result<Values> run(const NodeContext &context) override {
         const QString name = context.input("name").text().trimmed();
         if (name.isEmpty() || name.contains(QLatin1Char('/')) || name.contains(QLatin1Char('\\')) || name.startsWith(QLatin1Char('.')))
-            return badInput("name", QStringLiteral("\"%1\" cannot be a file name.").arg(name),
-                            QStringLiteral("Use a plain name without folders; the folder input says where."));
+            return makeInputError(QStringLiteral("node_failed"), QStringLiteral("name"),
+                                  QStringLiteral("\"%1\" cannot be a file name.").arg(name),
+                                  QStringLiteral("Use a plain name without folders; the folder input says where."));
         const QString format = context.input("format").text();
         const QString embed = context.input("embed").text();
 

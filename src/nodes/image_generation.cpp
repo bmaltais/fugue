@@ -180,14 +180,12 @@ private:
         const QList<Value> images = context.input(QStringLiteral("images")).items();
         const int most = std::max(kReferences, selection.model.limits.value("max_reference_images").toInt());
         if (images.size() > most) {
-            Error error = makeError(QStringLiteral("value_out_of_range"),
-                                    QStringLiteral("%1 takes at most %2 images, not %3.")
-                                        .arg(modelName(selection))
-                                        .arg(most)
-                                        .arg(images.size()),
-                                    QStringLiteral("Remove images, or use a model that takes more."));
-            error.input = QStringLiteral("images");
-            return error;
+            return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("images"),
+                                  QStringLiteral("%1 takes at most %2 images, not %3.")
+                                      .arg(modelName(selection))
+                                      .arg(most)
+                                      .arg(images.size()),
+                                  QStringLiteral("Remove images, or use a model that takes more."));
         }
         std::optional<QSize> size;
         QJsonArray sent;
@@ -240,17 +238,16 @@ private:
             const int least = limits.value(QStringLiteral("min_") + side).toInt(0);
             const int most = limits.value(QStringLiteral("max_") + side).toInt(0);
             if ((least > 0 && value < least) || (most > 0 && value > most)) {
-                Error error = makeError(QStringLiteral("value_out_of_range"),
-                                        QStringLiteral("%1 makes a %2 of %3 to %4 pixels, not %5.")
-                                            .arg(modelName(selection), side)
-                                            .arg(least)
-                                            .arg(most > 0 ? QString::number(most) : QStringLiteral("any"))
-                                            .arg(value));
-                error.input = context.inputs.contains(side)                ? side
-                              : editing()                                  ? QStringLiteral("images")
-                              : context.inputs.contains(QStringLiteral("image")) ? QStringLiteral("image")
-                                                                           : QString();
-                errors.append(error);
+                const QString blamed = context.inputs.contains(side)                   ? side
+                                       : editing()                                     ? QStringLiteral("images")
+                                       : context.inputs.contains(QStringLiteral("image")) ? QStringLiteral("image")
+                                                                                       : QString();
+                errors.append(makeInputError(QStringLiteral("value_out_of_range"), blamed,
+                                             QStringLiteral("%1 makes a %2 of %3 to %4 pixels, not %5.")
+                                                 .arg(modelName(selection), side)
+                                                 .arg(least)
+                                                 .arg(most > 0 ? QString::number(most) : QStringLiteral("any"))
+                                                 .arg(value)));
             }
         }
         return errors;
