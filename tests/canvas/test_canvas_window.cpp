@@ -1,6 +1,7 @@
 // The canvas in the real window (Main.qml, offscreen): how fast it opens with a large graph,
 // and what the mouse, wheel, trackpad and keyboard do on it (spec 12.1 to 12.3, 12.6).
 
+#include <atomic>
 #include <QElapsedTimer>
 #include <QVariantAnimation>
 #include <QJsonArray>
@@ -242,12 +243,17 @@ private slots:
 
     // 12.1's frame rate needs a real display: offscreen frames say nothing. Opt in with
     //   FUGUE_CANVAS_BENCH=1 QSG_RENDER_TIMING=1 QT_QPA_PLATFORM=xcb build/test_canvas_window benchmark
-    // It pans and drags a node for 3 s each at a zoom that shows the grid's text, and pans
-    // zoomed out, printing frames per second and the longest gap between two frames.
+    // It pans and drags a node for 3 s each at a zoom that shows the grid's text, with the node
+    // shadows and without, and pans zoomed out, printing frames per second, the longest gap
+    // between two frames and the render thread's time a frame.
     // Measured 2026-11-19 (Qt 6.12, RTX 3090, 60 Hz display through XWayland, 302 nodes and
-    // 600 wires, every node's rows made): pan 60.5 fps, drag 60.1, pan zoomed out 60.5; worst
-    // gap 21 to 22 ms (one late frame at most); render thread 2.1 ms a frame on average while
-    // dragging, under 0.5 ms while panning. Spike 05 had 1.5 ms for its lighter nodes.
+    // 600 wires, every node's rows made), before the canvas look (#47): pan 60.5 fps, drag
+    // 60.1, pan zoomed out 60.5; worst gap 21 to 22 ms (one late frame at most); render thread
+    // 2.1 ms a frame on average while dragging, under 0.5 ms while panning.
+    // After it, two runs: pan 60.1 to 60.3 fps, drag 59.9 to 60.2, zoomed out 60.5 to 60.8;
+    // worst gap 19 to 27 ms; render 0.3 to 1.7 ms panning, 2.1 to 2.5 ms dragging, 0.15 ms
+    // zoomed out. The shadows cost 0.45 ms at most (drag 2.54 on, 2.08 off; the other run
+    // 2.31 on, 2.41 off), inside docs/canvas-look.md 7's 1 ms, so nodes at rest keep theirs.
     void benchmark() {
         if (!qEnvironmentVariableIsSet("FUGUE_CANVAS_BENCH"))
             QSKIP("set FUGUE_CANVAS_BENCH=1 and run on a real display");
@@ -263,7 +269,19 @@ private slots:
             last = now;
             ++frames;
         });
-        auto measure = [&](const char *name, const std::function<void(qreal)> &step) {
+        // The render thread's time per frame, in microseconds: scene graph rendering from
+        // beforeRendering to afterRendering (QSG_RENDER_TIMING only prints whole milliseconds).
+        std::atomic<qint64> renderNs = 0, renderStart = 0;
+        std::atomic<int> rendered = 0;
+        QElapsedTimer renderClock;
+        renderClock.start();
+        connect(app.window, &QQuickWindow::beforeRendering, this, [&] { renderStart = renderClock.nsecsElapsed(); },
+                Qt::DirectConnection);
+        connect(app.window, &QQuickWindow::afterRendering, this, [&] {
+            renderNs += renderClock.nsecsElapsed() - renderStart;
+            ++rendered;
+        }, Qt::DirectConnection);
+        auto measure = [&](const QByteArray &name, const std::function<void(qreal)> &step) {
             QVariantAnimation animation;
             animation.setStartValue(0.0);
             animation.setEndValue(1.0);
@@ -271,11 +289,14 @@ private slots:
             connect(&animation, &QVariantAnimation::valueChanged, this, [&](const QVariant &t) { step(t.toReal()); });
             frames = 0;
             worst = 0;
+            renderNs = 0;
+            rendered = 0;
             clock.restart();
             last = 0;
             animation.start();
             QTRY_VERIFY_WITH_TIMEOUT(animation.state() == QAbstractAnimation::Stopped, 10000);
-            qInfo("RESULT %s: %.1f fps, worst gap %lld ms", name, frames * 1000.0 / clock.elapsed(), worst);
+            qInfo("RESULT %s: %.1f fps, worst gap %lld ms, render %.0f us a frame", name.constData(),
+                  frames * 1000.0 / clock.elapsed(), worst, rendered ? renderNs / 1000.0 / rendered : 0.0);
         };
         // Make every node's rows first (a swipe across the whole grid), the worst case.
         app.canvas->setProperty("navigation", "legacy");
@@ -289,14 +310,23 @@ private slots:
         app.world->setPosition({0, 0});
         QTest::qWait(500);
         const QPointF origin = app.world->position();
-        measure("pan at zoom 0.56", [&](qreal t) {
-            app.world->setX(origin.x() - 1500 * std::sin(t * M_PI));
-        });
-        app.model.beginMove("n45");
-        measure("drag a node at zoom 0.56", [&](qreal t) {
-            app.model.moveBy(200 * std::cos(t * 4 * M_PI) - 200, 200 * std::sin(t * 4 * M_PI));
-        });
-        app.model.endMove();
+        // With the node shadows and without them, for docs/canvas-look.md 7's budget (at most
+        // 1 ms of render time at 300 nodes).
+        QQuickItem *shadows = item(app.window->contentItem(), "shadows");
+        QVERIFY(shadows);
+        for (const bool on : {true, false}) {
+            shadows->setOpacity(on ? 1 : 0);
+            const QByteArray which = on ? "shadows on" : "shadows off";
+            measure("pan at zoom 0.56, " + which, [&](qreal t) {
+                app.world->setX(origin.x() - 1500 * std::sin(t * M_PI));
+            });
+            app.model.beginMove("n45");
+            measure("drag a node at zoom 0.56, " + which, [&](qreal t) {
+                app.model.moveBy(200 * std::cos(t * 4 * M_PI) - 200, 200 * std::sin(t * 4 * M_PI));
+            });
+            app.model.endMove();
+        }
+        shadows->setOpacity(1);
         for (int i = 0; i < 14; ++i)
             app.wheel({0, 0}, {0, -120}); // zoom 0.15: the whole grid, without text
         measure("pan zoomed out to 0.15", [&](qreal t) {

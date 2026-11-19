@@ -597,6 +597,7 @@ FocusScope {
         // Node shadows (7): one pre-painted 9-slice texture per level, shared by every node,
         // in their own layer so they draw in one batch; off below the readable zoom.
         Item {
+            objectName: "shadows"
             visible: canvas.tier === 0
             Repeater {
                 model: canvas.model.nodes
