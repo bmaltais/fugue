@@ -384,13 +384,13 @@ bool Workflows::saveTab(int index, const QString &path) {
     // A saved workflow stays portable: the images it takes from Fugue's inputs folder are copied
     // into an `inputs` folder beside it, and its nodes point there (Appendix A, always, no question).
     const Document before = document;
-    if (const Errors moved = relocateInputs(document, *m_registry, inputsDirBeside(path));
-        hasErrors(moved)) {
-        setNotice(tr("Could not save %1: %2").arg(QFileInfo(path).fileName(), firstMessage(moved)));
+    if (const Errors copied = relocateInputs(document, *m_registry, pathOf(index), path);
+        hasErrors(copied)) {
+        setNotice(tr("Could not save %1: %2").arg(QFileInfo(path).fileName(), firstMessage(copied)));
         return false;
     }
-    if (index == m_current && contentHash(document) != contentHash(before))
-        m_canvas->commit(document, tr("Move images"));
+    const bool moved = contentHash(document) != contentHash(before);
+    const Document relocated = document;
     document.refreshRequirements(appVersion());
     const Errors errors = document.saveFile(path);
     if (hasErrors(errors)) {
@@ -400,6 +400,9 @@ bool Workflows::saveTab(int index, const QString &path) {
     Tab &tab = m_tabs[size_t(index)];
     tab.path = path;
     tab.title = QFileInfo(path).fileName();
+    // After the path: the repointed inputs are relative to the new place (Appendix A).
+    if (index == m_current && moved)
+        m_canvas->commit(relocated, tr("Move images"));
     tab.savedHash = contentHash(document);
     tab.unsaved = false;
     tab.recoveryHash.clear();

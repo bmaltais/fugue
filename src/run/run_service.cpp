@@ -237,7 +237,13 @@ public:
     void previewFile(const QString &token, const QString &path) {
         if (m_quitting)
             return;
+        // CanvasRuns has taken a relative path from the workflow's folder; one still relative
+        // (an unsaved workflow's) names nothing yet.
         QString file = expandHome(path);
+        if (!QDir::isAbsolutePath(file)) {
+            emit filePreviewed(token, path, {{"missing", true}});
+            return;
+        }
         if (m_setup.roots) {
             const Result<QString> allowed = m_setup.roots->checkRead(file, QStringLiteral("file"));
             if (!allowed) {
@@ -421,6 +427,7 @@ private:
             RunEnvironment environment = m_process->environment;
             environment.registry = &m_compileRegistry;
             RunOptions options;
+            options.workflow = m_check.workflow; // a relative file is its folder's (Appendix A)
             options.roots = m_setup.roots;
             const GraphCheck graphCheck = checkGraph(*compilation, environment, options);
             problems += graphCheck.warnings;

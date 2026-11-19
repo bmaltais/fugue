@@ -267,6 +267,98 @@ private slots:
         QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
     }
 
+    // The run's state of `node` in run `run` of this window, from its run folder.
+    static QJsonObject ranNode(const RunApp &r, const QString &run, const QString &node, QString *status = nullptr) {
+        const fugue::Result<fugue::RunFolder> folder = fugue::RunFolder::open(r.app.dir.path() + "/runs", run);
+        if (!folder.ok())
+            return {};
+        if (status)
+            *status = folder->state().value("status").toString();
+        return folder->state().value("nodes").toObject().value(node).toObject();
+    }
+
+    // A saved workflow keeps its images in `inputs` beside it under relative paths (Appendix A),
+    // so its folder can move or be shared: reopened from where it went, it runs on the same
+    // images with the same keys, shows them before the run, and is not changed by opening.
+    void aSavedWorkflowsFolderMovesWithItsImages() {
+        const QByteArray graph = R"({
+  "fugue": 1,
+  "graph": {"nodes": {"src": {"type": "fugue/load-image", "version": "1.0.0"},
+                      "show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "src.image"}}}}},
+  "layout": {"nodes": {"src": {"pos": [100, 100]}, "show": {"pos": [400, 100]}}, "view": {"center": [300, 300], "zoom": 1}}
+})";
+        QTemporaryDir place;
+        QVERIFY(QDir().mkpath(place.filePath("first")));
+        QString key;
+        QString name;
+        {
+            RunApp r(graph);
+            QVERIFY(r.app.open());
+            r.app.model.select({"src"});
+            auto *data = new QMimeData;
+            data->setData("image/png", png(20, 10));
+            QGuiApplication::clipboard()->setMimeData(data);
+            r.app.key(Qt::Key_V, Qt::ControlModifier);
+            QVERIFY(r.app.workflows.saveAs(place.filePath("first/flow.fugue")));
+            const QString file = r.app.model.document().graph.nodes.value("src").inputs.value("file").literal().toString();
+            QVERIFY2(file.startsWith("inputs/") && !file.contains(place.path()), qPrintable(file));
+            name = file.mid(7);
+            QVERIFY(QFileInfo(place.filePath("first/inputs/" + name)).isFile());
+
+            QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+            r.app.key(Qt::Key_Return, Qt::ControlModifier);
+            QTRY_COMPARE(finished.size(), 1);
+            QString status;
+            key = ranNode(r, finished.first().at(0).toString(), "src", &status).value("key").toString();
+            QCOMPARE(status, QString("ok"));
+            QVERIFY(!key.isEmpty());
+        }
+        QFile saved(place.filePath("first/flow.fugue"));
+        QVERIFY(saved.open(QIODevice::ReadOnly));
+        const QByteArray bytes = saved.readAll();
+        saved.close();
+        QVERIFY(QDir(place.path()).rename("first", "moved"));
+
+        RunApp r(kLoadImage); // a node of the same id in the tab it opens beside
+        QVERIFY(r.app.open());
+        QVERIFY(r.app.workflows.openPath(place.filePath("moved/flow.fugue")));
+        QCOMPARE(r.app.model.document().graph.nodes.value("src").inputs.value("file").literal().toString(), "inputs/" + name);
+        QVERIFY(!r.app.workflows.unsaved());
+        // Its picture shows before any run, from the moved folder.
+        QTRY_VERIFY(r.role("src", NodeList::Thumbnail).toString().startsWith("file://"));
+        QCOMPARE(r.role("src", NodeList::ThumbnailInfo).toString(), QStringLiteral("20 × 10"));
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(finished.size(), 1);
+        QString status;
+        QCOMPARE(ranNode(r, finished.first().at(0).toString(), "src", &status).value("key").toString(), key);
+        QCOMPARE(status, QString("ok"));
+        QVERIFY(r.app.runs->errors().isEmpty());
+        // Saving it where it is now writes the same bytes: nothing was made absolute.
+        QVERIFY(r.app.workflows.save());
+        QFile again(place.filePath("moved/flow.fugue"));
+        QVERIFY(again.open(QIODevice::ReadOnly));
+        QCOMPARE(again.readAll(), bytes);
+        QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
+    }
+
+    // An unsaved workflow has no folder: a relative file is an error before a run, and the run
+    // says why.
+    void aRelativeFileInAnUnsavedWorkflowSaysWhy() {
+        RunApp r(kLoadImage);
+        QVERIFY(r.app.open());
+        r.app.workflows.newWorkflow();
+        QVERIFY(r.app.workflows.openText(QString::fromUtf8(R"({"fugue": 1, "graph": {"nodes": {
+            "src": {"type": "fugue/load-image", "version": "1.0.0", "inputs": {"file": "inputs/a.png"}},
+            "show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "src.image"}}}}}})")));
+        QTRY_COMPARE(r.state("src"), QStringLiteral("error"));
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(r.state("src"), QStringLiteral("error"));
+        QVERIFY2(r.role("src", NodeList::Error).toString().contains("not saved"), qPrintable(r.role("src", NodeList::Error).toString()));
+    }
+
     // A file that is not there shows a quiet placeholder, not an error.
     void aMissingFileShowsAPlaceholder() {
         RunApp r(kLoadImage);

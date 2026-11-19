@@ -54,6 +54,13 @@ struct FileRoots {
 // component that does not exist yet is kept as written. Empty when the links loop.
 QString canonicalPath(const QString &path);
 
+// The file a `file` input's text names (spec Appendix A): trimmed and "~" expanded; a relative
+// path is taken from the folder of `workflow` (the file the run came from, absolute) and walked
+// as canonicalPath walks it, so `..` and links are resolved before the roots judge it; an
+// absolute path is returned as written. A relative path with no workflow (an unsaved one) has
+// no folder to start from: file_not_found on `input`, saying so.
+Result<QString> inputFilePath(const QString &text, const QString &workflow, const QString &input);
+
 // Whether canonical `path` is `root` or inside it (both canonical).
 bool isInside(const QString &path, const QString &root);
 

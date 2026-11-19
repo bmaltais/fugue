@@ -71,6 +71,23 @@ QString canonicalPath(const QString &path) {
     return QLatin1Char('/') + resolved.join(QLatin1Char('/'));
 }
 
+Result<QString> inputFilePath(const QString &text, const QString &workflow, const QString &input) {
+    const QString path = expandHome(text.trimmed());
+    if (path.isEmpty() || QDir::isAbsolutePath(path))
+        return path;
+    if (workflow.isEmpty())
+        return makeInputError(QStringLiteral("file_not_found"), input,
+                              QStringLiteral("%1 is relative to the workflow's folder, and the workflow is not saved yet.")
+                                  .arg(path),
+                              QStringLiteral("Save the workflow first, or give the file's full path."));
+    const QString resolved = canonicalPath(QFileInfo(workflow).absolutePath() + QLatin1Char('/') + path);
+    if (resolved.isEmpty())
+        return makeInputError(QStringLiteral("file_not_found"), input,
+                              QStringLiteral("%1 leads through a loop of links.").arg(path),
+                              QStringLiteral("Pick the file again in the node."));
+    return resolved;
+}
+
 bool isInside(const QString &path, const QString &root) {
     if (root == QLatin1String("/"))
         return path.startsWith(QLatin1Char('/'));

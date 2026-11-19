@@ -1,5 +1,6 @@
 #include "run/canvas_runs.h"
 
+#include <QDir>
 #include <QJsonArray>
 #include <QFileInfo>
 #include <QSizeF>
@@ -8,6 +9,7 @@
 
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
+#include "engine/file_roots.h"
 #include "engine/paths.h"
 #include "engine/registry.h"
 #include "workflow/workflows.h"
@@ -67,6 +69,9 @@ CanvasRuns::CanvasRuns(CanvasModel *canvas, Workflows *workflows, RunService *se
                        QObject *parent)
     : QObject(parent), m_canvas(canvas), m_workflows(workflows), m_service(service), m_registry(registry) {
     connect(m_service, &RunService::filePreviewed, this, &CanvasRuns::onFilePreviewed);
+    // A new document's cards are made while its reset is under way, before documentReset says
+    // so (showTab), so they are counted from the reset's start.
+    connect(m_canvas->nodes(), &QAbstractItemModel::modelAboutToBeReset, this, [this] { m_rowsMade.clear(); });
     connect(m_canvas, &CanvasModel::rowsMade, this, [this](const QString &node) {
         m_rowsMade.insert(node);
         requestInputPreview(node);
@@ -233,8 +238,10 @@ void CanvasRuns::show(const QString &tab, const QString &node) {
 
 void CanvasRuns::showTab() {
     m_shownTab = currentTab();
-    m_rowsMade.clear(); // the cards are made again, and say so
     readNodes();
+    // The cards made already asked with the last tab's files.
+    for (const QString &node : std::as_const(m_rowsMade))
+        requestInputPreview(node);
     m_pendingProgress.clear();
     m_shown.clear();
     m_canvas->clearRunState();
@@ -591,7 +598,10 @@ void CanvasRuns::readNodes() {
                 const InputValue value = it->inputs.value(input.name);
                 if (input.widget() == QLatin1String("file") && value.kind() == InputValue::Kind::Literal
                     && value.literal().isString() && isImagePath(value.literal().toString())) {
-                    info.imageFile = value.literal().toString();
+                    // As the run will read it: a relative path is the workflow folder's.
+                    const QString text = value.literal().toString();
+                    const Result<QString> located = inputFilePath(text, m_workflows->pathOf(m_workflows->current()), input.name);
+                    info.imageFile = located ? located.value() : text;
                     break;
                 }
             }
@@ -663,7 +673,7 @@ QString CanvasRuns::imageFile(const QString &node) const {
         path = view.imagePath;
     else if (view.text.isEmpty())
         path = expandHome(m_nodeInfo.value(node).imageFile);
-    return !path.isEmpty() && QFileInfo(path).isFile() ? path : QString();
+    return QDir::isAbsolutePath(path) && QFileInfo(path).isFile() ? path : QString();
 }
 
 QVariantList CanvasRuns::errors() const { return m_tabs.value(m_shownTab).errors; }

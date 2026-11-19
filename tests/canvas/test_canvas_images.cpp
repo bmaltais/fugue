@@ -13,6 +13,7 @@
 
 #include "canvas_app.h"
 #include "engine/embed.h"
+#include "engine/file_roots.h"
 #include "engine/paths.h"
 #include "workflow/image_inputs.h"
 
@@ -265,6 +266,7 @@ private slots:
 
     void savingCopiesTheInputsNextToTheWorkflowAndItReloads() {
         QTemporaryDir place;
+        QString name;
         {
             App app(load(oneLoadImage));
             QVERIFY(app.open());
@@ -275,21 +277,50 @@ private slots:
             app.key(Qt::Key_V, Qt::ControlModifier);
             const QString stored = fileOf(app, "src");
             QVERIFY(stored.startsWith(inputsDir()));
+            name = QFileInfo(stored).fileName();
 
             QVERIFY(app.workflows.saveAs(place.filePath("flow.fugue")));
-            // Copied beside the workflow, the node repointed, the original kept.
-            const QString beside = fileOf(app, "src");
-            QCOMPARE(QFileInfo(beside).absolutePath(), place.filePath("inputs"));
-            QCOMPARE(read(beside), read(stored));
+            // Copied beside the workflow, the node repointed by a path relative to the workflow's
+            // folder (so the folder can move), the original kept.
+            QCOMPARE(fileOf(app, "src"), "inputs/" + name);
+            QCOMPARE(read(place.filePath("inputs/" + name)), read(stored));
             QVERIFY(QFileInfo(stored).isFile());
             QVERIFY(!app.workflows.unsaved());
         }
         // A fresh start opens the file with the image.
         App app(load(oneLoadImage));
         QVERIFY(app.workflows.openPath(place.filePath("flow.fugue")));
-        const QString file = fileOf(app, "src");
-        QCOMPARE(QFileInfo(file).absolutePath(), place.filePath("inputs"));
-        QVERIFY(QImage(file).size() == QSize(16, 10));
+        QCOMPARE(fileOf(app, "src"), "inputs/" + name);
+        QVERIFY(QImage(place.filePath("inputs/" + name)).size() == QSize(16, 10));
+    }
+
+    // Save As elsewhere takes the images beside the workflow along, still relative; a path
+    // into the new `inputs` folder written in full (by an older save) becomes relative; any
+    // other relative path, which would lead nowhere from the new folder, becomes the full path
+    // it led to.
+    void saveAsElsewhereTakesTheWorkflowsImagesAlong() {
+        QTemporaryDir place;
+        QVERIFY(QDir().mkpath(place.filePath("a/inputs")) && QDir().mkpath(place.filePath("b/inputs")));
+        QVERIFY(write(place.filePath("a/inputs/one.png"), encoded(picture(Qt::red), "PNG")));
+        QVERIFY(write(place.filePath("a/two.png"), encoded(picture(Qt::green), "PNG")));
+        QVERIFY(write(place.filePath("b/inputs/three.png"), encoded(picture(Qt::blue), "PNG")));
+        const QString flow = QStringLiteral(R"({"fugue": 1, "graph": {"nodes": {
+            "one": {"type": "fugue/load-image", "version": "1.0.0", "inputs": {"file": "inputs/one.png"}},
+            "two": {"type": "fugue/load-image", "version": "1.0.0", "inputs": {"file": "two.png"}},
+            "three": {"type": "fugue/load-image", "version": "1.0.0", "inputs": {"file": "%1"}}}}})")
+                                 .arg(place.filePath("b/inputs/three.png"));
+        QVERIFY(write(place.filePath("a/flow.fugue"), flow.toUtf8()));
+        App app(load(oneLoadImage));
+        QVERIFY(app.workflows.openPath(place.filePath("a/flow.fugue")));
+        QVERIFY(app.workflows.saveAs(place.filePath("b/flow.fugue")));
+        QCOMPARE(fileOf(app, "one"), QString("inputs/one.png"));
+        QCOMPARE(read(place.filePath("b/inputs/one.png")), read(place.filePath("a/inputs/one.png")));
+        QCOMPARE(fileOf(app, "two"), canonicalPath(place.filePath("a/two.png")));
+        QCOMPARE(fileOf(app, "three"), QString("inputs/three.png"));
+        // Saved again in the same place, nothing changes.
+        const Document before = app.model.document();
+        QVERIFY(app.workflows.save());
+        QCOMPARE(app.model.document().save(), before.save());
     }
 };
 

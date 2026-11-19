@@ -201,17 +201,62 @@ bool clipboardHasImage(const QMimeData &data) {
     return !clipboardFiles(data).isEmpty();
 }
 
-Errors relocateInputs(Document &document, const Registry &registry, const QString &to) {
-    const QString source = canonicalPath(inputsDir());
-    if (source.isEmpty() || source == canonicalPath(to))
-        return {};
+namespace {
 
-    // Find what to move before touching anything.
-    struct Move {
-        Nodes *nodes;
-        QString node, input, from, target;
+bool sameBytes(const QString &a, const QString &b) {
+    QFile one(a);
+    QFile two(b);
+    if (one.size() != two.size() || !one.open(QIODevice::ReadOnly) || !two.open(QIODevice::ReadOnly))
+        return false;
+    while (!one.atEnd())
+        if (one.read(1 << 16) != two.read(1 << 16))
+            return false;
+    return true;
+}
+
+// The name `source` takes in `folder`: its own, else `<stem>-2.<ext>`, `-3`, ...; a file there
+// with the same bytes is reused. `claimed` holds the names other sources took this time.
+QString nameIn(const QString &folder, const QString &source, QHash<QString, QString> &claimed) {
+    const QFileInfo info(source);
+    const QString suffix = info.suffix().isEmpty() ? QString() : QLatin1Char('.') + info.suffix();
+    for (int n = 1;; ++n) {
+        const QString name = n == 1 ? info.fileName() : QStringLiteral("%1-%2%3").arg(info.completeBaseName()).arg(n).arg(suffix);
+        const auto taken = claimed.constFind(name);
+        if (taken != claimed.constEnd()) {
+            if (*taken == source)
+                return name;
+            continue;
+        }
+        const QString there = QDir(folder).filePath(name);
+        if (!QFileInfo::exists(there) || sameBytes(there, source)) {
+            claimed.insert(name, source);
+            return name;
+        }
+    }
+}
+
+} // namespace
+
+Errors relocateInputs(Document &document, const Registry &registry, const QString &from, const QString &to) {
+    const QString global = canonicalPath(inputsDir());
+    const QString target = inputsDirBeside(to);
+    const QString targetCanonical = canonicalPath(target);
+    const QString besideFrom = from.isEmpty() ? QString() : canonicalPath(inputsDirBeside(from));
+    const bool newFolder = from.isEmpty()
+                           || canonicalPath(QFileInfo(from).absolutePath()) != canonicalPath(QFileInfo(to).absolutePath());
+    const auto under = [](const QString &path, const QString &folder) {
+        return !folder.isEmpty() && path != folder && isInside(path, folder);
     };
-    QList<Move> moves;
+
+    // Find what to change before touching anything.
+    struct Change {
+        Nodes *nodes;
+        QString node, input;
+        QString copy;    // the file to copy into `target`, or empty
+        QString literal; // what the input holds afterwards
+    };
+    QList<Change> changes;
+    QHash<QString, QString> claimed; // name in `target` -> the file copied there
     auto scan = [&](Nodes &nodes) {
         for (auto it = nodes.begin(); it != nodes.end(); ++it) {
             const NodeType *type = registry.nodeType(it->type);
@@ -222,37 +267,57 @@ Errors relocateInputs(Document &document, const Registry &registry, const QStrin
                 if (!spec || spec->widget() != QLatin1String("file") || in->kind() != InputValue::Kind::Literal
                     || !in->literal().isString())
                     continue;
-                const QString path = canonicalPath(expandHome(in->literal().toString()));
-                if (!path.isEmpty() && path != source && isInside(path, source))
-                    moves.append({&nodes, it.key(), in.key(), path, QDir(to).filePath(QFileInfo(path).fileName())});
+                const QString text = in->literal().toString();
+                const Result<QString> located = inputFilePath(text, from, in.key());
+                if (!located || located->isEmpty())
+                    continue; // relative in an unsaved workflow: it names nothing yet
+                const QString path = canonicalPath(located.value());
+                if (path.isEmpty())
+                    continue;
+                Change change{&nodes, it.key(), in.key(), {}, {}};
+                if (under(path, targetCanonical)) {
+                    change.literal = QStringLiteral("inputs/") + path.mid(targetCanonical.size() + 1);
+                } else if (under(path, global) || under(path, besideFrom)) {
+                    change.copy = path;
+                    change.literal = QStringLiteral("inputs/") + nameIn(target, path, claimed);
+                } else if (newFolder && !QDir::isAbsolutePath(expandHome(text.trimmed()))) {
+                    change.literal = path;
+                } else {
+                    continue;
+                }
+                if (change.literal != text || !change.copy.isEmpty())
+                    changes.append(change);
             }
         }
     };
     scan(document.graph.nodes);
     for (auto group = document.groups.begin(); group != document.groups.end(); ++group)
         scan(group->nodes);
-    if (moves.isEmpty())
+    if (changes.isEmpty())
         return {};
 
-    if (const Errors made = makeFolder(to); hasErrors(made))
-        return made;
-    for (const Move &move : moves) {
-        const QFileInfo target(move.target);
-        if (target.isFile() && target.size() == QFileInfo(move.from).size())
+    for (const Change &change : std::as_const(changes)) {
+        if (change.copy.isEmpty())
             continue;
-        QFile file(move.from);
+        if (const Errors made = makeFolder(target); hasErrors(made))
+            return made;
+        const QString name = change.literal.mid(7);
+        const QString destination = QDir(target).filePath(name);
+        if (QFileInfo::exists(destination))
+            continue; // the same bytes (nameIn)
+        QFile file(change.copy);
         if (!file.open(QIODevice::ReadOnly))
             return {makeError(QStringLiteral("file_not_found"),
                               QStringLiteral("The image %1 is gone, so the workflow's inputs cannot be moved: %2.")
-                                  .arg(QFileInfo(move.from).fileName(), file.errorString()))};
-        PartialFile partial(to, QFileInfo(move.from).fileName());
+                                  .arg(QFileInfo(change.copy).fileName(), file.errorString()))};
+        PartialFile partial(target, name);
         if (const Errors written = partial.write(file.readAll(), QStringLiteral("the image")); hasErrors(written))
             return written;
-        if (const Result<bool> committed = partial.commit(move.target, Overwrite::Replace); !committed)
+        if (const Result<bool> committed = partial.commit(destination, Overwrite::Never); !committed)
             return committed.errors();
     }
-    for (const Move &move : moves)
-        (*move.nodes)[move.node].inputs.insert(move.input, InputValue::literal(move.target));
+    for (const Change &change : std::as_const(changes))
+        (*change.nodes)[change.node].inputs.insert(change.input, InputValue::literal(change.literal));
     return {};
 }
 

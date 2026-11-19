@@ -37,7 +37,8 @@ struct Validation {
 };
 
 // Nothing runs. checkGraph() asks the providers to describe themselves only when some
-// node needs one.
-Validation validateDocument(const Document &document, Context &context);
+// node needs one. `workflow` is the file the document came from: a relative `file` input is
+// that file's folder's (file_roots.h inputFilePath).
+Validation validateDocument(const Document &document, Context &context, const QString &workflow);
 
 } // namespace fugue::cli

@@ -73,11 +73,15 @@ bool clipboardHasImage(const QMimeData &data);
 // The local files of a `text/uri-list` (a file manager's copy).
 QStringList clipboardFiles(const QMimeData &data);
 
-// Makes a saved workflow portable: every `file` input literal that names a file inside the
-// inputs folder (paths.h inputsDir) is copied into `to` (the `inputs` folder beside the .fugue)
-// under the same name, and the literal rewritten. Copies, never moves: other workflows may
-// use the file. The document is changed only when every copy worked.
-Errors relocateInputs(Document &document, const Registry &registry, const QString &to);
+// Makes a workflow saved from `from` (its file until now, empty when unsaved) to `to` portable
+// (Appendix A): every `file` input literal that names a file inside the inputs folder (paths.h
+// inputsDir), or inside the `inputs` folder beside `from`, is copied into the `inputs` folder
+// beside `to` under the same name and the literal becomes `inputs/<name>`, relative to the
+// workflow's folder; a full path into that folder becomes relative too. Any other relative
+// literal becomes the full path it named from `from`'s folder, as it would lead nowhere from a
+// new one. Copies, never moves: other workflows may use the file. The document is changed only
+// when every copy worked.
+Errors relocateInputs(Document &document, const Registry &registry, const QString &from, const QString &to);
 
 // One image in the inputs folder, for the "Recent inputs" list.
 struct RecentInput {

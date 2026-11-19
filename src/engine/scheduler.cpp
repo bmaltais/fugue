@@ -720,9 +720,19 @@ private:
             const bool pathLiteral = (spec.widget() == QLatin1String("file") || spec.widget() == QLatin1String("folder")) &&
                                      value.kind() == Value::Kind::Json && value.json().isString();
             // Trimmed and "~" expanded here, once: the node reads, the key names and the share
-            // copy judges (share_copy.h) the same path.
-            if (pathLiteral)
+            // copy judges (share_copy.h) the same path. A relative file is the workflow folder's
+            // (file_roots.h inputFilePath); a relative folder is the node's to place (Save Image's
+            // is under the output folder).
+            if (pathLiteral && spec.widget() == QLatin1String("file")) {
+                const Result<QString> located = inputFilePath(value.text(), m_options.workflow, spec.name);
+                if (!located) {
+                    resolved.problem = located.error();
+                    return resolved;
+                }
+                value = Value(located.value());
+            } else if (pathLiteral) {
                 value = Value(expandHome(value.text().trimmed()));
+            }
             n.inputs.insert(spec.name, value);
             // A file read by path is keyed by its content, not its path (10.1). Hashing reads
             // it, so the read roots (13.6) are checked first, cached result or not.

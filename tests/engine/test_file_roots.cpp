@@ -98,6 +98,32 @@ private slots:
         QVERIFY(FileRoots::defaults(path("cwd"), "/mnt/flows/a.fugue").allowsRead("/mnt/flows/inputs/x.png"));
     }
 
+    // A `file` input's relative path is taken from the workflow's own folder, walked as the
+    // kernel walks it; an absolute one (or "~/...") is not; an unsaved workflow has no folder.
+    void aRelativeFilePathIsTakenFromTheWorkflowsFolder() {
+        const QString workflow = path("root/flow.fugue");
+        const Result<QString> beside = inputFilePath("inputs/a.png", workflow, "file");
+        QVERIFY(beside.ok());
+        QCOMPARE(beside.value(), canonicalPath(path("root")) + "/inputs/a.png");
+        QCOMPARE(inputFilePath("  ./inside/../a.png ", workflow, "file").value(), canonicalPath(path("root")) + "/a.png");
+        // `..` and links are resolved one component at a time, so the roots judge where it leads.
+        QCOMPARE(inputFilePath("out/../x.png", workflow, "file").value(),
+                 QFileInfo(QDir(m_elsewhere.path()).canonicalPath()).path() + "/x.png");
+        QCOMPARE(inputFilePath("../rootless/x.png", workflow, "file").value(), canonicalPath(path("rootless")) + "/x.png");
+        // Not relative: as written, "~" expanded.
+        QCOMPARE(inputFilePath(path("rootless/x.png"), workflow, "file").value(), path("rootless/x.png"));
+        QCOMPARE(inputFilePath("~/x.png", workflow, "file").value(), QDir::homePath() + "/x.png");
+        QCOMPARE(inputFilePath("~/x.png", {}, "file").value(), QDir::homePath() + "/x.png");
+        // No folder to start from: an error that says so, on the input.
+        const Result<QString> unsaved = inputFilePath("inputs/a.png", {}, "file");
+        QVERIFY(!unsaved.ok());
+        QCOMPARE(unsaved.error().code, QString("file_not_found"));
+        QCOMPARE(unsaved.error().input, QString("file"));
+        QVERIFY2(unsaved.error().message.contains("inputs/a.png") && unsaved.error().message.contains("not saved"),
+                 qPrintable(unsaved.error().message));
+        QVERIFY(!unsaved.error().hint.isEmpty());
+    }
+
     void theyRoundTripThroughJson() {
         const FileRoots roots{{"/a"}, {"/b", "/c"}};
         const Result<FileRoots> back = FileRoots::fromJson(roots.toJson());
