@@ -90,6 +90,10 @@ public:
     Q_INVOKABLE void cancel();
     // A check now rather than after the edit pause (tests).
     Q_INVOKABLE void checkNow();
+    // The full image file of the node's picture slot (its last result, else the file its input
+    // names), for Open, Copy and Save Image; empty when it shows none or the file is gone.
+    // Never the thumbnail, which is a 512 px copy.
+    Q_INVOKABLE QString imageFile(const QString &node) const;
     // Selects the canvas node an error is shown on and puts it in view (the error list).
     Q_INVOKABLE void showError(const QString &node);
 
@@ -115,6 +119,7 @@ private:
         int thumbnailHeight = 0;
         QVariantMap values;
         QString thumbnailFile; // the file a sink wrote, named under its picture
+        QString imagePath;     // the full image behind `thumbnail`, for Open, Copy and Save Image
         QString text;          // a text, number or media label shown in the slot
         qreal textAspect = 0.5;
         QString inputThumbnail; // the image of the node's input file, before it runs

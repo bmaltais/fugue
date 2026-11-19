@@ -8,6 +8,7 @@
 
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
+#include "engine/paths.h"
 #include "engine/registry.h"
 #include "workflow/workflows.h"
 
@@ -366,6 +367,7 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
         view.thumbnail = thumbnail.value("url").toString();
         view.thumbnailWidth = thumbnail.value("width").toInt();
         view.thumbnailHeight = thumbnail.value("height").toInt();
+        view.imagePath = thumbnail.value("source").toString();
     } else if (kind == QLatin1String("node.done") || kind == QLatin1String("node.cached")) {
         setState(event.value("frozen").toBool() ? QStringLiteral("frozen") : QStringLiteral("cached"));
         view.progress = -1;
@@ -395,6 +397,7 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
             view.thumbnail = thumbnail.value("url").toString();
             view.thumbnailWidth = thumbnail.value("width").toInt();
             view.thumbnailHeight = thumbnail.value("height").toInt();
+            view.imagePath = thumbnail.value("source").toString();
             view.thumbnailFile = m_nodeInfo.value(top).savesFile ? thumbnail.value("file").toString() : QString();
             view.text = thumbnail.value("label").toString();
             view.textAspect = view.thumbnailWidth > 0 && view.thumbnail.isEmpty()
@@ -411,6 +414,7 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
                 view.text = excerpt;
                 view.textAspect = 0.5;
                 view.thumbnail.clear();
+                view.imagePath.clear();
                 break;
             }
         }
@@ -610,6 +614,7 @@ void CanvasRuns::refreshInputs() {
         if (runs.nodes.contains(node)) {
             NodeView &view = runs.nodes[node];
             view.thumbnail.clear();
+            view.imagePath.clear();
             view.text.clear();
             view.inputThumbnail.clear();
             view.inputMissing = false;
@@ -637,6 +642,16 @@ void CanvasRuns::onFilePreviewed(const QString &token, const QString &path, cons
     view.inputHeight = thumbnail.value("height").toInt();
     show(tab, node);
     emit inputPreviewed(node);
+}
+
+QString CanvasRuns::imageFile(const QString &node) const {
+    const NodeView view = m_tabs.value(m_shownTab).nodes.value(node);
+    QString path;
+    if (!view.thumbnail.isEmpty() && !view.imagePath.isEmpty())
+        path = view.imagePath;
+    else if (view.text.isEmpty())
+        path = expandHome(m_nodeInfo.value(node).imageFile);
+    return !path.isEmpty() && QFileInfo(path).isFile() ? path : QString();
 }
 
 QVariantList CanvasRuns::errors() const { return m_tabs.value(m_shownTab).errors; }

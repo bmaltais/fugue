@@ -73,7 +73,8 @@ QJsonObject thumbnailOf(const QJsonObject &handle, const QString &dir) {
                 return {};
         }
     }
-    return {{"url", QUrl::fromLocalFile(file).toString()}, {"width", width}, {"height", height}};
+    // "source" is the full image, the one Open, Copy and Save Image act on.
+    return {{"url", QUrl::fromLocalFile(file).toString()}, {"width", width}, {"height", height}, {"source", path}};
 }
 
 // What stands in for a thumbnail of a video or audio result: a label, and a video's shape.

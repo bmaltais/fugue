@@ -88,6 +88,7 @@ struct App {
     fugue::SettingsModel settings{dir.path() + "/config/fugue/settings.json", dir.path() + "/config/fugue/providers.json"};
     // A test's own runs (test_canvas_run), set before open(); the window runs without them.
     fugue::CanvasRuns *runs = nullptr;
+    fugue::ImageActions *imageActions = nullptr; // likewise (test_canvas_image_actions)
     QQmlApplicationEngine engine;
     QStringList warnings;
     QList<QUrl> openedUrls; // what help.docs and help.report-issue opened
@@ -120,7 +121,7 @@ struct App {
     }
 
     bool open() {
-        fugue::exposeToQml(engine, {&translator, &theme, &commands, &model, &workflows, &settings, runs});
+        fugue::exposeToQml(engine, {&translator, &theme, &commands, &model, &workflows, &settings, runs, imageActions});
         engine.load(QUrl("qrc:/Main.qml"));
         if (engine.rootObjects().isEmpty())
             return false;

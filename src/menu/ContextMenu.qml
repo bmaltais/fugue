@@ -43,6 +43,7 @@ Item {
             if (App.canvasModel.selection.indexOf(node) < 0)
                 App.canvasModel.select([node], "replace")
             kind = "node"
+            target.node = node
         } else {
             const frame = frameAt(w.x, w.y)
             if (frame !== "")

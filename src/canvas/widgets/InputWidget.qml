@@ -21,7 +21,7 @@ Rectangle {
     required property WidgetEdit edits // CanvasModel.widgets
     required property string nodeId
     required property var port  // CanvasModel::portMap
-    required property CanvasLook look  // theme.look (look.h)
+    required property CanvasLook look  // App.theme.look (look.h)
     property Item canvasView    // takes the focus back when an edit ends
     property Item nodeItem      // its rows, for Tab
     property Item row           // raised while the multiline editor covers the rows below

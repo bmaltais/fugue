@@ -7,7 +7,7 @@ import Fugue
 // corner, 3 the popup corner.
 BorderImage {
     required property Item target
-    required property CanvasLook look // theme.look
+    required property CanvasLook look // App.theme.look
     property int level: 3
 
     readonly property int reach: look.shadowMargins[level - 1]

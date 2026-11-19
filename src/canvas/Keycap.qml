@@ -5,7 +5,7 @@ import Fugue
 // 5u square, a 1 px edge in hairline-strong with a 2 px bottom edge, the node body's fill.
 Rectangle {
     id: cap
-    required property CanvasLook look // theme.look
+    required property CanvasLook look // App.theme.look
     property string text
     property bool glyph: false // text is a Lucide glyph name
 

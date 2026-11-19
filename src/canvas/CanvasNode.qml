@@ -45,7 +45,7 @@ Item {
     // Set by the canvas.
     property CanvasModel canvasModel
     property var canvasView // the FugueCanvas: port colors
-    property CanvasLook look       // theme.look
+    property CanvasLook look       // App.theme.look
     property var linkDrag: ({})
     property rect detailArea
     // 0: full detail; 1: the map (boxes, headers, port marks, thumbnails); 2: the overview

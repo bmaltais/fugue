@@ -51,6 +51,13 @@ QList<Row> menuRows() {
         {"node.color.cyan", QT_TRANSLATE_NOOP("Command", "Color: cyan"), QT_TRANSLATE_NOOP("Command", "Cyan"), {}, "canvas", "same"},
         {"node.color.blue", QT_TRANSLATE_NOOP("Command", "Color: blue"), QT_TRANSLATE_NOOP("Command", "Blue"), {}, "canvas", "same"},
         {"node.color.magenta", QT_TRANSLATE_NOOP("Command", "Color: magenta"), QT_TRANSLATE_NOOP("Command", "Magenta"), {}, "canvas", "same"},
+        // Handlers come from ImageActions (image_actions.h).
+        {"node.open-image", QT_TRANSLATE_NOOP("Command", "Open the node's image in the default viewer"),
+         QT_TRANSLATE_NOOP("Command", "Open Image"), {}, "canvas", "same"},
+        {"node.copy-image", QT_TRANSLATE_NOOP("Command", "Copy the node's image to the clipboard"),
+         QT_TRANSLATE_NOOP("Command", "Copy Image"), {}, "canvas", "same"},
+        {"node.save-image", QT_TRANSLATE_NOOP("Command", "Save the node's image to a file"),
+         QT_TRANSLATE_NOOP("Command", "Save Image…"), {}, "canvas", "same"},
         {"help.docs", QT_TRANSLATE_NOOP("Command", "Open the documentation"), QT_TRANSLATE_NOOP("Command", "Documentation"), {}, "app", "same"},
         {"help.report-issue", QT_TRANSLATE_NOOP("Command", "Report an issue"), nullptr, {}, "app", "same"},
         {"help.about", QT_TRANSLATE_NOOP("Command", "About Fugue"), nullptr, {}, "app", "same"},

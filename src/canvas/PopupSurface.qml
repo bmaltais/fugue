@@ -6,7 +6,7 @@ import Fugue
 // Popup's background.
 Item {
     id: surface
-    required property CanvasLook look // theme.look
+    required property CanvasLook look // App.theme.look
 
     Shadow {
         target: box

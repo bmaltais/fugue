@@ -81,6 +81,7 @@ ApplicationWindow {
 
         // The file pickers, the save and trust and recovery questions, the drop area.
         WorkflowDialogs { anchors.fill: parent; canvasView: fugueCanvas }
+        ImageSaveDialog {}
     }
 
     // The command registry's shortcuts, the `?` overlay and the quit question.
