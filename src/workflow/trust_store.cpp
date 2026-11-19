@@ -55,9 +55,8 @@ Errors TrustStore::trust(const QString &packId, const QString &version) {
     QJsonArray versions = packs.value(packId).toArray();
     versions.append(version);
     packs.insert(packId, versions);
-    if (const Errors made = makeFolder(QFileInfo(m_path).absolutePath()); !made.isEmpty())
-        return made;
-    return writeJsonFile(m_path, QJsonObject{{"packs", packs}});
+    // Only its owner may read or change what they trust (replaceFile makes the folder).
+    return replaceFile(m_path, writeJson(QJsonObject{{"packs", packs}}), QFileInfo(m_path).fileName(), FileMode::OwnerOnly);
 }
 
 QList<PackUse> TrustStore::packsUsed(const Document &document) {

@@ -315,6 +315,26 @@ private slots:
         QVERIFY(f.restart(third)->recoverable().isEmpty());
     }
 
+    // Recovery copies and trust.json are the owner's alone (0600), whatever the umask.
+    void recoveryCopiesAndTrustAreTheOwnersAlone() {
+        Fixture f;
+        const QFileDevice::Permissions owner = QFileDevice::ReadOwner | QFileDevice::WriteOwner;
+        const auto ownerOnly = [&](const QString &path) {
+            QFile file(path);
+            return file.exists() && (file.permissions() & ~(owner | QFileDevice::ReadUser | QFileDevice::WriteUser)) == 0;
+        };
+        f.canvas.addNode("fugue/text", 0, 0);
+        f.workflows->writeRecoveryCopies();
+        const QStringList copies = QDir(f.locations.recoveryDir).entryList({"*.fugue", "*.json"}, QDir::Files);
+        QCOMPARE(copies.size(), 2); // the copy and its note
+        for (const QString &name : copies)
+            QVERIFY2(ownerOnly(f.locations.recoveryDir + "/" + name), qPrintable(name));
+        QVERIFY(write(f.file("odd.fugue"), withMissingNode));
+        QVERIFY(f.workflows->openPath(f.file("odd.fugue")));
+        f.workflows->allowPendingTrust();
+        QVERIFY(ownerOnly(f.locations.trustPath));
+    }
+
     void discardingTheOfferDeletesTheCopies() {
         Fixture f;
         f.canvas.addNode("fugue/text", 0, 0);

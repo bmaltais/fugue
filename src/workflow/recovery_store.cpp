@@ -1,6 +1,7 @@
 #include "workflow/recovery_store.h"
 
 #include "engine/atomic_file.h"
+#include "engine/json.h"
 #include "engine/paths.h"
 
 #include <QDir>
@@ -31,18 +32,15 @@ Errors RecoveryStore::write(const QString &id, const Document &document, const Q
         return Errors{makeError("invalid_argument", QStringLiteral("%1 is not a recovery id.").arg(id))};
     if (const Errors made = makeFolder(m_dir); !made.isEmpty())
         return made;
-    // The copy is a workflow file of its own; the original is never touched.
-    if (const Errors saved = document.saveFile(copyPath(id)); !saved.isEmpty())
+    // The copy is a workflow file of its own; the original is never touched. Both files are
+    // the owner's alone, as the work they hold may be private.
+    if (const Errors saved = replaceFile(copyPath(id), writeJson(document.toJson()), QStringLiteral("the recovery copy"),
+                                         FileMode::OwnerOnly);
+        !saved.isEmpty())
         return saved;
     const QJsonObject meta{{"path", originalPath}, {"title", title}};
-    const QByteArray bytes = QJsonDocument(meta).toJson(QJsonDocument::Compact);
-    PartialFile partial(m_dir, id + ".json");
-    if (const Errors written = partial.write(bytes, QStringLiteral("the recovery note")); !written.isEmpty())
-        return written;
-    const Result<bool> committed = partial.commit(metaPath(id), Overwrite::Replace);
-    if (!committed.ok())
-        return committed.errors();
-    return {};
+    return replaceFile(metaPath(id), QJsonDocument(meta).toJson(QJsonDocument::Compact),
+                       QStringLiteral("the recovery note"), FileMode::OwnerOnly);
 }
 
 void RecoveryStore::remove(const QString &id) {
