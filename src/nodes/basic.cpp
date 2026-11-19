@@ -88,7 +88,7 @@ Result<QString> saveAsNew(const QString &folder, const QString &name, const QStr
         if (*committed)
             return target;
     }
-    return makeError(QStringLiteral("permission_denied"), QStringLiteral("No free name for %1 in %2.").arg(name, folder),
+    return makeError(QStringLiteral("node_failed"), QStringLiteral("No free name for %1 in %2.").arg(name, folder),
                      QStringLiteral("Pick another name or folder in the node."));
 }
 
@@ -117,9 +117,11 @@ public:
             folder = outputDir();
         else if (QDir::isRelativePath(folder))
             folder = outputDir() + QLatin1Char('/') + folder;
-        if (!QDir().mkpath(folder))
-            return makeError(QStringLiteral("permission_denied"), QStringLiteral("Cannot create the folder %1.").arg(folder),
-                             QStringLiteral("Pick another folder in the node."));
+        if (Errors made = makeFolder(folder); !made.isEmpty()) {
+            made.first().input = QStringLiteral("folder");
+            made.first().hint = QStringLiteral("Pick another folder in the node.");
+            return made;
+        }
 
         // The pixels as a PNG the engine can write (8 or 16 bit), made from a copy so an input
         // file is never the one read and written.

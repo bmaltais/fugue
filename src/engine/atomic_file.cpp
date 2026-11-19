@@ -4,6 +4,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fcntl.h>
 #include <limits>
 #include <signal.h>
@@ -28,13 +29,6 @@ QString uniquePart() {
 // The 13.3 code for a failed write, from its errno: a missing folder is file_not_found, a
 // refusal is permission_denied, and anything else (a full disk) is node_failed, the code
 // for a failure no other code fits. The message names the cause.
-QString writeFailureCode(int error) {
-    if (error == ENOENT || error == ENOTDIR)
-        return QStringLiteral("file_not_found");
-    if (error == EACCES || error == EPERM || error == EROFS)
-        return QStringLiteral("permission_denied");
-    return QStringLiteral("node_failed");
-}
 
 Error writeFailed(const QString &target, int error) {
     return makeError(writeFailureCode(error),
@@ -52,6 +46,23 @@ QString partialName(QString name) {
 }
 
 } // namespace
+
+QString writeFailureCode(int error) {
+    if (error == ENOENT || error == ENOTDIR)
+        return QStringLiteral("file_not_found");
+    if (error == EACCES || error == EPERM || error == EROFS)
+        return QStringLiteral("permission_denied");
+    return QStringLiteral("node_failed");
+}
+
+Errors makeFolder(const QString &dir) {
+    std::error_code error;
+    std::filesystem::create_directories(std::filesystem::path(QFile::encodeName(dir).toStdString()), error);
+    if (!error)
+        return {};
+    return {makeError(writeFailureCode(error.value()),
+                      QStringLiteral("Cannot create the folder %1: %2.").arg(dir, QString::fromStdString(error.message())))};
+}
 
 PartialFile::PartialFile(const QString &dir, const QString &name) : m_path(QDir(dir).filePath(partialName(name))) {}
 

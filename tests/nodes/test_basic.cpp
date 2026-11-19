@@ -519,6 +519,19 @@ private slots:
         QVERIFY2(tooLong.error.contains("too long"), qPrintable(tooLong.error));
     }
 
+    // A folder that cannot be made says why, by the 13.3 code of its cause: a file standing
+    // where a folder should be is file_not_found (ENOTDIR), not a blanket permission_denied.
+    void aFolderThatCannotBeMadeSaysWhy() {
+        const QString source = makePng("src-nofolder", 4, 3);
+        QFile blocker(path("blocker"));
+        QVERIFY(blocker.open(QIODevice::WriteOnly));
+        blocker.close();
+        const Ran ran = run(saveFlow(source, "'name': 'x', 'embed': 'none', 'folder': '" + path("blocker/sub") + "'"));
+        QVERIFY2(ran.error.startsWith("file_not_found"), qPrintable(ran.error));
+        QVERIFY2(ran.error.contains(path("blocker/sub")), qPrintable(ran.error));
+        QCOMPARE(ran.outcome.errors.value(0).input, QString("folder"));
+    }
+
     void aRelativeFolderIsUnderTheOutputFolder() {
         const QString source = makePng("src-rel", 4, 4);
         qputenv("XDG_PICTURES_DIR", path("pictures").toUtf8());

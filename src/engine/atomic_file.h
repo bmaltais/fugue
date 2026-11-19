@@ -16,6 +16,15 @@
 
 namespace fugue {
 
+// The 13.3 code for a write that failed with `error` (an errno): file_not_found for a
+// missing folder (ENOENT, ENOTDIR), permission_denied for a refusal (EACCES, EPERM, EROFS),
+// node_failed for anything else (a full disk).
+QString writeFailureCode(int error);
+
+// Makes `dir` and the folders above it. Empty when it exists or was made; else one error
+// with writeFailureCode's code, naming the folder and the cause.
+Errors makeFolder(const QString &dir);
+
 enum class Overwrite {
     Replace, // an existing file at the name is replaced, in the same step
     Never,   // an existing file at the name is kept, even one made a moment ago by another writer
@@ -35,13 +44,14 @@ public:
     // Where to write the content (a program such as ffmpeg may write it itself).
     QString path() const { return m_path; }
 
-    // Writes `bytes` as the whole content. permission_denied naming `what` on failure.
+    // Writes `bytes` as the whole content. On failure an error naming `what`, with
+    // writeFailureCode's code.
     Errors write(const QByteArray &bytes, const QString &what) const;
 
     // Gives the written partial file the name `target` (in the same folder) in one step.
     // True when done. With Overwrite::Never and a file already at `target`, false: that file
-    // is left as it is, and this partial file stays for another name. permission_denied when
-    // the move itself fails.
+    // is left as it is, and this partial file stays for another name. An error with
+    // writeFailureCode's code when the move itself fails.
     Result<bool> commit(const QString &target, Overwrite overwrite);
 
     // Removes the partial files a writer left in `dir` when it died mid-write: names of this
