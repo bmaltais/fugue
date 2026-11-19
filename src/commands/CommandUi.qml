@@ -249,7 +249,7 @@ Item {
             }
 
             Flickable {
-                id: rows
+                id: commandList
                 objectName: "commandList"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -261,7 +261,7 @@ Item {
                 ScrollBar.vertical: ScrollBar {}
                 Row {
                     id: columnsRow
-                    width: rows.width
+                    width: commandList.width
                     spacing: 9 * root.u
                     Repeater {
                         model: help.columns
@@ -278,7 +278,7 @@ Item {
                                     required property var modelData
                                     required property int index
                                     readonly property var rows: help.rowsOf(modelData)
-                                    visible: rows.length > 0
+                                    visible: group.rows.length > 0
                                     width: column.width
                                     Text {
                                         width: parent.width

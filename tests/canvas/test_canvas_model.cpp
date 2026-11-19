@@ -140,21 +140,21 @@ private slots:
         CanvasModel canvas(&m_registry);
         canvas.setDocument(document(threeNodes));
         const QVariantMap gen = node(canvas, "gen");
-        QCOMPARE(port(gen, "inputs", "prompt").value("widgetKind").toString(), QString("multiline"));
-        QCOMPARE(port(gen, "inputs", "width").value("widgetKind").toString(), QString("spin"));
-        QCOMPARE(port(gen, "inputs", "seed").value("widgetKind").toString(), QString("seed"));
+        QCOMPARE(port(gen, "inputs", "prompt").value("widgetType").toString(), QString("multiline"));
+        QCOMPARE(port(gen, "inputs", "width").value("widgetType").toString(), QString("spin"));
+        QCOMPARE(port(gen, "inputs", "seed").value("widgetType").toString(), QString("seed"));
         QCOMPARE(port(gen, "inputs", "seed").value("value").toString(), QString("random"));
-        QCOMPARE(port(gen, "inputs", "strength").value("widgetKind").toString(), QString("slider"));
+        QCOMPARE(port(gen, "inputs", "strength").value("widgetType").toString(), QString("slider"));
         // A slider's fill is its value's share of the range: 0.7 of 0 to 1.
         QCOMPARE(port(gen, "inputs", "strength").value("share").toDouble(), 0.7);
         // A resource input shows the model picker (spec 2.5, 6.2).
-        QCOMPARE(port(gen, "inputs", "model").value("widgetKind").toString(), QString("model"));
+        QCOMPARE(port(gen, "inputs", "model").value("widgetType").toString(), QString("model"));
         QVERIFY(port(gen, "inputs", "model").value("widget").toBool());
         // Media inputs are wire-only.
         QVERIFY(!port(gen, "inputs", "image").value("widget").toBool());
         const QVariantMap save = node(canvas, "save");
-        QCOMPARE(port(save, "inputs", "format").value("widgetKind").toString(), QString("choice"));
-        QCOMPARE(port(save, "inputs", "folder").value("widgetKind").toString(), QString("folder"));
+        QCOMPARE(port(save, "inputs", "format").value("widgetType").toString(), QString("choice"));
+        QCOMPARE(port(save, "inputs", "folder").value("widgetType").toString(), QString("folder"));
     }
 
     void aLinkIntoAMultilineInputShrinksItsRow() {

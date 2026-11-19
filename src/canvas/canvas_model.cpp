@@ -139,7 +139,8 @@ QHash<int, QByteArray> LinkList::roleNames() const {
 
 CanvasModel::CanvasModel(const Registry *registry, QObject *parent)
     : QObject(parent), m_registry(registry), m_nodeList(new NodeList(this)), m_linkList(new LinkList(this)),
-      m_search(new NodeSearch(registry, this, this)), m_undo(makeUndoStack()) {
+      m_search(new NodeSearch(registry, this, this)), m_widgets(new WidgetEdit(registry, this, this)),
+      m_undo(makeUndoStack()) {
     watchUndoStack();
 }
 
@@ -325,7 +326,7 @@ CanvasModel::NodeRow CanvasModel::makeRow(const QString &id) const {
             Port port;
             port.name = port.label = it.key();
             port.widget = linksIn(it.value()).isEmpty();
-            port.widgetKind = QStringLiteral("line");
+            port.widgetType = QStringLiteral("line");
             row.inputs.push_back(port);
         }
     }
@@ -365,8 +366,11 @@ void CanvasModel::portsFromType(NodeRow &row, const Node &node) const {
         port.label = label.isEmpty() ? (spec.label.isEmpty() ? spec.name : spec.label) : label;
         port.type = spec.type;
         port.kind = m_registry ? m_registry->portKind(spec.type.type) : PortKind::Unknown;
-        port.widgetKind = port.kind == PortKind::Resource ? QStringLiteral("model") : spec.widget();
-        port.widget = !port.widgetKind.isEmpty() && !spec.type.list;
+        // A resource input is a value row too: unwired, it shows the model picker (2.5). A list
+        // keeps its row but has no widget to edit it with (its value shows as "[n]").
+        if (!spec.type.list)
+            port.widgetType = port.kind == PortKind::Resource ? QStringLiteral("model") : spec.widget();
+        port.widget = !port.widgetType.isEmpty() || (spec.type.list && !spec.widget().isEmpty());
         port.required = spec.required();
         port.defaultValue = spec.defaultValue;
         port.min = spec.min;
@@ -454,7 +458,7 @@ void CanvasModel::layOut(NodeRow &row) const {
     for (Port &port : row.outputs)
         place(port, m_rowHeight);
     for (Port &port : row.inputs) {
-        const bool tall = port.widgetKind == QLatin1String("multiline") && port.widget
+        const bool tall = port.widgetType == QLatin1String("multiline") && port.widget
                           && linksIn(node.inputs.value(port.name)).isEmpty();
         place(port, tall ? m_tallRowHeight : m_rowHeight);
     }
@@ -537,7 +541,7 @@ QVariantMap CanvasModel::portMap(const NodeRow &row, const Port &port) const {
                     {"rowHeight", port.rowHeight},
                     {"wired", isWired(row.id, port.name, port.output)},
                     {"widget", port.widget},
-                    {"widgetKind", port.widgetKind},
+                    {"widgetType", port.widgetType},
                     {"required", port.required}};
     const Node &node = m_document.graph.nodes.value(row.id);
     if (port.widget) {
@@ -545,6 +549,8 @@ QVariantMap CanvasModel::portMap(const NodeRow &row, const Port &port) const {
         const InputValue value = node.inputs.value(port.name);
         map.insert("value", displayValue(value, port, &isDefault));
         map.insert("isDefault", isDefault);
+        // The stored value as it is, for the widget (undefined when unset).
+        map.insert("literal", value.toJson().toVariant());
         // A slider fills its value's share of its range.
         const QJsonValue number = value.isEmpty() ? port.defaultValue
                                   : value.kind() == InputValue::Kind::Literal ? value.literal() : QJsonValue();
@@ -603,6 +609,24 @@ bool CanvasModel::isWired(const QString &node, const QString &port, bool output)
             return true;
     }
     return false;
+}
+
+const InputSpec *CanvasModel::inputSpec(const QString &node, const QString &input) const {
+    if (!m_registry || !m_document.graph.nodes.contains(node))
+        return nullptr;
+    const QString type = m_document.graph.nodes.value(node).type;
+    if (const NodeType *installed = m_registry->nodeType(type))
+        return installed->input(input);
+    if (const GroupDefinition *group = m_document.group(type)) {
+        for (const GroupInput &exposed : group->inputs) {
+            if (exposed.name != input)
+                continue;
+            const PortRef target = exposed.targets.value(0);
+            const NodeType *inner = m_registry->nodeType(group->nodes.value(target.node).type);
+            return inner ? inner->input(target.port) : nullptr;
+        }
+    }
+    return nullptr;
 }
 
 const CanvasModel::Port *CanvasModel::findPort(const QString &node, const QString &port, bool output) const {

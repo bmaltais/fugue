@@ -42,6 +42,14 @@ foreach(qml ${fugue_canvas_qml})
   list(APPEND fugue_canvas_qml_files src/canvas/${qml})
 endforeach()
 qt_add_resources(fugue_core fugue_canvas_qml PREFIX /canvas FILES ${fugue_canvas_qml_files})
+# The widgets on a node's face (spec 6.2), in src/canvas/widgets/, under qrc:/canvas/widgets.
+file(GLOB fugue_widget_qml CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/src/canvas/widgets src/canvas/widgets/*.qml)
+set(fugue_widget_qml_files)
+foreach(qml ${fugue_widget_qml})
+  set_source_files_properties(src/canvas/widgets/${qml} PROPERTIES QT_RESOURCE_ALIAS ${qml})
+  list(APPEND fugue_widget_qml_files src/canvas/widgets/${qml})
+endforeach()
+qt_add_resources(fugue_core fugue_widget_qml PREFIX /canvas/widgets FILES ${fugue_widget_qml_files})
 # Its shaders (docs/canvas-look.md: the dot grid and rounded thumbnails), compiled to .qsb with
 # Qt's shader tools, under qrc:/canvas/shaders/<name>.qsb.
 file(GLOB fugue_canvas_shaders CONFIGURE_DEPENDS src/canvas/shaders/*.frag)

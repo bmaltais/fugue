@@ -14,6 +14,8 @@
 #include <QWheelEvent>
 #include <QtTest>
 
+#include <functional>
+
 #include "backend.h"
 #include "canvas/canvas_commands.h"
 #include "canvas/canvas_model.h"
@@ -88,9 +90,14 @@ struct App {
     QQuickItem *canvas = nullptr;
     QQuickItem *world = nullptr;
 
-    explicit App(const fugue::Document &document, const Look &look = {})
+    // `addTypes` adds node types of the test's own before the document opens; `look` is the
+    // theme and corner radius to draw with.
+    explicit App(const fugue::Document &document, const std::function<void(fugue::Registry &)> &addTypes = {},
+                 const Look &look = {})
         : hyprctl(prepareLook(dir, look)), theme(dir.path(), nullptr, hyprctl) {
         fugue::nodes::addBuiltinNodeTypes(registry);
+        if (addTypes)
+            addTypes(registry);
         fugue::registerDefaultCommands(commands);
         fugue::registerFileCommands(commands, workflows);
         model.search()->registerCommands(commands);

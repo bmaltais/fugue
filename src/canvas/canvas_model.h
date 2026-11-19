@@ -41,6 +41,10 @@
 //   undo step; the canvas emits searchRequested (double-click on empty canvas) and
 //   linkReleased (a dragged link let go on empty canvas) with the world point and the
 //   dragged port, for search filtered by port type.
+// - #48 widgets (done): WidgetEdit (canvas/widget_edit.h), owned here as `widgets`, edits an
+//   input's value from the widget on the node face; each port map carries `widgetType` and
+//   the stored `literal` for it. A resource input is a value row (the model picker). When a
+//   run starts, #19 calls widgets->advanceSeeds() for the seeds set to increment.
 // - #19 run state (done as a seam by #47): setRunState(node, {...}) fills the NodeList roles a
 //   run shows (runState, progress, seconds, error, warnings, thumbnail, output values);
 //   clearRunState() empties them. With no run they are empty and a node shows no state.
@@ -55,6 +59,7 @@
 //   edits below; canvas_commands.h registers them.
 // - Text size: FugueCanvas binds textSize to the theme's; rows and titles follow it.
 
+#include "canvas/widget_edit.h"
 #include "engine/document.h"
 #include "engine/port_type.h"
 #include "search/node_search.h"
@@ -163,6 +168,8 @@ class CanvasModel : public QObject {
     Q_PROPERTY(QVariantMap view READ view NOTIFY documentReset)
     // Node search (src/search/node_search.h): it adds nodes through addNode() and connectPorts().
     Q_PROPERTY(fugue::NodeSearch *search READ search CONSTANT)
+    // Editing input values in place (canvas/widget_edit.h), for the widgets on the node face.
+    Q_PROPERTY(WidgetEdit *widgets READ widgets CONSTANT)
     // The base text size in px (theme.textSize); a node's title and rows are sized from it.
     Q_PROPERTY(int textSize READ textSize WRITE setTextSize NOTIFY metricsChanged)
     Q_PROPERTY(qreal headerHeight READ headerHeight NOTIFY metricsChanged)
@@ -188,6 +195,7 @@ public:
     NodeList *nodes() const { return m_nodeList; }
     LinkList *links() const { return m_linkList; }
     fugue::NodeSearch *search() const { return m_search; }
+    WidgetEdit *widgets() const { return m_widgets; }
 
     void setDocument(const fugue::Document &document);
     // The document with the canvas's positions and viewport in its layout.
@@ -388,6 +396,7 @@ private:
     friend class NodeList;
     friend class LinkList;
     friend class EditCommand;
+    friend class WidgetEdit;
 
     // The document with positions folded in, and the nodes in drawing order.
     struct Snapshot {
@@ -401,8 +410,8 @@ private:
         bool output = false;
         std::optional<fugue::PortSpec> type; // none: unknown (a placeholder's port)
         fugue::PortKind kind = fugue::PortKind::Unknown;
-        bool widget = false; // a value input: shown as a widget when unlinked
-        QString widgetKind;  // spin, slider, line, multiline, toggle, choice, file, folder, color, seed, model
+        bool widget = false; // a value input: its row shows its widget when unlinked
+        QString widgetType;  // its 6.2 widget, or "model" for a resource input (2.5)
         bool required = false;
         QJsonValue defaultValue = QJsonValue::Undefined;
         std::optional<double> min, max;
@@ -474,6 +483,9 @@ private:
     QVariantList portMaps(const NodeRow &row, bool outputs) const;
     QVariantMap portMap(const NodeRow &row, const Port &port) const;
     const Port *findPort(const QString &node, const QString &port, bool output) const;
+    // The spec of a node's input: its type's, or for a group instance the inner input an
+    // exposed input leads to. None for a placeholder or an unknown name.
+    const fugue::InputSpec *inputSpec(const QString &node, const QString &input) const;
     QString problem(const QString &fromNode, const QString &output, const QString &toNode, const QString &input,
                     bool useDrag) const;
     QSet<QString> upstreamOf(const QString &node) const;
@@ -487,6 +499,7 @@ private:
     NodeList *m_nodeList;
     LinkList *m_linkList;
     fugue::NodeSearch *m_search;
+    WidgetEdit *m_widgets;
     std::vector<NodeRow> m_rows;
     QHash<QString, int> m_rowOf;
     std::vector<LinkRow> m_links;

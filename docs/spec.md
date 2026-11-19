@@ -467,7 +467,8 @@ the group's `default`, then to the inner input's own value. Behavior is specifie
 ```
 
 - `nodes`: per node id: position, size (0 means automatic), collapsed, color (a theme role, not
-  a hex value), a display title, pinned.
+  a hex value), a display title, pinned, and `increment`: the seed inputs the canvas adds one to
+  after each run it starts ([6.2](#62-widgets)).
 - `frames`: Frames ([5.1](#51-frame)).
 - `links`: reroute points, keyed by the target `<node id>.<input name>`, with `#<index>` added
   for an item of a list input (`merge.images#1`).
@@ -1921,7 +1922,7 @@ Building M2 made these further choices.
 
 | Choice made in M2 | Section | Confidence |
 | --- | --- | --- |
-| A node's face is ComfyUI's: wire-only inputs (media, data, resource, `any`) and the outputs side by side under the title, then one row per value input showing its value or default | 12.2, 3.2 | medium-high |
+| A node's face is ComfyUI's: wire-only inputs (media, data, `any`) and the outputs side by side under the title, then one row per value input showing its value or default; a resource input is a value row too, with the model picker (#48) | 12.2, 3.2, 2.5 | medium-high |
 | Port shapes: circle for text, number and boolean, square for image, video and audio, diamond for declared types, a ring for `any`; a list port has a second outline behind it. Colors are the theme's port colors (`theme.portColor`); `any` takes the text color and a placeholder's port the muted one | 12.6 | medium |
 | Link checks during a drag and on connect: the engine's compatibility (2.3), a node into itself, a cycle, and a node type that is not installed, each with a sentence saying why | 12.6, 2.3 | high |
 | Dragging a linked single input picks its link up and carries it from its source (ComfyUI); dragging an unlinked input reaches back to an output | 12.4 | high |
@@ -1945,6 +1946,17 @@ Building M2 made these further choices.
 | Shift+drag from an output lets go on another output that can feed every one of its inputs to move them all, and anywhere else to leave them be. Ctrl+Alt+click on an input removes its links (every list item), on an output every link out of it | 12.4 | medium |
 | Zoom keys step 1.1 at the canvas's center (ComfyUI). Fit (`.`, Home) frames the selection, or every node when none is selected, in three quarters of the canvas, within the zoom range | 12.4 | medium-high |
 | Until the design pass (#47): a bypassed node takes the palette's magenta (ComfyUI's purple), a muted one fades to half | 3.5, 12.6 | medium |
+| Widgets (#48): the engine decides, the QML only draws. Typed text is parsed and checked with the engine's literal rules (checkLiteral) in C++; a value that fails shows the engine's reason under the field and is not written, and the last valid value typed stays | 6.2, 3.2 | high |
+| A color widget's value is checked by the engine (#rrggbb or #rrggbbaa, `type_mismatch` otherwise), for literals, defaults and runs alike | 6.2 | high |
+| One undo step per field visit: each valid text is in the document as it is typed (so a save meanwhile has it), and Enter, Tab or leaving the field ends the step, as does any other edit that begins meanwhile (a command such as Ctrl+B, an undo), so the two stay separate steps; Escape puts a one-line field back, while in a multiline field (Enter is a new line there) it ends the edit and keeps the text, so a prompt is never lost to a key. A drag (spin scrub, slider) is one step; a chevron, toggle, choice or picked file is one each | 6.2, 12.11 | medium-high |
+| Numbers: a dot or a comma as the decimal point; empty text unsets an input with a default or an optional one, and is refused for a required number with none. Chevrons and Up/Down step by `step` (1 for whole numbers, else 0.1), held in `min`..`max` and rounded to the step; a drag on a spin scrubs a step per 6 units, a drag on a slider sets the value by position, and a click (no drag) types, as Blender does | 6.2 | medium |
+| Text: empty is the empty text, except an optional input with no default (a file, a folder), where it unsets | 6.2 | medium |
+| Seed modes: randomize stores `{"auto": "random"}`; increment keeps a number and lists the input in `layout.nodes.<id>.increment`, so the file keeps the choice and a run sees a number; going from randomize to a number draws one. The canvas adds one to each incrementing seed after a run it starts (wrapping to `min` past `max`), as one undo step | 6.2, 4.5 | medium |
+| The model picker lists, when it opens, the models every enabled provider instance offers of the input's resource type, with their state; models on disk (8.9) join it in M5. A typed name is stored as a handle served by that name; an optional model input can go back to "Any ready model" (unset, 8.4) | 2.5, 8.4 | medium |
+| A linked value input shows its source ("Prompt · Text") in place of the widget. List inputs keep a read-only row (`[n]`); a placeholder's inputs show their value read-only | 3.2, 3.6 | medium-high |
+| File and folder widgets store the path the portal returns as it is, or the path typed; the canvas checks no file roots (that waits for #19) | 6.2, 13.6 | medium |
+| Text-field focus (12.4): widget fields are text inputs, so while one has focus its keys are the field's; a press on the canvas or on another widget takes the focus from the field first, ending its edit. Menus are modal, so the window's keys sleep while one is open | 12.4 | high |
+| Widgets are made with a node's rows (in view at a readable zoom); at rest a widget is a well, a text and a mouse area, and editors, menus and pickers are made on first use | 12.1 | high |
 
 ## Appendix B: issue to section map
 

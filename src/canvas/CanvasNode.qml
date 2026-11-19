@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Shapes
+import "widgets"
 
 // One node on the canvas: a NodeList row (canvas_model.h), drawn as docs/canvas-look.md says
 // (4 anatomy, 5 ports, 9 states, 14 zoom tiers). Its ports sit where the model says (each
@@ -9,7 +10,7 @@ import QtQuick.Shapes
 //
 // States come from roles: mode (bypass, mute), missing, selected, and what a run set
 // (runState, progress, seconds, error, warnings, thumbnail; #19 fills them through
-// CanvasModel::setRunState). An unlinked input's widget is InputWell.qml (#48's slot).
+// CanvasModel::setRunState). A value input's widget is widgets/InputWidget.qml (#48).
 Item {
     id: node
 
@@ -260,39 +261,51 @@ Item {
             readonly property bool dim: node.dragging
                 && node.canvasModel.dragProblem(node.nodeId, modelData.name, false) !== ""
             readonly property bool under: node.hoverKey === "i:" + modelData.name
-            readonly property bool showsWidget: modelData.widget && !modelData.wired
+            // A value input's row has its widget (widgets/InputWidget.qml, #48) across it, the
+            // label drawn over the widget's well; a linked one shows where its value comes from.
+            readonly property bool hasWidget: modelData.widget
+            readonly property bool showsWidget: hasWidget && !modelData.wired
+            readonly property bool tall: showsWidget && modelData.widgetType === "multiline"
             y: modelData.rowTop
             width: node.width
             height: modelData.rowHeight
             opacity: dim ? 0.25 : 1
 
-            Text {
-                visible: node.full && !input.showsWidget
+            Loader {
+                objectName: "widgetLoader"
+                active: input.hasWidget
+                visible: node.full
+                // Under the label, except while typed into.
+                z: item && item.editingText ? 1 : -1
                 x: 3 * node.u
-                width: parent.width - 6 * node.u
-                height: node.canvasModel.rowHeight
+                y: Math.round(0.5 * node.u)
+                width: node.width - 6 * node.u
+                height: input.height - 2 * Math.round(0.5 * node.u)
+                opacity: node.bypassed ? 0.55 : 1
+                sourceComponent: InputWidget {
+                    edits: node.canvasModel.widgets
+                    nodeId: node.nodeId
+                    port: input.modelData
+                    look: node.look
+                    canvasView: node.canvasView
+                    nodeItem: node
+                    row: input
+                }
+            }
+            Text {
+                // A tall (multiline) well shows its text instead, and the label only while empty.
+                visible: node.full && (!input.tall || input.modelData.value === "" || input.modelData.value === undefined)
+                x: input.showsWidget ? 5 * node.u : 3 * node.u
+                y: input.tall ? Math.round(2 * node.u) : 0
+                width: (input.hasWidget ? 0.45 : 1) * (node.width - 6 * node.u) - (input.showsWidget ? 2 * node.u : 0)
+                height: input.tall ? 16 : node.canvasModel.rowHeight
                 verticalAlignment: Text.AlignVCenter
-                text: input.showsWidget ? "" : input.modelData.label
+                text: visible ? input.modelData.label : ""
                 elide: Text.ElideRight
                 textFormat: Text.PlainText
                 color: node.look.label
                 font.pixelSize: node.look.labelSize
                 opacity: node.bypassed ? 0.55 : 1
-            }
-            // The widget (#48 makes it editable in InputWell.qml).
-            Loader {
-                active: node.full && input.showsWidget
-                x: 3 * node.u
-                y: Math.round(0.5 * node.u)
-                width: parent.width - 6 * node.u
-                height: parent.height - 2 * Math.round(0.5 * node.u)
-                opacity: node.bypassed ? 0.55 : 1
-                sourceComponent: InputWell {
-                    port: input.modelData
-                    nodeId: node.nodeId
-                    canvasModel: node.canvasModel
-                    look: node.look
-                }
             }
             // An unlinked widget input shows its mark only on hover or to a compatible link.
             PortDot {

@@ -5,6 +5,7 @@
 #include "engine/suggest.h"
 
 #include <QJsonArray>
+#include <QRegularExpression>
 #include <QSet>
 
 #include <algorithm>
@@ -562,6 +563,10 @@ Errors checkLiteral(const InputSpec &input, const QJsonValue &value, PortKind ki
                 error.hint = QStringLiteral("Did you mean \"%1\"?").arg(near);
             return {error};
         }
+        static const QRegularExpression color(QStringLiteral("^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$"));
+        if (input.widget() == QLatin1String("color") && !color.match(value.toString()).hasMatch())
+            return mismatch(QStringLiteral("Input %1 takes a color as #rrggbb or #rrggbbaa, not %2.")
+                                .arg(input.name, shown(value)));
         return {};
     }
     if (id == "boolean") {

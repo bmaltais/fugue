@@ -271,6 +271,10 @@ FocusScope {
                    : canvas.spaceHeld ? Qt.OpenHandCursor : Qt.ArrowCursor
 
         onPressed: mouse => {
+            // A field on the canvas (a widget being typed into) gives up its focus first: the
+            // canvas is its focus scope, so forceActiveFocus alone would hand focus back to it.
+            if (canvas.Window.activeFocusItem)
+                canvas.Window.activeFocusItem.focus = false
             canvas.forceActiveFocus()
             canvas.gesture = ""
             if (mouse.button === Qt.RightButton)

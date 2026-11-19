@@ -247,6 +247,9 @@ void CanvasModel::relink(const QSet<QString> &nodes) {
 // --- edit bounds and the undo stack ---------------------------------------------
 
 void CanvasModel::beginEdit() {
+    // A widget being typed into (#48) ends its step first, so this edit is a step of its own.
+    if (m_widgets->editing() && !m_widgets->writing())
+        m_widgets->endSession();
     if (m_editDepth++ == 0)
         m_editBefore = snapshot();
 }
@@ -273,6 +276,7 @@ void CanvasModel::commit(const Document &document, const QString &text) {
 }
 
 void CanvasModel::finishGestures() {
+    m_widgets->endSession();
     if (!m_drag.isEmpty())
         endLinkDrag();
     if (m_moveOpen || m_cloneOpen)
