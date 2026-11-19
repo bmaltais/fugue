@@ -26,6 +26,7 @@ makedepends=(
   'git'
   'make'
   'pkgconf'
+  'qt6-shadertools'
 )
 checkdepends=(
   'noto-fonts'
