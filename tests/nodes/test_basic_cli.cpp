@@ -167,6 +167,30 @@ private slots:
         QVERIFY(readEmbeddedWorkflow(out + "/small.png").ok());
     }
 
+    // Number gives what was typed in it, and a Preview of it shows that in the run result.
+    void aNumberRunsFromTheCommandLine() {
+        write(path("number.fugue"),
+              "{\"fugue\": 1, \"graph\": {\"nodes\": {"
+              "\"n\": {\"type\": \"fugue/number\", \"version\": \"1.0.0\", \"inputs\": {\"value\": 2.5}},"
+              "\"look\": {\"type\": \"fugue/preview\", \"version\": \"1.0.0\", \"inputs\": {\"value\": {\"from\": \"n.value\"}}}}}}");
+        const Outcome ran = fugue({"run", path("number.fugue"), "--wait", "--json"});
+        QCOMPARE(ran.exitCode, 0);
+        const QList<QJsonObject> events = ran.lines();
+        QCOMPARE(events.last().value("status").toString(), QString("ok"));
+        for (const QJsonObject &event : events)
+            if (event.value("event").toString() == "node.done" && event.value("node").toString() == "n")
+                QCOMPARE(event.value("outputs").toObject().value("value").toDouble(), 2.5);
+        const Outcome result = fugue({"runs", "result", events.first().value("run").toString(), "--json"});
+        QCOMPARE(result.exitCode, 0);
+        QCOMPARE(result.data().value("outputs").toObject().value("look").toObject().value("value").toDouble(), 2.5);
+
+        // --set changes it for one run.
+        const Outcome set = fugue({"run", path("number.fugue"), "--set", "n.value=-4", "--wait", "--json"});
+        QCOMPARE(set.exitCode, 0);
+        const Outcome setResult = fugue({"runs", "result", set.lines().first().value("run").toString(), "--json"});
+        QCOMPARE(setResult.data().value("outputs").toObject().value("look").toObject().value("value").toDouble(), -4.0);
+    }
+
     void aMissingImageIsReportedByName() {
         write(path("missing.fugue"),
               "{\"fugue\": 1, \"graph\": {\"nodes\": {"
