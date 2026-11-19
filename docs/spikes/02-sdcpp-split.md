@@ -11,15 +11,15 @@ whether the component-level nodes of M5 ship in v0.1 ([spec 8.10](../spec.md#810
 
 ## Answer
 
-Yes. A 309-line patch against stable-diffusion.cpp, with no change to its sampling or model
-code, runs the three stages as three processes. The image is **pixel-identical** to the one a
+Yes. A small patch against stable-diffusion.cpp (309 added lines: a 210-line helper header and
+hooks in one function), with no change to its sampling or model code, runs the three stages as three processes. The image is **pixel-identical** to the one a
 single process makes from the same prompt and seed, in every case tried. Conditioning and
 latents are small plain tensor files. A saved latent also works as the start of a second
-sampling pass without ever becoming pixels.
+sampling pass in place of a decoded and re-encoded image.
 
-The split costs about 1.5 seconds per image when each stage is its own short-lived process,
-which a long-lived helper does not pay, and it lowers peak GPU memory because only one
-component is loaded at a time.
+The split costs 1 to 2 seconds per image when each stage is its own short-lived process, which
+a long-lived helper does not pay. Run that way, peak GPU memory is lower because only one
+component is loaded at a time; a helper that keeps components loaded trades that back for speed.
 
 ## Setup
 
@@ -61,11 +61,11 @@ from `nvidia-smi`.
 
 | Run | Wall | Peak GPU memory | Output |
 | --- | --- | --- | --- |
-| One process | 12.9 s | 13.7 GiB | image |
-| Encode only | 2.5 s | 4.1 GiB | conditioning, 205 kB |
-| Sample only | 10.1 s | 7.1 GiB | latent, 1.05 MB |
-| Decode only | 1.8 s | 3.6 GiB | image, **identical pixels** |
-| Three processes, total | 14.3 s | 7.1 GiB at most | |
+| One process | 13.4 s | 13.7 GiB | image |
+| Encode only | 2.8 s | 4.1 GiB | conditioning, 205 kB |
+| Sample only | 10.0 s | 7.1 GiB | latent, 1.05 MB |
+| Decode only | 1.9 s | 3.6 GiB | image, **identical pixels** |
+| Three processes, total | 14.6 s | 7.1 GiB at most | |
 
 **With a negative prompt, guidance 2.5, 832x1216** (two conditioning sets)
 
@@ -76,9 +76,10 @@ from `nvidia-smi`.
 | Sample only | 16.3 s | 7.1 GiB | latent, 1.01 MB |
 | Decode only | 1.9 s | 3.5 GiB | image, **identical pixels** |
 
-**Reusing conditioning.** The conditioning saved by the seed 42 run, sampled with seed 7 and
-decoded, is pixel-identical to a single process run with seed 7. The second image skipped the
-text encoder: 11.9 s in two processes against 13.0 s, and no 4 GiB encoder load.
+**Reusing conditioning.** The conditioning saved by the seed 42 run was reused twice: sampled
+with seed 7, and sampled with another sampler (`dpm++2m` in place of `euler`). Each result is
+pixel-identical to a single process run with the same settings. Both skipped the text encoder:
+11.9 s in two processes against 13.0 s for the seed change, and no 4 GiB encoder load.
 
 **Chaining a latent.** A second pass (strength 0.5, seed 9) over the first result:
 
@@ -86,43 +87,57 @@ text encoder: 11.9 s in two processes against 13.0 s, and no 4 GiB encoder load.
 | --- | --- |
 | The PNG, encoded by the VAE in the same process (reference) | image |
 | That same encoded latent, saved and loaded from a file | identical pixels to the reference |
-| The first sampler's own latent, loaded from its file, never decoded | a correct image; differs from the reference (PSNR 37 dB) |
+| The first sampler's own latent, loaded from its file | a correct image; differs from the reference (PSNR 37 dB) |
 
 The last row is the point of latents as a port type: the pixel round trip is lossy, and the
-latent path avoids it. It also shows the sampler's output and the VAE encoder's output are the
+latent path avoids it. (The spike still passed an image to set up the second pass and then
+replaced its latent; a real helper would take the latent alone.) It also shows the sampler's output and the VAE encoder's output are the
 same kind of value, so one latent type serves both.
 
-**Where the time goes** (from the library's log, single process): text encoder load 1.6 s and
-encode under 0.1 s; diffusion model load 2.6 s and 8 steps about 6.6 s; VAE load 0.2 s and decode
+**Where the time goes** (from the library's logs; loads vary by a few tenths of a second between
+runs): text encoder load 1.6 to 1.8 s and
+encode under 0.1 s; diffusion model load 2.6 to 3.4 s and 8 steps about 6.6 s; VAE load 0.2 s and decode
 0.6 s. Saving or loading a conditioning or latent file took 1 ms or less. Each process
 spends about 0.9 s outside its stage (start-up, reading model headers, exit).
 
 The library already loads each component's weights only when its stage first runs. That is why
 the encode-only process never touched the 6.1 GiB diffusion model.
 
+All runs, including the single-process ones, used the final patched binary with the hooks
+unset; no run of an unpatched build was compared. With the hooks unset the patched function
+follows the original path.
+
 ## What this means for Fugue
 
 - **M5 is in v0.1**, as the plan said it would be if this passed.
-- The helper keeps the model components loaded between jobs, so it pays neither the 1.5 s of
-  process starts nor the reloads. Fugue's residency planner then decides what stays loaded.
+- The helper keeps model components loaded between jobs, so it pays neither the process starts
+  nor the reloads. What stays loaded is then a choice between speed and memory, which is the
+  residency planner's job: all three components together peaked at 13.7 GiB here, one at a time
+  at 7.1 GiB.
 - `fugue/conditioning` and `fugue/latent` can be the plain tensor files the spec describes
   ([spec 2.6](../spec.md#26-data-values-latents-and-conditioning)). Conditioning is a few hundred
   kilobytes and a 1024x1024 latent is 1 MB, so hashing and caching them is cheap.
-- The cache works as designed: changing only the seed or the sampler reuses the conditioning.
+- The cache works as designed: changing only the seed or the sampler reused the conditioning.
 - Results are deterministic on one machine and one build. Nothing here says anything about
   matching another engine.
 
 ## Risks and what was not tested
 
-- **Upstream churn is the real cost.** The patch touches one function in a file that changes
-  often, and the library's public header changed 30 times in ten weeks. The helper must pin a
+- **Upstream churn is the real cost.** The patch hooks one function in a file that changes
+  often, and the library's public header had 28 commits in the ten weeks before the pinned one. The helper must pin a
   commit and move the pin on purpose. Upstream has not yet been asked whether it would take
   stage entry points in its C API; a yes would remove this cost. The question is written and
   will be posted with this result.
 - **One model family.** Only Z-Image Turbo was run. Its conditioning is one tensor per prompt.
   Models with CLIP encoders (SD 1.5, SDXL), reference-image editing (FLUX.2 Klein) and video
-  fill more fields of `SDCondition`. The patch serializes all of its tensor fields, but two
-  fields used only by MiniMax H3 (reference audio and reference blocks) are not covered.
+  fill more fields of `SDCondition`. The patch serializes all of its fields except two:
+  reference audio (used by MiniMax H3 and Wan S2V) and reference blocks (MiniMax H3).
+- **Encode-time side effects.** For PhotoMaker, PuLID and IP-Adapter the encode step also sets
+  state inside the engine that is not part of `SDCondition`. A sample-only stage would miss it,
+  so those features need their state carried across too. Z-Image does not use them.
+- **The patch is a proof, not a base.** Known gaps: it drops empty tensors inside list fields,
+  ignores the stored type on load, and does not check the image-guidance set for unsupported
+  fields. None was triggered here.
 - **Not run:** LoRA applied in the sample stage, ControlNet, inpainting masks, hires fix, batch
   counts above one, the Vulkan backend, AMD and unified-memory machines.
 - **Not built:** the persistent helper and its protocol. The spike used one process per stage.
