@@ -14,6 +14,8 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include <sys/stat.h>
+
 #include <cmath>
 #include <vector>
 
@@ -263,6 +265,45 @@ private slots:
         const Result<MediaHandle> unedited = clip->plainFile(node, "other", hashes);
         QVERIFY(unedited.ok());
         QCOMPARE(unedited->path(), m_clip);
+    }
+
+    // The same edit of the same video into the same place is encoded once per process.
+    void plainFileDoesNotEncodeTheSameEditTwice() {
+        FileHashes hashes(path("hashes.json"));
+        const Result<MediaHandle> clip = MediaHandle::probe(MediaType::Video, m_clip, hashes);
+        QVERIFY(clip.ok());
+        const Result<MediaHandle> cut = clip->trimmed(1, 2);
+        QVERIFY(cut.ok());
+        const QString node = path("nodes/again");
+        const auto fileId = [](const QString &file) {
+            struct stat info {};
+            return ::stat(QFile::encodeName(file).constData(), &info) == 0 ? quint64(info.st_ino) : 0;
+        };
+
+        const Result<MediaHandle> first = cut->plainFile(node, "video", hashes);
+        QVERIFY2(first.ok(), qPrintable(first.error().message));
+        const quint64 written = fileId(first->path());
+        QVERIFY(written != 0);
+        const Result<MediaHandle> second = cut->plainFile(node, "video", hashes);
+        QVERIFY(second.ok());
+        QCOMPARE(second->toJson(), first->toJson());
+        // An encode writes a new file and renames it into place; this is still the first one.
+        QCOMPARE(fileId(second->path()), written);
+
+        // Another edit into the same place is another file.
+        const Result<MediaHandle> shorter = clip->trimmed(1, 1.5);
+        QVERIFY(shorter.ok());
+        const Result<MediaHandle> third = shorter->plainFile(node, "video", hashes);
+        QVERIFY(third.ok());
+        QVERIFY(fileId(third->path()) != written);
+        QVERIFY(third->frames() < first->frames());
+
+        // A file that was changed or removed behind the memo is made again.
+        QVERIFY(QFile::remove(third->path()));
+        const Result<MediaHandle> remade = shorter->plainFile(node, "video", hashes);
+        QVERIFY(remade.ok());
+        QCOMPARE(remade->frames(), third->frames());
+        QVERIFY(QFile::exists(remade->path()));
     }
 
     void onlyVideosHaveFrames() {

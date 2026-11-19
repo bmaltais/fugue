@@ -9,8 +9,11 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QMutex>
+#include <QMutexLocker>
 
 #include "engine/ffmpeg.h"
 #include "engine/file_hashes.h"
@@ -138,10 +141,43 @@ Result<MediaHandle> MediaHandle::probeWithFfprobe(MediaType type, const QString 
     return handle;
 }
 
+namespace {
+
+// The edits this process has already applied, by output path: what went in (the source
+// handle without its path, so its hash and its edits) and what came out. plainFile() is
+// called once per node that takes the video, and two encodes of the same edit do not
+// even give the same bytes, so the first one is kept and reused while its file is still
+// the file that was written.
+struct AppliedEdit {
+    QJsonObject source;
+    MediaHandle result;
+};
+
+QMutex appliedMutex;
+QHash<QString, AppliedEdit> &appliedEdits() {
+    static QHash<QString, AppliedEdit> edits;
+    return edits;
+}
+
+QJsonObject withoutPath(QJsonObject handle) {
+    handle.remove("path");
+    return handle;
+}
+
+} // namespace
+
 Result<MediaHandle> MediaHandle::withEditsApplied(const QString &dir, const QString &name, FileHashes &hashes) const {
     if (!QDir().mkpath(dir))
         return makeError(QStringLiteral("permission_denied"), QStringLiteral("Cannot create %1.").arg(dir));
     const QString path = QDir(dir).filePath(name + QStringLiteral(".mkv"));
+    const QJsonObject source = withoutPath(toJson());
+    {
+        const QMutexLocker lock(&appliedMutex);
+        const auto found = appliedEdits().constFind(path);
+        // The memo of file hashes notices a file that was replaced or removed since.
+        if (found != appliedEdits().constEnd() && found->source == source && hashes.hash(path) == found->result.hash())
+            return found->result;
+    }
     const QString partial = QDir(dir).filePath(QStringLiteral(".") + name + QStringLiteral(".mkv.part"));
 
     // Re-encoded losslessly (FFV1 video, FLAC audio, in Matroska): trims must
@@ -162,7 +198,12 @@ Result<MediaHandle> MediaHandle::withEditsApplied(const QString &dir, const QStr
         QFile::remove(partial);
         return makeError(QStringLiteral("permission_denied"), QStringLiteral("Cannot write %1.").arg(path));
     }
-    return probeWithFfprobe(MediaType::Video, path, hashes);
+    const Result<MediaHandle> made = probeWithFfprobe(MediaType::Video, path, hashes);
+    if (made) {
+        const QMutexLocker lock(&appliedMutex);
+        appliedEdits().insert(path, AppliedEdit{source, made.value()});
+    }
+    return made;
 }
 
 } // namespace fugue
