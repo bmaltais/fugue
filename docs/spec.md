@@ -1898,7 +1898,8 @@ Building M1 made these further choices.
 | Save Image's `file` output is an image handle to the file written, so the cache can check it still exists | 14.1, 10.2 | medium |
 | Save Image never overwrites: the name is claimed in the same step as the file appears, and taken names go to `-2`, `-3`; a name may not hold `/` or `\` or start with `.`; a relative folder is under the output folder; WebP is lossless | 14.1 | medium |
 | The embedded `run` section is `{"nodes": {<path id>: {"auto", "engine", "model"}}}` for the saving node and everything upstream | 11.7 | high |
-| A "prompt" is the literal of a `text` input with the `multiline` widget; a "path" is an absolute literal of a `file` or `folder` input, or of any node upstream of one | 11.5, 11.7 | medium |
+| A "prompt" is the literal of a `text` input with the `multiline` widget; a "path" is an absolute literal that names something (`/x`, `~/x`, `C:\x`; not a lone `/` or `~`) of a `file` or `folder` input, or of any node upstream of one | 11.5, 11.7 | medium |
+| A value that arrives by link is checked against the input's `min`, `max`, `integer` and `choices` when the node is about to run, as the compiler checks a literal; failing fails the node on that input with the same code | 3.2, 9.5 | high |
 | A run from a compiled graph embeds nothing and warns `workflow_not_embedded`; a kernel's warnings go to run.done on its node | 11.7, 13.3 | medium-high |
 | `~` in a file or folder literal is expanded before the node runs and before its key is made, so `~/x.png` is keyed by content | 10.1 | high |
 | A cached Save Image does not rewrite its file when only the layout or an unrelated node changed, so the embedded copy can lag the canvas | 10.2, 11.7 | medium |
