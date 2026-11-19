@@ -45,9 +45,11 @@
 //   input's value from the widget on the node face; each port map carries `widgetType` and
 //   the stored `literal` for it. A resource input is a value row (the model picker). When a
 //   run starts, #19 calls widgets->advanceSeeds() for the seeds set to increment.
-// - #19 run state (done as a seam by #47): setRunState(node, {...}) fills the NodeList roles a
-//   run shows (runState, progress, seconds, error, warnings, thumbnail, output values);
-//   clearRunState() empties them. With no run they are empty and a node shows no state.
+// - #19 run state (done; run/canvas_runs.h fills it): setRunState(node, {...}) fills the
+//   NodeList roles a run shows (runState, progress, seconds, error, warnings, thumbnail, output
+//   values); setRunProgress() changes the progress alone; clearRunState() empties them. With no
+//   run they are empty and a node shows no state. previewSize()/previewSizeChanged() are the
+//   seam for node sizing (#49): the last image's pixel size, signalled after the re-layout.
 //   A node's row is found by id in O(1) (rowOf).
 // - #47 look (docs/canvas-look.md): the geometry here is the spec's. u = textSize / 3; a node is
 //   60u wide by default, its header 7u, then 1u of padding, outputs first and then inputs in
@@ -69,6 +71,7 @@
 #include <QObject>
 #include <QPointF>
 #include <QRectF>
+#include <QSizeF>
 #include <QSet>
 #include <QVariantList>
 #include <QVariantMap>
@@ -79,6 +82,7 @@
 #include <vector>
 
 namespace fugue {
+class ImageInputs;
 class Registry;
 }
 
@@ -115,6 +119,8 @@ public:
         Thumbnail, // the last image or video frame, as a URL
         ThumbnailInfo, // its info chip ("1024 × 1024")
         ThumbnailRect, // where it sits in the node, from the node's top left
+        ThumbnailText, // text in the thumbnail's place: a shown text or number, a label ("Video · 0:04")
+        ThumbnailDim,  // the slot is a placeholder ("No result yet"): drawn dimmed
     };
 
     explicit NodeList(CanvasModel *canvas);
@@ -196,6 +202,10 @@ public:
     LinkList *links() const { return m_linkList; }
     fugue::NodeSearch *search() const { return m_search; }
     WidgetEdit *widgets() const { return m_widgets; }
+    // Pasting and dropping images (workflow/image_inputs.h): set by Workflows; the paste command
+    // and the Paste button of Load Image go through it. Null without one.
+    fugue::ImageInputs *images() const { return m_images; }
+    void setImages(fugue::ImageInputs *images) { m_images = images; }
 
     void setDocument(const fugue::Document &document);
     // The document with the canvas's positions and viewport in its layout.
@@ -214,8 +224,11 @@ public:
     qreal headerHeight() const { return m_headerHeight; }
     qreal rowHeight() const { return m_rowHeight; }
     qreal unit() const { return m_textSize / 3.0; }
-    // A node's width when the layout sets none: 60u.
+    // A node's width when the layout sets none: 60u (longer text values widen it, up to the maximum).
     qreal defaultWidth() const { return m_defaultWidth; }
+    // What a manual resize allows (docs/canvas-look.md 4.1): 40u to 120u wide.
+    qreal minWidth() const { return qRound(40 * unit()); }
+    qreal maxWidth() const { return qRound(120 * unit()); }
 
     // --- hit tests, in world coordinates ---
 
@@ -290,6 +303,17 @@ public:
     // name -> the last value as text)}. Missing keys are empty. Kept across edits of the node.
     Q_INVOKABLE void setRunState(const QString &node, const QVariantMap &state);
     Q_INVOKABLE void clearRunState();
+    // Only a running node's progress (0 to 1): one role, no layout, for a run's frequent updates.
+    void setRunProgress(const QString &node, qreal progress);
+    // The node's title as the canvas shows it; empty when there is no such node.
+    QString nodeTitle(const QString &node) const;
+    // The seam for #49 (node size): the pixel size of the node's last image (setRunState's
+    // `thumbnailSize`), empty without one. previewSizeChanged(node) fires when a thumbnail
+    // comes, goes or changes size, after the node's rows were laid out again with it.
+    QSizeF previewSize(const QString &node) const;
+    // The node card made its rows (it came into view at a readable zoom): rowsMade(node) tells
+    // whoever makes previews only for those (CanvasRuns, the image of a Load Image's file).
+    Q_INVOKABLE void noteRowsMade(const QString &node) { emit rowsMade(node); }
 
     // --- clipboard ---
 
@@ -359,6 +383,22 @@ public:
 
     // Moving: beginMove picks what moves (the selection when the node is in it, else just
     // the node), moveBy offsets them from where they started, endMove finishes.
+    // Resizing (#49). A node is auto-sized unless the layout pins its size: it grows to fit
+    // its content (longer text values, multiline text, the run's thumbnail) and is
+    // recomputed only when that changes. A resize pins the width and height (never below
+    // what the content needs, 40u to 120u wide); autoSize() unpins them. resizeGripAt finds
+    // the node whose bottom-right grip (size world units square) holds the point. A
+    // resize, begin to end, is one undo step.
+    Q_INVOKABLE QString resizeGripAt(qreal x, qreal y, qreal size) const;
+    Q_INVOKABLE void beginResize(const QString &node);
+    Q_INVOKABLE void resizeBy(qreal dx, qreal dy); // from the size at beginResize
+    Q_INVOKABLE void endResize();
+    Q_INVOKABLE bool autoSize(const QString &node);
+    // The hook for anything that changes what a node's content needs without a document
+    // edit (a run's thumbnail arriving, #19): lays the node out again, tells the views what
+    // moved (size, thumbnail, ports) and brings its wires along. False when nothing changed.
+    Q_INVOKABLE bool refreshSize(const QString &node);
+
     Q_INVOKABLE void beginMove(const QString &node);
     Q_INVOKABLE void moveBy(qreal dx, qreal dy);
     Q_INVOKABLE void endMove();
@@ -391,6 +431,8 @@ signals:
     // included.
     void edited();
     void undoChanged();
+    void previewSizeChanged(const QString &node);
+    void rowsMade(const QString &node);
     void zoomRequested(qreal factor);
     void fitRequested();
 
@@ -427,7 +469,8 @@ private:
         bool missing = false;
         QPointF pos;
         qreal width = 0;
-        bool sized = false; // the layout sets the width
+        bool sized = false; // the layout pins the width (a manual resize, layout.nodes.<id>.size)
+        qreal pinnedHeight = 0; // the height the layout pins, 0: automatic (never below the content's)
         qreal height = 0;
         bool collapsed = false;
         qreal collapsedWidth = 0; // the header alone: fits the title (docs/canvas-look.md 9)
@@ -458,7 +501,10 @@ private:
         QStringList warnings;
         QString thumbnail;
         qreal thumbnailAspect = 1;
+        QSizeF thumbnailSize;
         QString thumbnailInfo;
+        QString thumbnailText;
+        bool thumbnailDim = false;
         QVariantMap values;
     };
 
@@ -479,6 +525,12 @@ private:
 
     void rebuildLinks();
     void layOut(NodeRow &row) const;
+    qreal autoWidth(const NodeRow &row, const fugue::Node &node) const;
+    // layOut again and emit what changed (plus `roles`); the node's wires follow.
+    // `resized`: the caller already changed the size state, so nothing before it to compare with.
+    bool relayOut(int row, QList<int> roles = {}, bool resized = false);
+    void refreshLinksOf(const QString &node);
+    std::pair<qreal, qreal> pinnedSize(const QJsonObject &entry) const;
     void autoPlace(const QSet<QString> &unplaced);
     NodeRow makeRow(const QString &id) const;
     void portsFromType(NodeRow &row, const fugue::Node &node) const;
@@ -505,6 +557,7 @@ private:
     LinkList *m_linkList;
     fugue::NodeSearch *m_search;
     WidgetEdit *m_widgets;
+    fugue::ImageInputs *m_images = nullptr;
     std::vector<NodeRow> m_rows;
     QHash<QString, int> m_rowOf;
     std::vector<LinkRow> m_links;
@@ -528,6 +581,11 @@ private:
     bool m_moveOpen = false;  // a move holds an edit open
     bool m_cloneOpen = false; // an Alt+drag clone holds one more
     bool m_dragOpen = false;  // a link drag holds an edit open
+    bool m_resizeOpen = false; // a resize holds one too
+    QString m_resizeNode;
+    QSizeF m_resizeStart;     // its size when the resize began
+    bool m_resizeWasSized = false;
+    qreal m_resizeWasWidth = 0, m_resizeWasHeight = 0;
 
     std::unique_ptr<QUndoStack> m_undo;
     int m_editDepth = 0;

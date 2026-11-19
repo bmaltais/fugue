@@ -72,11 +72,19 @@ FocusScope {
     property string hoveredNode: ""
     property var hoverPort: ({})
     property var hoverLink: ({})
+    // The node whose resize grip (its bottom right corner, 3u square) the pointer is on (#49).
+    property string hoverGrip: ""
+    function gripAt(w) {
+        return tier === 0 ? model.resizeGripAt(w.x, w.y, Math.max(3 * model.unit, 12 / world.scale)) : ""
+    }
     function updateHover(px, py) {
         const w = toWorld(px, py)
         const n = gesture === "" ? model.nodeAt(w.x, w.y) : ""
         if (n !== hoveredNode)
             hoveredNode = n
+        const grip = n !== "" ? gripAt(w) : ""
+        if (grip !== hoverGrip)
+            hoverGrip = grip
         const p = tier === 0 && (gesture === "" || gesture === "link")
             ? model.portAt(w.x, w.y, Math.max(8, 10 / world.scale)) : ({})
         if (p.node !== hoverPort.node || p.port !== hoverPort.port || p.output !== hoverPort.output)
@@ -90,6 +98,7 @@ FocusScope {
     }
     function clearHover() {
         hoveredNode = ""
+        hoverGrip = ""
         hoverPort = ({})
         if (hoverLink.row !== undefined) {
             hoverLink = ({})
@@ -184,6 +193,9 @@ FocusScope {
     }
     // The look (look.h), and the port colors as a JS object, converted once per theme change.
     readonly property var look: theme.look
+    // The window's runs (#19, run/canvas_runs.h), when the app gives them: a window made
+    // without them (most tests) draws no run pill and no running dots.
+    readonly property var windowRuns: typeof runs === "undefined" ? null : runs
     readonly property var ports: theme.look.ports
     readonly property var shadowMargins: theme.look.shadowMargins
     // A port color key from the model (CanvasModel::colorKey).
@@ -270,7 +282,9 @@ FocusScope {
         objectName: "canvasInput"
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
-        cursorShape: canvas.gesture === "pan" ? Qt.ClosedHandCursor
+        cursorShape: canvas.gesture === "resize" || (canvas.gesture === "" && canvas.hoverGrip !== "")
+                     ? Qt.SizeFDiagCursor
+                   : canvas.gesture === "pan" ? Qt.ClosedHandCursor
                    : canvas.spaceHeld ? Qt.OpenHandCursor : Qt.ArrowCursor
 
         onPressed: mouse => {
@@ -300,7 +314,15 @@ FocusScope {
                 canvas.model.disconnectInput(l.toNode, l.toPort, l.item)
                 return
             }
+            // The grip at a node's bottom right corner resizes it.
+            const grip = mouse.button === Qt.LeftButton ? canvas.gripAt(canvas.pressWorld) : ""
             canvas.clearHover()
+            if (grip !== "") {
+                canvas.gesture = "resize"
+                canvas.pressedNode = grip
+                canvas.model.beginResize(grip)
+                return
+            }
             const port = canvas.portUnder(mouse.x, mouse.y)
             if (port.node !== undefined) {
                 if ((mouse.modifiers & Qt.ControlModifier) && (mouse.modifiers & Qt.AltModifier)) {
@@ -356,6 +378,9 @@ FocusScope {
             case "move":
                 canvas.model.moveBy(w.x - canvas.pressWorld.x, w.y - canvas.pressWorld.y)
                 break
+            case "resize":
+                canvas.model.resizeBy(w.x - canvas.pressWorld.x, w.y - canvas.pressWorld.y)
+                break
             case "link": {
                 const port = canvas.portUnder(mouse.x, mouse.y)
                 canvas.hoverProblem = port.node !== undefined
@@ -382,6 +407,13 @@ FocusScope {
             if (mouse.button !== Qt.LeftButton)
                 return
             const w = canvas.toWorld(mouse.x, mouse.y)
+            // A double click on the grip returns the node to auto-size.
+            const grip = canvas.gripAt(w)
+            if (grip !== "") {
+                canvas.model.endResize()
+                canvas.model.autoSize(grip)
+                return
+            }
             if (canvas.model.nodeAt(w.x, w.y) === "" && canvas.portUnder(mouse.x, mouse.y).node === undefined)
                 canvas.searchRequested(w.x, w.y)
         }
@@ -416,6 +448,9 @@ FocusScope {
             if (!travelled && !spaceHeld && navigation === "legacy")
                 model.select([], "replace")
             rememberView()
+            break
+        case "resize":
+            model.endResize()
             break
         case "move":
             model.endMove()
@@ -585,6 +620,45 @@ FocusScope {
                 }
             }
 
+            // Into a running node (8.2): a 7 px dot in the wire's color with a 2 px canvas ring
+            // travels the wire every 900 ms. Only while a run is going, at the full tier.
+            Repeater {
+                objectName: "runningDots"
+                model: canvas.windowRuns && canvas.tier === 0 ? canvas.windowRuns.runningWires : []
+                delegate: Item {
+                    id: dot
+                    required property var modelData
+                    PathInterpolator {
+                        id: along
+                        path: Path {
+                            PathSvg { path: dot.modelData.path }
+                        }
+                        NumberAnimation on progress {
+                            from: 0
+                            to: 1
+                            duration: 900
+                            loops: Animation.Infinite
+                        }
+                    }
+                    Rectangle {
+                        x: along.x - 5.5
+                        y: along.y - 5.5
+                        width: 11
+                        height: 11
+                        radius: 5.5
+                        color: canvas.look.canvas
+                        Rectangle {
+                            x: 2
+                            y: 2
+                            width: 7
+                            height: 7
+                            radius: 3.5
+                            color: canvas.portColor(dot.modelData.color)
+                        }
+                    }
+                }
+            }
+
             // Reroute points: a 10 px dot in the wire's color with a 2 px canvas ring.
             Repeater {
                 model: canvas.tier <= 1 ? canvas.model.reroutes : []
@@ -715,6 +789,10 @@ FocusScope {
         // the port under it when that can take it; dashed in the error color when it cannot.
         Shape {
             id: draggedLink
+            objectName: "draggedLink"
+            // The default (geometry) renderer drew this wire as only its casing after a frame
+            // had been drawn with the pointer still on the start port (a degenerate curve).
+            preferredRendererType: Shape.CurveRenderer
             visible: canvas.dragging
             readonly property bool invalid: canvas.hoverProblem !== ""
             readonly property bool snapped: canvas.hoverPort.node !== undefined && !invalid
@@ -837,6 +915,18 @@ FocusScope {
                 color: canvas.look.text
                 font.pixelSize: canvas.look.labelSize
             }
+        }
+    }
+
+    // The run, top right (11).
+    Loader {
+        objectName: "runPill"
+        active: canvas.windowRuns !== null
+        x: canvas.width - width - 4 * canvas.look.unit
+        y: 4 * canvas.look.unit
+        sourceComponent: RunPill {
+            look: canvas.look
+            runs: canvas.windowRuns
         }
     }
 

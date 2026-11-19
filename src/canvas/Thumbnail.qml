@@ -9,6 +9,7 @@ Item {
     id: thumb
     property alias source: image.source
     property string info
+    property string text // shown in the image's place: a text or number result, a label
     required property var look
     property bool full: true // the info chip only at the full zoom tier
 
@@ -41,6 +42,20 @@ Item {
             readonly property real radius: thumb.look.thumbCorner
             fragmentShader: "qrc:/canvas/shaders/thumbnail.frag.qsb"
         }
+    }
+    Text {
+        visible: thumb.text !== ""
+        x: Math.round(2 * thumb.look.unit)
+        y: x
+        width: parent.width - 2 * x
+        height: parent.height - 2 * x
+        text: thumb.full ? thumb.text : ""
+        textFormat: Text.PlainText
+        wrapMode: Text.Wrap
+        elide: Text.ElideRight
+        color: thumb.look.label
+        font.pixelSize: thumb.look.labelSize
+        font.features: { "tnum": 1 }
     }
     Rectangle {
         anchors.fill: parent

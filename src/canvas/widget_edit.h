@@ -20,7 +20,9 @@
 // Seeds (6.2): "fixed" stores a number, "random" stores {"auto": "random"}, and "increment"
 // stores a number and lists the input under layout.nodes.<id>.increment, so the file keeps
 // the choice and a run still sees a plain number; advanceSeeds() adds one to each of them
-// after a run starts (#19 calls it).
+// after a run starts (CanvasRuns calls it). Leaving "random" takes the seed of the node's last
+// result (the run's value on the output of the same name), else draws one. A node added on
+// the canvas starts its seeds on "random" (CanvasModel::addNode).
 //
 // Resource inputs show the model picker (2.5). Its list comes from a model source: by
 // default each enabled provider instance (providers.json) is asked to describe() itself when
@@ -42,6 +44,7 @@
 #include <QVariantMap>
 
 #include <functional>
+#include <optional>
 
 class CanvasModel;
 
@@ -81,6 +84,14 @@ public:
     Q_INVOKABLE QString setPath(const QString &node, const QString &input, const QVariant &url);
     // A color from the color picker, stored as #rrggbb, or #rrggbbaa when not opaque.
     Q_INVOKABLE QString setColor(const QString &node, const QString &input, const QColor &color);
+    // The Paste button of a Load Image's file input (workflow/image_inputs.h): whether the input
+    // has one, and replacing its image with the clipboard's, as one undo step.
+    Q_INVOKABLE bool canPasteImage(const QString &node, const QString &input) const;
+    Q_INVOKABLE bool pasteImage(const QString &node);
+    // The images in the inputs folder, newest first: {path, name, modified}. At most 48.
+    Q_INVOKABLE QVariantList recentInputs() const;
+    // Points the node's file at one of them, one undo step.
+    Q_INVOKABLE bool useInput(const QString &node, const QString &path);
     // Takes the stored value out, so the default applies (or, for an optional input, nothing).
     Q_INVOKABLE void unset(const QString &node, const QString &input);
 
@@ -159,6 +170,8 @@ private:
     void write(const QString &node, const QString &input, const QJsonValue &value, const QString &text);
     QString stepText(const QString &node, const QString &input) const;
     double randomSeed(const fugue::InputSpec &spec) const;
+    // The seed the node's last result was made with, when a run showed one.
+    std::optional<double> lastSeed(const QString &node, const QString &input) const;
 
     const fugue::Registry *m_registry;
     CanvasModel *m_canvas;

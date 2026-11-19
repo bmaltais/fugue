@@ -21,6 +21,8 @@
 #include "menu/menu_commands.h"
 #include "engine/registry.h"
 #include "nodes/builtin.h"
+#include "run/canvas_runs.h"
+#include "run/run_service.h"
 #include "theme.h"
 #include "workflow/workflows.h"
 #include "translator.h"
@@ -72,6 +74,13 @@ int main(int argc, char *argv[]) {
     registerCanvasCommands(commands, canvasModel);
     // The menus' commands that need the canvas, and when each can run (#50).
     fugue::bindMenuCommands(commands, canvasModel);
+    // The window runs its own runs (spec 9.8) on a thread of their own, queued with the CLI's.
+    fugue::RunSetup runSetup;
+    runSetup.addNodeTypes = fugue::nodes::addBuiltinNodeTypes;
+    runSetup.addKernels = fugue::nodes::addBuiltinKernels;
+    fugue::RunService runService(runSetup);
+    fugue::CanvasRuns runs(&canvasModel, &workflows, &runService, &registry);
+    runs.registerCommands(commands);
 
     QQmlApplicationEngine engine;
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
@@ -81,6 +90,7 @@ int main(int argc, char *argv[]) {
     engine.rootContext()->setContextProperty("canvasModel", &canvasModel);
     engine.rootContext()->setContextProperty("commands", &commands);
     engine.rootContext()->setContextProperty("workflows", &workflows);
+    engine.rootContext()->setContextProperty("runs", &runs);
     engine.load(QUrl("qrc:/Main.qml"));
     if (engine.rootObjects().isEmpty())
         return 1;

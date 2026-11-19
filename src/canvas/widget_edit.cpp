@@ -1,4 +1,5 @@
 #include "canvas/widget_edit.h"
+#include "workflow/image_inputs.h"
 
 #include "canvas/canvas_model.h"
 #include "canvas/input_links.h"
@@ -323,6 +324,22 @@ QString WidgetEdit::setColor(const QString &node, const QString &input, const QC
     return setText(node, input, text);
 }
 
+bool WidgetEdit::canPasteImage(const QString &node, const QString &input) const {
+    return m_canvas->images() && m_canvas->images()->accepts(node, input);
+}
+
+bool WidgetEdit::pasteImage(const QString &node) {
+    return m_canvas->images() && m_canvas->images()->pasteInto(node);
+}
+
+QVariantList WidgetEdit::recentInputs() const {
+    return m_canvas->images() ? m_canvas->images()->recent() : QVariantList();
+}
+
+bool WidgetEdit::useInput(const QString &node, const QString &path) {
+    return m_canvas->images() && m_canvas->images()->use(node, path);
+}
+
 void WidgetEdit::unset(const QString &node, const QString &input) {
     if (!target(node, input).spec || !m_canvas->m_document.graph.nodes.contains(node))
         return;
@@ -448,9 +465,16 @@ void WidgetEdit::setSeedMode(const QString &node, const QString &input, const QS
     if (mode == QLatin1String("random"))
         n.inputs.insert(input, InputValue::autoRandom());
     else if (n.inputs.value(input).kind() == InputValue::Kind::Auto)
-        n.inputs.insert(input, InputValue::literal(randomSeed(*t.spec)));
+        n.inputs.insert(input, InputValue::literal(lastSeed(node, input).value_or(randomSeed(*t.spec))));
     setIncrementing(document, node, input, mode == QLatin1String("increment"));
     m_canvas->commit(document, stepText(node, input));
+}
+
+std::optional<double> WidgetEdit::lastSeed(const QString &node, const QString &input) const {
+    // The value a run reported on the output of the same name ("Seed used"), as shown.
+    bool ok = false;
+    const double seed = m_canvas->m_run.value(node).values.value(input).toString().toDouble(&ok);
+    return ok ? std::optional<double>(seed) : std::nullopt;
 }
 
 void WidgetEdit::advanceSeeds() {

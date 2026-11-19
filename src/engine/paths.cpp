@@ -1,6 +1,7 @@
 #include "paths.h"
 
 #include <QDir>
+#include <QFileInfo>
 #include <QStandardPaths>
 
 namespace fugue {
@@ -21,6 +22,12 @@ QString outputDir() {
     const QString pictures = qEnvironmentVariable("XDG_PICTURES_DIR");
     return (pictures.isEmpty() ? QStandardPaths::writableLocation(QStandardPaths::PicturesLocation) : pictures) +
            QStringLiteral("/Fugue");
+}
+
+QString inputsDir() { return outputDir() + QStringLiteral("/inputs"); }
+
+QString inputsDirBeside(const QString &workflowPath) {
+    return QFileInfo(workflowPath).absoluteDir().filePath(QStringLiteral("inputs"));
 }
 
 QString expandHome(const QString &path) {

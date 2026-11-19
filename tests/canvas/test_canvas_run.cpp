@@ -1,0 +1,564 @@
+// Runs from the canvas (#19, spec 9.8, 10.3, 12.4, 12.7).
+//
+// Seam: the real window (Main.qml, offscreen) with CanvasRuns and RunService as main() makes
+// them, keys pressed on the window, and what the nodes show read from the canvas model's
+// roles (NodeList). The run thread's providers are one FakeProvider, driven from the test;
+// every folder (runs, queue, lock, cache, thumbnails) is in the test's temporary folder.
+
+#include <QBuffer>
+#include <QClipboard>
+#include <QGuiApplication>
+#include <QMimeData>
+#include <QTemporaryDir>
+#include <QImage>
+#include <QElapsedTimer>
+#include <QJsonDocument>
+#include <QTimer>
+#include <QtTest>
+
+#include "canvas_app.h"
+#include "engine/fake_provider.h"
+#include "engine/queue.h"
+#include "engine/run_folder.h"
+#include "run/canvas_runs.h"
+#include "run/run_service.h"
+
+using namespace canvas_test;
+using fugue::CanvasRuns;
+using fugue::FakeProvider;
+using fugue::RunService;
+using fugue::RunSetup;
+
+namespace {
+
+// Words into a Generate Image and a Preview of it; the same again inside a group.
+const QByteArray kGraph = R"({
+  "fugue": 1,
+  "groups": {
+    "local/gen": {
+      "version": "1.0.0", "name": "Gen",
+      "inputs": [{"name": "prompt", "targets": ["inner.prompt"]}],
+      "outputs": [{"name": "image", "from": "inner.image"}],
+      "nodes": {"inner": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"seed": 1}}}
+    }
+  },
+  "graph": {"nodes": {
+    "words": {"type": "fugue/text", "version": "1.0.0", "inputs": {"text": "a cat"}},
+    "gen": {"type": "fugue/generate-image", "version": "1.0.0",
+            "inputs": {"prompt": {"from": "words.text"}, "seed": 5}},
+    "show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "gen.image"}}},
+    "grp": {"type": "local/gen", "version": "1.0.0", "inputs": {"prompt": {"from": "words.text"}}},
+    "show2": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "grp.image"}}}
+  }},
+  "layout": {"nodes": {
+    "words": {"pos": [0, 0]}, "gen": {"pos": [300, 0]}, "show": {"pos": [600, 0]},
+    "grp": {"pos": [300, 300]}, "show2": {"pos": [600, 300]}
+  }}
+})";
+
+QByteArray png(int width, int height) {
+    QImage image(width, height, QImage::Format_RGB32);
+    image.fill(Qt::darkCyan);
+    QByteArray bytes;
+    QBuffer buffer(&bytes);
+    buffer.open(QIODevice::WriteOnly);
+    image.save(&buffer, "PNG");
+    return bytes;
+}
+
+fugue::Description imageDescription() {
+    fugue::OfferedModel model;
+    model.handle = QJsonObject{{"resource", "fugue/image-model"}, {"name", "flux"}};
+    model.status = fugue::ModelStatus::Ready;
+    fugue::CapabilityOffer offer;
+    offer.capability = QStringLiteral("image.generate");
+    offer.models.append(model);
+    fugue::Description description;
+    description.engine = QStringLiteral("fake");
+    description.capabilities.append(offer);
+    return description;
+}
+
+// A provider whose description takes a while, as a real one over HTTP does: checkGraph waits
+// for it on an event loop of its own.
+class SlowProvider : public FakeProvider {
+public:
+    using FakeProvider::FakeProvider;
+    void describe(fugue::Reply<fugue::Description> reply) override {
+        QTimer::singleShot(300, this, [this, reply = std::move(reply)]() mutable { FakeProvider::describe(std::move(reply)); });
+    }
+};
+
+// The window with its runs. The fake provider is made on the run thread, where providers
+// live, and stays the same one for every run.
+struct RunApp {
+    App app;
+    std::shared_ptr<FakeProvider> fake;
+    std::unique_ptr<RunService> service;
+    std::unique_ptr<CanvasRuns> runs;
+
+    explicit RunApp(const QByteArray &graph, bool slow = false) : app(load(graph)) {
+        RunSetup setup;
+        setup.addNodeTypes = fugue::nodes::addBuiltinNodeTypes;
+        setup.addKernels = fugue::nodes::addBuiltinKernels;
+        auto *self = this;
+        setup.registerProviders = [self, slow](fugue::Registry &registry) {
+            if (!self->fake)
+                self->fake = slow ? std::make_shared<SlowProvider>(imageDescription())
+                                  : std::make_shared<FakeProvider>(imageDescription());
+            fugue::ProviderInstance instance;
+            instance.name = QStringLiteral("This machine");
+            instance.type = QStringLiteral("fake");
+            return registry.setProviders({fugue::ProviderEntry{instance, self->fake}});
+        };
+        const QString root = app.dir.path();
+        setup.runsRoot = root + "/runs";
+        setup.queueDir = root + "/queue";
+        setup.lockPath = root + "/engine.lock";
+        setup.cacheRoot = root + "/results";
+        setup.hashesPath = root + "/hashes.json";
+        setup.thumbnailDir = root + "/thumbnails";
+        setup.collectGarbage = false;
+        service = std::make_unique<RunService>(setup);
+        runs = std::make_unique<CanvasRuns>(&app.model, &app.workflows, service.get(), &app.registry);
+        runs->registerCommands(app.commands);
+        app.engine.rootContext()->setContextProperty("runs", runs.get());
+    }
+    ~RunApp() {
+        runs.reset();
+        service.reset(); // stops the run thread before the fake goes
+    }
+
+    QVariant role(const QString &node, int role) const {
+        const NodeList *nodes = app.model.nodes();
+        for (int row = 0; row < nodes->rowCount(); ++row)
+            if (nodes->data(nodes->index(row), NodeList::NodeId).toString() == node)
+                return nodes->data(nodes->index(row), role);
+        return {};
+    }
+    QString state(const QString &node) const { return role(node, NodeList::RunState).toString(); }
+
+    // The fake's jobs, read on the run thread where it lives.
+    QStringList jobs() {
+        QStringList list;
+        service->onRunThread([&] { list = fake ? fake->jobs() : QStringList(); });
+        return list;
+    }
+    void onFake(const std::function<void(FakeProvider &)> &call) {
+        service->onRunThread([&] { call(*fake); });
+    }
+};
+
+} // namespace
+
+const QByteArray kLoadImage = R"({
+  "fugue": 1,
+  "graph": {"nodes": {"src": {"type": "fugue/load-image", "version": "1.0.0"}}},
+  "layout": {"nodes": {"src": {"pos": [100, 100]}}, "view": {"center": [300, 300], "zoom": 1}}
+})";
+
+// Generate Image into a Preview and a Save Image (into the test's folder), and a number shown.
+QByteArray sinksGraph(const QString &folder) {
+    return QStringLiteral(R"({
+  "fugue": 1,
+  "graph": {"nodes": {
+    "words": {"type": "fugue/text", "version": "1.0.0", "inputs": {"text": "a cat"}},
+    "gen": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"prompt": {"from": "words.text"}, "seed": 5}},
+    "show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "gen.image"}}},
+    "save": {"type": "fugue/save-image", "version": "1.0.0",
+             "inputs": {"image": {"from": "gen.image"}, "name": "cat", "folder": "%1", "embed": "none"}},
+    "size": {"type": "fugue/number", "version": "1.0.0", "inputs": {"value": 768}},
+    "show-size": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "size.value"}}}
+  }},
+  "layout": {"nodes": {"words": {"pos": [0, 0]}, "gen": {"pos": [300, 0]}, "show": {"pos": [600, 0]},
+                       "save": {"pos": [600, 300]}, "size": {"pos": [0, 300]}, "show-size": {"pos": [300, 300]}},
+             "view": {"center": [400, 300], "zoom": 0.6}}
+})").arg(folder).toUtf8();
+}
+
+class TestCanvasRun : public QObject {
+    Q_OBJECT
+
+    QTemporaryDir pictures;
+
+private slots:
+    void initTestCase() {
+        // Pasted images go to <pictures>/Fugue/inputs (paths.h inputsDir).
+        qputenv("XDG_PICTURES_DIR", pictures.path().toUtf8());
+    }
+
+    // Load Image shows its file before any run (spec 12.7): a paste puts the picture on the
+    // node, undo takes it away again.
+    void pastingIntoLoadImageShowsItsPictureAndUndoTakesItAway() {
+        RunApp r(kLoadImage);
+        QVERIFY(r.app.open());
+        QCOMPARE(r.role("src", NodeList::Thumbnail).toString(), QString());
+        r.app.model.select({"src"});
+        QImage picture(64, 32, QImage::Format_RGB32);
+        picture.fill(Qt::red);
+        auto *data = new QMimeData;
+        data->setImageData(picture);
+        QGuiApplication::clipboard()->setMimeData(data);
+        const qreal height = r.role("src", NodeList::Height).toReal();
+        r.app.key(Qt::Key_V, Qt::ControlModifier);
+        QTRY_VERIFY(r.role("src", NodeList::Thumbnail).toString().startsWith("file://"));
+        QCOMPARE(r.role("src", NodeList::ThumbnailInfo).toString(), QStringLiteral("64 \u00d7 32"));
+        QVERIFY(r.role("src", NodeList::Height).toReal() > height); // the node grew to hold it
+        QQuickItem *card = item(r.app.window->contentItem(), "node-src");
+        QVERIFY(card);
+        QTRY_VERIFY(item(card, "thumbnail") && item(card, "thumbnail")->property("active").toBool());
+
+        r.app.key(Qt::Key_Z, Qt::ControlModifier);
+        QTRY_COMPARE(r.role("src", NodeList::Thumbnail).toString(), QString());
+        QTRY_COMPARE(r.role("src", NodeList::Height).toReal(), height);
+        QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
+    }
+
+    // A file that is not there shows a quiet placeholder, not an error.
+    void aMissingFileShowsAPlaceholder() {
+        RunApp r(kLoadImage);
+        QVERIFY(r.app.open());
+        QVERIFY(r.app.model.widgets()->setText("src", "file", r.app.dir.filePath("gone.png")).isEmpty());
+        QTRY_COMPARE(r.role("src", NodeList::ThumbnailText).toString(), QStringLiteral("File not found"));
+        QVERIFY(r.role("src", NodeList::ThumbnailDim).toBool());
+        QVERIFY(r.app.warnings.isEmpty());
+    }
+
+    // Preview and Save Image show a dimmed "No result yet" before a run, then the image (Save:
+    // with the file it wrote); a Preview of a number shows the number.
+    void previewAndSaveImageShowTheirResultInTheSlot() {
+        QTemporaryDir out;
+        RunApp r(sinksGraph(out.path()));
+        QVERIFY(r.app.open());
+        QCOMPARE(r.role("show", NodeList::ThumbnailText).toString(), QStringLiteral("No result yet"));
+        QVERIFY(r.role("show", NodeList::ThumbnailDim).toBool());
+        QCOMPARE(r.role("save", NodeList::ThumbnailText).toString(), QStringLiteral("No result yet"));
+
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(r.jobs().size(), 1);
+        r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(0), {{"image.png", png(320, 240)}}); });
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(finished.first().at(1).toString(), QStringLiteral("ok"));
+        QVERIFY(r.role("show", NodeList::Thumbnail).toString().startsWith("file://"));
+        QCOMPARE(r.role("show", NodeList::ThumbnailText).toString(), QString());
+        QVERIFY(!r.role("show", NodeList::ThumbnailDim).toBool());
+        QVERIFY(r.role("save", NodeList::Thumbnail).toString().startsWith("file://"));
+        const QString info = r.role("save", NodeList::ThumbnailInfo).toString();
+        QVERIFY2(info.startsWith("cat") && info.endsWith("320 \u00d7 240"), qPrintable(info));
+        QCOMPARE(r.role("show-size", NodeList::ThumbnailText).toString(), QStringLiteral("768"));
+        QVERIFY(r.app.warnings.isEmpty());
+    }
+
+
+    // Ctrl+Enter runs the shown workflow: progress shows on the running node, a finished
+    // node shows cached with its time, values and thumbnail, a failure inside a group shows
+    // on the group's node with the inner node's path id, and its downstream is skipped.
+    void ctrlEnterRunsWithLiveProgressValuesAndAnErrorThroughAGroup() {
+        RunApp r(kGraph);
+        QVERIFY(r.app.open());
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_VERIFY(r.runs->busy());
+        QVERIFY(r.app.commands.contextActive("run"));
+
+        QTRY_COMPARE(r.jobs().size(), 1); // one local GPU job at a time: gen first
+        const QString first = r.jobs().first();
+        QTRY_COMPARE(r.state("gen"), QStringLiteral("running"));
+        r.onFake([&](FakeProvider &f) { f.progress(first, 0.5, "sampling"); });
+        QTRY_COMPARE(r.role("gen", NodeList::Progress).toReal(), 0.5);
+        QTRY_COMPARE(r.runs->progress(), 0.5);
+        QCOMPARE(r.runs->runningNodes(), QStringList{"gen"});
+        QCOMPARE(r.runs->runningWires().size(), 1); // words -> gen
+        // The run pill says so, and a dot travels the wire into the running node.
+        QQuickItem *pillText = item(r.app.window->contentItem(), "runPillText");
+        QVERIFY(pillText);
+        QTRY_VERIFY(pillText->property("text").toString().endsWith("50%"));
+        QQuickItem *dots = item(r.app.window->contentItem(), "runningDots");
+        QVERIFY(dots);
+        QCOMPARE(dots->property("count").toInt(), 1);
+
+        r.onFake([&](FakeProvider &f) { f.finish(first, {{"image.png", png(640, 480)}}); });
+        QTRY_COMPARE(r.state("gen"), QStringLiteral("cached"));
+        QVERIFY(r.role("gen", NodeList::Seconds).toReal() >= 0);
+        QVERIFY(r.role("gen", NodeList::Thumbnail).toString().startsWith("file://"));
+        QCOMPARE(r.role("gen", NodeList::ThumbnailInfo).toString(), QStringLiteral("640 × 480"));
+        QCOMPARE(r.app.model.previewSize("gen"), QSizeF(640, 480));
+        // The thumbnail is a small copy, not the result itself.
+        QImage thumbnail(QUrl(r.role("gen", NodeList::Thumbnail).toString()).toLocalFile());
+        QVERIFY(!thumbnail.isNull());
+        QVERIFY(thumbnail.width() <= 512);
+        QTRY_COMPARE(r.state("show"), QStringLiteral("cached"));
+        QVERIFY(!r.role("show", NodeList::Thumbnail).toString().isEmpty());
+        // The seed it used is the last value on its port.
+        bool seedShown = false;
+        for (const QVariant &port : r.role("gen", NodeList::Outputs).toList())
+            seedShown |= port.toMap().value("name") == "seed" && port.toMap().value("value") == "5";
+        QVERIFY(seedShown);
+
+        QTRY_COMPARE(r.jobs().size(), 2); // then the group's inner node
+        r.onFake([&](FakeProvider &f) { f.fail(f.jobs().at(1), fugue::makeError("node_failed", "The model fell over.")); });
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(finished.first().at(1).toString(), QStringLiteral("failed"));
+        QCOMPARE(r.state("grp"), QStringLiteral("error"));
+        QVERIFY(r.role("grp", NodeList::Error).toString().startsWith("grp/inner: "));
+        QCOMPARE(r.state("show2"), QStringLiteral("skipped"));
+        const QVariantList errors = r.runs->errors();
+        QCOMPARE(errors.size(), 1);
+        QCOMPARE(errors.first().toMap().value("node").toString(), QStringLiteral("grp/inner"));
+        QCOMPARE(errors.first().toMap().value("shown").toString(), QStringLiteral("grp"));
+        QVERIFY(!r.runs->busy());
+        QVERIFY(!r.app.commands.contextActive("run"));
+        QTRY_COMPARE(dots->property("count").toInt(), 0);
+        // After the run the pill counts its errors; a click lists them by path id.
+        pillText = item(r.app.window->contentItem(), "runPillText");
+        QTRY_COMPARE(pillText->property("text").toString(), QStringLiteral("1 error"));
+        QQuickItem *box = item(r.app.window->contentItem(), "runPillBox");
+        QTest::mouseClick(r.app.window, Qt::LeftButton, {},
+                          box->mapToScene(QPointF(box->width() / 2, box->height() / 2)).toPoint());
+        QQuickItem *list = item(r.app.window->contentItem(), "runErrors");
+        QTRY_VERIFY(list && list->isVisible());
+        QVERIFY(r.app.warnings.isEmpty());
+    }
+
+    // 10.3 between runs: what is in the cache is cached, what would run is stale; an edit
+    // upstream makes its downstream stale again.
+    void nodesShowTheirCacheStateBetweenRuns() {
+        RunApp r(kGraph);
+        QVERIFY(r.app.open());
+        QSignalSpy checked(r.runs.get(), &CanvasRuns::checkApplied);
+        r.runs->checkNow();
+        QTRY_COMPARE(checked.size(), 1);
+        QCOMPARE(r.state("words"), QStringLiteral("stale"));
+        QCOMPARE(r.state("gen"), QStringLiteral("stale"));
+
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(r.jobs().size(), 1);
+        r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(0), {{"image.png", png(64, 64)}}); });
+        QTRY_COMPARE(r.jobs().size(), 2);
+        r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(1), {{"image.png", png(64, 64)}}); });
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(finished.first().at(1).toString(), QStringLiteral("ok"));
+
+        r.runs->checkNow();
+        QTRY_COMPARE(checked.size(), 2);
+        QCOMPARE(r.state("words"), QStringLiteral("cached"));
+        QCOMPARE(r.state("gen"), QStringLiteral("cached"));
+        QCOMPARE(r.state("grp"), QStringLiteral("cached"));
+
+        // A new text: everything that reads it would run.
+        QVERIFY(r.app.model.widgets()->setText("words", "text", "a dog").isEmpty());
+        QTRY_COMPARE(checked.size(), 3); // after the edit pause
+        QCOMPARE(r.state("words"), QStringLiteral("stale"));
+        QCOMPARE(r.state("gen"), QStringLiteral("stale"));
+        QVERIFY(!r.role("gen", NodeList::Thumbnail).toString().isEmpty()); // the last image stays
+    }
+
+    // Escape while a run is going cancels it (12.4): the provider's job is cancelled, the
+    // node that was running would run again.
+    void escapeCancelsTheRun() {
+        RunApp r(kGraph);
+        QVERIFY(r.app.open());
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(r.jobs().size(), 1);
+        QTRY_COMPARE(r.state("gen"), QStringLiteral("running"));
+        r.app.key(Qt::Key_Escape);
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(finished.first().at(1).toString(), QStringLiteral("cancelled"));
+        QCOMPARE(r.state("gen"), QStringLiteral("stale"));
+        QVERIFY(!r.app.commands.contextActive("run"));
+    }
+
+    // Shift+Enter runs up to the selected node only, adding no Preview; the seed set to
+    // increment is the one shown for this run and one more for the next.
+    void runToHereRunsOnlyWhatTheSelectedNodeNeedsAndSeedsAdvance() {
+        RunApp r(kGraph);
+        QVERIFY(r.app.open());
+        r.app.model.widgets()->setSeedMode("gen", "seed", "increment");
+        r.app.model.select({"gen"});
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        r.app.key(Qt::Key_Return, Qt::ShiftModifier);
+        QTRY_COMPARE(r.jobs().size(), 1);
+        QJsonObject params;
+        r.onFake([&](FakeProvider &f) { params = f.submitted(f.jobs().at(0)).params; });
+        QCOMPARE(params.value("seed").toInt(), 5);
+        QCOMPARE(r.app.model.widgets()->value("gen", "seed").toInt(), 6);
+        r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(0), {{"image.png", png(64, 64)}}); });
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(finished.first().at(1).toString(), QStringLiteral("ok"));
+        QCOMPARE(r.jobs().size(), 1); // the group never ran
+        QCOMPARE(r.state("show"), QString()); // not part of this run
+    }
+
+    // A run of the window waits in the queue the CLI's workers share, behind theirs.
+    void aWindowRunWaitsItsTurnInTheSharedQueue() {
+        RunApp r(kGraph);
+        QVERIFY(r.app.open());
+        const fugue::Queue queue(r.app.dir.path() + "/queue");
+        // A CLI run is active: its worker holds the engine lock.
+        QVERIFY(queue.enqueue("cli-run", "/w/a.fugue", false));
+        QVERIFY(queue.activate("cli-run"));
+        fugue::Lock worker(r.app.dir.path() + "/engine.lock");
+        QVERIFY(worker.tryAcquire());
+
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(queue.entries().size(), 2);
+        QTest::qWait(200);
+        QVERIFY(r.jobs().isEmpty()); // still waiting
+        QVERIFY(r.state("gen") != QLatin1String("running"));
+        QVERIFY(r.runs->busy() && !r.runs->running());
+
+        QVERIFY(queue.remove(QStringLiteral("cli-run")));
+        worker.release();
+        QTRY_COMPARE(r.jobs().size(), 1);
+        r.runs->cancel();
+        QTRY_VERIFY(!r.runs->busy());
+    }
+
+    // A run started while a check waits on a slow provider waits for the check, then runs.
+    void aRunStartedDuringACheckRunsAfterIt() {
+        RunApp r(kGraph, true);
+        QVERIFY(r.app.open());
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        r.runs->checkNow();
+        QTest::qWait(50); // the check is waiting on describe
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE_WITH_TIMEOUT(r.jobs().size(), 1, 10000);
+        r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(0), {{"image.png", png(64, 64)}}); });
+        QTRY_COMPARE_WITH_TIMEOUT(r.jobs().size(), 2, 10000);
+        r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(1), {{"image.png", png(64, 64)}}); });
+        QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 10000);
+        QCOMPARE(finished.first().at(1).toString(), QStringLiteral("ok"));
+    }
+
+    // Closing the window while a check waits on a provider neither hangs nor crashes.
+    void closingDuringACheckIsClean() {
+        auto r = std::make_unique<RunApp>(kGraph, true);
+        QVERIFY(r->app.open());
+        r->runs->checkNow();
+        QTest::qWait(50);
+        r.reset();
+    }
+
+    // Escape cancels a run only when nothing else wants it: open node search takes it first.
+    void escapeClosesSearchBeforeItCancelsTheRun() {
+        RunApp r(kGraph);
+        QVERIFY(r.app.open());
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(r.state("gen"), QStringLiteral("running"));
+        QObject *popup = r.app.engine.rootObjects().first()->findChild<QObject *>("nodeSearch");
+        QVERIFY(popup);
+        QTest::mouseMove(r.app.window, r.app.screen(100, 500));
+        r.app.key(Qt::Key_Tab);
+        QTRY_VERIFY(popup->property("opened").toBool());
+        r.app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!popup->property("opened").toBool());
+        QTest::qWait(100);
+        QVERIFY(r.runs->running());
+        QCOMPARE(r.state("gen"), QStringLiteral("running"));
+        r.app.key(Qt::Key_Escape); // now it is the run's
+        QTRY_VERIFY(!r.runs->busy());
+    }
+
+    // A frozen node (10.4) shows frozen, between runs and after one.
+    void aFrozenNodeShowsFrozen() {
+        QFile file(QStringLiteral(FUGUE_SOURCE_DIR "/examples/demo.fugue"));
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        RunApp r(file.readAll());
+        QVERIFY(r.app.open());
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(finished.size(), 1);
+        const QString run = finished.first().at(0).toString();
+        const fugue::Result<fugue::RunFolder> folder = fugue::RunFolder::open(r.app.dir.path() + "/runs", run);
+        QVERIFY(folder.ok());
+        const QString key = folder->state().value("nodes").toObject().value("subject").toObject().value("key").toString();
+        QVERIFY(!key.isEmpty());
+
+        fugue::Document document = r.app.model.document();
+        document.graph.nodes["subject"].frozen = key;
+        QSignalSpy checked(r.runs.get(), &CanvasRuns::checkApplied);
+        r.app.model.setDocument(document);
+        QTRY_VERIFY(checked.size() >= 1);
+        QCOMPARE(r.state("subject"), QStringLiteral("frozen"));
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(finished.size(), 2);
+        QCOMPARE(r.state("subject"), QStringLiteral("frozen"));
+        QCOMPARE(r.state("prompt"), QStringLiteral("cached"));
+    }
+
+    // Run first (Ctrl+Shift+Enter) goes ahead of the waiting runs, the CLI's included.
+    void runFirstGoesAheadOfTheWaitingRuns() {
+        RunApp r(kGraph);
+        QVERIFY(r.app.open());
+        const fugue::Queue queue(r.app.dir.path() + "/queue");
+        QVERIFY(queue.enqueue("cli-active", "/w/a.fugue", false));
+        QVERIFY(queue.activate("cli-active"));
+        fugue::Lock worker(r.app.dir.path() + "/engine.lock");
+        QVERIFY(worker.tryAcquire());
+        QVERIFY(queue.enqueue("cli-waiting", "/w/b.fugue", false));
+
+        r.app.key(Qt::Key_Return, Qt::ControlModifier | Qt::ShiftModifier);
+        QTRY_COMPARE(queue.entries().size(), 3);
+        const QList<fugue::QueueEntry> entries = queue.entries();
+        QCOMPARE(entries.at(0).run, QStringLiteral("cli-active"));
+        QCOMPARE(entries.at(1).run, r.runs->runs().value(0));
+        QCOMPARE(entries.at(2).run, QStringLiteral("cli-waiting"));
+        r.runs->cancel();
+        QTRY_VERIFY(!r.runs->busy());
+    }
+
+    // 300 nodes take their states from one check without holding the window up: the UI
+    // thread only applies them, and only to nodes whose state changed.
+    void threeHundredNodesTakeTheirStatesQuickly() {
+        QJsonObject nodes, layout;
+        for (int i = 0; i < 150; ++i) {
+            const QString n = QStringLiteral("n%1").arg(i), p = QStringLiteral("p%1").arg(i);
+            nodes.insert(n, QJsonObject{{"type", "fugue/number"}, {"version", "1.0.0"}, {"inputs", QJsonObject{{"value", i}}}});
+            nodes.insert(p, QJsonObject{{"type", "fugue/preview"}, {"version", "1.0.0"},
+                                        {"inputs", QJsonObject{{"value", QJsonObject{{"from", n + ".value"}}}}}});
+            layout.insert(n, QJsonObject{{"pos", QJsonArray{(i % 10) * 600, (i / 10) * 200}}});
+            layout.insert(p, QJsonObject{{"pos", QJsonArray{(i % 10) * 600 + 300, (i / 10) * 200}}});
+        }
+        const QJsonObject document{{"fugue", 1}, {"graph", QJsonObject{{"nodes", nodes}}},
+                                   {"layout", QJsonObject{{"nodes", layout}}}};
+        RunApp r(QJsonDocument(document).toJson());
+        QVERIFY(r.app.open());
+        QSignalSpy checked(r.runs.get(), &CanvasRuns::checkApplied);
+        QElapsedTimer timer;
+        timer.start();
+        r.runs->checkNow();
+        QTRY_COMPARE(checked.size(), 1);
+        const qint64 first = timer.elapsed();
+        QCOMPARE(r.state("p149"), QStringLiteral("stale"));
+        timer.restart();
+        r.runs->checkNow(); // the same states again: nothing to lay out
+        QTRY_COMPARE(checked.size(), 2);
+        qInfo("first check of 300 nodes applied in %lld ms, the same again in %lld ms", first, timer.elapsed());
+        QVERIFY(first < 1500);
+    }
+
+    // The demo workflow that ships (examples/demo.fugue) runs from the window: CPU nodes only.
+    void theDemoRuns() {
+        QFile file(QStringLiteral(FUGUE_SOURCE_DIR "/examples/demo.fugue"));
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        RunApp r(file.readAll());
+        QVERIFY(r.app.open());
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(finished.first().at(1).toString(), QStringLiteral("ok"));
+        for (const char *node : {"subject", "style", "prompt", "size", "show-prompt", "show-size"})
+            QCOMPARE(r.state(node), QStringLiteral("cached"));
+        bool shown = false;
+        for (const QVariant &port : r.role("size", NodeList::Outputs).toList())
+            shown |= port.toMap().value("value") == "768";
+        QVERIFY(shown);
+        QVERIFY(r.app.warnings.isEmpty());
+    }
+};
+
+QTEST_MAIN(TestCanvasRun)
+#include "test_canvas_run.moc"

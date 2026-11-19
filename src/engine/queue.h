@@ -33,6 +33,12 @@ struct QueueEntry {
     // entry written before the field existed.
     qint64 queuedBootMs = 0;
     bool active = false;
+    // The run belongs to a process that runs it itself (the window, 9.8), not to a
+    // `fugue __worker`: "owner": "window" with "process_start", the start time of that
+    // process (field 22 of /proc/<pid>/stat), which tells it from a later process that got
+    // the same pid.
+    bool inProcess = false;
+    qint64 processStart = 0;
 };
 
 class Queue {
@@ -45,6 +51,9 @@ public:
 
     // Adds an entry for `run`. `first` sorts it ahead of the waiting runs.
     bool enqueue(const QString &run, const QString &workflow, bool first) const;
+    // The same for a run this process runs itself (the window): the entry records this
+    // process and is live for as long as it lives (discardDead).
+    bool enqueueForThisProcess(const QString &run, const QString &workflow, bool first) const;
     // In queue order.
     QList<QueueEntry> entries() const;
     // The entry of a run, if it has one.
@@ -66,8 +75,10 @@ public:
     // boot clock, so wall-clock jumps do not count; an entry without that time is aged by
     // its file's modification time, and one queued before a reboot is dead). An active
     // entry is dead when `engineLock` can be taken: its owner held that lock for as long as
-    // it lived. The lock is left as it was found (still held if the caller held it). Not
-    // for a process that is itself running a run.
+    // it lived. The lock is left as it was found (still held if the caller held it). A
+    // waiting entry of a process that runs its own runs (enqueueForThisProcess) is dead when
+    // no process with its pid and start time is left; the caller's own entries are never
+    // dead, so a process that holds the lock for its own run may call this too.
     QStringList discardDead(Lock &engineLock) const;
 
 private:
@@ -99,6 +110,10 @@ private:
 // command line for a moment while it starts, so a pid is only checked once the worker has
 // recorded it itself (Queue::setPid from the worker), never one a parent got from spawning.
 bool isRunWorker(qint64 pid, const QString &run);
+
+// The start time of process `pid` in clock ticks since boot (field 22 of /proc/<pid>/stat),
+// or 0 when there is no such process. A pid and this together name one process.
+qint64 processStartTime(qint64 pid);
 
 // Sends `signal` to process `pid` only if it is the worker of `run`, and returns whether
 // it was sent. The process is pinned by a pidfd before its command line is checked, and

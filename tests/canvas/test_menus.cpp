@@ -100,7 +100,7 @@ private slots:
             QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(button));
             QTRY_VERIFY2(isOpen(app.window, "menuDropdown"), qPrintable(title));
             // Its first command that can run is a row of the open menu (the first one, when none
-            // can: Run waits for #19).
+            // can: this harness has no runs, so Run has none).
             QString first;
             for (const QVariant &row : bar[i].toMap().value("items").toList())
                 if (first.isEmpty() && row.toMap().value("enabled").toBool())
@@ -136,7 +136,7 @@ private slots:
         QTRY_COMPARE(currentRow(app.window, "menuDropdown"), QString("menuItem-edit.copy"));
         app.key(Qt::Key_Left);
         QTRY_COMPARE(currentRow(app.window, "menuDropdown"), QString("menuItem-file.new"));
-        // Run has nothing that can run yet (#19): Left and Right still move on.
+        // Run has nothing that can run here (this harness has no runs): Left and Right still move on.
         app.key(Qt::Key_Escape);
         QTRY_VERIFY(!isOpen(app.window, "menuDropdown"));
         QTest::keyClick(app.window, 'R', Qt::AltModifier);

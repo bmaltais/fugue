@@ -1,11 +1,13 @@
 #include "workflow/workflows.h"
 
+#include "engine/embed.h"
 #include "engine/paths.h"
 #include "workflow/content_hash.h"
 #include "workflow/workflow_io.h"
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
 #include <QClipboard>
@@ -53,6 +55,8 @@ Workflows::Workflows(CanvasModel *canvas, const Registry *registry, CommandRegis
     : QObject(parent), m_canvas(canvas), m_registry(registry), m_commands(commands),
       m_recovery(locations.recoveryDir), m_trust(locations.trustPath) {
     connect(m_canvas, &CanvasModel::edited, this, &Workflows::refreshUnsaved);
+    m_images = new ImageInputs(m_canvas, m_registry, this);
+    connect(m_images, &ImageInputs::message, this, &Workflows::setNotice);
     m_timer.setInterval(locations.recoveryIntervalMs);
     connect(&m_timer, &QTimer::timeout, this, &Workflows::writeRecoveryCopies);
     m_timer.start();
@@ -305,6 +309,33 @@ void Workflows::openUrls(const QVariantList &urls) {
     }
 }
 
+void Workflows::dropUrls(const QVariantList &urls, qreal x, qreal y) {
+    const QString onNode = m_canvas->nodeAt(x, y);
+    const bool onLoadImage = m_images->accepts(onNode, QStringLiteral("file"));
+    QStringList images, workflows;
+    for (const QVariant &url : urls) {
+        const QString text = url.toString();
+        const bool isFile = text.startsWith(QStringLiteral("file:")) || text.startsWith('/') || text.startsWith('~');
+        const QString path = isFile ? toPath(text) : QString();
+        if (path.isEmpty()) {
+            setNotice(tr("Only files can be opened, not %1.").arg(text));
+            continue;
+        }
+        QFile file(path);
+        const bool image = QFileInfo(path).isFile() && file.open(QIODevice::ReadOnly) && sniffImage(file.read(16));
+        file.close();
+        // A picture with a workflow in it opens as that workflow, except onto a Load Image.
+        if (image && (onLoadImage || !readEmbeddedWorkflow(path).ok()))
+            images.append(path);
+        else
+            workflows.append(path);
+    }
+    if (!images.isEmpty())
+        m_images->dropFiles(images, QPointF(x, y), onNode);
+    for (const QString &path : workflows)
+        openPath(path);
+}
+
 bool Workflows::openText(const QString &text) {
     const Result<Document> document = readWorkflowText(text);
     if (!document.ok()) {
@@ -350,6 +381,16 @@ void Workflows::analyze(const Document &document, const QString &title) {
 
 bool Workflows::saveTab(int index, const QString &path) {
     Document document = documentOf(index);
+    // A saved workflow stays portable: the images it takes from Fugue's inputs folder are copied
+    // into an `inputs` folder beside it, and its nodes point there (Appendix A, always, no question).
+    const Document before = document;
+    if (const Errors moved = relocateInputs(document, *m_registry, inputsDirBeside(path));
+        hasErrors(moved)) {
+        setNotice(tr("Could not save %1: %2").arg(QFileInfo(path).fileName(), firstMessage(moved)));
+        return false;
+    }
+    if (index == m_current && contentHash(document) != contentHash(before))
+        m_canvas->commit(document, tr("Move images"));
     document.refreshRequirements(appVersion());
     const Errors errors = document.saveFile(path);
     if (hasErrors(errors)) {
