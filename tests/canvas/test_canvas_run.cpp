@@ -13,6 +13,7 @@
 #include <QImage>
 #include <QJsonDocument>
 #include <QTimer>
+#include <QUndoStack>
 #include <QtTest>
 
 #include "canvas_app.h"
@@ -231,6 +232,36 @@ private slots:
         QVERIFY(r.role("gen", NodeList::Error).toString().contains("add a provider"));
         QVERIFY(!item(card, "noticeChip")->isVisible()); // the error chip says it now
         QCOMPARE(r.role("gen", NodeList::Notice).toString(), QString());
+        QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
+    }
+
+    // A click on a node's error chip (4.7) opens the run pill's error list and brings the node
+    // to the middle of the view, selected, as a click on its row in the list does.
+    void aClickOnAnErrorChipListsTheErrorsAndShowsTheNode() {
+        RunApp r(kGraph, false, fugue::Description{});
+        QVERIFY(r.app.open());
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(r.state("gen"), QString("error"));
+        r.app.model.select({"words"});
+        QQuickItem *card = item(r.app.window->contentItem(), "node-gen");
+        QVERIFY(card);
+        QQuickItem *chip = nullptr;
+        QTRY_VERIFY((chip = item(card, "errorChip")) && chip->isVisible());
+        QQuickItem *list = item(r.app.window->contentItem(), "runErrors");
+        QVERIFY(!list || !list->isVisible());
+        const QPointF before = r.app.pan();
+
+        QTest::mouseClick(r.app.window, Qt::LeftButton, {},
+                          chip->mapToScene(QPointF(chip->width() / 2, chip->height() / 2)).toPoint());
+        QTRY_VERIFY((list = item(r.app.window->contentItem(), "runErrors")) && list->isVisible());
+        QCOMPARE(r.app.model.selectedIds(), QStringList{"gen"});
+        QVERIFY(r.app.pan() != before);
+        // The node's header is in the middle of the canvas now.
+        const QPointF header = r.app.model.position("gen") + QPointF(30 * r.app.model.unit(), 10 * r.app.model.unit());
+        const QPoint middle = r.app.at(r.app.canvas->width() / 2, r.app.canvas->height() / 2);
+        QVERIFY2((r.app.screen(header.x(), header.y()) - middle).manhattanLength() <= 2,
+                 qPrintable(QStringLiteral("%1,%2").arg(r.app.screen(header.x(), header.y()).x()).arg(middle.x())));
+        QCOMPARE(r.app.model.undoStack()->count(), 0); // showing is not an edit
         QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
     }
 

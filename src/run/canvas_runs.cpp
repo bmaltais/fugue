@@ -555,7 +555,7 @@ void CanvasRuns::showError(const QString &node) {
     m_canvas->select({node});
     // Its header in the middle of the view, at the zoom the view has.
     const QPointF at = m_canvas->position(node) + QPointF(30 * m_canvas->unit(), 10 * m_canvas->unit());
-    m_canvas->setView(at.x(), at.y(), m_canvas->view().value("zoom", 1).toReal());
+    m_canvas->moveView(at.x(), at.y(), m_canvas->view().value("zoom", 1).toReal());
 }
 
 // What each node of the shown workflow is, for its slot: a node made to show a result

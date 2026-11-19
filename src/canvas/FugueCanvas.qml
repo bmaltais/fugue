@@ -232,6 +232,7 @@ FocusScope {
     Connections {
         target: canvas.model
         function onDocumentReset() { canvas.applyView() }
+        function onViewMoveRequested() { canvas.applyView() }
         function onZoomRequested(factor) { canvas.zoomAt(canvas.width / 2, canvas.height / 2, factor) }
         function onFitRequested() {
             if (canvas.model.fitView(canvas.width, canvas.height))
@@ -924,8 +925,19 @@ FocusScope {
         }
     }
 
+    // A node's error chip was clicked (4.7): the run pill lists the errors, and the node comes
+    // to the middle of the view, selected, as a click on its row there does.
+    function showNodeError(nodeId) {
+        if (!canvas.windowRuns)
+            return
+        if (runPill.item)
+            runPill.item.listOpen = true
+        canvas.windowRuns.showError(nodeId)
+    }
+
     // The run, top right (11).
     Loader {
+        id: runPill
         objectName: "runPill"
         active: canvas.windowRuns !== null
         x: canvas.width - width - 4 * canvas.look.unit

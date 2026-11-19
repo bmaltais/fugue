@@ -300,6 +300,11 @@ void CanvasModel::setView(qreal centerX, qreal centerY, qreal zoom) {
     m_view = {{"center", QVariantList{centerX, centerY}}, {"zoom", zoom}};
 }
 
+void CanvasModel::moveView(qreal centerX, qreal centerY, qreal zoom) {
+    setView(centerX, centerY, zoom);
+    emit viewMoveRequested();
+}
+
 void CanvasModel::setTextSize(int size) {
     if (size <= 0 || size == m_textSize)
         return;

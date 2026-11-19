@@ -217,7 +217,10 @@ public:
     QVariantList reroutes() const;
     // {center: [x, y], zoom} from layout.view, or empty when the file has none.
     QVariantMap view() const;
+    // Records the view the canvas shows (the canvas calls it as it pans and zooms).
     Q_INVOKABLE void setView(qreal centerX, qreal centerY, qreal zoom);
+    // Moves the canvas's view there: setView, and viewMoveRequested for the canvas to follow.
+    void moveView(qreal centerX, qreal centerY, qreal zoom);
 
     int textSize() const { return m_textSize; }
     // Lays every node and wire out again: one reset of each list.
@@ -444,6 +447,7 @@ signals:
     void rowsMade(const QString &node);
     void zoomRequested(qreal factor);
     void fitRequested();
+    void viewMoveRequested();
 
 private:
     friend class NodeList;

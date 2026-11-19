@@ -608,14 +608,21 @@ Item {
                         }
                     }
 
-                    // In error: the message in a chip under the node (4.7).
+                    // In error: the message in a chip under the node (4.7). A click lists the
+                    // run's errors and brings this node to the middle of the view.
                     Rectangle {
+                        objectName: "errorChip"
                         visible: face.failed && node.error !== "" && face.full
                         y: node.height + Math.round(1.5 * face.u)
                         width: node.width
                         height: errorText.height + 3 * face.u
                         radius: node.look.smallCorner
                         color: node.look.errorChip
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: node.canvasView.showNodeError(node.nodeId)
+                        }
                         Rectangle {
                             width: 2
                             height: parent.height
