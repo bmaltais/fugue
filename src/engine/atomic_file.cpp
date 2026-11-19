@@ -22,7 +22,7 @@ namespace {
 // Unique among the partial files of this process; the process id sets it apart from others'.
 QString uniquePart() {
     static std::atomic<quint64> next{0};
-    return QStringLiteral("%1-%2").arg(::getpid()).arg(next.fetch_add(1));
+    return QStringLiteral("fugue-%1-%2").arg(::getpid()).arg(next.fetch_add(1));
 }
 
 // The 13.3 code for a failed write, from its errno: a missing folder is file_not_found, a
@@ -41,7 +41,7 @@ Error writeFailed(const QString &target, int error) {
                      QStringLiteral("Cannot write %1: %2.").arg(target, QString::fromLocal8Bit(std::strerror(error))));
 }
 
-// `.<name>.<unique>.part`, with `name` shortened so the whole stays within a file name's
+// `.<name>.fugue-<pid>-<n>.part`, with `name` shortened so the whole stays within a file name's
 // limit (NAME_MAX, 255 bytes): the name is only there for a person reading the folder.
 QString partialName(QString name) {
     const QString unique = uniquePart();
@@ -56,9 +56,9 @@ QString partialName(QString name) {
 PartialFile::PartialFile(const QString &dir, const QString &name) : m_path(QDir(dir).filePath(partialName(name))) {}
 
 void PartialFile::removeStale(const QString &dir) {
-    static const QRegularExpression ours(QStringLiteral("^\\..*\\.(\\d+)-\\d+\\.part$"));
+    static const QRegularExpression ours(QStringLiteral("^\\..*\\.fugue-(\\d+)-\\d+\\.part$"));
     const QDateTime before = QDateTime::currentDateTimeUtc().addSecs(-600);
-    const QFileInfoList found = QDir(dir).entryInfoList({QStringLiteral(".*.part")}, QDir::Files | QDir::Hidden);
+    const QFileInfoList found = QDir(dir).entryInfoList({QStringLiteral(".*.fugue-*.part")}, QDir::Files | QDir::Hidden);
     for (const QFileInfo &file : found) {
         const QRegularExpressionMatch match = ours.match(file.fileName());
         if (!match.hasMatch() || file.lastModified() > before)

@@ -79,7 +79,8 @@ private slots:
         const PartialFile first(m_dir.path(), "a.png");
         const PartialFile second(m_dir.path(), "a.png");
         QVERIFY(first.path() != second.path());
-        QVERIFY(QFileInfo(first.path()).fileName().startsWith('.'));
+        QVERIFY(QFileInfo(first.path()).fileName().startsWith(".a.png.fugue-"));
+        QVERIFY(QFileInfo(first.path()).fileName().endsWith(".part"));
         QCOMPARE(QFileInfo(first.path()).absolutePath(), QDir(m_dir.path()).absolutePath());
     }
 
@@ -123,15 +124,17 @@ private slots:
             QVERIFY(file.setFileTime(time, QFileDevice::FileModificationTime));
         };
         const QString live = QString::number(QCoreApplication::applicationPid());
-        make(".shot.png.999999999-3.part", old);                          // writer gone, old: stale
-        make(".shot.png.999999999-4.part", QDateTime::currentDateTimeUtc()); // writer gone, fresh
-        make(".shot.png." + live + "-5.part", old);                       // writer alive
+        make(".shot.png.fugue-999999999-3.part", old);                          // writer gone, old: stale
+        make(".shot.png.fugue-999999999-4.part", QDateTime::currentDateTimeUtc()); // writer gone, fresh
+        make(".shot.png.fugue-" + live + "-5.part", old);                       // writer alive
+        make(".shot.png.999999999-6.part", old);                                // another program's form
         make(".notes.part", old);                                          // not ours
         make("shot.png", old);
         PartialFile::removeStale(m_dir.path());
         QStringList left = entries();
         left.sort();
-        QStringList expected{".notes.part", ".shot.png." + live + "-5.part", ".shot.png.999999999-4.part", "shot.png"};
+        QStringList expected{".notes.part", ".shot.png.fugue-" + live + "-5.part", ".shot.png.fugue-999999999-4.part",
+                             ".shot.png.999999999-6.part", "shot.png"};
         expected.sort();
         QCOMPARE(left, expected);
     }

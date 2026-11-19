@@ -24,7 +24,7 @@ enum class Overwrite {
 class PartialFile {
 public:
     // A partial file for files in `dir` (which must exist) named after `name`:
-    // `<dir>/.<name>.<unique>.part`, `name` shortened when needed to keep it within 255
+    // `<dir>/.<name>.fugue-<pid>-<n>.part`, `name` shortened when needed to keep it within 255
     // bytes. Nothing is created until something writes it.
     PartialFile(const QString &dir, const QString &name);
     // Removes the partial file, unless it was committed.
@@ -45,8 +45,9 @@ public:
     Result<bool> commit(const QString &target, Overwrite overwrite);
 
     // Removes the partial files a writer left in `dir` when it died mid-write: names of this
-    // class's form whose process is gone, untouched for ten minutes. A live writer's file, a
-    // fresh one (a writer on another machine sharing the folder) and other files stay.
+    // class's form (`.<name>.fugue-<pid>-<n>.part`) whose process is gone, untouched for ten
+    // minutes. A live writer's file, a fresh one (a writer on another machine sharing the
+    // folder) and every other file stay.
     static void removeStale(const QString &dir);
 
 private:
