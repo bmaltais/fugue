@@ -167,6 +167,42 @@ private slots:
         QVERIFY(readEmbeddedWorkflow(out + "/small.png").ok());
     }
 
+    // A compiled graph holds no workflow to embed: the image is saved, the run is a success, and
+    // the warning says why the file holds no workflow.
+    void aRunFromACompiledGraphSavesAndWarns() {
+        FileHashes hashes(path("hashes3.json"));
+        const vips::VImage pixels = (vips::VImage::black(7, 5, vips::VImage::option()->set("bands", 3)) + 60).cast(VIPS_FORMAT_UCHAR);
+        const MediaHandle fixture = MediaHandle::fromImage(pixels).value().saved(path("in3"), "src", hashes).value();
+        const QString out = path("out3");
+        write(path("tocompile.fugue"),
+              QByteArray("{\"fugue\": 1, \"graph\": {\"nodes\": {"
+                         "\"load\": {\"type\": \"fugue/load-image\", \"version\": \"1.0.0\", \"inputs\": {\"file\": \"") +
+                  fixture.path().toUtf8() + "\"}},"
+                  "\"save\": {\"type\": \"fugue/save-image\", \"version\": \"1.0.0\", \"inputs\": {\"image\": {\"from\": \"load.image\"},"
+                  " \"name\": \"compiled\", \"folder\": \"" + out.toUtf8() + "\"}}}}}");
+        const Outcome compiled = fugue({"compile", path("tocompile.fugue")});
+        QCOMPARE(compiled.exitCode, 0);
+        write(path("compiled.json"), compiled.out);
+
+        const Outcome ran = fugue({"run", path("compiled.json"), "--wait", "--json"});
+        QCOMPARE(ran.exitCode, 0);
+        const QJsonObject done = ran.lines().last();
+        QCOMPARE(done.value("status").toString(), QString("ok"));
+        const QJsonArray errors = done.value("errors").toArray();
+        QCOMPARE(errors.size(), 1);
+        QCOMPARE(errors.at(0).toObject().value("code").toString(), QString("workflow_not_embedded"));
+        QCOMPARE(errors.at(0).toObject().value("severity").toString(), QString("warning"));
+        QCOMPARE(errors.at(0).toObject().value("node").toString(), QString("save"));
+        QVERIFY(QFileInfo::exists(out + "/compiled.png"));
+
+        const QString run = ran.lines().first().value("run").toString();
+        for (const char *command : {"result", "status"}) {
+            const Outcome asked = fugue({"runs", command, run, "--json"});
+            QVERIFY2(asked.exitCode == 0, asked.out.constData());
+            QVERIFY2(asked.json().value("ok").toBool(), asked.out.constData());
+        }
+    }
+
     // Number gives what was typed in it, and a Preview of it shows that in the run result.
     void aNumberRunsFromTheCommandLine() {
         write(path("number.fugue"),
