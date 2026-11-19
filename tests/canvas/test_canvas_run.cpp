@@ -16,6 +16,8 @@
 #include <QUndoStack>
 #include <QtTest>
 
+#include <atomic>
+
 #include "canvas_app.h"
 #include "engine/fake_provider.h"
 #include "engine/queue.h"
@@ -79,18 +81,35 @@ fugue::Description imageDescription() {
     return description;
 }
 
+// While set, a SlowProvider's describe() never answers: a paired host that takes its whole
+// transfer timeout. Set and read on the test's thread and the run thread.
+std::atomic<bool> g_describeHangs{false};
+
 // A provider whose description takes a while, as a real one over HTTP does: checkGraph waits
 // for it on an event loop of its own.
 class SlowProvider : public FakeProvider {
 public:
     using FakeProvider::FakeProvider;
     void describe(fugue::Reply<fugue::Description> reply) override {
+        if (g_describeHangs.load()) {
+            m_unanswered.append(std::move(reply));
+            return;
+        }
         QTimer::singleShot(300, this, [this, reply = std::move(reply)]() mutable { FakeProvider::describe(std::move(reply)); });
     }
     // A cancel is answered from the event loop, as over HTTP, never inside the call.
     void cancel(const QString &job, fugue::Reply<QString> reply) override {
         QTimer::singleShot(0, this, [this, job, reply = std::move(reply)]() mutable { FakeProvider::cancel(job, std::move(reply)); });
     }
+
+private:
+    QList<fugue::Reply<fugue::Description>> m_unanswered;
+};
+
+// Until it goes, describe() hangs.
+struct DescribeHangs {
+    DescribeHangs() { g_describeHangs.store(true); }
+    ~DescribeHangs() { g_describeHangs.store(false); }
 };
 
 // The window with its runs. The fake provider is made on the run thread, where providers
@@ -159,6 +178,16 @@ struct RunApp {
         service->onRunThread([&] { call(*fake); });
     }
 };
+
+// Leaves a check of the window waiting on a describe() that never answers. The checks
+// asked before it (the one when the window opened: 300 ms pause, 300 ms describe) are over
+// first, so this one is the one that hangs.
+void hangACheck(RunApp &r) {
+    QTest::qWait(1000);
+    const DescribeHangs hangs;
+    r.runs->checkNow();
+    QTest::qWait(200); // the check is waiting on describe
+}
 
 } // namespace
 
@@ -605,6 +634,38 @@ private slots:
         r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(1), {{"image.png", png(64, 64)}}); });
         QTRY_COMPARE_WITH_TIMEOUT(finished.size(), 1, 10000);
         QCOMPARE(finished.first().at(1).toString(), QStringLiteral("ok"));
+    }
+
+    // A run asked for while a check waits on a provider that does not answer starts at once:
+    // the check gives way, and is made again later.
+    void aRunAskedForDuringAHangingCheckDoesNotWaitForIt() {
+        RunApp r(kGraph, true);
+        QVERIFY(r.app.open());
+        hangACheck(r);
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE_WITH_TIMEOUT(r.jobs().size(), 1, 5000);
+        r.runs->cancel();
+        QTRY_VERIFY(!r.runs->busy());
+    }
+
+    // A window run whose turn comes during a check that hangs starts at once, so the CLI runs
+    // queued behind it do not wait either.
+    void aWindowRunsTurnDuringAHangingCheckDoesNotWaitForIt() {
+        RunApp r(kGraph, true);
+        QVERIFY(r.app.open());
+        const fugue::Queue queue(r.app.dir.path() + "/queue");
+        QVERIFY(queue.enqueue("cli-run", "/w/a.fugue", false));
+        QVERIFY(queue.activate("cli-run"));
+        fugue::Lock worker(r.app.dir.path() + "/engine.lock");
+        QVERIFY(worker.tryAcquire());
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(queue.entries().size(), 2);
+        hangACheck(r);
+        QVERIFY(queue.remove(QStringLiteral("cli-run")));
+        worker.release();
+        QTRY_COMPARE_WITH_TIMEOUT(r.jobs().size(), 1, 5000);
+        r.runs->cancel();
+        QTRY_VERIFY(!r.runs->busy());
     }
 
     // A window run whose entry goes just as its turn comes (a `fugue runs cancel` between the

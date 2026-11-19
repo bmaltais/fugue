@@ -189,9 +189,12 @@ public:
             return;
         // checkGraph waits on providers with an event loop of its own, which delivers what is
         // queued here meanwhile: a start then waits for the check to end (compiling would
-        // replace the providers the check is using).
+        // replace the providers the check is using), which it ends at once. A check waits
+        // on describe() (a paired host: up to its transfer timeout); a run does not.
         if (m_checking) {
             m_parked.append({id, request});
+            if (m_checkAbort)
+                m_checkAbort->abort();
             return;
         }
         const Compilation compilation = compileRequest(request);
@@ -327,8 +330,16 @@ private:
     }
 
     void poll() {
-        if (m_checking)
-            return; // its turn is looked at again once the check is over
+        if (m_checking) {
+            // A check under way gives way to a run whose turn has come, which would otherwise
+            // hold up every run queued behind it too; the run starts once the check is over.
+            const QList<QueueEntry> entries = queue().entries();
+            if (m_checkAbort && !entries.isEmpty()
+                && std::any_of(m_waiting.cbegin(), m_waiting.cend(),
+                               [&](const Waiting &w) { return w.folder.id() == entries.first().run; }))
+                m_checkAbort->abort();
+            return;
+        }
         if (m_active) {
             if (!m_cancelAsked && m_activeFolder && m_activeFolder->cancelRequested()) {
                 m_cancelAsked = true;
@@ -453,13 +464,18 @@ private:
         const Compilation compilation = compileRequest(m_check);
         QJsonObject nodes;
         Errors problems = compilation.problems();
+        bool aborted = false;
         if (compilation.ok()) {
             RunEnvironment environment = m_process->environment;
             environment.registry = &m_compileRegistry;
             RunOptions options;
             options.workflow = m_check.workflow; // a relative file is its folder's (Appendix A)
             options.roots = m_setup.roots;
-            const GraphCheck graphCheck = checkGraph(*compilation, environment, options);
+            CheckAbort abort;
+            m_checkAbort = &abort;
+            const GraphCheck graphCheck = checkGraph(*compilation, environment, options, &abort);
+            m_checkAbort = nullptr;
+            aborted = graphCheck.aborted;
             problems += graphCheck.warnings;
             for (auto it = graphCheck.states.begin(); it != graphCheck.states.end(); ++it)
                 nodes.insert(it.key(), QJsonObject{{"state", nodeStateName(it.value())}});
@@ -469,15 +485,20 @@ private:
         m_checking = false;
         if (m_quitting)
             return;
-        emit checked(ticket, nodes, toJson(problems));
-        // What waited for the check: runs started meanwhile, a newer check, the queue.
+        // An aborted check is made again later (once no run is active), unless a newer one
+        // replaced it.
+        if (!aborted)
+            emit checked(ticket, nodes, toJson(problems));
+        else if (m_checkTicket < 0)
+            m_checkTicket = ticket;
+        // What waited for the check: runs started meanwhile, the queue, a newer check.
         const QList<Parked> parked = std::exchange(m_parked, {});
         for (const Parked &p : parked)
             start(p.id, p.request);
-        if (m_checkTicket >= 0 && !m_active)
-            QTimer::singleShot(0, this, &RunThread::checkNow);
         if (!m_waiting.isEmpty())
             poll();
+        if (m_checkTicket >= 0 && !m_active)
+            QTimer::singleShot(0, this, &RunThread::checkNow);
     }
 
     RunSetup m_setup;
@@ -499,6 +520,7 @@ private:
     };
     QList<Parked> m_parked; // started while a check was under way
     bool m_checking = false;
+    CheckAbort *m_checkAbort = nullptr; // the check under way's, while m_checking
     QElapsedTimer m_pruned;
     bool m_quitting = false;
     RunRequest m_check;

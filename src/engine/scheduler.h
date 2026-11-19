@@ -208,6 +208,21 @@ struct GraphCheck {
     // node (model_missing and the other 8.5 codes), which a run that reaches
     // the node reports as errors.
     Errors warnings;
+    // Ended early by CheckAbort::abort(): what is above is incomplete.
+    bool aborted = false;
+};
+
+// Ends a checkGraph that waits on providers, from the thread it runs on (from something
+// that thread's event loop delivers meanwhile, such as a run whose turn has come). One per
+// check; abort() before the check starts makes it return at once.
+class CheckAbort {
+public:
+    void abort();
+
+private:
+    friend GraphCheck checkGraph(const CompiledGraph &, const RunEnvironment &, const RunOptions &, CheckAbort *);
+    std::function<void()> m_quit;
+    bool m_aborted = false;
 };
 
 // Looks at the graph as a run would, running nothing and changing nothing:
@@ -216,7 +231,8 @@ struct GraphCheck {
 // event loop of its own. A node is stale when its result is not cached, when
 // anything upstream is stale, or when its key cannot be known yet (a
 // randomized seed, a node type that is not deterministic).
-GraphCheck checkGraph(const CompiledGraph &graph, const RunEnvironment &environment, const RunOptions &options = {});
+GraphCheck checkGraph(const CompiledGraph &graph, const RunEnvironment &environment, const RunOptions &options = {},
+                      CheckAbort *abort = nullptr);
 
 } // namespace fugue
 
