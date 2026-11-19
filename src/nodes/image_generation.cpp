@@ -27,8 +27,8 @@ const QString kEdit = QStringLiteral("image.edit");
 // Fantasi's choices (generator.h, generator.cpp at 6aa8dc2), kept as Fugue's starting ones.
 constexpr int kSizeMultiple = 64;          // image sizes go in steps of 64
 constexpr double kMegapixel = 1024.0 * 1024.0;
-// Edit Image's references: Fugue's starting four (14.1), raised by a model whose limits say
-// `max_reference_images` is higher.
+// Edit Image's references: Fugue's starting four (14.1), when the model reports no
+// `max_reference_images`; a reported limit holds, higher or lower.
 constexpr int kReferences = 4;
 
 // The size nearest a megapixel in the shape width x height, in steps of 64 (fitMegapixel).
@@ -181,7 +181,8 @@ private:
     Result<std::optional<QSize>> references(const NodeContext &context, const Selection &selection,
                                             JobRequest &request) const {
         const QList<Value> images = context.input(QStringLiteral("images")).items();
-        const int most = std::max(kReferences, selection.model.limits.value("max_reference_images").toInt());
+        const int reported = selection.model.limits.value("max_reference_images").toInt(0);
+        const int most = reported > 0 ? reported : kReferences;
         if (images.size() > most) {
             return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("images"),
                                   QStringLiteral("%1 takes at most %2 images, not %3.")

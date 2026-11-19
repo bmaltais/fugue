@@ -443,17 +443,22 @@ private slots:
         QVERIFY(tooMany.error().message.contains("4"));
     }
 
-    // A provider that reports a higher limit raises it (14.1).
-    void aModelsHigherReferenceLimitRaisesIt() {
+    // Four is Fugue's starting choice (14.1); a limit the model reports is the one that holds,
+    // higher or lower, since the model knows what it takes.
+    void aModelsReportedReferenceLimitHolds() {
         Bench bench;
         QList<Value> five;
         for (int i = 0; i < 5; ++i)
             five.append(bench.image(writePng(bench.file(QString("r%1.png").arg(i)), 1024, 1024)));
         const Selection roomy = selection({}, QJsonObject{{"max_reference_images", 8}});
         QVERIFY(bench.request(kEdit, {{"instruction", "mix"}, {"images", Value::list(five)}}, roomy).ok());
-        // A lower one does not lower Fugue's four.
         const Selection tight = selection({}, QJsonObject{{"max_reference_images", 2}});
-        QVERIFY(bench.request(kEdit, {{"instruction", "mix"}, {"images", Value::list(five.mid(0, 4))}}, tight).ok());
+        QVERIFY(bench.request(kEdit, {{"instruction", "mix"}, {"images", Value::list(five.mid(0, 2))}}, tight).ok());
+        const Result<JobRequest> three = bench.request(kEdit, {{"instruction", "mix"}, {"images", Value::list(five.mid(0, 3))}}, tight);
+        QVERIFY(!three.ok());
+        QCOMPARE(three.error().code, QStringLiteral("value_out_of_range"));
+        QCOMPARE(three.error().input, QStringLiteral("images"));
+        QVERIFY2(three.error().message.contains("at most 2"), qPrintable(three.error().message));
     }
 
     // --- outputs: the image and the values actually used (3.3, 8.1) ---
