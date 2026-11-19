@@ -1,7 +1,4 @@
 {
   "%Ln presses": { "one": "%Ln tryk", "other": "%Ln tryk" },
-  "Count": "Tæl",
-  "Count one more": "Tæl en mere",
-  "Quit": "Afslut",
-  "Show or hide the shortcuts": "Vis eller skjul genvejene"
+  "Count": "Tæl"
 }

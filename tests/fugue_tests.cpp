@@ -14,6 +14,7 @@
 #include <QtTest>
 
 #include "backend.h"
+#include "commands/command_registry.h"
 #include "theme.h"
 #include "translator.h"
 
@@ -369,6 +370,8 @@ private slots:
         QCoreApplication::installTranslator(&translator);
         Theme theme(dir.path());
         Backend backend;
+        fugue::CommandRegistry commands;
+        fugue::registerDefaultCommands(commands);
 
         QQmlApplicationEngine engine;
         QStringList warnings;
@@ -379,6 +382,7 @@ private slots:
         engine.rootContext()->setContextProperty("translator", &translator);
         engine.rootContext()->setContextProperty("theme", &theme);
         engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("commands", &commands);
         engine.load(QUrl("qrc:/Main.qml"));
         QVERIFY(!engine.rootObjects().isEmpty());
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());

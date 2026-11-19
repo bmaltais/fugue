@@ -20,8 +20,6 @@ ApplicationWindow {
 
     readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
 
-    Shortcut { sequence: "?"; onActivated: help.opened ? help.close() : help.open() }
-    Shortcut { sequence: "Q"; onActivated: Qt.quit() }
     Shortcut { sequence: "Space"; onActivated: backend.primaryAction() }
 
     // Right-to-left languages mirror the window; the Translator sets the
@@ -67,45 +65,6 @@ ApplicationWindow {
         }
     }
 
-    Popup {
-        id: help
-        objectName: "help"
-        anchors.centerIn: Overlay.overlay
-        modal: true
-        focus: true
-        padding: 24
-        background: Rectangle {
-            color: theme.background
-            border.color: theme.colors.selection
-            radius: theme.radius
-        }
-
-        ColumnLayout {
-            spacing: 8
-            // A popup is not an Item and doesn't inherit the window's
-            // mirroring, so its content opts in.
-            LayoutMirroring.enabled: win.rightToLeft
-            LayoutMirroring.childrenInherit: true
-
-            Repeater {
-                model: [
-                    { keys: "Space", action: qsTr("Count one more") },
-                    { keys: "?", action: qsTr("Show or hide the shortcuts") },
-                    { keys: "Q", action: qsTr("Quit") }
-                ]
-                delegate: RowLayout {
-                    required property var modelData
-                    spacing: 24
-
-                    Label {
-                        Layout.preferredWidth: 64
-                        text: modelData.keys
-                        color: theme.accent
-                        font.bold: true
-                    }
-                    Label { text: modelData.action }
-                }
-            }
-        }
-    }
+    // The command registry's shortcuts, the `?` overlay and the quit question.
+    CommandUi { anchors.fill: parent }
 }

@@ -11,6 +11,7 @@
 #include <QUrl>
 
 #include "backend.h"
+#include "commands/command_registry.h"
 #include "cli/args.h"
 #include "cli/cli.h"
 #include "nodes/builtin.h"
@@ -42,12 +43,17 @@ int main(int argc, char *argv[]) {
 
     Theme theme;
     Backend backend;
+    // The command registry: the default keymap, then the user's changes to it (spec 12.5).
+    fugue::CommandRegistry commands;
+    fugue::registerDefaultCommands(commands);
+    commands.loadKeymap(fugue::CommandRegistry::keymapPath());
 
     QQmlApplicationEngine engine;
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
     engine.rootContext()->setContextProperty("translator", &translator);
     engine.rootContext()->setContextProperty("theme", &theme);
     engine.rootContext()->setContextProperty("backend", &backend);
+    engine.rootContext()->setContextProperty("commands", &commands);
     engine.load(QUrl("qrc:/Main.qml"));
     if (engine.rootObjects().isEmpty())
         return 1;

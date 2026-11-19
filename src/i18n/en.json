@@ -1,7 +1,4 @@
 {
   "%Ln presses": { "one": "%Ln press", "other": "%Ln presses" },
-  "Count": "Count",
-  "Count one more": "Count one more",
-  "Quit": "Quit",
-  "Show or hide the shortcuts": "Show or hide the shortcuts"
+  "Count": "Count"
 }
