@@ -1,7 +1,9 @@
 #include "media.h"
 
 #include <QDir>
+#include <QFileInfo>
 
+#include "engine/file_hashes.h"
 #include "engine/hash.h"
 
 namespace fugue {
@@ -168,6 +170,39 @@ Result<MediaHandle> MediaHandle::cropped(int x, int y, int width, int height) co
     MediaHandle handle = *this;
     handle.m_edits.crop = Crop{offsetX + x, offsetY + y, width, height};
     return handle;
+}
+
+Result<MediaHandle> MediaHandle::probe(MediaType type, const QString &path, FileHashes &hashes) {
+    const QFileInfo info(path);
+    if (!info.isFile())
+        return makeError(QStringLiteral("file_not_found"), QStringLiteral("There is no file %1.").arg(path));
+    if (!info.isReadable())
+        return makeError(QStringLiteral("permission_denied"), QStringLiteral("Cannot read %1.").arg(path));
+    if (type == MediaType::Image)
+        return probeImage(info.absoluteFilePath(), hashes);
+    return probeWithFfprobe(type, info.absoluteFilePath(), hashes);
+}
+
+Result<MediaHandle> MediaHandle::saved(const QString &dir, const QString &name, FileHashes &hashes) const {
+    if (!hasFile()) {
+        if (m_type == MediaType::Image && hasImage())
+            return savedImage(dir, name, hashes);
+        return makeError(QStringLiteral("internal"), QStringLiteral("This %1 handle has no file.").arg(mediaTypeName(m_type)));
+    }
+    if (!m_hash.isEmpty())
+        return *this;
+    MediaHandle handle = *this;
+    handle.m_hash = hashes.hash(m_path);
+    if (handle.m_hash.isEmpty())
+        return makeError(QStringLiteral("file_not_found"), QStringLiteral("Cannot read %1.").arg(m_path));
+    return handle;
+}
+
+Result<MediaHandle> MediaHandle::plainFile(const QString &dir, const QString &name, FileHashes &hashes) const {
+    const Result<MediaHandle> handle = saved(dir, name, hashes);
+    if (!handle || handle->m_edits.isEmpty())
+        return handle;
+    return handle->withEditsApplied(dir, name, hashes);
 }
 
 MediaHandle MediaHandle::atPath(const QString &path) const {

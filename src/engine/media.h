@@ -26,6 +26,8 @@
 
 namespace fugue {
 
+class FileHashes;
+
 enum class MediaType { Image, Video, Audio };
 
 // "image", "video", "audio".
@@ -56,6 +58,17 @@ class MediaHandle {
 public:
     MediaHandle() = default;
 
+    // A decoded image held in memory, with no file yet. A lazy libvips
+    // pipeline is evaluated into memory here (spike 03: materialise every
+    // node's output; do not chain lazy images between nodes).
+    static Result<MediaHandle> fromImage(const vips::VImage &image);
+
+    // The handle a port of `type` carries for the file at `path`: metadata
+    // read from the file (the libvips header for images, ffprobe for video
+    // and audio; nothing is decoded) and the content hash from `hashes`.
+    // Fails with file_not_found or media_unreadable.
+    static Result<MediaHandle> probe(MediaType type, const QString &path, FileHashes &hashes);
+
     // The serialized form of 2.4. fromJson needs an absolute path and a
     // sha256 hash, and fails with invalid_document otherwise. toJson writes
     // only the fields that belong to the type, and edits only when there are
@@ -77,6 +90,26 @@ public:
     int sampleRate() const { return m_sampleRate; }
     VideoEdits edits() const { return m_edits; }
 
+    bool hasFile() const { return !m_path.isEmpty(); }
+    bool hasImage() const { return m_image.has_value(); }
+
+    // The decoded image: the one held, or else the file opened through
+    // libvips, which decodes pixels only as they are read. Images only.
+    Result<vips::VImage> image() const;
+
+    // A handle that has a file and a hash, for recording a node's output in
+    // the run folder and the result cache. An image held only in memory is
+    // written to <dir>/<name>.png, losslessly: 8-bit pixels as 8-bit, 16-bit
+    // as 16-bit, and float pixels (0 to 1) as 16-bit; the decoded image is
+    // kept too. A handle that already has a file is returned as it is
+    // (nothing is encoded again), and pending video edits stay pending.
+    Result<MediaHandle> saved(const QString &dir, const QString &name, FileHashes &hashes) const;
+
+    // Like saved(), but with nothing pending: a video's edits are applied
+    // into a new file, <dir>/<name>.mkv. This is what a command or provider
+    // node receives (spec 7.2), so `path` alone is the whole value.
+    Result<MediaHandle> plainFile(const QString &dir, const QString &name, FileHashes &hashes) const;
+
     // Size and length with the pending edits applied (videos); otherwise the
     // same as width(), height() and duration().
     int effectiveWidth() const;
@@ -95,6 +128,11 @@ public:
     MediaHandle atPath(const QString &path) const;
 
 private:
+    static Result<MediaHandle> probeImage(const QString &path, FileHashes &hashes);
+    static Result<MediaHandle> probeWithFfprobe(MediaType type, const QString &path, FileHashes &hashes);
+    Result<MediaHandle> savedImage(const QString &dir, const QString &name, FileHashes &hashes) const;
+    Result<MediaHandle> withEditsApplied(const QString &dir, const QString &name, FileHashes &hashes) const;
+
     MediaType m_type = MediaType::Image;
     QString m_path;
     QString m_hash;
@@ -108,6 +146,7 @@ private:
     bool m_hasAudio = false;
     int m_sampleRate = 0;
     VideoEdits m_edits;
+    std::optional<vips::VImage> m_image;
 };
 
 } // namespace fugue
