@@ -299,6 +299,7 @@ private slots:
         const int bottom = field->mapToScene(QPointF(0, field->height())).toPoint().y();
         app.window->resize(app.window->width(), bottom + 20);
         QTRY_COMPARE(app.window->height(), bottom + 20);
+        QTRY_COMPARE(app.window->contentItem()->height(), qreal(bottom + 20)); // the popups' layer too
         app.click(app.in("all", "mode"));
         QTRY_VERIFY2(app.menuOpen(), qPrintable(app.warnings.join('\n')));
         QObject *menu = app.popup("widgetMenu");
@@ -307,7 +308,11 @@ private slots:
         const QRectF rect(at, QSizeF(menu->property("width").toReal(), menu->property("height").toReal()));
         QVERIFY2(QRectF(0, 0, app.window->width(), app.window->height()).contains(rect),
                  qPrintable(QString("%1,%2 %3x%4").arg(rect.x()).arg(rect.y()).arg(rect.width()).arg(rect.height())));
-        QVERIFY(rect.bottom() <= field->mapToScene(QPointF(0, 0)).y() + 1); // above the field
+        QVERIFY2(rect.bottom() <= field->mapToScene(QPointF(0, 0)).y() + 1, qPrintable(QString("%1,%2 %3x%4 window %5").arg(rect.x()).arg(rect.y()).arg(rect.width()).arg(rect.height()).arg(app.window->height()))); // above the field
+        // Right above it and aligned to it, not pushed into a corner.
+        QVERIFY2(rect.bottom() >= field->mapToScene(QPointF(0, 0)).y() - 1
+                     && qAbs(rect.left() - field->mapToScene(QPointF(0, 0)).x()) <= 1,
+                 qPrintable(QString("%1,%2 %3x%4").arg(rect.x()).arg(rect.y()).arg(rect.width()).arg(rect.height())));
         app.key(Qt::Key_Escape);
         QTRY_VERIFY(!app.popup("widgetMenu"));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));

@@ -16,7 +16,7 @@ Item {
         const at = well.mapToItem(Overlay.overlay, 0, well.height)
         const end = well.mapToItem(Overlay.overlay, well.width, 0)
         const menu = menuComponent.createObject(picker, {
-            x: at.x, y: at.y, width: Math.max(end.x - at.x, 120), anchorHeight: well.height,
+            wantX: at.x, wantY: at.y, width: Math.max(end.x - at.x, 120), anchorHeight: well.height,
             entries: entries !== null ? entries : host.modelEntries(), followModels: entries === null
         }) as WidgetMenu
         menu.open()

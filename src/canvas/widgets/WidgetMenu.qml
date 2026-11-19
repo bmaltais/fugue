@@ -27,7 +27,11 @@ Popup {
     // No transitions: the next click on the canvas must not land on a menu still closing.
     enter: null
     exit: null
-    // The widget's height: where it opens, below it, or above it when there is no room.
+    // Where it wants to open (under the widget, in the overlay's coordinates), and the widget's
+    // height: below it, or above it when there is no room. Not `x` and `y`: a closed Popup reads
+    // them back as 0 until it is shown, so aboutToShow would place it from the corner.
+    property real wantX: 0
+    property real wantY: 0
     property real anchorHeight: 0
     readonly property Item overlay: Overlay.overlay
     margins: Placement.margin
@@ -37,7 +41,7 @@ Popup {
     onAboutToShow: {
         if (!overlay)
             return
-        const p = Placement.fit(overlay, overlay, x, y, width, height, 0, anchorHeight)
+        const p = Placement.fit(overlay, overlay, wantX, wantY, width, height, 0, anchorHeight)
         x = p.x
         y = p.y
     }
