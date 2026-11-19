@@ -505,6 +505,20 @@ private slots:
         QVERIFY(!QFileInfo::exists(path("escape.png")));
     }
 
+    // A name as long as a file name may be is saved; a longer one is refused on the name input,
+    // saying why.
+    void saveImageTakesANameUpToTheLimitAndSaysWhenItIsTooLong() {
+        const QString source = makePng("src-long", 4, 3);
+        const QString longest = QString(251, 'l');
+        const Ran ran = run(saveFlow(source, "'name': '" + longest + "', 'embed': 'none', 'folder': '" + outDir() + "'"));
+        QVERIFY2(ran.error.isEmpty(), qPrintable(ran.error));
+        QVERIFY(QFileInfo::exists(outDir() + "/" + longest + ".png"));
+        const Ran tooLong = run(saveFlow(source, "'name': '" + QString(300, 'l') + "', 'embed': 'none', 'folder': '" + outDir() + "'"));
+        QVERIFY(tooLong.error.startsWith("node_failed"));
+        QCOMPARE(tooLong.outcome.errors.value(0).input, QString("name"));
+        QVERIFY2(tooLong.error.contains("too long"), qPrintable(tooLong.error));
+    }
+
     void aRelativeFolderIsUnderTheOutputFolder() {
         const QString source = makePng("src-rel", 4, 4);
         qputenv("XDG_PICTURES_DIR", path("pictures").toUtf8());

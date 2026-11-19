@@ -100,6 +100,13 @@ public:
                                   QStringLiteral("\"%1\" cannot be a file name.").arg(name),
                                   QStringLiteral("Use a plain name without folders; the folder input says where."));
         const QString format = context.input("format").text();
+        // A file name holds at most 255 bytes (NAME_MAX) with its extension.
+        if (const qsizetype bytes = QFile::encodeName(name + QLatin1Char('.') + format).size(); bytes > 255)
+            return makeInputError(QStringLiteral("node_failed"), QStringLiteral("name"),
+                                  QStringLiteral("The name is too long for a file name: %1 bytes with .%2, at most 255.")
+                                      .arg(bytes)
+                                      .arg(format),
+                                  QStringLiteral("Use a shorter name."));
         const QString embed = context.input("embed").text();
 
         // Relative folders are under the output folder, so a workflow made elsewhere cannot

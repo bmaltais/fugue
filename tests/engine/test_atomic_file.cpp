@@ -95,6 +95,22 @@ private slots:
         QVERIFY(entries().isEmpty());
     }
 
+    // A name as long as the filesystem allows (255 bytes) still gets a partial file: the
+    // partial's own name is kept within the limit.
+    void aNameAtTheLengthLimitIsWritten() {
+        const QString name = QString(251, 'n') + ".png";
+        PartialFile partial(m_dir.path(), name);
+        QVERIFY(QFile::encodeName(QFileInfo(partial.path()).fileName()).size() <= 255);
+        QVERIFY(!hasErrors(partial.write("long", path(name))));
+        const Result<bool> committed = partial.commit(path(name), Overwrite::Never);
+        QVERIFY2(committed.ok(), qPrintable(committed.ok() ? QString() : committed.error().message));
+        QVERIFY(*committed);
+        QCOMPARE(readAll(path(name)), QByteArray("long"));
+        // Two at once still differ.
+        const PartialFile a(m_dir.path(), name), b(m_dir.path(), name);
+        QVERIFY(a.path() != b.path());
+    }
+
     void aMissingFolderIsAnError() {
         PartialFile partial(path("no/such/folder"), "a.png");
         const Errors written = partial.write("x", path("no/such/folder/a.png"));

@@ -25,10 +25,19 @@ Error moveFailed(const QString &target, int error) {
                      QStringLiteral("Cannot write %1: %2.").arg(target, QString::fromLocal8Bit(std::strerror(error))));
 }
 
+// `.<name>.<unique>.part`, with `name` shortened so the whole stays within a file name's
+// limit (NAME_MAX, 255 bytes): the name is only there for a person reading the folder.
+QString partialName(QString name) {
+    const QString unique = uniquePart();
+    const auto fits = [&] { return QFile::encodeName(QStringLiteral(".%1.%2.part").arg(name, unique)).size() <= 255; };
+    while (!name.isEmpty() && !fits())
+        name.chop(name.size() >= 2 && name.at(name.size() - 1).isLowSurrogate() ? 2 : 1);
+    return QStringLiteral(".%1.%2.part").arg(name, unique);
+}
+
 } // namespace
 
-PartialFile::PartialFile(const QString &dir, const QString &name)
-    : m_path(QDir(dir).filePath(QStringLiteral(".%1.%2.part").arg(name, uniquePart()))) {}
+PartialFile::PartialFile(const QString &dir, const QString &name) : m_path(QDir(dir).filePath(partialName(name))) {}
 
 PartialFile::~PartialFile() {
     if (!m_committed)

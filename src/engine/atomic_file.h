@@ -24,7 +24,8 @@ enum class Overwrite {
 class PartialFile {
 public:
     // A partial file for files in `dir` (which must exist) named after `name`:
-    // `<dir>/.<name>.<unique>.part`. Nothing is created until something writes it.
+    // `<dir>/.<name>.<unique>.part`, `name` shortened when needed to keep it within 255
+    // bytes. Nothing is created until something writes it.
     PartialFile(const QString &dir, const QString &name);
     // Removes the partial file, unless it was committed.
     ~PartialFile();
