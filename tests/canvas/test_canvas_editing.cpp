@@ -308,6 +308,30 @@ private slots:
 
 
 
+    // The hovered wire is worked out again when the wires change under a still pointer: a
+    // link a key took away has no cut handle left to click.
+    void theHoveredWireFollowsKeyEdits() {
+        App app(load(linked));
+        QVERIFY(app.open());
+        auto *cut = canvas_test::item(app.window->contentItem(), "cutHandle");
+        QVERIFY(cut);
+        // other's text into gen's prompt, in place of prompt's; then the pointer on its middle.
+        app.drag(Qt::LeftButton, app.screen(260, 444), app.screen(341, 224));
+        QCOMPARE(from(app, "gen", "prompt"), QString("other.text"));
+        const QVariantMap wire = app.model.linkAt(300, 334, 20);
+        QCOMPARE(wire.value("fromNode").toString(), QString("other"));
+        const QPoint middle = app.screen(wire.value("midX").toDouble(), wire.value("midY").toDouble());
+        QTest::mouseMove(app.window, middle + QPoint(2, 0));
+        QTRY_VERIFY(cut->isVisible());
+        // Ctrl+Z puts prompt's link back elsewhere: no handle is left over the empty spot, and
+        // a click there disconnects nothing.
+        app.key(Qt::Key_Z, Qt::ControlModifier);
+        QCOMPARE(from(app, "gen", "prompt"), QString("prompt.text"));
+        QVERIFY(!cut->isVisible());
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, middle);
+        QCOMPARE(from(app, "gen", "prompt"), QString("prompt.text"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
 
     void editsOnThreeHundredNodesStayQuick() {
         App app(grid(300));

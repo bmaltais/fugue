@@ -81,7 +81,9 @@ FocusScope {
     function gripAt(w) {
         return tier === 0 ? model.resizeGripAt(w.x, w.y, Math.max(3 * model.unit, 12 / world.scale)) : ""
     }
-    function updateHover(px, py) {
+    // `wiresChanged`: the wires changed under a still pointer, so the hovered one is looked up
+    // again even when its row number is the same (that row may hold another link now).
+    function updateHover(px, py, wiresChanged) {
         const w = toWorld(px, py)
         const n = gesture === "" ? model.nodeAt(w.x, w.y) : ""
         if (n !== hoveredNode)
@@ -95,7 +97,9 @@ FocusScope {
             hoverPort = p
         const l = tier === 0 && gesture === "" && n === "" && p.node === undefined && !model.linksHidden
             ? model.linkAt(w.x, w.y, 6 / world.scale) : ({})
-        if (l.row !== hoverLink.row) {
+        if (l.row !== hoverLink.row || (wiresChanged && (l.toNode !== hoverLink.toNode || l.toPort !== hoverLink.toPort
+                || l.item !== hoverLink.item || l.fromNode !== hoverLink.fromNode || l.midX !== hoverLink.midX
+                || l.midY !== hoverLink.midY))) {
             hoverLink = l
             refreshHighlights()
         }
@@ -131,9 +135,21 @@ FocusScope {
     }
     Connections {
         target: canvas.model.links
-        function onRowsInserted() { canvas.refreshHighlights() }
-        function onRowsRemoved() { canvas.highlightRows = []; canvas.refreshHighlights() }
+        function onRowsInserted() { canvas.rehover(); canvas.refreshHighlights() }
+        function onRowsRemoved() { canvas.highlightRows = []; canvas.rehover(); canvas.refreshHighlights() }
+        // A wire moved (one signal per wire): looked at once, after the batch.
+        function onDataChanged() { if (canvas.gesture === "" && canvas.hoverLink.row !== undefined) Qt.callLater(canvas.rehover) }
         function onModelReset() { canvas.hoverLink = ({}); canvas.highlightRows = []; canvas.refreshHighlights() }
+    }
+    // An edit from a key (undo, delete) changed the wires: what the pointer is over is worked
+    // out again now, so a cut handle never stays on a link that moved or went.
+    function rehover() {
+        if (gesture !== "")
+            return
+        if (hover.hovered)
+            updateHover(hover.point.position.x, hover.point.position.y, true)
+        else if (hoverLink.row !== undefined)
+            clearHover()
     }
 
     // The world area on screen, and the padded area nodes draw their detail in. The padded
