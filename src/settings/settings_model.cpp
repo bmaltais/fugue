@@ -221,6 +221,13 @@ QStringList SettingsModel::providerTypes() const { return {QStringLiteral("omarc
 QString SettingsModel::saveProviders(const QList<ProviderInstance> &instances) {
     if (!m_providersProblem.isEmpty())
         return tr("Fix %1 first: %2").arg(tilde(m_providersPath), m_providersProblem);
+    // The first save writes the defaults, which must hold the paired hosts: once the file is
+    // there, nothing is added to it.
+    if (!QFileInfo::exists(m_providersPath)) {
+        if (const QString problem = pairedHostsProblem(); !problem.isEmpty())
+            return tr("Nothing was saved: your paired hosts cannot be read now (%1). Try again in a moment.")
+                .arg(problem);
+    }
     const Errors errors = saveProviderInstances(m_providersPath, instances);
     if (!errors.isEmpty())
         return errors.first().message;

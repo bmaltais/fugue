@@ -230,6 +230,16 @@ Result<QList<ProviderInstance>> loadProviderInstances(const QString &path, const
 
 QList<ProviderInstance> defaultProviderInstances() { return defaultProviderInstances(OmarchyPaths::standard()); }
 
+QString pairedHostsProblem() { return pairedHostsProblem(OmarchyPaths::standard()); }
+
+QString pairedHostsProblem(const OmarchyPaths &omarchy) {
+    const QString path = QDir(omarchy.stateDir).filePath("network.json");
+    const Result<QJsonObject> network = readJsonObject(path);
+    if (network || (network.error().code == QLatin1String("file_not_found") && !QFileInfo::exists(path)))
+        return {};
+    return network.error().message;
+}
+
 QList<ProviderInstance> defaultProviderInstances(const OmarchyPaths &omarchy) {
     ProviderInstance local;
     local.name = QStringLiteral("This machine");
