@@ -717,9 +717,10 @@ QVariantMap CanvasModel::portMap(const NodeRow &row, const Port &port) const {
             map.insert("on", number.toBool());
     }
     if (port.output) {
-        // Bypassed (3.5), the output takes the first input of its type.
+        // Bypassed (3.5), the output takes the first input of its type, a list from a list
+        // and one from one, as the engine's bypass does (compiler.cpp).
         for (const Port &input : row.inputs)
-            if (port.type && input.type && input.type->type == port.type->type) {
+            if (port.type && input.type && input.type->type == port.type->type && input.type->list == port.type->list) {
                 map.insert("passFrom", input.name);
                 break;
             }

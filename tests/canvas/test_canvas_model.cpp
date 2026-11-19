@@ -469,6 +469,15 @@ private slots:
         QCOMPARE(port(node(canvas, "text"), "inputs", "extra").value("value").toString(), QString("kept"));
     }
 
+    // The engine passes an output the first input of its type and its list-ness (3.5).
+    void aBypassPassesOnlyAnInputOfTheSameListness() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(R"({"fugue": 1, "graph": {"nodes": {
+            "edit": {"type": "fugue/edit-image", "version": "1.0.0", "inputs": {}, "mode": "bypass"}}}})"));
+        const QVariantMap edit = node(canvas, "edit");
+        QVERIFY(!port(edit, "outputs", "image").contains("passFrom")); // images is a list
+        QCOMPARE(port(edit, "outputs", "seed").value("passFrom").toString(), QString("steps"));
+    }
 
     void nodesTheLayoutDoesNotPlaceGoInColumns() {
         CanvasModel canvas(&m_registry);
