@@ -358,7 +358,20 @@ private slots:
         QCOMPARE(finished.first().at(1).toString(), QStringLiteral("failed"));
         QCOMPARE(r.state("grp"), QStringLiteral("error"));
         QVERIFY(r.role("grp", NodeList::Error).toString().startsWith("grp/inner: "));
-        QCOMPARE(r.state("show2"), QStringLiteral("skipped"));
+        // What depends on it was skipped: the run's record says so (the canvas shows that only
+        // until the check after the run makes it stale, 10.3, which a busy machine may reach
+        // before this line).
+        const fugue::Result<fugue::RunFolder> folder =
+            fugue::RunFolder::open(r.app.dir.path() + "/runs", finished.first().at(0).toString());
+        QVERIFY(folder.ok());
+        QCOMPARE(folder->state().value("nodes").toObject().value("show2").toObject().value("state").toString(),
+                 QStringLiteral("skipped"));
+        // The check after the run keeps the error: the seed advanced at the start is no edit
+        // of the user's, and the run is newer than it.
+        QSignalSpy checked(r.runs.get(), &CanvasRuns::checkApplied);
+        r.runs->checkNow();
+        QTRY_VERIFY(checked.size() >= 1);
+        QCOMPARE(r.state("grp"), QStringLiteral("error"));
         const QVariantList errors = r.runs->errors();
         QCOMPARE(errors.size(), 1);
         QCOMPARE(errors.first().toMap().value("node").toString(), QStringLiteral("grp/inner"));

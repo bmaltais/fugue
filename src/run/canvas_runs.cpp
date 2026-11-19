@@ -122,6 +122,10 @@ QString CanvasRuns::startRun(const QString &target, bool first) {
     const QString id = m_service->start(request);
     // The run has the numbers shown; the next one gets the next (spec 6.2).
     m_canvas->widgets()->advanceSeeds();
+    // The run is newer than any edit so far, the seeds' own included: the check after it
+    // keeps the run's errors (they go with the next edit). A check due from an edit before
+    // the run cleared them when it landed after a short run.
+    m_checkFromEdit = false;
     m_tabOf.insert(id, tab);
     if (first)
         m_order.insert(m_active.isEmpty() ? 0 : 1, id);
@@ -471,22 +475,27 @@ void CanvasRuns::onChecked(int ticket, const QJsonObject &nodes, const QJsonArra
         const QString top = topOf(it.key());
         if (!next.contains(top)) {
             NodeView view = runs.nodes.value(top);
+            // An error stays until the workflow is edited, a group's inner one too.
+            const bool failed = aggregate(view) == QLatin1String("error");
             view.inner.clear();
             view.warnings.clear();
             view.notice.clear();
-            // An error stays until the workflow is edited.
-            if (asked.edit || view.state != QLatin1String("error")) {
+            if (asked.edit || !failed) {
                 view.error.clear();
                 view.state.clear();
+            } else {
+                view.state = QStringLiteral("error");
             }
             next.insert(top, view);
         }
         NodeView &view = next[top];
         const QString state = it.value().toObject().value("state").toString();
-        if (it.key().contains('/'))
-            view.inner.insert(it.key(), state);
-        else if (view.state != QLatin1String("error"))
+        if (it.key().contains('/')) {
+            const bool failed = runs.nodes.value(top).inner.value(it.key()) == QLatin1String("error");
+            view.inner.insert(it.key(), failed && !asked.edit ? QStringLiteral("error") : state);
+        } else if (view.state != QLatin1String("error")) {
             view.state = state;
+        }
     }
     for (const QJsonValue &value : problems) {
         const Error error = Error::fromJson(value.toObject());
@@ -502,12 +511,15 @@ void CanvasRuns::onChecked(int ticket, const QJsonObject &nodes, const QJsonArra
         if (next.contains(it.key()))
             continue;
         NodeView view = it.value();
+        const bool failed = aggregate(view) == QLatin1String("error");
         view.inner.clear();
         view.warnings.clear();
         view.notice.clear();
-        if (asked.edit || view.state != QLatin1String("error")) {
+        if (asked.edit || !failed) {
             view.state.clear();
             view.error.clear();
+        } else {
+            view.state = QStringLiteral("error");
         }
         next.insert(it.key(), view);
     }
