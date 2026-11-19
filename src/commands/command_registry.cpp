@@ -90,6 +90,14 @@ bool CommandRegistry::setLabel(const QString &id, const QString &label) {
     return true;
 }
 
+bool CommandRegistry::setLabelWhen(const QString &id, std::function<QString()> label) {
+    const auto it = m_index.constFind(id);
+    if (it == m_index.constEnd())
+        return false;
+    m_entries[*it].labelWhen = std::move(label);
+    return true;
+}
+
 bool CommandRegistry::setEnabledWhen(const QString &id, Check check) {
     const auto it = m_index.constFind(id);
     if (it == m_index.constEnd())
@@ -432,10 +440,11 @@ QVariantMap CommandRegistry::entry(const QString &id, const QVariantMap &target)
     const Entry &entry = m_entries[*it];
     const QVariantMap previous = std::exchange(m_target, target);
     const QString description = QCoreApplication::translate("Command", entry.spec.description.toUtf8().constData());
+    const QString dynamic = entry.labelWhen ? entry.labelWhen() : QString();
+    const QString source = !dynamic.isEmpty() ? dynamic : entry.spec.label;
     QVariantMap map{
         {"command", entry.spec.id},
-        {"label", entry.spec.label.isEmpty() ? description
-                                             : QCoreApplication::translate("Command", entry.spec.label.toUtf8().constData())},
+        {"label", source.isEmpty() ? description : QCoreApplication::translate("Command", source.toUtf8().constData())},
         {"description", description},
         {"keys", entry.keys},
         {"available", bool(entry.handler)},

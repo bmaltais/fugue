@@ -295,6 +295,9 @@ public:
     Q_INVOKABLE void toggleMode(const QString &mode);
     // Collapses the selection, or expands it when all of it is collapsed already.
     Q_INVOKABLE void toggleCollapsed();
+    // True when the selection is not empty and every selected node has the state the toggle
+    // commands act on: "bypass", "mute", "collapsed" or "pinned" (what they would remove).
+    bool selectionAll(const QString &state) const;
 
     // --- run state (#19) ---
 

@@ -352,6 +352,49 @@ private slots:
 
     // Pictures of the menus for a look at them, not a check:
     //   FUGUE_MENU_SHOTS=/tmp/shots QT_QUICK_BACKEND=rhi build/test_menus screenshots
+    void toggleLabelsNameWhatTheCommandWillDo() {
+        App app(load(framed));
+        QVERIFY(app.open());
+        const auto label = [&](const char *command) {
+            return app.commands.entry(command).value("label").toString();
+        };
+        // Nothing selected, or nothing in the state: the plain verbs.
+        QCOMPARE(label("node.bypass"), QString("Bypass"));
+        app.model.select({"c"});
+        QCOMPARE(label("node.bypass"), QString("Bypass"));
+        QCOMPARE(label("node.mute"), QString("Mute"));
+        QCOMPARE(label("node.collapse"), QString("Collapse"));
+        // The `?` overlay keeps the neutral name.
+        QCOMPARE(app.commands.entry("node.bypass").value("description").toString(), QString("Bypass"));
+
+        // A bypassed node: the context menu and the Node menu offer to undo it.
+        app.model.toggleMode("bypass");
+        app.model.toggleCollapsed();
+        QTest::mouseClick(app.window, Qt::RightButton, {}, app.screen(620, 90));
+        QTRY_VERIFY(isOpen(app.window, "contextMenuPopup"));
+        QCOMPARE(NEED("menuItem-node.bypass")->property("text").toString(), QString("Remove bypass"));
+        QCOMPARE(NEED("menuItem-node.mute")->property("text").toString(), QString("Mute"));
+        QCOMPARE(NEED("menuItem-node.collapse")->property("text").toString(), QString("Expand"));
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(allClosed(app.window));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("menuTitle-3")));
+        QTRY_VERIFY(isOpen(app.window, "menuDropdown"));
+        QCOMPARE(NEED("menuItem-node.bypass")->property("text").toString(), QString("Remove bypass"));
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(allClosed(app.window));
+
+        // Muted reads Unmute; a mixed selection says what the command does: apply to all.
+        app.model.toggleMode("bypass");
+        app.model.toggleMode("mute");
+        QCOMPARE(label("node.mute"), QString("Unmute"));
+        QCOMPARE(label("node.bypass"), QString("Bypass"));
+        app.model.select({"a", "c"});
+        QCOMPARE(label("node.mute"), QString("Mute"));
+        app.model.toggleMode("mute");
+        QCOMPARE(label("node.mute"), QString("Unmute"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void screenshots_data() {
         QTest::addColumn<QString>("theme");
         QTest::addColumn<int>("radius");
