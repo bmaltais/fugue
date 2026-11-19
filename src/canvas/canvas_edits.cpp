@@ -6,7 +6,7 @@
 #include "canvas/canvas_model.h"
 #include "canvas/input_links.h"
 
-#include "engine/canonical.h"
+#include "workflow/content_hash.h"
 
 #include <QJsonArray>
 #include <QJsonObject>
@@ -28,18 +28,6 @@ constexpr qreal pasteGap = 80;
 bool sameNode(const Node &a, const Node &b) {
     return a.type == b.type && a.version == b.version && a.inputs == b.inputs && a.mode == b.mode
            && a.provider == b.provider && a.frozen == b.frozen && a.extra == b.extra;
-}
-
-// The document as JSON without its viewport: what "unsaved" compares (11.2).
-QJsonObject contentJson(const Document &document) {
-    QJsonObject json = document.toJson();
-    QJsonObject layout = json.value("layout").toObject();
-    layout.remove("view");
-    if (layout.isEmpty())
-        json.remove("layout");
-    else
-        json.insert("layout", layout);
-    return json;
 }
 
 QJsonObject withoutPos(QJsonObject entry) {
@@ -88,7 +76,6 @@ CanvasModel::Snapshot CanvasModel::snapshot() const {
 
 void CanvasModel::restore(const Snapshot &target, bool selectAdded) {
     const Document &doc = target.document;
-    m_hash.clear();
     const Nodes oldNodes = m_document.graph.nodes;
     const QJsonObject oldLayout = m_document.layout;
     const QJsonObject oldEntries = oldLayout.value("nodes").toObject();
@@ -261,7 +248,8 @@ void CanvasModel::endEdit(const QString &text) {
     if (m_editDepth == 0 || --m_editDepth > 0)
         return;
     Snapshot after = snapshot();
-    if (contentJson(m_editBefore.document) == contentJson(after.document))
+    // "Changed" is what "unsaved" means (workflow/content_hash.h): the viewport is not content.
+    if (contentHash(m_editBefore.document) == contentHash(after.document))
         return;
     m_undo->push(new EditCommand(this, std::move(m_editBefore), std::move(after), text));
     m_editBefore = {};
@@ -286,10 +274,31 @@ void CanvasModel::finishGestures() {
         endEdit(tr("Edit"));
 }
 
-void CanvasModel::contentChanged() {
-    m_hash.clear();
-    emit edited();
-    updateUnsaved();
+void CanvasModel::contentChanged() { emit edited(); }
+
+void CanvasModel::watchUndoStack() {
+    connect(m_undo.get(), &QUndoStack::indexChanged, this, &CanvasModel::undoChanged);
+    connect(m_undo.get(), &QUndoStack::canUndoChanged, this, &CanvasModel::undoChanged);
+    connect(m_undo.get(), &QUndoStack::canRedoChanged, this, &CanvasModel::undoChanged);
+}
+
+std::unique_ptr<QUndoStack> CanvasModel::takeUndoStack() {
+    finishGestures();
+    std::unique_ptr<QUndoStack> taken = std::move(m_undo);
+    taken->disconnect(this);
+    m_undo = std::make_unique<QUndoStack>();
+    watchUndoStack();
+    emit undoChanged();
+    return taken;
+}
+
+void CanvasModel::setUndoStack(std::unique_ptr<QUndoStack> stack) {
+    if (!stack)
+        return;
+    finishGestures();
+    m_undo = std::move(stack);
+    watchUndoStack();
+    emit undoChanged();
 }
 
 bool CanvasModel::canUndo() const { return m_undo->canUndo(); }
@@ -305,29 +314,6 @@ void CanvasModel::undo() {
 void CanvasModel::redo() {
     finishGestures();
     m_undo->redo();
-}
-
-QString CanvasModel::contentHash() const {
-    if (m_hash.isEmpty())
-        m_hash = canonicalHash(contentJson(document()));
-    return m_hash;
-}
-
-bool CanvasModel::unsaved() const { return m_unsaved; }
-
-void CanvasModel::updateUnsaved() {
-    const bool unsaved = contentHash() != m_savedHash;
-    if (unsaved == m_unsaved)
-        return;
-    m_unsaved = unsaved;
-    emit unsavedChanged();
-}
-
-void CanvasModel::markSaved() { setSavedHash(contentHash()); }
-
-void CanvasModel::setSavedHash(const QString &hash) {
-    m_savedHash = hash;
-    updateUnsaved();
 }
 
 // --- edits of the selection ------------------------------------------------------
@@ -595,8 +581,12 @@ QStringList CanvasModel::insertCopy(const Document &copy, QPointF topLeft, bool 
     return added;
 }
 
-void CanvasModel::setPointer(qreal x, qreal y) { m_pointer = QPointF(x, y); }
-void CanvasModel::clearPointer() { m_pointer.reset(); }
+void CanvasModel::setPointer(const QVariant &point) {
+    if (point.canConvert<QPointF>() && point.isValid())
+        m_pointer = point.toPointF();
+    else
+        m_pointer.reset();
+}
 
 // --- view ----------------------------------------------------------------------
 

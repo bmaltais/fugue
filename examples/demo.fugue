@@ -1,0 +1,51 @@
+{
+  "fugue": 1,
+  "graph": {
+    "nodes": {
+      "subject": {
+        "type": "fugue/text",
+        "version": "1.0.0",
+        "inputs": {"text": "a lighthouse on a cliff"}
+      },
+      "style": {
+        "type": "fugue/text",
+        "version": "1.0.0",
+        "inputs": {"text": "oil painting, stormy sky, dramatic light"}
+      },
+      "prompt": {
+        "type": "fugue/text-concat",
+        "version": "1.0.0",
+        "inputs": {
+          "a": {"from": "subject.text"},
+          "b": {"from": "style.text"},
+          "separator": ", "
+        }
+      },
+      "size": {
+        "type": "fugue/number",
+        "version": "1.0.0",
+        "inputs": {"value": 768}
+      },
+      "show-prompt": {
+        "type": "fugue/preview",
+        "version": "1.0.0",
+        "inputs": {"value": {"from": "prompt.text"}}
+      },
+      "show-size": {
+        "type": "fugue/preview",
+        "version": "1.0.0",
+        "inputs": {"value": {"from": "size.value"}}
+      }
+    }
+  },
+  "layout": {
+    "nodes": {
+      "subject": {"pos": [0, 0]},
+      "style": {"pos": [0, 220]},
+      "prompt": {"pos": [320, 80]},
+      "size": {"pos": [320, 340]},
+      "show-prompt": {"pos": [640, 80]},
+      "show-size": {"pos": [640, 340]}
+    }
+  }
+}

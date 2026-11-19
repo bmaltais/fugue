@@ -11,6 +11,7 @@
 #include "canvas/canvas_model.h"
 #include "engine/document.h"
 #include "engine/registry.h"
+#include "workflow/content_hash.h"
 #include "nodes/builtin.h"
 
 using namespace fugue;
@@ -360,31 +361,35 @@ private slots:
         QCOMPARE(canvas.selectedIds().size(), 5);
     }
 
-    void unsavedIsByContentNotByEdits() {
+    void anUndoneEditBringsTheContentBack() {
         CanvasModel canvas(&m_registry);
-        QSignalSpy flips(&canvas, &CanvasModel::unsavedChanged);
         canvas.setDocument(document(chain));
-        QVERIFY(!canvas.unsaved());
-        const QString saved = canvas.contentHash();
-        QVERIFY(saved.startsWith("sha256:"));
-        // The viewport is not content.
-        canvas.setView(10, 20, 2);
-        QCOMPARE(canvas.contentHash(), saved);
+        const QString saved = contentHash(canvas.document());
         QVERIFY(canvas.connectPorts("other", "text", "join", "b"));
-        QVERIFY(canvas.unsaved());
-        QVERIFY(canvas.contentHash() != saved);
+        QVERIFY(contentHash(canvas.document()) != saved);
         canvas.undo();
-        QVERIFY(!canvas.unsaved()); // back to what was saved
-        QCOMPARE(flips.count(), 2);
-        canvas.redo();
-        canvas.markSaved();
-        QVERIFY(!canvas.unsaved());
-        canvas.undo();
-        QVERIFY(canvas.unsaved());
-        // A recovered copy: the saved file is another content.
+        QCOMPARE(contentHash(canvas.document()), saved);
+        // The viewport is not content, and no edit.
+        canvas.setView(10, 20, 2);
+        QCOMPARE(contentHash(canvas.document()), saved);
+        QCOMPARE(canvas.undoStack()->count(), 1);
+    }
+
+    void anUndoStackCanBeHandedOverAndBack() {
+        CanvasModel canvas(&m_registry);
         canvas.setDocument(document(chain));
-        canvas.setSavedHash({});
-        QVERIFY(canvas.unsaved());
+        canvas.select({"gen"});
+        canvas.deleteSelection();
+        const Document edited = canvas.document();
+        std::unique_ptr<QUndoStack> kept = canvas.takeUndoStack();
+        QVERIFY(!canvas.canUndo());
+        canvas.setDocument(document(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        canvas.addNode("fugue/number", 0, 0);
+        canvas.setDocument(edited);
+        canvas.setUndoStack(std::move(kept));
+        QVERIFY(canvas.canUndo());
+        canvas.undo();
+        QVERIFY(canvas.document().graph.nodes.contains("gen"));
     }
 
     void editedFiresForEveryChangeUndoIncluded() {

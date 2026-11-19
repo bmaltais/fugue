@@ -27,21 +27,20 @@
 // endLinkDrag, a picked-up link included), an Alt+drag clone and its move. An edit that
 // changes nothing pushes nothing. The viewport and the selection are not edits.
 //
-// Unsaved (11.2) is by content: contentHash() is the hash of the document without its
-// viewport (ComfyUI likewise ignores the canvas offset and zoom), and `unsaved` is whether it
-// differs from the hash markSaved() recorded. setDocument() clears the stack and counts as
-// saved.
+// setDocument() starts the document with an empty undo stack.
 //
 // The seam for the tickets that build on this:
-// - #20 save, open, recovery: setDocument() and document(); document() writes positions
-//   back into layout.nodes.<id>.pos and the viewport into layout.view, keeping every other
-//   layout key. After a save call markSaved(); for a recovered copy, setDocument() it and
-//   setSavedHash() to the hash of the file it came from (or empty: never saved). `edited`
-//   fires after every change to the content, undo and redo included; `unsavedChanged` when
-//   `unsaved` flips; undoStack() is the QUndoStack for its signals.
-// - #18 search: addNode(type, x, y), one undoable edit; the canvas emits searchRequested
-//   (double-click on empty canvas) and linkReleased (a dragged link let go on empty canvas)
-//   with the world point and the dragged port, for search filtered by port type.
+// - #20 save, open, recovery (done): Workflows swaps each tab's document in with
+//   setDocument() and reads it back with document(); document() writes positions back into
+//   layout.nodes.<id>.pos and the viewport into layout.view, keeping every other layout key.
+//   Each tab keeps its own undo stack: takeUndoStack() before another tab's document comes
+//   in, setUndoStack() when the tab is shown again. `edited` fires after every change to
+//   the content, undo and redo included; "unsaved" is workflow/content_hash.h, by content.
+// - #18 search (done): NodeSearch, owned here as `search`, adds a node with addNode(type,
+//   x, y) and links it with connectPorts inside beginEdit()/endEdit(), so the two are one
+//   undo step; the canvas emits searchRequested (double-click on empty canvas) and
+//   linkReleased (a dragged link let go on empty canvas) with the world point and the
+//   dragged port, for search filtered by port type.
 // - #19 run state: add roles to NodeList (state, progress, last output values); a node's
 //   row is found by id in O(1) (rowOf).
 // - The window's commands (edit.*, node.bypass, node.mute, node.collapse, view.*) call the
@@ -50,6 +49,7 @@
 
 #include "engine/document.h"
 #include "engine/port_type.h"
+#include "search/node_search.h"
 
 #include <QAbstractListModel>
 #include <QHash>
@@ -60,6 +60,7 @@
 #include <QVariantList>
 #include <QVariantMap>
 
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -138,6 +139,8 @@ class CanvasModel : public QObject {
     Q_PROPERTY(LinkList *links READ links CONSTANT)
     Q_PROPERTY(QVariantList frames READ frames NOTIFY framesChanged)
     Q_PROPERTY(QVariantMap view READ view NOTIFY documentReset)
+    // Node search (src/search/node_search.h): it adds nodes through addNode() and connectPorts().
+    Q_PROPERTY(fugue::NodeSearch *search READ search CONSTANT)
     // The base text size in px (theme.textSize); a node's title and rows are sized from it.
     Q_PROPERTY(int textSize READ textSize WRITE setTextSize NOTIFY metricsChanged)
     Q_PROPERTY(qreal headerHeight READ headerHeight NOTIFY metricsChanged)
@@ -149,7 +152,7 @@ class CanvasModel : public QObject {
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY undoChanged)
     Q_PROPERTY(QString undoText READ undoText NOTIFY undoChanged)
     Q_PROPERTY(QString redoText READ redoText NOTIFY undoChanged)
-    Q_PROPERTY(bool unsaved READ unsaved NOTIFY unsavedChanged)
+    Q_PROPERTY(QVariant pointer READ pointer WRITE setPointer)
 
 public:
     explicit CanvasModel(const fugue::Registry *registry, QObject *parent = nullptr);
@@ -157,6 +160,7 @@ public:
 
     NodeList *nodes() const { return m_nodeList; }
     LinkList *links() const { return m_linkList; }
+    fugue::NodeSearch *search() const { return m_search; }
 
     void setDocument(const fugue::Document &document);
     // The document with the canvas's positions and viewport in its layout.
@@ -216,6 +220,10 @@ public:
     // them moves them all, anywhere else leaves them as they were. With no links it is a
     // plain drag from the output.
     Q_INVOKABLE void beginLinksMove(const QString &node, const QString &output);
+    // The type of a port of a node on the canvas, or nothing when the node or port is not
+    // there or its type is not known (a placeholder's port). Node search uses it to filter
+    // by the port a link was dragged from.
+    std::optional<fugue::PortSpec> portType(const QString &node, const QString &port, bool output) const;
 
     // --- nodes ---
 
@@ -245,13 +253,24 @@ public:
     // Alt+drag: copies the node (the selection when the node is in it) where it is, selects
     // the copies and starts moving them; endMove() ends the gesture, one undo step in all.
     Q_INVOKABLE void beginCloneMove(const QString &node);
-    // The last pointer position over the canvas, in world coordinates, where paste puts nodes.
-    Q_INVOKABLE void setPointer(qreal x, qreal y);
-    Q_INVOKABLE void clearPointer();
+    // The pointer over the canvas, in world coordinates, where paste puts nodes; undefined
+    // (clearPointer) when it is not over the canvas. The canvas binds it.
+    QVariant pointer() const { return m_pointer ? QVariant(*m_pointer) : QVariant(); }
+    void setPointer(const QVariant &point);
+    void setPointer(qreal x, qreal y) { m_pointer = QPointF(x, y); }
+    void clearPointer() { m_pointer.reset(); }
 
     // --- undo (12.11) ---
 
-    QUndoStack *undoStack() const { return m_undo; }
+    QUndoStack *undoStack() const { return m_undo.get(); }
+    // Hands the undo stack over (a tab keeps it while another is shown) and starts an empty one.
+    std::unique_ptr<QUndoStack> takeUndoStack();
+    // Uses this stack, taken earlier for the document now set, in place of the current one.
+    void setUndoStack(std::unique_ptr<QUndoStack> stack);
+    // Brackets several edits into one undo step: the first begin takes the document as it
+    // is, the last end pushes one command named `text` when the content changed.
+    void beginEdit();
+    void endEdit(const QString &text);
     bool canUndo() const;
     bool canRedo() const;
     QString undoText() const;
@@ -259,13 +278,6 @@ public:
     // A gesture still in progress is finished first.
     Q_INVOKABLE void undo();
     Q_INVOKABLE void redo();
-
-    // The hash of the document without its viewport ("sha256:..."). Equal hashes, same content.
-    QString contentHash() const;
-    bool unsaved() const;
-    void markSaved();
-    void setSavedHash(const QString &hash);
-    QString savedHash() const { return m_savedHash; }
 
     // --- view commands ---
 
@@ -307,7 +319,6 @@ signals:
     // included.
     void edited();
     void undoChanged();
-    void unsavedChanged();
     void zoomRequested(qreal factor);
     void fitRequested();
 
@@ -359,14 +370,11 @@ private:
     // With selectAdded, nodes that come back are selected (undo of a delete, redo of a paste).
     void restore(const Snapshot &target, bool selectAdded);
     void relink(const QSet<QString> &nodes);
-    // An edit's bounds: the first begin takes the snapshot, the last end pushes a command
-    // when the content changed.
-    void beginEdit();
-    void endEdit(const QString &text);
     // One edit: the document is document() changed by the caller.
     void commit(const fugue::Document &document, const QString &text);
     void finishGestures();
     void contentChanged();
+    void watchUndoStack();
     // Adds a copy's nodes with new ids, its top left at topLeft, as one edit; selects them.
     QStringList insertCopy(const fugue::Document &copy, QPointF topLeft, bool connected, const QString &text,
                            QHash<QString, QString> *idMap);
@@ -380,7 +388,6 @@ private:
     void portsFromType(NodeRow &row, const fugue::Node &node) const;
     void refreshPorts(const QString &nodeId); // after a link change: wired flags
     void refreshLinkEnds(int linkRow);
-    void updateUnsaved();
     void emitNodeChanged(int row, const QList<int> &roles);
     QVariantList portMaps(const NodeRow &row, bool outputs) const;
     QVariantMap portMap(const NodeRow &row, const Port &port) const;
@@ -397,6 +404,7 @@ private:
     fugue::Document m_document;
     NodeList *m_nodeList;
     LinkList *m_linkList;
+    fugue::NodeSearch *m_search;
     std::vector<NodeRow> m_rows;
     QHash<QString, int> m_rowOf;
     std::vector<LinkRow> m_links;
@@ -416,11 +424,8 @@ private:
     bool m_cloneOpen = false; // an Alt+drag clone holds one more
     bool m_dragOpen = false;  // a link drag holds an edit open
 
-    QUndoStack *m_undo;
+    std::unique_ptr<QUndoStack> m_undo;
     int m_editDepth = 0;
     Snapshot m_editBefore;
-    mutable QString m_hash; // contentHash(), empty when it must be worked out again
-    QString m_savedHash;
-    bool m_unsaved = false;
     std::optional<QPointF> m_pointer;
 };

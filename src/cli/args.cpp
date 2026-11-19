@@ -3,6 +3,7 @@
 #include "cli/commands.h"
 #include "cli/runs.h"
 
+#include <QFileInfo>
 #include <QJsonArray>
 
 namespace fugue::cli {
@@ -180,7 +181,15 @@ bool wantsCli(int argc, char **argv) {
     if (argc < 2)
         return false;
     const QString first = QString::fromLocal8Bit(argv[1]);
-    return !first.startsWith('-') || first == "--help" || first == "-h" || first == "--version" || first == "--json";
+    if (first == "--help" || first == "-h" || first == "--version" || first == "--json")
+        return true;
+    if (first.startsWith('-'))
+        return false;
+    // `fugue path.fugue` opens the window on that file. A command word always wins, so a
+    // file named like one is opened as `fugue ./run`.
+    if (!table().contains(canonicalGroup(first)) && (first.endsWith(".fugue", Qt::CaseInsensitive) || QFileInfo(first).isFile()))
+        return false;
+    return true;
 }
 
 } // namespace fugue::cli

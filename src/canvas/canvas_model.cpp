@@ -3,6 +3,7 @@
 
 #include "engine/node_type.h"
 #include "engine/registry.h"
+#include "search/node_search.h"
 
 #include <QJsonArray>
 #include <QJsonObject>
@@ -105,11 +106,8 @@ QHash<int, QByteArray> LinkList::roleNames() const {
 
 CanvasModel::CanvasModel(const Registry *registry, QObject *parent)
     : QObject(parent), m_registry(registry), m_nodeList(new NodeList(this)), m_linkList(new LinkList(this)),
-      m_undo(new QUndoStack(this)) {
-    connect(m_undo, &QUndoStack::indexChanged, this, &CanvasModel::undoChanged);
-    connect(m_undo, &QUndoStack::canUndoChanged, this, &CanvasModel::undoChanged);
-    connect(m_undo, &QUndoStack::canRedoChanged, this, &CanvasModel::undoChanged);
-    m_savedHash = contentHash();
+      m_search(new NodeSearch(registry, this, this)), m_undo(std::make_unique<QUndoStack>()) {
+    watchUndoStack();
 }
 
 CanvasModel::~CanvasModel() = default;
@@ -174,8 +172,6 @@ void CanvasModel::setDocument(const Document &document) {
     emit framesChanged();
     emit linkDragChanged();
     emit documentReset();
-    m_hash.clear();
-    markSaved();
 }
 
 Document CanvasModel::document() const {
@@ -501,6 +497,11 @@ const CanvasModel::Port *CanvasModel::findPort(const QString &node, const QStrin
         if (p.name == port)
             return &p;
     return nullptr;
+}
+
+std::optional<PortSpec> CanvasModel::portType(const QString &node, const QString &port, bool output) const {
+    const Port *found = findPort(node, port, output);
+    return found ? found->type : std::nullopt;
 }
 
 // --- links -------------------------------------------------------------------
@@ -930,8 +931,6 @@ void CanvasModel::moveBy(qreal dx, qreal dy) {
         emit m_linkList->dataChanged(index, index,
                                      {LinkList::X1, LinkList::Y1, LinkList::X2, LinkList::Y2, LinkList::Path});
     }
-    if (!m_moving.isEmpty())
-        m_hash.clear();
 }
 
 void CanvasModel::endMove() {

@@ -72,6 +72,19 @@ FocusScope {
     function toWorld(px, py) {
         return Qt.point((px - world.x) / world.scale, (py - world.y) / world.scale)
     }
+    // Where the pointer is, in world coordinates; the middle of the view when it is outside.
+    // The `node.search` command (Tab, Shift+A) opens search here.
+    function pointerWorld() {
+        const p = hover.hovered ? hover.point.position : Qt.point(width / 2, height / 2)
+        return toWorld(p.x, p.y)
+    }
+    HoverHandler { id: hover }
+    // A paste lands at the pointer, wherever the view has moved since it stopped.
+    Binding {
+        target: canvas.model
+        property: "pointer"
+        value: hover.hovered ? canvas.toWorld(hover.point.position.x, hover.point.position.y) : undefined
+    }
     function zoomAt(px, py, factor) {
         const s = Math.max(minZoom, Math.min(maxZoom, world.scale * factor))
         const w = toWorld(px, py)
@@ -187,9 +200,6 @@ FocusScope {
         objectName: "canvasInput"
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
-        // The pointer is followed with no button down too: a paste lands where it is.
-        hoverEnabled: true
-        onExited: canvas.model.clearPointer()
         cursorShape: canvas.gesture === "pan" ? Qt.ClosedHandCursor
                    : canvas.spaceHeld ? Qt.OpenHandCursor : Qt.ArrowCursor
 
@@ -246,9 +256,6 @@ FocusScope {
 
         onPositionChanged: mouse => {
             const w = canvas.toWorld(mouse.x, mouse.y)
-            canvas.model.setPointer(w.x, w.y)
-            if (canvas.gesture === "")
-                return
             canvas.pointer = Qt.point(mouse.x, mouse.y)
             if (!canvas.travelled && Math.hypot(mouse.x - canvas.pressAt.x, mouse.y - canvas.pressAt.y)
                     >= Application.styleHints.startDragDistance)

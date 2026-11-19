@@ -19,8 +19,10 @@
 #include "engine/document.h"
 #include "engine/registry.h"
 #include "nodes/builtin.h"
+#include "search/node_search.h"
 #include "theme.h"
 #include "translator.h"
+#include "workflow/workflows.h"
 
 namespace canvas_test {
 
@@ -49,6 +51,7 @@ struct App {
     fugue::Registry registry;
     CanvasModel model{&registry};
     fugue::CommandRegistry commands;
+    fugue::Workflows workflows{&model, &registry, &commands, {dir.path() + "/recovery", dir.path() + "/trust.json"}};
     QQmlApplicationEngine engine;
     QStringList warnings;
     QQuickWindow *window = nullptr;
@@ -58,8 +61,11 @@ struct App {
     explicit App(const fugue::Document &document) {
         fugue::nodes::addBuiltinNodeTypes(registry);
         fugue::registerDefaultCommands(commands);
+        fugue::registerFileCommands(commands, workflows);
+        model.search()->registerCommands(commands);
         registerCanvasCommands(commands, model);
-        model.setDocument(document);
+        // Opened as a file is: one tab, nothing unsaved.
+        workflows.openText(QString::fromUtf8(document.save()));
         QObject::connect(&engine, &QQmlEngine::warnings, [this](const QList<QQmlError> &errors) {
             for (const auto &error : errors)
                 warnings << error.toString();
@@ -69,6 +75,7 @@ struct App {
         engine.rootContext()->setContextProperty("backend", &backend);
         engine.rootContext()->setContextProperty("canvasModel", &model);
         engine.rootContext()->setContextProperty("commands", &commands);
+        engine.rootContext()->setContextProperty("workflows", &workflows);
     }
 
     bool open() {

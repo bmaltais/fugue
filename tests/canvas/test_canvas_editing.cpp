@@ -89,12 +89,12 @@ private slots:
         QCOMPARE(from(app, "gen", "prompt"), QString("prompt.text"));
         app.key(Qt::Key_Z, Qt::ControlModifier);
         QCOMPARE(app.model.position("prompt"), QPointF(20, 100));
-        QVERIFY(!app.model.unsaved());
+        QVERIFY(!app.workflows.unsaved()); // back to what was opened
         app.key(Qt::Key_Y, Qt::ControlModifier);
         QCOMPARE(app.model.position("prompt"), QPointF(20, 150));
         app.key(Qt::Key_Z, Qt::ControlModifier | Qt::ShiftModifier);
         QCOMPARE(from(app, "gen", "prompt"), QString("other.text"));
-        QVERIFY(app.model.unsaved());
+        QVERIFY(app.workflows.unsaved());
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
@@ -258,6 +258,30 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    void eachTabHasItsOwnUndoStack() {
+        App app(load(linked));
+        QVERIFY(app.open());
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, app.screen(100, 410)); // other
+        app.key(Qt::Key_Delete);
+        QCOMPARE(app.model.nodes()->rowCount(), 3);
+        app.key(Qt::Key_N, Qt::ControlModifier); // a new tab
+        QCOMPARE(app.workflows.count(), 2);
+        QVERIFY(!app.model.canUndo());
+        app.model.addNode("fugue/number", 0, 0);
+        app.workflows.setCurrent(0);
+        QCOMPARE(app.model.nodes()->rowCount(), 3);
+        app.key(Qt::Key_Z, Qt::ControlModifier); // the delete in this tab, not the add in the other
+        QCOMPARE(app.model.nodes()->rowCount(), 4);
+        QVERIFY(!app.workflows.unsaved(0));
+        app.workflows.setCurrent(1);
+        QCOMPARE(app.model.nodes()->rowCount(), 1);
+        app.key(Qt::Key_Z, Qt::ControlModifier);
+        QCOMPARE(app.model.nodes()->rowCount(), 0);
+        app.key(Qt::Key_Y, Qt::ControlModifier);
+        QCOMPARE(app.model.nodes()->rowCount(), 1);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void zoomAndFitKeys() {
         App app(load(linked));
         QVERIFY(app.open());
@@ -292,7 +316,7 @@ private slots:
         QCOMPARE(app.screen(130, 400 + otherHeight / 2), middle);
         // The view is not an edit.
         QVERIFY(!app.model.canUndo());
-        QVERIFY(!app.model.unsaved());
+        QVERIFY(!app.workflows.unsaved());
     }
 };
 
