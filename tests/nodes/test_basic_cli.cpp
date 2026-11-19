@@ -140,6 +140,33 @@ private slots:
         QVERIFY(!QFileInfo::exists(out + "/fox-2.png"));
     }
 
+    // The pixel nodes hand Save Image float images (#15); they are saved at 16 bits in PNG and as
+    // 8 bits in WebP.
+    void aResizedImageIsSavedAsPngAndAsWebp() {
+        FileHashes hashes(path("hashes2.json"));
+        const vips::VImage pixels = (vips::VImage::black(10, 8, vips::VImage::option()->set("bands", 3)) + 200).cast(VIPS_FORMAT_UCHAR);
+        const MediaHandle fixture = MediaHandle::fromImage(pixels).value().saved(path("in2"), "src", hashes).value();
+        const QString out = path("out2");
+        auto save = [&](const QString &id, const QString &format) {
+            return QByteArray("\"") + id.toUtf8() + "\": {\"type\": \"fugue/save-image\", \"version\": \"1.0.0\", \"inputs\": {"
+                   "\"image\": {\"from\": \"small.image\"}, \"name\": \"small\", \"format\": \"" + format.toUtf8() +
+                   "\", \"folder\": \"" + out.toUtf8() + "\"}}";
+        };
+        write(path("resize.fugue"),
+              QByteArray("{\"fugue\": 1, \"graph\": {\"nodes\": {"
+                         "\"load\": {\"type\": \"fugue/load-image\", \"version\": \"1.0.0\", \"inputs\": {\"file\": \"") + fixture.path().toUtf8() + "\"}},"
+                         "\"small\": {\"type\": \"fugue/resize\", \"version\": \"1.0.0\", \"inputs\": {\"image\": {\"from\": \"load.image\"}, \"width\": 5, \"height\": 4}},"
+                  + save("png", "png") + "," + save("webp", "webp") + "}}}");
+        const Outcome ran = fugue({"run", path("resize.fugue"), "--wait", "--json"});
+        QCOMPARE(ran.exitCode, 0);
+        QCOMPARE(vips::VImage::new_from_file((out + "/small.png").toUtf8().constData()).width(), 5);
+        QCOMPARE(vips::VImage::new_from_file((out + "/small.png").toUtf8().constData()).format(), VIPS_FORMAT_USHORT);
+        const vips::VImage webp = vips::VImage::new_from_file((out + "/small.webp").toUtf8().constData());
+        QCOMPARE(webp.height(), 4);
+        QVERIFY(readEmbeddedWorkflow(out + "/small.webp").ok());
+        QVERIFY(readEmbeddedWorkflow(out + "/small.png").ok());
+    }
+
     void aMissingImageIsReportedByName() {
         write(path("missing.fugue"),
               "{\"fugue\": 1, \"graph\": {\"nodes\": {"
