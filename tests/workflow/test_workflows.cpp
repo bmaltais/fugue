@@ -5,6 +5,7 @@
 #include <QImage>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QProcess>
 #include <QQmlApplicationEngine>
 #include <QQuickItem>
 #include <QQuickStyle>
@@ -306,6 +307,7 @@ private slots:
         const QByteArray before = read(f.file("a.fugue"));
 
         // The app dies; the next start finds two copies.
+        f.workflows.reset();
         CanvasModel again(&f.registry);
         auto next = f.restart(again);
         QCOMPARE(next->recoverable().size(), 2);
@@ -327,6 +329,50 @@ private slots:
         QCOMPARE(again.nodes()->rowCount(), 2);
         QVERIFY(next->save());
         QCOMPARE(Document::loadFile(f.file("a.fugue"))->graph.nodes.size(), 2);
+    }
+
+    // A second Fugue never offers (so never discards or duplicates) the copies of one still
+    // running; the copies of one that ended, or died and left its lock, are offered to one
+    // start only.
+    void aRunningFuguesCopiesAreNotAnothersToOffer() {
+        QTemporaryDir dir;
+        const QString folder = dir.filePath("recovery");
+        const Document document = Document::load(textNode).value();
+        const auto ids = [](const QList<RecoveryEntry> &entries) {
+            QStringList list;
+            for (const RecoveryEntry &entry : entries)
+                list << entry.id;
+            list.sort();
+            return list;
+        };
+        QString lockPath;
+        QByteArray lock;
+        {
+            RecoveryStore first(folder);
+            QVERIFY(first.write("one", document, {}, "One").isEmpty());
+            RecoveryStore second(folder);
+            QVERIFY(second.list().isEmpty());
+            QVERIFY(second.write("two", document, {}, "Two").isEmpty());
+            QVERIFY(RecoveryStore(folder).list().isEmpty());
+            lockPath = folder + "/owner-" + first.owner() + ".lock";
+            lock = read(lockPath);
+            QVERIFY(!lock.isEmpty());
+        }
+        // The first one died: its lock is still there, naming a process that is gone.
+        QProcess gone;
+        gone.start("true");
+        QVERIFY(gone.waitForStarted());
+        const qint64 pid = gone.processId();
+        QVERIFY(gone.waitForFinished());
+        QList<QByteArray> lines = lock.split('\n');
+        lines[0] = QByteArray::number(pid);
+        QVERIFY(write(lockPath, lines.join('\n')));
+
+        RecoveryStore third(folder);
+        QCOMPARE(ids(third.list()), (QStringList{"one", "two"}));
+        // They are the third one's now: a fourth start does not offer them too.
+        RecoveryStore fourth(folder);
+        QVERIFY(fourth.list().isEmpty());
     }
 
     // A copy that cannot be read is kept aside, never deleted: it may be the only one.
@@ -370,6 +416,7 @@ private slots:
         Fixture f;
         f.canvas.addNode("fugue/text", 0, 0);
         f.workflows->writeRecoveryCopies();
+        f.workflows.reset();
         CanvasModel again(&f.registry);
         auto next = f.restart(again);
         QCOMPARE(next->recoverable().size(), 1);
