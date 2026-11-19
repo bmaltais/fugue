@@ -29,6 +29,9 @@ struct QueueEntry {
     QString run;
     qint64 pid = 0; // the worker's process id; 0 until it is known
     QString workflow;
+    // When it was queued, in CLOCK_BOOTTIME milliseconds ("queued_boottime_ms"); 0 in an
+    // entry written before the field existed.
+    qint64 queuedBootMs = 0;
     bool active = false;
 };
 
@@ -59,10 +62,12 @@ public:
     bool remove(const QueueEntry &seen) const;
     // Removes the entries whose process is gone and returns the runs they were for; the
     // caller ends those runs. A waiting entry is dead when its pid is not that run's worker
-    // (isRunWorker), or when it never got a pid within 30 seconds. An active entry is dead
-    // when `engineLock` can be taken: its owner held that lock for as long as it lived. The
-    // lock is left as it was found (still held if the caller held it). Not for a process
-    // that is itself running a run.
+    // (isRunWorker), or when it never got a pid within 30 seconds of being queued (on the
+    // boot clock, so wall-clock jumps do not count; an entry without that time is aged by
+    // its file's modification time, and one queued before a reboot is dead). An active
+    // entry is dead when `engineLock` can be taken: its owner held that lock for as long as
+    // it lived. The lock is left as it was found (still held if the caller held it). Not
+    // for a process that is itself running a run.
     QStringList discardDead(Lock &engineLock) const;
 
 private:

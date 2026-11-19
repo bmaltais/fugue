@@ -13,6 +13,7 @@
 #include <QtTest>
 
 #include <csignal>
+#include <ctime>
 
 #include "engine/json.h"
 #include "engine/queue.h"
@@ -27,6 +28,26 @@ class TestQueue : public QObject {
         for (const QueueEntry &entry : queue.entries())
             list << entry.run;
         return list;
+    }
+
+    // CLOCK_BOOTTIME in milliseconds: the same clock in every process, unmoved by changes
+    // to the wall clock, and counting suspend.
+    static qint64 bootMs() {
+        timespec now{};
+        clock_gettime(CLOCK_BOOTTIME, &now);
+        return qint64(now.tv_sec) * 1000 + now.tv_nsec / 1000000;
+    }
+
+    // An entry as some process wrote it, in the on-disk form.
+    static void writeEntry(const QTemporaryDir &dir, const QString &name, const QJsonObject &content) {
+        QDir().mkpath(dir.filePath("queue"));
+        QVERIFY(writeJsonFile(dir.filePath("queue/" + name), content).isEmpty());
+    }
+
+    static void age(const QTemporaryDir &dir, const QString &name, int seconds) {
+        QFile file(dir.filePath("queue/" + name));
+        QVERIFY(file.open(QIODevice::ReadWrite));
+        QVERIFY(file.setFileTime(QDateTime::currentDateTime().addSecs(-seconds), QFileDevice::FileModificationTime));
     }
 
 private slots:
@@ -48,14 +69,59 @@ private slots:
     void anEntryIsWrittenInTheOnDiskJsonForm() {
         QTemporaryDir dir;
         const Queue queue(dir.filePath("queue"));
+        const qint64 before = bootMs();
         QVERIFY(queue.enqueue("run-a", "/w/a.fugue", false));
+        const qint64 after = bootMs();
         QVERIFY(queue.setPid("run-a", 4242));
         QueueEntry entry;
         QVERIFY(queue.find("run-a", &entry));
         QCOMPARE(entry.pid, qint64(4242));
         QFile file(dir.filePath("queue/" + entry.file));
         QVERIFY(file.open(QIODevice::ReadOnly));
-        QCOMPARE(file.readAll(), writeJson(QJsonObject{{"pid", 4242}, {"run", "run-a"}, {"workflow", "/w/a.fugue"}}));
+        const QByteArray bytes = file.readAll();
+        // When it was queued, on the boot clock; setPid keeps it.
+        const qint64 queued = qint64(QJsonDocument::fromJson(bytes).object().value("queued_boottime_ms").toDouble());
+        QVERIFY(before <= queued && queued <= after);
+        QCOMPARE(bytes, writeJson(QJsonObject{{"pid", 4242}, {"queued_boottime_ms", double(queued)}, {"run", "run-a"},
+                                              {"workflow", "/w/a.fugue"}}));
+    }
+
+    // The 30 s allowed for a new worker to record its pid are measured on the boot clock,
+    // so a jump of the wall clock does not discard a worker that is still starting.
+    void aNewEntryWithoutAPidIsKeptWhenTheWallClockJumps() {
+        QTemporaryDir dir;
+        const Queue queue(dir.filePath("queue"));
+        QVERIFY(queue.enqueue("run-a", "/w/a.fugue", false));
+        age(dir, queue.entries().first().file, 3600); // the file looks an hour old
+        Lock lock(dir.filePath("engine.lock"));
+        QVERIFY(queue.discardDead(lock).isEmpty());
+        QCOMPARE(runs(queue), (QStringList{"run-a"}));
+    }
+
+    void anEntryThatGotNoPidIn30SecondsIsDead() {
+        QTemporaryDir dir;
+        const qint64 now = bootMs();
+        writeEntry(dir, "5-00000000000001-run-old", {{"run", "run-old"}, {"pid", 0}, {"queued_boottime_ms", double(now - 31000)}});
+        writeEntry(dir, "5-00000000000002-run-new", {{"run", "run-new"}, {"pid", 0}, {"queued_boottime_ms", double(now - 1000)}});
+        // Later than now on the boot clock: queued before the machine restarted.
+        writeEntry(dir, "5-00000000000003-run-before-boot",
+                   {{"run", "run-before-boot"}, {"pid", 0}, {"queued_boottime_ms", double(now + 3600000)}});
+        const Queue queue(dir.filePath("queue"));
+        Lock lock(dir.filePath("engine.lock"));
+        QCOMPARE(queue.discardDead(lock), (QStringList{"run-old", "run-before-boot"}));
+        QCOMPARE(runs(queue), (QStringList{"run-new"}));
+    }
+
+    // Entries written before the boot time was recorded fall back to the file's time.
+    void anEntryWithoutTheBootTimeIsAgedByItsFile() {
+        QTemporaryDir dir;
+        writeEntry(dir, "5-00000000000001-run-old", {{"run", "run-old"}, {"pid", 0}});
+        writeEntry(dir, "5-00000000000002-run-new", {{"run", "run-new"}, {"pid", 0}});
+        age(dir, "5-00000000000001-run-old", 31);
+        const Queue queue(dir.filePath("queue"));
+        Lock lock(dir.filePath("engine.lock"));
+        QCOMPARE(queue.discardDead(lock), (QStringList{"run-old"}));
+        QCOMPARE(runs(queue), (QStringList{"run-new"}));
     }
 
     void aPidIsNotRecordedForAnEntryThatWasRemoved() {
