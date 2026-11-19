@@ -40,8 +40,26 @@ add_library(fugue_cli STATIC ${fugue_cli_sources})
 target_include_directories(fugue_cli PUBLIC src)
 target_link_libraries(fugue_cli PUBLIC fugue_engine)
 
+# The built-in nodes (spec 14.1): kernels in src/nodes/*.cpp, and one node.json per node
+# in src/nodes/manifests/<name>/, compiled in as Qt resources under :/fugue/nodes. A new
+# .cpp or manifest needs no line here. qt_add_resources on a static library makes an object
+# library that is linked into every executable using it, so the resource initializer is
+# never dropped by the linker (tests/cli checks the shipped binary knows fugue/text).
+file(GLOB fugue_nodes_sources CONFIGURE_DEPENDS src/nodes/*.cpp src/nodes/*.h)
+add_library(fugue_nodes STATIC ${fugue_nodes_sources})
+target_include_directories(fugue_nodes PUBLIC src)
+target_link_libraries(fugue_nodes PUBLIC fugue_engine)
+file(GLOB fugue_node_manifests CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/src/nodes/manifests
+     src/nodes/manifests/*/node.json)
+set(fugue_node_manifest_files)
+foreach(manifest ${fugue_node_manifests})
+  set_source_files_properties(src/nodes/manifests/${manifest} PROPERTIES QT_RESOURCE_ALIAS ${manifest})
+  list(APPEND fugue_node_manifest_files src/nodes/manifests/${manifest})
+endforeach()
+qt_add_resources(fugue_nodes fugue_node_manifests PREFIX /fugue/nodes FILES ${fugue_node_manifest_files})
+
 add_executable(fugue src/main.cpp src/resources.qrc)
-target_link_libraries(fugue PRIVATE fugue_core fugue_cli)
+target_link_libraries(fugue PRIVATE fugue_core fugue_cli fugue_nodes)
 
 # The tests load the real Main.qml, so they carry the resources too.
 enable_testing()
@@ -57,6 +75,17 @@ foreach(test_source ${fugue_engine_tests})
   get_filename_component(test_name ${test_source} NAME_WE)
   add_executable(${test_name} ${test_source})
   target_link_libraries(${test_name} PRIVATE fugue_engine Qt6::Test)
+  add_test(NAME ${test_name} COMMAND ${test_name})
+endforeach()
+
+# Node tests: each tests/nodes/<name>.cpp is its own QtTest executable linking the built-in nodes.
+file(GLOB fugue_nodes_tests CONFIGURE_DEPENDS tests/nodes/*.cpp)
+foreach(test_source ${fugue_nodes_tests})
+  get_filename_component(test_name ${test_source} NAME_WE)
+  add_executable(${test_name} ${test_source})
+  target_link_libraries(${test_name} PRIVATE fugue_nodes Qt6::Test)
+  target_compile_definitions(${test_name} PRIVATE FUGUE_BINARY="$<TARGET_FILE:fugue>")
+  add_dependencies(${test_name} fugue)
   add_test(NAME ${test_name} COMMAND ${test_name})
 endforeach()
 
