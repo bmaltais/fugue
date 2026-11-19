@@ -1,0 +1,19 @@
+{
+  "manifest": 1,
+  "id": "fugue/blend",
+  "version": "1.0.0",
+  "name": "Blend",
+  "description": "Mix a top image into a base image. The top image is resized to the base (bicubic, center crop) when the sizes differ. The result keeps the base's alpha.",
+  "category": "Image/Adjust",
+  "keywords": ["mix", "composite", "overlay", "multiply"],
+  "runtime": {"kind": "builtin"},
+  "inputs": [
+    {"name": "base", "type": "image", "label": "Base"},
+    {"name": "top", "type": "image", "label": "Top"},
+    {"name": "mode", "type": "text", "label": "Mode", "default": "normal", "choices": ["normal", "multiply", "screen", "overlay", "soft_light", "difference"]},
+    {"name": "opacity", "type": "number", "label": "Opacity", "default": 0.5, "min": 0, "max": 1, "step": 0.01, "widget": "slider"}
+  ],
+  "outputs": [
+    {"name": "image", "type": "image", "label": "Image"}
+  ]
+}
