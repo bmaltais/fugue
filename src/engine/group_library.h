@@ -30,6 +30,10 @@ class Registry;
 // packsDir() + "/local".
 QString libraryDir();
 
+// The key a group definition carries (4.4, kept as an unknown key by older readers) naming the
+// library entry it came from or was saved to, so saving updates only that entry.
+inline constexpr char kLibraryKey[] = "library";
+
 // Saves the group of `document` (with the groups it uses, and their layout) to the library
 // folder `dir`, as local/<name> where <name> is the part of its id after the '/'. Saving over
 // an earlier version bumps it under the rules of 3.6: major when an exposed input or output
@@ -63,5 +67,11 @@ GroupChanges groupChanges(const Document &workflow, const Document &library, con
 // outputs the new definition lacks. Nested groups the library brings that clash with another
 // definition the workflow holds under their id come in under a new id.
 Document updateGroup(const Document &workflow, const Document &library, const QString &group, const Registry &registry);
+
+// Puts the definition of every library or pack group (runtime.kind "group", 6.1) the document
+// uses but does not hold into its groups, with the groups they use, as adding one from the
+// library does; so a file an agent or the CLI wrote with only the type id runs (5.3). What
+// cannot be read stays out (compile then says unknown_node_type). The ids embedded.
+QStringList embedGroupTypes(Document &document, const Registry &registry);
 
 } // namespace fugue

@@ -29,6 +29,11 @@ const GroupInput *exposedFor(const GroupDefinition &group, const PortRef &target
     return nullptr;
 }
 
+// An engine refusal as the window says it: the sentence and how to fix it.
+QString problemText(const Error &error) {
+    return error.hint.isEmpty() ? error.message : error.message + QLatin1Char(' ') + error.hint;
+}
+
 QVariant optionalNumber(const std::optional<double> &value) { return value ? QVariant(*value) : QVariant(); }
 
 std::optional<double> numberOf(const QVariant &value) {
@@ -68,7 +73,7 @@ QString CanvasModel::makeGroup(bool leaveSinks) {
     const Registry &registry = registryOr(m_registry);
     const Result<GroupMade> made = fugue::makeGroup(scopeDocument(), ids, registry);
     if (!made) {
-        setGroupProblem(made.error().message);
+        setGroupProblem(problemText(made.error()));
         return {};
     }
     Document level = made->document;
@@ -132,7 +137,7 @@ QStringList CanvasModel::ungroupSelection() {
         const GroupDefinition definition = *level.group(group);
         const Result<Ungrouped> back = fugue::ungroup(level, id);
         if (!back) {
-            setGroupProblem(back.error().message);
+            setGroupProblem(problemText(back.error()));
             return {};
         }
         level = back->document;
@@ -182,7 +187,7 @@ QString CanvasModel::makeUnique() {
         return {};
     const Result<GroupMade> made = fugue::makeUnique(scopeDocument(), ids.first(), registryOr(m_registry));
     if (!made) {
-        setGroupProblem(made.error().message);
+        setGroupProblem(problemText(made.error()));
         return {};
     }
     setGroupProblem({});
@@ -192,60 +197,53 @@ QString CanvasModel::makeUnique() {
 
 // --- the interface of the group shown (5.4) -----------------------------------------
 
-bool CanvasModel::exposeInput(const QString &node, const QString &input, const QString &into) {
+// A change of the group shown's face (on the whole workflow, so instances elsewhere follow):
+// committed as one step named `text`, or refused with its reason.
+bool CanvasModel::applyFaceEdit(const std::function<Result<Document>(const Document &, const QString &)> &edit,
+                                const QString &text) {
     const QString group = scopeGroup();
     if (group.isEmpty())
         return false;
-    const Result<Document> exposed = fugue::exposeInput(document(), group, {node, input}, registryOr(m_registry), into);
-    if (!exposed) {
-        setGroupProblem(exposed.error().message);
+    const Result<Document> done = edit(document(), group);
+    if (!done) {
+        setGroupProblem(problemText(done.error()));
         return false;
     }
     setGroupProblem({});
-    commitWhole(*exposed, tr("Expose input"));
+    commitWhole(*done, text);
     return true;
+}
+
+bool CanvasModel::exposeInput(const QString &node, const QString &input, const QString &into) {
+    return applyFaceEdit(
+        [&](const Document &whole, const QString &group) {
+            return fugue::exposeInput(whole, group, {node, input}, registryOr(m_registry), into);
+        },
+        tr("Expose input"));
 }
 
 bool CanvasModel::unexposeInput(const QString &node, const QString &input) {
-    const QString group = scopeGroup();
-    if (group.isEmpty())
-        return false;
-    const Result<Document> done = fugue::unexposeInput(document(), group, {node, input});
-    if (!done) {
-        setGroupProblem(done.error().message);
-        return false;
-    }
-    setGroupProblem({});
-    commitWhole(*done, tr("Stop exposing"));
-    return true;
+    return applyFaceEdit(
+        [&](const Document &whole, const QString &group) {
+            return fugue::unexposeInput(whole, group, {node, input});
+        },
+        tr("Stop exposing"));
 }
 
 bool CanvasModel::exposeOutput(const QString &node, const QString &output) {
-    const QString group = scopeGroup();
-    if (group.isEmpty())
-        return false;
-    const Result<Document> exposed = fugue::exposeOutput(document(), group, {node, output});
-    if (!exposed) {
-        setGroupProblem(exposed.error().message);
-        return false;
-    }
-    setGroupProblem({});
-    commitWhole(*exposed, tr("Expose output"));
-    return true;
+    return applyFaceEdit(
+        [&](const Document &whole, const QString &group) {
+            return fugue::exposeOutput(whole, group, {node, output});
+        },
+        tr("Expose output"));
 }
 
 bool CanvasModel::unexposeOutput(const QString &name) {
-    const QString group = scopeGroup();
-    if (group.isEmpty())
-        return false;
-    const Result<Document> done = fugue::unexposeOutput(document(), group, name);
-    if (!done) {
-        setGroupProblem(done.error().message);
-        return false;
-    }
-    setGroupProblem({});
-    commitWhole(*done, tr("Stop exposing"));
-    return true;
+    return applyFaceEdit(
+        [&](const Document &whole, const QString &group) {
+            return fugue::unexposeOutput(whole, group, name);
+        },
+        tr("Stop exposing"));
 }
 
 QString CanvasModel::exposedName(const QString &node, const QString &port, bool output) const {
@@ -321,6 +319,10 @@ QVariantMap CanvasModel::groupInterface() const {
                                   {"section", input.section},
                                   {"min", optionalNumber(input.min)},
                                   {"max", optionalNumber(input.max)},
+                                  {"default", input.defaultValue ? input.defaultValue->literal().toVariant() : QVariant()},
+                                  {"choices", input.choices ? input.choices->join(QStringLiteral(", ")) : QString()},
+                                  {"innerChoices", spec && spec->choices && !input.choices ? spec->choices->join(QStringLiteral(", "))
+                                                   : QString()},
                                   {"targets", targets},
                                   {"type", spec ? spec->type.toString() : QString()}});
     }
@@ -338,66 +340,61 @@ QVariantMap CanvasModel::groupInterface() const {
 }
 
 bool CanvasModel::editExposedInput(const QString &name, const QVariantMap &change) {
-    const QString group = scopeGroup();
-    if (group.isEmpty())
-        return false;
     ExposedChange edit;
     edit.name = change.value("name").toString().trimmed();
     edit.label = change.value("label").toString().trimmed();
     edit.section = change.value("section").toString().trimmed();
     edit.min = numberOf(change.value("min"));
     edit.max = numberOf(change.value("max"));
-    const Result<Document> done = fugue::editExposedInput(document(), group, name, edit);
-    if (!done) {
-        setGroupProblem(done.error().message);
-        return false;
+    // The default as text from the editor: a number for a number input, else the text; empty: none.
+    const QString type = change.value("type").toString();
+    const QString given = change.value("default").toString().trimmed();
+    if (change.value("default").isValid() && !given.isEmpty()) {
+        bool isNumber = false;
+        const double number = given.toDouble(&isNumber);
+        edit.defaultValue = type == QLatin1String("number") && isNumber ? QJsonValue(number)
+                            : type == QLatin1String("boolean")         ? QJsonValue(given == QLatin1String("true"))
+                                                                       : QJsonValue(given);
     }
-    setGroupProblem({});
-    commitWhole(*done, tr("Edit exposed input"));
-    return true;
+    if (const QString choices = change.value("choices").toString().trimmed(); !choices.isEmpty()) {
+        QStringList list;
+        for (const QString &choice : choices.split(QLatin1Char(',')))
+            if (!choice.trimmed().isEmpty())
+                list << choice.trimmed();
+        edit.choices = list;
+    }
+    return applyFaceEdit(
+        [&](const Document &whole, const QString &group) {
+            return fugue::editExposedInput(whole, group, name, edit, registryOr(m_registry));
+        },
+        tr("Edit exposed input"));
 }
 
 bool CanvasModel::renameExposedOutput(const QString &name, const QString &newName) {
-    const QString group = scopeGroup();
-    if (group.isEmpty())
-        return false;
-    const Result<Document> done = fugue::renameExposedOutput(document(), group, name, newName.trimmed());
-    if (!done) {
-        setGroupProblem(done.error().message);
-        return false;
-    }
-    setGroupProblem({});
-    commitWhole(*done, tr("Rename output"));
-    return true;
+    return applyFaceEdit(
+        [&](const Document &whole, const QString &group) {
+            return fugue::renameExposedOutput(whole, group, name, newName.trimmed());
+        },
+        tr("Rename output"));
 }
 
 bool CanvasModel::moveExposed(bool output, const QString &name, int to) {
-    const QString group = scopeGroup();
-    if (group.isEmpty())
-        return false;
-    const Result<Document> done = fugue::moveExposed(document(), group, output, name, to);
-    if (!done) {
-        setGroupProblem(done.error().message);
-        return false;
-    }
-    setGroupProblem({});
-    commitWhole(*done, output ? tr("Move output") : tr("Move input"));
-    return true;
+    return applyFaceEdit(
+        [&](const Document &whole, const QString &group) {
+            return fugue::moveExposed(whole, group, output, name, to);
+        },
+        output ? tr("Move output") : tr("Move input"));
 }
 
 bool CanvasModel::renameGroup(const QString &name) {
-    const QString group = scopeGroup();
-    if (group.isEmpty())
-        return false;
-    const Result<Document> done = fugue::renameGroup(document(), group, name, registryOr(m_registry));
-    if (!done) {
-        setGroupProblem(done.error().message);
-        return false;
-    }
-    setGroupProblem({});
-    commitWhole(*done, tr("Rename group"));
-    emit scopeChanged(); // the breadcrumb shows the name
-    return true;
+    const bool done = applyFaceEdit(
+        [&](const Document &whole, const QString &group) {
+            return fugue::renameGroup(whole, group, name, registryOr(m_registry));
+        },
+        tr("Rename group"));
+    if (done)
+        emit scopeChanged(); // the breadcrumb shows the name
+    return done;
 }
 
 // --- sections (5.4, 6.1) ---------------------------------------------------------------
@@ -408,7 +405,7 @@ QString CanvasModel::advancedHeaderAt(qreal x, qreal y) const {
         if (row.collapsed || x < row.pos.x() || x > row.pos.x() + row.shownWidth())
             continue;
         for (const Port &port : row.inputs)
-            if (port.header == QLatin1String("Advanced") && y >= row.pos.y() + port.headerTop
+            if (port.header == QLatin1String(kAdvancedSection) && y >= row.pos.y() + port.headerTop
                 && y < row.pos.y() + port.headerTop + m_rowHeight)
                 return row.id;
     }
@@ -452,16 +449,23 @@ bool CanvasModel::saveGroupToLibrary() {
         return false;
     const Registry &registry = registryOr(m_registry);
     Document whole = document();
+    // Saved as local/<name>: a different group of this workflow with that id would be overwritten.
+    const QString target = QStringLiteral("local/") + group.section(QLatin1Char('/'), 1);
+    if (target != group && whole.groups.contains(target)) {
+        setGroupProblem(tr("This workflow has another group with the id %1; rename one of them first.").arg(target));
+        return false;
+    }
     const Result<SavedGroup> saved =
         saveToLibrary(whole, group, registry, m_libraryDir.isEmpty() ? libraryDir() : m_libraryDir);
     if (!saved) {
-        setGroupProblem(saved.error().message);
+        setGroupProblem(problemText(saved.error()));
         return false;
     }
     setGroupProblem({});
     // The workflow takes the library's id and version, so it is in step with it.
     whole = renameGroupId(whole, group, saved->id);
     whole.groups[saved->id].version = saved->version;
+    whole.groups[saved->id].extra.insert(QLatin1String(kLibraryKey), saved->id);
     forEachNodes(whole, [&](Nodes &nodes) {
         for (Node &node : nodes)
             if (node.type == saved->id)
@@ -511,7 +515,7 @@ bool CanvasModel::updateGroupInstance(const QString &node) {
     const QString group = m_document.graph.nodes.value(node).type;
     const Result<Document> library = loadLibraryGroup(*m_registry->nodeType(group));
     if (!library) {
-        setGroupProblem(library.error().message);
+        setGroupProblem(problemText(library.error()));
         return false;
     }
     setGroupProblem({});

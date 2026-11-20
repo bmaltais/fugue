@@ -1015,22 +1015,33 @@ FocusScope {
         canvas.windowRuns.showError(nodeId)
     }
 
-    // Inside a group (5.2): where the canvas is, outside in; a click on a level goes back to it.
-    Rectangle {
+    // Inside a group (5.2, docs/canvas-look.md 10): where the canvas is, outside in, a pill as the
+    // zoom and run ones are; a click on a level goes back to it.
+    Item {
         objectName: "breadcrumb"
         visible: canvas.model.inGroup
         x: 4 * canvas.look.unit
         y: 4 * canvas.look.unit
-        width: crumbs.implicitWidth + 4 * canvas.look.unit
-        height: crumbs.implicitHeight + 2 * canvas.look.unit
-        radius: canvas.look.popupCorner
-        color: canvas.look.popup
-        border.width: 1
-        border.color: canvas.look.hairline
+        width: crumbBox.width
+        height: crumbBox.height
+        Shadow {
+            target: crumbBox
+            level: 2
+            look: canvas.look
+        }
+        Rectangle {
+            id: crumbBox
+            width: crumbs.implicitWidth + 6 * canvas.look.unit
+            height: 7 * canvas.look.unit
+            radius: Math.min(canvas.look.popupCorner, 14)
+            color: canvas.look.popup
+            border.width: 1
+            border.color: canvas.look.hairline
+        }
         Row {
             id: crumbs
-            x: 2 * canvas.look.unit
-            anchors.verticalCenter: parent.verticalCenter
+            x: 3 * canvas.look.unit
+            anchors.verticalCenter: crumbBox.verticalCenter
             spacing: canvas.look.unit
             Repeater {
                 model: [{id: "", title: qsTr("Workflow")}].concat(canvas.model.breadcrumb)
@@ -1042,12 +1053,22 @@ FocusScope {
                     spacing: canvas.look.unit
                     Text {
                         visible: crumb.index > 0
+                        anchors.verticalCenter: parent.verticalCenter
                         text: "\u203a"
                         color: canvas.look.label
                         font.pixelSize: canvas.look.labelSize
                     }
+                    Glyph {
+                        visible: crumb.index > 0
+                        anchors.verticalCenter: parent.verticalCenter
+                        look: canvas.look
+                        name: "layers"
+                        color: crumb.last ? canvas.look.text : canvas.look.label
+                        font.pixelSize: 12
+                    }
                     Text {
                         objectName: "crumb" + crumb.index
+                        anchors.verticalCenter: parent.verticalCenter
                         text: crumb.modelData.title
                         textFormat: Text.PlainText
                         color: crumb.last ? canvas.look.text : canvas.look.label

@@ -3,6 +3,7 @@
 #include <QFileInfo>
 
 #include "cli/process.h"
+#include "engine/group_library.h"
 #include "engine/trust_store.h"
 
 namespace fugue::cli {
@@ -18,7 +19,10 @@ Compilation compileDocument(const Document &document, Registry &registry, const 
     options.trusted = [store = TrustStore()](const QString &pack, const QString &version) {
         return store.isTrusted(pack, version);
     };
-    const Compilation compilation = compile(document, registry, options);
+    // A library or pack group named only by its type id runs from its definition (5.3, 6.1).
+    Document embedded = document;
+    embedGroupTypes(embedded, registry);
+    const Compilation compilation = compile(embedded, registry, options);
     // The provider warnings come first, with what the compiler found.
     const Errors problems = providerProblems + compilation.problems();
     return compilation ? Compilation(compilation.value(), problems) : Compilation(problems);

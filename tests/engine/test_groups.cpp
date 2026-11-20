@@ -212,7 +212,7 @@ private slots:
         doc = *exposeInput(doc, inner->group, {"gen", "steps"}, r, {}, &name);
         QCOMPARE(name, QStringLiteral("steps"));
         doc = *exposeInput(doc, outer->group, {inner->instance, "steps"}, r, {}, &name);
-        doc = *editExposedInput(doc, outer->group, "steps", {"steps", "Steps", "Advanced", 2, 10});
+        doc = *editExposedInput(doc, outer->group, "steps", {"steps", "Steps", "Advanced", 2, 10, {}, {}}, r);
 
         const NodeType face = groupFace(doc, r, outer->group);
         QCOMPARE(face.id, outer->group);
@@ -266,10 +266,10 @@ private slots:
             "copy", Node{made->group, Version{1, 0, 0}, {{"negative", InputValue::literal("x")}}, {}, {}, {}, {}});
         doc.groups[holder->group].nodes["save2"].inputs.insert("image", InputValue::link({"copy", "image"}));
 
-        doc = *editExposedInput(doc, made->group, "negative", {"words", {}, {}, {}, {}});
+        doc = *editExposedInput(doc, made->group, "negative", {"words", {}, {}, {}, {}, {}, {}}, r);
         QCOMPARE(doc.graph.nodes.value(made->instance).inputs.value("words").from().toString(), QStringLiteral("prompt.text"));
         QCOMPARE(doc.group(holder->group)->nodes.value("copy").inputs.value("words").literal().toString(), QStringLiteral("x"));
-        QCOMPARE(editExposedInput(doc, made->group, "words", {"Bad name", {}, {}, {}, {}}).error().code,
+        QCOMPARE(editExposedInput(doc, made->group, "words", {"Bad name", {}, {}, {}, {}, {}, {}}, r).error().code,
                  QStringLiteral("group_invalid"));
 
         doc = *renameExposedOutput(doc, made->group, "image", "picture");

@@ -107,9 +107,19 @@ struct ExposedChange {
     QString label;
     QString section;
     std::optional<double> min, max;
+    // The group's default (4.4): a literal checked against the narrowed input, or none.
+    QJsonValue defaultValue = QJsonValue::Undefined;
+    // The choices it narrows a choice input to, a subset of the inner one's, or none.
+    std::optional<QStringList> choices;
 };
+// Sets an exposed input's name, label, section, range, default and choices (an empty name keeps
+// it; none removes the group's narrowing or default). group_invalid for an unknown group or
+// input, a name taken or not valid, a minimum above the maximum, or choices the inner input does
+// not have; a default that does not fit is the literal's own error (value_out_of_range, ...).
 Result<Document> editExposedInput(const Document &document, const QString &group, const QString &name,
-                                  const ExposedChange &change);
+                                  const ExposedChange &change, const Registry &registry);
+// Renames an exposed output, and every link that reads it from an instance. group_invalid for an
+// unknown group or output, or a name taken or not valid; the same name changes nothing.
 Result<Document> renameExposedOutput(const Document &document, const QString &group, const QString &name,
                                      const QString &newName);
 // The group under a new id (not used yet): the definition, every instance and its layout.
@@ -127,6 +137,11 @@ Result<Document> moveExposed(const Document &document, const QString &group, boo
 // port that is gone are dropped, and so are the instance values of exposed inputs left with no
 // target (and links from outputs that went). True when anything changed.
 bool pruneGroup(Document &document, const QString &group, const Registry &registry);
+
+// The exposed inputs and outputs of `group` with these names are gone: every instance drops their
+// values and the links read from them, and an outer group's face that led to them loses that
+// target or output, outwards through every level.
+void dropExposedPorts(Document &document, const QString &group, const QSet<QString> &inputs, const QSet<QString> &outputs);
 
 // Drops those of the candidate definitions that no node of the graph uses, directly or through
 // other groups, with their layout.groups entries, and then the definitions only they used.

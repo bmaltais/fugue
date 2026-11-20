@@ -48,12 +48,12 @@ Item {
         objectName: "groupNotice"
         visible: (root.model.groupProblem !== "" && !editor.visible) || root.model.groupNotice !== ""
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-        height: visible ? noticeRow.implicitHeight + 16 : 0
+        height: visible ? noticeRow.implicitHeight + 4 * root.look.unit : 0
         color: root.look.popup
         border.color: root.look.hairline
         RowLayout {
             id: noticeRow
-            anchors { fill: parent; margins: 8 }
+            anchors { fill: parent; margins: 2 * root.look.unit }
             LayoutMirroring.enabled: root.rightToLeft
             LayoutMirroring.childrenInherit: true
             Label {
@@ -62,12 +62,29 @@ Item {
                 color: root.look.text
                 text: root.model.groupProblem !== "" ? root.model.groupProblem : root.model.groupNotice
             }
-            ToolButton {
-                text: "\u00d7"
+            GlyphButton {
+                glyph: "x"
                 focusPolicy: Qt.NoFocus
-                Accessible.name: qsTr("Dismiss")
+                label: qsTr("Dismiss")
                 onClicked: { root.model.dismissGroupProblem(); root.model.dismissGroupNotice() }
             }
+        }
+    }
+
+    // A small button with a Lucide glyph (docs/canvas-look.md 16) and its name for screen readers.
+    component GlyphButton: ToolButton {
+        id: glyphButton
+        property string glyph
+        property string label
+        Accessible.name: label
+        ToolTip.text: label
+        ToolTip.visible: hovered
+        contentItem: Glyph {
+            look: root.look
+            name: glyphButton.glyph
+            color: glyphButton.enabled ? root.look.text : root.look.label
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
         }
     }
 
@@ -87,7 +104,7 @@ Item {
         property var sinks: []
         ColumnLayout {
             anchors.fill: parent
-            spacing: 16
+            spacing: 4 * root.look.unit
             LayoutMirroring.enabled: root.rightToLeft
             LayoutMirroring.childrenInherit: true
             Label {
@@ -123,7 +140,7 @@ Item {
         function line(label, names) { return names && names.length > 0 ? label.arg(names.join(", ")) : "" }
         ColumnLayout {
             anchors.fill: parent
-            spacing: 12
+            spacing: 3 * root.look.unit
             LayoutMirroring.enabled: root.rightToLeft
             LayoutMirroring.childrenInherit: true
             Label {
@@ -169,7 +186,7 @@ Item {
         onOpened: frameTitle.forceActiveFocus()
         ColumnLayout {
             anchors.fill: parent
-            spacing: 12
+            spacing: 3 * root.look.unit
             LayoutMirroring.enabled: root.rightToLeft
             LayoutMirroring.childrenInherit: true
             Label { text: qsTr("Frame title") }
@@ -211,7 +228,7 @@ Item {
 
         ColumnLayout {
             anchors.fill: parent
-            spacing: 12
+            spacing: 3 * root.look.unit
             LayoutMirroring.enabled: root.rightToLeft
             LayoutMirroring.childrenInherit: true
 
@@ -243,7 +260,7 @@ Item {
                 clip: true
                 ColumnLayout {
                     width: editor.availableWidth
-                    spacing: 8
+                    spacing: 2 * root.look.unit
 
                     Label {
                         font.bold: true
@@ -268,7 +285,9 @@ Item {
                             color: root.look.well
                             function change(key, value) {
                                 const next = {name: modelData.name, label: modelData.label, section: modelData.section,
-                                              min: modelData.min, max: modelData.max}
+                                              min: modelData.min, max: modelData.max, type: modelData.type,
+                                              default: modelData.default === undefined ? "" : String(modelData.default),
+                                              choices: modelData.choices}
                                 next[key] = value
                                 root.model.editExposedInput(modelData.name, next)
                             }
@@ -281,7 +300,7 @@ Item {
                                     Layout.fillWidth: true
                                     TextField {
                                         objectName: "exposedName" + inputRow.index
-                                        Layout.preferredWidth: 140
+                                        Layout.preferredWidth: 35 * root.look.unit
                                         text: inputRow.modelData.name
                                         placeholderText: qsTr("name")
                                         onEditingFinished: if (text !== inputRow.modelData.name) inputRow.change("name", text)
@@ -294,7 +313,7 @@ Item {
                                     }
                                     TextField {
                                         objectName: "exposedSection" + inputRow.index
-                                        Layout.preferredWidth: 120
+                                        Layout.preferredWidth: 30 * root.look.unit
                                         text: inputRow.modelData.section
                                         placeholderText: qsTr("Section")
                                         onEditingFinished: if (text !== inputRow.modelData.section) inputRow.change("section", text)
@@ -306,18 +325,41 @@ Item {
                                     visible: inputRow.modelData.type === "number"
                                     Label { text: qsTr("Range") }
                                     TextField {
-                                        Layout.preferredWidth: 90
+                                        Layout.preferredWidth: 22 * root.look.unit
                                         text: inputRow.modelData.min === undefined ? "" : String(inputRow.modelData.min)
                                         placeholderText: qsTr("min")
                                         validator: DoubleValidator {}
                                         onEditingFinished: inputRow.change("min", text)
                                     }
                                     TextField {
-                                        Layout.preferredWidth: 90
+                                        Layout.preferredWidth: 22 * root.look.unit
                                         text: inputRow.modelData.max === undefined ? "" : String(inputRow.modelData.max)
                                         placeholderText: qsTr("max")
                                         validator: DoubleValidator {}
                                         onEditingFinished: inputRow.change("max", text)
+                                    }
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Label { text: qsTr("Default") }
+                                    TextField {
+                                        objectName: "exposedDefault" + inputRow.index
+                                        Layout.preferredWidth: 30 * root.look.unit
+                                        text: inputRow.modelData.default === undefined ? "" : String(inputRow.modelData.default)
+                                        placeholderText: qsTr("the inner value")
+                                        onEditingFinished: inputRow.change("default", text)
+                                    }
+                                    Label {
+                                        visible: choicesField.visible
+                                        text: qsTr("Choices")
+                                    }
+                                    TextField {
+                                        id: choicesField
+                                        visible: inputRow.modelData.choices !== "" || inputRow.modelData.innerChoices !== ""
+                                        Layout.fillWidth: true
+                                        text: inputRow.modelData.choices
+                                        placeholderText: inputRow.modelData.innerChoices
+                                        onEditingFinished: if (text !== inputRow.modelData.choices) inputRow.change("choices", text)
                                     }
                                 }
                                 RowLayout {
@@ -341,21 +383,21 @@ Item {
                                             currentIndex = 0
                                         }
                                     }
-                                    ToolButton {
-                                        text: "↑"
+                                    GlyphButton {
+                                        glyph: "chevron-up"
                                         enabled: inputRow.index > 0
-                                        Accessible.name: qsTr("Move up")
+                                        label: qsTr("Move up")
                                         onClicked: root.model.moveExposed(false, inputRow.modelData.name, inputRow.index - 1)
                                     }
-                                    ToolButton {
-                                        text: "↓"
+                                    GlyphButton {
+                                        glyph: "chevron-down"
                                         enabled: inputRow.index < (editor.face.inputs || []).length - 1
-                                        Accessible.name: qsTr("Move down")
+                                        label: qsTr("Move down")
                                         onClicked: root.model.moveExposed(false, inputRow.modelData.name, inputRow.index + 1)
                                     }
-                                    ToolButton {
-                                        text: "×"
-                                        Accessible.name: qsTr("Stop exposing")
+                                    GlyphButton {
+                                        glyph: "x"
+                                        label: qsTr("Stop exposing")
                                         onClicked: root.model.removeExposedInput(inputRow.modelData.name)
                                     }
                                 }
@@ -364,7 +406,7 @@ Item {
                     }
 
                     Label {
-                        Layout.topMargin: 8
+                        Layout.topMargin: 2 * root.look.unit
                         font.bold: true
                         text: qsTr("Outputs")
                     }
@@ -376,7 +418,7 @@ Item {
                             required property int index
                             Layout.fillWidth: true
                             TextField {
-                                Layout.preferredWidth: 140
+                                Layout.preferredWidth: 35 * root.look.unit
                                 text: outputRow.modelData.name
                                 onEditingFinished: if (text !== outputRow.modelData.name)
                                                        root.model.renameExposedOutput(outputRow.modelData.name, text)
@@ -384,23 +426,23 @@ Item {
                             Label {
                                 Layout.fillWidth: true
                                 color: root.look.label
-                                text: qsTr("from %1").arg(outputRow.modelData.from) + "  " + outputRow.modelData.type
+                                text: qsTr("from %1 · %2").arg(outputRow.modelData.from).arg(outputRow.modelData.type)
                             }
-                            ToolButton {
-                                text: "↑"
+                            GlyphButton {
+                                glyph: "chevron-up"
                                 enabled: outputRow.index > 0
-                                Accessible.name: qsTr("Move up")
+                                label: qsTr("Move up")
                                 onClicked: root.model.moveExposed(true, outputRow.modelData.name, outputRow.index - 1)
                             }
-                            ToolButton {
-                                text: "↓"
+                            GlyphButton {
+                                glyph: "chevron-down"
                                 enabled: outputRow.index < (editor.face.outputs || []).length - 1
-                                Accessible.name: qsTr("Move down")
+                                label: qsTr("Move down")
                                 onClicked: root.model.moveExposed(true, outputRow.modelData.name, outputRow.index + 1)
                             }
-                            ToolButton {
-                                text: "×"
-                                Accessible.name: qsTr("Stop exposing")
+                            GlyphButton {
+                                glyph: "x"
+                                label: qsTr("Stop exposing")
                                 onClicked: root.model.unexposeOutput(outputRow.modelData.name)
                             }
                         }

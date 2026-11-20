@@ -444,6 +444,7 @@ exactly one definition, at one version, per group id.
 | `inputs[].label`, `section`, `default`, `min`, `max`, `choices` | Display name, section, and a default or narrowed constraints. Everything else is taken from the first target. |
 | `outputs[].name`, `outputs[].from` | An output on the face and the inner `<node id>.<output name>` it carries. |
 | `nodes` | The inner graph, same shape as `graph.nodes`. Inner ids are local to the definition. |
+| `library` | The library entry (`local/<name>`) the definition was saved to or added from. Saving to the library updates only that entry ([5.3](#53-definitions-copies-and-the-library)). |
 
 An instance of a group is an ordinary entry in `graph.nodes` whose `type` is the group id and
 whose `inputs` are the exposed inputs. An exposed input the instance does not set falls back to
@@ -592,12 +593,15 @@ with an id and a version, and it appears in node search.
   nodes whose `groups` holds the group and every group it uses, and whose `layout.groups` their
   insides), and lists the folder in `local/pack.json`. Saving over an earlier version bumps it
   under 3.6: major when an exposed input or output went or changed type, minor when one was
-  added, patch for any other change; saving the same definition keeps the version. The workflow's
+  added, patch for any other change; saving the same definition keeps the version. An entry is
+  updated only by the group that came from it (`library`, 4.4): another group of the same name is
+  refused until renamed. The workflow's
   definition and instances take the version saved. A window lists library groups it did not
   start with after a restart.
 - Adding a library group brings its definition (and the groups it uses) into the workflow, as a
   paste does: a nested group that clashes with another definition of the workflow comes in under
-  a new id. Updating drops the values and links of exposed inputs and outputs that went.
+  a new id. Updating drops the values and links of exposed inputs and outputs that went or
+  changed type, the same ones the update listed.
 - The groups of the workflow appear in node search too, except one the level shown is inside of.
 
 ### 5.4 Exposed inputs and outputs
@@ -607,10 +611,12 @@ with an id and a version, and it appears in node search.
   default and constraints, and can get a display name and a narrowed range. Inside a group each
   exposed port is marked with the name it has on the face.
 - The interface editor (Node > Group inputs and outputs…) renames the group and its exposed inputs
-  and outputs, sets labels, sections and ranges, reorders them and adds inner inputs of the same
-  type to an exposed input. Renaming an exposed input or output renames it on every instance.
+  and outputs, sets labels, sections, ranges, defaults and choices (a subset of the inner input's),
+  reorders them and adds inner inputs of the same type to an exposed input. Renaming an exposed
+  input or output renames it on every instance, and in the face of every group around it.
 - An exposed input or output whose inner node is deleted leaves the face, and every instance
-  loses its value or links for it.
+  loses its value or links for it; a group around it that exposed that port loses it too, outwards
+  through every level.
 - One exposed input can drive several inner inputs (one seed for two samplers).
 - Exposed inputs can be reordered and put in sections. A section named "Advanced" is collapsed
   by default. On every node face (a manifest's `section` and `advanced` inputs too, 6.1) a
@@ -689,7 +695,7 @@ search, versions, groups, caching, the canvas and workflows treat all tiers alik
 | `kind` | Other fields | Status in v0.1 |
 | --- | --- | --- |
 | `command` | `entry` (program path relative to the node folder), `mode` (`oneshot` default, or `persistent`), `idle_timeout_s` (default 300), `timeout_s` (optional) | Ships in M3. |
-| `group` | `definition` (a workflow document whose `groups` holds the group, under the node's id, and every group it uses, [5.3](#53-definitions-copies-and-the-library)) | Ships in M3. A workflow runs a group only from the definition it embeds: an instance of a library group the workflow does not hold is `unknown_node_type`. |
+| `group` | `definition` (a workflow document whose `groups` holds the group, under the node's id, and every group it uses, [5.3](#53-definitions-copies-and-the-library)) | Ships in M3. A workflow runs a group from the definition it embeds; one that names a library or pack group only by its type id (as an agent may write it, 13.4) gets that definition put in before the compile, and only one that cannot be read is `unknown_node_type`. |
 | `native` | `entry` (a shared library), `abi` (`"<major>.<min_host_minor>"`, [6.9](#69-native-tier)) | Defined, ships after the first command nodes ([6.9](#69-native-tier)). |
 | `script` | | Reserved, not in v0.1 ([6.10](#610-script-tier)). |
 | `builtin` | | Only for the `fugue` pack: implemented in the kernel. |

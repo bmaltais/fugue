@@ -130,6 +130,7 @@ public:
         ThumbnailDim,  // the slot is a placeholder ("No result yet"): drawn dimmed
         Notice,        // why the node cannot run now and how to fix it (8.5), from a check
         UpdateAvailable, // a group whose library version is newer: that version (5.3), else empty
+        GroupSize,       // a group instance: how many nodes its definition holds (its caption row), else 0
     };
 
     explicit NodeList(CanvasModel *canvas);
@@ -651,6 +652,7 @@ private:
         QString color;      // layout color
         bool pinned = false;
         bool advancedOpen = false; // layout: the Advanced section shown (layout.nodes.<id>.advanced)
+        int groupSize = 0;         // a group instance: its definition's node count, shown on a row of its own
         QRectF thumbnail;   // where the run's thumbnail goes, empty without one
         std::vector<Port> inputs;
         std::vector<Port> outputs;
@@ -700,6 +702,8 @@ private:
     void commitWhole(const fugue::Document &whole, const QString &text);
     void setGroupProblem(const QString &problem);
     void setGroupNotice(const QString &notice);
+    bool applyFaceEdit(const std::function<fugue::Result<fugue::Document>(const fugue::Document &, const QString &)> &edit,
+                       const QString &text);
     // An instance of `group` may go in the level shown: false when it would hold itself (5.2).
     bool canHoldGroup(const fugue::Document &document, const QString &group) const;
     // Makes the document this one: only nodes that differ are touched, and their links.

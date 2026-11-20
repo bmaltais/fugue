@@ -116,6 +116,12 @@ Result<SavedGroup> saveToLibrary(const Document &document, const QString &group,
     const QString folder = dir + QLatin1Char('/') + name;
     SavedGroup saved{id, definition->version, true};
     const Result<QJsonObject> oldManifest = readJsonObject(folder + QStringLiteral("/node.json"));
+    // Only the group that came from (or went to) that library entry may update it: another
+    // group that happens to have the name would overwrite it.
+    if (oldManifest.ok() && definition->extra.value(QLatin1String(kLibraryKey)).toString() != id)
+        return libraryError(QStringLiteral("The library has another group named %1.").arg(id),
+                            QStringLiteral("Rename this group, then save it to the library."));
+    file.groups[id].extra.insert(QLatin1String(kLibraryKey), id);
     const Result<Document> oldFile = Document::loadFile(folder + QLatin1Char('/') + QLatin1String(kDefinition));
     if (oldManifest.ok()) {
         const Result<NodeType> old = NodeType::fromJson(oldManifest.value());
@@ -221,6 +227,7 @@ GroupChanges groupChanges(const Document &workflow, const Document &library, con
 
 Document updateGroup(const Document &workflow, const Document &library, const QString &group, const Registry &registry) {
     Document doc = workflow;
+    const NodeType before = groupFace(workflow, registry, group);
     const QStringList incoming = usedGroups(library, group);
     // A nested group the workflow holds otherwise under the same id comes in under a new id.
     QHash<QString, QString> renamed;
@@ -253,29 +260,75 @@ Document updateGroup(const Document &workflow, const Document &library, const QS
         doc.layout.insert("groups", layouts);
     doc.present.groups = true;
 
-    // Every instance moves to the new version and loses what the new face lacks.
+    // Every instance moves to the new version and loses what the new face lacks or retypes (3.6:
+    // what the update listed as going), outwards through the groups around it.
     const GroupDefinition &now = *doc.group(group);
-    QSet<QString> inputs, outputs;
-    for (const GroupInput &input : now.inputs)
-        inputs.insert(input.name);
-    for (const GroupOutput &output : now.outputs)
-        outputs.insert(output.name);
+    const NodeType after = groupFace(doc, registry, group);
+    const QHash<QString, QString> oldInputs = ports(before.inputs), newInputs = ports(after.inputs);
+    const QHash<QString, QString> oldOutputs = ports(before.outputs), newOutputs = ports(after.outputs);
+    QSet<QString> goneInputs, goneOutputs;
+    for (const GroupInput &input : workflow.group(group) ? workflow.group(group)->inputs : QList<GroupInput>())
+        if (!std::any_of(now.inputs.begin(), now.inputs.end(), [&](const GroupInput &i) { return i.name == input.name; })
+            || (oldInputs.contains(input.name) && newInputs.value(input.name) != oldInputs.value(input.name)))
+            goneInputs.insert(input.name);
+    for (const GroupOutput &output : workflow.group(group) ? workflow.group(group)->outputs : QList<GroupOutput>())
+        if (!std::any_of(now.outputs.begin(), now.outputs.end(), [&](const GroupOutput &o) { return o.name == output.name; })
+            || (oldOutputs.contains(output.name) && newOutputs.value(output.name) != oldOutputs.value(output.name)))
+            goneOutputs.insert(output.name);
+    const Version version = now.version;
     forEachNodes(doc, [&](Nodes &nodes) {
-        QSet<QString> instances;
-        for (auto it = nodes.begin(); it != nodes.end(); ++it) {
-            if (it->type != group)
-                continue;
-            instances.insert(it.key());
-            it->version = now.version;
-            it->inputs.removeIf([&](const auto &entry) { return !inputs.contains(entry.key()); });
-        }
-        if (instances.isEmpty())
-            return;
         for (Node &node : nodes)
-            stripLinks(node, [&](const PortRef &from) { return instances.contains(from.node) && !outputs.contains(from.port); });
+            if (node.type == group)
+                node.version = version;
     });
+    dropExposedPorts(doc, group, goneInputs, goneOutputs);
     pruneGroup(doc, group, registry);
     return doc;
+}
+
+QStringList embedGroupTypes(Document &document, const Registry &registry) {
+    QStringList embedded;
+    for (bool more = true; more;) {
+        more = false;
+        QStringList wanted;
+        forEachNodes(document, [&](Nodes &nodes) {
+            for (const Node &node : nodes)
+                if (!document.group(node.type) && !wanted.contains(node.type))
+                    if (const NodeType *type = registry.nodeType(node.type);
+                        type && type->runtime.value("kind") == QLatin1String("group"))
+                        wanted << node.type;
+        });
+        for (const QString &id : wanted) {
+            const Result<Document> file = loadLibraryGroup(*registry.nodeType(id));
+            if (!file)
+                continue;
+            // An instance keeps the version it was written with: a different major is the
+            // compiler's node_version_mismatch, as for any node type (3.6). Keyed by where it
+            // sits: the graph ("") or a definition, then its id.
+            QHash<QString, Version> versions;
+            for (auto it = document.graph.nodes.cbegin(); it != document.graph.nodes.cend(); ++it)
+                if (it->type == id)
+                    versions.insert(QLatin1Char('/') + it.key(), it->version);
+            for (auto group = document.groups.cbegin(); group != document.groups.cend(); ++group)
+                for (auto it = group->nodes.cbegin(); it != group->nodes.cend(); ++it)
+                    if (it->type == id)
+                        versions.insert(group.key() + QLatin1Char('/') + it.key(), it->version);
+            Document holder = document;
+            holder.groups.insert(id, GroupDefinition{}); // nothing of the workflow's to keep
+            document = updateGroup(holder, *file, id, registry);
+            auto restore = [&](const QString &where, Nodes &nodes) {
+                for (auto it = nodes.begin(); it != nodes.end(); ++it)
+                    if (const QString key = where + QLatin1Char('/') + it.key(); it->type == id && versions.contains(key))
+                        it->version = versions.value(key);
+            };
+            restore({}, document.graph.nodes);
+            for (auto group = document.groups.begin(); group != document.groups.end(); ++group)
+                restore(group.key(), group->nodes);
+            embedded << id;
+            more = true;
+        }
+    }
+    return embedded;
 }
 
 } // namespace fugue

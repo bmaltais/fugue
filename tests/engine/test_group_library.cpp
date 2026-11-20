@@ -107,8 +107,13 @@ private slots:
         QCOMPARE(file->group("local/pass")->nodes.keys(), QList<QString>{"gen"});
         QVERIFY(file->layout.value("groups").toObject().contains("local/pass"));
 
-        // Saving it again unchanged keeps the version.
-        const Result<SavedGroup> again = saveToLibrary(doc, "local/pass", m_registry, packs.filePath("local"));
+        // Another group of that name cannot overwrite it; the one saved can, and unchanged it
+        // keeps the version.
+        const Result<SavedGroup> other = saveToLibrary(doc, "local/pass", m_registry, packs.filePath("local"));
+        QCOMPARE(other.error().code, QStringLiteral("group_invalid"));
+        Document mine = doc;
+        mine.groups["local/pass"].extra.insert(kLibraryKey, "local/pass");
+        const Result<SavedGroup> again = saveToLibrary(mine, "local/pass", m_registry, packs.filePath("local"));
         QVERIFY(again.ok());
         QVERIFY(!again->changed);
         QCOMPARE(again->version.toString(), QStringLiteral("1.0.0"));
@@ -120,6 +125,8 @@ private slots:
         QString instance;
         Document doc = workflow(m_registry, &instance);
         QVERIFY(saveToLibrary(doc, "local/pass", m_registry, dir).ok());
+        // As the canvas does after a save: the definition names its library entry.
+        doc.groups["local/pass"].extra.insert(kLibraryKey, "local/pass");
 
         // An inner value changes: patch.
         doc.groups["local/pass"].nodes["gen"].inputs.insert("steps", InputValue::literal(9));
@@ -228,6 +235,61 @@ private slots:
         QCOMPARE(compiled.error().code, QStringLiteral("unknown_node_type"));
         QCOMPARE(compiled.error().node, instance);
         QVERIFY(compiled.error().hint.contains("library"));
+        // The CLI and runs embed it first (an agent wrote only the type id): then it compiles,
+        // and the instance keeps the version it was written with.
+        QCOMPARE(embedGroupTypes(bare, library), QStringList{"local/pass"});
+        QVERIFY(bare.group("local/pass"));
+        QCOMPARE(bare.graph.nodes.value(instance).version.toString(), QStringLiteral("1.0.0"));
+        const Compilation embedded = compile(bare, library);
+        QVERIFY2(embedded.ok(), qPrintable(dump(embedded.errors())));
+    }
+
+    void anUpdateDropsRetypedPortsAndOuterFacesFollow() {
+        QString instance;
+        const Document mine = workflow(m_registry, &instance);
+        // The workflow nests local/pass in local/outer, whose face exposes pass's prompt.
+        Result<GroupMade> outer = makeGroup(mine, {instance, "prompt"}, m_registry);
+        QVERIFY(outer.ok());
+        Document doc = *exposeInput(outer->document, outer->group, {"prompt", "text"}, m_registry);
+        // pass's output now feeds save through outer's face; drop it in the library version.
+        Document theirs = *unexposeOutput(doc, "local/pass", "image");
+        theirs.groups["local/pass"].version = Version{2, 0, 0};
+        const Document updated = updateGroup(doc, theirs, "local/pass", m_registry);
+        // outer's output led from pass.image: it goes too, and save's link with it.
+        QVERIFY(updated.group(outer->group)->outputs.isEmpty());
+        QVERIFY(!updated.graph.nodes.value("save").inputs.contains("image"));
+    }
+
+    void renamingAnInnerGroupsInputReachesTheOuterFace() {
+        QString instance;
+        const Document mine = workflow(m_registry, &instance);
+        Result<GroupMade> outer = makeGroup(mine, {instance, "prompt"}, m_registry);
+        Document doc = *exposeInput(outer->document, outer->group, {instance, "prompt"}, m_registry);
+        doc = *editExposedInput(doc, "local/pass", "prompt", {"words", {}, {}, {}, {}, {}, {}}, m_registry);
+        const GroupInput &driven = doc.group(outer->group)->inputs.last();
+        QCOMPARE(driven.targets.value(0).toString(), instance + ".words");
+        doc = *renameExposedOutput(doc, "local/pass", "image", "picture");
+        QCOMPARE(doc.group(outer->group)->outputs.value(0).from.toString(), instance + ".picture");
+        // Stop exposing it inside: the outer face loses the target, the input with it.
+        doc = *unexposeInput(doc, "local/pass", {"gen", "prompt"});
+        QVERIFY(std::none_of(doc.group(outer->group)->inputs.begin(), doc.group(outer->group)->inputs.end(),
+                             [&](const GroupInput &i) { return i.targets.contains(PortRef{instance, "words"}); }));
+    }
+
+    void anExposedInputTakesADefaultAndChoicesThatFit() {
+        QString instance;
+        Document doc = workflow(m_registry, &instance);
+        doc = *exposeInput(doc, "local/pass", {"gen", "steps"}, m_registry);
+        ExposedChange change{"steps", {}, {}, 1, 10, QJsonValue(6), std::nullopt};
+        doc = *editExposedInput(doc, "local/pass", "steps", change, m_registry);
+        QCOMPARE(doc.group("local/pass")->inputs.last().defaultValue->literal().toInt(), 6);
+        change.defaultValue = QJsonValue(40);
+        QCOMPARE(editExposedInput(doc, "local/pass", "steps", change, m_registry).error().code,
+                 QStringLiteral("value_out_of_range"));
+        change.defaultValue = QJsonValue::Undefined;
+        change.choices = QStringList{"a"};
+        QCOMPARE(editExposedInput(doc, "local/pass", "steps", change, m_registry).error().code,
+                 QStringLiteral("group_invalid"));
     }
 };
 

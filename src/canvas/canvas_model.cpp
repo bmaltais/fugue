@@ -84,6 +84,7 @@ QVariant NodeList::data(const QModelIndex &index, int role) const {
     case Pinned: return row.pinned;
     case ThumbnailRect: return row.thumbnail;
     case UpdateAvailable: return m_canvas->updateAvailable(row.id);
+    case GroupSize: return row.groupSize;
     default: break;
     }
     const CanvasModel::RunInfo run = m_canvas->m_run.value(row.id);
@@ -110,7 +111,7 @@ QHash<int, QByteArray> NodeList::roleNames() const {
             {Color, "color"}, {Pinned, "pinned"}, {RunState, "runState"}, {Progress, "progress"},
             {Seconds, "seconds"}, {Error, "error"}, {Warnings, "warnings"}, {Thumbnail, "thumbnail"},
             {ThumbnailInfo, "thumbnailInfo"}, {ThumbnailFile, "thumbnailFile"}, {ThumbnailRect, "thumbnailRect"}, {ThumbnailText, "thumbnailText"}, {ThumbnailDim, "thumbnailDim"},
-            {Notice, "notice"}, {UpdateAvailable, "updateAvailable"}};
+            {Notice, "notice"}, {UpdateAvailable, "updateAvailable"}, {GroupSize, "groupSize"}};
 }
 
 LinkList::LinkList(CanvasModel *canvas) : QAbstractListModel(canvas), m_canvas(canvas) {}
@@ -419,7 +420,7 @@ void CanvasModel::portsFromType(NodeRow &row, const Node &node) const {
         port.widget = !port.widgetType.isEmpty() || (spec.type.list && !spec.widget().isEmpty());
         port.required = spec.required();
         port.section = spec.section;
-        port.advanced = spec.advanced || spec.section == QLatin1String("Advanced");
+        port.advanced = spec.advanced || spec.section == QLatin1String(kAdvancedSection);
         port.defaultValue = spec.defaultValue;
         port.min = spec.min;
         port.max = spec.max;
@@ -443,6 +444,7 @@ void CanvasModel::portsFromType(NodeRow &row, const Node &node) const {
         const NodeType face = groupFace(m_document, m_registry ? *m_registry : none, node.type);
         const GroupDefinition *group = m_document.group(node.type);
         row.title = face.name;
+        row.groupSize = int(group->nodes.size());
         for (const GroupInput &exposed : group->inputs) {
             if (const InputSpec *spec = face.input(exposed.name)) {
                 row.exposed.insert_or_assign(exposed.name, *spec);
@@ -541,7 +543,7 @@ void CanvasModel::layOut(NodeRow &row) const {
         for (Port &port : row.inputs) {
             const InputValue value = node.inputs.value(port.name);
             // A section starts with its header row; Advanced stays folded unless open or linked.
-            const QString portSection = port.advanced && port.section.isEmpty() ? QStringLiteral("Advanced") : port.section;
+            const QString portSection = port.advanced && port.section.isEmpty() ? QString::fromLatin1(kAdvancedSection) : port.section;
             port.headerTop = -1;
             port.header.clear();
             port.hidden = false;
@@ -575,8 +577,9 @@ void CanvasModel::layOut(NodeRow &row) const {
             if (tall && !hasThumbnail && extra > 0)
                 port.rowHeight = height; // the last one takes the extra below
         }
-        // A placeholder says so on a row of its own (spec 11.6).
-        if (row.missing)
+        // A placeholder says so on a row of its own (spec 11.6), and a group how many nodes it
+        // holds (docs/canvas-look.md 9).
+        if (row.missing || row.groupSize > 0)
             top += m_rowHeight;
         if (hasThumbnail) {
             // 1.5u in from the sides, 1u under the rows, its height from its aspect (0.5 to 1.5).
@@ -748,7 +751,8 @@ QVariantMap CanvasModel::portMap(const NodeRow &row, const Port &port) const {
         map.insert("headerTop", port.headerTop);
         map.insert("header", port.header);
         // The Advanced header shows whether it is open and how many it folds.
-        if (port.header == QLatin1String("Advanced")) {
+        if (port.header == QLatin1String(kAdvancedSection)) {
+            map.insert("advancedHeader", true);
             map.insert("advancedOpen", row.advancedOpen);
             int folded = 0;
             for (const Port &other : row.inputs)

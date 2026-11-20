@@ -56,7 +56,7 @@ struct Faces {
             InputSpec spec = exposedInputSpec(*inner, exposed);
             spec.label = !exposed.label.isEmpty() ? exposed.label : exposed.name == target.port ? innerLabel : QString();
             spec.section = exposed.section;
-            spec.advanced = exposed.section == QLatin1String("Advanced");
+            spec.advanced = exposed.section == QLatin1String(kAdvancedSection);
             type.inputs << spec;
         }
         for (const GroupOutput &exposed : group->outputs) {
@@ -250,6 +250,14 @@ void renameInstanceInputs(Document &document, const QString &group, const QStrin
             if (node.type == group && node.inputs.contains(from))
                 node.inputs.insert(to, node.inputs.take(from));
     });
+    // An outer group whose face drives the instance's input drives it under the new name.
+    for (GroupDefinition &outer : document.groups) {
+        const QSet<QString> instances = instancesIn(outer.nodes, group);
+        for (GroupInput &exposed : outer.inputs)
+            for (PortRef &target : exposed.targets)
+                if (instances.contains(target.node) && target.port == from)
+                    target.port = to;
+    }
     QJsonObject layout = document.layout;
     if (layout.contains("links"))
         layout.insert("links", renamedLinkKeys(layout.value("links").toObject(),
@@ -271,7 +279,12 @@ void renameInstanceInputs(Document &document, const QString &group, const QStrin
 
 // Drops instance values of these exposed inputs and links from these exposed outputs, on
 // every instance of the group.
+// Drops instance values of these exposed inputs and links from these exposed outputs, on
+// every instance of the group; and an outer group's face that led to them (B exposing the
+// instance's port a1.x) loses that target or output, which cascades outwards.
 void dropFromInstances(Document &document, const QString &group, const QSet<QString> &inputs, const QSet<QString> &outputs) {
+    if (inputs.isEmpty() && outputs.isEmpty())
+        return;
     forEachNodes(document, [&](Nodes &nodes) {
         const QSet<QString> instances = instancesIn(nodes, group);
         if (instances.isEmpty())
@@ -286,6 +299,29 @@ void dropFromInstances(Document &document, const QString &group, const QSet<QStr
                 });
         }
     });
+    QHash<QString, std::pair<QSet<QString>, QSet<QString>>> outer; // group -> (inputs, outputs) gone
+    for (auto it = document.groups.begin(); it != document.groups.end(); ++it) {
+        const QSet<QString> instances = instancesIn(it->nodes, group);
+        if (instances.isEmpty())
+            continue;
+        for (qsizetype i = it->inputs.size() - 1; i >= 0; --i) {
+            GroupInput &exposed = it->inputs[i];
+            exposed.targets.removeIf([&](const PortRef &t) { return instances.contains(t.node) && inputs.contains(t.port); });
+            if (exposed.targets.isEmpty()) {
+                outer[it.key()].first.insert(exposed.name);
+                it->inputs.removeAt(i);
+            }
+        }
+        for (qsizetype i = it->outputs.size() - 1; i >= 0; --i)
+            if (instances.contains(it->outputs[i].from.node) && outputs.contains(it->outputs[i].from.port)) {
+                outer[it.key()].second.insert(it->outputs[i].name);
+                it->outputs.removeAt(i);
+            }
+    }
+    // No recursion (5.2): each step goes one group outwards, so this ends.
+    for (auto it = outer.cbegin(); it != outer.cend(); ++it)
+        if (it.key() != group)
+            dropFromInstances(document, it.key(), it->first, it->second);
 }
 
 GroupDefinition *groupOf(Document &document, const QString &group) {
@@ -735,7 +771,7 @@ Result<Document> unexposeOutput(const Document &document, const QString &groupId
 }
 
 Result<Document> editExposedInput(const Document &document, const QString &groupId, const QString &name,
-                                  const ExposedChange &change) {
+                                  const ExposedChange &change, const Registry &registry) {
     Document doc = document;
     GroupDefinition *group = groupOf(doc, groupId);
     if (!group)
@@ -754,10 +790,32 @@ Result<Document> editExposedInput(const Document &document, const QString &group
     }
     if (change.min && change.max && *change.min > *change.max)
         return groupError(QStringLiteral("The minimum %1 is above the maximum %2.").arg(*change.min).arg(*change.max));
+    if (change.choices) {
+        Faces faces{doc, registry, {}};
+        const std::optional<InputSpec> inner = it->targets.isEmpty() ? std::nullopt : faces.input(*group, it->targets.first());
+        if (!inner || !inner->choices)
+            return groupError(QStringLiteral("The input %1 is not a choice, so it has no choices to narrow.").arg(name));
+        for (const QString &choice : *change.choices)
+            if (!inner->choices->contains(choice))
+                return groupError(QStringLiteral("\"%1\" is not one of the choices of %2.").arg(choice, name),
+                                  QStringLiteral("Choose among: %1.").arg(inner->choices->join(QStringLiteral(", "))));
+    }
     it->label = change.label;
     it->section = change.section.trimmed();
     it->min = change.min;
     it->max = change.max;
+    it->choices = change.choices;
+    if (change.defaultValue.isUndefined() || change.defaultValue.isNull()) {
+        it->defaultValue.reset();
+    } else {
+        Faces faces{doc, registry, {}};
+        if (const std::optional<InputSpec> inner = it->targets.isEmpty() ? std::nullopt : faces.input(*group, it->targets.first())) {
+            const InputSpec spec = exposedInputSpec(*inner, *it);
+            if (Errors errors = checkLiteral(spec, change.defaultValue, registry.portKind(spec.type.type)); hasErrors(errors))
+                return errors;
+        }
+        it->defaultValue = InputValue::literal(change.defaultValue);
+    }
     it->name = newName;
     if (newName != name)
         renameInstanceInputs(doc, groupId, name, newName);
@@ -782,6 +840,11 @@ Result<Document> renameExposedOutput(const Document &document, const QString &gr
     if (outputNames(*group).contains(newName))
         return groupError(QStringLiteral("Group %1 has an output named %2 already.").arg(groupId, newName));
     it->name = newName;
+    // An outer group's face that carries the output out reads it under the new name.
+    for (GroupDefinition &outer : doc.groups)
+        for (GroupOutput &exposed : outer.outputs)
+            if (instancesIn(outer.nodes, groupId).contains(exposed.from.node) && exposed.from.port == name)
+                exposed.from.port = newName;
     forEachNodes(doc, [&](Nodes &nodes) {
         const QSet<QString> instances = instancesIn(nodes, groupId);
         if (instances.isEmpty())
@@ -887,6 +950,10 @@ bool pruneGroup(Document &document, const QString &groupId, const Registry &regi
     if (!goneInputs.isEmpty() || !goneOutputs.isEmpty())
         dropFromInstances(document, groupId, goneInputs, goneOutputs);
     return changed;
+}
+
+void dropExposedPorts(Document &document, const QString &group, const QSet<QString> &inputs, const QSet<QString> &outputs) {
+    dropFromInstances(document, group, inputs, outputs);
 }
 
 void dropUnusedGroups(Document &document, QStringList candidates) {
