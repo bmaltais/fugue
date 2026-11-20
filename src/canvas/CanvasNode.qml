@@ -140,12 +140,14 @@ Item {
             }
 
             // Selected: a 2 px accent ring outside a 2 px gap; its corner r + 4 (0 when r is 0).
+            // Around a group's whole stack, its second card included (#72).
             Rectangle {
+                readonly property real stack: node.groupSize > 0 ? face.u : 0
                 visible: node.selected
                 x: -4
                 y: -4
-                width: parent.width + 8
-                height: parent.height + 8
+                width: parent.width + 8 + stack
+                height: parent.height + 8 + stack
                 radius: face.corner > 0 ? face.corner + 4 : 0
                 color: "transparent"
                 border.width: 2

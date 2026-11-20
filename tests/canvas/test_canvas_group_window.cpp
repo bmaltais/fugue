@@ -6,6 +6,7 @@
 #include <QtTest>
 
 #include "canvas_app.h"
+#include "../window_grab.h"
 
 using namespace canvas_test;
 
@@ -65,6 +66,42 @@ private slots:
         app.key(Qt::Key_G, Qt::ControlModifier | Qt::ShiftModifier);
         QTRY_VERIFY(app.model.document().groups.isEmpty());
         QVERIFY(app.model.document().graph.nodes.contains("gen"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // #72: a selected group's ring goes around the whole stack, the second card 1u down and
+    // right included, so it is accent on all four sides.
+    void aSelectedGroupIsRingedAllAround() {
+        App app(load(kGraph));
+        QVERIFY(app.open());
+        app.model.select({"prompt", "gen"});
+        app.key(Qt::Key_E, Qt::ControlModifier | Qt::ShiftModifier);
+        QTRY_COMPARE(app.model.document().groups.size(), 1);
+        const QString instance = app.model.selectedIds().value(0);
+        QVERIFY(app.model.isGroup(instance));
+        app.workflows.dismissPendingTrust();
+        app.workflows.dismissNotice();
+        QTest::qWait(200);
+        const NodeList *nodes = app.model.nodes();
+        QRectF box;
+        for (int r = 0; r < nodes->rowCount(); ++r)
+            if (nodes->data(nodes->index(r), NodeList::NodeId).toString() == instance)
+                box = QRectF(app.model.position(instance), QSizeF(nodes->data(nodes->index(r), NodeList::Width).toReal(),
+                                                                   nodes->data(nodes->index(r), NodeList::Height).toReal()));
+        QVERIFY(!box.isEmpty());
+        const qreal u = app.model.unit();
+        const QImage shot = test_support::grab(app.window);
+        const QColor accent = app.theme.look()->property("accent").value<QColor>();
+        const auto ring = [&](qreal x, qreal y) {
+            const QColor c = shot.pixelColor(app.screen(x, y));
+            return qAbs(c.red() - accent.red()) <= 2 && qAbs(c.green() - accent.green()) <= 2
+                   && qAbs(c.blue() - accent.blue()) <= 2;
+        };
+        const qreal midX = box.center().x(), midY = box.center().y();
+        QVERIFY(ring(box.left() - 3, midY));
+        QVERIFY(ring(midX, box.top() - 3));
+        QVERIFY2(ring(box.right() + u + 3, midY), "right side");
+        QVERIFY2(ring(midX, box.bottom() + u + 3), "bottom side");
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
