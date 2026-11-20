@@ -174,7 +174,18 @@ void CanvasModel::refreshNodeTypes() {
     m_search->refresh();
 }
 
+// A group's face: its definition without the nodes inside.
+static QJsonObject faceJson(const GroupDefinition *group) {
+    QJsonObject face = group ? groupJson(*group).toObject() : QJsonObject();
+    face.remove("nodes");
+    return face;
+}
+
 void CanvasModel::restore(const Snapshot &target, bool selectAdded) {
+    // The face of the group shown, from the whole workflow (a level's own document does not hold
+    // its group's definition), before and after: the exposed marks inside follow it.
+    const QString level = scopeGroup();
+    const QJsonObject faceBefore = level.isEmpty() ? QJsonObject() : faceJson(m_root.group(level));
     // The snapshot is the whole workflow; the canvas shows its level, or the nearest level up
     // that is still there (an undo of the Make group of a group entered since).
     if (!m_scope.isEmpty()) {
@@ -237,14 +248,7 @@ void CanvasModel::restore(const Snapshot &target, bool selectAdded) {
         if (!doc.groups.contains(it.key()))
             changedGroups.insert(it.key());
     // Inside a group its nodes change with every edit; the marks only follow its face.
-    const QString level = scopeGroup();
-    auto faceJson = [](const GroupDefinition *group) {
-        QJsonObject face = group ? groupJson(*group).toObject() : QJsonObject();
-        face.remove("nodes");
-        return face;
-    };
-    const bool levelChanged = !level.isEmpty() && changedGroups.contains(level)
-                              && faceJson(m_document.group(level)) != faceJson(doc.group(level));
+    const bool levelChanged = !level.isEmpty() && faceBefore != faceJson(m_root.group(level));
     changedGroups.remove(level);
     auto faceChanged = [&](const QString &type) {
         if (levelChanged)
@@ -263,7 +267,7 @@ void CanvasModel::restore(const Snapshot &target, bool selectAdded) {
         NodeRow &row = m_rows[size_t(r)];
         const QPointF pos = point(newEntries.value(row.id).toObject().value("pos")).value_or(row.pos);
         if (!sameNode(oldNodes.value(row.id), doc.graph.nodes.value(row.id))
-            || (!changedGroups.isEmpty() && faceChanged(doc.graph.nodes.value(row.id).type))
+            || ((levelChanged || !changedGroups.isEmpty()) && faceChanged(doc.graph.nodes.value(row.id).type))
             || withoutPos(oldEntries.value(row.id).toObject()) != withoutPos(newEntries.value(row.id).toObject())
             || pinnedSize(newEntries.value(row.id).toObject())
                    != std::pair<qreal, qreal>{row.sized ? row.width : 0, row.pinnedHeight}) {

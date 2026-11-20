@@ -205,6 +205,32 @@ private slots:
         QCOMPARE(canvas.document().graph.nodes.value(first).type, QStringLiteral("local/group"));
     }
 
+    // #72: an expose inside a group tells the view at once: the node's ports change, so its
+    // exposed mark shows without leaving and entering the group again. Likewise un-exposing.
+    void exposingInsideAGroupRefreshesTheNodesPortsAtOnce() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(chain));
+        canvas.select({"gen"});
+        const QString instance = canvas.makeGroup();
+        QVERIFY(canvas.enterGroup(instance));
+        QSignalSpy changed(canvas.nodes(), &QAbstractItemModel::dataChanged);
+        auto inputsChanged = [&](const QString &id) {
+            for (const QList<QVariant> &call : changed) {
+                const QModelIndex index = call.at(0).toModelIndex();
+                const QList<int> roles = call.at(2).value<QList<int>>();
+                if (index.data(NodeList::NodeId).toString() == id && (roles.isEmpty() || roles.contains(NodeList::Inputs)))
+                    return true;
+            }
+            return false;
+        };
+        QVERIFY(canvas.exposeInput("gen", "seed"));
+        QVERIFY(inputsChanged("gen"));
+        changed.clear();
+        QVERIFY(canvas.unexposeInput("gen", "seed"));
+        QVERIFY(inputsChanged("gen"));
+        QCOMPARE(port(canvas, "gen", "seed").value("exposedAs").toString(), QString());
+    }
+
     void exposedPortsShowOnTheFaceAndInterfaceEditsReachInstances() {
         CanvasModel canvas(&m_registry);
         canvas.setDocument(document(chain));
