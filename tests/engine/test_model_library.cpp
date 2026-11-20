@@ -94,8 +94,12 @@ private slots:
         QCOMPARE(library.folders(type("io.test.pack/text-encoder")),
                  (QStringList{fugue.filePath("text-encoder"), fugue.filePath("text_encoders"), fugue.filePath("clip"),
                               comfy.filePath("text-encoder"), comfy.filePath("text_encoders"), comfy.filePath("clip")}));
-        QCOMPARE(names(library.list(type("io.test.pack/text-encoder"))),
-                 (QStringList{"mine.gguf", "t5.safetensors", "Qwen3-4B-Q8_0.gguf"}));
+        const QList<ModelFile> files = library.list(type("io.test.pack/text-encoder"));
+        QCOMPARE(names(files), (QStringList{"mine.gguf", "t5.safetensors", "Qwen3-4B-Q8_0.gguf"}));
+        // Each file knows the folder it was found in, which the model picker groups by.
+        QCOMPARE(files.at(0).folder, fugue.filePath("text-encoder"));
+        QCOMPARE(files.at(1).folder, comfy.filePath("text_encoders"));
+        QCOMPARE(files.at(2).folder, comfy.filePath("clip"));
     }
 
     void withNoExtensionsDeclaredComfyUisModelFilesAndGgufAreModels() {

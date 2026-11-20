@@ -33,11 +33,12 @@ bool hasExtension(const QString &fileName, const QStringList &extensions) {
     return false;
 }
 
-// The files under `folder` (and its subfolders) with one of `extensions`, named relative to it.
+// The files under `folder` (and its subfolders) with one of `extensions`, named relative to it;
+// `top` is the type folder the walk started in.
 // Names starting with "." are left out (QDir lists no hidden entries); a folder already walked,
 // through a link or another root, is not walked again.
-void walk(const QString &folder, const QString &prefix, const QStringList &extensions, QSet<QString> &walked,
-          QList<ModelFile> &out) {
+void walk(const QString &top, const QString &folder, const QString &prefix, const QStringList &extensions,
+          QSet<QString> &walked, QList<ModelFile> &out) {
     const QString canonical = QFileInfo(folder).canonicalFilePath();
     if (canonical.isEmpty() || walked.contains(canonical))
         return;
@@ -47,9 +48,9 @@ void walk(const QString &folder, const QString &prefix, const QStringList &exten
     for (const QFileInfo &entry : entries) {
         const QString name = prefix + entry.fileName();
         if (entry.isDir())
-            walk(entry.filePath(), name + QLatin1Char('/'), extensions, walked, out);
+            walk(top, entry.filePath(), name + QLatin1Char('/'), extensions, walked, out);
         else if (hasExtension(entry.fileName(), extensions))
-            out.append(ModelFile{QDir::cleanPath(entry.absoluteFilePath()), name, entry.size()});
+            out.append(ModelFile{QDir::cleanPath(entry.absoluteFilePath()), name, top, entry.size()});
     }
 }
 
@@ -101,7 +102,7 @@ QList<ModelFile> ModelLibrary::list(const PortType &type) const {
     QList<ModelFile> out;
     for (const QString &folder : folders(type)) {
         QList<ModelFile> found;
-        walk(folder, {}, extensions, walked, found);
+        walk(folder, folder, {}, extensions, walked, found);
         std::sort(found.begin(), found.end(), [](const ModelFile &a, const ModelFile &b) { return a.name < b.name; });
         for (const ModelFile &file : found) {
             const QString canonical = QFileInfo(file.path).canonicalFilePath();

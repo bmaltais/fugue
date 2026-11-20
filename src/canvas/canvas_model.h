@@ -610,6 +610,9 @@ public:
 
 signals:
     void documentReset();
+    // setDocument() put another document in (a tab, a file opened); documentReset follows. Not
+    // sent when a group is entered or left, or by an undo.
+    void documentReplaced();
     // The level shown changed: a group was entered or left (the rows were reset just before).
     void scopeChanged();
     void groupProblemChanged();

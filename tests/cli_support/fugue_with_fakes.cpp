@@ -4,7 +4,8 @@
 // for tests and never installed.
 //
 // Node types: every node.json under the folder $FUGUE_NODE_MANIFESTS names, which the
-// tests write. A missing folder is an empty registry.
+// tests write. A missing folder is an empty registry. One resource type is declared, as a pack
+// would: fugue/test-lora, whose files are in each model folder's `loras/` (ComfyUI's name).
 //
 // Kernels (the matching manifests are written by the tests):
 //   fugue/note   -> text "hello"
@@ -74,6 +75,7 @@ void addManifestFolder(Registry &registry, const QString &folder) {
 int main(int argc, char **argv) {
     cli::Hooks hooks;
     hooks.addNodeTypes = [](Registry &registry) {
+        registry.add(DeclaredPortType{*PortType::parse("fugue/test-lora"), PortKind::Resource, "Test LoRA", {}, {"loras"}});
         addManifestFolder(registry, qEnvironmentVariable("FUGUE_NODE_MANIFESTS"));
     };
     hooks.addKernels = [](Kernels &kernels) {

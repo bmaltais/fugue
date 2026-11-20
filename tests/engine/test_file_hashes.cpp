@@ -10,6 +10,8 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include <algorithm>
+
 #include "engine/file_hashes.h"
 #include "engine/hash.h"
 
@@ -104,6 +106,48 @@ private slots:
         FileHashes later(store);
         QCOMPARE(later.hash(a), planted);
         QCOMPARE(later.hash(b), planted);
+    }
+
+    void aHashAnotherProcessSavedIsSeenByOneAlreadyOpen() {
+        // The window's run thread keeps its store open for the life of the window; a model the
+        // canvas hashed meanwhile must not be read again when a run reaches it.
+        QTemporaryDir dir;
+        const QString path = dir.filePath("model.safetensors");
+        writeFile(path, "weights");
+        const QString store = dir.filePath("hashes.json");
+        FileHashes running(store);
+        QCOMPARE(running.known(path), QString());
+        FileHashes canvas(store);
+        canvas.remember(path, planted);
+        QVERIFY(canvas.save());
+        QCOMPARE(running.known(path), planted);
+        QCOMPARE(running.hash(path), planted);
+    }
+
+    void hashingALargeFileReportsProgressAndCanStop() {
+        QTemporaryDir dir;
+        const QString path = dir.filePath("model.safetensors");
+        const QByteArray bytes(5 * 1024 * 1024 + 7, 'x');
+        writeFile(path, bytes);
+        FileHashes hashes(dir.filePath("hashes.json"));
+        QList<qint64> seen;
+        qint64 total = 0;
+        const QString hash = hashes.hash(path, [&](qint64 done, qint64 of) {
+            seen << done;
+            total = of;
+            return true;
+        });
+        QCOMPARE(hash, sha256(bytes));
+        QCOMPARE(total, qint64(bytes.size()));
+        QVERIFY(seen.size() > 1);
+        QCOMPARE(seen.last(), qint64(bytes.size()));
+        QVERIFY(std::is_sorted(seen.begin(), seen.end()));
+
+        // Stopped part way: no hash, and nothing remembered.
+        const QString other = dir.filePath("other.safetensors");
+        writeFile(other, bytes + "y");
+        QCOMPARE(hashes.hash(other, [](qint64 done, qint64) { return done == 0; }), QString());
+        QCOMPARE(hashes.known(other), QString());
     }
 
     void aDamagedStoreIsIgnored() {

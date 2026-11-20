@@ -375,6 +375,14 @@ private slots:
         QCOMPARE(registry.portKind(*PortType::parse("io.github.alice.tools/latent")), PortKind::Unknown);
         QCOMPARE(registry.portKind(*PortType::parse("image")), PortKind::Builtin);
         QCOMPARE(registry.portKind(*PortType::parse("any")), PortKind::Any);
+        QVERIFY(registry.add(DeclaredPortType{*PortType::parse("io.github.alice.tools/lora"), PortKind::Resource,
+                                              "LoRA", {}, {}})
+                    .isEmpty());
+        // Every declared type, sorted by id (what `fugue model list` goes through).
+        QStringList declared;
+        for (const DeclaredPortType *each : registry.portTypes())
+            declared << each->type.toString();
+        QCOMPARE(declared, (QStringList{"io.github.alice.tools/latent@2", "io.github.alice.tools/lora"}));
 
         // The same declared type twice is refused; the built-ins cannot be declared.
         QVERIFY(hasErrors(registry.add(DeclaredPortType{

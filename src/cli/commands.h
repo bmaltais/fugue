@@ -60,6 +60,8 @@ Reply runsList(const Command &command, Context &context);
 Reply runsStatus(const Command &command, Context &context);
 Reply runsEvents(const Command &command, Context &context);
 Reply runsResult(const Command &command, Context &context);
+// models.cpp: `model list` (13.1), models on disk and offered by providers.
+Reply modelList(const Command &command, Context &context);
 // packs.cpp: the `pack` commands (13.1). All but list need a person (13.6).
 Reply packList(const Command &command, Context &context);
 Reply packAdd(const Command &command, Context &context);

@@ -63,7 +63,8 @@ const char *helpText =
     "  runs list | runs status|events|result|cancel <run-id>\n"
     "  node list [--type <port type>] | node describe <type id>...\n"
     "  pack list | pack add <folder|git-url> [--ref <tag|commit>] | pack update [id] [--ref ...] | pack remove|trust <id>\n"
-    "  provider, model, cache, command, skill (later releases)\n"
+    "  model list [--type <resource type>] [--hash]\n"
+    "  provider, cache, command, skill (later releases)\n"
     "With no command, fugue opens the window.\n";
 
 } // namespace

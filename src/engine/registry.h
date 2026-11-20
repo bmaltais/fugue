@@ -82,6 +82,8 @@ public:
     // Builtin, Any, the declared kind, or Unknown.
     PortKind portKind(const PortType &type) const;
     const DeclaredPortType *portType(const PortType &type) const;
+    // Every declared port type, sorted by PortType::toString().
+    QList<const DeclaredPortType *> portTypes() const;
 
     // The configured provider instances in the user's order (8.3), replacing
     // the ones set before. Every name must be set and unique; when the result

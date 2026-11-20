@@ -142,6 +142,13 @@ PortKind Registry::portKind(const PortType &type) const {
     return declared ? declared->kind : PortKind::Unknown;
 }
 
+QList<const DeclaredPortType *> Registry::portTypes() const {
+    QList<const DeclaredPortType *> out;
+    for (const auto &[key, type] : m_portTypes)
+        out << &type;
+    return out;
+}
+
 const DeclaredPortType *Registry::portType(const PortType &type) const {
     const auto found = m_portTypes.find(type.toString());
     return found == m_portTypes.end() ? nullptr : &found->second;

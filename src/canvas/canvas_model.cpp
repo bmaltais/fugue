@@ -199,6 +199,7 @@ void CanvasModel::setDocument(const Document &document) {
     m_outerViews.clear();
     m_root = Document();
     m_undo->clear();
+    emit documentReplaced();
     loadLevel(document);
     if (wasInGroup)
         emit scopeChanged();

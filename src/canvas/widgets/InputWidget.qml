@@ -61,9 +61,16 @@ Rectangle {
     readonly property real number: typeof literal === "number" ? literal
                                    : port.value !== undefined && port.value !== "" && !isNaN(Number(port.value))
                                      ? Number(port.value) : 0
+    // A model file picked and still being hashed (WidgetEdit::setDiskModel): {progress, name},
+    // {error} when it could not be read, or empty.
+    readonly property var hashing: kind === "model" && edits.hashRevision >= 0 ? edits.hashState(nodeId, name) : ({})
     readonly property string valueText: {
         if (linked)
             return edits.source(nodeId, name)
+        if (hashing.error !== undefined)
+            return hashing.error
+        if (hashing.progress !== undefined)
+            return qsTr("Reading model… %1%").arg(Math.floor(hashing.progress * 100))
         if (kind === "model" && (port.value === undefined || port.value === ""))
             return port.required ? qsTr("Choose a model") : qsTr("Any ready model")
         return port.value !== undefined ? port.value : ""
@@ -115,7 +122,8 @@ Rectangle {
         lineHeight: root.tall ? 16 : 1
         elide: root.kind === "file" || root.kind === "folder" ? Text.ElideMiddle : Text.ElideRight
         textFormat: Text.PlainText
-        color: root.linked || root.isDefault || root.kind === "model" && root.literal === undefined
+        color: root.hashing.error !== undefined ? root.look.error
+               : root.linked || root.isDefault || root.kind === "model" && root.literal === undefined
                ? root.look.label : root.look.text
         font.pixelSize: root.look.labelSize
         font.weight: root.tall ? Font.Normal : Font.Medium
@@ -329,21 +337,29 @@ Rectangle {
         const entries = []
         const spec = edits.spec(nodeId, name)
         const current = literal !== undefined ? literal.name : undefined
+        const currentHash = literal !== undefined ? literal.hash : undefined
         if (spec.optional)
             entries.push({ text: qsTr("Any ready model"), value: { unset: true }, checked: current === undefined })
         // Grouped by provider instance (this machine, a paired host), each under its name. A
         // model that is not ready says so, and its note says how to make it ready: Fugue never
-        // starts one by itself (8.4).
+        // starts one by itself (8.4). Then the files on disk, under the folder each is in.
         const listed = edits.models(nodeId, name)
         let group = null
         for (const m of listed) {
-            if (m.provider !== group) {
-                group = m.provider
-                entries.push({ text: m.provider, heading: true, enabled: false })
+            const heading = m.path !== undefined ? m.folder : m.provider
+            if (heading !== group) {
+                group = heading
+                entries.push({ text: heading, heading: true, enabled: false })
+            }
+            if (m.path !== undefined) {
+                // The file a stored handle names is the one with its hash, not only its name.
+                entries.push({ text: m.title, detail: sizeText(m.size), value: { disk: m.path },
+                               checked: currentHash !== undefined && m.handle.hash === currentHash })
+                continue
             }
             const status = m.status === "ready" ? "" : m.status === "loading" ? qsTr("loading") : qsTr("not running")
             entries.push({ text: m.title, detail: status, note: m.note, value: { handle: m.handle },
-                           checked: m.name === current })
+                           checked: m.name === current && currentHash === undefined })
         }
         if (edits.modelsLoading(nodeId, name))
             entries.push({ text: qsTr("Looking for models…"), enabled: false })
@@ -351,6 +367,11 @@ Rectangle {
             entries.push({ text: edits.modelsEmptyText(nodeId, name), enabled: false, note: "" })
         entries.push({ text: qsTr("Type a name…"), value: { typeName: true } })
         return entries
+    }
+    // A model file's size as people read it: "6.2 GB", "335 MB".
+    function sizeText(bytes) {
+        const gb = bytes / 1e9
+        return gb >= 1 ? qsTr("%1 GB").arg(gb.toFixed(1)) : qsTr("%1 MB").arg(Math.max(1, Math.round(bytes / 1e6)))
     }
     // A Load Image's picker: the file browser, then the images last pasted or dropped.
     function inputEntries() {
@@ -375,6 +396,8 @@ Rectangle {
                 return edits.unset(nodeId, name)
             if (value.typeName)
                 return openEditor()
+            if (value.disk !== undefined)
+                return edits.setDiskModel(nodeId, name, value.disk)
             return edits.setModel(nodeId, name, value.handle)
         }
     }

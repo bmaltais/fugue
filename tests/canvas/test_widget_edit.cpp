@@ -5,13 +5,20 @@
 
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QSignalSpy>
+#include <QTemporaryDir>
 #include <QtTest>
 #include <QUndoStack>
 
 #include "canvas/canvas_model.h"
 #include "canvas/widget_edit.h"
 #include "engine/document.h"
+#include "engine/file_hashes.h"
+#include "engine/hash.h"
+#include "engine/model_library.h"
 #include "engine/registry.h"
 #include "nodes/builtin.h"
 #include "widget_fixture.h"
@@ -40,6 +47,12 @@ const char *fixture = R"({
   "layout": {"nodes": {"all": {"pos": [0, 0]}, "prompt": {"pos": [400, 0], "title": "Prompt"},
                        "join": {"pos": [700, 0]}, "gone": {"pos": [0, 600]}}}
 })";
+
+bool writeModel(const QString &path, const QByteArray &bytes) {
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QFile file(path);
+    return file.open(QIODevice::WriteOnly | QIODevice::Truncate) && file.write(bytes) == bytes.size();
+}
 
 struct Fixture {
     Registry registry;
@@ -321,7 +334,7 @@ private slots:
         QCOMPARE(askedFor, QString("fugue/image-model"));
         QVERIFY(f.edits.modelsLoading("all", "model"));
         const QJsonObject zimage{{"resource", "fugue/image-model"}, {"name", "z-image-turbo"}};
-        answer({{"z-image-turbo", zimage, "ready", "This machine", "", ""}});
+        answer({widget_test::served("z-image-turbo", zimage, "ready", "This machine")});
         QVERIFY(!f.edits.modelsLoading("all", "model"));
         QVERIFY(changed.count() >= 1);
         const QVariantList listed = f.edits.models("all", "model");
@@ -339,6 +352,127 @@ private slots:
         QCOMPARE(f.edits.value("all", "model").toMap().value("name").toString(), QString("flux2-klein"));
         // Unset: any ready model (8.4).
         f.edits.unset("all", "model");
+        QCOMPARE(f.stored("all", "model"), QJsonValue(QJsonValue::Undefined));
+    }
+
+    void thePickerListsModelFilesOnDiskByFolderBesideTheProvidersModels() {
+        QTemporaryDir fugueModels, comfy;
+        QVERIFY(writeModel(comfy.filePath("image-model/b.gguf"), "b"));
+        QVERIFY(writeModel(fugueModels.filePath("image-model/sub/a.safetensors"), "a"));
+        Fixture f;
+        f.edits.setModelRoots({fugueModels.path(), comfy.path()});
+        const QJsonObject served{{"resource", "fugue/image-model"}, {"name", "z-image-turbo"}};
+        f.edits.setModelSource([&](const QString &, const QStringList &, std::function<void(QList<WidgetEdit::Model>)> done) {
+            done({widget_test::served("z-image-turbo", served, "ready", "This machine")});
+        });
+        f.edits.requestModels("all", "model");
+        const QVariantList listed = f.edits.models("all", "model");
+        QCOMPARE(listed.size(), 3);
+        // What providers offer first, then each folder's files in the folders' order.
+        QCOMPARE(listed.at(0).toMap().value("provider").toString(), QString("This machine"));
+        const QVariantMap a = listed.at(1).toMap();
+        QCOMPARE(a.value("name").toString(), QString("sub/a.safetensors"));
+        QCOMPARE(a.value("folder").toString(), fugueModels.filePath("image-model"));
+        QCOMPARE(a.value("path").toString(), fugueModels.filePath("image-model/sub/a.safetensors"));
+        QCOMPARE(a.value("size").toLongLong(), 1);
+        QCOMPARE(a.value("provider").toString(), QString());
+        // Not hashed yet: listing reads no model file, so the handle has no hash.
+        QVERIFY(!a.value("handle").toMap().contains("hash"));
+        QCOMPARE(listed.at(2).toMap().value("folder").toString(), comfy.filePath("image-model"));
+    }
+
+    void pickingAFileOnDiskHashesItInTheBackgroundOnceThenStoresItsHandle() {
+        QTemporaryDir models;
+        const QString path = models.filePath("image-model/flux/model.safetensors");
+        QVERIFY(writeModel(path, QByteArray(3 * 1024 * 1024, 'w')));
+        FileHashes running(FileHashes::defaultPath());
+        Fixture f;
+        f.edits.setModelRoots({models.path()});
+        const int before = f.steps();
+        QSignalSpy hashing(&f.edits, &WidgetEdit::hashingChanged);
+        QCOMPARE(f.edits.setDiskModel("all", "model", path), QString());
+        // Nothing is stored until the hash is known; meanwhile the input says it is reading.
+        QCOMPARE(f.stored("all", "model"), QJsonValue(QJsonValue::Undefined));
+        QVERIFY(f.edits.hashState("all", "model").contains("progress"));
+        QTRY_VERIFY(f.edits.hashState("all", "model").isEmpty());
+        QVERIFY(hashing.count() >= 2);
+        const QString hash = sha256(QByteArray(3 * 1024 * 1024, 'w'));
+        QCOMPARE(f.stored("all", "model"),
+                 QJsonValue(QJsonObject{{"resource", "fugue/image-model"}, {"name", "flux/model.safetensors"}, {"hash", hash}}));
+        QCOMPARE(f.steps(), before + 1);
+        // Remembered for every Fugue process, and listed with it. A run's store, open since
+        // before the pick (the window's run thread), finds the file by it: the node gets its path.
+        FileHashes stored(FileHashes::defaultPath());
+        QCOMPARE(stored.known(path), hash);
+        QCOMPARE(running.known(path), hash);
+        const Result<QJsonValue> given = ModelLibrary({models.path()}, &f.registry)
+                                             .withPaths(f.stored("all", "model"), running, ModelLibrary::Hashing::RememberedOnly);
+        QVERIFY(given.ok());
+        QCOMPARE(given.value().toObject().value("path").toString(), path);
+        f.edits.requestModels("all", "model");
+        QCOMPARE(f.edits.models("all", "model").last().toMap().value("handle").toMap().value("hash").toString(), hash);
+
+        // A file whose hash is remembered is set at once.
+        f.edits.unset("all", "model");
+        QCOMPARE(f.edits.setDiskModel("all", "model", path), QString());
+        QVERIFY(f.edits.hashState("all", "model").isEmpty());
+        QCOMPARE(f.stored("all", "model").toObject().value("hash").toString(), hash);
+    }
+
+    void anotherValueSetWhileAFileIsHashedWins() {
+        QTemporaryDir models;
+        const QString path = models.filePath("image-model/big.gguf");
+        QVERIFY(writeModel(path, QByteArray(4 * 1024 * 1024, 'q')));
+        Fixture f;
+        f.edits.setModelRoots({models.path()});
+        QCOMPARE(f.edits.setDiskModel("all", "model", path), QString());
+        QCOMPARE(f.edits.setModelName("all", "model", "flux2-klein"), QString());
+        QVERIFY(f.edits.hashState("all", "model").isEmpty());
+        // The hash still arrives and is remembered, but does not replace the typed name.
+        QTRY_COMPARE(FileHashes(FileHashes::defaultPath()).known(path), sha256(QByteArray(4 * 1024 * 1024, 'q')));
+        QTest::qWait(50);
+        QCOMPARE(f.stored("all", "model").toObject().value("name").toString(), QString("flux2-klein"));
+    }
+
+    void aPickWaitsForItsLevelAndIsDroppedWhenTheDocumentIsReplaced() {
+        QTemporaryDir models;
+        const QString path = models.filePath("image-model/large.gguf");
+        const QByteArray bytes(6 * 1024 * 1024, 'g');
+        QVERIFY(writeModel(path, bytes));
+        Fixture f;
+        f.edits.setModelRoots({models.path()});
+        f.canvas.select({"prompt", "join"});
+        const QString group = f.canvas.makeGroup();
+        QVERIFY2(!group.isEmpty(), qPrintable(f.canvas.groupProblem()));
+        // Picked on the top level, then into a group while it is read: the group's nodes never
+        // show it, and the handle is stored once the top level is back.
+        QCOMPARE(f.edits.setDiskModel("all", "model", path), QString());
+        QVERIFY(f.canvas.enterGroup(group));
+        QVERIFY(f.edits.hashState("all", "model").isEmpty());
+        QTRY_COMPARE(FileHashes(FileHashes::defaultPath()).known(path), sha256(bytes));
+        QTest::qWait(50);
+        QVERIFY(f.canvas.leaveGroup());
+        QCOMPARE(f.stored("all", "model").toObject().value("hash").toString(), sha256(bytes));
+
+        // Another document (a tab, a file opened) drops a pick still being read.
+        const QString other = models.filePath("image-model/other.gguf");
+        QVERIFY(writeModel(other, bytes + "o"));
+        f.edits.unset("all", "model");
+        QCOMPARE(f.edits.setDiskModel("all", "model", other), QString());
+        f.canvas.setDocument(document(fixture));
+        QVERIFY(f.edits.hashState("all", "model").isEmpty());
+        QTRY_VERIFY(!FileHashes(FileHashes::defaultPath()).known(other).isEmpty());
+        QTest::qWait(50);
+        QCOMPARE(f.stored("all", "model"), QJsonValue(QJsonValue::Undefined));
+    }
+
+    void aFileThatIsNotAModelOfTheInputsTypeIsRefused() {
+        QTemporaryDir models;
+        QVERIFY(writeModel(models.filePath("elsewhere/x.gguf"), "x"));
+        Fixture f;
+        f.edits.setModelRoots({models.path()});
+        QVERIFY(!f.edits.setDiskModel("all", "model", models.filePath("elsewhere/x.gguf")).isEmpty());
+        QVERIFY(!f.edits.setDiskModel("all", "count", models.filePath("elsewhere/x.gguf")).isEmpty());
         QCOMPARE(f.stored("all", "model"), QJsonValue(QJsonValue::Undefined));
     }
 

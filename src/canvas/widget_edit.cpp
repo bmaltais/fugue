@@ -3,9 +3,12 @@
 
 #include "canvas/canvas_model.h"
 #include "canvas/input_links.h"
-#include "engine/providers.h"
+#include "engine/file_hashes.h"
+#include "engine/model_library.h"
 #include "engine/registry.h"
+#include "engine/settings.h"
 
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QPointer>
 #include <QRandomGenerator>
@@ -79,77 +82,24 @@ void setIncrementing(Document &document, const QString &node, const QString &inp
     document.layout = layout;
 }
 
-// Asks each enabled provider instance to describe itself and lists the models it offers of
-// the resource type for one of the capabilities, grouped by instance in the user's order.
-// The providers live until every reply is in.
-WidgetEdit::ModelSource providerModels() {
-    return [](const QString &type, const QStringList &capabilities, std::function<void(QList<WidgetEdit::Model>)> done) {
-        const Result<QList<ProviderInstance>> instances = loadProviderInstances(providersPath());
-        if (!instances.ok())
-            return done({});
-        struct Pending {
-            int left = 0;
-            QList<QList<WidgetEdit::Model>> byInstance; // in the user's order
-            std::function<void(QList<WidgetEdit::Model>)> done;
-            std::vector<std::shared_ptr<Provider>> providers;
-        };
-        auto pending = std::make_shared<Pending>();
-        pending->done = std::move(done);
-        QList<std::pair<std::shared_ptr<Provider>, QString>> asked;
-        for (const ProviderInstance &instance : instances.value()) {
-            if (!instance.enabled)
-                continue;
-            Result<std::shared_ptr<Provider>> made = createProvider(instance);
-            if (!made.ok())
-                continue;
-            pending->providers.push_back(made.value());
-            asked.append({made.value(), instance.name});
-        }
-        pending->left = int(asked.size());
-        pending->byInstance.resize(asked.size());
-        if (asked.isEmpty())
-            return pending->done({});
-        for (qsizetype index = 0; index < asked.size(); ++index) {
-            const auto &[provider, name] = asked.at(index);
-            provider->describe([pending, type, capabilities, index, name = name](const Result<Description> &description) {
-                QList<WidgetEdit::Model> &models = pending->byInstance[index];
-                if (description.ok()) {
-                    for (const CapabilityOffer &offer : description->capabilities) {
-                        if (!capabilities.isEmpty() && !capabilities.contains(offer.capability))
-                            continue;
-                        for (const OfferedModel &model : offer.models) {
-                            if (model.handle.value("resource").toString() != type)
-                                continue;
-                            const bool listed = std::any_of(models.begin(), models.end(), [&](const WidgetEdit::Model &m) {
-                                return sameModel(m.handle, model.handle);
-                            });
-                            if (listed)
-                                continue;
-                            const QString note = model.status == ModelStatus::Ready
-                                                     ? QString()
-                                                     : (model.reason + QLatin1Char(' ') + model.hint).trimmed();
-                            models.append({model.handle.value("name").toString(), model.handle,
-                                           modelStatusName(model.status), name, model.title, note});
-                        }
-                    }
-                }
-                if (--pending->left > 0)
-                    return;
-                QList<WidgetEdit::Model> all;
-                for (const QList<WidgetEdit::Model> &each : std::as_const(pending->byInstance))
-                    all += each;
-                pending->done(all);
-                // Not from inside a provider's own reply.
-                QTimer::singleShot(0, [pending] { pending->providers.clear(); });
-            });
-        }
-    };
-}
-
 } // namespace
 
 WidgetEdit::WidgetEdit(const Registry *registry, CanvasModel *canvas, QObject *parent)
     : QObject(parent), m_registry(registry), m_canvas(canvas) {
+    // One file at a time: two models read at once from one disk each take twice as long.
+    m_hashPool.setMaxThreadCount(1);
+    connect(canvas, &CanvasModel::documentReplaced, this, [this] {
+        if (m_picks.isEmpty())
+            return;
+        m_picks.clear();
+        ++m_hashRevision;
+        emit hashingChanged();
+    });
+    connect(canvas, &CanvasModel::scopeChanged, this, [this] {
+        storePicks();
+        ++m_hashRevision;
+        emit hashingChanged();
+    });
     connect(canvas, &CanvasModel::documentReset, this, [this] {
         if (!editing())
             return;
@@ -279,10 +229,21 @@ QString WidgetEdit::check(const QString &node, const QString &input, const QStri
     return unsetIt ? QString() : checkValue(t, value);
 }
 
+WidgetEdit::~WidgetEdit() {
+    // A model being hashed is not waited for: the next pick hashes it again.
+    m_stopHashing->store(true);
+    m_hashPool.waitForDone();
+}
+
 void WidgetEdit::write(const QString &node, const QString &input, const QJsonValue &value, const QString &text) {
     Document document = m_canvas->scopeDocument();
     if (!document.graph.nodes.contains(node))
         return;
+    // Any other value for the input replaces a file still being hashed for it.
+    if (dropPick(node, input)) {
+        ++m_hashRevision;
+        emit hashingChanged();
+    }
     Node &n = document.graph.nodes[node];
     if (value.isUndefined())
         n.inputs.remove(input);
@@ -549,9 +510,11 @@ void WidgetEdit::requestModels(const QString &node, const QString &input) {
     const QString key = modelsKey(node, input);
     if (key.isEmpty())
         return;
-    const QString type = target(node, input).spec->type.type.toString();
+    const PortType &portType = target(node, input).spec->type.type;
+    const QString type = portType.toString();
+    m_diskModels.insert(key, listDiskModels(library(), portType, hashes()));
     if (!m_source)
-        m_source = providerModels();
+        m_source = listOfferedModels;
     m_loading.insert(key);
     ++m_modelsRevision;
     emit modelsChanged();
@@ -571,13 +534,20 @@ QVariantList WidgetEdit::models(const QString &node, const QString &input) const
     if (key.isEmpty())
         return {};
     QVariantList list;
-    for (const Model &model : m_models.value(key))
-        list.append(QVariantMap{{"name", model.name},
-                                {"title", model.title.isEmpty() ? model.name : model.title},
-                                {"handle", model.handle.toVariantMap()},
-                                {"status", model.status},
-                                {"provider", model.provider},
-                                {"note", model.note}});
+    for (const Model &model : m_models.value(key) + m_diskModels.value(key)) {
+        QVariantMap entry{{"name", model.name},
+                          {"title", model.title.isEmpty() ? model.name : model.title},
+                          {"handle", model.handle.toVariantMap()},
+                          {"status", model.status},
+                          {"provider", model.provider},
+                          {"note", model.note}};
+        if (model.onDisk()) {
+            entry.insert("path", model.path);
+            entry.insert("folder", model.folder);
+            entry.insert("size", model.size);
+        }
+        list.append(entry);
+    }
     return list;
 }
 
@@ -591,8 +561,14 @@ QString WidgetEdit::modelsEmptyText(const QString &node, const QString &input) c
     const bool image = std::any_of(wanted.begin(), wanted.end(), [](const QString &capability) {
         return capability.startsWith(QLatin1String("image."));
     });
-    return image ? tr("No image model available: start one in omarchy-local-ai or add a provider")
-                 : tr("No model available: start one in omarchy-local-ai or add a provider");
+    if (image)
+        return tr("No image model available: start one in omarchy-local-ai or add a provider");
+    // A model file of this kind goes in its folder in Fugue's models folder (8.9).
+    const Target t = target(node, input);
+    const QString folder = t.spec ? library().folders(t.spec->type.type).value(0) : QString();
+    if (folder.isEmpty())
+        return tr("No model available: start one in omarchy-local-ai or add a provider");
+    return tr("No model found: put one in %1, or add its folder to Extra model folders in Settings").arg(folder);
 }
 
 QString WidgetEdit::setModel(const QString &node, const QString &input, const QVariantMap &handle) {
@@ -605,4 +581,145 @@ QString WidgetEdit::setModelName(const QString &node, const QString &input, cons
     if (target(node, input).widget != QLatin1String("model"))
         return tr("%1 cannot be edited here.").arg(input);
     return setText(node, input, name);
+}
+
+// --- files on disk -------------------------------------------------------------
+
+ModelLibrary WidgetEdit::library() const {
+    return ModelLibrary(m_modelRoots ? *m_modelRoots : ModelLibrary::roots(currentSettings()), m_registry);
+}
+
+FileHashes &WidgetEdit::hashes() {
+    if (!m_hashes)
+        m_hashes = std::make_shared<FileHashes>(FileHashes::defaultPath());
+    return *m_hashes;
+}
+
+QString WidgetEdit::setDiskModel(const QString &node, const QString &input, const QString &path) {
+    const Target t = target(node, input);
+    if (t.widget != QLatin1String("model"))
+        return tr("%1 cannot be edited here.").arg(input);
+    if (m_canvas->scopeDocument().graph.nodes.value(node).inputs.value(input).kind() == InputValue::Kind::Link)
+        return tr("%1 is linked; take the link out to pick a model.").arg(label(*t.spec));
+    // Only a file the library lists for the input's type: its name is what finds it again.
+    const PortType &type = t.spec->type.type;
+    // The files the picker listed, else the folders walked now.
+    const QString key = modelsKey(node, input);
+    QList<Model> files = m_diskModels.value(key);
+    if (files.isEmpty())
+        files = listDiskModels(library(), type, hashes());
+    const QString canonical = QFileInfo(path).canonicalFilePath();
+    const auto file = std::find_if(files.begin(), files.end(), [&](const Model &each) {
+        return !canonical.isEmpty() && QFileInfo(each.path).canonicalFilePath() == canonical;
+    });
+    if (file == files.end())
+        return tr("%1 is not a model file of this kind in the model folders.").arg(QFileInfo(path).fileName());
+    if (const QString known = hashes().known(file->path); !known.isEmpty())
+        return setValue(node, input, diskHandle(type.toString(), file->name, known).toVariantMap());
+    dropPick(node, input);
+    Pick pick;
+    pick.scope = m_canvas->scopePath();
+    pick.node = node;
+    pick.input = input;
+    pick.path = file->path;
+    pick.resource = type.toString();
+    pick.name = file->name;
+    m_picks.append(pick);
+    startHashing(file->path);
+    ++m_hashRevision;
+    emit hashingChanged();
+    return {};
+}
+
+void WidgetEdit::startHashing(const QString &path) {
+    if (m_hashing.contains(path))
+        return;
+    m_hashing.insert(path);
+    QPointer<WidgetEdit> self(this);
+    hashes(); // made here, on the window's thread
+    std::shared_ptr<FileHashes> store = m_hashes;
+    std::shared_ptr<std::atomic_bool> stop = m_stopHashing;
+    m_hashPool.start([self, store, stop, path] {
+        int shown = -1; // percent last told, so the window is told at most a hundred times
+        const QString hash = store->hash(path, [&](qint64 done, qint64 total) {
+            const int percent = total > 0 ? int(done * 100 / total) : 100;
+            if (percent != shown) {
+                shown = percent;
+                QMetaObject::invokeMethod(self, [self, path, percent] {
+                    if (!self)
+                        return;
+                    bool moved = false;
+                    for (Pick &pick : self->m_picks)
+                        if (pick.path == path) {
+                            pick.progress = percent / 100.0;
+                            moved = true;
+                        }
+                    if (moved) {
+                        ++self->m_hashRevision;
+                        emit self->hashingChanged();
+                    }
+                });
+            }
+            return !stop->load();
+        });
+        if (stop->load())
+            return;
+        if (!hash.isEmpty())
+            store->save();
+        QMetaObject::invokeMethod(self, [self, path, hash] {
+            if (self)
+                self->hashed(path, hash);
+        });
+    });
+}
+
+void WidgetEdit::hashed(const QString &path, const QString &hash) {
+    m_hashing.remove(path);
+    for (Pick &pick : m_picks) {
+        if (pick.path != path)
+            continue;
+        if (hash.isEmpty())
+            pick.error = tr("%1 could not be read.").arg(QFileInfo(path).fileName());
+        else
+            pick.hash = hash;
+    }
+    storePicks();
+    ++m_hashRevision;
+    emit hashingChanged();
+}
+
+void WidgetEdit::storePicks() {
+    const QString scope = m_canvas->scopePath();
+    QList<Pick> ready;
+    for (qsizetype i = m_picks.size() - 1; i >= 0; --i)
+        if (m_picks.at(i).scope == scope && !m_picks.at(i).hash.isEmpty())
+            ready.prepend(m_picks.takeAt(i));
+    // Written only while the node still has the input: it may be gone by now.
+    for (const Pick &pick : std::as_const(ready))
+        if (target(pick.node, pick.input).widget == QLatin1String("model"))
+            setValue(pick.node, pick.input, diskHandle(pick.resource, pick.name, pick.hash).toVariantMap());
+}
+
+const WidgetEdit::Pick *WidgetEdit::pickFor(const QString &node, const QString &input) const {
+    const QString scope = m_canvas->scopePath();
+    for (const Pick &pick : m_picks)
+        if (pick.scope == scope && pick.node == node && pick.input == input)
+            return &pick;
+    return nullptr;
+}
+
+bool WidgetEdit::dropPick(const QString &node, const QString &input) {
+    const QString scope = m_canvas->scopePath();
+    return m_picks.removeIf([&](const Pick &pick) {
+        return pick.scope == scope && pick.node == node && pick.input == input;
+    }) > 0;
+}
+
+QVariantMap WidgetEdit::hashState(const QString &node, const QString &input) const {
+    const Pick *pick = pickFor(node, input);
+    if (!pick)
+        return {};
+    if (!pick->error.isEmpty())
+        return {{"error", pick->error}};
+    return {{"progress", pick->progress}, {"name", pick->name}};
 }

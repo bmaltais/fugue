@@ -209,7 +209,9 @@ Rules:
   (loaded). The scheduler decides when a model is loaded and keeps it across nodes
   ([9.3](#93-residency)).
 - An unwired input of a resource type shows a model picker listing the models of that type found
-  on disk and offered by providers. The chosen handle is stored as the input's literal.
+  on disk and offered by providers. The chosen handle is stored as the input's literal. A file on
+  disk is hashed when it is picked, on a worker thread, with the input showing how far; the hash
+  is remembered, so each file is read once.
 
 ### 2.6 Data values: latents and conditioning
 
@@ -1755,7 +1757,7 @@ Each command works with no display, never opens a dialog, and takes `--json`. Fo
 | `fugue node new <name>`, `fugue node test <path>` | Authoring ([6.11](#611-authoring-tools)). |
 | `fugue pack list`, `add <folder\|git-url> [--ref <tag\|commit>]`, `remove <id>`, `update [id] [--ref <tag\|commit>]`, `trust <id>` | Packs ([6.6](#66-installing)). All but `list` need a human ([13.6](#136-safety)). |
 | `fugue provider list` | Instances, their capabilities and status. |
-| `fugue model list [--type <resource type>]` | Models found on disk and offered by providers. |
+| `fugue model list [--type <resource type>] [--hash]` | Models found on disk and offered by providers. A file on disk has a `handle` only once its hash is known (listing reads no model file); `--hash` hashes the others, once each, so every file gets a full handle; a file it cannot read is a `media_unreadable` warning. |
 | `fugue cache status`, `fugue cache clear [--workflow <file>] [--node <id>]` | The result cache. |
 | `fugue command list` | The command registry and current key bindings. |
 | `fugue skill install` | Install the bundled agent skill ([13.5](#135-agent-skill)). |
@@ -2108,7 +2110,7 @@ Building M2 made these further choices.
 | Numbers: a dot or a comma as the decimal point (a comma before exactly three digits, as in 1,000, or two separators, as in 1.000,5, is refused as grouping rather than read as another number); empty text unsets an input with a default or an optional one, and is refused for a required number with none. Chevrons and Up/Down step by `step` (1 for whole numbers, else 0.1), held in `min`..`max` and rounded to the step; a drag on a spin scrubs a step per 6 units, a drag on a slider sets the value by position, and a click (no drag) types, as Blender does | 6.2 | medium |
 | Text: empty is the empty text, except an optional input with no default (a file, a folder), where it unsets | 6.2 | medium |
 | Seed modes: randomize stores `{"auto": "random"}`; increment keeps a number and lists the input in `layout.nodes.<id>.increment`, so the file keeps the choice and a run sees a number; going from randomize to a number takes the seed of the result the node shows (the run's value on the output of the same name, "Seed used"), else draws one. The canvas adds one to each incrementing seed after a run it starts (wrapping to `min` past `max`), as one undo step | 6.2, 4.5 | medium |
-| The model picker lists, when it opens, the models every enabled provider instance offers of the input's resource type (for the node type's capabilities, 8.4), with their state; models on disk (8.9) join it in M5. A typed name is stored as a handle served by that name; an optional model input can go back to "Any ready model" (unset, 8.4) | 2.5, 8.4 | medium |
+| The model picker lists, when it opens, the models every enabled provider instance offers of the input's resource type (for the node type's capabilities, 8.4), with their state; then the input type's files on disk (8.9), by folder (#76). A typed name is stored as a handle served by that name; an optional model input can go back to "Any ready model" (unset, 8.4) | 2.5, 8.4 | medium |
 | A linked value input shows its source ("Prompt · Text") in place of the widget. List inputs keep a read-only row (`[n]`); a placeholder's inputs show their value read-only | 3.2, 3.6 | medium-high |
 | File and folder widgets store the path the portal returns as it is, or the path typed; the canvas checks no file roots (see the #19 row on canvas runs and roots) | 6.2, 13.6 | medium |
 | Text-field focus (12.4): widget fields are text inputs, so while one has focus its keys are the field's; a press on the canvas or on another widget takes the focus from the field first, ending its edit. Menus are modal, so the window's keys sleep while one is open | 12.4 | high |
@@ -2179,6 +2181,8 @@ Building M2 made these further choices.
 | Finding a model (#66): by remembered hash, then by hashing the files with the handle's name; never by hashing the whole folder (a ComfyUI folder holds hundreds of GB). A renamed model is found once its hash is remembered | 8.9, 2.5 | medium |
 | A derived handle (#66) gets no `path`; the handles inside it (base, each `apply` step) get theirs | 7.2, 2.5 | medium-high |
 | A handle without a hash cannot be found on disk: `model_missing` (a provider serves name-only handles) | 2.5, 8.9 | medium-high |
+| Picking a model file (#76) hashes it then, one file at a time on a worker thread, and stores the handle when the hash is known (its own undo step); another value set meanwhile wins. A pick belongs to the level it was made at (entering a group meanwhile holds it until that level is shown again), and another document (a tab, a file opened) drops it; the hash is remembered either way. ComfyUI's picker stores a file name; Fugue's handle needs the hash (2.5), and hashing at pick time means a run never waits on it. The hash goes to the shared store, which a process already holding it reads again when another has saved since (the window's run thread lives as long as the window) | 2.5, 8.9 | medium-high |
+| `fugue model list` (#76) prints a disk file's handle only when its hash is remembered, and takes `--hash` to hash the rest: a listing that reads every model would take minutes on a large folder, and a handle without its hash names a provider's model (2.5). `--hash` is also the way to hash a whole folder once (8.9) | 13.1, 13.4 | medium-high |
 | Helper packaging (#77, the owner's choice): Vulkan helper in `fugue`, CUDA helper in a `fugue-helper-cuda` split package, as Arch splits ollama and ollama-cuda; CI builds the Vulkan one, the CUDA toolkit being several GB | 8.10 | high |
 | Stage hooks as image options (`fugue.*`) of stable-diffusion.cpp's option API, in place of the spike's environment variables; the extensions' encode-time state crosses through two virtual methods on its extension interface | 8.10 | medium-high |
 | No pixel-parity test was built for the first pin (#77): the spike showed identical pixels at this commit (spikes/02), and the owner judged that enough. #77 ran these staged once: Z-Image, FLUX.2 Klein 4B and 9B, FLUX.1, SDXL, SD 1.5, Qwen-Image Edit 2511 (the Qwen-Image 2.1 files at hand did not load, stable-diffusion.cpp failing on them before any stage), image-to-image from a latent, and IP-Adapter. PhotoMaker and PuLID were not run (no ID images or embedding at hand), so their carried state is unverified. A pin move runs only the few checks 8.10 lists, by hand (GPU and model files), as the owner asked: the families are stable-diffusion.cpp's to test | 8.10 | medium-high |

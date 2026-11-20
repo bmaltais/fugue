@@ -45,37 +45,68 @@ QString key(const QString &path) {
 } // namespace
 
 FileHashes::FileHashes(QString storePath) : m_storePath(std::move(storePath)) {
+    m_entries = read(m_storePath, &m_stamp);
+}
+
+FileHashes::StoreStamp FileHashes::stampOf(const QString &storePath) {
+    const std::optional<Stat> stat = statFile(storePath);
+    return stat ? StoreStamp{stat->size, stat->mtimeNs} : StoreStamp{};
+}
+
+QHash<QString, FileHashes::Entry> FileHashes::read(const QString &storePath, StoreStamp *stamp) {
+    if (stamp)
+        *stamp = stampOf(storePath);
     // A memo: one that is missing, corrupt or of another version is simply started again.
-    const Result<QJsonObject> read = readJsonObject(m_storePath);
-    const QJsonObject root = read ? read.value() : QJsonObject();
+    const Result<QJsonObject> json = readJsonObject(storePath);
+    const QJsonObject root = json ? json.value() : QJsonObject();
+    QHash<QString, Entry> entries;
     if (root.value("fugue-hashes").toInt() != storeVersion)
-        return;
+        return entries;
     const QJsonObject files = root.value("files").toObject();
     for (auto it = files.begin(); it != files.end(); ++it) {
         const QJsonObject entry = it.value().toObject();
         const QString hash = entry.value("hash").toString();
         if (isSha256(hash))
-            m_entries.insert(it.key(), Entry{entry.value("size").toInteger(), entry.value("mtime_ns").toInteger(), hash});
+            entries.insert(it.key(), Entry{entry.value("size").toInteger(), entry.value("mtime_ns").toInteger(), hash});
     }
+    return entries;
+}
+
+const FileHashes::Entry *FileHashes::lookup(const QString &key, qint64 size, qint64 mtimeNs) {
+    const auto matches = [&](const Entry &entry) { return entry.size == size && entry.mtimeNs == mtimeNs; };
+    if (const auto it = m_entries.constFind(key); it != m_entries.constEnd() && matches(*it))
+        return &*it;
+    if (stampOf(m_storePath) == m_stamp)
+        return nullptr;
+    // Another process saved since: take what it knows that this one does not.
+    const QHash<QString, Entry> stored = read(m_storePath, &m_stamp);
+    for (auto it = stored.constBegin(); it != stored.constEnd(); ++it) {
+        const auto ours = m_entries.constFind(it.key());
+        if (ours == m_entries.constEnd() || ours->size != it->size || ours->mtimeNs != it->mtimeNs)
+            m_entries.insert(it.key(), it.value());
+    }
+    const auto it = m_entries.constFind(key);
+    return it != m_entries.constEnd() && matches(*it) ? &*it : nullptr;
 }
 
 QString FileHashes::defaultPath() {
     return stateDir() + QStringLiteral("/hashes.json");
 }
 
-QString FileHashes::hash(const QString &path) {
+QString FileHashes::hash(const QString &path) { return hash(path, {}); }
+
+QString FileHashes::hash(const QString &path, const HashProgress &progress) {
     const std::optional<Stat> stat = statFile(path);
     if (!stat)
         return {};
     const QString name = key(path);
     {
         QMutexLocker lock(&m_mutex);
-        const auto it = m_entries.constFind(name);
-        if (it != m_entries.constEnd() && it->size == stat->size && it->mtimeNs == stat->mtimeNs)
-            return it->hash;
+        if (const Entry *entry = lookup(name, stat->size, stat->mtimeNs))
+            return entry->hash;
     }
     // Hashed outside the lock: a large file takes seconds.
-    const QString hash = sha256File(path);
+    const QString hash = sha256File(path, progress);
     const std::optional<Stat> after = statFile(path);
     if (hash.isEmpty() || !after || after->size != stat->size || after->mtimeNs != stat->mtimeNs)
         return hash; // changed while it was read: do not remember it
@@ -89,8 +120,8 @@ QString FileHashes::known(const QString &path) {
     if (!stat)
         return {};
     QMutexLocker lock(&m_mutex);
-    const auto it = m_entries.constFind(key(path));
-    return it != m_entries.constEnd() && it->size == stat->size && it->mtimeNs == stat->mtimeNs ? it->hash : QString();
+    const Entry *entry = lookup(key(path), stat->size, stat->mtimeNs);
+    return entry ? entry->hash : QString();
 }
 
 void FileHashes::remember(const QString &path, const QString &hash) {
@@ -107,23 +138,43 @@ bool FileHashes::save() {
     if (!lockFile.lock())
         return false;
 
-    // What other processes saved, then ours on top, then only what is still true.
-    FileHashes onDisk(m_storePath);
-    QHash<QString, Entry> merged = onDisk.m_entries;
+    // What other processes saved, then ours on top, then only what is still true. The files
+    // are looked at and the store written without the lock, so a lookup meanwhile does not wait.
+    QHash<QString, Entry> ours;
     {
         QMutexLocker lock(&m_mutex);
-        for (auto it = m_entries.constBegin(); it != m_entries.constEnd(); ++it)
-            merged.insert(it.key(), it.value());
+        ours = m_entries;
+    }
+    QHash<QString, Entry> merged = read(m_storePath, nullptr);
+    for (auto it = ours.constBegin(); it != ours.constEnd(); ++it) {
+        // One of ours the file has moved past does not replace another process's newer entry.
+        const std::optional<Stat> stat = statFile(it.key());
+        if (merged.contains(it.key()) && (!stat || stat->size != it->size || stat->mtimeNs != it->mtimeNs))
+            continue;
+        merged.insert(it.key(), it.value());
     }
     QJsonObject files;
-    for (auto it = merged.constBegin(); it != merged.constEnd(); ++it) {
+    for (auto it = merged.begin(); it != merged.end();) {
         const std::optional<Stat> stat = statFile(it.key());
-        if (!stat || stat->size != it->size || stat->mtimeNs != it->mtimeNs)
+        if (!stat || stat->size != it->size || stat->mtimeNs != it->mtimeNs) {
+            it = merged.erase(it);
             continue;
+        }
         files.insert(it.key(), QJsonObject{{"size", it->size}, {"mtime_ns", it->mtimeNs}, {"hash", it->hash}});
+        ++it;
     }
 
-    return writeJsonFile(m_storePath, QJsonObject{{"fugue-hashes", storeVersion}, {"files", files}}).isEmpty();
+    if (!writeJsonFile(m_storePath, QJsonObject{{"fugue-hashes", storeVersion}, {"files", files}}).isEmpty())
+        return false;
+    // The store now holds what this one knew and what the others saved: keep the same, with
+    // anything remembered while it was written.
+    QMutexLocker lock(&m_mutex);
+    for (auto it = m_entries.constBegin(); it != m_entries.constEnd(); ++it)
+        if (!ours.contains(it.key()) || ours.value(it.key()).hash != it->hash)
+            merged.insert(it.key(), it.value());
+    m_entries = std::move(merged);
+    m_stamp = stampOf(m_storePath);
+    return true;
 }
 
 } // namespace fugue

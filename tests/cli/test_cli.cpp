@@ -103,6 +103,7 @@ class TestCli : public QObject {
         env.remove("WAYLAND_DISPLAY");
         env.insert("XDG_CACHE_HOME", cache());
         env.insert("XDG_STATE_HOME", m_dir.filePath("state"));
+        env.insert("XDG_DATA_HOME", m_dir.filePath("data")); // Fugue's models folder (8.9)
         env.insert("XDG_CONFIG_HOME", m_dir.filePath("config")); // not the developer's providers.json
         // Nor Omarchy's state: without providers.json its paired hosts are instances (8.2).
         env.insert("HOME", m_dir.filePath("home"));
@@ -495,12 +496,120 @@ private slots:
         QVERIFY(o.firstMessage().contains("not available in this version"));
     }
 
+    // --- models (8.9, 13.1) ---
+
+    void modelListShowsTheFilesOnDiskWithAHandleOnceHashed() {
+        // Fugue's own models folder, and a ComfyUI folder under Extra model folders.
+        const QString comfy = m_dir.filePath("comfy");
+        write(m_dir.filePath("config/fugue/settings.json"), QJsonDocument(QJsonObject{
+                                                                {"model_paths", QJsonArray{comfy}}}).toJson());
+        write(m_dir.filePath("data/fugue/models/loras/mine.gguf"), "abc");
+        write(comfy + "/loras/style/detail.safetensors", "abc");
+        write(comfy + "/loras/notes.txt", "not a model");
+
+        const Outcome listed = fugue({"model", "list", "--type", "fugue/test-lora", "--json"});
+        QCOMPARE(listed.exitCode, 0);
+        const QJsonArray models = listed.json().value("data").toObject().value("models").toArray();
+        QCOMPARE(models.size(), 2);
+        const QJsonObject mine = models.at(0).toObject();
+        QCOMPARE(mine.value("source").toString(), QString("disk"));
+        QCOMPARE(mine.value("type").toString(), QString("fugue/test-lora"));
+        QCOMPARE(mine.value("name").toString(), QString("mine.gguf"));
+        QCOMPARE(mine.value("folder").toString(), m_dir.filePath("data/fugue/models/loras"));
+        QCOMPARE(mine.value("size").toInt(), 3);
+        // Listing reads no model file: no hash, so no handle yet.
+        QCOMPARE(mine.value("hashed").toBool(), false);
+        QVERIFY(!mine.contains("handle"));
+        QCOMPARE(models.at(1).toObject().value("name").toString(), QString("style/detail.safetensors"));
+
+        // --hash hashes each file once and gives full handles.
+        const Outcome hashed = fugue({"model", "list", "--type", "fugue/test-lora", "--hash", "--json"});
+        QCOMPARE(hashed.exitCode, 0);
+        QVERIFY2(hashed.err.contains("Hashing"), hashed.err.constData());
+        const QString abc = "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        const QJsonObject detail =
+            hashed.json().value("data").toObject().value("models").toArray().at(1).toObject();
+        QCOMPARE(detail.value("handle").toObject(),
+                 (QJsonObject{{"resource", "fugue/test-lora"}, {"name", "style/detail.safetensors"}, {"hash", abc}}));
+        // Remembered: the next listing has them without --hash, and reads nothing.
+        const Outcome again = fugue({"model", "list", "--json"});
+        QVERIFY(!again.err.contains("Hashing"));
+        const QJsonArray all = again.json().value("data").toObject().value("models").toArray();
+        QCOMPARE(all.at(0).toObject().value("handle").toObject().value("hash").toString(), abc);
+        // For people: one line per model.
+        const Outcome text = fugue({"model", "list"});
+        QVERIFY2(text.out.contains("fugue/test-lora  style/detail.safetensors  sha256:ba7816bf8f01…"), text.out.constData());
+        QFile::remove(m_dir.filePath("config/fugue/settings.json"));
+    }
+
+    void aFileThatCannotBeReadIsAWarningWithNoHandle() {
+        const QString path = m_dir.filePath("data/fugue/models/loras/locked.safetensors");
+        write(path, "abc");
+        QVERIFY(QFile::setPermissions(path, QFileDevice::Permissions()));
+        const Outcome o = fugue({"model", "list", "--type", "fugue/test-lora", "--hash", "--json"});
+        QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+        QFile::remove(path);
+        QCOMPARE(o.exitCode, 0);
+        const QJsonObject json = o.json();
+        bool listed = false;
+        for (const QJsonValue &each : json.value("data").toObject().value("models").toArray())
+            if (each.toObject().value("name") == "locked.safetensors") {
+                listed = true;
+                QVERIFY(!each.toObject().contains("handle"));
+                QCOMPARE(each.toObject().value("hashed").toBool(), false);
+            }
+        QVERIFY(listed);
+        QCOMPARE(json.value("warnings").toArray().size(), 1);
+        const QJsonObject warning = json.value("warnings").toArray().at(0).toObject();
+        QCOMPARE(warning.value("code").toString(), QString("media_unreadable"));
+        QCOMPARE(warning.value("severity").toString(), QString("warning"));
+    }
+
+    void modelListTakesOnlyAResourceType() {
+        const Outcome o = fugue({"model", "list", "--type", "image", "--json"});
+        QCOMPARE(o.exitCode, 1);
+        QCOMPARE(o.firstCode(), QString("usage"));
+        QCOMPARE(o.json().value("errors").toArray().at(0).toObject().value("valid").toArray(),
+                 QJsonArray{"fugue/test-lora"});
+    }
+
+    void modelListShowsWhatProvidersOffer() {
+        // omarchy-local-ai's state on a paired machine (tests/engine/data/omarchy): the paired
+        // host lab is offline, so its image model is listed as unavailable with why. studio is
+        // asked on a port where nothing listens, so it lists nothing.
+        const QString data = FUGUE_SOURCE_DIR "/tests/engine/data/omarchy/";
+        const QString state = m_dir.filePath("home/.local/state/omarchy/agent-local");
+        const QString config = m_dir.filePath("home/.config/omarchy/agent-local");
+        for (const char *name : {"status.json", "network.json"}) {
+            QFile file(data + name);
+            QVERIFY(file.open(QIODevice::ReadOnly));
+            write(state + "/" + name, file.readAll().replace("https://studio.tail1234.ts.net/", "http://127.0.0.1:9/"));
+        }
+        write(config + "/key", "local-test-key");
+        write(config + "/remotes/lab.key", "lab-test-key");
+        const Outcome o = fugue({"model", "list", "--json"});
+        QDir(m_dir.filePath("home/.local/state/omarchy")).removeRecursively();
+        QDir(m_dir.filePath("home/.config/omarchy")).removeRecursively();
+        QCOMPARE(o.exitCode, 0);
+        bool lab = false;
+        for (const QJsonValue &each : o.json().value("data").toObject().value("models").toArray()) {
+            const QJsonObject model = each.toObject();
+            if (model.value("source") == "provider" && model.value("provider") == "lab") {
+                lab = true;
+                QCOMPARE(model.value("type").toString(), QString("fugue/image-model"));
+                QCOMPARE(model.value("status").toString(), QString("unavailable"));
+                QVERIFY(model.value("note").toString().contains("lab is offline"));
+                QVERIFY(model.value("handle").toObject().contains("name"));
+            }
+        }
+        QVERIFY2(lab, o.out.constData());
+    }
+
     // --- later milestones ---
 
     void laterMilestoneCommandsAreParsedAndSayNotAvailable() {
         for (const QStringList &args : QList<QStringList>{
-                 {"provider", "list"}, {"providers", "list"}, {"model", "list", "--type", "t"},
-                 {"models", "list"}, {"cache", "status"}, {"cache", "clear", "--workflow", "f", "--node", "n"},
+                 {"provider", "list"}, {"providers", "list"}, {"cache", "status"}, {"cache", "clear", "--workflow", "f", "--node", "n"},
                  {"command", "list"}, {"skill", "install"}, {"node", "new", "x"}, {"node", "test", "x"},
              }) {
             const Outcome o = fugue(args + QStringList{"--json"});

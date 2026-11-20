@@ -54,7 +54,7 @@ const QMap<QString, QMap<QString, Spec>> &table() {
           {"update", {0, 1, {"ref"}, {}, packUpdate}},
           {"trust", {1, 1, {}, {}, packTrust}}}},
         {"provider", {{"list", {0, 0, {}, {}, nullptr}}}},
-        {"model", {{"list", {0, 0, {"type"}, {}, nullptr}}}},
+        {"model", {{"list", {0, 0, {"type"}, {"hash"}, modelList}}}},
         {"cache", {{"status", {0, 0, {}, {}, nullptr}}, {"clear", {0, 0, {"workflow", "node"}, {}, nullptr}}}},
         {"command", {{"list", {0, 0, {}, {}, nullptr}}}},
         {"skill", {{"install", {0, 0, {}, {}, nullptr}}}},

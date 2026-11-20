@@ -31,9 +31,20 @@
 // capabilities (image.generate for Generate Image, image.edit for Edit Image; any capability
 // for a node type that names none), is listed in the instances' order, with how to make a
 // model that is not ready ready (8.4: Fugue never starts one by itself). An instance whose
-// describe() fails lists nothing. Models on disk (8.9) are not listed yet: nothing finds them
-// until the component pack (M5). A name typed into the picker is stored as a handle served by
-// name, {"resource": type, "name": …}.
+// describe() fails lists nothing (engine/model_offers.h). After them come the input type's
+// model files on disk (8.9), by folder in the model folders' order, listed when the picker
+// opens. A name typed into the picker is stored as a handle served by name,
+// {"resource": type, "name": …}.
+//
+// A file on disk is named by its content hash (2.5). Picking one whose hash is remembered
+// stores its handle at once; otherwise the file is hashed on a worker thread, one file at a
+// time (a model of several GB on a slow disk takes from seconds to minutes), hashState() says
+// how far, and the handle is stored as its own undo step when the hash is known. The hash is
+// saved to the shared store, so it is computed once for every Fugue process. A pick belongs to
+// the level it was made at: entering a group meanwhile hides it, and it is stored once that
+// level is shown again. Any other value set on the input meanwhile wins, and another document
+// (another tab, a file opened) drops the pick; the hashing goes on and is remembered either way.
+// Closing the window stops it.
 
 #include "engine/document.h"
 #include "engine/node_type.h"
@@ -49,12 +60,20 @@
 #include <QVariantMap>
 #include <QtQmlIntegration/qqmlintegration.h>
 
+#include "engine/model_offers.h"
+
+#include <QThreadPool>
+
+#include <atomic>
 #include <functional>
+#include <memory>
 #include <optional>
 
 class CanvasModel;
 
 namespace fugue {
+class FileHashes;
+class ModelLibrary;
 class Registry;
 }
 
@@ -64,9 +83,12 @@ class WidgetEdit : public QObject {
     QML_UNCREATABLE("made in C++, read through App")
     // Bumped whenever a model list arrives, so the pickers re-read models().
     Q_PROPERTY(int modelsRevision READ modelsRevision NOTIFY modelsChanged)
+    // Bumped whenever a picked file's hashing moves on or ends, so the inputs re-read hashState().
+    Q_PROPERTY(int hashRevision READ hashRevision NOTIFY hashingChanged)
 
 public:
     WidgetEdit(const fugue::Registry *registry, CanvasModel *canvas, QObject *parent = nullptr);
+    ~WidgetEdit() override;
 
     // What the widget of an input needs: {widget, type, label, min, max, step, integer,
     // choices, optional, default (when there is one)}. `widget` is a 6.2 name, or "model" for
@@ -136,27 +158,23 @@ public:
     Q_INVOKABLE void advanceSeeds();
 
     // --- the model picker ---
-    // One model: {name, handle, status ("ready", "loading", "unavailable"), provider, title,
-    // note}. `name` is the handle's; `title` the one people know it by (empty: the name);
-    // `note`, for a model that is not ready, why and how to make it ready.
-    struct Model {
-        QString name;
-        QJsonObject handle;
-        QString status;
-        QString provider;
-        QString title;
-        QString note;
-    };
+    // One model (engine/model_offers.h): a provider's, or a file on disk.
+    using Model = fugue::ListedModel;
     // Lists the models of a resource type that offer one of `capabilities` (all models of
     // the type when it is empty), grouped by provider instance in the user's order.
     using ModelSource = std::function<void(const QString &resourceType, const QStringList &capabilities,
                                            std::function<void(QList<Model>)> done)>;
     // Replaces where models come from (tests pass a fixed list).
     void setModelSource(ModelSource source) { m_source = std::move(source); }
-    // Asks the source for the models of the input's resource type; modelsChanged when they come.
+    // The model folders searched for files on disk (tests); by default the settings' roots
+    // (ModelLibrary::roots) when the picker opens.
+    void setModelRoots(QStringList roots) { m_modelRoots = std::move(roots); }
+    // Lists the input type's files on disk, and asks the source for the providers' models;
+    // modelsChanged when they come.
     Q_INVOKABLE void requestModels(const QString &node, const QString &input);
     // The models last listed for the input, as maps {name, title, handle, status, provider,
-    // note}; empty before any arrive.
+    // note}, plus {path, folder, size} for a file on disk (provider empty); the providers'
+    // first, then the files.
     Q_INVOKABLE QVariantList models(const QString &node, const QString &input) const;
     Q_INVOKABLE bool modelsLoading(const QString &node, const QString &input) const;
     // What the picker says when no model is listed: what kind is missing and how to get one.
@@ -166,9 +184,18 @@ public:
     Q_INVOKABLE QString setModel(const QString &node, const QString &input, const QVariantMap &handle);
     // A model served by this name, as typed.
     Q_INVOKABLE QString setModelName(const QString &node, const QString &input, const QString &name);
+    // Picks the model file at `path`, which must be one of the input type's files in the model
+    // folders: its handle now when its hash is remembered, else once hashed (see the top).
+    // Returns why not, or empty.
+    Q_INVOKABLE QString setDiskModel(const QString &node, const QString &input, const QString &path);
+    // A picked file being hashed for the input: {progress: 0 to 1, name}; {error} when it could
+    // not be read; empty otherwise.
+    Q_INVOKABLE QVariantMap hashState(const QString &node, const QString &input) const;
+    int hashRevision() const { return m_hashRevision; }
 
 signals:
     void modelsChanged();
+    void hashingChanged();
     // A session ended without finish() or cancel(): another edit began, or the document was
     // replaced. The field closes.
     void sessionEnded();
@@ -194,6 +221,19 @@ private:
     QString modelsKey(const QString &node, const QString &input) const;
     // The seed the node's last result was made with, when a run showed one.
     std::optional<double> lastSeed(const QString &node, const QString &input) const;
+    // The model folders in effect now (the settings' roots, or setModelRoots()).
+    fugue::ModelLibrary library() const;
+    fugue::FileHashes &hashes();
+    // Hashes `path` on the worker thread unless it is being hashed already.
+    void startHashing(const QString &path);
+    void hashed(const QString &path, const QString &hash);
+    // Stores the handle of each pick of the level shown whose hash is known.
+    void storePicks();
+    // The pick for the input on the level shown, else null.
+    struct Pick;
+    const Pick *pickFor(const QString &node, const QString &input) const;
+    // Drops it; true when there was one.
+    bool dropPick(const QString &node, const QString &input);
 
     const fugue::Registry *m_registry;
     CanvasModel *m_canvas;
@@ -207,4 +247,21 @@ private:
     QHash<QString, QList<Model>> m_models; // by modelsKey()
     QSet<QString> m_loading;
     int m_modelsRevision = 0;
+    std::optional<QStringList> m_modelRoots;
+    QHash<QString, QList<Model>> m_diskModels; // by modelsKey()
+    // A file picked for an input and being hashed.
+    struct Pick {
+        QString scope; // CanvasModel::scopePath() when it was picked
+        QString node, input;
+        QString path, resource, name;
+        QString hash;  // known, waiting for its level to be shown
+        QString error; // it could not be read
+        double progress = 0;
+    };
+    QList<Pick> m_picks;
+    QSet<QString> m_hashing; // paths on the worker thread
+    int m_hashRevision = 0;
+    std::shared_ptr<fugue::FileHashes> m_hashes;
+    std::shared_ptr<std::atomic_bool> m_stopHashing = std::make_shared<std::atomic_bool>(false);
+    QThreadPool m_hashPool;
 };

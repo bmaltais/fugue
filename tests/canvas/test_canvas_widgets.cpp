@@ -10,6 +10,7 @@
 #include <QUndoStack>
 
 #include "canvas/widget_edit.h"
+#include "engine/hash.h"
 #include "canvas_app.h"
 #include "widget_fixture.h"
 #include "../engine/omarchy_fixture.h"
@@ -455,9 +456,9 @@ private slots:
         const QJsonObject zimage{{"resource", "fugue/image-model"}, {"name", "z-image-turbo"}};
         app.model.widgets()->setModelSource([&](const QString &, const QStringList &,
                                                 std::function<void(QList<WidgetEdit::Model>)> done) {
-            done({{"z-image-turbo", zimage, "ready", "This machine", "Z-Image Turbo", ""},
-                  {"flux2-klein", QJsonObject{{"resource", "fugue/image-model"}, {"name", "flux2-klein"}}, "loading",
-                   "gx10", "", "flux2-klein is starting. Wait for it to finish loading."}});
+            done({widget_test::served("z-image-turbo", zimage, "ready", "This machine", "Z-Image Turbo"),
+                  widget_test::served("flux2-klein", QJsonObject{{"resource", "fugue/image-model"}, {"name", "flux2-klein"}},
+                                      "loading", "gx10", "", "flux2-klein is starting. Wait for it to finish loading.")});
         });
         QVERIFY(app.open());
         QCOMPARE(canvas_test::item(app.widget("all", "model"), "widgetValue")->property("text").toString(),
@@ -488,6 +489,38 @@ private slots:
         app.key(Qt::Key_Return); // Any ready model: nothing listed is chosen, so it is first
         QCOMPARE(app.stored("all", "model"), QJsonValue(QJsonValue::Undefined));
         QCOMPARE(app.steps(), 3);
+    }
+
+    void aModelFileOnDiskIsPickedFromItsFolderAndStoredByHash() {
+        // A ComfyUI models folder under Extra model folders (8.9), and no provider model.
+        QTemporaryDir models;
+        const QByteArray bytes(2 * 1000 * 1000, 'm');
+        QVERIFY(test::writeFixtureFile(models.filePath("image-model/turbo.safetensors"), bytes));
+        WidgetApp app;
+        app.model.widgets()->setModelRoots({models.path()});
+        app.model.widgets()->setModelSource([](const QString &, const QStringList &,
+                                               std::function<void(QList<WidgetEdit::Model>)> done) { done({}); });
+        QVERIFY(app.open());
+        app.click(app.in("all", "model"));
+        QTRY_VERIFY2(app.menuOpen(), qPrintable(app.warnings.join('\n')));
+        QStringList rows;
+        for (const QVariant &entry : app.popup("widgetMenu")->property("entries").toList()) {
+            const QVariantMap e = entry.toMap();
+            rows << (e.value("heading").toBool() ? "# " : "") + e.value("text").toString()
+                        + (e.value("detail").toString().isEmpty() ? QString() : " | " + e.value("detail").toString());
+        }
+        QCOMPARE(rows, (QStringList{"Any ready model", "# " + models.filePath("image-model"), "turbo.safetensors | 2 MB",
+                                    "Type a name…"}));
+        app.key(Qt::Key_Down);
+        app.key(Qt::Key_Return);
+        // Hashed in the background, then stored as one step; the face shows the file's name.
+        QTRY_COMPARE(app.stored("all", "model"),
+                     QJsonValue(QJsonObject{{"resource", "fugue/image-model"}, {"name", "turbo.safetensors"},
+                                            {"hash", sha256(bytes)}}));
+        QTRY_COMPARE(canvas_test::item(app.widget("all", "model"), "widgetValue")->property("text").toString(),
+                     QString("turbo.safetensors"));
+        QCOMPARE(app.steps(), 1);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
     void onFirstRunThePickerListsThePairedHostsModelsByHost() {

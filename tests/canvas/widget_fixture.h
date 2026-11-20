@@ -6,6 +6,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 
+#include "engine/model_offers.h"
 #include "engine/registry.h"
 
 namespace widget_test {
@@ -36,6 +37,19 @@ inline void addWidgetType(fugue::Registry &registry) {
     const fugue::Errors errors = registry.addManifest(QJsonDocument::fromJson(manifest).object());
     if (!errors.isEmpty())
         qFatal("widget fixture: %s", qPrintable(errors.first().message));
+}
+
+// A model a provider offers, as the model picker's source lists it.
+inline fugue::ListedModel served(const QString &name, const QJsonObject &handle, const QString &status,
+                                 const QString &provider, const QString &title = {}, const QString &note = {}) {
+    fugue::ListedModel model;
+    model.name = name;
+    model.handle = handle;
+    model.status = status;
+    model.provider = provider;
+    model.title = title;
+    model.note = note;
+    return model;
 }
 
 } // namespace widget_test

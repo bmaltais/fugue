@@ -39,7 +39,8 @@ struct Settings;
 // One model file.
 struct ModelFile {
     QString path; // absolute
-    QString name; // relative to its type folder ("flux1/model.safetensors"), for display and the handle
+    QString name;   // relative to its type folder ("flux1/model.safetensors"), for display and the handle
+    QString folder; // the type folder it was found in (one of folders()), absolute
     qint64 size = 0;
 };
 
