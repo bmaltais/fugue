@@ -133,18 +133,29 @@ private:
         return context;
     }
 
-    // Raises the cancel flag after `ms`, from another thread.
-    std::thread cancelAfter(int ms) {
+    // Raises the cancel flag `delayMs` after the program has written `marker`, from another
+    // thread, and notes when (m_raisedAt), so a test does not depend on how fast it starts.
+    std::thread cancelWhenFile(const QString &marker, int delayMs = 50) {
         const auto flag = m_cancel;
-        return std::thread([flag, ms] {
-            std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+        std::atomic<qint64> *raisedAt = &m_raisedAt;
+        return std::thread([flag, raisedAt, marker, delayMs] {
+            QElapsedTimer waited;
+            waited.start();
+            while (!QFileInfo::exists(marker) && waited.elapsed() < 20000)
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
+            raisedAt->store(QDateTime::currentMSecsSinceEpoch());
             flag->store(true);
         });
     }
+    std::atomic<qint64> m_raisedAt{0};
 
 private slots:
     void init() {
         QVERIFY(m_root.isValid());
+        QFile secret(m_root.path() + "/secret.txt");
+        QVERIFY(secret.open(QIODevice::WriteOnly));
+        secret.write("secret");
         m_hashes = std::make_unique<FileHashes>(m_root.path() + "/hashes.json");
         m_cancel = std::make_shared<std::atomic<bool>>(false);
         m_progress.clear();
@@ -210,11 +221,13 @@ private slots:
         QVERIFY(!absolute.ok());
         QCOMPARE(absolute.error().code, QString("node_bad_output"));
         QCOMPARE(absolute.error().output, QString("image"));
+        QVERIFY2(absolute.error().message.contains("outside"), qPrintable(absolute.error().message));
 
         const Node viaLink = makeNode(m_root.path(), "vialink", "@escape-link.sh");
         const Result<Values> linked = kernel.run(contextFor(viaLink));
         QVERIFY(!linked.ok());
         QCOMPARE(linked.error().code, QString("node_bad_output"));
+        QVERIFY2(linked.error().message.contains("outside"), qPrintable(linked.error().message));
     }
 
     void anErrorLineFailsTheNodeWithItsMessage() {
@@ -289,7 +302,9 @@ exit 3
         // A symbolic link out of the folder is no better.
         QFile::link(m_root.path() + "/echo/run.sh", node.dir + "/linked.sh");
         node.type.runtime["entry"] = "./linked.sh";
-        QVERIFY(!kernel.run(contextFor(node)).ok());
+        const Result<Values> linked = kernel.run(contextFor(node));
+        QVERIFY(!linked.ok());
+        QVERIFY2(linked.error().message.contains("inside the node's folder"), qPrintable(linked.error().message));
     }
 
     void cancelStopsAOneShotProgramAndWhatItStarted() {
@@ -301,7 +316,7 @@ wait
 )SH");
         CommandKernel kernel(kGraceMs);
         const NodeContext context = contextFor(node);
-        std::thread cancel = cancelAfter(300);
+        std::thread cancel = cancelWhenFile(context.workDir + "/child.pid");
         QElapsedTimer clock;
         clock.start();
         const Result<Values> result = kernel.run(context);
@@ -317,15 +332,29 @@ wait
     void aProgramThatIgnoresSigtermIsKilledAfterTheGracePeriod() {
         const Node node = makeNode(m_root.path(), "stubborn", "@stubborn.sh");
         CommandKernel kernel(kGraceMs);
-        std::thread cancel = cancelAfter(200);
-        QElapsedTimer clock;
-        clock.start();
-        const Result<Values> result = kernel.run(contextFor(node));
+        const NodeContext context = contextFor(node);
+        std::thread cancel = cancelWhenFile(context.workDir + "/started");
+        const Result<Values> result = kernel.run(context);
+        const qint64 took = QDateTime::currentMSecsSinceEpoch() - m_raisedAt.load();
         cancel.join();
         QVERIFY(!result.ok());
         QCOMPARE(result.error().code, QString("cancelled"));
-        QVERIFY2(clock.elapsed() >= 200 + kGraceMs, "killed before the grace period was over");
-        QVERIFY2(clock.elapsed() < 4000, "was not killed");
+        QVERIFY2(took >= kGraceMs, "killed before the grace period was over");
+        QElapsedTimer clock;
+        clock.start();
+        QVERIFY2(took < 4000, "was not killed");
+    }
+
+    void whatAProgramLeftRunningIsKilledWhenItExits() {
+        const Node node = makeNode(m_root.path(), "leaver",
+                                   "cat > /dev/null\n(trap '' TERM; exec sleep 60) &\necho $! > child.pid\n"
+                                   "echo '{\"outputs\": {}}'\n");
+        CommandKernel kernel(kGraceMs);
+        const NodeContext context = contextFor(node);
+        QVERIFY(kernel.run(context).ok());
+        const qint64 child = readFile(context.workDir + "/child.pid").trimmed().toLongLong();
+        QVERIFY(child > 0);
+        QVERIFY2(waitGone(child), "a child outlived its program");
     }
 
     void theTimeoutEndsAOneShotRunWithNodeTimeout() {
@@ -355,7 +384,7 @@ wait
     void aPersistentNodeReportsProgressForItsRun() {
         const Node node = makeNode(m_root.path(), "persprog", persistentScript(), {{"mode", "persistent"}});
         CommandKernel kernel(kGraceMs);
-        std::thread cancel = cancelAfter(400); // ends the slow run
+        std::thread cancel = cancelWhenFile(node.dir + "/slow.started"); // ends the slow run
         const Result<Values> result = kernel.run(contextFor(node, {{"mode", Value("slow")}}));
         cancel.join();
         QVERIFY(!result.ok());
@@ -365,7 +394,7 @@ wait
     void cancelAsksAPersistentNodeAndKeepsItRunning() {
         const Node node = makeNode(m_root.path(), "perscancel", persistentScript(), {{"mode", "persistent"}});
         CommandKernel kernel(kGraceMs);
-        std::thread cancel = cancelAfter(400);
+        std::thread cancel = cancelWhenFile(node.dir + "/slow.started");
         const Result<Values> cancelled = kernel.run(contextFor(node, {{"mode", Value("slow")}}));
         cancel.join();
         QVERIFY(!cancelled.ok());
@@ -381,15 +410,14 @@ wait
     void aPersistentNodeThatIgnoresCancelIsKilledAndTheNextRunStartsANewOne() {
         const Node node = makeNode(m_root.path(), "persdeaf", persistentScript(), {{"mode", "persistent"}});
         CommandKernel kernel(kGraceMs);
-        std::thread cancel = cancelAfter(300);
-        QElapsedTimer clock;
-        clock.start();
+        std::thread cancel = cancelWhenFile(node.dir + "/slow.started");
         const Result<Values> cancelled = kernel.run(contextFor(node, {{"mode", Value("deaf")}}));
+        const qint64 took = QDateTime::currentMSecsSinceEpoch() - m_raisedAt.load();
         cancel.join();
         QVERIFY(!cancelled.ok());
         QCOMPARE(cancelled.error().code, QString("cancelled"));
-        QVERIFY2(clock.elapsed() >= 300 + kGraceMs, "killed before the grace period was over");
-        QVERIFY(clock.elapsed() < 4000);
+        QVERIFY2(took >= kGraceMs, "killed before the grace period was over");
+        QVERIFY(took < 4000);
         const QList<qint64> pids = pidsIn(node.dir + "/pids.txt");
         QCOMPARE(pids.size(), 1);
         QVERIFY(waitGone(pids.first()));
@@ -433,7 +461,9 @@ wait
         const Node node =
             makeNode(m_root.path(), "persbusy", persistentScript(), {{"mode", "persistent"}, {"idle_timeout_s", 0.2}});
         CommandKernel kernel(kGraceMs);
-        std::thread cancel = cancelAfter(900); // a slow run, longer than the idle timeout
+        QVERIFY(kernel.run(contextFor(node)).ok()); // arms the idle timer, then a run takes over
+        QTest::qWait(50);
+        std::thread cancel = cancelWhenFile(node.dir + "/slow.started", 800); // longer than the idle timeout
         const Result<Values> result = kernel.run(contextFor(node, {{"mode", Value("slow")}}));
         cancel.join();
         QCOMPARE(result.error().code, QString("cancelled")); // asked to stop, not stopped for idling

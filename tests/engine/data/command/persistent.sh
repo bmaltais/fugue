@@ -12,9 +12,10 @@ while read -r line; do
       id=$(echo "$line" | sed 's/.*"id":"\([^"]*\)".*/\1/')
       case "$line" in
         *'"mode":"die"'*) exit 3 ;;
-        *'"mode":"deaf"'*) sleep 60 ;;
+        *'"mode":"deaf"'*) touch "$FUGUE_NODE_DIR/slow.started"; sleep 60 ;;
         *'"mode":"slow"'*)
           echo "{\"op\":\"progress\",\"id\":\"$id\",\"value\":0.5,\"message\":\"working\"}"
+          touch "$FUGUE_NODE_DIR/slow.started"
           for i in $(seq 1 100); do
             if read -r -t 0.1 msg && [[ "$msg" == *'"op":"cancel"'* ]]; then
               echo "{\"op\":\"error\",\"id\":\"$id\",\"code\":\"cancelled\",\"message\":\"stopped\"}"

@@ -59,7 +59,8 @@ public:
         QMetaObject::invokeMethod(
             m_context,
             [this] {
-                signalGroup(SIGKILL);
+                if (m_pgid > 0)
+                    ::kill(-m_pgid, SIGKILL);
                 if (m_process) {
                     m_process->disconnect();
                     m_process->waitForFinished(3000);
@@ -98,6 +99,10 @@ public:
     // A persistent process that is busy is never stopped for being idle; one that is free
     // is, after the idle timeout.
     void setBusy(bool busy) {
+        {
+            QMutexLocker lock(&m_mutex);
+            m_busy = busy;
+        }
         post([this, busy] {
             if (!m_idle)
                 return;
@@ -122,7 +127,25 @@ public:
     // True once the program has exited or never started.
     bool gone() const {
         QMutexLocker lock(&m_mutex);
-        return m_gone;
+        return m_gone || m_retiring;
+    }
+    // Takes the process for a run: false when it is being stopped for idling (or is gone), so
+    // the caller starts another. Once true, the idle stop leaves it alone until setBusy(false).
+    bool acquire() {
+        QMutexLocker lock(&m_mutex);
+        if (m_gone || m_retiring)
+            return false;
+        m_busy = true;
+        return true;
+    }
+    // Drops what the program printed while no run was waiting for it.
+    void discardLines() {
+        QMutexLocker lock(&m_mutex);
+        std::deque<Event> kept;
+        for (Event &event : m_events)
+            if (event.kind != Event::Line)
+                kept.push_back(std::move(event));
+        m_events.swap(kept);
     }
     // The last lines the program wrote to stderr.
     QStringList tail() const {
@@ -153,6 +176,9 @@ private:
         QObject::connect(m_process, &QProcess::finished, m_context, [this](int code, QProcess::ExitStatus status) {
             readOutput(true);
             readErrors(true);
+            // Whatever the program started and left running goes with it.
+            if (m_pgid > 0)
+                ::kill(-m_pgid, SIGKILL);
             Event event;
             event.kind = Event::Exited;
             event.exitCode = code;
@@ -173,12 +199,19 @@ private:
             QObject::connect(m_idle, &QTimer::timeout, m_context, [this] { stopWhenIdle(); });
         }
         m_process->start(program, {});
+        m_pgid = pid_t(m_process->processId()); // setsid: the process id is the group id
     }
 
     // Shutdown message, then SIGTERM, then SIGKILL, a grace period apart (7.3).
     void stopWhenIdle() {
         if (!m_process || m_process->state() != QProcess::Running)
             return;
+        {
+            QMutexLocker lock(&m_mutex);
+            if (m_busy)
+                return;
+            m_retiring = true;
+        }
         m_process->write("{\"op\":\"shutdown\"}\n");
         QTimer::singleShot(m_grace, m_context, [this] {
             if (!m_process || m_process->state() != QProcess::Running)
@@ -242,6 +275,7 @@ private:
     // Used on the process's thread only.
     QProcess *m_process = nullptr;
     QTimer *m_idle = nullptr;
+    pid_t m_pgid = 0;
     QByteArray m_out;
     QByteArray m_err;
 
@@ -250,6 +284,8 @@ private:
     std::deque<Event> m_events;
     QStringList m_tail;
     bool m_gone = false;
+    bool m_busy = true;     // a run owns it (or it is starting)
+    bool m_retiring = false; // told to shut down for idling
 };
 
 enum class Expect { Ready, Result };
@@ -326,6 +362,8 @@ Result<QJsonObject> await(Process &process, const NodeContext &context, const QS
             }
 
             // A line of the program's stdout.
+            if (event->line.trimmed().isEmpty())
+                continue;
             QJsonParseError parseError;
             const QJsonDocument document = QJsonDocument::fromJson(event->line, &parseError);
             if (!document.isObject()) {
@@ -337,7 +375,7 @@ Result<QJsonObject> await(Process &process, const NodeContext &context, const QS
                 QString op = line.value("op").toString();
                 if (op.isEmpty() && line.contains("outputs"))
                     op = QStringLiteral("result");
-                const bool mine = !persistent || !line.contains("id") || line.value("id").toString() == id;
+                const bool mine = !persistent || line.value("id").toString() == id;
                 if (op == QLatin1String("ready") && expect == Expect::Ready) {
                     return QJsonObject();
                 } else if (op == QLatin1String("progress") && mine) {
@@ -387,6 +425,8 @@ Result<Values> outputsFrom(const QJsonObject &result, const NodeContext &context
         return nodeError(QStringLiteral("node_failed"), QStringLiteral("No file hashes to read the outputs with."));
 
     const QString workDir = QFileInfo(context.workDir).canonicalFilePath();
+    if (workDir.isEmpty())
+        return nodeError(QStringLiteral("node_bad_output"), QStringLiteral("The node's work_dir is gone."));
     auto fileIn = [&](const QJsonValue &value, const QString &output) -> Result<QString> {
         auto bad = [&](const QString &message) {
             Error error = nodeError(QStringLiteral("node_bad_output"), message);
@@ -422,7 +462,9 @@ Result<Values> outputsFrom(const QJsonObject &result, const NodeContext &context
         if (media) {
             const Result<MediaHandle> handle = MediaHandle::probe(*media, file.value(), *context.hashes);
             if (!handle) {
-                Error error = handle.error();
+                Error error = nodeError(QStringLiteral("node_bad_output"),
+                                        QStringLiteral("Output %1 is not a readable %2: %3")
+                                            .arg(spec.name, id, handle.error().message));
                 error.output = spec.name;
                 return error;
             }
@@ -469,12 +511,39 @@ Result<Values> outputsFrom(const QJsonObject &result, const NodeContext &context
     return values;
 }
 
-QJsonObject requestFor(const NodeContext &context, const QString &id) {
+// An input as the program gets it: a media handle with nothing pending, so `path` is the whole
+// value (7.2).
+Result<QJsonValue> plainJson(const QString &name, const Value &value, const NodeContext &context) {
+    if (value.isMedia()) {
+        const Result<MediaHandle> plain = value.media().plainFile(context.workDir, name, *context.hashes);
+        if (!plain)
+            return plain.error();
+        return QJsonValue(plain->toJson());
+    }
+    if (value.isList()) {
+        QJsonArray items;
+        for (const Value &item : value.items()) {
+            const Result<QJsonValue> one = plainJson(name, item, context);
+            if (!one)
+                return one;
+            items.append(one.value());
+        }
+        return QJsonValue(items);
+    }
+    return value.toJson();
+}
+
+Result<QJsonObject> requestFor(const NodeContext &context, const QString &id) {
     QJsonObject inputs;
-    for (auto it = context.inputs.begin(); it != context.inputs.end(); ++it)
-        if (!it.value().isEmpty())
-            inputs.insert(it.key(), it.value().toJson());
-    return {{"protocol", kProtocol},
+    for (auto it = context.inputs.begin(); it != context.inputs.end(); ++it) {
+        if (it.value().isEmpty())
+            continue;
+        const Result<QJsonValue> plain = plainJson(it.key(), it.value(), context);
+        if (!plain)
+            return plain.error();
+        inputs.insert(it.key(), plain.value());
+    }
+    return QJsonObject{{"protocol", kProtocol},
             {"op", "run"},
             {"id", id},
             {"node", QJsonObject{{"type", context.type->id}, {"version", context.type->version.toString()}}},
@@ -545,7 +614,12 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
     const double timeout = runtime.value("timeout_s").toDouble(0);
     const int timeoutMs = timeout > 0 ? int(timeout * 1000) : 0;
     const QString id = QStringLiteral("%1:%2").arg(context.run, context.node);
-    const QJsonObject request = requestFor(context, id);
+    if (!context.hashes)
+        return nodeError(QStringLiteral("node_failed"), QStringLiteral("No file hashes to prepare the inputs with."));
+    const Result<QJsonObject> made = requestFor(context, id);
+    if (!made)
+        return made.error();
+    const QJsonObject &request = made.value();
 
     if (!persistent) {
         Process process(program, context.workDir, environment, 0, d->grace);
@@ -559,10 +633,10 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
 
     const std::shared_ptr<Impl::Slot> slot = d->slot(type.id);
     QMutexLocker run(&slot->run);
-    if (!slot->process || slot->process->gone()) {
+    if (!slot->process || !slot->process->acquire()) {
         const double idle = runtime.value("idle_timeout_s").toDouble(300);
         slot->process = std::make_unique<Process>(program, context.workDir, environment, idle, d->grace);
-        const Result<QJsonObject> ready = await(*slot->process, context, id, true, Expect::Ready, timeoutMs, d->grace);
+        const Result<QJsonObject> ready = await(*slot->process, context, id, true, Expect::Ready, 0, d->grace);
         if (!ready) {
             slot->process.reset();
             return ready.error();
@@ -570,6 +644,7 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
     }
     Process &process = *slot->process;
     process.setBusy(true);
+    process.discardLines();
     process.sendLine(request);
     const Result<QJsonObject> result = await(process, context, id, true, Expect::Result, timeoutMs, d->grace);
     if (process.gone())
