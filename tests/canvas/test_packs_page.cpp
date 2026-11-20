@@ -144,7 +144,8 @@ private slots:
         click(app, NEED("packYes"));
         QTRY_VERIFY(QFileInfo(packs() + "/io.example.tools/pack.json").isFile());
         QTRY_VERIFY(find(app.window, "pack-io.example.tools"));
-        QTRY_VERIFY(find(app.window, "packsRestart"));
+        // Usable at once (#70): the window's node types have it, with no restart.
+        QTRY_VERIFY(app.registry.nodeType("io.example.tools/tool"));
         QCOMPARE(fugue::TrustStore(trustFile()).isTrusted("io.example.tools", "1.0.0"), false);
 
         click(app, NEED("packTrust-io.example.tools"));
@@ -161,6 +162,7 @@ private slots:
         click(app, NEED("packYes"));
         QTRY_VERIFY(!QFileInfo(packs() + "/io.example.tools").exists());
         QTRY_VERIFY(!find(app.window, "pack-io.example.tools"));
+        QTRY_VERIFY(!app.registry.nodeType("io.example.tools/tool"));
         QCOMPARE(fugue::TrustStore(trustFile()).isTrusted("io.example.tools", "1.0.0"), false);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }

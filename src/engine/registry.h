@@ -89,6 +89,14 @@ public:
     const QList<ProviderEntry> &providers() const { return m_providers; }
     QStringList providerNames() const;
 
+    // A reload of the packs (6.5): takes the node types, port types, aliases and pack versions
+    // of `from`, a registry filled again from disk, and keeps the providers. Every pointer to a
+    // type of this registry is invalid after; the registry itself stays where it is.
+    void replaceTypes(Registry &&from);
+    // Whether `other` has the same node types (with their folders and seals), port types and
+    // pack versions: a reload that would change nothing.
+    bool sameTypes(const Registry &other) const;
+
 private:
     QList<ProviderEntry> m_providers;
     QHash<QString, QString> m_packVersions;

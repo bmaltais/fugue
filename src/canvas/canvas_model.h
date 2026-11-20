@@ -226,6 +226,12 @@ public:
     fugue::ImageInputs *images() const { return m_images; }
     void setImages(fugue::ImageInputs *images) { m_images = images; }
 
+    // The registry was filled again (#70, engine/registry_reloader.h): every node is made again
+    // from the types it has now, so a placeholder whose type came shows as the node, a node whose
+    // pack went as a placeholder, and a library group newer than the workflow's shows "update
+    // available"; node search lists the new types. Nothing of the document changes: no undo step.
+    void refreshNodeTypes();
+
     // Starts the workflow at its top level, with an empty undo stack.
     void setDocument(const fugue::Document &document);
     // The whole workflow, with the canvas's positions and viewport in its layout: what is
@@ -578,6 +584,8 @@ signals:
     void interfaceEditorRequested();
     // The frame.rename command: the window asks for the title.
     void frameRenameRequested(const QString &frame);
+    // saveGroupToLibrary() wrote a new version: the node types are read again (#70).
+    void librarySaved();
     // A paste added nodes from this document: the same questions as for opening it (missing
     // nodes, packs to trust) are asked of it (Workflows).
     void pasted(const fugue::Document &document);

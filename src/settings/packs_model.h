@@ -6,8 +6,8 @@
 // reaches the person through `question` and waits for answer(): nothing is installed, trusted,
 // removed or run on its own. QML only asks and answers; the engine (pack_manager.h) decides.
 //
-// The running window keeps the node types it started with, so a change to the packs shows as
-// `restartNeeded` until Fugue is started again.
+// A pack installed, updated, removed or trusted here is usable at once: packsModified() has the
+// window read its node types again (#70, engine/registry_reloader.h).
 
 #include <QElapsedTimer>
 #include <QMutex>
@@ -47,7 +47,6 @@ class PacksModel : public QObject {
     // False for a moment after a question appears, so a click or key meant for the one before
     // cannot answer the next (install is followed at once by the setup question).
     Q_PROPERTY(bool questionReady READ questionReady NOTIFY questionChanged)
-    Q_PROPERTY(bool restartNeeded READ restartNeeded NOTIFY packsChanged)
 
 public:
     // `registry` is the window's (to tell which packs it has loaded); null is fine. The two
@@ -64,7 +63,6 @@ public:
     QStringList log() const { return m_log; }
     QString message() const { return m_message; }
     QString failure() const { return m_failure; }
-    bool restartNeeded() const { return m_restartNeeded; }
     bool questionReady() const { return m_questionReady; }
 
     // Read the packs folders again.
@@ -88,6 +86,8 @@ signals:
     void questionChanged();
     void logChanged();
     void messageChanged();
+    // An action changed what is installed or trusted (it is over, and refresh() has run).
+    void packsModified();
 
 private:
     template <typename Work> void start(Work work);
@@ -104,7 +104,6 @@ private:
     QString m_message;
     QString m_failure;
     bool m_busy = false;
-    bool m_restartNeeded = false;
     bool m_questionReady = false;
     std::atomic<bool> m_cancel{false};
     std::atomic<bool> m_sawNo{false}; // the person said no to something in this action

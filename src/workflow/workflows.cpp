@@ -381,12 +381,18 @@ void Workflows::openStartup(const QStringList &paths) {
         openPath(path);
 }
 
-void Workflows::analyze(const Document &document, const QString &title) {
+QString Workflows::missingNotice(const Document &document, const QString &title) const {
     const QStringList missing = missingTypes(document, *m_registry);
-    setNotice(missing.isEmpty()
-                  ? QString()
-                  : tr("%1 uses nodes that are not installed (%2). They open as placeholders and keep their inputs.")
-                        .arg(title, missing.join(QStringLiteral(", "))));
+    return missing.isEmpty()
+               ? QString()
+               : tr("%1 uses nodes that are not installed (%2). They open as placeholders and keep their inputs.")
+                     .arg(title, missing.join(QStringLiteral(", ")));
+}
+
+void Workflows::analyze(const Document &document, const QString &title) {
+    m_missingNotice = missingNotice(document, title);
+    m_missingTab = m_missingNotice.isEmpty() ? QString() : m_tabs[size_t(m_current)].id;
+    setNotice(m_missingNotice);
     bool changed = false;
     for (const PackUse &use : m_trust.untrusted(document, *m_registry)) {
         bool known = false;
@@ -588,6 +594,27 @@ void Workflows::dismissPendingTrust() {
 
 bool Workflows::isTrusted(const QString &packId, const QString &version) const {
     return m_trust.isTrusted(packId, version);
+}
+
+void Workflows::refreshNodeTypes() {
+    // The banner, while it still lists missing nodes: the ones installed now are not missing.
+    if (!m_missingTab.isEmpty() && m_notice == m_missingNotice) {
+        for (int i = 0; i < count(); ++i) {
+            if (m_tabs[size_t(i)].id != m_missingTab)
+                continue;
+            m_missingNotice = missingNotice(documentOf(i), m_tabs[size_t(i)].title);
+            setNotice(m_missingNotice);
+        }
+    }
+    // A pack trusted meanwhile (the Packs page) is not asked about again.
+    QVariantList still;
+    for (const QVariant &entry : std::as_const(m_pendingTrust))
+        if (!m_trust.isTrusted(entry.toMap().value("id").toString(), entry.toMap().value("version").toString()))
+            still << entry;
+    if (still.size() != m_pendingTrust.size()) {
+        m_pendingTrust = still;
+        emit pendingTrustChanged();
+    }
 }
 
 // --- commands ---

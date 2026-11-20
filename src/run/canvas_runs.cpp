@@ -521,6 +521,12 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
         updateRunning();
 }
 
+void CanvasRuns::refreshNodeTypes() {
+    m_service->reloadNodeTypes();
+    refreshInputs();
+    scheduleCheck(false);
+}
+
 void CanvasRuns::scheduleCheck(bool edit) {
     m_checkFromEdit |= edit;
     m_checkTimer.start();

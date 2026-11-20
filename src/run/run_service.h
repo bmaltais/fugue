@@ -3,8 +3,9 @@
 // The window's runs (spec 9.8: "The window runs its own runs"), off the UI thread.
 //
 // RunService is the window's end of the engine. It owns one thread, the run thread, and
-// everything a run touches lives there: its own Registry (node types, and the provider
-// instances read again at each run's turn, as a `fugue __worker` does), the kernels, the
+// everything a run touches lives there: its own Registry (node types, filled again after a
+// reloadNodeTypes(), and the provider instances read again at each run's turn, as a
+// `fugue __worker` does), the kernels, the
 // result cache and file-hash memo (cli::Process), the Run objects and the engine lock. The UI
 // thread only hands over a copy of the document and gets events back, so nothing it does
 // waits on compiling, hashing, moving outputs into the store, a provider or the queue.
@@ -113,6 +114,12 @@ public:
 
     // Calls `call` on the run thread and waits for it (tests: a FakeProvider lives there).
     void onRunThread(const std::function<void()> &call);
+
+    // The packs changed (#70): the run thread fills its registries again (RunSetup::addNodeTypes)
+    // before it next uses each, never under a run or a check in flight. The next compile (a run
+    // started, a check) takes the new types, and the next run to start runs them, so an updated
+    // command node runs its new files. A run already waiting keeps what it was compiled to.
+    void reloadNodeTypes();
 
 signals:
     void event(const QString &run, const QJsonObject &event);

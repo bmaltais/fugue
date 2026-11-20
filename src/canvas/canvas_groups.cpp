@@ -473,11 +473,12 @@ bool CanvasModel::saveGroupToLibrary() {
     });
     commitWhole(whole, tr("Save to library"));
     emit scopeChanged(); // the breadcrumb's group may have a new id
-    setGroupNotice(saved->changed ? tr("Saved %1 %2 to the library. Other workflows can add it from node search after "
-                                       "Fugue restarts.")
+    setGroupNotice(saved->changed ? tr("Saved %1 %2 to the library. Every open workflow can add it from node search.")
                                         .arg(saved->id, saved->version.toString())
                                   : tr("The library has this version of %1 already (%2).")
                                         .arg(saved->id, saved->version.toString()));
+    if (saved->changed)
+        emit librarySaved();
     return true;
 }
 

@@ -2,6 +2,8 @@
 
 #include "engine/ids.h"
 
+#include <algorithm>
+
 namespace fugue {
 
 namespace {
@@ -143,6 +145,27 @@ PortKind Registry::portKind(const PortType &type) const {
 const DeclaredPortType *Registry::portType(const PortType &type) const {
     const auto found = m_portTypes.find(type.toString());
     return found == m_portTypes.end() ? nullptr : &found->second;
+}
+
+void Registry::replaceTypes(Registry &&from) {
+    m_nodeTypes = std::move(from.m_nodeTypes);
+    m_aliases = std::move(from.m_aliases);
+    m_portTypes = std::move(from.m_portTypes);
+    m_packVersions = std::move(from.m_packVersions);
+}
+
+bool Registry::sameTypes(const Registry &other) const {
+    const auto sameNode = [](const auto &a, const auto &b) {
+        return a.first == b.first && a.second.dir == b.second.dir && a.second.seal == b.second.seal
+               && a.second.toJson() == b.second.toJson();
+    };
+    const auto samePort = [](const auto &a, const auto &b) {
+        return a.first == b.first && a.second.kind == b.second.kind && a.second.name == b.second.name
+               && a.second.extensions == b.second.extensions;
+    };
+    return m_packVersions == other.m_packVersions && m_aliases == other.m_aliases
+           && std::equal(m_nodeTypes.begin(), m_nodeTypes.end(), other.m_nodeTypes.begin(), other.m_nodeTypes.end(), sameNode)
+           && std::equal(m_portTypes.begin(), m_portTypes.end(), other.m_portTypes.begin(), other.m_portTypes.end(), samePort);
 }
 
 } // namespace fugue

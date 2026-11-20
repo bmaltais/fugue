@@ -159,6 +159,21 @@ CanvasModel::Snapshot CanvasModel::snapshot() const {
     return {document(), order};
 }
 
+void CanvasModel::refreshNodeTypes() {
+    // Rows hold what they were made from a type, never the type: made again, where they are.
+    QSet<QString> all;
+    for (int r = 0; r < int(m_rows.size()); ++r) {
+        NodeRow &row = m_rows[size_t(r)];
+        NodeRow fresh = makeRow(row.id);
+        fresh.pos = row.pos;
+        row = std::move(fresh);
+        all.insert(row.id);
+        emitNodeChanged(r, {});
+    }
+    relink(all);
+    m_search->refresh();
+}
+
 void CanvasModel::restore(const Snapshot &target, bool selectAdded) {
     // The snapshot is the whole workflow; the canvas shows its level, or the nearest level up
     // that is still there (an undo of the Make group of a group entered since).

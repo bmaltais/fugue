@@ -90,6 +90,9 @@ public:
     Q_INVOKABLE void cancel();
     // A check now rather than after the edit pause (tests).
     Q_INVOKABLE void checkNow();
+    // The registry was filled again, or trust given (#70): the run thread reloads too, and the
+    // nodes are checked again against the new types (a placeholder that turned real can run).
+    void refreshNodeTypes();
     // The full image file of the node's picture slot (its last result, else the file its input
     // names), for Open, Copy and Save Image; empty when it shows none or the file is gone.
     // Never the thumbnail, which is a 512 px copy.

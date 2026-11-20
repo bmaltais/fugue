@@ -19,8 +19,10 @@
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
 #include "engine/document.h"
+#include "engine/pack_loader.h"
 #include "engine/registry.h"
 #include "menu/menu_commands.h"
+#include "node_type_reloads.h"
 #include "nodes/builtin.h"
 #include "qml_app.h"
 #include "search/node_search.h"
@@ -97,15 +99,23 @@ struct App {
     QQuickWindow *window = nullptr;
     QQuickItem *canvas = nullptr;
     QQuickItem *world = nullptr;
+    // Fills the registry again as main()'s does (#70): the built-ins, the test's types and the
+    // packs of the test's own XDG data folder, which it watches. Wired to the window in open().
+    std::unique_ptr<fugue::RegistryReloader> reloader;
 
-    // `addTypes` adds node types of the test's own before the document opens; `look` is the
-    // theme and corner radius to draw with.
+    // `addTypes` adds node types of the test's own before the document opens, and again at each
+    // reload; `look` is the theme and corner radius to draw with.
     explicit App(const fugue::Document &document, const std::function<void(fugue::Registry &)> &addTypes = {},
                  const Look &look = {})
         : hyprctl(prepareLook(dir, look)), theme(dir.path(), nullptr, hyprctl) {
-        fugue::nodes::addBuiltinNodeTypes(registry);
-        if (addTypes)
-            addTypes(registry);
+        const auto fill = [addTypes](fugue::Registry &into) {
+            fugue::nodes::addBuiltinNodeTypes(into);
+            if (addTypes)
+                addTypes(into);
+            fugue::loadInstalledPacks(into); // the test's own (XDG) packs folder, mostly empty
+        };
+        fill(registry);
+        reloader = std::make_unique<fugue::RegistryReloader>(&registry, fill);
         fugue::registerDefaultCommands(commands);
         fugue::registerMenuCommands(commands);
         fugue::registerFileCommands(commands, workflows);
@@ -127,7 +137,9 @@ struct App {
     bool open() {
         // As main() does: the English catalog gives counted strings their plural forms.
         QCoreApplication::installTranslator(&translator);
-        fugue::exposeToQml(engine, {&translator, &theme, &commands, &model, &workflows, &settings, runs, imageActions});
+        const fugue::AppObjects objects{&translator, &theme, &commands, &model, &workflows, &settings, runs, imageActions};
+        fugue::followNodeTypeReloads(*reloader, objects);
+        fugue::exposeToQml(engine, objects);
         engine.load(QUrl("qrc:/Main.qml"));
         if (engine.rootObjects().isEmpty())
             return false;

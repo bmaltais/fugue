@@ -457,6 +457,49 @@ private slots:
         QCOMPARE(registry.nodeType("io.github.alice.tools/sharpen-old")->id,
                  QStringLiteral("io.github.alice.tools/sharpen-pro"));
     }
+
+    // A reload of the packs (6.5): the types, port types and pack versions are the new ones,
+    // the providers stay, and sameTypes() tells whether anything changed at all.
+    void aReloadTakesTheNewTypesAndKeepsTheProviders() {
+        Registry registry;
+        QVERIFY(registry.add(fakeType("io.github.alice.tools/old")).isEmpty());
+        registry.setPackVersion("io.github.alice.tools", "1.0.0");
+        ProviderInstance studio;
+        studio.name = "Studio";
+        studio.type = "fake";
+        QVERIFY(registry.setProviders({ProviderEntry{studio, nullptr}}).isEmpty());
+
+        auto fresh = [] {
+            Registry next;
+            DeclaredPortType mask;
+            mask.type = *PortType::parse("io.github.alice.tools/mask");
+            mask.kind = PortKind::Data;
+            mask.name = "Mask";
+            next.add(mask);
+            NodeType renamed = fakeType("io.github.alice.tools/new", "1.1.0");
+            renamed.aliases = QStringList{"io.github.alice.tools/old"};
+            next.add(renamed);
+            next.setNodeDir("io.github.alice.tools/new", "/packs/alice/new", "seal-1");
+            next.setPackVersion("io.github.alice.tools", "1.1.0");
+            return next;
+        };
+        QVERIFY(!registry.sameTypes(fresh()));
+        registry.replaceTypes(fresh());
+        QVERIFY(registry.sameTypes(fresh()));
+        QCOMPARE(registry.nodeType("io.github.alice.tools/old")->id, QStringLiteral("io.github.alice.tools/new"));
+        QCOMPARE(registry.nodeTypes().size(), 1);
+        QVERIFY(registry.portType(*PortType::parse("io.github.alice.tools/mask")));
+        QCOMPARE(registry.packVersion("io.github.alice.tools"), QStringLiteral("1.1.0"));
+        QCOMPARE(registry.providerNames(), QStringList{"Studio"});
+
+        // A node's files changing on disk (its seal) is a change; so is a pack version alone.
+        Registry resealed = fresh();
+        resealed.setNodeDir("io.github.alice.tools/new", "/packs/alice/new", "seal-2");
+        QVERIFY(!registry.sameTypes(resealed));
+        Registry bumped = fresh();
+        bumped.setPackVersion("io.github.alice.tools", "1.1.1");
+        QVERIFY(!registry.sameTypes(bumped));
+    }
 };
 
 QTEST_GUILESS_MAIN(TestRegistry)

@@ -130,6 +130,10 @@ public:
     Q_INVOKABLE void dismissPendingTrust();
     bool isTrusted(const QString &packId, const QString &version) const;
 
+    // The registry was filled again, or trust given on the Packs page (#70): the banner's
+    // missing nodes are counted again, and packs trusted meanwhile leave pendingTrust.
+    void refreshNodeTypes();
+
     Q_INVOKABLE void dismissNotice();
     // A line for the banner from outside (the image actions, #57).
     void notify(const QString &text) { setNotice(text); }
@@ -172,6 +176,8 @@ private:
     QString untitledName() const;
     void setNotice(const QString &text);
     void analyze(const Document &document, const QString &title);
+    // The banner's line on the nodes of `document` that are not installed, empty for none.
+    QString missingNotice(const Document &document, const QString &title) const;
     static QString toPath(const QString &pathOrUrl);
 
     CanvasModel *m_canvas;
@@ -187,6 +193,9 @@ private:
     QVariantList m_recoverable;
     QVariantList m_pendingTrust;
     QString m_notice;
+    // The last missing-nodes line and the tab it is about, to count again on a reload.
+    QString m_missingNotice;
+    QString m_missingTab;
 };
 
 // Wires the file commands of the keymap (file.new, file.open, file.save, file.save-as,

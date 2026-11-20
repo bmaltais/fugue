@@ -582,6 +582,7 @@ struct CommandKernel::Impl {
         QMutex run;   // one run at a time
         QMutex guard; // `process`, for shutdown() to reach it during a run
         std::unique_ptr<Process> process;
+        QString seal; // NodeType::seal of the files `process` was started from
     };
     QMutex mutex;
     bool closed = false;
@@ -637,8 +638,8 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
 
     if (!type.seal.isEmpty() && nodeSeal(folder, entry) != type.seal)
         return nodeError(QStringLiteral("node_failed"),
-                         QStringLiteral("%1 changed on disk after it was loaded, so it is not run: restart Fugue to load "
-                                        "(and, if it is a new version, trust) the pack again.")
+                         QStringLiteral("%1 changed on disk after it was loaded, so it is not run. Fugue loads the pack "
+                                        "again in a moment; run again then (a new version asks for trust first).")
                              .arg(type.id));
 
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
@@ -679,6 +680,12 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
             return nodeError(QStringLiteral("cancelled"), QStringLiteral("The node was cancelled."));
     }
     std::unique_lock<QMutex> run(slot->run, std::adopt_lock);
+    // The pack was loaded again with other files (an update): the program of the old ones goes.
+    if (slot->seal != type.seal) {
+        QMutexLocker guard(&slot->guard);
+        slot->process.reset();
+        slot->seal = type.seal;
+    }
     // A program that was reused may have just exited (its idle stop, or a crash between runs):
     // nothing it said is lost then, so the run starts again once with a new program.
     for (int attempt = 0; attempt < 2; ++attempt) {

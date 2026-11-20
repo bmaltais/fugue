@@ -21,6 +21,7 @@
 #include "menu/menu_commands.h"
 #include "engine/pack_loader.h"
 #include "engine/registry.h"
+#include "node_type_reloads.h"
 #include "nodes/builtin.h"
 #include "qml_app.h"
 #include "run/canvas_runs.h"
@@ -65,11 +66,16 @@ int main(int argc, char *argv[]) {
     fugue::registerMenuCommands(commands);
     commands.loadKeymap(fugue::CommandRegistry::keymapPath());
 
-    // The canvas reads node types from the same registry the CLI fills (built-ins now,
-    // packs from M3) and starts on an empty workflow.
+    // The canvas reads node types from the same registry the CLI fills (the built-ins, then the
+    // packs) and starts on an empty workflow. The run thread fills its own the same way.
+    const auto addNodeTypes = [](fugue::Registry &registry) {
+        fugue::nodes::addBuiltinNodeTypes(registry);
+        fugue::loadInstalledPacks(registry);
+    };
     fugue::Registry registry;
-    fugue::nodes::addBuiltinNodeTypes(registry);
-    fugue::loadInstalledPacks(registry);
+    addNodeTypes(registry);
+    // Filled again when the packs change, so they are usable with no restart (#70).
+    fugue::RegistryReloader reloader(&registry, addNodeTypes);
     CanvasModel canvasModel(&registry);
     // The open workflows: tabs, open, save, recovery, import (spec 11). It starts with one
     // empty workflow and has the previous session's recovery copies ready to offer.
@@ -89,10 +95,7 @@ int main(int argc, char *argv[]) {
     appSettings.registerCommands(commands, [](const QUrl &url) { QDesktopServices::openUrl(url); });
     // The window runs its own runs (spec 9.8) on a thread of their own, queued with the CLI's.
     fugue::RunSetup runSetup;
-    runSetup.addNodeTypes = [](fugue::Registry &registry) {
-        fugue::nodes::addBuiltinNodeTypes(registry);
-        fugue::loadInstalledPacks(registry);
-    };
+    runSetup.addNodeTypes = addNodeTypes;
     runSetup.addKernels = fugue::nodes::addBuiltinKernels;
     fugue::RunService runService(runSetup);
     fugue::CanvasRuns runs(&canvasModel, &workflows, &runService, &registry);
@@ -101,9 +104,12 @@ int main(int argc, char *argv[]) {
     fugue::ImageActions imageActions(commands, canvasModel, runs);
     QObject::connect(&imageActions, &fugue::ImageActions::message, &workflows, &fugue::Workflows::notify);
 
+    const fugue::AppObjects objects{&translator, &theme, &commands, &canvasModel, &workflows, &appSettings, &runs, &imageActions};
+    fugue::followNodeTypeReloads(reloader, objects);
+
     QQmlApplicationEngine engine;
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
-    fugue::exposeToQml(engine, {&translator, &theme, &commands, &canvasModel, &workflows, &appSettings, &runs, &imageActions});
+    fugue::exposeToQml(engine, objects);
     engine.load(QUrl("qrc:/Main.qml"));
     if (engine.rootObjects().isEmpty())
         return 1;

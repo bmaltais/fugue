@@ -41,9 +41,9 @@
     "one": "%n node · Tab to enter",
     "other": "%n nodes · Tab to enter"
   },
-  "%n packs updated. Restart Fugue to use them.": {
-    "one": "%n pack updated. Restart Fugue to use them.",
-    "other": "%n packs updated. Restart Fugue to use them."
+  "%n packs updated.": {
+    "one": "%n pack updated.",
+    "other": "%n packs updated."
   },
   "&Colors": "&Colors",
   "&Edit": "&Edit",
@@ -202,7 +202,7 @@
   "Inputs folder": "Inputs folder",
   "Inputs that go: %1": "Inputs that go: %1",
   "Install %1 %2?": "Install %1 %2?",
-  "Installed %1 %2. Trust it before it runs; restart Fugue to use its nodes.": "Installed %1 %2. Trust it before it runs; restart Fugue to use its nodes.",
+  "Installed %1 %2. Its nodes are in node search; trust it before they run.": "Installed %1 %2. Its nodes are in node search; trust it before they run.",
   "Its setup was not run.": "Its setup was not run.",
   "Keep working": "Keep working",
   "Key": "Key",
@@ -304,7 +304,7 @@
   "Remove %1": "Remove %1",
   "Remove %1?": "Remove %1?",
   "Remove bypass": "Remove bypass",
-  "Removed %1. Restart Fugue to stop using its nodes.": "Removed %1. Restart Fugue to stop using its nodes.",
+  "Removed %1. Workflows that use its nodes keep them as placeholders.": "Removed %1. Workflows that use its nodes keep them as placeholders.",
   "Remove…": "Remove…",
   "Rename": "Rename",
   "Rename Frame": "Rename Frame",
@@ -316,7 +316,6 @@
   "Replace image": "Replace image",
   "Report an issue": "Report an issue",
   "Resize": "Resize",
-  "Restart Fugue for the changes to reach the canvas.": "Restart Fugue for the changes to reach the canvas.",
   "Right-click an inner input and choose Expose on the group to add one.": "Right-click an inner input and choose Expose on the group to add one.",
   "Run": "Run",
   "Run first in the queue": "Run first in the queue",
@@ -337,7 +336,7 @@
   "Save the selected group, or the group shown, to the library": "Save the selected group, or the group shown, to the library",
   "Save the workflow": "Save the workflow",
   "Save to library": "Save to library",
-  "Saved %1 %2 to the library. Other workflows can add it from node search after Fugue restarts.": "Saved %1 %2 to the library. Other workflows can add it from node search after Fugue restarts.",
+  "Saved %1 %2 to the library. Every open workflow can add it from node search.": "Saved %1 %2 to the library. Every open workflow can add it from node search.",
   "Saved to %1 as you change it.": "Saved to %1 as you change it.",
   "Search looks at names, categories and port types.": "Search looks at names, categories and port types.",
   "Search nodes": "Search nodes",

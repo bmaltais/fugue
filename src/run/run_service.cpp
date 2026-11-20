@@ -288,6 +288,8 @@ public:
         emit filePreviewed(token, path, t.isEmpty() ? QJsonObject{{"missing", true}} : t);
     }
 
+    void reloadNodeTypes() { ++m_typesWanted; }
+
     void check(const RunRequest &request, int ticket) {
         m_check = request;
         m_checkTicket = ticket;
@@ -309,9 +311,21 @@ private:
 
     Queue queue() const { return Queue(m_context.queueDir); }
 
+    // Fills `registry` again when a reload was asked for since `filled`; called only where nothing
+    // uses it (compileRequest: no check under way; begin: no run active).
+    void refill(Registry &registry, int &filled) {
+        if (filled == m_typesWanted || !m_setup.addNodeTypes)
+            return;
+        Registry fresh;
+        m_setup.addNodeTypes(fresh);
+        registry.replaceTypes(std::move(fresh));
+        filled = m_typesWanted;
+    }
+
     // Compiles as `fugue run` does (cli::compileDocument), with the providers from the setup,
     // into the registry runs do not use, so a run under way keeps its providers.
     Compilation compileRequest(const RunRequest &request) {
+        refill(m_compileRegistry, m_compileTypes);
         const Errors providerProblems = m_setup.registerProviders(m_compileRegistry);
         if (hasErrors(providerProblems))
             return Compilation(providerProblems);
@@ -385,6 +399,8 @@ private:
     }
 
     void begin(Waiting waiting) {
+        // The types too, after a reload: no run is active, so nothing holds them.
+        refill(m_context.registry, m_runTypes);
         // providers.json is read now, when the run's turn has come, as the worker does.
         const Errors providerProblems = m_setup.registerProviders(m_context.registry);
         const QString id = waiting.folder.id();
@@ -514,6 +530,10 @@ private:
     TrustStore m_trust{m_setup.trustPath.isEmpty() ? TrustStore::defaultPath() : m_setup.trustPath};
     cli::Context m_context;
     Registry m_compileRegistry;
+    // Reloads asked for, and the one each registry was last filled for.
+    int m_typesWanted = 0;
+    int m_compileTypes = 0;
+    int m_runTypes = 0;
     std::unique_ptr<cli::Process> m_process;
     ResidentModels m_models;
     QString m_thumbnails;
@@ -576,6 +596,10 @@ void RunService::check(const RunRequest &request, int ticket) {
 void RunService::previewFile(const QString &token, const QString &path) {
     QMetaObject::invokeMethod(m_worker, [w = m_worker, token, path] { w->previewFile(token, path); },
                               Qt::QueuedConnection);
+}
+
+void RunService::reloadNodeTypes() {
+    QMetaObject::invokeMethod(m_worker, [w = m_worker] { w->reloadNodeTypes(); }, Qt::QueuedConnection);
 }
 
 void RunService::onRunThread(const std::function<void()> &call) {

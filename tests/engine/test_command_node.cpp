@@ -392,6 +392,33 @@ wait
         QCOMPARE(pidsIn(node.dir + "/pids.txt").size(), 1);
     }
 
+    // The pack was updated and loaded again (#70): its node runs the new files, so the program
+    // still running from the old ones is stopped and a new one started.
+    void aPersistentNodeLoadedAgainWithNewFilesStartsANewProgram() {
+        Node node = makeNode(m_root.path(), "persreload", persistentScript(), {{"mode", "persistent"}});
+        {
+            QFile manifest(node.dir + "/node.json"); // the seal covers it, so it must be there
+            QVERIFY(manifest.open(QIODevice::WriteOnly));
+            manifest.write("{}");
+        }
+        node.type.seal = nodeSeal(node.dir, "./run.sh");
+        QVERIFY(!node.type.seal.isEmpty());
+        CommandKernel kernel(kGraceMs);
+        QVERIFY(kernel.run(contextFor(node)).ok());
+        const qint64 old = pidsIn(node.dir + "/pids.txt").value(0);
+
+        QFile script(node.dir + "/run.sh");
+        QVERIFY(script.open(QIODevice::Append));
+        script.write("# version 2\n");
+        script.close();
+        node.type.seal = nodeSeal(node.dir, "./run.sh"); // what the loader takes on a reload
+        const Result<Values> next = kernel.run(contextFor(node));
+        QVERIFY2(next.ok(), qPrintable(next.error().message));
+        QCOMPARE(next->value("text").text(), QString("run 1")); // a new program counts from 1
+        QCOMPARE(pidsIn(node.dir + "/pids.txt").size(), 2);
+        QVERIFY(waitGone(old));
+    }
+
     void aPersistentNodeReportsProgressForItsRun() {
         const Node node = makeNode(m_root.path(), "persprog", persistentScript(), {{"mode", "persistent"}});
         CommandKernel kernel(kGraceMs);

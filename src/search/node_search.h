@@ -147,6 +147,10 @@ public:
     // pointerSearchRequested() with the pointer's world point (openAt).
     void registerCommands(CommandRegistry &commands);
 
+    // The results made again from the registry and the workflow's groups as they are now; the
+    // registry was filled again (#70), so no row may keep a type it pointed at.
+    void refresh();
+
 signals:
     void activeChanged();
     void queryChanged();
@@ -154,7 +158,6 @@ signals:
     void pointerSearchRequested();
 
 private:
-    void refresh();
     // The faces of the workflow's groups that can go in the level shown.
     std::vector<NodeType> groupFaces() const;
 

@@ -150,14 +150,14 @@ void PacksModel::finish(const QString &message, const Errors &errors, bool chang
         for (const Error &error : errors)
             if (error.severity == Error::Severity::Warning && !hasErrors(errors))
                 m_failure += (m_failure.isEmpty() ? QString() : QStringLiteral("\n")) + error.message;
-        if (changed)
-            m_restartNeeded = true;
         m_busy = false;
         m_question.clear();
         emit messageChanged();
         emit questionChanged();
         emit busyChanged();
         refresh();
+        if (changed)
+            emit packsModified();
     }, Qt::QueuedConnection);
 }
 
@@ -190,7 +190,7 @@ void PacksModel::add(const QString &location, const QString &ref) {
             finish({}, added.errors(), false);
             return;
         }
-        QString text = tr("Installed %1 %2. Trust it before it runs; restart Fugue to use its nodes.").arg(added->pack.id, added->pack.version);
+        QString text = tr("Installed %1 %2. Its nodes are in node search; trust it before they run.").arg(added->pack.id, added->pack.version);
         if (added->setupSkipped)
             text += QLatin1Char(' ') + tr("Its setup was not run.");
         finish(text, added.warnings(), true);
@@ -205,7 +205,7 @@ void PacksModel::update(const QString &id) {
             finish({}, changed.errors(), false);
             return;
         }
-        finish(changed->isEmpty() ? (m_sawNo ? tr("Nothing was updated; you said no.") : tr("Nothing to update.")) : tr("%n packs updated. Restart Fugue to use them.", nullptr, int(changed->size())),
+        finish(changed->isEmpty() ? (m_sawNo ? tr("Nothing was updated; you said no.") : tr("Nothing to update.")) : tr("%n packs updated.", nullptr, int(changed->size())),
                changed.warnings(), !changed->isEmpty());
     });
 }
@@ -214,7 +214,7 @@ void PacksModel::remove(const QString &id) {
     start([this, id] {
         TrustStore trust(m_trustFile);
         const Result<PackSummary> removed = removePack(id, m_packsFolder, trust, prompts());
-        finish(removed ? tr("Removed %1. Restart Fugue to stop using its nodes.").arg(id) : QString(), removed ? Errors() : removed.errors(), bool(removed));
+        finish(removed ? tr("Removed %1. Workflows that use its nodes keep them as placeholders.").arg(id) : QString(), removed ? Errors() : removed.errors(), bool(removed));
     });
 }
 
@@ -222,7 +222,7 @@ void PacksModel::trust(const QString &id) {
     start([this, id] {
         TrustStore trust(m_trustFile);
         const Result<PackSummary> done = trustPack(id, m_packsFolder, trust, prompts());
-        finish(done ? tr("Trusted %1 %2.").arg(done->id, done->version) : QString(), done ? Errors() : done.errors(), false);
+        finish(done ? tr("Trusted %1 %2.").arg(done->id, done->version) : QString(), done ? Errors() : done.errors(), bool(done));
     });
 }
 

@@ -19,7 +19,10 @@
 #include <atomic>
 
 #include "canvas_app.h"
+#include "disk_pack.h"
 #include "engine/fake_provider.h"
+#include "engine/pack_loader.h"
+#include "engine/trust_store.h"
 #include "engine/queue.h"
 #include "engine/run_folder.h"
 #include "run/canvas_runs.h"
@@ -123,7 +126,11 @@ struct RunApp {
     explicit RunApp(const QByteArray &graph, bool slow = false, const fugue::Description &offers = imageDescription())
         : app(load(graph)) {
         RunSetup setup;
-        setup.addNodeTypes = fugue::nodes::addBuiltinNodeTypes;
+        // As main() fills it: the built-ins, then the test's own (XDG) packs folder.
+        setup.addNodeTypes = [](fugue::Registry &registry) {
+            fugue::nodes::addBuiltinNodeTypes(registry);
+            fugue::loadInstalledPacks(registry);
+        };
         setup.addKernels = fugue::nodes::addBuiltinKernels;
         auto *self = this;
         setup.registerProviders = [self, slow, offers](fugue::Registry &registry) {
@@ -882,6 +889,48 @@ private slots:
         qInfo("first check of 300 nodes applied in %lld ms CPU, the same again in %lld ms", first,
               test_support::cpuMs() - start);
         QVERIFY(first < 1500);
+    }
+
+    // #70: a pack installed between two runs is what the next run runs, with no restart, and so
+    // is its update (a new version, trusted again): the run thread reloads between runs.
+    void aReloadBetweenTwoRunsRunsTheNewTypes() {
+        const QString packs = fugue::packsDir();
+        QDir(packs).removeRecursively();
+        RunApp r(R"({
+  "fugue": 1,
+  "graph": {"nodes": {
+    "say": {"type": "io.example.tools/say", "version": "1.0.0"},
+    "show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "say.text"}}}
+  }},
+  "layout": {"nodes": {"say": {"pos": [0, 0]}, "show": {"pos": [300, 0]}}}
+})");
+        QVERIFY(r.app.open());
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        r.runs->start();
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(finished.at(0).at(1).toString(), QStringLiteral("failed")); // not installed
+
+        fugue::TrustStore trust;
+        QVERIFY(writeSayPack(packs, "first"));
+        QVERIFY(trust.trust("io.example.tools", "1.0.0").isEmpty());
+        r.app.reloader->reload();
+        QVERIFY(!r.role("say", NodeList::Missing).toBool());
+        r.runs->start();
+        QTRY_COMPARE(finished.size(), 2);
+        QCOMPARE(finished.at(1).at(1).toString(), QStringLiteral("ok"));
+        QCOMPARE(r.role("show", NodeList::ThumbnailText).toString(), QStringLiteral("first"));
+
+        // The update: new files at a new version. The workflow still records 1.0.0, a minor
+        // step behind, which loads and runs (3.6).
+        QVERIFY(writeSayPack(packs, "second", "1.1.0"));
+        QVERIFY(trust.trust("io.example.tools", "1.1.0").isEmpty());
+        r.app.reloader->reload();
+        r.runs->start();
+        QTRY_COMPARE(finished.size(), 3);
+        QCOMPARE(finished.at(2).at(1).toString(), QStringLiteral("ok"));
+        QCOMPARE(r.role("show", NodeList::ThumbnailText).toString(), QStringLiteral("second"));
+        r.close();
+        QDir(packs).removeRecursively();
     }
 
     // The demo workflow that ships (examples/demo.fugue) runs from the window: CPU nodes only.

@@ -596,8 +596,8 @@ with an id and a version, and it appears in node search.
   added, patch for any other change; saving the same definition keeps the version. An entry is
   updated only by the group that came from it (`library`, 4.4): another group of the same name is
   refused until renamed. The workflow's
-  definition and instances take the version saved. A window lists library groups it did not
-  start with after a restart.
+  definition and instances take the version saved. Every open window lists the saved group at
+  once, and its instances there show "update available" (6.5).
 - Adding a library group brings its definition (and the groups it uses) into the workflow, as a
   paste does: a nested group that clashes with another definition of the workflow comes in under
   a new id. Updating drops the values and links of exposed inputs and outputs that went or
@@ -801,6 +801,16 @@ holding that node's `node.json`.
 - At startup Fugue reads only manifests and builds the registry. A manifest that fails
   validation disables that node (or pack) with a visible reason; it never stops Fugue.
 - Programs, libraries and group definitions load on first use.
+- What is installed changes while Fugue runs: the window reads the manifests again after an
+  install, update, removal or trust on the Packs page, a save to the library, or a change of the
+  pack paths, and when the pack folders change on disk (a `fugue pack add`, another window's save,
+  an edit by hand), once they have been quiet for half a second. Every open workflow follows: a
+  placeholder whose type is now installed becomes the node, a node whose pack went becomes a
+  placeholder that keeps its inputs and links (11.6), node search lists what is there now, and
+  nothing of the document changes. Runs take the new types between runs, never during one: the
+  next compile uses them, and a run waiting in the queue keeps the graph it was compiled to. A
+  command node runs the files read at the last reload; a persistent program started from older
+  files is stopped and started again.
 - The folder `local` of the first pack path is the group library ([5.3](#53-definitions-copies-and-the-library)):
   the one disk pack with the id `local`, holding groups only. A `local` folder elsewhere is refused.
 
@@ -825,7 +835,7 @@ holding that node's `node.json`.
 - The window does the same on the Packs page of the settings panel (`Ctrl+,`): the installed
   packs with why a pack or node did not load, add (folder or pinned git address), update, trust
   and remove. It asks the same questions on the page, with the same details, and acts only after
-  a yes. The running window keeps the node types it started with, so it says to restart Fugue.
+  a yes. What it changed is usable in every open window at once (6.5).
 - No registry or catalog in v0.1. No signing in v0.1.
 
 ### 6.7 Trust
@@ -2097,7 +2107,8 @@ Building M2 made these further choices.
 | Groups (#26): the canvas keeps the whole workflow and the instances entered; every edit applies to the level shown and is merged back, and undo restores the whole workflow, so an undo after leaving still undoes an edit made inside. Entering is not an edit (as in ComfyUI, where entering a subgraph is navigation) | 5.2, 12.11 | high |
 | Make group merges links from one output into inner inputs of one type into one exposed input (ComfyUI's subgraph conversion makes one input per link); a list input fed from both sides cannot be split and is refused | 5.2, 5.4 | medium-high |
 | A group's id follows its name while it is `local/…`, so library folders are named after what the user called the group | 5.3 | medium |
-| The library is the `local` folder of the first pack path, loaded as a pack of groups only; saving bumps the version by 3.6 from the face; a window sees a newly saved group after a restart (the registry is fixed at start, as for packs, 6.6) | 5.3, 6.5 | medium |
+| The library is the `local` folder of the first pack path, loaded as a pack of groups only; saving bumps the version by 3.6 from the face; every open window sees a newly saved group at once (#70: the registry is read again, 6.5) | 5.3, 6.5 | medium |
+| Live node types (#70): one registry per window stays in place and takes the types read again (`Registry::replaceTypes`); a reload asked for by the window (Packs page, library save) happens at once, one seen on disk (QFileSystemWatcher on the pack paths, pack and node folders, manifests and command entries) after 500 ms of quiet and only when the types differ. The run thread fills its compile registry before its next compile and its run registry before its next run starts. ComfyUI loads custom nodes only at server start (its Manager says "restart required"); Fugue has no server to restart | 6.5, 6.6 | medium-high |
 | Advanced sections fold on every node face, not only groups' (6.1 says `advanced` inputs are collapsed); a linked advanced input always shows | 5.4, 6.1 | medium-high |
 | Ungroup of a muted instance mutes its nodes; of a bypassed one keeps the inner modes (a bypassed group's pass-through has no node-by-node equivalent) | 5.2, 3.5 | medium |
 | The `?` overlay lists the commands that have a key; the rest (colors, exports, help links) are in the menus and appear in the overlay once the keymap file binds them | 12.5 | medium |

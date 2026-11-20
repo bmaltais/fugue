@@ -21,16 +21,6 @@ ColumnLayout {
         note: qsTr("Nodes come in packs. A trusted pack runs programs as you: Fugue enforces no sandbox, so trust only what you would run in a terminal.")
     }
 
-    Text {
-        objectName: "packsRestart"
-        visible: page.model.restartNeeded
-        Layout.fillWidth: true
-        wrapMode: Text.Wrap
-        color: page.look.label
-        font.pixelSize: page.look.labelSize
-        text: qsTr("Restart Fugue for the changes to reach the canvas.")
-    }
-
     // The question: what will happen, and the person says yes or no.
     Rectangle {
         id: ask
