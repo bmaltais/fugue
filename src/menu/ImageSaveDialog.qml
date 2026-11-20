@@ -15,9 +15,13 @@ Item {
         objectName: "imageSaveDialog"
         title: qsTr("Save the image")
         fileMode: FileDialog.SaveFile
-        onAccepted: root.actions.saveTo(selectedFile.toString())
-        onRejected: root.actions.cancelSave()
+        onAccepted: if (root.actions) root.actions.saveTo(selectedFile.toString())
+        onRejected: if (root.actions) root.actions.cancelSave() // gone first when the window closes
     }
+
+    // The window going while the dialog shows (quit from the keys): it closes first, so the
+    // in-window dialog is not torn down mid-show.
+    Component.onDestruction: dialog.close()
 
     Connections {
         target: root.actions
