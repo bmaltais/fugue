@@ -51,6 +51,8 @@
   "1 of %1": "1 of %1",
   "A command node is a program that runs as you, with no sandbox. Nothing from these packs runs until you allow it.": "A command node is a program that runs as you, with no sandbox. Nothing from these packs runs until you allow it.",
   "A folder with a pack.json, or a git address pinned to a tag or a commit.": "A folder with a pack.json, or a git address pinned to a tag or a commit.",
+  "A group cannot hold itself: %1 holds the group shown.": "A group cannot hold itself: %1 holds the group shown.",
+  "A group cannot hold itself: the copy has an instance of %1, which holds the group shown.": "A group cannot hold itself: the copy has an instance of %1, which holds the group shown.",
   "A group never writes files or shows previews from inside. Leave %1 outside the group, wired to its output?": "A group never writes files or shows previews from inside. Leave %1 outside the group, wired to its output?",
   "A list of %1 cannot feed an input that takes one.": "A list of %1 cannot feed an input that takes one.",
   "A node cannot feed itself.": "A node cannot feed itself.",
