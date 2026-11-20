@@ -32,6 +32,10 @@ public:
     // which is then remembered. Empty when the file cannot be read.
     QString hash(const QString &path);
 
+    // The remembered hash of the file at `path` while its size and modification time are
+    // unchanged; empty otherwise. Never reads the file.
+    QString known(const QString &path);
+
     // Records that the file now at `path` has `hash`, without reading it. For
     // a file whose bytes are known, such as one just moved or hard-linked into
     // the result cache's store (a rename keeps size and modification time).

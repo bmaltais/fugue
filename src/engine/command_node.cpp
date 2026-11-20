@@ -26,6 +26,7 @@
 #include <QCryptographicHash>
 
 #include "engine/file_hashes.h"
+#include "engine/model_library.h"
 #include "engine/registry.h"
 
 namespace fugue {
@@ -586,12 +587,38 @@ Result<QJsonValue> plainJson(const QString &name, const Value &value, const Node
     return value.toJson();
 }
 
+// A resource input as the program gets it: each handle with its file's path; model_missing on the
+// input when a file is not on this machine.
+Result<QJsonValue> resourceJson(const QString &name, const Value &value, const ModelLibrary &library, FileHashes &hashes) {
+    if (value.isList()) {
+        QJsonArray items;
+        for (const Value &item : value.items()) {
+            const Result<QJsonValue> one = resourceJson(name, item, library, hashes);
+            if (!one)
+                return one;
+            items.append(one.value());
+        }
+        return QJsonValue(items);
+    }
+    const Result<QJsonObject> made = library.withPaths(value.toJson().toObject(), hashes);
+    if (!made) {
+        Error error = made.error();
+        error.input = name;
+        return error;
+    }
+    return QJsonValue(made.value());
+}
+
 Result<QJsonObject> requestFor(const NodeContext &context, const QString &id) {
+    const ModelLibrary library = ModelLibrary::current(context.registry);
     QJsonObject inputs;
     for (auto it = context.inputs.begin(); it != context.inputs.end(); ++it) {
         if (it.value().isEmpty())
             continue;
-        const Result<QJsonValue> plain = plainJson(it.key(), it.value(), context);
+        const InputSpec *spec = context.type->input(it.key());
+        const bool resource = spec && context.registry && context.registry->portKind(spec->type.type) == PortKind::Resource;
+        const Result<QJsonValue> plain = resource ? resourceJson(it.key(), it.value(), library, *context.hashes)
+                                                  : plainJson(it.key(), it.value(), context);
         if (!plain)
             return plain.error();
         inputs.insert(it.key(), plain.value());

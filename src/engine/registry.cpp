@@ -161,7 +161,7 @@ bool Registry::sameTypes(const Registry &other) const {
     };
     const auto samePort = [](const auto &a, const auto &b) {
         return a.first == b.first && a.second.kind == b.second.kind && a.second.name == b.second.name
-               && a.second.extensions == b.second.extensions;
+               && a.second.extensions == b.second.extensions && a.second.folders == b.second.folders;
     };
     return m_packVersions == other.m_packVersions && m_aliases == other.m_aliases
            && std::equal(m_nodeTypes.begin(), m_nodeTypes.end(), other.m_nodeTypes.begin(), other.m_nodeTypes.end(), sameNode)

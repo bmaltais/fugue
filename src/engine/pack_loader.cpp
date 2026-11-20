@@ -40,6 +40,13 @@ bool isFolderName(const QString &name) {
     return pattern.match(name).hasMatch();
 }
 
+// A model folder name a resource type declares: one path segment, not hidden (a folder starting
+// with "." is never searched), as ComfyUI's are ("upscale_models", "ESRGAN").
+bool isModelFolderName(const QString &name) {
+    return !name.isEmpty() && !name.startsWith(QLatin1Char('.')) && !name.contains(QLatin1Char('/'))
+           && !name.contains(QLatin1Char('\\'));
+}
+
 // A path inside the node's own folder: relative, and never leaving it.
 bool isInsideFolder(const QString &path) {
     if (path.isEmpty() || QDir::isAbsolutePath(path) || path.startsWith(QLatin1Char('~')))
@@ -125,13 +132,20 @@ std::optional<PackManifest> parsePack(const QJsonObject &json, PackOrigin origin
                 bool extensionsOk = extensions.isUndefined() || extensions.isArray();
                 for (const QJsonValue &extension : extensions.toArray())
                     extensionsOk = extensionsOk && extension.isString() && !extension.toString().isEmpty();
-                if (!entry.isObject() || !extensionsOk || id.contains(QLatin1Char('@')) || !parsed || parsed->isBuiltin() || parsed->isAny() ||
+                // Model folder names under each models root (8.9): one plain name each, as ComfyUI's
+                // ("text_encoders"), and only on a resource type.
+                const QJsonValue folders = type.value("folders");
+                bool foldersOk = folders.isUndefined() || (folders.isArray() && kind == QLatin1String("resource"));
+                for (const QJsonValue &folder : folders.toArray())
+                    foldersOk = foldersOk && isModelFolderName(folder.toString());
+                if (!entry.isObject() || !extensionsOk || !foldersOk || id.contains(QLatin1Char('@')) || !parsed || parsed->isBuiltin() || parsed->isAny() ||
                     !id.startsWith(pack.id + QLatin1Char('/')) || !versionValue.isDouble() || version < 1 ||
                     (kind != QLatin1String("resource") && kind != QLatin1String("data")) ||
                     type.value("name").toString().isEmpty()) {
                     errors << invalid(QStringLiteral("pack.json \"types\" entry %1 needs an id %2/<name>, a version "
                                                      "of 1 or more, a kind of \"resource\" or \"data\", a name and, if any, "
-                                                     "extensions as a list of text.")
+                                                     "extensions as a list of text and (for a resource) folders as a list of "
+                                                     "plain folder names.")
                                           .arg(id.isEmpty() ? QStringLiteral("(no id)") : QStringLiteral("\"%1\"").arg(id), pack.id));
                     continue;
                 }
@@ -140,6 +154,8 @@ std::optional<PackManifest> parsePack(const QJsonObject &json, PackOrigin origin
                 declared.name = type.value("name").toString();
                 for (const QJsonValue &extension : type.value("extensions").toArray())
                     declared.extensions << extension.toString();
+                for (const QJsonValue &folder : folders.toArray())
+                    declared.folders << folder.toString();
                 pack.types << declared;
             }
         }

@@ -791,7 +791,7 @@ holding that node's `node.json`.
 | `manifest`, `id`, `version`, `name` | yes | The id is lowercase reverse-DNS. |
 | `license`, `source`, `description` | no | |
 | `nodes` | yes | Subfolder names, each with a `node.json`. |
-| `types` | no | Declared port types ([2.2](#22-declared-types)): `id`, `version`, `kind` (`resource` or `data`), `name`, and for resources `extensions` (file extensions found in the models folder). |
+| `types` | no | Declared port types ([2.2](#22-declared-types)): `id`, `version`, `kind` (`resource` or `data`), `name`, and for resources `extensions` (file extensions found in the models folder; default ComfyUI's list plus `.gguf`) and `folders` (the folder names under each models root, such as `["upscaler", "upscale_models"]`; default the last part of the id, [8.9](#89-models-on-disk)). |
 | `setup` | no | A command that prepares the pack's private environment ([6.8](#68-per-pack-environments)). |
 | `converters` | no | Import and export converters ([11.9](#119-converters)). |
 
@@ -1198,6 +1198,14 @@ reference. A new inference runtime is a new provider module.
   shared without copying).
 - A model is identified by content hash, never by path or name. The hash is computed once and
   remembered.
+- Under each root (Fugue's folder first, then the settings' paths in order) a resource type's files
+  are in the folders its pack declares in `folders`, else in the folder named after its id's last
+  part, with their subfolders. A type that declares ComfyUI's folder names (`text_encoders`, `clip`)
+  lets a ComfyUI `models/` folder be added as it is. Names starting with "." are skipped; a file
+  reached twice (a link, overlapping roots) counts once.
+- Finding a handle's file looks at the remembered hashes, then hashes the files with the handle's
+  `name` (once). Other files are not hashed to find a model: hashing every model of a large folder
+  takes minutes. A missing model is `model_missing`, with the folder to put it in.
 - No downloads in v0.1. Fugue shows where a missing model can be had and which folder it goes in.
 - Fugue never modifies or deletes a model file.
 
@@ -2142,6 +2150,10 @@ Building M2 made these further choices.
 | Wiring far out (#74). ComfyUI keeps its slots usable when zoomed out and connects a wire dropped on a node's body to the first input that fits. We match: ports work wherever they are drawn (the map tier), with the same 10 px reach on screen, and a drop on a body connects to the one port that fits (the one free one when an input is linked). We improve: when several free ports fit, a short list asks which; and a magnifier: far out, a short hover (400 ms; 300 during a drag) shows the node at zoom 1 over itself, its ports live, without moving the view; a wire started there leaves it as it travels, and the node it reaches shows its own to drop on | 12.6 | medium-high |
 | Selection toolbar (#74): as ComfyUI's selection toolbox (the owner's screenshot: delete, info, color, frame, widgets, help, bypass, "…"), a bar over the selection made of commands, so it is enabled and labelled as the menus are. Fugue's set: Run to here, Bypass, Color, Frame, Enter (a group), Open Image (a node with an image), Delete, "…" (the node's menu); no Info or Help yet, Fugue has neither panel. Node types adding their own buttons (ComfyUI's extensions do, through a hook in its frontend whose exact name and set were not read for this) waits for a manifest field and a protocol message (7.2) | 12.3 | medium |
 | Pin (#55): a pinned node stays where it is when a drag or its Frame moves the others, as ComfyUI's pinned nodes | 12.4 | high |
+| Model folders (#66): a resource type names its folders under each models root (`folders` in pack.json, else its id's last part), as ComfyUI's `folder_paths.py` maps a category to several folders (`text_encoders` and `clip`); subfolders are searched, as ComfyUI does | 8.9, 6.4 | high |
+| Finding a model (#66): by remembered hash, then by hashing the files with the handle's name; never by hashing the whole folder (a ComfyUI folder holds hundreds of GB). A renamed model is found once its hash is remembered | 8.9, 2.5 | medium |
+| A derived handle (#66) gets no `path`; the handles inside it (base, each `apply` step) get theirs | 7.2, 2.5 | medium-high |
+| A handle without a hash cannot be found on disk: `model_missing` (a provider serves name-only handles) | 2.5, 8.9 | medium-high |
 
 ## Appendix B: issue to section map
 

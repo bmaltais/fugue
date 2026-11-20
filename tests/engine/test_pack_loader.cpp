@@ -116,6 +116,21 @@ private slots:
         QCOMPARE(registry.portKind(*PortType::parse(id + "/palette")), PortKind::Data);
     }
 
+    void aResourceTypeNamesItsModelFolders() {
+        QTemporaryDir root;
+        const QString id = "io.github.alice.tools";
+        QJsonObject pack = packJson(id, {"mix"});
+        pack["types"] = QJsonArray{QJsonObject{{"id", id + "/upscaler"}, {"version", 1}, {"kind", "resource"},
+                                               {"name", "Upscaler"}, {"extensions", QJsonArray{".pth"}},
+                                               {"folders", QJsonArray{"upscaler", "upscale_models", "ESRGAN"}}}};
+        const QString dir = makePack(root.path(), id, pack, {{"mix", nodeJson(id + "/mix")}});
+        Registry registry;
+        QVERIFY(loadPack(registry, dir).enabled);
+        const DeclaredPortType *declared = registry.portType(*PortType::parse(id + "/upscaler"));
+        QVERIFY(declared);
+        QCOMPARE(declared->folders, (QStringList{"upscaler", "upscale_models", "ESRGAN"}));
+    }
+
     void aBadNodeDisablesOnlyThatNode() {
         QTemporaryDir root;
         const QString id = "io.github.alice.tools";
@@ -185,6 +200,10 @@ private slots:
         QTest::newRow("type id with @") << with("types", QJsonArray{QJsonObject{{"id", "io.github.alice.tools/x@5"}, {"version", 1}, {"kind", "data"}, {"name", "X"}}}) << "invalid_document";
         QTest::newRow("type of another pack") << with("types", QJsonArray{QJsonObject{{"id", "io.github.bob.tools/x"}, {"version", 1}, {"kind", "data"}, {"name", "X"}}}) << "invalid_document";
         QTest::newRow("empty extension") << with("types", QJsonArray{QJsonObject{{"id", "io.github.alice.tools/x"}, {"version", 1}, {"kind", "resource"}, {"name", "X"}, {"extensions", QJsonArray{""}}}}) << "invalid_document";
+        QTest::newRow("model folder with a slash") << with("types", QJsonArray{QJsonObject{{"id", "io.github.alice.tools/x"}, {"version", 1}, {"kind", "resource"}, {"name", "X"}, {"folders", QJsonArray{"a/b"}}}}) << "invalid_document";
+        QTest::newRow("model folder ..") << with("types", QJsonArray{QJsonObject{{"id", "io.github.alice.tools/x"}, {"version", 1}, {"kind", "resource"}, {"name", "X"}, {"folders", QJsonArray{".."}}}}) << "invalid_document";
+        QTest::newRow("hidden model folder") << with("types", QJsonArray{QJsonObject{{"id", "io.github.alice.tools/x"}, {"version", 1}, {"kind", "resource"}, {"name", "X"}, {"folders", QJsonArray{".cache"}}}}) << "invalid_document";
+        QTest::newRow("folders on a data type") << with("types", QJsonArray{QJsonObject{{"id", "io.github.alice.tools/x"}, {"version", 1}, {"kind", "data"}, {"name", "X"}, {"folders", QJsonArray{"x"}}}}) << "invalid_document";
         QTest::newRow("uppercase node folder") << with("nodes", QJsonArray{"Blend"}) << "invalid_document";
         QTest::newRow("reserved local") << with("id", "local") << "invalid_document";
     }
