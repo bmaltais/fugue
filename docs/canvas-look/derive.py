@@ -198,7 +198,7 @@ def tokens(colors, light):
         t["well"] = mix(bg, fg, 0.035)           # darker than the body: recessed
         t["dot"] = mix(t["canvas"], fg, 0.13)
         t["dot-major"] = mix(t["canvas"], fg, 0.22)
-        t["bevel"] = fg + (0.06,)                 # 1 px highlight along the header's top edge
+        t["bevel"] = fg + (0.10,)                 # 1 px highlight along the card's top edge (#63)
         t["scrim"] = (0.0, 0.0, 0.0, 0.45)
     t["text"] = fg
     t["accent"] = colors["accent"]
@@ -295,13 +295,15 @@ def css_block(name, colors, light):
         lines.append(f"  --role-{role}: {tohex(colors[role])};")
     # Shadows (docs/canvas-look.md, "Elevation"): the same values the 9-slice images bake.
     if light:
-        lines += ["  --shadow-1: 0 1px 2px rgba(0,0,0,.07), 0 3px 10px rgba(0,0,0,.07);",
-                  "  --shadow-2: 0 2px 4px rgba(0,0,0,.08), 0 10px 28px rgba(0,0,0,.14);",
-                  "  --shadow-3: 0 4px 10px rgba(0,0,0,.08), 0 18px 48px rgba(0,0,0,.20);"]
+        lines += ["  --shadow-1: 0 1px 3px rgba(0,0,0,.12), 0 6px 18px rgba(0,0,0,.12);",
+                  "  --shadow-2: 0 2px 5px rgba(0,0,0,.14), 0 12px 32px rgba(0,0,0,.18);",
+                  "  --shadow-3: 0 4px 10px rgba(0,0,0,.08), 0 18px 48px rgba(0,0,0,.20);",
+                  "  --shadow-4: 0 3px 8px rgba(0,0,0,.14), 0 20px 48px rgba(0,0,0,.24);"]
     else:
-        lines += ["  --shadow-1: 0 1px 2px rgba(0,0,0,.45), 0 4px 12px rgba(0,0,0,.30);",
-                  "  --shadow-2: 0 2px 6px rgba(0,0,0,.50), 0 12px 32px rgba(0,0,0,.45);",
-                  "  --shadow-3: 0 6px 16px rgba(0,0,0,.50), 0 20px 56px rgba(0,0,0,.55);"]
+        lines += ["  --shadow-1: 0 2px 4px rgba(0,0,0,.75), 0 8px 24px rgba(0,0,0,.65);",
+                  "  --shadow-2: 0 3px 8px rgba(0,0,0,.80), 0 16px 40px rgba(0,0,0,.75);",
+                  "  --shadow-3: 0 6px 16px rgba(0,0,0,.50), 0 20px 56px rgba(0,0,0,.55);",
+                  "  --shadow-4: 0 4px 10px rgba(0,0,0,.80), 0 24px 60px rgba(0,0,0,.80);"]
     lines.append("}")
     return "\n".join(lines)
 

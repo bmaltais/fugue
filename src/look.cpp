@@ -145,7 +145,7 @@ Tokens tokens(const QHash<QString, QColor> &colors, bool light) {
         t.dot = mix(t.canvas, fg, .13);
         t.dotMajor = mix(t.canvas, fg, .22);
         t.bevel = fg;
-        t.bevel.setAlphaF(.06f);
+        t.bevel.setAlphaF(.10f);
         t.scrim = QColor::fromRgbF(0, 0, 0, .45f);
         t.errorHeader = mix(t.header, red, .20);
         t.errorChip = mix(t.body, red, .14);
@@ -267,6 +267,12 @@ QHash<QString, QColor> portColors(const QHash<QString, QColor> &colors, bool lig
     return out;
 }
 
+Corners corners(int setting, int omarchy) {
+    if (setting >= 0)
+        return {setting, setting};
+    return {std::min(omarchy, 8), omarchy};
+}
+
 namespace {
 
 struct ShadowLayer {
@@ -274,45 +280,53 @@ struct ShadowLayer {
 };
 
 std::vector<ShadowLayer> shadowLayers(int level, bool light) {
+    // A tight contact shadow under the edge, then a large soft ambient one, both cast down.
+    // Dark themes need far more: black over a near-black canvas only shows when it is deep.
+    using Layers = std::vector<ShadowLayer>;
     switch (level) {
-    case 1: return light ? std::vector<ShadowLayer>{{1, 2, .07}, {3, 10, .07}} : std::vector<ShadowLayer>{{1, 2, .45}, {4, 12, .30}};
-    case 2: return light ? std::vector<ShadowLayer>{{2, 4, .08}, {10, 28, .14}} : std::vector<ShadowLayer>{{2, 6, .50}, {12, 32, .45}};
-    default: return light ? std::vector<ShadowLayer>{{4, 10, .08}, {18, 48, .20}} : std::vector<ShadowLayer>{{6, 16, .50}, {20, 56, .55}};
+    case 1: return light ? Layers{{1, 3, .12}, {6, 18, .12}} : Layers{{2, 4, .75}, {8, 24, .65}};
+    case 2: return light ? Layers{{2, 5, .14}, {12, 32, .18}} : Layers{{3, 8, .80}, {16, 40, .75}};
+    case 4: return light ? Layers{{3, 8, .14}, {20, 48, .24}} : Layers{{4, 10, .80}, {24, 60, .80}};
+    case 3:
+    default: return light ? Layers{{4, 10, .08}, {18, 48, .20}} : Layers{{6, 16, .50}, {20, 56, .55}};
     }
 }
 
-// A separable Gaussian blur of a coverage buffer; CSS's blur radius B is sigma B / 2.
+// One box blur pass of `radius` along rows (`step` 1) or columns (`step` width), with a
+// running sum, so its cost does not grow with the radius; outside the buffer is clear.
+void boxPass(const std::vector<float> &from, std::vector<float> &to, int lines, int length, int lineStep, int step,
+             int radius) {
+    const float scale = 1.0f / float(2 * radius + 1);
+    for (int line = 0; line < lines; ++line) {
+        const size_t base = size_t(line) * size_t(lineStep);
+        const auto at = [&](int i) { return i >= 0 && i < length ? from[base + size_t(i) * size_t(step)] : 0.0f; };
+        float sum = 0;
+        for (int i = -radius; i <= radius; ++i)
+            sum += at(i);
+        for (int i = 0; i < length; ++i) {
+            to[base + size_t(i) * size_t(step)] = sum * scale;
+            sum += at(i + radius + 1) - at(i - radius);
+        }
+    }
+}
+
+// A Gaussian blur of a coverage buffer, as three box blurs whose widths add up to the same
+// spread (Kovesi's approximation); CSS's blur radius B is sigma B / 2.
 void blur(std::vector<float> &buffer, int width, int height, double sigma) {
     if (sigma < .3)
         return;
-    const int radius = int(std::ceil(sigma * 3));
-    std::vector<float> kernel(size_t(2 * radius + 1));
-    float sum = 0;
-    for (int i = -radius; i <= radius; ++i)
-        sum += kernel[size_t(i + radius)] = float(std::exp(-(i * i) / (2 * sigma * sigma)));
-    for (float &k : kernel)
-        k /= sum;
+    constexpr int passes = 3;
+    int lower = int(std::floor(std::sqrt(12 * sigma * sigma / passes + 1)));
+    if (lower % 2 == 0)
+        --lower;
+    const int wider = int(std::round((12 * sigma * sigma - passes * lower * lower - 4.0 * passes * lower - 3 * passes)
+                                     / (-4.0 * lower - 4)));
     std::vector<float> pass(buffer.size());
-    for (int y = 0; y < height; ++y)
-        for (int x = 0; x < width; ++x) {
-            float v = 0;
-            for (int i = -radius; i <= radius; ++i) {
-                const int xi = x + i;
-                if (xi >= 0 && xi < width)
-                    v += buffer[size_t(y * width + xi)] * kernel[size_t(i + radius)];
-            }
-            pass[size_t(y * width + x)] = v;
-        }
-    for (int y = 0; y < height; ++y)
-        for (int x = 0; x < width; ++x) {
-            float v = 0;
-            for (int i = -radius; i <= radius; ++i) {
-                const int yi = y + i;
-                if (yi >= 0 && yi < height)
-                    v += pass[size_t(yi * width + x)] * kernel[size_t(i + radius)];
-            }
-            buffer[size_t(y * width + x)] = v;
-        }
+    for (int i = 0; i < passes; ++i) {
+        const int radius = ((i < wider ? lower : lower + 2) - 1) / 2;
+        boxPass(buffer, pass, height, width, width, 1, radius);
+        boxPass(pass, buffer, width, height, 1, width, radius);
+    }
 }
 
 } // namespace
@@ -323,10 +337,14 @@ QImage shadowImage(int level, int corner, bool light, int *margin) {
     for (const ShadowLayer &layer : layers)
         reach = std::max(reach, std::abs(layer.y) + layer.blur * 1.5);
     const int e = int(std::ceil(reach));
-    const int box = 2 * corner + 3; // the corners and a 1 px middle that stretches
-    const int size = 2 * e + box;
+    const int border = e + corner + 1; // the 9-slice border: the margin, the corner and 1 px
+    const int out = 2 * border + 1;    // and a 1 px middle that stretches
     if (margin)
         *margin = e;
+    // Painted around a box big enough that its middle is as dark as a real node's (a blur wider
+    // than the box would leave it pale), then cut down to the borders and one middle line.
+    const int box = 2 * corner + 3 + 2 * e;
+    const int size = 2 * e + box;
 
     // Total opacity: each layer is black laid over the others.
     std::vector<float> clear(size_t(size * size), 1.0f);
@@ -350,11 +368,12 @@ QImage shadowImage(int level, int corner, bool light, int *margin) {
         for (size_t i = 0; i < clear.size(); ++i)
             clear[i] *= 1.0f - float(layer.alpha) * std::clamp(coverage[i], 0.0f, 1.0f);
     }
-    QImage image(size, size, QImage::Format_ARGB32_Premultiplied);
-    for (int y = 0; y < size; ++y) {
+    const auto from = [&](int i) { return i < border ? i : i == border ? size / 2 : size - out + i; };
+    QImage image(out, out, QImage::Format_ARGB32_Premultiplied);
+    for (int y = 0; y < out; ++y) {
         auto *line = reinterpret_cast<QRgb *>(image.scanLine(y));
-        for (int x = 0; x < size; ++x)
-            line[x] = qRgba(0, 0, 0, qRound((1.0f - clear[size_t(y * size + x)]) * 255));
+        for (int x = 0; x < out; ++x)
+            line[x] = qRgba(0, 0, 0, qRound((1.0f - clear[size_t(from(y) * size + from(x))]) * 255));
     }
     return image;
 }
@@ -412,7 +431,7 @@ QString CanvasLook::iconFont() const { return icons().family; }
 
 QString CanvasLook::glyph(const QString &name) const { return icons().glyphs.value(name); }
 
-void CanvasLook::update(const QHash<QString, QColor> &colors, bool light, int radius, int textSize) {
+void CanvasLook::update(const QHash<QString, QColor> &colors, bool light, fugue::look::Corners corners, int textSize) {
     using namespace fugue::look;
     m_colors = colors;
     m_roles.clear();
@@ -452,8 +471,8 @@ void CanvasLook::update(const QHash<QString, QColor> &colors, bool light, int ra
 
     m_textSize = textSize;
     m_unit = textSize / 3.0;
-    m_corner = std::min(radius, 8);
-    m_popupCorner = radius;
+    m_corner = corners.node;
+    m_popupCorner = corners.popup;
     m_smallCorner = std::min(m_corner, 4);
     m_thumbCorner = std::max(0, m_corner - 6);
     m_labelSize = qRound(textSize * 11 / 12.0);
@@ -463,11 +482,12 @@ void CanvasLook::update(const QHash<QString, QColor> &colors, bool light, int ra
     m_resultSize = qRound(textSize * 13 / 12.0);
     m_overlayTitleSize = qRound(textSize * 3 / 2.0);
 
-    int margins[3] = {};
+    int margins[4] = {};
     m_shadow1 = dataUrl(shadowImage(1, m_corner, light, &margins[0]));
     m_shadow2 = dataUrl(shadowImage(2, m_corner, light, &margins[1]));
     m_shadow3 = dataUrl(shadowImage(3, m_popupCorner, light, &margins[2]));
-    m_shadowMargins = {margins[0], margins[1], margins[2]};
+    m_shadow4 = dataUrl(shadowImage(4, m_corner, light, &margins[3]));
+    m_shadowMargins = {margins[0], margins[1], margins[2], margins[3]};
     emit changed();
 }
 

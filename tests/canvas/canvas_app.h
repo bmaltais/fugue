@@ -53,7 +53,8 @@ inline fugue::Document load(const QByteArray &json) {
 }
 
 // An Omarchy theme for the window: a shipped theme's palette by name (empty: Theme's
-// fallbacks) and Hyprland's rounding (negative: none, as without Hyprland).
+// fallbacks) and Hyprland's rounding (negative: none, as without Hyprland). The canvas draws
+// with that rounding too, set as the corner_radius setting (none: the setting's default).
 struct Look {
     QString theme;
     int radius = -1;
@@ -70,6 +71,11 @@ inline QString prepareLook(const QTemporaryDir &dir, const Look &look) {
     }
     if (look.radius < 0)
         return {};
+    QDir(dir.path()).mkpath("config/fugue");
+    QFile settings(dir.filePath("config/fugue/settings.json"));
+    if (settings.open(QIODevice::WriteOnly))
+        settings.write(QStringLiteral("{\"corner_radius\": %1}\n").arg(look.radius).toUtf8());
+    settings.close();
     QFile script(dir.filePath("hyprctl"));
     if (!script.open(QIODevice::WriteOnly))
         return {};
@@ -122,7 +128,7 @@ struct App {
         model.search()->registerCommands(commands);
         registerCanvasCommands(commands, model);
         fugue::bindMenuCommands(commands, model, [this](const QUrl &url) { openedUrls << url; });
-        settings.attach(&translator, &model);
+        settings.attach(&translator, &model, nullptr, &theme);
         settings.registerCommands(commands, [this](const QUrl &url) { openedUrls << url; });
         // Opened as a file is: one tab, nothing unsaved.
         workflows.openText(QString::fromUtf8(document.save()));

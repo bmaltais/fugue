@@ -76,10 +76,19 @@ FocusScope {
     property string hoveredNode: ""
     property var hoverPort: ({})
     property var hoverLink: ({})
-    // The node whose resize grip (its bottom right corner, 3u square) the pointer is on (#49).
-    property string hoverGrip: ""
-    function gripAt(w) {
-        return tier === 0 ? model.resizeGripAt(w.x, w.y, Math.max(3 * model.unit, 12 / world.scale)) : ""
+    // The resize corner the pointer is on, {node, corner} (#49, #63): any corner of an open
+    // node, a square 4u wide (at least 12 screen px) inside it, unless a port is there too
+    // (a port wins: a link drag from it); and the one being dragged.
+    property var hoverCorner: ({})
+    property string resizeCorner: ""
+    function cornerAt(w) {
+        if (tier !== 0 || model.portAt(w.x, w.y, Math.max(8, 10 / world.scale)).node !== undefined)
+            return ({})
+        return model.resizeCornerAt(w.x, w.y, Math.max(4 * model.unit, 12 / world.scale))
+    }
+    // The resize cursor of a corner: diagonal one way for nw and se, the other for ne and sw.
+    function cornerCursor(corner) {
+        return corner === "nw" || corner === "se" ? Qt.SizeFDiagCursor : Qt.SizeBDiagCursor
     }
     // `wiresChanged`: the wires changed under a still pointer, so the hovered one is looked up
     // again even when its row number is the same (that row may hold another link now).
@@ -88,9 +97,9 @@ FocusScope {
         const n = gesture === "" ? model.nodeAt(w.x, w.y) : ""
         if (n !== hoveredNode)
             hoveredNode = n
-        const grip = n !== "" ? gripAt(w) : ""
-        if (grip !== hoverGrip)
-            hoverGrip = grip
+        const c = n !== "" ? cornerAt(w) : ({})
+        if (c.node !== hoverCorner.node || c.corner !== hoverCorner.corner)
+            hoverCorner = c
         const p = tier === 0 && (gesture === "" || gesture === "link")
             ? model.portAt(w.x, w.y, Math.max(8, 10 / world.scale)) : ({})
         if (p.node !== hoverPort.node || p.port !== hoverPort.port || p.output !== hoverPort.output)
@@ -106,7 +115,7 @@ FocusScope {
     }
     function clearHover() {
         hoveredNode = ""
-        hoverGrip = ""
+        hoverCorner = ({})
         hoverPort = ({})
         if (hoverLink.row !== undefined) {
             hoverLink = ({})
@@ -303,8 +312,9 @@ FocusScope {
         objectName: "canvasInput"
         anchors.fill: parent
         acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
-        cursorShape: canvas.gesture === "resize" || (canvas.gesture === "" && canvas.hoverGrip !== "")
-                     ? Qt.SizeFDiagCursor
+        cursorShape: canvas.gesture === "resize" ? canvas.cornerCursor(canvas.resizeCorner)
+                   : canvas.gesture === "" && canvas.hoverCorner.corner !== undefined
+                     ? canvas.cornerCursor(canvas.hoverCorner.corner)
                    : canvas.gesture === "pan" ? Qt.ClosedHandCursor
                    : canvas.spaceHeld ? Qt.OpenHandCursor : Qt.ArrowCursor
 
@@ -344,13 +354,14 @@ FocusScope {
                 canvas.model.disconnectInput(l.toNode, l.toPort, l.item)
                 return
             }
-            // The grip at a node's bottom right corner resizes it.
-            const grip = mouse.button === Qt.LeftButton ? canvas.gripAt(canvas.pressWorld) : ""
+            // A node's corner resizes it.
+            const corner = mouse.button === Qt.LeftButton ? canvas.cornerAt(canvas.pressWorld) : ({})
             canvas.clearHover()
-            if (grip !== "") {
+            if (corner.node !== undefined) {
                 canvas.gesture = "resize"
-                canvas.pressedNode = grip
-                canvas.model.beginResize(grip)
+                canvas.pressedNode = corner.node
+                canvas.resizeCorner = corner.corner
+                canvas.model.beginResize(corner.node, corner.corner)
                 return
             }
             const port = canvas.portUnder(mouse.x, mouse.y)
@@ -460,11 +471,11 @@ FocusScope {
             if (mouse.button !== Qt.LeftButton)
                 return
             const w = canvas.toWorld(mouse.x, mouse.y)
-            // A double click on the grip returns the node to auto-size.
-            const grip = canvas.gripAt(w)
-            if (grip !== "") {
+            // A double click on a corner returns the node to auto-size.
+            const corner = canvas.cornerAt(w)
+            if (corner.node !== undefined) {
                 canvas.model.endResize()
-                canvas.model.autoSize(grip)
+                canvas.model.autoSize(corner.node)
                 return
             }
             const hit = canvas.model.nodeAt(w.x, w.y)
@@ -531,6 +542,7 @@ FocusScope {
             break
         case "resize":
             model.endResize()
+            resizeCorner = ""
             break
         case "move":
             model.endMove()
@@ -769,10 +781,13 @@ FocusScope {
         }
 
         // Node shadows (7): one pre-painted 9-slice texture per level, shared by every node,
-        // in their own layer so they draw in one batch; off below the readable zoom.
+        // in their own layer so they draw in one batch; off below the readable zoom. A node at
+        // rest is level 1, a selected one 2, and the selected nodes being dragged 4 (lifted).
         Item {
+            id: shadowLayer
             objectName: "shadows"
             visible: canvas.tier === 0
+            readonly property bool lifting: canvas.gesture === "move" && canvas.travelled
             Repeater {
                 model: canvas.model.nodes
                 delegate: BorderImage {
@@ -782,7 +797,7 @@ FocusScope {
                     required property real nodeHeight
                     required property bool selected
                     required property string mode
-                    readonly property int level: selected ? 2 : 1
+                    readonly property int level: selected ? (shadowLayer.lifting ? 4 : 2) : 1
                     readonly property int reach: canvas.shadowMargins[level - 1]
                     readonly property int edge: reach + canvas.look.corner + 1
                     x: posX - reach
@@ -790,7 +805,7 @@ FocusScope {
                     width: nodeWidth + 2 * reach
                     height: nodeHeight + 2 * reach
                     opacity: mode === "mute" ? 0.4 : 1
-                    source: level === 2 ? canvas.look.shadow2 : canvas.look.shadow1
+                    source: level === 4 ? canvas.look.shadow4 : level === 2 ? canvas.look.shadow2 : canvas.look.shadow1
                     border.left: edge
                     border.top: edge
                     border.right: edge
@@ -813,6 +828,8 @@ FocusScope {
                 tier: canvas.tier
                 hovered: canvas.hoveredNode === nodeId
                 hoverKey: canvas.hoverPort.node === nodeId ? (canvas.hoverPort.output ? "o:" : "i:") + canvas.hoverPort.port : ""
+                activeCorner: canvas.gesture === "resize" ? (canvas.pressedNode === nodeId ? canvas.resizeCorner : "")
+                            : canvas.hoverCorner.node === nodeId ? canvas.hoverCorner.corner : ""
             }
         }
 

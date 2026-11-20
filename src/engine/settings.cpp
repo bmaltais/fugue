@@ -6,6 +6,8 @@
 #include <QRegularExpression>
 #include <QSet>
 
+#include <cmath>
+
 #include "engine/atomic_file.h"
 #include "engine/json.h"
 #include "engine/paths.h"
@@ -14,8 +16,8 @@ namespace fugue {
 
 namespace {
 
-const QStringList kKeys{"navigation",  "language",  "output_folder", "inputs_folder",
-                        "model_paths", "pack_paths", "new_seed",      "embed_workflow"};
+const QStringList kKeys{"navigation", "language", "output_folder",  "inputs_folder", "model_paths",
+                        "pack_paths", "new_seed", "embed_workflow", "corner_radius"};
 
 QString oneOf(const QJsonValue &value, const QStringList &choices, const QString &key) {
     if (value.isString() && choices.contains(value.toString()))
@@ -76,6 +78,8 @@ void apply(Settings &settings, const QString &key, const QJsonValue &value) {
         settings.newSeed = value.toString();
     else if (key == QLatin1String("embed_workflow"))
         settings.embedWorkflow = value.toString();
+    else if (key == QLatin1String("corner_radius"))
+        settings.cornerRadius = value.isString() ? Settings::followOmarchy : value.toInt();
 }
 
 } // namespace
@@ -91,6 +95,8 @@ QJsonValue settingDefault(const QString &key) {
         return QStringLiteral("random");
     if (key == QLatin1String("embed_workflow"))
         return QStringLiteral("full");
+    if (key == QLatin1String("corner_radius"))
+        return 8;
     if (key == QLatin1String("model_paths") || key == QLatin1String("pack_paths"))
         return QJsonArray();
     return QJsonValue(QJsonValue::Undefined); // language and folders: absent
@@ -103,6 +109,14 @@ QString checkSetting(const QString &key, const QJsonValue &value) {
         return oneOf(value, {"random", "fixed"}, key);
     if (key == QLatin1String("embed_workflow"))
         return oneOf(value, {"full", "no-prompts", "none"}, key);
+    if (key == QLatin1String("corner_radius")) {
+        const double px = value.toDouble(-1);
+        if (value == QJsonValue(QStringLiteral("omarchy"))
+            || (value.isDouble() && px == std::floor(px) && px >= 0 && px <= Settings::maxCornerRadius))
+            return {};
+        return QStringLiteral("corner_radius must be a whole number of px from 0 to %1, or omarchy.")
+            .arg(Settings::maxCornerRadius);
+    }
     if (key == QLatin1String("language")) {
         static const QRegularExpression code(QStringLiteral("^[a-z]{2,3}(-[A-Za-z]{2})?$"));
         if (value.isString() && code.match(value.toString()).hasMatch())

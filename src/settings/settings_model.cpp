@@ -14,6 +14,7 @@
 #include "engine/json.h"
 #include "engine/paths.h"
 #include "engine/providers_file.h"
+#include "theme.h"
 #include "translator.h"
 
 namespace fugue {
@@ -82,10 +83,11 @@ SettingsModel::SettingsModel(const QString &settingsFile, const QString &provide
     loadProviders();
 }
 
-void SettingsModel::attach(Translator *translator, CanvasModel *canvas, const Registry *registry) {
+void SettingsModel::attach(Translator *translator, CanvasModel *canvas, const Registry *registry, Theme *theme) {
     m_packs.setRegistry(registry);
     m_translator = translator;
     m_canvas = canvas;
+    m_theme = theme;
     pushLive();
 }
 
@@ -130,6 +132,8 @@ void SettingsModel::pushLive() {
         m_translator->setLanguageOverride(m_file.settings.language);
     if (m_canvas)
         m_canvas->setNewNodeOptions(m_file.settings.newSeed, m_file.settings.embedWorkflow);
+    if (m_theme)
+        m_theme->setCornerRadius(m_file.settings.cornerRadius);
 }
 
 void SettingsModel::reload() {
