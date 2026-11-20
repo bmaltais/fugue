@@ -108,7 +108,7 @@ Item {
                     sourceComponent: ComboBox {
                         objectName: "downloadInto"
                         model: App.workflows.downloadRoots.map(r => qsTr("Into %1").arg(r.title))
-                        currentIndex: App.workflows.downloadRoots.findIndex(r => r.path === App.workflows.downloadRoot)
+                        currentIndex: Math.max(0, App.workflows.downloadRoots.findIndex(r => r.path === App.workflows.downloadRoot))
                         onActivated: index => App.workflows.setDownloadRoot(App.workflows.downloadRoots[index].path)
                         Accessible.name: qsTr("Download into")
                     }
@@ -154,6 +154,7 @@ Item {
                     }
                     ThemedButton {
                         objectName: "downloadCancel"
+                        Layout.leftMargin: 8 // Destructive: twice the row's gap before it
                         text: qsTr("Cancel")
                         onClicked: notice.downloads.cancel()
                     }

@@ -60,6 +60,14 @@ _Avoid_: full id, node path
 A saved document: a graph, its layout, and what it requires.
 _Avoid_: project, scene, patch
 
+**Model folder**:
+A folder Fugue finds models in: its own (`~/.local/share/fugue/models`) or one the settings add, in ComfyUI's layout or holding one kind. In code, a *root*. The one downloads go in is the *download folder*.
+_Avoid_: model path, models dir
+
+**Part**:
+A download not finished yet, `<file>.part` beside where the model goes; it becomes the model only once its hash is the handle's.
+_Avoid_: temp file, partial
+
 **Template**:
 A ready-to-run workflow listed in the window and by `fugue template list`: a folder of the workflow, its description, a preview and sample pictures. Opening one makes a new workflow from it; the template itself is never edited. Bundled ones come from the fugue-workflows repo; a person keeps their own in ~/Documents/Fugue/templates.
 _Avoid_: example, preset, starter

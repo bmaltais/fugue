@@ -1281,7 +1281,8 @@ reference. A new inference runtime is a new provider module.
   Templates dialog or `fugue model get`. It goes in the model folder the person picks (settings'
   `download_folder`, remembered; Fugue's own folder by default): under a root in the layout, the
   type's folder that is there (`text_encoders` before `clip` when both are), else its first; a
-  root of one kind takes files of that kind only, the rest go in Fugue's own folder. The file is
+  root of one kind takes files of that kind only: when the files of one download are not all
+  that kind, they all go in Fugue's own folder, so one download is never split. The file is
   the handle's `name` under that folder, a relative path of a file with one of the type's
   extensions. The source must be https (http only to a loopback address); redirects are followed,
   never from https to http.
@@ -1987,7 +1988,8 @@ authoring, validating, running and fetching results.
   Outside them is `permission_denied`. "The current directory" is the one `fugue run` was started
   in; `fugue run` records the roots in the run folder for the worker. Paths are judged after `..`
   and symbolic links are resolved. A run started without roots is not limited; the canvas
-  starts its runs without them (Appendix A).
+  starts its runs without them (Appendix A). `fugue model get` writes only into the model
+  folders (8.9): Fugue's own and the ones the settings name, which the person chose.
 - This is a guard against mistakes and prompt injection, not a security boundary: anything with
   a shell as the user can edit Fugue's files. The docs say so.
 

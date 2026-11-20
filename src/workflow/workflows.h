@@ -92,7 +92,7 @@ public:
     ModelDownloads *downloads() const { return m_downloads; }
     QString downloadOffer() const;
     QVariantList downloadRoots() const { return downloadOffer().isEmpty() ? QVariantList() : m_offer.roots; }
-    QString downloadRoot() const;
+    QString downloadRoot() const { return m_offer.root; }
     QString pathOf(int index) const;
     // Pasting and dropping images into the canvas (workflow/image_inputs.h).
     ImageInputs *images() const { return m_images; }
@@ -225,6 +225,7 @@ private:
         QString text;
         QJsonArray models; // the workflow's, as Document::models() gives them
         QVariantList roots;
+        QString root; // where they go (ModelLibrary::fitDownloadRoot)
     };
     // The banner's line on the nodes and models of `document` that are not here, empty for none;
     // with what it may offer to download.
@@ -232,6 +233,9 @@ private:
     // The shown workflow's missing line and offer again, after its models may have changed.
     // The banner shows it when it showed the last one, or `force`.
     void refreshMissing(bool force);
+    // The library with its download root fitted to `models`' missing ones that have a source,
+    // and those.
+    QList<MissingModel> downloadable(const QJsonArray &models, ModelLibrary &library) const;
     // Plans the downloads of `models`' missing ones that have a source and queues them.
     void startDownloads(const QJsonArray &models, const QString &what);
     // Adds the packs not asked about yet to pendingTrust; true when one was added.
@@ -255,6 +259,7 @@ private:
     // The last missing-nodes line, to tell it from the banner's other lines on a reload.
     QString m_missingNotice;
     DownloadOffer m_offer; // what goes with m_missingNotice
+    Errors m_refused;      // models of the downloads under way that could not be planned
     ModelDownloads *m_downloads;
     // "<pack id> <version>" the person answered "not now" for: a reload does not ask again.
     QSet<QString> m_trustDismissed;

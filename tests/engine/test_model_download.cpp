@@ -152,6 +152,14 @@ private slots:
                  (QStringList{m_root.path(), comfy.path(), loras.path()}));
         QCOMPARE(library.downloadRoots({type("io.test.pack/lora"), type("io.test.pack/encoder")}),
                  (QStringList{m_root.path(), comfy.path()}));
+
+        // One download is not split: a LoRA folder takes a batch of LoRAs only.
+        library.setDownloadRoot(loras.path());
+        library.fitDownloadRoot({type("io.test.pack/lora")});
+        QCOMPARE(library.downloadRoot(), loras.path());
+        library.fitDownloadRoot({type("io.test.pack/lora"), type("io.test.pack/encoder")});
+        QCOMPARE(library.downloadRoot(), m_root.path());
+        QCOMPARE(library.downloadFolder(type("io.test.pack/lora")), m_root.filePath("loras"));
     }
 
     void onlyHttpsOrThisMachineIsASource() {
@@ -296,6 +304,83 @@ private slots:
         const Errors errors = runToEnd(download);
         QVERIFY2(errors.isEmpty(), qPrintable(errors.isEmpty() ? QString() : errors.first().message));
         QCOMPARE(readFile(m_root.filePath("loras/m.safetensors")), bytes);
+    }
+
+    void aRedirectIsFollowedOnlyToWhatASourceMayBe() {
+        const QByteArray bytes = modelBytes();
+        m_server->on("GET", "/m.safetensors", [&](const HttpRequest &) {
+            HttpResponse response{302, {}, "text/plain"};
+            response.headers << "Location: " + m_server->origin() + "/store/m.safetensors";
+            return response;
+        });
+        m_server->on("GET", "/store/m.safetensors", [&](const HttpRequest &) {
+            return HttpResponse{200, bytes, "application/octet-stream"};
+        });
+        m_server->on("GET", "/away.safetensors", [&](const HttpRequest &) {
+            HttpResponse response{302, {}, "text/plain"};
+            response.headers << "Location: http://example.invalid/m.safetensors"; // off this machine, in clear
+            return response;
+        });
+        ModelDownload followed(target(bytes), &m_network, m_hashes.get());
+        const Errors none = runToEnd(followed);
+        QVERIFY2(none.isEmpty(), qPrintable(none.isEmpty() ? QString() : none.first().message));
+        QCOMPARE(readFile(m_root.filePath("loras/m.safetensors")), bytes);
+
+        DownloadTarget away = target(bytes, "/away.safetensors");
+        away.path = m_root.filePath("loras/away.safetensors");
+        ModelDownload refused(away, &m_network, m_hashes.get());
+        const Errors errors = runToEnd(refused);
+        QCOMPARE(errors.size(), 1);
+        QCOMPARE(errors.first().code, QStringLiteral("download_failed"));
+        QVERIFY(errors.first().message.contains("example.invalid"));
+        QVERIFY(!QFileInfo::exists(away.path));
+    }
+
+    void aRangeWithNoTotalEndsWithTheStream() {
+        const QByteArray bytes = modelBytes();
+        writeFile(m_root.filePath("loras/m.safetensors.part"), bytes.left(1000));
+        m_server->on("GET", "/m.safetensors", [&](const HttpRequest &request) {
+            HttpResponse response = ranged(request, bytes);
+            response.headers = {"Content-Range: bytes 1000-" + QByteArray::number(bytes.size() - 1) + "/*"};
+            return response;
+        });
+        ModelDownload download(target(bytes), &m_network, m_hashes.get());
+        download.setRetries(3, 0);
+        const Errors errors = runToEnd(download);
+        QVERIFY2(errors.isEmpty(), qPrintable(errors.isEmpty() ? QString() : errors.first().message));
+        QCOMPARE(m_server->requests().size(), 1);
+    }
+
+    void aLinkAtThePartsNameIsNotWrittenThrough() {
+        const QByteArray bytes = modelBytes();
+        QTemporaryDir elsewhere;
+        writeFile(elsewhere.filePath("precious"), "keep me");
+        QDir().mkpath(m_root.filePath("loras"));
+        QVERIFY(QFile::link(elsewhere.filePath("precious"), m_root.filePath("loras/m.safetensors.part")));
+        m_server->on("GET", "/m.safetensors", [&](const HttpRequest &request) { return ranged(request, bytes); });
+        ModelDownload download(target(bytes), &m_network, m_hashes.get());
+        const Errors errors = runToEnd(download);
+        QVERIFY2(errors.isEmpty(), qPrintable(errors.isEmpty() ? QString() : errors.first().message));
+        QCOMPARE(readFile(elsewhere.filePath("precious")), QByteArray("keep me"));
+        QCOMPARE(readFile(m_root.filePath("loras/m.safetensors")), bytes);
+        QVERIFY(!QFileInfo(m_root.filePath("loras/m.safetensors")).isSymLink());
+    }
+
+    void oneFileHasOneWriter() {
+        m_server->on("GET", "/m.safetensors", [&](const HttpRequest &) {
+            HttpResponse response;
+            response.hold = true;
+            return response;
+        });
+        ModelDownload first(target("abc"), &m_network, m_hashes.get());
+        first.start();
+        ModelDownload second(target("abc"), &m_network, m_hashes.get());
+        const Errors errors = runToEnd(second);
+        QCOMPARE(errors.size(), 1);
+        QVERIFY(errors.first().message.contains("another Fugue"));
+        QVERIFY(QFileInfo::exists(m_root.filePath("loras/m.safetensors.part"))); // the first one's, kept
+        first.cancel();
+        QVERIFY(!QFileInfo::exists(m_root.filePath("loras/m.safetensors.part.lock")));
     }
 
     void anErrorStatusFailsAtOnceAndKeepsNothing() {

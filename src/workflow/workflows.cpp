@@ -80,6 +80,22 @@ QString offerText(const QList<MissingModel> &missing) {
                  : Workflows::tr("Download %n models", nullptr, count);
 }
 
+// The bytes of the models of `missing` that have a source, as the card's button says them;
+// empty unless every one records its size.
+QString downloadSize(const QList<MissingModel> &missing) {
+    qint64 bytes = 0;
+    int count = 0;
+    for (const MissingModel &model : missing) {
+        if (model.source.isEmpty())
+            continue;
+        if (model.size < 0)
+            return {};
+        bytes += model.size;
+        ++count;
+    }
+    return count ? ModelDownloads::sizeText(bytes) : QString();
+}
+
 // A model folder as the banner's choice names it.
 QString rootTitle(const QString &root, const ModelLibrary &library) {
     if (root == library.roots().value(0))
@@ -89,7 +105,7 @@ QString rootTitle(const QString &root, const ModelLibrary &library) {
 }
 
 // Each message with its hint, for the banner.
-QString explained(const Errors &errors) {
+QString withHints(const Errors &errors) {
     QStringList lines;
     for (const Error &error : errors)
         lines << (error.hint.isEmpty() ? error.message : error.message + QLatin1Char(' ') + error.hint);
@@ -119,16 +135,16 @@ Workflows::Workflows(CanvasModel *canvas, const Registry *registry, CommandRegis
     // The banner says what arrived, or what went wrong; what is still missing comes back.
     connect(m_downloads, &ModelDownloads::finished, this, [this](int arrived, const Errors &all) {
         refreshMissing(false);
-        Errors errors; // a cancel is the person's own: what is still missing is the news
+        // What could not be planned, then what failed; a cancel is the person's own, not news.
+        Errors errors = m_refused;
+        m_refused.clear();
         for (const Error &error : all)
             if (error.code != QLatin1String("cancelled"))
                 errors << error;
         if (!errors.isEmpty())
-            setNotice(explained(errors));
-        else if (m_missingNotice.isEmpty())
-            setNotice(tr("Downloaded %n models.", nullptr, arrived));
-        else
-            setNotice(m_missingNotice);
+            setNotice(withHints(errors));
+        else if (arrived > 0)
+            setNotice(m_missingNotice.isEmpty() ? tr("Downloaded %n models.", nullptr, arrived) : m_missingNotice);
         emit noticeChanged(); // the offer, with the same line
     });
     connect(m_images, &ImageInputs::message, this, &Workflows::setNotice);
@@ -449,7 +465,9 @@ QVariantList Workflows::templates() const {
     QVariantList out;
     for (const Template &t : TemplateLibrary(m_templateRoots, m_registry).list()) {
         QVariantList missing;
-        const QList<MissingModel> absent = models.missing(t.models, hashes);
+        ModelLibrary library = models;
+        downloadable(t.models, library); // the folders they would go in
+        const QList<MissingModel> absent = library.missing(t.models, hashes);
         for (const MissingModel &model : absent)
             missing.append(QVariantMap{{"name", model.handle.value(QStringLiteral("name")).toString()},
                                        {"source", model.source},
@@ -469,6 +487,7 @@ QVariantList Workflows::templates() const {
                                {"own", t.own},
                                {"missingModels", missing},
                                {"download", offerText(absent)},
+                               {"downloadSize", downloadSize(absent)},
                                {"neededPacks", t.neededPacks},
                                {"status", status.join(QStringLiteral(" · "))}});
     }
@@ -501,23 +520,24 @@ QString Workflows::missingNotice(const Document &document, const QString &title,
                      .arg(title, missing.join(QStringLiteral(", ")));
     // Spec 4.3: the models it names that are not here, without reading a model file.
     FileHashes hashes(FileHashes::defaultPath());
-    const ModelLibrary library = ModelLibrary::current(m_registry);
-    const QList<MissingModel> absent = library.missing(document, hashes);
-    QStringList models;
+    ModelLibrary library = ModelLibrary::current(m_registry);
     QList<PortType> types;
+    for (const MissingModel &model : downloadable(document.models(), library))
+        if (const std::optional<PortType> type = PortType::parse(model.handle.value(QStringLiteral("resource")).toString()))
+            types << *type;
+    const QList<MissingModel> absent = library.missing(document, hashes); // with the fitted folders
+    QStringList models;
     for (const MissingModel &model : absent) {
         const QString name = model.handle.value(QStringLiteral("name")).toString();
         models << (model.source.isEmpty() ? tr("%1, into %2").arg(name, model.folder)
                                           : tr("%1 from %2, into %3").arg(name, model.source, model.folder));
-        if (const std::optional<PortType> type = PortType::parse(model.handle.value(QStringLiteral("resource")).toString());
-            type && !model.source.isEmpty())
-            types << *type;
     }
     if (!models.isEmpty())
         lines << tr("%1 needs models that are not in the model folders: %2.").arg(title, models.join(QStringLiteral("; ")));
     if (offer) {
         offer->text = offerText(absent);
         offer->models = document.models();
+        offer->root = library.downloadRoot();
         offer->roots.clear();
         if (!offer->text.isEmpty())
             for (const QString &root : library.downloadRoots(types))
@@ -541,16 +561,26 @@ QString Workflows::downloadOffer() const {
     return !m_notice.isEmpty() && m_notice == m_missingNotice && !m_downloads->busy() ? m_offer.text : QString();
 }
 
-QString Workflows::downloadRoot() const { return ModelLibrary::current(m_registry).downloadRoot(); }
+QList<MissingModel> Workflows::downloadable(const QJsonArray &models, ModelLibrary &library) const {
+    FileHashes hashes(FileHashes::defaultPath());
+    QList<PortType> types;
+    for (const MissingModel &model : library.missing(models, hashes))
+        if (const std::optional<PortType> type = PortType::parse(model.handle.value(QStringLiteral("resource")).toString());
+            type && !model.source.isEmpty())
+            types << *type;
+    library.fitDownloadRoot(types);
+    QList<MissingModel> out;
+    for (const MissingModel &model : library.missing(models, hashes))
+        if (!model.source.isEmpty())
+            out << model;
+    return out;
+}
 
 void Workflows::startDownloads(const QJsonArray &models, const QString &what) {
-    FileHashes hashes(FileHashes::defaultPath());
-    const ModelLibrary library = ModelLibrary::current(m_registry);
+    ModelLibrary library = ModelLibrary::current(m_registry);
     QList<DownloadTarget> targets;
     Errors refused;
-    for (const MissingModel &model : library.missing(models, hashes)) {
-        if (model.source.isEmpty())
-            continue;
+    for (const MissingModel &model : downloadable(models, library)) {
         const Result<DownloadTarget> target = planDownload(library, model);
         if (target)
             targets << target.value();
@@ -558,7 +588,11 @@ void Workflows::startDownloads(const QJsonArray &models, const QString &what) {
             refused << target.errors();
     }
     if (!refused.isEmpty())
-        setNotice(explained(refused));
+        setNotice(withHints(refused));
+    // Said again when they end, beside what failed then; at once when nothing is to come.
+    if (targets.isEmpty())
+        refused.clear();
+    m_refused += refused;
     m_downloads->add(targets, what);
     emit noticeChanged(); // the offer hides while they download
 }
@@ -583,7 +617,7 @@ void Workflows::setDownloadRoot(const QString &root) {
                                         root == library.roots().value(0) ? QJsonValue(QJsonValue::Undefined)
                                                                          : QJsonValue(root));
     if (!errors.isEmpty()) {
-        setNotice(explained(errors));
+        setNotice(withHints(errors));
         return;
     }
     refreshMissing(false); // the line names the folders they go in

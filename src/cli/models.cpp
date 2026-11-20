@@ -30,11 +30,6 @@ namespace fugue::cli {
 
 namespace {
 
-QString sizeText(qint64 bytes) {
-    return bytes >= 1000000000 ? QStringLiteral("%1 GB").arg(double(bytes) / 1e9, 0, 'f', 1)
-                               : QStringLiteral("%1 MB").arg(std::max<qint64>(1, (bytes + 500000) / 1000000));
-}
-
 // The providers' models of `type` (every type when empty), waiting for every reply.
 QList<ListedModel> offered(const QString &type) {
     QList<ListedModel> models;
@@ -172,6 +167,13 @@ Reply modelGet(const Command &command, Context &context) {
     }
 
     FileHashes hashes(FileHashes::defaultPath());
+    // One folder for them all: a root of one kind takes them only when they are all that kind.
+    QList<PortType> types;
+    for (const MissingModel &model : library.missing(named, hashes))
+        if (const std::optional<PortType> type = PortType::parse(model.handle.value("resource").toString());
+            type && !model.source.isEmpty())
+            types << *type;
+    library.fitDownloadRoot(types);
     const QList<MissingModel> missing = library.missing(named, hashes);
     Errors errors;
     QList<DownloadTarget> targets;

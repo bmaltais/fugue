@@ -7,8 +7,8 @@
 namespace fugue {
 
 ModelDownloads::ModelDownloads(QObject *parent) : QObject(parent) {
-    connect(&m_queue, &DownloadQueue::started, this, [this] { tell(true); });
-    connect(&m_queue, &DownloadQueue::progress, this, [this] { tell(false); });
+    connect(&m_queue, &DownloadQueue::started, this, [this] { notifyChanged(true); });
+    connect(&m_queue, &DownloadQueue::progress, this, [this] { notifyChanged(false); });
     connect(&m_queue, &DownloadQueue::fileFinished, this, [this](int, const Errors &errors) {
         if (errors.isEmpty())
             ++m_arrived;
@@ -16,6 +16,12 @@ ModelDownloads::ModelDownloads(QObject *parent) : QObject(parent) {
     connect(&m_queue, &DownloadQueue::finished, this, [this](const Errors &errors) {
         const int arrived = m_arrived;
         m_arrived = 0;
+        QStringList failed;
+        for (const Error &error : errors)
+            if (error.code != QLatin1String("cancelled"))
+                failed << error.message;
+        m_failure = failed.join(QLatin1Char(' '));
+        m_failedWhat = m_failure.isEmpty() ? QString() : m_what;
         m_what.clear();
         emit changed();
         emit finished(arrived, errors);
@@ -30,9 +36,7 @@ QString ModelDownloads::sizeText(qint64 bytes) {
 QString ModelDownloads::label() const {
     if (!busy())
         return {};
-    const DownloadTarget &target = m_queue.targets().at(m_queue.index());
-    const QString name = target.handle.value(QStringLiteral("name")).toString();
-    const QString shown = name.isEmpty() ? QFileInfo(target.path).fileName() : QFileInfo(name).fileName();
+    const QString shown = QFileInfo(m_queue.targets().at(m_queue.index()).fileName()).fileName();
     return m_queue.targets().size() > 1
                ? tr("%1, %2 of %3").arg(shown).arg(m_queue.index() + 1).arg(m_queue.targets().size())
                : shown;
@@ -53,13 +57,16 @@ double ModelDownloads::fraction() const {
 void ModelDownloads::add(const QList<DownloadTarget> &targets, const QString &what) {
     if (targets.isEmpty())
         return;
-    if (!busy())
+    if (!busy()) {
         m_what = what;
+        m_failure.clear();
+        m_failedWhat.clear();
+    }
     m_queue.add(targets);
-    tell(true);
+    notifyChanged(true);
 }
 
-void ModelDownloads::tell(bool now) {
+void ModelDownloads::notifyChanged(bool now) {
     if (!now && m_told.isValid() && m_told.elapsed() < 100)
         return;
     m_told.start();

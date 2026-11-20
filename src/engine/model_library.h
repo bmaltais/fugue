@@ -98,6 +98,9 @@ public:
     // The roots a download of all of `types` may go in, in order: those in the layout, and a
     // root of one kind when every type is that kind.
     QStringList downloadRoots(const QList<PortType> &types) const;
+    // Makes Fugue's own folder the download root when the one set cannot take every one of
+    // `types`, so a batch of downloads goes in one root, not some here and some there.
+    void fitDownloadRoot(const QList<PortType> &types);
 
     // The folders the files of `type` are in, under every root in order, whether they exist or not.
     QStringList folders(const PortType &type) const;

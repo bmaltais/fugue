@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QHostAddress>
+#include <QLockFile>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -31,10 +32,8 @@ Error failed(const QString &message, const QString &hint = {}) {
     return makeError(QStringLiteral("download_failed"), message, hint);
 }
 
-QString sizeText(qint64 bytes) {
-    return bytes >= 1000000000 ? QStringLiteral("%1 GB").arg(double(bytes) / 1e9, 0, 'f', 1)
-                               : QStringLiteral("%1 MB").arg(std::max<qint64>(1, (bytes + 500000) / 1000000));
-}
+// Something is at `path`: a file, a folder, or a link (even one pointing nowhere).
+bool occupied(const QString &path) { return QFileInfo::exists(path) || QFileInfo(path).isSymLink(); }
 
 // Renames `from` to `to` unless something is at `to`, atomically where the file system can
 // (renameat2 RENAME_NOREPLACE). 0, or the errno.
@@ -45,12 +44,22 @@ int renameNoReplace(const QString &from, const QString &to) {
     if (errno != EINVAL && errno != ENOSYS)
         return errno;
     // A file system without the flag: as close as it gets.
-    if (QFileInfo::exists(to) || QFileInfo(to).isSymLink())
+    if (occupied(to))
         return EEXIST;
     return ::rename(a.constData(), b.constData()) == 0 ? 0 : errno;
 }
 
 } // namespace
+
+QString sizeText(qint64 bytes) {
+    return bytes >= 1000000000 ? QStringLiteral("%1 GB").arg(double(bytes) / 1e9, 0, 'f', 1)
+                               : QStringLiteral("%1 MB").arg(std::max<qint64>(1, (bytes + 500000) / 1000000));
+}
+
+QString DownloadTarget::fileName() const {
+    const QString name = handle.value(QStringLiteral("name")).toString();
+    return name.isEmpty() ? QFileInfo(path).fileName() : name;
+}
 
 bool isAllowedSource(const QUrl &url) {
     if (!url.isValid() || url.host().isEmpty())
@@ -91,7 +100,7 @@ Result<DownloadTarget> planDownload(const ModelLibrary &library, const MissingMo
         return failed(QStringLiteral("The model name %1 is not a file name Fugue can download to.").arg(shown),
                       QStringLiteral("Download it yourself and put it in %1.").arg(folder));
     const QString path = QDir::cleanPath(folder + QLatin1Char('/') + name);
-    if (QFileInfo::exists(path) || QFileInfo(path).isSymLink())
+    if (occupied(path))
         return failed(QStringLiteral("%1 is in %2 already, but it is another file than the one the workflow names.")
                           .arg(name, folder),
                       QStringLiteral("Move or rename that file, then download again."));
@@ -110,8 +119,17 @@ ModelDownload::~ModelDownload() {
         m_hasher->wait();
         delete m_hasher;
     }
-    if (m_reply)
-        m_reply->abort();
+    dropReply();
+}
+
+void ModelDownload::dropReply() {
+    if (!m_reply)
+        return;
+    QNetworkReply *reply = m_reply;
+    m_reply = nullptr;
+    reply->disconnect(this); // abort() says finished at once: not to this download
+    reply->abort();
+    reply->deleteLater();
 }
 
 void ModelDownload::setRetries(int count, int firstDelayMs) {
@@ -119,10 +137,6 @@ void ModelDownload::setRetries(int count, int firstDelayMs) {
     m_retryDelayMs = firstDelayMs;
 }
 
-QString ModelDownload::shownName() const {
-    const QString name = m_target.handle.value(QStringLiteral("name")).toString();
-    return name.isEmpty() ? QFileInfo(m_target.path).fileName() : name;
-}
 
 void ModelDownload::start() {
     const QString folder = QFileInfo(m_target.path).absolutePath();
@@ -131,10 +145,22 @@ void ModelDownload::start() {
                               QStringLiteral("Fugue cannot make the folder %1.").arg(folder),
                               QStringLiteral("Check that the model folder is writable, or download into another.")),
                     true);
-    if (QFileInfo::exists(m_target.path) || QFileInfo(m_target.path).isSymLink())
+    if (occupied(m_target.path))
         return fail(failed(QStringLiteral("%1 is there already.").arg(m_target.path),
                            QStringLiteral("Move or rename that file, then download again.")),
                     true);
+    // One writer of a part: another Fugue (the window, `fugue model get`) fetching the same file.
+    m_lock = std::make_unique<QLockFile>(partPath() + QStringLiteral(".lock"));
+    m_lock->setStaleLockTime(0); // a lock whose process is gone is taken over, however old
+    if (!m_lock->tryLock(0)) {
+        m_lock.reset();
+        return fail(failed(QStringLiteral("%1 is being downloaded by another Fugue already.").arg(m_target.fileName()),
+                           QStringLiteral("Wait for that download to end.")),
+                    true);
+    }
+    // A link at the part's name would have the download write into whatever it points to.
+    if (QFileInfo(partPath()).isSymLink())
+        QFile::remove(partPath());
     m_part.setFileName(partPath());
     const qint64 left = QFileInfo(partPath()).size();
     if (QFileInfo::exists(partPath()) && left > 0)
@@ -163,13 +189,14 @@ void ModelDownload::resumePart(qint64 size) {
             m_hash.addData(chunk);
             read += chunk.size();
         }
-        m_received = read;
+        m_hashedBytes = read;
     });
     connect(m_hasher, &QThread::finished, this, [this] {
         m_hasher->deleteLater();
         m_hasher = nullptr;
         if (m_cancelled)
             return;
+        m_received = m_hashedBytes; // the thread has ended: m_hash is this thread's again
         // Exactly the bytes hashed: a part that grew or shrank meanwhile is cut to them.
         if (!m_part.open(QIODevice::ReadWrite) || !m_part.resize(m_received) || !m_part.seek(m_received))
             return fail(makeError(QStringLiteral("permission_denied"),
@@ -186,8 +213,9 @@ void ModelDownload::request() {
         return;
     m_headersRead = false;
     QNetworkRequest request(m_target.source);
-    // Follows redirects (a model host hands off to its storage), never from https to http.
-    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+    // Follows redirects (a model host hands off to its storage) to what a source may be, never
+    // from https to http: from http on this machine only to this machine.
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::UserVerifiedRedirectPolicy);
     request.setTransferTimeout(m_stallMs);
     request.setHeader(QNetworkRequest::UserAgentHeader, QByteArrayLiteral("Fugue"));
     // The file's own bytes: a compressed answer's length is not the file's, nor can a range of it
@@ -196,6 +224,17 @@ void ModelDownload::request() {
     if (m_received > 0)
         request.setRawHeader("Range", "bytes=" + QByteArray::number(m_received) + '-');
     m_reply = m_network->get(request);
+    connect(m_reply, &QNetworkReply::redirected, this, [this](const QUrl &to) {
+        const QUrl from = m_reply ? m_reply->url() : QUrl();
+        if (m_reply && isAllowedSource(to) && !(from.scheme() == QLatin1String("https") && to.scheme() != from.scheme())) {
+            emit m_reply->redirectAllowed();
+            return;
+        }
+        fail(failed(QStringLiteral("%1 sent the download of %2 on to %3, which Fugue does not download from.")
+                        .arg(from.host(), m_target.fileName(), to.toString()),
+                    QStringLiteral("Download it yourself and put it in %1.").arg(QFileInfo(m_target.path).absolutePath())),
+             true);
+    });
     connect(m_reply, &QNetworkReply::readyRead, this, &ModelDownload::readData);
     connect(m_reply, &QNetworkReply::finished, this, &ModelDownload::replyFinished);
 }
@@ -209,7 +248,7 @@ void ModelDownload::readHeaders() {
                               : -1;
     if (status == 416 && m_received > 0) {
         // Nothing past the part's end: it may hold the whole file. The hash tells.
-        m_complete = true;
+        m_partWhole = true;
         m_total = m_received;
         return;
     }
@@ -218,7 +257,10 @@ void ModelDownload::readHeaders() {
         const QRegularExpressionMatch match = range.match(QString::fromLatin1(reply->rawHeader("Content-Range")));
         if (!match.hasMatch() || match.captured(1).toLongLong() != m_received)
             return restartFromZero();
-        m_total = match.captured(3) == QLatin1String("*") ? m_received + length : match.captured(3).toLongLong();
+        if (match.captured(3) != QLatin1String("*"))
+            m_total = match.captured(3).toLongLong();
+        else
+            m_total = length >= 0 ? m_received + length : -1; // told by the end of the stream
     } else if (status == 200) {
         if (m_received > 0) {
             // The server sent the whole file again: start the part over.
@@ -236,7 +278,7 @@ void ModelDownload::readHeaders() {
             hint = QStringLiteral("The model may need a sign-in or a licence accepted at %1: download it in a "
                                   "browser and put it in %2.")
                        .arg(host, QFileInfo(m_target.path).absolutePath());
-        return fail(failed(QStringLiteral("%1 answered %2 for %3.").arg(host).arg(status).arg(shownName()), hint), true);
+        return fail(failed(QStringLiteral("%1 answered %2 for %3.").arg(host).arg(status).arg(m_target.fileName()), hint), true);
     }
     if (m_target.size >= 0 && m_total >= 0 && m_total != m_target.size) {
         return fail(makeError(QStringLiteral("download_mismatch"),
@@ -245,7 +287,7 @@ void ModelDownload::readHeaders() {
                                   .arg(m_target.source.toString())
                                   .arg(m_total)
                                   .arg(m_target.size)
-                                  .arg(shownName()),
+                                  .arg(m_target.fileName()),
                               QStringLiteral("The source may hold a newer build of the model: get the one the workflow "
                                              "was made with from its maker.")),
                     false);
@@ -255,7 +297,7 @@ void ModelDownload::readHeaders() {
         const qint64 needed = m_total - m_received;
         if (storage.isValid() && storage.bytesAvailable() >= 0 && storage.bytesAvailable() < needed)
             return fail(failed(QStringLiteral("%1 needs %2 more, and %3 has %4 free.")
-                                   .arg(shownName(), sizeText(needed), storage.rootPath(),
+                                   .arg(m_target.fileName(), sizeText(needed), storage.rootPath(),
                                         sizeText(storage.bytesAvailable())),
                                QStringLiteral("Make room there, or download into another model folder.")),
                         true);
@@ -267,7 +309,7 @@ void ModelDownload::readData() {
         return;
     if (!m_headersRead)
         readHeaders();
-    if (m_ended || !m_reply || m_complete)
+    if (m_ended || !m_reply || m_partWhole)
         return;
     const QByteArray data = m_reply->readAll();
     if (data.isEmpty())
@@ -295,12 +337,12 @@ void ModelDownload::replyFinished() {
         readHeaders(); // an error status (a 404 says so in error() too) is read as one
     if (m_ended || m_reply != reply)
         return;
-    if (m_headersRead && !m_complete && reply->isReadable())
+    if (m_headersRead && !m_partWhole && reply->isReadable())
         readData();
     if (m_ended || m_reply != reply)
         return;
     m_reply = nullptr;
-    const bool whole = m_complete || (reply->error() == QNetworkReply::NoError && (m_total < 0 || m_received == m_total));
+    const bool whole = m_partWhole || (reply->error() == QNetworkReply::NoError && (m_total < 0 || m_received == m_total));
     if (whole)
         return verify();
     // A break: the connection dropped or the server fell silent. Go on from here.
@@ -313,24 +355,18 @@ void ModelDownload::replyFinished() {
     }
     const QString host = m_target.source.host();
     if (!m_headersRead && m_received == 0)
-        return fail(failed(QStringLiteral("%1 could not be reached for %2: %3.").arg(host, shownName(), reply->errorString()),
+        return fail(failed(QStringLiteral("%1 could not be reached for %2: %3.").arg(host, m_target.fileName(), reply->errorString()),
                            QStringLiteral("Check the network, then download again.")),
                     true);
     fail(failed(QStringLiteral("The download of %1 broke off at %2 of %3: %4.")
-                    .arg(shownName(), sizeText(m_received), m_total >= 0 ? sizeText(m_total) : QStringLiteral("?"),
+                    .arg(m_target.fileName(), sizeText(m_received), m_total >= 0 ? sizeText(m_total) : QStringLiteral("?"),
                          reply->errorString()),
                 QStringLiteral("Download again to go on from there.")),
          true);
 }
 
 void ModelDownload::restartFromZero() {
-    if (m_reply) {
-        QNetworkReply *reply = m_reply;
-        m_reply = nullptr;
-        reply->disconnect(this);
-        reply->abort();
-        reply->deleteLater();
-    }
+    dropReply();
     m_part.resize(0);
     m_part.seek(0);
     m_hash.reset();
@@ -347,14 +383,14 @@ void ModelDownload::verify() {
         return fail(makeError(QStringLiteral("download_mismatch"),
                               QStringLiteral("The file from %1 is not %2: its content hash is %3, the workflow names "
                                              "%4. It was deleted.")
-                                  .arg(m_target.source.toString(), shownName(), got, wanted),
+                                  .arg(m_target.source.toString(), m_target.fileName(), got, wanted),
                               QStringLiteral("The source may hold a newer build of the model: get the one the workflow "
                                              "was made with from its maker.")),
                     false);
     if (const int error = renameNoReplace(partPath(), m_target.path); error != 0)
         return fail(failed(error == EEXIST ? QStringLiteral("A file came to %1 while %2 was downloading; it was left "
                                                             "as it is.")
-                                                 .arg(m_target.path, shownName())
+                                                 .arg(m_target.path, m_target.fileName())
                                            : QStringLiteral("Fugue could not move %1 into place: %2.")
                                                  .arg(partPath(), QString::fromLocal8Bit(std::strerror(error))),
                            error == EEXIST ? QStringLiteral("Check which of the two is the model.") : QString()),
@@ -369,30 +405,18 @@ void ModelDownload::cancel() {
         return;
     m_cancelled = true;
     m_stopHashing = true;
-    if (m_reply) {
-        QNetworkReply *reply = m_reply;
-        m_reply = nullptr;
-        reply->disconnect(this);
-        reply->abort();
-        reply->deleteLater();
-    }
+    dropReply();
     if (m_hasher)
         m_hasher->wait(); // its file is the part, removed below
     m_part.close();
     QFile::remove(partPath());
-    end({makeError(QStringLiteral("cancelled"), QStringLiteral("The download of %1 was cancelled.").arg(shownName()))});
+    end({makeError(QStringLiteral("cancelled"), QStringLiteral("The download of %1 was cancelled.").arg(m_target.fileName()))});
 }
 
 void ModelDownload::fail(const Error &error, bool keepPart) {
     if (m_ended)
         return;
-    if (m_reply) {
-        QNetworkReply *reply = m_reply;
-        m_reply = nullptr;
-        reply->disconnect(this);
-        reply->abort();
-        reply->deleteLater();
-    }
+    dropReply();
     m_part.close();
     if (!keepPart)
         QFile::remove(partPath());
@@ -403,6 +427,7 @@ void ModelDownload::end(const Errors &errors) {
     if (m_ended)
         return;
     m_ended = true;
+    m_lock.reset(); // unlocks
     emit finished(errors);
 }
 
@@ -430,7 +455,9 @@ void DownloadQueue::cancel() {
         return;
     m_targets = m_targets.mid(0, m_index + 1); // the rest are dropped
     if (m_current)
-        m_current->cancel(); // else between two files: next() finds none left
+        m_current->cancel();
+    else // between two files: next() finds none left
+        m_errors << makeError(QStringLiteral("cancelled"), QStringLiteral("The downloads were cancelled."));
 }
 
 qint64 DownloadQueue::received() const { return m_current ? m_current->received() : 0; }

@@ -159,6 +159,7 @@
   "Documentation": "Documentation",
   "Done": "Done",
   "Download": "Download",
+  "Download %1": "Download %1",
   "Download %n models": {
     "one": "Download %n model",
     "other": "Download %n models"

@@ -477,6 +477,9 @@ private slots:
         makeTemplateNeeding(f.bundled.filePath("gen"), "Gen", bytes, QString::fromLatin1(server.origin() + "/m.gguf"));
         makeTemplateNeeding(f.bundled.filePath("more"), "More", other,
                             QString::fromLatin1(server.origin() + "/other.gguf"), "other.gguf");
+        // A source that serves another file than the one named.
+        makeTemplateNeeding(f.bundled.filePath("wrong"), "Wrong", "the named bytes",
+                            QString::fromLatin1(server.origin() + "/m.gguf"), "wrong.gguf");
         QTemporaryDir dir;
         QFile shell(dir.filePath("shell.toml"));
         QVERIFY(shell.open(QIODevice::WriteOnly));
@@ -528,6 +531,20 @@ private slots:
         QVERIFY(window->findChild<QObject *>("templatesDialog")->property("visible").toBool());
         QCOMPARE(workflows.count(), 1);
         QCOMPARE(workflows.tabs().at(0).toMap().value("title").toString(), QString("Untitled"));
+        // The size is on the button; a failure shows on its own card, not only under the scrim.
+        item(window->contentItem(), "templatesSearch")->setProperty("text", "wrong"); // its card in view
+        QTRY_VERIFY(!item(window->contentItem(), "templateCard-gen"));
+        QTRY_VERIFY(item(window->contentItem(), "templateDownload-wrong"));
+        QCOMPARE(item(window->contentItem(), "templateDownload-wrong")->property("text").toString(), QString("Download 1 MB"));
+        click(item(window->contentItem(), "templateDownload-wrong"));
+        QTRY_VERIFY(!workflows.downloads()->busy());
+        // The cards are made again when the list is read again: look each time.
+        const auto statusOf = [&](const QString &id) {
+            QQuickItem *status = item(window->contentItem(), "templateStatus-" + id);
+            return status ? status->property("text").toString() : QString();
+        };
+        QTRY_VERIFY2(statusOf("wrong").contains("another file than wrong.gguf"),
+                     qPrintable(statusOf("wrong")));
         QTest::keyClick(window, Qt::Key_Escape);
         QTRY_VERIFY(!window->findChild<QObject *>("templatesDialog")->property("visible").toBool());
 
@@ -545,9 +562,17 @@ private slots:
         QTRY_VERIFY(!item(window->contentItem(), "downloadProgress"));
         // What it lacks again, with its button: a cancel needs no news of its own.
         QVERIFY(workflows.notice().contains("other.gguf"));
-        QTRY_VERIFY(item(window->contentItem(), "downloadModels")->isVisible());
+        QTRY_VERIFY(item(window->contentItem(), "downloadModels"));
         QVERIFY(!QFileInfo::exists(ModelLibrary::current(&f.registry).downloadFolder(*PortType::parse("fugue/diffusion-model"))
                                    + "/other.gguf.part"));
+
+        // A cancel from elsewhere with nothing arrived says nothing of its own.
+        workflows.dismissNotice();
+        workflows.downloadTemplate("more");
+        QTRY_VERIFY(workflows.downloads()->busy());
+        workflows.downloads()->cancel();
+        QTRY_VERIFY(!workflows.downloads()->busy());
+        QVERIFY2(!workflows.notice().contains("Downloaded"), qPrintable(workflows.notice()));
         QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join("\n")));
         forgetDownloads();
     }

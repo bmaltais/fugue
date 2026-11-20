@@ -246,6 +246,11 @@ QStringList ModelLibrary::downloadRoots(const QList<PortType> &types) const {
     return out;
 }
 
+void ModelLibrary::fitDownloadRoot(const QList<PortType> &types) {
+    if (!downloadRoots(types).contains(downloadRoot()))
+        m_downloadRoot = m_roots.value(0);
+}
+
 QList<ModelFile> ModelLibrary::list(const PortType &type) const {
     const QString key = type.toString();
     if (const auto listed = m_listed.constFind(key); listed != m_listed.constEnd())

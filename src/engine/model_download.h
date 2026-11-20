@@ -11,7 +11,9 @@
 // again with a Range request, a few times; a part left by an earlier Fugue is read and hashed,
 // then resumed the same way. Cancel deletes the part.
 //
-// http is taken only to this machine (a loopback address): nothing it sends leaves it.
+// http is taken only to this machine (a loopback address): nothing it sends leaves it. A
+// redirect is followed only to what a source may be, and never from https to http. A lock beside
+// the part keeps a second Fugue process from writing it too.
 //
 // The window and the CLI run the same DownloadQueue. Not thread-safe: one thread, with an
 // event loop.
@@ -26,10 +28,12 @@
 #include <QUrl>
 
 #include <atomic>
+#include <memory>
 
 #include "engine/error.h"
 #include "engine/result.h"
 
+class QLockFile;
 class QNetworkAccessManager;
 class QNetworkReply;
 class QThread;
@@ -46,7 +50,13 @@ struct DownloadTarget {
     QUrl source;
     QString path;      // the file it becomes, absolute
     qint64 size = -1;  // in bytes, when `requires` records it
+
+    // The handle's name ("flux1/model.gguf"), else the file's.
+    QString fileName() const;
 };
+
+// "12.3 GB", "450 MB", for a CLI line or an error's message (the window has its own, translated).
+QString sizeText(qint64 bytes);
 
 // Where `model` goes (ModelLibrary::downloadFolder() of its type, then its handle's name) and
 // from where. Fails with download_failed when it has no source, the source is not https (or
@@ -93,8 +103,9 @@ private:
     void verify();
     void fail(const Error &error, bool keepPart);
     void end(const Errors &errors);
+    // Stops the request without its signals reaching this download.
+    void dropReply();
     QString partPath() const { return m_target.path + QStringLiteral(".part"); }
-    QString shownName() const;
 
     DownloadTarget m_target;
     QNetworkAccessManager *m_network;
@@ -102,8 +113,10 @@ private:
     QFile m_part;
     QCryptographicHash m_hash{QCryptographicHash::Sha256};
     QPointer<QNetworkReply> m_reply;
-    QThread *m_hasher = nullptr;
+    std::unique_ptr<QLockFile> m_lock;
+    QThread *m_hasher = nullptr; // hashing an earlier part; it alone touches m_hash meanwhile
     std::atomic<bool> m_stopHashing{false};
+    std::atomic<qint64> m_hashedBytes{0}; // what it hashed, read once it has ended
     qint64 m_received = 0;
     qint64 m_total = -1;
     int m_retries = 5;
@@ -111,7 +124,7 @@ private:
     int m_stallMs = 60000;
     int m_attempt = 0;
     bool m_headersRead = false;
-    bool m_complete = false; // the server says the part already holds the whole file (416)
+    bool m_partWhole = false; // the server says the part already holds the whole file (416)
     bool m_cancelled = false;
     bool m_ended = false;
 };

@@ -31,6 +31,11 @@ class ModelDownloads : public QObject {
     Q_PROPERTY(QString progressText READ progressText NOTIFY changed)
     // 0 to 1; -1 while the size is not known.
     Q_PROPERTY(double fraction READ fraction NOTIFY changed)
+    // What went wrong the last time the line emptied (a cancel is not news), and who had asked:
+    // a Templates card shows its own, which the banner under the dialog would hide. Cleared by
+    // the next add().
+    Q_PROPERTY(QString failure READ failure NOTIFY changed)
+    Q_PROPERTY(QString failedWhat READ failedWhat NOTIFY changed)
 
 public:
     explicit ModelDownloads(QObject *parent = nullptr);
@@ -40,6 +45,8 @@ public:
     QString label() const;
     QString progressText() const;
     double fraction() const;
+    QString failure() const { return m_failure; }
+    QString failedWhat() const { return m_failedWhat; }
 
     // Queues `targets`. While another's files are fetched, these wait after them, and `what`
     // stays the first asker's until the line is empty.
@@ -55,12 +62,14 @@ signals:
     void finished(int arrived, const fugue::Errors &errors);
 
 private:
-    void tell(bool now);
+    // changed(), at most ten times a second unless `now`.
+    void notifyChanged(bool now);
 
     QNetworkAccessManager m_network;
     FileHashes m_hashes{FileHashes::defaultPath()};
     DownloadQueue m_queue{&m_network, &m_hashes};
     QString m_what;
+    QString m_failure, m_failedWhat;
     int m_arrived = 0;
     QElapsedTimer m_told;
 };

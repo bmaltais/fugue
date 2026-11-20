@@ -256,34 +256,42 @@ Popup {
                                 readonly property var downloads: App.workflows.downloads
                                 readonly property bool downloading: downloads.busy
                                                                     && downloads.what === "template:" + cell.modelData.id
+                                readonly property bool failed: !downloads.busy
+                                                               && downloads.failedWhat === "template:" + cell.modelData.id
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 7 * dialog.u
-                                visible: cell.modelData.status !== "" || downloading
+                                visible: cell.modelData.status !== "" || downloading || failed
                                 spacing: dialog.u
                                 Text {
                                     objectName: "templateStatus-" + cell.modelData.id
                                     Layout.fillWidth: true
                                     text: statusRow.downloading
                                           ? [statusRow.downloads.label, statusRow.downloads.progressText].filter(t => t !== "").join(" · ")
-                                          : cell.modelData.status
+                                          : statusRow.failed ? statusRow.downloads.failure : cell.modelData.status
                                     elide: Text.ElideRight
                                     color: statusRow.downloading ? dialog.look.label : dialog.look.error
                                     font.pixelSize: dialog.look.captionSize
-                                    // Which files, on hover; opening it names where each goes.
-                                    ToolTip.visible: statusHover.hovered && cell.modelData.missingModels.length > 0
-                                    ToolTip.text: cell.modelData.missingModels.map(m => m.name).join("\n")
+                                    // Which files and where each goes, or the whole failure, on hover.
+                                    ToolTip.visible: statusHover.hovered && (statusRow.failed || cell.modelData.missingModels.length > 0)
+                                    ToolTip.text: statusRow.failed ? statusRow.downloads.failure
+                                                  : cell.modelData.missingModels.map(m => qsTr("%1, into %2").arg(m.name, m.folder)).join("\n")
+                                    ToolTip.delay: 300
                                     HoverHandler { id: statusHover }
                                 }
                                 // Its own press target: a click here does not open the template.
                                 ThemedButton {
                                     objectName: "templateDownload-" + cell.modelData.id
+                                    // Destructive: Cancel stands apart, twice the row's gap before it.
+                                    Layout.leftMargin: statusRow.downloading ? dialog.u : 0
                                     visible: statusRow.downloading || (cell.modelData.download !== "" && !statusRow.downloads.busy)
                                     flat: true
                                     implicitHeight: 7 * dialog.u
                                     topInset: 0
                                     bottomInset: 0
                                     font.pixelSize: dialog.look.captionSize
-                                    text: statusRow.downloading ? qsTr("Cancel") : qsTr("Download")
+                                    text: statusRow.downloading ? qsTr("Cancel")
+                                          : cell.modelData.downloadSize !== "" ? qsTr("Download %1").arg(cell.modelData.downloadSize)
+                                          : qsTr("Download")
                                     Accessible.name: statusRow.downloading ? qsTr("Cancel the download") : cell.modelData.download
                                     ToolTip.visible: hovered && !statusRow.downloading
                                     ToolTip.text: cell.modelData.download
