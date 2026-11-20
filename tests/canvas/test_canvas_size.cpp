@@ -115,6 +115,16 @@ private slots:
         QCOMPARE(node(canvas, "prompt").value("nodeHeight").toDouble(), plain - 64 + 160);
     }
 
+    // #74: a multiline field keeps its label as a caption line above its text, so a filled one
+    // still says what it is: its row is one line taller than its text.
+    void aMultilineRowHasACaptionLineAboveItsText() {
+        QCOMPARE(node_size::multilineHeight(3, 12), 4 * 16 + 2 * 6.0);
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(workflow(placed, "one\ntwo\nthree\nfour")));
+        const QVariantMap text = port(node(canvas, "prompt"), "inputs", "text");
+        QCOMPARE(text.value("rowHeight").toDouble(), node_size::multilineHeight(4, 12));
+    }
+
     // A long prompt is measured only as far as the row's 40u cap, so typing into it does
     // not lay the whole text out on every key (CPU time, tests/cpu_time.h).
     void aLongPromptIsMeasuredOnlyToTheCap() {

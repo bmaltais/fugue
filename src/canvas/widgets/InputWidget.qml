@@ -101,7 +101,7 @@ Rectangle {
         objectName: "widgetValue"
         visible: !root.editingText
         x: root.tall ? root.pad : root.width * 0.45
-        y: root.tall ? Math.round(1.5 * root.look.unit) : 0
+        y: root.tall ? Math.round(1.5 * root.look.unit) + 16 : 0 // under the caption line (#74)
         z: 1
         width: root.width - x - root.pad - root.decorWidth - (glyphMark.visible ? glyphMark.width + root.look.unit : 0)
         height: root.tall ? root.height - 2 * y : root.height

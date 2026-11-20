@@ -17,7 +17,8 @@ qreal lineWidgetWidth(const QString &label, const QString &value, int textSize);
 // so a long prompt is not laid out whole on every key.
 int wrappedLines(const QString &text, qreal width, int textSize, int maxLines = -1);
 
-// The height of a multiline well that shows `lines` lines: 16 px each and 1.5u above and below.
+// The height of a multiline well that shows `lines` lines: 16 px each, one more for the field's label
+// as a caption above them (#74), and 1.5u above and below.
 qreal multilineHeight(int lines, int textSize);
 
 } // namespace fugue::node_size

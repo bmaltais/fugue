@@ -360,8 +360,10 @@ Item {
                         }
                     }
                     Text {
-                        // A tall (multiline) well shows its text instead, and the label only while empty.
-                        visible: face.full && input.shown && (!input.tall || input.modelData.value === "" || input.modelData.value === undefined)
+                        // The label; on a tall (multiline) well a caption line above its text, there
+                        // whether it is filled or not (#74).
+                        objectName: "inputLabel"
+                        visible: face.full && input.shown
                         x: input.showsWidget ? 5 * face.u : 3 * face.u
                         y: input.tall ? Math.round(2 * face.u) : 0
                         width: (input.hasWidget ? 0.45 : 1) * (node.width - 6 * face.u) - (input.showsWidget ? 2 * face.u : 0)
@@ -722,17 +724,48 @@ Item {
                         color: node.look.label
                         font.pixelSize: 12
                     }
-                    Text {
-                        visible: node.groupSize > 0 && face.full && !node.collapsed
+                    // A group card's footer: how many nodes it holds, and a button that enters it (as
+                    // ComfyUI's "Enter subgraph", #74; Tab and a double-click on the body too).
+                    Loader {
+                        active: node.groupSize > 0 && face.full && !node.collapsed
                         x: 3 * face.u
                         y: node.height - 2 * face.u - node.canvasModel.rowHeight
                         width: node.width - 6 * face.u
                         height: node.canvasModel.rowHeight
-                        verticalAlignment: Text.AlignVCenter
-                        text: visible ? qsTr("%n nodes · Tab to enter", "", node.groupSize) : ""
-                        elide: Text.ElideRight
-                        color: node.look.label
-                        font.pixelSize: node.look.captionSize
+                        sourceComponent: Item {
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: parent.width - enterButton.width - face.u
+                                text: qsTr("%n nodes", "", node.groupSize)
+                                elide: Text.ElideRight
+                                color: node.look.label
+                                font.pixelSize: node.look.captionSize
+                            }
+                            Rectangle {
+                                id: enterButton
+                                objectName: "enterGroupButton"
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: enterText.implicitWidth + 2 * face.u
+                                height: parent.height - face.u
+                                radius: node.look.smallCorner
+                                color: enterArea.containsMouse ? node.look.well : "transparent"
+                                Text {
+                                    id: enterText
+                                    anchors.centerIn: parent
+                                    text: qsTr("Enter group") + " \u203a"
+                                    color: enterArea.containsMouse ? node.look.text : node.look.label
+                                    font.pixelSize: node.look.captionSize
+                                }
+                                MouseArea {
+                                    id: enterArea
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: node.canvasModel.enterGroup(node.nodeId)
+                                }
+                            }
+                        }
                     }
 
                     // A placeholder's note (spec 11.6).

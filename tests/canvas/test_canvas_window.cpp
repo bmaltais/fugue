@@ -626,6 +626,27 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // #74: a filled multiline field still shows its label (a caption above its text), so a
+    // group card with two prompts says which is which.
+    void aFilledMultilineFieldShowsItsLabel() {
+        App app(load(small));
+        QVERIFY(app.open());
+        QTest::qWait(100);
+        bool shown = false;
+        std::function<void(QQuickItem *)> walk = [&](QQuickItem *from) {
+            for (QQuickItem *child : from->childItems()) {
+                if (child->isVisible() && child->property("text").toString() == QLatin1String("Text")
+                    && child->objectName() == QLatin1String("inputLabel"))
+                    shown = true;
+                walk(child);
+            }
+        };
+        QQuickItem *prompt = item(app.window->contentItem(), "node-prompt");
+        QVERIFY(prompt);
+        walk(prompt);
+        QVERIFY(shown);
+    }
+
     void draggingFromAnOutputToAnInputConnectsThem() {
         App app(load(small));
         QVERIFY(app.open());

@@ -38,9 +38,9 @@
     "one": "%n error",
     "other": "%n errors"
   },
-  "%n nodes · Tab to enter": {
-    "one": "%n node · Tab to enter",
-    "other": "%n nodes · Tab to enter"
+  "%n nodes": {
+    "one": "%n node",
+    "other": "%n nodes"
   },
   "%n packs updated.": {
     "one": "%n pack updated.",
