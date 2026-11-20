@@ -58,6 +58,11 @@ QString manifest(const QString &id, const QString &name, const QString &inType, 
     return QString::fromUtf8(QJsonDocument(json).toJson());
 }
 
+// A template of the fake nodes (11.10), naming a model with its source.
+const char *shoutyAbout = R"({"title": "Shouty", "category": "text", "description": "Says hi.", "tags": ["demo"]})";
+const char *shoutyWorkflow = R"({"fugue": 1, "graph": {"nodes": {"c": {"type": "fugue/shout", "version": "1.0.0",
+    "inputs": {"in": "hi"}}}}})";
+
 QString plainManifest(const QString &id, bool sink, bool hasInput, bool hasOutput) {
     QJsonObject json{
         {"manifest", 1},
@@ -108,6 +113,7 @@ class TestCli : public QObject {
         // Nor Omarchy's state: without providers.json its paired hosts are instances (8.2).
         env.insert("HOME", m_dir.filePath("home"));
         env.insert("FUGUE_NODE_MANIFESTS", m_dir.filePath("manifests"));
+        env.insert("FUGUE_TEMPLATES", m_dir.filePath("templates")); // the bundled templates (11.10)
         QProcess process;
         process.setProcessEnvironment(env);
         process.start(binary, args);
@@ -471,6 +477,41 @@ private slots:
         o = fugue({"workflow", "new", path, "--json"});
         QCOMPARE(o.exitCode, 1);
         QCOMPARE(o.firstCode(), QString("usage"));
+    }
+
+    // 11.10: the templates, and a new workflow made from one, for agents as for the window.
+    void templatesAreListedAndANewWorkflowIsMadeFromOne() {
+        write(m_dir.filePath("templates/shouty/template.json"), shoutyAbout);
+        write(m_dir.filePath("templates/shouty/workflow.fugue"), shoutyWorkflow);
+        Outcome o = fugue({"template", "list", "--json"});
+        QCOMPARE(o.exitCode, 0);
+        const QJsonArray listed = o.json().value("data").toObject().value("templates").toArray();
+        QCOMPARE(listed.size(), 1);
+        const QJsonObject shouty = listed.at(0).toObject();
+        QCOMPARE(shouty.value("id").toString(), QString("shouty"));
+        QCOMPARE(shouty.value("title").toString(), QString("Shouty"));
+        QCOMPARE(shouty.value("description").toString(), QString("Says hi."));
+        QCOMPARE(shouty.value("own").toBool(), false);
+        QVERIFY(QFileInfo(shouty.value("folder").toString()).isDir());
+        QCOMPARE(fugue({"templates", "list"}).out.contains("shouty"), true); // the plural too
+        // A broken template is left out, with a warning naming it.
+        write(m_dir.filePath("templates/broken/template.json"), "{ not json");
+        write(m_dir.filePath("templates/broken/workflow.fugue"), shoutyWorkflow);
+        o = fugue({"template", "list", "--json"});
+        QCOMPARE(o.exitCode, 0);
+        QCOMPARE(o.json().value("data").toObject().value("templates").toArray().size(), 1);
+        const QJsonArray warnings = o.json().value("warnings").toArray();
+        QCOMPARE(warnings.size(), 1);
+        QVERIFY(warnings.at(0).toObject().value("message").toString().contains("broken"));
+
+        const QString path = m_dir.filePath("from-template.fugue");
+        o = fugue({"workflow", "new", path, "--template", "shouty", "--json"});
+        QCOMPARE(o.exitCode, 0);
+        QCOMPARE(fugue({"validate", path, "--json"}).exitCode, 0);
+        o = fugue({"workflow", "new", m_dir.filePath("other.fugue"), "--template", "nope", "--json"});
+        QCOMPARE(o.exitCode, 1);
+        QCOMPARE(o.firstCode(), QString("usage"));
+        QVERIFY(!QFile::exists(m_dir.filePath("other.fugue")));
     }
 
     void workflowDescribeSummarisesNodesAndLinks() {

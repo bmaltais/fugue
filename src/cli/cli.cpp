@@ -59,11 +59,12 @@ const char *helpText =
     "usage: fugue <command> [--json]\n"
     "  run <file> [--wait] [--first] [--to <node>] [--provider <name>] [--set <node>.<input>=<value>]\n"
     "  validate <file> | compile <file>\n"
-    "  workflow new|describe|export|run|validate|compile <file>\n"
+    "  workflow new <file> [--template <id>] | workflow describe|export|run|validate|compile <file>\n"
     "  runs list | runs status|events|result|cancel <run-id>\n"
     "  node list [--type <port type>] | node describe <type id>...\n"
     "  pack list | pack add <folder|git-url> [--ref <tag|commit>] | pack update [id] [--ref ...] | pack remove|trust <id>\n"
     "  model list [--type <resource type>] [--hash]\n"
+    "  template list\n"
     "  provider, cache, command, skill (later releases)\n"
     "With no command, fugue opens the window.\n";
 

@@ -13,6 +13,9 @@ the work is tracked in the [issues](https://github.com/bmaltais/fugue/issues) by
 
 ## Build
 
+The bundled templates are a submodule ([fugue-workflows](https://github.com/bmaltais/fugue-workflows)):
+clone with `--recurse-submodules`, or run `git submodule update --init` once.
+
 ```sh
 bin/build        # the app and the tests
 bin/test         # builds, then runs every test (arguments go to ctest)

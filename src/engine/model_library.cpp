@@ -9,6 +9,7 @@
 
 #include <algorithm>
 
+#include "engine/document.h"
 #include "engine/file_hashes.h"
 #include "engine/hash.h"
 #include "engine/model_shape.h"
@@ -58,7 +59,7 @@ void walk(const QString &top, const QString &folder, const QString &prefix, cons
     }
 }
 
-Error missing(const QString &message, const QString &hint) {
+Error notFound(const QString &message, const QString &hint) {
     return makeError(QStringLiteral("model_missing"), message, hint);
 }
 
@@ -232,12 +233,12 @@ Result<QString> ModelLibrary::resolve(const QJsonObject &handle, FileHashes &has
     const std::optional<PortType> type = PortType::parse(resource);
     const DeclaredPortType *declared = type ? resourceType(*type) : nullptr;
     if (!declared)
-        return missing(QStringLiteral("%1 is not a resource type of an installed pack.")
+        return notFound(QStringLiteral("%1 is not a resource type of an installed pack.")
                            .arg(resource.isEmpty() ? QStringLiteral("A model with no type") : resource),
                        resource.isEmpty() ? QStringLiteral("Pick the model again.")
                                           : QStringLiteral("Install the pack that declares %1.").arg(resource));
     if (!isSha256(hash))
-        return missing(QStringLiteral("The model %1 is served by a provider; it has no file on disk to give this node.")
+        return notFound(QStringLiteral("The model %1 is served by a provider; it has no file on disk to give this node.")
                            .arg(shown),
                        QStringLiteral("Pick a model file for this input."));
 
@@ -256,9 +257,26 @@ Result<QString> ModelLibrary::resolve(const QJsonObject &handle, FileHashes &has
                 return file.path;
         }
 
-    return missing(QStringLiteral("The model %1 (%2) is not in the model folders.").arg(shown, declared->name),
+    return notFound(QStringLiteral("The model %1 (%2) is not in the model folders.").arg(shown, declared->name),
                    QStringLiteral("Put %1 in %2, or add the folder it is in to Extra model folders in Settings.")
                        .arg(fileName.isEmpty() ? QStringLiteral("the file") : fileName, folders(*type).value(0)));
+}
+
+QList<MissingModel> ModelLibrary::missing(const Document &document, FileHashes &hashes) const {
+    return missing(document.models(), hashes);
+}
+
+QList<MissingModel> ModelLibrary::missing(const QJsonArray &models, FileHashes &hashes) const {
+    QList<MissingModel> out;
+    for (const QJsonValue entry : models) {
+        QJsonObject handle = entry.toObject();
+        const QString source = handle.take(QStringLiteral("source")).toString();
+        if (resolve(handle, hashes, Hashing::RememberedOnly))
+            continue;
+        const std::optional<PortType> type = PortType::parse(handle.value(QStringLiteral("resource")).toString());
+        out.append({handle, source, type ? folders(*type).value(0) : QString()});
+    }
+    return out;
 }
 
 Result<QJsonValue> ModelLibrary::withPaths(const QJsonValue &value, FileHashes &hashes, Hashing hashing) const {

@@ -26,7 +26,7 @@ QVariantMap colors() {
 QVariantList bar() {
     return {
         submenu(QT_TRANSLATE_NOOP("Menu", "&File"),
-                {command("file.new"), command("file.open"), command("file.open-clipboard"), separator(),
+                {command("file.new"), command("file.open"), command("file.open-clipboard"), command("file.templates"), separator(),
                  command("file.save"), command("file.save-as"), command("file.export-share"),
                  command("file.export-compiled"), separator(), command("file.close"), command("app.quit")}),
         submenu(QT_TRANSLATE_NOOP("Menu", "&Edit"),

@@ -179,8 +179,13 @@ foreach(test_source ${fugue_search_tests})
   set_tests_properties(${test_name} PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
 endforeach()
 
+# A `fugue` run from the build folder finds the bundled templates beside it, as an installed one
+# finds share/fugue/templates (engine/templates.h).
+file(CREATE_LINK ${CMAKE_SOURCE_DIR}/templates ${CMAKE_BINARY_DIR}/templates SYMBOLIC)
+
 # Workflow tests: each tests/workflow/<name>.cpp is its own QtTest executable with the app's
-# code, the real Main.qml and the built-in node types. FUGUE_SOURCE_DIR finds examples/.
+# code, the real Main.qml and the built-in node types. FUGUE_SOURCE_DIR finds examples/ and the
+# bundled templates/.
 file(GLOB fugue_workflow_tests CONFIGURE_DEPENDS tests/workflow/*.cpp)
 foreach(test_source ${fugue_workflow_tests})
   get_filename_component(test_name ${test_source} NAME_WE)
@@ -245,6 +250,9 @@ include(GNUInstallDirs)
 install(TARGETS fugue RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES share/fugue.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 install(FILES share/fugue.svg DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
-install(FILES examples/demo.fugue examples/text-to-image.fugue examples/z-image-turbo.fugue
-              examples/flux2-klein-4b.fugue examples/flux2-klein-9b.fugue DESTINATION ${CMAKE_INSTALL_DATADIR}/fugue/examples)
+install(FILES examples/demo.fugue DESTINATION ${CMAKE_INSTALL_DATADIR}/fugue/examples)
+# The bundled templates (spec 11.10): the `templates` submodule, bmaltais/fugue-workflows at the
+# commit this release pins. Its folders and categories.json; not its README, check script or CI.
+install(DIRECTORY templates/ DESTINATION ${CMAKE_INSTALL_DATADIR}/fugue/templates
+        PATTERN ".*" EXCLUDE PATTERN "bin" EXCLUDE PATTERN "README.md" EXCLUDE)
 install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/fugue)

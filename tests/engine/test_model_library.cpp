@@ -15,6 +15,7 @@
 
 #include <tuple>
 
+#include "engine/document.h"
 #include "engine/file_hashes.h"
 #include "engine/model_library.h"
 #include "engine/registry.h"
@@ -96,6 +97,44 @@ class TestModelLibrary : public QObject {
     Q_OBJECT
 
 private slots:
+
+    // A workflow's models that are not here (4.3, 11.6): each once, with the folder it goes in and
+    // where it can be had, as `requires` records it; a check reads no model file.
+    void aWorkflowsMissingModelsSayWhereToGetAndPutThem() {
+        QTemporaryDir root, state;
+        Registry registry;
+        declare(registry, "io.test.pack/lora", {".safetensors"});
+        writeFile(root.filePath("lora/here.safetensors"), "other bytes"); // taken to be it, unread
+        FileHashes hashes(state.filePath("hashes.json"));
+        const QString gone = QStringLiteral("sha256:") + QString(64, u'1');
+        const QString unsourced = QStringLiteral("sha256:") + QString(64, u'2');
+        const auto lora = [](const QString &hash, const QString &name) {
+            return QJsonObject{{"resource", "io.test.pack/lora"}, {"hash", hash}, {"name", name}};
+        };
+        const auto node = [](const QJsonObject &inputs) {
+            return QJsonObject{{"type", "fugue/text"}, {"version", "1.0.0"}, {"inputs", inputs}};
+        };
+        QJsonObject sourced = lora(gone, "gone.safetensors");
+        sourced.insert("source", "https://example.com/gone");
+        const QJsonObject json{
+            {"fugue", 1},
+            {"graph", QJsonObject{{"nodes", QJsonObject{
+                {"a", node({{"x", lora(abcHash, "here.safetensors")}, {"y", lora(gone, "gone.safetensors")}})},
+                {"b", node({{"x", QJsonArray{lora(gone, "gone.safetensors"), lora(unsourced, "other.safetensors")}}})}}}}},
+            {"requires", QJsonObject{{"models", QJsonArray{sourced}}}}};
+        const Result<Document> document = Document::fromJson(json);
+        QVERIFY2(document, qPrintable(document ? QString() : document.errors().first().message));
+
+        const ModelLibrary library({root.path()}, &registry);
+        const QList<MissingModel> missing = library.missing(*document, hashes);
+        QCOMPARE(missing.size(), 2);
+        QCOMPARE(missing.at(0).handle.value("name").toString(), QStringLiteral("gone.safetensors"));
+        QCOMPARE(missing.at(0).source, QStringLiteral("https://example.com/gone"));
+        QCOMPARE(missing.at(0).folder, root.filePath("lora"));
+        QCOMPARE(missing.at(1).handle.value("name").toString(), QStringLiteral("other.safetensors"));
+        QVERIFY(missing.at(1).source.isEmpty());
+        QVERIFY(hashes.known(root.filePath("lora/here.safetensors")).isEmpty()); // not read
+    }
     void listsTheModelsOfATypeInItsFolderAndSubfolders() {
         QTemporaryDir root;
         Registry registry;

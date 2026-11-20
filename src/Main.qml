@@ -93,6 +93,12 @@ ApplicationWindow {
     Connections {
         target: App.commands
         function onWindowRequested(id) {
+            if (id === "file.templates") {
+                if (!win.templatesDialog)
+                    win.templatesDialog = templatesComponent.createObject(win.contentItem)
+                win.templatesDialog.open()
+                return
+            }
             if (id !== "app.settings" || !win.appSettingsModel)
                 return
             if (!win.settingsPanel)
@@ -101,6 +107,12 @@ ApplicationWindow {
         }
     }
     property var settingsPanel: null
+    // The Templates dialog (#83), made the first time file.templates asks for it.
+    property var templatesDialog: null
+    Component {
+        id: templatesComponent
+        TemplatesDialog {}
+    }
     Component {
         id: settingsComponent
         SettingsPanel { model: win.appSettingsModel }

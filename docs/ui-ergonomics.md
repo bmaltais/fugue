@@ -77,6 +77,14 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 - New: the path, then its choices (Found by its files, ComfyUI layout, LoRAs, VAEs, Diffusion models, Text encoders, Checkpoints), then "Found: LoRAs" in the label color while the choice is Found by its files.
 - Rule: Floor (each choice is a SmallButton, 7u = 28px tall). Gaps (one unit inside the folder's chunk, as the folders' list keeps). Posture: the default needs no decision; the choices are there for a wrong guess.
 
+### 2026-11-20 Templates dialog (#83)
+
+- Control: File > Browse templates (`file.templates`, `src/menu/menus.cpp`), after Open the workflow on the clipboard, before the separator; and the dialog it opens, `src/workflow/TemplatesDialog.qml`: categories on the left (7u rows, as Settings' pages), a search field, cards in a grid (56u or wider, the preview at 16:10, title, two lines of description, a status line in the error color when models or packs are missing).
+- Old: none; the examples were files to open by hand.
+- New: the menu entry; the dialog, focused on its search field. The whole card is the press target; Enter opens the first match from the field, or the card the arrows reached. Escape or the scrim closes it.
+- Why: picking a template is recognition, not recall, so the preview leads the card (Hick: one look per card, not a list of names); the search takes the keys at once. The status says before opening what the machine lacks.
+- Rule: Learned place (the File items before it keep their order). Floor (a card is far above 24px; the tabs are 7u = 28px). Primary (one action, open a card, with no other button competing). Posture: a transient dialog, larger targets.
+
 ## Unread
 
 Settings, the shortcuts overlay, the quit question, About, every menu except Run, the context menus, the workflow dialogs and their questions (those questions are a row of buttons), the group dialogs, image save, the widget pickers (but their search field), the magnifier.

@@ -1,0 +1,90 @@
+#pragma once
+
+// Workflow templates (spec 11.10): ready-to-run workflows the window lists and the CLI copies.
+//
+// A template is a folder:
+//   <id>/template.json   {"title", "description", "category", "tags": [...]}; title required
+//   <id>/workflow.fugue  the workflow; its `requires.models` give each model's `source`
+//   <id>/preview.webp    (or .png, .jpg) what it makes; optional
+//   <id>/inputs/         sample images its Load Image nodes name as `inputs/<name>`; optional
+// and a root of templates may hold a categories.json, {"categories": [{"id", "title"}]}, the
+// order and titles of its categories. Nothing lists the templates: a root's folders are its
+// templates, so there is no index to keep in step with them.
+//
+// What a template needs is read from its workflow, never written twice: the models it names
+// (Document::models()) and the node versions it was made with. A template whose built-in
+// nodes this Fugue lacks, or has at another major or an older minor (3.6), was made by a newer
+// Fugue and is not listed; one whose pack is not installed is listed with the pack named.
+//
+// The bundled templates (the fugue-workflows repo, at the commit a Fugue release pins) and the
+// person's own (~/Documents/Fugue/templates) are two roots of the same kind. The person's own
+// folder may also hold plain .fugue files, each a template named after its file.
+
+#include <QJsonArray>
+#include <QList>
+#include <QString>
+#include <QStringList>
+
+#include <optional>
+
+#include "engine/error.h"
+
+namespace fugue {
+
+class Registry;
+
+struct TemplateRoot {
+    QString path;
+    bool own = false; // the person's own templates (listed first, under "Your templates")
+};
+
+struct Template {
+    QString id;       // the folder's name (or a .fugue file's stem); a person's own wins a clash
+    QString folder;   // absolute
+    QString workflow; // absolute path of the workflow file
+    QString preview;  // absolute path, empty when there is none
+    QString title;
+    QString description;
+    QString category;      // id
+    QString categoryTitle; // as the root's categories.json names it, else the id
+    QStringList tags;
+    bool own = false;
+    QJsonArray models;         // Document::models(): resource, hash, name, source
+    QStringList missingPacks;  // namespaces of the packs it uses that are not installed
+};
+
+class TemplateLibrary {
+public:
+    TemplateLibrary(QList<TemplateRoot> roots, const Registry *registry);
+
+    // The person's own folder, then the bundled one: $FUGUE_TEMPLATES when set; else
+    // <prefix>/share/fugue/templates beside the running binary's bin/, else templates/ beside
+    // the binary (the build folder links the source tree's there).
+    static QList<TemplateRoot> standardRoots();
+    static QString ownFolder(); // ~/Documents/Fugue/templates
+
+    // Every template this Fugue can open: the person's own first, then by category in the
+    // order categories.json gives (unnamed ones after, by id), then by title.
+    QList<Template> list() const;
+    // What kept a template out of list(), or is wrong with one in it, for the bundled
+    // templates' check: an unreadable template.json or workflow, a missing title, a Load Image
+    // file that is not in the folder. A template made by a newer Fugue is not a problem.
+    Errors problems() const;
+
+    // The template with this id, or nullptr.
+    std::optional<Template> find(const QString &id) const;
+
+    // Writes the template as a new workflow file at `path` (never replacing one), with its
+    // sample inputs copied into the `inputs` folder beside it, so the names it gives them
+    // still lead to them. A file of the same name already in that folder with other bytes is
+    // a failure, and nothing is written.
+    Errors copyTo(const Template &chosen, const QString &path) const;
+
+private:
+    void scan(QList<Template> *out, Errors *problems) const;
+
+    QList<TemplateRoot> m_roots;
+    const Registry *m_registry;
+};
+
+} // namespace fugue

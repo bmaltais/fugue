@@ -423,7 +423,9 @@ An object is a link if and only if it has the key `from`. `null` is not a value;
 - `packs`: the packs those types come from, with an optional `source` Fugue can offer to install
   from (a prompt; nothing installs silently).
 - `models`: every resource handle with a hash that appears as a literal, with an optional
-  `source`. On open Fugue checks the model folders and reports what is missing without blocking.
+  `source`. On open Fugue checks the model folders and reports what is missing without blocking:
+  the banner names each missing file, where to get it (`source`) and the folder it goes in (#83).
+  The check reads no model file (8.9).
 
 ### 4.4 `groups` section
 
@@ -1574,7 +1576,7 @@ validation warns and the node runs normally.
 - One format: the `.fugue` document of [section 4](#4-the-workflow-document).
 - Workflows are ordinary files wherever the user saves them. File dialogs go through the desktop
   portal, never `QFileDialog`. Fugue keeps a recent list and suggests `~/Documents/Fugue`.
-- A few example workflows ship with the app, and a user templates folder is supported.
+- Templates ship with the app, and the person has a templates folder of their own ([11.10](#1110-templates)).
 
 ### 11.2 Saving
 
@@ -1648,6 +1650,30 @@ document to stdout, or exits nonzero if the file is not its format. An export co
 document on stdin and writes the file named by its argument. Converters are trusted with their
 pack ([6.7](#67-trust)). No v0.1 milestone ships a pack converter; the interface exists so the
 first one (ComfyUI import, after v0.1) is a module.
+
+### 11.10 Templates
+
+Ready-to-run workflows, listed by File > Browse templates (`file.templates`) and `fugue template
+list`, and copied out by opening one or by `fugue workflow new <file> --template <id>` (#83).
+
+- A template is a folder: `template.json` (title, description, category, tags), `workflow.fugue`,
+  a preview (`preview.webp`, `.png` or `.jpg`) and `inputs/`, the sample pictures its Load Image
+  nodes name as `inputs/<name>`. A root of templates may hold `categories.json`, the order and
+  titles of its categories. Nothing indexes the templates: a root's folders are its templates.
+- What a template needs is read from its workflow, not written again: its models (handles, with
+  each `source` in `requires.models`) and the node versions it was made with. A template whose
+  built-in nodes this Fugue lacks, or has at another major or an older minor ([3.6](#36-versions)),
+  is not listed; one whose pack is not installed is listed with the pack named.
+- Two roots: the person's own folder (`~/Documents/Fugue/templates`, listed first, where a plain
+  `.fugue` file is a template too) and the bundled one. The bundled templates are the
+  `bmaltais/fugue-workflows` repo, a submodule (`templates/`) at the commit a release pins,
+  installed to `share/fugue/templates`; `$FUGUE_TEMPLATES` names another. Its CI checks every
+  template against Fugue's main branch; Fugue's tests check the pinned ones.
+- The dialog shows categories, a search over title, description and tags, and cards with the
+  preview and what this machine lacks (models, packs; a check, reading no model file). Opening
+  one makes a new unsaved tab named after it, its samples taken into the inputs folder as a
+  pasted image is, so it runs as it opens and a save keeps it portable. The CLI writes the
+  workflow with its samples copied into `inputs/` beside it, never replacing a file.
 
 ---
 
@@ -1820,7 +1846,7 @@ are never three implementations.
 ### 13.1 Commands
 
 Each command works with no display, never opens a dialog, and takes `--json`. For `node`,
-`pack`, `provider` and `model` the plural is an alias (`fugue nodes list` is `fugue node list`).
+`pack`, `provider`, `model` and `template` the plural is an alias (`fugue nodes list` is `fugue node list`).
 `fugue run` starts a run and `fugue runs` manages runs; those two are different commands.
 
 | Command | Does |
@@ -1828,7 +1854,7 @@ Each command works with no display, never opens a dialog, and takes `--json`. Fo
 | `fugue run <file> [--wait] [--first] [--to <node>] [--provider <name>] [--set <node>.<input>=<value>]` | Start a run. Prints a run id and returns; `--wait` streams events and exits when it ends; `--first` queues it ahead of waiting runs. Short for `fugue workflow run`. |
 | `fugue validate <file>` | Compile and report errors and warnings; execute nothing. Short for `fugue workflow validate`. |
 | `fugue compile <file>` | Print the compiled graph. Short for `fugue workflow compile`. |
-| `fugue workflow new <file>` | Write an empty workflow. |
+| `fugue workflow new <file> [--template <id>]` | Write an empty workflow, or a template's ([11.10](#1110-templates)) with its sample inputs beside it. |
 | `fugue workflow describe <file>` | A readable summary: nodes, links, sinks, what is missing. |
 | `fugue workflow export <file> --share [--no-prompts] [--no-layout]` | Write a share copy. |
 | `fugue runs list` | Recent and queued runs. |
@@ -1841,6 +1867,7 @@ Each command works with no display, never opens a dialog, and takes `--json`. Fo
 | `fugue node new <name>`, `fugue node test <path>` | Authoring ([6.11](#611-authoring-tools)). |
 | `fugue pack list`, `add <folder\|git-url> [--ref <tag\|commit>]`, `remove <id>`, `update [id] [--ref <tag\|commit>]`, `trust <id>` | Packs ([6.6](#66-installing)). All but `list` need a human ([13.6](#136-safety)). |
 | `fugue provider list` | Instances, their capabilities and status. |
+| `fugue template list` | The templates, each with the models it names (`here` or not, and the folder a missing one goes in) and the packs it lacks; what is wrong with one is a warning. |
 | `fugue model list [--type <resource type>] [--hash]` | Models found on disk and offered by providers. A file on disk has a `handle` only once its hash is known (listing reads no model file); `--hash` hashes the others, once each, so every file gets a full handle; a file it cannot read is a `media_unreadable` warning. |
 | `fugue cache status`, `fugue cache clear [--workflow <file>] [--node <id>]` | The result cache. |
 | `fugue command list` | The command registry and current key bindings. |
@@ -1984,8 +2011,8 @@ choice; a limit the provider reports for the model replaces it, higher or lower.
   model, seed, and in Advanced the longest answer, temperature and thinking (off); outputs `text`, `seed`,
   `model`) and Enhance Prompt (`fugue/enhance-prompt`: an idea, a style, more instructions,
   model, seed; outputs the prompt as `text`, with `seed` and `model`), both on `text.generate`
-  (8.1, 8.7). `examples/enhance-prompt.fugue` (Generate Image, any model) and
-  `examples/z-image-turbo-enhance.fugue` (the component nodes) are ready to open.
+  (8.1, 8.7). The templates `enhance-prompt` (Generate Image, any model) and
+  `z-image-turbo-enhance` (the component nodes) are ready to open (11.10).
 - Pad (for outpainting), Rotate, Flip, Blur, Sharpen, Invert.
 - Mask tools: grow, shrink, invert, from alpha, solid.
 - Number Math.
@@ -2000,12 +2027,12 @@ negative prompt, one conditioning; optional reference pictures for an edit, #88)
 scheduler, denoise), VAE Decode and VAE Encode. A text-to-image graph of them gave the same
 pixels as one `generate` run of the same helper for Z-Image Turbo and FLUX.2 Klein 4B at guidance
 1, checked by hand on an RTX 3090 (SDXL's size conditioning differs: Appendix A);
-`examples/z-image-turbo.fugue`, `examples/flux2-klein-4b.fugue` and `examples/flux2-klein-9b.fugue` are ready to open.
+the templates `z-image-turbo`, `flux2-klein-4b` and `flux2-klein-9b` are ready to open (11.10).
 Image editing (#88), as ComfyUI's FLUX.2 Klein 9B templates do it: Load Image, Resize to
 Megapixels (1 MP), Text Encode's references, an Empty Latent of the resized size, Sampler, VAE
-Decode; `examples/flux2-klein-9b-edit.fugue` (distilled: 4 steps, guidance 1),
-`examples/flux2-klein-9b-base-edit.fugue` (base: 20 steps, guidance 5, empty negative prompt) and
-`examples/flux2-klein-9b-edit-2-refs.fugue`. Checked on an RTX 3090: staged equals one `generate`
+Decode; the templates `flux2-klein-9b-edit` (distilled: 4 steps, guidance 1),
+`flux2-klein-9b-base-edit` (base: 20 steps, guidance 5, empty negative prompt) and
+`flux2-klein-9b-edit-2-refs`, each with sample pictures. Checked on an RTX 3090: staged equals one `generate`
 run with the same reference, byte for byte. Not built: ComfyUI's KV-cache edit (FluxKVCache) and
 its outpaint template (pad, mask, color match). Then text
 encoders other than one LLM (FLUX.1's CLIP-L and T5, SD3), ControlNet, upscale with a model,
@@ -2268,7 +2295,7 @@ Building M2 made these further choices.
 | No providers.json: the default instances are this machine and every host omarchy-local-ai's `network.json` says is paired, by host name at `https://<dns>`, the address the omarchy provider already matches a paired host's models by (so a file the settings write later holds the same entries). Offline paired hosts are kept, so their models show as offline and pins stay valid. Read wherever providers.json is read, never written; a file that exists wins entirely | 8.2 | medium-high |
 | The model picker lists models by instance for the node type's capabilities, titled by the provider's display name; a model that is not ready stays choosable (a run then says it is not running, 8.4) and shows why and the command that starts it; Up and Down skip the instance headings | 8.4, 2.5 | medium-high |
 | A paired host with no model to offer says why (offline, unreachable, or nothing shared running) instead of "not paired" | 8.7 | high |
-| Menu items and gaps from ComfyUI: export a share copy and the compiled graph (11.5, #54), Clear workflow, the help links and About are commands; templates, Clipspace, refresh node definitions, unload models, focus mode, theme switching, node shapes, properties panels and the Manager are not planned (Fugue has no Python node definitions, follows the Omarchy theme, and installs packs per 6.6); rename and pin (#55), the side panels (#56), a node's image actions (#57), align and distribute (#58) and the tab menu (#59) are later tickets | 12.5 | medium |
+| Menu items and gaps from ComfyUI: export a share copy and the compiled graph (11.5, #54), Clear workflow, the help links and About are commands; templates are File > Browse templates (#83, 11.10); Clipspace, refresh node definitions, unload models, focus mode, theme switching, node shapes, properties panels and the Manager are not planned (Fugue has no Python node definitions, follows the Omarchy theme, and installs packs per 6.6); rename and pin (#55), the side panels (#56), a node's image actions (#57), align and distribute (#58) and the tab menu (#59) are later tickets | 12.5 | medium |
 | Settings panel (#51): six pages (General, Folders, Run, Providers, Keymap, Theme) instead of ComfyUI's category tree, since Fugue has about a dozen settings. Each change is written at once (no Apply), checked in C++; QML only asks | 1.4 | high |
 | settings.json keeps keys it does not know; a known key with a bad value is listed as a problem and its default used, the value left as written; a file that is not a JSON object is never overwritten. A value equal to the default leaves the file, so a later default reaches users who never chose | 1.4 | high |
 | `new_seed`: random (default, as ComfyUI's control_after_generate) or fixed (a random number that stays) for seed widgets of nodes added on the canvas; increment stays a per-node choice. `embed_workflow` sets what new Save Image nodes start with (11.7) | 6.2, 11.7 | medium |
@@ -2319,6 +2346,12 @@ Building M4 made these further choices.
 | A text job waits up to 300 seconds of silence (image jobs: 15 s per request): reading a long prompt or an image, or reasoning, can stream nothing for a while | 8.7 | medium |
 | Resize to Megapixels defaults its multiple to 16 (ComfyUI's resolution_steps defaults to 1): sizes then match a latent of the same picture | 14.1 | medium-high |
 | Text Encode takes an edit's reference pictures and carries them on its conditioning (`meta.references`) to the Sampler, which sends them again (#88). stable-diffusion.cpp's flux2 preset gives references to the model, not the text encoder, but every stage of one generation must send the same options (the guidance sets an edit makes are chosen at encode), so both stages send `ref_images`. ComfyUI attaches reference latents to the conditioning (ReferenceLatent) on the positive and negative branch, after a VAE Encode of each: one wire here does all of it. The Sampler's cache follows the pictures, since the conditioning's descriptor holds them. The encode VAE-encodes them too, unused (a few hundred ms) | 14.3 | high |
+| Templates (#83) are a separate repo, `bmaltais/fugue-workflows` (private, like Fugue), bundled as a submodule at a pinned commit: the owner's call (2026-11-20), so templates can be published and contributed apart from the app. ComfyUI ships its templates as a pip package pinned by version | 11.10 | high |
+| A template is a folder with no index: ComfyUI's `index.json` must be kept in step with the files by a sync script and CI. A template's models and node versions come from its workflow, not from fields written again (ComfyUI repeats the models in the index and on each node) | 11.10 | high |
+| Templates carry sample pictures (`inputs/`), as ComfyUI's repo does (`input/`); opening one takes them into the inputs folder, so an edit template runs as it opens (owner, 2026-11-20). Packs are not carried: a copy would replace the installed version of the pack; side-by-side versions are #90 | 11.10 | high |
+| A template made by a newer Fugue is left out, judged by its nodes' versions (3.6), not by `requires.fugue`: a node at the same major and the same or older minor runs as made | 11.10 | medium-high |
+| The person's own templates folder is `~/Documents/Fugue/templates`, beside where workflows are suggested; there a plain `.fugue` is a template too. ComfyUI has none (custom nodes' `example_workflows` only) | 11.10 | medium-high |
+| A template's sources are exact: each URL's file has the recorded sha256 (Hugging Face's LFS oid). The FLUX.2 Klein 9B templates name unsloth's current Q8 file, not the older build first checked on the 3090, whose bytes only unofficial mirrors still hold (owner, 2026-11-20) | 11.10 | high |
 
 ## Appendix B: issue to section map
 
@@ -2353,6 +2386,9 @@ Building M4 made these further choices.
 | #28 video, song and text nodes | 14.2, 8.1, 8.7 |
 | #87 Text Generate, Enhance Prompt | 14.2, 8.1, 8.7 |
 | #88 Klein 9B edit: references, Resize to Megapixels | 14.1, 14.3 |
+| #83 workflow templates, missing models on open | 11.10, 4.3, 13.1 |
+| #89 model downloads | 8.9 |
+| #90 node versions side by side | 3.6, 6.6 |
 | #29 more pixel and mask nodes | 14.2, 2.1 |
 | #30 agent skill | 13.4, 13.5 |
 | #31 providers as modules | 8.8 |

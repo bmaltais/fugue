@@ -22,6 +22,7 @@
 #include "engine/version.h"
 
 #include <QByteArray>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QList>
@@ -206,6 +207,10 @@ struct Document {
     // keeps the recorded entries of packs still used (adding new ones needs
     // pack data the registry gains in M3). Unknown keys are kept.
     void refreshRequirements(const QString &appVersion);
+
+    // The `models` refreshRequirements() writes: every resource handle with a hash in a literal,
+    // once per hash, sorted by hash, with the `source` `requires` records for that hash.
+    QJsonArray models() const;
 };
 
 } // namespace fugue

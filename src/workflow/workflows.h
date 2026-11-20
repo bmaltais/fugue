@@ -20,6 +20,7 @@
 #include "commands/command_registry.h"
 #include "engine/document.h"
 #include "engine/registry.h"
+#include "engine/templates.h"
 #include "workflow/image_inputs.h"
 #include "workflow/recovery_store.h"
 #include "engine/trust_store.h"
@@ -41,6 +42,8 @@ struct WorkflowLocations {
     QString recoveryDir = RecoveryStore::defaultDir();
     QString trustPath = TrustStore::defaultPath();
     int recoveryIntervalMs = 30000;
+    // Where the templates are (11.10): the person's own folder, then the bundled one.
+    QList<TemplateRoot> templateRoots = TemplateLibrary::standardRoots();
 };
 
 class Workflows : public QObject {
@@ -94,6 +97,20 @@ public:
     // output with its workflow embedded opens as a workflow, as openUrls does. Dropped on a
     // Load Image, an image always replaces its image, even one that has a workflow in it.
     Q_INVOKABLE void dropUrls(const QVariantList &urls, qreal x, qreal y);
+    // A template (engine/templates.h) as a new tab with no file, named after it. The sample
+    // images it names are taken into the inputs folder as a pasted image is (image_inputs.h),
+    // so it runs as it opens and a save copies them beside the file. False (with a notice) when
+    // it cannot be read.
+    bool openTemplate(const Template &chosen);
+    // The templates for the Templates dialog, in TemplateLibrary::list()'s order, each a map:
+    // id, title, description, category, categoryTitle, tags, preview (a file URL or empty),
+    // own, missingModels (name, source, folder each), missingPacks, and status, one line: what
+    // it lacks on this machine, or empty when it is ready. A check: no model file is read.
+    Q_INVOKABLE QVariantList templates() const;
+    // Opens the template with this id (openTemplate); false when there is none.
+    Q_INVOKABLE bool openTemplateById(const QString &id);
+    // The person's own templates folder, as the dialog names it.
+    Q_INVOKABLE QString ownTemplatesFolder() const { return TemplateLibrary::ownFolder(); }
     // JSON text, as pasted: a workflow document, opened as a new tab with no file.
     Q_INVOKABLE bool openText(const QString &text);
     Q_INVOKABLE bool openClipboard();
@@ -188,6 +205,7 @@ private:
     ImageInputs *m_images;
     const Registry *m_registry;
     CommandRegistry *m_commands;
+    QList<TemplateRoot> m_templateRoots;
     RecoveryStore m_recovery;
     TrustStore m_trust;
     QTimer m_timer;

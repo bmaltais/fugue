@@ -23,6 +23,18 @@ jobs:
 
       - uses: actions/checkout@v4
 
+      - name: Check out the bundled templates (the templates submodule, a private repo)
+        # TEMPLATES_DEPLOY_KEY is a read-only deploy key of bmaltais/fugue-workflows.
+        env:
+          KEY: ${{ secrets.TEMPLATES_DEPLOY_KEY }}
+        run: |
+          pacman -S --noconfirm --needed openssh
+          mkdir -p ~/.ssh && printf '%s\n' "$KEY" > ~/.ssh/templates && chmod 600 ~/.ssh/templates
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/templates -o IdentitiesOnly=yes" \
+            git -c url."git@github.com:".insteadOf="https://github.com/" submodule update --init templates
+
       - name: Install the package's dependencies
         # The PKGBUILD in this repo is the one list of what the app needs, and CI reads it rather than keeping a copy.
         # Once the recipe is upstream in omarchy-pkgs, this can read pkgbuilds/<repo name>/PKGBUILD from there again.

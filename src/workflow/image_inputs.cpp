@@ -422,6 +422,40 @@ void makeInputsAbsolute(Document &document, const Registry &registry, const QStr
         scan(group->nodes);
 }
 
+Errors takeInputsFrom(Document &document, const Registry &registry, const QString &folder) {
+    const QString root = canonicalPath(folder);
+    Document changed = document;
+    Errors errors;
+    const FileRoots roots = FileRoots::forInputs();
+    const auto scan = [&](Nodes &nodes) {
+        for (auto it = nodes.begin(); it != nodes.end(); ++it) {
+            const NodeType *type = registry.nodeType(it->type);
+            if (!type)
+                continue;
+            for (auto in = it->inputs.begin(); in != it->inputs.end(); ++in) {
+                const InputSpec *spec = type->input(in.key());
+                if (!spec || spec->widget() != QLatin1String("file") || in->kind() != InputValue::Kind::Literal
+                    || !in->literal().isString())
+                    continue;
+                const QString path = canonicalPath(in->literal().toString());
+                if (path.isEmpty() || root.isEmpty() || !isInside(path, root) || !QFileInfo(path).isFile())
+                    continue;
+                const Result<QString> stored = storeImageFile(path, inputsDir(), roots);
+                if (stored)
+                    *in = InputValue::literal(stored.value());
+                else
+                    errors.append(stored.errors());
+            }
+        }
+    };
+    scan(changed.graph.nodes);
+    for (auto group = changed.groups.begin(); group != changed.groups.end(); ++group)
+        scan(group->nodes);
+    if (errors.isEmpty())
+        document = changed;
+    return errors;
+}
+
 QList<RecentInput> recentInputs(int limit) {
     QList<RecentInput> list;
     const QFileInfoList files = QDir(inputsDir()).entryInfoList(QDir::Files, QDir::Time);

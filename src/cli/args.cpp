@@ -30,7 +30,7 @@ const QMap<QString, QMap<QString, Spec>> &table() {
         {"validate", {{"", validateSpec}}},
         {"compile", {{"", compileSpec}}},
         {"workflow",
-         {{"new", {1, 1, {}, {}, workflowNew}},
+         {{"new", {1, 1, {"template"}, {}, workflowNew}},
           {"describe", {1, 1, {}, {}, workflowDescribe}},
           {"export", {1, 1, {}, {"share", "no-prompts", "no-layout"}, nullptr}}, // M2
           {"run", runSpec},
@@ -55,6 +55,7 @@ const QMap<QString, QMap<QString, Spec>> &table() {
           {"trust", {1, 1, {}, {}, packTrust}}}},
         {"provider", {{"list", {0, 0, {}, {}, nullptr}}}},
         {"model", {{"list", {0, 0, {"type"}, {"hash"}, modelList}}}},
+        {"template", {{"list", {0, 0, {}, {}, templateList}}}},
         {"cache", {{"status", {0, 0, {}, {}, nullptr}}, {"clear", {0, 0, {"workflow", "node"}, {}, nullptr}}}},
         {"command", {{"list", {0, 0, {}, {}, nullptr}}}},
         {"skill", {{"install", {0, 0, {}, {}, nullptr}}}},
@@ -64,9 +65,9 @@ const QMap<QString, QMap<QString, Spec>> &table() {
     return commands;
 }
 
-// Spec 13.1: the plural is an alias for these four only.
+// Spec 13.1: the plural is an alias for these five only.
 QString canonicalGroup(const QString &word) {
-    if (word == "nodes" || word == "packs" || word == "providers" || word == "models")
+    if (word == "nodes" || word == "packs" || word == "providers" || word == "models" || word == "templates")
         return word.chopped(1);
     return word;
 }

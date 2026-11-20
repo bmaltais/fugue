@@ -1007,24 +1007,44 @@ QString Document::sourceHash() const {
     return canonicalHash(QJsonObject{{"graph", graphJson(graph)}, {"groups", groupsJson(groups)}});
 }
 
-void Document::refreshRequirements(const QString &appVersion) {
-    QMap<QString, Version> types;
-    QMap<QString, QJsonObject> models;
+QJsonArray Document::models() const {
+    QMap<QString, QJsonObject> found;
     const auto addNodes = [&](const Nodes &nodes) {
-        for (const Node &node : nodes) {
-            if (!groups.contains(node.type) && (!types.contains(node.type) || types[node.type] < node.version))
-                types[node.type] = node.version;
+        for (const Node &node : nodes)
             for (const InputValue &value : node.inputs)
-                collectResources(value, models);
-        }
+                collectResources(value, found);
     };
     addNodes(graph.nodes);
     for (const GroupDefinition &group : groups) {
         addNodes(group.nodes);
         for (const GroupInput &input : group.inputs)
             if (input.defaultValue)
-                collectResources(*input.defaultValue, models);
+                collectResources(*input.defaultValue, found);
     }
+    QMap<QString, QString> sources;
+    for (const QJsonValue entry : requirements.value("models").toArray())
+        if (entry.toObject().value("source").isString())
+            sources.insert(entry.toObject().value("hash").toString(), entry.toObject().value("source").toString());
+    QJsonArray list;
+    for (auto it = found.begin(); it != found.end(); ++it) {
+        QJsonObject entry = it.value();
+        if (sources.contains(it.key()))
+            entry.insert("source", sources.value(it.key()));
+        list << entry;
+    }
+    return list;
+}
+
+void Document::refreshRequirements(const QString &appVersion) {
+    QMap<QString, Version> types;
+    const auto addNodes = [&](const Nodes &nodes) {
+        for (const Node &node : nodes)
+            if (!groups.contains(node.type) && (!types.contains(node.type) || types[node.type] < node.version))
+                types[node.type] = node.version;
+    };
+    addNodes(graph.nodes);
+    for (const GroupDefinition &group : groups)
+        addNodes(group.nodes);
 
     QJsonObject nodes;
     QSet<QString> packsUsed;
@@ -1034,18 +1054,7 @@ void Document::refreshRequirements(const QString &appVersion) {
         if (pack != "fugue" && pack != "local")
             packsUsed.insert(pack);
     }
-
-    QMap<QString, QString> sources;
-    for (const QJsonValue entry : requirements.value("models").toArray())
-        if (entry.toObject().value("source").isString())
-            sources.insert(entry.toObject().value("hash").toString(), entry.toObject().value("source").toString());
-    QJsonArray modelList;
-    for (auto it = models.begin(); it != models.end(); ++it) {
-        QJsonObject entry = it.value();
-        if (sources.contains(it.key()))
-            entry.insert("source", sources.value(it.key()));
-        modelList << entry;
-    }
+    const QJsonArray modelList = models();
 
     QJsonObject packs;
     const QJsonObject oldPacks = requirements.value("packs").toObject();

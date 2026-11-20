@@ -161,7 +161,9 @@ Reply compileWorkflow(const Command &command, Context &context) {
     return reply;
 }
 
-Reply workflowNew(const Command &command, Context &) {
+Reply workflowNew(const Command &command, Context &context) {
+    if (command.has("template"))
+        return workflowFromTemplate(command, context);
     const QString path = command.positionals.at(0);
     if (QFileInfo::exists(path))
         return Reply::failure(makeError("usage", QStringLiteral("%1 already exists.").arg(path),

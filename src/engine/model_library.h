@@ -25,6 +25,7 @@
 // node, a check), not one for the life of the process. Not thread-safe.
 
 #include <QHash>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QList>
@@ -47,6 +48,15 @@ struct ModelFile {
     QString name;   // relative to its type folder ("flux1/model.safetensors"), for display and the handle
     QString folder; // the type folder it was found in (one of folders()), absolute
     qint64 size = 0;
+};
+
+struct Document;
+
+// A model a workflow names that is not in the model folders (4.3, 11.6).
+struct MissingModel {
+    QJsonObject handle; // resource, hash, name
+    QString source;     // where it can be had, as the workflow's `requires` records it; may be empty
+    QString folder;     // the folder it goes in: its type's first folder under Fugue's own root
 };
 
 class ModelLibrary {
@@ -86,6 +96,12 @@ public:
     // `hash`. Fails with model_missing, saying where to put the file, when no such file is found,
     // the handle has no hash (a model a provider serves), or its type is not a resource type here.
     Result<QString> resolve(const QJsonObject &handle, FileHashes &hashes, Hashing hashing = Hashing::Read) const;
+
+    // The models `document` names (Document::models()) that are not here, in its order. A check:
+    // it reads no model file (Hashing::RememberedOnly).
+    QList<MissingModel> missing(const Document &document, FileHashes &hashes) const;
+    // The same for a list in Document::models()'s form (a template's).
+    QList<MissingModel> missing(const QJsonArray &models, FileHashes &hashes) const;
 
     // A resource input's value as a command node gets it (7.2): each handle with the `path` of its
     // file added, a list item by item. A derived handle (2.5) has no file of its own: its `base`,

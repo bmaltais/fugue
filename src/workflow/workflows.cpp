@@ -2,7 +2,9 @@
 
 #include "engine/atomic_file.h"
 #include "engine/embed.h"
+#include "engine/file_hashes.h"
 #include "engine/json.h"
+#include "engine/model_library.h"
 #include "engine/paths.h"
 #include "workflow/content_hash.h"
 #include "workflow/workflow_io.h"
@@ -69,7 +71,7 @@ QString firstMessage(const Errors &errors) {
 Workflows::Workflows(CanvasModel *canvas, const Registry *registry, CommandRegistry *commands,
                      WorkflowLocations locations, QObject *parent)
     : QObject(parent), m_canvas(canvas), m_registry(registry), m_commands(commands),
-      m_recovery(locations.recoveryDir), m_trust(locations.trustPath) {
+      m_templateRoots(locations.templateRoots), m_recovery(locations.recoveryDir), m_trust(locations.trustPath) {
     connect(m_canvas, &CanvasModel::edited, this, &Workflows::refreshUnsaved);
     connect(m_canvas, &CanvasModel::pasted, this, [this](const Document &document) {
         if (m_current >= 0)
@@ -372,6 +374,61 @@ bool Workflows::openText(const QString &text) {
     return true;
 }
 
+bool Workflows::openTemplate(const Template &chosen) {
+    Result<Document> document = Document::loadFile(chosen.workflow);
+    Errors errors = document ? Errors() : document.errors();
+    if (document) {
+        makeInputsAbsolute(document.value(), *m_registry, chosen.workflow);
+        errors = takeInputsFrom(document.value(), *m_registry, chosen.folder);
+    }
+    if (!errors.isEmpty()) {
+        setNotice(tr("Could not open the template %1: %2").arg(chosen.title, firstMessage(errors)));
+        return false;
+    }
+    addTab(document.value(), {}, chosen.title, true, true);
+    analyze(document.value(), chosen.title);
+    return true;
+}
+
+QVariantList Workflows::templates() const {
+    FileHashes hashes(FileHashes::defaultPath());
+    const ModelLibrary models = ModelLibrary::current(m_registry);
+    QVariantList out;
+    for (const Template &t : TemplateLibrary(m_templateRoots, m_registry).list()) {
+        QVariantList missing;
+        for (const MissingModel &model : models.missing(t.models, hashes))
+            missing.append(QVariantMap{{"name", model.handle.value(QStringLiteral("name")).toString()},
+                                       {"source", model.source},
+                                       {"folder", model.folder}});
+        QStringList status;
+        if (!missing.isEmpty())
+            status << tr("Models missing: %1 of %2").arg(missing.size()).arg(t.models.size());
+        if (!t.missingPacks.isEmpty())
+            status << tr("Packs missing: %1").arg(t.missingPacks.join(QStringLiteral(", ")));
+        out.append(QVariantMap{{"id", t.id},
+                               {"title", t.title},
+                               {"description", t.description},
+                               {"category", t.category},
+                               {"categoryTitle", t.categoryTitle},
+                               {"tags", t.tags},
+                               {"preview", t.preview.isEmpty() ? QString() : QUrl::fromLocalFile(t.preview).toString()},
+                               {"own", t.own},
+                               {"missingModels", missing},
+                               {"missingPacks", t.missingPacks},
+                               {"status", status.join(QStringLiteral(" · "))}});
+    }
+    return out;
+}
+
+bool Workflows::openTemplateById(const QString &id) {
+    const std::optional<Template> chosen = TemplateLibrary(m_templateRoots, m_registry).find(id);
+    if (!chosen) {
+        setNotice(tr("There is no template %1.").arg(id));
+        return false;
+    }
+    return openTemplate(*chosen);
+}
+
 bool Workflows::openClipboard() {
     return openText(QGuiApplication::clipboard()->text());
 }
@@ -382,11 +439,22 @@ void Workflows::openStartup(const QStringList &paths) {
 }
 
 QString Workflows::missingNotice(const Document &document, const QString &title) const {
+    QStringList lines;
     const QStringList missing = missingTypes(document, *m_registry);
-    return missing.isEmpty()
-               ? QString()
-               : tr("%1 uses nodes that are not installed (%2). They open as placeholders and keep their inputs.")
+    if (!missing.isEmpty())
+        lines << tr("%1 uses nodes that are not installed (%2). They open as placeholders and keep their inputs.")
                      .arg(title, missing.join(QStringLiteral(", ")));
+    // Spec 4.3: the models it names that are not here, without reading a model file.
+    FileHashes hashes(FileHashes::defaultPath());
+    QStringList models;
+    for (const MissingModel &model : ModelLibrary::current(m_registry).missing(document, hashes)) {
+        const QString name = model.handle.value(QStringLiteral("name")).toString();
+        models << (model.source.isEmpty() ? tr("%1, into %2").arg(name, model.folder)
+                                          : tr("%1 from %2, into %3").arg(name, model.source, model.folder));
+    }
+    if (!models.isEmpty())
+        lines << tr("%1 needs models that are not in the model folders: %2.").arg(title, models.join(QStringLiteral("; ")));
+    return lines.join(QLatin1Char(' '));
 }
 
 void Workflows::analyze(const Document &document, const QString &title) {
@@ -642,6 +710,16 @@ void registerFileCommands(CommandRegistry &registry, Workflows &workflows) {
     registry.setHandler("file.new", [&workflows] { workflows.newWorkflow(); });
     registry.setHandler("file.open", [&workflows] { emit workflows.openDialogRequested(); });
     registry.setHandler("file.save", [&workflows] { workflows.save(); });
+    if (!registry.contains("file.templates")) {
+        CommandSpec spec;
+        spec.id = QStringLiteral("file.templates");
+        spec.description = QT_TRANSLATE_NOOP("Command", "Browse templates");
+        spec.versus = QStringLiteral("same");
+        const QString problem =
+            registry.add(spec, [&registry] { emit registry.windowRequested(QStringLiteral("file.templates")); });
+        if (!problem.isEmpty())
+            qWarning("Fugue: %s", qPrintable(problem));
+    }
     registry.setHandler("file.save-as", [&workflows] { emit workflows.saveAsRequested(); });
     if (!registry.contains("file.open-clipboard")) {
         CommandSpec spec;

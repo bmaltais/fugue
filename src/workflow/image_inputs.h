@@ -94,6 +94,12 @@ Errors relocateInputs(Document &document, const Registry &registry, const QStrin
 // is empty: a relative path in an unsaved workflow names nothing.
 void makeInputsAbsolute(Document &document, const Registry &registry, const QString &from);
 
+// Takes into the inputs folder (storeImageFile) every image a `file` input literal names, by
+// its full path, inside `folder` (a template's), and points the literal at the stored copy, so
+// the document no longer leans on that folder. The document is changed only when every image
+// was stored.
+Errors takeInputsFrom(Document &document, const Registry &registry, const QString &folder);
+
 // One image in the inputs folder, for the "Recent inputs" list.
 struct RecentInput {
     QString path;

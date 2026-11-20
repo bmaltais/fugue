@@ -6,6 +6,7 @@
 #include <QElapsedTimer>
 #include <QImage>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
 #include <QQmlApplicationEngine>
@@ -13,6 +14,7 @@
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QSignalSpy>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -488,6 +490,33 @@ private slots:
         QTRY_VERIFY(!QDir(f.locations.recoveryDir).entryList({"*.fugue"}).isEmpty());
     }
 
+    // --- missing models ---
+
+    // Spec 4.3: on open, Fugue checks the model folders and says what is missing, where each
+    // file can be had and where it goes, without blocking.
+    void openingSaysWhichModelsAreMissingWhereToGetThemAndWhereTheyGo() {
+        Fixture f;
+        const QString hash = QStringLiteral("sha256:") + QString(64, u'3');
+        QJsonObject model{{"resource", "fugue/diffusion-model"}, {"hash", hash}, {"name", "big-model.gguf"}};
+        QJsonObject sourced = model;
+        sourced.insert("source", "https://huggingface.co/example/big-model.gguf");
+        const QJsonObject json{
+            {"fugue", 1},
+            {"graph", QJsonObject{{"nodes", QJsonObject{{"models", QJsonObject{
+                {"type", "fugue/load-models"}, {"version", "1.0.0"},
+                {"inputs", QJsonObject{{"diffusion_model", model}}}}}}}}},
+            {"requires", QJsonObject{{"models", QJsonArray{sourced}}}}};
+        QVERIFY(write(f.file("needs.fugue"), QJsonDocument(json).toJson()));
+        QVERIFY(f.workflows->openPath(f.file("needs.fugue")));
+        const QString notice = f.workflows->notice();
+        QVERIFY2(notice.contains("big-model.gguf"), qPrintable(notice));
+        QVERIFY2(notice.contains("https://huggingface.co/example/big-model.gguf"), qPrintable(notice));
+        QVERIFY2(notice.contains(QDir::cleanPath(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation) +
+                                                 "/fugue/models/diffusion-model")),
+                 qPrintable(notice));
+        QCOMPARE(f.canvas.nodes()->rowCount(), 1); // it opened all the same
+    }
+
     // --- missing nodes and trust ---
 
     void missingNodesOpenAsPlaceholdersKeepingInputsAndSurviveASave() {
@@ -737,41 +766,6 @@ private slots:
         QVERIFY2(compiled.ok(), qPrintable(compiled.error().message));
         QVERIFY(compiled->nodes.contains("show-prompt"));
         QVERIFY(!hasErrors(compiled.problems()));
-    }
-
-    void textToImageExampleLoadsAndCompiles() {
-        Fixture f;
-        const QString example = QStringLiteral(FUGUE_SOURCE_DIR "/examples/text-to-image.fugue");
-        QVERIFY(f.workflows->openPath(example));
-        QVERIFY(f.workflows->notice().isEmpty());
-        QCOMPARE(f.canvas.nodes()->rowCount(), 7);
-        for (int i = 0; i < f.canvas.nodes()->rowCount(); ++i)
-            QVERIFY(!f.canvas.nodes()->data(f.canvas.nodes()->index(i), NodeList::Missing).toBool());
-        const Document document = Document::loadFile(example).value();
-        const Compilation compiled = compile(document, f.registry);
-        QVERIFY2(compiled.ok(), qPrintable(compiled.error().message));
-        QVERIFY(compiled->nodes.contains("generate"));
-        // The size is set, by an Image Size node, never left to a model's default (#72).
-        QCOMPARE(document.graph.nodes.value("generate").inputs.value("width").from().toString(), QString("size.width"));
-        QCOMPARE(document.graph.nodes.value("generate").inputs.value("height").from().toString(), QString("size.height"));
-        QVERIFY(!hasErrors(compiled.problems()));
-    }
-
-    // The component-node examples (#79): every node known, the graph compiles.
-    void theComponentExamplesLoadAndCompile() {
-        for (const char *name : {"z-image-turbo", "flux2-klein-4b", "flux2-klein-9b"}) {
-            Fixture f;
-            const QString example = QStringLiteral(FUGUE_SOURCE_DIR "/examples/%1.fugue").arg(QLatin1String(name));
-            QVERIFY2(f.workflows->openPath(example), name);
-            QVERIFY(f.workflows->notice().isEmpty());
-            QCOMPARE(f.canvas.nodes()->rowCount(), 7);
-            for (int i = 0; i < f.canvas.nodes()->rowCount(); ++i)
-                QVERIFY(!f.canvas.nodes()->data(f.canvas.nodes()->index(i), NodeList::Missing).toBool());
-            const Compilation compiled = compile(Document::loadFile(example).value(), f.registry);
-            QVERIFY2(compiled.ok(), qPrintable(compiled.error().message));
-            QVERIFY(compiled->nodes.contains("sample"));
-            QVERIFY(!hasErrors(compiled.problems()));
-        }
     }
 
     // --- the window ---

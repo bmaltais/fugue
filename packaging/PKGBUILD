@@ -47,10 +47,12 @@ _sdcpp=532d2c15c430a785a712b2d94281f04e733008a4
 _ggml=eeda9ec48fc84a3df0bb9dcc19ae9053075a2539
 _cutlass=ad7b2f5e84fcfa124cb02b91d5bd26d238c0459e
 source=("$pkgbase::git+$url.git"
+        "fugue-workflows::git+https://github.com/bmaltais/fugue-workflows.git"
         "sdcpp-$_sdcpp.tar.gz::https://github.com/leejet/stable-diffusion.cpp/archive/$_sdcpp.tar.gz"
         "ggml-$_ggml.tar.gz::https://github.com/leejet/ggml/archive/$_ggml.tar.gz"
         "cutlass-$_cutlass.tar.gz::https://github.com/NVIDIA/cutlass/archive/$_cutlass.tar.gz")
 sha256sums=('SKIP'
+            'SKIP'
             '0278dc8e6e180adc4b43b3ace515eeef870dd76533a34fa1edcfa071ce7d7812'
             '8bd7adc7eb1366d31670467951d21eb1a5f55e8f6d89b9b91909ffb0246ac5d2'
             '36429479df2ab1cd1c7981c2d34e786106326ccfefc8846f902f76151a65e112')
@@ -61,6 +63,11 @@ pkgver() {
 }
 
 prepare() {
+  # The bundled templates, at the commit the fugue checkout pins (its `templates` submodule).
+  cd "$srcdir/$pkgbase"
+  git submodule init templates
+  git config submodule.templates.url "$srcdir/fugue-workflows"
+  git -c protocol.file.allow=always submodule update templates
   cd "$srcdir/stable-diffusion.cpp-$_sdcpp"
   patch -p1 --forward --input="$srcdir/$pkgbase/helper/sdcpp.patch"
 }
