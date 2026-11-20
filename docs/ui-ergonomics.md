@@ -61,6 +61,7 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 - Old: none; a model list of a ComfyUI folder (a dozen files per type) could only be scrolled, 12 rows at a time.
 - New: one row (the menu's row height + 2) above the list, a search glyph and a plain field, focused when the menu opens, for every model menu and any menu of more than 12 entries. Typing filters by every word; Up, Down and Enter work from the field; Escape empties it, then closes.
 - Why: a long unordered list is found by recall, not by scanning (Hick); the field takes the keys at once, so no extra click comes before typing.
+- Rule: Floor (the field is 26px tall at text size 12: the row height, 24, plus 2). Posture: a transient popover, with no new decision: typing narrows, Enter picks as before.
 
 ## Unread
 
