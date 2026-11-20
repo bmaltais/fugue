@@ -37,7 +37,18 @@ QByteArray readFile(const QString &path) {
     return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
 }
 
-bool alive(qint64 pid) { return pid > 0 && ::kill(pid_t(pid), 0) == 0; }
+// Running, not merely still in the process table: a process whose parent is gone is adopted by
+// init, and in a container init may never reap it, so it stays there as a zombie (state Z).
+bool alive(qint64 pid) {
+    if (pid <= 0 || ::kill(pid_t(pid), 0) != 0)
+        return false;
+    QFile stat(QStringLiteral("/proc/%1/stat").arg(pid));
+    if (!stat.open(QIODevice::ReadOnly))
+        return false;
+    const QByteArray text = stat.readAll();
+    const int close = text.lastIndexOf(')'); // "pid (name) S ..."; the name may hold spaces
+    return close < 0 || text.mid(close + 2, 1) != "Z";
+}
 
 bool waitGone(qint64 pid, int ms = 3000) {
     QElapsedTimer clock;
