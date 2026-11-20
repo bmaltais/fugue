@@ -209,7 +209,8 @@ Rules:
   (loaded). The scheduler decides when a model is loaded and keeps it across nodes
   ([9.3](#93-residency)).
 - An unwired input of a resource type shows a model picker listing the models of that type found
-  on disk and offered by providers. The chosen handle is stored as the input's literal. A file on
+  on disk and offered by providers, with a search field that filters them by every word typed
+  (name, folder or provider, #84). The chosen handle is stored as the input's literal. A file on
   disk is hashed when it is picked, on a worker thread, with the input showing how far; the hash
   is remembered, so each file is read once.
 

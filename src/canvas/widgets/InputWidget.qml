@@ -365,7 +365,7 @@ Rectangle {
             entries.push({ text: qsTr("Looking for models…"), enabled: false })
         else if (listed.length === 0)
             entries.push({ text: edits.modelsEmptyText(nodeId, name), enabled: false, note: "" })
-        entries.push({ text: qsTr("Type a name…"), value: { typeName: true } })
+        entries.push({ text: qsTr("Type a name…"), value: { typeName: true }, keep: true })
         return entries
     }
     // A model file's size as people read it: "6.2 GB", "335 MB".

@@ -523,6 +523,57 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // #84: a long ComfyUI folder is filtered by typing. Every word must be in the file's name
+    // or its folder; a heading with no match under it is left out; Escape empties the field first.
+    void typingInTheModelPickerFiltersTheModels() {
+        QTemporaryDir models;
+        for (const char *file : {"image-model/z-image-turbo-Q8_0.gguf", "image-model/flux-2-klein-4b-Q8_0.gguf",
+                                 "image-model/flux-2-klein-9b-Q8_0.gguf", "image-model/sdxl/RealVisXL.safetensors"})
+            QVERIFY(test::writeFixtureFile(models.filePath(file), "weights"));
+        WidgetApp app;
+        app.model.widgets()->setModelRoots({models.path()});
+        app.model.widgets()->setModelSource([](const QString &, const QStringList &,
+                                               std::function<void(QList<WidgetEdit::Model>)> done) { done({}); });
+        QVERIFY(app.open());
+        app.click(app.in("all", "model"));
+        QTRY_VERIFY2(app.menuOpen(), qPrintable(app.warnings.join('\n')));
+        QObject *menu = app.popup("widgetMenu");
+        const auto rows = [&] {
+            QStringList out;
+            for (const QVariant &entry : menu->property("shown").toList()) {
+                const QVariantMap e = entry.toMap();
+                out << (e.value("heading").toBool() ? "# " : "") + e.value("text").toString();
+            }
+            return out;
+        };
+        QTRY_COMPARE(rows().size(), 7); // Any ready model, the folder, four files, Type a name…
+        QVERIFY(canvas_test::item(app.window->contentItem(), "widgetMenuSearch")); // shown, and has the keys
+
+        app.type("klein 9");
+        QTRY_COMPARE(rows(), (QStringList{"# " + models.filePath("image-model"), "flux-2-klein-9b-Q8_0.gguf",
+                                          "Type a name…"}));
+        app.key(Qt::Key_Escape); // empties the field, the menu stays
+        QTRY_COMPARE(rows().size(), 7);
+        QVERIFY(app.menuOpen());
+
+        app.type("sdxl"); // the subfolder is part of the name
+        QTRY_COMPARE(rows(), (QStringList{"# " + models.filePath("image-model"), "sdxl/RealVisXL.safetensors",
+                                          "Type a name…"}));
+        app.key(Qt::Key_Return); // the first match
+        QTRY_VERIFY(!app.menuOpen());
+        QTRY_COMPARE(app.stored("all", "model").toObject().value("name").toString(), QString("sdxl/RealVisXL.safetensors"));
+
+        app.click(app.in("all", "model"));
+        QTRY_VERIFY(app.menuOpen());
+        menu = app.popup("widgetMenu");
+        app.type("nothing like it");
+        QTRY_COMPARE(rows(), (QStringList{"No model matches “nothing like it”", "Type a name…"}));
+        app.key(Qt::Key_Escape);
+        app.key(Qt::Key_Escape); // then closes
+        QTRY_VERIFY(!app.menuOpen());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void onFirstRunThePickerListsThePairedHostsModelsByHost() {
         // No providers.json, this machine with only text models, studio paired and running
         // two image models, lab paired and offline (spec 8.2's default): the real model

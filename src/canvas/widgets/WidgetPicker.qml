@@ -17,7 +17,10 @@ Item {
         const end = well.mapToItem(Overlay.overlay, well.width, 0)
         const menu = menuComponent.createObject(picker, {
             wantX: at.x, wantY: at.y, width: Math.max(end.x - at.x, 120), anchorHeight: well.height,
-            entries: entries !== null ? entries : host.modelEntries(), followModels: entries === null
+            entries: entries !== null ? entries : host.modelEntries(), followModels: entries === null,
+            // A model list, or a long one, is searched (#84).
+            searchable: entries === null || entries.length > 12,
+            nothingMatches: entries === null ? qsTr("No model matches “%1”") : qsTr("Nothing matches “%1”")
         }) as WidgetMenu
         menu.open()
     }

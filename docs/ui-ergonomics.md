@@ -55,6 +55,13 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 - Record: [.ui-ergonomics/2026-11-20-main-window.md](../.ui-ergonomics/2026-11-20-main-window.md)
 - Rule: Primary. Run stays Ctrl+Enter.
 
+### 2026-11-20 widget menu search (#84)
+
+- Control: search field of a widget's menu, `src/canvas/widgets/WidgetMenu.qml` (`widgetMenuSearch`), opened by `WidgetPicker.qml`.
+- Old: none; a model list of a ComfyUI folder (a dozen files per type) could only be scrolled, 12 rows at a time.
+- New: one row (the menu's row height + 2) above the list, a search glyph and a plain field, focused when the menu opens, for every model menu and any menu of more than 12 entries. Typing filters by every word; Up, Down and Enter work from the field; Escape empties it, then closes.
+- Why: a long unordered list is found by recall, not by scanning (Hick); the field takes the keys at once, so no extra click comes before typing.
+
 ## Unread
 
-Settings, the shortcuts overlay, the quit question, About, every menu except Run, the context menus, the workflow dialogs and their questions (those questions are a row of buttons), the group dialogs, image save, the widget pickers, the magnifier.
+Settings, the shortcuts overlay, the quit question, About, every menu except Run, the context menus, the workflow dialogs and their questions (those questions are a row of buttons), the group dialogs, image save, the widget pickers (but their search field), the magnifier.
