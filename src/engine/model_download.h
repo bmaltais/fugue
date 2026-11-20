@@ -128,7 +128,7 @@ public:
     // Stops the file being fetched (its part is deleted) and drops the rest.
     void cancel();
 
-    bool busy() const { return m_current != nullptr; }
+    bool busy() const { return m_running; }
     const QList<DownloadTarget> &targets() const { return m_targets; } // all added since idle
     int index() const { return m_index; } // of the file being fetched
     qint64 received() const;
@@ -150,6 +150,7 @@ private:
     QList<DownloadTarget> m_targets;
     int m_index = -1;
     QPointer<ModelDownload> m_current;
+    bool m_running = false; // from the first file's start to finished(), between files too
     Errors m_errors;
     int m_retries = 5;
     int m_retryDelayMs = 2000;

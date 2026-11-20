@@ -20,7 +20,11 @@
 #include "commands/command_registry.h"
 #include "engine/compiler.h"
 #include "engine/document.h"
+#include "engine/file_hashes.h"
+#include "engine/hash.h"
+#include "engine/model_library.h"
 #include "engine/paths.h"
+#include "engine/settings.h"
 #include "engine/registry.h"
 #include "engine/templates.h"
 #include "menu/menu_commands.h"
@@ -29,6 +33,7 @@
 #include "theme.h"
 #include "translator.h"
 #include "workflow/workflows.h"
+#include "../engine/fake_http.h"
 
 using namespace fugue;
 
@@ -100,6 +105,26 @@ struct Fixture {
         return TemplateLibrary({{own.path(), true}, {bundled.path(), false}}, &registry);
     }
 };
+
+// A template whose Load Models names one diffusion model by the hash of `bytes`, from `source`.
+void makeTemplateNeeding(const QString &folder, const QString &title, const QByteArray &bytes, const QString &source,
+                         const QString &name = "m.gguf") {
+    const QJsonObject model{{"resource", "fugue/diffusion-model"}, {"hash", sha256(bytes)}, {"name", name}};
+    QJsonObject recorded = model;
+    recorded.insert("source", source);
+    recorded.insert("size", bytes.size());
+    makeTemplate(folder, {{"title", title}},
+                 workflow({{"models", node("fugue/load-models", {{"diffusion_model", model}})}},
+                          {{"models", QJsonArray{recorded}}}));
+}
+
+// Under ctest a test's home stays between runs: no model, remembered hash or setting of an
+// earlier run.
+void forgetDownloads() {
+    QDir(dataDir() + "/models").removeRecursively();
+    QFile::remove(FileHashes::defaultPath());
+    QFile::remove(settingsPath());
+}
 
 } // namespace
 
@@ -371,6 +396,160 @@ private slots:
         QTest::keyClick(window, Qt::Key_Return);
         QTRY_COMPARE(workflows.tabs().at(workflows.current()).toMap().value("title").toString(), QString("Gen"));
         QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join("\n")));
+    }
+
+    // #89: the banner offers the opened workflow's missing models, into the model folder the
+    // person picks (remembered in the settings); what arrives is found, and the banner says so.
+    void theBannerOffersTheMissingModelsAndTheFolderTheyGoIn() {
+        forgetDownloads();
+        Fixture f;
+        const QByteArray bytes = "a diffusion model";
+        fugue::test::FakeHttpServer server;
+        QVERIFY(server.listen());
+        server.on("GET", "/m.gguf", [&](const fugue::test::HttpRequest &) {
+            return fugue::test::HttpResponse{200, bytes, "application/octet-stream"};
+        });
+        makeTemplateNeeding(f.bundled.filePath("gen"), "Gen", bytes, QString::fromLatin1(server.origin() + "/m.gguf"));
+        // A ComfyUI models folder beside Fugue's own.
+        QTemporaryDir comfy;
+        QDir().mkpath(comfy.filePath("diffusion_models"));
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{comfy.path()}).isEmpty());
+
+        CanvasModel canvas(&f.registry);
+        CommandRegistry commands;
+        QTemporaryDir state;
+        WorkflowLocations locations;
+        locations.recoveryDir = state.filePath("recovery");
+        locations.trustPath = state.filePath("trust.json");
+        locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        // English plural forms come from the catalog, as in the app.
+        Translator translator(state.filePath("language"));
+        QCoreApplication::installTranslator(&translator);
+        Workflows workflows(&canvas, &f.registry, &commands, locations);
+        QCOMPARE(workflows.templates().at(0).toMap().value("download").toString(), QString("Download 1 model, 1 MB"));
+
+        QVERIFY(workflows.openTemplateById("gen"));
+        QCOMPARE(workflows.downloadOffer(), QString("Download 1 model, 1 MB"));
+        const QString own = dataDir() + "/models";
+        QCOMPARE(workflows.downloadRoot(), own);
+        QCOMPARE(workflows.downloadRoots().size(), 2);
+        QCOMPARE(workflows.downloadRoots().at(0).toMap().value("title").toString(), QString("Fugue's models folder"));
+        QVERIFY(workflows.notice().contains(own + "/"));
+
+        // Into the ComfyUI folder: remembered, and the banner names where it goes.
+        workflows.setDownloadRoot(comfy.path());
+        QCOMPARE(currentSettings().downloadFolder, comfy.path());
+        QCOMPARE(workflows.downloadRoot(), comfy.path());
+        QVERIFY(workflows.notice().contains(comfy.filePath("diffusion_models")));
+
+        workflows.downloadMissing();
+        QVERIFY(workflows.downloads()->busy());
+        QVERIFY(workflows.downloadOffer().isEmpty()); // not twice
+        QTRY_VERIFY(!workflows.downloads()->busy());
+        QCOMPARE(readFile(comfy.filePath("diffusion_models/m.gguf")), bytes);
+        QCOMPARE(workflows.notice(), QString("Downloaded 1 model."));
+        QVERIFY(workflows.downloadOffer().isEmpty());
+        QVERIFY(workflows.templates().at(0).toMap().value("status").toString().isEmpty()); // found by its hash
+
+        // Back to Fugue's own: the default, so no key is left.
+        workflows.setDownloadRoot(own);
+        QVERIFY(currentSettings().downloadFolder.isEmpty());
+        forgetDownloads();
+    }
+
+    // #89 in the window: a card's Download fetches its models without opening it; the banner's
+    // button does the same for the workflow just opened, with progress and Cancel.
+    void aCardAndTheBannerDownloadWithProgressAndCancel() {
+        forgetDownloads();
+        Fixture f;
+        const QByteArray bytes = "a diffusion model", other = "another diffusion model";
+        fugue::test::FakeHttpServer server;
+        QVERIFY(server.listen());
+        bool hold = false;
+        server.on("GET", "/m.gguf", [&](const fugue::test::HttpRequest &) {
+            return fugue::test::HttpResponse{200, bytes, "application/octet-stream"};
+        });
+        server.on("GET", "/other.gguf", [&](const fugue::test::HttpRequest &) {
+            fugue::test::HttpResponse response{200, other, "application/octet-stream"};
+            response.hold = hold;
+            return response;
+        });
+        makeTemplateNeeding(f.bundled.filePath("gen"), "Gen", bytes, QString::fromLatin1(server.origin() + "/m.gguf"));
+        makeTemplateNeeding(f.bundled.filePath("more"), "More", other,
+                            QString::fromLatin1(server.origin() + "/other.gguf"), "other.gguf");
+        QTemporaryDir dir;
+        QFile shell(dir.filePath("shell.toml"));
+        QVERIFY(shell.open(QIODevice::WriteOnly));
+        shell.write("[font]\nbase-size = 12\n");
+        shell.close();
+        Translator translator(dir.path() + "/language");
+        Theme theme(dir.path());
+        CanvasModel canvas(&f.registry);
+        CommandRegistry commands;
+        registerDefaultCommands(commands);
+        WorkflowLocations locations;
+        locations.recoveryDir = dir.filePath("recovery");
+        locations.trustPath = dir.filePath("trust.json");
+        locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        registerMenuCommands(commands);
+        Workflows workflows(&canvas, &f.registry, &commands, locations);
+        registerFileCommands(commands, workflows);
+
+        QQmlApplicationEngine engine;
+        QStringList warnings;
+        connect(&engine, &QQmlEngine::warnings, this, [&](const QList<QQmlError> &errors) {
+            for (const auto &error : errors)
+                warnings << error.toString();
+        });
+        fugue::exposeToQml(engine, {&translator, &theme, &commands, &canvas, &workflows});
+        engine.load(QUrl("qrc:/Main.qml"));
+        QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        // A control made just now is placed at the next polish: click once it is in the window.
+        const auto click = [&](QQuickItem *target) {
+            QVERIFY(target);
+            const auto center = [target] { return target->mapToScene(QPointF(target->width() / 2, target->height() / 2)); };
+            QTRY_VERIFY(QRectF(0, 0, window->width(), window->height()).contains(center()));
+            QTest::mouseClick(window, Qt::LeftButton, {}, center().toPoint());
+        };
+
+        QVERIFY(commands.run("file.templates"));
+        QTRY_VERIFY(window->findChild<QObject *>("templatesDialog")->property("opened").toBool());
+        QTRY_VERIFY(item(window->contentItem(), "templateDownload-gen"));
+        QQuickItem *download = item(window->contentItem(), "templateDownload-gen");
+        QTRY_VERIFY(download->isVisible());
+        QVERIFY(download->height() >= 24); // the floor
+        click(download);
+        QTRY_COMPARE(server.requestsTo("GET", "/m.gguf").size(), 1);
+        QTRY_VERIFY(!workflows.downloads()->busy());
+        // The card says it is ready now; no template was opened.
+        QTRY_VERIFY(!item(window->contentItem(), "templateStatus-gen")->isVisible());
+        QVERIFY(window->findChild<QObject *>("templatesDialog")->property("visible").toBool());
+        QCOMPARE(workflows.count(), 1);
+        QCOMPARE(workflows.tabs().at(0).toMap().value("title").toString(), QString("Untitled"));
+        QTest::keyClick(window, Qt::Key_Escape);
+        QTRY_VERIFY(!window->findChild<QObject *>("templatesDialog")->property("visible").toBool());
+
+        // The banner of a workflow that lacks one: Download, then progress and Cancel.
+        hold = true;
+        QVERIFY(workflows.openTemplateById("more"));
+        QTRY_VERIFY(item(window->contentItem(), "downloadModels") && item(window->contentItem(), "downloadModels")->isVisible());
+        QVERIFY(!item(window->contentItem(), "downloadInto")); // one model folder: no choice
+        click(item(window->contentItem(), "downloadModels"));
+        QTRY_VERIFY(item(window->contentItem(), "downloadProgress"));
+        QTRY_VERIFY(!item(window->contentItem(), "downloadModels"));
+        QTRY_COMPARE(server.requestsTo("GET", "/other.gguf").size(), 1);
+        click(item(window->contentItem(), "downloadCancel"));
+        QTRY_VERIFY(!workflows.downloads()->busy());
+        QTRY_VERIFY(!item(window->contentItem(), "downloadProgress"));
+        // What it lacks again, with its button: a cancel needs no news of its own.
+        QVERIFY(workflows.notice().contains("other.gguf"));
+        QTRY_VERIFY(item(window->contentItem(), "downloadModels")->isVisible());
+        QVERIFY(!QFileInfo::exists(ModelLibrary::current(&f.registry).downloadFolder(*PortType::parse("fugue/diffusion-model"))
+                                   + "/other.gguf.part"));
+        QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join("\n")));
+        forgetDownloads();
     }
 
     // The bundled templates (the templates submodule, fugue-workflows at the pinned commit): this

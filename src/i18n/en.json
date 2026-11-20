@@ -39,6 +39,7 @@
     "one": "%1 · %n node",
     "other": "%1 · %n nodes"
   },
+  "%1, %2 of %3": "%1, %2 of %3",
   "%1, into %2": "%1, into %2",
   "%1, unsaved": "%1, unsaved",
   "%1: \"%2\" must be a list; ignored": "%1: \"%2\" must be a list; ignored",
@@ -102,6 +103,7 @@
   "Can't load: %1": "Can't load: %1",
   "Cancel": "Cancel",
   "Cancel run": "Cancel run",
+  "Cancel the download": "Cancel the download",
   "Cancel the run": "Cancel the run",
   "Canvas navigation": "Canvas navigation",
   "Change keys in %1": "Change keys in %1",
@@ -156,6 +158,21 @@
   "Dismiss": "Dismiss",
   "Documentation": "Documentation",
   "Done": "Done",
+  "Download": "Download",
+  "Download %n models": {
+    "one": "Download %n model",
+    "other": "Download %n models"
+  },
+  "Download %n models, %1": {
+    "one": "Download %n model, %1",
+    "other": "Download %n models, %1"
+  },
+  "Download into": "Download into",
+  "Downloaded %n models.": {
+    "one": "Downloaded %n model.",
+    "other": "Downloaded %n models."
+  },
+  "Downloading %1": "Downloading %1",
   "Drives %1": "Drives %1",
   "Dropping an image back onto Fugue reloads its workflow. Local file paths are never embedded.": "Dropping an image back onto Fugue reloads its workflow. Local file paths are never embedded.",
   "Edit": "Edit",
@@ -208,6 +225,7 @@
   "Fugue has no provider module %1.": "Fugue has no provider module %1.",
   "Fugue workflows (*.fugue)": "Fugue workflows (*.fugue)",
   "Fugue workflows and images with one (*.fugue *.png *.webp)": "Fugue workflows and images with one (*.fugue *.png *.webp)",
+  "Fugue's models folder": "Fugue's models folder",
   "Full": "Full",
   "General": "General",
   "Gives %1": "Gives %1",
@@ -225,6 +243,7 @@
   "Inputs that go: %1": "Inputs that go: %1",
   "Install %1 %2?": "Install %1 %2?",
   "Installed %1 %2. Its nodes are in node search; trust it before they run.": "Installed %1 %2. Its nodes are in node search; trust it before they run.",
+  "Into %1": "Into %1",
   "Its setup was not run.": "Its setup was not run.",
   "Keep": "Keep",
   "Keep working": "Keep working",

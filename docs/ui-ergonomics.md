@@ -85,6 +85,15 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 - Why: picking a template is recognition, not recall, so the preview leads the card (Hick: one look per card, not a list of names); the search takes the keys at once. The status says before opening what the machine lacks.
 - Rule: Learned place (the File items before it keep their order). Floor (a card is far above 24px; the tabs are 7u = 28px). Primary (one action, open a card, with no other button competing). Posture: a transient dialog, larger targets.
 
+### 2026-11-20 model downloads (#89)
+
+- Control: the banner, `src/workflow/WorkflowDialogs.qml` (`workflowNotice`): after its line, `downloadInto` (a ComboBox, "Into <folder>", only when more than one model folder can take the files) and `downloadModels` (highlighted, "Download 3 models, 19.4 GB"), before the dismiss ×; under it, while models download, `downloadProgress`: "Downloading <file>, 2 of 3", a bar, "4.2 of 10.2 GB", and `downloadCancel` last. The banner now also shows while downloads run with no line.
+- Control: on a Templates card, `src/workflow/TemplatesDialog.qml`, the status line's row ends in `templateDownload-<id>`, a flat button, "Download" (its tooltip the count and size), "Cancel" while that template's models come; the status line then shows the file and progress. Cards are 3u taller for the 7u row.
+- Old: the banner was a line and ×; a card's status was text only.
+- New: one action per workflow, where the line names what is missing; the folder choice beside it, remembered, so the usual case is one click.
+- Why: the button sits where the eye already is (the line that says what is missing), and the count and size say what the click costs before it is made. One button for all, not one per model: a template's models are wanted together (Hick: one decision, not three). Progress stays at the bottom edge, off the canvas, and Cancel is the row's last control.
+- Rule: Floor (the banner's buttons and choice are Material's 48px; the card's button 7u = 28px). Primary (Download is the banner's one highlighted control; on a card, opening it stays the primary and Download is flat). Gaps (8px inside a row, 16 between the line's row and the progress row). Destructive (Cancel, which drops the part, is the last control of its own row). Posture: the banner is transient; it asks nothing the person did not start.
+
 ## Unread
 
 Settings, the shortcuts overlay, the quit question, About, every menu except Run, the context menus, the workflow dialogs and their questions (those questions are a row of buttons), the group dialogs, image save, the widget pickers (but their search field), the magnifier.

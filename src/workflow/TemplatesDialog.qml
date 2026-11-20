@@ -8,8 +8,9 @@ import "../canvas"
 // The Templates dialog (spec 11.10, #83), opened by file.templates (File > Browse templates):
 // the categories on the left, a search field and the templates as cards on the right. A card
 // shows its preview, title, description and, when this machine lacks something it needs, what
-// (models, packs). Clicking a card, or Enter on it, opens it as a new workflow and closes the
-// dialog; the banner then names each missing model, where to get it and where it goes.
+// (models, packs), with a Download button for its missing models that have a source (#89), and
+// their progress while they come. Clicking a card, or Enter on it, opens it as a new workflow and
+// closes the dialog; the banner then names each missing model, where to get it and where it goes.
 // Styled as the settings panel: scrim, popup card, level 3 shadow.
 Popup {
     id: dialog
@@ -46,6 +47,12 @@ Popup {
             category = ""
     }
     onOpened: search.forceActiveFocus()
+    // Models that arrived change what the cards say.
+    Connections {
+        target: App.workflows.downloads
+        enabled: dialog.visible
+        function onFinished() { dialog.templates = App.workflows.templates() }
+    }
 
     // The tabs on the left: All, the person's own when there are any, then each category in
     // the order the templates come in (categories.json's).
@@ -179,7 +186,7 @@ Popup {
                 // As many 56u cards as fit, sharing the spare width.
                 readonly property int columns: Math.max(1, Math.floor(width / (56 * dialog.u)))
                 cellWidth: Math.floor(width / columns)
-                cellHeight: cellWidth * 10 / 16 + 22 * dialog.u
+                cellHeight: cellWidth * 10 / 16 + 25 * dialog.u
                 Keys.onReturnPressed: if (currentIndex >= 0) dialog.openTemplate(dialog.shown[currentIndex].id)
                 Keys.onEnterPressed: if (currentIndex >= 0) dialog.openTemplate(dialog.shown[currentIndex].id)
 
@@ -244,18 +251,45 @@ Popup {
                                 color: dialog.look.label
                                 font.pixelSize: dialog.look.captionSize
                             }
-                            Text {
-                                objectName: "templateStatus-" + cell.modelData.id
+                            RowLayout {
+                                id: statusRow
+                                readonly property var downloads: App.workflows.downloads
+                                readonly property bool downloading: downloads.busy
+                                                                    && downloads.what === "template:" + cell.modelData.id
                                 Layout.fillWidth: true
-                                visible: text !== ""
-                                text: cell.modelData.status
-                                elide: Text.ElideRight
-                                color: dialog.look.error
-                                font.pixelSize: dialog.look.captionSize
-                                // Which files, on hover; opening it names where each goes.
-                                ToolTip.visible: statusHover.hovered && cell.modelData.missingModels.length > 0
-                                ToolTip.text: cell.modelData.missingModels.map(m => m.name).join("\n")
-                                HoverHandler { id: statusHover }
+                                Layout.preferredHeight: 7 * dialog.u
+                                visible: cell.modelData.status !== "" || downloading
+                                spacing: dialog.u
+                                Text {
+                                    objectName: "templateStatus-" + cell.modelData.id
+                                    Layout.fillWidth: true
+                                    text: statusRow.downloading
+                                          ? [statusRow.downloads.label, statusRow.downloads.progressText].filter(t => t !== "").join(" · ")
+                                          : cell.modelData.status
+                                    elide: Text.ElideRight
+                                    color: statusRow.downloading ? dialog.look.label : dialog.look.error
+                                    font.pixelSize: dialog.look.captionSize
+                                    // Which files, on hover; opening it names where each goes.
+                                    ToolTip.visible: statusHover.hovered && cell.modelData.missingModels.length > 0
+                                    ToolTip.text: cell.modelData.missingModels.map(m => m.name).join("\n")
+                                    HoverHandler { id: statusHover }
+                                }
+                                // Its own press target: a click here does not open the template.
+                                ThemedButton {
+                                    objectName: "templateDownload-" + cell.modelData.id
+                                    visible: statusRow.downloading || (cell.modelData.download !== "" && !statusRow.downloads.busy)
+                                    flat: true
+                                    implicitHeight: 7 * dialog.u
+                                    topInset: 0
+                                    bottomInset: 0
+                                    font.pixelSize: dialog.look.captionSize
+                                    text: statusRow.downloading ? qsTr("Cancel") : qsTr("Download")
+                                    Accessible.name: statusRow.downloading ? qsTr("Cancel the download") : cell.modelData.download
+                                    ToolTip.visible: hovered && !statusRow.downloading
+                                    ToolTip.text: cell.modelData.download
+                                    onClicked: statusRow.downloading ? statusRow.downloads.cancel()
+                                                                     : App.workflows.downloadTemplate(cell.modelData.id)
+                                }
                             }
                         }
                     }

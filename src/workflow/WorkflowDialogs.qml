@@ -73,31 +73,91 @@ Item {
         }
     }
 
-    // What went wrong, or what the opened workflow lacks.
+    // What went wrong, or what the opened workflow lacks; its missing models' Download button
+    // (#89), and the models downloading.
     Rectangle {
         id: notice
         objectName: "workflowNotice"
-        visible: App.workflows.notice.length > 0
+        readonly property var downloads: App.workflows.downloads
+        visible: App.workflows.notice.length > 0 || downloads.busy
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-        height: visible ? noticeRow.implicitHeight + 16 : 0
+        height: visible ? noticeColumn.implicitHeight + 16 : 0
         color: root.look.popup
         border.color: root.look.hairline
-        RowLayout {
-            id: noticeRow
+        ColumnLayout {
+            id: noticeColumn
             anchors { fill: parent; margins: 8 }
+            spacing: 16 // two chunks: the line and its button, then the download under way
             LayoutMirroring.enabled: root.rightToLeft
             LayoutMirroring.childrenInherit: true
-            Label {
+            RowLayout {
+                id: noticeRow
                 Layout.fillWidth: true
-                wrapMode: Text.Wrap
-                color: root.look.text
-                text: App.workflows.notice
+                visible: App.workflows.notice.length > 0
+                spacing: 8
+                Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    color: root.look.text
+                    text: App.workflows.notice
+                }
+                // Where they go, when more than one model folder can take them; remembered. Made
+                // only when shown, as the progress row below: the window keeps few items (#5).
+                Loader {
+                    active: App.workflows.downloadOffer !== "" && App.workflows.downloadRoots.length > 1
+                    sourceComponent: ComboBox {
+                        objectName: "downloadInto"
+                        model: App.workflows.downloadRoots.map(r => qsTr("Into %1").arg(r.title))
+                        currentIndex: App.workflows.downloadRoots.findIndex(r => r.path === App.workflows.downloadRoot)
+                        onActivated: index => App.workflows.setDownloadRoot(App.workflows.downloadRoots[index].path)
+                        Accessible.name: qsTr("Download into")
+                    }
+                }
+                Loader {
+                    active: App.workflows.downloadOffer !== ""
+                    sourceComponent: ThemedButton {
+                        objectName: "downloadModels"
+                        highlighted: true
+                        text: App.workflows.downloadOffer
+                        onClicked: App.workflows.downloadMissing()
+                    }
+                }
+                ToolButton {
+                    text: "×"
+                    focusPolicy: Qt.NoFocus
+                    Accessible.name: qsTr("Dismiss")
+                    onClicked: App.workflows.dismissNotice()
+                }
             }
-            ToolButton {
-                text: "×"
-                focusPolicy: Qt.NoFocus
-                Accessible.name: qsTr("Dismiss")
-                onClicked: App.workflows.dismissNotice()
+            Loader {
+                Layout.fillWidth: true
+                active: notice.downloads.busy
+                sourceComponent: RowLayout {
+                    objectName: "downloadProgress"
+                    spacing: 8
+                    Label {
+                        color: root.look.text
+                        text: qsTr("Downloading %1").arg(notice.downloads.label)
+                        elide: Text.ElideMiddle
+                        Layout.maximumWidth: noticeColumn.width / 2
+                    }
+                    ProgressBar {
+                        Layout.fillWidth: true
+                        from: 0
+                        to: 1
+                        indeterminate: notice.downloads.fraction < 0
+                        value: Math.max(0, notice.downloads.fraction)
+                    }
+                    Label {
+                        color: root.look.label
+                        text: notice.downloads.progressText
+                    }
+                    ThemedButton {
+                        objectName: "downloadCancel"
+                        text: qsTr("Cancel")
+                        onClicked: notice.downloads.cancel()
+                    }
+                }
             }
         }
     }

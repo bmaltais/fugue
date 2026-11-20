@@ -22,6 +22,7 @@
 #include "engine/registry.h"
 #include "engine/templates.h"
 #include "workflow/image_inputs.h"
+#include "workflow/model_downloads.h"
 #include "workflow/recovery_store.h"
 #include "engine/trust_store.h"
 
@@ -63,6 +64,15 @@ class Workflows : public QObject {
     Q_PROPERTY(QString notice READ notice NOTIFY noticeChanged)
     // Where the file picker starts: ~/Documents/Fugue as a file URL.
     Q_PROPERTY(QUrl suggestedFolder READ suggestedFolder CONSTANT)
+    // The models being downloaded (#89).
+    Q_PROPERTY(fugue::ModelDownloads *downloads READ downloads CONSTANT)
+    // While the banner names missing models of the shown workflow that have a source: the
+    // button's text, "Download 3 models, 19.4 GB" (the size when every one records it). Else empty.
+    Q_PROPERTY(QString downloadOffer READ downloadOffer NOTIFY noticeChanged)
+    // The model folders those may go in (ModelLibrary::downloadRoots), each {path, title}, and
+    // the one they go in now (the settings' download_folder, else Fugue's own).
+    Q_PROPERTY(QVariantList downloadRoots READ downloadRoots NOTIFY noticeChanged)
+    Q_PROPERTY(QString downloadRoot READ downloadRoot NOTIFY noticeChanged)
 
 public:
     Workflows(CanvasModel *canvas, const Registry *registry, CommandRegistry *commands,
@@ -79,6 +89,10 @@ public:
     QVariantList pendingTrust() const { return m_pendingTrust; }
     QString notice() const { return m_notice; }
     QUrl suggestedFolder() const;
+    ModelDownloads *downloads() const { return m_downloads; }
+    QString downloadOffer() const;
+    QVariantList downloadRoots() const { return downloadOffer().isEmpty() ? QVariantList() : m_offer.roots; }
+    QString downloadRoot() const;
     QString pathOf(int index) const;
     // Pasting and dropping images into the canvas (workflow/image_inputs.h).
     ImageInputs *images() const { return m_images; }
@@ -105,7 +119,8 @@ public:
     // The templates for the Templates dialog, in TemplateLibrary::list()'s order, each a map:
     // id, title, description, category, categoryTitle, tags, preview (a file URL or empty),
     // own, missingModels (name, source, folder each), neededPacks (not installed, or at another version), and status, one line: what
-    // it lacks on this machine, or empty when it is ready. A check: no model file is read.
+    // it lacks on this machine, or empty when it is ready; download, the button's text for its
+    // missing models that have a source (as downloadOffer), else empty. A check: no model file is read.
     Q_INVOKABLE QVariantList templates() const;
     // Opens the template with this id (openTemplate); false when there is none.
     Q_INVOKABLE bool openTemplateById(const QString &id);
@@ -153,6 +168,16 @@ public:
     // installed and trusted now.
     void refreshNodeTypes();
 
+    // --- model downloads (#89) ---
+
+    // Downloads the missing models the banner offers (downloadOffer), into downloadRoot().
+    Q_INVOKABLE void downloadMissing();
+    // Downloads the missing models of the template with this id.
+    Q_INVOKABLE void downloadTemplate(const QString &id);
+    // Makes `root` (one of downloadRoots) where downloads go from now on: the settings'
+    // download_folder.
+    Q_INVOKABLE void setDownloadRoot(const QString &root);
+
     Q_INVOKABLE void dismissNotice();
     // A line for the banner from outside (the image actions, #57).
     void notify(const QString &text) { setNotice(text); }
@@ -195,8 +220,20 @@ private:
     QString untitledName() const;
     void setNotice(const QString &text);
     void analyze(const Document &document, const QString &title);
-    // The banner's line on the nodes of `document` that are not installed, empty for none.
-    QString missingNotice(const Document &document, const QString &title) const;
+    // What the banner offers to download: its button's text, the models, and where they may go.
+    struct DownloadOffer {
+        QString text;
+        QJsonArray models; // the workflow's, as Document::models() gives them
+        QVariantList roots;
+    };
+    // The banner's line on the nodes and models of `document` that are not here, empty for none;
+    // with what it may offer to download.
+    QString missingNotice(const Document &document, const QString &title, DownloadOffer *offer = nullptr) const;
+    // The shown workflow's missing line and offer again, after its models may have changed.
+    // The banner shows it when it showed the last one, or `force`.
+    void refreshMissing(bool force);
+    // Plans the downloads of `models`' missing ones that have a source and queues them.
+    void startDownloads(const QJsonArray &models, const QString &what);
     // Adds the packs not asked about yet to pendingTrust; true when one was added.
     bool addPendingTrust(const QList<PackUse> &uses);
     static QString toPath(const QString &pathOrUrl);
@@ -217,6 +254,8 @@ private:
     QString m_notice;
     // The last missing-nodes line, to tell it from the banner's other lines on a reload.
     QString m_missingNotice;
+    DownloadOffer m_offer; // what goes with m_missingNotice
+    ModelDownloads *m_downloads;
     // "<pack id> <version>" the person answered "not now" for: a reload does not ask again.
     QSet<QString> m_trustDismissed;
 };

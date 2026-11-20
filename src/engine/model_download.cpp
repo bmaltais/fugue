@@ -419,15 +419,18 @@ void DownloadQueue::add(const QList<DownloadTarget> &targets) {
         if (!queued)
             m_targets.append(target);
     }
-    if (!m_current)
+    if (!m_running && m_index + 1 < m_targets.size()) {
+        m_running = true;
         next();
+    }
 }
 
 void DownloadQueue::cancel() {
-    if (!m_current)
+    if (!m_running)
         return;
     m_targets = m_targets.mid(0, m_index + 1); // the rest are dropped
-    m_current->cancel();
+    if (m_current)
+        m_current->cancel(); // else between two files: next() finds none left
 }
 
 qint64 DownloadQueue::received() const { return m_current ? m_current->received() : 0; }
@@ -440,6 +443,7 @@ void DownloadQueue::next() {
         m_targets.clear();
         m_errors.clear();
         m_index = -1;
+        m_running = false;
         emit finished(errors);
         return;
     }

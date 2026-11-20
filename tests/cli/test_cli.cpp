@@ -614,6 +614,9 @@ private slots:
         QCOMPARE(o.exitCode, 1);
         QCOMPARE(o.firstCode(), QString("usage"));
         QCOMPARE(fugue({"model", "get", "nothing-by-this-name", "--json"}).firstCode(), QString("usage"));
+        // The other tests share these folders.
+        QDir(m_dir.filePath("data/fugue/models/loras")).removeRecursively();
+        QDir(m_dir.filePath("templates/needs")).removeRecursively();
     }
 
     void workflowDescribeSummarisesNodesAndLinks() {

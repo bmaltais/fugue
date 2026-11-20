@@ -4,8 +4,10 @@
 #include "engine/embed.h"
 #include "engine/file_hashes.h"
 #include "engine/json.h"
+#include "engine/model_download.h"
 #include "engine/model_library.h"
 #include "engine/paths.h"
+#include "engine/settings.h"
 #include "workflow/content_hash.h"
 #include "workflow/workflow_io.h"
 
@@ -59,6 +61,41 @@ Result<bool> writeWorkflow(const Document &document, const QString &path, bool r
     return partial.commit(path, Overwrite::Never);
 }
 
+// The button for the models of `missing` that have a source: "Download 3 models, 19.4 GB", the
+// size when every one records it. Empty for none.
+QString offerText(const QList<MissingModel> &missing) {
+    int count = 0;
+    qint64 bytes = 0;
+    bool sized = true;
+    for (const MissingModel &model : missing) {
+        if (model.source.isEmpty())
+            continue;
+        ++count;
+        sized = sized && model.size >= 0;
+        bytes += std::max<qint64>(0, model.size);
+    }
+    if (count == 0)
+        return {};
+    return sized ? Workflows::tr("Download %n models, %1", nullptr, count).arg(ModelDownloads::sizeText(bytes))
+                 : Workflows::tr("Download %n models", nullptr, count);
+}
+
+// A model folder as the banner's choice names it.
+QString rootTitle(const QString &root, const ModelLibrary &library) {
+    if (root == library.roots().value(0))
+        return Workflows::tr("Fugue's models folder");
+    const QString home = QDir::homePath();
+    return root.startsWith(home + QLatin1Char('/')) ? QLatin1Char('~') + root.mid(home.size()) : root;
+}
+
+// Each message with its hint, for the banner.
+QString explained(const Errors &errors) {
+    QStringList lines;
+    for (const Error &error : errors)
+        lines << (error.hint.isEmpty() ? error.message : error.message + QLatin1Char(' ') + error.hint);
+    return lines.join(QLatin1Char(' '));
+}
+
 QString firstMessage(const Errors &errors) {
     for (const Error &error : errors)
         if (error.severity == Error::Severity::Error)
@@ -78,6 +115,22 @@ Workflows::Workflows(CanvasModel *canvas, const Registry *registry, CommandRegis
             analyze(document, m_tabs[size_t(m_current)].title);
     });
     m_images = new ImageInputs(m_canvas, m_registry, this);
+    m_downloads = new ModelDownloads(this);
+    // The banner says what arrived, or what went wrong; what is still missing comes back.
+    connect(m_downloads, &ModelDownloads::finished, this, [this](int arrived, const Errors &all) {
+        refreshMissing(false);
+        Errors errors; // a cancel is the person's own: what is still missing is the news
+        for (const Error &error : all)
+            if (error.code != QLatin1String("cancelled"))
+                errors << error;
+        if (!errors.isEmpty())
+            setNotice(explained(errors));
+        else if (m_missingNotice.isEmpty())
+            setNotice(tr("Downloaded %n models.", nullptr, arrived));
+        else
+            setNotice(m_missingNotice);
+        emit noticeChanged(); // the offer, with the same line
+    });
     connect(m_images, &ImageInputs::message, this, &Workflows::setNotice);
     m_timer.setInterval(locations.recoveryIntervalMs);
     connect(&m_timer, &QTimer::timeout, this, &Workflows::writeRecoveryCopies);
@@ -396,7 +449,8 @@ QVariantList Workflows::templates() const {
     QVariantList out;
     for (const Template &t : TemplateLibrary(m_templateRoots, m_registry).list()) {
         QVariantList missing;
-        for (const MissingModel &model : models.missing(t.models, hashes))
+        const QList<MissingModel> absent = models.missing(t.models, hashes);
+        for (const MissingModel &model : absent)
             missing.append(QVariantMap{{"name", model.handle.value(QStringLiteral("name")).toString()},
                                        {"source", model.source},
                                        {"folder", model.folder}});
@@ -414,6 +468,7 @@ QVariantList Workflows::templates() const {
                                {"preview", t.preview.isEmpty() ? QString() : QUrl::fromLocalFile(t.preview).toString()},
                                {"own", t.own},
                                {"missingModels", missing},
+                               {"download", offerText(absent)},
                                {"neededPacks", t.neededPacks},
                                {"status", status.join(QStringLiteral(" · "))}});
     }
@@ -438,7 +493,7 @@ void Workflows::openStartup(const QStringList &paths) {
         openPath(path);
 }
 
-QString Workflows::missingNotice(const Document &document, const QString &title) const {
+QString Workflows::missingNotice(const Document &document, const QString &title, DownloadOffer *offer) const {
     QStringList lines;
     const QStringList missing = missingTypes(document, *m_registry);
     if (!missing.isEmpty())
@@ -446,20 +501,98 @@ QString Workflows::missingNotice(const Document &document, const QString &title)
                      .arg(title, missing.join(QStringLiteral(", ")));
     // Spec 4.3: the models it names that are not here, without reading a model file.
     FileHashes hashes(FileHashes::defaultPath());
+    const ModelLibrary library = ModelLibrary::current(m_registry);
+    const QList<MissingModel> absent = library.missing(document, hashes);
     QStringList models;
-    for (const MissingModel &model : ModelLibrary::current(m_registry).missing(document, hashes)) {
+    QList<PortType> types;
+    for (const MissingModel &model : absent) {
         const QString name = model.handle.value(QStringLiteral("name")).toString();
         models << (model.source.isEmpty() ? tr("%1, into %2").arg(name, model.folder)
                                           : tr("%1 from %2, into %3").arg(name, model.source, model.folder));
+        if (const std::optional<PortType> type = PortType::parse(model.handle.value(QStringLiteral("resource")).toString());
+            type && !model.source.isEmpty())
+            types << *type;
     }
     if (!models.isEmpty())
         lines << tr("%1 needs models that are not in the model folders: %2.").arg(title, models.join(QStringLiteral("; ")));
+    if (offer) {
+        offer->text = offerText(absent);
+        offer->models = document.models();
+        offer->roots.clear();
+        if (!offer->text.isEmpty())
+            for (const QString &root : library.downloadRoots(types))
+                offer->roots.append(QVariantMap{{"path", root}, {"title", rootTitle(root, library)}});
+    }
     return lines.join(QLatin1Char(' '));
 }
 
+void Workflows::refreshMissing(bool force) {
+    if (m_current < 0)
+        return;
+    const QString missing = missingNotice(documentOf(m_current), m_tabs[size_t(m_current)].title, &m_offer);
+    const bool shown = m_notice == m_missingNotice;
+    m_missingNotice = missing;
+    if (force || shown)
+        setNotice(missing);
+    emit noticeChanged(); // the offer may differ with the same line
+}
+
+QString Workflows::downloadOffer() const {
+    return !m_notice.isEmpty() && m_notice == m_missingNotice && !m_downloads->busy() ? m_offer.text : QString();
+}
+
+QString Workflows::downloadRoot() const { return ModelLibrary::current(m_registry).downloadRoot(); }
+
+void Workflows::startDownloads(const QJsonArray &models, const QString &what) {
+    FileHashes hashes(FileHashes::defaultPath());
+    const ModelLibrary library = ModelLibrary::current(m_registry);
+    QList<DownloadTarget> targets;
+    Errors refused;
+    for (const MissingModel &model : library.missing(models, hashes)) {
+        if (model.source.isEmpty())
+            continue;
+        const Result<DownloadTarget> target = planDownload(library, model);
+        if (target)
+            targets << target.value();
+        else
+            refused << target.errors();
+    }
+    if (!refused.isEmpty())
+        setNotice(explained(refused));
+    m_downloads->add(targets, what);
+    emit noticeChanged(); // the offer hides while they download
+}
+
+void Workflows::downloadMissing() {
+    if (!downloadOffer().isEmpty())
+        startDownloads(m_offer.models, QStringLiteral("workflow"));
+}
+
+void Workflows::downloadTemplate(const QString &id) {
+    const std::optional<Template> chosen = TemplateLibrary(m_templateRoots, m_registry).find(id);
+    if (chosen)
+        startDownloads(chosen->models, QStringLiteral("template:") + id);
+}
+
+void Workflows::setDownloadRoot(const QString &root) {
+    const ModelLibrary library = ModelLibrary::current(m_registry);
+    if (!library.roots().contains(root))
+        return;
+    // Fugue's own folder is the default: no key.
+    const Errors errors = changeSetting(settingsPath(), QStringLiteral("download_folder"),
+                                        root == library.roots().value(0) ? QJsonValue(QJsonValue::Undefined)
+                                                                         : QJsonValue(root));
+    if (!errors.isEmpty()) {
+        setNotice(explained(errors));
+        return;
+    }
+    refreshMissing(false); // the line names the folders they go in
+}
+
 void Workflows::analyze(const Document &document, const QString &title) {
-    m_missingNotice = missingNotice(document, title);
+    m_missingNotice = missingNotice(document, title, &m_offer);
     setNotice(m_missingNotice);
+    emit noticeChanged(); // the offer may differ with the same line
     if (addPendingTrust(m_trust.untrusted(document, *m_registry)))
         emit pendingTrustChanged();
 }
@@ -677,10 +810,11 @@ void Workflows::refreshNodeTypes() {
     // The banner follows the shown workflow's missing nodes (a pack removed adds some, one
     // installed takes them away), unless it shows another line; a line dismissed comes back
     // only when what is missing changed.
-    const QString missing = missingNotice(shown, m_tabs[size_t(m_current)].title);
+    const QString missing = missingNotice(shown, m_tabs[size_t(m_current)].title, &m_offer);
     if (missing != m_missingNotice && (m_notice.isEmpty() || m_notice == m_missingNotice))
         setNotice(missing);
     m_missingNotice = missing;
+    emit noticeChanged(); // the offer
 
     // The question follows what is installed and trusted now: a pack trusted meanwhile (the
     // Packs page, the CLI) is not asked about, nor one at a version no longer installed; a pack

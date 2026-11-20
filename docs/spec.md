@@ -81,7 +81,7 @@ XDG variables are honored; the defaults are shown.
 
 | Path | Holds |
 | --- | --- |
-| `~/.config/fugue/settings.json` | Settings, written by the settings panel (`app.settings`, Ctrl+,): `navigation`, `language`, `output_folder`, `inputs_folder`, `model_paths`, `pack_paths`, `new_seed`, `embed_workflow`, `corner_radius` (`src/engine/settings.h` has the table). Keys Fugue does not know are kept. |
+| `~/.config/fugue/settings.json` | Settings, written by the settings panel (`app.settings`, Ctrl+,): `navigation`, `language`, `output_folder`, `inputs_folder`, `model_paths`, `model_folder_kinds`, `download_folder`, `pack_paths`, `new_seed`, `embed_workflow`, `corner_radius` (`src/engine/settings.h` has the table). Keys Fugue does not know are kept. |
 | `~/.config/fugue/providers.json` | Provider instances and their keys, mode 0600 ([8.2](#82-provider-instances)). |
 | `~/.config/fugue/keybindings.json` | Keymap diff ([12.5](#125-command-registry-and-keymap)). |
 | `~/.local/share/fugue/packs/<pack-id>/` | Installed packs ([6.5](#65-where-packs-live-and-how-they-load)). |
@@ -413,7 +413,7 @@ An object is a link if and only if it has the key `from`. `null` is not a value;
   "packs": {"io.github.alice.tools": {"version": "1.2.0",
                                       "source": "https://github.com/alice/fugue-tools"}},
   "models": [{"resource": "fugue/lora", "hash": "sha256:…",
-              "name": "detail-tweaker.safetensors", "source": "https://…"}]
+              "name": "detail-tweaker.safetensors", "source": "https://…", "size": 151000000}]
 }
 }
 ```
@@ -423,9 +423,10 @@ An object is a link if and only if it has the key `from`. `null` is not a value;
 - `packs`: the packs those types come from, with an optional `source` Fugue can offer to install
   from (a prompt; nothing installs silently).
 - `models`: every resource handle with a hash that appears as a literal, with an optional
-  `source`. On open Fugue checks the model folders and reports what is missing without blocking:
-  the banner names each missing file, where to get it (`source`) and the folder it goes in (#83).
-  The check reads no model file (8.9).
+  `source` (where its file can be downloaded, 8.9) and `size` (its bytes). On open Fugue checks
+  the model folders and reports what is missing without blocking: the banner names each missing
+  file, where to get it (`source`) and the folder it goes in (#83), and offers to download those
+  with a source (#89). The check reads no model file (8.9).
 
 ### 4.4 `groups` section
 
@@ -1276,7 +1277,21 @@ reference. A new inference runtime is a new provider module.
   takes minutes. A missing model is `model_missing`, with the folder to put it in. A check
   (`fugue validate`, the canvas) reads no model file: a file with the handle's name that has no
   remembered hash is taken to be the one, and the run that reaches the node finds out.
-- No downloads in v0.1. Fugue shows where a missing model can be had and which folder it goes in.
+- Downloads (#89): a missing model with a `source` (4.3) can be downloaded, from the banner, the
+  Templates dialog or `fugue model get`. It goes in the model folder the person picks (settings'
+  `download_folder`, remembered; Fugue's own folder by default): under a root in the layout, the
+  type's folder that is there (`text_encoders` before `clip` when both are), else its first; a
+  root of one kind takes files of that kind only, the rest go in Fugue's own folder. The file is
+  the handle's `name` under that folder, a relative path of a file with one of the type's
+  extensions. The source must be https (http only to a loopback address); redirects are followed,
+  never from https to http.
+- A download is written to `<file>.part`, hashed as it arrives, and renamed into place, never
+  over a file that is there, only once its sha256 is the handle's; the hash is then remembered.
+  A mismatch, or a size other than `requires` records, deletes the part
+  (`download_mismatch`). A break is taken up again with a Range request (five times, the wait
+  doubling from 2 s; 60 s of silence is a break); a part an earlier Fugue left is hashed and
+  resumed; Cancel deletes the part. Free space is checked once the size is known. Files come one
+  after another. Any https source is safe to take, since a wrong file is never kept.
 - Fugue never modifies or deletes a model file.
 
 ### 8.10 GPU memory and the helper
@@ -1872,6 +1887,7 @@ Each command works with no display, never opens a dialog, and takes `--json`. Fo
 | `fugue pack list`, `add <folder\|git-url> [--ref <tag\|commit>]`, `remove <id>`, `update [id] [--ref <tag\|commit>]`, `trust <id>` | Packs ([6.6](#66-installing)). All but `list` need a human ([13.6](#136-safety)). |
 | `fugue provider list` | Instances, their capabilities and status. |
 | `fugue template list` | The templates, each with the models it names (`here` or not, and the folder a missing one goes in) and the packs it lacks; what is wrong with one is a warning. |
+| `fugue model get <file\|template id> [--into <model folder>]` | Download the models a workflow or template names that are not here and have a `source` (8.9, #89), into the model folder downloads go in (`--into` names another, for this call); progress on stderr. Each failure is an error; what arrived stays. |
 | `fugue model list [--type <resource type>] [--hash]` | Models found on disk and offered by providers. A file on disk has a `handle` only once its hash is known (listing reads no model file); `--hash` hashes the others, once each, so every file gets a full handle; a file it cannot read is a `media_unreadable` warning. |
 | `fugue cache status`, `fugue cache clear [--workflow <file>] [--node <id>]` | The result cache. |
 | `fugue command list` | The command registry and current key bindings. |
@@ -1931,7 +1947,7 @@ Codes in v0.1:
 
 | Area | Codes |
 | --- | --- |
-| Files | `file_not_found`, `invalid_json`, `invalid_document`, `unsupported_format_version`, `permission_denied`, `media_unreadable` |
+| Files | `file_not_found`, `invalid_json`, `invalid_document`, `unsupported_format_version`, `permission_denied`, `media_unreadable`, `download_failed` (no source, a source or name Fugue does not take, an error status, a break it gave up on, no room, a file at the name), `download_mismatch` (the file is not the handle's, by hash or size; deleted) |
 | Graph | `unknown_node_type`, `node_version_mismatch`, `unknown_input`, `missing_input`, `unknown_link_source`, `unknown_output`, `type_mismatch`, `value_out_of_range`, `value_not_in_choices`, `cycle`, `group_recursion`, `unknown_provider` |
 | Warnings | `not_part_of_output`, `model_missing` (an error when a run reaches the node, 8.5), `model_mismatch` (a text encoder, VAE or LoRA that does not fit its diffusion model, by the files' headers, #85, #86; an error when a run reaches a stage), `model_unsupported` (a model file in a format the helper cannot load, such as ComfyUI's mixed quantization; likewise), `frozen_result_missing`, `pack_update_available`, `workflow_not_embedded`, `node_bad_preview` |
 | Trust | `pack_untrusted`, `needs_confirmation` |
@@ -2058,7 +2074,7 @@ these.
 | **M5** component level | The helper and the component nodes. The M0 spike passed ([spikes/02](spikes/02-sdcpp-split.md)), so these are in v0.1. The optional ComfyUI provider is no longer needed as a fallback and moves after v0.1. | #32, #33 |
 
 After v0.1: an MCP server, a live control channel, a node catalog, a minimap, loops and batches,
-regional prompting, conditioning math, ComfyUI workflow import, model downloads, a sandbox for
+regional prompting, conditioning math, ComfyUI workflow import, a sandbox for
 command nodes, the script tier, packaging for Windows and macOS.
 
 ---
@@ -2356,6 +2372,11 @@ Building M4 made these further choices.
 | A template made by a newer Fugue is left out, judged by its nodes' versions (3.6), not by `requires.fugue`: a node at the same major and the same or older minor runs as made | 11.10 | medium-high |
 | The person's own templates folder is `~/Documents/Fugue/templates`, beside where workflows are suggested; there a plain `.fugue` is a template too. ComfyUI has none (custom nodes' `example_workflows` only) | 11.10 | medium-high |
 | A template's sources are exact: each URL's file has the recorded sha256 (Hugging Face's LFS oid). The FLUX.2 Klein 9B templates name unsloth's current Q8 file, not the older build first checked on the 3090, whose bytes only unofficial mirrors still hold (owner, 2026-11-20) | 11.10 | high |
+| Model downloads (#89, the owner reversed "no downloads"): any https source, not ComfyUI's allowlist of Hugging Face and Civitai, since the file is kept only when its hash is the handle's; ComfyUI's download list trusts the name and checks no hash by default. http is taken only to this machine, where nothing leaves it | 8.9 | high |
+| A cancelled download deletes its part; a break or a quit keeps it, and the next download of that file goes on from it after hashing what is there. A browser's cancel deletes too; a part kept after a cancel would hold many GB nobody asked for | 8.9 | medium-high |
+| Downloads run one file after another, not side by side: the first model is usable while the rest arrive, and one bar tells it. The banner shows one button for all of a workflow's missing models ("Download 3 models, 19.4 GB"), not one per model as #89 first said, and a choice of folder only when more than one can take them | 8.9, 12.10 | medium-high |
+| `requires.models` may record each model's `size` (#89), for the button's total and an early stop when a source serves another size; the total shows only when every model records one | 4.3, 8.9 | medium-high |
+| After a download Fugue says what arrived, or what failed with its hint; after a cancel the banner names what is still missing, with its button again | 12.10 | medium |
 
 ## Appendix B: issue to section map
 
@@ -2391,7 +2412,7 @@ Building M4 made these further choices.
 | #87 Text Generate, Enhance Prompt | 14.2, 8.1, 8.7 |
 | #88 Klein 9B edit: references, Resize to Megapixels | 14.1, 14.3 |
 | #83 workflow templates, missing models on open | 11.10, 4.3, 13.1 |
-| #89 model downloads | 8.9 |
+| #89 model downloads | 8.9, 4.3, 13.1, 13.3 |
 | #90 node versions side by side | 3.6, 6.6 |
 | #29 more pixel and mask nodes | 14.2, 2.1 |
 | #30 agent skill | 13.4, 13.5 |
