@@ -8,6 +8,7 @@ namespace fugue {
 
 QString configDir(); // $XDG_CONFIG_HOME/fugue  (~/.config/fugue)
 QString stateDir();  // $XDG_STATE_HOME/fugue   (~/.local/state/fugue)
+QString dataDir();   // $XDG_DATA_HOME/fugue    (~/.local/share/fugue)
 QString cacheDir();  // $XDG_CACHE_HOME/fugue   (~/.cache/fugue)
 // The default output folder of Save nodes: Fugue under the user's pictures folder
 // ($XDG_PICTURES_DIR, else the desktop's setting, else ~/Pictures): ~/Pictures/Fugue, unless

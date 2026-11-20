@@ -18,6 +18,7 @@ QString under(QStandardPaths::StandardLocation location) {
 
 QString configDir() { return under(QStandardPaths::GenericConfigLocation); }
 QString stateDir() { return under(QStandardPaths::GenericStateLocation); }
+QString dataDir() { return under(QStandardPaths::GenericDataLocation); }
 QString cacheDir() { return under(QStandardPaths::GenericCacheLocation); }
 
 QString defaultOutputDir() {

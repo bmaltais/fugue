@@ -1,0 +1,341 @@
+#include "engine/pack_loader.h"
+
+#include "engine/json.h"
+#include "engine/paths.h"
+#include "engine/settings.h"
+#include "engine/trust_store.h"
+#include "engine/version.h"
+
+#include <QDir>
+#include <QFileInfo>
+#include <QJsonArray>
+#include <QRegularExpression>
+
+#include <cstdio>
+
+namespace fugue {
+
+namespace {
+
+const QStringList knownPackFields = {"manifest", "id",    "version", "name",  "license",   "source",
+                                     "description", "nodes", "types", "setup", "converters"};
+
+Error problem(const QString &code, const QString &message, Error::Severity severity = Error::Severity::Error) {
+    Error error = makeError(code, message);
+    error.severity = severity;
+    return error;
+}
+
+Error invalid(const QString &message) { return problem(QStringLiteral("invalid_document"), message); }
+
+bool isPackId(const QString &id) {
+    static const QRegularExpression pattern(QStringLiteral("^[a-z][a-z0-9-]*(\\.[a-z0-9][a-z0-9-]*)+$"));
+    return pattern.match(id).hasMatch();
+}
+
+bool isFolderName(const QString &name) {
+    static const QRegularExpression pattern(QStringLiteral("^[A-Za-z0-9_][A-Za-z0-9._-]*$"));
+    return pattern.match(name).hasMatch();
+}
+
+// A path inside the node's own folder: relative, and never leaving it.
+bool isInsideFolder(const QString &path) {
+    if (path.isEmpty() || QDir::isAbsolutePath(path) || path.startsWith(QLatin1Char('~')))
+        return false;
+    const QString clean = QDir::cleanPath(path);
+    return clean != QLatin1String("..") && !clean.startsWith(QLatin1String("../")) && clean != QLatin1String(".");
+}
+
+bool isPositiveNumber(const QJsonValue &value) { return value.isDouble() && value.toDouble() > 0; }
+
+struct PackManifest {
+    QString id;
+    QString version;
+    QString name;
+    QStringList nodes;
+    QList<DeclaredPortType> types;
+};
+
+// Validates pack.json, reporting every problem found.
+std::optional<PackManifest> parsePack(const QJsonObject &json, PackOrigin origin, Errors &errors) {
+    const qsizetype before = errors.size();
+    PackManifest pack;
+
+    if (!json.value("manifest").isDouble())
+        errors << invalid(QStringLiteral("pack.json needs \"manifest\": 1."));
+    else if (json.value("manifest").toInt() != 1)
+        errors << problem(QStringLiteral("unsupported_format_version"),
+                          QStringLiteral("pack.json has manifest format %1; this Fugue reads format 1.")
+                              .arg(json.value("manifest").toDouble()));
+
+    pack.id = json.value("id").toString();
+    const bool reserved = pack.id == QLatin1String("fugue") || pack.id == QLatin1String("local");
+    if (reserved && origin == PackOrigin::Disk)
+        errors << invalid(QStringLiteral("The pack id \"%1\" belongs to Fugue; a pack folder cannot use it.").arg(pack.id));
+    else if (!(isPackId(pack.id) || (reserved && origin == PackOrigin::BuiltIn)))
+        errors << invalid(QStringLiteral("pack.json \"id\" must be lowercase reverse-DNS, like io.github.alice.tools."));
+
+    pack.version = json.value("version").toString();
+    if (!Version::parse(pack.version))
+        errors << invalid(QStringLiteral("pack.json \"version\" must be MAJOR.MINOR.PATCH."));
+
+    pack.name = json.value("name").toString();
+    if (pack.name.trimmed().isEmpty())
+        errors << invalid(QStringLiteral("pack.json needs a \"name\"."));
+
+    for (const char *key : {"license", "source", "description"})
+        if (json.contains(key) && !json.value(key).isString())
+            errors << invalid(QStringLiteral("pack.json \"%1\" must be text.").arg(key));
+
+    if (!json.value("nodes").isArray()) {
+        errors << invalid(QStringLiteral("pack.json needs \"nodes\", a list of node folder names."));
+    } else {
+        for (const QJsonValue &entry : json.value("nodes").toArray()) {
+            const QString name = entry.toString();
+            if (!isFolderName(name))
+                errors << invalid(QStringLiteral("pack.json \"nodes\" must list plain folder names, not %1.")
+                                      .arg(entry.isString() ? QStringLiteral("\"%1\"").arg(name) : QStringLiteral("that")));
+            else if (pack.nodes.contains(name))
+                errors << invalid(QStringLiteral("pack.json lists the node folder \"%1\" twice.").arg(name));
+            else
+                pack.nodes << name;
+        }
+    }
+
+    if (json.contains("types")) {
+        if (!json.value("types").isArray()) {
+            errors << invalid(QStringLiteral("pack.json \"types\" must be a list."));
+        } else {
+            for (const QJsonValue &entry : json.value("types").toArray()) {
+                const QJsonObject type = entry.toObject();
+                const QString id = type.value("id").toString();
+                const QJsonValue versionValue = type.value("version");
+                const int version = versionValue.toInt(0);
+                const QString kind = type.value("kind").toString();
+                DeclaredPortType declared;
+                const auto parsed = PortType::parse(version > 1 ? QStringLiteral("%1@%2").arg(id).arg(version) : id);
+                if (!entry.isObject() || !parsed || parsed->isBuiltin() || parsed->isAny() ||
+                    !id.startsWith(pack.id + QLatin1Char('/')) || !versionValue.isDouble() || version < 1 ||
+                    (kind != QLatin1String("resource") && kind != QLatin1String("data")) ||
+                    type.value("name").toString().isEmpty()) {
+                    errors << invalid(QStringLiteral("pack.json \"types\" entry %1 needs an id %2/<name>, a version "
+                                                     "of 1 or more, a kind of \"resource\" or \"data\" and a name.")
+                                          .arg(id.isEmpty() ? QStringLiteral("(no id)") : QStringLiteral("\"%1\"").arg(id), pack.id));
+                    continue;
+                }
+                declared.type = *parsed;
+                declared.kind = kind == QLatin1String("resource") ? PortKind::Resource : PortKind::Data;
+                declared.name = type.value("name").toString();
+                for (const QJsonValue &extension : type.value("extensions").toArray())
+                    declared.extensions << extension.toString();
+                pack.types << declared;
+            }
+        }
+    }
+
+    if (json.contains("setup")) {
+        const QJsonObject setup = json.value("setup").toObject();
+        const QJsonArray command = setup.value("command").toArray();
+        bool ok = json.value("setup").isObject() && !command.isEmpty();
+        for (const QJsonValue &word : command)
+            ok = ok && word.isString() && !word.toString().isEmpty();
+        if (!ok)
+            errors << invalid(QStringLiteral("pack.json \"setup.command\" must be a program and its arguments, "
+                                             "like [\"uv\", \"sync\"]."));
+    }
+
+    for (auto it = json.begin(); it != json.end(); ++it)
+        if (!knownPackFields.contains(it.key()))
+            errors << problem(QStringLiteral("invalid_document"),
+                              QStringLiteral("pack.json has an unknown field \"%1\"; it is ignored.").arg(it.key()),
+                              Error::Severity::Warning);
+
+    if (hasErrors(errors.mid(before)))
+        return std::nullopt;
+    return pack;
+}
+
+// What is wrong with a node's `runtime` (6.1, 6.9), without opening anything it names;
+// empty when it is fine or absent (the registry reports an absent one).
+QString runtimeProblem(const QJsonObject &runtime, PackOrigin origin) {
+    if (runtime.isEmpty())
+        return {};
+    const QString kind = runtime.value("kind").toString();
+    const auto path = [&](const char *key) -> QString {
+        const QString value = runtime.value(key).toString();
+        return isInsideFolder(value) ? QString()
+                                     : QStringLiteral("runtime.%1 must be a path inside the node's folder.").arg(key);
+    };
+    if (kind == QLatin1String("command")) {
+        if (const QString bad = path("entry"); !bad.isEmpty())
+            return bad;
+        const QString mode = runtime.value("mode").toString(QStringLiteral("oneshot"));
+        if (mode != QLatin1String("oneshot") && mode != QLatin1String("persistent"))
+            return QStringLiteral("runtime.mode must be \"oneshot\" or \"persistent\".");
+        for (const char *key : {"idle_timeout_s", "timeout_s"})
+            if (runtime.contains(key) && !isPositiveNumber(runtime.value(key)))
+                return QStringLiteral("runtime.%1 must be a number above 0.").arg(key);
+        return {};
+    }
+    if (kind == QLatin1String("group"))
+        return path("definition");
+    if (kind == QLatin1String("native")) {
+        if (const QString bad = path("entry"); !bad.isEmpty())
+            return bad;
+        static const QRegularExpression abiPattern(QStringLiteral("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"));
+        const auto match = abiPattern.match(runtime.value("abi").toString());
+        if (!match.hasMatch())
+            return QStringLiteral("runtime.abi must be \"<major>.<min_host_minor>\", like \"1.0\".");
+        if (match.captured(1).toInt() != kHostAbiMajor || match.captured(2).toInt() > kHostAbiMinor)
+            return QStringLiteral("runtime.abi %1 needs a newer host than this Fugue (ABI %2.%3).")
+                .arg(runtime.value("abi").toString())
+                .arg(kHostAbiMajor)
+                .arg(kHostAbiMinor);
+        return {};
+    }
+    if (kind == QLatin1String("builtin"))
+        return origin == PackOrigin::BuiltIn ? QString()
+                                             : QStringLiteral("runtime.kind \"builtin\" is only for the fugue pack.");
+    if (kind == QLatin1String("script"))
+        return QStringLiteral("runtime.kind \"script\" is reserved and not available in this version.");
+    return QStringLiteral("runtime.kind \"%1\" is not known; use command, group or native.").arg(kind);
+}
+
+// The one sentence a person sees for a node that did not load.
+QString reasonOf(const Errors &errors) {
+    QString reason;
+    qsizetype count = 0;
+    for (const Error &error : errors) {
+        if (error.severity != Error::Severity::Error)
+            continue;
+        if (count++ == 0)
+            reason = error.message;
+    }
+    if (count > 1)
+        reason += QStringLiteral(" (and %1 more)").arg(count - 1);
+    return reason;
+}
+
+// Loads one node folder; empty reason on success, the type id in `typeId`.
+QString loadNode(Registry &registry, const PackManifest &pack, const QString &folder, const QString &name,
+                 PackOrigin origin, QString &typeId, Errors &warnings) {
+    const QString path = folder + QLatin1Char('/') + name + QStringLiteral("/node.json");
+    const Result<QJsonObject> read = readJsonObject(path);
+    if (!read.ok())
+        return read.error().code == QLatin1String("file_not_found")
+                   ? QStringLiteral("%1/node.json is missing.").arg(name)
+                   : reasonOf(read.errors());
+    const QJsonObject &manifest = read.value();
+    const QString id = manifest.value("id").toString();
+    if (id != pack.id + QLatin1Char('/') + name)
+        return QStringLiteral("The node id \"%1\" must be \"%2/%3\": the pack's id, then the folder name.")
+            .arg(id, pack.id, name);
+    if (const QString bad = runtimeProblem(manifest.value("runtime").toObject(), origin); !bad.isEmpty())
+        return bad;
+    const Errors errors = registry.addManifest(manifest);
+    for (const Error &error : errors)
+        if (error.severity == Error::Severity::Warning) {
+            Error warning = error;
+            warning.message = QStringLiteral("%1: %2").arg(name, error.message);
+            warnings << warning;
+        }
+    if (hasErrors(errors))
+        return reasonOf(errors);
+    typeId = id;
+    return {};
+}
+
+} // namespace
+
+QString packsDir() { return dataDir() + QStringLiteral("/packs"); }
+
+QStringList packSearchPaths() {
+    QStringList paths{packsDir()};
+    for (const QString &extra : currentSettings().packPaths)
+        paths << QDir::cleanPath(expandHome(extra));
+    return paths;
+}
+
+bool PackReport::hasProblems() const {
+    for (const LoadedPack &pack : packs)
+        if (!pack.enabled || !pack.disabled.isEmpty())
+            return true;
+    return false;
+}
+
+LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin) {
+    LoadedPack loaded;
+    loaded.path = folder;
+
+    const Result<QJsonObject> read = readJsonObject(folder + QStringLiteral("/pack.json"));
+    if (!read.ok()) {
+        loaded.errors = read.errors();
+        return loaded;
+    }
+    const std::optional<PackManifest> pack = parsePack(read.value(), origin, loaded.errors);
+    loaded.id = read.value().value("id").toString();
+    loaded.version = read.value().value("version").toString();
+    loaded.name = read.value().value("name").toString();
+    if (!pack)
+        return loaded;
+    if (!registry.packVersion(pack->id).isEmpty()) {
+        loaded.errors << invalid(QStringLiteral("A pack with the id %1 is already loaded (version %2); this one is skipped.")
+                                     .arg(pack->id, registry.packVersion(pack->id)));
+        return loaded;
+    }
+
+    // A type another pack already declared keeps its owner; ours is reported and the nodes
+    // using it will say why they cannot load.
+    for (const DeclaredPortType &type : pack->types)
+        loaded.errors << registry.add(type);
+
+    for (const QString &name : pack->nodes) {
+        QString typeId;
+        const QString reason = loadNode(registry, *pack, folder, name, origin, typeId, loaded.errors);
+        if (reason.isEmpty())
+            loaded.nodes << typeId;
+        else
+            loaded.disabled << PackProblem{name, reason};
+    }
+    loaded.nodes.sort();
+
+    for (const QFileInfo &entry : QDir(folder).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name))
+        if (!pack->nodes.contains(entry.fileName()) && QFileInfo::exists(entry.filePath() + QStringLiteral("/node.json")))
+            loaded.errors << problem(QStringLiteral("invalid_document"),
+                                     QStringLiteral("The folder \"%1\" has a node.json but pack.json does not list it; "
+                                                    "it is not loaded.").arg(entry.fileName()),
+                                     Error::Severity::Warning);
+
+    registry.setPackVersion(pack->id, pack->version);
+    loaded.enabled = true;
+    return loaded;
+}
+
+PackReport loadPacks(Registry &registry, const QStringList &searchPaths) {
+    PackReport report;
+    for (const QString &path : searchPaths) {
+        const QDir dir(path);
+        if (!dir.exists())
+            continue;
+        for (const QFileInfo &entry : dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
+            if (entry.fileName().startsWith(QLatin1Char('.')))
+                continue;
+            report.packs << loadPack(registry, entry.filePath());
+        }
+    }
+    return report;
+}
+
+PackReport loadInstalledPacks(Registry &registry) {
+    const PackReport report = loadPacks(registry, packSearchPaths());
+    for (const LoadedPack &pack : report.packs) {
+        for (const Error &error : pack.errors)
+            std::fprintf(stderr, "pack %s: %s: %s\n", qPrintable(pack.path), qPrintable(error.code), qPrintable(error.message));
+        for (const PackProblem &node : pack.disabled)
+            std::fprintf(stderr, "pack %s: node %s is disabled: %s\n", qPrintable(pack.path), qPrintable(node.node),
+                         qPrintable(node.reason));
+    }
+    return report;
+}
+
+} // namespace fugue

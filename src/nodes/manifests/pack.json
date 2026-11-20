@@ -1,0 +1,31 @@
+{
+  "manifest": 1,
+  "id": "fugue",
+  "version": "1.0.0",
+  "name": "Fugue",
+  "license": "MIT",
+  "source": "https://github.com/bmaltais/fugue",
+  "description": "The nodes that ship with Fugue.",
+  "nodes": [
+    "blend",
+    "brightness-contrast",
+    "crop",
+    "edit-image",
+    "generate-image",
+    "load-image",
+    "number",
+    "preview",
+    "resize",
+    "save-image",
+    "text",
+    "text-concat"
+  ],
+  "types": [
+    {
+      "id": "fugue/image-model",
+      "version": 1,
+      "kind": "resource",
+      "name": "Image model"
+    }
+  ]
+}

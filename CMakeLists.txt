@@ -86,8 +86,9 @@ target_include_directories(fugue_cli PUBLIC src)
 target_link_libraries(fugue_cli PUBLIC fugue_engine)
 
 # The built-in nodes (spec 14.1): kernels in src/nodes/*.cpp, and one node.json per node
-# in src/nodes/manifests/<name>/, compiled in as Qt resources under :/fugue/nodes. A new
-# .cpp or manifest needs no line here. qt_add_resources on a static library makes an object
+# in src/nodes/manifests/<name>/, compiled in as Qt resources under :/fugue/nodes, which is the
+# `fugue` pack (pack.json lists its nodes; a node.json it does not list is reported). A new
+# .cpp needs no line here; a new node needs its folder added to pack.json. qt_add_resources on a static library makes an object
 # library that is linked into every executable using it, so the resource initializer is
 # never dropped by the linker (tests/cli checks the shipped binary knows fugue/text).
 file(GLOB fugue_nodes_sources CONFIGURE_DEPENDS src/nodes/*.cpp src/nodes/*.h)
@@ -96,7 +97,8 @@ target_include_directories(fugue_nodes PUBLIC src)
 target_link_libraries(fugue_nodes PUBLIC fugue_engine)
 file(GLOB fugue_node_manifests CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/src/nodes/manifests
      src/nodes/manifests/*/node.json)
-set(fugue_node_manifest_files)
+set(fugue_node_manifest_files src/nodes/manifests/pack.json) # the fugue pack's pack.json lists the nodes
+set_source_files_properties(src/nodes/manifests/pack.json PROPERTIES QT_RESOURCE_ALIAS pack.json)
 foreach(manifest ${fugue_node_manifests})
   set_source_files_properties(src/nodes/manifests/${manifest} PROPERTIES QT_RESOURCE_ALIAS ${manifest})
   list(APPEND fugue_node_manifest_files src/nodes/manifests/${manifest})

@@ -1,10 +1,12 @@
 // Node search without a window (spec 12.8): ranking, filtering by a dragged link's port,
 // and what accepting a result does to the canvas.
 
+#include <QTemporaryDir>
 #include <QtTest>
 
 #include "canvas/canvas_model.h"
 #include "engine/document.h"
+#include "engine/pack_loader.h"
 #include "engine/registry.h"
 #include "nodes/builtin.h"
 #include "search/node_search.h"
@@ -51,6 +53,32 @@ private slots:
         canvas = std::make_unique<CanvasModel>(&registry);
         canvas->setDocument(load(small));
         search = canvas->search();
+    }
+
+    // The #23 acceptance test: a pack of fake nodes on disk loads, validates and shows in search.
+    void aNodeFromAPackOnDiskShowsInSearch() {
+        QTemporaryDir root;
+        const QString id = "io.github.alice.tools";
+        QDir().mkpath(root.path() + "/p/sharpen");
+        const auto put = [](const QString &path, const QByteArray &text) {
+            QFile file(path);
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write(text);
+        };
+        put(root.path() + "/p/pack.json", R"({"manifest": 1, "id": "io.github.alice.tools", "version": "1.2.0",
+            "name": "Alice tools", "nodes": ["sharpen"]})");
+        put(root.path() + "/p/sharpen/node.json", R"({"manifest": 1, "id": "io.github.alice.tools/sharpen",
+            "version": "1.2.0", "name": "Sharpen Plus", "category": "Image/Filter", "keywords": ["unsharp"],
+            "runtime": {"kind": "command", "entry": "./sharpen.sh"},
+            "inputs": [{"name": "image", "type": "image"}], "outputs": [{"name": "image", "type": "image"}]})");
+        Registry withPack;
+        nodes::addBuiltinNodeTypes(withPack);
+        QVERIFY(!loadPacks(withPack, {root.path()}).hasProblems());
+        CanvasModel model(&withPack);
+        model.setDocument(load(small));
+        model.search()->openAt(10, 20);
+        model.search()->setQuery("unsharp");
+        QCOMPARE(names(model.search()->results()), QStringList{"Sharpen Plus"});
     }
 
     void emptyQueryListsEveryNodeTypeByCategory() {

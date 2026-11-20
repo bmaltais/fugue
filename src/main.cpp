@@ -19,6 +19,7 @@
 #include "cli/cli.h"
 #include "menu/image_actions.h"
 #include "menu/menu_commands.h"
+#include "engine/pack_loader.h"
 #include "engine/registry.h"
 #include "nodes/builtin.h"
 #include "qml_app.h"
@@ -33,7 +34,12 @@ int main(int argc, char *argv[]) {
     // `fugue <command>` is the command line (spec 13): no QGuiApplication, no
     // display, no QML. It must be decided before any application object exists.
     if (fugue::cli::wantsCli(argc, argv))
-        return fugue::cli::run(argc, argv, {fugue::nodes::addBuiltinNodeTypes, fugue::nodes::addBuiltinKernels});
+        return fugue::cli::run(argc, argv,
+                               {[](fugue::Registry &registry) {
+                                    fugue::nodes::addBuiltinNodeTypes(registry);
+                                    fugue::loadInstalledPacks(registry);
+                                },
+                                fugue::nodes::addBuiltinKernels});
 
     QGuiApplication app(argc, argv);
     app.setApplicationName("fugue");
@@ -63,6 +69,7 @@ int main(int argc, char *argv[]) {
     // packs from M3) and starts on an empty workflow.
     fugue::Registry registry;
     fugue::nodes::addBuiltinNodeTypes(registry);
+    fugue::loadInstalledPacks(registry);
     CanvasModel canvasModel(&registry);
     // The open workflows: tabs, open, save, recovery, import (spec 11). It starts with one
     // empty workflow and has the previous session's recovery copies ready to offer.
