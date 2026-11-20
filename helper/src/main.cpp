@@ -24,6 +24,7 @@
 // is #78; this runs one operation and exits.
 
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -247,5 +248,9 @@ int main(int argc, char **argv) {
         reply = {{"error", {{"code", "input_invalid"}, {"message", e.what()}}}};
     }
     std::printf("%s\n", reply.dump().c_str());
-    return reply.contains("error") ? 1 : 0;
+    std::fflush(stdout);
+    // End without the exit-time teardown (run() has freed the models already): NVIDIA's Vulkan
+    // driver can crash in it, a shader-compiler thread still running at exit (seen with SDXL),
+    // which would turn a finished run into a failed one.
+    std::_Exit(reply.contains("error") ? 1 : 0);
 }
