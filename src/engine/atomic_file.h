@@ -72,7 +72,10 @@ enum class FileMode {
 };
 
 // Writes `bytes` as the whole of `path` through a PartialFile, replacing what is there in
-// one step and making the folders above it. Empty when done; else one error naming `what`.
+// one step and making the folders above it. The content is on the disk (fsync) before it
+// takes the name, so a power loss leaves the old file or the new one, never an empty one. A
+// `path` that is a symbolic link stays one: the file it points to is replaced. Empty when
+// done; else one error naming `what`.
 Errors replaceFile(const QString &path, const QByteArray &bytes, const QString &what,
                    FileMode mode = FileMode::Usual);
 

@@ -5,6 +5,7 @@
 #include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QScopeGuard>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -246,6 +247,58 @@ private slots:
         QFile file(providersFile());
         QVERIFY(file.open(QIODevice::ReadOnly));
         QCOMPARE(file.readAll(), QByteArray("{broken"));
+    }
+
+    // providers.json edited by hand (or by another window) after the panel read it: a change
+    // in the panel is refused rather than written over it, and the panel shows the file as it
+    // is now.
+    void aProvidersFileChangedOutsideThePanelIsNotOverwritten() {
+        const auto list = [](const QStringList &names) {
+            QJsonArray providers;
+            for (const QString &name : names)
+                providers.append(QJsonObject{{"name", name}, {"type", "omarchy"}});
+            return QJsonDocument(QJsonObject{{"providers", providers}}).toJson();
+        };
+        writeFile(providersFile(), list({"This machine", "A"}));
+        SettingsModel model;
+        QCOMPARE(model.providers().size(), 2);
+        writeFile(providersFile(), list({"This machine", "A", "B"}));
+        QSignalSpy changed(&model, &SettingsModel::providersChanged);
+        QVERIFY(!model.setProviderField(0, "enabled", false).isEmpty());
+        const auto loaded = loadProviderInstances(providersFile());
+        QVERIFY(loaded.ok());
+        QCOMPARE(loaded.value().size(), 3);
+        QVERIFY(loaded.value().first().enabled);
+        QCOMPARE(model.providers().size(), 3);
+        QVERIFY(changed.count() >= 1);
+        // Now that the panel shows it, the change goes through.
+        QCOMPARE(model.setProviderField(0, "enabled", false), QString());
+        QCOMPARE(loadProviderInstances(providersFile()).value().size(), 3);
+    }
+
+    // Without providers.json the panel shows the defaults, paired hosts included. While
+    // Omarchy's network.json does not read (omarchy-agent-local rewriting it), the hosts are
+    // unknown, so a change is refused rather than written without them for good.
+    void theDefaultsAreNotSavedWithoutThePairedHosts() {
+        const QByteArray home = qgetenv("HOME");
+        const auto restore = qScopeGuard([home] { qputenv("HOME", home); });
+        qputenv("HOME", m_home.filePath("home").toUtf8());
+        const QString network = m_home.filePath("home/.local/state/omarchy/agent-local/network.json");
+        writeFile(network, "{\"hosts\": {\"studio\": ");
+        SettingsModel model;
+        const QString refused = model.setProviderField(0, "enabled", false);
+        QVERIFY(!refused.isEmpty());
+        QVERIFY2(refused.contains("network.json"), qPrintable(refused));
+        QVERIFY(!QFile::exists(providersFile()));
+        // Once it reads again, the hosts are in what is written.
+        writeFile(network, QJsonDocument(QJsonObject{{"hosts", QJsonObject{{"studio", QJsonObject{
+                               {"dns", "studio.tail1234.ts.net"}, {"paired", true}}}}}}).toJson());
+        model.reload();
+        QCOMPARE(model.setProviderField(0, "enabled", false), QString());
+        const auto loaded = loadProviderInstances(providersFile());
+        QVERIFY(loaded.ok());
+        QCOMPARE(loaded.value().size(), 2);
+        QCOMPARE(loaded.value().last().name, QStringLiteral("studio"));
     }
 };
 

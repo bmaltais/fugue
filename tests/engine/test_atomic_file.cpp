@@ -139,6 +139,19 @@ private slots:
         QCOMPARE(left, expected);
     }
 
+    // A settings file a dotfile manager links in stays a link: its target gets the content.
+    void replacingASymlinkedFileWritesItsTargetAndKeepsTheLink() {
+        writeAll(path("real-providers.json"), "old");
+        QVERIFY(QFile::link(path("real-providers.json"), path("providers.json")));
+        QVERIFY(!hasErrors(replaceFile(path("providers.json"), "new", "providers.json", FileMode::OwnerOnly)));
+        QVERIFY(QFileInfo(path("providers.json")).isSymLink());
+        QCOMPARE(readAll(path("real-providers.json")), QByteArray("new"));
+        QCOMPARE(readAll(path("providers.json")), QByteArray("new"));
+        QStringList left = entries();
+        left.sort();
+        QCOMPARE(left, (QStringList{"providers.json", "real-providers.json"}));
+    }
+
     void aMissingFolderIsAnError() {
         PartialFile partial(path("no/such/folder"), "a.png");
         const Errors written = partial.write("x", path("no/such/folder/a.png"));

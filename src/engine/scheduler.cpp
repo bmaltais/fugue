@@ -12,6 +12,7 @@
 #include <QPointer>
 #include <QSet>
 #include <QRandomGenerator>
+#include <QScopeGuard>
 #include <QThread>
 #include <QThreadPool>
 #include <QTimer>
@@ -1259,14 +1260,29 @@ RunOutcome runGraph(const CompiledGraph &graph, const RunFolder &folder, const R
     return run.outcome();
 }
 
-GraphCheck checkGraph(const CompiledGraph &graph, const RunEnvironment &environment, const RunOptions &options) {
+void CheckAbort::abort() {
+    m_aborted = true;
+    if (m_quit)
+        m_quit();
+}
+
+GraphCheck checkGraph(const CompiledGraph &graph, const RunEnvironment &environment, const RunOptions &options,
+                      CheckAbort *abort) {
     Scheduler scheduler(graph, std::nullopt, environment, options, true);
     QEventLoop loop;
     scheduler.onFinished = [&loop] { loop.quit(); };
-    scheduler.start();
-    if (!scheduler.finished())
+    if (abort)
+        abort->m_quit = [&loop] { loop.quit(); };
+    const auto disarm = qScopeGuard([abort] {
+        if (abort)
+            abort->m_quit = nullptr;
+    });
+    if (!(abort && abort->m_aborted))
+        scheduler.start();
+    if (!scheduler.finished() && !(abort && abort->m_aborted))
         loop.exec();
     GraphCheck check;
+    check.aborted = !scheduler.finished();
     check.states = scheduler.outcome().states;
     check.keys = scheduler.outcome().keys;
     check.warnings = scheduler.outcome().errors;

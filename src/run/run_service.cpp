@@ -3,6 +3,7 @@
 #include <QCryptographicHash>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QEventLoop>
 #include <QFileInfo>
 #include <QImage>
 #include <QImageReader>
@@ -29,6 +30,8 @@ namespace fugue {
 namespace {
 
 constexpr int kThumbnailWidth = 512;
+// How long a closing window waits for its active run to end after cancelling it.
+constexpr int kShutdownWaitMs = 5000;
 
 QDateTime now() { return QDateTime::currentDateTimeUtc(); }
 
@@ -145,11 +148,32 @@ public:
             if (queue().remove(waiting.folder.id()))
                 waiting.folder.finish(RunStatus::Cancelled, {}, now());
         m_waiting.clear();
-        if (m_active) {
-            m_active.reset(); // cancels and waits for its kernels
-            queue().remove(m_activeId);
-        }
+        if (m_active)
+            endActiveRun();
         m_lock.reset();
+    }
+
+    // The active run, cancelled as the window closes: given kShutdownWaitMs to end as a run
+    // does (its provider jobs cancelled, run.done written, the file-hash memo saved), else
+    // deleted (which waits for its kernels) and ended here, so its folder never stays
+    // "running" with no one left to end it.
+    void endActiveRun() {
+        if (!m_active->isFinished()) {
+            QEventLoop loop;
+            connect(m_active.get(), &Run::finished, &loop, &QEventLoop::quit);
+            QTimer::singleShot(kShutdownWaitMs, &loop, &QEventLoop::quit);
+            m_active->cancel();
+            if (!m_active->isFinished())
+                loop.exec();
+        }
+        const bool finished = m_active->isFinished();
+        m_active.reset();
+        if (!finished) {
+            if (m_activeFolder && !isTerminal(m_activeFolder->status()))
+                m_activeFolder->finish(RunStatus::Cancelled, {}, now());
+            m_process->hashes.save();
+        }
+        queue().remove(m_activeId);
     }
 
     // On the run thread once its event loop has ended (QThread::finished), so no check is
@@ -165,9 +189,12 @@ public:
             return;
         // checkGraph waits on providers with an event loop of its own, which delivers what is
         // queued here meanwhile: a start then waits for the check to end (compiling would
-        // replace the providers the check is using).
+        // replace the providers the check is using), which it ends at once. A check waits
+        // on describe() (a paired host: up to its transfer timeout); a run does not.
         if (m_checking) {
             m_parked.append({id, request});
+            if (m_checkAbort)
+                m_checkAbort->abort();
             return;
         }
         const Compilation compilation = compileRequest(request);
@@ -294,17 +321,25 @@ private:
         return compilation ? Compilation(compilation.value(), problems) : Compilation(problems);
     }
 
-    // The run.done of a run someone else ended (a `fugue runs cancel` of a waiting run).
+    // The run.done of a waiting run whose entry someone else took: only a cancel does that
+    // (`fugue runs cancel`), which takes the entry and then ends the folder. One not ended yet
+    // (or whose canceller died in between) is ended here as cancelled; RunFolder::finish
+    // writes one run.done whoever comes first.
     static QJsonObject ended(const RunFolder &folder) {
-        for (const QJsonObject &e : folder.events())
-            if (e.value("event") == QLatin1String("run.done"))
-                return e;
-        return {{"event", "run.done"}, {"status", runStatusName(folder.status())}};
+        return folder.finish(RunStatus::Cancelled, {}, now());
     }
 
     void poll() {
-        if (m_checking)
-            return; // its turn is looked at again once the check is over
+        if (m_checking) {
+            // A check under way gives way to a run whose turn has come, which would otherwise
+            // hold up every run queued behind it too; the run starts once the check is over.
+            const QList<QueueEntry> entries = queue().entries();
+            if (m_checkAbort && !entries.isEmpty()
+                && std::any_of(m_waiting.cbegin(), m_waiting.cend(),
+                               [&](const Waiting &w) { return w.folder.id() == entries.first().run; }))
+                m_checkAbort->abort();
+            return;
+        }
         if (m_active) {
             if (!m_cancelAsked && m_activeFolder && m_activeFolder->cancelRequested()) {
                 m_cancelAsked = true;
@@ -329,8 +364,14 @@ private:
         const QString first = entries.first().run;
         const auto mine = std::find_if(m_waiting.begin(), m_waiting.end(),
                                        [&](const Waiting &w) { return w.folder.id() == first; });
-        if (mine == m_waiting.end() || !m_lock->tryAcquire() || !queue().activate(first))
+        if (mine == m_waiting.end() || !m_lock->tryAcquire())
             return;
+        if (!queue().activate(first)) {
+            // Its entry went meanwhile (a `fugue runs cancel`): the lock goes back at once, or
+            // every worker would wait on a window that runs nothing. The next poll ends the run.
+            m_lock->release();
+            return;
+        }
         begin(m_waiting.takeAt(int(mine - m_waiting.begin())));
     }
 
@@ -355,8 +396,8 @@ private:
         m_active.reset(new Run(waiting.graph, waiting.folder, m_process->environment, waiting.options));
         connect(m_active.get(), &Run::emitted, this, [this, id](const QJsonObject &e) { emit event(id, withThumbnails(e)); });
         connect(m_active.get(), &Run::finished, this, [this, id] {
-            // shutdown() deletes the run, which cancels it and finishes on the way: shutdown
-            // clears up after it, and m_active is already empty.
+            // A run that ends while the window closes (endActiveRun waits for this) is
+            // cleared up there.
             if (m_quitting)
                 return;
             queue().remove(id);
@@ -423,13 +464,18 @@ private:
         const Compilation compilation = compileRequest(m_check);
         QJsonObject nodes;
         Errors problems = compilation.problems();
+        bool aborted = false;
         if (compilation.ok()) {
             RunEnvironment environment = m_process->environment;
             environment.registry = &m_compileRegistry;
             RunOptions options;
             options.workflow = m_check.workflow; // a relative file is its folder's (Appendix A)
             options.roots = m_setup.roots;
-            const GraphCheck graphCheck = checkGraph(*compilation, environment, options);
+            CheckAbort abort;
+            m_checkAbort = &abort;
+            const GraphCheck graphCheck = checkGraph(*compilation, environment, options, &abort);
+            m_checkAbort = nullptr;
+            aborted = graphCheck.aborted;
             problems += graphCheck.warnings;
             for (auto it = graphCheck.states.begin(); it != graphCheck.states.end(); ++it)
                 nodes.insert(it.key(), QJsonObject{{"state", nodeStateName(it.value())}});
@@ -439,15 +485,20 @@ private:
         m_checking = false;
         if (m_quitting)
             return;
-        emit checked(ticket, nodes, toJson(problems));
-        // What waited for the check: runs started meanwhile, a newer check, the queue.
+        // An aborted check is made again later (once no run is active), unless a newer one
+        // replaced it.
+        if (!aborted)
+            emit checked(ticket, nodes, toJson(problems));
+        else if (m_checkTicket < 0)
+            m_checkTicket = ticket;
+        // What waited for the check: runs started meanwhile, the queue, a newer check.
         const QList<Parked> parked = std::exchange(m_parked, {});
         for (const Parked &p : parked)
             start(p.id, p.request);
-        if (m_checkTicket >= 0 && !m_active)
-            QTimer::singleShot(0, this, &RunThread::checkNow);
         if (!m_waiting.isEmpty())
             poll();
+        if (m_checkTicket >= 0 && !m_active)
+            QTimer::singleShot(0, this, &RunThread::checkNow);
     }
 
     RunSetup m_setup;
@@ -469,6 +520,7 @@ private:
     };
     QList<Parked> m_parked; // started while a check was under way
     bool m_checking = false;
+    CheckAbort *m_checkAbort = nullptr; // the check under way's, while m_checking
     QElapsedTimer m_pruned;
     bool m_quitting = false;
     RunRequest m_check;

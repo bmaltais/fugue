@@ -16,6 +16,8 @@
 #include <QUndoStack>
 #include <QtTest>
 
+#include <atomic>
+
 #include "canvas_app.h"
 #include "engine/fake_provider.h"
 #include "engine/queue.h"
@@ -79,14 +81,35 @@ fugue::Description imageDescription() {
     return description;
 }
 
+// While set, a SlowProvider's describe() never answers: a paired host that takes its whole
+// transfer timeout. Set and read on the test's thread and the run thread.
+std::atomic<bool> g_describeHangs{false};
+
 // A provider whose description takes a while, as a real one over HTTP does: checkGraph waits
 // for it on an event loop of its own.
 class SlowProvider : public FakeProvider {
 public:
     using FakeProvider::FakeProvider;
     void describe(fugue::Reply<fugue::Description> reply) override {
+        if (g_describeHangs.load()) {
+            m_unanswered.append(std::move(reply));
+            return;
+        }
         QTimer::singleShot(300, this, [this, reply = std::move(reply)]() mutable { FakeProvider::describe(std::move(reply)); });
     }
+    // A cancel is answered from the event loop, as over HTTP, never inside the call.
+    void cancel(const QString &job, fugue::Reply<QString> reply) override {
+        QTimer::singleShot(0, this, [this, job, reply = std::move(reply)]() mutable { FakeProvider::cancel(job, std::move(reply)); });
+    }
+
+private:
+    QList<fugue::Reply<fugue::Description>> m_unanswered;
+};
+
+// Until it goes, describe() hangs.
+struct DescribeHangs {
+    DescribeHangs() { g_describeHangs.store(true); }
+    ~DescribeHangs() { g_describeHangs.store(false); }
 };
 
 // The window with its runs. The fake provider is made on the run thread, where providers
@@ -125,8 +148,12 @@ struct RunApp {
         runs->registerCommands(app.commands);
         app.runs = runs.get();
     }
-    ~RunApp() {
-        // The window goes before the runs it shows, as in main(), which makes its engine last.
+    ~RunApp() { close(); }
+    // The window goes before the runs it shows, as in main(), which makes its engine last.
+    // The test's folder stays until the RunApp goes.
+    void close() {
+        if (!service)
+            return;
         qDeleteAll(app.engine.rootObjects());
         runs.reset();
         service.reset(); // stops the run thread before the fake goes
@@ -151,6 +178,16 @@ struct RunApp {
         service->onRunThread([&] { call(*fake); });
     }
 };
+
+// Leaves a check of the window waiting on a describe() that never answers. The checks
+// asked before it (the one when the window opened: 300 ms pause, 300 ms describe) are over
+// first, so this one is the one that hangs.
+void hangACheck(RunApp &r) {
+    QTest::qWait(1000);
+    const DescribeHangs hangs;
+    r.runs->checkNow();
+    QTest::qWait(200); // the check is waiting on describe
+}
 
 } // namespace
 
@@ -482,6 +519,28 @@ private slots:
         QVERIFY(r.app.warnings.isEmpty());
     }
 
+    // An edit's check that a newer check replaces before it is answered (only the latest is
+    // answered) still counts as the edit's: the last run's error goes.
+    void anEditsCheckReplacedByANewerOneStillClearsTheLastRunsErrors() {
+        RunApp r(kGraph);
+        QVERIFY(r.app.open());
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(r.jobs().size(), 1);
+        r.onFake([&](FakeProvider &f) { f.fail(f.jobs().at(0), fugue::makeError("node_failed", "The model fell over.")); });
+        QTRY_COMPARE(r.jobs().size(), 2);
+        r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(1), {{"image.png", png(64, 64)}}); });
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(r.state("gen"), QStringLiteral("error"));
+
+        QSignalSpy checked(r.runs.get(), &CanvasRuns::checkApplied);
+        QVERIFY(r.app.model.widgets()->setText("words", "text", "a dog").isEmpty());
+        r.runs->checkNow(); // the edit's
+        r.runs->checkNow(); // replaces it before the run thread answers it
+        QTRY_VERIFY(checked.size() >= 1);
+        QCOMPARE(r.state("gen"), QStringLiteral("stale"));
+    }
+
     // 10.3 between runs: what is in the cache is cached, what would run is stale; an edit
     // upstream makes its downstream stale again.
     void nodesShowTheirCacheStateBetweenRuns() {
@@ -599,6 +658,95 @@ private slots:
         QCOMPARE(finished.first().at(1).toString(), QStringLiteral("ok"));
     }
 
+    // A run asked for while a check waits on a provider that does not answer starts at once:
+    // the check gives way, and is made again later.
+    void aRunAskedForDuringAHangingCheckDoesNotWaitForIt() {
+        RunApp r(kGraph, true);
+        QVERIFY(r.app.open());
+        hangACheck(r);
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE_WITH_TIMEOUT(r.jobs().size(), 1, 5000);
+        r.runs->cancel();
+        QTRY_VERIFY(!r.runs->busy());
+    }
+
+    // A window run whose turn comes during a check that hangs starts at once, so the CLI runs
+    // queued behind it do not wait either.
+    void aWindowRunsTurnDuringAHangingCheckDoesNotWaitForIt() {
+        RunApp r(kGraph, true);
+        QVERIFY(r.app.open());
+        const fugue::Queue queue(r.app.dir.path() + "/queue");
+        QVERIFY(queue.enqueue("cli-run", "/w/a.fugue", false));
+        QVERIFY(queue.activate("cli-run"));
+        fugue::Lock worker(r.app.dir.path() + "/engine.lock");
+        QVERIFY(worker.tryAcquire());
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(queue.entries().size(), 2);
+        hangACheck(r);
+        QVERIFY(queue.remove(QStringLiteral("cli-run")));
+        worker.release();
+        QTRY_COMPARE_WITH_TIMEOUT(r.jobs().size(), 1, 5000);
+        r.runs->cancel();
+        QTRY_VERIFY(!r.runs->busy());
+    }
+
+    // A window run whose entry goes just as its turn comes (a `fugue runs cancel` between the
+    // window reading the queue and activating its entry) leaves the engine lock free: here
+    // the entry cannot be activated at all.
+    void aTurnThatCannotBeTakenLeavesTheEngineLockFree() {
+        RunApp r(kGraph);
+        QVERIFY(r.app.open());
+        const QString queueDir = r.app.dir.path() + "/queue";
+        const fugue::Queue queue(queueDir);
+        QVERIFY(queue.enqueue("cli-run", "/w/a.fugue", false));
+        QVERIFY(queue.activate("cli-run"));
+        fugue::Lock worker(r.app.dir.path() + "/engine.lock");
+        QVERIFY(worker.tryAcquire());
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(queue.entries().size(), 2);
+        QVERIFY(queue.remove(QStringLiteral("cli-run")));
+        // No entry in the folder can be renamed (activated) from now on.
+        const QFileDevice::Permissions was = QFile::permissions(queueDir);
+        QVERIFY(QFile::setPermissions(queueDir, QFileDevice::ReadOwner | QFileDevice::ExeOwner));
+        worker.release();
+        QTest::qWait(200); // the window has tried its turn a few times
+        bool free = false;
+        for (int i = 0; i < 20 && !free; ++i) {
+            free = worker.tryAcquire();
+            if (!free)
+                QTest::qWait(20);
+        }
+        worker.release();
+        QVERIFY(QFile::setPermissions(queueDir, was));
+        QVERIFY(free);
+        QVERIFY(r.jobs().isEmpty());
+        r.runs->cancel();
+        QTRY_VERIFY(!r.runs->busy());
+    }
+
+    // `fugue runs cancel` of a waiting window run takes its entry, then ends its folder. A
+    // window that looks in between ends it as cancelled, never with the status it had.
+    void aWaitingRunCancelledFromOutsideEndsCancelled() {
+        RunApp r(kGraph);
+        QVERIFY(r.app.open());
+        const fugue::Queue queue(r.app.dir.path() + "/queue");
+        QVERIFY(queue.enqueue("cli-run", "/w/a.fugue", false));
+        QVERIFY(queue.activate("cli-run"));
+        fugue::Lock worker(r.app.dir.path() + "/engine.lock");
+        QVERIFY(worker.tryAcquire());
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(queue.entries().size(), 2);
+        const QString run = r.runs->runs().value(0);
+        QVERIFY(queue.remove(run)); // and the canceller has not ended the folder yet
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(finished.first().at(1).toString(), QStringLiteral("cancelled"));
+        const fugue::Result<fugue::RunFolder> folder = fugue::RunFolder::open(r.app.dir.path() + "/runs", run);
+        QVERIFY(folder.ok());
+        QCOMPARE(fugue::runStatusName(folder->status()), QStringLiteral("cancelled"));
+        QVERIFY(queue.remove(QStringLiteral("cli-run")));
+    }
+
     // Closing the window while a check waits on a provider neither hangs nor crashes.
     void closingDuringACheckIsClean() {
         auto r = std::make_unique<RunApp>(kGraph, true);
@@ -608,12 +756,29 @@ private slots:
         r.reset();
     }
 
-    // Closing the window while a node runs cancels the run, which reports its end as it goes.
+    // Closing the window while a node runs cancels the run, which ends as cancelled: its
+    // folder says so (run.done, `ended`), the queue is empty (`fugue runs` lists nothing) and
+    // the file-hash memo is saved.
     void closingDuringARunIsClean() {
         auto r = std::make_unique<RunApp>(kGraph, true);
         QVERIFY(r->app.open());
         r->app.key(Qt::Key_Return, Qt::ControlModifier);
         QTRY_COMPARE(r->state("gen"), QStringLiteral("running"));
+        const QString run = r->runs->runs().value(0);
+        QVERIFY(!run.isEmpty());
+        const QString root = r->app.dir.path();
+        r->close();
+
+        const fugue::Result<fugue::RunFolder> folder = fugue::RunFolder::open(root + "/runs", run);
+        QVERIFY(folder.ok());
+        QCOMPARE(fugue::runStatusName(folder->status()), QStringLiteral("cancelled"));
+        QVERIFY(folder->state().contains("ended"));
+        QCOMPARE(folder->state().value("status").toString(), QStringLiteral("cancelled"));
+        const QList<QJsonObject> events = folder->events();
+        QVERIFY(std::any_of(events.cbegin(), events.cend(),
+                            [](const QJsonObject &e) { return e.value("event") == QLatin1String("run.done"); }));
+        QVERIFY(fugue::Queue(root + "/queue").entries().isEmpty());
+        QVERIFY(QFileInfo::exists(root + "/hashes.json"));
         r.reset();
     }
 

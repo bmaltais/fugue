@@ -202,6 +202,8 @@
   "Not available yet": "Not available yet",
   "Not installed. Find it in packs…": "Not installed. Find it in packs…",
   "Not now": "Not now",
+  "Nothing was saved: %1 changed outside the panel. It now shows the file as it is; make the change again.": "Nothing was saved: %1 changed outside the panel. It now shows the file as it is; make the change again.",
+  "Nothing was saved: your paired hosts cannot be read now (%1). Try again in a moment.": "Nothing was saved: your paired hosts cannot be read now (%1). Try again in a moment.",
   "Only files can be opened, not %1.": "Only files can be opened, not %1.",
   "Open": "Open",
   "Open Image": "Open Image",

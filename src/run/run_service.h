@@ -30,7 +30,9 @@
 // check() is `fugue validate`'s view of the nodes (10.3) for the canvas: cached, stale,
 // frozen or skipped, by path id, made on the run thread while no run is active (checkGraph
 // waits on providers with an event loop of its own, which must not run inside a run), the
-// latest request only.
+// latest request only. A check gives way to runs: one asked for, or a waiting one whose turn
+// in the queue comes, ends it at once (a paired host's describe can take its whole transfer
+// timeout), and it is made again once no run is active.
 //
 // Cancel (9.6): a waiting run leaves the queue and ends as cancelled; an active one is
 // cancelled cooperatively. `fugue runs cancel` reaches an active window run through the run
@@ -90,7 +92,8 @@ class RunService : public QObject {
 
 public:
     explicit RunService(RunSetup setup, QObject *parent = nullptr);
-    // Cancels what is running, waits for it, and stops the run thread.
+    // Cancels what is running, waits for it to end (at most a few seconds, then ends its
+    // folder as cancelled), and stops the run thread.
     ~RunService() override;
 
     // Starts a run and returns its id at once; everything else happens on the run thread.
