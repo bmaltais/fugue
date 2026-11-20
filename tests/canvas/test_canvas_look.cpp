@@ -207,6 +207,10 @@ private slots:
         QCOMPARE(at(56 + 100, 60 + 28 + 4 + 24 + 12 + 2), look->tokens().body.name()); // between rows, left of the label
         QCOMPARE(at(56 + 120, 60 + 6), look->tokens().header.name());
         QCOMPARE(at(56 + 252 + 120, 360 + 6), look->tokens().errorHeader.name());
+        // A colored node (column 1, row 2) takes its color whole, header and body (#72).
+        const QVariantMap blue = look->role("blue");
+        QCOMPARE(at(56 + 252 + 120, 660 + 6), blue.value("tint").value<QColor>().name());
+        QCOMPARE(at(56 + 252 + 100, 660 + 28 + 4 + 24 + 12 + 2), blue.value("tintBody").value<QColor>().name());
         // The error's message sits in a chip under it.
         QVERIFY(!app.model.nodes()->data(app.model.nodes()->index(0, 0), NodeList::Error).isNull());
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));

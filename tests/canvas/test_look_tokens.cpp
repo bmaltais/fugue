@@ -94,6 +94,10 @@ private slots:
         COMPARE_COLOR(blue.frameEdge, "#30355f");
         COMPARE_COLOR(blue.frameTitle, "#bea8c3");
         COMPARE_COLOR(blue.tint, "#36354f");
+        // #72: a colored node is tinted whole, as in ComfyUI: its body too, a clear step from
+        // the plain body.
+        QVERIFY(look::deltaE(blue.tintBody, t.body) > 0.03);
+        COMPARE_COLOR(blue.tintBody, "#2f3150");
         // The neutral role takes the label color.
         const look::RoleTokens muted = look::roleTokens(t, t.label, ethereal.value("foreground"), false);
         COMPARE_COLOR(muted.frame, "#1a1b2a");
@@ -268,6 +272,11 @@ private slots:
             const look::RoleTokens r = look::roleTokens(t, colors.value(role), text, read.light);
             QVERIFY2(look::contrast(text, r.tint) >= 4.5, qPrintable(role));
             QVERIFY2(look::contrast(r.frameTitle, r.frame) >= 4.5, qPrintable(role));
+            // The body of a colored node: text and labels read on it. (Its ports keep their 3:1:
+            // a mark draws on the plain body, its hollow inside or its ring, PortDot.qml.)
+            QVERIFY2(look::contrast(text, r.tintBody) >= 4.5, qPrintable(role));
+            QVERIFY2(look::contrast(t.label, r.tintBody) >= std::min(4.5, look::contrast(t.label, t.body)) - 0.01,
+                     qPrintable(role));
         }
     }
 

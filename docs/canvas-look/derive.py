@@ -229,6 +229,13 @@ def tokens(colors, light):
             t[f"tint-{role}"] = mix(t["header"], rc, k)
             if contrast(fg, t[f"tint-{role}"]) >= 4.5:
                 break
+        # The body takes the color too (#72): each tint steps down until the text, and the
+        # label as well as it reads on the plain body, read on it.
+        label_need = min(4.5, contrast(t["label"], t["body"]))
+        for k in ((0.18, 0.14, 0.10, 0.06) if light else (0.22, 0.18, 0.14, 0.10, 0.06)):
+            t[f"tint-body-{role}"] = mix(t["body"], rc, k)
+            if contrast(fg, t[f"tint-body-{role}"]) >= 4.5 and contrast(t["label"], t[f"tint-body-{role}"]) >= label_need:
+                break
     return t
 
 

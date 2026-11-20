@@ -103,9 +103,13 @@ Item {
             readonly property bool failed: node.runState === "error"
             readonly property bool frozen: node.runState === "frozen" && !bypassed && !muted
             readonly property bool dashed: bypassed || node.missing
+            // A layout color tints the whole node, header and body, as in ComfyUI (#72).
+            readonly property var colorRole: node.color !== "" ? node.look.role(node.color) : null
             readonly property color headerFill: failed ? node.look.errorHeader
                                                : bypassed ? node.look.bypassHeader
-                                               : node.color !== "" ? node.look.role(node.color).tint : node.look.header
+                                               : colorRole ? colorRole.tint : node.look.header
+            readonly property color bodyFill: bypassed ? node.look.bypassBody
+                                             : colorRole ? colorRole.tintBody : node.look.body
             readonly property color edge: failed ? node.look.error
                                         : running ? node.look.accent
                                         : node.hovered ? node.look.hairlineStrong : node.look.hairline
@@ -163,7 +167,7 @@ Item {
                 width: parent.width
                 height: parent.height
                 radius: face.corner
-                color: node.look.body
+                color: face.bodyFill
                 border.width: 1
                 border.color: node.look.hairline
             }
@@ -171,7 +175,7 @@ Item {
             Rectangle {
                 anchors.fill: parent
                 radius: face.corner
-                color: face.bypassed ? node.look.bypassBody : node.look.body
+                color: face.bodyFill
                 border.width: face.dashed ? 0 : 1
                 border.color: face.edge
             }

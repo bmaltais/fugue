@@ -201,6 +201,15 @@ RoleTokens roleTokens(const Tokens &t, const QColor &role, const QColor &text, b
         if (contrast(text, r.tint) >= 4.5)
             break;
     }
+    // The body takes the color too (#72), as a bypassed node takes magenta: each tint steps down
+    // until the text, and the label as well as it reads on the plain body, read on it.
+    const double labelNeed = std::min(4.5, contrast(t.label, t.body));
+    const std::vector<double> bodies = light ? std::vector<double>{.18, .14, .10, .06} : std::vector<double>{.22, .18, .14, .10, .06};
+    for (const double k : bodies) {
+        r.tintBody = mix(t.body, role, k);
+        if (contrast(text, r.tintBody) >= 4.5 && contrast(t.label, r.tintBody) >= labelNeed)
+            break;
+    }
     return r;
 }
 
@@ -506,7 +515,8 @@ QVariantMap CanvasLook::role(const QString &name) const {
     else
         color = m_tokens.label; // muted, and anything unknown
     const fugue::look::RoleTokens r = fugue::look::roleTokens(m_tokens, color, m_text, m_light);
-    const QVariantMap map{{"frame", r.frame}, {"frameEdge", r.frameEdge}, {"frameTitle", r.frameTitle}, {"tint", r.tint}};
+    const QVariantMap map{{"frame", r.frame}, {"frameEdge", r.frameEdge}, {"frameTitle", r.frameTitle}, {"tint", r.tint},
+                          {"tintBody", r.tintBody}};
     m_roles.insert(name, map);
     return map;
 }

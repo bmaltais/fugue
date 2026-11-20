@@ -91,6 +91,11 @@ svg.wires.over { z-index: 30; }
 .node.tint-green .hd { background: var(--tint-green); }
 .node.tint-magenta .hd { background: var(--tint-magenta); }
 .node.tint-orange .hd { background: var(--tint-orange); }
+/* A layout color tints the whole node, as in ComfyUI (#72): the body too. */
+.node.tint-blue { background: var(--tint-body-blue); }
+.node.tint-green { background: var(--tint-body-green); }
+.node.tint-magenta { background: var(--tint-body-magenta); }
+.node.tint-orange { background: var(--tint-body-orange); }
 .progress { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--hairline); }
 .progress i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); }
 

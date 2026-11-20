@@ -57,9 +57,10 @@ struct Tokens {
 // `colors` holds at least background, foreground, accent and red (Theme's fallbacks applied).
 Tokens tokens(const QHash<QString, QColor> &colors, bool light);
 
-// A layout color (spec 4.5) as a frame fill, its edge and title, and a node header tint.
+// A layout color (spec 4.5) as a frame fill, its edge and title, and a node's header tint and
+// body tint (the whole node takes the color, as in ComfyUI; #72).
 struct RoleTokens {
-    QColor frame, frameEdge, frameTitle, tint;
+    QColor frame, frameEdge, frameTitle, tint, tintBody;
 };
 RoleTokens roleTokens(const Tokens &tokens, const QColor &role, const QColor &text, bool light);
 
@@ -156,7 +157,7 @@ public:
     void update(const QHash<QString, QColor> &colors, bool light, fugue::look::Corners corners, int textSize);
 
     // A layout color (spec 4.5: a theme role, a palette name such as "blue" or a semantic one
-    // such as "accent" or "muted") as {frame, frameEdge, frameTitle, tint}; an unknown role is
+    // such as "accent" or "muted") as {frame, frameEdge, frameTitle, tint, tintBody}; an unknown role is
     // muted.
     Q_INVOKABLE QVariantMap role(const QString &name) const;
     // The color a port color key stands for: the type colors, "any" (the label color) and

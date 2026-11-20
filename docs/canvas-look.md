@@ -30,8 +30,9 @@ contrast table from the installed themes, so the three cannot drift apart.
    node made outranks what it is. Chrome (headers, borders, labels) stays quiet. Learned from
    Substance 3D Designer, Krea Nodes and Figma Weave, where the preview is the node's face.
 2. **Color means port type and nothing else.** Headers are neutral. States are glyphs, edges
-   and opacity, with color only as a second signal. A layout color (spec 4.5) tints a header
-   gently and never fights the type colors.
+   and opacity, with color only as a second signal. A layout color (spec 4.5) tints the whole
+   node, header and body, as ComfyUI's node colors do (#72), gently enough that text, labels and
+   the type colors still read.
 3. **One elevation order:** canvas, frame, node, selected node, popup. Dark themes lift a surface
    with a lighter fill; light themes with a white card and a soft shadow.
 4. **Round corners by default, any radius holds.** Corners are 8 px unless the corner radius
@@ -112,7 +113,7 @@ the mockups use the same.
 | Width | default 60u (240), minimum 40u (160), maximum 120u; auto-sized (longer text values widen it) until a resize pins it; double-click on a corner returns to auto |
 | Resize | from any of the four corners (as ComfyUI): a square 4u wide (at least 12 screen px) inside each corner, with the matching diagonal resize cursor before the press; a top or left corner moves the node so the opposite corner stays put. The mark: a 1.5 px stroke 3 px inside the edge, concentric with the corner (an L at `r` = 0, an arc of `r` − 3 with short legs beyond), in all four corners while the node is hovered or selected (as ComfyUI's Vue nodes), in `label` (4.5:1 on the body and the header, 6.1), and in `text` in the corner under the pointer or being dragged; a port in a corner wins over it (a press there drags a link). Sizes in `u`: inset 0.75u, legs at least 0.75u, stroke 0.375u |
 | Edge | 1 px `hairline` inside the box; `hairline-strong` on hover |
-| Fill | `body` |
+| Fill | `body`; `tint-body-<role>` when the node has a layout color (#72) |
 | Corner | `r` (header top corners `r − 1` inside the edge) |
 | Body padding | 1u above the first row, 2u below the last item |
 | Shadow | level 1 (section 7) |
@@ -254,6 +255,7 @@ light design tools lay cards on a gray table.
 | `frame-<role>-edge` | `mix(canvas, role, .35)` | same | frame edge |
 | `frame-<role>-title` | `mix(role, text, k)`, k from .5, stepping up by .1 until 4.5:1 on the frame fill | same | frame title |
 | `tint-<role>` | `mix(header, role, k)`, k = .18, stepping down by .04 until the title reads at 4.5:1 | same, from .14 | header of a colored node |
+| `tint-body-<role>` | `mix(body, role, k)`, k = .22, stepping down by .04 until `text` reads at 4.5:1 and `label` as well as on `body` | same, from .18 | body of a colored node (#72); its port marks keep the plain `body` inside and around them, so the type colors keep their 3:1 |
 | `scrim` | black at 45% | black at 22% | behind the `?` overlay |
 
 `text`, `accent`, `accentForeground` and `error` are the theme's own. The neutral role `muted`
