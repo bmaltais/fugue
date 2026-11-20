@@ -10,7 +10,9 @@
 #include "canvas/canvas_model.h"
 #include "engine/document.h"
 #include "engine/registry.h"
+#include "canvas/node_size.h"
 #include "nodes/builtin.h"
+#include "../cpu_time.h"
 
 using namespace fugue;
 
@@ -111,6 +113,22 @@ private slots:
         QVERIFY2(eight > plain, "eight lines are taller than the three-line row");
         canvas.setDocument(document(workflow(placed, QString("line\n").repeated(80))));
         QCOMPARE(node(canvas, "prompt").value("nodeHeight").toDouble(), plain - 64 + 160);
+    }
+
+    // A long prompt is measured only as far as the row's 40u cap, so typing into it does
+    // not lay the whole text out on every key (CPU time, tests/cpu_time.h).
+    void aLongPromptIsMeasuredOnlyToTheCap() {
+        const QString text = QString("a red fox in the snow ").repeated(20000);
+        QCOMPARE(node_size::wrappedLines(text, 200, 12, 10), 11); // one past the cap says "more"
+        QCOMPARE(node_size::wrappedLines("one\ntwo", 200, 12, 10), 2);
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(workflow(placed, text)));
+        const qint64 start = test_support::cpuMs();
+        canvas.setTextSize(13);
+        canvas.setTextSize(12);
+        const qint64 spent = test_support::cpuMs() - start;
+        qInfo("two layouts of a %lld-character prompt: %lld ms CPU", qint64(text.size()), spent);
+        QVERIFY2(spent < 40, qPrintable(QString::number(spent)));
     }
 
     void editingTheContentResizesTheNodeAndItsWiresFollow() {

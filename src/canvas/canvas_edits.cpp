@@ -168,20 +168,27 @@ void CanvasModel::restore(const Snapshot &target, bool selectAdded) {
     QStringList added;
     bool selectionLost = false;
 
-    // Nodes that are gone.
+    // Nodes that are gone, each run of neighbouring rows in one removal (a delete of the
+    // whole graph is one change of the list, not one per node).
     for (int r = int(m_rows.size()) - 1; r >= 0; --r) {
-        const QString id = m_rows[size_t(r)].id;
-        if (doc.graph.nodes.contains(id))
+        if (doc.graph.nodes.contains(m_rows[size_t(r)].id))
             continue;
-        affected.insert(id);
-        if (m_selected.remove(id))
-            selectionLost = true;
-        m_nodeList->beginRemoveRows({}, r, r);
-        m_rows.erase(m_rows.begin() + r);
+        int first = r;
+        while (first > 0 && !doc.graph.nodes.contains(m_rows[size_t(first - 1)].id))
+            --first;
+        for (int i = first; i <= r; ++i) {
+            const QString &id = m_rows[size_t(i)].id;
+            affected.insert(id);
+            if (m_selected.remove(id))
+                selectionLost = true;
+        }
+        m_nodeList->beginRemoveRows({}, first, r);
+        m_rows.erase(m_rows.begin() + first, m_rows.begin() + r + 1);
         m_rowOf.clear();
         for (int i = 0; i < int(m_rows.size()); ++i)
             m_rowOf.insert(m_rows[size_t(i)].id, i);
         m_nodeList->endRemoveRows();
+        r = first;
     }
 
     // The viewport is not part of an edit: keep the one on screen.
@@ -274,14 +281,24 @@ void CanvasModel::relink(const QSet<QString> &nodes) {
     if (nodes.isEmpty())
         return;
     QSet<QString> ends;
+    bool reroutes = false; // a link with reroute points went or came: the points change
+    auto touched = [&](const LinkRow &link) { return nodes.contains(link.toNode) || nodes.contains(link.from.node); };
+    // Each run of neighbouring rows goes in one removal.
     for (int i = int(m_links.size()) - 1; i >= 0; --i) {
-        const LinkRow &link = m_links[size_t(i)];
-        if (!nodes.contains(link.toNode) && !nodes.contains(link.from.node))
+        if (!touched(m_links[size_t(i)]))
             continue;
-        ends << link.toNode << link.from.node;
-        m_linkList->beginRemoveRows({}, i, i);
-        m_links.erase(m_links.begin() + i);
+        int first = i;
+        while (first > 0 && touched(m_links[size_t(first - 1)]))
+            --first;
+        for (int j = first; j <= i; ++j) {
+            const LinkRow &link = m_links[size_t(j)];
+            ends << link.toNode << link.from.node;
+            reroutes |= link.curves.size() > 1;
+        }
+        m_linkList->beginRemoveRows({}, first, i);
+        m_links.erase(m_links.begin() + first, m_links.begin() + i + 1);
         m_linkList->endRemoveRows();
+        i = first;
     }
     m_linksOf.clear();
     for (int i = 0; i < int(m_links.size()); ++i) {
@@ -322,12 +339,14 @@ void CanvasModel::relink(const QSet<QString> &nodes) {
             if (link.toNode != link.from.node)
                 m_linksOf[link.toNode].append(at);
             refreshLinkEnds(at);
+            reroutes |= link.curves.size() > 1;
         }
         m_linkList->endInsertRows();
     }
     for (const QString &id : ends)
         refreshPorts(id);
-    emit reroutesChanged();
+    if (reroutes)
+        emit reroutesChanged();
 }
 
 // --- edit bounds and the undo stack ---------------------------------------------
@@ -526,7 +545,7 @@ bool CanvasModel::selectionAll(const QString &state) const {
         if (state == QLatin1String("pinned"))
             return row.pinned;
         const std::optional<NodeMode> mode = parseNodeMode(state);
-        return mode && document().graph.nodes.value(id).mode == *mode;
+        return mode && m_document.graph.nodes.value(id).mode == *mode;
     });
 }
 

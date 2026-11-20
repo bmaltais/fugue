@@ -563,6 +563,48 @@ private slots:
         QVERIFY(!canvas.document().layout.contains("nodes"));
     }
 
+    // At 300 nodes (spec 12.1) whole-graph edits change each list once, not once per row,
+    // an edit that moves no reroute point leaves them alone, and menu checks stay cheap.
+    void largeEditsChangeEachListOnce() {
+        QJsonObject nodes, positions;
+        nodes.insert("src", QJsonObject{{"type", "fugue/load-image"}, {"version", "1.0.0"}});
+        for (int i = 0; i < 300; ++i) {
+            const QString id = QStringLiteral("n%1").arg(i);
+            const QString base = i > 0 ? QStringLiteral("n%1").arg(i - 1) : QStringLiteral("src");
+            nodes.insert(id, QJsonObject{{"type", "fugue/blend"}, {"version", "1.0.0"},
+                                         {"inputs", QJsonObject{{"base", QJsonObject{{"from", base + ".image"}}},
+                                                                {"top", QJsonObject{{"from", "src.image"}}}}}});
+            positions.insert(id, QJsonObject{{"pos", QJsonArray{(i % 20) * 260, (i / 20) * 160}}});
+        }
+        const Result<Document> made = Document::fromJson(QJsonObject{
+            {"fugue", 1}, {"graph", QJsonObject{{"nodes", nodes}}}, {"layout", QJsonObject{{"nodes", positions}}}});
+        QVERIFY(made.ok());
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(made.value());
+        QCOMPARE(canvas.links()->rowCount(), 600);
+
+        QSignalSpy reroutes(&canvas, &CanvasModel::reroutesChanged);
+        canvas.select({"n5"});
+        canvas.toggleMode("bypass");
+        QCOMPARE(reroutes.count(), 0);
+
+        canvas.selectAll();
+        qint64 start = test_support::cpuMs();
+        for (int i = 0; i < 10; ++i)
+            canvas.selectionAll("bypass");
+        const qint64 checks = test_support::cpuMs() - start;
+
+        QSignalSpy nodeRemovals(canvas.nodes(), &QAbstractItemModel::rowsRemoved);
+        QSignalSpy linkRemovals(canvas.links(), &QAbstractItemModel::rowsRemoved);
+        start = test_support::cpuMs();
+        canvas.deleteSelection();
+        const qint64 deleted = test_support::cpuMs() - start;
+        QCOMPARE(canvas.nodes()->rowCount(), 0);
+        QCOMPARE(nodeRemovals.count(), 1);
+        QCOMPARE(linkRemovals.count(), 1);
+        qInfo("301 nodes, CPU time: 10 menu checks %lld ms, delete all %lld ms", checks, deleted);
+        QVERIFY2(checks < 50, qPrintable(QString::number(checks)));
+    }
 
     void fitFramesTheSelectionOrEverything() {
         CanvasModel canvas(&m_registry);

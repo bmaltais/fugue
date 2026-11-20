@@ -12,8 +12,10 @@ namespace fugue::node_size {
 // the node's 3u margins, the well's 2u padding and 2u between the two.
 qreal lineWidgetWidth(const QString &label, const QString &value, int textSize);
 
-// How many lines `text` takes wrapped to `width` (a multiline value, at the label size).
-int wrappedLines(const QString &text, qreal width, int textSize);
+// How many lines `text` takes wrapped to `width` (a multiline value, at the label size). With
+// `maxLines` set, the layout stops past it and says maxLines + 1: a row shows at most so many,
+// so a long prompt is not laid out whole on every key.
+int wrappedLines(const QString &text, qreal width, int textSize, int maxLines = -1);
 
 // The height of a multiline well that shows `lines` lines: 16 px each and 1.5u above and below.
 qreal multilineHeight(int lines, int textSize);

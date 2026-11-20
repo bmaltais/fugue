@@ -529,7 +529,9 @@ void CanvasModel::layOut(NodeRow &row) const {
                 height = m_tallRowHeight;
                 if (value.kind() == InputValue::Kind::Literal && value.literal().isString())
                     height = std::clamp(node_size::multilineHeight(
-                                            node_size::wrappedLines(value.literal().toString(), textWidth, m_textSize), m_textSize),
+                                            node_size::wrappedLines(value.literal().toString(), textWidth, m_textSize,
+                                                                    int(maxTall / 16) + 1),
+                                            m_textSize),
                                         m_tallRowHeight, std::max(maxTall, m_tallRowHeight));
                 grows = &port;
                 canGrow = true;

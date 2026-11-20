@@ -31,10 +31,11 @@ qreal lineWidgetWidth(const QString &label, const QString &value, int textSize) 
     return std::ceil(labelWidth + valueWidth + 3 * u * 2 + 2 * u * 2 + 2 * u);
 }
 
-int wrappedLines(const QString &text, qreal width, int textSize) {
+int wrappedLines(const QString &text, qreal width, int textSize, int maxLines) {
     if (text.isEmpty())
         return 1;
-    QString shown = text;
+    // A line holds at least one character, so the text past this many cannot change the answer.
+    QString shown = maxLines >= 0 ? text.left(qsizetype(maxLines + 1) * std::max<qsizetype>(1, qsizetype(width))) : text;
     shown.replace(QLatin1Char('\n'), QChar::LineSeparator); // QTextLayout breaks lines at U+2028
     QTextLayout layout(shown, labelFont(textSize, QFont::Normal));
     QTextOption option;
@@ -47,7 +48,8 @@ int wrappedLines(const QString &text, qreal width, int textSize) {
         if (!line.isValid())
             break;
         line.setLineWidth(std::max<qreal>(width, 1));
-        ++lines;
+        if (++lines > maxLines && maxLines >= 0)
+            break;
     }
     layout.endLayout();
     return std::max(lines, 1);
