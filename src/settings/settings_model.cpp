@@ -76,11 +76,14 @@ QString checkAddress(const QString &address) {
 SettingsModel::SettingsModel(const QString &settingsFile, const QString &providersFile, QObject *parent)
     : QObject(parent), m_path(settingsFile.isEmpty() ? settingsPath() : settingsFile),
       m_providersPath(providersFile.isEmpty() ? fugue::providersPath() : providersFile) {
+    // What the Packs page shows follows the files: the pack folders of the settings change it.
+    connect(this, &SettingsModel::changed, &m_packs, &PacksModel::refresh);
     loadSettings();
     loadProviders();
 }
 
-void SettingsModel::attach(Translator *translator, CanvasModel *canvas) {
+void SettingsModel::attach(Translator *translator, CanvasModel *canvas, const Registry *registry) {
+    m_packs.setRegistry(registry);
     m_translator = translator;
     m_canvas = canvas;
     pushLive();

@@ -499,8 +499,7 @@ private slots:
 
     void laterMilestoneCommandsAreParsedAndSayNotAvailable() {
         for (const QStringList &args : QList<QStringList>{
-                 {"pack", "list"}, {"packs", "add", "x"}, {"pack", "trust", "x"}, {"pack", "remove", "x"},
-                 {"pack", "update"}, {"provider", "list"}, {"providers", "list"}, {"model", "list", "--type", "t"},
+                 {"provider", "list"}, {"providers", "list"}, {"model", "list", "--type", "t"},
                  {"models", "list"}, {"cache", "status"}, {"cache", "clear", "--workflow", "f", "--node", "n"},
                  {"command", "list"}, {"skill", "install"}, {"node", "new", "x"}, {"node", "test", "x"},
              }) {

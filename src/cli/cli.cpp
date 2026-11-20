@@ -62,7 +62,8 @@ const char *helpText =
     "  workflow new|describe|export|run|validate|compile <file>\n"
     "  runs list | runs status|events|result|cancel <run-id>\n"
     "  node list [--type <port type>] | node describe <type id>...\n"
-    "  pack, provider, model, cache, command, skill (later releases)\n"
+    "  pack list | pack add <folder|git-url> [--ref <tag|commit>] | pack update [id] [--ref ...] | pack remove|trust <id>\n"
+    "  provider, model, cache, command, skill (later releases)\n"
     "With no command, fugue opens the window.\n";
 
 } // namespace

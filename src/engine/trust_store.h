@@ -37,6 +37,8 @@ public:
 
     bool isTrusted(const QString &packId, const QString &version) const;
     Errors trust(const QString &packId, const QString &version);
+    // Drops every version of a pack (it was removed). No effect for a pack that was never trusted.
+    Errors forget(const QString &packId);
 
     // Every pack the document's nodes (groups' inner nodes included) come from, built-ins left out.
     // The version of a pack is the INSTALLED one (Registry::packVersion), as the compiler asks
