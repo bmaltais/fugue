@@ -6,6 +6,7 @@
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QThread>
+#include <QTimer>
 
 #include "engine/pack_loader.h"
 #include "engine/registry.h"
@@ -34,6 +35,7 @@ PacksModel::~PacksModel() {
     {
         QMutexLocker lock(&m_mutex);
         m_closing = true;
+        m_cancel = true;
         m_answer = int(Answer::No); // a question still open is a no
     }
     m_answered.wakeAll();
@@ -71,7 +73,7 @@ void PacksModel::refresh() {
 
 Answer PacksModel::ask(const QString &kind, const PackSummary &pack) {
     QVariantMap question{
-        {"kind", kind}, {"id", pack.id}, {"name", pack.name}, {"version", pack.version}, {"oldVersion", pack.oldVersion},
+        {"kind", kind}, {"id", pack.id}, {"name", pack.name.isEmpty() ? pack.id : pack.name}, {"version", pack.version}, {"oldVersion", pack.oldVersion},
         {"source", pack.source.location.isEmpty() ? QString()
                    : pack.source.ref.isEmpty() ? pack.source.location
                                                : QStringLiteral("%1 at %2").arg(pack.source.location, pack.source.ref)},
@@ -85,29 +87,48 @@ Answer PacksModel::ask(const QString &kind, const PackSummary &pack) {
     }
     QMetaObject::invokeMethod(this, [this, question] {
         m_question = question;
+        m_questionReady = false;
         emit questionChanged();
+        QTimer::singleShot(600, this, [this] {
+            if (!m_question.isEmpty() && !m_questionReady) {
+                m_questionReady = true;
+                emit questionChanged();
+            }
+        });
     }, Qt::QueuedConnection);
     QMutexLocker lock(&m_mutex);
     while (m_answer < 0)
         m_answered.wait(&m_mutex);
+    if (Answer(m_answer) != Answer::Yes)
+        m_sawNo = true;
     return Answer(m_answer);
+}
+
+void PacksModel::cancel() {
+    m_cancel = true;
+    if (!m_question.isEmpty()) {
+        m_questionReady = true;
+        answer(false);
+    }
 }
 
 void PacksModel::answer(bool yes) {
     {
         QMutexLocker lock(&m_mutex);
-        if (m_answer >= 0 || m_question.isEmpty())
+        if (m_answer >= 0 || m_question.isEmpty() || !m_questionReady)
             return;
         m_answer = int(yes ? Answer::Yes : Answer::No);
     }
     m_question.clear();
+    m_questionReady = false;
     emit questionChanged();
     m_answered.wakeAll();
 }
 
 PackPrompts PacksModel::prompts() {
     PackPrompts prompts;
-    prompts.install = [this](const PackSummary &pack) { return ask(pack.oldVersion.isEmpty() ? "install" : "update", pack); };
+    prompts.cancelled = [this] { return m_cancel.load(); };
+    prompts.install = [this](const PackSummary &pack) { return ask(pack.updating ? "update" : "install", pack); };
     prompts.remove = [this](const PackSummary &pack) { return ask("remove", pack); };
     prompts.trust = [this](const PackSummary &pack) { return ask("trust", pack); };
     prompts.runSetup = [this](const PackSummary &pack) { return ask("setup", pack); };
@@ -149,6 +170,8 @@ template <typename Work> void PacksModel::start(Work work) {
         m_thread = nullptr;
     }
     m_busy = true;
+    m_cancel = false;
+    m_sawNo = false;
     m_log.clear();
     m_message.clear();
     m_failure.clear();
@@ -182,7 +205,7 @@ void PacksModel::update(const QString &id) {
             finish({}, changed.errors(), false);
             return;
         }
-        finish(changed->isEmpty() ? tr("Nothing to update.") : tr("%n packs updated. Restart Fugue to use them.", nullptr, int(changed->size())),
+        finish(changed->isEmpty() ? (m_sawNo ? tr("Nothing was updated; you said no.") : tr("Nothing to update.")) : tr("%n packs updated. Restart Fugue to use them.", nullptr, int(changed->size())),
                changed.warnings(), !changed->isEmpty());
     });
 }

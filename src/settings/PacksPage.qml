@@ -31,6 +31,73 @@ ColumnLayout {
         text: qsTr("Restart Fugue for the changes to reach the canvas.")
     }
 
+    // The question: what will happen, and the person says yes or no.
+    Rectangle {
+        id: ask
+        objectName: "packQuestion"
+        visible: page.model.question.kind !== undefined
+        readonly property var q: page.model.question
+        Layout.fillWidth: true
+        implicitHeight: askColumn.implicitHeight + 6 * page.u
+        radius: page.look.smallCorner
+        color: page.look.well
+        border.width: 2
+        border.color: page.look.accent
+        ColumnLayout {
+            id: askColumn
+            x: 3 * page.u
+            y: 3 * page.u
+            width: ask.width - 6 * page.u
+            spacing: page.u
+            Text {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                color: page.look.text
+                font.pixelSize: page.look.textSize
+                font.weight: Font.DemiBold
+                text: switch (ask.q.kind) {
+                    case "install": return qsTr("Install %1 %2?").arg(ask.q.name).arg(ask.q.version)
+                    case "update": return ask.q.oldVersion !== ""
+                                          ? qsTr("Update %1 from %2 to %3?").arg(ask.q.name).arg(ask.q.oldVersion).arg(ask.q.version)
+                                          : qsTr("Replace %1 with version %2?").arg(ask.q.name).arg(ask.q.version)
+                    case "remove": return qsTr("Remove %1?").arg(ask.q.name)
+                    case "trust": return qsTr("Trust %1 %2 and let its nodes run?").arg(ask.q.name).arg(ask.q.version)
+                    case "setup": return qsTr("Run the setup of %1 %2?").arg(ask.q.name).arg(ask.q.version)
+                    default: return ""
+                }
+            }
+            Text {
+                objectName: "packQuestionDetail"
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                color: page.look.label
+                font.pixelSize: page.look.labelSize
+                text: ask.q.kind === "setup"
+                      ? qsTr("%1\nIn %2, this command runs as you:\n%3").arg(ask.q.description).arg(ask.q.folder).arg(ask.q.command)
+                      : qsTr("%1\nRuns as: %2\nDeclares: %3\nNo sandbox: a trusted pack runs programs as you.")
+                            .arg(ask.q.source !== "" ? ask.q.id + "\n" + qsTr("From %1").arg(ask.q.source) : ask.q.id)
+                            .arg(ask.q.runtime && ask.q.runtime.length ? ask.q.runtime.join(", ") : qsTr("no nodes"))
+                            .arg(ask.q.permissions && ask.q.permissions.length ? ask.q.permissions.join(", ") : qsTr("nothing (network, files, GPU)"))
+            }
+            Row {
+                spacing: page.u
+                SettingsParts.SmallButton {
+                    objectName: "packYes"
+                    enabled: page.model.questionReady
+                    highlighted: true
+                    text: ask.q.kind === "setup" ? qsTr("Run it") : ask.q.kind === "remove" ? qsTr("Remove") : qsTr("Yes")
+                    onClicked: page.model.answer(true)
+                }
+                SettingsParts.SmallButton {
+                    objectName: "packNo"
+                    enabled: page.model.questionReady
+                    text: qsTr("No")
+                    onClicked: page.model.answer(false)
+                }
+            }
+        }
+    }
+
     Text {
         visible: page.model.packs.length === 0
         text: qsTr("No packs installed.")
@@ -157,75 +224,18 @@ ColumnLayout {
         onClicked: page.model.update("")
     }
 
-    // The question: what will happen, and the person says yes or no.
-    Rectangle {
-        id: ask
-        objectName: "packQuestion"
-        visible: page.model.question.kind !== undefined
-        readonly property var q: page.model.question
-        Layout.fillWidth: true
-        implicitHeight: askColumn.implicitHeight + 6 * page.u
-        radius: page.look.smallCorner
-        color: page.look.well
-        border.width: 2
-        border.color: page.look.accent
-        ColumnLayout {
-            id: askColumn
-            x: 3 * page.u
-            y: 3 * page.u
-            width: ask.width - 6 * page.u
-            spacing: page.u
-            Text {
-                Layout.fillWidth: true
-                wrapMode: Text.Wrap
-                color: page.look.text
-                font.pixelSize: page.look.textSize
-                font.weight: Font.DemiBold
-                text: switch (ask.q.kind) {
-                    case "install": return qsTr("Install %1 %2?").arg(ask.q.name).arg(ask.q.version)
-                    case "update": return qsTr("Update %1 from %2 to %3?").arg(ask.q.name).arg(ask.q.oldVersion).arg(ask.q.version)
-                    case "remove": return qsTr("Remove %1?").arg(ask.q.name)
-                    case "trust": return qsTr("Trust %1 %2 and let its nodes run?").arg(ask.q.name).arg(ask.q.version)
-                    case "setup": return qsTr("Run the setup of %1?").arg(ask.q.name)
-                    default: return ""
-                }
-            }
-            Text {
-                objectName: "packQuestionDetail"
-                Layout.fillWidth: true
-                wrapMode: Text.Wrap
-                color: page.look.label
-                font.pixelSize: page.look.labelSize
-                text: ask.q.kind === "setup"
-                      ? qsTr("%1\nIn %2, this command runs as you:\n%3").arg(ask.q.description).arg(ask.q.folder).arg(ask.q.command)
-                      : qsTr("%1\nRuns as: %2\nDeclares: %3\nNo sandbox: a trusted pack runs programs as you.")
-                            .arg(ask.q.source !== "" ? qsTr("From %1").arg(ask.q.source) : ask.q.id)
-                            .arg(ask.q.runtime && ask.q.runtime.length ? ask.q.runtime.join(", ") : qsTr("no nodes"))
-                            .arg(ask.q.permissions && ask.q.permissions.length ? ask.q.permissions.join(", ") : qsTr("nothing (network, files, GPU)"))
-            }
-            Row {
-                spacing: page.u
-                SettingsParts.SmallButton {
-                    objectName: "packYes"
-                    highlighted: true
-                    text: ask.q.kind === "setup" ? qsTr("Run it") : ask.q.kind === "remove" ? qsTr("Remove") : qsTr("Yes")
-                    onClicked: page.model.answer(true)
-                }
-                SettingsParts.SmallButton {
-                    objectName: "packNo"
-                    text: qsTr("No")
-                    onClicked: page.model.answer(false)
-                }
-            }
-        }
-    }
-
     Text {
         objectName: "packsBusy"
-        visible: page.model.busy && page.model.question.kind === undefined
+        visible: page.model.busy
         text: qsTr("Working…")
         color: page.look.label
         font.pixelSize: page.look.labelSize
+    }
+    SettingsParts.SmallButton {
+        objectName: "packsCancel"
+        visible: page.model.busy
+        text: qsTr("Cancel")
+        onClicked: page.model.cancel()
     }
     Text {
         objectName: "packsMessage"

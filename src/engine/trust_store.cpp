@@ -12,6 +12,8 @@
 #include <QMap>
 #include <QSet>
 #include <QDir>
+#include <QMutex>
+#include <QMutexLocker>
 
 namespace fugue {
 
@@ -29,6 +31,13 @@ bool TrustStore::isBuiltIn(const QString &packId) {
 TrustStore::TrustStore(QString path) : m_path(std::move(path)) {}
 
 namespace {
+
+// trust.json is read, changed and written back: one change at a time in this process (the
+// window's worker thread and its GUI thread both make changes).
+QMutex &fileLock() {
+    static QMutex mutex;
+    return mutex;
+}
 
 QJsonObject readPacks(const QString &path) {
     QFile file(path);
@@ -49,6 +58,7 @@ bool TrustStore::isTrusted(const QString &packId, const QString &version) const 
 }
 
 Errors TrustStore::trust(const QString &packId, const QString &version) {
+    QMutexLocker lock(&fileLock());
     if (isBuiltIn(packId) || isTrusted(packId, version))
         return {};
     QJsonObject packs = readPacks(m_path);
@@ -60,6 +70,7 @@ Errors TrustStore::trust(const QString &packId, const QString &version) {
 }
 
 Errors TrustStore::forget(const QString &packId) {
+    QMutexLocker lock(&fileLock());
     QJsonObject packs = readPacks(m_path);
     if (!packs.contains(packId))
         return {};

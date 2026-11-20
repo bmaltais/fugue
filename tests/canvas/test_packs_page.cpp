@@ -121,6 +121,7 @@ private slots:
         click(app, NEED("packAdd"));
         QTRY_VERIFY(find(app.window, "packQuestion"));
         QVERIFY(find(app.window, "packQuestionDetail"));
+        QTRY_VERIFY(NEED("packNo")->isEnabled());
         click(app, NEED("packNo"));
         QTRY_VERIFY(!find(app.window, "packQuestion"));
         QTRY_VERIFY(find(app.window, "packsFailure"));
@@ -139,6 +140,7 @@ private slots:
         click(app, NEED("packAdd"));
         QTRY_VERIFY(find(app.window, "packQuestion"));
         QVERIFY(!QFileInfo(packs() + "/io.example.tools").exists()); // nothing before the yes
+        QTRY_VERIFY(NEED("packYes")->isEnabled());
         click(app, NEED("packYes"));
         QTRY_VERIFY(QFileInfo(packs() + "/io.example.tools/pack.json").isFile());
         QTRY_VERIFY(find(app.window, "pack-io.example.tools"));
@@ -148,17 +150,57 @@ private slots:
         click(app, NEED("packTrust-io.example.tools"));
         QTRY_VERIFY(find(app.window, "packQuestion"));
         QCOMPARE(fugue::TrustStore(trustFile()).isTrusted("io.example.tools", "1.0.0"), false);
+        QTRY_VERIFY(NEED("packYes")->isEnabled());
         click(app, NEED("packYes"));
         QTRY_COMPARE(fugue::TrustStore(trustFile()).isTrusted("io.example.tools", "1.0.0"), true);
 
         click(app, NEED("packRemove-io.example.tools"));
         QTRY_VERIFY(find(app.window, "packQuestion"));
         QVERIFY(QFileInfo(packs() + "/io.example.tools").isDir());
+        QTRY_VERIFY(NEED("packYes")->isEnabled());
         click(app, NEED("packYes"));
         QTRY_VERIFY(!QFileInfo(packs() + "/io.example.tools").exists());
         QTRY_VERIFY(!find(app.window, "pack-io.example.tools"));
         QCOMPARE(fugue::TrustStore(trustFile()).isTrusted("io.example.tools", "1.0.0"), false);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    void aStaleAnswerCannotAnswerTheNextQuestion() {
+        App app(load(emptyDoc));
+        QVERIFY(app.open());
+        fugue::PacksModel *model = app.settings.packs();
+        model->add(m_source, {});
+        QTRY_VERIFY(!model->question().isEmpty());
+        model->answer(true); // too soon: it was meant for nothing on this question
+        QVERIFY(!model->question().isEmpty());
+        QVERIFY(!QFileInfo(packs() + "/io.example.tools").exists());
+        QTRY_VERIFY(model->questionReady());
+        model->cancel(); // a cancel answers no
+        QVERIFY(model->waitIdle());
+        QVERIFY(!QFileInfo(packs() + "/io.example.tools").exists());
+        QVERIFY(model->failure().contains("not installed"));
+    }
+
+    void saidNoToAnUpdateIsNotNothingToUpdate() {
+        App app(load(emptyDoc));
+        QVERIFY(app.open());
+        fugue::PacksModel *model = app.settings.packs();
+        model->add(m_source, {});
+        QTRY_VERIFY(model->questionReady());
+        model->answer(true);
+        QVERIFY(model->waitIdle());
+        QVERIFY(QFileInfo(packs() + "/io.example.tools/pack.json").isFile());
+        QFile bump(m_source + "/pack.json");
+        QVERIFY(bump.open(QIODevice::WriteOnly));
+        bump.write(QJsonDocument(QJsonObject{{"manifest", 1}, {"id", "io.example.tools"}, {"version", "1.1.0"}, {"name", "Tools"},
+                                             {"nodes", QJsonArray{"tool"}}}).toJson());
+        bump.close();
+        model->update("io.example.tools");
+        QTRY_VERIFY(model->questionReady());
+        QCOMPARE(model->question().value("kind").toString(), QString("update"));
+        model->answer(false);
+        QVERIFY(model->waitIdle());
+        QVERIFY(model->message().contains("said no"));
     }
 
     void aPackThatDoesNotLoadShowsWhy() {

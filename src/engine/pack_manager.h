@@ -47,7 +47,8 @@ struct PackSummary {
     QStringList setupCommand; // empty when the pack has no setup
     QString setupDescription;
     PackSource source;        // empty location when installed by copying into the folder by hand
-    QString oldVersion;       // for an update: the version being replaced
+    QString oldVersion;       // for an update: the version being replaced (empty when it did not load)
+    bool updating = false;    // the pack replaces an installed one
 };
 
 enum class Answer { Yes, No, NoHuman };
@@ -60,6 +61,8 @@ struct PackPrompts {
     std::function<Answer(const PackSummary &)> runSetup;  // run this exact command?
     // What a command prints while it runs (git, setup), a line at a time. May be null.
     std::function<void(const QString &)> log;
+    // True when the person stopped the work: git and a setup are killed, and the rest is skipped.
+    std::function<bool()> cancelled;
 };
 
 struct PackAdded {

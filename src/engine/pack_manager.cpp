@@ -89,7 +89,8 @@ struct ProcessResult {
 
 // Runs a program (never a shell) and passes its output on line by line.
 ProcessResult runProgram(const QString &program, const QStringList &arguments, const QString &workDir,
-                         const std::function<void(const QString &)> &log, bool quiet = false) {
+                         const std::function<void(const QString &)> &log, bool quiet = false,
+                         const std::function<bool()> &cancelled = {}) {
     ProcessResult result;
     QProcess process;
     process.setProcessChannelMode(QProcess::MergedChannels);
@@ -126,7 +127,14 @@ ProcessResult runProgram(const QString &program, const QStringList &arguments, c
     if (!process.waitForStarted(10000))
         return result;
     process.closeWriteChannel();
-    process.waitForFinished(-1);
+    // A cancel kills the program: git or a setup may take minutes, and the person can stop it.
+    while (process.state() != QProcess::NotRunning && !process.waitForFinished(100)) {
+        if (cancelled && cancelled()) {
+            process.kill();
+            process.waitForFinished(3000);
+            break;
+        }
+    }
     pending += process.readAll();
     flush(true);
     result.exitCode = process.exitStatus() == QProcess::NormalExit ? process.exitCode() : -1;
@@ -221,7 +229,10 @@ struct Staged {
     PackSource source;
 };
 
-Result<Staged> stage(const PackSource &wanted, const QString &packsDir, const std::function<void(const QString &)> &log) {
+Result<Staged> stage(const PackSource &wanted, const QString &packsDir, const PackPrompts &prompts) {
+    const auto &log = prompts.log;
+    if (prompts.cancelled && prompts.cancelled())
+        return fail(QStringLiteral("cancelled"), QStringLiteral("Cancelled."));
     Staged staged;
     removeStale(packsDir);
     staged.staging = makeStaging(packsDir);
@@ -254,7 +265,7 @@ Result<Staged> stage(const PackSource &wanted, const QString &packsDir, const st
             clone << QStringLiteral("-c") << QStringLiteral("protocol.%1.allow=always").arg(QLatin1String(scheme));
         clone << QStringLiteral("clone") << QStringLiteral("--quiet") << QStringLiteral("--no-checkout") << QStringLiteral("--")
               << wanted.location << work;
-        const ProcessResult cloned = runProgram(QStringLiteral("git"), clone, {}, log);
+        const ProcessResult cloned = runProgram(QStringLiteral("git"), clone, {}, log, false, prompts.cancelled);
         if (!cloned.ok)
             return cleanFail(fail(QStringLiteral("fetch_failed"), QStringLiteral("git could not clone %1.").arg(wanted.location),
                                   cloned.output.trimmed().isEmpty() ? QStringLiteral("Is git installed, and is the address right?") : cloned.output.trimmed()));
@@ -267,7 +278,7 @@ Result<Staged> stage(const PackSource &wanted, const QString &packsDir, const st
         const ProcessResult checkedOut = runProgram(QStringLiteral("git"),
             {QStringLiteral("-c"), QStringLiteral("advice.detachedHead=false"), QStringLiteral("checkout"), QStringLiteral("--quiet"),
              QStringLiteral("--detach"), isTag ? QStringLiteral("refs/tags/%1").arg(wanted.ref) : wanted.ref + QStringLiteral("^{commit}"),
-             QStringLiteral("--")}, work, log);
+             QStringLiteral("--")}, work, log, false, prompts.cancelled);
         if (!checkedOut.ok)
             return cleanFail(fail(QStringLiteral("fetch_failed"), QStringLiteral("%1 has no commit \"%2\".").arg(wanted.location, wanted.ref),
                                   QStringLiteral("Pin the pack to a tag or a commit that exists.")));
@@ -398,7 +409,7 @@ Result<PackAdded> install(const Staged &staged, PackSummary summary, const QStri
     }
     if (runSetup) {
         const QStringList &command = summary.setupCommand;
-        const ProcessResult done = runProgram(command.first(), command.mid(1), target, prompts.log);
+        const ProcessResult done = runProgram(command.first(), command.mid(1), target, prompts.log, false, prompts.cancelled);
         if (!done.ok) {
             QDir(target).removeRecursively();
             if (replacing)
@@ -453,7 +464,7 @@ Result<PackAdded> addPack(const QString &location, const QString &ref, const QSt
                     QStringLiteral("Use a folder, or https://, ssh://, git:// or file:// with --ref."));
     }
 
-    Result<Staged> staged = stage(source, packsDir, prompts.log);
+    Result<Staged> staged = stage(source, packsDir, prompts);
     if (!staged)
         return staged.errors();
     const auto done = [&](Result<PackAdded> result) {
@@ -501,6 +512,8 @@ Result<QList<PackAdded>> updatePacks(const QString &id, const QString &ref, cons
         return errors;
     };
     for (const QString &name : ids) {
+        if (prompts.cancelled && prompts.cancelled())
+            return Result<QList<PackAdded>>(changed, warnings + Errors{warningOf(fail(QStringLiteral("cancelled"), QStringLiteral("Cancelled before the other packs.")))});
         const QString folder = packsDir + QLatin1Char('/') + name;
         if (QFileInfo(folder).isSymLink()) {
             if (const auto stop = problem(name, {fail(QStringLiteral("usage"), QStringLiteral("%1 is a link, not an installed pack folder.").arg(folder))}))
@@ -528,7 +541,7 @@ Result<QList<PackAdded>> updatePacks(const QString &id, const QString &ref, cons
             continue;
         }
         const Result<PackSummary> current = summarizePack(folder);
-        Result<Staged> staged = stage(source, packsDir, prompts.log);
+        Result<Staged> staged = stage(source, packsDir, prompts);
         if (!staged) {
             if (const auto stop = problem(name, staged.errors()))
                 return *stop;
@@ -555,6 +568,7 @@ Result<QList<PackAdded>> updatePacks(const QString &id, const QString &ref, cons
             continue; // the same commit under the same pin
         }
         next->oldVersion = current ? current->version : QString();
+        next->updating = true;
         const Result<bool> yes = ask(prompts.install, *next, QStringLiteral("Updating a pack"));
         if (!yes) {
             cleanup();
@@ -608,8 +622,16 @@ Result<PackSummary> removePack(const QString &id, const QString &packsDir, Trust
 Result<PackSummary> trustPack(const QString &id, const QString &packsDir, TrustStore &trust, const PackPrompts &prompts) {
     if (TrustStore::isBuiltIn(id))
         return fail(QStringLiteral("usage"), QStringLiteral("%1 is part of Fugue and is always trusted.").arg(id));
-    const QString folder = packsDir + QLatin1Char('/') + id;
-    if (!validPackId(id) || !QFileInfo(folder).isDir())
+    // A pack in the packs folder, or in a folder of the settings: trust is for any pack found.
+    QString folder;
+    QStringList places = packSearchPaths();
+    places.prepend(packsDir);
+    for (const QString &place : places)
+        if (validPackId(id) && QFileInfo(place + QLatin1Char('/') + id).isDir()) {
+            folder = place + QLatin1Char('/') + id;
+            break;
+        }
+    if (folder.isEmpty())
         return fail(QStringLiteral("unknown_pack"), QStringLiteral("No pack %1 is installed in %2.").arg(id, packsDir));
     const Result<PackSummary> summary = summarizePack(folder);
     if (!summary)

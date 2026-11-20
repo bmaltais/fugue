@@ -9,6 +9,7 @@
 // The running window keeps the node types it started with, so a change to the packs shows as
 // `restartNeeded` until Fugue is started again.
 
+#include <QElapsedTimer>
 #include <QMutex>
 #include <QObject>
 #include <QString>
@@ -16,6 +17,8 @@
 #include <QVariantMap>
 #include <QWaitCondition>
 #include <QtQmlIntegration/qqmlintegration.h>
+
+#include <atomic>
 
 #include "engine/pack_manager.h"
 
@@ -41,6 +44,9 @@ class PacksModel : public QObject {
     // How the last action ended: a sentence, and the reason when it failed.
     Q_PROPERTY(QString message READ message NOTIFY messageChanged)
     Q_PROPERTY(QString failure READ failure NOTIFY messageChanged)
+    // False for a moment after a question appears, so a click or key meant for the one before
+    // cannot answer the next (install is followed at once by the setup question).
+    Q_PROPERTY(bool questionReady READ questionReady NOTIFY questionChanged)
     Q_PROPERTY(bool restartNeeded READ restartNeeded NOTIFY packsChanged)
 
 public:
@@ -59,6 +65,7 @@ public:
     QString message() const { return m_message; }
     QString failure() const { return m_failure; }
     bool restartNeeded() const { return m_restartNeeded; }
+    bool questionReady() const { return m_questionReady; }
 
     // Read the packs folders again.
     Q_INVOKABLE void refresh();
@@ -68,8 +75,10 @@ public:
     Q_INVOKABLE void update(const QString &id);
     Q_INVOKABLE void remove(const QString &id);
     Q_INVOKABLE void trust(const QString &id);
-    // The person's answer to `question`.
+    // The person's answer to `question`; ignored until questionReady.
     Q_INVOKABLE void answer(bool yes);
+    // Stops the work: a question is answered no, git and a setup are killed.
+    Q_INVOKABLE void cancel();
     // Only for the tests: waits for the work to end.
     bool waitIdle(int msec = 30000);
 
@@ -96,6 +105,9 @@ private:
     QString m_failure;
     bool m_busy = false;
     bool m_restartNeeded = false;
+    bool m_questionReady = false;
+    std::atomic<bool> m_cancel{false};
+    std::atomic<bool> m_sawNo{false}; // the person said no to something in this action
 
     QMutex m_mutex;
     QWaitCondition m_answered;
