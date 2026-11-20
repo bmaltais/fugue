@@ -761,9 +761,22 @@ holding that node's `node.json`.
 
 ### 6.6 Installing
 
-- Copy a folder into the packs folder, or `fugue pack add <git-url|path>` (a git clone pinned
-  to a tag or commit). Also `fugue pack list`, `remove`, `update`.
-- Updates are explicit and pinned. Nothing updates on its own.
+- Copy a folder into the packs folder, or `fugue pack add <folder|git-url>`. A folder is copied;
+  a git address (`https://`, `ssh://`, `git://`, `file://` or `user@host:path`) is cloned and
+  must be pinned with `--ref <tag|commit>`. Also `fugue pack list`, `remove`, `update`, `trust`.
+- The pack goes to `packs/<id>` with a `.fugue-source.json` beside `pack.json` saying where it
+  came from (and the commit a ref resolved to), so `update` can fetch it again. The `.git`
+  folder is not kept. A pack is checked in a staging folder first and put in place only when
+  it loads and the person agreed; a refusal or a failure leaves no half-installed pack.
+- The prompt shows the pack, its version and source, the runtime kinds of its nodes and what
+  they declare ([6.3](#63-the-needs-block)). Installing does not trust: `fugue pack trust <id>`
+  or the first run does ([6.7](#67-trust)).
+- Updates are explicit and pinned. Nothing updates on its own. `pack update` fetches the pack
+  again at the same ref, or at `--ref`, shows the new version and asks; a pack already at that
+  commit is left alone. A new version asks for trust again. A pack that was copied in by hand
+  has no source and cannot be updated.
+- `pack remove` removes a pack from the packs folder (not one found through a settings path)
+  and forgets its trust.
 - No registry or catalog in v0.1. No signing in v0.1.
 
 ### 6.7 Trust
@@ -1640,7 +1653,7 @@ Each command works with no display, never opens a dialog, and takes `--json`. Fo
 | `fugue node list [--type <port type>]` | Installed node types. |
 | `fugue node describe <type id>…` | Full manifests as data. |
 | `fugue node new <name>`, `fugue node test <path>` | Authoring ([6.11](#611-authoring-tools)). |
-| `fugue pack list`, `add`, `remove`, `update`, `trust` | Packs. All but `list` need a human ([13.6](#136-safety)). |
+| `fugue pack list`, `add <folder\|git-url> [--ref <tag\|commit>]`, `remove <id>`, `update [id] [--ref <tag\|commit>]`, `trust <id>` | Packs ([6.6](#66-installing)). All but `list` need a human ([13.6](#136-safety)). |
 | `fugue provider list` | Instances, their capabilities and status. |
 | `fugue model list [--type <resource type>]` | Models found on disk and offered by providers. |
 | `fugue cache status`, `fugue cache clear [--workflow <file>] [--node <id>]` | The result cache. |
@@ -1705,6 +1718,7 @@ Codes in v0.1:
 | Graph | `unknown_node_type`, `node_version_mismatch`, `unknown_input`, `missing_input`, `unknown_link_source`, `unknown_output`, `type_mismatch`, `value_out_of_range`, `value_not_in_choices`, `cycle`, `group_recursion`, `unknown_provider` |
 | Warnings | `not_part_of_output`, `model_missing`, `frozen_result_missing`, `pack_update_available`, `workflow_not_embedded` |
 | Trust | `pack_untrusted`, `needs_confirmation` |
+| Packs | `pack_invalid`, `pack_exists`, `unknown_pack`, `fetch_failed`, `setup_failed` |
 | Providers | `capability_unavailable`, `model_not_running`, `provider_unreachable` |
 | Running | `node_failed`, `node_bad_output`, `node_timeout`, `out_of_memory`, `cancelled` |
 | Other | `unknown_run`, `usage`, `internal` |

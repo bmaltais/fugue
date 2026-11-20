@@ -59,6 +59,14 @@ Errors TrustStore::trust(const QString &packId, const QString &version) {
     return replaceFile(m_path, writeJson(QJsonObject{{"packs", packs}}), QFileInfo(m_path).fileName(), FileMode::OwnerOnly);
 }
 
+Errors TrustStore::forget(const QString &packId) {
+    QJsonObject packs = readPacks(m_path);
+    if (!packs.contains(packId))
+        return {};
+    packs.remove(packId);
+    return replaceFile(m_path, writeJson(QJsonObject{{"packs", packs}}), QFileInfo(m_path).fileName(), FileMode::OwnerOnly);
+}
+
 QList<PackUse> TrustStore::packsUsed(const Document &document, const Registry &registry) {
     QMap<QString, PackUse> used;
     const QJsonObject recorded = document.requirements.value("packs").toObject();

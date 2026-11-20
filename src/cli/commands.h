@@ -60,5 +60,11 @@ Reply runsList(const Command &command, Context &context);
 Reply runsStatus(const Command &command, Context &context);
 Reply runsEvents(const Command &command, Context &context);
 Reply runsResult(const Command &command, Context &context);
+// packs.cpp: the `pack` commands (13.1). All but list need a person (13.6).
+Reply packList(const Command &command, Context &context);
+Reply packAdd(const Command &command, Context &context);
+Reply packRemove(const Command &command, Context &context);
+Reply packUpdate(const Command &command, Context &context);
+Reply packTrust(const Command &command, Context &context);
 
 } // namespace fugue::cli
