@@ -62,7 +62,8 @@ public:
 
     // Records the folder a type's node.json was read from (NodeType::dir). No effect for an id
     // that is not a type here.
-    void setNodeDir(const QString &typeId, const QString &dir);
+    // `seal` is NodeType::seal.
+    void setNodeDir(const QString &typeId, const QString &dir, const QString &seal = {});
 
     // The version of each installed pack, which trust is asked for and given at (6.7). The
     // workflow's own `requires.packs` is only what its author had, never what runs. A pack

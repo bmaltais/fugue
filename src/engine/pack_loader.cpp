@@ -1,4 +1,5 @@
 #include "engine/pack_loader.h"
+#include "engine/command_node.h"
 
 #include "engine/json.h"
 #include "engine/paths.h"
@@ -256,7 +257,12 @@ QString loadNode(Registry &registry, const PackManifest &pack, const QString &fo
         }
     if (hasErrors(errors))
         return reasonOf(errors);
-    registry.setNodeDir(id, folder + QLatin1Char('/') + name);
+    const QJsonObject runtime = manifest.value("runtime").toObject();
+    const QString nodeDir = folder + QLatin1Char('/') + name;
+    registry.setNodeDir(id, nodeDir,
+                        runtime.value("kind").toString() == QLatin1String("command")
+                            ? nodeSeal(nodeDir, runtime.value("entry").toString())
+                            : QString());
     typeId = id;
     return {};
 }

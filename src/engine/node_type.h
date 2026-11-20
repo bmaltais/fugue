@@ -69,6 +69,9 @@ struct NodeType {
     // The folder holding node.json: set by the pack loader, empty for a type that has none
     // (the built-ins' resources). Not part of the manifest, so toJson() leaves it out.
     QString dir;
+    // What the pack loader saw of a command node's files (nodeSeal in command_node.h); the
+    // runner refuses to run when they no longer match. Empty: not checked.
+    QString seal;
     QJsonObject runtime; // has at least "kind"
     QJsonObject needs;   // 6.3, raw
     QJsonValue capabilities = QJsonValue::Undefined; // 8.1, raw

@@ -492,6 +492,67 @@ wait
         QVERIFY2(waitGone(pid), "the persistent process outlived the kernel");
     }
 
+    void aNodeChangedOnDiskSinceItWasLoadedIsNotRun() {
+        Node node = makeNode(m_root.path(), "sealed", "cat > /dev/null\necho '{\"outputs\": {}}'\n");
+        {
+            QFile manifest(node.dir + "/node.json");
+            QVERIFY(manifest.open(QIODevice::WriteOnly));
+            manifest.write("{}");
+        }
+        node.type.seal = nodeSeal(node.dir, "./run.sh");
+        QVERIFY(!node.type.seal.isEmpty());
+        CommandKernel kernel(kGraceMs);
+        QVERIFY(kernel.run(contextFor(node)).ok());
+
+        QFile script(node.dir + "/run.sh");
+        QVERIFY(script.open(QIODevice::Append));
+        script.write("# edited\n");
+        script.close();
+        const Result<Values> changed = kernel.run(contextFor(node));
+        QVERIFY(!changed.ok());
+        QVERIFY2(changed.error().message.contains("changed on disk"), qPrintable(changed.error().message));
+    }
+
+    void shuttingDownEndsARunInFlightAndRefusesNewOnes() {
+        const Node node = makeNode(m_root.path(), "persshut", persistentScript(), {{"mode", "persistent"}});
+        CommandKernel kernel(kGraceMs);
+        Result<Values> running = makeError("pending", "pending");
+        std::thread run([&] { running = kernel.run(contextFor(node, {{"mode", Value("slow")}})); });
+        QElapsedTimer waited;
+        waited.start();
+        while (!QFileInfo::exists(node.dir + "/slow.started") && waited.elapsed() < 10000)
+            QTest::qWait(10);
+        kernel.shutdown();
+        run.join();
+        QVERIFY(!running.ok());
+        QVERIFY(waitGone(pidsIn(node.dir + "/pids.txt").first()));
+        const Result<Values> after = kernel.run(contextFor(node));
+        QVERIFY(!after.ok());
+        QVERIFY(after.error().message.contains("shutting down"));
+    }
+
+    void aRunWaitingForTheSameNodeHearsACancel() {
+        const Node node = makeNode(m_root.path(), "persqueue", persistentScript(), {{"mode", "persistent"}});
+        CommandKernel kernel(kGraceMs);
+        // The first run holds the program until it is cancelled with a flag of its own.
+        auto firstCancel = std::make_shared<std::atomic<bool>>(false);
+        NodeContext first = contextFor(node, {{"mode", Value("slow")}});
+        first.cancelled = [firstCancel] { return firstCancel->load(); };
+        std::thread holder([&] { kernel.run(first); });
+        QElapsedTimer waited;
+        waited.start();
+        while (!QFileInfo::exists(node.dir + "/slow.started") && waited.elapsed() < 10000)
+            QTest::qWait(10);
+
+        std::thread cancel = cancelWhenFile(node.dir + "/slow.started");
+        const Result<Values> queued = kernel.run(contextFor(node));
+        cancel.join();
+        QVERIFY(!queued.ok());
+        QCOMPARE(queued.error().code, QString("cancelled"));
+        firstCancel->store(true);
+        holder.join();
+    }
+
     // --- the seam in the scheduler's kernels ---
 
     void theKernelsServeACommandTypeWithTheCommandRunner() {

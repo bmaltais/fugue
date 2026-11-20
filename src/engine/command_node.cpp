@@ -2,6 +2,7 @@
 
 #include <QDir>
 #include <QElapsedTimer>
+#include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -15,11 +16,14 @@
 
 #include <csignal>
 #include <deque>
+#include <mutex>
 #include <map>
 #include <optional>
 
 #include <sys/types.h>
 #include <unistd.h>
+
+#include <QCryptographicHash>
 
 #include "engine/file_hashes.h"
 #include "engine/registry.h"
@@ -312,7 +316,7 @@ Error reportedError(const QJsonObject &line) {
 // Expect::Ready), or the error that ended it. Handles progress, cancel, the timeout and a
 // program that dies or breaks the protocol.
 Result<QJsonObject> await(Process &process, const NodeContext &context, const QString &id, bool persistent,
-                          Expect expect, int timeoutMs, int graceMs) {
+                          Expect expect, int timeoutMs, int graceMs, bool *heard = nullptr) {
     enum class Why { None, Cancelled, Timeout, Protocol };
     Why why = Why::None;
     QString protocolMessage;
@@ -362,6 +366,8 @@ Result<QJsonObject> await(Process &process, const NodeContext &context, const QS
             }
 
             // A line of the program's stdout.
+            if (heard)
+                *heard = true;
             if (event->line.trimmed().isEmpty())
                 continue;
             QJsonParseError parseError;
@@ -553,16 +559,30 @@ Result<QJsonObject> requestFor(const NodeContext &context, const QString &id) {
 
 } // namespace
 
+QString nodeSeal(const QString &dir, const QString &entry) {
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    for (const QString &name : {QStringLiteral("node.json"), entry}) {
+        QFile file(QFileInfo(QDir(dir).absoluteFilePath(name)).canonicalFilePath());
+        if (name.isEmpty() || !file.open(QIODevice::ReadOnly))
+            return {};
+        hash.addData(file.readAll());
+        hash.addData(QByteArrayView("\0", 1));
+    }
+    return QString::fromLatin1(hash.result().toHex());
+}
+
 struct CommandKernel::Impl {
     explicit Impl(int graceMs) : grace(graceMs) {}
     int grace;
 
     // A persistent program per node type, and the lock that makes it one run at a time.
     struct Slot {
-        QMutex run;
+        QMutex run;   // one run at a time
+        QMutex guard; // `process`, for shutdown() to reach it during a run
         std::unique_ptr<Process> process;
     };
     QMutex mutex;
+    bool closed = false;
     std::map<QString, std::shared_ptr<Slot>> packs;
 
     std::shared_ptr<Slot> slot(const QString &typeId) {
@@ -582,10 +602,18 @@ void CommandKernel::shutdown() {
     std::map<QString, std::shared_ptr<Impl::Slot>> packs;
     {
         QMutexLocker lock(&d->mutex);
+        d->closed = true;
         packs.swap(d->packs);
     }
+    // A run in flight fails when its program is killed; then the lock is free.
     for (auto &entry : packs) {
+        {
+            QMutexLocker guard(&entry.second->guard);
+            if (entry.second->process)
+                entry.second->process->signal(SIGKILL);
+        }
         QMutexLocker run(&entry.second->run);
+        QMutexLocker guard(&entry.second->guard);
         entry.second->process.reset();
     }
 }
@@ -604,6 +632,12 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
     if (entry.isEmpty() || program.isEmpty() || !program.startsWith(folder + QLatin1Char('/')))
         return nodeError(QStringLiteral("node_failed"),
                          QStringLiteral("%1's entry must be a file inside the node's folder: %2.").arg(type.id, entry));
+
+    if (!type.seal.isEmpty() && nodeSeal(folder, entry) != type.seal)
+        return nodeError(QStringLiteral("node_failed"),
+                         QStringLiteral("%1 changed on disk after it was loaded, so it is not run: restart Fugue to load "
+                                        "(and, if it is a new version, trust) the pack again.")
+                             .arg(type.id));
 
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.insert(QStringLiteral("FUGUE_PROTOCOL"), QStringLiteral("1"));
@@ -631,29 +665,57 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
         return outputsFrom(result.value(), context);
     }
 
-    const std::shared_ptr<Impl::Slot> slot = d->slot(type.id);
-    QMutexLocker run(&slot->run);
-    if (!slot->process || !slot->process->acquire()) {
-        const double idle = runtime.value("idle_timeout_s").toDouble(300);
-        slot->process = std::make_unique<Process>(program, context.workDir, environment, idle, d->grace);
-        const Result<QJsonObject> ready = await(*slot->process, context, id, true, Expect::Ready, 0, d->grace);
-        if (!ready) {
-            slot->process.reset();
-            return ready.error();
-        }
+    {
+        QMutexLocker lock(&d->mutex);
+        if (d->closed)
+            return nodeError(QStringLiteral("node_failed"), QStringLiteral("Fugue is shutting down."));
     }
-    Process &process = *slot->process;
-    process.setBusy(true);
-    process.discardLines();
-    process.sendLine(request);
-    const Result<QJsonObject> result = await(process, context, id, true, Expect::Result, timeoutMs, d->grace);
-    if (process.gone())
-        slot->process.reset();
-    else
-        process.setBusy(false);
-    if (!result)
-        return result.error();
-    return outputsFrom(result.value(), context);
+    const std::shared_ptr<Impl::Slot> slot = d->slot(type.id);
+    // Another run of this node type may hold the program: wait, but a cancel is heard.
+    while (!slot->run.tryLock(50)) {
+        if (context.cancelled && context.cancelled())
+            return nodeError(QStringLiteral("cancelled"), QStringLiteral("The node was cancelled."));
+    }
+    std::unique_lock<QMutex> run(slot->run, std::adopt_lock);
+    // A program that was reused may have just exited (its idle stop, or a crash between runs):
+    // nothing it said is lost then, so the run starts again once with a new program.
+    for (int attempt = 0; attempt < 2; ++attempt) {
+        bool reused = true;
+        if (!slot->process || !slot->process->acquire()) {
+            reused = false;
+            const double idle = runtime.value("idle_timeout_s").toDouble(300);
+            auto fresh = std::make_unique<Process>(program, context.workDir, environment, idle, d->grace);
+            {
+                QMutexLocker guard(&slot->guard);
+                slot->process = std::move(fresh);
+            }
+            const Result<QJsonObject> ready = await(*slot->process, context, id, true, Expect::Ready, 0, d->grace);
+            if (!ready) {
+                QMutexLocker guard(&slot->guard);
+                slot->process.reset();
+                return ready.error();
+            }
+        }
+        Process &process = *slot->process;
+        process.setBusy(true);
+        process.discardLines();
+        process.sendLine(request);
+        bool heard = false;
+        const Result<QJsonObject> result =
+            await(process, context, id, true, Expect::Result, timeoutMs, d->grace, &heard);
+        if (process.gone()) {
+            QMutexLocker guard(&slot->guard);
+            slot->process.reset();
+        } else {
+            process.setBusy(false);
+        }
+        if (!result && reused && !heard && attempt == 0 && result.error().code == QLatin1String("node_failed"))
+            continue;
+        if (!result)
+            return result.error();
+        return outputsFrom(result.value(), context);
+    }
+    return nodeError(QStringLiteral("node_failed"), QStringLiteral("The node's program could not be run."));
 }
 
 } // namespace fugue

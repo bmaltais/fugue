@@ -26,6 +26,12 @@
 
 namespace fugue {
 
+// A hash of what a command node runs: its node.json and its entry file. The loader keeps it in
+// NodeType::seal and the runner compares before every run, so a pack that is updated or edited
+// on disk after it was loaded (and trusted, 6.7) does not run until it is loaded again. Other
+// files of the node are not covered. Empty when a file cannot be read.
+QString nodeSeal(const QString &dir, const QString &entry);
+
 class CommandKernel : public NodeKernel {
 public:
     // `graceMs` is the time a program gets to stop after a cancel, a timeout or a shutdown
@@ -35,7 +41,8 @@ public:
 
     Result<Values> run(const NodeContext &context) override;
 
-    // Stops every persistent process now.
+    // Stops every persistent process now, ending runs in flight (they fail) and refusing new
+    // ones. Final: a kernel that was shut down runs nothing.
     void shutdown();
 
 private:

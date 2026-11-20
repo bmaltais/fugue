@@ -105,10 +105,12 @@ QStringList Registry::providerNames() const {
     return names;
 }
 
-void Registry::setNodeDir(const QString &typeId, const QString &dir) {
+void Registry::setNodeDir(const QString &typeId, const QString &dir, const QString &seal) {
     const auto found = m_nodeTypes.find(typeId);
-    if (found != m_nodeTypes.end())
+    if (found != m_nodeTypes.end()) {
         found->second.dir = dir;
+        found->second.seal = seal;
+    }
 }
 
 const NodeType *Registry::nodeType(const QString &id) const {

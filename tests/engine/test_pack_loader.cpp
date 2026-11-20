@@ -94,6 +94,12 @@ private slots:
         QCOMPARE(registry.packVersion(id), QString("1.2.0"));
         // The node's folder, where its program is found.
         QCOMPARE(registry.nodeType(id + "/sharpen")->dir, dir + "/sharpen");
+        QVERIFY(registry.nodeType(id + "/sharpen")->seal.isEmpty()); // no run.sh in this fixture
+        // With its program in place, the loader seals what the node runs.
+        write(dir + "/sharpen/run.sh", "#!/bin/sh\n");
+        Registry sealed;
+        QVERIFY(loadPack(sealed, dir).enabled);
+        QVERIFY(!sealed.nodeType(id + "/sharpen")->seal.isEmpty());
     }
 
     void declaredTypesAreRegisteredBeforeTheNodesThatUseThem() {
