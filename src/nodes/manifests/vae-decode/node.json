@@ -1,0 +1,17 @@
+{
+  "manifest": 1,
+  "id": "fugue/vae-decode",
+  "version": "1.0.0",
+  "name": "VAE Decode",
+  "description": "Turns a sampled latent into an image, with the VAE of the model that sampled it.",
+  "category": "Diffusion",
+  "keywords": ["decode", "latent to image", "vae"],
+  "runtime": {"kind": "builtin"},
+  "capabilities": ["latent.decode"],
+  "inputs": [
+    {"name": "latent", "type": "fugue/latent", "label": "Latent"}
+  ],
+  "outputs": [
+    {"name": "image", "type": "image", "label": "Image"}
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "manifest": 1,
+  "id": "fugue/vae-encode",
+  "version": "1.0.0",
+  "name": "VAE Encode",
+  "description": "Turns an image into a latent with the model's VAE, for a Sampler to redraw from (image to image).",
+  "category": "Diffusion",
+  "keywords": ["encode", "image to latent", "img2img", "vae"],
+  "runtime": {"kind": "builtin"},
+  "capabilities": ["latent.encode"],
+  "inputs": [
+    {"name": "model", "type": "fugue/model", "label": "Model"},
+    {"name": "image", "type": "image", "label": "Image"}
+  ],
+  "outputs": [
+    {"name": "latent", "type": "fugue/latent", "label": "Latent"}
+  ]
+}

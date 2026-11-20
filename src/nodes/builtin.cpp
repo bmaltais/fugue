@@ -18,6 +18,7 @@ void addBuiltinNodeTypes(Registry &registry) {
 
 void addBuiltinKernels(Kernels &kernels) {
     addBasicKernels(kernels);
+    addComponentKernels(kernels);
     addImageGenerationKernels(kernels);
     addImageSizeKernels(kernels);
     addPixelKernels(kernels);

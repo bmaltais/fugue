@@ -1,0 +1,511 @@
+// The component nodes (spec 14.3, 2.5, 2.6, 8.10): Load Models, Apply LoRA, Text Encode,
+// Empty Latent, Sampler, VAE Decode and VAE Encode, run by the helper's stage capabilities.
+//
+// Seams: the kernels each node type registers, driven by hand as the scheduler drives them
+// (a NodeKernel's run, a ProviderKernel's request and outputs); and at the bottom the shipped
+// `fugue` binary running a graph of them through the fake helper (tests/helper_support).
+
+#include <QDir>
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QProcess>
+#include <QProcessEnvironment>
+#include <QTemporaryDir>
+#include <QtTest>
+
+#include <vips/vips8>
+
+#include "engine/file_hashes.h"
+#include "engine/hash.h"
+#include "engine/media.h"
+#include "engine/model_library.h"
+#include "engine/paths.h"
+#include "engine/registry.h"
+#include "engine/vips.h"
+#include "nodes/builtin.h"
+#include "nodes/kernels.h"
+
+using namespace fugue;
+
+namespace {
+
+const QString kLoadModels = QStringLiteral("fugue/load-models");
+const QString kApplyLora = QStringLiteral("fugue/apply-lora");
+const QString kTextEncode = QStringLiteral("fugue/text-encode");
+const QString kEmptyLatent = QStringLiteral("fugue/empty-latent");
+const QString kSampler = QStringLiteral("fugue/sampler");
+const QString kVaeDecode = QStringLiteral("fugue/vae-decode");
+const QString kVaeEncode = QStringLiteral("fugue/vae-encode");
+
+void writeFile(const QString &path, const QByteArray &bytes) {
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate) || file.write(bytes) != bytes.size())
+        qFatal("cannot write %s", qPrintable(path));
+}
+
+QByteArray readFile(const QString &path) {
+    QFile file(path);
+    return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+}
+
+// What the helper's stage capabilities offer (engine/helper_provider.h): one model with an empty
+// handle, the model files coming in the job.
+Selection helperSelection() {
+    Selection chosen;
+    chosen.instance = QStringLiteral("Fugue helper");
+    chosen.engine = QStringLiteral("sdcpp");
+    chosen.model.status = ModelStatus::Ready;
+    return chosen;
+}
+
+class Bench {
+public:
+    Bench() : hashes(dir.filePath("hashes.json")) {
+        nodes::addBuiltinNodeTypes(registry);
+        nodes::addBuiltinKernels(kernels);
+        QDir().mkpath(workDir());
+    }
+
+    // A model file in a folder of Fugue's models folder (the test's own data folder), and its handle.
+    QJsonObject model(const QString &type, const QString &file, const QByteArray &bytes = {}) {
+        const QByteArray content = bytes.isEmpty() ? file.toUtf8() + " weights" : bytes;
+        writeFile(modelPath(file), content);
+        return QJsonObject{{"resource", type}, {"hash", sha256(content)}, {"name", QFileInfo(file).fileName()}};
+    }
+    static QString modelPath(const QString &file) { return dataDir() + "/models/" + file; }
+
+    // Z-Image Turbo as the owner's ComfyUI folder has it.
+    QJsonObject zImage() {
+        return QJsonObject{{"diffusion_model", model("fugue/diffusion-model", "diffusion_models/z-image-turbo.gguf")},
+                           {"text_encoder", model("fugue/text-encoder", "clip/Qwen3-4B.gguf")},
+                           {"vae", model("fugue/vae", "vae/ae.safetensors")}};
+    }
+    // The model Load Models makes of them.
+    QJsonObject loaded(const QJsonObject &parts) {
+        Values inputs;
+        for (auto it = parts.begin(); it != parts.end(); ++it)
+            inputs.insert(it.key(), Value(it.value()));
+        const Result<Values> out = run(kLoadModels, inputs);
+        if (!out)
+            qFatal("Load Models failed: %s", qPrintable(out.error().message));
+        return out->value("model").json().toObject();
+    }
+
+    QString workDir() const { return dir.filePath("work"); }
+
+    const NodeType &type(const QString &id) const { return *registry.nodeType(id); }
+
+    // The scheduler fills defaults in before a kernel sees the inputs (node_kernel.h).
+    NodeContext context(const QString &id, Values inputs) {
+        for (const InputSpec &spec : type(id).inputs)
+            if (!inputs.contains(spec.name) && !spec.defaultValue.isUndefined())
+                inputs.insert(spec.name, Value(spec.defaultValue));
+        NodeContext context;
+        context.node = QStringLiteral("n");
+        context.run = QStringLiteral("20261120-120000-000-test");
+        context.type = &type(id);
+        context.inputs = inputs;
+        context.workDir = workDir();
+        context.progress = [](double, const QString &, const QString &) {};
+        context.cancelled = [] { return false; };
+        context.hashes = &hashes;
+        context.registry = &registry;
+        return context;
+    }
+
+    Result<Values> run(const QString &id, const Values &inputs) { return kernels.node(id)->run(context(id, inputs)); }
+
+    Result<JobRequest> request(const QString &id, const Values &inputs) {
+        return kernels.provider(id)->request(context(id, inputs), helperSelection());
+    }
+
+    Result<Values> outputs(const QString &id, const Values &inputs, const JobResult &result) {
+        return kernels.provider(id)->outputs(context(id, inputs), helperSelection(), result);
+    }
+
+    QTemporaryDir dir;
+    FileHashes hashes;
+    Registry registry;
+    Kernels kernels;
+};
+
+} // namespace
+
+class TestComponentNodes : public QObject {
+    Q_OBJECT
+
+private slots:
+    // --- the types (2.2, 2.6, 8.9) ---
+
+    void theModelTypesAreFoundInComfyUIsFolders() {
+        Bench bench;
+        const ModelLibrary library({QStringLiteral("/models")}, &bench.registry);
+        const auto folders = [&](const char *type) { return library.folders(*PortType::parse(QString::fromLatin1(type))); };
+        QCOMPARE(folders("fugue/diffusion-model"),
+                 (QStringList{"/models/diffusion-model", "/models/diffusion_models", "/models/unet"}));
+        QCOMPARE(folders("fugue/text-encoder"),
+                 (QStringList{"/models/text-encoder", "/models/text_encoders", "/models/clip"}));
+        QCOMPARE(folders("fugue/vae"), QStringList{"/models/vae"});
+        QCOMPARE(folders("fugue/lora"), (QStringList{"/models/lora", "/models/loras"}));
+        QCOMPARE(folders("fugue/model"), QStringList{"/models/checkpoints"});
+        QCOMPARE(bench.registry.portKind(*PortType::parse("fugue/latent")), PortKind::Data);
+        QCOMPARE(bench.registry.portKind(*PortType::parse("fugue/conditioning")), PortKind::Data);
+    }
+
+    // --- Load Models and Apply LoRA: handles only, nothing is loaded (2.5) ---
+
+    void loadModelsMakesOneModelOfTheThreeFiles() {
+        Bench bench;
+        const QJsonObject parts = bench.zImage();
+        const QJsonObject model = bench.loaded(parts);
+        QCOMPARE(model.value("resource").toString(), QStringLiteral("fugue/model"));
+        const QJsonObject derived = model.value("derived").toObject();
+        QCOMPARE(derived.value("base").toObject(), parts.value("diffusion_model").toObject());
+        QCOMPARE(derived.value("text_encoder").toObject(), parts.value("text_encoder").toObject());
+        QCOMPARE(derived.value("vae").toObject(), parts.value("vae").toObject());
+        QVERIFY(!derived.contains("apply"));
+    }
+
+    void applyLoraStacksStepsOnTheModel() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.zImage());
+        const QJsonObject detail = bench.model("fugue/lora", "loras/detail.safetensors");
+        const QJsonObject ink = bench.model("fugue/lora", "loras/style/ink.safetensors");
+        const Result<Values> once =
+            bench.run(kApplyLora, {{"model", Value(model)}, {"lora", Value(detail)}, {"strength", Value(0.8)}});
+        QVERIFY(once);
+        const Result<Values> twice =
+            bench.run(kApplyLora, {{"model", once->value("model")}, {"lora", Value(ink)}});
+        QVERIFY(twice);
+        const QJsonObject derived = twice->value("model").json().toObject().value("derived").toObject();
+        QCOMPARE(derived.value("base"), model.value("derived").toObject().value("base"));
+        QCOMPARE(derived.value("vae"), model.value("derived").toObject().value("vae"));
+        const QJsonArray apply = derived.value("apply").toArray();
+        QCOMPARE(apply.size(), 2);
+        QCOMPARE(apply.at(0).toObject(), (QJsonObject{{"lora", detail}, {"strength", 0.8}}));
+        QCOMPARE(apply.at(1).toObject(), (QJsonObject{{"lora", ink}, {"strength", 1}})); // the default
+    }
+
+    // --- Text Encode ---
+
+    void textEncodeSendsThePromptsAndEveryFileOfTheModel() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.zImage());
+        const Result<JobRequest> request =
+            bench.request(kTextEncode, {{"model", Value(model)}, {"prompt", Value("a red fox")},
+                                        {"negative_prompt", Value("blurry")}});
+        QVERIFY2(request, request ? "" : qPrintable(request.error().message));
+        QCOMPARE(request->capability, QStringLiteral("text.encode"));
+        QVERIFY(request->model.isEmpty()); // any ready model: the files go in the job
+        QCOMPARE(request->params.value("prompt").toString(), QStringLiteral("a red fox"));
+        QCOMPARE(request->params.value("negative_prompt").toString(), QStringLiteral("blurry"));
+        // Every component, as stable-diffusion.cpp loads a model (and checks) as one context.
+        QCOMPARE(request->params.value("context").toObject(),
+                 (QJsonObject{{"diffusion_model_path", Bench::modelPath("diffusion_models/z-image-turbo.gguf")},
+                              {"llm_path", Bench::modelPath("clip/Qwen3-4B.gguf")},
+                              {"vae_path", Bench::modelPath("vae/ae.safetensors")}}));
+        // The negative set is always made: the Sampler's guidance decides whether it is used.
+        QVERIFY(request->params.value("sample.guidance.txt_cfg").toDouble() != 1);
+        QVERIFY(!request->params.contains("loras"));
+    }
+
+    void textEncodeAppliesTheModelsLoras() {
+        Bench bench;
+        const Result<Values> withLora = bench.run(
+            kApplyLora, {{"model", Value(bench.loaded(bench.zImage()))},
+                         {"lora", Value(bench.model("fugue/lora", "loras/detail.safetensors"))}, {"strength", Value(0.5)}});
+        QVERIFY(withLora);
+        const Result<JobRequest> request =
+            bench.request(kTextEncode, {{"model", withLora->value("model")}, {"prompt", Value("a fox")}});
+        QVERIFY(request);
+        QCOMPARE(request->params.value("loras").toArray(),
+                 (QJsonArray{QJsonObject{{"path", Bench::modelPath("loras/detail.safetensors")}, {"multiplier", 0.5}}}));
+    }
+
+    void aModelFileThatIsNotHereIsModelMissingOnTheModelInput() {
+        Bench bench;
+        const QJsonObject parts = bench.zImage();
+        const QJsonObject model = bench.loaded(parts);
+        QVERIFY(QFile::remove(Bench::modelPath("vae/ae.safetensors")));
+        const Result<JobRequest> request =
+            bench.request(kTextEncode, {{"model", Value(model)}, {"prompt", Value("a fox")}});
+        QVERIFY(!request);
+        QCOMPARE(request.error().code, QStringLiteral("model_missing"));
+        QCOMPARE(request.error().input, QStringLiteral("model"));
+    }
+
+    void aCheckpointIsOneFile() {
+        Bench bench;
+        const QJsonObject checkpoint = bench.model("fugue/model", "checkpoints/sd15.safetensors");
+        const Result<JobRequest> request =
+            bench.request(kTextEncode, {{"model", Value(checkpoint)}, {"prompt", Value("a fox")}});
+        QVERIFY(request);
+        QCOMPARE(request->params.value("context").toObject(),
+                 (QJsonObject{{"model_path", Bench::modelPath("checkpoints/sd15.safetensors")}}));
+    }
+
+    void textEncodeGivesTheHelpersConditioningFile() {
+        Bench bench;
+        const QString file = bench.workDir() + "/conditioning.bin";
+        const Result<Values> out = bench.outputs(
+            kTextEncode, {{"model", Value(bench.loaded(bench.zImage()))}, {"prompt", Value("a fox")}},
+            JobResult{QJsonObject{{"conditioning", QJsonObject{{"path", file}}}}, {}});
+        QVERIFY(out);
+        QCOMPARE(out->value("conditioning").json().toObject(),
+                 (QJsonObject{{"data", "fugue/conditioning"}, {"path", file}}));
+        const Result<Values> none = bench.outputs(
+            kTextEncode, {{"model", Value(bench.loaded(bench.zImage()))}, {"prompt", Value("a fox")}}, JobResult{});
+        QVERIFY(!none);
+        QCOMPARE(none.error().code, QStringLiteral("node_failed"));
+    }
+
+    // --- Empty Latent and Sampler ---
+
+    void anEmptyLatentIsASizeInAFile() {
+        Bench bench;
+        const Result<Values> out = bench.run(kEmptyLatent, {{"width", Value(832)}});
+        QVERIFY(out);
+        const QJsonObject latent = out->value("latent").json().toObject();
+        QCOMPARE(latent.value("data").toString(), QStringLiteral("fugue/latent"));
+        QCOMPARE(latent.value("meta").toObject(), (QJsonObject{{"width", 832}, {"height", 1024}, {"empty", true}}));
+        QVERIFY(QFileInfo(latent.value("path").toString()).absolutePath() == bench.workDir());
+        QVERIFY(!readFile(latent.value("path").toString()).isEmpty()); // so the scheduler can hash it
+    }
+
+    void theSamplerStartsFromNoiseOfAnEmptyLatentsSize() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.zImage());
+        const Result<Values> empty = bench.run(kEmptyLatent, {{"width", Value(832)}, {"height", Value(1216)}});
+        QVERIFY(empty);
+        const QJsonObject conditioning{{"data", "fugue/conditioning"}, {"path", "/runs/r/nodes/encode/conditioning.bin"}};
+        const Result<JobRequest> request =
+            bench.request(kSampler, {{"model", Value(model)}, {"conditioning", Value(conditioning)},
+                                     {"latent", empty->value("latent")}, {"seed", Value(42)}, {"steps", Value(8)},
+                                     {"sampler", Value("euler")}, {"scheduler", Value("simple")}});
+        QVERIFY2(request, request ? "" : qPrintable(request.error().message));
+        QCOMPARE(request->capability, QStringLiteral("latent.sample"));
+        QJsonObject params = request->params;
+        QCOMPARE(params.take("context").toObject().value("diffusion_model_path").toString(),
+                 Bench::modelPath("diffusion_models/z-image-turbo.gguf"));
+        // The options stable-diffusion.cpp names (docs/guides/c_api.md at the pin).
+        QCOMPARE(params, (QJsonObject{{"width", 832},
+                                      {"height", 1216},
+                                      {"seed", 42},
+                                      {"sample.steps", 8},
+                                      {"sample.guidance.txt_cfg", 1},
+                                      {"sample.method", "euler"},
+                                      {"sample.scheduler", "simple"}}));
+        QCOMPARE(request->inputs, (QJsonObject{{"conditioning", QJsonObject{{"path", conditioning.value("path")}}}}));
+    }
+
+    void theSamplerRedrawsFromAGivenLatentAsFarAsDenoiseSays() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.zImage());
+        const QJsonObject latent{{"data", "fugue/latent"},
+                                 {"path", "/runs/r/nodes/encode/latent.bin"},
+                                 {"meta", QJsonObject{{"width", 640}, {"height", 480}, {"model", model}}}};
+        const Result<JobRequest> request =
+            bench.request(kSampler, {{"model", Value(model)},
+                                     {"conditioning", Value(QJsonObject{{"data", "fugue/conditioning"}, {"path", "/c.bin"}})},
+                                     {"latent", Value(latent)}, {"denoise", Value(0.6)}});
+        QVERIFY(request);
+        QCOMPARE(request->inputs.value("init_latent").toObject(), (QJsonObject{{"path", "/runs/r/nodes/encode/latent.bin"}}));
+        QCOMPARE(request->params.value("strength").toDouble(), 0.6);
+        QCOMPARE(request->params.value("width").toInt(), 640);
+        QCOMPARE(request->params.value("height").toInt(), 480);
+        QVERIFY(!request->params.contains("sample.method")); // unset: the model's own
+    }
+
+    void aSampledLatentKnowsItsSizeAndModel() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.zImage());
+        const Result<Values> empty = bench.run(kEmptyLatent, {});
+        QVERIFY(empty);
+        const QString file = bench.workDir() + "/latent.bin";
+        const Result<Values> out =
+            bench.outputs(kSampler, {{"model", Value(model)}, {"latent", empty->value("latent")}},
+                          JobResult{QJsonObject{{"latent", QJsonObject{{"path", file}}}}, {}});
+        QVERIFY(out);
+        QCOMPARE(out->value("latent").json().toObject(),
+                 (QJsonObject{{"data", "fugue/latent"},
+                              {"path", file},
+                              {"meta", QJsonObject{{"width", 1024}, {"height", 1024}, {"model", model}}}}));
+    }
+
+    // --- VAE Decode and VAE Encode ---
+
+    void vaeDecodeUsesTheModelThatSampledTheLatent() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.zImage());
+        const QJsonObject latent{{"data", "fugue/latent"},
+                                 {"path", "/runs/r/nodes/sample/latent.bin"},
+                                 {"meta", QJsonObject{{"width", 1024}, {"height", 768}, {"model", model}}}};
+        const Result<JobRequest> request = bench.request(kVaeDecode, {{"latent", Value(latent)}});
+        QVERIFY(request);
+        QCOMPARE(request->capability, QStringLiteral("latent.decode"));
+        QCOMPARE(request->params.value("context").toObject().value("vae_path").toString(),
+                 Bench::modelPath("vae/ae.safetensors"));
+        QCOMPARE(request->inputs, (QJsonObject{{"latent", QJsonObject{{"path", "/runs/r/nodes/sample/latent.bin"}}}}));
+    }
+
+    void anEmptyLatentCannotBeDecoded() {
+        Bench bench;
+        const Result<Values> empty = bench.run(kEmptyLatent, {});
+        QVERIFY(empty);
+        const Result<JobRequest> request = bench.request(kVaeDecode, {{"latent", empty->value("latent")}});
+        QVERIFY(!request);
+        QCOMPARE(request.error().code, QStringLiteral("node_failed"));
+        QCOMPARE(request.error().input, QStringLiteral("latent"));
+    }
+
+    void vaeEncodeMakesALatentOfTheImagesSize() {
+        Bench bench;
+        initVips();
+        const QString png = bench.dir.filePath("start.png");
+        (vips::VImage::black(320, 192, vips::VImage::option()->set("bands", 3)) + 90)
+            .cast(VIPS_FORMAT_UCHAR)
+            .write_to_file(png.toUtf8().constData());
+        const Result<MediaHandle> image = MediaHandle::probe(MediaType::Image, png, bench.hashes);
+        QVERIFY(image);
+        const QJsonObject model = bench.loaded(bench.zImage());
+        const Values inputs{{"model", Value(model)}, {"image", Value(image.value())}};
+        const Result<JobRequest> request = bench.request(kVaeEncode, inputs);
+        QVERIFY(request);
+        QCOMPARE(request->capability, QStringLiteral("latent.encode"));
+        QCOMPARE(request->params.value("width").toInt(), 320);
+        QCOMPARE(request->params.value("height").toInt(), 192);
+        QCOMPARE(request->inputs, (QJsonObject{{"image", QJsonObject{{"path", png}}}}));
+        const QString file = bench.workDir() + "/latent.bin";
+        const Result<Values> out =
+            bench.outputs(kVaeEncode, inputs, JobResult{QJsonObject{{"latent", QJsonObject{{"path", file}}}}, {}});
+        QVERIFY(out);
+        QCOMPARE(out->value("latent").json().toObject().value("meta").toObject(),
+                 (QJsonObject{{"width", 320}, {"height", 192}, {"model", model}}));
+    }
+
+    // stb_image in the helper reads PNG and JPEG: anything else goes as a PNG, at a size in
+    // steps of 16 that the latent's descriptor then tells truly.
+    void vaeEncodeSendsOtherFormatsAsAPngAtASizeInStepsOf16() {
+        Bench bench;
+        initVips();
+        const QString webp = bench.dir.filePath("start.webp");
+        (vips::VImage::black(330, 200, vips::VImage::option()->set("bands", 4)) + 90)
+            .cast(VIPS_FORMAT_UCHAR)
+            .write_to_file(webp.toUtf8().constData());
+        const Result<MediaHandle> image = MediaHandle::probe(MediaType::Image, webp, bench.hashes);
+        QVERIFY(image);
+        const QJsonObject model = bench.loaded(bench.zImage());
+        const Values inputs{{"model", Value(model)}, {"image", Value(image.value())}};
+        const Result<JobRequest> request = bench.request(kVaeEncode, inputs);
+        QVERIFY2(request, request ? "" : qPrintable(request.error().message));
+        const QString sent = request->inputs.value("image").toObject().value("path").toString();
+        QCOMPARE(QFileInfo(sent).absolutePath(), bench.workDir());
+        const vips::VImage png = vips::VImage::new_from_file(sent.toUtf8().constData());
+        QCOMPARE(png.bands(), 3);
+        QCOMPARE(QString::fromLatin1(png.get_string("vips-loader")), QStringLiteral("pngload"));
+        QCOMPARE(request->params.value("width").toInt(), 336);
+        QCOMPARE(request->params.value("height").toInt(), 208);
+        const Result<Values> out = bench.outputs(
+            kVaeEncode, inputs, JobResult{QJsonObject{{"latent", QJsonObject{{"path", bench.workDir() + "/latent.bin"}}}}, {}});
+        QVERIFY(out);
+        QCOMPARE(out->value("latent").json().toObject().value("meta").toObject().value("width").toInt(), 336);
+    }
+
+    // --- end to end: the shipped binary, the fake helper (no inference here) ---
+
+    // Text to image in stages, run by the helper Fugue starts itself (no providers.json: the
+    // defaults end with it, 8.2). A new seed samples and decodes again, but the prompt's
+    // conditioning comes from the cache (2.6).
+    void aTextToImageGraphRunsInStagesOnTheHelper() {
+        Bench bench;
+        const QJsonObject parts = bench.zImage();
+        const auto node = [](const QString &type, const QJsonObject &inputs) {
+            return QJsonObject{{"type", type}, {"version", "1.0.0"}, {"inputs", inputs}};
+        };
+        const auto from = [](const QString &output) { return QJsonObject{{"from", output}}; };
+        const QJsonObject nodes{
+            {"models", node(kLoadModels, parts)},
+            {"encode", node(kTextEncode, {{"model", from("models.model")}, {"prompt", "a red fox in snow"}})},
+            {"size", node(kEmptyLatent, {{"width", 512}, {"height", 512}})},
+            {"sample", node(kSampler, {{"model", from("models.model")},
+                                       {"conditioning", from("encode.conditioning")},
+                                       {"latent", from("size.latent")},
+                                       {"seed", 1},
+                                       {"steps", 4}})},
+            {"decode", node(kVaeDecode, {{"latent", from("sample.latent")}})}};
+        const QString flow = bench.dir.filePath("flow.fugue");
+        writeFile(flow, QJsonDocument(QJsonObject{{"fugue", 1}, {"graph", QJsonObject{{"nodes", nodes}}}})
+                            .toJson(QJsonDocument::Compact));
+        const QString log = bench.dir.filePath("helper.log");
+
+        const QList<QJsonObject> first = fugue(bench, log, {"run", flow, "--to", "decode", "--wait", "--json"});
+        QVERIFY(!first.isEmpty());
+        QCOMPARE(first.last().value("event").toString(), QStringLiteral("run.done"));
+        QCOMPARE(first.last().value("status").toString(), QStringLiteral("ok"));
+        QCOMPARE(jobs(log), (QStringList{"text.encode", "latent.sample", "latent.decode"}));
+        const QJsonObject decoded = doneOutputs(first, "decode").value("image").toObject();
+        QCOMPARE(decoded.value("width").toInt(), 1);
+        QVERIFY(decoded.value("hash").toString().startsWith("sha256:"));
+
+        QFile::remove(log);
+        const QList<QJsonObject> again =
+            fugue(bench, log, {"run", flow, "--to", "decode", "--set", "sample.seed=2", "--wait", "--json"});
+        QVERIFY(!again.isEmpty());
+        QCOMPARE(again.last().value("status").toString(), QStringLiteral("ok"));
+        QCOMPARE(jobs(log), (QStringList{"latent.sample", "latent.decode"})); // the conditioning was kept
+    }
+
+private:
+    // The shipped binary with the fake helper as this machine's helper; its events.
+    static QList<QJsonObject> fugue(const Bench &bench, const QString &log, const QStringList &args) {
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        for (const char *name : {"QT_QPA_PLATFORM", "DISPLAY", "WAYLAND_DISPLAY", "FUGUE_NODE_MANIFESTS"})
+            env.remove(QString::fromLatin1(name));
+        // Its own cache and runs (ctest keeps one home per test across runs); the models stay
+        // in the data folder Bench wrote them to.
+        env.insert("XDG_CACHE_HOME", bench.dir.filePath("cache"));
+        env.insert("XDG_STATE_HOME", bench.dir.filePath("state"));
+        env.insert("FUGUE_HELPER", QStringLiteral(FUGUE_FAKE_HELPER));
+        env.insert("FAKE_HELPER_LOG", log);
+        QProcess process;
+        process.setProcessEnvironment(env);
+        process.setWorkingDirectory(bench.dir.path()); // inside the write roots (13.6)
+        process.start(QStringLiteral(FUGUE_BINARY), args);
+        if (!process.waitForFinished(60000)) {
+            process.kill();
+            process.waitForFinished();
+            qWarning("fugue timed out: %s", qPrintable(args.join(' ')));
+            return {};
+        }
+        const QByteArray out = process.readAllStandardOutput();
+        if (process.exitCode() != 0)
+            qWarning("fugue %s: %s %s", qPrintable(args.join(' ')), out.constData(),
+                     process.readAllStandardError().constData());
+        QList<QJsonObject> events;
+        for (const QByteArray &line : out.trimmed().split('\n'))
+            events.append(QJsonDocument::fromJson(line).object());
+        return events;
+    }
+
+    // The capabilities of the jobs the helper ran, in order.
+    static QStringList jobs(const QString &log) {
+        QStringList ran;
+        for (const QString &line : QString::fromUtf8(readFile(log)).split('\n', Qt::SkipEmptyParts))
+            if (line.startsWith(QLatin1String("job ")))
+                ran << line.mid(4);
+        return ran;
+    }
+
+    static QJsonObject doneOutputs(const QList<QJsonObject> &events, const QString &node) {
+        for (const QJsonObject &event : events)
+            if (event.value("event").toString() == QLatin1String("node.done") && event.value("node").toString() == node)
+                return event.value("outputs").toObject();
+        return {};
+    }
+};
+
+QTEST_GUILESS_MAIN(TestComponentNodes)
+#include "test_component_nodes.moc"

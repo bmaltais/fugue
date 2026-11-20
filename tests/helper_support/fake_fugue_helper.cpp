@@ -9,8 +9,10 @@
 //   ignore_cancel   a cancel changes nothing
 //
 // A finished job writes one file into output_dir, named by what the capability makes
-// (conditioning.bin, latent.bin, image.png), holding the prompt. With FAKE_HELPER_LOG set, it
-// appends "start <pid>", "job <capability>" and "shutdown" lines to that file.
+// (conditioning.bin, latent.bin, image.png). The .bin files hold the job's params without
+// "fake" as compact JSON, so a file differs whenever what made it does; the image is a 1x1 PNG.
+// With FAKE_HELPER_LOG set, it appends "start <pid>", "job <capability>" and "shutdown" lines
+// to that file.
 
 #include <QCoreApplication>
 #include <QDir>
@@ -182,7 +184,13 @@ private:
         if (!out.open(QIODevice::WriteOnly))
             return over(QStringLiteral("error"),
                         {{"error", QJsonObject{{"code", "helper_failed"}, {"message", "cannot write " + file}}}});
-        out.write(params.value("prompt").toString().toUtf8());
+        if (name == QLatin1String("image")) {
+            out.write(QByteArray::fromBase64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="));
+        } else {
+            QJsonObject made = params;
+            made.remove(QStringLiteral("fake"));
+            out.write(QJsonDocument(made).toJson(QJsonDocument::Compact));
+        }
         out.close();
         job->outputs = QJsonObject{{name, QJsonObject{{"path", file}}}};
         over(QStringLiteral("done"));

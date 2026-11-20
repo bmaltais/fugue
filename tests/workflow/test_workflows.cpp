@@ -757,6 +757,23 @@ private slots:
         QVERIFY(!hasErrors(compiled.problems()));
     }
 
+    // The component-node examples (#79): every node known, the graph compiles.
+    void theComponentExamplesLoadAndCompile() {
+        for (const char *name : {"z-image-turbo", "flux2-klein-4b"}) {
+            Fixture f;
+            const QString example = QStringLiteral(FUGUE_SOURCE_DIR "/examples/%1.fugue").arg(QLatin1String(name));
+            QVERIFY2(f.workflows->openPath(example), name);
+            QVERIFY(f.workflows->notice().isEmpty());
+            QCOMPARE(f.canvas.nodes()->rowCount(), 7);
+            for (int i = 0; i < f.canvas.nodes()->rowCount(); ++i)
+                QVERIFY(!f.canvas.nodes()->data(f.canvas.nodes()->index(i), NodeList::Missing).toBool());
+            const Compilation compiled = compile(Document::loadFile(example).value(), f.registry);
+            QVERIFY2(compiled.ok(), qPrintable(compiled.error().message));
+            QVERIFY(compiled->nodes.contains("sample"));
+            QVERIFY(!hasErrors(compiled.problems()));
+        }
+    }
+
     // --- the window ---
 
     void theWindowShowsTheTabsAndTheNotice() {

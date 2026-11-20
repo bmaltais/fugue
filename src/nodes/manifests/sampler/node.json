@@ -1,0 +1,36 @@
+{
+  "manifest": 1,
+  "id": "fugue/sampler",
+  "version": "1.0.0",
+  "name": "Sampler",
+  "description": "Denoises a latent with the model, following the conditioning: from noise for an Empty Latent, else from the latent given, by the amount Denoise sets.",
+  "category": "Diffusion",
+  "keywords": ["ksampler", "sample", "denoise", "steps", "cfg", "seed", "diffusion"],
+  "runtime": {"kind": "builtin"},
+  "capabilities": ["latent.sample"],
+  "inputs": [
+    {"name": "model", "type": "fugue/model", "label": "Model"},
+    {"name": "conditioning", "type": "fugue/conditioning", "label": "Conditioning"},
+    {"name": "latent", "type": "fugue/latent", "label": "Latent"},
+    {"name": "seed", "type": "number", "label": "Seed", "default": 0, "integer": true, "min": 0,
+     "max": 9007199254740991, "widget": "seed"},
+    {"name": "steps", "type": "number", "label": "Steps", "default": 20, "integer": true, "min": 1, "max": 200},
+    {"name": "guidance", "type": "number", "label": "Guidance", "default": 1, "min": 0, "max": 30, "step": 0.1,
+     "description": "How closely to follow the prompt (CFG). 1 for distilled models such as Z-Image Turbo and FLUX.2 Klein, which also skips the negative prompt; about 5 to 8 for SDXL and SD 1.5."},
+    {"name": "sampler", "type": "text", "label": "Sampler", "optional": true, "advanced": true,
+     "choices": ["euler", "euler_a", "heun", "dpm2", "dpm++2s_a", "dpm++2m", "dpm++2mv2", "ipndm", "ipndm_v", "lcm",
+                 "ddim_trailing", "tcd", "res_multistep", "res_2s", "er_sde", "euler_cfg_pp", "euler_a_cfg_pp",
+                 "euler_ge", "dpm++2m_sde", "dpm++2m_sde_bt", "lms"],
+     "description": "Unset: the model's own."},
+    {"name": "scheduler", "type": "text", "label": "Scheduler", "optional": true, "advanced": true,
+     "choices": ["discrete", "karras", "exponential", "ays", "gits", "sgm_uniform", "simple", "smoothstep",
+                 "kl_optimal", "lcm", "bong_tangent", "logit_normal", "flux2", "flux", "beta"],
+     "description": "Unset: the model's own."},
+    {"name": "denoise", "type": "number", "label": "Denoise", "default": 1, "min": 0, "max": 1, "step": 0.05,
+     "widget": "slider",
+     "description": "For a latent from VAE Encode or another Sampler: how far to move from it, 0 keeps it, 1 ignores it. An Empty Latent always starts from noise."}
+  ],
+  "outputs": [
+    {"name": "latent", "type": "fugue/latent", "label": "Latent"}
+  ]
+}

@@ -222,16 +222,24 @@ Values of a data type are files in the run folder referenced by a handle with a 
  "meta": {"width": 1024, "height": 1024, "channels": 16, "family": "flux2"}}
 ```
 
-- A latent is a tensor file plus a small descriptor.
-- Conditioning is a recipe, not a tensor bag: tensor files plus a JSON of named modifiers (text
-  and encoder, ControlNet references with strengths, masks, areas, timestep ranges) that the
-  sampler interprets.
+- A latent is a tensor file plus a small descriptor (`meta`). An Empty Latent is the descriptor
+  alone, a size: the Sampler makes the noise.
+- Conditioning is what the encode leaves for sampling, in the helper's stage file (8.10): every
+  conditioning set, negative included, and the state image extensions set while encoding. Later
+  modifiers (ControlNet references with strengths, masks, areas, timestep ranges) are applied by
+  nodes between Text Encode and the Sampler.
 - Because each value has a content hash, changing only the sampler does not re-encode the prompt.
 
-The concrete data and resource types for generation (`fugue/latent`, `fugue/conditioning`,
-`fugue/diffusion-model`, `fugue/text-encoder`, `fugue/vae`, `fugue/lora`, `fugue/controlnet`,
-`fugue/upscale-model`) are declared by the built-in component pack in M5 and are provisional
-until then. The type system above is fixed now so they need no redesign.
+The built-in pack declares the generation types (#79): data `fugue/latent` and
+`fugue/conditioning`; resources `fugue/diffusion-model` (folders `diffusion-model`,
+`diffusion_models`, `unet`), `fugue/text-encoder` (`text-encoder`, `text_encoders`, `clip`),
+`fugue/vae` (`vae`), `fugue/lora` (`lora`, `loras`) and `fugue/model` (`checkpoints`). A
+`fugue/model` is everything stable-diffusion.cpp loads as one model: a checkpoint file, or the
+derived handle Load Models makes, `{"base": <diffusion model>, "text_encoder": …, "vae": …}`, with
+Apply LoRA's `apply` steps. A latent's `meta` holds the image size, and for a sampled or encoded
+latent the model, which VAE Decode decodes with; an Empty Latent's is only the size
+(`"empty": true`), the Sampler starting from noise. `fugue/controlnet` and
+`fugue/upscale-model` come with their nodes.
 
 ---
 
@@ -1271,6 +1279,10 @@ reference. A new inference runtime is a new provider module.
   generation that runs out of memory frees the others and is tried once more. Fugue's own
   residency ([9.3](#93-residency)) records the helper as one model of its instance: dropping it
   shuts the helper down.
+- stable-diffusion.cpp loads a model as one context of all its files and checks at load that
+  every component is there, so every stage job names all of them, even the ones it does not run:
+  one `fugue/model` gives the same context to every stage, and the helper keeps that one loaded
+  for the whole graph.
 - Out of memory is a typed error on the node (`out_of_memory`). A helper crash kills only the helper.
 - The component-level helper is based on stable-diffusion.cpp with separate encode, sample and
   decode steps, C++ only. The M0 spike showed the split works
@@ -1945,10 +1957,18 @@ choice; a limit the provider reports for the model replaces it, higher or lower.
 
 ### 14.3 M5: component level
 
-The spike passed ([spikes/02](spikes/02-sdcpp-split.md)): model pickers, Text Encode, Empty Latent, Sampler, VAE Decode and
-Encode, LoRA load and apply (strength, stacking; the result is a derived handle,
-[2.5](#25-resource-handles)). Then ControlNet, upscale with a model, hires fix as a group, inpaint
-models. A coarse Generate Image can later be rebuilt as a group of these.
+The spike passed ([spikes/02](spikes/02-sdcpp-split.md)). Shipped (#79), each stage a job of the
+helper's stage capabilities: Load Models (diffusion model, text encoder and VAE picked from disk,
+one `fugue/model`, [2.6](#26-data-values-latents-and-conditioning)), Apply LoRA (strength,
+stacking; the result is a derived handle, [2.5](#25-resource-handles)), Text Encode (prompt and
+negative prompt, one conditioning), Empty Latent, Sampler (seed, steps, guidance, sampler,
+scheduler, denoise), VAE Decode and VAE Encode. A text-to-image graph of them gave the same
+pixels as one `generate` run of the same helper for Z-Image Turbo and FLUX.2 Klein 4B at guidance
+1, checked by hand on an RTX 3090 (SDXL's size conditioning differs: Appendix A);
+`examples/z-image-turbo.fugue` and `examples/flux2-klein-4b.fugue` are ready to open. Then text
+encoders other than one LLM (FLUX.1's CLIP-L and T5, SD3), ControlNet, upscale with a model,
+hires fix as a group, inpaint models. A coarse Generate Image can later be rebuilt as a group of
+these.
 
 ---
 
@@ -2238,6 +2258,10 @@ Building M2 made these further choices.
 | Stage hooks as image options (`fugue.*`) of stable-diffusion.cpp's option API, in place of the spike's environment variables; the extensions' encode-time state crosses through two virtual methods on its extension interface | 8.10 | medium-high |
 | No pixel-parity test was built for the first pin (#77): the spike showed identical pixels at this commit (spikes/02), and the owner judged that enough. #77 ran these staged once: Z-Image, FLUX.2 Klein 4B and 9B, FLUX.1, SDXL, SD 1.5, Qwen-Image Edit 2511 (the Qwen-Image 2.1 files at hand did not load, stable-diffusion.cpp failing on them before any stage), image-to-image from a latent, and IP-Adapter. PhotoMaker and PuLID were not run (no ID images or embedding at hand), so their carried state is unverified. A pin move runs only the few checks 8.10 lists, by hand (GPU and model files), as the owner asked: the families are stable-diffusion.cpp's to test | 8.10 | medium-high |
 | Sources pinned as GitHub commit archives with SHA-256 (stable-diffusion.cpp, ggml, CUTLASS), not git submodules: verifiable, and a package lists them as its own sources | 8.10 | high |
+| The component nodes take one `fugue/model`, made by Load Models from the three files, not ComfyUI's separate MODEL, CLIP and VAE wires (#79): stable-diffusion.cpp fails to load a context missing any component ("model metadata validation failed"), so every stage needs all three, and one handle keeps one helper context warm. VAE Decode takes only the latent, which carries the model | 2.6, 14.3, 8.10 | high |
+| Text Encode takes the prompt and the negative prompt and gives one conditioning (#79, the owner's choice over ComfyUI's positive and negative wires, which would need a patch change): stable-diffusion.cpp encodes both sets in one call. It always makes the negative set (guidance other than 1 at encode), the Sampler's guidance being unknown to it; sampling at 1 skips it, so the pixels match a single run, at the cost of a second, short encode of the (often empty) negative prompt | 14.3 | high |
+| Load Models' text encoder is the model's one LLM encoder (`llm_path`: Qwen3 for Z-Image and FLUX.2 Klein, Qwen2.5-VL for Qwen-Image); families with CLIP and T5 encoders (FLUX.1, SD3) come later. A plain `fugue/model` is a checkpoint (`model_path`, the `checkpoints` folder) | 14.3 | medium-high |
+| An Empty Latent is a size in a small file, not a tensor: the helper makes the noise from the seed, as a single run does. The Sampler's guidance defaults to 1 (the distilled models the examples use); sampler and scheduler unset are the model's own. Text Encode sends no image size, so SDXL's size conditioning is the model's default size, as ComfyUI's plain CLIPTextEncode uses a fixed one | 14.3 | medium |
 
 ## Appendix B: issue to section map
 

@@ -154,7 +154,7 @@ private slots:
         QCOMPARE(path, m_dir.filePath("conditioning.bin"));
         QFile file(path);
         QVERIFY(file.open(QIODevice::ReadOnly));
-        QCOMPARE(file.readAll(), QByteArray("a lighthouse"));
+        QCOMPARE(QJsonDocument::fromJson(file.readAll()).object().value("prompt").toString(), QStringLiteral("a lighthouse"));
 
         const qint64 pid = helper->pid();
         QVERIFY(alive(pid));

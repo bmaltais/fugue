@@ -1,0 +1,20 @@
+{
+  "manifest": 1,
+  "id": "fugue/text-encode",
+  "version": "1.0.0",
+  "name": "Text Encode",
+  "description": "Turns a prompt into conditioning for the Sampler, with the model's text encoder. Kept while only the sampling changes, so a new seed does not encode the prompt again.",
+  "category": "Diffusion",
+  "keywords": ["prompt", "clip text encode", "conditioning", "negative prompt"],
+  "runtime": {"kind": "builtin"},
+  "capabilities": ["text.encode"],
+  "inputs": [
+    {"name": "model", "type": "fugue/model", "label": "Model"},
+    {"name": "prompt", "type": "text", "label": "Prompt", "widget": "multiline"},
+    {"name": "negative_prompt", "type": "text", "label": "Negative prompt", "default": "", "widget": "multiline",
+     "description": "What the image should not show. Used only when the Sampler's guidance is not 1."}
+  ],
+  "outputs": [
+    {"name": "conditioning", "type": "fugue/conditioning", "label": "Conditioning"}
+  ]
+}

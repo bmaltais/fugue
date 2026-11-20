@@ -225,6 +225,30 @@ private slots:
         QCOMPARE(made.error().code, QStringLiteral("model_missing"));
     }
 
+    // Load Models' handle (src/nodes/components.cpp): the base and every other part get paths.
+    void eachPartOfADerivedHandleGetsItsPath() {
+        QTemporaryDir root, state;
+        Registry registry;
+        declare(registry, "io.test.pack/model", {".gguf"});
+        declare(registry, "io.test.pack/encoder", {".gguf"});
+        writeFile(root.filePath("model/unet.gguf"));
+        writeFile(root.filePath("encoder/qwen.gguf"));
+        FileHashes hashes(state.filePath("hashes.json"));
+        const ModelLibrary library({root.path()}, &registry);
+        const QJsonObject derived{{"resource", "io.test.pack/model"},
+                                  {"derived", QJsonObject{{"base", handle("io.test.pack/model", abcHash, "unet.gguf")},
+                                                          {"text_encoder", handle("io.test.pack/encoder", abcHash, "qwen.gguf")}}}};
+        const Result<QJsonValue> made = library.withPaths(derived, hashes);
+        QVERIFY(made);
+        const QJsonObject parts = made->toObject().value("derived").toObject();
+        QCOMPARE(parts.value("base").toObject().value("path").toString(), root.filePath("model/unet.gguf"));
+        QCOMPARE(parts.value("text_encoder").toObject().value("path").toString(), root.filePath("encoder/qwen.gguf"));
+
+        QVERIFY(QFile::remove(root.filePath("encoder/qwen.gguf")));
+        const ModelLibrary again({root.path()}, &registry);
+        QCOMPARE(again.withPaths(derived, hashes).error().code, QStringLiteral("model_missing"));
+    }
+
     void aChangedFileNoLongerMatchesItsRememberedHash() {
         QTemporaryDir root, state;
         Registry registry;

@@ -1,0 +1,17 @@
+{
+  "manifest": 1,
+  "id": "fugue/empty-latent",
+  "version": "1.0.0",
+  "name": "Empty Latent",
+  "description": "The size of the image to make, for a Sampler to start from noise.",
+  "category": "Diffusion",
+  "keywords": ["empty latent image", "size", "width", "height", "noise"],
+  "runtime": {"kind": "builtin"},
+  "inputs": [
+    {"name": "width", "type": "number", "label": "Width", "default": 1024, "integer": true, "min": 64, "max": 8192, "step": 16},
+    {"name": "height", "type": "number", "label": "Height", "default": 1024, "integer": true, "min": 64, "max": 8192, "step": 16}
+  ],
+  "outputs": [
+    {"name": "latent", "type": "fugue/latent", "label": "Latent"}
+  ]
+}

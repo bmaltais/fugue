@@ -9,6 +9,7 @@
 namespace fugue::nodes {
 
 void addBasicKernels(Kernels &kernels);           // basic.cpp
+void addComponentKernels(Kernels &kernels);       // components.cpp
 void addImageGenerationKernels(Kernels &kernels); // image_generation.cpp
 void addImageSizeKernels(Kernels &kernels);       // image_size.cpp
 void addPixelKernels(Kernels &kernels);           // pixel.cpp

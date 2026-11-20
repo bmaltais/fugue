@@ -178,6 +178,16 @@ Result<QJsonValue> ModelLibrary::withPaths(const QJsonValue &value, FileHashes &
     if (!base)
         return base;
     derived.insert("base", base.value());
+    // The other parts named beside the base (Load Models' text_encoder and vae).
+    for (const QString &key : derived.keys()) {
+        const QJsonValue part = derived.value(key);
+        if (key == QLatin1String("base") || !part.isObject() || !part.toObject().contains("resource"))
+            continue;
+        const Result<QJsonValue> found = withPaths(part, hashes, hashing);
+        if (!found)
+            return found;
+        derived.insert(key, found.value());
+    }
     QJsonArray apply = derived.value("apply").toArray();
     for (qsizetype i = 0; i < apply.size(); ++i) {
         QJsonObject step = apply.at(i).toObject();

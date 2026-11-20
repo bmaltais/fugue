@@ -7,19 +7,26 @@
   "source": "https://github.com/bmaltais/fugue",
   "description": "The nodes that ship with Fugue.",
   "nodes": [
+    "apply-lora",
     "blend",
     "brightness-contrast",
     "crop",
     "edit-image",
+    "empty-latent",
     "generate-image",
     "image-size",
     "load-image",
+    "load-models",
     "number",
     "preview",
     "resize",
+    "sampler",
     "save-image",
     "text",
-    "text-concat"
+    "text-concat",
+    "text-encode",
+    "vae-decode",
+    "vae-encode"
   ],
   "types": [
     {
@@ -27,6 +34,68 @@
       "version": 1,
       "kind": "resource",
       "name": "Image model"
+    },
+    {
+      "id": "fugue/model",
+      "version": 1,
+      "kind": "resource",
+      "name": "Model",
+      "folders": [
+        "checkpoints"
+      ]
+    },
+    {
+      "id": "fugue/diffusion-model",
+      "version": 1,
+      "kind": "resource",
+      "name": "Diffusion model",
+      "folders": [
+        "diffusion-model",
+        "diffusion_models",
+        "unet"
+      ]
+    },
+    {
+      "id": "fugue/text-encoder",
+      "version": 1,
+      "kind": "resource",
+      "name": "Text encoder",
+      "folders": [
+        "text-encoder",
+        "text_encoders",
+        "clip"
+      ]
+    },
+    {
+      "id": "fugue/vae",
+      "version": 1,
+      "kind": "resource",
+      "name": "VAE",
+      "folders": [
+        "vae"
+      ]
+    },
+    {
+      "id": "fugue/lora",
+      "version": 1,
+      "kind": "resource",
+      "name": "LoRA",
+      "folders": [
+        "lora",
+        "loras"
+      ]
+    },
+    {
+      "id": "fugue/latent",
+      "version": 1,
+      "kind": "data",
+      "name": "Latent"
+    },
+    {
+      "id": "fugue/conditioning",
+      "version": 1,
+      "kind": "data",
+      "name": "Conditioning"
     }
   ]
 }

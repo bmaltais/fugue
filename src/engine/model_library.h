@@ -78,8 +78,9 @@ public:
     Result<QString> resolve(const QJsonObject &handle, FileHashes &hashes, Hashing hashing = Hashing::Read) const;
 
     // A resource input's value as a command node gets it (7.2): each handle with the `path` of its
-    // file added, a list item by item. A derived handle (2.5) has no file of its own: its `base`
-    // and the `lora` of each `apply` step get theirs. Fails as resolve() does, for the first
+    // file added, a list item by item. A derived handle (2.5) has no file of its own: its `base`,
+    // every other handle beside it (a model's `text_encoder` and `vae`) and the `lora` of each
+    // `apply` step get theirs. Fails as resolve() does, for the first
     // handle not found.
     Result<QJsonValue> withPaths(const QJsonValue &value, FileHashes &hashes, Hashing hashing = Hashing::Read) const;
 

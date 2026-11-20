@@ -1,0 +1,19 @@
+{
+  "manifest": 1,
+  "id": "fugue/apply-lora",
+  "version": "1.0.0",
+  "name": "Apply LoRA",
+  "description": "The model with a LoRA applied at a strength. Chain several to stack them; wire the result to both Text Encode and Sampler.",
+  "category": "Diffusion",
+  "keywords": ["lora", "loader", "style", "fine-tune", "adapter"],
+  "runtime": {"kind": "builtin"},
+  "inputs": [
+    {"name": "model", "type": "fugue/model", "label": "Model"},
+    {"name": "lora", "type": "fugue/lora", "label": "LoRA"},
+    {"name": "strength", "type": "number", "label": "Strength", "default": 1, "min": -4, "max": 4, "step": 0.05,
+     "description": "How strongly the LoRA changes the model: 0 not at all, 1 as trained."}
+  ],
+  "outputs": [
+    {"name": "model", "type": "fugue/model", "label": "Model"}
+  ]
+}
