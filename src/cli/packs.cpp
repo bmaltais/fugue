@@ -43,7 +43,7 @@ Answer yesNo(const QString &question) {
     QTextStream err(stderr);
     err << question << " [y/N] ";
     err.flush();
-    QTextStream in(stdin);
+    static QTextStream in(stdin); // one reader: a second would lose what the first buffered
     const QString line = in.readLine().trimmed().toLower();
     if (line == QLatin1String("y") || line == QLatin1String("yes"))
         return Answer::Yes;
@@ -141,7 +141,8 @@ Reply packList(const Command &, Context &) {
 }
 
 Reply packAdd(const Command &command, Context &context) {
-    const Result<PackAdded> added = addPack(command.positionals.at(0), command.value("ref"), packsDir(), terminalPrompts(context));
+    TrustStore trust;
+    const Result<PackAdded> added = addPack(command.positionals.at(0), command.value("ref"), packsDir(), trust, terminalPrompts(context));
     if (!added)
         return Reply::failure(added.errors());
     QString text = QStringLiteral("Installed %1 %2.").arg(added->pack.id, added->pack.version);
@@ -149,7 +150,7 @@ Reply packAdd(const Command &command, Context &context) {
         text += QStringLiteral(" Its setup was not run; run it yourself in %1.").arg(added->pack.folder);
     text += QStringLiteral(" Trust it with `fugue pack trust %1` before it runs.").arg(added->pack.id);
     Reply reply = Reply::success(addedJson(*added), text);
-    reply.errors = added.errors(); // warnings
+    reply.errors = added.warnings();
     return reply;
 }
 
@@ -162,7 +163,8 @@ Reply packRemove(const Command &command, Context &context) {
 }
 
 Reply packUpdate(const Command &command, Context &context) {
-    const Result<QList<PackAdded>> changed = updatePacks(command.positionals.value(0), command.value("ref"), packsDir(), terminalPrompts(context));
+    TrustStore trust;
+    const Result<QList<PackAdded>> changed = updatePacks(command.positionals.value(0), command.value("ref"), packsDir(), trust, terminalPrompts(context));
     if (!changed)
         return Reply::failure(changed.errors());
     QJsonArray updated;
@@ -174,7 +176,7 @@ Reply packUpdate(const Command &command, Context &context) {
             lines << QStringLiteral("  Its setup was not run; run it yourself in %1.").arg(added.pack.folder);
     }
     Reply reply = Reply::success(QJsonObject{{"updated", updated}}, lines.isEmpty() ? QStringLiteral("Nothing to update.") : lines.join('\n'));
-    reply.errors = changed.errors(); // packs that could not be fetched, as warnings
+    reply.errors = changed.warnings(); // packs that could not be fetched
     return reply;
 }
 

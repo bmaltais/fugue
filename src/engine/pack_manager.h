@@ -77,13 +77,18 @@ Result<PackSummary> summarizePack(const QString &folder);
 
 // `fugue pack add`. A folder is copied; a git URL (https, ssh, git, file or user@host:path) is
 // cloned and `ref` checked out. `packsDir` is where the pack goes.
-Result<PackAdded> addPack(const QString &location, const QString &ref, const QString &packsDir,
+//
+// The setup question is asked before anything changes, and a setup that fails puts the pack
+// (or, for an update, the old version) back as it was. A new, updated or re-installed pack is
+// not trusted: its id's trust is forgotten (6.7). The id may not be found in any search path.
+Result<PackAdded> addPack(const QString &location, const QString &ref, const QString &packsDir, TrustStore &trust,
                           const PackPrompts &prompts);
 
 // `fugue pack update [id]`: each given pack (all of those with a recorded source when `id` is
 // empty) is fetched again, at `ref` when given, else at the ref it was installed at. Returns
-// the packs that changed. A pack already at that version and commit is left alone.
-Result<QList<PackAdded>> updatePacks(const QString &id, const QString &ref, const QString &packsDir,
+// the packs that changed. A pack already at that commit under that ref is left alone. `ref`
+// needs an id. For all packs a pack that fails is a warning and the others go on.
+Result<QList<PackAdded>> updatePacks(const QString &id, const QString &ref, const QString &packsDir, TrustStore &trust,
                                      const PackPrompts &prompts);
 
 // `fugue pack remove`: only a pack in `packsDir`, not one found through a settings path.
