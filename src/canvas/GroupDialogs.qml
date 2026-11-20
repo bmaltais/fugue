@@ -94,15 +94,6 @@ Item {
         }
     }
 
-    component Question: Popup {
-        anchors.centerIn: Overlay.overlay
-        modal: true
-        focus: true
-        padding: 6 * root.look.unit
-        width: Math.min(root.width - 12 * root.look.unit, 520)
-        Overlay.modal: Rectangle { color: root.look.scrim }
-        background: PopupSurface { look: root.look }
-    }
 
     Question {
         id: sinksAsk
@@ -121,13 +112,13 @@ Item {
             }
             RowLayout {
                 Layout.alignment: Qt.AlignRight
-                Button { text: qsTr("Cancel"); onClicked: sinksAsk.close() }
-                Button {
+                ThemedButton { text: qsTr("Cancel"); onClicked: sinksAsk.close() }
+                ThemedButton {
                     objectName: "groupSinksInside"
                     text: qsTr("Put inside")
                     onClicked: { sinksAsk.close(); root.model.makeGroup(false) }
                 }
-                Button {
+                ThemedButton {
                     objectName: "groupSinksOutside"
                     text: qsTr("Leave outside")
                     highlighted: true
@@ -174,8 +165,8 @@ Item {
             }
             RowLayout {
                 Layout.alignment: Qt.AlignRight
-                Button { text: qsTr("Cancel"); onClicked: updateAsk.close() }
-                Button {
+                ThemedButton { text: qsTr("Cancel"); onClicked: updateAsk.close() }
+                ThemedButton {
                     objectName: "groupUpdateOk"
                     text: qsTr("Update")
                     highlighted: true
@@ -223,8 +214,8 @@ Item {
             }
             RowLayout {
                 Layout.alignment: Qt.AlignRight
-                Button { text: qsTr("Cancel"); onClicked: renameAsk.close() }
-                Button {
+                ThemedButton { text: qsTr("Cancel"); onClicked: renameAsk.close() }
+                ThemedButton {
                     id: renameOk
                     objectName: "renameOk"
                     text: qsTr("Rename")
@@ -485,7 +476,7 @@ Item {
 
             RowLayout {
                 Layout.alignment: Qt.AlignRight
-                Button {
+                ThemedButton {
                     objectName: "groupInterfaceClose"
                     text: qsTr("Done")
                     highlighted: true

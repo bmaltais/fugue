@@ -4,6 +4,7 @@
 // and folds. Driven by keys and the mouse on the real Main.qml, offscreen.
 
 #include <QFont>
+#include <QQuickStyle>
 
 #include <functional>
 #include <QtTest>
@@ -33,6 +34,7 @@ class TestCanvasGroupWindow : public QObject {
     Q_OBJECT
 
 private slots:
+    void initTestCase() { QQuickStyle::setStyle("Material"); } // as main() does
     void keysAndClicksMakeEnterAndLeaveGroups() {
         App app(load(kGraph));
         QVERIFY(app.open());
@@ -228,12 +230,53 @@ private slots:
                 walk(child);
             }
         };
-        QTest::qWait(200);
         QQuickItem *root = app.window->contentItem();
         while (root->parentItem())
             root = root->parentItem();
+        // The editor opens with Material's fade: its fields are there once it has.
+        QTRY_VERIFY((fields = 0, walk(root), fields >= 3));
+        fields = 0;
         walk(root);
         QVERIFY2(fields >= 3, qPrintable(QString::number(fields)));
+    }
+
+    // #74: a dialog's highlighted button (Rename, Save) reads: its label at 4.5:1 on its fill,
+    // not Material's white on the pale accent.
+    void aHighlightedButtonReads() {
+        if (!QFileInfo::exists("/usr/share/omarchy/themes/kanagawa"))
+            QSKIP("Omarchy's themes are not installed here");
+        App app(load(kGraph), {}, Look{"kanagawa"}); // a pale accent (#dcd7ba), as the owner's
+        QVERIFY(app.open());
+        app.model.select({"gen"});
+        app.key(Qt::Key_F2);
+        QQuickItem *ok = nullptr;
+        QTRY_VERIFY((ok = item(app.window->contentItem(), "renameOk")) && ok->isVisible());
+        // Its label is the theme's accent foreground, made to read on the accent the window gives
+        // Material for a highlighted button's fill (Main.qml: Material.accent).
+        auto *label = ok->property("contentItem").value<QQuickItem *>();
+        QVERIFY(label);
+        const CanvasLook *look = app.theme.look();
+        QCOMPARE(label->property("color").value<QColor>(), look->property("accentForeground").value<QColor>());
+        QVERIFY(fugue::look::contrast(look->property("accentForeground").value<QColor>(),
+                                      look->property("accent").value<QColor>()) >= 4.5);
+        app.key(Qt::Key_Escape);
+    }
+
+    // #74: the group card's footer has an Enter button, as ComfyUI's "Enter subgraph".
+    void theGroupCardsEnterButtonEntersIt() {
+        App app(load(kGraph));
+        QVERIFY(app.open());
+        app.model.select({"prompt", "gen"});
+        app.key(Qt::Key_E, Qt::ControlModifier | Qt::ShiftModifier);
+        QTRY_COMPARE(app.model.document().groups.size(), 1);
+        app.workflows.dismissPendingTrust();
+        app.workflows.dismissNotice();
+        QQuickItem *enter = nullptr;
+        QTRY_VERIFY((enter = item(app.window->contentItem(), "enterGroupButton")) && enter->isVisible());
+        QTest::qWait(100);
+        QTest::mouseClick(app.window, Qt::LeftButton, {},
+                          enter->mapToScene(QPointF(enter->width() / 2, enter->height() / 2)).toPoint());
+        QTRY_VERIFY(app.model.inGroup());
     }
 
     void aFrameMovesWithItsNodesAndAdvancedOpensOnClick() {

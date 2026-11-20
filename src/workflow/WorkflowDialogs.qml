@@ -102,15 +102,6 @@ Item {
         }
     }
 
-    component Question: Popup {
-        anchors.centerIn: Overlay.overlay
-        modal: true
-        focus: true
-        padding: 6 * root.look.unit
-        width: Math.min(root.width - 12 * root.look.unit, 520)
-        Overlay.modal: Rectangle { color: root.look.scrim }
-        background: PopupSurface { look: root.look }
-    }
 
     Question {
         id: closeAsk
@@ -129,13 +120,13 @@ Item {
             }
             RowLayout {
                 Layout.alignment: Qt.AlignRight
-                Button { text: qsTr("Cancel"); onClicked: closeAsk.close() }
-                Button {
+                ThemedButton { text: qsTr("Cancel"); onClicked: closeAsk.close() }
+                ThemedButton {
                     objectName: "closeDiscard"
                     text: qsTr("Discard")
                     onClicked: { closeAsk.close(); App.workflows.discardAndClose(closeAsk.index) }
                 }
-                Button {
+                ThemedButton {
                     objectName: "closeSave"
                     text: qsTr("Save")
                     highlighted: true
@@ -179,12 +170,12 @@ Item {
             }
             RowLayout {
                 Layout.alignment: Qt.AlignRight
-                Button {
+                ThemedButton {
                     objectName: "trustLater"
                     text: qsTr("Not now")
                     onClicked: App.workflows.dismissPendingTrust()
                 }
-                Button {
+                ThemedButton {
                     objectName: "trustAllow"
                     text: qsTr("Allow")
                     highlighted: true
@@ -221,12 +212,12 @@ Item {
             }
             RowLayout {
                 Layout.alignment: Qt.AlignRight
-                Button {
+                ThemedButton {
                     objectName: "recoverDiscard"
                     text: qsTr("Discard")
                     onClicked: App.workflows.discardRecovery()
                 }
-                Button {
+                ThemedButton {
                     objectName: "recoverOpen"
                     text: qsTr("Recover")
                     highlighted: true

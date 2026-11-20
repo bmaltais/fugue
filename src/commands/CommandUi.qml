@@ -103,8 +103,8 @@ Item {
             }
             RowLayout {
                 Layout.alignment: Qt.AlignRight
-                Button { text: qsTr("Keep working"); flat: true; onClicked: quitAsk.close() }
-                Button {
+                ThemedButton { text: qsTr("Keep working"); flat: true; onClicked: quitAsk.close() }
+                ThemedButton {
                     objectName: "quitAnyway"
                     text: qsTr("Quit")
                     highlighted: true
