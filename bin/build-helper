@@ -10,6 +10,10 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 backend="${1:-cpu}"
 (($#)) && shift
+if [[ ! $backend =~ ^(cuda|vulkan|cpu)$ ]]; then
+  echo "usage: bin/build-helper cuda|vulkan|cpu [cmake options]" >&2
+  exit 2
+fi
 args=()
 if command -v ccache >/dev/null; then
   # As bin/build: objects are reused across build folders and worktrees, so a fresh
@@ -28,5 +32,9 @@ if [[ $backend == cuda ]]; then
   export PATH="/opt/cuda/bin:$PATH"
   args+=(-DCMAKE_CUDA_HOST_COMPILER="$NVCC_CCBIN")
 fi
-cmake -S "$root/helper" -B "$root/build-helper-$backend" -DFUGUE_HELPER_BACKEND="$backend" "${args[@]}" "$@" >/dev/null
+# Quiet unless it fails.
+if ! out=$(cmake -S "$root/helper" -B "$root/build-helper-$backend" -DFUGUE_HELPER_BACKEND="$backend" "${args[@]}" "$@" 2>&1); then
+  echo "$out" >&2
+  exit 1
+fi
 cmake --build "$root/build-helper-$backend" -j"$(nproc)"

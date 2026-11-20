@@ -15,14 +15,16 @@
 // plus "context" (the model files and context options) and "params" (the generation options),
 // passed to stable-diffusion.cpp by key as they are (docs/guides/c_api.md at the pin). A value
 // is a string, number, bool, list of numbers, {"image": PATH} or a list of them, or for
-// "loras" a list of {"path", "multiplier"}. Every stage of one generation takes the same
-// context and params: what a stage does not use it does not load.
+// "loras" a list of {"path", "multiplier", "is_high_noise"} (the last two optional). Every stage of one generation takes the same
+// context and params. A stage loads only the components it runs, except that every call
+// VAE-encodes the request's images (init, reference, control) and so loads the VAE.
 //
 // The reply is one JSON line on stdout, {"outputs": [...]} or {"error": {"code", "message"}};
 // the library's log goes to stderr. The persistent helper behind the provider protocol (8.8)
 // is #78; this runs one operation and exits.
 
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <memory>
 #include <string>
@@ -31,16 +33,12 @@
 #include "json.hpp"
 #include "stable-diffusion.h"
 
-// stb is third-party code: its own warnings are not ours to fix.
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
-#pragma GCC diagnostic ignored "-Wstringop-overflow"
-#pragma GCC diagnostic ignored "-Warray-bounds"
+// stb and json.hpp come from stable-diffusion.cpp's thirdparty/, a system include folder here
+// (CMakeLists.txt): their warnings are not ours.
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
-#pragma GCC diagnostic pop
 
 using nlohmann::json;
 
@@ -154,39 +152,41 @@ std::string required(const json &request, const char *field) {
 json run(const json &request) {
     const std::string op = request.value("op", "");
     if (op != "encode" && op != "sample" && op != "decode" && op != "vae_encode" && op != "generate")
-        fail("input_invalid", "unknown op \"" + op + "\"");
+        fail("input_invalid", "unknown op \"" + op + "\"; use encode, sample, decode, vae_encode or generate");
 
-    Opt image(sd_img_gen_opt_create());
-    if (!image)
+    Opt options(sd_img_gen_opt_create());
+    if (!options)
         fail("out_of_memory", "cannot create the options");
     const json params = request.value("params", json::object());
     for (const auto &[key, value] : params.items())
-        setOption(image.get(), key, value);
+        setOption(options.get(), key, value);
 
     json outputs = json::array();
-    auto stage = [&](const char *key, const std::string &path) { check(sd_opt_set_string(image.get(), key, path.c_str()), key); };
+    auto setPath = [&](const char *key, const std::string &path) {
+        check(sd_opt_set_string(options.get(), key, path.c_str()), key);
+    };
     std::string imageOut;
     if (op == "encode") {
         const std::string cond = required(request, "conditioning");
-        stage("fugue.cond_out", cond);
-        stage("fugue.stop_after", "cond");
+        setPath("fugue.cond_out", cond);
+        setPath("fugue.stop_after", "cond");
         outputs.push_back({{"conditioning", cond}});
     } else if (op == "sample") {
         const std::string latent = required(request, "latent");
-        stage("fugue.cond_in", required(request, "conditioning"));
+        setPath("fugue.cond_in", required(request, "conditioning"));
         if (request.contains("init_latent"))
-            stage("fugue.init_latent_in", required(request, "init_latent"));
-        stage("fugue.latent_out", latent);
-        stage("fugue.stop_after", "sample");
+            setPath("fugue.init_latent_in", required(request, "init_latent"));
+        setPath("fugue.latent_out", latent);
+        setPath("fugue.stop_after", "sample");
         outputs.push_back({{"latent", latent}});
     } else if (op == "decode") {
-        stage("fugue.latent_in", required(request, "latent"));
+        setPath("fugue.latent_in", required(request, "latent"));
         imageOut = required(request, "image");
     } else if (op == "vae_encode") {
         const std::string latent = required(request, "latent");
-        check(sd_opt_set_tensor(image.get(), "init_image", loadImage(required(request, "image")).get()), "init_image");
-        stage("fugue.init_latent_out", latent);
-        stage("fugue.stop_after", "init");
+        check(sd_opt_set_tensor(options.get(), "init_image", loadImage(required(request, "image")).get()), "init_image");
+        setPath("fugue.init_latent_out", latent);
+        setPath("fugue.stop_after", "init");
         outputs.push_back({{"latent", latent}});
     } else {
         imageOut = required(request, "image");
@@ -203,20 +203,18 @@ json run(const json &request) {
     std::unique_ptr<sd_ctx_t, void (*)(sd_ctx_t *)> ctxOwner(ctx, sd_ctx_free);
 
     sd_result_t *result = nullptr;
-    check(sd_generate_image(ctx, image.get(), &result), op);
+    check(sd_generate_image(ctx, options.get(), &result), op);
     std::unique_ptr<sd_result_t, void (*)(sd_result_t *)> resultOwner(result, sd_result_free);
     if (!imageOut.empty()) {
         const size_t count = sd_result_get_image_count(result);
         if (count == 0)
             fail("helper_failed", "no image was made");
         for (size_t i = 0; i < count; ++i) {
-            std::string path = imageOut;
-            if (count > 1) {
-                const size_t dot = path.rfind('.');
-                path.insert(dot == std::string::npos ? path.size() : dot, "-" + std::to_string(i));
-            }
-            saveImage(sd_result_get_image(result, i), path);
-            outputs.push_back({{"image", path}});
+            std::filesystem::path path = imageOut;
+            if (count > 1) // out.png -> out-0.png, out-1.png, ...
+                path.replace_filename(path.stem().string() + "-" + std::to_string(i) + path.extension().string());
+            saveImage(sd_result_get_image(result, i), path.string());
+            outputs.push_back({{"image", path.string()}});
         }
     }
     return {{"outputs", outputs}};
@@ -243,6 +241,8 @@ int main(int argc, char **argv) {
         reply = run(request);
     } catch (const Failure &f) {
         reply = {{"error", {{"code", f.code}, {"message", f.message}}}};
+    } catch (const std::bad_alloc &) {
+        reply = {{"error", {{"code", "out_of_memory"}, {"message", "out of memory"}}}};
     } catch (const std::exception &e) {
         reply = {{"error", {{"code", "input_invalid"}, {"message", e.what()}}}};
     }

@@ -1238,8 +1238,8 @@ reference. A new inference runtime is a new provider module.
   decode steps, C++ only. The M0 spike showed the split works
   ([spikes/02](spikes/02-sdcpp-split.md)).
 - Fugue carries the split as its own patch against a pinned stable-diffusion.cpp commit; it does
-  not depend on upstream adopting it. To keep that cheap: the patch stays as small as the spike's
-  (hooks at the existing stage seams, no change to sampling or model code); the pin moves only on
+  not depend on upstream adopting it. To keep that cheap: the patch stays small: hooks at the
+  existing stage seams and the stage file format, no change to sampling or model code; the pin moves only on
   purpose; and every move of the pin is checked where the patch can break, not model by model
   (stable-diffusion.cpp tests its families): staged runs of Z-Image (LLM conditioning), of SDXL
   with a negative prompt (CLIP conditioning, two sets) and of image-to-image from a latent, the
@@ -1247,7 +1247,7 @@ reference. A new inference runtime is a new provider module.
   PuLID only when the move changes their code.
 - The helper's source is `helper/`: the pin (stable-diffusion.cpp, its ggml and CUTLASS commits,
   with their hashes), the patch `helper/sdcpp.patch`, and `fugue-helper`. `bin/build-helper cuda`
-  (or `vulkan`, `cpu`) builds it. The patch adds image options `fugue.*` that name the files a
+  (or `vulkan`, `cpu`) builds it; `helper/README.md` says how, and how to move the pin. The patch adds image options `fugue.*` that name the files a
   stage reads in place of running or writes after it, and the stage to stop after:
   `fugue.init_latent_in`/`_out` (the start latent), `fugue.cond_in`/`_out`, `fugue.latent_in`/`_out`
   (the sampled latent, after a hires pass), `fugue.stop_after` (`init`, `cond` or `sample`). On
@@ -1258,9 +1258,10 @@ reference. A new inference runtime is a new provider module.
   context and generation options as stable-diffusion.cpp names them.
 - The conditioning file carries everything the encode step leaves for sampling: every field of
   the conditioning sets, and the state PhotoMaker, PuLID and IP-Adapter set while encoding. A file
-  is read only by a model of the version it was written for. Image references (FLUX.2 Klein,
-  Qwen-Image Edit) are VAE-encoded by the sampling call, so `sample` takes the reference images as
-  `encode` does.
+  is read only by a model of the version it was written for. Every call VAE-encodes the request's
+  images (init, reference, control), so `sample` takes the reference images as `encode` does, and
+  a stage with images loads the VAE beside its own component. An inpaint model cannot start from
+  a latent alone (its extra input is made from the init image).
 
 ### 8.11 The provider interface
 
@@ -2180,8 +2181,8 @@ Building M2 made these further choices.
 | A handle without a hash cannot be found on disk: `model_missing` (a provider serves name-only handles) | 2.5, 8.9 | medium-high |
 | Helper packaging (#77, the owner's choice): Vulkan helper in `fugue`, CUDA helper in a `fugue-helper-cuda` split package, as Arch splits ollama and ollama-cuda; CI builds the Vulkan one, the CUDA toolkit being several GB | 8.10 | high |
 | Stage hooks as image options (`fugue.*`) of stable-diffusion.cpp's option API, in place of the spike's environment variables; the extensions' encode-time state crosses through two virtual methods on its extension interface | 8.10 | medium-high |
-| No pixel-parity test was built for the first pin (#77): the spike showed identical pixels at this commit (spikes/02), and the owner judged that enough. #77 ran every family at hand staged once (Z-Image, FLUX.2 Klein 4B and 9B, FLUX.1, SDXL, SD 1.5, Qwen-Image), plus image-to-image from a latent and IP-Adapter. A pin move runs only the few checks 8.10 lists, by hand (GPU and model files), as the owner asked: the families are stable-diffusion.cpp's to test | 8.10 | medium-high |
-| Sources pinned as release tarballs with SHA-256 (stable-diffusion.cpp, ggml, CUTLASS), not git submodules: verifiable, and a package lists them as its own sources | 8.10 | high |
+| No pixel-parity test was built for the first pin (#77): the spike showed identical pixels at this commit (spikes/02), and the owner judged that enough. #77 ran these staged once: Z-Image, FLUX.2 Klein 4B and 9B, FLUX.1, SDXL, SD 1.5, Qwen-Image Edit 2511 (the Qwen-Image 2.1 files at hand did not load, stable-diffusion.cpp failing on them before any stage), image-to-image from a latent, and IP-Adapter. PhotoMaker and PuLID were not run (no ID images or embedding at hand), so their carried state is unverified. A pin move runs only the few checks 8.10 lists, by hand (GPU and model files), as the owner asked: the families are stable-diffusion.cpp's to test | 8.10 | medium-high |
+| Sources pinned as GitHub commit archives with SHA-256 (stable-diffusion.cpp, ggml, CUTLASS), not git submodules: verifiable, and a package lists them as its own sources | 8.10 | high |
 
 ## Appendix B: issue to section map
 

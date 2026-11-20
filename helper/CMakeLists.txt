@@ -6,10 +6,11 @@
 #
 # The pin moves only on purpose (spec 8.10): change the three commits and their hashes together,
 # take the submodule commits from `git ls-tree <commit> ggml thirdparty/cutlass` of
-# stable-diffusion.cpp, and refresh sdcpp.patch against the new commit.
+# stable-diffusion.cpp, and refresh sdcpp.patch against the new commit (README.md). CI checks
+# that packaging/PKGBUILD names the same commits.
 # A packager that downloads the sources itself passes FETCHCONTENT_SOURCE_DIR_SDCPP (patched
 # already), FETCHCONTENT_SOURCE_DIR_SDCPP_GGML and FETCHCONTENT_SOURCE_DIR_SDCPP_CUTLASS.
-cmake_minimum_required(VERSION 3.24)
+cmake_minimum_required(VERSION 3.25)
 project(fugue_helper LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -67,6 +68,7 @@ find_program(PATCH_EXECUTABLE patch REQUIRED)
 FetchContent_Declare(sdcpp
   URL https://github.com/leejet/stable-diffusion.cpp/archive/${sdcpp_commit}.tar.gz
   URL_HASH SHA256=${sdcpp_sha256}
+  SYSTEM  # its headers (and thirdparty/: json.hpp, stb) warn under our flags; they are not ours
   PATCH_COMMAND ${PATCH_EXECUTABLE} -p1 --forward --input=${CMAKE_CURRENT_SOURCE_DIR}/sdcpp.patch)
 FetchContent_MakeAvailable(sdcpp)
 

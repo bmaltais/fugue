@@ -37,6 +37,7 @@ makedepends=(
   'pkgconf'
   'qt6-shadertools'
   'shaderc'
+  'spirv-headers'
   'vulkan-headers'
 )
 checkdepends=(

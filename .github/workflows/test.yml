@@ -50,23 +50,3 @@ jobs:
       - name: Test
         run: su tester -c 'LANG=en_US.UTF-8 dbus-run-session -- bin/test'
 
-  helper:
-    name: Build the helper (Vulkan)
-    runs-on: ubuntu-latest
-    # stable-diffusion.cpp with Fugue's stage patch (helper/). The CUDA helper needs a
-    # multi-gigabyte toolkit and is built where it runs; Vulkan checks the patch and the code.
-    container: archlinux:latest
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Install git for the checkout
-        run: pacman -Syu --noconfirm --needed git
-
-      - uses: actions/checkout@v4
-
-      - name: Install the helper's build dependencies
-        run: pacman -S --noconfirm --needed base-devel cmake shaderc vulkan-headers vulkan-icd-loader
-
-      - name: Build
-        run: bin/build-helper vulkan
