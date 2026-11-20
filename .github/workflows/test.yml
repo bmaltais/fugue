@@ -26,10 +26,13 @@ jobs:
       - name: Install the package's dependencies
         # The PKGBUILD in this repo is the one list of what the app needs, and CI reads it rather than keeping a copy.
         # Once the recipe is upstream in omarchy-pkgs, this can read pkgbuilds/<repo name>/PKGBUILD from there again.
+        # cuda is left out: only the CUDA helper needs it, and the helper job builds the Vulkan one.
         run: |
           source packaging/PKGBUILD
           deps=("${depends[@]}" "${makedepends[@]}" "${checkdepends[@]}")
-          pacman -S --noconfirm --needed base-devel cmake dbus "${deps[@]%%[<>=]*}"
+          wanted=()
+          for dep in "${deps[@]%%[<>=]*}"; do [[ $dep == cuda ]] || wanted+=("$dep"); done
+          pacman -S --noconfirm --needed base-devel cmake dbus "${wanted[@]}"
 
       - name: Set up a user and a locale like a desktop's
         # Root can read any file, so tests about unreadable ones need an ordinary user, with a second group for tests that change a file's group; and the container generates no locale.
@@ -46,3 +49,24 @@ jobs:
 
       - name: Test
         run: su tester -c 'LANG=en_US.UTF-8 dbus-run-session -- bin/test'
+
+  helper:
+    name: Build the helper (Vulkan)
+    runs-on: ubuntu-latest
+    # stable-diffusion.cpp with Fugue's stage patch (helper/). The CUDA helper needs a
+    # multi-gigabyte toolkit and is built where it runs; Vulkan checks the patch and the code.
+    container: archlinux:latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Install git for the checkout
+        run: pacman -Syu --noconfirm --needed git
+
+      - uses: actions/checkout@v4
+
+      - name: Install the helper's build dependencies
+        run: pacman -S --noconfirm --needed base-devel cmake shaderc vulkan-headers vulkan-icd-loader
+
+      - name: Build
+        run: bin/build-helper vulkan

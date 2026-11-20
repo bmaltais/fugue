@@ -1226,7 +1226,10 @@ reference. A new inference runtime is a new provider module.
   links with the helper (#32). Until then free GPU memory is not measured before a node starts.
 - GPU work in the engine and the CLI uses Vulkan compute directly or runs in the helper, never
   Qt RHI: Qt's `offscreen` platform gives neither a Vulkan instance nor a GL context. Fugue links
-  no CUDA and bundles no NVIDIA files; the helper builds against the system CUDA package.
+  no CUDA and bundles no NVIDIA files. The helper is built twice: for Vulkan, in the `fugue`
+  package, so it runs on any GPU; and for CUDA, against the system CUDA package, in the
+  `fugue-helper-cuda` package, the faster one on NVIDIA cards. Both install to `lib/fugue/`
+  (`fugue-helper-vulkan`, `fugue-helper-cuda`).
 - If memory is short, Fugue names the processes holding it (`nvidia-smi --query-compute-apps` on
   NVIDIA, including the GB10) and offers to stop Omarchy's model
   servers, only with confirmation. It never kills another application.
@@ -1237,8 +1240,27 @@ reference. A new inference runtime is a new provider module.
 - Fugue carries the split as its own patch against a pinned stable-diffusion.cpp commit; it does
   not depend on upstream adopting it. To keep that cheap: the patch stays as small as the spike's
   (hooks at the existing stage seams, no change to sampling or model code); the pin moves only on
-  purpose; and every move of the pin must pass a test that the staged run gives the same pixels
-  as a single run of the same build.
+  purpose; and every move of the pin is checked where the patch can break, not model by model
+  (stable-diffusion.cpp tests its families): staged runs of Z-Image (LLM conditioning), of SDXL
+  with a negative prompt (CLIP conditioning, two sets) and of image-to-image from a latent, the
+  Z-Image one giving the same pixels as a single run of the same build; IP-Adapter, PhotoMaker or
+  PuLID only when the move changes their code.
+- The helper's source is `helper/`: the pin (stable-diffusion.cpp, its ggml and CUTLASS commits,
+  with their hashes), the patch `helper/sdcpp.patch`, and `fugue-helper`. `bin/build-helper cuda`
+  (or `vulkan`, `cpu`) builds it. The patch adds image options `fugue.*` that name the files a
+  stage reads in place of running or writes after it, and the stage to stop after:
+  `fugue.init_latent_in`/`_out` (the start latent), `fugue.cond_in`/`_out`, `fugue.latent_in`/`_out`
+  (the sampled latent, after a hires pass), `fugue.stop_after` (`init`, `cond` or `sample`). On
+  them `fugue-helper` builds its operations: `encode` (prompts to conditioning), `sample`
+  (conditioning, and optionally a start latent, to a latent), `decode` (latent to image),
+  `vae_encode` (image to latent) and `generate` (all at once). Until #78 it runs one operation per
+  process: `fugue-helper <request.json>`, the request naming the operation, its files, and the
+  context and generation options as stable-diffusion.cpp names them.
+- The conditioning file carries everything the encode step leaves for sampling: every field of
+  the conditioning sets, and the state PhotoMaker, PuLID and IP-Adapter set while encoding. A file
+  is read only by a model of the version it was written for. Image references (FLUX.2 Klein,
+  Qwen-Image Edit) are VAE-encoded by the sampling call, so `sample` takes the reference images as
+  `encode` does.
 
 ### 8.11 The provider interface
 
@@ -2156,6 +2178,10 @@ Building M2 made these further choices.
 | Finding a model (#66): by remembered hash, then by hashing the files with the handle's name; never by hashing the whole folder (a ComfyUI folder holds hundreds of GB). A renamed model is found once its hash is remembered | 8.9, 2.5 | medium |
 | A derived handle (#66) gets no `path`; the handles inside it (base, each `apply` step) get theirs | 7.2, 2.5 | medium-high |
 | A handle without a hash cannot be found on disk: `model_missing` (a provider serves name-only handles) | 2.5, 8.9 | medium-high |
+| Helper packaging (#77, the owner's choice): Vulkan helper in `fugue`, CUDA helper in a `fugue-helper-cuda` split package, as Arch splits ollama and ollama-cuda; CI builds the Vulkan one, the CUDA toolkit being several GB | 8.10 | high |
+| Stage hooks as image options (`fugue.*`) of stable-diffusion.cpp's option API, in place of the spike's environment variables; the extensions' encode-time state crosses through two virtual methods on its extension interface | 8.10 | medium-high |
+| No pixel-parity test was built for the first pin (#77): the spike showed identical pixels at this commit (spikes/02), and the owner judged that enough. #77 ran every family at hand staged once (Z-Image, FLUX.2 Klein 4B and 9B, FLUX.1, SDXL, SD 1.5, Qwen-Image), plus image-to-image from a latent and IP-Adapter. A pin move runs only the few checks 8.10 lists, by hand (GPU and model files), as the owner asked: the families are stable-diffusion.cpp's to test | 8.10 | medium-high |
+| Sources pinned as release tarballs with SHA-256 (stable-diffusion.cpp, ggml, CUTLASS), not git submodules: verifiable, and a package lists them as its own sources | 8.10 | high |
 
 ## Appendix B: issue to section map
 

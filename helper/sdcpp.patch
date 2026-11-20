@@ -1,0 +1,703 @@
+diff --git i/src/api/options.cpp w/src/api/options.cpp
+index 591cce3..a672edd 100644
+--- i/src/api/options.cpp
++++ w/src/api/options.cpp
+@@ -502,6 +502,19 @@ static void add_hires_specs(std::vector<ParamSpec>& specs) {
+     hires.choice("hires.upscaler", &sd::HiresConfig::upscaler, parse_hires_upscaler, SD_HIRES_UPSCALER_COUNT);
+ }
+ 
++static void add_fugue_specs(std::vector<ParamSpec>& specs) {
++    using namespace sd::api;
++    ParamGroup fugue(specs, Image, [](sd::OptConfig& config) { return std::tie(config.image.fugue); });
++
++    fugue.string("fugue.init_latent_in", &sd::FugueStageConfig::init_latent_in);
++    fugue.string("fugue.init_latent_out", &sd::FugueStageConfig::init_latent_out);
++    fugue.string("fugue.cond_in", &sd::FugueStageConfig::cond_in);
++    fugue.string("fugue.cond_out", &sd::FugueStageConfig::cond_out);
++    fugue.string("fugue.latent_in", &sd::FugueStageConfig::latent_in);
++    fugue.string("fugue.latent_out", &sd::FugueStageConfig::latent_out);
++    fugue.string("fugue.stop_after", &sd::FugueStageConfig::stop_after);
++}
++
+ static void add_tiling_specs(std::vector<ParamSpec>& specs) {
+     using namespace sd::api;
+     ParamGroup tiling(specs, Image | Video | ADetail, [](sd::OptConfig& config) { return std::tie(config.image.vae_tiling_params, config.video.vae_tiling_params); });
+@@ -547,6 +560,7 @@ static std::vector<ParamSpec> make_specs() {
+     add_sampling_specs(specs);
+     add_cache_specs(specs);
+     add_hires_specs(specs);
++    add_fugue_specs(specs);
+     add_tiling_specs(specs);
+     add_postprocess_specs(specs);
+     return specs;
+diff --git i/src/config.h w/src/config.h
+index 7331ccc..a0cd51f 100644
+--- i/src/config.h
++++ w/src/config.h
+@@ -172,6 +172,18 @@ namespace sd {
+         ContextConfig();
+     };
+ 
++    // Fugue's stage split (pipeline/fugue_stages.h): files generate_image reads in place of a
++    // stage or writes after one, and the stage it stops after ("init", "cond" or "sample").
++    struct FugueStageConfig {
++        const char* init_latent_in{};
++        const char* init_latent_out{};
++        const char* cond_in{};
++        const char* cond_out{};
++        const char* latent_in{};
++        const char* latent_out{};
++        const char* stop_after{};
++    };
++
+     struct ImageConfig {
+         const sd_lora_t* loras{};
+         uint32_t lora_count{};
+@@ -203,6 +215,7 @@ namespace sd {
+         bool circular_y{};
+         sd::ImagePreprocessConfig image_preprocess{};
+         enum sd_control_type_t control_type {};
++        sd::FugueStageConfig fugue{};
+ 
+         ImageConfig();
+     };
+diff --git i/src/extensions/generation_extension.h w/src/extensions/generation_extension.h
+index 018092e..1c15a4c 100644
+--- i/src/extensions/generation_extension.h
++++ w/src/extensions/generation_extension.h
+@@ -14,6 +14,7 @@
+ #include "model/diffusion/model.hpp"
+ #include "model_loader.h"
+ #include "model_manager.h"
++#include "pipeline/fugue_stages.h"
+ #include "stable-diffusion.h"
+ 
+ struct GenerationExtensionInitContext {
+@@ -56,6 +57,12 @@ struct GenerationExtension {
+     virtual bool prepare_condition(GenerationExtensionConditionContext&) {
+         return false;
+     }
++    // Fugue's stage split: the state prepare_condition() set, written with the conditioning
++    // and read back in place of calling it.
++    virtual void save_condition(fugue_stages::File&) const {}
++    virtual bool load_condition(fugue_stages::File&) {
++        return true;
++    }
+     virtual const SDCondition& before_condition(int step,
+                                                 const SDCondition& condition) const {
+         return condition;
+diff --git i/src/extensions/photomaker_extension.cpp w/src/extensions/photomaker_extension.cpp
+index 59b9a2c..df15e7e 100644
+--- i/src/extensions/photomaker_extension.cpp
++++ w/src/extensions/photomaker_extension.cpp
+@@ -308,6 +308,31 @@ struct PhotoMakerExtension : public GenerationExtension {
+         return true;
+     }
+ 
++    void save_condition(fugue_stages::File& f) const override {
++        if (id_condition.empty() || start_merge_step == -1) {
++            return;
++        }
++        fugue_stages::put_cond(f, "photomaker.id_condition", id_condition);
++        f.meta["photomaker.start_merge_step"] = std::to_string(start_merge_step);
++    }
++
++    bool load_condition(fugue_stages::File& f) override {
++        reset_runtime_condition();
++        auto it = f.meta.find("photomaker.start_merge_step");
++        if (it == f.meta.end()) {
++            return true;
++        }
++        if (!enabled) {
++            return f.fail("the conditioning uses PhotoMaker, which this context did not load");
++        }
++        try {
++            start_merge_step = std::stoi(it->second);
++        } catch (...) {
++            return f.fail("bad photomaker.start_merge_step");
++        }
++        return fugue_stages::get_cond(f, "photomaker.id_condition", id_condition);
++    }
++
+     const SDCondition& before_condition(int step,
+                                         const SDCondition& condition) const override {
+         if (!id_condition.empty() && start_merge_step != -1 && step > start_merge_step) {
+diff --git i/src/extensions/pulid_extension.cpp w/src/extensions/pulid_extension.cpp
+index fa660c3..6809531 100644
+--- i/src/extensions/pulid_extension.cpp
++++ w/src/extensions/pulid_extension.cpp
+@@ -107,6 +107,26 @@ struct PuLIDExtension : public GenerationExtension {
+         return false;  // PuLID does not modify the conditioning
+     }
+ 
++    void save_condition(fugue_stages::File& f) const override {
++        if (!enabled || id_embedding.empty()) {
++            return;
++        }
++        fugue_stages::put(f, "pulid.id_embedding", id_embedding);
++        fugue_stages::put_float(f, "pulid.id_weight", id_weight);
++    }
++
++    bool load_condition(fugue_stages::File& f) override {
++        reset_runtime_condition();
++        if (f.blobs.count("pulid.id_embedding") == 0) {
++            return true;
++        }
++        if (!enabled) {
++            return f.fail("the conditioning uses PuLID, which this context did not load");
++        }
++        return fugue_stages::get(f, "pulid.id_embedding", id_embedding) &&
++               fugue_stages::get_float(f, "pulid.id_weight", id_weight);
++    }
++
+     void before_diffusion(DiffusionParams& params, int /*step*/) const override {
+         if (!enabled || id_embedding.empty()) {
+             return;
+diff --git i/src/pipeline/fugue_stages.h w/src/pipeline/fugue_stages.h
+new file mode 100644
+index 0000000..eebdda2
+--- /dev/null
++++ w/src/pipeline/fugue_stages.h
+@@ -0,0 +1,311 @@
++// Fugue's stage split (github.com/bmaltais/fugue, helper/sdcpp.patch): the files that carry
++// conditioning and latents between the stages of generate_image, so encode, sample and decode
++// can run as separate calls. The `fugue.*` image options (src/api/options.cpp) choose what is
++// read, written and where generate_image stops.
++//
++// A file is in the safetensors layout: an 8-byte header length, a JSON header, raw tensors.
++// Every list field records its length in the metadata, so an empty tensor inside a list keeps
++// its place (it is stored with shape [0]); a tensor is read back only as the type it was stored
++// as.
++#ifndef __SD_PIPELINE_FUGUE_STAGES_H__
++#define __SD_PIPELINE_FUGUE_STAGES_H__
++
++#include <cstdint>
++#include <cstring>
++#include <fstream>
++#include <map>
++#include <string>
++#include <vector>
++
++#include "conditioning/conditioner.hpp"
++#include "core/tensor.hpp"
++#include "json.hpp"
++
++namespace fugue_stages {
++
++    struct Blob {
++        std::string dtype;  // "F32" or "I32"
++        std::vector<int64_t> shape;
++        std::vector<uint8_t> bytes;
++    };
++
++    // The tensors of a file by name, and its string metadata.
++    struct File {
++        std::map<std::string, Blob> blobs;
++        std::map<std::string, std::string> meta;
++        std::string error;  // why reading failed, else empty
++
++        bool fail(const std::string& why) {
++            if (error.empty()) {
++                error = why;
++            }
++            return false;
++        }
++    };
++
++    template <typename T>
++    inline const char* dtype_of();
++    template <>
++    inline const char* dtype_of<float>() { return "F32"; }
++    template <>
++    inline const char* dtype_of<int32_t>() { return "I32"; }
++
++    // An empty tensor is stored only when `keep_empty` (a list item), with shape [0].
++    template <typename T>
++    inline void put(File& f, const std::string& name, const sd::Tensor<T>& t, bool keep_empty = false) {
++        if (t.empty() && !keep_empty) {
++            return;
++        }
++        Blob b;
++        b.dtype = dtype_of<T>();
++        b.shape = t.empty() ? std::vector<int64_t>{0} : t.shape();
++        b.bytes.resize(t.empty() ? 0 : static_cast<size_t>(t.numel()) * sizeof(T));
++        if (!b.bytes.empty()) {
++            std::memcpy(b.bytes.data(), t.data(), b.bytes.size());
++        }
++        f.blobs[name] = std::move(b);
++    }
++
++    // Reads `name` into `out`; absent leaves `out` empty. Fails on a type or size mismatch.
++    template <typename T>
++    inline bool get(File& f, const std::string& name, sd::Tensor<T>& out, bool required = false) {
++        out      = {};
++        auto it  = f.blobs.find(name);
++        if (it == f.blobs.end()) {
++            return required ? f.fail("missing tensor " + name) : true;
++        }
++        const Blob& b = it->second;
++        if (b.dtype != dtype_of<T>()) {
++            return f.fail("tensor " + name + " is " + b.dtype + ", expected " + dtype_of<T>());
++        }
++        int64_t numel = 1;
++        for (int64_t d : b.shape) {
++            numel *= d;
++        }
++        if (numel < 0 || static_cast<uint64_t>(numel) * sizeof(T) != b.bytes.size()) {
++            return f.fail("tensor " + name + " has the wrong size for its shape");
++        }
++        if (numel == 0) {
++            return true;
++        }
++        std::vector<T> data(static_cast<size_t>(numel));
++        std::memcpy(data.data(), b.bytes.data(), b.bytes.size());
++        out = sd::Tensor<T>(b.shape, std::move(data));
++        return true;
++    }
++
++    inline void put_count(File& f, const std::string& name, size_t n) { f.meta[name + ".count"] = std::to_string(n); }
++
++    inline bool get_count(File& f, const std::string& name, size_t& n) {
++        n       = 0;
++        auto it = f.meta.find(name + ".count");
++        if (it == f.meta.end()) {
++            return true;
++        }
++        try {
++            n = static_cast<size_t>(std::stoull(it->second));
++        } catch (...) {
++            return f.fail("bad count for " + name);
++        }
++        return true;
++    }
++
++    inline void put_list(File& f, const std::string& name, const std::vector<sd::Tensor<float>>& list) {
++        put_count(f, name, list.size());
++        for (size_t i = 0; i < list.size(); i++) {
++            put(f, name + "." + std::to_string(i), list[i], true);
++        }
++    }
++
++    inline bool get_list(File& f, const std::string& name, std::vector<sd::Tensor<float>>& list) {
++        list.clear();
++        size_t n = 0;
++        if (!get_count(f, name, n)) {
++            return false;
++        }
++        list.resize(n);
++        for (size_t i = 0; i < n; i++) {
++            if (!get(f, name + "." + std::to_string(i), list[i], true)) {
++                return false;
++            }
++        }
++        return true;
++    }
++
++    inline bool write_file(const std::string& path, const File& f) {
++        nlohmann::json header = nlohmann::json::object();
++        nlohmann::json md     = nlohmann::json::object();
++        for (const auto& [k, v] : f.meta) {
++            md[k] = v;
++        }
++        header["__metadata__"] = md;
++        uint64_t offset        = 0;
++        for (const auto& [name, b] : f.blobs) {
++            header[name] = {{"dtype", b.dtype}, {"shape", b.shape}, {"data_offsets", {offset, offset + b.bytes.size()}}};
++            offset += b.bytes.size();
++        }
++        std::string head = header.dump();
++        while (head.size() % 8 != 0) {
++            head.push_back(' ');
++        }
++        std::ofstream out(path, std::ios::binary | std::ios::trunc);
++        if (!out) {
++            return false;
++        }
++        uint64_t n = head.size();
++        out.write(reinterpret_cast<const char*>(&n), 8);
++        out.write(head.data(), static_cast<std::streamsize>(head.size()));
++        for (const auto& [name, b] : f.blobs) {
++            out.write(reinterpret_cast<const char*>(b.bytes.data()), static_cast<std::streamsize>(b.bytes.size()));
++        }
++        return static_cast<bool>(out);
++    }
++
++    inline bool read_file(const std::string& path, File& f) {
++        std::ifstream in(path, std::ios::binary);
++        if (!in) {
++            return f.fail("cannot open " + path);
++        }
++        uint64_t n = 0;
++        in.read(reinterpret_cast<char*>(&n), 8);
++        if (!in || n == 0 || n > (64u << 20)) {
++            return f.fail(path + " is not a tensor file");
++        }
++        std::string head(n, '\0');
++        in.read(head.data(), static_cast<std::streamsize>(n));
++        nlohmann::json header = nlohmann::json::parse(head, nullptr, false);
++        if (!in || header.is_discarded() || !header.is_object()) {
++            return f.fail(path + " has a bad header");
++        }
++        const std::streamoff base = 8 + static_cast<std::streamoff>(n);
++        try {
++            for (auto it = header.begin(); it != header.end(); ++it) {
++                if (it.key() == "__metadata__") {
++                    for (auto m = it.value().begin(); m != it.value().end(); ++m) {
++                        if (m.value().is_string()) {
++                            f.meta[m.key()] = m.value().get<std::string>();
++                        }
++                    }
++                    continue;
++                }
++                Blob b;
++                b.dtype            = it.value().at("dtype").get<std::string>();
++                b.shape            = it.value().at("shape").get<std::vector<int64_t>>();
++                const uint64_t beg = it.value().at("data_offsets").at(0).get<uint64_t>();
++                const uint64_t end = it.value().at("data_offsets").at(1).get<uint64_t>();
++                if (end < beg) {
++                    return f.fail(path + ": bad offsets for " + it.key());
++                }
++                b.bytes.resize(end - beg);
++                in.seekg(base + static_cast<std::streamoff>(beg));
++                in.read(reinterpret_cast<char*>(b.bytes.data()), static_cast<std::streamsize>(b.bytes.size()));
++                if (!in) {
++                    return f.fail(path + " is cut short");
++                }
++                f.blobs[it.key()] = std::move(b);
++            }
++        } catch (const std::exception& e) {
++            return f.fail(path + " has a bad header: " + e.what());
++        }
++        return true;
++    }
++
++    // Every field of SDCondition, under `p`.
++    inline void put_cond(File& f, const std::string& p, const SDCondition& c) {
++        put(f, p + ".c_crossattn", c.c_crossattn);
++        put(f, p + ".c_vector", c.c_vector);
++        put(f, p + ".c_concat", c.c_concat);
++        put(f, p + ".c_t5_ids", c.c_t5_ids);
++        put(f, p + ".c_t5_weights", c.c_t5_weights);
++        put(f, p + ".c_input_ids", c.c_input_ids);
++        put(f, p + ".c_position_ids", c.c_position_ids);
++        put(f, p + ".c_token_types", c.c_token_types);
++        put(f, p + ".c_vinput_mask", c.c_vinput_mask);
++        put_count(f, p + ".c_image_embeds", c.c_image_embeds.size());
++        for (size_t i = 0; i < c.c_image_embeds.size(); i++) {
++            const std::string name = p + ".c_image_embeds." + std::to_string(i);
++            f.meta[name + ".index"] = std::to_string(c.c_image_embeds[i].first);
++            put(f, name, c.c_image_embeds[i].second, true);
++        }
++        put_list(f, p + ".c_ref_images", c.c_ref_images);
++        put_list(f, p + ".c_ref_audios", c.c_ref_audios);
++        put_list(f, p + ".extra_c_crossattns", c.extra_c_crossattns);
++        if (!c.c_reference_blocks.empty()) {
++            std::vector<int32_t> rows;
++            for (const auto& block : c.c_reference_blocks) {
++                rows.push_back(static_cast<int32_t>(block.kind));
++                rows.push_back(block.video_index);
++                rows.push_back(block.audio_index);
++            }
++            const int64_t n = static_cast<int64_t>(c.c_reference_blocks.size());
++            put(f, p + ".c_reference_blocks", sd::Tensor<int32_t>({3, n}, std::move(rows)));
++        }
++    }
++
++    inline bool get_cond(File& f, const std::string& p, SDCondition& c) {
++        c = {};
++        bool ok = get(f, p + ".c_crossattn", c.c_crossattn) && get(f, p + ".c_vector", c.c_vector) &&
++                  get(f, p + ".c_concat", c.c_concat) && get(f, p + ".c_t5_ids", c.c_t5_ids) &&
++                  get(f, p + ".c_t5_weights", c.c_t5_weights) && get(f, p + ".c_input_ids", c.c_input_ids) &&
++                  get(f, p + ".c_position_ids", c.c_position_ids) && get(f, p + ".c_token_types", c.c_token_types) &&
++                  get(f, p + ".c_vinput_mask", c.c_vinput_mask);
++        size_t n = 0;
++        if (!ok || !get_count(f, p + ".c_image_embeds", n)) {
++            return false;
++        }
++        for (size_t i = 0; i < n; i++) {
++            const std::string name = p + ".c_image_embeds." + std::to_string(i);
++            sd::Tensor<float> t;
++            int index = 0;
++            try {
++                index = std::stoi(f.meta.at(name + ".index"));
++            } catch (...) {
++                return f.fail("bad index for " + name);
++            }
++            if (!get(f, name, t, true)) {
++                return false;
++            }
++            c.c_image_embeds.emplace_back(index, std::move(t));
++        }
++        if (!get_list(f, p + ".c_ref_images", c.c_ref_images) || !get_list(f, p + ".c_ref_audios", c.c_ref_audios) ||
++            !get_list(f, p + ".extra_c_crossattns", c.extra_c_crossattns)) {
++            return false;
++        }
++        sd::Tensor<int32_t> blocks;
++        if (!get(f, p + ".c_reference_blocks", blocks)) {
++            return false;
++        }
++        if (!blocks.empty()) {
++            if (blocks.shape().size() != 2 || blocks.shape()[0] != 3) {
++                return f.fail("bad shape for " + p + ".c_reference_blocks");
++            }
++            const int32_t* rows = blocks.data();
++            for (int64_t i = 0; i < blocks.shape()[1]; i++) {
++                MiniMaxH3ReferenceBlock block;
++                block.kind        = static_cast<MiniMaxH3ReferenceKind>(rows[3 * i]);
++                block.video_index = rows[3 * i + 1];
++                block.audio_index = rows[3 * i + 2];
++                c.c_reference_blocks.push_back(block);
++            }
++        }
++        return true;
++    }
++
++    inline void put_float(File& f, const std::string& name, float v) {
++        put(f, name, sd::Tensor<float>({1}, std::vector<float>{v}));
++    }
++
++    inline bool get_float(File& f, const std::string& name, float& v) {
++        sd::Tensor<float> t;
++        if (!get(f, name, t)) {
++            return false;
++        }
++        if (!t.empty()) {
++            v = t.data()[0];
++        }
++        return true;
++    }
++
++}  // namespace fugue_stages
++
++#endif  // __SD_PIPELINE_FUGUE_STAGES_H__
+diff --git i/src/pipeline/image.cpp w/src/pipeline/image.cpp
+index f2cdcea..bf67272 100644
+--- i/src/pipeline/image.cpp
++++ w/src/pipeline/image.cpp
+@@ -10,6 +10,8 @@
+ 
+ #include "core/rng.hpp"
+ #include "diffusion_engine.h"
++#include "extensions/generation_extension.h"
++#include "fugue_stages.h"
+ #include "model/vae/vae.hpp"
+ #include "pipeline/image_upscale.h"
+ #include "request.h"
+@@ -197,7 +199,7 @@ namespace sd::pipeline {
+         sd::Tensor<float> mask_image_tensor;
+         int image_channels = sd->get_image_channels();
+ 
+-        if (sd_img_gen_params->init_image.data != nullptr) {
++        if (sd_img_gen_params->init_image.data != nullptr || sd_img_gen_params->fugue.init_latent_in != nullptr) {
+             LOG_INFO("IMG2IMG");
+ 
+             if (request->strength < 1.f) {
+@@ -255,8 +257,10 @@ namespace sd::pipeline {
+                 plan->sample_steps = static_cast<int>(plan->sigmas.size() - 1);
+             }
+ 
+-            init_image_tensor = ensure_image_tensor_channels(sd_image_to_tensor(sd_img_gen_params->init_image, request->width, request->height),
+-                                                             image_channels);
++            if (sd_img_gen_params->init_image.data != nullptr) {
++                init_image_tensor = ensure_image_tensor_channels(sd_image_to_tensor(sd_img_gen_params->init_image, request->width, request->height),
++                                                                 image_channels);
++            }
+         }
+ 
+         if (sd_img_gen_params->mask_image.data != nullptr) {
+@@ -916,6 +920,85 @@ namespace sd::pipeline {
+         return {};
+     }
+ 
++    // Fugue's stage split (fugue_stages.h): conditioning and latents written after a stage of
++    // generate_image, or read in place of running it.
++    static bool fugue_fail(const fugue_stages::File& f, const char* what, const char* path) {
++        LOG_ERROR("fugue: %s '%s': %s", what, path, f.error.empty() ? "cannot write" : f.error.c_str());
++        return false;
++    }
++
++    static bool fugue_check_kind(fugue_stages::File& f, StableDiffusionGGML* sd, const char* kind) {
++        if (f.meta["kind"] != kind) {
++            return f.fail(std::string("not a ") + kind + " file");
++        }
++        if (f.meta["version"] != sd_version_name(sd->version)) {
++            return f.fail("made for " + f.meta["version"] + ", not " + sd_version_name(sd->version));
++        }
++        return true;
++    }
++
++    static bool fugue_save_cond(StableDiffusionGGML* sd, const ImageGenerationEmbeds& embeds, const char* path) {
++        fugue_stages::File f;
++        f.meta["kind"]    = "fugue/conditioning";
++        f.meta["version"] = sd_version_name(sd->version);
++        fugue_stages::put_cond(f, "cond", embeds.cond);
++        fugue_stages::put_cond(f, "uncond", embeds.uncond);
++        fugue_stages::put_cond(f, "img_uncond", embeds.img_uncond);
++        if (!sd->ip_adapter_tokens.empty()) {
++            fugue_stages::put(f, "ip_adapter.tokens", sd->ip_adapter_tokens);
++            fugue_stages::put(f, "ip_adapter.uncond_tokens", sd->ip_adapter_uncond_tokens);
++            fugue_stages::put_float(f, "ip_adapter.strength", sd->ip_adapter_strength);
++        }
++        for (const auto& extension : sd->generation_extensions) {
++            extension->save_condition(f);
++        }
++        return fugue_stages::write_file(path, f) || fugue_fail(f, "cannot write conditioning", path);
++    }
++
++    static bool fugue_load_cond(StableDiffusionGGML* sd, ImageGenerationEmbeds& embeds, const char* path) {
++        fugue_stages::File f;
++        sd->reset_generation_extensions();
++        sd->ip_adapter_tokens        = {};
++        sd->ip_adapter_uncond_tokens = {};
++        bool ok = fugue_stages::read_file(path, f) && fugue_check_kind(f, sd, "fugue/conditioning") &&
++                  fugue_stages::get_cond(f, "cond", embeds.cond) && fugue_stages::get_cond(f, "uncond", embeds.uncond) &&
++                  fugue_stages::get_cond(f, "img_uncond", embeds.img_uncond) &&
++                  fugue_stages::get(f, "ip_adapter.tokens", sd->ip_adapter_tokens) &&
++                  fugue_stages::get(f, "ip_adapter.uncond_tokens", sd->ip_adapter_uncond_tokens) &&
++                  fugue_stages::get_float(f, "ip_adapter.strength", sd->ip_adapter_strength);
++        if (ok && !sd->ip_adapter_tokens.empty() && sd->ip_adapter == nullptr) {
++            ok = f.fail("the conditioning uses IP-Adapter, which this context did not load");
++        }
++        for (const auto& extension : sd->generation_extensions) {
++            ok = ok && extension->load_condition(f);
++        }
++        return ok || fugue_fail(f, "cannot read conditioning", path);
++    }
++
++    static bool fugue_save_latents(StableDiffusionGGML* sd,
++                                   const std::vector<sd::Tensor<float>>& latents,
++                                   const GenerationRequest& request,
++                                   const char* path) {
++        fugue_stages::File f;
++        f.meta["kind"]    = "fugue/latent";
++        f.meta["version"] = sd_version_name(sd->version);
++        f.meta["width"]   = std::to_string(request.width);
++        f.meta["height"]  = std::to_string(request.height);
++        fugue_stages::put_list(f, "latent", latents);
++        return fugue_stages::write_file(path, f) || fugue_fail(f, "cannot write latent", path);
++    }
++
++    static bool fugue_load_latents(StableDiffusionGGML* sd, std::vector<sd::Tensor<float>>& latents, const char* path) {
++        fugue_stages::File f;
++        bool ok = fugue_stages::read_file(path, f) && fugue_check_kind(f, sd, "fugue/latent") &&
++                  fugue_stages::get_list(f, "latent", latents);
++        for (const auto& latent : latents) {
++            ok = ok && (!latent.empty() || f.fail("an empty latent"));
++        }
++        ok = ok && (!latents.empty() || f.fail("no latent"));
++        return ok || fugue_fail(f, "cannot read latent", path);
++    }
++
+     bool generate_image(StableDiffusionGGML* sd,
+                         const sd::ImageConfig* sd_img_gen_params,
+                         sd::Image** images_out,
+@@ -974,20 +1057,60 @@ namespace sd::pipeline {
+             return false;
+         }
+         ImageGenerationLatents latents = std::move(*latents_opt);
+-
+-        auto embeds_opt = prepare_image_generation_embeds(sd,
+-                                                          sd_img_gen_params,
+-                                                          &request,
+-                                                          &plan,
+-                                                          &latents,
+-                                                          ref_image_params);
+-        if (!embeds_opt.has_value()) {
++        const sd::FugueStageConfig& fugue = sd_img_gen_params->fugue;
++        const std::string stop_after      = SAFE_STR(fugue.stop_after);
++        if (!stop_after.empty() && stop_after != "init" && stop_after != "cond" && stop_after != "sample") {
++            LOG_ERROR("fugue: unknown stage '%s' to stop after", stop_after.c_str());
+             return false;
+         }
+-        ImageGenerationEmbeds embeds = std::move(*embeds_opt);
++        if (fugue.init_latent_out != nullptr) {
++            if (!fugue_save_latents(sd, {latents.init_latent}, request, fugue.init_latent_out))
++                return false;
++        }
++        if (fugue.init_latent_in != nullptr) {
++            std::vector<sd::Tensor<float>> loaded;
++            if (!fugue_load_latents(sd, loaded, fugue.init_latent_in))
++                return false;
++            if (loaded[0].shape() != latents.init_latent.shape()) {
++                LOG_ERROR("fugue: the init latent '%s' does not fit a %dx%d image", fugue.init_latent_in, request.width, request.height);
++                return false;
++            }
++            latents.init_latent = std::move(loaded[0]);
++        }
++        if (stop_after == "init") {
++            return true;
++        }
++
++        ImageGenerationEmbeds embeds;
++        if (fugue.cond_in != nullptr) {
++            if (!fugue_load_cond(sd, embeds, fugue.cond_in))
++                return false;
++        } else if (fugue.latent_in == nullptr) {
++            auto embeds_opt = prepare_image_generation_embeds(sd,
++                                                              sd_img_gen_params,
++                                                              &request,
++                                                              &plan,
++                                                              &latents,
++                                                              ref_image_params);
++            if (!embeds_opt.has_value()) {
++                return false;
++            }
++            embeds = std::move(*embeds_opt);
++        }
++        if (fugue.cond_out != nullptr) {
++            if (!fugue_save_cond(sd, embeds, fugue.cond_out))
++                return false;
++        }
++        if (stop_after == "cond") {
++            return true;
++        }
+         std::vector<sd::Tensor<float>> final_latents;
++        if (fugue.latent_in != nullptr) {
++            if (!fugue_load_latents(sd, final_latents, fugue.latent_in))
++                return false;
++        }
+         int64_t denoise_start = ggml_time_ms();
+-        for (int b = 0; b < request.batch_count; b++) {
++        for (int b = 0; b < request.batch_count && fugue.latent_in == nullptr; b++) {
+             sd_cancel_mode_t cancel = sd->get_cancel_flag();
+             if (cancel == SD_CANCEL_ALL) {
+                 LOG_ERROR("cancelling generation");
+@@ -1055,7 +1178,7 @@ namespace sd::pipeline {
+             return false;
+         }
+ 
+-        if (request.hires.enabled && request.hires.target_width > 0) {
++        if (request.hires.enabled && request.hires.target_width > 0 && fugue.latent_in == nullptr) {
+             if (sd->get_cancel_flag() == SD_CANCEL_ALL) {
+                 LOG_ERROR("cancelling generation before hires fix");
+                 return false;
+@@ -1201,6 +1324,13 @@ namespace sd::pipeline {
+ 
+             final_latents = std::move(hires_final_latents);
+         }
++        if (fugue.latent_out != nullptr) {
++            if (!fugue_save_latents(sd, final_latents, request, fugue.latent_out))
++                return false;
++        }
++        if (stop_after == "sample") {
++            return true;
++        }
+ 
+         int num_images = 0;
+         auto result    = decode_image_outputs(sd, request, final_latents, &num_images);
+diff --git i/src/stable-diffusion.cpp w/src/stable-diffusion.cpp
+index acc3672..f7ad89c 100644
+--- i/src/stable-diffusion.cpp
++++ w/src/stable-diffusion.cpp
+@@ -75,6 +75,11 @@ static sd_status_t run_image(sd_ctx_t* ctx, const sd::ImageConfig* params, sd::I
+         sd::free_images(images, count);
+         throw;
+     }
++    // Fugue's stage split (pipeline/fugue_stages.h): a call that stops after a stage makes no image.
++    if (count == 0 && params->fugue.stop_after != nullptr) {
++        *result_out = static_cast<sd::ImageGenerationResult*>(calloc(1, sizeof(sd::ImageGenerationResult)));
++        return *result_out ? SD_STATUS_OK : sd::api::error(SD_STATUS_OUT_OF_MEMORY, nullptr, "could not allocate image result");
++    }
+     return sd::make_image_generation_result(images, count, infos, result_out) ? SD_STATUS_OK
+                                                                               : sd::api::error(SD_STATUS_OUT_OF_MEMORY, nullptr, "could not allocate image result");
+ }

@@ -1,0 +1,32 @@
+#!/bin/bash
+# Builds fugue-helper (helper/CMakeLists.txt) for one backend into build-helper-<backend>/:
+#
+#   bin/build-helper cuda|vulkan|cpu [cmake options]
+#
+# For a build only this machine runs, `-DCMAKE_CUDA_ARCHITECTURES=native -DGGML_NATIVE=ON`
+# compiles far less than the package's portable default.
+set -euo pipefail
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+backend="${1:-cpu}"
+(($#)) && shift
+args=()
+if command -v ccache >/dev/null; then
+  # As bin/build: objects are reused across build folders and worktrees, so a fresh
+  # build-helper-<backend>/ or a reapplied patch recompiles only the files that changed.
+  export CCACHE_BASEDIR="${CCACHE_BASEDIR:-$(dirname "$root")}"
+  args+=(-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_CUDA_COMPILER_LAUNCHER=ccache)
+else
+  args+=(-DCMAKE_C_COMPILER_LAUNCHER= -DCMAKE_CXX_COMPILER_LAUNCHER= -DCMAKE_CUDA_COMPILER_LAUNCHER=)
+fi
+if [[ $backend == cuda ]]; then
+  # Arch's nvcc asks for an older GCC than the system one; clang++ works (docs/spikes/02). An
+  # NVCC_CCBIN naming a compiler that is not installed (a GCC since removed) is passed over.
+  if [[ ! -x ${NVCC_CCBIN:-} ]]; then
+    export NVCC_CCBIN=/usr/bin/clang++
+  fi
+  export PATH="/opt/cuda/bin:$PATH"
+  args+=(-DCMAKE_CUDA_HOST_COMPILER="$NVCC_CCBIN")
+fi
+cmake -S "$root/helper" -B "$root/build-helper-$backend" -DFUGUE_HELPER_BACKEND="$backend" "${args[@]}" "$@" >/dev/null
+cmake --build "$root/build-helper-$backend" -j"$(nproc)"
