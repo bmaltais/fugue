@@ -103,6 +103,7 @@ Item {
             readonly property bool failed: node.runState === "error"
             readonly property bool frozen: node.runState === "frozen" && !bypassed && !muted
             readonly property bool dashed: bypassed || node.missing
+            readonly property bool renaming: !!node.canvasView && node.canvasView.renamingNode === node.nodeId
             // A layout color tints the whole node, header and body, as in ComfyUI (#72).
             readonly property var colorRole: node.color !== "" ? node.look.role(node.color) : null
             readonly property color headerFill: failed ? node.look.errorHeader
@@ -232,7 +233,9 @@ Item {
                     border.color: face.kindPort ? node.canvasView.portColor(face.kindPort.color) : "transparent"
                 }
                 Text {
-                    visible: face.full
+                    id: titleText
+                    // Hidden while it is edited in place (#74).
+                    visible: face.full && !face.renaming
                     // A group's kind mark is the layers glyph (drawn with the decor), 12 px.
                     x: node.groupSize > 0 ? 3 * face.u - 1 + 12 + 1.5 * face.u
                      : kind.visible ? kind.x + kind.width + 1.5 * face.u : 3 * face.u - 1
@@ -445,7 +448,7 @@ Item {
             Loader {
                 id: decor
                 active: face.stateGlyph !== "" || face.caption !== "" || node.warnings.length > 0 || node.pinned
-                        || face.dashed || node.collapsed || extrasNeeded || node.groupSize > 0
+                        || face.dashed || node.collapsed || extrasNeeded || node.groupSize > 0 || face.renaming
                 // What only some nodes have, made here too so a big graph pays nothing for it
                 // (test_canvas_window counts items): section headers (6.1, 5.4; the Advanced one
                 // opens and folds with a click, which FugueCanvas takes), the names an entered
@@ -462,6 +465,69 @@ Item {
                     Binding {
                         decor.metaWidth: meta.visible ? meta.width : 0
                     }
+                    // The title edited in place (F2, a double-click on it, Rename on the menu; #74),
+                    // over the header's title.
+                    Loader {
+                        active: face.renaming
+                        x: 1 + titleText.x
+                        width: titleText.width
+                        y: 1 + ((node.collapsed ? node.height - 2 : node.canvasModel.headerHeight - 1) - height) / 2
+                        sourceComponent: TitleEditor {
+                            initial: node.title
+                            color: node.look.text
+                            font.pixelSize: node.look.textSize
+                            font.weight: Font.DemiBold
+                            onDone: keep => {
+                                if (keep)
+                                    node.canvasModel.renameNode(node.nodeId, text)
+                                node.canvasView.renamingNode = ""
+                            }
+                        }
+                    }
+                    // A group card's footer: how many nodes it holds, and a button that enters it (as
+                    // ComfyUI's "Enter subgraph", #74; Tab and a double-click on the body too).
+                    Loader {
+                        active: node.groupSize > 0 && face.full && !node.collapsed
+                        x: 3 * face.u
+                        y: node.height - 2 * face.u - node.canvasModel.rowHeight
+                        width: node.width - 6 * face.u
+                        height: node.canvasModel.rowHeight
+                        sourceComponent: Item {
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: parent.width - enterButton.width - face.u
+                                text: qsTr("%n nodes", "", node.groupSize)
+                                elide: Text.ElideRight
+                                color: node.look.label
+                                font.pixelSize: node.look.captionSize
+                            }
+                            Rectangle {
+                                id: enterButton
+                                objectName: "enterGroupButton"
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: enterText.implicitWidth + 2 * face.u
+                                height: parent.height - face.u
+                                radius: node.look.smallCorner
+                                color: enterArea.containsMouse ? node.look.well : "transparent"
+                                Text {
+                                    id: enterText
+                                    anchors.centerIn: parent
+                                    text: qsTr("Enter group") + " \u203a"
+                                    color: enterArea.containsMouse ? node.look.text : node.look.label
+                                    font.pixelSize: node.look.captionSize
+                                }
+                                MouseArea {
+                                    id: enterArea
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: node.canvasModel.enterGroup(node.nodeId)
+                                }
+                            }
+                        }
+                    }
+
                     Repeater {
                         model: decor.extrasNeeded ? node.inputs.filter(p => p.headerTop !== undefined) : []
                         delegate: Row {
@@ -724,50 +790,6 @@ Item {
                         color: node.look.label
                         font.pixelSize: 12
                     }
-                    // A group card's footer: how many nodes it holds, and a button that enters it (as
-                    // ComfyUI's "Enter subgraph", #74; Tab and a double-click on the body too).
-                    Loader {
-                        active: node.groupSize > 0 && face.full && !node.collapsed
-                        x: 3 * face.u
-                        y: node.height - 2 * face.u - node.canvasModel.rowHeight
-                        width: node.width - 6 * face.u
-                        height: node.canvasModel.rowHeight
-                        sourceComponent: Item {
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: parent.width - enterButton.width - face.u
-                                text: qsTr("%n nodes", "", node.groupSize)
-                                elide: Text.ElideRight
-                                color: node.look.label
-                                font.pixelSize: node.look.captionSize
-                            }
-                            Rectangle {
-                                id: enterButton
-                                objectName: "enterGroupButton"
-                                anchors.right: parent.right
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: enterText.implicitWidth + 2 * face.u
-                                height: parent.height - face.u
-                                radius: node.look.smallCorner
-                                color: enterArea.containsMouse ? node.look.well : "transparent"
-                                Text {
-                                    id: enterText
-                                    anchors.centerIn: parent
-                                    text: qsTr("Enter group") + " \u203a"
-                                    color: enterArea.containsMouse ? node.look.text : node.look.label
-                                    font.pixelSize: node.look.captionSize
-                                }
-                                MouseArea {
-                                    id: enterArea
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: node.canvasModel.enterGroup(node.nodeId)
-                                }
-                            }
-                        }
-                    }
-
                     // A placeholder's note (spec 11.6).
                     Text {
                         visible: node.missing && face.full && !node.collapsed

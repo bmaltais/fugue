@@ -126,11 +126,24 @@ private slots:
             field->setProperty("text", text);
             app.key(Qt::Key_Return);
         };
+        // A title is edited in place on the header (#74): Enter keeps, Esc drops.
+        auto inPlace = [&](const QString &text, Qt::Key key = Qt::Key_Return) {
+            QQuickItem *field = nullptr;
+            QTRY_VERIFY((field = item(app.window->contentItem(), "titleEditor")) && field->isVisible());
+            QTRY_VERIFY(field->hasActiveFocus());
+            QCOMPARE(field->property("selectedText").toString(), field->property("text").toString());
+            field->setProperty("text", text);
+            app.key(key);
+            QTRY_VERIFY(!item(app.window->contentItem(), "titleEditor"));
+        };
         app.model.select({"gen"});
         app.key(Qt::Key_F2);
-        answer("Hero shot");
+        inPlace("Hero shot");
         QTRY_COMPARE(app.model.nodeTitle("gen"), QStringLiteral("Hero shot"));
         QVERIFY(!ask || !ask->isVisible());
+        app.key(Qt::Key_F2);
+        inPlace("Dropped", Qt::Key_Escape);
+        QCOMPARE(app.model.nodeTitle("gen"), QStringLiteral("Hero shot"));
 
         app.key(Qt::Key_P);
         QTRY_VERIFY(app.model.selectionAll("pinned"));
@@ -142,7 +155,7 @@ private slots:
 
         // A double-click on a node's title renames it too.
         QTest::mouseDClick(app.window, Qt::LeftButton, {}, app.screen(at.x(), at.y()));
-        answer("");
+        inPlace("");
         QTRY_COMPARE(app.model.nodeTitle("gen"), QStringLiteral("Generate Image"));
 
         // A group card's output: double-click its port, and the face shows the new label.
@@ -247,8 +260,9 @@ private slots:
             QSKIP("Omarchy's themes are not installed here");
         App app(load(kGraph), {}, Look{"kanagawa"}); // a pale accent (#dcd7ba), as the owner's
         QVERIFY(app.open());
-        app.model.select({"gen"});
-        app.key(Qt::Key_F2);
+        // The port rename question (a title is renamed in place).
+        QMetaObject::invokeMethod(&app.model, "portRenameRequested", Q_ARG(QString, "gen"), Q_ARG(QString, "image"),
+                                  Q_ARG(bool, true));
         QQuickItem *ok = nullptr;
         QTRY_VERIFY((ok = item(app.window->contentItem(), "renameOk")) && ok->isVisible());
         // Its label is the theme's accent foreground, made to read on the accent the window gives
@@ -277,6 +291,24 @@ private slots:
         QTest::mouseClick(app.window, Qt::LeftButton, {},
                           enter->mapToScene(QPointF(enter->width() / 2, enter->height() / 2)).toPoint());
         QTRY_VERIFY(app.model.inGroup());
+    }
+
+    // #74: a double-click on a Frame's title edits it in place.
+    void aFrameTitleIsEditedInPlace() {
+        App app(load(kGraph));
+        QVERIFY(app.open());
+        app.model.select({"prompt"});
+        app.key(Qt::Key_G, Qt::ControlModifier);
+        QTRY_COMPARE(app.model.frames().size(), 1);
+        const QVariantMap frame = app.model.frames().first().toMap();
+        QTest::mouseDClick(app.window, Qt::LeftButton, {},
+                           app.screen(frame.value("x").toReal() + 30, frame.value("y").toReal() + 8));
+        QQuickItem *field = nullptr;
+        QTRY_VERIFY((field = item(app.window->contentItem(), "titleEditor")) && field->hasActiveFocus());
+        field->setProperty("text", QStringLiteral("Inputs"));
+        app.key(Qt::Key_Return);
+        QTRY_COMPARE(app.model.frames().first().toMap().value("title").toString(), QStringLiteral("Inputs"));
+        QVERIFY(!item(app.window->contentItem(), "titleEditor"));
     }
 
     void aFrameMovesWithItsNodesAndAdvancedOpensOnClick() {

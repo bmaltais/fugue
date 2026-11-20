@@ -646,7 +646,7 @@ FocusScope {
                 border.color: role.frameEdge
                 Text {
                     // Zoomed out, the title is drawn above the nodes instead (below).
-                    visible: canvas.tier === 0
+                    visible: canvas.tier === 0 && canvas.renamingFrame !== parent.modelData.id
                     x: 3 * canvas.look.unit
                     y: 2 * canvas.look.unit
                     width: parent.width - 6 * canvas.look.unit
@@ -657,6 +657,27 @@ FocusScope {
                     color: parent.role.frameTitle
                     font.pixelSize: canvas.frameTitleWorld
                     font.weight: Font.DemiBold
+                }
+                // The title edited in place (a double-click on it, Rename Frame; #74).
+                Loader {
+                    id: frameTitleEdit
+                    readonly property var frame: parent.modelData
+                    readonly property color ink: parent.role.frameTitle
+                    active: canvas.renamingFrame === frame.id
+                    x: 3 * canvas.look.unit
+                    y: 2 * canvas.look.unit
+                    width: parent.width - 6 * canvas.look.unit
+                    sourceComponent: TitleEditor {
+                        initial: frameTitleEdit.frame.title
+                        color: frameTitleEdit.ink
+                        font.pixelSize: canvas.frameTitleWorld
+                        font.weight: Font.DemiBold
+                        onDone: keep => {
+                            if (keep)
+                                canvas.model.renameFrame(frameTitleEdit.frame.id, text)
+                            canvas.renamingFrame = ""
+                        }
+                    }
                 }
             }
         }
@@ -868,6 +889,7 @@ FocusScope {
             delegate: Rectangle {
                 required property var modelData
                 readonly property var role: canvas.look.role(modelData.color || "muted")
+                visible: canvas.renamingFrame !== modelData.id // edited in place below (#74)
                 readonly property real s: 1 / world.scale
                 x: modelData.x + 3 * canvas.look.unit
                 y: modelData.y + 2 * canvas.look.unit
@@ -1053,6 +1075,14 @@ FocusScope {
     // A node's warnings (docs/canvas-look.md 9, #72): one card for the canvas, shown while a
     // node's warning count is hovered, kept up by a click until a click elsewhere, Esc or a change
     // of level. Its text can be selected and copied.
+    // The node or Frame whose title is edited in place (#74), or "".
+    property string renamingNode: ""
+    property string renamingFrame: ""
+    Connections {
+        target: canvas.model
+        function onNodeRenameRequested(node) { canvas.renamingNode = node }
+        function onFrameRenameRequested(frame) { canvas.renamingFrame = frame }
+    }
     property string warningsNode: ""
     property bool warningsPinned: false
     function showWarnings(nodeId, warnings, badge, pin) {

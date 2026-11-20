@@ -314,7 +314,7 @@ private slots:
         QVERIFY(listed);
     }
 
-    // #55: Rename on a node's context menu asks for its title.
+    // #55, #74: Rename on a node's context menu edits its title in place.
     void renameFromTheContextMenu() {
         App app(load(framed));
         QVERIFY(app.open());
@@ -322,10 +322,11 @@ private slots:
         QTRY_VERIFY(isOpen(app.window, "contextMenuPopup"));
         QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("menuItem-edit.rename")));
         QQuickItem *field = nullptr;
-        QTRY_VERIFY((field = find(app.window, "renameField")) != nullptr);
+        QTRY_VERIFY((field = find(app.window, "titleEditor")) != nullptr);
         QCOMPARE(field->property("text").toString(), app.model.nodeTitle("c"));
         field->setProperty("text", QStringLiteral("Far away"));
-        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("renameOk")));
+        // A click elsewhere keeps the title (#74).
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, app.screen(500, 500));
         QTRY_COMPARE(app.model.nodeTitle("c"), QStringLiteral("Far away"));
     }
 

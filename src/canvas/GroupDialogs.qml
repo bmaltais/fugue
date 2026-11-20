@@ -25,17 +25,10 @@ Item {
             sinksAsk.sinks = sinks
             sinksAsk.open()
         }
-        function onFrameRenameRequested(frame) {
-            const found = root.model.frames.find(f => f.id === frame)
-            renameAsk.ask("frame", frame, "", false, qsTr("Frame title"), found ? found.title : "")
-        }
-        function onNodeRenameRequested(node) {
-            renameAsk.ask("node", node, "", false, qsTr("Node title"), root.model.nodeTitle(node))
-        }
         function onPortRenameRequested(node, port, output) {
             const found = root.model.portToRename(node, port, output)
             const prompt = output ? qsTr("Output name on the group") : qsTr("Input name on the group")
-            renameAsk.ask("port", node, port, output, prompt, found.label || "")
+            renameAsk.ask(node, port, output, prompt, found.label || "")
         }
         function onGroupUpdateAsked(node, changes) {
             updateAsk.node = node
@@ -176,19 +169,16 @@ Item {
         }
     }
 
-    // Rename a Frame, a node (#55) or a port on a group's face (#72): one question, its field
-    // filled with what shows now and selected. Empty, a node goes back to its type's name and a
-    // port to its inner port's.
+    // Rename a port on a group's face (#72): its field filled with the label shown now, selected;
+    // empty goes back to the inner port's. (Node and Frame titles are edited in place, #74.)
     Question {
         id: renameAsk
         objectName: "renameAsk"
-        property string kind: "" // frame, node or port
         property string target: ""
         property string port: ""
         property bool output: false
         property string prompt: ""
-        function ask(kind, target, port, output, prompt, current) {
-            renameAsk.kind = kind
+        function ask(target, port, output, prompt, current) {
             renameAsk.target = target
             renameAsk.port = port
             renameAsk.output = output
@@ -222,12 +212,7 @@ Item {
                     highlighted: true
                     onClicked: {
                         renameAsk.close()
-                        if (renameAsk.kind === "frame")
-                            root.model.renameFrame(renameAsk.target, renameField.text)
-                        else if (renameAsk.kind === "node")
-                            root.model.renameNode(renameAsk.target, renameField.text)
-                        else
-                            root.model.renamePort(renameAsk.target, renameAsk.port, renameAsk.output, renameField.text)
+                        root.model.renamePort(renameAsk.target, renameAsk.port, renameAsk.output, renameField.text)
                     }
                 }
             }
