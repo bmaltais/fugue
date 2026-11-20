@@ -3,6 +3,7 @@
 #include <QFileInfo>
 
 #include "cli/process.h"
+#include "engine/trust_store.h"
 
 namespace fugue::cli {
 
@@ -14,6 +15,9 @@ Compilation compileDocument(const Document &document, Registry &registry, const 
     options.target = settings.target;
     options.provider = settings.provider;
     options.providers = registry.providerNames();
+    options.trusted = [store = TrustStore()](const QString &pack, const QString &version) {
+        return store.isTrusted(pack, version);
+    };
     const Compilation compilation = compile(document, registry, options);
     // The provider warnings come first, with what the compiler found.
     const Errors problems = providerProblems + compilation.problems();

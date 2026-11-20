@@ -18,6 +18,7 @@
 #include "cli/process.h"
 #include "cli/runs.h"
 #include "engine/compiler.h"
+#include "engine/trust_store.h"
 #include "engine/file_hashes.h"
 #include "engine/paths.h"
 #include "engine/queue.h"
@@ -316,6 +317,9 @@ private:
         CompileOptions options;
         options.target = request.target;
         options.providers = m_compileRegistry.providerNames();
+        options.trusted = [store = m_trust](const QString &pack, const QString &version) {
+            return store.isTrusted(pack, version);
+        };
         const Compilation compilation = compile(request.document, m_compileRegistry, options);
         const Errors problems = providerProblems + compilation.problems();
         return compilation ? Compilation(compilation.value(), problems) : Compilation(problems);
@@ -502,6 +506,7 @@ private:
     }
 
     RunSetup m_setup;
+    TrustStore m_trust{m_setup.trustPath.isEmpty() ? TrustStore::defaultPath() : m_setup.trustPath};
     cli::Context m_context;
     Registry m_compileRegistry;
     std::unique_ptr<cli::Process> m_process;

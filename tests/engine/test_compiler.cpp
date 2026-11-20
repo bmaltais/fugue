@@ -186,6 +186,7 @@ private slots:
     void runToHereKeepsOnlyWhatTheTargetNeeds();
     void unknownTargetIsAUsageError();
     void providerPinsAreResolvedAndChecked();
+    void nodesOfUntrustedPacksFailAtTheInstalledVersion();
     void listInputsTakeItemsAndCheckTheirCount();
     void compiledGraphRoundTripsThroughJson();
     void compiledGraphJsonIsChecked();
@@ -697,6 +698,48 @@ void TestCompiler::unknownTargetIsAUsageError() {
     QCOMPARE(result.problems().first().code, QString("usage"));
     QCOMPARE(result.problems().first().valid, (QJsonArray{"g7/gen", "g7/inner3/s2", "prompt", "save"}));
     QCOMPARE(result.problems().first().hint, QString("Did you mean \"g7/gen\"?"));
+}
+
+void TestCompiler::nodesOfUntrustedPacksFailAtTheInstalledVersion() {
+    Registry r = registry();
+    const Errors added = r.addManifest(json(
+        "{'manifest': 1, 'id': 'io.example.tools/shout', 'version': '2.0.0', 'name': 'Shout',"
+        " 'runtime': {'kind': 'builtin'},"
+        " 'inputs': [{'name': 'text', 'type': 'text'}],"
+        " 'outputs': [{'name': 'text', 'type': 'text'}]}"));
+    QVERIFY2(!hasErrors(added), qPrintable(dump(added)));
+    r.setPackVersion("io.example.tools", "2.0.0");
+    // The workflow claims a version the user trusted; only the installed one counts.
+    const Document doc = document(
+        "{'fugue': 1, 'graph': {'nodes': {"
+        "'a': {'type': 'fugue/text', 'version': '1.0.0', 'inputs': {'text': 'x'}},"
+        "'b': {'type': 'io.example.tools/shout', 'version': '2.0.0', 'inputs': {'text': {'from': 'a.text'}}}}},"
+        " 'requires': {'packs': {'io.example.tools': {'version': '1.0.0'}}}}");
+
+    // Nobody asks: a pure check of meaning.
+    { const Compilation plain = compile(doc, r); QVERIFY2(plain.ok(), qPrintable(dump(plain.problems()))); }
+
+    CompileOptions options;
+    QStringList asked;
+    options.trusted = [&](const QString &pack, const QString &version) {
+        asked << pack + "@" + version;
+        return pack == "io.example.tools" && version == "1.0.0"; // what the workflow says, not what is installed
+    };
+    Compilation result = compile(doc, r, options);
+    QVERIFY(!result.ok());
+    QVERIFY(dump(result.problems()).contains("pack_untrusted"));
+    QCOMPARE(result.problems().first().node, QString("b"));
+    QVERIFY(asked.contains("io.example.tools@2.0.0"));
+    QVERIFY(!asked.contains("fugue@")); // built-in packs are not asked about
+
+    options.trusted = [](const QString &pack, const QString &version) {
+        return pack == "io.example.tools" && version == "2.0.0";
+    };
+    QVERIFY(compile(doc, r, options).ok());
+
+    // A pack with no installed version has none to be trusted at.
+    r.setPackVersion("io.example.tools", {});
+    QVERIFY(!compile(doc, r, options).ok());
 }
 
 void TestCompiler::providerPinsAreResolvedAndChecked() {

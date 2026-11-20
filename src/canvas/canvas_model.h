@@ -451,6 +451,9 @@ public:
 
 signals:
     void documentReset();
+    // A paste added nodes from this document: the same questions as for opening it (missing
+    // nodes, packs to trust) are asked of it (Workflows).
+    void pasted(const fugue::Document &document);
     void framesChanged();
     void reroutesChanged();
     void metricsChanged();

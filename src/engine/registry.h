@@ -18,6 +18,7 @@
 #include "engine/port_type.h"
 #include "engine/providers.h"
 
+#include <QHash>
 #include <QJsonObject>
 #include <QList>
 #include <QString>
@@ -59,6 +60,12 @@ public:
     // fromJson() then add(): the path a node.json takes.
     Errors addManifest(const QJsonObject &manifest);
 
+    // The version of each installed pack, which trust is asked for and given at (6.7). The
+    // workflow's own `requires.packs` is only what its author had, never what runs. A pack
+    // not set here has no installed version: "".
+    void setPackVersion(const QString &packId, const QString &version) { m_packVersions[packId] = version; }
+    QString packVersion(const QString &packId) const { return m_packVersions.value(packId); }
+
     // The type with this id, else the type that has it as an alias, else null.
     // The pointer stays valid as long as the registry.
     const NodeType *nodeType(const QString &id) const;
@@ -79,6 +86,7 @@ public:
 
 private:
     QList<ProviderEntry> m_providers;
+    QHash<QString, QString> m_packVersions;
     std::map<QString, NodeType> m_nodeTypes;
     std::map<QString, QString> m_aliases; // alias -> owning type id
     std::map<QString, DeclaredPortType> m_portTypes; // keyed by PortType::toString()

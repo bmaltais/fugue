@@ -179,6 +179,7 @@ private:
     void checkTarget();
     void build(Scope *scope);
     bool checkVersion(const QString &path, const Node &node, const QString &typeName, const Version &installed);
+    bool checkTrust(const QString &path, const QString &typeId);
     void check(Scope *scope);
     void checkInstance(Scope *scope, const QString &id, Scope *child);
     void checkNode(Scope *scope, const QString &id, Flat &flat, bool face);
@@ -344,6 +345,26 @@ bool Compiler::checkVersion(const QString &path, const Node &node, const QString
     return false;
 }
 
+// 6.7: a node of a pack the user has not allowed does not run. The version asked about is the
+// installed one, not what the workflow says it was made with.
+bool Compiler::checkTrust(const QString &path, const QString &typeId) {
+    if (!m_options.trusted)
+        return true;
+    const int slash = typeId.lastIndexOf(QLatin1Char('/'));
+    const QString pack = slash <= 0 ? QString() : typeId.left(slash);
+    if (pack.isEmpty() || pack == QLatin1String("fugue") || pack == QLatin1String("local"))
+        return true;
+    const QString version = m_registry.packVersion(pack);
+    if (m_options.trusted(pack, version))
+        return true;
+    Error error = nodeError(QStringLiteral("pack_untrusted"), path,
+                            QStringLiteral("Node %1 is from the pack %2 %3, which you have not allowed to run.")
+                                .arg(path, pack, version));
+    error.hint = QStringLiteral("Open the workflow in the app and choose Allow for %1, or run `fugue pack trust %1`.").arg(pack);
+    fail(error);
+    return false;
+}
+
 // Classifies every node of a scope and makes the scopes of its group instances.
 void Compiler::build(Scope *scope) {
     for (auto it = scope->nodes->constBegin(); it != scope->nodes->constEnd(); ++it) {
@@ -375,6 +396,10 @@ void Compiler::build(Scope *scope) {
         }
         if (const NodeType *type = m_registry.nodeType(node.type)) {
             if (!checkVersion(path, node, type->id, type->version)) {
+                m_status[path] = Status::Broken;
+                continue;
+            }
+            if (!checkTrust(path, type->id)) {
                 m_status[path] = Status::Broken;
                 continue;
             }

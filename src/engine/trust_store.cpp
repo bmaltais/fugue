@@ -1,4 +1,4 @@
-#include "workflow/trust_store.h"
+#include "engine/trust_store.h"
 
 #include "engine/atomic_file.h"
 #include "engine/json.h"
@@ -59,7 +59,7 @@ Errors TrustStore::trust(const QString &packId, const QString &version) {
     return replaceFile(m_path, writeJson(QJsonObject{{"packs", packs}}), QFileInfo(m_path).fileName(), FileMode::OwnerOnly);
 }
 
-QList<PackUse> TrustStore::packsUsed(const Document &document) {
+QList<PackUse> TrustStore::packsUsed(const Document &document, const Registry &registry) {
     QMap<QString, PackUse> used;
     const QJsonObject recorded = document.requirements.value("packs").toObject();
     const auto addNodes = [&](const Nodes &nodes) {
@@ -73,7 +73,8 @@ QList<PackUse> TrustStore::packsUsed(const Document &document) {
             if (use.id.isEmpty()) {
                 const QJsonObject entry = recorded.value(pack).toObject();
                 use.id = pack;
-                use.version = entry.value("version").toString();
+                const QString installed = registry.packVersion(pack);
+                use.version = installed.isEmpty() ? entry.value("version").toString() : installed;
                 use.source = entry.value("source").toString();
             }
             if (!use.types.contains(node.type))
@@ -89,9 +90,9 @@ QList<PackUse> TrustStore::packsUsed(const Document &document) {
     return list;
 }
 
-QList<PackUse> TrustStore::untrusted(const Document &document) const {
+QList<PackUse> TrustStore::untrusted(const Document &document, const Registry &registry) const {
     QList<PackUse> list;
-    for (const PackUse &use : packsUsed(document))
+    for (const PackUse &use : packsUsed(document, registry))
         if (!isTrusted(use.id, use.version))
             list << use;
     return list;

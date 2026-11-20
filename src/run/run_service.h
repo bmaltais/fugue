@@ -72,6 +72,7 @@ struct RunSetup {
     QString lockPath;     // default Queue::defaultLockPath()
     QString cacheRoot;    // default ResultCache::defaultRoot()
     QString hashesPath;   // default FileHashes::defaultPath()
+    QString trustPath;    // default TrustStore::defaultPath(): the packs the user allowed (6.7)
     QString thumbnailDir; // default <cache>/thumbnails
     // The file roots of 13.6 the runs are held to; none: not limited (spec Appendix A, #19).
     std::optional<FileRoots> roots;

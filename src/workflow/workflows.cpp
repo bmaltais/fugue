@@ -71,6 +71,10 @@ Workflows::Workflows(CanvasModel *canvas, const Registry *registry, CommandRegis
     : QObject(parent), m_canvas(canvas), m_registry(registry), m_commands(commands),
       m_recovery(locations.recoveryDir), m_trust(locations.trustPath) {
     connect(m_canvas, &CanvasModel::edited, this, &Workflows::refreshUnsaved);
+    connect(m_canvas, &CanvasModel::pasted, this, [this](const Document &document) {
+        if (m_current >= 0)
+            analyze(document, m_tabs[size_t(m_current)].title);
+    });
     m_images = new ImageInputs(m_canvas, m_registry, this);
     connect(m_images, &ImageInputs::message, this, &Workflows::setNotice);
     m_timer.setInterval(locations.recoveryIntervalMs);
@@ -384,7 +388,7 @@ void Workflows::analyze(const Document &document, const QString &title) {
                   : tr("%1 uses nodes that are not installed (%2). They open as placeholders and keep their inputs.")
                         .arg(title, missing.join(QStringLiteral(", "))));
     bool changed = false;
-    for (const PackUse &use : m_trust.untrusted(document)) {
+    for (const PackUse &use : m_trust.untrusted(document, *m_registry)) {
         bool known = false;
         for (const QVariant &entry : m_pendingTrust)
             known |= entry.toMap().value("id") == use.id && entry.toMap().value("version") == use.version;

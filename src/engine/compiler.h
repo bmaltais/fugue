@@ -13,6 +13,8 @@
 //     (missing_input), literals fit their constraints and choices
 //     (checkLiteral), list inputs their item counts (value_out_of_range);
 //   - no cycles (cycle) and no group recursion (group_recursion);
+//   - a node of a pack the user has not trusted at its installed version (pack_untrusted),
+//     when the caller passes `trusted`;
 //   - pinned providers exist (unknown_provider), when the caller passes the
 //     configured names.
 // Warnings: nodes not part of any output (not_part_of_output), and inputs a
@@ -43,6 +45,7 @@
 #include <QString>
 #include <QStringList>
 
+#include <functional>
 #include <optional>
 
 namespace fugue {
@@ -126,6 +129,11 @@ struct CompileOptions {
     // every pin must be one of them (unknown_provider); when not, pins are
     // not checked.
     std::optional<QStringList> providers;
+    // Whether the user trusts a pack at a version (6.7). When set, a node of a pack that is
+    // not built in (`fugue`, `local`) fails with pack_untrusted unless this says yes for the
+    // pack's INSTALLED version (Registry::packVersion). Every run path sets it; only a pure
+    // check of meaning (tests) leaves it out.
+    std::function<bool(const QString &pack, const QString &version)> trusted;
 };
 
 // What compiling gives: the compiled graph with the warnings found, or, when

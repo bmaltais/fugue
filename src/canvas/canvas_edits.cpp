@@ -643,8 +643,11 @@ QStringList CanvasModel::paste(const QString &text, bool connected) {
         const QVariantList center = m_view.value("center").toList();
         at = QPointF(center.value(0).toDouble(), center.value(1).toDouble());
     }
-    return insertCopy(loaded.value(), at.value_or(QPointF(cloneOffset, cloneOffset)), connected,
-                      connected ? tr("Paste with connections") : tr("Paste"), nullptr);
+    const QStringList added = insertCopy(loaded.value(), at.value_or(QPointF(cloneOffset, cloneOffset)), connected,
+                                         connected ? tr("Paste with connections") : tr("Paste"), nullptr);
+    if (!added.isEmpty())
+        emit pasted(loaded.value());
+    return added;
 }
 
 QStringList CanvasModel::cloneSelection() {

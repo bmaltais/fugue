@@ -512,6 +512,23 @@ private slots:
         QCOMPARE(copy.graph.nodes.value("show").inputs.value("value").from().toString(), QString("odd.image"));
     }
 
+    void pastingNodesOfAnUnknownPackAsksForTrustLikeOpening() {
+        Fixture f;
+        QVERIFY(f.workflows->pendingTrust().isEmpty());
+        QVERIFY(!f.canvas.paste(QString::fromUtf8(withMissingNode)).isEmpty());
+        const QVariantList asked = f.workflows->pendingTrust();
+        QCOMPARE(asked.size(), 1);
+        QCOMPARE(asked.first().toMap().value("id").toString(), QString("io.example.tools"));
+    }
+
+    void theVersionAskedAboutIsTheInstalledOne() {
+        Fixture f;
+        f.registry.setPackVersion("io.example.tools", "3.1.0"); // the workflow says 2.0.0
+        QVERIFY(write(f.file("odd.fugue"), withMissingNode));
+        QVERIFY(f.workflows->openPath(f.file("odd.fugue")));
+        QCOMPARE(f.workflows->pendingTrust().first().toMap().value("version").toString(), QString("3.1.0"));
+    }
+
     void anUnknownPacksNodesAskForTrustAndTheAnswerIsRemembered() {
         Fixture f;
         QVERIFY(write(f.file("odd.fugue"), withMissingNode));

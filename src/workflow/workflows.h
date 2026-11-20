@@ -22,7 +22,7 @@
 #include "engine/registry.h"
 #include "workflow/image_inputs.h"
 #include "workflow/recovery_store.h"
-#include "workflow/trust_store.h"
+#include "engine/trust_store.h"
 
 #include <QObject>
 #include <QUndoStack>
