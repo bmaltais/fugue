@@ -764,17 +764,22 @@ QVariantMap CanvasModel::portMap(const NodeRow &row, const Port &port) const {
             map.insert("folded", folded);
         }
     }
-    // Inside a group: the inner port the group's face exposes, under that name (5.4).
+    // Inside a group: the inner port the group's face exposes, under that name (5.4), and what the
+    // face shows for it, its label when it has one (#74).
     if (!m_scope.isEmpty()) {
         if (const GroupDefinition *group = m_document.group(scopeGroup())) {
+            const auto expose = [&map](const QString &name, const QString &label) {
+                map.insert("exposedAs", name);
+                map.insert("exposedLabel", label.isEmpty() ? name : label);
+            };
             if (port.output) {
                 for (const GroupOutput &exposed : group->outputs)
                     if (exposed.from == PortRef{row.id, port.name})
-                        map.insert("exposedAs", exposed.name);
+                        expose(exposed.name, exposed.label);
             } else {
                 for (const GroupInput &exposed : group->inputs)
                     if (exposed.targets.contains(PortRef{row.id, port.name}))
-                        map.insert("exposedAs", exposed.name);
+                        expose(exposed.name, exposed.label);
             }
         }
     }

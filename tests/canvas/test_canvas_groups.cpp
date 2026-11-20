@@ -255,6 +255,9 @@ private slots:
         QCOMPARE(canvas.portToRename("gen", "image", true).value("name").toString(), QStringLiteral("image"));
         QVERIFY(canvas.portToRename("gen", "steps", false).isEmpty()); // not exposed
         QVERIFY(canvas.renamePort("gen", "image", true, "Result"));
+        // #74: the exposed mark inside shows the new label at once, as the card does.
+        QCOMPARE(port(canvas, "gen", "image", true).value("exposedLabel").toString(), QStringLiteral("Result"));
+        QCOMPARE(port(canvas, "gen", "image", true).value("exposedAs").toString(), QStringLiteral("image"));
         QVERIFY(canvas.leaveGroup());
         QCOMPARE(port(canvas, instance, "image", true).value("label").toString(), QStringLiteral("Result"));
     }
