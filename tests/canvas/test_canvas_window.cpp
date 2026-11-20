@@ -567,6 +567,29 @@ private slots:
                  qPrintable(QStringLiteral("%1, %2").arg(moved.x()).arg(moved.y())));
     }
 
+    // #72: an input with a widget shows its dot while the pointer is on the port, also just
+    // outside the node's left edge (within the port's reach), as an output does on the right.
+    void anInputsDotShowsWhileItsPortIsHoveredFromOutside() {
+        App app(load(small));
+        QVERIFY(app.open());
+        qreal y = -1;
+        const NodeList *nodes = app.model.nodes();
+        for (int r = 0; r < nodes->rowCount(); ++r)
+            if (nodes->data(nodes->index(r), NodeList::NodeId).toString() == QLatin1String("gen"))
+                for (const QVariant &p : nodes->data(nodes->index(r), NodeList::Inputs).toList())
+                    if (p.toMap().value("name") == QLatin1String("width"))
+                        y = 60 + p.toMap().value("y").toReal();
+        QVERIFY(y > 60);
+        QQuickItem *dot = item(app.window->contentItem(), "inputDot-width");
+        QVERIFY(dot);
+        QTest::mouseMove(app.window, app.screen(600, 700)); // nowhere
+        QTRY_VERIFY(!dot->isVisible());
+        QTest::mouseMove(app.window, app.screen(340 - 6, y));
+        QTRY_COMPARE(app.canvas->property("hoverPort").toMap().value("port").toString(), QStringLiteral("width"));
+        QTRY_VERIFY(dot->isVisible());
+        QVERIFY(dot->property("hovered").toBool());
+    }
+
     void draggingFromAnOutputToAnInputConnectsThem() {
         App app(load(small));
         QVERIFY(app.open());

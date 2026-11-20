@@ -353,9 +353,12 @@ Item {
                         color: node.look.label
                         font.pixelSize: node.look.labelSize
                     }
-                    // An unlinked widget input shows its mark only on hover or to a compatible link.
+                    // An unlinked widget input shows its mark only on hover (of the node, or of the
+                    // port itself, which reaches past the node's edge) or to a compatible link.
                     PortDot {
-                        visible: input.shown && node.tier <= 1 && (!input.showsWidget || node.hovered || (face.dragging && !input.dim))
+                        objectName: "inputDot-" + input.modelData.name
+                        visible: input.shown && node.tier <= 1
+                                 && (!input.showsWidget || node.hovered || input.under || (face.dragging && !input.dim))
                         x: -width / 2
                         y: node.canvasModel.rowHeight / 2 - height / 2
                         shape: input.modelData.shape
