@@ -20,8 +20,11 @@
 // A `preview` line shows its image on the node (NodeContext::preview); a bad one is left out, and
 // the first of a run is a warning (node_bad_preview).
 //
-// Not yet (7.2, 7.3): resource handles are passed on without a resolved `path`, and a persistent
-// process is not stopped when memory is needed.
+// A resource input's handle gets the `path` of its model file (7.2), found by hash in the model
+// folders (engine/model_library); a model that is not on this machine fails the node with
+// model_missing before the program starts.
+//
+// Not yet (7.3): a persistent process is not stopped when memory is needed.
 
 #include "engine/node_kernel.h"
 

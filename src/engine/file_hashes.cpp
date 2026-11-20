@@ -84,6 +84,15 @@ QString FileHashes::hash(const QString &path) {
     return hash;
 }
 
+QString FileHashes::known(const QString &path) {
+    const std::optional<Stat> stat = statFile(path);
+    if (!stat)
+        return {};
+    QMutexLocker lock(&m_mutex);
+    const auto it = m_entries.constFind(key(path));
+    return it != m_entries.constEnd() && it->size == stat->size && it->mtimeNs == stat->mtimeNs ? it->hash : QString();
+}
+
 void FileHashes::remember(const QString &path, const QString &hash) {
     const std::optional<Stat> stat = statFile(path);
     if (!stat || !isSha256(hash))

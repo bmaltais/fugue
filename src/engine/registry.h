@@ -35,6 +35,7 @@ struct DeclaredPortType {
     PortKind kind = PortKind::Data; // Resource or Data
     QString name;                   // display name
     QStringList extensions;         // resources: file extensions in the models folder
+    QStringList folders;            // resources: folder names under each models root (8.9); empty: the id's name
 };
 
 // A configured provider instance (8.2) and the provider made for it.

@@ -51,4 +51,12 @@ QString expandHome(const QString &path) {
     return path;
 }
 
+QStringList searchPaths(const QString &own, const QStringList &extra) {
+    QStringList paths{QDir::cleanPath(own)};
+    for (const QString &entry : extra)
+        if (const QString path = QDir::cleanPath(expandHome(entry)); QDir::isAbsolutePath(path) && !paths.contains(path))
+            paths << path;
+    return paths;
+}
+
 } // namespace fugue

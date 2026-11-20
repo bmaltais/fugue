@@ -9,6 +9,7 @@
 #include <QtTest>
 
 #include "engine/hash.h"
+#include "engine/paths.h"
 #include "scheduler_support.h"
 
 using namespace fugue;
@@ -532,6 +533,32 @@ private slots:
         const GraphCheck fine = checkGraph(world.graph(generateGraph("a cat", model("flux"))), world.environment());
         QVERIFY(fine.warnings.isEmpty());
         QCOMPARE(fine.states.value("g"), NodeState::Stale);
+    }
+
+    // 8.9: a node that loads a model from disk; validate warns while its file is not there.
+    void checkReportsAModelThatIsNotOnDiskAsAWarning() {
+        World world;
+        const QJsonObject lora{{"resource", "fugue/lora"}, {"hash", sha256Of("check-lora")}, {"name", "check.safetensors"}};
+        const QJsonObject nodes{{"a", node("fugue/gpu-model", {{"model", lora}})},
+                                {"s", node("fugue/save", {{"value", from("a.text")}})}};
+        const GraphCheck check = checkGraph(world.graph(nodes), world.environment());
+        QCOMPARE(check.warnings.size(), 1);
+        QCOMPARE(check.warnings.first().code, QStringLiteral("model_missing"));
+        QCOMPARE(check.warnings.first().severity, Error::Severity::Warning);
+        QCOMPARE(check.warnings.first().node, QStringLiteral("a"));
+        QCOMPARE(check.warnings.first().input, QStringLiteral("model"));
+        QCOMPARE(world.calls.count("a"), 0);
+
+        // In Fugue's models folder (the test's own data folder), it is found.
+        const QString path = dataDir() + "/models/lora/check.safetensors";
+        QVERIFY(QDir().mkpath(QFileInfo(path).absolutePath()));
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("check-lora");
+        file.close();
+        const GraphCheck fine = checkGraph(world.graph(nodes), world.environment());
+        QVERIFY(QFile::remove(path));
+        QVERIFY2(fine.warnings.isEmpty(), qPrintable(fine.warnings.value(0).message));
     }
 
     // 8.5: the provider checks do not depend on the rest of the node's inputs being known.

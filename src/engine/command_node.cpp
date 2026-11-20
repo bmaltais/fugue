@@ -26,6 +26,7 @@
 #include <QCryptographicHash>
 
 #include "engine/file_hashes.h"
+#include "engine/model_library.h"
 #include "engine/registry.h"
 
 namespace fugue {
@@ -587,10 +588,27 @@ Result<QJsonValue> plainJson(const QString &name, const Value &value, const Node
 }
 
 Result<QJsonObject> requestFor(const NodeContext &context, const QString &id) {
+    std::optional<ModelLibrary> library; // read from the settings for the first resource input
     QJsonObject inputs;
     for (auto it = context.inputs.begin(); it != context.inputs.end(); ++it) {
         if (it.value().isEmpty())
             continue;
+        const InputSpec *spec = context.type->input(it.key());
+        if (spec && context.registry && context.registry->portKind(spec->type.type) == PortKind::Resource) {
+            // Each handle with its file's path (7.2); model_missing on the input when a file is not here.
+            if (context.cancelled && context.cancelled())
+                return nodeError(QStringLiteral("cancelled"), QStringLiteral("The node was cancelled."));
+            if (!library)
+                library.emplace(ModelLibrary::current(context.registry));
+            const Result<QJsonValue> withPaths = library->withPaths(it.value().toJson(), *context.hashes);
+            if (!withPaths) {
+                Error error = withPaths.error();
+                error.input = it.key();
+                return error;
+            }
+            inputs.insert(it.key(), withPaths.value());
+            continue;
+        }
         const Result<QJsonValue> plain = plainJson(it.key(), it.value(), context);
         if (!plain)
             return plain.error();

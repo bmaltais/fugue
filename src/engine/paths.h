@@ -3,6 +3,7 @@
 // Fugue's own folders (spec 1.4). XDG variables are honored; the defaults are shown.
 
 #include <QString>
+#include <QStringList>
 
 namespace fugue {
 
@@ -30,5 +31,10 @@ QString inputsDirBeside(const QString &workflowPath);
 // both use them); any other text as it is. The scheduler applies it to every literal of a
 // `file` or `folder` input before the node sees it or its key is made (10.1).
 QString expandHome(const QString &path);
+
+// A folder of Fugue's own, then each of `extra` (from settings.json) with "~" expanded, cleaned. A
+// relative entry is left out: it would mean a different folder to the window and the CLI. A
+// folder named twice counts once. Pack and model search paths are made this way.
+QStringList searchPaths(const QString &own, const QStringList &extra);
 
 } // namespace fugue

@@ -20,6 +20,8 @@
 
 #include "engine/command_node.h"
 #include "engine/file_hashes.h"
+#include "engine/hash.h"
+#include "engine/paths.h"
 #include "engine/registry.h"
 
 using namespace fugue;
@@ -80,7 +82,8 @@ struct Node {
     NodeType type;
 };
 
-Node makeNode(const QString &root, const QString &name, const QByteArray &script, const QJsonObject &runtimeExtra = {}) {
+Node makeNode(const QString &root, const QString &name, const QByteArray &script, const QJsonObject &runtimeExtra = {},
+              const QJsonArray &extraInputs = {}) {
     const QString dir = root + "/" + name;
     QDir().mkpath(dir);
     QByteArray body = script;
@@ -97,6 +100,10 @@ Node makeNode(const QString &root, const QString &name, const QByteArray &script
     file.close();
     file.setPermissions(file.permissions() | QFileDevice::ExeUser);
 
+    QJsonArray inputs{QJsonObject{{"name", "mode"}, {"type", "text"}, {"optional", true}},
+                      QJsonObject{{"name", "amount"}, {"type", "number"}, {"default", 1}}};
+    for (const QJsonValue &input : extraInputs)
+        inputs.append(input);
     QJsonObject runtime{{"kind", "command"}, {"entry", "./run.sh"}};
     for (auto it = runtimeExtra.begin(); it != runtimeExtra.end(); ++it)
         runtime.insert(it.key(), it.value());
@@ -106,8 +113,7 @@ Node makeNode(const QString &root, const QString &name, const QByteArray &script
         {"version", "1.2.0"},
         {"name", name},
         {"runtime", runtime},
-        {"inputs", QJsonArray{QJsonObject{{"name", "mode"}, {"type", "text"}, {"optional", true}},
-                              QJsonObject{{"name", "amount"}, {"type", "number"}, {"default", 1}}}},
+        {"inputs", inputs},
         {"outputs", QJsonArray{QJsonObject{{"name", "text"}, {"type", "text"}, {"optional", true}},
                                QJsonObject{{"name", "image"}, {"type", "image"}, {"optional", true}}}}};
     Result<NodeType> type = NodeType::fromJson(manifest);
@@ -233,6 +239,83 @@ private slots:
         QCOMPARE(image.height(), 1);
         QVERIFY(image.hash().startsWith("sha256:"));
         QCOMPARE(image.path(), QFileInfo(context.workDir + "/out.png").canonicalFilePath());
+    }
+
+    // --- resource inputs (7.2, 8.9) ---
+
+    // A model file in Fugue's models folder (the test's own XDG data folder), declared as the
+    // resource type io.github.test.tools/<type>, and a handle for it.
+    QJsonObject modelHandle(const QString &typeName, const QString &file, const QByteArray &bytes) {
+        const QString id = "io.github.test.tools/" + typeName;
+        if (!m_registry.portType(*PortType::parse(id))) {
+            DeclaredPortType declared;
+            declared.type = *PortType::parse(id);
+            declared.kind = PortKind::Resource;
+            declared.name = typeName;
+            declared.extensions = {".safetensors"};
+            if (!m_registry.add(declared).isEmpty())
+                qFatal("cannot declare %s", qPrintable(id));
+        }
+        const QString path = dataDir() + "/models/" + typeName + "/" + file;
+        QDir().mkpath(QFileInfo(path).absolutePath());
+        QFile out(path);
+        if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate))
+            qFatal("cannot write %s", qPrintable(path));
+        out.write(bytes);
+        return QJsonObject{{"resource", id}, {"hash", sha256(bytes)}, {"name", file}};
+    }
+
+    void aResourceInputGetsThePathOfItsModelFile() {
+        const QJsonObject base = modelHandle("base", "base.safetensors", "base weights");
+        const QJsonObject lora1 = modelHandle("lora", "detail.safetensors", "lora one");
+        const QJsonObject lora2 = modelHandle("lora", "style/ink.safetensors", "lora two");
+        const QJsonObject derived{{"resource", "io.github.test.tools/base"},
+                                  {"derived", QJsonObject{{"base", base},
+                                                          {"apply", QJsonArray{QJsonObject{{"lora", lora1}, {"strength", 0.8}}}}}}};
+        const Node node = makeNode(m_root.path(), "uses-models", "@echo.sh", {},
+                                   QJsonArray{QJsonObject{{"name", "model"}, {"type", "io.github.test.tools/base"}},
+                                              QJsonObject{{"name", "loras"}, {"type", "io.github.test.tools/lora"}, {"list", true}},
+                                              QJsonObject{{"name", "merged"}, {"type", "io.github.test.tools/base"}, {"optional", true}}});
+        CommandKernel kernel(kGraceMs);
+        const NodeContext context = contextFor(node, {{"model", Value(base)},
+                                                      {"loras", Value::list({Value(lora1), Value(lora2)})},
+                                                      {"merged", Value(derived)}});
+        const Result<Values> result = kernel.run(context);
+        QVERIFY2(result.ok(), qPrintable(result.error().message));
+
+        const QJsonObject inputs =
+            QJsonDocument::fromJson(readFile(context.workDir + "/request.json")).object().value("inputs").toObject();
+        const QString models = dataDir() + "/models/";
+        QJsonObject expected = base;
+        expected.insert("path", models + "base/base.safetensors");
+        QCOMPARE(inputs.value("model").toObject(), expected); // the handle as it was, and its path
+        const QJsonArray loras = inputs.value("loras").toArray();
+        QCOMPARE(loras.size(), 2);
+        QCOMPARE(loras.at(0).toObject().value("path").toString(), models + "lora/detail.safetensors");
+        QCOMPARE(loras.at(1).toObject().value("path").toString(), models + "lora/style/ink.safetensors");
+        // A derived handle has no file of its own: its base and what is applied to it get theirs.
+        const QJsonObject merged = inputs.value("merged").toObject();
+        QVERIFY(!merged.contains("path"));
+        const QJsonObject parts = merged.value("derived").toObject();
+        QCOMPARE(parts.value("base").toObject().value("path").toString(), models + "base/base.safetensors");
+        QCOMPARE(parts.value("apply").toArray().at(0).toObject().value("lora").toObject().value("path").toString(),
+                 models + "lora/detail.safetensors");
+        QCOMPARE(parts.value("apply").toArray().at(0).toObject().value("strength").toDouble(), 0.8);
+    }
+
+    void aModelThatIsNotOnDiskFailsTheNodeWithModelMissing() {
+        QJsonObject gone = modelHandle("base", "gone.safetensors", "gone weights");
+        QVERIFY(QFile::remove(dataDir() + "/models/base/gone.safetensors"));
+        const Node node = makeNode(m_root.path(), "needs-gone", "@echo.sh", {},
+                                   QJsonArray{QJsonObject{{"name", "model"}, {"type", "io.github.test.tools/base"}}});
+        CommandKernel kernel(kGraceMs);
+        const NodeContext context = contextFor(node, {{"model", Value(gone)}});
+        const Result<Values> result = kernel.run(context);
+        QVERIFY(!result.ok());
+        QCOMPARE(result.error().code, QString("model_missing"));
+        QCOMPARE(result.error().input, QString("model"));
+        QVERIFY2(result.error().message.contains("gone.safetensors"), qPrintable(result.error().message));
+        QVERIFY(!QFileInfo::exists(context.workDir + "/request.json")); // the program never started
     }
 
     void anOutputFileOutsideTheWorkDirIsRefused() {

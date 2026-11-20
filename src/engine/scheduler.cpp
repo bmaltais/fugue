@@ -23,6 +23,7 @@
 
 #include "engine/file_hashes.h"
 #include "engine/ids.h"
+#include "engine/model_library.h"
 #include "engine/paths.h"
 
 namespace fugue {
@@ -557,6 +558,10 @@ private:
         } else if (n.kernel) {
             for (const Value &value : std::as_const(n.inputs))
                 collectModels(value, n.models);
+            // Under validate a model file that is not on this machine is a warning (8.5, 8.9); a
+            // kernel that needs the file reports model_missing as its error.
+            if (m_dry)
+                warnMissingModels(n);
         }
         if (unknown)
             return stale(n);
@@ -582,6 +587,29 @@ private:
         if (m_dry)
             return stale(n);
         n.phase = Phase::Ready;
+    }
+
+    void warnMissingModels(const NodeRun &n) {
+        std::optional<ModelLibrary> library; // read from the settings for the first resource input
+        for (auto it = n.inputs.begin(); it != n.inputs.end(); ++it) {
+            const InputSpec *spec = n.type->input(it.key());
+            if (!spec || !m_env.registry || m_env.registry->portKind(spec->type.type) != PortKind::Resource)
+                continue;
+            if (!library)
+                library.emplace(ModelLibrary::current(m_env.registry));
+            if (it.value().isEmpty())
+                continue; // not known yet (a link from a node that has not run)
+            // A check reads no model file: one with the handle's name is taken to be it.
+            const Result<QJsonValue> found =
+                library->withPaths(it.value().toJson(), *m_env.hashes, ModelLibrary::Hashing::RememberedOnly);
+            if (found)
+                continue;
+            Error warning = found.error();
+            warning.severity = Error::Severity::Warning;
+            warning.node = n.path;
+            warning.input = it.key();
+            m_outcome.errors.append(warning);
+        }
     }
 
     static bool hasLink(const InputValue &written) {
