@@ -143,12 +143,20 @@ public:
     void add(const QString &typeId, std::shared_ptr<NodeKernel> kernel);
     void add(const QString &typeId, std::shared_ptr<ProviderKernel> kernel);
 
+    // The kernel that serves every node type whose runtime kind is `command` and that has no
+    // kernel of its own (7): one runner for all the packs' programs.
+    void setCommandKernel(std::shared_ptr<NodeKernel> kernel) { m_command = std::move(kernel); }
+
+    // The kernel for a node type: its own, else the command runner for a command type.
+    std::shared_ptr<NodeKernel> node(const NodeType &type) const;
+    // The kernel registered for exactly this id (null for a command type).
     std::shared_ptr<NodeKernel> node(const QString &typeId) const;
     std::shared_ptr<ProviderKernel> provider(const QString &typeId) const;
 
 private:
     std::map<QString, std::shared_ptr<NodeKernel>> m_nodes;
     std::map<QString, std::shared_ptr<ProviderKernel>> m_providers;
+    std::shared_ptr<NodeKernel> m_command;
 };
 
 } // namespace fugue

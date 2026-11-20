@@ -92,6 +92,8 @@ private slots:
         QVERIFY(pack.disabled.isEmpty());
         QVERIFY(registry.nodeType(id + "/sharpen") != nullptr);
         QCOMPARE(registry.packVersion(id), QString("1.2.0"));
+        // The node's folder, where its program is found.
+        QCOMPARE(registry.nodeType(id + "/sharpen")->dir, dir + "/sharpen");
     }
 
     void declaredTypesAreRegisteredBeforeTheNodesThatUseThem() {

@@ -89,7 +89,10 @@ int main(int argc, char *argv[]) {
     appSettings.registerCommands(commands, [](const QUrl &url) { QDesktopServices::openUrl(url); });
     // The window runs its own runs (spec 9.8) on a thread of their own, queued with the CLI's.
     fugue::RunSetup runSetup;
-    runSetup.addNodeTypes = fugue::nodes::addBuiltinNodeTypes;
+    runSetup.addNodeTypes = [](fugue::Registry &registry) {
+        fugue::nodes::addBuiltinNodeTypes(registry);
+        fugue::loadInstalledPacks(registry);
+    };
     runSetup.addKernels = fugue::nodes::addBuiltinKernels;
     fugue::RunService runService(runSetup);
     fugue::CanvasRuns runs(&canvasModel, &workflows, &runService, &registry);

@@ -20,6 +20,12 @@ std::shared_ptr<NodeKernel> Kernels::node(const QString &typeId) const {
     return found == m_nodes.end() ? nullptr : found->second;
 }
 
+std::shared_ptr<NodeKernel> Kernels::node(const NodeType &type) const {
+    if (std::shared_ptr<NodeKernel> own = node(type.id))
+        return own;
+    return type.runtime.value("kind").toString() == QLatin1String("command") ? m_command : nullptr;
+}
+
 std::shared_ptr<ProviderKernel> Kernels::provider(const QString &typeId) const {
     const auto found = m_providers.find(typeId);
     return found == m_providers.end() ? nullptr : found->second;
