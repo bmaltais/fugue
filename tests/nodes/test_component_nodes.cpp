@@ -145,6 +145,19 @@ public:
     Kernels kernels;
 };
 
+// A picture of this size and format in the test's folder, probed as the scheduler hands it over.
+MediaHandle picture(Bench &bench, const QString &name, int width, int height, int bands = 3) {
+    initVips();
+    const QString path = bench.dir.filePath(name);
+    (vips::VImage::black(width, height, vips::VImage::option()->set("bands", bands)) + 90)
+        .cast(VIPS_FORMAT_UCHAR)
+        .write_to_file(path.toUtf8().constData());
+    const Result<MediaHandle> image = MediaHandle::probe(MediaType::Image, path, bench.hashes);
+    if (!image)
+        qFatal("cannot probe %s", qPrintable(path));
+    return image.value();
+}
+
 } // namespace
 
 class TestComponentNodes : public QObject {
@@ -515,6 +528,61 @@ private slots:
             kVaeEncode, inputs, JobResult{QJsonObject{{"latent", QJsonObject{{"path", bench.workDir() + "/latent.bin"}}}}, {}});
         QVERIFY(out);
         QCOMPARE(out->value("latent").json().toObject().value("meta").toObject().value("width").toInt(), 336);
+    }
+
+    // --- references (image editing: FLUX.2 Klein, Qwen-Image Edit) ---
+
+    // stable-diffusion.cpp takes the references as the generation option ref_images; each
+    // stage of one generation sends the same options, so Text Encode sends them as well.
+    void textEncodeSendsItsReferences() {
+        Bench bench;
+        const MediaHandle png = picture(bench, "first.png", 320, 192);
+        const MediaHandle webp = picture(bench, "second.webp", 200, 200, 4);
+        const Result<JobRequest> request =
+            bench.request(kTextEncode, {{"model", Value(bench.loaded(bench.zImage()))}, {"prompt", Value("make it night")},
+                                        {"references", Value::list({Value(png), Value(webp)})}});
+        QVERIFY2(request, request ? "" : qPrintable(request.error().message));
+        const QJsonArray sent = request->params.value("ref_images").toArray();
+        QCOMPARE(sent.size(), 2);
+        QCOMPARE(sent.at(0).toObject(), (QJsonObject{{"image", png.path()}})); // a PNG goes as it is
+        const QString converted = sent.at(1).toObject().value("image").toString();
+        QCOMPARE(QFileInfo(converted).absolutePath(), bench.workDir()); // anything else as a PNG
+        QCOMPARE(QString::fromLatin1(vips::VImage::new_from_file(converted.toUtf8().constData()).get_string("vips-loader")),
+                 QStringLiteral("pngload"));
+    }
+
+    void noReferencesSendsNone() {
+        Bench bench;
+        const Result<JobRequest> request =
+            bench.request(kTextEncode, {{"model", Value(bench.loaded(bench.zImage()))}, {"prompt", Value("a fox")}});
+        QVERIFY(request);
+        QVERIFY(!request->params.contains("ref_images"));
+    }
+
+    // The references ride the conditioning to the Sampler, as ComfyUI's ReferenceLatent puts
+    // them on it; so the conditioning of one prompt with other pictures is another value.
+    void theConditioningCarriesItsReferencesToTheSampler() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.zImage());
+        const MediaHandle first = picture(bench, "first.png", 320, 192);
+        const MediaHandle second = picture(bench, "second.jpg", 256, 256);
+        const Values inputs{{"model", Value(model)}, {"prompt", Value("put the hat on the fox")},
+                            {"references", Value::list({Value(first), Value(second)})}};
+        const QString file = bench.workDir() + "/conditioning.bin";
+        const Result<Values> out =
+            bench.outputs(kTextEncode, inputs, JobResult{QJsonObject{{"conditioning", QJsonObject{{"path", file}}}}, {}});
+        QVERIFY(out);
+        const QJsonObject conditioning = out->value("conditioning").json().toObject();
+        QCOMPARE(conditioning.value("meta").toObject().value("references").toArray(),
+                 (QJsonArray{first.toJson(), second.toJson()}));
+
+        const Result<Values> empty = bench.run(kEmptyLatent, {{"width", Value(320)}, {"height", Value(192)}});
+        const Result<JobRequest> sample =
+            bench.request(kSampler, {{"model", Value(model)}, {"conditioning", Value(conditioning)},
+                                     {"latent", empty->value("latent")}, {"seed", Value(1)}, {"steps", Value(4)}});
+        QVERIFY2(sample, sample ? "" : qPrintable(sample.error().message));
+        QCOMPARE(sample->params.value("ref_images").toArray(),
+                 (QJsonArray{QJsonObject{{"image", first.path()}}, QJsonObject{{"image", second.path()}}}));
     }
 
     // --- end to end: the shipped binary, the fake helper (no inference here) ---

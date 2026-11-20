@@ -252,6 +252,58 @@ Result<Values> latentOutput(const JobResult &result, int width, int height, cons
     return Values{{QStringLiteral("latent"), Value(dataHandle(kLatentType, path.value(), made.toJson()))}};
 }
 
+// A file the helper reads (stb_image: PNG or JPEG): the image's own when it is one, else the
+// image written as an 8-bit RGB PNG to `converted`, upright.
+Result<QString> readable(const MediaHandle &image, const QString &converted) {
+    // Before anything reads an image: an input from the result cache was never probed.
+    if (!initVips())
+        return vipsUnavailable();
+    const QString format = image.format();
+    if (image.hasFile() && (format == QLatin1String("png") || format == QLatin1String("jpeg")))
+        return image.path();
+    try {
+        const Result<vips::VImage> decoded = image.image();
+        if (!decoded)
+            return decoded.errors();
+        vips::VImage rgb = decoded->autorot().colourspace(VIPS_INTERPRETATION_sRGB);
+        if (rgb.bands() > 3)
+            rgb = rgb.extract_band(0, vips::VImage::option()->set("n", 3));
+        rgb.cast(VIPS_FORMAT_UCHAR).write_to_file(QFile::encodeName(converted).constData());
+        return converted;
+    } catch (const vips::VError &error) {
+        return vipsError(error, QStringLiteral("media_unreadable"));
+    }
+}
+
+// The references of an edit as the generation option ref_images ([{"image": PATH}]), each a
+// file the helper reads; a converted one is written into `workDir`.
+Result<QJsonArray> refImages(const QList<MediaHandle> &references, const QString &workDir) {
+    QJsonArray sent;
+    for (qsizetype i = 0; i < references.size(); ++i) {
+        const Result<QString> file =
+            readable(references.at(i), QDir(workDir).filePath(QStringLiteral("reference-%1.png").arg(i + 1)));
+        if (!file)
+            return file.errors();
+        sent.append(QJsonObject{{"image", file.value()}});
+    }
+    return sent;
+}
+
+// The references a conditioning carries (Text Encode puts them in its descriptor, as ComfyUI's
+// ReferenceLatent puts reference latents on a conditioning).
+Result<QList<MediaHandle>> referencesOf(const Value &conditioning) {
+    QList<MediaHandle> references;
+    const QJsonArray carried =
+        conditioning.json().toObject().value(QStringLiteral("meta")).toObject().value(QStringLiteral("references")).toArray();
+    for (const QJsonValue &item : carried) {
+        const Result<MediaHandle> image = MediaHandle::fromJson(item.toObject());
+        if (!image)
+            return image.errors();
+        references.append(image.value());
+    }
+    return references;
+}
+
 // --- the nodes that only make values ---
 
 class LoadModelsKernel : public NodeKernel {
@@ -362,18 +414,40 @@ public:
         const Result<ModelFiles> files = modelInput(context);
         if (!files)
             return files.errors();
-        return job(*files,
-                   QJsonObject{{"prompt", context.input(QStringLiteral("prompt")).text()},
-                               {"negative_prompt", context.input(QStringLiteral("negative_prompt")).text()},
-                               {"sample.guidance.txt_cfg", kGuidanceThatMakesTheNegativeSet}},
-                   true);
+        QJsonObject params{{"prompt", context.input(QStringLiteral("prompt")).text()},
+                           {"negative_prompt", context.input(QStringLiteral("negative_prompt")).text()},
+                           {"sample.guidance.txt_cfg", kGuidanceThatMakesTheNegativeSet}};
+        // The references change the encode too: a model that reads them in its text encoder
+        // (Qwen-Image Edit), and the guidance sets an edit makes (request.cpp at the pin).
+        if (const QList<MediaHandle> references = referencesInput(context); !references.isEmpty()) {
+            const Result<QJsonArray> sent = refImages(references, context.workDir);
+            if (!sent)
+                return sent.errors();
+            params.insert(QStringLiteral("ref_images"), sent.value());
+        }
+        return job(*files, params, true);
     }
 
-    Result<Values> outputs(const NodeContext &, const Selection &, const JobResult &result) override {
+    Result<Values> outputs(const NodeContext &context, const Selection &, const JobResult &result) override {
         const Result<QString> path = written(result, QStringLiteral("conditioning"));
         if (!path)
             return path.errors();
-        return Values{{QStringLiteral("conditioning"), Value(dataHandle(kConditioningType, path.value()))}};
+        QJsonObject descriptor;
+        if (const QList<MediaHandle> references = referencesInput(context); !references.isEmpty()) {
+            QJsonArray carried;
+            for (const MediaHandle &image : references)
+                carried.append(image.toJson());
+            descriptor.insert(QStringLiteral("references"), carried);
+        }
+        return Values{{QStringLiteral("conditioning"), Value(dataHandle(kConditioningType, path.value(), descriptor))}};
+    }
+
+private:
+    static QList<MediaHandle> referencesInput(const NodeContext &context) {
+        QList<MediaHandle> references;
+        for (const Value &item : context.input(QStringLiteral("references")).items())
+            references.append(item.media());
+        return references;
     }
 };
 
@@ -396,6 +470,16 @@ public:
             params.insert(QStringLiteral("sample.method"), method.text());
         if (const Value scheduler = context.input(QStringLiteral("scheduler")); !scheduler.isEmpty())
             params.insert(QStringLiteral("sample.scheduler"), scheduler.text());
+        // The edit's references, sent as Text Encode sent them, so both stages make one generation.
+        const Result<QList<MediaHandle>> references = referencesOf(context.input(QStringLiteral("conditioning")));
+        if (!references)
+            return references.errors();
+        if (!references->isEmpty()) {
+            const Result<QJsonArray> sent = refImages(references.value(), context.workDir);
+            if (!sent)
+                return sent.errors();
+            params.insert(QStringLiteral("ref_images"), sent.value());
+        }
         JobRequest request = job(*files, params, true);
         request.inputs.insert(QStringLiteral("conditioning"), fileOf(context.input(QStringLiteral("conditioning"))));
         if (!from.empty) { // redrawn from a latent, by the amount denoise sets
@@ -450,7 +534,7 @@ public:
         if (!files)
             return files.errors();
         const MediaHandle image = context.input(QStringLiteral("image")).media();
-        const Result<QString> file = readable(image, context.workDir);
+        const Result<QString> file = readable(image, QDir(context.workDir).filePath(QStringLiteral("image.png")));
         if (!file)
             return file.errors();
         // The helper scales the image to the size it is given: its own, in steps of 16.
@@ -471,29 +555,6 @@ private:
         return {step(image.width()), step(image.height())};
     }
 
-    // A file the helper reads (stb_image: PNG or JPEG): the image's own when it is one, else
-    // the image written as an 8-bit RGB PNG into the node's folder, upright.
-    static Result<QString> readable(const MediaHandle &image, const QString &workDir) {
-        // Before anything reads an image: an input from the result cache was never probed.
-        if (!initVips())
-            return vipsUnavailable();
-        const QString format = image.format();
-        if (image.hasFile() && (format == QLatin1String("png") || format == QLatin1String("jpeg")))
-            return image.path();
-        try {
-            const Result<vips::VImage> decoded = image.image();
-            if (!decoded)
-                return decoded.errors();
-            vips::VImage rgb = decoded->autorot().colourspace(VIPS_INTERPRETATION_sRGB);
-            if (rgb.bands() > 3)
-                rgb = rgb.extract_band(0, vips::VImage::option()->set("n", 3));
-            const QString path = QDir(workDir).filePath(QStringLiteral("image.png"));
-            rgb.cast(VIPS_FORMAT_UCHAR).write_to_file(QFile::encodeName(path).constData());
-            return path;
-        } catch (const vips::VError &error) {
-            return vipsError(error, QStringLiteral("media_unreadable"));
-        }
-    }
 };
 
 } // namespace
