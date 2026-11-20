@@ -47,6 +47,8 @@ FocusScope {
     signal linkReleased(var from, real x, real y)
     // A right-click, in canvas coordinates: the window opens the context menu (#50).
     signal contextMenuRequested(real x, real y)
+    // A named menu (menus.h) for the selection at a canvas point: the selection toolbar's (#74).
+    signal menuRequested(string kind, real x, real y)
 
     property bool spaceHeld: false
     // "pan", "move", "link", "marquee", or "alt" (a press with Alt on a node, not yet a drag)
@@ -1282,6 +1284,124 @@ FocusScope {
                             anchors.fill: parent
                             hoverEnabled: true
                             onClicked: canvas.chooseDrop(dropRow.modelData)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // The selection toolbar (#74, as ComfyUI's selection toolbox): over the selection, its common
+    // commands, Enter on a group and Open Image on a node with one, and "…" for the node's menu.
+    // Each button is a command, shown and enabled as the menus say. Made only while shown.
+    property int toolbarTick: 0 // the nodes' changes (a move, a bypass, a new image): read again
+    Connections {
+        target: canvas.model.nodes
+        function onDataChanged() { canvas.toolbarTick++ }
+        function onRowsInserted() { canvas.toolbarTick++ }
+        function onRowsRemoved() { canvas.toolbarTick++ }
+        function onModelReset() { canvas.toolbarTick++ }
+    }
+    // A new selection changes which commands apply once the registry has heard of it too.
+    Connections {
+        target: canvas.model
+        function onSelectionChanged() { Qt.callLater(() => canvas.toolbarTick++) }
+    }
+    Loader {
+        active: canvas.model.selection.length > 0 && canvas.gesture === "" && canvas.renamingNode === ""
+                && canvas.dropChoice.node === undefined && !canvas.lensOpen
+        z: 8
+        sourceComponent: Item {
+            id: toolbar
+            objectName: "selectionToolbar"
+            readonly property var selection: canvas.model.selection
+            readonly property var target: selection.length === 1 ? {node: selection[0]} : ({})
+            // The selection's box on screen, read again when a node changes (toolbarTick).
+            readonly property rect box: canvas.toolbarTick >= 0 ? boxOf(selection) : Qt.rect(0, 0, 0, 0)
+            function boxOf(ids) {
+                let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity
+                for (const id of ids) {
+                    const r = canvas.model.nodeRect(id)
+                    if (r.width <= 0)
+                        continue
+                    left = Math.min(left, r.x)
+                    top = Math.min(top, r.y)
+                    right = Math.max(right, r.x + r.width)
+                    bottom = Math.max(bottom, r.y + r.height)
+                }
+                if (left === Infinity)
+                    return Qt.rect(0, 0, 0, 0)
+                return Qt.rect(world.x + left * world.scale, world.y + top * world.scale,
+                               (right - left) * world.scale, (bottom - top) * world.scale)
+            }
+            visible: box.width > 0
+            width: buttons.implicitWidth + 2 * canvas.look.unit
+            height: 9 * canvas.look.unit
+            x: Math.max(8, Math.min(box.x + box.width / 2 - width / 2, canvas.width - width - 8))
+            // Above the selection; below it when there is no room above.
+            y: box.y - height - 2 * canvas.look.unit >= 8 ? box.y - height - 2 * canvas.look.unit
+                                                           : Math.min(box.y + box.height + 2 * canvas.look.unit,
+                                                                      canvas.height - height - 8)
+            // No shadow: it would fall on the selection just under it, its ring included.
+            Rectangle {
+                id: toolbarBox
+                anchors.fill: parent
+                radius: Math.min(canvas.look.popupCorner, 10)
+                color: canvas.look.popup
+                border.width: 1
+                border.color: canvas.look.hairline
+            }
+            Row {
+                id: buttons
+                anchors.centerIn: parent
+                spacing: canvas.look.unit / 2
+                Repeater {
+                    // Always there: Bypass, Frame, Delete (off when they cannot act), the colors and
+                    // the menu; the rest only where they apply.
+                    model: [{command: "run.to-here", glyph: "play"}, {command: "node.bypass", glyph: "corner-down-right"},
+                            {command: "colors", glyph: "palette"}, {command: "frame.make", glyph: "frame"},
+                            {command: "group.enter", glyph: "log-in"}, {command: "node.open-image", glyph: "image"},
+                            {command: "edit.delete", glyph: "trash-2"}, {command: "more", glyph: "ellipsis"}]
+                    delegate: Rectangle {
+                        id: button
+                        required property var modelData
+                        readonly property bool menu: modelData.command === "colors" || modelData.command === "more"
+                        // Read again when a node or the selection changes (toolbarTick).
+                        readonly property var entry: canvas.toolbarTick < 0 ? ({})
+                            : menu ? ({available: true, enabled: true, label: ""})
+                            : App.commands.entry(modelData.command, toolbar.target)
+                        readonly property bool always: menu || modelData.command === "node.bypass"
+                                                        || modelData.command === "frame.make" || modelData.command === "edit.delete"
+                        objectName: "toolbar-" + modelData.command
+                        visible: entry.available === true && (always || entry.enabled === true)
+                        width: 7 * canvas.look.unit
+                        height: 7 * canvas.look.unit
+                        radius: canvas.look.smallCorner
+                        color: buttonArea.containsMouse && entry.enabled ? canvas.look.menuRow : "transparent"
+                        opacity: entry.enabled ? 1 : 0.4
+                        Accessible.role: Accessible.Button
+                        Accessible.name: entry.label || modelData.command
+                        Glyph {
+                            anchors.centerIn: parent
+                            look: canvas.look
+                            name: button.modelData.glyph
+                            color: buttonArea.containsMouse && button.entry.enabled ? canvas.look.text : canvas.look.label
+                        }
+                        MouseArea {
+                            id: buttonArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            enabled: button.entry.enabled === true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                const at = button.mapToItem(canvas, 0, button.height + canvas.look.unit)
+                                if (button.modelData.command === "more")
+                                    canvas.menuRequested("node", at.x, at.y)
+                                else if (button.modelData.command === "colors")
+                                    canvas.menuRequested("colors", at.x, at.y)
+                                else
+                                    App.commands.triggerOn(button.modelData.command, toolbar.target)
+                            }
                         }
                     }
                 }

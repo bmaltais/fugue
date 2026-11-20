@@ -31,3 +31,8 @@ arrow-down e046
 corner-down-left e0a5
 file e0c4
 palette e1dd
+trash-2 e18e
+ellipsis e0ba
+frame e291
+image e0f9
+log-in e111

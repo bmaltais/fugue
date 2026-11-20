@@ -314,6 +314,46 @@ private slots:
         QVERIFY(listed);
     }
 
+    // #74: a toolbar over the selection, as ComfyUI's: its common commands, Enter on a group,
+    // and "…" for the node's whole menu.
+    void aToolbarSitsOverTheSelection() {
+        App app(load(framed));
+        QVERIFY(app.open());
+        QVERIFY(!find(app.window, "selectionToolbar"));
+        app.model.select({"c"});
+        QQuickItem *bar = nullptr;
+        QTRY_VERIFY((bar = find(app.window, "selectionToolbar")) != nullptr);
+        // Above the node, inside the window.
+        const QRectF node = app.model.nodeRect("c");
+        QVERIFY(bar->mapToScene(QPointF(0, bar->height())).y() <= app.screen(node.x(), node.y()).y());
+        for (const char *button : {"toolbar-node.bypass", "toolbar-colors", "toolbar-edit.delete", "toolbar-more"})
+            QVERIFY2(find(app.window, button), button);
+        QVERIFY(!find(app.window, "toolbar-group.enter")); // not a group
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("toolbar-node.bypass")));
+        QTRY_COMPARE(app.model.document().graph.nodes.value("c").mode, NodeMode::Bypass);
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("toolbar-more")));
+        QTRY_VERIFY(isOpen(app.window, "contextMenuPopup"));
+        QCOMPARE(popup(app.window, "contextMenu")->property("kind").toString(), QString("node"));
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(allClosed(app.window));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("toolbar-colors")));
+        QTRY_VERIFY(find(app.window, "menuItem-node.color.red"));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("menuItem-node.color.red")));
+        QTRY_COMPARE(app.model.document().layout.value("nodes").toObject().value("c").toObject().value("color").toString(),
+                     QStringLiteral("red"));
+        // A group's toolbar enters it; none while nothing is selected.
+        app.model.select({"a", "b"});
+        const QString group = app.model.makeGroup();
+        app.model.select({group});
+        QTRY_VERIFY(find(app.window, "toolbar-group.enter"));
+        QTest::qWait(50); // the row places it
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("toolbar-group.enter")));
+        QTRY_VERIFY(app.model.inGroup());
+        app.model.select({});
+        QTRY_VERIFY(!find(app.window, "selectionToolbar"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     // #55, #74: Rename on a node's context menu edits its title in place.
     void renameFromTheContextMenu() {
         App app(load(framed));

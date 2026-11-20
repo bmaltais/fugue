@@ -31,6 +31,23 @@ Item {
         return ""
     }
 
+    // Opens the menu `kind` (menus.h) at the canvas point (px, py) for the selection, as the
+    // selection toolbar's "…" and color buttons do (#74).
+    function openMenu(kind, px, py) {
+        if (!root.menu)
+            root.menu = Qt.createComponent("CommandMenu.qml").createObject(root, {objectName: "contextMenuPopup"})
+        const menu = root.menu
+        const selection = App.canvasModel.selection
+        const target = selection.length > 0 ? {node: selection[0]} : {}
+        root.kind = kind === "colors" ? "node" : kind
+        menu.close()
+        menu.target = target
+        menu.items = App.commands.menu(kind, target)
+        const p = canvas.mapToItem(root, px, py)
+        menu.byKey = false
+        menu.popupFit(root, p.x, p.y, 0, 0)
+    }
+
     // Opens the menu for what is at the canvas point (px, py).
     function openAt(px, py, byKey) {
         if (!root.menu)

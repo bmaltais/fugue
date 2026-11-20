@@ -156,7 +156,7 @@ in `text`, Medium, elided.
 | `spin` | value; ‹ › chevrons at the ends on hover; drag to scrub |
 | `slider` | a fill from the left at `accent` 22% for the value's share of its range |
 | `line` | value, elided at the right |
-| `multiline` | 16u row (64); three lines at 16 px line height, `text`; scrolls when focused |
+| `multiline` | 16u row (64); its label as a caption on the first line, filled or not (#74), then the text, at 16 px line height, `text`; scrolls when focused |
 | `toggle` | a 22 × 12 switch at the right: `accent` track, `accentForeground` knob; off is `hairline-strong` |
 | `choice` | value and a chevron-down glyph |
 | `file`, `folder` | the path elided in the middle, a folder glyph |
@@ -514,6 +514,16 @@ A dashed edge in QML is a `Shape` with `strokeStyle: ShapePath.DashLine` around 
 - **Marquee**: 1 px `accent` edge, `accent` at 10% fill.
 - **Zoom and run pills**: like the breadcrumb, bottom left (zoom percent) and top right (run
   state: spinner, "Running", node and percent, "1 of 3").
+- **Selection toolbar** (#74, as ComfyUI's selection toolbox): over the selection's box, centred
+  (under it when there is no room above), 9u tall, `popup` fill, `hairline` edge, corner
+  `min(R, 10)`, no shadow (it would fall on the selection). Buttons 7u square, 14 px glyphs in
+  `label`, `menu-row` and `text` under the pointer, 40% when off: Run to here (one node), Bypass,
+  Color (the color menu), Frame, Enter (a group), Open Image (a node with an image), Delete, and
+  "…" (the node's menu). Hidden during a gesture, a title edit, the drop list or the magnifier.
+- **Magnifier** (#74): far out, the node a short hover rests on at zoom 1 over itself, on a
+  `canvas` card with a `hairline-strong` edge and a level 3 shadow, its ports live.
+- **Drop list** (#74): a wire let go on a body where several free ports fit: a small `popup`
+  list, a row per port (`menu-row` under the pointer), a linked input marked "replaces its link".
 
 ## 12. Node search (spec 12.8)
 
@@ -595,8 +605,9 @@ same information. Nothing animates when no run is in progress (spec 12.1: no CPU
 A subset of Lucide (ISC) as an icon font in the resources, loaded with `FontLoader`, drawn with
 `Text { font.family: icons.name; text: "\ue..." }`: check, refresh-cw, loader-circle, snowflake,
 triangle-alert, corner-down-right, ban, skip-forward, circle-help, pin, layers, dices,
-chevron-down, chevron-left, chevron-right, folder, box, search, circle-x, x, play. About 22 glyphs,
-under 10 KB. Text glyphs recolor through `color`, render through the same distance-field text as
+chevron-down, chevron-left, chevron-right, folder, box, search, circle-x, x, play, and for the
+selection toolbar (#74) trash-2, ellipsis, frame, image, log-in; the full list with code points in
+`share/fonts/lucide-fugue.txt`. About 33 glyphs, under 10 KB. Text glyphs recolor through `color`, render through the same distance-field text as
 labels and batch with them; an SVG `Image` would need a separate texture per color.
 
 ## 17. What step 2 changes

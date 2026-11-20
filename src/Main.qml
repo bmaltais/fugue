@@ -60,6 +60,7 @@ ApplicationWindow {
                 onSearchRequested: (x, y) => App.canvasModel.search.openAt(x, y)
                 onLinkReleased: (from, x, y) => App.canvasModel.search.openFromLink(from, x, y)
                 onContextMenuRequested: (x, y) => contextMenu.openAt(x, y, false)
+                onMenuRequested: (kind, x, y) => contextMenu.openMenu(kind, x, y)
 
                 // Tab and Shift+A (`node.search`) open search where the pointer is; Add node
                 // in the context menu, where it was opened.

@@ -82,7 +82,10 @@ QVariantList frame() {
 
 } // namespace
 
-QStringList names() { return {QStringLiteral("bar"), QStringLiteral("canvas"), QStringLiteral("node"), QStringLiteral("frame")}; }
+QStringList names() {
+    return {QStringLiteral("bar"), QStringLiteral("canvas"), QStringLiteral("node"), QStringLiteral("frame"),
+            QStringLiteral("colors")};
+}
 
 QVariantList tree(const QString &name) {
     if (name == QLatin1String("bar"))
@@ -93,6 +96,8 @@ QVariantList tree(const QString &name) {
         return node();
     if (name == QLatin1String("frame"))
         return frame();
+    if (name == QLatin1String("colors")) // the selection toolbar's color button (#74)
+        return colors().value("items").toList();
     return {};
 }
 
