@@ -112,6 +112,9 @@ Result<Document> editExposedInput(const Document &document, const QString &group
                                   const ExposedChange &change);
 Result<Document> renameExposedOutput(const Document &document, const QString &group, const QString &name,
                                      const QString &newName);
+// The group under a new id (not used yet): the definition, every instance and its layout.
+Document renameGroupId(const Document &document, const QString &from, const QString &to);
+
 // Renames a group (its display name); its id follows (local/<name>, 5.3) when that is free,
 // on every instance and in the layout. The id it has after in `newId`.
 Result<Document> renameGroup(const Document &document, const QString &group, const QString &name,

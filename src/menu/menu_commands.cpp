@@ -66,6 +66,10 @@ QList<Row> menuRows() {
          QT_TRANSLATE_NOOP("Command", "Make unique"), {}, "group-selected", "same"},
         {"group.interface", QT_TRANSLATE_NOOP("Command", "Edit the inputs and outputs of the group shown"),
          QT_TRANSLATE_NOOP("Command", "Group inputs and outputs…"), {}, "group", "added"},
+        {"group.save-to-library", QT_TRANSLATE_NOOP("Command", "Save the selected group, or the group shown, to the library"),
+         QT_TRANSLATE_NOOP("Command", "Save to library"), {}, "canvas", "added"},
+        {"group.update", QT_TRANSLATE_NOOP("Command", "Update the selected group from the library"),
+         QT_TRANSLATE_NOOP("Command", "Update group…"), {}, "group-selected", "added"},
         {"group.expose", QT_TRANSLATE_NOOP("Command", "Expose the port on the group's face"),
          QT_TRANSLATE_NOOP("Command", "Expose on the group"), {}, "group", "same"},
         {"group.unexpose", QT_TRANSLATE_NOOP("Command", "Stop exposing the port on the group's face"),
@@ -177,6 +181,14 @@ void bindMenuCommands(CommandRegistry &registry, CanvasModel &canvas, std::funct
             model->unexposeOutput(exposed());
         else
             model->unexposeInput(target.value("node").toString(), target.value("port").toString());
+    });
+    registry.setEnabledWhen("group.save-to-library", [model] {
+        const QStringList ids = model->selectedIds();
+        return (ids.size() == 1 && model->isGroup(ids.first())) || model->inGroup();
+    });
+    registry.setEnabledWhen("group.update", [model] {
+        const QStringList ids = model->selectedIds();
+        return ids.size() == 1 && !model->updateAvailable(ids.first()).isEmpty();
     });
     const auto onFrame = [&registry] { return !registry.target().value("frame").toString().isEmpty(); };
     registry.setEnabledWhen("frame.rename", onFrame);

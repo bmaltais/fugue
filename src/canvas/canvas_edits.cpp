@@ -670,6 +670,16 @@ Document CanvasModel::copyOf(const QStringList &ids) const {
     }
     if (!copiedLinks.isEmpty())
         copy.layout.insert("links", copiedLinks);
+    // A Frame whose nodes are all copied comes with them (5.1: it copies as one).
+    QJsonArray copiedFrames;
+    for (const QJsonValue &value : all.layout.value("frames").toArray()) {
+        const QJsonArray members = value.toObject().value("nodes").toArray();
+        if (!members.isEmpty()
+            && std::all_of(members.begin(), members.end(), [&](const QJsonValue &id) { return inCopy.contains(id.toString()); }))
+            copiedFrames.append(value);
+    }
+    if (!copiedFrames.isEmpty())
+        copy.layout.insert("frames", copiedFrames);
     const QJsonObject groupLayouts = all.layout.value("groups").toObject();
     QJsonObject copiedGroups;
     for (const QString &id : copy.groups.keys())
@@ -826,6 +836,35 @@ QStringList CanvasModel::insertCopy(const Document &copy, QPointF topLeft, bool 
     }
     if (!groupLayouts.isEmpty())
         document.layout.insert("groups", groupLayouts);
+    // The copy's Frames, on its new ids, moved with its nodes.
+    const QJsonArray copiedFrames = copy.layout.value("frames").toArray();
+    if (!copiedFrames.isEmpty()) {
+        QJsonArray frames = document.layout.value("frames").toArray();
+        QSet<QString> taken;
+        for (const QJsonValue &frame : frames)
+            taken.insert(frame.toObject().value("id").toString());
+        const QPointF shift = topLeft - corner;
+        for (const QJsonValue &value : copiedFrames) {
+            QJsonObject frame = value.toObject();
+            const QJsonArray rect = frame.value("rect").toArray();
+            if (rect.size() != 4)
+                continue;
+            frame.insert("rect", QJsonArray{qRound64(rect[0].toDouble() + shift.x()), qRound64(rect[1].toDouble() + shift.y()),
+                                            rect[2], rect[3]});
+            QJsonArray members;
+            for (const QJsonValue &id : frame.value("nodes").toArray())
+                if (ids.contains(id.toString()))
+                    members.append(ids.value(id.toString()));
+            frame.insert("nodes", members);
+            QString id;
+            for (int n = 1; id.isEmpty() || taken.contains(id); ++n)
+                id = QStringLiteral("f%1").arg(n);
+            taken.insert(id);
+            frame.insert("id", id);
+            frames.append(frame);
+        }
+        document.layout.insert("frames", frames);
+    }
     // The copy's reroute points, on its new ids, moved with its nodes.
     const QJsonObject copiedLinks = copy.layout.value("links").toObject();
     if (!copiedLinks.isEmpty()) {

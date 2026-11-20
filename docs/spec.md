@@ -468,7 +468,8 @@ the group's `default`, then to the inner input's own value. Behavior is specifie
 ```
 
 - `nodes`: per node id: position, size (0 means automatic), collapsed, color (a theme role, not
-  a hex value), a display title, pinned, and `increment`: the seed inputs the canvas adds one to
+  a hex value), a display title, pinned, `advanced` (true: the node's Advanced section is open,
+  [5.4](#54-exposed-inputs-and-outputs)), and `increment`: the seed inputs the canvas adds one to
   after each run it starts ([6.2](#62-widgets)).
 - `frames`: Frames ([5.1](#51-frame)).
 - `links`: reroute points, keyed by the target `<node id>.<input name>`, with `#<index>` added
@@ -545,7 +546,12 @@ Two separate things, as in every mature node tool.
 ### 5.1 Frame
 
 A purely visual box with a color and a title. It moves and copies as one. It lives only in
-`layout` and has no effect on a run. Made with Ctrl+G.
+`layout` and has no effect on a run. Made with Ctrl+G around the selection.
+
+- Dragging its title band moves it with what lies in it: the nodes whose middle is inside it and
+  the Frames inside it. Its `nodes` list is rewritten to those nodes after the move.
+- Its context menu renames it, colors it and deletes it (the nodes stay); a double-click on the
+  title renames it too.
 
 ### 5.2 Group
 
@@ -555,7 +561,15 @@ with an id and a version, and it appears in node search.
 - **Make group** (Ctrl+Shift+E): Fugue creates the group's inputs and outputs from every link
   that crosses the selection boundary. The user can rename, reorder and add to them.
 - **Enter and leave**: Tab on a selected group, or a double-click on its body, enters it, with
-  a breadcrumb trail. Escape or the breadcrumb leaves it.
+  a breadcrumb trail. Escape or the breadcrumb leaves it. Entering and leaving are not edits;
+  an edit inside is an edit of the definition and one undo step, and an undo always restores the
+  whole workflow (when it takes away the group shown, the canvas goes up to the nearest level
+  that is still there).
+- Making a group inside a group keeps the outer face working: an exposed input that drove a node
+  now in the new group drives it through the new group's face, and so do outputs; Ungroup inside
+  does the reverse.
+- A group's id follows its name: renaming "Group" to "Two pass" makes it `local/two-pass` (when
+  free), on every instance.
 - **Nesting** is allowed. **Recursion** is forbidden and checked when a group is made or
   edited, directly or through another group (error `group_recursion`).
 - **Ungroup** (Ctrl+Shift+G) puts the inner nodes back with their links and values.
@@ -573,14 +587,35 @@ with an id and a version, and it appears in node search.
 - Updates are explicit. When the library has a newer version the group's instances show "update
   available"; updating shows what changed under the rules of [3.6](#36-versions) and replaces the
   workflow's definition, so every instance moves together. Nothing changes silently.
+- **Save to library** writes `local/<name>/node.json` (the face as inputs and outputs, `runtime:
+  {"kind": "group", "definition": "group.fugue"}`) and `group.fugue` (a workflow document with no
+  nodes whose `groups` holds the group and every group it uses, and whose `layout.groups` their
+  insides), and lists the folder in `local/pack.json`. Saving over an earlier version bumps it
+  under 3.6: major when an exposed input or output went or changed type, minor when one was
+  added, patch for any other change; saving the same definition keeps the version. The workflow's
+  definition and instances take the version saved. A window lists library groups it did not
+  start with after a restart.
+- Adding a library group brings its definition (and the groups it uses) into the workflow, as a
+  paste does: a nested group that clashes with another definition of the workflow comes in under
+  a new id. Updating drops the values and links of exposed inputs and outputs that went.
+- The groups of the workflow appear in node search too, except one the level shown is inside of.
 
 ### 5.4 Exposed inputs and outputs
 
-- Any inner input can be exposed with one action. An exposed input keeps the inner input's type,
-  default and constraints, and can get a display name and a narrowed range.
+- Any inner input can be exposed with one action (right-click its port inside the group: Expose
+  on the group; Stop exposing undoes it). An exposed input keeps the inner input's type,
+  default and constraints, and can get a display name and a narrowed range. Inside a group each
+  exposed port is marked with the name it has on the face.
+- The interface editor (Node > Group inputs and outputs…) renames the group and its exposed inputs
+  and outputs, sets labels, sections and ranges, reorders them and adds inner inputs of the same
+  type to an exposed input. Renaming an exposed input or output renames it on every instance.
+- An exposed input or output whose inner node is deleted leaves the face, and every instance
+  loses its value or links for it.
 - One exposed input can drive several inner inputs (one seed for two samplers).
 - Exposed inputs can be reordered and put in sections. A section named "Advanced" is collapsed
-  by default.
+  by default. On every node face (a manifest's `section` and `advanced` inputs too, 6.1) a
+  section starts with a header row; the Advanced header says how many inputs it folds and a click
+  opens or folds it (`layout.nodes.<id>.advanced`). A linked advanced input always shows.
 - Inner inputs that are not exposed keep their values and stay visible inside the group.
 - Outputs work the same way, including "values used" outputs.
 
@@ -589,7 +624,9 @@ with an id and a version, and it appears in node search.
 A group never starts a run and never writes a file or shows a preview from inside when it runs
 as a node. Whatever is wanted from it is exposed as an output and the sink sits outside.
 
-- While the user has entered a group, its inner sinks work; they go quiet on leaving.
+- While the user has entered a group, its inner sinks work; they go quiet on leaving. The canvas
+  passes the entered instance's path id to the compiler, which keeps that level's sinks (not those
+  of groups nested in it).
 - Making a group from a selection that contains a sink, Fugue offers to leave the sink outside
   and wire it to the new group's output.
 
@@ -652,7 +689,7 @@ search, versions, groups, caching, the canvas and workflows treat all tiers alik
 | `kind` | Other fields | Status in v0.1 |
 | --- | --- | --- |
 | `command` | `entry` (program path relative to the node folder), `mode` (`oneshot` default, or `persistent`), `idle_timeout_s` (default 300), `timeout_s` (optional) | Ships in M3. |
-| `group` | `definition` (a file holding a group definition, [4.4](#44-groups-section)) | Ships in M3. |
+| `group` | `definition` (a workflow document whose `groups` holds the group, under the node's id, and every group it uses, [5.3](#53-definitions-copies-and-the-library)) | Ships in M3. A workflow runs a group only from the definition it embeds: an instance of a library group the workflow does not hold is `unknown_node_type`. |
 | `native` | `entry` (a shared library), `abi` (`"<major>.<min_host_minor>"`, [6.9](#69-native-tier)) | Defined, ships after the first command nodes ([6.9](#69-native-tier)). |
 | `script` | | Reserved, not in v0.1 ([6.10](#610-script-tier)). |
 | `builtin` | | Only for the `fugue` pack: implemented in the kernel. |
@@ -758,6 +795,8 @@ holding that node's `node.json`.
 - At startup Fugue reads only manifests and builds the registry. A manifest that fails
   validation disables that node (or pack) with a visible reason; it never stops Fugue.
 - Programs, libraries and group definitions load on first use.
+- The folder `local` of the first pack path is the group library ([5.3](#53-definitions-copies-and-the-library)):
+  the one disk pack with the id `local`, holding groups only. A `local` folder elsewhere is refused.
 
 ### 6.6 Installing
 
@@ -1723,6 +1762,7 @@ Codes in v0.1:
 | Warnings | `not_part_of_output`, `model_missing`, `frozen_result_missing`, `pack_update_available`, `workflow_not_embedded` |
 | Trust | `pack_untrusted`, `needs_confirmation` |
 | Packs | `pack_invalid`, `pack_exists`, `unknown_pack`, `fetch_failed`, `setup_failed` |
+| Groups | `group_invalid` (an edit a group cannot take: a list input fed from both sides of the selection, a name taken or not valid, a port exposed already) |
 | Providers | `capability_unavailable`, `model_not_running`, `provider_unreachable` |
 | Running | `node_failed`, `node_bad_output`, `node_timeout`, `out_of_memory`, `cancelled` |
 | Other | `unknown_run`, `usage`, `internal` |
@@ -2047,7 +2087,13 @@ Building M2 made these further choices.
 | Context menus: right-click on a node, a Frame or empty canvas (on release; a right-drag still does nothing); Shift+F10 or the Menu key (`app.context-menu`, added) opens the selection's or the pointer's. A right-click on a node outside the selection selects it first (ComfyUI); inside, the selection stays | 12.3 | high |
 | Open Image, Copy Image and Save Image… (`node.open-image`, `node.copy-image`, `node.save-image`) are on a node's context menu and the Node menu, enabled when its picture slot has an image file: its last result, else a Load Image's file. ComfyUI's menu (`useImageMenuOptions`) has the same three for a node with a preview, acting on the shown image: Open Image opens it in a browser tab, Copy Image draws it on a canvas and puts a re-encoded PNG on the clipboard, Save Image downloads it. Matched: the three verbs, shown for image nodes only, a notice when one fails. Improved: all three use the FULL file, not the 512 px thumbnail; Copy puts the file's own bytes under their real MIME type (png, jpeg, webp), plus a PNG of the picture when the file is not one (and `application/x-fugue-image-type` naming the original's type, which a Fugue paste takes first), so another app and a Fugue paste (14.1) get the original; never a decoded QImage, which qtwayland would re-encode for every image/* request; it reads and decodes off the UI thread; Save copies the original bytes (an embedded workflow stays), atomically, through a save dialog that asks before replacing, starting in the output folder; Open hands the default viewer a file with the right extension (when the file's name lacks it, a copy made off the UI thread in `fugue-view` in the runtime folder, 0700, named by the path, size and time), and refuses a file whose bytes are no image. Not in ComfyUI: the mask editor entry | 12.3 | high |
 | Node and Frame colors: one command per theme role, `node.color.<role>` for none, accent, muted, red, orange, yellow, green, cyan, blue and magenta, in Edit > Colors and the context menus; the selection's nodes, or the Frame the menu was opened on, take it in one undo step. A swatch shows the theme's color; the node header shows `tint-<role>`. No `error` role (it is the palette's red). ComfyUI's presets are fixed dark colors (red, brown, green, blue, pale blue, cyan, purple, yellow, black) lightened for light themes; theme roles follow every palette. A color wheel and hex colors are #52 | 4.5 | medium |
-| Frames are not selectable until #26, so a Frame's color comes only from its own context menu | 5.1 | medium |
+| A Frame is picked by its title band, not selected: dragging it selects and moves what lies in it, and its color, title and deletion come from its context menu | 5.1 | medium |
+| Groups (#26): the canvas keeps the whole workflow and the instances entered; every edit applies to the level shown and is merged back, and undo restores the whole workflow, so an undo after leaving still undoes an edit made inside. Entering is not an edit (as in ComfyUI, where entering a subgraph is navigation) | 5.2, 12.11 | high |
+| Make group merges links from one output into inner inputs of one type into one exposed input (ComfyUI's subgraph conversion makes one input per link); a list input fed from both sides cannot be split and is refused | 5.2, 5.4 | medium-high |
+| A group's id follows its name while it is `local/…`, so library folders are named after what the user called the group | 5.3 | medium |
+| The library is the `local` folder of the first pack path, loaded as a pack of groups only; saving bumps the version by 3.6 from the face; a window sees a newly saved group after a restart (the registry is fixed at start, as for packs, 6.6) | 5.3, 6.5 | medium |
+| Advanced sections fold on every node face, not only groups' (6.1 says `advanced` inputs are collapsed); a linked advanced input always shows | 5.4, 6.1 | medium-high |
+| Ungroup of a muted instance mutes its nodes; of a bypassed one keeps the inner modes (a bypassed group's pass-through has no node-by-node equivalent) | 5.2, 3.5 | medium |
 | The `?` overlay lists the commands that have a key; the rest (colors, exports, help links) are in the menus and appear in the overlay once the keymap file binds them | 12.5 | medium |
 | No providers.json: the default instances are this machine and every host omarchy-local-ai's `network.json` says is paired, by host name at `https://<dns>`, the address the omarchy provider already matches a paired host's models by (so a file the settings write later holds the same entries). Offline paired hosts are kept, so their models show as offline and pins stay valid. Read wherever providers.json is read, never written; a file that exists wins entirely | 8.2 | medium-high |
 | The model picker lists models by instance for the node type's capabilities, titled by the provider's display name; a model that is not ready stays choosable (a run then says it is not running, 8.4) and shows why and the command that starts it; Up and Down skip the instance headings | 8.4, 2.5 | medium-high |

@@ -73,6 +73,8 @@ void registerCanvasCommands(fugue::CommandRegistry &commands, CanvasModel &canva
     commands.setHandler("group.leave", [model] { model->leaveGroup(); });
     commands.setHandler("group.make-unique", [model] { model->makeUnique(); });
     commands.setHandler("group.interface", [model] { emit model->interfaceEditorRequested(); });
+    commands.setHandler("group.save-to-library", [model] { model->saveGroupToLibrary(); });
+    commands.setHandler("group.update", [model] { model->requestGroupUpdate(); });
     commands.setContextActive(QStringLiteral("canvas"), true);
     // group-selected: one group instance is selected (Tab enters it); group: one is entered.
     auto contexts = [model, &commands] {

@@ -214,8 +214,8 @@ private slots:
         // build), so the bound is loose; the item count below is the exact check.
         QVERIFY2(app.openedCpuMs < 1000, qPrintable(QString::number(app.openedCpuMs)));
         QVERIFY2(app.openedMs < 60000, qPrintable(QString::number(app.openedMs)));
-        // What the time grows with, counted, so it can be checked without a clock: 3534 items
-        // on 2026-11-19 (the faces and rows of the 44 nodes in view, two items for each other
+        // What the time grows with, counted, so it can be checked without a clock: 3727 items
+        // on 2026-11-20 (the faces and rows of the 44 nodes in view, two items for each other
         // node, a shadow each, a shape per wire). One more item on every node is 302 more.
         QVERIFY2(items < 3800, qPrintable(QString::number(items)));
         QCOMPARE(item(app.window->contentItem(), "nodes")->property("count").toInt(), 302);

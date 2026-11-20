@@ -813,20 +813,27 @@ Result<Document> renameGroup(const Document &document, const QString &groupId, c
         if (wanted != groupId && !registry.nodeType(wanted))
             id = wanted;
     }
-    if (id != groupId) {
-        doc.groups.insert(id, doc.groups.take(groupId));
-        forEachNodes(doc, [&](Nodes &nodes) {
-            for (Node &node : nodes)
-                if (node.type == groupId)
-                    node.type = id;
-        });
-        const QJsonObject inner = groupLayout(doc, groupId);
-        setGroupLayout(doc, groupId, {});
-        if (!inner.isEmpty())
-            setGroupLayout(doc, id, inner);
-    }
+    if (id != groupId)
+        doc = renameGroupId(doc, groupId, id);
     if (newId)
         *newId = id;
+    return doc;
+}
+
+Document renameGroupId(const Document &document, const QString &from, const QString &to) {
+    Document doc = document;
+    if (from == to || !doc.groups.contains(from) || doc.groups.contains(to))
+        return doc;
+    doc.groups.insert(to, doc.groups.take(from));
+    forEachNodes(doc, [&](Nodes &nodes) {
+        for (Node &node : nodes)
+            if (node.type == from)
+                node.type = to;
+    });
+    const QJsonObject inner = groupLayout(doc, from);
+    setGroupLayout(doc, from, {});
+    if (!inner.isEmpty())
+        setGroupLayout(doc, to, inner);
     return doc;
 }
 
@@ -910,6 +917,9 @@ void dropUnusedGroups(Document &document, QStringList candidates) {
         document.groups.remove(id);
         setGroupLayout(document, id, {});
     }
+    // None left: no empty section either, so grouping and ungrouping leaves the file as it was.
+    if (document.groups.isEmpty())
+        document.present.groups = false;
 }
 
 } // namespace fugue

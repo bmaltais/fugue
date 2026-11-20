@@ -39,7 +39,8 @@ QVariantList bar() {
                  command("node.collapse"), command("node.pin"), separator(), command("node.open-image"),
                  command("node.copy-image"), command("node.save-image"), separator(), command("frame.make"),
                  command("group.make"), command("group.ungroup"), command("group.enter"), command("group.leave"),
-                 command("group.make-unique"), command("group.interface")}),
+                 command("group.make-unique"), command("group.interface"), command("group.save-to-library"),
+                 command("group.update")}),
         submenu(QT_TRANSLATE_NOOP("Menu", "&Run"),
                 {command("run.start"), command("run.start-first"), command("run.to-here"), separator(),
                  command("run.cancel")}),
@@ -53,7 +54,8 @@ QVariantList bar() {
 QVariantList canvas() {
     return {command("node.search"), command("edit.paste"), command("edit.paste-connected"), separator(),
             command("edit.select-all"), command("view.fit"), command("view.toggle-links"), separator(),
-            command("frame.make"), command("group.make"), command("group.leave"), command("group.interface")};
+            command("frame.make"), command("group.make"), command("group.leave"), command("group.interface"),
+            command("group.save-to-library")};
 }
 
 // Right-click on a node: it is selected first, so each command acts on the selection.
@@ -62,7 +64,8 @@ QVariantList node() {
             command("node.collapse"), command("node.pin"), colors(), separator(), command("node.open-image"),
             command("node.copy-image"), command("node.save-image"), separator(), command("edit.copy"),
             command("edit.clone"), separator(), command("frame.make"), command("group.make"),
-            command("group.ungroup"), command("group.enter"), command("group.make-unique"), separator(),
+            command("group.ungroup"), command("group.enter"), command("group.make-unique"),
+            command("group.save-to-library"), command("group.update"), separator(),
             command("run.to-here"), separator(),
             command("edit.delete")};
 }

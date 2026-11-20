@@ -1,0 +1,432 @@
+// Groups and Frames on the canvas (spec 5): entering and leaving a group, edits inside that
+// change its definition, undo across levels, Make group (and its sinks), Ungroup, Make unique,
+// exposing inner ports, Make group inside a group, Frames, the folded Advanced section, the
+// recursion guard, groups in node search, and the library round trip.
+//
+// Seams: CanvasModel's group and Frame calls, observed through document() (the whole workflow),
+// scopeDocument() (the level shown), the node rows, compile() and node search.
+
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QSignalSpy>
+#include <QTemporaryDir>
+#include <QtTest>
+#include <QUndoStack>
+
+#include "canvas/canvas_model.h"
+#include "engine/compiler.h"
+#include "engine/document.h"
+#include "engine/group_library.h"
+#include "engine/pack_loader.h"
+#include "engine/registry.h"
+#include "nodes/builtin.h"
+#include "search/node_search.h"
+
+using namespace fugue;
+
+namespace {
+
+Document document(const char *json) {
+    const Result<Document> loaded = Document::load(QByteArray(json));
+    if (!loaded.ok())
+        qFatal("fixture does not load: %s", qPrintable(loaded.error().message));
+    return loaded.value();
+}
+
+// prompt -> gen -> save, prompt -> join; all placed.
+const char *chain = R"({
+  "fugue": 1,
+  "graph": {"nodes": {
+    "prompt": {"type": "fugue/text", "version": "1.0.0", "inputs": {"text": "a red fox"}},
+    "gen": {"type": "fugue/generate-image", "version": "1.0.0",
+            "inputs": {"prompt": {"from": "prompt.text"}, "steps": 8, "seed": 3}},
+    "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "gen.image"}, "name": "fox"}},
+    "join": {"type": "fugue/text-concat", "version": "1.0.0", "inputs": {"a": {"from": "prompt.text"}}}
+  }},
+  "layout": {"nodes": {"prompt": {"pos": [0, 100]}, "gen": {"pos": [300, 80]},
+                       "save": {"pos": [640, 120]}, "join": {"pos": [300, 600]}}}
+})";
+
+QStringList rowIds(const CanvasModel &canvas) {
+    QStringList ids;
+    for (int i = 0; i < canvas.nodes()->rowCount(); ++i)
+        ids << canvas.nodes()->data(canvas.nodes()->index(i, 0), NodeList::NodeId).toString();
+    ids.sort();
+    return ids;
+}
+
+QVariantList inputsOf(const CanvasModel &canvas, const QString &node) {
+    for (int i = 0; i < canvas.nodes()->rowCount(); ++i) {
+        const QModelIndex index = canvas.nodes()->index(i, 0);
+        if (canvas.nodes()->data(index, NodeList::NodeId).toString() == node)
+            return canvas.nodes()->data(index, NodeList::Inputs).toList();
+    }
+    return {};
+}
+
+QVariantMap port(const CanvasModel &canvas, const QString &node, const QString &name, bool output = false) {
+    for (int i = 0; i < canvas.nodes()->rowCount(); ++i) {
+        const QModelIndex index = canvas.nodes()->index(i, 0);
+        if (canvas.nodes()->data(index, NodeList::NodeId).toString() != node)
+            continue;
+        for (const QVariant &p : canvas.nodes()->data(index, output ? NodeList::Outputs : NodeList::Inputs).toList())
+            if (p.toMap().value("name") == name)
+                return p.toMap();
+    }
+    return {};
+}
+
+// The compiled nodes, path ids with their first part dropped from grouped ones, so a graph and
+// the same graph grouped compare.
+QStringList compiledTypes(const Document &doc, const Registry &registry) {
+    const Compilation compiled = compile(doc, registry);
+    if (!compiled.ok())
+        return {QStringLiteral("does not compile: ") + compiled.error().message};
+    QStringList types;
+    for (auto it = compiled->nodes.cbegin(); it != compiled->nodes.cend(); ++it)
+        types << it.key().section('/', -1) + '=' + it->type;
+    types.sort();
+    return types;
+}
+
+} // namespace
+
+class TestCanvasGroups : public QObject {
+    Q_OBJECT
+
+    Registry m_registry;
+
+private slots:
+    void initTestCase() { nodes::addBuiltinNodeTypes(m_registry); }
+
+    void enteringShowsTheInsideAndEditsChangeTheDefinition() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(chain));
+        canvas.select({"gen"});
+        const QString instance = canvas.makeGroup();
+        QVERIFY2(!instance.isEmpty(), qPrintable(canvas.groupProblem()));
+        QStringList top{"join", "prompt", "save", instance};
+        top.sort();
+        QCOMPARE(rowIds(canvas), top);
+        const QString group = canvas.document().graph.nodes.value(instance).type;
+
+        QSignalSpy scope(&canvas, &CanvasModel::scopeChanged);
+        QVERIFY(canvas.enterGroup(instance));
+        QCOMPARE(scope.count(), 1);
+        QVERIFY(canvas.inGroup());
+        QCOMPARE(canvas.scopePath(), instance);
+        QCOMPARE(canvas.scopeGroup(), group);
+        QCOMPARE(rowIds(canvas), QStringList{"gen"});
+        QCOMPARE(canvas.breadcrumb().size(), 1);
+        QCOMPARE(canvas.breadcrumb().first().toMap().value("title").toString(), QStringLiteral("Group"));
+        // The face drives gen's prompt: marked inside.
+        QCOMPARE(port(canvas, "gen", "prompt").value("exposedAs").toString(), QStringLiteral("prompt"));
+        QCOMPARE(port(canvas, "gen", "image", true).value("exposedAs").toString(), QStringLiteral("image"));
+
+        // An edit inside is an edit of the definition, one undo step.
+        canvas.select({"gen"});
+        canvas.toggleMode("bypass");
+        QCOMPARE(canvas.document().group(group)->nodes.value("gen").mode, NodeMode::Bypass);
+        QCOMPARE(canvas.scopeDocument().graph.nodes.value("gen").mode, NodeMode::Bypass);
+        // The whole workflow is what is saved: the instance and the rest are there.
+        QVERIFY(canvas.document().graph.nodes.contains("save"));
+
+        QVERIFY(canvas.leaveGroup());
+        QVERIFY(!canvas.inGroup());
+        QCOMPARE(canvas.selectedIds(), QStringList{instance});
+        QCOMPARE(canvas.document().group(group)->nodes.value("gen").mode, NodeMode::Bypass);
+        // Undo after leaving restores the definition; the canvas stays at the top.
+        canvas.undo();
+        QCOMPARE(canvas.document().group(group)->nodes.value("gen").mode, NodeMode::Normal);
+        QVERIFY(!canvas.inGroup());
+        QVERIFY(!canvas.leaveGroup());
+    }
+
+    void undoingTheMakeGroupWhileInsideGoesBackUp() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(chain));
+        canvas.select({"gen"});
+        const QString instance = canvas.makeGroup();
+        QVERIFY(canvas.enterGroup(instance));
+        canvas.undo();
+        QVERIFY(!canvas.inGroup());
+        QCOMPARE(rowIds(canvas), (QStringList{"gen", "join", "prompt", "save"}));
+        QVERIFY(canvas.document().groups.isEmpty());
+        canvas.redo();
+        QCOMPARE(canvas.document().groups.size(), 1);
+        QVERIFY(!canvas.inGroup());
+    }
+
+    void makeGroupAsksAboutSinksAndLeavesThemOutside() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(chain));
+        canvas.select({"gen", "save"});
+        QSignalSpy asked(&canvas, &CanvasModel::makeGroupAsked);
+        canvas.requestMakeGroup();
+        QCOMPARE(asked.count(), 1);
+        QCOMPARE(asked.first().first().toStringList(), QStringList{"Save Image"});
+        const QString instance = canvas.makeGroup(true);
+        const Document doc = canvas.document();
+        QVERIFY(doc.graph.nodes.contains("save"));
+        QCOMPARE(doc.graph.nodes.value("save").inputs.value("image").from().toString(), instance + ".image");
+        // The grouped workflow runs what the original did.
+        QCOMPARE(compiledTypes(doc, m_registry), compiledTypes(document(chain), m_registry));
+    }
+
+    void ungroupPutsTheNodesBackAsOneStep() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(chain));
+        const QByteArray before = canvas.document().save();
+        canvas.select({"gen", "join"});
+        const QString instance = canvas.makeGroup();
+        canvas.select({instance});
+        const int steps = canvas.undoStack()->count();
+        const QStringList back = canvas.ungroupSelection();
+        QCOMPARE(back, (QStringList{"gen", "join"}));
+        QCOMPARE(canvas.undoStack()->count(), steps + 1);
+        QCOMPARE(canvas.selectedIds(), (QStringList{"gen", "join"}));
+        const Document doc = canvas.document();
+        QVERIFY(doc.groups.isEmpty()); // nothing else used it
+        QCOMPARE(doc.save(), before);
+    }
+
+    void makeUniqueDetachesOneInstance() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(chain));
+        canvas.select({"gen"});
+        const QString first = canvas.makeGroup();
+        canvas.select({first});
+        const QString second = canvas.cloneSelection().value(0);
+        QCOMPARE(canvas.document().graph.nodes.value(second).type, canvas.document().graph.nodes.value(first).type);
+        canvas.select({second});
+        const QString unique = canvas.makeUnique();
+        QCOMPARE(unique, QStringLiteral("local/group-2"));
+        QCOMPARE(canvas.document().graph.nodes.value(second).type, unique);
+        QCOMPARE(canvas.document().graph.nodes.value(first).type, QStringLiteral("local/group"));
+    }
+
+    void exposedPortsShowOnTheFaceAndInterfaceEditsReachInstances() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(chain));
+        canvas.select({"gen"});
+        const QString instance = canvas.makeGroup();
+        QVERIFY(canvas.enterGroup(instance));
+        QVERIFY2(canvas.exposeInput("gen", "seed"), qPrintable(canvas.groupProblem()));
+        QCOMPARE(canvas.exposedName("gen", "seed", false), QStringLiteral("seed"));
+        QCOMPARE(port(canvas, "gen", "seed").value("exposedAs").toString(), QStringLiteral("seed"));
+        QVERIFY(!canvas.exposeInput("gen", "seed"));
+        QVERIFY(!canvas.groupProblem().isEmpty());
+        // steps goes in Advanced, renamed.
+        QVERIFY(canvas.exposeInput("gen", "steps"));
+        QVERIFY(canvas.editExposedInput("steps", {{"name", "quality"}, {"label", "Quality"}, {"section", "Advanced"},
+                                                  {"min", 2}, {"max", 20}}));
+        const QVariantMap face = canvas.groupInterface();
+        QCOMPARE(face.value("inputs").toList().size(), 3);
+        QCOMPARE(face.value("inputs").toList().last().toMap().value("name").toString(), QStringLiteral("quality"));
+        QVERIFY(canvas.moveExposed(false, "quality", 0));
+        QCOMPARE(canvas.groupInterface().value("inputs").toList().first().toMap().value("name").toString(),
+                 QStringLiteral("quality"));
+        QVERIFY(!canvas.editExposedInput("quality", {{"name", "Not A Name"}}));
+        QVERIFY(canvas.renameGroup("Two pass"));
+        QCOMPARE(canvas.scopeGroup(), QStringLiteral("local/two-pass"));
+        QCOMPARE(canvas.breadcrumb().first().toMap().value("title").toString(), QStringLiteral("Two pass"));
+
+        canvas.leaveGroup();
+        QCOMPARE(canvas.document().graph.nodes.value(instance).type, QStringLiteral("local/two-pass"));
+        // On the face: quality first, in a folded Advanced section, with the narrowed range.
+        const QVariantMap quality = port(canvas, instance, "quality");
+        QCOMPARE(quality.value("label").toString(), QStringLiteral("Quality"));
+        QCOMPARE(quality.value("header").toString(), QStringLiteral("Advanced"));
+        QVERIFY(quality.value("hidden").toBool());
+        QCOMPARE(quality.value("folded").toInt(), 1);
+        canvas.toggleAdvanced(instance);
+        QVERIFY(!port(canvas, instance, "quality").value("hidden").toBool());
+        QVERIFY(port(canvas, instance, "seed").value("widget").toBool());
+
+        // Deleting an exposed node inside drops it from the face, and the instance's value.
+        canvas.enterGroup(instance);
+        canvas.select({"gen"});
+        canvas.deleteSelection();
+        QVERIFY(canvas.groupInterface().value("inputs").toList().isEmpty());
+        canvas.leaveGroup();
+        QVERIFY(!canvas.document().graph.nodes.value(instance).inputs.contains("prompt"));
+        QVERIFY(!canvas.document().graph.nodes.value("save").inputs.contains("image"));
+    }
+
+    void aGroupMadeInsideAGroupKeepsTheOuterFaceWorking() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(chain));
+        const QStringList flat = compiledTypes(canvas.document(), m_registry);
+        canvas.select({"gen", "join"});
+        const QString outer = canvas.makeGroup();
+        QVERIFY(canvas.enterGroup(outer));
+        canvas.select({"gen"});
+        const QString inner = canvas.makeGroup();
+        QVERIFY2(!inner.isEmpty(), qPrintable(canvas.groupProblem()));
+        // The outer group's prompt drove gen.prompt; now it drives the inner instance.
+        const GroupDefinition *face = canvas.document().group(canvas.scopeGroup());
+        bool through = false;
+        for (const GroupInput &input : face->inputs)
+            for (const PortRef &target : input.targets)
+                through |= target.node == inner;
+        QVERIFY(through);
+        QCOMPARE(face->outputs.value(0).from.node, inner);
+        // Nested, it still runs the same nodes; and saves and loads.
+        QCOMPARE(compiledTypes(canvas.document(), m_registry), flat);
+        const Result<Document> reloaded = Document::load(canvas.document().save());
+        QVERIFY(reloaded.ok());
+        QCOMPARE(compiledTypes(*reloaded, m_registry), flat);
+        // Entering the inner one: two crumbs; the first one leads back to the top.
+        QVERIFY(canvas.enterGroup(inner));
+        QCOMPARE(canvas.scopePath(), outer + "/" + inner);
+        QCOMPARE(canvas.breadcrumb().size(), 2);
+        canvas.leaveTo(0);
+        QVERIFY(!canvas.inGroup());
+        // Ungrouping inside the outer group puts gen back and the face follows.
+        QVERIFY(canvas.enterGroup(outer));
+        canvas.select({inner});
+        canvas.ungroupSelection();
+        QCOMPARE(compiledTypes(canvas.document(), m_registry), flat);
+        QCOMPARE(canvas.document().groups.size(), 1);
+    }
+
+    void aGroupCannotGoInsideItself() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(chain));
+        canvas.select({"gen"});
+        const QString instance = canvas.makeGroup();
+        const QString group = canvas.document().graph.nodes.value(instance).type;
+        canvas.select({instance});
+        const QString copy = canvas.copySelection();
+        QVERIFY(canvas.enterGroup(instance));
+        QVERIFY(canvas.paste(copy).isEmpty());
+        QVERIFY(!canvas.groupProblem().isEmpty());
+        QVERIFY(canvas.addNode(group, 0, 0).isEmpty());
+        QVERIFY(!canvas.canAddGroup(group));
+        // Node search leaves it out inside, and lists it at the top.
+        canvas.search()->openAt(0, 0);
+        canvas.search()->setQuery("Group");
+        for (int i = 0; i < canvas.search()->count(); ++i)
+            QVERIFY(canvas.search()->results()->data(canvas.search()->results()->index(i), SearchResults::TypeId) != group);
+        canvas.search()->close();
+        canvas.leaveGroup();
+        canvas.search()->openAt(0, 0);
+        canvas.search()->setQuery("Group");
+        int row = -1;
+        for (int i = 0; i < canvas.search()->count(); ++i)
+            if (canvas.search()->results()->data(canvas.search()->results()->index(i), SearchResults::TypeId) == group)
+                row = i;
+        QVERIFY(row >= 0);
+        const QString added = canvas.search()->accept(row);
+        QCOMPARE(canvas.document().graph.nodes.value(added).type, group);
+    }
+
+    void framesHoldNodesAndMoveWithThem() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(chain));
+        // What a Frame holds is what lies in it: prompt alone here (gen is right of it).
+        canvas.select({"prompt"});
+        const QString frame = canvas.frameSelection();
+        QCOMPARE(frame, QStringLiteral("f1"));
+        const QVariantMap made = canvas.frames().first().toMap();
+        QVERIFY(made.value("x").toReal() < 0 && made.value("y").toReal() < 100);
+        // Its title band picks it.
+        QCOMPARE(canvas.frameAt(made.value("x").toReal() + 4, made.value("y").toReal() + 4, 30), frame);
+        canvas.select({});
+        canvas.beginFrameMove(frame);
+        QCOMPARE(canvas.selectedIds(), QStringList{"prompt"});
+        canvas.moveBy(50, 20);
+        canvas.endMove();
+        QCOMPARE(canvas.position("prompt"), QPointF(50, 120));
+        QCOMPARE(canvas.position("gen"), QPointF(300, 80));
+        QCOMPARE(canvas.frames().first().toMap().value("x").toReal(), made.value("x").toReal() + 50);
+        canvas.undo();
+        QCOMPARE(canvas.position("prompt"), QPointF(0, 100));
+        QCOMPARE(canvas.frames().first().toMap().value("x").toReal(), made.value("x").toReal());
+        // A copy of everything it holds brings it along.
+        canvas.select({"prompt"});
+        canvas.setPointer(0, 1000);
+        const QStringList pasted = canvas.paste(canvas.copySelection());
+        QCOMPARE(canvas.frames().size(), 2);
+        const QVariantMap second = canvas.frames().last().toMap();
+        QCOMPARE(second.value("id").toString(), QStringLiteral("f2"));
+        QCOMPARE(canvas.scopeDocument().layout.value("frames").toArray().last().toObject().value("nodes").toArray(),
+                 QJsonArray{pasted.value(0)});
+        QCOMPARE(second.value("y").toReal() - made.value("y").toReal(), canvas.position(pasted.value(0)).y() - 100);
+        canvas.undo();
+        QCOMPARE(canvas.frames().size(), 1);
+        canvas.renameFrame(frame, "Inputs");
+        QCOMPARE(canvas.frames().first().toMap().value("title").toString(), QStringLiteral("Inputs"));
+        canvas.deleteFrame(frame);
+        QVERIFY(canvas.frames().isEmpty());
+        QVERIFY(canvas.document().graph.nodes.contains("prompt"));
+    }
+
+    void advancedInputsFoldUnlessOpenOrLinked() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(chain));
+        // Generate Image's steps and guidance are advanced (6.1).
+        QVERIFY(port(canvas, "gen", "steps").value("hidden").toBool());
+        QCOMPARE(port(canvas, "gen", "steps").value("folded").toInt(), 2);
+        const qreal folded = canvas.nodes()->data(canvas.nodes()->index(1, 0), NodeList::Height).toReal();
+        Q_UNUSED(folded);
+        canvas.toggleAdvanced("gen");
+        QVERIFY(!port(canvas, "gen", "steps").value("hidden").toBool());
+        QVERIFY(canvas.scopeDocument().layout.value("nodes").toObject().value("gen").toObject().value("advanced").toBool());
+        canvas.undo();
+        QVERIFY(port(canvas, "gen", "steps").value("hidden").toBool());
+        // A linked advanced input shows anyway.
+        QVERIFY(canvas.connectPorts("prompt", "text", "join", "b"));
+        QVERIFY(inputsOf(canvas, "gen").size() > 0);
+    }
+
+    void theLibraryRoundTrip() {
+        QTemporaryDir packs;
+        CanvasModel canvas(&m_registry);
+        canvas.setLibraryDir(packs.filePath("local"));
+        canvas.setDocument(document(chain));
+        canvas.select({"gen"});
+        const QString instance = canvas.makeGroup();
+        canvas.select({instance});
+        QVERIFY2(canvas.saveGroupToLibrary(), qPrintable(canvas.groupProblem()));
+        QVERIFY(canvas.groupNotice().contains("local/group"));
+
+        // Another window's registry has it as a node type; adding it embeds the definition.
+        Registry library;
+        nodes::addBuiltinNodeTypes(library);
+        loadPacks(library, {packs.path()});
+        QVERIFY(library.nodeType("local/group"));
+        CanvasModel other(&library);
+        other.setDocument(document(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        const QString added = other.addNode("local/group", 100, 100);
+        QVERIFY2(!added.isEmpty(), qPrintable(other.groupProblem()));
+        QVERIFY(other.document().group("local/group"));
+        QCOMPARE(other.updateAvailable(added), QString());
+
+        // The library moves on: the other workflow sees an update, and takes it.
+        canvas.enterGroup(instance);
+        canvas.exposeInput("gen", "seed");
+        canvas.leaveGroup();
+        canvas.select({instance});
+        QVERIFY(canvas.saveGroupToLibrary());
+        Registry newer;
+        nodes::addBuiltinNodeTypes(newer);
+        loadPacks(newer, {packs.path()});
+        CanvasModel later(&newer);
+        later.setDocument(other.document());
+        QCOMPARE(later.updateAvailable(added), QStringLiteral("1.1.0"));
+        const QVariantMap changes = later.groupUpdate(added);
+        QCOMPARE(changes.value("addedInputs").toStringList(), QStringList{"seed"});
+        QSignalSpy asked(&later, &CanvasModel::groupUpdateAsked);
+        later.select({added});
+        later.requestGroupUpdate();
+        QCOMPARE(asked.count(), 1);
+        QVERIFY(later.updateGroupInstance(added));
+        QCOMPARE(later.document().graph.nodes.value(added).version.toString(), QStringLiteral("1.1.0"));
+        QCOMPARE(later.updateAvailable(added), QString());
+        QVERIFY(port(later, added, "seed").value("name").isValid());
+    }
+};
+
+QTEST_MAIN(TestCanvasGroups)
+#include "test_canvas_groups.moc"

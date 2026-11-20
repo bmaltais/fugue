@@ -129,6 +129,7 @@ public:
         ThumbnailText, // text in the thumbnail's place: a shown text or number, a label ("Video · 0:04")
         ThumbnailDim,  // the slot is a placeholder ("No result yet"): drawn dimmed
         Notice,        // why the node cannot run now and how to fix it (8.5), from a check
+        UpdateAvailable, // a group whose library version is newer: that version (5.3), else empty
     };
 
     explicit NodeList(CanvasModel *canvas);
@@ -209,6 +210,7 @@ class CanvasModel : public QObject {
     Q_PROPERTY(QVariantList breadcrumb READ breadcrumb NOTIFY scopeChanged)
     Q_PROPERTY(bool inGroup READ inGroup NOTIFY scopeChanged)
     Q_PROPERTY(QString groupProblem READ groupProblem NOTIFY groupProblemChanged)
+    Q_PROPERTY(QString groupNotice READ groupNotice NOTIFY groupNoticeChanged)
 
 public:
     explicit CanvasModel(const fugue::Registry *registry, QObject *parent = nullptr);
@@ -280,7 +282,7 @@ public:
     Q_INVOKABLE QStringList selectedSinks() const;
     // The group.make command: with sinks selected, makeGroupAsked(their titles) first, for the
     // window to ask whether they stay outside (5.5); without, makeGroup() at once.
-    void requestMakeGroup();
+    Q_INVOKABLE void requestMakeGroup();
     // Ungroup (Ctrl+Shift+G) the selected group instances; their inner nodes are selected.
     Q_INVOKABLE QStringList ungroupSelection();
     // Make unique (5.3): the selected instance gets its own copy of its definition.
@@ -307,6 +309,27 @@ public:
     Q_INVOKABLE bool renameExposedOutput(const QString &name, const QString &newName);
     Q_INVOKABLE bool moveExposed(bool output, const QString &name, int to);
     Q_INVOKABLE bool renameGroup(const QString &name);
+    // The library (5.3, engine/group_library.h). Save to library: the selected group instance's
+    // definition, or the group shown, goes to the library as local/<name> at the version 3.6
+    // gives, which the workflow's definition and its instances take. False with groupProblem
+    // set when refused; groupNotice says where it went.
+    Q_INVOKABLE bool saveGroupToLibrary();
+    // The version the library has of the node's group when it is newer than the workflow's
+    // definition ("update available"), else empty.
+    Q_INVOKABLE QString updateAvailable(const QString &node) const;
+    // What updating the node's group would change: {name, from, to, addedInputs, removedInputs,
+    // addedOutputs, removedOutputs}; empty when there is no update.
+    Q_INVOKABLE QVariantMap groupUpdate(const QString &node) const;
+    // Replaces the workflow's definition of the node's group with the library's: every instance
+    // moves together (5.3). One undo step.
+    Q_INVOKABLE bool updateGroupInstance(const QString &node);
+    // The group.update command: groupUpdateAsked(groupUpdate(selected)) for the window to show.
+    Q_INVOKABLE void requestGroupUpdate();
+    // Where the library is (tests point it elsewhere).
+    void setLibraryDir(const QString &dir) { m_libraryDir = dir; }
+    QString groupNotice() const { return m_groupNotice; }
+    Q_INVOKABLE void dismissGroupNotice() { setGroupNotice({}); }
+
     // Why the last group edit was refused, one sentence; empty after one that worked.
     QString groupProblem() const { return m_groupProblem; }
     Q_INVOKABLE void dismissGroupProblem() { setGroupProblem({}); }
@@ -548,6 +571,8 @@ signals:
     void scopeChanged();
     void groupProblemChanged();
     void makeGroupAsked(const QStringList &sinks);
+    void groupNoticeChanged();
+    void groupUpdateAsked(const QString &node, const QVariantMap &changes);
     // The group.interface command: the window opens the interface editor of the group shown.
     void interfaceEditorRequested();
     // The frame.rename command: the window asks for the title.
@@ -674,6 +699,7 @@ private:
     // Commits a change of the whole workflow (a face edit, which instances elsewhere follow).
     void commitWhole(const fugue::Document &whole, const QString &text);
     void setGroupProblem(const QString &problem);
+    void setGroupNotice(const QString &notice);
     // An instance of `group` may go in the level shown: false when it would hold itself (5.2).
     bool canHoldGroup(const fugue::Document &document, const QString &group) const;
     // Makes the document this one: only nodes that differ are touched, and their links.
@@ -765,6 +791,8 @@ private:
     QStringList m_scope;
     std::vector<QVariantMap> m_outerViews;
     QString m_groupProblem;
+    QString m_groupNotice;
+    QString m_libraryDir;
     QStringList m_movingFrames; // Frames a move carries (beginFrameMove)
     std::vector<QRectF> m_frameStart;
 

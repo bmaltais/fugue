@@ -5,6 +5,7 @@
 
 #include "canvas/canvas_model.h"
 
+#include "engine/group_library.h"
 #include "engine/groups.h"
 #include "engine/registry.h"
 
@@ -429,4 +430,97 @@ void CanvasModel::toggleAdvanced(const QString &node) {
     entries.insert(node, entry);
     document.layout.insert("nodes", entries);
     commit(document, open ? tr("Show advanced inputs") : tr("Fold advanced inputs"));
+}
+
+// --- the library (5.3) ---------------------------------------------------------------
+
+void CanvasModel::setGroupNotice(const QString &notice) {
+    if (notice == m_groupNotice)
+        return;
+    m_groupNotice = notice;
+    emit groupNoticeChanged();
+}
+
+bool CanvasModel::saveGroupToLibrary() {
+    QString group;
+    const QStringList ids = selectedIds();
+    if (ids.size() == 1 && isGroup(ids.first()))
+        group = m_document.graph.nodes.value(ids.first()).type;
+    else
+        group = scopeGroup();
+    if (group.isEmpty())
+        return false;
+    const Registry &registry = registryOr(m_registry);
+    Document whole = document();
+    const Result<SavedGroup> saved =
+        saveToLibrary(whole, group, registry, m_libraryDir.isEmpty() ? libraryDir() : m_libraryDir);
+    if (!saved) {
+        setGroupProblem(saved.error().message);
+        return false;
+    }
+    setGroupProblem({});
+    // The workflow takes the library's id and version, so it is in step with it.
+    whole = renameGroupId(whole, group, saved->id);
+    whole.groups[saved->id].version = saved->version;
+    forEachNodes(whole, [&](Nodes &nodes) {
+        for (Node &node : nodes)
+            if (node.type == saved->id)
+                node.version = saved->version;
+    });
+    commitWhole(whole, tr("Save to library"));
+    emit scopeChanged(); // the breadcrumb's group may have a new id
+    setGroupNotice(saved->changed ? tr("Saved %1 %2 to the library. Other workflows can add it from node search after "
+                                       "Fugue restarts.")
+                                        .arg(saved->id, saved->version.toString())
+                                  : tr("The library has this version of %1 already (%2).")
+                                        .arg(saved->id, saved->version.toString()));
+    return true;
+}
+
+QString CanvasModel::updateAvailable(const QString &node) const {
+    const auto it = m_document.graph.nodes.constFind(node);
+    if (it == m_document.graph.nodes.constEnd() || !m_registry)
+        return {};
+    const GroupDefinition *group = m_document.group(it->type);
+    const NodeType *library = m_registry->nodeType(it->type);
+    if (!group || !library || library->runtime.value("kind") != QLatin1String("group") || library->version <= group->version)
+        return {};
+    return library->version.toString();
+}
+
+QVariantMap CanvasModel::groupUpdate(const QString &node) const {
+    if (updateAvailable(node).isEmpty())
+        return {};
+    const QString group = m_document.graph.nodes.value(node).type;
+    const Result<Document> library = loadLibraryGroup(*m_registry->nodeType(group));
+    if (!library)
+        return {{"problem", library.error().message}};
+    const GroupChanges changes = groupChanges(document(), *library, group, *m_registry);
+    return {{"name", m_document.group(group)->name},
+            {"from", changes.from.toString()},
+            {"to", changes.to.toString()},
+            {"addedInputs", changes.addedInputs},
+            {"removedInputs", changes.removedInputs},
+            {"addedOutputs", changes.addedOutputs},
+            {"removedOutputs", changes.removedOutputs}};
+}
+
+bool CanvasModel::updateGroupInstance(const QString &node) {
+    if (updateAvailable(node).isEmpty())
+        return false;
+    const QString group = m_document.graph.nodes.value(node).type;
+    const Result<Document> library = loadLibraryGroup(*m_registry->nodeType(group));
+    if (!library) {
+        setGroupProblem(library.error().message);
+        return false;
+    }
+    setGroupProblem({});
+    commitWhole(updateGroup(document(), *library, group, *m_registry), tr("Update group"));
+    return true;
+}
+
+void CanvasModel::requestGroupUpdate() {
+    const QStringList ids = selectedIds();
+    if (ids.size() == 1 && !updateAvailable(ids.first()).isEmpty())
+        emit groupUpdateAsked(ids.first(), groupUpdate(ids.first()));
 }

@@ -3,6 +3,7 @@
 #include "canvas/node_size.h"
 
 #include "engine/compiler.h"
+#include "engine/group_library.h"
 #include "engine/groups.h"
 #include "engine/node_type.h"
 #include "engine/registry.h"
@@ -82,6 +83,7 @@ QVariant NodeList::data(const QModelIndex &index, int role) const {
     case Color: return row.color;
     case Pinned: return row.pinned;
     case ThumbnailRect: return row.thumbnail;
+    case UpdateAvailable: return m_canvas->updateAvailable(row.id);
     default: break;
     }
     const CanvasModel::RunInfo run = m_canvas->m_run.value(row.id);
@@ -108,7 +110,7 @@ QHash<int, QByteArray> NodeList::roleNames() const {
             {Color, "color"}, {Pinned, "pinned"}, {RunState, "runState"}, {Progress, "progress"},
             {Seconds, "seconds"}, {Error, "error"}, {Warnings, "warnings"}, {Thumbnail, "thumbnail"},
             {ThumbnailInfo, "thumbnailInfo"}, {ThumbnailFile, "thumbnailFile"}, {ThumbnailRect, "thumbnailRect"}, {ThumbnailText, "thumbnailText"}, {ThumbnailDim, "thumbnailDim"},
-            {Notice, "notice"}};
+            {Notice, "notice"}, {UpdateAvailable, "updateAvailable"}};
 }
 
 LinkList::LinkList(CanvasModel *canvas) : QAbstractListModel(canvas), m_canvas(canvas) {}
@@ -1316,6 +1318,25 @@ double newFixedSeed(const InputSpec &spec) {
 } // namespace
 
 QString CanvasModel::addNode(const QString &typeId, qreal x, qreal y) {
+    // A group of the library the workflow does not hold yet: its definition comes in with it,
+    // as a paste of one instance does (nested groups that clash get new ids), so the workflow
+    // never depends on the library to open (5.3).
+    if (const NodeType *type = m_registry ? m_registry->nodeType(typeId) : nullptr;
+        type && type->runtime.value("kind") == QLatin1String("group") && !m_document.group(typeId)) {
+        const Result<Document> file = loadLibraryGroup(*type);
+        if (!file) {
+            setGroupProblem(file.error().message);
+            return {};
+        }
+        Document copy = *file;
+        Node node;
+        node.type = typeId;
+        node.version = copy.group(typeId)->version;
+        copy.graph.nodes.insert(QStringLiteral("g"), node);
+        copy.layout.insert("nodes", QJsonObject{{"g", QJsonObject{{"pos", QJsonArray{0, 0}}}}});
+        const QStringList added = insertCopy(copy, QPointF(x, y), false, tr("Add node"), nullptr);
+        return added.value(0);
+    }
     // A group of this workflow: one more instance of its definition (5.3), unless the level
     // shown is inside it.
     if (const GroupDefinition *group = m_document.group(typeId)) {

@@ -31,16 +31,22 @@ Item {
             frameTitle.text = found ? found.title : ""
             frameAsk.open()
         }
+        function onGroupUpdateAsked(node, changes) {
+            updateAsk.node = node
+            updateAsk.changes = changes
+            updateAsk.open()
+        }
         function onInterfaceEditorRequested() {
             if (root.model.inGroup)
                 editor.open()
         }
     }
 
-    // Why a group edit was refused, when the editor is not there to say it.
+    // Why a group edit was refused (when the editor is not there to say it), or where a group
+    // was saved.
     Rectangle {
         objectName: "groupNotice"
-        visible: root.model.groupProblem !== "" && !editor.visible
+        visible: (root.model.groupProblem !== "" && !editor.visible) || root.model.groupNotice !== ""
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
         height: visible ? noticeRow.implicitHeight + 16 : 0
         color: root.look.popup
@@ -54,13 +60,13 @@ Item {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
                 color: root.look.text
-                text: root.model.groupProblem
+                text: root.model.groupProblem !== "" ? root.model.groupProblem : root.model.groupNotice
             }
             ToolButton {
                 text: "\u00d7"
                 focusPolicy: Qt.NoFocus
                 Accessible.name: qsTr("Dismiss")
-                onClicked: root.model.dismissGroupProblem()
+                onClicked: { root.model.dismissGroupProblem(); root.model.dismissGroupNotice() }
             }
         }
     }
@@ -103,6 +109,54 @@ Item {
                     text: qsTr("Leave outside")
                     highlighted: true
                     onClicked: { sinksAsk.close(); root.model.makeGroup(true) }
+                }
+            }
+        }
+    }
+
+    // An update from the library (5.3) says what it changes first (3.6); every instance moves.
+    Question {
+        id: updateAsk
+        objectName: "groupUpdateAsk"
+        property string node: ""
+        property var changes: ({})
+        function line(label, names) { return names && names.length > 0 ? label.arg(names.join(", ")) : "" }
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 12
+            LayoutMirroring.enabled: root.rightToLeft
+            LayoutMirroring.childrenInherit: true
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                font.bold: true
+                text: qsTr("Update %1 from %2 to %3?").arg(updateAsk.changes.name || "")
+                          .arg(updateAsk.changes.from || "").arg(updateAsk.changes.to || "")
+            }
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                text: [updateAsk.line(qsTr("New inputs: %1"), updateAsk.changes.addedInputs),
+                       updateAsk.line(qsTr("Inputs that go: %1"), updateAsk.changes.removedInputs),
+                       updateAsk.line(qsTr("New outputs: %1"), updateAsk.changes.addedOutputs),
+                       updateAsk.line(qsTr("Outputs that go: %1"), updateAsk.changes.removedOutputs)]
+                          .filter(l => l !== "").join("\n")
+                      || qsTr("The inputs and outputs stay the same.")
+            }
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                color: root.look.label
+                text: qsTr("Every instance of the group in this workflow moves to the new version; values and links of inputs and outputs that go are dropped.")
+            }
+            RowLayout {
+                Layout.alignment: Qt.AlignRight
+                Button { text: qsTr("Cancel"); onClicked: updateAsk.close() }
+                Button {
+                    objectName: "groupUpdateOk"
+                    text: qsTr("Update")
+                    highlighted: true
+                    onClicked: { updateAsk.close(); root.model.updateGroupInstance(updateAsk.node) }
                 }
             }
         }

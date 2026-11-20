@@ -41,6 +41,7 @@ Item {
     required property rect thumbnailRect
     required property string thumbnailText // in the image's place (a shown text, a label)
     required property bool thumbnailDim    // a placeholder: no result yet
+    required property string updateAvailable // a group the library has a newer version of (5.3)
 
     // Set by the canvas.
     property CanvasModel canvasModel
@@ -262,17 +263,6 @@ Item {
                             }
                         }
                     }
-                    // Inside a group: the output its face carries out, named outside the node (5.4).
-                    Text {
-                        objectName: "exposedMark"
-                        visible: face.full && output.modelData.exposedAs !== undefined
-                        x: node.width + 2 * face.u
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: visible ? "\u2192 " + output.modelData.exposedAs : ""
-                        textFormat: Text.PlainText
-                        color: node.look.accent
-                        font.pixelSize: node.look.captionSize
-                    }
                     PortDot {
                         visible: node.tier <= 1
                         x: node.width - width / 2
@@ -309,42 +299,6 @@ Item {
                     width: node.width
                     height: modelData.rowHeight
                     opacity: dim ? 0.25 : 1
-
-                    // A section starts with its header row, just above the first input in it; the
-                    // Advanced one opens and folds with a click (FugueCanvas takes it).
-                    Item {
-                        objectName: "sectionHeader"
-                        visible: face.full && input.modelData.headerTop !== undefined
-                        y: visible ? input.modelData.headerTop - input.modelData.rowTop : 0
-                        width: node.width
-                        height: node.canvasModel.rowHeight
-                        Text {
-                            x: 3 * face.u
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: parent.width - 6 * face.u
-                            readonly property bool advanced: input.modelData.header === "Advanced"
-                            text: !parent.visible ? ""
-                                : !advanced ? input.modelData.header
-                                : input.modelData.advancedOpen ? "\u25be " + qsTr("Advanced")
-                                : "\u25b8 " + qsTr("Advanced (%1)").arg(input.modelData.folded)
-                            elide: Text.ElideRight
-                            textFormat: Text.PlainText
-                            color: node.look.label
-                            font.pixelSize: node.look.captionSize
-                            font.weight: Font.DemiBold
-                        }
-                    }
-                    // Inside a group: the input its face drives, named outside the node (5.4).
-                    Text {
-                        objectName: "exposedMark"
-                        visible: face.full && input.shown && input.modelData.exposedAs !== undefined
-                        x: -implicitWidth - 2 * face.u
-                        y: (node.canvasModel.rowHeight - height) / 2
-                        text: visible ? input.modelData.exposedAs + " \u2192" : ""
-                        textFormat: Text.PlainText
-                        color: node.look.accent
-                        font.pixelSize: node.look.captionSize
-                    }
 
                     Loader {
                         objectName: "widgetLoader"
@@ -450,13 +404,83 @@ Item {
             Loader {
                 id: decor
                 active: face.stateGlyph !== "" || face.caption !== "" || node.warnings.length > 0 || node.pinned
-                        || face.dashed || node.collapsed
+                        || face.dashed || node.collapsed || extrasNeeded
+                // What only some nodes have, made here too so a big graph pays nothing for it
+                // (test_canvas_window counts items): section headers (6.1, 5.4; the Advanced one
+                // opens and folds with a click, which FugueCanvas takes), the names an entered
+                // group's face gives its inner ports (5.4), and the update chip of a group the library
+                // has a newer version of (5.3).
+                readonly property bool extrasNeeded: face.full && node.rowsMade && !node.collapsed
+                    && (node.updateAvailable !== ""
+                        || node.inputs.some(p => p.headerTop !== undefined || p.exposedAs !== undefined)
+                        || node.outputs.some(p => p.exposedAs !== undefined))
                 anchors.fill: parent
                 // The width its meta text takes from the title, set by the item while it is there.
                 property real metaWidth: 0
                 sourceComponent: Item {
                     Binding {
                         decor.metaWidth: meta.visible ? meta.width : 0
+                    }
+                    Repeater {
+                        model: decor.extrasNeeded ? node.inputs.filter(p => p.headerTop !== undefined) : []
+                        delegate: Text {
+                            required property var modelData
+                            objectName: "sectionHeader"
+                            readonly property bool advanced: modelData.header === "Advanced"
+                            x: 3 * face.u
+                            y: modelData.headerTop
+                            width: node.width - 6 * face.u
+                            height: node.canvasModel.rowHeight
+                            verticalAlignment: Text.AlignVCenter
+                            text: !advanced ? modelData.header
+                                : modelData.advancedOpen ? "\u25be " + qsTr("Advanced")
+                                : "\u25b8 " + qsTr("Advanced (%1)").arg(modelData.folded)
+                            elide: Text.ElideRight
+                            textFormat: Text.PlainText
+                            color: node.look.label
+                            font.pixelSize: node.look.captionSize
+                            font.weight: Font.DemiBold
+                        }
+                    }
+                    Repeater {
+                        model: !decor.extrasNeeded ? [] : node.inputs.filter(p => p.exposedAs !== undefined && !p.hidden)
+                            .concat(node.outputs.filter(p => p.exposedAs !== undefined))
+                        delegate: Text {
+                            required property var modelData
+                            objectName: "exposedMark"
+                            x: modelData.output ? node.width + 2 * face.u : -implicitWidth - 2 * face.u
+                            y: modelData.rowTop + (node.canvasModel.rowHeight - height) / 2
+                            text: modelData.output ? "\u2192 " + modelData.exposedAs : modelData.exposedAs + " \u2192"
+                            textFormat: Text.PlainText
+                            color: node.look.accent
+                            font.pixelSize: node.look.captionSize
+                        }
+                    }
+                    Rectangle {
+                        objectName: "updateChip"
+                        visible: decor.extrasNeeded && node.updateAvailable !== ""
+                        x: node.width - width
+                        y: -height - Math.round(face.u)
+                        width: updateText.implicitWidth + 3 * face.u
+                        height: updateText.implicitHeight + face.u
+                        radius: node.look.smallCorner
+                        color: node.look.accent
+                        Text {
+                            id: updateText
+                            anchors.centerIn: parent
+                            text: parent.visible ? qsTr("Update to %1").arg(node.updateAvailable) : ""
+                            textFormat: Text.PlainText
+                            color: node.look.accentForeground
+                            font.pixelSize: node.look.captionSize
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                node.canvasModel.select([node.nodeId], "replace")
+                                node.canvasModel.requestGroupUpdate()
+                            }
+                        }
                     }
 
                     // Collapsed: every input meets at the header's left end and every output at its
