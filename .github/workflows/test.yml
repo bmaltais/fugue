@@ -32,7 +32,8 @@ jobs:
           mkdir -p ~/.ssh && printf '%s\n' "$KEY" > ~/.ssh/templates && chmod 600 ~/.ssh/templates
           ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          GIT_SSH_COMMAND="ssh -i ~/.ssh/templates -o IdentitiesOnly=yes" \
+          # ssh reads the passwd home, not the container's $HOME: name both files.
+          GIT_SSH_COMMAND="ssh -i $HOME/.ssh/templates -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts" \
             git -c url."git@github.com:".insteadOf="https://github.com/" submodule update --init templates
 
       - name: Install the package's dependencies
