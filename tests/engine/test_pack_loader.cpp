@@ -171,16 +171,24 @@ private slots:
         QTest::newRow("newer format") << with("manifest", 2) << "unsupported_format_version";
         QTest::newRow("bad setup") << with("setup", QJsonObject{{"command", "uv sync"}}) << "invalid_document";
         QTest::newRow("reserved id") << with("id", "fugue") << "invalid_document";
+        QTest::newRow("look-alike fugue.") << with("id", "fugue.core") << "invalid_document";
+        QTest::newRow("look-alike local.") << with("id", "local.nodes") << "invalid_document";
+        QTest::newRow("trailing hyphen") << with("id", "io.a-.tools") << "invalid_document";
+        QTest::newRow("type id with @") << with("types", QJsonArray{QJsonObject{{"id", "io.github.alice.tools/x@5"}, {"version", 1}, {"kind", "data"}, {"name", "X"}}}) << "invalid_document";
+        QTest::newRow("type of another pack") << with("types", QJsonArray{QJsonObject{{"id", "io.github.bob.tools/x"}, {"version", 1}, {"kind", "data"}, {"name", "X"}}}) << "invalid_document";
+        QTest::newRow("empty extension") << with("types", QJsonArray{QJsonObject{{"id", "io.github.alice.tools/x"}, {"version", 1}, {"kind", "resource"}, {"name", "X"}, {"extensions", QJsonArray{""}}}}) << "invalid_document";
+        QTest::newRow("uppercase node folder") << with("nodes", QJsonArray{"Blend"}) << "invalid_document";
         QTest::newRow("reserved local") << with("id", "local") << "invalid_document";
     }
     void aBrokenPackJsonDisablesThePack() {
         QFETCH(QByteArray, text);
         QFETCH(QString, code);
         QTemporaryDir root;
-        write(root.path() + "/p/pack.json", text);
-        write(root.path() + "/p/a/node.json", QJsonDocument(nodeJson("io.github.alice.tools/a")).toJson());
+        const QString folder = root.path() + "/io.github.alice.tools";
+        write(folder + "/pack.json", text);
+        write(folder + "/a/node.json", QJsonDocument(nodeJson("io.github.alice.tools/a")).toJson());
         Registry registry;
-        const LoadedPack pack = loadPack(registry, root.path() + "/p");
+        const LoadedPack pack = loadPack(registry, folder);
         QVERIFY(!pack.enabled);
         QVERIFY2(hasCode(pack.errors, code), qPrintable(pack.errors.value(0).code + ": " + pack.errors.value(0).message));
         QVERIFY(registry.nodeTypes().isEmpty());
@@ -189,9 +197,9 @@ private slots:
 
     void aMissingPackJsonDisablesThePack() {
         QTemporaryDir root;
-        QDir().mkpath(root.path() + "/p");
+        QDir().mkpath(root.path() + "/io.github.alice.tools");
         Registry registry;
-        const LoadedPack pack = loadPack(registry, root.path() + "/p");
+        const LoadedPack pack = loadPack(registry, root.path() + "/io.github.alice.tools");
         QVERIFY(!pack.enabled);
         QVERIFY(hasCode(pack.errors, "file_not_found"));
     }
@@ -204,6 +212,8 @@ private slots:
         QTest::newRow("command without entry") << QJsonObject{{"kind", "command"}} << false;
         QTest::newRow("entry outside") << QJsonObject{{"kind", "command"}, {"entry", "../run.sh"}} << false;
         QTest::newRow("absolute entry") << QJsonObject{{"kind", "command"}, {"entry", "/bin/sh"}} << false;
+        QTest::newRow("mode not text") << QJsonObject{{"kind", "command"}, {"entry", "x"}, {"mode", 5}} << false;
+        QTest::newRow("native huge minor") << QJsonObject{{"kind", "native"}, {"entry", "libx.so"}, {"abi", "1.99999999999"}} << false;
         QTest::newRow("bad mode") << QJsonObject{{"kind", "command"}, {"entry", "x"}, {"mode", "daemon"}} << false;
         QTest::newRow("group") << QJsonObject{{"kind", "group"}, {"definition", "group.json"}} << true;
         QTest::newRow("group outside") << QJsonObject{{"kind", "group"}, {"definition", "../g.json"}} << false;
@@ -232,7 +242,7 @@ private slots:
     void aPackOnDiskCannotClaimABuiltInIdOrKind() {
         QTemporaryDir root;
         QJsonObject node = nodeJson("fugue/evil", "builtin");
-        const QString dir = makePack(root.path(), "p", packJson("fugue", {"evil"}), {{"evil", node}});
+        const QString dir = makePack(root.path(), "fugue", packJson("fugue", {"evil"}), {{"evil", node}});
         Registry registry;
         QVERIFY(!loadPack(registry, dir).enabled);
         QVERIFY(registry.nodeType("fugue/evil") == nullptr);
@@ -247,6 +257,61 @@ private slots:
         const LoadedPack pack = loadPack(registry, dir, PackOrigin::BuiltIn);
         QVERIFY2(pack.enabled && pack.disabled.isEmpty(), qPrintable(reasonOf(pack, "thing")));
         QVERIFY(registry.nodeType("fugue/thing") != nullptr);
+    }
+
+    void anAliasMustBelongToThePack_data() {
+        QTest::addColumn<QString>("alias");
+        QTest::addColumn<bool>("loads");
+        QTest::newRow("own") << "io.github.alice.tools/old-name" << true;
+        QTest::newRow("builtin") << "fugue/upscale" << false;
+        QTest::newRow("local") << "local/foo" << false;
+        QTest::newRow("another pack") << "io.github.bob.tools/old" << false;
+    }
+    void anAliasMustBelongToThePack() {
+        QFETCH(QString, alias);
+        QFETCH(bool, loads);
+        QTemporaryDir root;
+        const QString id = "io.github.alice.tools";
+        QJsonObject node = nodeJson(id + "/n");
+        node["aliases"] = QJsonArray{alias};
+        const QString dir = makePack(root.path(), id, packJson(id, {"n"}), {{"n", node}});
+        Registry registry;
+        const LoadedPack pack = loadPack(registry, dir);
+        QVERIFY2(pack.disabled.isEmpty() == loads, qPrintable(reasonOf(pack, "n")));
+        QCOMPARE(registry.nodeType(alias) != nullptr, loads);
+    }
+
+    void aPackFolderMustBeNamedAfterItsId() {
+        QTemporaryDir root;
+        const QString id = "io.github.alice.tools";
+        const QString dir = makePack(root.path(), "aaa", packJson(id, {"a"}), {{"a", nodeJson(id + "/a")}});
+        Registry registry;
+        const LoadedPack pack = loadPack(registry, dir);
+        QVERIFY(!pack.enabled);
+        QCOMPARE(registry.packVersion(id), QString());
+    }
+
+    void aSymbolicLinkAsNodeFolderIsRefused() {
+        QTemporaryDir root, elsewhere;
+        const QString id = "io.github.alice.tools";
+        const QString dir = makePack(root.path(), id, packJson(id, {"a"}), {});
+        writeJson(elsewhere.path() + "/node.json", nodeJson(id + "/a"));
+        QVERIFY(QFile::link(elsewhere.path(), dir + "/a"));
+        Registry registry;
+        const LoadedPack pack = loadPack(registry, dir);
+        QVERIFY(pack.enabled);
+        QVERIFY(reasonOf(pack, "a").contains("symbolic link"));
+        QVERIFY(registry.nodeTypes().isEmpty());
+    }
+
+    void aSearchPathGivenTwiceLoadsItsPacksOnce() {
+        QTemporaryDir root;
+        const QString id = "io.github.alice.tools";
+        makePack(root.path(), id, packJson(id, {"a"}), {{"a", nodeJson(id + "/a")}});
+        Registry registry;
+        const PackReport report = loadPacks(registry, {root.path(), root.path() + "/../" + QFileInfo(root.path()).fileName()});
+        QCOMPARE(report.packs.size(), 1);
+        QVERIFY(!report.hasProblems());
     }
 
     void aFolderPackJsonDoesNotListIsAWarning() {
@@ -266,8 +331,8 @@ private slots:
 
     void loadPacksReadsEverySubfolderOfEveryPath() {
         QTemporaryDir one, two;
-        makePack(one.path(), "a", packJson("io.github.a.tools", {"x"}), {{"x", nodeJson("io.github.a.tools/x")}});
-        makePack(two.path(), "b", packJson("io.github.b.tools", {"x"}), {{"x", nodeJson("io.github.b.tools/x")}});
+        makePack(one.path(), "io.github.a.tools", packJson("io.github.a.tools", {"x"}), {{"x", nodeJson("io.github.a.tools/x")}});
+        makePack(two.path(), "io.github.b.tools", packJson("io.github.b.tools", {"x"}), {{"x", nodeJson("io.github.b.tools/x")}});
         QDir().mkpath(one.path() + "/not-a-pack");
         write(one.path() + "/a-file.txt", "x");
         Registry registry;
@@ -281,10 +346,10 @@ private slots:
     void aPackIdFoundTwiceLoadsOnceFromTheEarlierPath() {
         QTemporaryDir one, two;
         const QString id = "io.github.a.tools";
-        makePack(one.path(), "a", packJson(id, {"x"}), {{"x", nodeJson(id + "/x")}});
+        makePack(one.path(), id, packJson(id, {"x"}), {{"x", nodeJson(id + "/x")}});
         QJsonObject newer = packJson(id, {"x"});
         newer["version"] = "9.0.0";
-        makePack(two.path(), "a", newer, {{"x", nodeJson(id + "/x")}});
+        makePack(two.path(), id, newer, {{"x", nodeJson(id + "/x")}});
         Registry registry;
         const PackReport report = loadPacks(registry, {one.path(), two.path()});
         QCOMPARE(report.packs.size(), 2);
@@ -299,7 +364,7 @@ private slots:
         const QString id = "io.github.alice.tools";
         QJsonObject bad = nodeJson(id + "/a");
         bad["version"] = "x";
-        makePack(root.path(), "a", packJson(id, {"a"}), {{"a", bad}});
+        makePack(root.path(), id, packJson(id, {"a"}), {{"a", bad}});
         Registry registry;
         const PackReport report = loadPacks(registry, {root.path()});
         QVERIFY(report.hasProblems());

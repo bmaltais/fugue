@@ -59,15 +59,15 @@ private slots:
     void aNodeFromAPackOnDiskShowsInSearch() {
         QTemporaryDir root;
         const QString id = "io.github.alice.tools";
-        QDir().mkpath(root.path() + "/p/sharpen");
+        QDir().mkpath(root.path() + "/io.github.alice.tools/sharpen");
         const auto put = [](const QString &path, const QByteArray &text) {
             QFile file(path);
             QVERIFY(file.open(QIODevice::WriteOnly));
             file.write(text);
         };
-        put(root.path() + "/p/pack.json", R"({"manifest": 1, "id": "io.github.alice.tools", "version": "1.2.0",
+        put(root.path() + "/io.github.alice.tools/pack.json", R"({"manifest": 1, "id": "io.github.alice.tools", "version": "1.2.0",
             "name": "Alice tools", "nodes": ["sharpen"]})");
-        put(root.path() + "/p/sharpen/node.json", R"({"manifest": 1, "id": "io.github.alice.tools/sharpen",
+        put(root.path() + "/io.github.alice.tools/sharpen/node.json", R"({"manifest": 1, "id": "io.github.alice.tools/sharpen",
             "version": "1.2.0", "name": "Sharpen Plus", "category": "Image/Filter", "keywords": ["unsharp"],
             "runtime": {"kind": "command", "entry": "./sharpen.sh"},
             "inputs": [{"name": "image", "type": "image"}], "outputs": [{"name": "image", "type": "image"}]})");

@@ -10,6 +10,7 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QRegularExpression>
+#include <QSet>
 
 #include <cstdio>
 
@@ -29,12 +30,12 @@ Error problem(const QString &code, const QString &message, Error::Severity sever
 Error invalid(const QString &message) { return problem(QStringLiteral("invalid_document"), message); }
 
 bool isPackId(const QString &id) {
-    static const QRegularExpression pattern(QStringLiteral("^[a-z][a-z0-9-]*(\\.[a-z0-9][a-z0-9-]*)+$"));
+    static const QRegularExpression pattern(QStringLiteral("^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$"));
     return pattern.match(id).hasMatch();
 }
 
 bool isFolderName(const QString &name) {
-    static const QRegularExpression pattern(QStringLiteral("^[A-Za-z0-9_][A-Za-z0-9._-]*$"));
+    static const QRegularExpression pattern(QStringLiteral("^[a-z][a-z0-9-]*$"));
     return pattern.match(name).hasMatch();
 }
 
@@ -70,7 +71,8 @@ std::optional<PackManifest> parsePack(const QJsonObject &json, PackOrigin origin
 
     pack.id = json.value("id").toString();
     const bool reserved = pack.id == QLatin1String("fugue") || pack.id == QLatin1String("local");
-    if (reserved && origin == PackOrigin::Disk)
+    if (origin == PackOrigin::Disk && (reserved || pack.id.startsWith(QLatin1String("fugue.")) ||
+                                       pack.id.startsWith(QLatin1String("local."))))
         errors << invalid(QStringLiteral("The pack id \"%1\" belongs to Fugue; a pack folder cannot use it.").arg(pack.id));
     else if (!(isPackId(pack.id) || (reserved && origin == PackOrigin::BuiltIn)))
         errors << invalid(QStringLiteral("pack.json \"id\" must be lowercase reverse-DNS, like io.github.alice.tools."));
@@ -114,12 +116,17 @@ std::optional<PackManifest> parsePack(const QJsonObject &json, PackOrigin origin
                 const QString kind = type.value("kind").toString();
                 DeclaredPortType declared;
                 const auto parsed = PortType::parse(version > 1 ? QStringLiteral("%1@%2").arg(id).arg(version) : id);
-                if (!entry.isObject() || !parsed || parsed->isBuiltin() || parsed->isAny() ||
+                const QJsonValue extensions = type.value("extensions");
+                bool extensionsOk = extensions.isUndefined() || extensions.isArray();
+                for (const QJsonValue &extension : extensions.toArray())
+                    extensionsOk = extensionsOk && extension.isString() && !extension.toString().isEmpty();
+                if (!entry.isObject() || !extensionsOk || id.contains(QLatin1Char('@')) || !parsed || parsed->isBuiltin() || parsed->isAny() ||
                     !id.startsWith(pack.id + QLatin1Char('/')) || !versionValue.isDouble() || version < 1 ||
                     (kind != QLatin1String("resource") && kind != QLatin1String("data")) ||
                     type.value("name").toString().isEmpty()) {
                     errors << invalid(QStringLiteral("pack.json \"types\" entry %1 needs an id %2/<name>, a version "
-                                                     "of 1 or more, a kind of \"resource\" or \"data\" and a name.")
+                                                     "of 1 or more, a kind of \"resource\" or \"data\", a name and, if any, "
+                                                     "extensions as a list of text.")
                                           .arg(id.isEmpty() ? QStringLiteral("(no id)") : QStringLiteral("\"%1\"").arg(id), pack.id));
                     continue;
                 }
@@ -169,8 +176,8 @@ QString runtimeProblem(const QJsonObject &runtime, PackOrigin origin) {
     if (kind == QLatin1String("command")) {
         if (const QString bad = path("entry"); !bad.isEmpty())
             return bad;
-        const QString mode = runtime.value("mode").toString(QStringLiteral("oneshot"));
-        if (mode != QLatin1String("oneshot") && mode != QLatin1String("persistent"))
+        const QJsonValue mode = runtime.value("mode");
+        if (!mode.isUndefined() && mode != QLatin1String("oneshot") && mode != QLatin1String("persistent"))
             return QStringLiteral("runtime.mode must be \"oneshot\" or \"persistent\".");
         for (const char *key : {"idle_timeout_s", "timeout_s"})
             if (runtime.contains(key) && !isPositiveNumber(runtime.value(key)))
@@ -182,7 +189,7 @@ QString runtimeProblem(const QJsonObject &runtime, PackOrigin origin) {
     if (kind == QLatin1String("native")) {
         if (const QString bad = path("entry"); !bad.isEmpty())
             return bad;
-        static const QRegularExpression abiPattern(QStringLiteral("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"));
+        static const QRegularExpression abiPattern(QStringLiteral("^(0|[1-9][0-9]{0,3})\\.(0|[1-9][0-9]{0,3})$"));
         const auto match = abiPattern.match(runtime.value("abi").toString());
         if (!match.hasMatch())
             return QStringLiteral("runtime.abi must be \"<major>.<min_host_minor>\", like \"1.0\".");
@@ -225,7 +232,15 @@ QString loadNode(Registry &registry, const PackManifest &pack, const QString &fo
         return read.error().code == QLatin1String("file_not_found")
                    ? QStringLiteral("%1/node.json is missing.").arg(name)
                    : reasonOf(read.errors());
+    if (QFileInfo(folder + QLatin1Char('/') + name).isSymLink())
+        return QStringLiteral("The node folder \"%1\" is a symbolic link; put the folder itself in the pack.").arg(name);
     const QJsonObject &manifest = read.value();
+    // An alias is an old id of this very node: one in another pack's namespace (or fugue/ or
+    // local/) would make a workflow of that pack, or a built-in, resolve to this node.
+    for (const QJsonValue &alias : manifest.value("aliases").toArray())
+        if (!alias.toString().startsWith(pack.id + QLatin1Char('/')))
+            return QStringLiteral("The alias \"%1\" must start with \"%2/\": a node can only be known by old ids of its own pack.")
+                .arg(alias.toString(), pack.id);
     const QString id = manifest.value("id").toString();
     if (id != pack.id + QLatin1Char('/') + name)
         return QStringLiteral("The node id \"%1\" must be \"%2/%3\": the pack's id, then the folder name.")
@@ -252,13 +267,14 @@ QString packsDir() { return dataDir() + QStringLiteral("/packs"); }
 QStringList packSearchPaths() {
     QStringList paths{packsDir()};
     for (const QString &extra : currentSettings().packPaths)
-        paths << QDir::cleanPath(expandHome(extra));
+        if (const QString path = QDir::cleanPath(expandHome(extra)); QDir::isAbsolutePath(path))
+            paths << path; // a relative path would mean a different folder to the window and the CLI
     return paths;
 }
 
 bool PackReport::hasProblems() const {
     for (const LoadedPack &pack : packs)
-        if (!pack.enabled || !pack.disabled.isEmpty())
+        if (!pack.enabled || !pack.disabled.isEmpty() || hasErrors(pack.errors))
             return true;
     return false;
 }
@@ -278,6 +294,11 @@ LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin
     loaded.name = read.value().value("name").toString();
     if (!pack)
         return loaded;
+    if (origin == PackOrigin::Disk && QFileInfo(folder).fileName() != pack->id) {
+        loaded.errors << invalid(QStringLiteral("The folder is named \"%1\" but pack.json says the id is %2; a pack lives in a "
+                                                "folder named after its id.").arg(QFileInfo(folder).fileName(), pack->id));
+        return loaded;
+    }
     if (!registry.packVersion(pack->id).isEmpty()) {
         loaded.errors << invalid(QStringLiteral("A pack with the id %1 is already loaded (version %2); this one is skipped.")
                                      .arg(pack->id, registry.packVersion(pack->id)));
@@ -313,10 +334,12 @@ LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin
 
 PackReport loadPacks(Registry &registry, const QStringList &searchPaths) {
     PackReport report;
+    QSet<QString> seen;
     for (const QString &path : searchPaths) {
         const QDir dir(path);
-        if (!dir.exists())
+        if (!dir.exists() || seen.contains(dir.canonicalPath()))
             continue;
+        seen.insert(dir.canonicalPath());
         for (const QFileInfo &entry : dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
             if (entry.fileName().startsWith(QLatin1Char('.')))
                 continue;

@@ -30,7 +30,8 @@ constexpr int kHostAbiMinor = 0;
 QString packsDir();
 
 // The folders to look in, in order: packsDir(), then settings.json's `pack_paths`
-// (~ expanded). A path holds packs, one per subfolder.
+// (~ expanded; a relative path is ignored). A path holds packs, one per subfolder, each
+// in a folder named after the pack's id.
 QStringList packSearchPaths();
 
 enum class PackOrigin {
@@ -57,7 +58,7 @@ struct LoadedPack {
 
 struct PackReport {
     QList<LoadedPack> packs;   // in search order
-    bool hasProblems() const;  // any pack disabled or any node disabled
+    bool hasProblems() const;  // any pack or node disabled, or any error (not warning) in a pack
 };
 
 // Loads one pack folder into the registry: its declared types, then its nodes, and sets the
