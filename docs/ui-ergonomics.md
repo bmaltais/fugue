@@ -81,7 +81,7 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 
 - Control: File > Browse templates (`file.templates`, `src/menu/menus.cpp`), after Open the workflow on the clipboard, before the separator; and the dialog it opens, `src/workflow/TemplatesDialog.qml`: categories on the left (7u rows, as Settings' pages), a search field, cards in a grid (56u or wider, the preview at 16:10, title, two lines of description, a status line in the error color when models or packs are missing).
 - Old: none; the examples were files to open by hand.
-- New: the menu entry; the dialog, focused on its search field. The whole card is the press target; Enter opens the first match from the field, or the card the arrows reached. Escape or the scrim closes it.
+- New: the menu entry; the dialog, focused on its search field. The whole card is the press target; Enter opens the first match from the field, or the card the arrows reached (Down from the field goes to the first card). The category tabs take Tab focus; Up, Down, Space and Enter pick one. A card's status line names the missing files on hover. Escape or the scrim closes it (Popup's default close policy).
 - Why: picking a template is recognition, not recall, so the preview leads the card (Hick: one look per card, not a list of names); the search takes the keys at once. The status says before opening what the machine lacks.
 - Rule: Learned place (the File items before it keep their order). Floor (a card is far above 24px; the tabs are 7u = 28px). Primary (one action, open a card, with no other button competing). Posture: a transient dialog, larger targets.
 

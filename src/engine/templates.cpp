@@ -14,6 +14,8 @@
 
 #include "engine/atomic_file.h"
 #include "engine/document.h"
+#include "engine/file_inputs.h"
+#include "engine/file_roots.h"
 #include "engine/ids.h"
 #include "engine/node_type.h"
 #include "engine/registry.h"
@@ -25,21 +27,31 @@ namespace {
 const QString kAbout = QStringLiteral("template.json");
 const QString kWorkflow = QStringLiteral("workflow.fugue");
 
+// A template folder that is not as 11.10 says (no template.json, no title).
 Error problem(const QString &message, const QString &hint = {}) {
     return makeError(QStringLiteral("invalid_document"), message, hint);
 }
 
-// A JSON object file, or why it is not one.
+// `error` with the template it is about named first; its code kept.
+Error named(const QString &id, Error error) {
+    error.message = QStringLiteral("Template %1: %2").arg(id, error.message);
+    return error;
+}
+
+// A JSON object file, or why it is not one (13.3's codes: permission_denied, invalid_json,
+// invalid_document).
 Result<QJsonObject> readObject(const QString &path) {
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly))
-        return problem(QStringLiteral("%1 cannot be read: %2.").arg(path, file.errorString()));
+        return makeError(QStringLiteral("permission_denied"),
+                         QStringLiteral("%1 cannot be read: %2.").arg(path, file.errorString()));
     QJsonParseError parsed;
     const QJsonDocument json = QJsonDocument::fromJson(file.readAll(), &parsed);
-    if (parsed.error != QJsonParseError::NoError || !json.isObject())
-        return problem(QStringLiteral("%1 is not a JSON object: %2.")
-                           .arg(path, parsed.error != QJsonParseError::NoError ? parsed.errorString()
-                                                                               : QStringLiteral("not an object")));
+    if (parsed.error != QJsonParseError::NoError)
+        return makeError(QStringLiteral("invalid_json"),
+                         QStringLiteral("%1 is not JSON: %2.").arg(path, parsed.errorString()));
+    if (!json.isObject())
+        return problem(QStringLiteral("%1 is not a JSON object.").arg(path));
     return json.object();
 }
 
@@ -48,38 +60,30 @@ struct FileInput {
     QString node;
     QString text;
 };
-QList<FileInput> fileInputs(const Document &document, const Registry &registry) {
+QList<FileInput> fileInputs(Document document, const Registry &registry) {
     QList<FileInput> out;
-    const auto scan = [&](const Nodes &nodes) {
-        for (auto it = nodes.begin(); it != nodes.end(); ++it) {
-            const NodeType *type = registry.nodeType(it->type);
-            if (!type)
-                continue;
-            for (auto in = it->inputs.begin(); in != it->inputs.end(); ++in) {
-                const InputSpec *spec = type->input(in.key());
-                if (spec && spec->widget() == QLatin1String("file") && in->kind() == InputValue::Kind::Literal &&
-                    in->literal().isString() && !in->literal().toString().trimmed().isEmpty())
-                    out.append({it.key(), in->literal().toString().trimmed()});
-            }
-        }
-    };
-    scan(document.graph.nodes);
-    for (const GroupDefinition &group : document.groups)
-        scan(group.nodes);
+    forEachFileLiteral(document, registry, [&](const QString &node, const QString &, InputValue &value) {
+        const QString text = value.literal().toString().trimmed();
+        if (!text.isEmpty())
+            out.append({node, text});
+    });
     return out;
 }
 
-// A relative path that stays inside its folder ("inputs/cat.png", not "../x" or "/x").
-bool staysInside(const QString &text) {
-    const QString clean = QDir::cleanPath(text);
-    return !QDir::isAbsolutePath(text) && !text.startsWith(QLatin1Char('~')) && clean != QLatin1String("..") &&
-           !clean.startsWith(QLatin1String("../"));
+// The file a template's relative `text` names inside its `folder`, or empty when it names
+// none there: an absolute or "~" path, or one that leads out, by `..` or by a link.
+QString sampleIn(const QString &folder, const QString &text) {
+    if (QDir::isAbsolutePath(text) || text.startsWith(QLatin1Char('~')))
+        return {};
+    const QString root = canonicalPath(folder);
+    const QString path = canonicalPath(QDir(folder).filePath(text));
+    return !root.isEmpty() && !path.isEmpty() && isInside(path, root) && QFileInfo(path).isFile() ? path : QString();
 }
 
-// Whether this Fugue can open `document` as it was made (3.6), and the packs it lacks. A
-// built-in node this Fugue lacks, or has at another major or an older minor, means a newer
-// Fugue made it.
-bool opensHere(const Document &document, const Registry &registry, QStringList *missingPacks) {
+// Whether this Fugue can open `document` as it was made (3.6), and the packs it needs: not
+// installed, or installed at another major or an older minor. A built-in node this Fugue lacks,
+// or has at such a version, means a newer Fugue made it.
+bool opensHere(const Document &document, const Registry &registry, QStringList *neededPacks) {
     QSet<QString> packs;
     bool fits = true;
     const auto scan = [&](const Nodes &nodes) {
@@ -100,8 +104,8 @@ bool opensHere(const Document &document, const Registry &registry, QStringList *
     scan(document.graph.nodes);
     for (const GroupDefinition &group : document.groups)
         scan(group.nodes);
-    *missingPacks = QStringList(packs.begin(), packs.end());
-    missingPacks->sort();
+    *neededPacks = QStringList(packs.begin(), packs.end());
+    neededPacks->sort();
     return fits;
 }
 
@@ -166,6 +170,9 @@ void TemplateLibrary::scan(QList<Template> *out, Errors *problems) const {
                 if (!hasAbout && !QFileInfo(folder.filePath(kWorkflow)).isFile())
                     continue; // not a template folder
                 t.id = entry.fileName();
+                if (seen.contains(t.id))
+                    continue; // the person's own, listed first, wins, even one that is broken
+                seen.insert(t.id);
                 t.folder = entry.absoluteFilePath();
                 t.workflow = folder.filePath(kWorkflow);
                 t.preview = previewOf(t.folder);
@@ -177,7 +184,7 @@ void TemplateLibrary::scan(QList<Template> *out, Errors *problems) const {
                 const Result<QJsonObject> read = readObject(folder.filePath(kAbout));
                 if (!read) {
                     if (problems)
-                        problems->append(problem(QStringLiteral("Template %1: %2").arg(t.id, read.error().message)));
+                        problems->append(named(t.id, read.error()));
                     continue;
                 }
                 about = read.value();
@@ -189,27 +196,28 @@ void TemplateLibrary::scan(QList<Template> *out, Errors *problems) const {
                 }
             } else if (root.own && entry.suffix() == QLatin1String("fugue")) {
                 t.id = entry.completeBaseName();
+                if (seen.contains(t.id))
+                    continue;
+                seen.insert(t.id);
                 t.folder = entry.absolutePath();
                 t.workflow = entry.absoluteFilePath();
                 t.title = t.id;
             } else {
                 continue;
             }
-            if (seen.contains(t.id))
-                continue; // the person's own, listed first, wins
 
             const Result<Document> document = Document::loadFile(t.workflow);
             if (!document) {
                 if (problems)
-                    problems->append(problem(QStringLiteral("Template %1: %2").arg(t.id, document.errors().first().message)));
+                    problems->append(named(t.id, document.errors().first()));
                 continue;
             }
-            if (m_registry && !opensHere(*document, *m_registry, &t.missingPacks))
+            if (m_registry && !opensHere(*document, *m_registry, &t.neededPacks))
                 continue;
             if (m_registry && problems)
                 for (const FileInput &input : fileInputs(*document, *m_registry))
-                    if (!staysInside(input.text) || !QFileInfo(QDir(t.folder).filePath(input.text)).isFile())
-                        problems->append(problem(
+                    if (sampleIn(t.folder, input.text).isEmpty())
+                        problems->append(makeError(QStringLiteral("file_not_found"),
                             QStringLiteral("Template %1: node %2 names %3, which is not a file in the template's folder.")
                                 .arg(t.id, input.node, input.text),
                             QStringLiteral("Put the sample in the template's inputs folder and name it inputs/<name>.")));
@@ -221,7 +229,6 @@ void TemplateLibrary::scan(QList<Template> *out, Errors *problems) const {
             for (const QJsonValue tag : about.value(QStringLiteral("tags")).toArray())
                 t.tags << tag.toString();
             t.models = document->models();
-            seen.insert(t.id);
             found.append({t, category != categories.end() ? category->first : int(categories.size())});
         }
     }
@@ -260,61 +267,88 @@ std::optional<Template> TemplateLibrary::find(const QString &id) const {
 }
 
 Errors TemplateLibrary::copyTo(const Template &chosen, const QString &path) const {
+    const Error exists = makeError(QStringLiteral("usage"), QStringLiteral("%1 already exists.").arg(path),
+                                   QStringLiteral("Choose a new file name; fugue does not overwrite."));
     if (QFileInfo::exists(path))
-        return {makeError(QStringLiteral("usage"), QStringLiteral("%1 already exists.").arg(path),
-                          QStringLiteral("Choose a new file name; fugue does not overwrite."))};
+        return {exists};
     QFile source(chosen.workflow);
     if (!source.open(QIODevice::ReadOnly))
         return {makeError(QStringLiteral("file_not_found"),
                           QStringLiteral("%1 cannot be read: %2.").arg(chosen.workflow, source.errorString()))};
-    const QByteArray workflow = source.readAll();
-    const Result<Document> document = Document::load(workflow);
+    QByteArray workflow = source.readAll();
+    Result<Document> document = Document::load(workflow);
     if (!document)
         return document.errors();
 
-    // The samples to copy, each checked before anything is written.
+    // Where each sample goes, beside the new file under the name the workflow gives it; a
+    // different file already there keeps its name, and the sample takes `-2`, `-3`... with the
+    // workflow's literal changed to match. Planned before anything is written.
     const QDir to = QFileInfo(path).absoluteDir();
+    QHash<QString, QString> renamed;              // literal -> new literal
     QList<std::pair<QString, QByteArray>> copies; // target, bytes
     QSet<QString> planned;
     for (const FileInput &input : m_registry ? fileInputs(*document, *m_registry) : QList<FileInput>()) {
-        if (!staysInside(input.text) || planned.contains(input.text))
+        if (planned.contains(input.text))
             continue;
-        QFile sample(QDir(chosen.folder).filePath(input.text));
-        if (!sample.open(QIODevice::ReadOnly))
+        planned.insert(input.text);
+        QFile sample(sampleIn(chosen.folder, input.text));
+        if (sample.fileName().isEmpty() || !sample.open(QIODevice::ReadOnly))
             continue; // a sample the template lacks: the node says so when it runs
         const QByteArray bytes = sample.readAll();
-        const QString target = to.filePath(input.text);
-        QFile there(target);
-        if (there.exists()) {
+        const QFileInfo wanted(QDir::cleanPath(input.text));
+        QString literal = wanted.filePath();
+        for (int n = 2;; ++n) {
+            QFile there(to.filePath(literal));
+            if (!there.exists())
+                break;
             if (there.open(QIODevice::ReadOnly) && there.readAll() == bytes)
-                continue; // a copy made before
-            return {makeError(QStringLiteral("usage"),
-                              QStringLiteral("%1 is already there with other content.").arg(target),
-                              QStringLiteral("Write the workflow into another folder."))};
+                break; // a copy made before
+            const QString suffix = wanted.suffix().isEmpty() ? QString() : QLatin1Char('.') + wanted.suffix();
+            literal = QDir(wanted.path()).filePath(QStringLiteral("%1-%2%3").arg(wanted.completeBaseName()).arg(n).arg(suffix));
+            literal = QDir::cleanPath(literal);
         }
-        planned.insert(input.text);
-        copies.append({target, bytes});
+        if (literal != input.text)
+            renamed.insert(input.text, literal);
+        if (!QFileInfo::exists(to.filePath(literal)))
+            copies.append({to.filePath(literal), bytes});
     }
-    for (const auto &[target, bytes] : copies) {
+    if (!renamed.isEmpty()) {
+        forEachFileLiteral(*document, *m_registry, [&](const QString &, const QString &, InputValue &value) {
+            const QString text = value.literal().toString().trimmed();
+            if (renamed.contains(text))
+                value = InputValue::literal(renamed.value(text));
+        });
+        workflow = document->save();
+    }
+
+    // The samples, then the workflow; a failure removes the samples this wrote.
+    QStringList written;
+    const auto undo = [&written](Errors errors) {
+        for (const QString &file : std::as_const(written))
+            QFile::remove(file);
+        return errors;
+    };
+    const auto write = [](const QString &target, const QByteArray &bytes) -> Result<bool> {
         const QString folder = QFileInfo(target).absolutePath();
         if (Errors made = makeFolder(folder); !made.isEmpty())
             return made;
         PartialFile partial(folder, QFileInfo(target).fileName());
-        if (Errors written = partial.write(bytes, target); !written.isEmpty())
-            return written;
-        const Result<bool> committed = partial.commit(target, Overwrite::Never);
-        if (!committed)
-            return committed.errors();
+        if (Errors failed = partial.write(bytes, target); !failed.isEmpty())
+            return failed;
+        return partial.commit(target, Overwrite::Never);
+    };
+    for (const auto &[target, bytes] : copies) {
+        const Result<bool> done = write(target, bytes);
+        if (!done)
+            return undo(done.errors());
+        if (done.value())
+            written << target;
     }
-    PartialFile partial(to.absolutePath(), QFileInfo(path).fileName());
-    if (Errors written = partial.write(workflow, path); !written.isEmpty())
-        return written;
-    const Result<bool> committed = partial.commit(path, Overwrite::Never);
-    if (!committed)
-        return committed.errors();
-    if (!committed.value())
-        return {makeError(QStringLiteral("usage"), QStringLiteral("%1 already exists.").arg(path),
-                          QStringLiteral("Choose a new file name; fugue does not overwrite."))};
+    const Result<bool> done = write(path, workflow);
+    if (!done)
+        return undo(done.errors());
+    if (!done.value())
+        return undo({exists});
     return {};
 }
 

@@ -60,6 +60,10 @@ _Avoid_: full id, node path
 A saved document: a graph, its layout, and what it requires.
 _Avoid_: project, scene, patch
 
+**Template**:
+A ready-to-run workflow listed in the window and by `fugue template list`: a folder of the workflow, its description, a preview and sample pictures. Opening one makes a new workflow from it; the template itself is never edited. Bundled ones come from the fugue-workflows repo; a person keeps their own in ~/Documents/Fugue/templates.
+_Avoid_: example, preset, starter
+
 **Layout**:
 The positions, sizes, colors, comments and frames of a workflow. Optional; removing it never changes what the graph does.
 _Avoid_: canvas state, UI state

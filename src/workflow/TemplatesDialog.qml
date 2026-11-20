@@ -115,6 +115,13 @@ Popup {
                     Accessible.role: Accessible.PageTab
                     Accessible.name: modelData.title
                     Accessible.selected: current
+                    activeFocusOnTab: true
+                    border.width: activeFocus ? 1 : 0
+                    border.color: dialog.look.accent
+                    Keys.onSpacePressed: dialog.category = modelData.id
+                    Keys.onReturnPressed: dialog.category = modelData.id
+                    Keys.onUpPressed: if (index > 0) dialog.category = dialog.categories[index - 1].id
+                    Keys.onDownPressed: if (index < dialog.categories.length - 1) dialog.category = dialog.categories[index + 1].id
                     HoverHandler { id: tabHover }
                     TapHandler { onTapped: dialog.category = tab.modelData.id }
                     Text {
@@ -153,9 +160,10 @@ Popup {
                 Layout.fillWidth: true
                 placeholderText: qsTr("Search templates")
                 font.pixelSize: dialog.look.textSize
-                Keys.onDownPressed: grid.forceActiveFocus()
-                Keys.onReturnPressed: if (dialog.shown.length > 0) dialog.openTemplate(dialog.shown[grid.currentIndex >= 0 ? grid.currentIndex : 0].id)
-                Keys.onEnterPressed: if (dialog.shown.length > 0) dialog.openTemplate(dialog.shown[grid.currentIndex >= 0 ? grid.currentIndex : 0].id)
+                // Enter opens the first match; Down goes to the cards.
+                Keys.onDownPressed: { grid.currentIndex = 0; grid.forceActiveFocus() }
+                Keys.onReturnPressed: if (dialog.shown.length > 0) dialog.openTemplate(dialog.shown[0].id)
+                Keys.onEnterPressed: if (dialog.shown.length > 0) dialog.openTemplate(dialog.shown[0].id)
             }
 
             GridView {
@@ -244,6 +252,10 @@ Popup {
                                 elide: Text.ElideRight
                                 color: dialog.look.error
                                 font.pixelSize: dialog.look.captionSize
+                                // Which files, on hover; opening it names where each goes.
+                                ToolTip.visible: statusHover.hovered && cell.modelData.missingModels.length > 0
+                                ToolTip.text: cell.modelData.missingModels.map(m => m.name).join("\n")
+                                HoverHandler { id: statusHover }
                             }
                         }
                     }

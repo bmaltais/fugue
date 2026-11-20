@@ -44,12 +44,12 @@ Reply templateList(const Command &, Context &context) {
                                   {"workflow", t.workflow},
                                   {"preview", t.preview},
                                   {"models", needs},
-                                  {"missing_packs", QJsonArray::fromStringList(t.missingPacks)}});
+                                  {"needed_packs", QJsonArray::fromStringList(t.neededPacks)}});
         QString line = QStringLiteral("%1  %2").arg(t.id, t.title);
         if (missing)
             line += QStringLiteral("  (%1 of %2 models missing)").arg(missing).arg(t.models.size());
-        if (!t.missingPacks.isEmpty())
-            line += QStringLiteral("  (needs %1)").arg(t.missingPacks.join(QStringLiteral(", ")));
+        if (!t.neededPacks.isEmpty())
+            line += QStringLiteral("  (needs %1)").arg(t.neededPacks.join(QStringLiteral(", ")));
         lines << line;
     }
     // What is wrong with a template (a broken one is left out): warnings, so the templates
@@ -76,8 +76,21 @@ Reply workflowFromTemplate(const Command &command, Context &context) {
     const Errors errors = library.copyTo(*chosen, path);
     if (!errors.isEmpty())
         return Reply::failure(errors);
-    return Reply::success(QJsonObject{{"file", path}, {"template", chosen->id}},
-                          QStringLiteral("Wrote %1 from the template %2.").arg(path, chosen->title));
+    // What it still needs here, as opening it in the window says (4.3).
+    FileHashes hashes(FileHashes::defaultPath());
+    QJsonArray missing;
+    QStringList lines{QStringLiteral("Wrote %1 from the template %2.").arg(path, chosen->title)};
+    for (const MissingModel &model : ModelLibrary::current(&context.registry).missing(chosen->models, hashes)) {
+        QJsonObject entry = model.handle;
+        entry.insert("source", model.source);
+        entry.insert("folder", model.folder);
+        missing.append(entry);
+        lines << QStringLiteral("Missing model %1: get it from %2 and put it in %3.")
+                     .arg(model.handle.value("name").toString(),
+                          model.source.isEmpty() ? QStringLiteral("its maker") : model.source, model.folder);
+    }
+    return Reply::success(QJsonObject{{"file", path}, {"template", chosen->id}, {"missing_models", missing}},
+                          lines.join('\n'));
 }
 
 } // namespace fugue::cli

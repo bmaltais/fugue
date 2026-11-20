@@ -14,7 +14,8 @@
 // What a template needs is read from its workflow, never written twice: the models it names
 // (Document::models()) and the node versions it was made with. A template whose built-in
 // nodes this Fugue lacks, or has at another major or an older minor (3.6), was made by a newer
-// Fugue and is not listed; one whose pack is not installed is listed with the pack named.
+// Fugue and is not listed; one whose pack is not installed, or installed at another version, is
+// listed with the pack named.
 //
 // The bundled templates (the fugue-workflows repo, at the commit a Fugue release pins) and the
 // person's own (~/Documents/Fugue/templates) are two roots of the same kind. The person's own
@@ -50,7 +51,7 @@ struct Template {
     QStringList tags;
     bool own = false;
     QJsonArray models;         // Document::models(): resource, hash, name, source
-    QStringList missingPacks;  // namespaces of the packs it uses that are not installed
+    QStringList neededPacks;   // namespaces of its packs not installed, or installed at another version
 };
 
 class TemplateLibrary {
@@ -75,9 +76,9 @@ public:
     std::optional<Template> find(const QString &id) const;
 
     // Writes the template as a new workflow file at `path` (never replacing one), with its
-    // sample inputs copied into the `inputs` folder beside it, so the names it gives them
-    // still lead to them. A file of the same name already in that folder with other bytes is
-    // a failure, and nothing is written.
+    // sample inputs copied beside it under the names the workflow gives them (`inputs/<name>`).
+    // A different file already at such a name stays: the sample takes `-2`, `-3`... and the
+    // workflow names that instead. On a failure nothing it wrote is left.
     Errors copyTo(const Template &chosen, const QString &path) const;
 
 private:

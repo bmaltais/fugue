@@ -1663,7 +1663,8 @@ list`, and copied out by opening one or by `fugue workflow new <file> --template
 - What a template needs is read from its workflow, not written again: its models (handles, with
   each `source` in `requires.models`) and the node versions it was made with. A template whose
   built-in nodes this Fugue lacks, or has at another major or an older minor ([3.6](#36-versions)),
-  is not listed; one whose pack is not installed is listed with the pack named.
+  is not listed; one whose pack is not installed, or installed at another version, is listed
+  with the pack named.
 - Two roots: the person's own folder (`~/Documents/Fugue/templates`, listed first, where a plain
   `.fugue` file is a template too) and the bundled one. The bundled templates are the
   `bmaltais/fugue-workflows` repo, a submodule (`templates/`) at the commit a release pins,
@@ -1673,7 +1674,10 @@ list`, and copied out by opening one or by `fugue workflow new <file> --template
   preview and what this machine lacks (models, packs; a check, reading no model file). Opening
   one makes a new unsaved tab named after it, its samples taken into the inputs folder as a
   pasted image is, so it runs as it opens and a save keeps it portable. The CLI writes the
-  workflow with its samples copied into `inputs/` beside it, never replacing a file.
+  workflow with its samples copied into `inputs/` beside it, never replacing a file: a sample
+  whose name is taken by another file takes `-2`, `-3`..., and the workflow names that. A sample
+  must be a file inside its template's folder; one that leads out, by `..` or a link, is not read.
+  The person's own template wins over a bundled one of the same id, even when it is broken.
 
 ---
 

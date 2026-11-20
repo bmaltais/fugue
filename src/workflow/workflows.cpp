@@ -403,8 +403,8 @@ QVariantList Workflows::templates() const {
         QStringList status;
         if (!missing.isEmpty())
             status << tr("Models missing: %1 of %2").arg(missing.size()).arg(t.models.size());
-        if (!t.missingPacks.isEmpty())
-            status << tr("Packs missing: %1").arg(t.missingPacks.join(QStringLiteral(", ")));
+        if (!t.neededPacks.isEmpty())
+            status << tr("Packs needed: %1").arg(t.neededPacks.join(QStringLiteral(", ")));
         out.append(QVariantMap{{"id", t.id},
                                {"title", t.title},
                                {"description", t.description},
@@ -414,7 +414,7 @@ QVariantList Workflows::templates() const {
                                {"preview", t.preview.isEmpty() ? QString() : QUrl::fromLocalFile(t.preview).toString()},
                                {"own", t.own},
                                {"missingModels", missing},
-                               {"missingPacks", t.missingPacks},
+                               {"neededPacks", t.neededPacks},
                                {"status", status.join(QStringLiteral(" · "))}});
     }
     return out;
@@ -710,15 +710,18 @@ void registerFileCommands(CommandRegistry &registry, Workflows &workflows) {
     registry.setHandler("file.new", [&workflows] { workflows.newWorkflow(); });
     registry.setHandler("file.open", [&workflows] { emit workflows.openDialogRequested(); });
     registry.setHandler("file.save", [&workflows] { workflows.save(); });
+    // The Templates dialog is the window's (Main.qml), like Settings.
+    const auto browseTemplates = [&registry] { emit registry.windowRequested(QStringLiteral("file.templates")); };
     if (!registry.contains("file.templates")) {
         CommandSpec spec;
         spec.id = QStringLiteral("file.templates");
         spec.description = QT_TRANSLATE_NOOP("Command", "Browse templates");
         spec.versus = QStringLiteral("same");
-        const QString problem =
-            registry.add(spec, [&registry] { emit registry.windowRequested(QStringLiteral("file.templates")); });
+        const QString problem = registry.add(spec, browseTemplates);
         if (!problem.isEmpty())
             qWarning("Fugue: %s", qPrintable(problem));
+    } else {
+        registry.setHandler("file.templates", browseTemplates);
     }
     registry.setHandler("file.save-as", [&workflows] { emit workflows.saveAsRequested(); });
     if (!registry.contains("file.open-clipboard")) {

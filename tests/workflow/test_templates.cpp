@@ -23,6 +23,7 @@
 #include "engine/paths.h"
 #include "engine/registry.h"
 #include "engine/templates.h"
+#include "menu/menu_commands.h"
 #include "nodes/builtin.h"
 #include "qml_app.h"
 #include "theme.h"
@@ -163,7 +164,7 @@ private slots:
 
         const QList<Template> listed = f.library().list();
         QCOMPARE(ids(listed), (QStringList{"packed", "older"}));
-        QCOMPARE(listed.at(0).missingPacks, QStringList{"io.example.tools"});
+        QCOMPARE(listed.at(0).neededPacks, QStringList{"io.example.tools"});
         QVERIFY(f.library().problems().isEmpty());
     }
 
@@ -221,13 +222,39 @@ private slots:
         QVERIFY(f.library().copyTo(chosen, out.filePath("again.fugue")).isEmpty());
         QCOMPARE(f.library().copyTo(chosen, out.filePath("mine.fugue")).value(0).code, QString("usage"));
 
-        // Another picture under that name: nothing is written.
+        // Another picture under that name stays; the sample takes the next name, and the new
+        // workflow names it.
         writeFile(out.filePath("inputs/cat.png"), png('x'));
-        const Errors clash = f.library().copyTo(chosen, out.filePath("third.fugue"));
-        QVERIFY(!clash.isEmpty());
-        QVERIFY2(clash.first().message.contains("cat.png"), qPrintable(clash.first().message));
-        QVERIFY(!QFileInfo::exists(out.filePath("third.fugue")));
+        QVERIFY(f.library().copyTo(chosen, out.filePath("third.fugue")).isEmpty());
         QCOMPARE(readFile(out.filePath("inputs/cat.png")), png('x'));
+        QCOMPARE(readFile(out.filePath("inputs/cat-2.png")), png());
+        const Document third = Document::loadFile(out.filePath("third.fugue")).value();
+        QCOMPARE(third.graph.nodes.value("load").inputs.value("file").literal().toString(), QString("inputs/cat-2.png"));
+    }
+
+    // A sample that leads out of its template, by a link, is not read.
+    void aSampleLinkedOutOfItsFolderIsNotCopied() {
+        Fixture f;
+        QTemporaryDir elsewhere;
+        writeFile(elsewhere.filePath("secret.png"), png());
+        makeTemplate(f.bundled.filePath("sly"), {{"title", "Sly"}},
+                     workflow({{"load", node("fugue/load-image", {{"file", "inputs/x.png"}})}}));
+        QDir().mkpath(f.bundled.filePath("sly/inputs"));
+        QVERIFY(QFile::link(elsewhere.filePath("secret.png"), f.bundled.filePath("sly/inputs/x.png")));
+        QVERIFY(!f.library().problems().isEmpty()); // named as a sample not in its folder
+        QTemporaryDir out;
+        QVERIFY(f.library().copyTo(*f.library().find("sly"), out.filePath("w.fugue")).isEmpty());
+        QVERIFY(!QFileInfo::exists(out.filePath("inputs/x.png")));
+    }
+
+    // A person's own template that is broken still hides the bundled one of its id.
+    void aBrokenOwnTemplateStillHidesTheBundledOne() {
+        Fixture f;
+        makeTemplate(f.bundled.filePath("same"), {{"title", "Bundled"}});
+        writeFile(f.own.filePath("same/template.json"), "{ broken");
+        writeJson(f.own.filePath("same/workflow.fugue"), workflow({{"p", node("fugue/text")}}));
+        QVERIFY(f.library().list().isEmpty());
+        QCOMPARE(f.library().problems().value(0).code, QString("invalid_json"));
     }
 
     // The window opens a template as a new workflow with no file, its sample inputs taken into
@@ -294,6 +321,7 @@ private slots:
         locations.recoveryDir = dir.filePath("recovery");
         locations.trustPath = dir.filePath("trust.json");
         locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        registerMenuCommands(commands); // as main.cpp does, before the file commands
         Workflows workflows(&canvas, &f.registry, &commands, locations);
         registerFileCommands(commands, workflows);
 
@@ -332,6 +360,16 @@ private slots:
         QTest::mouseClick(window, Qt::LeftButton, {}, card->mapToScene(QPointF(card->width() / 2, card->height() / 2)).toPoint());
         QTRY_COMPARE(workflows.tabs().at(workflows.current()).toMap().value("title").toString(), QString("Talk"));
         QTRY_VERIFY(!window->findChild<QObject *>("templatesDialog")->property("visible").toBool());
+
+        // From the keyboard: the search field has the keys, Enter opens the first match.
+        QVERIFY(commands.run("file.templates"));
+        QTRY_VERIFY(window->findChild<QObject *>("templatesDialog")->property("opened").toBool());
+        QTRY_VERIFY(item(window->contentItem(), "templatesSearch")->hasActiveFocus());
+        for (const char c : {'g', 'e', 'n'})
+            QTest::keyClick(window, c);
+        QTRY_VERIFY(!item(window->contentItem(), "templateCard-talk"));
+        QTest::keyClick(window, Qt::Key_Return);
+        QTRY_COMPARE(workflows.tabs().at(workflows.current()).toMap().value("title").toString(), QString("Gen"));
         QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join("\n")));
     }
 
@@ -357,7 +395,7 @@ private slots:
         QVERIFY(listed.size() >= 9);
 
         for (const Template &t : listed) {
-            QVERIFY2(t.missingPacks.isEmpty(), qPrintable(t.id));
+            QVERIFY2(t.neededPacks.isEmpty(), qPrintable(t.id));
             QVERIFY2(!t.preview.isEmpty(), qPrintable(t.id));
             for (const QJsonValue model : t.models)
                 QVERIFY2(model.toObject().value("source").toString().startsWith("https://"), qPrintable(t.id));

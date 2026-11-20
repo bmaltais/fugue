@@ -2,6 +2,7 @@
 
 #include "canvas/canvas_model.h"
 #include "engine/atomic_file.h"
+#include "engine/file_inputs.h"
 #include "engine/hash.h"
 #include "engine/paths.h"
 #include "engine/vips.h"
@@ -396,61 +397,35 @@ Errors relocateInputs(Document &document, const Registry &registry, const QStrin
 void makeInputsAbsolute(Document &document, const Registry &registry, const QString &from) {
     if (from.isEmpty())
         return;
-    const auto scan = [&](Nodes &nodes) {
-        for (auto it = nodes.begin(); it != nodes.end(); ++it) {
-            const NodeType *type = registry.nodeType(it->type);
-            if (!type)
-                continue;
-            for (auto in = it->inputs.begin(); in != it->inputs.end(); ++in) {
-                const InputSpec *spec = type->input(in.key());
-                if (!spec || spec->widget() != QLatin1String("file") || in->kind() != InputValue::Kind::Literal
-                    || !in->literal().isString())
-                    continue;
-                const QString text = in->literal().toString();
-                if (text.trimmed().isEmpty() || QDir::isAbsolutePath(expandHome(text.trimmed())))
-                    continue;
-                const Result<QString> located = inputFilePath(text, from, in.key());
-                if (!located || located->isEmpty())
-                    continue;
-                const QString canonical = canonicalPath(located.value());
-                *in = InputValue::literal(canonical.isEmpty() ? located.value() : canonical);
-            }
-        }
-    };
-    scan(document.graph.nodes);
-    for (auto group = document.groups.begin(); group != document.groups.end(); ++group)
-        scan(group->nodes);
+    forEachFileLiteral(document, registry, [&](const QString &, const QString &input, InputValue &value) {
+        const QString text = value.literal().toString();
+        if (text.trimmed().isEmpty() || QDir::isAbsolutePath(expandHome(text.trimmed())))
+            return;
+        const Result<QString> located = inputFilePath(text, from, input);
+        if (!located || located->isEmpty())
+            return;
+        const QString canonical = canonicalPath(located.value());
+        value = InputValue::literal(canonical.isEmpty() ? located.value() : canonical);
+    });
 }
 
 Errors takeInputsFrom(Document &document, const Registry &registry, const QString &folder) {
     const QString root = canonicalPath(folder);
+    if (root.isEmpty())
+        return {};
     Document changed = document;
     Errors errors;
     const FileRoots roots = FileRoots::forInputs();
-    const auto scan = [&](Nodes &nodes) {
-        for (auto it = nodes.begin(); it != nodes.end(); ++it) {
-            const NodeType *type = registry.nodeType(it->type);
-            if (!type)
-                continue;
-            for (auto in = it->inputs.begin(); in != it->inputs.end(); ++in) {
-                const InputSpec *spec = type->input(in.key());
-                if (!spec || spec->widget() != QLatin1String("file") || in->kind() != InputValue::Kind::Literal
-                    || !in->literal().isString())
-                    continue;
-                const QString path = canonicalPath(in->literal().toString());
-                if (path.isEmpty() || root.isEmpty() || !isInside(path, root) || !QFileInfo(path).isFile())
-                    continue;
-                const Result<QString> stored = storeImageFile(path, inputsDir(), roots);
-                if (stored)
-                    *in = InputValue::literal(stored.value());
-                else
-                    errors.append(stored.errors());
-            }
-        }
-    };
-    scan(changed.graph.nodes);
-    for (auto group = changed.groups.begin(); group != changed.groups.end(); ++group)
-        scan(group->nodes);
+    forEachFileLiteral(changed, registry, [&](const QString &, const QString &, InputValue &value) {
+        const QString path = canonicalPath(value.literal().toString());
+        if (path.isEmpty() || !isInside(path, root) || !QFileInfo(path).isFile())
+            return;
+        const Result<QString> stored = storeImageFile(path, inputsDir(), roots);
+        if (stored)
+            value = InputValue::literal(stored.value());
+        else
+            errors.append(stored.errors());
+    });
     if (errors.isEmpty())
         document = changed;
     return errors;

@@ -104,7 +104,7 @@ public:
     bool openTemplate(const Template &chosen);
     // The templates for the Templates dialog, in TemplateLibrary::list()'s order, each a map:
     // id, title, description, category, categoryTitle, tags, preview (a file URL or empty),
-    // own, missingModels (name, source, folder each), missingPacks, and status, one line: what
+    // own, missingModels (name, source, folder each), neededPacks (not installed, or at another version), and status, one line: what
     // it lacks on this machine, or empty when it is ready. A check: no model file is read.
     Q_INVOKABLE QVariantList templates() const;
     // Opens the template with this id (openTemplate); false when there is none.
