@@ -327,6 +327,19 @@ private slots:
         QCOMPARE(sent->params.value("guidance").toDouble(), 7.0);
     }
 
+    // #72: a default size of 0 (or less) is no default: left to the server, never sent as a
+    // size, so the model's limits do not fail it.
+    void aDefaultSizeOfZeroIsLeftToTheServer() {
+        Bench bench;
+        const QJsonObject defaults{{"width", 0}, {"height", 0}, {"steps", 8}};
+        const QJsonObject limits{{"min_width", 64}, {"max_width", 4096}, {"min_height", 64}, {"max_height", 4096}};
+        const Result<JobRequest> sent = bench.request(kGenerate, {{"prompt", "a cat"}}, selection(defaults, limits));
+        QVERIFY2(sent.ok(), qPrintable(sent.ok() ? QString() : sent.error().message));
+        QVERIFY(!sent->params.contains("width"));
+        QVERIFY(!sent->params.contains("height"));
+        QCOMPARE(sent->params.value("steps").toInt(), 8);
+    }
+
     // A model that reports no defaults leaves them to the server.
     void noDefaultsLeavesTheParametersOut() {
         Bench bench;

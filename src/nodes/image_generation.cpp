@@ -143,10 +143,11 @@ public:
             const Value set = context.input(key);
             if (params.contains(key))
                 continue;
+            const bool size = key == QLatin1String("width") || key == QLatin1String("height");
             if (!set.isEmpty())
                 params.insert(key, set.json());
-            else if (defaults.contains(key))
-                params.insert(key, defaults.value(key));
+            else if (defaults.contains(key) && (!size || defaults.value(key).toDouble() > 0))
+                params.insert(key, defaults.value(key)); // a size of 0 is no default: the server's own
         }
         if (const Errors outside = outsideLimits(context, selection, params); hasErrors(outside))
             return outside;

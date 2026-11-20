@@ -327,6 +327,31 @@ private slots:
         QCOMPARE(fixture.server.requests().first().headers.value("authorization"), QByteArray("Bearer wrong-key"));
     }
 
+    // #72: sd-server reports 0 for a size it leaves to the model ("native"): that is no
+    // default, not a size of 0, so it is not passed on (and a run does not fail on it).
+    void aDefaultSizeOfZeroIsNoDefault() {
+        Fixture fixture;
+        fixture.server.on("GET", "/sdcpp/v1/capabilities", [](const HttpRequest &) {
+            QJsonObject caps = capabilities();
+            QJsonObject modes = caps.value("defaults_by_mode").toObject();
+            QJsonObject imgGen = modes.value("img_gen").toObject();
+            imgGen.insert("width", 0);
+            imgGen.insert("height", 0);
+            modes.insert("img_gen", imgGen);
+            caps.insert("defaults_by_mode", modes);
+            return HttpResponse{200, json(caps)};
+        });
+        fixture.writeStatus(QJsonObject{{kKlein, row(kKlein, "image", "active", fixture.endpoint())}});
+        auto provider = fixture.provider();
+        const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
+        QVERIFY(described.ok());
+        const OfferedModel *model = findModel(described.value(), "image.generate", kKlein);
+        QVERIFY(model);
+        QVERIFY(!model->defaults.contains("width"));
+        QVERIFY(!model->defaults.contains("height"));
+        QCOMPARE(model->defaults.value("steps").toInt(), 4);
+    }
+
     void aPairedHostIsReadFromNetworkJsonWithItsOwnKey() {
         Fixture fixture;
         const QByteArray remoteKey = "studio-key-0123456789";

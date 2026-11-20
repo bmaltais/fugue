@@ -54,8 +54,9 @@ QJsonObject defaultsOf(const QJsonObject &capabilities) {
         mode = capabilities.value("defaults").toObject();
     const QJsonObject sample = mode.value("sample_params").toObject();
     QJsonObject defaults;
+    // A size of 0 is sd-server's "the model's own": no default, not a size (#72).
     for (const char *key : {"width", "height"})
-        if (mode.contains(QLatin1String(key)))
+        if (mode.value(QLatin1String(key)).toDouble() > 0)
             defaults.insert(QLatin1String(key), mode.value(QLatin1String(key)));
     if (sample.contains("sample_steps"))
         defaults.insert("steps", sample.value("sample_steps"));
