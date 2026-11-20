@@ -1,0 +1,49 @@
+#pragma once
+
+// Which packs the user has allowed (spec 6.7), kept in `trust.json` in the state folder, per
+// pack id and version: a pack update asks again. The `fugue` and `local` packs are always
+// trusted. Opening a workflow asks about the packs of its nodes before anything of theirs can
+// run; a group is only a graph, so the packs of the nodes inside it count, not the group's id.
+//
+//   {"packs": {"io.github.alice.tools": ["1.2.0"]}}
+
+#include "engine/document.h"
+#include "engine/result.h"
+
+#include <QList>
+#include <QString>
+#include <QStringList>
+
+namespace fugue {
+
+// A pack a workflow uses.
+struct PackUse {
+    QString id;
+    QString version; // from the workflow's `requires.packs`, empty when it records none
+    QString source;  // where `requires.packs` says to get it, may be empty
+    QStringList types; // the node types of this pack the workflow uses, sorted
+};
+
+class TrustStore {
+public:
+    // ~/.local/state/fugue/trust.json
+    static QString defaultPath();
+    // The pack of a node type id: what precedes the last "/" ("io.github.alice.tools/sharpen").
+    static QString packOf(const QString &typeId);
+    static bool isBuiltIn(const QString &packId);
+
+    explicit TrustStore(QString path = defaultPath());
+
+    bool isTrusted(const QString &packId, const QString &version) const;
+    Errors trust(const QString &packId, const QString &version);
+
+    // Every pack the document's nodes (groups' inner nodes included) come from, built-ins left out.
+    static QList<PackUse> packsUsed(const Document &document);
+    // Those of them not trusted.
+    QList<PackUse> untrusted(const Document &document) const;
+
+private:
+    QString m_path;
+};
+
+} // namespace fugue

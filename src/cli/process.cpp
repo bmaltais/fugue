@@ -43,8 +43,10 @@ Errors registerProviders(Registry &registry) {
     return hasErrors(refused) ? refused : problems;
 }
 
-Process::Process(const Context &context)
-    : cache(ResultCache::defaultRoot()), hashes(FileHashes::defaultPath()) {
+Process::Process(const Context &context) : Process(context, ResultCache::defaultRoot(), FileHashes::defaultPath()) {}
+
+Process::Process(const Context &context, const QString &cacheRoot, const QString &hashesPath)
+    : cache(cacheRoot), hashes(hashesPath) {
     environment.registry = &context.registry;
     environment.kernels = &context.kernels;
     environment.cache = &cache;

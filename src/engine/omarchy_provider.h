@@ -26,7 +26,9 @@
 //
 // Each row of kind image becomes a model of image.generate, and also of image.edit when its
 // `edit` is true. Video, music and text rows are not offered until their capabilities' nodes
-// are built (M4). A served model is named by its recipe, with no content hash.
+// are built (M4). A served model is named by its recipe, with no content hash; its row's
+// `name` ("FLUX.2 Klein 4B") is its title, for display only. Without providers.json each
+// paired host is an instance of its own (providers.h defaultProviderInstances).
 
 #include <QHash>
 

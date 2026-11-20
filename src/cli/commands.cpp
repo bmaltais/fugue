@@ -132,7 +132,7 @@ Reply validateWorkflow(const Command &command, Context &context) {
     const Result<Document> document = Document::loadFile(command.positionals.at(0));
     if (!document)
         return loadFailed(document.errors());
-    const Validation validation = validateDocument(*document, context);
+    const Validation validation = validateDocument(*document, context, command.positionals.at(0));
     if (hasErrors(validation.errors))
         return Reply::failure(validation.errors);
     // The state of every node (10.3), for people too.

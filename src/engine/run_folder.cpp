@@ -177,6 +177,13 @@ std::optional<FileRoots> RunFolder::roots() const {
     return roots ? roots.value() : FileRoots{};
 }
 
+bool RunFolder::requestCancel() const {
+    QFile file(m_path + QStringLiteral("/cancel"));
+    return file.open(QIODevice::WriteOnly);
+}
+
+bool RunFolder::cancelRequested() const { return QFile::exists(m_path + QStringLiteral("/cancel")); }
+
 bool RunFolder::queued(const QString &workflow) const {
     QJsonObject state{{"status", runStatusName(RunStatus::Queued)}};
     if (!workflow.isEmpty())

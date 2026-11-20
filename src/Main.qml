@@ -1,28 +1,35 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Layouts
+import Fugue
+import "canvas"
+import "menu"
+import "search"
+import "settings"
+import "workflow"
 
 ApplicationWindow {
     id: win
     width: 960
-    height: 680
+    // 680 for the canvas and the menu bar's 7u at the default text size.
+    height: 708
     minimumWidth: 640
     minimumHeight: 460
     visible: true
-    title: "Fugue"
-    color: theme.background
+    title: App.workflows.windowTitle
+    color: App.theme.background
+    font.pixelSize: App.theme.textSize
 
-    Material.theme: theme.light ? Material.Light : Material.Dark
-    Material.accent: theme.accent
-    Material.background: theme.background
-    Material.foreground: theme.foreground
+    Material.theme: App.theme.light ? Material.Light : Material.Dark
+    Material.accent: App.theme.accent
+    Material.background: App.theme.background
+    Material.foreground: App.theme.foreground
 
-    readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
-
-    Shortcut { sequence: "?"; onActivated: help.opened ? help.close() : help.open() }
-    Shortcut { sequence: "Q"; onActivated: Qt.quit() }
-    Shortcut { sequence: "Space"; onActivated: backend.primaryAction() }
+    readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
+    // The settings (settings/settings_model.h); a test window may run without them.
+    readonly property SettingsModel appSettingsModel: App.settings
 
     // Right-to-left languages mirror the window; the Translator sets the
     // application's layout direction.
@@ -31,81 +38,74 @@ ApplicationWindow {
         LayoutMirroring.enabled: win.rightToLeft
         LayoutMirroring.childrenInherit: true
 
-        // The app's one job goes here.
         ColumnLayout {
-            anchors.centerIn: parent
-            spacing: 24
+            anchors.fill: parent
+            spacing: 0
 
-            Label {
-                objectName: "count"
-                Layout.alignment: Qt.AlignHCenter
-                text: qsTr("%Ln presses", "", backend.count)
-                font.pixelSize: 32
+            MenuBar {
+                Layout.fillWidth: true
+                Layout.preferredHeight: implicitHeight
             }
+            WorkflowTabs {
+                Layout.fillWidth: true
+                Layout.preferredHeight: implicitHeight
+            }
+            FugueCanvas {
+                id: fugueCanvas
+                objectName: "canvas"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                model: App.canvasModel
+                navigation: win.appSettingsModel ? win.appSettingsModel.navigation : "legacy"
+                onSearchRequested: (x, y) => App.canvasModel.search.openAt(x, y)
+                onLinkReleased: (from, x, y) => App.canvasModel.search.openFromLink(from, x, y)
+                onContextMenuRequested: (x, y) => contextMenu.openAt(x, y, false)
 
-            Button {
-                id: countButton
-                objectName: "countButton"
-                Layout.alignment: Qt.AlignHCenter
-                text: qsTr("Count")
-                highlighted: true
-                // Material.roundedScale isn't inherited, and takes a binding,
-                // not a literal number.
-                Material.roundedScale: theme.radius
-                focusPolicy: Qt.NoFocus
-                onClicked: backend.primaryAction()
-                // A highlighted button colors its caption by Material's own
-                // rule, not Material.foreground, so it can't read on every accent.
-                contentItem: Label {
-                    text: countButton.text
-                    font: countButton.font
-                    color: theme.accentForeground
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
+                // Tab and Shift+A (`node.search`) open search where the pointer is; Add node
+                // in the context menu, where it was opened.
+                Connections {
+                    target: App.canvasModel.search
+                    function onPointerSearchRequested() {
+                        const t = App.commands.target()
+                        const p = t.x !== undefined ? Qt.point(t.x, t.y) : fugueCanvas.pointerWorld()
+                        App.canvasModel.search.openAt(p.x, p.y)
+                    }
+                }
+                ContextMenu {
+                    id: contextMenu
+                    anchors.fill: parent
+                    canvas: fugueCanvas
                 }
             }
         }
+
+        // The file pickers, the save and trust and recovery questions, the drop area.
+        WorkflowDialogs { anchors.fill: parent; canvasView: fugueCanvas }
+        ImageSaveDialog {}
     }
 
-    Popup {
-        id: help
-        objectName: "help"
-        anchors.centerIn: Overlay.overlay
-        modal: true
-        focus: true
-        padding: 24
-        background: Rectangle {
-            color: theme.background
-            border.color: theme.colors.selection
-            radius: theme.radius
+    // The command registry's shortcuts, the `?` overlay and the quit question.
+    CommandUi { anchors.fill: parent }
+
+    // The settings panel (#51), made the first time app.settings (Ctrl+,) asks for it.
+    Connections {
+        target: App.commands
+        function onWindowRequested(id) {
+            if (id !== "app.settings" || !win.appSettingsModel)
+                return
+            if (!win.settingsPanel)
+                win.settingsPanel = settingsComponent.createObject(win.contentItem)
+            win.settingsPanel.open()
         }
+    }
+    property var settingsPanel: null
+    Component {
+        id: settingsComponent
+        SettingsPanel { model: win.appSettingsModel }
+    }
 
-        ColumnLayout {
-            spacing: 8
-            // A popup is not an Item and doesn't inherit the window's
-            // mirroring, so its content opts in.
-            LayoutMirroring.enabled: win.rightToLeft
-            LayoutMirroring.childrenInherit: true
-
-            Repeater {
-                model: [
-                    { keys: "Space", action: qsTr("Count one more") },
-                    { keys: "?", action: qsTr("Show or hide the shortcuts") },
-                    { keys: "Q", action: qsTr("Quit") }
-                ]
-                delegate: RowLayout {
-                    required property var modelData
-                    spacing: 24
-
-                    Label {
-                        Layout.preferredWidth: 64
-                        text: modelData.keys
-                        color: theme.accent
-                        font.bold: true
-                    }
-                    Label { text: modelData.action }
-                }
-            }
-        }
+    NodeSearchPopup {
+        id: searchPopup
+        canvas: fugueCanvas
     }
 }

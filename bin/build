@@ -15,4 +15,9 @@ else
   launcher=(-DCMAKE_C_COMPILER_LAUNCHER= -DCMAKE_CXX_COMPILER_LAUNCHER=)
 fi
 cmake -S "$root" -B "$root/build" -DCMAKE_BUILD_TYPE=Release "${launcher[@]}" >/dev/null
-cmake --build "$root/build" -j"$(nproc)"
+# Optional CMake targets: `bin/build fugue` builds only the app (no tests). None builds all.
+targets=()
+if (($#)); then
+  targets=(--target "$@")
+fi
+cmake --build "$root/build" -j"$(nproc)" "${targets[@]}"

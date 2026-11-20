@@ -372,6 +372,35 @@ private slots:
         QCOMPARE(firstError(read).value("input").toString(), QString("file"));
     }
 
+    // A relative `file` path is the workflow's folder's, wherever `fugue run` was started
+    // (Appendix A); the roots still judge where it leads after `..` and links.
+    void aRelativeFileIsReadFromBesideTheWorkflow() {
+        QVERIFY(QDir().mkpath(path("shared/inputs")));
+        QVERIFY(QFile::copy(rootsSource(), path("shared/inputs/src.png")));
+        QVERIFY(QDir().mkpath(path("work5")));
+        const QString flow = rootsFlow(path("shared/flow.fugue"), "inputs/src.png", path("work5/out"), "relative");
+        const Outcome ran = fugue({"run", flow, "--wait", "--json"}, path("work5"));
+        QVERIFY2(ran.exitCode == 0, ran.out.constData());
+        QVERIFY(QFileInfo::exists(path("work5/out/relative.png")));
+        // `fugue validate` takes it from the same folder: the run's result is the cached one.
+        const Outcome valid = fugue({"validate", flow, "--json"}, path("work5"));
+        QVERIFY2(valid.exitCode == 0, valid.out.constData());
+        QCOMPARE(valid.data().value("nodes").toObject().value("load").toObject().value("state").toString(), QString("cached"));
+
+        QTemporaryDir elsewhere;
+        QVERIFY(elsewhere.isValid());
+        QVERIFY(QFile::copy(rootsSource(), elsewhere.filePath("src.png")));
+        QVERIFY(QFile::link(elsewhere.path(), path("shared/away")));
+        for (const QString &escape : {QStringLiteral("away/src.png"), QStringLiteral("inputs/../away/src.png")}) {
+            const Outcome out = fugue({"run", rootsFlow(path("shared/escape.fugue"), escape, path("work5/out"), "escape"),
+                                       "--wait", "--json"},
+                                      path("work5"));
+            QCOMPARE(out.exitCode, 1);
+            QCOMPARE(firstError(out).value("code").toString(), QString("permission_denied"));
+            QCOMPARE(firstError(out).value("input").toString(), QString("file"));
+        }
+    }
+
     // Load Image reads only under the home folder.
     void aLoadOutsideTheReadRootsIsRefused() {
         QTemporaryDir elsewhere;

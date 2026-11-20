@@ -65,4 +65,18 @@ private:
     bool m_committed = false;
 };
 
+// Who may read a file replaceFile writes.
+enum class FileMode {
+    Usual,     // as the umask allows (0644 on most systems)
+    OwnerOnly, // 0600 from the first byte: a file holding keys (providers.json, 8.2)
+};
+
+// Writes `bytes` as the whole of `path` through a PartialFile, replacing what is there in
+// one step and making the folders above it. The content is on the disk (fsync) before it
+// takes the name, so a power loss leaves the old file or the new one, never an empty one. A
+// `path` that is a symbolic link stays one: the file it points to is replaced. Empty when
+// done; else one error naming `what`.
+Errors replaceFile(const QString &path, const QByteArray &bytes, const QString &what,
+                   FileMode mode = FileMode::Usual);
+
 } // namespace fugue

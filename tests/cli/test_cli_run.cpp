@@ -26,6 +26,9 @@
 #include <unistd.h>
 
 #include "engine/queue.h"
+#include "cli/process.h"
+#include "engine/registry.h"
+#include "../engine/omarchy_fixture.h"
 #include "cli/runs.h"
 #include "engine/run_folder.h"
 
@@ -96,6 +99,8 @@ class TestCliRun : public QObject {
         env.insert("XDG_CACHE_HOME", path("cache"));
         env.insert("XDG_STATE_HOME", path("state"));
         env.insert("XDG_CONFIG_HOME", path("config"));
+        // Not the developer's Omarchy state: its paired hosts would be instances (8.2).
+        env.insert("HOME", path("home"));
         env.insert("FUGUE_NODE_MANIFESTS", path("manifests"));
         env.insert("FUGUE_TEST_GATE", gate());
         QProcess process;
@@ -357,6 +362,25 @@ private slots:
         QVERIFY(nodeEnded);
     }
 
+    // A window that closed (or crashed) mid-run is not asked to cancel through its folder: no
+    // one would read the request. Its run is ended as its worker's would be.
+    void cancellingADeadWindowsRunSaysTheWorkerIsGone() {
+        const QString id = "20260101-000000-000-wind";
+        auto folder = RunFolder::create(runsRoot(), id);
+        QVERIFY(folder.ok());
+        folder->writeState(QJsonObject{{"status", "running"}});
+        write(queueDir() + "/0-00000000000001-" + id,
+              QJsonDocument(QJsonObject{{"run", id}, {"pid", double(deadPid())}, {"owner", "window"},
+                                        {"process_start", 1}})
+                  .toJson());
+        const Outcome o = fugue({"runs", "cancel", id, "--json"});
+        QVERIFY(o.exitCode != 0);
+        QVERIFY(o.data().value("status").toString() != QLatin1String("cancelling"));
+        QCOMPARE(statusOf(id), QString("failed"));
+        QVERIFY(!QFile::exists(RunFolder::open(runsRoot(), id)->path() + "/cancel"));
+        QVERIFY(queued().isEmpty());
+    }
+
     void anEntryWhoseProcessIsGoneIsDiscarded() {
         // A crashed worker left itself first in the queue, and its run unfinished.
         const QString dead = "20260101-000000-000-dead";
@@ -491,6 +515,36 @@ private slots:
         QCOMPARE(warnings.at(0).toObject().value("code").toString(), QString("capability_unavailable"));
         QCOMPARE(warnings.at(0).toObject().value("severity").toString(), QString("warning"));
         QCOMPARE(warnings.at(0).toObject().value("node").toString(), QString("g"));
+    }
+
+    void withoutProvidersJsonValidateAsksThePairedHosts() {
+        // The spec 8.2 default, from the Omarchy state in $HOME: this machine (text models
+        // only), lab (offline) and studio, whose servers refuse here (port 1). The warning
+        // names what each of them lacks.
+        test::writeOmarchyState(path("home"), "http://127.0.0.1:1");
+        const Outcome o = fugue({"validate", path("gen.fugue"), "--json"});
+        QCOMPARE(o.exitCode, 0);
+        const QJsonArray warnings = o.json().value("warnings").toArray();
+        QCOMPARE(warnings.size(), 1);
+        const QJsonObject warning = warnings.at(0).toObject();
+        QCOMPARE(warning.value("code").toString(), QString("capability_unavailable"));
+        QVERIFY2(warning.value("message").toString().contains("lab is offline."), qPrintable(warning.value("message").toString()));
+        QVERIFY(warning.value("message").toString().contains("flux2-klein-4b-sdcpp-cuda is not answering"));
+        QVERIFY(warning.value("hint").toString().contains("Turn on lab"));
+    }
+
+    void aWindowRunRegistersTheSameDefaultInstances() {
+        // RunService's default (run_service.h) is cli::registerProviders, as for a worker.
+        test::PairedHome home;
+        Registry registry;
+        const Errors problems = cli::registerProviders(registry);
+        QVERIFY(!hasErrors(problems));
+        QStringList names;
+        for (const ProviderEntry &entry : registry.providers()) {
+            names << entry.instance.name;
+            QVERIFY(entry.provider);
+        }
+        QCOMPARE(names, (QStringList{"This machine", "lab", "studio"}));
     }
 
     void aWorkerCollectsGarbageAtMostOncePerHour() {

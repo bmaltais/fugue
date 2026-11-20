@@ -527,11 +527,7 @@ std::optional<InputSpec> Compiler::exposedSpec(Scope *child, const GroupInput &i
     }
     if (!spec)
         return std::nullopt;
-    spec = narrowed(*spec, {&input});
-    spec->name = input.name;
-    if (input.defaultValue && input.defaultValue->kind() == InputValue::Kind::Literal)
-        spec->defaultValue = input.defaultValue->literal();
-    return spec;
+    return exposedInputSpec(*spec, input);
 }
 
 // A bypassed group instance as seen from outside: its exposed inputs and its
@@ -1102,6 +1098,14 @@ bool isValueJson(const QJsonValue &value, bool allowList) {
 }
 
 } // namespace
+
+InputSpec exposedInputSpec(const InputSpec &inner, const GroupInput &exposed) {
+    InputSpec spec = narrowed(inner, {&exposed});
+    spec.name = exposed.name;
+    if (exposed.defaultValue && exposed.defaultValue->kind() == InputValue::Kind::Literal)
+        spec.defaultValue = exposed.defaultValue->literal();
+    return spec;
+}
 
 // --- CompiledNode and CompiledGraph ------------------------------------------
 

@@ -1,21 +1,27 @@
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLocalServer>
 #include <QLocalSocket>
 #include <QQmlApplicationEngine>
-#include <QQmlContext>
 #include <QQuickItem>
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QRegularExpression>
 #include <QTemporaryDir>
 #include <QtTest>
+#include <cmath>
 
-#include "backend.h"
+#include "canvas/canvas_model.h"
+#include "commands/command_registry.h"
+#include "menu/menus.h"
+#include "qml_app.h"
 #include "theme.h"
+#include "workflow/workflows.h"
 #include "translator.h"
+#include "window_grab.h"
 
 namespace {
 
@@ -72,7 +78,10 @@ QStringList placeholders(const QString &text) {
 // single quotes count. A text that isn't a literal can't be in a catalog.
 QMap<QString, bool> translatables(const QString &folder, QStringList *problems) {
     QMap<QString, bool> found;
-    for (const QFileInfo &info : QDir(folder).entryInfoList({"*.qml", "*.js", "*.cpp", "*.h"}, QDir::Files)) {
+    // Every folder under src/ too: the canvas keeps its QML and C++ in src/canvas/.
+    QDirIterator files(folder, {"*.qml", "*.js", "*.cpp", "*.h"}, QDir::Files, QDirIterator::Subdirectories);
+    while (files.hasNext()) {
+        const QFileInfo info(files.next());
         QFile file(info.filePath());
         if (!file.open(QIODevice::ReadOnly))
             continue;
@@ -122,10 +131,28 @@ QMap<QString, bool> translatables(const QString &folder, QStringList *problems) 
                     ++i;
                 const QString word = code.mid(start, i - start);
                 skipSpace();
-                if ((word != "qsTr" && word != "tr") || i >= code.size() || code[i] != '(')
+                // qsTr("text") and tr("text"); QT_TRANSLATE_NOOP("Context", "text") and
+                // translate("Context", "text"), which C++ uses for strings listed in tables
+                // (command names, menu titles) and translated when shown.
+                const bool withContext = word == "QT_TRANSLATE_NOOP" || word == "translate";
+                if ((word != "qsTr" && word != "tr" && !withContext) || i >= code.size() || code[i] != '(')
                     continue;
                 ++i;
                 skipSpace();
+                if (withContext) {
+                    // translate() with a text that is not a literal looks up one listed elsewhere.
+                    if (i >= code.size() || code[i] != '"')
+                        continue;
+                    QString context;
+                    literal(&context);
+                    skipSpace();
+                    if (i >= code.size() || code[i] != ',')
+                        continue;
+                    ++i;
+                    skipSpace();
+                    if (i >= code.size() || code[i] != '"')
+                        continue;
+                }
                 if (i >= code.size() || (code[i] != '"' && code[i] != '\'')) {
                     *problems << info.fileName() + ": not a literal: " + code.mid(start, 40);
                     continue;
@@ -169,10 +196,39 @@ class FugueTests : public QObject {
 private slots:
     void initTestCase() { QQuickStyle::setStyle("Material"); }
 
-    void primaryActionCounts() {
-        Backend backend;
-        backend.primaryAction();
-        QCOMPARE(backend.count(), 1);
+    // No test may open the desktop's own file or colour picker (the xdg-desktop-portal's,
+    // through the owner's platform theme): it would show on the owner's screen. Tests run on
+    // the generic theme (tests/test_environment.cpp), so a FileDialog is Qt's own, an item
+    // in the test's window.
+    void noTestOpensANativeDialog() {
+        QCOMPARE(qgetenv("QT_NO_XDG_DESKTOP_PORTAL"), QByteArray("1"));
+        QVERIFY(qgetenv("DBUS_SESSION_BUS_ADDRESS").contains("nonexistent"));
+        QQmlApplicationEngine engine;
+        engine.loadData(R"(
+            import QtQuick
+            import QtQuick.Dialogs
+            Window {
+                width: 640; height: 480; visible: true
+                FileDialog { id: files; objectName: "files" }
+                ColorDialog { id: colors; objectName: "colors" }
+            })");
+        QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        // Qt's own dialog is a popup item made in the window when it opens.
+        auto made = [&](const char *impl) {
+            for (QObject *child : window->findChildren<QObject *>())
+                if (QByteArray(child->metaObject()->className()).startsWith(impl))
+                    return true;
+            return false;
+        };
+        for (const auto &[name, impl] : {std::pair{"files", "QQuickFileDialogImpl"}, {"colors", "QQuickColorDialogImpl"}}) {
+            QObject *dialog = window->findChild<QObject *>(name);
+            QVERIFY(dialog);
+            QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+            QTRY_VERIFY2(made(impl), impl);
+            QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
+        }
     }
 
     void themeFallsBack() {
@@ -240,10 +296,180 @@ private slots:
         QTRY_COMPARE(theme.radius(), 4);
 
         QVERIFY(write(hypr.filePath("response.json"), "{\"int\":8}"));
+        // The socket appearing in its folder brings the connection, not the next retry (1 s,
+        // 2 s, 4 s and on), which a busy machine could push past any wait here.
         QLocalServer events;
         QVERIFY(events.listen(hypr.filePath("events.sock")));
-        QTRY_VERIFY_WITH_TIMEOUT(events.hasPendingConnections(), 5000);
+        QTRY_VERIFY(events.hasPendingConnections());
         QTRY_COMPARE(theme.radius(), 8);
+    }
+
+    // hyprctl answering slowly, as on a busy machine (a test run under ctest -j8), still
+    // sets the corners: the query is only given up when it hangs.
+    void themeWaitsForASlowHyprctl() {
+        QTemporaryDir dir, hypr;
+        const QString command = fakeHyprctl(hypr.path());
+        QVERIFY(write(command, "#!/bin/bash\nsleep 1\ncat '" + hypr.path().toUtf8() + "/response.json'\n"));
+        QVERIFY(write(hypr.filePath("response.json"), "{\"int\":6}"));
+        Theme theme(dir.path(), nullptr, command);
+        QTRY_COMPARE(theme.radius(), 6);
+    }
+
+    void themeFollowsTheDesktopTextSize() {
+        QTemporaryDir dir;
+        Theme theme(dir.path());
+        QCOMPARE(theme.textSize(), 12);
+        // The user's shell.toml wins over the theme's own.
+        QVERIFY(QDir(dir.path()).mkpath("theme"));
+        QVERIFY(write(dir.path() + "/theme/shell.toml", "[font]\nbase-size = 14\n"));
+        QTRY_COMPARE(theme.textSize(), 14);
+        QVERIFY(write(dir.path() + "/shell.toml", "[bar]\nbase-size = 3\n[font]\nfamily = \"x\"\nbase-size = 18 # big\n"));
+        QTRY_COMPARE(theme.textSize(), 18);
+        QVERIFY(write(dir.path() + "/shell.toml", "[font]\nbase-size = 400\n"));
+        QTRY_COMPARE(theme.textSize(), 14);
+    }
+
+    void themeHasSemanticTokens() {
+        QTemporaryDir dir;
+        Theme dark(dir.path());
+        QCOMPARE(dark.error(), dark.colors().value("red").value<QColor>());
+        QCOMPARE(dark.text(), dark.foreground());
+        QCOMPARE(dark.portColor("number"), dark.colors().value("blue").value<QColor>());
+        QCOMPARE(dark.portColor("some-declared-type"), dark.portColor("declared"));
+        for (const QString &type : QStringList{"text", "number", "boolean", "image", "video", "audio", "declared"})
+            QVERIFY2(dark.portColor(type).isValid(), qPrintable(type));
+        QVERIFY(dark.portColors().contains("image"));
+
+        // Panels and muted text read on both a dark and a light theme.
+        auto contrast = [](const QColor &a, const QColor &b) {
+            auto l = [](const QColor &c) {
+                auto f = [](double v) { return v <= .04045 ? v / 12.92 : std::pow((v + .055) / 1.055, 2.4); };
+                return .2126 * f(c.redF()) + .7152 * f(c.greenF()) + .0722 * f(c.blueF());
+            };
+            return (std::max(l(a), l(b)) + .05) / (std::min(l(a), l(b)) + .05);
+        };
+        QVERIFY(QDir(dir.path()).mkpath("theme"));
+        QVERIFY(write(dir.path() + "/theme/colors.toml", "mode = \"light\"\nbackground = \"#fafafa\"\n"
+                                                         "foreground = \"#202020\"\naccent = \"#2255cc\"\n"));
+        Theme light(dir.path());
+        for (const Theme *theme : {&dark, &light}) {
+            QVERIFY(contrast(theme->text(), theme->panel()) >= 7);
+            QVERIFY(contrast(theme->muted(), theme->panel()) >= 3);
+            QVERIFY(contrast(theme->border(), theme->background()) >= 1.2);
+            QVERIFY(theme->panel() != theme->background());
+        }
+        QVERIFY(light.light());
+        QVERIFY(light.panel().lightness() > 200);
+    }
+
+    void translatorMirrorsTheLayoutForRightToLeftLanguages() {
+        QTemporaryDir dir;
+        QVERIFY(write(dir.path() + "/language", "ar\n"));
+        QVERIFY(write(dir.path() + "/ar.json", R"({"Count": "عد"})"));
+        {
+            Translator translator(dir.path() + "/language", dir.path());
+            QCOMPARE(QGuiApplication::layoutDirection(), Qt::RightToLeft);
+            QCOMPARE(translator.translate("Main", "Count"), QString("عد"));
+        }
+        QVERIFY(write(dir.path() + "/language", "da\n"));
+        Translator back(dir.path() + "/language", dir.path());
+        QCOMPARE(QGuiApplication::layoutDirection(), Qt::LeftToRight);
+    }
+
+    // The window on a dark and a light theme, left-to-right and right-to-left:
+    // follows the palette, mirrors its content, scales its text, and is saved
+    // to images (set FUGUE_SHOTS to a directory to keep them for a look).
+    void windowLooksRightInEveryThemeAndDirection_data() {
+        QTest::addColumn<bool>("light");
+        QTest::addColumn<QString>("language");
+        QTest::newRow("dark ltr") << false << "en";
+        QTest::newRow("light ltr") << true << "en";
+        QTest::newRow("dark rtl") << false << "ar";
+        QTest::newRow("light rtl") << true << "ar";
+    }
+
+    void windowLooksRightInEveryThemeAndDirection() {
+        QFETCH(bool, light);
+        QFETCH(QString, language);
+        QTemporaryDir dir;
+        QVERIFY(QDir(dir.path()).mkpath("theme"));
+        QVERIFY(write(dir.path() + "/theme/colors.toml",
+                      light ? "mode = \"light\"\nbackground = \"#fafafa\"\nforeground = \"#202020\"\n"
+                              "accent = \"#2255cc\"\n"
+                            : "background = \"#101418\"\nforeground = \"#d8dee9\"\naccent = \"#88c0d0\"\n"));
+        QVERIFY(write(dir.path() + "/shell.toml", "[font]\nbase-size = 16\n"));
+        QVERIFY(write(dir.path() + "/language", language.toUtf8() + "\n"));
+        QVERIFY(write(dir.path() + "/ar.json", R"({"Count": "عد", "Quit": "إنهاء"})"));
+        Translator translator(dir.path() + "/language", dir.path());
+        QCoreApplication::installTranslator(&translator);
+        Theme theme(dir.path());
+        CanvasModel canvasModel(nullptr);
+        fugue::CommandRegistry commands;
+        fugue::Workflows workflows(&canvasModel, nullptr, &commands,
+                                   {dir.path() + "/recovery", dir.path() + "/trust.json"});
+        fugue::registerDefaultCommands(commands);
+
+        QQmlApplicationEngine engine;
+        QStringList warnings;
+        connect(&engine, &QQmlEngine::warnings, this, [&](const QList<QQmlError> &errors) {
+            for (const auto &error : errors)
+                warnings << error.toString();
+        });
+        fugue::exposeToQml(engine, {&translator, &theme, &commands, &canvasModel, &workflows});
+        engine.load(QUrl("qrc:/Main.qml"));
+        QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        QTest::qWait(100);
+
+        const bool rtl = language == "ar";
+        const QImage shot = test_support::grab(window);
+        QVERIFY(!shot.isNull());
+        // The menu bar along the top in the recessed fill, then the canvas: the theme's
+        // background on a dark theme, a shade darker on a light one (docs/canvas-look.md 6.1).
+        // Each is read where nothing is drawn on it, in either direction: the bar's middle,
+        // past its titles, and the canvas's bottom-right corner (the zoom pill sits bottom
+        // left, the run pill top right). The text follows the desktop size.
+        auto *bar = item(window->contentItem(), "menuBar");
+        auto *canvas = item(window->contentItem(), "canvas");
+        QVERIFY(bar && canvas);
+        auto *file = item(window->contentItem(), "menuTitle-0");
+        auto *last = item(window->contentItem(), "menuTitle-5");
+        QVERIFY(file && last);
+        const QPoint inBar = bar->mapToScene(QPointF(bar->width() / 2, bar->height() / 2)).toPoint();
+        const QRectF titles = file->mapRectToScene(file->boundingRect()).united(last->mapRectToScene(last->boundingRect()));
+        QVERIFY2(!titles.contains(inBar), qPrintable(QStringLiteral("%1 %2").arg(inBar.x()).arg(titles.right())));
+        QCOMPARE(QColor(shot.pixel(inBar)).name(), theme.look()->tokens().well.name());
+        const QPoint inCanvas = canvas->mapToScene(QPointF(canvas->width() - 4, canvas->height() - 4)).toPoint();
+        QCOMPARE(QColor(shot.pixel(inCanvas)).name(), theme.look()->tokens().canvas.name());
+        // Mirrored, the menu titles start at the right.
+        const qreal fileX = file->mapToScene(QPointF(file->width() / 2, 0)).x();
+        QVERIFY2(rtl ? fileX > window->width() / 2 : fileX < window->width() / 2, qPrintable(QString::number(fileX)));
+        QCOMPARE(theme.look()->tokens().canvas == theme.background(), !light);
+        QCOMPARE(window->property("font").value<QFont>().pixelSize(), 16);
+        QCOMPARE(QGuiApplication::layoutDirection(), rtl ? Qt::RightToLeft : Qt::LeftToRight);
+
+        // Mirrored: the help popup's first column (Run, its keys at its far side) moves to the
+        // right half. Its rows are laid out once the popup is, so wait for that.
+        QTest::keyClick(window, '?');
+        auto *help = window->findChild<QObject *>("help");
+        QTRY_VERIFY(help->property("opened").toBool());
+        auto *content = help->property("contentItem").value<QQuickItem *>();
+        QTRY_VERIFY(item(content, "helpKeys"));
+        auto *keys = item(content, "helpKeys");
+        const qreal middle = content->width() / 2;
+        QTRY_VERIFY(keys->mapToItem(content, QPointF(0, 0)).x() > 0);
+        const QPointF at = keys->mapToItem(content, QPointF(0, 0));
+        QVERIFY2(rtl ? at.x() > middle : at.x() < middle, qPrintable(QStringLiteral("%1 %2").arg(at.x()).arg(middle)));
+        QTest::qWait(300);
+        const QImage popup = test_support::grab(window);
+        QVERIFY(!popup.isNull());
+        if (const QString out = qEnvironmentVariable("FUGUE_SHOTS"); !out.isEmpty())
+            QVERIFY(popup.save(QString("%1/%2-%3.png").arg(out, light ? "light" : "dark", rtl ? "rtl" : "ltr")));
+
+        QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join('\n')));
+        QCoreApplication::removeTranslator(&translator);
     }
 
     void translatorFallsBackToEnglish() {
@@ -362,13 +588,48 @@ private slots:
         QVERIFY2(problems.isEmpty(), qPrintable(problems.join('\n')));
     }
 
+    void menuMnemonicsNeverTakeACommandsAltKey() {
+        // A top menu's Alt+letter comes from its translated title (MenuBar.qml); a letter
+        // that is also a command's Alt key (Alt+C collapses, 12.4) would take it away.
+        fugue::CommandRegistry commands;
+        fugue::registerDefaultCommands(commands);
+        QSet<QString> altKeys;
+        for (const QString &id : commands.ids())
+            for (const QString &key : commands.keys(id))
+                if (key.startsWith("Alt+") && key.size() == 5)
+                    altKeys << key;
+        auto clashes = [&](const QString &code, const QJsonObject &catalog) {
+            QStringList found;
+            for (const QVariant &menu : fugue::menus::tree("bar")) {
+                const QString english = menu.toMap().value("title").toString();
+                const QString title = catalog.value(english).toString(english);
+                const qsizetype at = title.indexOf('&');
+                const QString key = at >= 0 && at + 1 < title.size() ? "Alt+" + QString(title.at(at + 1).toUpper()) : QString();
+                if (altKeys.contains(key))
+                    found << code + ": " + title + " takes " + key;
+            }
+            return found;
+        };
+        // The check itself sees a clash.
+        QCOMPARE(clashes("xx", QJsonObject{{"&File", "&Clé"}}).size(), 1);
+        const QString folder = QFileInfo(QFINDTESTDATA("../src/i18n/en.json")).absolutePath();
+        QStringList problems;
+        for (const QFileInfo &file : QDir(folder).entryInfoList({"*.json"}, QDir::Files))
+            problems << clashes(file.completeBaseName(), readCatalog(file.filePath()));
+        QVERIFY2(problems.isEmpty(), qPrintable(problems.join('\n')));
+    }
+
     void windowLoadsAndAnswersTheKeyboard() {
         // A temp language and theme, so the test never depends on the desktop's.
         QTemporaryDir dir;
         Translator translator(dir.path() + "/language");
         QCoreApplication::installTranslator(&translator);
         Theme theme(dir.path());
-        Backend backend;
+        CanvasModel canvasModel(nullptr);
+        fugue::CommandRegistry commands;
+        fugue::Workflows workflows(&canvasModel, nullptr, &commands,
+                                   {dir.path() + "/recovery", dir.path() + "/trust.json"});
+        fugue::registerDefaultCommands(commands);
 
         QQmlApplicationEngine engine;
         QStringList warnings;
@@ -376,9 +637,7 @@ private slots:
             for (const auto &error : errors)
                 warnings << error.toString();
         });
-        engine.rootContext()->setContextProperty("translator", &translator);
-        engine.rootContext()->setContextProperty("theme", &theme);
-        engine.rootContext()->setContextProperty("backend", &backend);
+        fugue::exposeToQml(engine, {&translator, &theme, &commands, &canvasModel, &workflows});
         engine.load(QUrl("qrc:/Main.qml"));
         QVERIFY(!engine.rootObjects().isEmpty());
         auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
@@ -387,19 +646,10 @@ private slots:
         window->requestActivate();
         QVERIFY(QTest::qWaitForWindowActive(window));
 
-        auto *count = item(window->contentItem(), "count");
-        QVERIFY(count);
-        QTest::keyClick(window, Qt::Key_Space);
-        QCOMPARE(count->property("text").toString(), QString("1 press"));
-        QTest::keyClick(window, Qt::Key_Space);
-        QCOMPARE(count->property("text").toString(), QString("2 presses"));
-        QCOMPARE(backend.count(), 2);
-
-        // The caption reads on the accent: black on the fallback yellow.
-        auto *button = item(window->contentItem(), "countButton");
-        QVERIFY(button);
-        QCOMPARE(button->property("contentItem").value<QQuickItem *>()->property("color").value<QColor>(),
-                 theme.accentForeground());
+        // The window is the canvas, and it has the keyboard.
+        auto *canvas = item(window->contentItem(), "canvas");
+        QVERIFY(canvas);
+        QTRY_VERIFY(canvas->hasActiveFocus());
 
         auto *help = window->findChild<QObject *>("help");
         QTest::keyClick(window, '?');

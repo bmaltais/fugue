@@ -42,7 +42,9 @@ Result<Command> parseArguments(const QStringList &args);
 
 // True when argv asks for the command line rather than the window: the first
 // argument is a word (not a Qt option such as -platform) or --help, --version
-// or --json. main() calls it before it creates any application object.
+// or --json, and not a file to open: a word that is no command and names a `.fugue` file
+// (or any existing file) opens the window on it, as `fugue demo.fugue`. main() calls it
+// before it creates any application object.
 bool wantsCli(int argc, char **argv);
 
 } // namespace fugue::cli

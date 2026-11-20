@@ -22,6 +22,9 @@ Errors registerProviders(Registry &registry);
 // Needs the registry's providers set (registerProviders).
 struct Process {
     explicit Process(const Context &context);
+    // The same with the result store and the file-hash memo somewhere else (the window's
+    // tests keep them in a temporary folder).
+    Process(const Context &context, const QString &cacheRoot, const QString &hashesPath);
 
     ResultCache cache;
     FileHashes hashes;

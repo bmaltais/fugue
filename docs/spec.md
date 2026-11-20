@@ -81,7 +81,7 @@ XDG variables are honored; the defaults are shown.
 
 | Path | Holds |
 | --- | --- |
-| `~/.config/fugue/settings.json` | Settings. |
+| `~/.config/fugue/settings.json` | Settings, written by the settings panel (`app.settings`, Ctrl+,): `navigation`, `language`, `output_folder`, `inputs_folder`, `model_paths`, `pack_paths`, `new_seed`, `embed_workflow` (`src/engine/settings.h` has the table). Keys Fugue does not know are kept. |
 | `~/.config/fugue/providers.json` | Provider instances and their keys, mode 0600 ([8.2](#82-provider-instances)). |
 | `~/.config/fugue/keybindings.json` | Keymap diff ([12.5](#125-command-registry-and-keymap)). |
 | `~/.local/share/fugue/packs/<pack-id>/` | Installed packs ([6.5](#65-where-packs-live-and-how-they-load)). |
@@ -94,6 +94,7 @@ XDG variables are honored; the defaults are shown.
 | `~/.cache/fugue/runs/<run-id>/` | Run folders ([9.7](#97-run-folder)). |
 | `~/Documents/Fugue/` | Suggested place for workflows. Not required. |
 | `~/Pictures/Fugue/` | Default output folder for Save nodes. A setting. |
+| `~/Pictures/Fugue/inputs/` | Images pasted or dropped into Load Image, `<name>-<10 hex of the content hash>.<ext>` ([14.1](#141-m1-the-first-twelve)). Follows the output folder unless set on its own. |
 
 ### 1.5 Hashes and canonical JSON
 
@@ -467,7 +468,8 @@ the group's `default`, then to the inner input's own value. Behavior is specifie
 ```
 
 - `nodes`: per node id: position, size (0 means automatic), collapsed, color (a theme role, not
-  a hex value), a display title, pinned.
+  a hex value), a display title, pinned, and `increment`: the seed inputs the canvas adds one to
+  after each run it starts ([6.2](#62-widgets)).
 - `frames`: Frames ([5.1](#51-frame)).
 - `links`: reroute points, keyed by the target `<node id>.<input name>`, with `#<index>` added
   for an item of a list input (`merge.images#1`).
@@ -964,6 +966,14 @@ A provider instance is a configured use of a provider module, stored in
 - Fields: `name` (unique), `type` (a provider module id), `address`, `key`, `enabled`, plus
   settings the module declares.
 - The list order is the user's preference order.
+- **No file, the default.** Without `providers.json` Fugue uses: `This machine` (type `omarchy`,
+  no address), then one `omarchy` instance per host omarchy-local-ai's `network.json` says this
+  machine is paired with, named after the host (`gx10-f5f4`), with the address
+  `https://<its dns name>`, in name order. A paired host that is offline is kept (its models show
+  as offline, and a pin on it stays valid); a host that is not paired is not used. The default is
+  read again wherever the file is read (the CLI, each window run, each time a model picker opens),
+  and nothing is written: the file is made only when the user changes a provider in the settings.
+  A file that exists wins entirely; nothing is added to it.
 - **Local or remote is only the address.** It is never a property of a graph.
 - Keys live only here. They are never written into a workflow, an export or an embedded graph.
 
@@ -985,10 +995,21 @@ A provider instance is a configured use of a provider module, stored in
   used is an output, so the result is reproducible.
 - A handle that does not match what is running is a clear error with an offer to start the right
   model. Fugue never substitutes another model silently.
+- The model picker of a provider node lists the models every enabled instance that describes
+  itself offers for the node type's capabilities (Generate Image: `image.generate`; Edit Image:
+  `image.edit`, so only models that edit), grouped under each instance's name in the user's order,
+  by the name the provider gives them (`FLUX.2 Klein 4B`, display only: the handle keeps the
+  served name). "Any ready model" (unset) comes first. A model that is not ready says so (`not
+  running`, `loading`) with why and how to fix it under its name; until Fugue can start a model
+  with the user's confirmation ([13.6](#136-safety)) that is the `omarchy-agent-local` command to
+  run. With no model the picker says so: "No image model available: start one in
+  omarchy-local-ai or add a provider".
 
 ### 8.5 When nothing can serve a capability
 
-The node shows what is missing and how to fix it (start a model, add a provider, enable one).
+The node shows what is missing and how to fix it (start a model, add a provider, enable one):
+before a run the canvas check's warning is a chip under the node, and a run's error of these codes
+carries its fix.
 Error codes: `capability_unavailable`, `model_not_running`, `model_missing`,
 `provider_unreachable`. `fugue validate` reports a missing model as a warning; a run that reaches
 the node reports it as an error.
@@ -1198,7 +1219,7 @@ Per-node events go to the canvas and, as JSON lines, to the CLI:
 | `node.running` | `node` |
 | `node.progress` | `node`, `value` (0 to 1), `stage`, `message` |
 | `node.preview` | `node`, `image` |
-| `node.cached` | `node`, `outputs`, `shown` (a sink with no outputs) |
+| `node.cached` | `node`, `outputs`, `shown` (a sink with no outputs), `frozen` (true when it is the node's frozen result, 10.4) |
 | `node.done` | `node`, `outputs`, `seconds`, `shown` (a sink with no outputs) |
 | `node.skipped` | `node`, `reason` (`muted`, `upstream_muted`, `upstream_failed`, `upstream_empty`, `cancelled`) |
 | `node.error` | `node`, `error` |
@@ -1250,7 +1271,8 @@ Each run has a folder `~/.cache/fugue/runs/<run-id>/`:
 
 ### 9.8 Runs across processes
 
-v0.1 has no daemon. The window runs its own runs. `fugue run` from the CLI starts a detached
+v0.1 has no daemon. The window runs its own runs, in its own process, and its queue entries are
+live while that process lives (Appendix A). `fugue run` from the CLI starts a detached
 run worker, prints the run id and returns; `--wait` stays attached and streams events.
 
 - `fugue runs status|events|result|cancel <run-id>` read the run folder; cancel signals the worker.
@@ -1453,7 +1475,7 @@ CurveRenderer drops to 15 fps when dragging at 1000 nodes).
 
 ### 12.3 Navigation
 
-Two presets, chosen in settings:
+Two presets, chosen in settings (`navigation`, applied at once):
 
 | | Legacy (default, ComfyUI's default) | Standard |
 | --- | --- | --- |
@@ -1462,8 +1484,11 @@ Two presets, chosen in settings:
 | Select with a marquee | Ctrl+drag | left-drag |
 | Zoom | wheel | Ctrl+wheel |
 
-In both: middle-drag and Space+drag pan. A trackpad is told from a wheel by `pixelDelta`: on a
-trackpad, scrolling pans and a pinch zooms. Right-click opens the context menu; right-drag does
+In both: middle-drag and Space+drag pan. A touchpad is told from a mouse wheel by its scroll
+phase (anything but `NoScrollPhase`) alone, never by the device type (Qt on Wayland reports an ordinary mouse as a touchpad) and never by `pixelDelta`, which a mouse wheel
+can carry too (Wayland, libinput high-resolution wheels). A mouse wheel zooms by 1.1x per 120
+units at the pointer (legacy) or pans (standard). On a touchpad, scrolling pans and a pinch zooms.
+A wheel over an open multiline field scrolls the field when it has more text than shows. Right-click opens the context menu; right-drag does
 nothing. Marquee selection adds with Shift and subtracts with Alt.
 
 Space: holding Space and dragging pans. A Space press with no drag does nothing. This departs
@@ -1512,6 +1537,11 @@ and the `?` overlay marks each one.
 | `view.zoom-in`, `view.zoom-out` | Zoom | Alt+=, Alt+-, Ctrl+=, Ctrl+- | Ctrl added |
 | `view.toggle-links` | Hide or show links | L | same |
 | `panel.nodes`, `panel.workflows` | Toggle the node library, the workflows panel | N, W | same |
+| `app.menu-bar` | Open the menu bar | F10 | added |
+| `app.context-menu` | Open the context menu | Shift+F10, Menu | added |
+
+Commands with no default key (the colors `node.color.<role>`, `edit.clear`, the exports, the help
+links) are in the menus, and the keymap file can bind any of them.
 
 Tab enters a group when exactly one group is selected and opens node search otherwise, inside a
 group too. A command states the context it applies in, and the more specific context owns the key.
@@ -1532,6 +1562,9 @@ belong to the field. Hence the Ctrl and F1 alternatives for quit and the overlay
   settings panel and the CLI's listing all read the same registry.
 - Each key has one owner at a time in a given context (canvas, a selected group, a text field,
   a run in progress). Contexts belong to commands, not to the keymap file.
+- The menu bar and the context menus list command ids; each item's name, key and enabled
+  state come from the registry when the menu opens, and a command not built yet shows as
+  unavailable. Alt+letter opens a top menu where 12.4 binds nothing to it.
 - The user's keymap is a diff against the defaults at `~/.config/fugue/keybindings.json`:
 
 ```json
@@ -1705,8 +1738,8 @@ authoring, validating, running and fetching results.
   home folder; write under the current directory, the output folder and `~/Documents/Fugue`.
   Outside them is `permission_denied`. "The current directory" is the one `fugue run` was started
   in; `fugue run` records the roots in the run folder for the worker. Paths are judged after `..`
-  and symbolic links are resolved. A run started without roots (the canvas, for now) is not
-  limited.
+  and symbolic links are resolved. A run started without roots is not limited; the canvas
+  starts its runs without them (Appendix A).
 - This is a guard against mistakes and prompt injection, not a security boundary: anything with
   a shell as the user can edit Fugue's files. The docs say so.
 
@@ -1916,6 +1949,98 @@ Building M1 made these further choices.
 | Edit Image's reference limit is the model's `max_reference_images` when it reports one, higher or lower, else 4; it is checked when the job is made, not under validate | 14.1 | medium |
 | Seeds default to 0; `strength` defaults to 0.7 and is sent only with a start image; an empty negative prompt is not sent | 14.1 | medium |
 | Unset steps, guidance and size are filled from the model's defaults in the request, so the job is fully specified | 8.1 | medium-high |
+
+Building M2 made these further choices.
+
+| Choice made in M2 | Section | Confidence |
+| --- | --- | --- |
+| A node's face (#47, [canvas-look.md](canvas-look.md) 4): a 7u header, then the outputs, then the inputs in order, one 6u row each (Blender's order, not ComfyUI's side by side), so a value input's widget spans the node; a resource input is a value row too, with the model picker (#48) | 12.2, 3.2, 2.5 | medium-high |
+| Port shapes: circle for text, number and boolean, square for image, video and audio, diamond for declared types, a ring for `any`; a list port has a second outline behind it. Colors are the theme's port colors (`theme.portColor`), repaired where two collide and lifted to 3:1 against the node and canvas ([canvas-look.md](canvas-look.md) 6.2); `any` takes the text color and a placeholder's port the muted one | 12.6 | medium |
+| Link checks during a drag and on connect: the engine's compatibility (2.3), a node into itself, a cycle, and a node type that is not installed, each with a sentence saying why | 12.6, 2.3 | high |
+| Dragging a linked single input picks its link up and carries it from its source (ComfyUI); dragging an unlinked input reaches back to an output | 12.4 | high |
+| A new link into a list input adds an item at the end: the first is stored as a plain link, a second turns the value into an array | 2.3, 4.2 | medium |
+| Nodes the layout does not place (agent-written files) go in columns by depth, below the placed ones | 4.5, 13.4 | medium |
+| Positions are written to `layout.nodes.<id>.pos` as whole numbers, the viewport to `layout.view` (center whole, zoom to three decimals) | 4.5, 4.6 | medium-high |
+| Zoom runs 0.1 to 4, 1.1 per wheel step (ComfyUI's step); below 0.5 node text and ports are not drawn, and a press there is on the node, not a port (ComfyUI draws a low-detail node below about 0.6) | 12.1, 12.3 | medium-high |
+| A node's port rows are made the first time it is in view at a readable zoom, so a 300-node file opens at the cost of what is on screen | 12.1 | high |
+| A touchpad is a wheel event with a scroll phase, never judged by the device type (the owner's mouse reports `touchpad`: angle 120, pixel 15, phase none) or by `pixelDelta`; it pans in both presets; Ctrl+wheel zooms in both; a pinch arrives as a native zoom gesture. A real touchpad on Wayland reports phases (not testable here: offscreen sends synthetic events) | 12.3 | high for mouse, medium for touchpad hardware |
+| Space+drag pans with the left button held; Space and a move with no button does nothing (ComfyUI pans on that too) | 12.3 | medium |
+| The canvas is never mirrored in right-to-left languages: a graph's direction and its saved positions are geometry | 12.11 | medium-high |
+| A click selects a node, Shift or Ctrl+click adds, dragging a selected node moves the selection, and a click on empty canvas clears it (legacy). A marquee selects every node it touches, as ComfyUI's does | 12.3, 12.4 | high |
+| Furniture (12.9) in #16 is drawn from the layout only (collapsed nodes, Frames, reroute points); making and editing it waits for the command registry and undo (#17, #21) | 12.9 | medium |
+| Node search ranks by name, then keywords, category and description, with letters-in-order as the last resort; every word of the query must match. A dragged link keeps the node types with a compatible port (the engine's rules) and links the first such port; a node dropped from an input goes left of the point so its output faces it | 12.8, 12.4 | medium-high |
+| Undo: one `QUndoStack` per workflow, in the canvas model. Each step keeps the whole document before and after it, and undo or redo makes the canvas match by node id, remaking only what differs. A gesture is one step: a drag, a dragged link (one picked up included), an Alt+drag clone with its move, a Shift+drag of links. An edit that leaves the content hash of "unsaved" (11.2) as it was is no step; the viewport and the selection are not edits. Each tab keeps its own stack (12.10) of at most 50 steps, as ComfyUI's change tracker | 12.10, 12.11 | high |
+| The clipboard holds a `.fugue` document of the selection (its nodes, their layout and the group definitions they use) as `application/x-fugue` and as plain text, so any workflow text pastes. A paste gets new ids, puts the copy's top left at the pointer (else the view's center) and selects it. A plain paste keeps the links between the pasted nodes; Ctrl+Shift+V also keeps links from nodes still in the workflow that pass the link checks | 12.4 | medium-high |
+| Clone keeps no links from outside, as litegraph's node clone does. Ctrl+D puts the copy 20 units right and down; Alt+drag clones the node, or the selection when the node is in it, where it is and drags the copy. Alt+click with no drag takes the node out of the selection | 12.4 | medium |
+| Shift or Ctrl+click on a node already selected, with no drag, takes it out of the selection (litegraph's toggle); dragging it still moves the selection | 12.4 | medium-high |
+| Bypass, mute and collapse on a mixed selection: every node takes the state, unless all have it already, and then all lose it. That is ComfyUI's rule for bypass and mute; its collapse flips each node, which leaves a mixed selection mixed, so collapse follows the other two here | 12.4 | medium-high |
+| Delete removes the nodes, every link into or out of them, and their layout: entries, reroute points into them and their places in Frames | 12.4, 4.5 | high |
+| Shift+drag from an output lets go on another output that can feed every one of its inputs to move them all, and anywhere else to leave them be. Ctrl+Alt+click on an input removes its links (every list item), on an output every link out of it | 12.4 | medium |
+| Zoom keys step 1.1 at the canvas's center (ComfyUI). Fit (`.`, Home) frames the selection, or every node when none is selected, in three quarters of the canvas, within the zoom range | 12.4 | medium-high |
+| A bypassed node is tinted magenta (body, header and a dashed edge from the palette's magenta, the share stepped down until the text reads at 4.5:1) with a dashed pass-through line in the type color; a muted one fades to 40% with no tint, its outgoing wires too ([canvas-look.md](canvas-look.md) 9). ComfyUI's litegraph draws bypass as magenta `#FF00FF` at alpha 0.2 and mute as alpha 0.4 (read in LGraphCanvas.getNodeModeAlpha); we keep the magenta and the faded mute, but tint rather than fade so the text stays readable | 3.5, 12.6 | high for ComfyUI's look, medium-high for ours |
+| A toggle command's menu name says what it will do to the target: "Remove bypass" (ComfyUI: "Remove Bypass"), "Unmute", "Expand", "Unpin" when every selected node already has the state, else the plain verb; the `?` overlay keeps the neutral name | 12.4 | medium-high |
+| Node shadows (#47) are painted once per level in C++ and handed to QML as `data:` URLs on `theme.look`, drawn as a 9-slice `BorderImage` per node in a layer of their own, not through an image provider: the same shared texture, with no provider to register in each engine. Measured at 302 nodes: at most 0.45 ms of render time, inside the 1 ms budget, so nodes at rest keep theirs | 12.1 | high |
+| The valid-target ring while dragging a link is one item drawn by the canvas at the port under the pointer, not one per port; hover growth and the widget port marks appear without animation, which would cost objects at 300 nodes | 12.1, 12.6 | medium-high |
+| The casing layer of highlighted wires (a selection's and the hovered one) is capped at 64 wires: selecting more draws their wires at rest | 12.1 | medium |
+| A collapsed node is its header, as wide as its title plus 24u (kind mark, meta and padding), at most 60u; the mockup's width, where canvas-look.md first said 12u | 12.6 | medium |
+| A node's face is made the first time it comes into view (half a screen around the view, any zoom) and kept: off screen a node is two items, so a 300-node file opens at the cost of what is on screen. The open test bounds CPU time, not the wall clock, and counts the items | 12.1 | high |
+| The tab bar (no section in canvas-look.md) is a recessed `well` strip, the current tab on the node `body` color with an accent line on top | 12.10 | medium |
+| Widgets (#48): the engine decides, the QML only draws. Typed text is parsed and checked with the engine's literal rules (checkLiteral) in C++; a value that fails shows the engine's reason under the field and is not written, and the last valid value typed stays | 6.2, 3.2 | high |
+| The engine's reasons stay English for now: a widget's bubble shows checkLiteral's message (`must be at most 12`) as the CLI and agents get it, untranslated, since translating the engine's errors would make their text differ between the window and the JSON the CLI prints; the window's own words, the keymap file's problems included, are translated | 12.11, 6.2 | medium |
+| A color widget's value is checked by the engine (#rrggbb or #rrggbbaa, `type_mismatch` otherwise), for literals, defaults and runs alike | 6.2 | high |
+| One undo step per field visit: each valid text is in the document as it is typed (so a save meanwhile has it), and Enter, Tab or leaving the field ends the step, as does any other edit that begins meanwhile (a command such as Ctrl+B, an undo), so the two stay separate steps; Escape puts a one-line field back, while in a multiline field (Enter is a new line there) it ends the edit and keeps the text, so a prompt is never lost to a key. A drag (spin scrub, slider) is one step; a chevron, toggle, choice or picked file is one each | 6.2, 12.11 | medium-high |
+| Numbers: a dot or a comma as the decimal point (a comma before exactly three digits, as in 1,000, or two separators, as in 1.000,5, is refused as grouping rather than read as another number); empty text unsets an input with a default or an optional one, and is refused for a required number with none. Chevrons and Up/Down step by `step` (1 for whole numbers, else 0.1), held in `min`..`max` and rounded to the step; a drag on a spin scrubs a step per 6 units, a drag on a slider sets the value by position, and a click (no drag) types, as Blender does | 6.2 | medium |
+| Text: empty is the empty text, except an optional input with no default (a file, a folder), where it unsets | 6.2 | medium |
+| Seed modes: randomize stores `{"auto": "random"}`; increment keeps a number and lists the input in `layout.nodes.<id>.increment`, so the file keeps the choice and a run sees a number; going from randomize to a number takes the seed of the result the node shows (the run's value on the output of the same name, "Seed used"), else draws one. The canvas adds one to each incrementing seed after a run it starts (wrapping to `min` past `max`), as one undo step | 6.2, 4.5 | medium |
+| The model picker lists, when it opens, the models every enabled provider instance offers of the input's resource type (for the node type's capabilities, 8.4), with their state; models on disk (8.9) join it in M5. A typed name is stored as a handle served by that name; an optional model input can go back to "Any ready model" (unset, 8.4) | 2.5, 8.4 | medium |
+| A linked value input shows its source ("Prompt · Text") in place of the widget. List inputs keep a read-only row (`[n]`); a placeholder's inputs show their value read-only | 3.2, 3.6 | medium-high |
+| File and folder widgets store the path the portal returns as it is, or the path typed; the canvas checks no file roots (see the #19 row on canvas runs and roots) | 6.2, 13.6 | medium |
+| Text-field focus (12.4): widget fields are text inputs, so while one has focus its keys are the field's; a press on the canvas or on another widget takes the focus from the field first, ending its edit. Menus are modal, so the window's keys sleep while one is open | 12.4 | high |
+| Widgets are made with a node's rows (in view at a readable zoom); at rest a widget is a well, a text and a mouse area, and editors, menus and pickers are made on first use | 12.1 | high |
+| Canvas runs (#19) run in the window's process (9.8: no daemon) on a thread of their own that owns everything a run touches: its own registry (node types, and providers.json read again at each run's turn, as a worker does), the kernels, the result cache and the Run objects. The UI thread hands over a copy of the document and gets the events back, so compiling, hashing, moving outputs and waiting for providers or the queue never block it. A run goes through `fugue run`'s steps and code: compile (run to here is the compiler's target), run folder, an entry in the shared queue, its turn, the scheduler. A run that does not compile gets no folder, as with `fugue run` | 9.8, 12.1 | high |
+| The window's queue entries record `"owner": "window"`, its pid and that process's start time (`/proc/<pid>/stat`, field 22); such an entry is live while that very process lives, whoever looks, and a process never discards its own entries, so the window can look for dead ones while it holds the lock. `fugue runs cancel` of an active window run leaves the file `cancel` in its run folder, which the window looks for every 50 ms; a waiting one is cancelled by taking its entry, as for a worker's | 9.8, 9.6 | medium-high |
+| Canvas runs carry no file roots (13.6): the roots guard against agents and scripts writing where nobody looked, while on the canvas a person sets every path on the node face, often through the portal, which can be anywhere (a USB disk, `/mnt`); limiting them would refuse the user's own choice. A workflow opened from elsewhere shows its paths on its nodes before anything runs. Revisit if the canvas ever runs workflows an agent wrote without the user looking (11.8) | 13.6 | medium |
+| A node added on the canvas starts its seeds on randomize, as ComfyUI's control-after-generate does by default: Run makes a new picture each time, the loop people come from ComfyUI with. The manifests keep `0` as the default, so `fugue run` and agents stay reproducible without asking, and no manifest default needs `{"auto": "random"}`. Leaving randomize keeps the seed of the result shown, so a liked image can be iterated on downstream from the cache | 6.2, 10.1, 14.1 | medium |
+| Per-node state on the canvas (10.3): between runs it is `fugue validate`'s (checkGraph on the run thread, 300 ms after the last edit and when a workflow is shown, only while no run is active); during a run it follows the events. A node's error stays until the workflow is edited or run again; its last values (time, output values, thumbnail) stay through edits, at 50% while it runs again. A node inside a group shows on the group's node, its error with the inner path id (`g7/first: ...`), and every error of the run is listed by path id from the run pill | 10.3, 12.7, 9.5 | medium-high |
+| Thumbnails: the run thread writes each image result once as a PNG at most 512 px wide under `~/.cache/fugue/thumbnails/<content hash>-512.png` and the node shows that file (`file://`), not the result: no image provider to register in each engine (as with the shadows), no full-size decode on the canvas, and the cost per node stays one small asynchronous image. `CanvasModel::previewSize(node)` and `previewSizeChanged(node)` give the result's pixel size to node sizing (#49) | 12.7, 12.1 | medium-high |
+| One slot under a node's rows shows what it has: the last image result (Save Image's with the name of the file it wrote in the chip), a Preview's text or number as an excerpt, a video or audio result as a label ("Video · 0:04"; a first frame would need ffmpeg per result), and before any run a Load Image's file (made on the run thread like a result's, cached by path, time and size, asked only once the node's card has made its rows, again after every edit that changes the file, a paste, drop, pick or undo; a missing or unreadable file, or one outside the runs' file roots when they have any, shows "File not found"). Preview and Save Image show a dimmed "No result yet" until a result comes. A run's result takes the slot from the input's picture, and a new file drops the old result | 12.7, 14.1 | medium |
+| Each workflow tab keeps what its runs showed and shows it again when it comes back; a run started in one tab never paints another. Progress reaches the canvas at most once per node every 33 ms, through a path that changes one role and lays nothing out | 12.10, 12.1 | medium-high |
+| Run first (Ctrl+Shift+Enter) queues ahead of every waiting run, the CLI's included (9.8's class 3), never ahead of the active one. Cancel (Ctrl+Alt+Enter, Escape while a run is waiting or going) takes the window's active run, else its last waiting one | 9.2, 12.4 | medium |
+| Node size (#49). ComfyUI (ComfyUI_frontend, litegraph, read at 55d8fd2): `computeSize` gives the minimum; a manual size is clamped to it while dragging and is never pinned (it only grows by `_arrangeWidgets`, nothing shrinks it); a saved size below the minimum is raised on load; the handle is a 15 px square at each of the four corners; there is no double-click on the canvas handle (the Vue nodes have one that fits the height; the context menu's Resize resets to the minimum); an image preview is a growable row with a 220 px minimum, drawn aspect-fit and never upscaled, and the node is not resized when an image arrives; text and DOM widgets have a minimum height and an optional maximum and share the free height. We match: the minimum is the content's (a resize never cuts content off), the layout's `size` is read on load and raised to the minimum, free height goes to the growable item (the preview, else the last multiline input), a bottom-right grip. We improve: auto-size is the default and a node follows its content (a preview by its aspect up to 1.5 times the width, a multiline value by its wrapped lines up to 40u, the longest text value up to 120u wide), recomputed only when the content changes, never per frame; a manual size is pinned in `layout.nodes.<id>.size` and a double-click on the grip returns the node to auto; a resize or a return to auto is one undo step; width is held between 40u and 120u; the file may pin only the width (`[w, 0]`) | 4.5, 12 | medium-high |
+| `layout.nodes.<id>.size` is written only for a pinned node (`[width, height]`, whole numbers, 0 for the part left automatic) and removed when the node returns to auto; the pinned height is never stored below what the content needs | 4.5 | high |
+| A pinned height that is only spare room shrinks back (#49): when the content shrinks below the tallest content the pin has stood over since it was set or read (a thumbnail clears: a result dropped by an edit, a cleared file) and nothing can take the room (no thumbnail, no unlinked multiline input), the node shows its content's height, never less. The pin stays in the layout, unchanged, so the picture gets its room back when it returns, and shrinking changes no document (no unsaved state, no undo step). Blank room the user pinned over the content as it was stays, and a pin read from a file holds until its content first shrinks. ComfyUI never shrinks a node by itself (the blank box stays); a box with nothing in it serves nothing | 4.5, 12 | medium |
+| An optional number, slider or seed input with no value and no default shows "auto", dimmed, in its well (the run decides); a missing type's linked input takes the shape and color of the type it is linked to | 6.2, 3.6 | medium-high |
+| Images in (#53), research. ComfyUI (ComfyUI_frontend `usePaste.ts`, `app.ts` drop handler and `handleFile`, `useNodeImageUpload.ts`, read at main on 2026-11-19): a paste event looks at the clipboard items in order and takes the first `image/*` before any workflow text; with a Load Image selected it replaces that node's image, else a Load Image is created; a dropped file goes to the node under the pointer if that node handles it, else a workflow found in the file (PNG/WebP/JSON) wins and opens, else an image makes a Load Image node (several images: one node each, joined by a Batch Images node). The image is uploaded to the server's `input/` folder (`POST /upload/image`, the server renames a clash to `name (1).png` and skips an identical file), the widget holds the name, and a failed upload is a toast. There is no paste button; the combo's list shows the folder's files by name with a preview of the selected one, no thumbnails of the others. We match: image paste and drop create or replace a Load Image, a workflow in a dropped file opens as a workflow, one node per image. We improve: the original bytes are kept (a drop is copied byte for byte, a clipboard image keeps its best encoded type; only bare pixels become a lossless PNG), the file is named from the source name with a content hash so the same image is one file whatever it was called, a Paste button sits on the node, the picker lists recent inputs with thumbnails, a file manager's copy (`text/uri-list`) pastes like a drop, one undo step per paste, and a saved workflow carries its images with it | 14.1, 12.4 | medium-high |
+| Images in (#53), the rule. Order of the paste command: workflow data (`application/x-fugue`, or workflow JSON as text) first, then an image. An image is, in order: the encoded bytes of the first offered of `image/png`, `image/webp`, `image/avif`, `image/tiff`, `image/jpeg`, `image/gif`, `image/bmp` whose bytes really are an image (a wrong label is ignored), else the files of a `text/uri-list`, else a decoded `QImage` written as lossless PNG (never JPEG). The format and extension come from the bytes (PNG, JPEG `jpg`, WebP, GIF, TIFF `tif`, BMP, AVIF), checked again by libvips reading the header; a file that is not one of them, a damaged one, one over 256 MB or over 256 megapixels is refused with a message in the window banner and nothing changes. With exactly one Load Image selected the image replaces its `file`; otherwise a Load Image is made at the pointer (the view's center when the pointer is outside), selected, and the paste is one undo step. A dropped file is copied byte for byte (EXIF orientation, profile and an embedded workflow stay); it must be a regular file. Several images make one node each, 320 units apart, one undo step. A drop on a Load Image replaces its image even when the picture holds a workflow; elsewhere a picture with an embedded workflow opens as a workflow, and any other image is taken as an image | 14.1, 11.4 | medium-high |
+| Images in (#53), where they live. One folder for every workflow: `inputs` under the output folder (`~/Pictures/Fugue/inputs`, from the same lookup as Save nodes, so `XDG_PICTURES_DIR` and a localized folder are honored), chosen by the owner so the images are visible. A file is `<stem>-<first 10 hex of the SHA-256>.<real extension>`; the stem is the dropped file's name (last path component, extension cut, anything but letters, digits, `-`, `_`, `.` made `_`, leading dots dropped, at most 48 characters, `image` if nothing is left) or `pasted-YYYYMMDD-HHMMSS` for the clipboard (the clipboard names no source). A file already in the folder is reused whatever it was called, so the same image is one file, but only a regular file (never a symbolic link) with the same hash part and extension whose whole content is the same bytes: a name and a size prove nothing, since a run's Save Image may write into the folder. A file under the chosen name with other bytes is never replaced; the name takes `-2`, `-3` before the extension. Written atomically (`PartialFile`), the final path checked inside the folder with the file roots. Fugue never deletes from it. Cache keys stay the content hash of the file | 1.4, 14.1, 13.6 | medium-high |
+| Images in (#53), file roots. The inputs folder is under the output folder, so the default write roots cover it; it is also a default read root (the pictures folder may be set outside the home), and `fugue run` adds the `inputs` folder beside the workflow file it runs as a read root. Storing an image checks the write against roots of just the inputs folder, never wider. A dropped file the user chose is read without a roots check (an explicit gesture, as the file picker is) but must be a regular file | 13.6 | medium |
+| Images in (#53), saving. Save and Save As copy every file the workflow's `file` inputs name under the inputs folder into `inputs` beside the .fugue (same names), repoint those inputs and write, as one step: always, with no question (a question per save would be noise, and a portable file is what a saved workflow should be; the cost is a duplicate file, never a loss). The original stays. If a copy fails the save fails with the reason and nothing is rewritten. The repoint is an undo step ("Move images"). The repointed input holds `inputs/<name>`, relative to the workflow's folder, so the folder can be moved or shared whole; a full path into that `inputs` folder (written by an older save) becomes relative too. Save As to another folder copies the files of the old `inputs` folder along the same way (a different file already there under the name gets `-2`, `-3`), and any other relative path becomes the full path it led to, since it would lead nowhere from the new folder. A shared copy (11.5) keeps a relative path and replaces an absolute one by the bare file name, which then resolves beside the file | 11.2, 11.5, 14.1 | medium |
+| Images in (#53), the UI thread. A paste or drop hashes, checks (the libvips header) and writes the image on the UI thread, at most 256 MB: a typical picture takes milliseconds, and keeping it synchronous keeps one undo step per paste with its result known at once; a worker with a busy notice is for when the cap or the formats grow. Save's copies of a workflow's inputs stream a megabyte at a time and the same-bytes check reads in chunks, so no image is held whole | 14.1, 12.4 | medium |
+| Undo after Save As to another folder: before the inputs move, the relative `file` paths of the canvas and of every document the undo steps keep become the full paths they name from the old folder (no step of its own), so an undo after the save never resolves an old relative path against the new folder, where it may name another file. The repoint stays its own step ("Move images") | 12.11, 14.1 | medium-high |
+| A name typed without an extension gets the real one (`.fugue`, or the image's format for Save Image…) and then never replaces a file already there, since the dialog asked about the name as typed: the save fails with a notice. The dialogs offer the real suffix and filter, so the portal can ask about the full name | 11.2, 12.3 | high |
+| Open and drop read only regular files (a pipe, socket or device is refused before it is opened, as opening a pipe waits for a writer), a `.fugue` of at most 64 MB (refused by its size before it is read), and in a PNG or WebP only the chunk headers and the workflow's own chunk | 11.4 | high |
+| Recovery owners (11.3): each running Fugue's recovery store holds `owner-<id>.lock` (QLockFile, never stale by age) in the recovery folder from its first copy, and each note names its owner; a copy is offered only when its owner's lock is free or stale (the process is gone), and the start that offers it holds that lock until it ends, so two Fugues never offer, discard or duplicate each other's copies. A copy without an owner (older) is offered. A copy that cannot be read is moved to `unreadable/` in the recovery folder, never deleted. Copies, notes and trust.json are 0600 | 11.3, 6.7 | medium-high |
+| Relative `file` paths. A `file` input's relative path (a literal, or text that comes by link) is resolved against the folder of the workflow file being run, never the working directory: on the canvas, by `fugue run` and `fugue validate` (the CLI's compiled-graph file counts as that file), and for the picture a Load Image shows before a run. Trimmed and "~" expanded first, then joined to the folder and walked one component at a time (`file_roots.h` `inputFilePath`, the same walk as the roots' `canonicalPath`), so `..` and symbolic links are resolved before the read roots judge the path; a relative path may lead out of the workflow's folder, and the roots, where a run has them, decide (confining it would protect nothing, as an absolute path can name the same file). An unsaved workflow has no folder: a relative path there is `file_not_found` on the input ("…is relative to the workflow's folder, and the workflow is not saved yet", hint: save first or give the full path), and its picture shows "File not found". `folder` inputs are not changed (Save Image's relative folder is under the output folder). The cache key stays the file's content hash, so a moved folder keeps its cached results. ComfyUI resolves an image name against its server's `input/` folder only, so a workflow and its images cannot travel together | 13.6, 14.1, 11.5 | medium-high |
+| Images in (#53), the picker. A Load Image's file input has a Paste button (always shown, takes the clipboard into that node) and its picker glyph opens "Browse files…" followed by the newest 48 images of the inputs folder with thumbnails; the thumbnails are decoded small, only for rows that scroll into view. The list reads the folder's names and times when it opens; picking one is one undo step and only a file inside the inputs folder is accepted | 6.2, 14.1 | medium-high |
+| Menus (#50) are built from the command registry: a menu lists command ids (`src/menu/menus.cpp`) and takes each one's name, first key and state from the registry when it opens, so a menu, the `?` overlay and the keymap never disagree. A command with no handler is listed, off and at half opacity; the ticket that owns a command says when it can run (`setEnabledWhen`) and whether a toggle is on | 12.5 | high |
+| Six top menus, File, Edit, View, Node, Run and Help, where ComfyUI has one "Comfy" menu (Workflow/File, Edit, View, Help) and keeps node and run commands in context menus and the action bar: every command is reachable from the keyboard and the mouse in one place. Alt+F, E, V, N, R, H open them (none is bound in 12.4); F10 opens the first (`app.menu-bar`, added); Left and Right move along the bar | 12.4, 12.5 | medium-high |
+| A narrow window (the titles do not fit, as with a large text size or a long translation) shows one menu button in their place, with the menus as submenus; Alt+letter still opens each one under it | 12.5 | medium |
+| While a menu is open the window's shortcuts sleep, so bare letters (Q, L) reach the menu, not quit or links | 12.4 | high |
+| Context menus: right-click on a node, a Frame or empty canvas (on release; a right-drag still does nothing); Shift+F10 or the Menu key (`app.context-menu`, added) opens the selection's or the pointer's. A right-click on a node outside the selection selects it first (ComfyUI); inside, the selection stays | 12.3 | high |
+| Open Image, Copy Image and Save Image… (`node.open-image`, `node.copy-image`, `node.save-image`) are on a node's context menu and the Node menu, enabled when its picture slot has an image file: its last result, else a Load Image's file. ComfyUI's menu (`useImageMenuOptions`) has the same three for a node with a preview, acting on the shown image: Open Image opens it in a browser tab, Copy Image draws it on a canvas and puts a re-encoded PNG on the clipboard, Save Image downloads it. Matched: the three verbs, shown for image nodes only, a notice when one fails. Improved: all three use the FULL file, not the 512 px thumbnail; Copy puts the file's own bytes under their real MIME type (png, jpeg, webp), plus a PNG of the picture when the file is not one (and `application/x-fugue-image-type` naming the original's type, which a Fugue paste takes first), so another app and a Fugue paste (14.1) get the original; never a decoded QImage, which qtwayland would re-encode for every image/* request; it reads and decodes off the UI thread; Save copies the original bytes (an embedded workflow stays), atomically, through a save dialog that asks before replacing, starting in the output folder; Open hands the default viewer a file with the right extension (when the file's name lacks it, a copy made off the UI thread in `fugue-view` in the runtime folder, 0700, named by the path, size and time), and refuses a file whose bytes are no image. Not in ComfyUI: the mask editor entry | 12.3 | high |
+| Node and Frame colors: one command per theme role, `node.color.<role>` for none, accent, muted, red, orange, yellow, green, cyan, blue and magenta, in Edit > Colors and the context menus; the selection's nodes, or the Frame the menu was opened on, take it in one undo step. A swatch shows the theme's color; the node header shows `tint-<role>`. No `error` role (it is the palette's red). ComfyUI's presets are fixed dark colors (red, brown, green, blue, pale blue, cyan, purple, yellow, black) lightened for light themes; theme roles follow every palette. A color wheel and hex colors are #52 | 4.5 | medium |
+| Frames are not selectable until #26, so a Frame's color comes only from its own context menu | 5.1 | medium |
+| The `?` overlay lists the commands that have a key; the rest (colors, exports, help links) are in the menus and appear in the overlay once the keymap file binds them | 12.5 | medium |
+| No providers.json: the default instances are this machine and every host omarchy-local-ai's `network.json` says is paired, by host name at `https://<dns>`, the address the omarchy provider already matches a paired host's models by (so a file the settings write later holds the same entries). Offline paired hosts are kept, so their models show as offline and pins stay valid. Read wherever providers.json is read, never written; a file that exists wins entirely | 8.2 | medium-high |
+| The model picker lists models by instance for the node type's capabilities, titled by the provider's display name; a model that is not ready stays choosable (a run then says it is not running, 8.4) and shows why and the command that starts it; Up and Down skip the instance headings | 8.4, 2.5 | medium-high |
+| A paired host with no model to offer says why (offline, unreachable, or nothing shared running) instead of "not paired" | 8.7 | high |
+| Menu items and gaps from ComfyUI: export a share copy and the compiled graph (11.5, #54), Clear workflow, the help links and About are commands; templates, Clipspace, refresh node definitions, unload models, focus mode, theme switching, node shapes, properties panels and the Manager are not planned (Fugue has no Python node definitions, follows the Omarchy theme, and installs packs per 6.6); rename and pin (#55), the side panels (#56), a node's image actions (#57), align and distribute (#58) and the tab menu (#59) are later tickets | 12.5 | medium |
+| Settings panel (#51): six pages (General, Folders, Run, Providers, Keymap, Theme) instead of ComfyUI's category tree, since Fugue has about a dozen settings. Each change is written at once (no Apply), checked in C++; QML only asks | 1.4 | high |
+| settings.json keeps keys it does not know; a known key with a bad value is listed as a problem and its default used, the value left as written; a file that is not a JSON object is never overwritten. A value equal to the default leaves the file, so a later default reaches users who never chose | 1.4 | high |
+| `new_seed`: random (default, as ComfyUI's control_after_generate) or fixed (a random number that stays) for seed widgets of nodes added on the canvas; increment stays a per-node choice. `embed_workflow` sets what new Save Image nodes start with (11.7) | 6.2, 11.7 | medium |
+| `language`: follow Omarchy (default) or a shipped catalog, live. `output_folder` and `inputs_folder` are read afresh by every run and the CLI | 1.4, 12.11 | high |
+| Providers page: the effective instances in preference order; with no providers.json the defaults show as "default, not saved", and the first change writes them all (mode 0600, atomically). Keys and secret module fields reach the panel only as set or not set | 8.2, 8.8 | medium |
+| ComfyUI settings not taken: custom navigation mix, zoom and pointer tuning, link render modes, node opacity and badges, palettes and background images (the Omarchy theme), auto save (recovery, 11.3), server flags (each provider owns its engine's), accounts. Later: minimap, snap to grid, side panel layout, reduce motion, keys edited in place, pack enable/disable. Full table in the #51 pull request | 12 | medium |
 
 ## Appendix B: issue to section map
 

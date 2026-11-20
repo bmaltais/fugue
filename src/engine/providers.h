@@ -16,6 +16,8 @@
 
 namespace fugue {
 
+struct OmarchyPaths; // omarchy_provider.h
+
 // One entry of ~/.config/fugue/providers.json.
 struct ProviderInstance {
     QString name;         // unique; what pins name
@@ -32,11 +34,28 @@ QString providersPath();
 // The list in the user's order. Errors are invalid_document, one per bad entry.
 Result<QList<ProviderInstance>> parseProviderInstances(const QJsonObject &document);
 
-// Reads and parses a providers.json. A missing file gives defaultProviderInstances().
+// Reads and parses a providers.json. A missing file gives defaultProviderInstances(), read
+// from Omarchy's state in `omarchy` (OmarchyPaths::standard() when not given). A file that
+// is there wins entirely: nothing is added to it. Nothing here writes the file.
 Result<QList<ProviderInstance>> loadProviderInstances(const QString &path);
+Result<QList<ProviderInstance>> loadProviderInstances(const QString &path, const OmarchyPaths &omarchy);
 
-// What a machine with no providers.json gets: [{"name": "This machine", "type": "omarchy"}].
+// What a machine with no providers.json gets (spec 8.2): "This machine" (type omarchy, no
+// address), then one omarchy instance per host omarchy-local-ai's network.json says this
+// machine is paired with, named after the host, at https://<its dns name> (what the omarchy
+// provider matches a paired host's models by), in the hosts' name order. A paired host that
+// is offline is kept, so its models show as offline and a pin on it stays valid. A
+// network.json that is missing adds no host (none is paired); one that cannot be read adds
+// none either, for now: pairedHostsProblem() says so.
 QList<ProviderInstance> defaultProviderInstances();
+QList<ProviderInstance> defaultProviderInstances(const OmarchyPaths &omarchy);
+
+// Why the paired hosts of defaultProviderInstances() are unknown right now: network.json is
+// there but does not read (omarchy-agent-local may be rewriting it). Empty when it reads or
+// is missing. Defaults made meanwhile lack the hosts, so they must not be written to
+// providers.json, where a file that is there wins for good.
+QString pairedHostsProblem();
+QString pairedHostsProblem(const OmarchyPaths &omarchy);
 
 // Makes the provider an instance is a use of. M0 compiles in only omarchy (8.7); any other type
 // is unknown_provider until provider modules arrive (M4).

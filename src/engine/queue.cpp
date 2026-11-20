@@ -48,6 +48,8 @@ QueueEntry parse(const QString &file, const QString &dir) {
         entry.pid = qint64(json->value("pid").toDouble());
         entry.workflow = json->value("workflow").toString();
         entry.queuedBootMs = qint64(json->value("queued_boottime_ms").toDouble());
+        entry.inProcess = json->value("owner").toString() == QLatin1String("window");
+        entry.processStart = qint64(json->value("process_start").toDouble());
     }
     if (entry.run.isEmpty()) // unreadable: the name's last part still says which run
         entry.run = file.section('-', 2);
@@ -89,6 +91,15 @@ bool Queue::enqueue(const QString &run, const QString &workflow, bool first) con
     const Guard guard(m_dir);
     return write(fileName(first ? 3 : 5, QDateTime::currentMSecsSinceEpoch(), run),
                  QJsonObject{{"run", run}, {"pid", 0}, {"queued_boottime_ms", double(bootMs())}, {"workflow", workflow}});
+}
+
+bool Queue::enqueueForThisProcess(const QString &run, const QString &workflow, bool first) const {
+    const Guard guard(m_dir);
+    const qint64 pid = qint64(::getpid());
+    return write(fileName(first ? 3 : 5, QDateTime::currentMSecsSinceEpoch(), run),
+                 QJsonObject{{"run", run}, {"pid", double(pid)}, {"owner", "window"},
+                             {"process_start", double(processStartTime(pid))},
+                             {"queued_boottime_ms", double(bootMs())}, {"workflow", workflow}});
 }
 
 QList<QueueEntry> Queue::entries() const {
@@ -149,11 +160,18 @@ bool Queue::remove(const QueueEntry &seen) const {
 
 QStringList Queue::discardDead(Lock &engineLock) const {
     QStringList gone;
+    const qint64 self = qint64(::getpid());
+    const qint64 started = processStartTime(self);
+    const auto mine = [self, started](const QueueEntry &entry) {
+        return entry.inProcess && entry.pid == self && entry.processStart == started;
+    };
     for (const QueueEntry &entry : entries()) {
-        if (entry.active)
+        if (entry.active || mine(entry))
             continue;
         bool dead = false;
-        if (entry.pid > 0) {
+        if (entry.inProcess) {
+            dead = entry.pid <= 0 || processStartTime(entry.pid) != entry.processStart;
+        } else if (entry.pid > 0) {
             dead = !isRunWorker(entry.pid, entry.run);
         } else if (entry.queuedBootMs > 0) {
             // A worker records its pid as soon as it runs; an entry that never got one
@@ -174,7 +192,7 @@ QStringList Queue::discardDead(Lock &engineLock) const {
     const bool held = engineLock.held();
     if (engineLock.tryAcquire()) {
         for (const QueueEntry &entry : entries())
-            if (entry.active && remove(entry))
+            if (entry.active && !mine(entry) && remove(entry))
                 gone << entry.run;
         if (!held)
             engineLock.release();
@@ -191,6 +209,19 @@ bool isRunWorker(qint64 pid, const QString &run) {
     const QList<QByteArray> arguments = file.readAll().split('\0');
     const qsizetype at = arguments.indexOf("__worker");
     return at >= 0 && at + 1 < arguments.size() && arguments.at(at + 1) == run.toUtf8();
+}
+
+qint64 processStartTime(qint64 pid) {
+    if (pid <= 0)
+        return 0;
+    QFile file(QStringLiteral("/proc/%1/stat").arg(pid));
+    if (!file.open(QIODevice::ReadOnly))
+        return 0;
+    // "pid (comm) state ppid ...": comm may hold spaces and parentheses, so the fields are
+    // counted from the last ')'. starttime is field 22, the 20th after it.
+    const QByteArray stat = file.readAll();
+    const QList<QByteArray> fields = stat.mid(stat.lastIndexOf(')') + 2).split(' ');
+    return fields.size() > 19 ? fields.at(19).toLongLong() : 0;
 }
 
 bool signalRunWorker(qint64 pid, const QString &run, int signal) {

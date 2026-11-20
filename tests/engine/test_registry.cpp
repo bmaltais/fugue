@@ -260,6 +260,27 @@ private slots:
         QCOMPARE(checkLiteral(method, "zzzzzzzz", PortKind::Builtin).first().hint, QString());
     }
 
+    void literalColorsAreHexWithOptionalAlpha() {
+        // 6.2: a color widget's value is #rrggbb or #rrggbbaa.
+        InputSpec tint;
+        tint.name = "tint";
+        tint.type = PortSpec{*PortType::parse("text"), false};
+        tint.widgetName = "color";
+        QVERIFY(checkLiteral(tint, "#1a2B3c", PortKind::Builtin).isEmpty());
+        QVERIFY(checkLiteral(tint, "#1a2b3c80", PortKind::Builtin).isEmpty());
+        for (const char *bad : {"red", "#fff", "1a2b3c", "#1a2b3g", "#1a2b3c8", " #1a2b3c"})
+            QCOMPARE(codes(checkLiteral(tint, bad, PortKind::Builtin)), QStringList{"type_mismatch"});
+        // A manifest whose color default is not one fails to load.
+        QJsonObject manifest = object(sharpen);
+        QJsonArray inputs = manifest["inputs"].toArray();
+        inputs.append(QJsonObject{{"name", "tint"}, {"type", "text"}, {"widget", "color"}, {"default", "red"}});
+        manifest["inputs"] = inputs;
+        QVERIFY(!NodeType::fromJson(manifest).ok());
+        // A plain text input takes any text.
+        tint.widgetName.clear();
+        QVERIFY(checkLiteral(tint, "red", PortKind::Builtin).isEmpty());
+    }
+
     void literalOtherForms() {
         InputSpec flag;
         flag.name = "flag";

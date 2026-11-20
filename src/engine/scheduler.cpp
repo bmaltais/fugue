@@ -12,6 +12,7 @@
 #include <QPointer>
 #include <QSet>
 #include <QRandomGenerator>
+#include <QScopeGuard>
 #include <QThread>
 #include <QThreadPool>
 #include <QTimer>
@@ -720,9 +721,19 @@ private:
             const bool pathLiteral = (spec.widget() == QLatin1String("file") || spec.widget() == QLatin1String("folder")) &&
                                      value.kind() == Value::Kind::Json && value.json().isString();
             // Trimmed and "~" expanded here, once: the node reads, the key names and the share
-            // copy judges (share_copy.h) the same path.
-            if (pathLiteral)
+            // copy judges (share_copy.h) the same path. A relative file is the workflow folder's
+            // (file_roots.h inputFilePath); a relative folder is the node's to place (Save Image's
+            // is under the output folder).
+            if (pathLiteral && spec.widget() == QLatin1String("file")) {
+                const Result<QString> located = inputFilePath(value.text(), m_options.workflow, spec.name);
+                if (!located) {
+                    resolved.problem = located.error();
+                    return resolved;
+                }
+                value = Value(located.value());
+            } else if (pathLiteral) {
                 value = Value(expandHome(value.text().trimmed()));
+            }
             n.inputs.insert(spec.name, value);
             // A file read by path is keyed by its content, not its path (10.1). Hashing reads
             // it, so the read roots (13.6) are checked first, cached result or not.
@@ -1135,7 +1146,10 @@ private:
         n.state = state;
         n.outputs = outputs;
         n.shown = shownBy(n);
-        emitEvent(withShown({{"event", "node.cached"}, {"node", n.path}, {"outputs", valuesJson(outputs)}}, n.shown));
+        QJsonObject event{{"event", "node.cached"}, {"node", n.path}, {"outputs", valuesJson(outputs)}};
+        if (state == NodeState::Frozen)
+            event.insert("frozen", true); // its frozen result (10.4), so the canvas shows it frozen
+        emitEvent(withShown(event, n.shown));
     }
 
     void finish() {
@@ -1246,14 +1260,29 @@ RunOutcome runGraph(const CompiledGraph &graph, const RunFolder &folder, const R
     return run.outcome();
 }
 
-GraphCheck checkGraph(const CompiledGraph &graph, const RunEnvironment &environment, const RunOptions &options) {
+void CheckAbort::abort() {
+    m_aborted = true;
+    if (m_quit)
+        m_quit();
+}
+
+GraphCheck checkGraph(const CompiledGraph &graph, const RunEnvironment &environment, const RunOptions &options,
+                      CheckAbort *abort) {
     Scheduler scheduler(graph, std::nullopt, environment, options, true);
     QEventLoop loop;
     scheduler.onFinished = [&loop] { loop.quit(); };
-    scheduler.start();
-    if (!scheduler.finished())
+    if (abort)
+        abort->m_quit = [&loop] { loop.quit(); };
+    const auto disarm = qScopeGuard([abort] {
+        if (abort)
+            abort->m_quit = nullptr;
+    });
+    if (!(abort && abort->m_aborted))
+        scheduler.start();
+    if (!scheduler.finished() && !(abort && abort->m_aborted))
         loop.exec();
     GraphCheck check;
+    check.aborted = !scheduler.finished();
     check.states = scheduler.outcome().states;
     check.keys = scheduler.outcome().keys;
     check.warnings = scheduler.outcome().errors;

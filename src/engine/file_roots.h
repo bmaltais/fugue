@@ -5,7 +5,7 @@
 //
 // `fugue run` sets them, from the folder it was started in, and the run folder carries
 // them to the worker (roots.json, RunFolder::writeRoots). A run without them (the canvas,
-// in-process tests) is not limited; the canvas decides for itself (#19).
+// in-process tests) is not limited; the canvas starts its runs without them (spec Appendix A).
 //
 // Paths are compared in canonical form, resolved one component at a time the way the
 // kernel resolves them: a link is followed where it stands, so `link/..` is the folder above
@@ -28,7 +28,13 @@ struct FileRoots {
 
     // 13.6's defaults: read under the home folder; write under `workingDirectory` (where
     // `fugue run` was started), the output folder (paths.h) and ~/Documents/Fugue.
-    static FileRoots defaults(const QString &workingDirectory);
+    // The inputs folder (paths.h inputsDir, under the output folder) is writable as part of it,
+    // and readable always, as XDG_PICTURES_DIR may put it outside the home folder. With `workflowPath`
+    // (the file a run was started from), the `inputs` folder beside it is readable too.
+    static FileRoots defaults(const QString &workingDirectory, const QString &workflowPath = {});
+
+    // The roots for storing an image: read and write the inputs folder, and nothing else.
+    static FileRoots forInputs();
 
     bool allowsRead(const QString &path) const;
     bool allowsWrite(const QString &path) const;
@@ -47,6 +53,13 @@ struct FileRoots {
 // symbolic link is replaced by where it leads (followed again, 40 links at most). A
 // component that does not exist yet is kept as written. Empty when the links loop.
 QString canonicalPath(const QString &path);
+
+// The file a `file` input's text names (spec Appendix A): trimmed and "~" expanded; a relative
+// path is taken from the folder of `workflow` (the file the run came from, absolute) and walked
+// as canonicalPath walks it, so `..` and links are resolved before the roots judge it; an
+// absolute path is returned as written. A relative path with no workflow (an unsaved one) has
+// no folder to start from: file_not_found on `input`, saying so.
+Result<QString> inputFilePath(const QString &text, const QString &workflow, const QString &input);
 
 // Whether canonical `path` is `root` or inside it (both canonical).
 bool isInside(const QString &path, const QString &root);

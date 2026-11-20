@@ -1,6 +1,7 @@
 #include "embed.h"
 
 #include <QFile>
+#include <QFileInfo>
 #include <QtEndian>
 
 #include <array>
@@ -72,31 +73,42 @@ QByteArray xmpPacket(const QByteArray &workflowJson) {
            QByteArray("</rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end=\"w\"?>");
 }
 
-// The text of the first uncompressed `fugue` iTXt chunk in a PNG, or null.
-QByteArray pngFugueText(const QByteArray &bytes) {
-    qsizetype at = 8;
-    while (at + 12 <= bytes.size()) {
-        const quint32 length = qFromBigEndian<quint32>(bytes.constData() + at);
-        if (at + 12 + qsizetype(length) > bytes.size())
+// The text of the first uncompressed `fugue` iTXt chunk in a PNG file, or null. Only chunk
+// headers are read on the way, never the image data.
+QByteArray pngFugueText(QFile &file) {
+    qint64 at = 8;
+    while (file.seek(at)) {
+        const QByteArray header = file.read(8);
+        if (header.size() < 8)
             break;
-        if (bytes.mid(at + 4, 4) == "iTXt") {
-            const QByteArray data = bytes.mid(at + 8, length);
+        const quint32 length = qFromBigEndian<quint32>(header.constData());
+        const QByteArray type = header.mid(4, 4);
+        if (type == "IEND")
+            break;
+        if (type == "iTXt" && length <= quint32(maxEmbeddedWorkflowBytes)) {
+            const QByteArray data = file.read(length);
+            if (data.size() < qsizetype(length))
+                break;
             // Only the uncompressed form is written; one compressed by another tool is not read.
             if (isFugueItxt(data) && data.size() >= 10 && data.at(6) == 0)
                 return data.mid(10);
         }
-        at += 12 + length;
+        at += 12 + qint64(length);
     }
     return {};
 }
 
-QByteArray webpXmp(const QByteArray &bytes) {
-    qsizetype at = 12;
-    while (at + 8 <= bytes.size()) {
-        const quint32 length = qFromLittleEndian<quint32>(bytes.constData() + at + 4);
-        if (bytes.mid(at, 4) == "XMP ")
-            return bytes.mid(at + 8, length);
-        at += 8 + qsizetype(length) + (length & 1);
+// The XMP chunk of a WebP file, or null; the other chunks are skipped unread.
+QByteArray webpXmp(QFile &file) {
+    qint64 at = 12;
+    while (file.seek(at)) {
+        const QByteArray header = file.read(8);
+        if (header.size() < 8)
+            break;
+        const quint32 length = qFromLittleEndian<quint32>(header.constData() + 4);
+        if (header.startsWith("XMP "))
+            return length <= quint32(maxEmbeddedWorkflowBytes) ? file.read(length) : QByteArray();
+        at += 8 + qint64(length) + (length & 1);
     }
     return {};
 }
@@ -163,15 +175,16 @@ Result<QByteArray> webpWithWorkflow(const vips::VImage &image, const QByteArray 
 
 Result<QJsonObject> readEmbeddedWorkflow(const QString &path) {
     QFile file(path);
-    if (!file.open(QIODevice::ReadOnly))
+    // A pipe or a device is never opened: opening a pipe waits for a writer.
+    if (!QFileInfo(path).isFile() || !file.open(QIODevice::ReadOnly))
         return makeError(file.exists() ? QStringLiteral("permission_denied") : QStringLiteral("file_not_found"),
                          QStringLiteral("Cannot read %1.").arg(path));
-    const QByteArray bytes = file.readAll();
+    const QByteArray head = file.read(12);
     QByteArray text;
-    if (bytes.startsWith(pngSignature)) {
-        text = pngFugueText(bytes);
-    } else if (bytes.startsWith("RIFF") && bytes.mid(8, 4) == "WEBP") {
-        const QString xmp = QString::fromUtf8(webpXmp(bytes));
+    if (head.startsWith(pngSignature)) {
+        text = pngFugueText(file);
+    } else if (head.size() == 12 && head.startsWith("RIFF") && head.mid(8, 4) == "WEBP") {
+        const QString xmp = QString::fromUtf8(webpXmp(file));
         const qsizetype open = xmp.indexOf(QString::fromLatin1(xmpOpen));
         const qsizetype close = xmp.indexOf(QString::fromLatin1(xmpClose));
         if (open >= 0 && close > open)

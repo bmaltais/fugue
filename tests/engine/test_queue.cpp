@@ -218,6 +218,47 @@ private slots:
         QCOMPARE(runs(queue), (QStringList{"run-b"}));
     }
 
+    // The window runs its own runs (9.8): its entries are not a `__worker`'s, so they are
+    // live while the window's process lives, known by its pid and that process's start time.
+    void aWindowsWaitingEntryIsLiveWhileItsProcessLives() {
+        QTemporaryDir dir;
+        const Queue queue(dir.filePath("queue"));
+        QVERIFY(queue.enqueueForThisProcess("run-a", "/w/a.fugue", false));
+        QueueEntry entry;
+        QVERIFY(queue.find("run-a", &entry));
+        QCOMPARE(entry.pid, QCoreApplication::applicationPid());
+        QVERIFY(entry.inProcess);
+        Lock lock(dir.filePath("engine.lock"));
+        QVERIFY(queue.discardDead(lock).isEmpty());
+        QCOMPARE(runs(queue), (QStringList{"run-a"}));
+    }
+
+    void aWindowsWaitingEntryIsDeadOnceItsPidBelongsToAnotherProcess() {
+        QTemporaryDir dir;
+        // This process's pid, but a start time that is not this process's: the window died
+        // and the id went to someone else.
+        writeEntry(dir, "5-00000000000001-run-a",
+                   {{"run", "run-a"}, {"pid", double(QCoreApplication::applicationPid())}, {"owner", "window"},
+                    {"process_start", 1}, {"queued_boottime_ms", double(bootMs())}});
+        const Queue queue(dir.filePath("queue"));
+        Lock lock(dir.filePath("engine.lock"));
+        QCOMPARE(queue.discardDead(lock), (QStringList{"run-a"}));
+    }
+
+    // The window holds the engine lock while its run is active; looking for dead entries
+    // then must not take its own active entry for one.
+    void aProcessHoldingTheLockKeepsItsOwnActiveEntry() {
+        QTemporaryDir dir;
+        const Queue queue(dir.filePath("queue"));
+        QVERIFY(queue.enqueueForThisProcess("run-a", "/w/a.fugue", false));
+        QVERIFY(queue.activate("run-a"));
+        Lock lock(dir.filePath("engine.lock"));
+        QVERIFY(lock.tryAcquire());
+        QVERIFY(queue.discardDead(lock).isEmpty());
+        QCOMPARE(runs(queue), (QStringList{"run-a"}));
+        QVERIFY(lock.held());
+    }
+
     void aProcessIsARunsWorkerOnlyByItsCommandLine() {
         QVERIFY(!isRunWorker(QCoreApplication::applicationPid(), "run-a"));
         QVERIFY(!isRunWorker(0, "run-a"));

@@ -5,7 +5,9 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "engine/omarchy_provider.h"
 #include "engine/providers.h"
+#include "omarchy_fixture.h"
 
 using namespace fugue;
 
@@ -96,13 +98,62 @@ private slots:
             QCOMPARE(error.code, QStringLiteral("invalid_document"));
     }
 
-    void withoutAProvidersFileThisMachineIsTheOnlyInstance() {
+    void withoutAProvidersFileOrPairedHostsThisMachineIsTheOnlyInstance() {
         QTemporaryDir dir;
-        const auto loaded = loadProviderInstances(dir.filePath("providers.json"));
+        const OmarchyPaths nothing{dir.filePath("state"), dir.filePath("config")};
+        const auto loaded = loadProviderInstances(dir.filePath("providers.json"), nothing);
         QVERIFY(loaded.ok());
         QCOMPARE(loaded.value().size(), 1);
         QCOMPARE(loaded.value().first().name, QStringLiteral("This machine"));
         QCOMPARE(loaded.value().first().type, QStringLiteral("omarchy"));
+        QVERIFY(loaded.value().first().enabled);
+        QVERIFY(loaded.value().first().address.isEmpty());
+    }
+
+    void withoutAProvidersFileEachPairedHostIsAnInstanceToo() {
+        // The spec 8.2 default: this machine, then every host network.json says this machine
+        // is paired with, by name, at the address its models are reached through. A host
+        // that is offline stays, so a pin on it says it is offline rather than unknown; a
+        // host that is not paired is not used.
+        QTemporaryDir home;
+        const OmarchyPaths paths = test::writeOmarchyState(home.path());
+        const auto loaded = loadProviderInstances(home.filePath("config/fugue/providers.json"), paths);
+        QVERIFY(loaded.ok());
+        QStringList names;
+        for (const ProviderInstance &instance : loaded.value()) {
+            names << instance.name;
+            QCOMPARE(instance.type, QStringLiteral("omarchy"));
+            QVERIFY(instance.enabled);
+            QVERIFY(instance.key.isEmpty()); // the host's key stays in Omarchy's own file
+        }
+        QCOMPARE(names, (QStringList{"This machine", "lab", "studio"}));
+        QCOMPARE(loaded.value().at(1).address, QStringLiteral("https://lab.tail1234.ts.net"));
+        QCOMPARE(loaded.value().at(2).address, QStringLiteral("https://studio.tail1234.ts.net"));
+        // Nothing is written: the file is the user's, made once they change something (#51).
+        QVERIFY(!QFile::exists(home.filePath("config/fugue/providers.json")));
+    }
+
+    void anExistingProvidersFileWinsEntirely() {
+        QTemporaryDir home;
+        const OmarchyPaths paths = test::writeOmarchyState(home.path());
+        QFile file(home.filePath("providers.json"));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(R"({"providers": [{"name": "Only this", "type": "omarchy"}]})");
+        file.close();
+        const auto loaded = loadProviderInstances(file.fileName(), paths);
+        QVERIFY(loaded.ok());
+        QCOMPARE(loaded.value().size(), 1);
+        QCOMPARE(loaded.value().first().name, QStringLiteral("Only this"));
+    }
+
+    void aNetworkFileThatCannotBeReadLeavesThisMachine() {
+        QTemporaryDir home;
+        const OmarchyPaths paths = test::writeOmarchyState(home.path());
+        QVERIFY(test::writeFixtureFile(paths.stateDir + "/network.json", "{half"));
+        const auto loaded = loadProviderInstances(home.filePath("providers.json"), paths);
+        QVERIFY(loaded.ok());
+        QCOMPARE(loaded.value().size(), 1);
+        QCOMPARE(loaded.value().first().name, QStringLiteral("This machine"));
     }
 
     void aProvidersFileThatIsNotJsonIsAnError() {

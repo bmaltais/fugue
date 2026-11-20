@@ -569,6 +569,7 @@ private slots:
         env.insert("XDG_CACHE_HOME", dir.filePath("cache"));
         env.insert("XDG_STATE_HOME", dir.filePath("state"));
         env.insert("XDG_CONFIG_HOME", dir.filePath("config"));
+        env.insert("HOME", dir.filePath("home")); // not the developer's Omarchy state (8.2)
         QProcess process;
         process.setProcessEnvironment(env);
         process.start(FUGUE_BINARY, {"run", dir.filePath("flow.fugue"), "--to", "c", "--wait", "--json"});
