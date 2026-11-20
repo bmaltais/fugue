@@ -50,6 +50,12 @@ struct Tokens {
     // until the text and the labels still read at 4.5:1 on it.
     QColor bypassBody, bypassHeader, bypassEdge;
     QColor bevel; // the header's top highlight (dark themes), with alpha
+    // A sheen on a node's fill (#72), as if light fell on the card from above: `sheenTop` laid
+    // over the fill at its top, `sheenBottom` at its bottom, both with alpha. The step between
+    // them is small and the same to the eye on every theme (OKLab 0.012): the top lighter, or,
+    // on a fill too bright for that, the bottom darker. A hovered or selected node is lit more
+    // (`litTop`, `litBottom`: twice the step). Labels read at every end.
+    QColor sheenTop, sheenBottom, litTop, litBottom;
     QColor scrim; // behind the `?` overlay, with alpha
     double labelShare = 0; // the share of text in `label` the 4.5:1 rule settled on
 };
@@ -110,6 +116,10 @@ class CanvasLook : public QObject {
     Q_PROPERTY(QColor selectedRow MEMBER m_selectedRow NOTIFY changed)
     Q_PROPERTY(QColor menuRow MEMBER m_menuRow NOTIFY changed)
     Q_PROPERTY(QColor bevel MEMBER m_bevel NOTIFY changed)
+    Q_PROPERTY(QColor sheenTop MEMBER m_sheenTop NOTIFY changed)
+    Q_PROPERTY(QColor sheenBottom MEMBER m_sheenBottom NOTIFY changed)
+    Q_PROPERTY(QColor litTop MEMBER m_litTop NOTIFY changed)
+    Q_PROPERTY(QColor litBottom MEMBER m_litBottom NOTIFY changed)
     Q_PROPERTY(QColor scrim MEMBER m_scrim NOTIFY changed)
     Q_PROPERTY(QColor bypassBody MEMBER m_bypassBody NOTIFY changed)
     Q_PROPERTY(QColor bypassHeader MEMBER m_bypassHeader NOTIFY changed)
@@ -180,7 +190,7 @@ private:
     mutable QHash<QString, QVariantMap> m_roles;
 
     QColor m_canvas, m_dot, m_dotMajor, m_body, m_header, m_hairline, m_hairlineStrong, m_well, m_label, m_popup;
-    QColor m_errorHeader, m_errorChip, m_selectedRow, m_menuRow, m_bevel, m_scrim, m_bypassBody, m_bypassHeader, m_bypassEdge;
+    QColor m_errorHeader, m_errorChip, m_selectedRow, m_menuRow, m_bevel, m_sheenTop, m_sheenBottom, m_litTop, m_litBottom, m_scrim, m_bypassBody, m_bypassHeader, m_bypassEdge;
     QColor m_text, m_accent, m_accentForeground, m_error;
     bool m_light = false;
     QVariantMap m_ports;

@@ -26,6 +26,10 @@
   --error-chip: #362330;
   --selected-row: #292a45;
   --popup: #1c1d2b;
+  --sheen-top: rgba(255, 206, 173, 0.015);
+  --sheen-bottom: rgba(0, 0, 0, 0.0);
+  --lit-top: rgba(255, 206, 173, 0.03);
+  --lit-bottom: rgba(0, 0, 0, 0.0);
   --label: #d1aa93;
   --frame-muted: #1a1b2a;
   --frame-muted-edge: #4d4347;
@@ -91,6 +95,10 @@
   --error-chip: #423140;
   --selected-row: #323a53;
   --popup: #272836;
+  --sheen-top: rgba(169, 177, 214, 0.025);
+  --sheen-bottom: rgba(0, 0, 0, 0.0);
+  --lit-top: rgba(169, 177, 214, 0.045);
+  --lit-bottom: rgba(0, 0, 0, 0.0);
   --label: #9ca3c6;
   --frame-muted: #272936;
   --frame-muted-edge: #474b5e;
@@ -156,6 +164,10 @@
   --error-chip: #f6ebeb;
   --selected-row: #e9eeed;
   --popup: #fdfbf8;
+  --sheen-top: rgba(255, 255, 255, 0.0);
+  --sheen-bottom: rgba(0, 0, 0, 0.02);
+  --lit-top: rgba(255, 255, 255, 0.0);
+  --lit-bottom: rgba(0, 0, 0, 0.035);
   --label: #6d6889;
   --frame-muted: #e3dddc;
   --frame-muted-edge: #c4bec7;
@@ -221,6 +233,10 @@
   --error-chip: #faece7;
   --selected-row: #e4ebef;
   --popup: #fffef9;
+  --sheen-top: rgba(255, 255, 255, 0.0);
+  --sheen-bottom: rgba(0, 0, 0, 0.02);
+  --lit-top: rgba(255, 255, 255, 0.0);
+  --lit-bottom: rgba(0, 0, 0, 0.035);
   --label: #2f2e2d;
   --frame-muted: #dddad0;
   --frame-muted-edge: #afada5;
@@ -286,6 +302,10 @@
   --error-chip: #eaeaea;
   --selected-row: #eeeeee;
   --popup: #ffffff;
+  --sheen-top: rgba(255, 255, 255, 0.0);
+  --sheen-bottom: rgba(0, 0, 0, 0.02);
+  --lit-top: rgba(255, 255, 255, 0.0);
+  --lit-bottom: rgba(0, 0, 0, 0.035);
   --label: #212121;
   --frame-muted: #dadada;
   --frame-muted-edge: #aaaaaa;
@@ -394,7 +414,10 @@ svg.wires.over { z-index: 30; }
 /* ---- node ---- */
 .node {
   position: absolute; width: 240px; z-index: 10;
-  background: var(--body); border: 1px solid var(--hairline); border-radius: var(--r);
+  /* The fill and its sheen (#72): lighter at the top, lit more when hovered or selected. */
+  --fill: var(--body); --sheen-a: var(--sheen-top); --sheen-b: var(--sheen-bottom);
+  background: linear-gradient(var(--sheen-a), var(--sheen-b)), var(--fill);
+  border: 1px solid var(--hairline); border-radius: var(--r);
   box-shadow: var(--shadow-1);
 }
 .node.hover { border-color: var(--hairline-strong); }
@@ -427,10 +450,11 @@ svg.wires.over { z-index: 30; }
 .node.tint-magenta .hd { background: var(--tint-magenta); }
 .node.tint-orange .hd { background: var(--tint-orange); }
 /* A layout color tints the whole node, as in ComfyUI (#72): the body too. */
-.node.tint-blue { background: var(--tint-body-blue); }
-.node.tint-green { background: var(--tint-body-green); }
-.node.tint-magenta { background: var(--tint-body-magenta); }
-.node.tint-orange { background: var(--tint-body-orange); }
+.node.tint-blue { --fill: var(--tint-body-blue); }
+.node.tint-green { --fill: var(--tint-body-green); }
+.node.tint-magenta { --fill: var(--tint-body-magenta); }
+.node.tint-orange { --fill: var(--tint-body-orange); }
+.node.hover, .node.sel { --sheen-a: var(--lit-top); --sheen-b: var(--lit-bottom); }
 .progress { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--hairline); }
 .progress i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); }
 
@@ -496,7 +520,7 @@ svg.wires.over { z-index: 30; }
 .node.error .meta { color: var(--error); }
 /* Bypassed, as ComfyUI draws it in magenta: body and header tinted with the palette's magenta
    (the app steps the share down until the text reads at 4.5:1), a dashed edge in it. */
-.node.bypassed { background: color-mix(in srgb, var(--body), var(--role-magenta) 22%); border-style: dashed;
+.node.bypassed { --fill: color-mix(in srgb, var(--body), var(--role-magenta) 22%); border-style: dashed;
   border-color: color-mix(in srgb, var(--canvas), var(--role-magenta) 85%); }
 .node.bypassed .hd { background: color-mix(in srgb, var(--header), var(--role-magenta) 34%); }
 .node.muted { opacity: .4; }

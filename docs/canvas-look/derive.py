@@ -208,12 +208,31 @@ def tokens(colors, light):
     t["error-chip"] = mix(t["body"], red, 0.14 if not light else 0.10)
     t["selected-row"] = mix(t["body"], colors["accent"], 0.16 if not light else 0.12)
     t["popup"] = t["body"] if light else mix(bg, fg, 0.09)
+    # The sheen (#72): the least alpha of light (the text on dark themes, white on light ones)
+    # that makes a step of OKLab 0.012 from the top of a node's fill to its bottom; on a fill
+    # with no room to lighten, of black at the bottom instead. Lit (hovered, selected): twice.
+    def sheen(over, step):
+        a = 0.005
+        while a <= 0.6 + 1e-9:
+            if delta_e(mix(t["body"], over, a), t["body"]) >= step:
+                return over + (round(a, 3),)
+            a += 0.005
+        return over + (0.0,)
+    for name, step in (("sheen", 0.012), ("lit", 0.024)):
+        top = sheen(WHITE if light else fg, step)
+        bottom = BLACK + (0.0,)
+        if top[3] == 0:
+            bottom = sheen(BLACK, step)
+        t[f"{name}-top"], t[f"{name}-bottom"] = top, bottom
+        t[f"_{name}-top-over"] = mix(t["body"], top[:3], top[3])
+        t[f"_{name}-bottom-over"] = mix(t["body"], bottom[:3], bottom[3])
+    sheened = ["_sheen-top-over", "_sheen-bottom-over", "_lit-top-over", "_lit-bottom-over"]
     # Labels and captions sit on all of these; the share of text grows from its base until the
     # label reads at 4.5:1 on every one of them.
     for k in [b / 100 for b in range(87 if light else 80, 101, 2)]:
         t["label"] = mix(t["body"], fg, k)
         t["_label-share"] = k
-        if min(contrast(t["label"], t[s]) for s in LABEL_SURFACES) >= 4.5:
+        if min(contrast(t["label"], t[s]) for s in LABEL_SURFACES + sheened) >= 4.5:
             break
     # Frame fills and node-color header tints per theme role (layout colors are roles, spec 4.5).
     # A tint steps down until the title on it still reads at 4.5:1.

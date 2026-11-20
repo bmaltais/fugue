@@ -87,6 +87,9 @@ private slots:
         QCOMPARE(t.labelShare, 0.80);
         // A 1 px highlight of the text color along the header's top, on dark themes only.
         QVERIFY(std::abs(t.bevel.alphaF() - 0.10) < 0.01);
+        // The sheen (#72), as derive.py makes it: the text at 1.5% over the top, 3% when lit.
+        QVERIFY(std::abs(t.sheenTop.alphaF() - 0.015) < 0.003 && t.sheenBottom.alpha() == 0);
+        QVERIFY(std::abs(t.litTop.alphaF() - 0.03) < 0.003 && t.litBottom.alpha() == 0);
         QVERIFY(std::abs(t.scrim.alphaF() - 0.45) < 0.01);
 
         const look::RoleTokens blue = look::roleTokens(t, ethereal.value("blue"), ethereal.value("foreground"), false);
@@ -263,6 +266,22 @@ private slots:
         for (const QColor &port : look::portColors(colors, read.light, t)) {
             QVERIFY2(look::contrast(port, t.body) >= 2.99, qPrintable(port.name()));
             QVERIFY2(look::contrast(port, t.canvas) >= 2.99, qPrintable(port.name()));
+        }
+        // The sheen (#72): the same small step on every theme, and the labels and text read at
+        // both ends of it.
+        const auto over = [](const QColor &fill, const QColor &layer) {
+            return look::mix(fill, QColor(layer.rgb()), layer.alphaF());
+        };
+        const QColor top = over(t.body, t.sheenTop), bottom = over(t.body, t.sheenBottom);
+        const double step = look::deltaE(top, bottom);
+        QVERIFY2(step >= 0.011 && step < 0.02, qPrintable(QString::number(step)));
+        // Lit (hovered or selected): twice the step.
+        const QColor litTop = over(t.body, t.litTop), litBottom = over(t.body, t.litBottom);
+        const double lit = look::deltaE(litTop, litBottom);
+        QVERIFY2(lit >= 0.022 && lit < 0.035, qPrintable(QString::number(lit)));
+        for (const QColor &end : {top, bottom, litTop, litBottom}) {
+            QVERIFY(look::contrast(t.label, end) >= 4.5);
+            QVERIFY(look::contrast(colors.value("foreground"), end) >= 4.5);
         }
         const QColor text = colors.value("foreground");
         QVERIFY(look::contrast(text, t.bypassBody) >= 4.5);

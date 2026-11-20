@@ -28,6 +28,18 @@ using canvas_test::Look;
 
 namespace {
 
+// A node's fill as drawn: between its sheen's two ends (#72), give or take rounding.
+bool onSheen(const QColor &pixel, const QColor &fill, const CanvasLook *look) {
+    const auto over = [](const QColor &base, const QColor &layer) {
+        return fugue::look::mix(base, QColor(layer.rgb()), layer.alphaF());
+    };
+    const QColor top = over(fill, look->property("sheenTop").value<QColor>());
+    const QColor bottom = over(fill, look->property("sheenBottom").value<QColor>());
+    const auto within = [](int v, int a, int b) { return v >= std::min(a, b) - 2 && v <= std::max(a, b) + 2; };
+    return within(pixel.red(), top.red(), bottom.red()) && within(pixel.green(), top.green(), bottom.green())
+           && within(pixel.blue(), top.blue(), bottom.blue());
+}
+
 // A stand-in for a generated image, as the mockups draw one: a fox in a misty birch wood.
 QString writeScene(const QString &path, int width, int height) {
     QImage image(width, height, QImage::Format_RGB32);
@@ -204,13 +216,31 @@ private slots:
         // The canvas left of the nodes, past their shadows, a node's body, its header, an error's
         // header (cached sits at column 0, row 0: x 56 to 256, y 60 on; error at column 1, row 1).
         QCOMPARE(at(12, 400), look->tokens().canvas.name());
-        QCOMPARE(at(56 + 100, 60 + 28 + 4 + 24 + 12 + 2), look->tokens().body.name()); // between rows, left of the label
+        // Between rows, left of the label: the body, on its sheen (#72).
+        QVERIFY2(onSheen(QColor(at(56 + 100, 60 + 28 + 4 + 24 + 12 + 2)), look->tokens().body, look),
+                 qPrintable(at(56 + 100, 60 + 28 + 4 + 24 + 12 + 2)));
         QCOMPARE(at(56 + 120, 60 + 6), look->tokens().header.name());
         QCOMPARE(at(56 + 252 + 120, 360 + 6), look->tokens().errorHeader.name());
         // A colored node (column 1, row 2) takes its color whole, header and body (#72).
         const QVariantMap blue = look->role("blue");
         QCOMPARE(at(56 + 252 + 120, 660 + 6), blue.value("tint").value<QColor>().name());
-        QCOMPARE(at(56 + 252 + 100, 660 + 28 + 4 + 24 + 12 + 2), blue.value("tintBody").value<QColor>().name());
+        QVERIFY2(onSheen(QColor(at(56 + 252 + 100, 660 + 28 + 4 + 24 + 12 + 2)), blue.value("tintBody").value<QColor>(), look),
+                 qPrintable(at(56 + 252 + 100, 660 + 28 + 4 + 24 + 12 + 2)));
+        // The sheen: a tall node (the one with its result, column 3, row 2) is lighter near its
+        // top than near its bottom, or darker at the bottom on a fill too bright to lighten.
+        const auto lightness = [&](qreal x, qreal y) { return fugue::look::oklch(QColor(at(x, y))).L; };
+        qreal tall = 0;
+        for (int r = 0; r < app.model.nodes()->rowCount(); ++r)
+            if (app.model.nodes()->data(app.model.nodes()->index(r, 0), NodeList::NodeId) == QStringLiteral("thumb"))
+                tall = app.model.nodes()->data(app.model.nodes()->index(r, 0), NodeList::Height).toReal();
+        QVERIFY(tall > 200);
+        QVERIFY2(lightness(56 + 3 * 252 + 4, 660 + 40) > lightness(56 + 3 * 252 + 4, 660 + tall - 4),
+                 qPrintable(QString::number(tall)));
+        // Hovered (column 1, row 0) and selected (column 2, row 0) are lit more than at rest
+        // (column 0), at the same place on the same kind of node.
+        const qreal rest = lightness(56 + 4, 60 + 40);
+        QVERIFY(lightness(56 + 252 + 4, 60 + 40) > rest);
+        QVERIFY(lightness(56 + 2 * 252 + 4, 60 + 40) > rest);
         // The error's message sits in a chip under it.
         QVERIFY(!app.model.nodes()->data(app.model.nodes()->index(0, 0), NodeList::Error).isNull());
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
@@ -247,7 +277,8 @@ private slots:
             return qAbs(a.red() - b.red()) <= 2 && qAbs(a.green() - b.green()) <= 2 && qAbs(a.blue() - b.blue()) <= 2;
         };
         QVERIFY2(near(header(560, 360), t.bypassHeader), qPrintable(header(560, 360).name() + " vs " + t.bypassHeader.name()));
-        QVERIFY2(near(body(560, 360), t.bypassBody), qPrintable(body(560, 360).name() + " vs " + t.bypassBody.name()));
+        QVERIFY2(onSheen(body(560, 360), t.bypassBody, app.theme.look()),
+                 qPrintable(body(560, 360).name() + " vs " + t.bypassBody.name()));
         // The tint is a visible step from the plain node, not a hair.
         QVERIFY(fugue::look::deltaE(body(560, 360), body(56, 60)) > 0.02);
         QVERIFY(fugue::look::deltaE(header(560, 360), header(56, 60)) > 0.03);

@@ -172,10 +172,26 @@ Item {
                 border.color: node.look.hairline
             }
             // The box: body fill and a 1 px edge (dashed for bypassed and missing nodes, below).
+            // The fill has a sheen (#72): a little lighter at the top, as if lit from above, and
+            // lit more while hovered or selected; the rectangle's own two-stop gradient, drawn in
+            // its vertex colors, so it costs nothing.
             Rectangle {
+                id: box
+                readonly property bool lit: node.hovered || node.selected
                 anchors.fill: parent
                 radius: face.corner
-                color: face.bodyFill
+                gradient: Gradient {
+                    GradientStop {
+                        position: 0
+                        color: Qt.tint(face.bodyFill, box.lit ? node.look.litTop : node.look.sheenTop)
+                        Behavior on color { ColorAnimation { duration: 120; easing.type: Easing.OutCubic } }
+                    }
+                    GradientStop {
+                        position: 1
+                        color: Qt.tint(face.bodyFill, box.lit ? node.look.litBottom : node.look.sheenBottom)
+                        Behavior on color { ColorAnimation { duration: 120; easing.type: Easing.OutCubic } }
+                    }
+                }
                 border.width: face.dashed ? 0 : 1
                 border.color: face.edge
             }

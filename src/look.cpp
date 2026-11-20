@@ -16,6 +16,10 @@ namespace fugue::look {
 
 namespace {
 
+// The sheen's step from the top of a node's fill to its bottom, in OKLab (#72).
+constexpr double kSheenStep = 0.012;
+
+
 double linear(double v) { return v <= .04045 ? v / 12.92 : std::pow((v + .055) / 1.055, 2.4); }
 double gamma(double v) { return v <= .0031308 ? 12.92 * v : 1.055 * std::pow(v, 1 / 2.4) - .055; }
 double clamp01(double v) { return std::clamp(v, 0.0, 1.0); }
@@ -159,8 +163,31 @@ Tokens tokens(const QHash<QString, QColor> &colors, bool light) {
         if (contrast(fg, t.menuRow) >= 4.5)
             break;
     }
+    // The sheen: the least alpha of light (the text on dark themes, white on light ones) that
+    // makes the step; on a fill with no room to lighten, of black at the bottom instead.
+    const auto sheen = [&](const QColor &over, double step) {
+        QColor layer = over;
+        for (double a = .005; a <= .6; a += .005)
+            if (deltaE(mix(t.body, over, a), t.body) >= step) {
+                layer.setAlphaF(float(a));
+                return layer;
+            }
+        layer.setAlphaF(0);
+        return layer;
+    };
+    const auto ends = [&](double step, QColor &top, QColor &bottom) {
+        top = sheen(light ? QColor(Qt::white) : fg, step);
+        bottom = QColor(0, 0, 0, 0);
+        if (top.alpha() == 0)
+            bottom = sheen(QColor(Qt::black), step);
+    };
+    ends(kSheenStep, t.sheenTop, t.sheenBottom);
+    ends(2 * kSheenStep, t.litTop, t.litBottom);
+    const auto over = [](const QColor &fill, const QColor &layer) { return mix(fill, QColor(layer.rgb()), layer.alphaF()); };
     // Labels sit on all of these: the share of text grows until the label reads at 4.5:1 on each.
-    const QList<QColor> surfaces{t.body, t.header, t.well, t.popup, t.selectedRow, t.menuRow, t.canvas};
+    const QList<QColor> surfaces{t.body,      t.header,  t.well,   t.popup, t.selectedRow,
+                                 t.menuRow,   t.canvas,  over(t.body, t.sheenTop), over(t.body, t.sheenBottom),
+                                 over(t.body, t.litTop), over(t.body, t.litBottom)};
     for (int share = light ? 87 : 80; share <= 100; share += 2) {
         t.labelShare = share / 100.0;
         t.label = mix(t.body, fg, t.labelShare);
@@ -461,6 +488,10 @@ void CanvasLook::update(const QHash<QString, QColor> &colors, bool light, fugue:
     m_selectedRow = t.selectedRow;
     m_menuRow = t.menuRow;
     m_bevel = t.bevel;
+    m_sheenTop = t.sheenTop;
+    m_sheenBottom = t.sheenBottom;
+    m_litTop = t.litTop;
+    m_litBottom = t.litBottom;
     m_scrim = t.scrim;
     m_bypassBody = t.bypassBody;
     m_bypassHeader = t.bypassHeader;
