@@ -585,6 +585,48 @@ private slots:
                  (QJsonArray{QJsonObject{{"image", first.path()}}, QJsonObject{{"image", second.path()}}}));
     }
 
+    // A reference whose file is gone or changed since Text Encode ran (a cached conditioning
+    // outlives it) is said as such, not sent to the helper.
+    void aReferenceThatChangedSinceTheEncodeIsAnError() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.zImage());
+        const MediaHandle first = picture(bench, "first.png", 320, 192);
+        const Result<Values> out = bench.outputs(
+            kTextEncode, {{"model", Value(model)}, {"prompt", Value("x")}, {"references", Value::list({Value(first)})}},
+            JobResult{QJsonObject{{"conditioning", QJsonObject{{"path", bench.workDir() + "/conditioning.bin"}}}}, {}});
+        const Result<Values> empty = bench.run(kEmptyLatent, {{"width", Value(320)}, {"height", Value(192)}});
+        const Values inputs{{"model", Value(model)}, {"conditioning", out->value("conditioning")}, {"latent", empty->value("latent")}};
+        picture(bench, "first.png", 320, 192, 4); // other content at the same path
+        const Result<JobRequest> changed = bench.request(kSampler, inputs);
+        QVERIFY(!changed);
+        QCOMPARE(changed.error().code, QStringLiteral("file_not_found"));
+        QCOMPARE(changed.error().input, QStringLiteral("conditioning"));
+        QFile::remove(first.path());
+        QVERIFY(!bench.request(kSampler, inputs));
+    }
+
+    // A JPEG that is turned by its EXIF orientation goes to the helper upright, as a PNG: stb_image
+    // does not read the orientation.
+    void aTurnedJpegGoesUpright() {
+        Bench bench;
+        initVips();
+        const QString jpeg = bench.dir.filePath("turned.jpg");
+        vips::VImage image = (vips::VImage::black(320, 192, vips::VImage::option()->set("bands", 3)) + 90).cast(VIPS_FORMAT_UCHAR);
+        image = image.copy();
+        image.set("orientation", 6); // turned 90 degrees
+        image.jpegsave(jpeg.toUtf8().constData());
+        const Result<MediaHandle> handle = MediaHandle::probe(MediaType::Image, jpeg, bench.hashes);
+        QVERIFY(handle);
+        const Result<JobRequest> request =
+            bench.request(kTextEncode, {{"model", Value(bench.loaded(bench.zImage()))}, {"prompt", Value("x")},
+                                        {"references", Value::list({Value(handle.value())})}});
+        QVERIFY2(request, request ? "" : qPrintable(request.error().message));
+        const QString sent = request->params.value("ref_images").toArray().first().toObject().value("image").toString();
+        QVERIFY(sent != jpeg);
+        const vips::VImage upright = vips::VImage::new_from_file(sent.toUtf8().constData());
+        QCOMPARE(QSize(upright.width(), upright.height()), QSize(192, 320));
+    }
+
     // --- end to end: the shipped binary, the fake helper (no inference here) ---
 
     // Text to image in stages, run by the helper Fugue starts itself (no providers.json: the

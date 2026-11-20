@@ -36,6 +36,7 @@
 
 #include <vips/vips8>
 
+#include "engine/file_hashes.h"
 #include "engine/media.h"
 #include "engine/model_library.h"
 #include "engine/model_shape.h"
@@ -252,16 +253,20 @@ Result<Values> latentOutput(const JobResult &result, int width, int height, cons
     return Values{{QStringLiteral("latent"), Value(dataHandle(kLatentType, path.value(), made.toJson()))}};
 }
 
-// A file the helper reads (stb_image: PNG or JPEG): the image's own when it is one, else the
-// image written as an 8-bit RGB PNG to `converted`, upright.
+// A file the helper reads (stb_image: PNG or JPEG, which ignores EXIF orientation): the
+// image's own when it is one and upright, else the image written as an 8-bit RGB PNG to
+// `converted`, upright.
 Result<QString> readable(const MediaHandle &image, const QString &converted) {
     // Before anything reads an image: an input from the result cache was never probed.
     if (!initVips())
         return vipsUnavailable();
     const QString format = image.format();
-    if (image.hasFile() && (format == QLatin1String("png") || format == QLatin1String("jpeg")))
-        return image.path();
     try {
+        if (image.hasFile() && (format == QLatin1String("png") || format == QLatin1String("jpeg"))) {
+            vips::VImage header = vips::VImage::new_from_file(QFile::encodeName(image.path()).constData());
+            if (header.get_typeof("orientation") == 0 || header.get_int("orientation") == 1)
+                return image.path();
+        }
         const Result<vips::VImage> decoded = image.image();
         if (!decoded)
             return decoded.errors();
@@ -290,8 +295,9 @@ Result<QJsonArray> refImages(const QList<MediaHandle> &references, const QString
 }
 
 // The references a conditioning carries (Text Encode puts them in its descriptor, as ComfyUI's
-// ReferenceLatent puts reference latents on a conditioning).
-Result<QList<MediaHandle>> referencesOf(const Value &conditioning) {
+// ReferenceLatent puts reference latents on a conditioning). Each must still be the picture
+// Text Encode had: a cached conditioning can outlive a file it names.
+Result<QList<MediaHandle>> referencesOf(const Value &conditioning, FileHashes &hashes) {
     QList<MediaHandle> references;
     const QJsonArray carried =
         conditioning.json().toObject().value(QStringLiteral("meta")).toObject().value(QStringLiteral("references")).toArray();
@@ -299,6 +305,10 @@ Result<QList<MediaHandle>> referencesOf(const Value &conditioning) {
         const Result<MediaHandle> image = MediaHandle::fromJson(item.toObject());
         if (!image)
             return image.errors();
+        if (hashes.hash(image->path()) != image->hash())
+            return makeInputError(QStringLiteral("file_not_found"), QStringLiteral("conditioning"),
+                                  QStringLiteral("The reference %1 is gone or changed since Text Encode read it.").arg(image->path()),
+                                  QStringLiteral("Run Text Encode again with the pictures as they are now."));
         references.append(image.value());
     }
     return references;
@@ -471,7 +481,7 @@ public:
         if (const Value scheduler = context.input(QStringLiteral("scheduler")); !scheduler.isEmpty())
             params.insert(QStringLiteral("sample.scheduler"), scheduler.text());
         // The edit's references, sent as Text Encode sent them, so both stages make one generation.
-        const Result<QList<MediaHandle>> references = referencesOf(context.input(QStringLiteral("conditioning")));
+        const Result<QList<MediaHandle>> references = referencesOf(context.input(QStringLiteral("conditioning")), *context.hashes);
         if (!references)
             return references.errors();
         if (!references->isEmpty()) {
