@@ -65,6 +65,11 @@ void FakeProvider::result(const QString &job, Reply<JobResult> reply) {
     later(std::move(reply), Result<JobResult>(found.result));
 }
 
+void FakeProvider::shutdown(Reply<Nothing> reply) {
+    ++m_shutdowns;
+    later(std::move(reply), Result<Nothing>(Nothing{}));
+}
+
 JobRequest FakeProvider::submitted(const QString &job) const { return m_jobs.value(job).request; }
 
 QStringList FakeProvider::jobs() const { return m_order; }

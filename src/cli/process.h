@@ -6,6 +6,7 @@
 
 #include "cli/commands.h"
 #include "engine/file_hashes.h"
+#include "engine/gpu_memory.h"
 #include "engine/result_cache.h"
 #include "engine/scheduler.h"
 
@@ -28,6 +29,7 @@ struct Process {
 
     ResultCache cache;
     FileHashes hashes;
+    GpuMemoryProbe gpu; // free GPU memory (8.10) for environment.freeGpuMemoryMb
     RunEnvironment environment;
 };
 

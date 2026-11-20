@@ -184,6 +184,21 @@ private slots:
         QVERIFY(!QFile::exists(providersFile())); // only a change writes it
     }
 
+    void aHelperProviderCanBeAddedWithItsIdleTimeout() {
+        SettingsModel model;
+        QVERIFY(model.providerTypes().contains("fugue-helper"));
+        QCOMPARE(model.addProvider("fugue-helper"), QString());
+        const int added = model.providers().size() - 1;
+        const QVariantList fields = model.providers().at(added).toMap().value("fields").toList();
+        QCOMPARE(fields.size(), 1);
+        QCOMPARE(fields.first().toMap().value("name").toString(), QStringLiteral("idle_timeout_s"));
+        QCOMPARE(fields.first().toMap().value("set").toBool(), false);
+        QCOMPARE(model.setProviderField(added, "idle_timeout_s", "120"), QString());
+        const ProviderInstance saved = loadProviderInstances(providersFile()).value().last();
+        QCOMPARE(saved.type, QStringLiteral("fugue-helper"));
+        QCOMPARE(saved.settings.value("idle_timeout_s").toString(), QStringLiteral("120"));
+    }
+
     void aProviderChangeWritesEveryInstanceOwnerOnly() {
         SettingsModel model;
         QCOMPARE(model.addProvider("omarchy"), QString());

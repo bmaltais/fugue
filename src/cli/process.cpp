@@ -5,6 +5,8 @@
 #include <QFile>
 #include <QFileInfo>
 
+#include <limits>
+
 #include "engine/paths.h"
 
 namespace fugue::cli {
@@ -51,6 +53,11 @@ Process::Process(const Context &context, const QString &cacheRoot, const QString
     environment.kernels = &context.kernels;
     environment.cache = &cache;
     environment.hashes = &hashes;
+    // 8.10. Read only when a GPU node needs it, so a command that runs none sets up no Vulkan.
+    environment.freeGpuMemoryMb = [this] {
+        return gpu.freeMb().value_or(std::numeric_limits<qint64>::max()); // not measured: room enough
+    };
+    environment.gpuProcesses = [] { return fugue::gpuProcesses(); };
 }
 
 void collectGarbageIfDue(const Context &context, Process &process) {

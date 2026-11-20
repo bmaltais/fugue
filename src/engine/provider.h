@@ -39,7 +39,10 @@ ModelStatus parseModelStatus(const QString &text);
 // per model, not per capability as 8.8's table reads, because one omarchy instance can run
 // several image servers at once with different defaults and edit support.
 struct OfferedModel {
-    QJsonObject handle;     // a resource handle (2.5); served-by-name models have no hash
+    // A resource handle (2.5); served-by-name models have no hash. Empty for a provider that
+    // takes its model files in the job (the helper's stage capabilities, 8.10): it is chosen for
+    // "any ready model", and a model picker does not list it.
+    QJsonObject handle;
     QString title;          // the name people know it by ("FLUX.2 Klein 4B"); display only, not in the handle
     ModelStatus status = ModelStatus::Unavailable;
     QString reason;         // why it is not ready, one sentence

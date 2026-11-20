@@ -439,6 +439,97 @@ private slots:
         QCOMPARE(world.models.keys(), QStringList{"newest"});
     }
 
+    // 8.10: a provider Fugue started (the helper) gives its memory back only by stopping, so
+    // when the last model it was recorded holding is dropped, it is told to shut down.
+    void droppingTheLastModelOfAProviderShutsItDown() {
+        World world;
+        const auto provider = world.provider("This machine", {"flux"});
+        world.type("fugue/gpu-big",
+                   "'needs': {'gpu': {'api': 'any', 'vram_mb': 4000}},"
+                   "'inputs': [{'name': 'text', 'type': 'text'}], 'outputs': [{'name': 'text', 'type': 'text'}]",
+                   [](const NodeContext &context) -> Result<Values> { return Values{{"text", context.input("text")}}; });
+        RunEnvironment environment = world.environment();
+        environment.freeGpuMemoryMb = [&world] { return qint64(8000 - 6000 * world.models.keys().size()); };
+
+        const QJsonObject nodes{{"g", node("fugue/generate", {{"prompt", "one"}, {"model", model("flux")}})},
+                                {"a", node("fugue/gpu-big", {{"text", from("g.text")}})},
+                                {"s", node("fugue/save", {{"value", from("a.text")}})}};
+        Run run(world.graph(nodes), world.folder(), environment);
+        run.start();
+        QTRY_COMPARE(provider->jobs().size(), 1);
+        provider->finish(provider->jobs().first(), {{"result.txt", "cat"}});
+        QTRY_VERIFY(run.isFinished());
+        QCOMPARE(run.outcome().status, RunStatus::Ok);
+        QVERIFY(world.models.keys().isEmpty());
+        QTRY_COMPARE(provider->shutdowns(), 1);
+    }
+
+    // A node's own persistent program is among its models: making room for the node does not
+    // stop the program it is about to use (7.3).
+    void makingRoomKeepsTheNodesOwnProgram() {
+        World world;
+        QVERIFY(!hasErrors(world.registry.addManifest(json(
+            "{'manifest': 1, 'id': 'fugue/gpu-prog', 'version': '1.0.0', 'name': 'Fake',"
+            " 'runtime': {'kind': 'command', 'mode': 'persistent', 'entry': './run.sh'},"
+            " 'needs': {'gpu': {'api': 'any', 'vram_mb': 4000}},"
+            " 'inputs': [{'name': 'text', 'type': 'text'}], 'outputs': [{'name': 'text', 'type': 'text'}]}"))));
+        world.kernel("fugue/gpu-prog", [](const NodeContext &context) -> Result<Values> {
+            return Values{{"text", context.input("text")}};
+        });
+        world.models.put("program:fugue/gpu-prog"); // least recently used
+        world.models.put("other");
+        RunEnvironment environment = world.environment();
+        environment.freeGpuMemoryMb = [&world] { return qint64(8000 - 3000 * world.models.keys().size()); };
+        const QJsonObject nodes{{"a", node("fugue/gpu-prog", {{"text", "x"}})},
+                                {"s", node("fugue/save", {{"value", from("a.text")}})}};
+        QCOMPARE(runGraph(world.graph(nodes), world.folder(), environment).status, RunStatus::Ok);
+        QCOMPARE(world.models.keys(), QStringList{"program:fugue/gpu-prog"});
+    }
+
+    // A model on an instance with a job in flight is in use: it is not dropped.
+    void makingRoomKeepsTheModelOfABusyInstance() {
+        World world;
+        const auto provider = world.provider("Studio", {"flux"}, "https://studio.example.ts.net");
+        world.type("fugue/gpu-big",
+                   "'needs': {'gpu': {'api': 'any', 'vram_mb': 4000}},"
+                   "'inputs': [{'name': 'text', 'type': 'text'}], 'outputs': [{'name': 'text', 'type': 'text'}]",
+                   [](const NodeContext &context) -> Result<Values> { return Values{{"text", context.input("text")}}; });
+        world.models.put("Studio\nflux");
+        RunEnvironment environment = world.environment();
+        environment.freeGpuMemoryMb = [] { return qint64(1000); };
+        const QJsonObject nodes{{"a", node("fugue/generate", {{"prompt", "one"}, {"model", model("flux")}})},
+                                {"b", node("fugue/gpu-big", {{"text", "x"}})},
+                                {"s", node("fugue/save", {{"value", from("a.text")}})},
+                                {"t", node("fugue/save", {{"value", from("b.text")}})}};
+        Run run(world.graph(nodes), world.folder(), environment);
+        run.start();
+        QTRY_COMPARE(provider->jobs().size(), 1);
+        QTRY_COMPARE(world.calls.count("b"), 1); // it ran while Studio was busy
+        QVERIFY(world.models.contains("Studio\nflux"));
+        QCOMPARE(provider->shutdowns(), 0);
+        provider->finish(provider->jobs().first(), {{"result.txt", "cat"}});
+        QTRY_VERIFY(run.isFinished());
+        QCOMPARE(run.outcome().status, RunStatus::Ok);
+    }
+
+    void aFinalOutOfMemoryNamesWhatHoldsGpuMemory() {
+        World world;
+        world.kernel("fugue/gpu-model", [](const NodeContext &) -> Result<Values> {
+            return makeError("out_of_memory", "The GPU ran out of memory.");
+        });
+        RunEnvironment environment = world.environment();
+        environment.gpuProcesses = [] { return QList<GpuProcess>{GpuProcess{4242, "sd-server", 9876}}; };
+        const QJsonObject lora{{"resource", "fugue/lora"}, {"hash", sha256Of("lora")}, {"name", "detail.safetensors"}};
+        const QJsonObject nodes{{"a", node("fugue/gpu-model", {{"model", lora}})},
+                                {"s", node("fugue/save", {{"value", from("a.text")}})}};
+        const RunOutcome outcome = runGraph(world.graph(nodes), world.folder(), environment);
+        QCOMPARE(outcome.status, RunStatus::Failed);
+        const Error error = outcome.errors.first();
+        QCOMPARE(error.code, QStringLiteral("out_of_memory"));
+        QVERIFY2(error.message.contains("sd-server (pid 4242, 9.6 GB)"), qPrintable(error.message));
+        QVERIFY2(error.hint.contains("omarchy-agent-local stop"), qPrintable(error.hint));
+    }
+
     // --- checkGraph: what validate shows (9.1, 10.3, 8.5) ---
 
     void checkTellsCachedFromStaleAndRunsNothing() {

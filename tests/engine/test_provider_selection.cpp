@@ -5,6 +5,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "engine/helper_provider.h"
 #include "engine/omarchy_provider.h"
 #include "engine/providers.h"
 #include "omarchy_fixture.h"
@@ -178,9 +179,28 @@ private slots:
         instance.type = QStringLiteral("io.example.engine");
         const auto unknown = createProvider(instance);
         QVERIFY(!unknown.ok());
-        QVERIFY(!unknown.value());
         QCOMPARE(unknown.errors().first().code, QStringLiteral("unknown_provider"));
-        QCOMPARE(strings(unknown.errors().first().valid), QStringList{"omarchy"});
+        QCOMPARE(strings(unknown.errors().first().valid), (QStringList{"fugue-helper", "omarchy"}));
+
+        instance.type = QStringLiteral("fugue-helper");
+        const auto helper = createProvider(instance);
+        QVERIFY(helper.ok());
+        QVERIFY(qobject_cast<HelperProvider *>(helper.value().get()));
+    }
+
+    void theDefaultsEndWithTheHelperWhenOneIsInstalled() {
+        // Last, so "any ready model" stays omarchy's; models on disk only the helper serves.
+        QTemporaryDir state;
+        const OmarchyPaths paths{state.path(), state.path()};
+        qputenv("FUGUE_HELPER", FUGUE_FAKE_HELPER);
+        const QList<ProviderInstance> withHelper = defaultProviderInstances(paths);
+        qputenv("FUGUE_HELPER", "");
+        const QList<ProviderInstance> without = defaultProviderInstances(paths);
+        QCOMPARE(without.size(), 1);
+        QCOMPARE(withHelper.size(), 2);
+        QCOMPARE(withHelper.first().type, QStringLiteral("omarchy"));
+        QCOMPARE(withHelper.last().name, QStringLiteral("Fugue helper"));
+        QCOMPARE(withHelper.last().type, QStringLiteral("fugue-helper"));
     }
 
     void autoTakesTheFirstEnabledReadyInstanceInTheUsersOrder() {

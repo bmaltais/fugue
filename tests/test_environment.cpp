@@ -1,4 +1,5 @@
-// Linked into every test that makes a QGuiApplication, and every engine test, so it holds when a test binary is run
+// Linked into every test that makes a QGuiApplication, every engine test and every CLI test (the
+// `fugue` they start inherits it), so it holds when a test binary is run
 // by hand too, not only under ctest (CMakeLists.txt sets the same for ctest). It runs before
 // main(), so before Qt reads the environment.
 //
@@ -53,6 +54,10 @@ void isolateFromTheDesktop() {
     qputenv("QT_QPA_PLATFORMTHEME", "generic");
     qputenv("QT_NO_XDG_DESKTOP_PORTAL", "1");
     qputenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent/fugue-tests-have-no-session-bus");
+    // Nor the machine's GPU helper (a source checkout's build-helper-*/ sits beside build/): none,
+    // unless a test names one (empty FUGUE_HELPER: no helper, engine/helper_provider.h).
+    if (!qEnvironmentVariableIsSet("FUGUE_HELPER"))
+        qputenv("FUGUE_HELPER", "");
     isolateFromTheOwnersFiles();
 }
 

@@ -24,7 +24,9 @@
 // folders (engine/model_library); a model that is not on this machine fails the node with
 // model_missing before the program starts.
 //
-// Not yet (7.3): a persistent process is not stopped when memory is needed.
+// A persistent program whose type declares `needs.gpu` is a resident model (9.3) while it runs,
+// under residentProgramKey(): dropping it when memory is needed (the scheduler, 8.10) stops it
+// as the idle stop does (7.3) and returns once it is gone, unless a run holds it.
 
 #include "engine/node_kernel.h"
 
@@ -37,6 +39,12 @@ namespace fugue {
 // on disk after it was loaded (and trusted, 6.7) does not run until it is loaded again. Other
 // files of the node are not covered. Empty when a file cannot be read.
 QString nodeSeal(const QString &dir, const QString &entry);
+
+// The resident-model key of a node type's persistent program, "program:<type id>"; empty for a
+// type whose program is not one (not persistent, or no `needs.gpu`). A node of the type keeps
+// it among its own models, so making room for the node does not stop its program.
+QString residentProgramKey(const NodeType &type);
+QString residentProgramKey(const QString &typeId);
 
 class CommandKernel : public NodeKernel {
 public:

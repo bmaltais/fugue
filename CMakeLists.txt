@@ -12,6 +12,7 @@ endif()
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickControls2 DBus Test ShaderTools)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(VIPS REQUIRED IMPORTED_TARGET vips-cpp)
+find_package(Vulkan REQUIRED) # free GPU memory by device type (spec 8.10); no device is created
 
 # The engine: documents, compiler, scheduler, cache, providers. It runs with
 # no display (the CLI and tests use it headless), so it never links Gui or
@@ -19,7 +20,7 @@ pkg_check_modules(VIPS REQUIRED IMPORTED_TARGET vips-cpp)
 file(GLOB fugue_engine_sources CONFIGURE_DEPENDS src/engine/*.cpp src/engine/*.h)
 add_library(fugue_engine STATIC ${fugue_engine_sources})
 target_include_directories(fugue_engine PUBLIC src)
-target_link_libraries(fugue_engine PUBLIC Qt6::Core Qt6::Network PkgConfig::VIPS)
+target_link_libraries(fugue_engine PUBLIC Qt6::Core Qt6::Network PkgConfig::VIPS PRIVATE Vulkan::Vulkan)
 target_compile_options(fugue_engine PUBLIC -Wall -Wextra)
 
 # Everything else but main.cpp, shared by the app and the tests, so each source
@@ -126,6 +127,11 @@ foreach(test_source ${fugue_commands_tests})
   set_tests_properties(${test_name} PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
 endforeach()
 
+# A stand-in for fugue-helper that speaks its protocol without inference (test_helper_provider).
+add_executable(fake_fugue_helper tests/helper_support/fake_fugue_helper.cpp)
+target_link_libraries(fake_fugue_helper PRIVATE Qt6::Core)
+target_compile_options(fake_fugue_helper PRIVATE -Wall -Wextra)
+
 # Engine tests: each tests/engine/<name>.cpp is its own QtTest executable, so
 # parts can be tested (and fail) independently. They link only the engine.
 file(GLOB fugue_engine_tests CONFIGURE_DEPENDS tests/engine/*.cpp)
@@ -133,7 +139,9 @@ foreach(test_source ${fugue_engine_tests})
   get_filename_component(test_name ${test_source} NAME_WE)
   add_executable(${test_name} ${test_source} tests/test_environment.cpp)
   target_link_libraries(${test_name} PRIVATE fugue_engine Qt6::Test)
-  target_compile_definitions(${test_name} PRIVATE FUGUE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+  target_compile_definitions(${test_name} PRIVATE FUGUE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+                             FUGUE_FAKE_HELPER="$<TARGET_FILE:fake_fugue_helper>")
+  add_dependencies(${test_name} fake_fugue_helper)
   add_test(NAME ${test_name} COMMAND ${test_name})
 endforeach()
 
@@ -199,7 +207,7 @@ target_link_libraries(fugue_with_fakes PRIVATE fugue_cli)
 file(GLOB fugue_cli_tests CONFIGURE_DEPENDS tests/cli/*.cpp)
 foreach(test_source ${fugue_cli_tests})
   get_filename_component(test_name ${test_source} NAME_WE)
-  add_executable(${test_name} ${test_source})
+  add_executable(${test_name} ${test_source} tests/test_environment.cpp)
   target_link_libraries(${test_name} PRIVATE fugue_cli Qt6::Test)
   target_compile_definitions(${test_name} PRIVATE FUGUE_BINARY="$<TARGET_FILE:fugue>"
                              FUGUE_FAKE_BINARY="$<TARGET_FILE:fugue_with_fakes>"

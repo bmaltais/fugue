@@ -1,5 +1,6 @@
 #include "providers.h"
 
+#include "engine/helper_provider.h"
 #include "engine/json.h"
 #include "engine/paths.h"
 #include "omarchy_provider.h"
@@ -240,7 +241,10 @@ QString pairedHostsProblem(const OmarchyPaths &omarchy) {
     return network.error().message;
 }
 
-QList<ProviderInstance> defaultProviderInstances(const OmarchyPaths &omarchy) {
+namespace {
+
+// This machine's and each paired host's omarchy instance (8.2).
+QList<ProviderInstance> omarchyDefaults(const OmarchyPaths &omarchy) {
     ProviderInstance local;
     local.name = QStringLiteral("This machine");
     local.type = QStringLiteral("omarchy");
@@ -278,15 +282,32 @@ QList<ProviderInstance> defaultProviderInstances(const OmarchyPaths &omarchy) {
     return instances;
 }
 
+} // namespace
+
+QList<ProviderInstance> defaultProviderInstances(const OmarchyPaths &omarchy) {
+    QList<ProviderInstance> instances = omarchyDefaults(omarchy);
+    // Last: "any ready model" stays the model servers'; only the helper runs models on disk.
+    if (!helperProgram(hasNvidiaGpu()).isEmpty()) {
+        ProviderInstance helper;
+        helper.name = QStringLiteral("Fugue helper");
+        helper.type = QStringLiteral("fugue-helper");
+        instances.append(helper);
+    }
+    return instances;
+}
+
 Result<std::shared_ptr<Provider>> createProvider(const ProviderInstance &instance) {
     if (instance.type == QLatin1String("omarchy"))
         return Result<std::shared_ptr<Provider>>(
             std::make_shared<OmarchyProvider>(instance, OmarchyPaths::standard()));
+    if (instance.type == QLatin1String("fugue-helper"))
+        return Result<std::shared_ptr<Provider>>(
+            std::make_shared<HelperProvider>(instance, helperProgram(hasNvidiaGpu())));
     Error error = makeError(
         QStringLiteral("unknown_provider"),
         QStringLiteral("%1 has the provider type %2, which this Fugue does not have.").arg(instance.name, instance.type),
         QStringLiteral("Change its type in %1.").arg(kProvidersFile));
-    error.valid = QJsonArray{"omarchy"};
+    error.valid = QJsonArray{"fugue-helper", "omarchy"};
     return Result<std::shared_ptr<Provider>>(error);
 }
 

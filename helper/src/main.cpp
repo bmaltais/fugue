@@ -1,9 +1,10 @@
-// fugue-helper: one stage of image generation per run, on stable-diffusion.cpp with Fugue's
-// stage patch (helper/sdcpp.patch, spec 8.10).
+// fugue-helper: stages of image generation on stable-diffusion.cpp with Fugue's stage patch
+// (helper/sdcpp.patch, spec 8.10).
 //
-//   fugue-helper <request.json>
+//   fugue-helper <request.json>     one operation, then exit
+//   fugue-helper --serve            the provider protocol over stdio (8.8), for HelperProvider
 //
-// The request names an operation and its files:
+// A request names an operation and its files:
 //
 //   {"op": "encode",     "conditioning": OUT}                  prompts -> conditioning
 //   {"op": "sample",     "conditioning": IN, "latent": OUT,    conditioning -> latent; with
@@ -18,19 +19,48 @@
 // "loras" a list of {"path", "multiplier", "is_high_noise"} (the last two optional). Every stage of one generation takes the same
 // context and params. A stage loads only the components it runs, except that every call
 // VAE-encodes the request's images (init, reference, control) and so loads the VAE.
+// The one-shot reply is one JSON line on stdout, {"outputs": [...]} or {"error": {"code",
+// "message"}}; the library's log goes to stderr.
 //
-// The reply is one JSON line on stdout, {"outputs": [...]} or {"error": {"code", "message"}};
-// the library's log goes to stderr. The persistent helper behind the provider protocol (8.8)
-// is #78; this runs one operation and exits.
+// --serve reads one JSON line per operation on stdin, each with an "id" its reply echoes:
+//
+//   {"op": "submit", "capability", "params", "inputs", "output_dir"}  -> {"job"}
+//   {"op": "status", "job"}    -> {"state", "progress", "stage", "error"?}
+//   {"op": "cancel", "job"}    -> {"state"}
+//   {"op": "result", "job"}    -> {"outputs": {NAME: {"path"} or a list of them}, "used"}
+//   {"op": "shutdown"}         -> {}, then it exits; so does it when stdin closes
+//
+// The capability is the operation: text.encode (encode), latent.sample (sample),
+// latent.decode (decode), latent.encode (vae_encode). params.context is the request's
+// "context" and the other params its "params"; inputs.conditioning, .latent, .init_latent and
+// .image ({"path"}) are its input files, and its outputs are written into output_dir as
+// conditioning.bin, latent.bin, image.png. Jobs run one at a time, in order. Unasked, it writes
+// {"op": "status", "job", "state", "progress", "stage", "error"?} lines as a job moves.
+// An error is {"error": {"code", "message"}}; out of memory is "out_of_memory".
+//
+// Loaded models stay loaded between jobs (one context per set of context options) until their
+// memory is needed: before loading, the least recently used contexts are freed while the device
+// has less free memory than the new one's files take, and a load or a generation that runs out
+// of memory frees the others and is tried once more.
 
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
+#include <deque>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <iostream>
+#include <limits>
+#include <list>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
+#include "ggml-backend.h"
 #include "json.hpp"
 #include "stable-diffusion.h"
 
@@ -150,7 +180,107 @@ std::string required(const json &request, const char *field) {
     return request[field].get<std::string>();
 }
 
-json run(const json &request) {
+// The free memory of the device the models load on (the first GPU), in bytes; as good as
+// unlimited without one (a CPU build).
+size_t freeDeviceMemory() {
+    for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
+        ggml_backend_dev_t device = ggml_backend_dev_get(i);
+        const enum ggml_backend_dev_type type = ggml_backend_dev_type(device);
+        if (type != GGML_BACKEND_DEVICE_TYPE_GPU && type != GGML_BACKEND_DEVICE_TYPE_IGPU)
+            continue;
+        size_t free = 0, total = 0;
+        ggml_backend_dev_memory(device, &free, &total);
+        return free;
+    }
+    return std::numeric_limits<size_t>::max();
+}
+
+// What loading the model files of `options` takes, about: their sizes (the weights), and a fifth
+// more for the buffers.
+size_t memoryFor(const json &options) {
+    size_t bytes = 0;
+    for (const auto &[key, value] : options.items()) {
+        const std::string suffix = "_path";
+        if (!value.is_string() || key.size() < suffix.size() || key.compare(key.size() - suffix.size(), suffix.size(), suffix) != 0)
+            continue;
+        std::error_code ignored;
+        const auto size = std::filesystem::file_size(value.get<std::string>(), ignored);
+        if (!ignored)
+            bytes += size;
+    }
+    return bytes + bytes / 5;
+}
+
+// The loaded contexts, one per set of context options, least recently used first.
+class Contexts {
+public:
+    Contexts() = default;
+    Contexts(const Contexts &) = delete;
+    Contexts &operator=(const Contexts &) = delete;
+    ~Contexts() { clear(); }
+
+    sd_ctx_t *get(const json &options) {
+        const std::string key = options.dump();
+        for (auto it = m_entries.begin(); it != m_entries.end(); ++it)
+            if (it->key == key) {
+                m_entries.splice(m_entries.end(), m_entries, it);
+                return m_entries.back().ctx;
+            }
+        const size_t needed = memoryFor(options);
+        while (!m_entries.empty() && freeDeviceMemory() < needed)
+            dropFirst();
+        Opt context(sd_ctx_opt_create());
+        if (!context)
+            fail("out_of_memory", "cannot create the context options");
+        for (const auto &[name, value] : options.items())
+            setOption(context.get(), name, value);
+        sd_ctx_t *ctx = nullptr;
+        sd_status_t status = sd_ctx_create(context.get(), &ctx);
+        if (status == SD_STATUS_OUT_OF_MEMORY && !m_entries.empty()) {
+            clear();
+            status = sd_ctx_create(context.get(), &ctx);
+        }
+        check(status, "loading the models");
+        m_entries.push_back({key, ctx});
+        return ctx;
+    }
+
+    // Frees every context but `keep`; false when there was none to free.
+    bool dropOthers(sd_ctx_t *keep) {
+        bool dropped = false;
+        for (auto it = m_entries.begin(); it != m_entries.end();) {
+            if (it->ctx == keep) {
+                ++it;
+                continue;
+            }
+            sd_ctx_free(it->ctx);
+            it = m_entries.erase(it);
+            dropped = true;
+        }
+        return dropped;
+    }
+
+    void clear() {
+        while (!m_entries.empty())
+            dropFirst();
+    }
+
+private:
+    void dropFirst() {
+        sd_ctx_free(m_entries.front().ctx);
+        m_entries.pop_front();
+    }
+
+    struct Entry {
+        std::string key;
+        sd_ctx_t *ctx;
+    };
+    std::list<Entry> m_entries;
+};
+
+// `running` is told the context just before the generation (false from it: cancelled, do not
+// start) and null after it.
+json run(const json &request, Contexts &contexts, const std::function<bool(sd_ctx_t *)> &running = {}) {
     const std::string op = request.value("op", "");
     if (op != "encode" && op != "sample" && op != "decode" && op != "vae_encode" && op != "generate")
         fail("input_invalid", "unknown op \"" + op + "\"; use encode, sample, decode, vae_encode or generate");
@@ -193,18 +323,20 @@ json run(const json &request) {
         imageOut = required(request, "image");
     }
 
-    Opt context(sd_ctx_opt_create());
-    if (!context)
-        fail("out_of_memory", "cannot create the context options");
-    const json contextOptions = request.value("context", json::object());
-    for (const auto &[key, value] : contextOptions.items())
-        setOption(context.get(), key, value);
-    sd_ctx_t *ctx = nullptr;
-    check(sd_ctx_create(context.get(), &ctx), "loading the models");
-    std::unique_ptr<sd_ctx_t, void (*)(sd_ctx_t *)> ctxOwner(ctx, sd_ctx_free);
+    sd_ctx_t *ctx = contexts.get(request.value("context", json::object()));
 
     sd_result_t *result = nullptr;
-    check(sd_generate_image(ctx, options.get(), &result), op);
+    // sd_generate_image clears a cancel asked before it starts, so that one is heard here.
+    if (running && !running(ctx))
+        fail("cancelled", op + " was cancelled");
+    sd_status_t status = sd_generate_image(ctx, options.get(), &result);
+    if (status == SD_STATUS_OUT_OF_MEMORY && contexts.dropOthers(ctx))
+        status = sd_generate_image(ctx, options.get(), &result);
+    if (running)
+        running(nullptr);
+    if (status == SD_STATUS_CANCELLED)
+        fail("cancelled", op + " was cancelled");
+    check(status, op);
     std::unique_ptr<sd_result_t, void (*)(sd_result_t *)> resultOwner(result, sd_result_free);
     if (!imageOut.empty()) {
         const size_t count = sd_result_get_image_count(result);
@@ -221,35 +353,267 @@ json run(const json &request) {
     return {{"outputs", outputs}};
 }
 
+json errorJson(const std::string &code, const std::string &message) {
+    return {{"code", code}, {"message", message}};
+}
+
+// Runs one operation: the reply, {"outputs": [...]} or {"error": ...}.
+json attempt(const std::function<json()> &call) {
+    try {
+        return call();
+    } catch (const Failure &f) {
+        return {{"error", errorJson(f.code, f.message)}};
+    } catch (const std::bad_alloc &) {
+        return {{"error", errorJson("out_of_memory", "out of memory")}};
+    } catch (const std::exception &e) {
+        return {{"error", errorJson("input_invalid", e.what())}};
+    }
+}
+
+// --serve: the provider protocol of spec 8.8 over stdio.
+class Server {
+public:
+    int serve() {
+        sd_set_progress_callback(&Server::progressed, this);
+        std::thread worker([this] { work(); });
+        worker.detach(); // ended with the process (_Exit): a running job is not waited for
+        std::string line;
+        while (std::getline(std::cin, line)) {
+            if (line.empty())
+                continue;
+            const json message = json::parse(line, nullptr, false);
+            if (message.is_discarded() || !message.is_object()) {
+                say({{"error", errorJson("input_invalid", "a line that is not a JSON object")}});
+                continue;
+            }
+            if (message.value("op", "") == "shutdown") {
+                say({{"id", message.value("id", json())}});
+                break;
+            }
+            json reply = handle(message);
+            reply["id"] = message.value("id", json());
+            say(reply);
+        }
+        // Without the exit-time teardown, as the one-shot run (main()).
+        std::fflush(stdout);
+        std::_Exit(0);
+    }
+
+private:
+    struct Job {
+        json request; // the one-shot form
+        std::string stage;
+        std::string state = "queued";
+        json outputs = json::object();
+        json error;
+        bool cancel = false;
+    };
+
+    void say(const json &message) {
+        const std::string text = message.dump() + "\n";
+        std::lock_guard<std::mutex> lock(m_out);
+        std::fwrite(text.data(), 1, text.size(), stdout);
+        std::fflush(stdout);
+    }
+
+    // Under m_mutex.
+    json statusOf(const std::string &id, const Job &job) const {
+        json status{{"op", "status"}, {"job", id}, {"state", job.state}, {"stage", job.stage},
+                    {"progress", job.state == "done" ? 1.0 : m_progress.count(id) ? m_progress.at(id) : 0.0}};
+        if (!job.error.is_null())
+            status["error"] = job.error;
+        return status;
+    }
+
+    json handle(const json &message) {
+        const std::string op = message.value("op", "");
+        if (op == "submit")
+            return submit(message);
+        const std::string id = message.value("job", "");
+        std::lock_guard<std::mutex> lock(m_mutex);
+        const auto found = m_jobs.find(id);
+        if (op != "status" && op != "cancel" && op != "result")
+            return {{"error", errorJson("input_invalid", "unknown op \"" + op + "\"")}};
+        if (found == m_jobs.end())
+            return {{"error", errorJson("input_invalid", "no job \"" + id + "\"")}};
+        Job &job = found->second;
+        if (op == "status") {
+            json status = statusOf(id, job);
+            status.erase("op");
+            status.erase("job");
+            return status;
+        }
+        if (op == "cancel") {
+            if (job.state == "queued") {
+                job.state = "cancelled";
+                say(statusOf(id, job));
+                m_jobs.erase(found); // work() passes over an id it no longer has
+                m_progress.erase(id);
+                return {{"state", "cancelled"}};
+            } else if (job.state == "running") {
+                job.cancel = true;
+                if (m_running)
+                    sd_cancel_generation(m_running, SD_CANCEL_ALL);
+            }
+            return {{"state", job.state}};
+        }
+        if (job.state != "done")
+            return {{"error", errorJson("input_invalid", "job \"" + id + "\" is " + job.state + ", not done")}};
+        // The options it ran with, as it was given them (the library reports no others).
+        json used = job.request.value("params", json::object());
+        used["engine"] = "sdcpp";
+        const json reply{{"outputs", job.outputs}, {"used", used}};
+        // Fugue fetches a result once, at once: the job is done with.
+        m_progress.erase(id);
+        m_jobs.erase(found);
+        return reply;
+    }
+
+    json submit(const json &message) {
+        static const std::map<std::string, std::string> ops{{"text.encode", "encode"},
+                                                            {"latent.sample", "sample"},
+                                                            {"latent.decode", "decode"},
+                                                            {"latent.encode", "vae_encode"}};
+        const std::string capability = message.value("capability", "");
+        const auto op = ops.find(capability);
+        if (op == ops.end())
+            return {{"error", errorJson("input_invalid", "no capability \"" + capability + "\"")}};
+        json params = message.value("params", json::object());
+        json request{{"op", op->second}, {"context", params.value("context", json::object())}};
+        params.erase("context");
+        request["params"] = params;
+        const json inputs = message.value("inputs", json::object());
+        for (const char *name : {"conditioning", "latent", "init_latent", "image"})
+            if (inputs.contains(name) && inputs[name].is_object() && inputs[name].contains("path"))
+                request[name] = inputs[name]["path"];
+        const std::filesystem::path dir = message.value("output_dir", "");
+        if (dir.empty())
+            return {{"error", errorJson("input_invalid", "\"output_dir\" is required")}};
+        if (op->second == "encode")
+            request["conditioning"] = (dir / "conditioning.bin").string();
+        else if (op->second == "sample" || op->second == "vae_encode")
+            request["latent"] = (dir / "latent.bin").string();
+        else
+            request["image"] = (dir / "image.png").string();
+
+        std::lock_guard<std::mutex> lock(m_mutex);
+        const std::string id = std::to_string(++m_count);
+        Job job;
+        job.request = request;
+        job.stage = op->second;
+        m_jobs[id] = job;
+        m_queue.push_back(id);
+        m_wake.notify_one();
+        return {{"job", id}};
+    }
+
+    void work() {
+        Contexts contexts;
+        for (;;) {
+            std::string id;
+            json request;
+            {
+                std::unique_lock<std::mutex> lock(m_mutex);
+                m_wake.wait(lock, [this] { return !m_queue.empty(); });
+                id = m_queue.front();
+                m_queue.pop_front();
+                const auto queued = m_jobs.find(id);
+                if (queued == m_jobs.end())
+                    continue; // cancelled while it waited
+                Job &job = queued->second;
+                job.state = "running";
+                m_current = id;
+                request = job.request;
+                say(statusOf(id, job));
+            }
+            const json reply = attempt([&] {
+                return run(request, contexts, [this](sd_ctx_t *ctx) {
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    if (ctx && m_jobs[m_current].cancel) // asked while the models loaded
+                        return false;
+                    m_running = ctx;
+                    return true;
+                });
+            });
+            std::lock_guard<std::mutex> lock(m_mutex);
+            Job &job = m_jobs[id];
+            m_running = nullptr;
+            m_current.clear();
+            if (job.cancel) {
+                job.state = "cancelled";
+            } else if (reply.contains("error")) {
+                job.state = "error";
+                job.error = reply["error"];
+            } else {
+                job.state = "done";
+                for (const json &output : reply["outputs"])
+                    for (const auto &[name, path] : output.items()) {
+                        const json file{{"path", path}};
+                        if (!job.outputs.contains(name))
+                            job.outputs[name] = file;
+                        else if (job.outputs[name].is_array())
+                            job.outputs[name].push_back(file);
+                        else
+                            job.outputs[name] = json::array({job.outputs[name], file});
+                    }
+            }
+            say(statusOf(id, job));
+            if (job.state != "done") { // Fugue asks nothing more of it
+                m_progress.erase(id);
+                m_jobs.erase(id);
+            }
+        }
+    }
+
+    // sd.cpp's progress callback, on the worker thread: one status line per step.
+    static void progressed(int step, int steps, float, void *data) {
+        auto *self = static_cast<Server *>(data);
+        std::lock_guard<std::mutex> lock(self->m_mutex);
+        if (self->m_current.empty() || steps <= 0)
+            return;
+        self->m_progress[self->m_current] = double(step) / steps;
+        self->say(self->statusOf(self->m_current, self->m_jobs[self->m_current]));
+    }
+
+    std::mutex m_out; // stdout, written by both threads
+    std::mutex m_mutex;
+    std::condition_variable m_wake;
+    std::map<std::string, Job> m_jobs;
+    std::map<std::string, double> m_progress;
+    std::deque<std::string> m_queue;
+    std::string m_current;         // the running job
+    sd_ctx_t *m_running = nullptr; // its context while it generates, for cancel
+    int m_count = 0;
+};
+
 void logToStderr(enum sd_log_level_t, const char *text, void *) { std::fputs(text, stderr); }
 
 } // namespace
 
 int main(int argc, char **argv) {
     if (argc != 2) {
-        std::fprintf(stderr, "usage: fugue-helper <request.json>\n");
+        std::fprintf(stderr, "usage: fugue-helper <request.json> | --serve\n");
         return 2;
     }
     sd_set_log_callback(logToStderr, nullptr);
+    if (std::string(argv[1]) == "--serve")
+        return Server().serve();
     json reply;
-    try {
-        std::ifstream in(argv[1]);
-        if (!in)
-            fail("input_invalid", std::string("cannot read ") + argv[1]);
-        const json request = json::parse(in, nullptr, false);
-        if (request.is_discarded() || !request.is_object())
-            fail("input_invalid", std::string(argv[1]) + " is not a JSON object");
-        reply = run(request);
-    } catch (const Failure &f) {
-        reply = {{"error", {{"code", f.code}, {"message", f.message}}}};
-    } catch (const std::bad_alloc &) {
-        reply = {{"error", {{"code", "out_of_memory"}, {"message", "out of memory"}}}};
-    } catch (const std::exception &e) {
-        reply = {{"error", {{"code", "input_invalid"}, {"message", e.what()}}}};
+    {
+        Contexts contexts; // freed before the reply, as one run's models always were
+        reply = attempt([&] {
+            std::ifstream in(argv[1]);
+            if (!in)
+                fail("input_invalid", std::string("cannot read ") + argv[1]);
+            const json request = json::parse(in, nullptr, false);
+            if (request.is_discarded() || !request.is_object())
+                fail("input_invalid", std::string(argv[1]) + " is not a JSON object");
+            return run(request, contexts);
+        });
     }
     std::printf("%s\n", reply.dump().c_str());
     std::fflush(stdout);
-    // End without the exit-time teardown (run() has freed the models already): NVIDIA's Vulkan
+    // End without the exit-time teardown (the models are freed already): NVIDIA's Vulkan
     // driver can crash in it, a shader-compiler thread still running at exit (seen with SDXL),
     // which would turn a finished run into a failed one.
     std::_Exit(reply.contains("error") ? 1 : 0);

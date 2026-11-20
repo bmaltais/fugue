@@ -1,5 +1,7 @@
 #include "scheduler.h"
 
+#include "engine/command_node.h"
+
 #include <algorithm>
 #include <exception>
 #include <memory>
@@ -558,6 +560,9 @@ private:
         } else if (n.kernel) {
             for (const Value &value : std::as_const(n.inputs))
                 collectModels(value, n.models);
+            // Its own persistent program, which holds memory between runs (7.3).
+            if (const QString program = residentProgramKey(*n.type); !program.isEmpty())
+                n.models.append(program);
             // Under validate a model file that is not on this machine is a warning (8.5, 8.9); a
             // kernel that needs the file reports model_missing as its error.
             if (m_dry)
@@ -849,12 +854,59 @@ private:
     // way: estimates are declared, not trusted, and a real shortage comes
     // back as out_of_memory.
     void makeRoom(const NodeRun &n) {
-        if (!m_env.freeGpuMemoryMb || !m_env.models || n.providerKernel)
+        if (!m_env.freeGpuMemoryMb || !m_env.models)
             return;
         const qint64 needed = qint64(n.type->needs.value("gpu").toObject().value("vram_mb").toDouble());
         while (needed > 0 && m_env.freeGpuMemoryMb() < needed)
-            if (m_env.models->evictLeastRecentlyUsed(n.models).isEmpty())
+            if (dropModel(n).isEmpty())
                 break;
+    }
+
+    // Drops the least recently used resident model `n` does not need (9.3), and gives its key.
+    // A provider's model ("<instance>\n<model>") is held by its server: when the instance has
+    // no model left on record, it is told to shut down, which gives the memory back for a
+    // provider Fugue started (the helper, 8.10) and does nothing for one it did not.
+    // A model on an instance with a job in flight is not dropped: its server is using it.
+    // Dropping one waits until its memory is back (a program or a helper that stops), so the
+    // next measurement sees it.
+    QString dropModel(const NodeRun &n) {
+        QStringList keep = n.models;
+        for (int i = 0; i < m_providers.size(); ++i) {
+            if (!m_busy.at(i))
+                continue;
+            const QString prefix = m_providers.at(i).instance.name + QLatin1Char('\n');
+            for (const QString &key : m_env.models->keys())
+                if (key.startsWith(prefix))
+                    keep.append(key);
+        }
+        const QString key = m_env.models->evictLeastRecentlyUsed(keep);
+        const qsizetype cut = key.indexOf(QLatin1Char('\n'));
+        if (cut <= 0)
+            return key;
+        const QString prefix = key.left(cut + 1);
+        for (const QString &other : m_env.models->keys())
+            if (other.startsWith(prefix))
+                return key;
+        for (int i = 0; i < m_providers.size(); ++i) {
+            const ProviderEntry &entry = m_providers.at(i);
+            if (entry.provider && entry.instance.name == key.left(cut))
+                entry.provider->shutdown([](const Result<Nothing> &) {});
+        }
+        return key;
+    }
+
+    // A GPU node out of memory with nothing left to drop: who holds the memory (8.10). Fugue
+    // stops none of them: the user may, Omarchy's model servers with one command.
+    Error withMemoryHolders(Error error) const {
+        if (!m_env.gpuProcesses)
+            return error;
+        const QList<GpuProcess> holders = m_env.gpuProcesses();
+        if (holders.isEmpty())
+            return error;
+        error.message += QStringLiteral(" GPU memory is held by %1.").arg(describeGpuProcesses(holders));
+        error.hint = QStringLiteral("Close one of them, or stop Omarchy's model servers with "
+                                    "`omarchy-agent-local stop`, then run again.");
+        return error;
     }
 
     // The values used by the node and everything upstream of it (NodeContext::used),
@@ -1166,14 +1218,16 @@ private:
     // A running node came back with an error.
     void failed(NodeRun &n, const Error &error) {
         const bool lane = n.holdsGpu || n.holdsInstance;
+        const bool gpu = n.holdsGpu;
         release(n);
         if (m_cancel->load()) {
             skip(n, QStringLiteral("cancelled"));
-        } else if (error.code == QLatin1String("out_of_memory") && lane && m_env.models &&
-                   !m_env.models->evictLeastRecentlyUsed(n.models).isEmpty()) {
+        } else if (error.code == QLatin1String("out_of_memory") && lane && m_env.models && !dropModel(n).isEmpty()) {
             // 9.3: drop the least recently used model, not everything, and
             // try again.
             n.phase = Phase::Ready;
+        } else if (error.code == QLatin1String("out_of_memory") && gpu) {
+            fail(n, withMemoryHolders(error));
         } else {
             fail(n, error);
         }

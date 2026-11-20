@@ -25,10 +25,13 @@ public:
     void status(const QString &job, Reply<JobStatus> reply) override;
     void cancel(const QString &job, Reply<QString> reply) override;
     void result(const QString &job, Reply<JobResult> reply) override;
+    void shutdown(Reply<Nothing> reply) override;
 
     // What the engine sent for a job, and every job id in submission order.
     JobRequest submitted(const QString &job) const;
     QStringList jobs() const;
+    // How many times shutdown() was called.
+    int shutdowns() const { return m_shutdowns; }
 
     // Moves a job, emitting statusChanged.
     void progress(const QString &job, double value, const QString &stage);
@@ -51,6 +54,7 @@ private:
     Errors m_describeErrors;
     QHash<QString, Job> m_jobs;
     QStringList m_order;
+    int m_shutdowns = 0;
 };
 
 } // namespace fugue

@@ -7,7 +7,7 @@ run as separate calls ([spec 8.10](../docs/spec.md#810-gpu-memory-and-the-helper
 | --- | --- |
 | `CMakeLists.txt` | The pin: stable-diffusion.cpp, ggml and CUTLASS commits with their SHA-256 |
 | `sdcpp.patch` | The stage patch: `fugue.*` image options, the stage file format (`src/pipeline/fugue_stages.h`), hooks in `generate_image` |
-| `src/main.cpp` | `fugue-helper <request.json>`: one operation per run; the request format is at its top |
+| `src/main.cpp` | `fugue-helper <request.json>` (one operation, then exit) and `fugue-helper --serve` (the provider protocol over stdio, for Fugue's `fugue-helper` provider); both formats are at its top |
 
 ## Build
 
@@ -47,3 +47,13 @@ The pin moves only on purpose (spec 8.10).
    - IP-Adapter, PhotoMaker or PuLID, only when the move changes their code.
 
    These need a GPU and model files, so they are run by hand, not in CI.
+4. Run the stages once through Fugue's provider, as the app does (`--serve`, models kept loaded):
+   ```sh
+   FUGUE_REAL_HELPER=$PWD/build-helper-cuda/fugue-helper-cuda \
+   FUGUE_REAL_HELPER_REQUEST=params.json \
+   build/test_helper_provider aRealHelperRunsTheStagesWarm
+   ```
+   `params.json` holds the generation options with their `context`, for example
+   `{"prompt": "…", "width": 1024, "height": 1024, "sample.steps": 8, "sample.guidance.txt_cfg": 1,
+   "context": {"diffusion_model_path": "…", "llm_path": "…", "vae_path": "…"}}`. Set
+   `FUGUE_REAL_HELPER_KEEP=out.png` to keep the image: it is the same as the one-shot staged run's.

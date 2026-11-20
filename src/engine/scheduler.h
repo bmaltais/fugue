@@ -26,9 +26,12 @@
 //     instance, one whose model is already resident goes first. When a node
 //     of those lanes fails with out_of_memory, the least recently used
 //     resident model it does not need is dropped and the node runs again; it
-//     fails only when nothing is left to drop. Before a GPU node starts,
+//     fails only when nothing is left to drop, and then its error names the
+//     processes holding GPU memory (8.10). Before a GPU node starts,
 //     free GPU memory (RunEnvironment::freeGpuMemoryMb, 8.10) is compared
-//     with its `needs.gpu.vram_mb` and models are dropped the same way.
+//     with its `needs.gpu.vram_mb` and models are dropped the same way. A
+//     provider instance whose last recorded model is dropped is told to shut
+//     down: one Fugue started (the helper) gives its memory back that way.
 //   - Errors are per node (9.5): the node gets node.error, every node
 //     downstream is skipped with `upstream_failed`, other branches carry on.
 //   - A node whose required input is linked to an output that came back
@@ -75,6 +78,7 @@
 
 #include "engine/compiler.h"
 #include "engine/error.h"
+#include "engine/gpu_memory.h"
 #include "engine/node_kernel.h"
 #include "engine/providers.h"
 #include "engine/registry.h"
@@ -99,12 +103,15 @@ struct RunEnvironment {
     // between them. Without it there is no residency preference.
     ResidentModels *models = nullptr;
 
-    // Free GPU memory in MB, measured as 8.10 says (by Vulkan device type;
-    // gpu_memory.h has the unified-memory figure); unset means it is not
-    // measured, which is the case until the helper (#32) can tell the device. Before a GPU node that declares
+    // Free GPU memory in MB, measured as 8.10 says (GpuMemoryProbe); unset
+    // means it is not measured. Before a GPU node that declares
     // `needs.gpu.vram_mb` starts, resident models are dropped, least recently
     // used first, while this is short of it.
     std::function<qint64()> freeGpuMemoryMb;
+    // The processes holding GPU memory (gpuProcesses(), nvidia-smi), named in
+    // the error of a GPU node that ran out of memory with nothing left to
+    // drop (8.10); unset means they are not named.
+    std::function<QList<GpuProcess>()> gpuProcesses;
 
     // How many CPU nodes run at once; 0 means the number of cores minus one,
     // at least one (9.2).

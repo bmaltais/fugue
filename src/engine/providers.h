@@ -46,7 +46,9 @@ Result<QList<ProviderInstance>> loadProviderInstances(const QString &path, const
 // provider matches a paired host's models by), in the hosts' name order. A paired host that
 // is offline is kept, so its models show as offline and a pin on it stays valid. A
 // network.json that is missing adds no host (none is paired); one that cannot be read adds
-// none either, for now: pairedHostsProblem() says so.
+// none either, for now: pairedHostsProblem() says so. Last, when a fugue-helper is installed
+// (helperProgram), "Fugue helper" (type fugue-helper): after the model servers, so "any ready
+// model" stays theirs.
 QList<ProviderInstance> defaultProviderInstances();
 QList<ProviderInstance> defaultProviderInstances(const OmarchyPaths &omarchy);
 
@@ -57,8 +59,8 @@ QList<ProviderInstance> defaultProviderInstances(const OmarchyPaths &omarchy);
 QString pairedHostsProblem();
 QString pairedHostsProblem(const OmarchyPaths &omarchy);
 
-// Makes the provider an instance is a use of. M0 compiles in only omarchy (8.7); any other type
-// is unknown_provider until provider modules arrive (M4).
+// Makes the provider an instance is a use of: omarchy and fugue-helper are compiled in (8.7);
+// any other type is unknown_provider until provider modules arrive (M4).
 Result<std::shared_ptr<Provider>> createProvider(const ProviderInstance &instance);
 
 // An instance with the outcome of its describe(). A disabled instance need not be described.

@@ -8,6 +8,8 @@
 #include <QRegularExpression>
 #include <QSet>
 
+#include <algorithm>
+
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
 #include "engine/atomic_file.h"
@@ -51,14 +53,17 @@ struct ModuleField {
 };
 
 // The settings a provider module declares beyond name, type, address, key and enabled (8.8).
-// Only omarchy is compiled in (8.7) and it declares none; a field the file holds that no
-// module declares is shown as it is, secret when its name says so.
+// omarchy declares none; fugue-helper declares idle_timeout_s (engine/helper_provider.h). A
+// field the file holds that no module declares is shown as it is, secret when its name says so.
 QList<ModuleField> moduleFields(const ProviderInstance &instance) {
     static const QRegularExpression secretName(QStringLiteral("key|token|secret|password"),
                                                QRegularExpression::CaseInsensitiveOption);
     QList<ModuleField> fields;
+    if (instance.type == QLatin1String("fugue-helper"))
+        fields.append({QStringLiteral("idle_timeout_s"), false});
     for (auto it = instance.settings.begin(); it != instance.settings.end(); ++it)
-        fields.append({it.key(), secretName.match(it.key()).hasMatch()});
+        if (!std::any_of(fields.begin(), fields.end(), [&](const ModuleField &f) { return f.name == it.key(); }))
+            fields.append({it.key(), secretName.match(it.key()).hasMatch()});
     return fields;
 }
 
@@ -236,7 +241,7 @@ QVariantList SettingsModel::providers() const {
     return list;
 }
 
-QStringList SettingsModel::providerTypes() const { return {QStringLiteral("omarchy")}; }
+QStringList SettingsModel::providerTypes() const { return {QStringLiteral("omarchy"), QStringLiteral("fugue-helper")}; }
 
 QString SettingsModel::saveProviders(const QList<ProviderInstance> &instances) {
     if (!m_providersProblem.isEmpty())

@@ -48,6 +48,8 @@ void listOfferedModels(const QString &type, const QStringList &capabilities,
                     if (!capabilities.isEmpty() && !capabilities.contains(offer.capability))
                         continue;
                     for (const OfferedModel &model : offer.models) {
+                        if (model.handle.isEmpty()) // model files come in the job (provider.h)
+                            continue;
                         if (!type.isEmpty() && model.handle.value("resource").toString() != type)
                             continue;
                         const bool listed = std::any_of(models.begin(), models.end(), [&](const ListedModel &m) {

@@ -1,5 +1,6 @@
 #include "command_node.h"
 
+#include <QDeadlineTimer>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
@@ -28,6 +29,7 @@
 #include "engine/file_hashes.h"
 #include "engine/model_library.h"
 #include "engine/registry.h"
+#include "engine/resident_models.h"
 
 namespace fugue {
 namespace {
@@ -116,6 +118,21 @@ public:
             else
                 m_idle->start(m_idleMs);
         });
+    }
+    // Stops it now as the idle stop does, unless a run holds it (7.3: its memory is needed),
+    // and returns once it is gone: shutdown, SIGTERM and SIGKILL take at most two grace periods.
+    // At once when a run holds it.
+    void stopUnlessBusyAndWait() {
+        {
+            QMutexLocker lock(&m_mutex);
+            if (m_busy || m_gone)
+                return;
+        }
+        post([this] { stopWhenIdle(); });
+        QDeadlineTimer deadline(2 * m_grace + 1000);
+        QMutexLocker lock(&m_mutex);
+        while (!m_gone && !m_busy && !deadline.hasExpired())
+            m_wake.wait(&m_mutex, deadline);
     }
 
     // The next thing the program did, waiting up to `ms`.
@@ -648,6 +665,10 @@ struct CommandKernel::Impl {
         QMutex guard; // `process`, for shutdown() to reach it during a run
         std::unique_ptr<Process> process;
         QString seal; // NodeType::seal of the files `process` was started from
+        // While the program is a resident model: the payload ResidentModels holds, whose drop
+        // stops the program and waits for it, so the memory is back when the drop returns. Weak,
+        // so that only ResidentModels keeps it.
+        std::weak_ptr<void> resident;
     };
     QMutex mutex;
     bool closed = false;
@@ -660,7 +681,42 @@ struct CommandKernel::Impl {
             found = std::make_shared<Slot>();
         return found;
     }
+
+    // 7.3, 8.10, 9.3: a persistent program that uses the GPU keeps its memory between runs, so
+    // it is a resident model: the scheduler drops the least recently used one when memory is
+    // needed, and dropping it stops the program. One that a run holds is not stopped; the next
+    // run makes it resident again.
+    static void keepResident(const std::shared_ptr<Slot> &slot, ResidentModels &models, const QString &typeId) {
+        std::shared_ptr<void> payload;
+        {
+            QMutexLocker guard(&slot->guard);
+            // expired(), not a null test: the payload points at nothing, only its drop matters.
+            payload = slot->resident.lock();
+            if (slot->resident.expired()) {
+                const std::weak_ptr<Slot> weak = slot;
+                payload = std::shared_ptr<void>(nullptr, [weak](void *) {
+                    if (const std::shared_ptr<Slot> held = weak.lock()) {
+                        QMutexLocker guard(&held->guard);
+                        if (held->process)
+                            held->process->stopUnlessBusyAndWait();
+                    }
+                });
+                slot->resident = payload;
+            }
+        }
+        models.put(residentProgramKey(typeId), payload);
+    }
 };
+
+QString residentProgramKey(const NodeType &type) {
+    const QJsonObject &runtime = type.runtime;
+    if (runtime.value("kind").toString() != QLatin1String("command") ||
+        runtime.value("mode").toString() != QLatin1String("persistent") || !type.needs.value("gpu").isObject())
+        return {};
+    return residentProgramKey(type.id);
+}
+
+QString residentProgramKey(const QString &typeId) { return QStringLiteral("program:") + typeId; }
 
 CommandKernel::CommandKernel(int graceMs) : d(new Impl(graceMs)) {}
 
@@ -790,6 +846,8 @@ Result<Values> CommandKernel::run(const NodeContext &context) {
             continue;
         if (!result)
             return result.error();
+        if (context.models && !residentProgramKey(type).isEmpty())
+            Impl::keepResident(slot, *context.models, type.id);
         return withWarnings(outputsFrom(result.value(), context), warnings);
     }
     return nodeError(QStringLiteral("node_failed"), QStringLiteral("The node's program could not be run."));

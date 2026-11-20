@@ -23,6 +23,7 @@
 #include "engine/hash.h"
 #include "engine/paths.h"
 #include "engine/registry.h"
+#include "engine/resident_models.h"
 
 using namespace fugue;
 
@@ -647,6 +648,43 @@ wait
         QVERIFY2(next.ok(), qPrintable(next.error().message));
         QCOMPARE(next->value("text").text(), QString("run 1"));
         QCOMPARE(pidsIn(node.dir + "/pids.txt").size(), 2);
+    }
+
+    // 7.3, 8.10: a persistent program that uses the GPU holds memory between runs, so it is a
+    // resident model (9.3); dropping it when memory is needed stops the program.
+    void aPersistentGpuProgramIsStoppedWhenItsMemoryIsNeeded() {
+        Node node = makeNode(m_root.path(), "persgpu", persistentScript(), {{"mode", "persistent"}});
+        node.type.needs = QJsonObject{{"gpu", QJsonObject{{"vram_mb", 4000}}}};
+        CommandKernel kernel(kGraceMs);
+        ResidentModels models;
+        NodeContext context = contextFor(node);
+        context.models = &models;
+        QVERIFY(kernel.run(context).ok());
+        context.workDir = contextFor(node).workDir;
+        QVERIFY(kernel.run(context).ok()); // a second run keeps it: it is the same program
+        const QList<qint64> pids = pidsIn(node.dir + "/pids.txt");
+        QCOMPARE(pids.size(), 1);
+        QVERIFY(alive(pids.first()));
+        QCOMPARE(models.keys(), QStringList{"program:io.github.test.tools/persgpu"});
+
+        QCOMPARE(models.evictLeastRecentlyUsed(), QStringLiteral("program:io.github.test.tools/persgpu"));
+        QVERIFY2(waitGone(pids.first()), "the program was not stopped");
+
+        context.workDir = contextFor(node).workDir;
+        const Result<Values> next = kernel.run(context);
+        QVERIFY2(next.ok(), qPrintable(next.error().message));
+        QCOMPARE(pidsIn(node.dir + "/pids.txt").size(), 2);
+        QVERIFY(models.contains("program:io.github.test.tools/persgpu"));
+    }
+
+    void aPersistentProgramWithoutTheGpuIsNotAResidentModel() {
+        const Node node = makeNode(m_root.path(), "perscpu", persistentScript(), {{"mode", "persistent"}});
+        CommandKernel kernel(kGraceMs);
+        ResidentModels models;
+        NodeContext context = contextFor(node);
+        context.models = &models;
+        QVERIFY(kernel.run(context).ok());
+        QVERIFY(models.keys().isEmpty());
     }
 
     void aBusyPersistentNodeIsNotStoppedForBeingIdle() {

@@ -984,6 +984,9 @@ For nodes with costly startup, such as loading a model. Set `runtime.mode: "pers
   whose `code` is `cancelled`, or with the `result` if it finished first.
 - `{"op": "shutdown"}` asks it to exit. Fugue sends it after the idle timeout
   (`idle_timeout_s`, default 300) or when it needs the memory, then SIGTERM, then SIGKILL.
+  "When it needs the memory": a program whose type declares `needs.gpu` is a resident model
+  ([9.3](#93-residency)) while it runs, and is stopped when the scheduler drops it to make room
+  for GPU work, least recently used first. A program in the middle of a run is not stopped.
 - If the process dies, the running node fails with `node_failed` and the next run starts a new one.
 
 ### 7.4 Cancel and timeouts
@@ -1054,6 +1057,9 @@ A provider instance is a configured use of a provider module, stored in
   read again wherever the file is read (the CLI, each window run, each time a model picker opens),
   and nothing is written: the file is made only when the user changes a provider in the settings.
   A file that exists wins entirely; nothing is added to it.
+  When a `fugue-helper` is installed, the default ends with `Fugue helper` (type
+  `fugue-helper`): last, so "any ready model" stays the model servers', while only the helper
+  runs models from disk.
 - **Local or remote is only the address.** It is never a property of a graph.
 - Keys live only here. They are never written into a workflow, an export or an embedded graph.
 
@@ -1110,6 +1116,28 @@ Servers drop finished jobs (the Omarchy image server after 600 seconds).
 
 The shipped providers are not special: they sit behind the same interface and registry as a
 third-party module ([8.11](#811-the-provider-interface)).
+
+**The `fugue-helper` provider** runs `fugue-helper --serve` ([8.10](#810-gpu-memory-and-the-helper))
+and speaks the protocol of 8.8 to it over `stdio`:
+
+- The program: `lib/fugue/fugue-helper-cuda` on an NVIDIA card (the faster one), else
+  `fugue-helper-vulkan`, beside the app (`FUGUE_HELPER` names another; a source checkout's
+  `build-helper-<backend>/` is used when nothing is installed).
+- Started on the first job, not by `describe`: a model picker describes every provider each time
+  it opens, so the provider answers `describe` itself. It offers `text.encode`, `latent.sample`,
+  `latent.decode` and `latent.encode`, each with one model with an empty handle: the models come
+  as files in the job (`params.context`, by path, as stable-diffusion.cpp's context options
+  name them), so the offer is chosen for "any ready model" and a picker does not list it.
+- Kept warm while it has jobs and for `idle_timeout_s` after the last (an instance setting,
+  default 600), then sent `shutdown`, and killed when it is not out within 5 seconds.
+- One job at a time: the helper runs the jobs it is sent in order.
+- `submit` carries `output_dir`, where the helper writes the job's files (it shares the
+  filesystem).
+- A helper that dies fails the jobs it held with `node_failed` and the last lines of its log, and
+  is started again on the next job. `out_of_memory` from the helper stays `out_of_memory`; its
+  other errors are `node_failed`.
+- Cancel is cooperative (stable-diffusion.cpp stops at its next step); a job not over within 5
+  seconds is ended by killing the helper.
 
 **The `omarchy` provider** (from reading omarchy-local-ai and Fantasi's source, checked against
 omarchy-local-ai at commit 703ae0c when the provider was built):
@@ -1223,9 +1251,9 @@ reference. A new inference runtime is a new provider module.
   `MemAvailable` from `/proc/meminfo`, capped at the heap size (on the GB10 nvidia-smi reports no
   memory figures and the Vulkan budget does not see other processes). CPU devices are skipped.
   omarchy-local-ai does not model a discrete NVIDIA card, so its figures are not relied on.
-  M0 builds the `MemAvailable` reading only, and nothing uses it yet: telling the device type,
-  the cap at the heap size and the discrete card's figure need Vulkan, which the engine first
-  links with the helper (#32). Until then free GPU memory is not measured before a node starts.
+  The engine links Vulkan for this and only asks about devices; it creates none. The device is
+  the first discrete card, else the first integrated one. Without a Vulkan driver or a GPU
+  nothing is measured.
 - GPU work in the engine and the CLI uses Vulkan compute directly or runs in the helper, never
   Qt RHI: Qt's `offscreen` platform gives neither a Vulkan instance nor a GL context. Fugue links
   no CUDA and bundles no NVIDIA files. The helper is built twice: for Vulkan, in the `fugue`
@@ -1234,7 +1262,15 @@ reference. A new inference runtime is a new provider module.
   (`fugue-helper-vulkan`, `fugue-helper-cuda`).
 - If memory is short, Fugue names the processes holding it (`nvidia-smi --query-compute-apps` on
   NVIDIA, including the GB10) and offers to stop Omarchy's model
-  servers, only with confirmation. It never kills another application.
+  servers, only with confirmation. It never kills another application. In v0.1 the offer is the
+  error's fix: a GPU node out of memory with no resident model left to drop names the processes,
+  and its hint is `omarchy-agent-local stop` (every running model).
+- The helper keeps the models it loaded (one stable-diffusion.cpp context per set of context
+  options) between jobs. Before it loads more, it frees its least recently used contexts while the
+  device has less free memory than the new files take (their size, plus a fifth); a load or a
+  generation that runs out of memory frees the others and is tried once more. Fugue's own
+  residency ([9.3](#93-residency)) records the helper as one model of its instance: dropping it
+  shuts the helper down.
 - Out of memory is a typed error on the node (`out_of_memory`). A helper crash kills only the helper.
 - The component-level helper is based on stable-diffusion.cpp with separate encode, sample and
   decode steps, C++ only. The M0 spike showed the split works
@@ -1255,9 +1291,11 @@ reference. A new inference runtime is a new provider module.
   (the sampled latent, after a hires pass), `fugue.stop_after` (`init`, `cond` or `sample`). On
   them `fugue-helper` builds its operations: `encode` (prompts to conditioning), `sample`
   (conditioning, and optionally a start latent, to a latent), `decode` (latent to image),
-  `vae_encode` (image to latent) and `generate` (all at once). Until #78 it runs one operation per
-  process: `fugue-helper <request.json>`, the request naming the operation, its files, and the
-  context and generation options as stable-diffusion.cpp names them.
+  `vae_encode` (image to latent) and `generate` (all at once). `fugue-helper <request.json>`
+  runs one operation, the request naming it, its files, and the context and generation options
+  as stable-diffusion.cpp names them; `fugue-helper --serve` takes the same operations as jobs
+  of the 8.8 protocol over `stdio`, for the `fugue-helper` provider (8.7). Both end with
+  `_Exit`, without the exit-time teardown, which NVIDIA's Vulkan driver can crash in.
 - The conditioning file carries everything the encode step leaves for sampling: every field of
   the conditioning sets, and the state PhotoMaker, PuLID and IP-Adapter set while encoding. A file
   is read only by a model of the version it was written for. Every call VAE-encodes the request's
@@ -1319,6 +1357,12 @@ and swapping means stopping and starting.
 
 - Among ready nodes it prefers the ones that reuse a model or helper state already loaded.
 - On out-of-memory it evicts the least recently used model, not everything.
+- A provider's model is recorded as held by its instance. When the last one of an instance is
+  dropped, the instance is sent `shutdown`: a provider Fugue started (the helper) gives its
+  memory back that way, and one it did not start ignores it. A model of an instance with a job
+  in flight is not dropped, nor a node's own models (its persistent program among them).
+- Dropping a model returns once its memory is back (a program or the helper has exited, or was
+  killed after the grace period), so free memory is measured again only then.
 - Resident models are an in-memory cache, separate from the result cache.
 
 ### 9.4 Events
@@ -2183,6 +2227,13 @@ Building M2 made these further choices.
 | A handle without a hash cannot be found on disk: `model_missing` (a provider serves name-only handles) | 2.5, 8.9 | medium-high |
 | Picking a model file (#76) hashes it then, one file at a time on a worker thread, and stores the handle when the hash is known (its own undo step); another value set meanwhile wins. A pick belongs to the level it was made at (entering a group meanwhile holds it until that level is shown again), and another document (a tab, a file opened) drops it; the hash is remembered either way. ComfyUI's picker stores a file name; Fugue's handle needs the hash (2.5), and hashing at pick time means a run never waits on it. The hash goes to the shared store, which a process already holding it reads again when another has saved since (the window's run thread lives as long as the window) | 2.5, 8.9 | medium-high |
 | `fugue model list` (#76) prints a disk file's handle only when its hash is remembered, and takes `--hash` to hash the rest: a listing that reads every model would take minutes on a large folder, and a handle without its hash names a provider's model (2.5). `--hash` is also the way to hash a whole folder once (8.9) | 13.1, 13.4 | medium-high |
+| The `fugue-helper` provider (#78) answers `describe` itself and starts the helper on the first job: a picker describes every provider each time it opens, and that must not start a GPU process. Its stage capabilities offer one model with an empty handle, the models coming as files in the job, so selection needs no new rule and pickers skip it (8.7) | 8.7, 8.11 | medium-high |
+| With no providers.json the helper is a default instance when one is installed, after the omarchy ones, so "any ready model" stays the model servers' (#78, owner's choice) | 8.2 | high |
+| The CUDA helper is chosen on an NVIDIA card (the kernel driver is loaded: `/proc/driver/nvidia/version`), else the Vulkan one: CUDA was 35% faster on Z-Image's DiT on the 3090 (#77) | 8.7, 8.10 | high |
+| The helper keeps a context per set of context options and frees the least recently used ones before a load the device has no room for, by the files' size plus a fifth, as ComfyUI frees models before loading by an estimate; a load or generation out of memory frees the others and is tried once. Fugue records the helper as one resident model of its instance, and dropping it shuts the helper down (#78) | 8.10, 9.3 | medium |
+| "Offers to stop Omarchy's model servers, only with confirmation" is, in v0.1, the out_of_memory error's hint (`omarchy-agent-local stop`) after the processes holding GPU memory are named, as 8.4 gives `omarchy-agent-local` commands until Fugue can confirm and run one itself (13.6) (#78) | 8.10 | medium |
+| A persistent command program is stopped "when the memory is needed" only if its type declares `needs.gpu`: it is then a resident model, dropped least recently used first (#67); a program without it holds no GPU memory | 7.3, 9.3 | medium-high |
+| Free GPU memory is the first discrete Vulkan device's budget minus usage, else the first integrated one's MemAvailable capped at its heap; Vulkan is set up only when a GPU node first asks, so commands that run none load no driver (#78) | 8.10 | medium-high |
 | Helper packaging (#77, the owner's choice): Vulkan helper in `fugue`, CUDA helper in a `fugue-helper-cuda` split package, as Arch splits ollama and ollama-cuda; CI builds the Vulkan one, the CUDA toolkit being several GB | 8.10 | high |
 | Stage hooks as image options (`fugue.*`) of stable-diffusion.cpp's option API, in place of the spike's environment variables; the extensions' encode-time state crosses through two virtual methods on its extension interface | 8.10 | medium-high |
 | No pixel-parity test was built for the first pin (#77): the spike showed identical pixels at this commit (spikes/02), and the owner judged that enough. #77 ran these staged once: Z-Image, FLUX.2 Klein 4B and 9B, FLUX.1, SDXL, SD 1.5, Qwen-Image Edit 2511 (the Qwen-Image 2.1 files at hand did not load, stable-diffusion.cpp failing on them before any stage), image-to-image from a latent, and IP-Adapter. PhotoMaker and PuLID were not run (no ID images or embedding at hand), so their carried state is unverified. A pin move runs only the few checks 8.10 lists, by hand (GPU and model files), as the owner asked: the families are stable-diffusion.cpp's to test | 8.10 | medium-high |
