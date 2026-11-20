@@ -759,7 +759,7 @@ private slots:
 
     // The component-node examples (#79): every node known, the graph compiles.
     void theComponentExamplesLoadAndCompile() {
-        for (const char *name : {"z-image-turbo", "flux2-klein-4b"}) {
+        for (const char *name : {"z-image-turbo", "flux2-klein-4b", "flux2-klein-9b"}) {
             Fixture f;
             const QString example = QStringLiteral(FUGUE_SOURCE_DIR "/examples/%1.fugue").arg(QLatin1String(name));
             QVERIFY2(f.workflows->openPath(example), name);

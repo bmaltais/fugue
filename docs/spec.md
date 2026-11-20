@@ -1966,7 +1966,7 @@ negative prompt, one conditioning), Empty Latent, Sampler (seed, steps, guidance
 scheduler, denoise), VAE Decode and VAE Encode. A text-to-image graph of them gave the same
 pixels as one `generate` run of the same helper for Z-Image Turbo and FLUX.2 Klein 4B at guidance
 1, checked by hand on an RTX 3090 (SDXL's size conditioning differs: Appendix A);
-`examples/z-image-turbo.fugue` and `examples/flux2-klein-4b.fugue` are ready to open. Then text
+`examples/z-image-turbo.fugue`, `examples/flux2-klein-4b.fugue` and `examples/flux2-klein-9b.fugue` are ready to open. Then text
 encoders other than one LLM (FLUX.1's CLIP-L and T5, SD3), ControlNet, upscale with a model,
 hires fix as a group, inpaint models. A coarse Generate Image can later be rebuilt as a group of
 these.

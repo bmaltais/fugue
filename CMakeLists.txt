@@ -246,5 +246,5 @@ install(TARGETS fugue RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES share/fugue.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
 install(FILES share/fugue.svg DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
 install(FILES examples/demo.fugue examples/text-to-image.fugue examples/z-image-turbo.fugue
-              examples/flux2-klein-4b.fugue DESTINATION ${CMAKE_INSTALL_DATADIR}/fugue/examples)
+              examples/flux2-klein-4b.fugue examples/flux2-klein-9b.fugue DESTINATION ${CMAKE_INSTALL_DATADIR}/fugue/examples)
 install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/fugue)
