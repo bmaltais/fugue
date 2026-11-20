@@ -64,6 +64,13 @@ QJsonValue groupJson(const GroupDefinition &group) {
     return holder.toJson().value("groups").toObject().value("g");
 }
 
+// A group's face: its definition without the nodes inside.
+QJsonObject faceJson(const GroupDefinition *group) {
+    QJsonObject face = group ? groupJson(*group).toObject() : QJsonObject();
+    face.remove("nodes");
+    return face;
+}
+
 // Reroute points belong to their link: after an edit from `before` to `after`, each key of
 // after's layout.links names the same link (same source, same input) or goes. A list item's
 // points follow it when items before it go; a new link into the same slot gets none.
@@ -174,16 +181,9 @@ void CanvasModel::refreshNodeTypes() {
     m_search->refresh();
 }
 
-// A group's face: its definition without the nodes inside.
-static QJsonObject faceJson(const GroupDefinition *group) {
-    QJsonObject face = group ? groupJson(*group).toObject() : QJsonObject();
-    face.remove("nodes");
-    return face;
-}
-
 void CanvasModel::restore(const Snapshot &target, bool selectAdded) {
-    // The face of the group shown, from the whole workflow (a level's own document does not hold
-    // its group's definition), before and after: the exposed marks inside follow it.
+    // The face of the group shown, from the whole workflow, before and after the edit: the exposed
+    // marks inside follow it, so a change refreshes every row of the level (#72).
     const QString level = scopeGroup();
     const QJsonObject faceBefore = level.isEmpty() ? QJsonObject() : faceJson(m_root.group(level));
     // The snapshot is the whole workflow; the canvas shows its level, or the nearest level up

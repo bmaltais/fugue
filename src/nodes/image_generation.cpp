@@ -27,7 +27,6 @@ const QString kEdit = QStringLiteral("image.edit");
 
 // Fantasi's choices (generator.h, generator.cpp at 6aa8dc2), kept as Fugue's starting ones.
 constexpr int kSizeMultiple = 64;          // image sizes go in steps of 64
-constexpr double kMegapixel = 1024.0 * 1024.0;
 // Edit Image's references: Fugue's starting four (14.1), when the model reports no
 // `max_reference_images`; a reported limit holds, higher or lower.
 constexpr int kReferences = 4;

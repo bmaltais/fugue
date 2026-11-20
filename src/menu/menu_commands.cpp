@@ -65,8 +65,8 @@ QList<Row> menuRows() {
         {"help.about", QT_TRANSLATE_NOOP("Command", "About Fugue"), nullptr, {}, "app", "same"},
         {"group.make-unique", QT_TRANSLATE_NOOP("Command", "Make the selected group unique (its own copy of the definition)"),
          QT_TRANSLATE_NOOP("Command", "Make unique"), {}, "group-selected", "same"},
-        {"group.interface", QT_TRANSLATE_NOOP("Command", "Edit the inputs and outputs of the group shown"),
-         QT_TRANSLATE_NOOP("Command", "Group inputs and outputs…"), {}, "group", "added"},
+        {"group.interface", QT_TRANSLATE_NOOP("Command", "Edit the inputs and outputs of the group shown or selected"),
+         QT_TRANSLATE_NOOP("Command", "Group inputs and outputs…"), {}, "canvas", "added"},
         {"group.save-to-library", QT_TRANSLATE_NOOP("Command", "Save the selected group, or the group shown, to the library"),
          QT_TRANSLATE_NOOP("Command", "Save to library"), {}, "canvas", "added"},
         {"group.update", QT_TRANSLATE_NOOP("Command", "Update the selected group from the library"),
@@ -163,13 +163,14 @@ void bindMenuCommands(CommandRegistry &registry, CanvasModel &canvas, std::funct
     });
     // Run to here runs up to one node (spec 12.4); with several selected it would do nothing.
     registry.setEnabledWhen("run.to-here", [model] { return model->selectedIds().size() == 1; });
-    for (const char *id : {"edit.select-all", "edit.clear", "view.fit", "run.start", "run.start-first", "file.export-share",
-                           "file.export-compiled"})
+    for (const char *id : {"edit.select-all", "edit.clear", "view.fit", "run.start", "run.start-first",
+                           "file.export-share", "file.export-compiled"})
         registry.setEnabledWhen(QString::fromLatin1(id), hasNodes);
     // Paste takes Fugue's own nodes, a workflow as text (a JSON object, checked cheaply here and
     // in full by the paste), or an image (a Load Image node, 14.1); not any text (#72).
     const auto workflowOnClipboard = [](const QMimeData *data) {
-        return data->hasFormat(QString::fromLatin1(canvasClipboardType)) || data->text().trimmed().startsWith(QLatin1Char('{'));
+        return data->hasFormat(QString::fromLatin1(canvasClipboardType))
+               || data->text().trimmed().startsWith(QLatin1Char('{'));
     };
     registry.setEnabledWhen("edit.paste", [workflowOnClipboard] {
         const QMimeData *data = QGuiApplication::clipboard()->mimeData();
@@ -211,6 +212,10 @@ void bindMenuCommands(CommandRegistry &registry, CanvasModel &canvas, std::funct
     registry.setEnabledWhen("group.make-unique", [model] {
         const QStringList ids = model->selectedIds();
         return ids.size() == 1 && model->groupInstances(ids.first()) > 1;
+    });
+    registry.setEnabledWhen("group.interface", [model] {
+        const QStringList ids = model->selectedIds();
+        return model->inGroup() || (ids.size() == 1 && model->isGroup(ids.first()));
     });
     registry.setEnabledWhen("group.update", [model] {
         const QStringList ids = model->selectedIds();

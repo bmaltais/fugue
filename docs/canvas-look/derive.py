@@ -39,7 +39,7 @@ PORT_ROLE = {"text": "green", "number": "blue", "boolean": "orange", "image": "m
              "video": "cyan", "audio": "yellow"}
 KEEP_ORDER = ["image", "text", "number", "video", "audio", "boolean", "declared"]
 # Every surface `label` text is drawn on.
-LABEL_SURFACES = ["body", "header", "well", "popup", "selected-row", "canvas"]
+LABEL_SURFACES = ["body", "header", "well", "popup", "selected-row", "menu-row", "canvas"]
 # Two port colors closer than this OKLab distance count as the same color.
 MIN_DE = 0.08
 # OKLCH hue a port type falls back to when its theme color collides with one kept before it.
@@ -208,15 +208,20 @@ def tokens(colors, light):
     t["error-chip"] = mix(t["body"], red, 0.14 if not light else 0.10)
     t["selected-row"] = mix(t["body"], colors["accent"], 0.16 if not light else 0.12)
     t["popup"] = t["body"] if light else mix(bg, fg, 0.09)
+    # The current row of a menu on the popup surface: a clear accent fill, lessened until the text
+    # reads on it at 4.5:1 (as look.cpp).
+    for k in (0.32, 0.28, 0.24, 0.20, 0.16, 0.12, 0.08):
+        t["menu-row"] = mix(t["popup"], colors["accent"], k)
+        if contrast(fg, t["menu-row"]) >= 4.5:
+            break
     # The sheen (#72): the least alpha of light (the text on dark themes, white on light ones)
     # that makes a step of OKLab 0.012 from the top of a node's fill to its bottom; on a fill
     # with no room to lighten, of black at the bottom instead. Lit (hovered, selected): twice.
     def sheen(over, step):
-        a = 0.005
-        while a <= 0.6 + 1e-9:
+        for i in range(1, 121):  # alpha .005 to .6, in steps of .005
+            a = i * 0.005
             if delta_e(mix(t["body"], over, a), t["body"]) >= step:
                 return over + (round(a, 3),)
-            a += 0.005
         return over + (0.0,)
     for name, step in (("sheen", 0.012), ("lit", 0.024)):
         top = sheen(WHITE if light else fg, step)
@@ -250,10 +255,14 @@ def tokens(colors, light):
                 break
         # The body takes the color too (#72): each tint steps down until the text, and the
         # label as well as it reads on the plain body, read on it.
+        # Text and label read at every end of the sheen over it too.
         label_need = min(4.5, contrast(t["label"], t["body"]))
+        layers = [(0, 0, 0, 0.0)] + [t[k] for k in ("sheen-top", "sheen-bottom", "lit-top", "lit-bottom")]
         for k in ((0.18, 0.14, 0.10, 0.06) if light else (0.22, 0.18, 0.14, 0.10, 0.06)):
-            t[f"tint-body-{role}"] = mix(t["body"], rc, k)
-            if contrast(fg, t[f"tint-body-{role}"]) >= 4.5 and contrast(t["label"], t[f"tint-body-{role}"]) >= label_need:
+            fill = mix(t["body"], rc, k)
+            t[f"tint-body-{role}"] = fill
+            ends = [mix(fill, layer[:3], layer[3]) for layer in layers]
+            if all(contrast(fg, e) >= 4.5 and contrast(t["label"], e) >= label_need for e in ends):
                 break
     return t
 

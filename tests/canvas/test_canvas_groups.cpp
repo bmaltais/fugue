@@ -229,6 +229,12 @@ private slots:
         QVERIFY(canvas.unexposeInput("gen", "seed"));
         QVERIFY(inputsChanged("gen"));
         QCOMPARE(port(canvas, "gen", "seed").value("exposedAs").toString(), QString());
+        // An output too: un-exposed, its mark goes at once.
+        QCOMPARE(port(canvas, "gen", "image", true).value("exposedAs").toString(), QStringLiteral("image"));
+        changed.clear();
+        QVERIFY(canvas.unexposeOutput("image"));
+        QVERIFY(inputsChanged("gen")); // the whole row: its outputs with it
+        QCOMPARE(port(canvas, "gen", "image", true).value("exposedAs").toString(), QString());
     }
 
     // #72: a port of a group's face is renamed where it shows: on the group card (outside) or on

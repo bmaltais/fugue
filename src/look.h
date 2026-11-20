@@ -190,7 +190,9 @@ private:
     mutable QHash<QString, QVariantMap> m_roles;
 
     QColor m_canvas, m_dot, m_dotMajor, m_body, m_header, m_hairline, m_hairlineStrong, m_well, m_label, m_popup;
-    QColor m_errorHeader, m_errorChip, m_selectedRow, m_menuRow, m_bevel, m_sheenTop, m_sheenBottom, m_litTop, m_litBottom, m_scrim, m_bypassBody, m_bypassHeader, m_bypassEdge;
+    QColor m_errorHeader, m_errorChip, m_selectedRow, m_menuRow, m_bevel, m_scrim, m_bypassBody, m_bypassHeader,
+        m_bypassEdge;
+    QColor m_sheenTop, m_sheenBottom, m_litTop, m_litBottom;
     QColor m_text, m_accent, m_accentForeground, m_error;
     bool m_light = false;
     QVariantMap m_ports;

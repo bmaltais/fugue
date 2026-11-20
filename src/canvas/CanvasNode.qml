@@ -616,36 +616,43 @@ Item {
                         }
                         // Warnings: a count and the triangle, in the label color. Hovered, they
                         // show the warnings; a click keeps them up (#72; the canvas's one card).
-                        Item {
-                            id: warningsBadge
-                            objectName: "warningsBadge"
-                            visible: node.warnings.length > 0
+                        Loader {
+                            // Made only while the node has warnings: no items for the others.
+                            active: node.warnings.length > 0
+                            visible: active
                             anchors.verticalCenter: parent.verticalCenter
-                            width: warningsRow.implicitWidth
-                            height: warningsRow.implicitHeight
-                            Row {
-                                id: warningsRow
-                                spacing: face.u
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: node.warnings.length
-                                    color: node.look.label
-                                    font.pixelSize: node.look.captionSize
+                            sourceComponent: Item {
+                                id: warningsBadge
+                                objectName: "warningsBadge"
+                                width: warningsRow.implicitWidth
+                                height: warningsRow.implicitHeight
+                                Row {
+                                    id: warningsRow
+                                    spacing: face.u
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: node.warnings.length
+                                        color: node.look.label
+                                        font.pixelSize: node.look.captionSize
+                                    }
+                                    Glyph {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        name: "triangle-alert"
+                                        look: node.look
+                                        color: node.look.label
+                                    }
                                 }
-                                Glyph {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    name: "triangle-alert"
-                                    look: node.look
-                                    color: node.look.label
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    function show(pin) {
+                                        node.canvasView.showWarnings(node.nodeId, node.warnings, warningsBadge, pin)
+                                    }
+                                    onEntered: show(false)
+                                    onExited: node.canvasView.hideWarnings()
+                                    onClicked: show(true)
                                 }
-                            }
-                            MouseArea {
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onEntered: node.canvasView.showWarnings(node.nodeId, node.warnings, warningsBadge, false)
-                                onExited: node.canvasView.hideWarnings()
-                                onClicked: node.canvasView.showWarnings(node.nodeId, node.warnings, warningsBadge, true)
                             }
                         }
                         Glyph {

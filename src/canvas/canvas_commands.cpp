@@ -30,10 +30,11 @@ void pasteFromClipboard(CanvasModel &canvas, bool connected) {
     const QString type = QString::fromLatin1(canvasClipboardType);
     // Plain text works too, when it is a workflow; paste() ignores anything else.
     const QString text = data->hasFormat(type) ? QString::fromUtf8(data->data(type)) : data->text();
-    // Workflow data first; when there is none, an image goes into a Load Image node.
+    // Workflow data first; when there is none, an image goes into a Load Image node (a plain
+    // paste only: an image has no links to keep).
     if (!canvas.paste(text, connected).isEmpty())
         return;
-    if (canvas.images())
+    if (!connected && canvas.images())
         canvas.images()->paste(*data);
 }
 
@@ -85,7 +86,13 @@ void registerCanvasCommands(fugue::CommandRegistry &commands, CanvasModel &canva
     });
     commands.setHandler("group.leave", [model] { model->leaveGroup(); });
     commands.setHandler("group.make-unique", [model] { model->makeUnique(); });
-    commands.setHandler("group.interface", [model] { emit model->interfaceEditorRequested(); });
+    // Inside a group: its face. On a group card (#72): that group's, entered first.
+    commands.setHandler("group.interface", [model] {
+        const QStringList ids = model->selectedIds();
+        if (!model->inGroup() && ids.size() == 1 && model->isGroup(ids.first()))
+            model->enterGroup(ids.first());
+        emit model->interfaceEditorRequested();
+    });
     commands.setHandler("group.save-to-library", [model] { model->saveGroupToLibrary(); });
     commands.setHandler("group.update", [model] { model->requestGroupUpdate(); });
     commands.setContextActive(QStringLiteral("canvas"), true);

@@ -628,6 +628,8 @@ signals:
 
 private:
     void toggleLayoutFlag(const QString &flag, const QString &text);
+    // Starts moving these nodes: all but the pinned ones (#55), which are returned.
+    QStringList startMoving(const QStringList &ids);
     friend class NodeList;
     friend class LinkList;
     friend class EditCommand;
@@ -808,6 +810,7 @@ private:
     QSet<QString> m_dragUnreachable; // nodes the dragged link would make a cycle with
 
     QStringList m_moving;
+    QStringList m_pinnedMembers; // a Frame move's pinned nodes: they stay, and stay its members (#55)
     std::vector<QPointF> m_moveStart;
     bool m_moveOpen = false;  // a move holds an edit open
     bool m_cloneOpen = false; // an Alt+drag clone holds one more

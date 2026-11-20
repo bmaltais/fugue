@@ -137,7 +137,9 @@ public:
     // checkable, checked. Empty for an unknown id. A menu asks again each time it opens.
     Q_INVOKABLE QVariantMap entry(const QString &id, const QVariantMap &target = {}) const;
     // A menu tree of menus.h (bar, canvas, node, frame), each command item merged with its
-    // entry() and titles translated; commands not registered are left out.
+    // entry() and titles translated; commands not registered are left out. A context menu (any
+    // but the bar) also leaves out commands not built and `hideWhenOff` ones that are off (#72),
+    // and never starts, ends or doubles a separator.
     Q_INVOKABLE QVariantList menu(const QString &name, const QVariantMap &target = {}) const;
 
     QStringList activeKeys() const;
@@ -186,8 +188,6 @@ private:
 
     static QString canonicalKey(const QString &key, QString *problem = nullptr);
     void rebuild();
-    // `context`: a context menu, which leaves out commands not built and `hideWhenOff` ones that
-    // are off; the menu bar shows them all.
     QVariantList resolve(const QVariantList &items, const QVariantMap &target, bool context = false) const;
 
     QList<Entry> m_entries;

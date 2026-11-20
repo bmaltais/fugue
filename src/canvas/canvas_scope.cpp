@@ -259,12 +259,7 @@ void CanvasModel::beginFrameMove(const QString &frameId) {
     m_moveOpen = true;
     m_moving.clear();
     m_moveStart.clear();
-    for (const QString &id : members) {
-        if (m_rows[size_t(rowOf(id))].pinned)
-            continue; // pinned in place (#55)
-        m_moving << id;
-        m_moveStart.push_back(m_rows[size_t(rowOf(id))].pos);
-    }
+    m_pinnedMembers = startMoving(members);
     m_movingFrames.clear();
     m_frameStart.clear();
     for (const QJsonValue &value : frames) {

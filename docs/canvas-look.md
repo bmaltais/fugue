@@ -255,7 +255,7 @@ light design tools lay cards on a gray table.
 | `frame-<role>-edge` | `mix(canvas, role, .35)` | same | frame edge |
 | `frame-<role>-title` | `mix(role, text, k)`, k from .5, stepping up by .1 until 4.5:1 on the frame fill | same | frame title |
 | `tint-<role>` | `mix(header, role, k)`, k = .18, stepping down by .04 until the title reads at 4.5:1 | same, from .14 | header of a colored node |
-| `tint-body-<role>` | `mix(body, role, k)`, k = .22, stepping down by .04 until `text` reads at 4.5:1 and `label` as well as on `body` | same, from .18 | body of a colored node (#72); its port marks keep the plain `body` inside and around them, so the type colors keep their 3:1 |
+| `tint-body-<role>` | `mix(body, role, k)`, k = .22, stepping down by .04 until `text` reads at 4.5:1 and `label` as well as on `body` | same, from .18 | body of a colored node (#72); a port mark keeps the plain `body` inside it (a hollow mark's middle, a filled mark's 2 px ring), so its type color reads against `body` at 3:1 |
 | `scrim` | black at 45% | black at 22% | behind the `?` overlay |
 | `sheen-top`, `sheen-bottom` | `text` over the top, at the least alpha that makes a step of OKLab 0.012 to the bottom (nothing there) | white over the top the same way; on a fill with no room to lighten, black over the bottom instead | a node's fill, as if lit from above (#72): seen, barely, and the same step on every theme; `label` reads at both ends |
 | `lit-top`, `lit-bottom` | the same at twice the step (0.024) | same | a hovered or selected node |
@@ -296,35 +296,36 @@ shared with number); on ethereal (the owner's theme) text, video and declared ch
 
 From `python3 docs/canvas-look/derive.py --table` (WCAG ratios; ΔE is the smallest OKLab distance
 between any two of the seven port colors). "Label share" is the `k` the label rule settled on, and
-"Label, worst surface" its lowest ratio across the six surfaces it is drawn on. Where the share
-climbs toward 1 (everforest .98, gruvbox and tokyo-night .90), labels come close to `text` and the
-hierarchy rests on size and weight.
+"Label, worst surface" its lowest ratio across the seven surfaces it is drawn on (the menu row
+included); the share also covers the ends of the node sheen (#72). Where the share climbs toward 1
+(everforest 1.00, gruvbox and tokyo-night .96), labels come close to `text` and the hierarchy rests
+on size and weight.
 
 | Theme | Mode | Title/header | Label share | Label, worst surface | Accent/canvas | Port/body (theme) | Port (lifted) | Port ΔE (theme) | Port ΔE (resolved) | Error/canvas | Text/error chip | Title/tinted header | Frame title/fill |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| catppuccin-latte | light | 7.06 | 0.87 | 4.62 (selected-row) | 4.07 | 2.49 | 3.00 | 0.00 | 0.10 | 4.50 | 6.43 | 5.88 | 4.60 |
-| catppuccin | dark | 8.21 | 0.80 | 4.85 (selected-row) | 7.79 | 6.53 | 6.53 | 0.00 | 0.07 | 7.08 | 7.41 | 5.33 | 7.79 |
-| ethereal | dark | 10.61 | 0.80 | 6.52 (selected-row) | 5.65 | 4.99 | 4.99 | 0.00 | 0.09 | 5.81 | 10.20 | 7.53 | 8.04 |
-| everforest | dark | 5.51 | 0.98 | 4.58 (selected-row) | 5.74 | 4.57 | 4.57 | 0.00 | 0.08 | 4.55 | 5.18 | 4.62 | 5.29 |
-| flexoki-light | light | 17.06 | 0.87 | 11.21 (selected-row) | 5.79 | 2.34 | 3.00 | 0.00 | 0.07 | 3.84 | 16.62 | 13.96 | 6.41 |
-| gruvbox | dark | 6.12 | 0.90 | 4.53 (selected-row) | 5.94 | 4.58 | 4.58 | 0.00 | 0.07 | 4.70 | 5.80 | 4.58 | 5.64 |
-| hackerman | dark | 12.78 | 0.80 | 6.52 (selected-row) | 15.05 | 6.14 | 6.84 | 0.03 | 0.09 | 13.92 | 10.66 | 8.05 | 10.21 |
-| jade-horse | dark | 9.11 | 0.80 | 5.30 (selected-row) | 8.49 | 5.52 | 5.52 | 0.00 | 0.06 | 6.13 | 8.59 | 6.32 | 8.02 |
-| kanagawa | dark | 8.16 | 0.82 | 4.58 (selected-row) | 11.26 | 3.77 | 3.77 | 0.04 | 0.08 | 3.22 | 8.52 | 6.18 | 6.41 |
-| last-horizon | dark | 13.83 | 0.80 | 8.26 (selected-row) | 7.29 | 2.78 | 3.03 | 0.00 | mono | 6.83 | 13.12 | 8.72 | 8.39 |
-| lumon | dark | 8.54 | 0.80 | 4.91 (selected-row) | 8.80 | 4.06 | 4.06 | 0.00 | 0.08 | 4.04 | 8.45 | 5.86 | 6.86 |
-| lupine | light | 14.38 | 0.87 | 9.00 (selected-row) | 4.44 | 4.77 | 4.07 | 0.00 | 0.11 | 4.31 | 13.34 | 11.43 | 6.97 |
-| matte-black | dark | 7.89 | 0.80 | 4.73 (selected-row) | 7.35 | 2.55 | 3.03 | 0.00 | 0.10 | 4.97 | 7.53 | 5.19 | 5.44 |
-| miasma | dark | 6.63 | 0.82 | 4.66 (selected-row) | 3.86 | 2.56 | 3.03 | 0.00 | 0.07 | 2.30 | 6.90 | 5.36 | 4.87 |
-| nord | dark | 6.58 | 0.82 | 4.54 (selected-row) | 4.64 | 3.63 | 3.63 | 0.00 | 0.08 | 3.05 | 6.78 | 4.87 | 5.60 |
-| retro-82 | dark | 9.88 | 0.80 | 5.67 (selected-row) | 9.30 | 3.38 | 3.99 | 0.00 | 0.11 | 5.37 | 9.91 | 6.89 | 6.56 |
-| ristretto | dark | 7.78 | 0.80 | 4.87 (selected-row) | 6.33 | 5.23 | 5.23 | 0.00 | 0.09 | 5.35 | 7.42 | 5.25 | 6.94 |
-| rose-pine | light | 6.53 | 0.87 | 4.50 (selected-row) | 2.94 | 2.16 | 3.00 | 0.00 | 0.04 | 3.60 | 6.25 | 5.39 | 4.52 |
-| solitude | dark | 8.83 | 0.80 | 5.67 (selected-row) | 4.70 | 3.27 | 3.27 | 0.00 | mono | 2.78 | 9.05 | 5.47 | 6.86 |
-| starship | dark | 10.71 | 0.80 | 6.42 (selected-row) | 8.28 | 4.88 | 4.88 | 0.00 | 0.08 | 5.66 | 10.62 | 7.60 | 8.29 |
-| tokyo-night | dark | 6.31 | 0.90 | 4.54 (selected-row) | 6.79 | 4.73 | 4.73 | 0.00 | 0.08 | 6.46 | 5.67 | 4.59 | 6.11 |
-| vantablack | dark | 16.07 | 0.80 | 9.72 (selected-row) | 6.33 | 5.59 | 5.59 | 0.00 | mono | 8.42 | 14.86 | 10.95 | 11.29 |
-| white | light | 18.80 | 0.87 | 13.80 (selected-row) | 4.62 | 8.86 | 4.62 | 0.00 | mono | 13.00 | 17.41 | 14.16 | 11.52 |
+| catppuccin-latte | light | 7.06 | 0.99 | 4.72 (menu-row) | 4.07 | 2.49 | 3.00 | 0.00 | 0.10 | 4.50 | 6.43 | 5.88 | 4.60 |
+| catppuccin | dark | 8.21 | 0.98 | 4.64 (menu-row) | 7.79 | 6.53 | 6.53 | 0.00 | 0.03 | 7.08 | 7.41 | 5.33 | 7.79 |
+| ethereal | dark | 10.61 | 0.80 | 4.85 (menu-row) | 5.65 | 4.99 | 4.99 | 0.00 | 0.09 | 5.81 | 10.20 | 7.53 | 8.04 |
+| everforest | dark | 5.51 | 1.00 | 4.58 (menu-row) | 5.74 | 4.57 | 4.57 | 0.00 | 0.08 | 4.55 | 5.18 | 4.62 | 5.29 |
+| flexoki-light | light | 17.06 | 0.87 | 8.12 (menu-row) | 5.79 | 2.34 | 3.00 | 0.00 | 0.07 | 3.84 | 16.62 | 13.96 | 6.41 |
+| gruvbox | dark | 6.12 | 0.96 | 4.50 (menu-row) | 5.94 | 4.58 | 4.58 | 0.00 | 0.08 | 4.70 | 5.80 | 4.58 | 5.64 |
+| hackerman | dark | 12.78 | 0.88 | 4.57 (menu-row) | 15.05 | 6.14 | 6.84 | 0.03 | 0.09 | 13.92 | 10.66 | 8.05 | 10.21 |
+| jade-horse | dark | 9.11 | 0.92 | 4.51 (menu-row) | 8.49 | 5.52 | 5.52 | 0.00 | 0.09 | 6.13 | 8.59 | 6.32 | 8.02 |
+| kanagawa | dark | 8.16 | 0.96 | 4.59 (menu-row) | 11.26 | 3.77 | 3.77 | 0.04 | 0.08 | 3.22 | 8.52 | 6.18 | 6.41 |
+| last-horizon | dark | 13.83 | 0.80 | 5.81 (menu-row) | 7.29 | 2.78 | 3.03 | 0.00 | mono | 6.83 | 13.12 | 8.72 | 8.39 |
+| lumon | dark | 8.54 | 0.98 | 4.59 (menu-row) | 8.80 | 4.06 | 4.06 | 0.00 | 0.08 | 4.04 | 8.45 | 5.86 | 6.86 |
+| lupine | light | 14.38 | 0.87 | 6.73 (menu-row) | 4.44 | 4.77 | 4.07 | 0.00 | 0.11 | 4.31 | 13.34 | 11.43 | 6.97 |
+| matte-black | dark | 7.89 | 0.98 | 4.65 (menu-row) | 7.35 | 2.55 | 3.03 | 0.00 | 0.10 | 4.97 | 7.53 | 5.19 | 5.44 |
+| miasma | dark | 6.63 | 0.94 | 4.56 (menu-row) | 3.86 | 2.56 | 3.03 | 0.00 | 0.07 | 2.30 | 6.90 | 5.36 | 4.87 |
+| nord | dark | 6.58 | 0.98 | 4.52 (menu-row) | 4.64 | 3.63 | 3.63 | 0.00 | 0.08 | 3.05 | 6.78 | 4.87 | 5.60 |
+| retro-82 | dark | 9.88 | 0.90 | 4.62 (menu-row) | 9.30 | 3.38 | 3.99 | 0.00 | 0.11 | 5.37 | 9.91 | 6.89 | 6.56 |
+| ristretto | dark | 7.78 | 0.94 | 4.53 (menu-row) | 6.33 | 5.23 | 5.23 | 0.00 | 0.09 | 5.35 | 7.42 | 5.25 | 6.94 |
+| rose-pine | light | 6.53 | 0.97 | 4.65 (menu-row) | 2.94 | 2.16 | 3.00 | 0.00 | 0.04 | 3.60 | 6.25 | 5.39 | 4.52 |
+| solitude | dark | 8.83 | 0.82 | 4.55 (menu-row) | 4.70 | 3.27 | 3.27 | 0.00 | mono | 2.78 | 9.05 | 5.47 | 6.86 |
+| starship | dark | 10.71 | 0.82 | 4.61 (menu-row) | 8.28 | 4.88 | 4.88 | 0.00 | 0.08 | 5.66 | 10.62 | 7.60 | 8.29 |
+| tokyo-night | dark | 6.31 | 0.96 | 4.50 (menu-row) | 6.79 | 4.73 | 4.73 | 0.00 | 0.08 | 6.46 | 5.67 | 4.59 | 6.11 |
+| vantablack | dark | 16.07 | 0.80 | 7.06 (menu-row) | 6.33 | 5.59 | 5.59 | 0.00 | mono | 8.42 | 14.86 | 10.95 | 11.29 |
+| white | light | 18.80 | 0.87 | 10.48 (menu-row) | 4.62 | 8.86 | 4.62 | 0.00 | mono | 13.00 | 17.41 | 14.16 | 11.52 |
 
 What still falls short, and what covers it:
 

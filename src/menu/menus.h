@@ -5,9 +5,10 @@
 // the command registry (CommandRegistry::menu() merges them in), so a menu, the `?` overlay
 // and the keymap never disagree, and a command registered later shows up where it is listed.
 //
-// An item is a map: {command: id} (with {swatch: role} on a color), {separator: true}, or a
-// submenu {title, items} whose title is English with `&` before its mnemonic, translated in
-// the "Menu" context.
+// An item is a map: {command: id} (with {swatch: role} on a color, and {hideWhenOff: true} when
+// a context menu leaves it out where it does not apply, #72), {separator: true}, or a submenu
+// {title, items} whose title is English with `&` before its mnemonic, translated in the "Menu"
+// context.
 
 #include <QStringList>
 #include <QVariantList>

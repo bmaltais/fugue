@@ -34,8 +34,8 @@ Item {
         }
         function onPortRenameRequested(node, port, output) {
             const found = root.model.portToRename(node, port, output)
-            renameAsk.ask("port", node, port, output, output ? qsTr("Output name on the group") : qsTr("Input name on the group"),
-                          found.label || "")
+            const prompt = output ? qsTr("Output name on the group") : qsTr("Input name on the group")
+            renameAsk.ask("port", node, port, output, prompt, found.label || "")
         }
         function onGroupUpdateAsked(node, changes) {
             updateAsk.node = node

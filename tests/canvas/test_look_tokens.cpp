@@ -286,16 +286,22 @@ private slots:
         const QColor text = colors.value("foreground");
         QVERIFY(look::contrast(text, t.bypassBody) >= 4.5);
         QVERIFY(look::contrast(text, t.bypassHeader) >= 4.5);
-        QVERIFY(look::contrast(t.label, t.bypassBody) >= 4.5);
+        for (const QColor &layer : {QColor(0, 0, 0, 0), t.sheenTop, t.sheenBottom, t.litTop, t.litBottom}) {
+            QVERIFY(look::contrast(t.label, over(t.bypassBody, layer)) >= 4.5);
+            QVERIFY(look::contrast(text, over(t.bypassBody, layer)) >= 4.5);
+        }
         for (const char *role : {"blue", "green", "magenta", "orange"}) {
             const look::RoleTokens r = look::roleTokens(t, colors.value(role), text, read.light);
             QVERIFY2(look::contrast(text, r.tint) >= 4.5, qPrintable(role));
             QVERIFY2(look::contrast(r.frameTitle, r.frame) >= 4.5, qPrintable(role));
-            // The body of a colored node: text and labels read on it. (Its ports keep their 3:1:
-            // a mark draws on the plain body, its hollow inside or its ring, PortDot.qml.)
-            QVERIFY2(look::contrast(text, r.tintBody) >= 4.5, qPrintable(role));
-            QVERIFY2(look::contrast(t.label, r.tintBody) >= std::min(4.5, look::contrast(t.label, t.body)) - 0.01,
-                     qPrintable(role));
+            // The body of a colored node: text and labels read on it, at every end of its sheen.
+            // (A port mark keeps the plain body inside it, its hollow or its ring, PortDot.qml.)
+            const double labelNeed = std::min(4.5, look::contrast(t.label, t.body)) - 0.01;
+            for (const QColor &layer : {QColor(0, 0, 0, 0), t.sheenTop, t.sheenBottom, t.litTop, t.litBottom}) {
+                const QColor fill = over(r.tintBody, layer);
+                QVERIFY2(look::contrast(text, fill) >= 4.5, qPrintable(role));
+                QVERIFY2(look::contrast(t.label, fill) >= labelNeed, qPrintable(QString(role) + " " + fill.name()));
+            }
         }
     }
 

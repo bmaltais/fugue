@@ -7,6 +7,8 @@
 
 namespace fugue::nodes {
 
+constexpr double kMegapixel = 1024.0 * 1024.0;
+
 // The size of `megapixels` (of 1024 × 1024 pixels each) in the shape `aspect` (width / height),
 // each side a multiple of `multiple` and at least one step: the width is the nearest multiple to
 // the exact one, the height the nearest to the area left.

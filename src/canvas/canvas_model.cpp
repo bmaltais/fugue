@@ -1498,13 +1498,20 @@ void CanvasModel::beginMove(const QString &node) {
     // The whole drag is one edit, however many steps it takes.
     beginEdit();
     m_moveOpen = true;
-    const QStringList ids = m_selected.contains(node) ? selectedIds() : QStringList{node};
+    startMoving(m_selected.contains(node) ? selectedIds() : QStringList{node});
+}
+
+QStringList CanvasModel::startMoving(const QStringList &ids) {
+    QStringList pinned;
     for (const QString &id : ids) {
-        if (m_rows[size_t(rowOf(id))].pinned)
-            continue; // pinned in place (#55)
+        if (m_rows[size_t(rowOf(id))].pinned) {
+            pinned << id; // pinned in place (#55)
+            continue;
+        }
         m_moving << id;
         m_moveStart.push_back(m_rows[size_t(rowOf(id))].pos);
     }
+    return pinned;
 }
 
 void CanvasModel::moveBy(qreal dx, qreal dy) {
@@ -1553,7 +1560,7 @@ void CanvasModel::endMove() {
             const QJsonArray r = frame.value("rect").toArray();
             const QRectF rect(r.at(0).toDouble(), r.at(1).toDouble(), r.at(2).toDouble(), r.at(3).toDouble());
             QJsonArray members;
-            for (const QString &id : std::as_const(m_moving))
+            for (const QString &id : m_moving + m_pinnedMembers)
                 if (const int row = rowOf(id); row >= 0
                     && rect.contains(QRectF(m_rows[size_t(row)].pos, QSizeF(m_rows[size_t(row)].shownWidth(),
                                                                             m_rows[size_t(row)].height)).center()))
@@ -1564,6 +1571,7 @@ void CanvasModel::endMove() {
         m_document.layout.insert("frames", frames);
         m_movingFrames.clear();
         m_frameStart.clear();
+        m_pinnedMembers.clear();
     }
     m_moving.clear();
     m_moveStart.clear();

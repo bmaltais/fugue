@@ -65,9 +65,10 @@ QVariantList canvas() {
 QVariantList node() {
     return {ifOn("group.expose"), ifOn("group.unexpose"), command("edit.rename"), separator(), command("node.bypass"),
             command("node.mute"), command("node.collapse"), command("node.pin"), colors(), separator(),
-            ifOn("node.open-image"), ifOn("node.copy-image"), ifOn("node.save-image"), separator(), command("edit.copy"),
+            ifOn("node.open-image"), ifOn("node.copy-image"), ifOn("node.save-image"), separator(),
+            command("edit.copy"),
             command("edit.clone"), separator(), command("frame.make"), command("group.make"),
-            ifOn("group.ungroup"), ifOn("group.enter"), ifOn("group.make-unique"),
+            ifOn("group.ungroup"), ifOn("group.enter"), ifOn("group.interface"), ifOn("group.make-unique"),
             ifOn("group.save-to-library"), ifOn("group.update"), separator(),
             command("run.to-here"), separator(),
             command("edit.delete")};

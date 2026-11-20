@@ -96,6 +96,10 @@ private slots:
         canvas.endMove();
         QCOMPARE(canvas.position("prompt"), QPointF(0, 100));
         QCOMPARE(canvas.position("other"), QPointF(0, 440));
+        // Still inside the moved Frame, the pinned node is still one of its nodes.
+        const QJsonArray held = canvas.document().layout.value("frames").toArray().first().toObject().value("nodes").toArray();
+        QVERIFY(held.contains(QJsonValue("prompt")));
+        QVERIFY(held.contains(QJsonValue("other")));
         // Pinned again with all pinned: unpinned, and the pin is one step back.
         canvas.select({"gen", "prompt"});
         canvas.togglePinned();

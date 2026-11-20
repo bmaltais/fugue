@@ -317,7 +317,7 @@ Item {
                                             required property int index
                                             width: group.width
                                             height: 7 * root.u
-                                            opacity: modelData.available ? 1 : 0.5
+                                            opacity: modelData.available ? 1 : 0.4 // as an off menu row
                                             Text {
                                                 anchors.left: parent.left
                                                 anchors.right: badges.left

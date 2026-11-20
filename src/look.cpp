@@ -19,6 +19,17 @@ namespace {
 // The sheen's step from the top of a node's fill to its bottom, in OKLab (#72).
 constexpr double kSheenStep = 0.012;
 
+// A color with alpha laid over an opaque fill.
+QColor over(const QColor &fill, const QColor &layer) { return mix(fill, QColor(layer.rgb()), layer.alphaF()); }
+
+// Whether `fg` (at 4.5:1) and `label` (at `labelNeed`) read on `fill` at every end of the sheen.
+bool readsUnderSheen(const Tokens &t, const QColor &fill, const QColor &fg, double labelNeed) {
+    for (const QColor &layer : {QColor(0, 0, 0, 0), t.sheenTop, t.sheenBottom, t.litTop, t.litBottom})
+        if (contrast(fg, over(fill, layer)) < 4.5 || contrast(t.label, over(fill, layer)) < labelNeed)
+            return false;
+    return true;
+}
+
 
 double linear(double v) { return v <= .04045 ? v / 12.92 : std::pow((v + .055) / 1.055, 2.4); }
 double gamma(double v) { return v <= .0031308 ? 12.92 * v : 1.055 * std::pow(v, 1 / 2.4) - .055; }
@@ -167,8 +178,8 @@ Tokens tokens(const QHash<QString, QColor> &colors, bool light) {
     // makes the step; on a fill with no room to lighten, of black at the bottom instead.
     const auto sheen = [&](const QColor &over, double step) {
         QColor layer = over;
-        for (double a = .005; a <= .6; a += .005)
-            if (deltaE(mix(t.body, over, a), t.body) >= step) {
+        for (int i = 1; i <= 120; ++i) // alpha .005 to .6, in steps of .005
+            if (const double a = i * .005; deltaE(mix(t.body, over, a), t.body) >= step) {
                 layer.setAlphaF(float(a));
                 return layer;
             }
@@ -183,7 +194,6 @@ Tokens tokens(const QHash<QString, QColor> &colors, bool light) {
     };
     ends(kSheenStep, t.sheenTop, t.sheenBottom);
     ends(2 * kSheenStep, t.litTop, t.litBottom);
-    const auto over = [](const QColor &fill, const QColor &layer) { return mix(fill, QColor(layer.rgb()), layer.alphaF()); };
     // Labels sit on all of these: the share of text grows until the label reads at 4.5:1 on each.
     const QList<QColor> surfaces{t.body,      t.header,  t.well,   t.popup, t.selectedRow,
                                  t.menuRow,   t.canvas,  over(t.body, t.sheenTop), over(t.body, t.sheenBottom),
@@ -200,7 +210,7 @@ Tokens tokens(const QHash<QString, QColor> &colors, bool light) {
     const double labelNeed = std::min(4.5, contrast(t.label, t.body));
     for (const double k : {.26, .22, .18, .14, .10, .06}) {
         t.bypassBody = mix(t.body, magenta, k);
-        if (contrast(fg, t.bypassBody) >= 4.5 && contrast(t.label, t.bypassBody) >= labelNeed)
+        if (readsUnderSheen(t, t.bypassBody, fg, labelNeed)) // each end of the sheen over it too (#72)
             break;
     }
     for (const double k : {.40, .34, .28, .22, .16, .10}) {
@@ -231,10 +241,11 @@ RoleTokens roleTokens(const Tokens &t, const QColor &role, const QColor &text, b
     // The body takes the color too (#72), as a bypassed node takes magenta: each tint steps down
     // until the text, and the label as well as it reads on the plain body, read on it.
     const double labelNeed = std::min(4.5, contrast(t.label, t.body));
-    const std::vector<double> bodies = light ? std::vector<double>{.18, .14, .10, .06} : std::vector<double>{.22, .18, .14, .10, .06};
+    const std::vector<double> bodies =
+        light ? std::vector<double>{.18, .14, .10, .06} : std::vector<double>{.22, .18, .14, .10, .06};
     for (const double k : bodies) {
         r.tintBody = mix(t.body, role, k);
-        if (contrast(text, r.tintBody) >= 4.5 && contrast(t.label, r.tintBody) >= labelNeed)
+        if (readsUnderSheen(t, r.tintBody, text, labelNeed)) // at every end of the sheen over it
             break;
     }
     return r;
@@ -546,7 +557,10 @@ QVariantMap CanvasLook::role(const QString &name) const {
     else
         color = m_tokens.label; // muted, and anything unknown
     const fugue::look::RoleTokens r = fugue::look::roleTokens(m_tokens, color, m_text, m_light);
-    const QVariantMap map{{"frame", r.frame}, {"frameEdge", r.frameEdge}, {"frameTitle", r.frameTitle}, {"tint", r.tint},
+    const QVariantMap map{{"frame", r.frame},
+                          {"frameEdge", r.frameEdge},
+                          {"frameTitle", r.frameTitle},
+                          {"tint", r.tint},
                           {"tintBody", r.tintBody}};
     m_roles.insert(name, map);
     return map;

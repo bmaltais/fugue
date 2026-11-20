@@ -314,6 +314,21 @@ private slots:
         QVERIFY(listed);
     }
 
+    // #55: Rename on a node's context menu asks for its title.
+    void renameFromTheContextMenu() {
+        App app(load(framed));
+        QVERIFY(app.open());
+        QTest::mouseClick(app.window, Qt::RightButton, {}, app.screen(620, 90));
+        QTRY_VERIFY(isOpen(app.window, "contextMenuPopup"));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("menuItem-edit.rename")));
+        QQuickItem *field = nullptr;
+        QTRY_VERIFY((field = find(app.window, "renameField")) != nullptr);
+        QCOMPARE(field->property("text").toString(), app.model.nodeTitle("c"));
+        field->setProperty("text", QStringLiteral("Far away"));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("renameOk")));
+        QTRY_COMPARE(app.model.nodeTitle("c"), QStringLiteral("Far away"));
+    }
+
     // #72: a row that is off looks off (dimmed), not merely a little paler than one that is on.
     void aDisabledRowIsDimmed() {
         App app(load(framed));

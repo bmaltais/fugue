@@ -174,7 +174,10 @@ FocusScope {
         const padX = v.width / 2, padY = v.height / 2
         detailArea = Qt.rect(v.x - padX, v.y - padY, v.width + 2 * padX, v.height + 2 * padY)
     }
-    onViewAreaChanged: updateDetailArea()
+    onViewAreaChanged: {
+        updateDetailArea()
+        closeWarnings() // the warnings card sits by its badge on screen: a pan or a zoom takes it away
+    }
 
     function toWorld(px, py) {
         return Qt.point((px - world.x) / world.scale, (py - world.y) / world.scale)
@@ -486,20 +489,22 @@ FocusScope {
             }
             // On a group's port (its card's, or an exposed mark inside): rename it on the face (#72).
             const port = canvas.portUnder(mouse.x, mouse.y)
-            if (port.node !== undefined && canvas.model.portToRename(port.node, port.port, port.output).name !== undefined) {
+            if (port.node !== undefined
+                    && canvas.model.portToRename(port.node, port.port, port.output).name !== undefined) {
                 canvas.model.endLinkDrag()
                 canvas.model.portRenameRequested(port.node, port.port, port.output)
                 return
             }
             const hit = canvas.model.nodeAt(w.x, w.y)
             // On a node's title: rename it (#55).
-            if (hit !== "" && port.node === undefined && w.y <= canvas.model.position(hit).y + canvas.model.headerHeight) {
+            if (hit !== "" && port.node === undefined
+                    && w.y <= canvas.model.position(hit).y + canvas.model.headerHeight) {
                 canvas.model.endMove()
                 canvas.model.nodeRenameRequested(hit)
                 return
             }
             // A double click on a group's body enters it (5.2); its title stays for renaming.
-            if (hit !== "" && canvas.model.isGroup(hit) && canvas.portUnder(mouse.x, mouse.y).node === undefined
+            if (hit !== "" && canvas.model.isGroup(hit) && port.node === undefined
                     && w.y > canvas.model.position(hit).y + canvas.model.headerHeight) {
                 canvas.model.endMove()
                 canvas.model.enterGroup(hit)
@@ -512,7 +517,7 @@ FocusScope {
                 canvas.model.frameRenameRequested(frame)
                 return
             }
-            if (hit === "" && canvas.portUnder(mouse.x, mouse.y).node === undefined)
+            if (hit === "" && port.node === undefined)
                 canvas.searchRequested(w.x, w.y)
         }
 
@@ -538,7 +543,7 @@ FocusScope {
 
     // A Frame title's size in world units (#72): it zooms with the canvas, as ComfyUI's group
     // titles do, down to 10 px on screen, where it stops so it still reads.
-    readonly property real frameTitleWorld: Math.max(look.frameTitleSize, 10 / world.scale)
+    readonly property real frameTitleWorld: Math.max(look.frameTitleSize, Math.ceil(10 / world.scale))
 
     // The Frame whose title band (as tall as its title, at least a node header) holds the world
     // point, or "".
@@ -1051,8 +1056,9 @@ FocusScope {
     property string warningsNode: ""
     property bool warningsPinned: false
     function showWarnings(nodeId, warnings, badge, pin) {
-        if (pin || warningsNode !== nodeId)
-            warningsPinned = pin || (warningsPinned && warningsNode === nodeId)
+        if (warningsPinned && !pin)
+            return // a card kept up by a click stays as it is while other badges are hovered
+        warningsPinned = pin
         warningsNode = nodeId
         warningsTip.text = warnings.join("\n")
         const at = badge.mapToItem(canvas, badge.width, badge.height)
@@ -1071,6 +1077,7 @@ FocusScope {
         target: canvas.model
         function onScopeChanged() { canvas.closeWarnings() }
     }
+
     Item {
         id: warningsTip
         objectName: "warningsTip"
