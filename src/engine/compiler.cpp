@@ -395,6 +395,19 @@ void Compiler::build(Scope *scope) {
             continue;
         }
         if (const NodeType *type = m_registry.nodeType(node.type)) {
+            // A library group (6.1, runtime.kind "group") runs from the definition the workflow
+            // embeds (5.3); without one there is nothing to run.
+            if (type->runtime.value("kind") == QLatin1String("group")) {
+                m_status[path] = Status::Broken;
+                Error error = nodeError(QStringLiteral("unknown_node_type"), path,
+                                        QStringLiteral("Node %1 is an instance of the group %2, which this workflow "
+                                                       "does not hold.")
+                                            .arg(path, node.type));
+                error.hint = QStringLiteral("Add the group from the library in the canvas, which puts its definition "
+                                            "in the workflow's groups.");
+                fail(error);
+                continue;
+            }
             if (!checkVersion(path, node, type->id, type->version)) {
                 m_status[path] = Status::Broken;
                 continue;

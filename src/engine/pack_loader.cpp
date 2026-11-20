@@ -72,7 +72,11 @@ std::optional<PackManifest> parsePack(const QJsonObject &json, PackOrigin origin
 
     pack.id = json.value("id").toString();
     const bool reserved = pack.id == QLatin1String("fugue") || pack.id == QLatin1String("local");
-    if (origin == PackOrigin::Disk && (reserved || pack.id.startsWith(QLatin1String("fugue.")) ||
+    if (origin == PackOrigin::Library) {
+        // The group library has the one reserved id it may use.
+        if (pack.id != QLatin1String("local"))
+            errors << invalid(QStringLiteral("The group library's pack.json must have the id local, not \"%1\".").arg(pack.id));
+    } else if (origin == PackOrigin::Disk && (reserved || pack.id.startsWith(QLatin1String("fugue.")) ||
                                        pack.id.startsWith(QLatin1String("local."))))
         errors << invalid(QStringLiteral("The pack id \"%1\" belongs to Fugue; a pack folder cannot use it.").arg(pack.id));
     else if (!(isPackId(pack.id) || (reserved && origin == PackOrigin::BuiltIn)))
@@ -169,6 +173,8 @@ QString runtimeProblem(const QJsonObject &runtime, PackOrigin origin) {
     if (runtime.isEmpty())
         return {};
     const QString kind = runtime.value("kind").toString();
+    if (origin == PackOrigin::Library && kind != QLatin1String("group"))
+        return QStringLiteral("The group library holds groups only; runtime.kind \"%1\" is not one.").arg(kind);
     const auto path = [&](const char *key) -> QString {
         const QString value = runtime.value(key).toString();
         return isInsideFolder(value) ? QString()
@@ -301,7 +307,7 @@ LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin
     loaded.name = read.value().value("name").toString();
     if (!pack)
         return loaded;
-    if (origin == PackOrigin::Disk && QFileInfo(folder).fileName() != pack->id) {
+    if (origin != PackOrigin::BuiltIn && QFileInfo(folder).fileName() != pack->id) {
         loaded.errors << invalid(QStringLiteral("The folder is named \"%1\" but pack.json says the id is %2; a pack lives in a "
                                                 "folder named after its id.").arg(QFileInfo(folder).fileName(), pack->id));
         return loaded;
@@ -342,15 +348,16 @@ LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin
 PackReport loadPacks(Registry &registry, const QStringList &searchPaths) {
     PackReport report;
     QSet<QString> seen;
-    for (const QString &path : searchPaths) {
-        const QDir dir(path);
+    for (qsizetype i = 0; i < searchPaths.size(); ++i) {
+        const QDir dir(searchPaths[i]);
         if (!dir.exists() || seen.contains(dir.canonicalPath()))
             continue;
         seen.insert(dir.canonicalPath());
         for (const QFileInfo &entry : dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
             if (entry.fileName().startsWith(QLatin1Char('.')))
                 continue;
-            report.packs << loadPack(registry, entry.filePath());
+            const bool library = i == 0 && entry.fileName() == QLatin1String("local") && !entry.isSymLink();
+            report.packs << loadPack(registry, entry.filePath(), library ? PackOrigin::Library : PackOrigin::Disk);
         }
     }
     return report;

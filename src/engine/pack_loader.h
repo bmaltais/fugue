@@ -37,6 +37,10 @@ QStringList packSearchPaths();
 enum class PackOrigin {
     BuiltIn, // ships with Fugue; may use the reserved ids and `runtime.kind: "builtin"`
     Disk,
+    // The user's group library (5.3): the folder `local` of the first search path, written by
+    // Fugue (engine/group_library.h). Its id is `local` and it holds groups only, so nothing
+    // in it runs a program.
+    Library,
 };
 
 // A node of a pack that did not load, or a node folder pack.json does not list.
@@ -67,7 +71,7 @@ LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin
 
 // Loads every pack found under `searchPaths`, each subfolder holding a pack.json. A pack id
 // found twice loads once, from the earlier path; the later one is disabled. A path that does
-// not exist is skipped.
+// not exist is skipped. The first path's folder `local` is the group library (PackOrigin::Library).
 PackReport loadPacks(Registry &registry, const QStringList &searchPaths);
 
 // loadPacks(registry, packSearchPaths()), the problems also written to stderr, one line each.

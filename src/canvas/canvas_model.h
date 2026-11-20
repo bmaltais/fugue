@@ -249,6 +249,9 @@ public:
     QString scopePath() const { return m_scope.join(QLatin1Char('/')); }
     // The id of the group whose inside is shown, empty at the top.
     QString scopeGroup() const;
+    // Whether an instance of this group of the workflow may be added to the level shown (not
+    // when the level is inside it, 5.2).
+    bool canAddGroup(const QString &group) const { return canHoldGroup(m_document, group); }
     // Whether the node of the level is a group instance.
     Q_INVOKABLE bool isGroup(const QString &node) const;
     // Shows the inside of a group instance of the level (Tab, a double-click on its body).
