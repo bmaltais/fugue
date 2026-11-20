@@ -70,7 +70,14 @@ ModelLibrary::ModelLibrary(QStringList roots, const Registry *registry, QHash<QS
 
 ModelLibrary ModelLibrary::current(const Registry *registry) {
     const Settings settings = currentSettings();
-    return ModelLibrary(roots(settings), registry, rootKinds(settings));
+    ModelLibrary library(roots(settings), registry, rootKinds(settings));
+    if (!settings.downloadFolder.isEmpty())
+        library.setDownloadRoot(QDir::cleanPath(expandHome(settings.downloadFolder)));
+    return library;
+}
+
+QString ModelLibrary::downloadRoot() const {
+    return m_roots.contains(m_downloadRoot) ? m_downloadRoot : m_roots.value(0);
 }
 
 QStringList ModelLibrary::roots(const Settings &settings) {
@@ -198,6 +205,47 @@ QStringList ModelLibrary::folders(const PortType &type) const {
     return out;
 }
 
+bool ModelLibrary::takesFile(const PortType &type, const QString &fileName) const {
+    const DeclaredPortType *declared = resourceType(type);
+    return declared && hasExtension(fileName, declared->extensions.isEmpty() ? defaultExtensions : declared->extensions);
+}
+
+QString ModelLibrary::downloadFolder(const PortType &type) const {
+    const DeclaredPortType *declared = resourceType(type);
+    if (!declared)
+        return {};
+    const QStringList names = folderNames(*declared);
+    const auto inLayout = [&](const QString &root) {
+        for (const QString &name : names)
+            if (QFileInfo(root + QLatin1Char('/') + name).isDir())
+                return QDir::cleanPath(root + QLatin1Char('/') + name);
+        return QDir::cleanPath(root + QLatin1Char('/') + names.first());
+    };
+    const QString root = downloadRoot();
+    const QString kind = kindOf(root);
+    if (kind == kLayout)
+        return inLayout(root);
+    if (kind == type.toString())
+        return root;
+    return inLayout(m_roots.value(0));
+}
+
+QStringList ModelLibrary::downloadRoots(const QList<PortType> &types) const {
+    QStringList out;
+    for (const QString &root : m_roots) {
+        const QString kind = kindOf(root);
+        bool takes = kind == kLayout;
+        if (!takes && !kind.isEmpty() && !types.isEmpty()) {
+            takes = true;
+            for (const PortType &type : types)
+                takes = takes && type.toString() == kind;
+        }
+        if (takes)
+            out << root;
+    }
+    return out;
+}
+
 QList<ModelFile> ModelLibrary::list(const PortType &type) const {
     const QString key = type.toString();
     if (const auto listed = m_listed.constFind(key); listed != m_listed.constEnd())
@@ -271,10 +319,12 @@ QList<MissingModel> ModelLibrary::missing(const QJsonArray &models, FileHashes &
     for (const QJsonValue entry : models) {
         QJsonObject handle = entry.toObject();
         const QString source = handle.take(QStringLiteral("source")).toString();
+        const QJsonValue size = handle.take(QStringLiteral("size"));
         if (resolve(handle, hashes, Hashing::RememberedOnly))
             continue;
         const std::optional<PortType> type = PortType::parse(handle.value(QStringLiteral("resource")).toString());
-        out.append({handle, source, type ? folders(*type).value(0) : QString()});
+        out.append({handle, source, type ? downloadFolder(*type) : QString(),
+                    size.isDouble() && size.toDouble() >= 0 ? qint64(size.toDouble()) : -1});
     }
     return out;
 }

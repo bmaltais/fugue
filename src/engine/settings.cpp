@@ -18,8 +18,8 @@ namespace {
 
 const QStringList kKeys{"navigation",     "language",       "output_folder",
                         "inputs_folder",  "model_paths",    "model_folder_kinds",
-                        "pack_paths",     "new_seed",       "embed_workflow",
-                        "corner_radius"};
+                        "download_folder", "pack_paths",    "new_seed",
+                        "embed_workflow", "corner_radius"};
 
 QString oneOf(const QJsonValue &value, const QStringList &choices, const QString &key) {
     if (value.isString() && choices.contains(value.toString()))
@@ -78,7 +78,9 @@ void apply(Settings &settings, const QString &key, const QJsonValue &value) {
         const QJsonObject kinds = value.toObject();
         for (auto it = kinds.begin(); it != kinds.end(); ++it)
             settings.modelFolderKinds.insert(it.key(), it.value().toString());
-    } else if (key == QLatin1String("pack_paths"))
+    } else if (key == QLatin1String("download_folder"))
+        settings.downloadFolder = value.toString();
+    else if (key == QLatin1String("pack_paths"))
         settings.packPaths = strings(value);
     else if (key == QLatin1String("new_seed"))
         settings.newSeed = value.toString();
@@ -131,7 +133,8 @@ QString checkSetting(const QString &key, const QJsonValue &value) {
             return {};
         return QStringLiteral("language must be a language code such as da or pt-BR.");
     }
-    if (key == QLatin1String("output_folder") || key == QLatin1String("inputs_folder"))
+    if (key == QLatin1String("output_folder") || key == QLatin1String("inputs_folder")
+        || key == QLatin1String("download_folder"))
         return checkFolder(value, key);
     if (key == QLatin1String("model_paths") || key == QLatin1String("pack_paths"))
         return checkFolders(value, key);

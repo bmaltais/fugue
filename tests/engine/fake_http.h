@@ -30,6 +30,11 @@ struct HttpResponse {
     // Never answered: the connection stays open with nothing sent, as a server that is still
     // working on the request.
     bool hold = false;
+    // Sends the headers (Content-Length of the whole body) and only this many bytes of the body,
+    // then drops the connection: a break in the middle of a download. -1: the whole body.
+    qsizetype cutAfter = -1;
+    // More header lines, each "Name: value".
+    QList<QByteArray> headers{};
 };
 
 class FakeHttpServer {
@@ -96,9 +101,14 @@ private:
                 return;
             QByteArray reply = "HTTP/1.1 " + QByteArray::number(response.status) + " X\r\n" +
                                "Content-Type: " + response.contentType + "\r\n" +
-                               "Content-Length: " + QByteArray::number(response.body.size()) +
-                               "\r\nConnection: close\r\n\r\n" + response.body;
+                               "Content-Length: " + QByteArray::number(response.body.size()) + "\r\n";
+            for (const QByteArray &header : response.headers)
+                reply += header + "\r\n";
+            reply += "Connection: close\r\n\r\n";
+            reply += response.cutAfter >= 0 ? response.body.left(response.cutAfter) : response.body;
             socket->write(reply);
+            // A cut body ends the same way: the client finds the connection closed short of its
+            // Content-Length.
             socket->disconnectFromHost();
         });
     }

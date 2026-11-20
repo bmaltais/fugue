@@ -1,23 +1,30 @@
 // `fugue model list` (spec 13.1): the models found on disk (8.9) and offered by providers (8.2).
+// `fugue model get <workflow|template>`: the models it names that are not here, downloaded (#89).
 //
 // A file on disk gets a handle only when its content hash is known (2.5: the hash is the
 // identity), and listing reads no model file: hashing a model of several GB takes from seconds to
 // minutes. `--hash` hashes the files not hashed yet, once (the hash is remembered for every Fugue
 // process), so an agent gets a full handle for every file (13.4).
 
+#include <QDir>
 #include <QEventLoop>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QNetworkAccessManager>
 
 #include <algorithm>
 #include <optional>
 
 #include "cli/commands.h"
+#include "engine/document.h"
 #include "engine/file_hashes.h"
+#include "engine/model_download.h"
 #include "engine/model_library.h"
 #include "engine/model_offers.h"
+#include "engine/paths.h"
 #include "engine/registry.h"
+#include "engine/templates.h"
 
 namespace fugue::cli {
 
@@ -127,6 +134,105 @@ Reply modelList(const Command &command, Context &context) {
     Reply reply = Reply::success(QJsonObject{{"models", models}}, lines.join('\n'));
     reply.errors = warnings; // 13.2: a success with warnings
     return reply;
+}
+
+Reply modelGet(const Command &command, Context &context) {
+    // A workflow file, else a template's id.
+    const QString what = command.positionals.at(0);
+    QJsonArray named;
+    if (QFileInfo::exists(what)) {
+        const Result<Document> document = Document::loadFile(what);
+        if (!document)
+            return Reply::failure(document.errors());
+        named = document->models();
+    } else {
+        const TemplateLibrary templates(TemplateLibrary::standardRoots(), &context.registry);
+        const std::optional<Template> chosen = templates.find(what);
+        if (!chosen) {
+            Error error = makeError("usage", QStringLiteral("There is no workflow file or template \"%1\".").arg(what),
+                                    "Give a .fugue file, or the id of one `fugue template list` shows.");
+            for (const Template &t : templates.list())
+                error.valid.append(t.id);
+            return Reply::failure(error);
+        }
+        named = chosen->models;
+    }
+
+    ModelLibrary library = ModelLibrary::current(&context.registry);
+    if (command.has("into")) {
+        const QString root = QDir::cleanPath(expandHome(command.value("into")));
+        if (!library.roots().contains(root)) {
+            Error error = makeError("usage", QStringLiteral("%1 is not a model folder.").arg(command.value("into")),
+                                    "Use Fugue's own models folder or one of the extra model folders in Settings.");
+            for (const QString &each : library.roots())
+                error.valid.append(each);
+            return Reply::failure(error);
+        }
+        library.setDownloadRoot(root);
+    }
+
+    FileHashes hashes(FileHashes::defaultPath());
+    const QList<MissingModel> missing = library.missing(named, hashes);
+    Errors errors;
+    QList<DownloadTarget> targets;
+    for (const MissingModel &model : missing) {
+        const Result<DownloadTarget> target = planDownload(library, model);
+        if (target)
+            targets << target.value();
+        else
+            errors << target.errors();
+    }
+
+    QJsonArray downloaded;
+    QStringList lines;
+    if (!targets.isEmpty()) {
+        QNetworkAccessManager network;
+        DownloadQueue queue(&network, &hashes);
+        QEventLoop loop;
+        int shown = 0; // tenths of the file being fetched told on stderr
+        QObject::connect(&queue, &DownloadQueue::started, &loop, [&](int index) {
+            const DownloadTarget &target = queue.targets().at(index);
+            shown = 0;
+            context.log(QStringLiteral("Downloading %1%2 from %3 into %4")
+                            .arg(target.handle.value("name").toString(),
+                                 target.size >= 0 ? QStringLiteral(" (%1)").arg(sizeText(target.size)) : QString(),
+                                 target.source.toString(), QFileInfo(target.path).absolutePath()));
+        });
+        // A file over 100 MB is told every tenth, so a long download shows it is moving.
+        QObject::connect(&queue, &DownloadQueue::progress, &loop, [&](int, qint64 received, qint64 total) {
+            const int tenth = total > 0 ? int(received * 10 / total) : 0;
+            if (total > 100000000 && tenth > shown && tenth < 10)
+                context.log(QStringLiteral("  %1% (%2 of %3)").arg(tenth * 10).arg(sizeText(received), sizeText(total)));
+            shown = std::max(shown, tenth);
+        });
+        QObject::connect(&queue, &DownloadQueue::fileFinished, &loop, [&](int index, const Errors &failed) {
+            const DownloadTarget &target = queue.targets().at(index);
+            if (!failed.isEmpty()) {
+                errors += failed;
+                return;
+            }
+            downloaded.append(QJsonObject{{"name", target.handle.value("name")},
+                                          {"type", target.handle.value("resource")},
+                                          {"path", target.path},
+                                          {"handle", target.handle}});
+            lines << QStringLiteral("Downloaded %1 into %2.")
+                         .arg(target.handle.value("name").toString(), QFileInfo(target.path).absolutePath());
+        });
+        QObject::connect(&queue, &DownloadQueue::finished, &loop, &QEventLoop::quit);
+        queue.add(targets);
+        loop.exec();
+    }
+
+    if (!errors.isEmpty()) {
+        // What did arrive stays; the reply names what did not.
+        for (const QString &line : std::as_const(lines))
+            context.log(line);
+        return Reply::failure(errors);
+    }
+    if (missing.isEmpty())
+        lines << QStringLiteral("Every model it names is here.");
+    return Reply::success(QJsonObject{{"downloaded", downloaded}, {"here", named.size() - qsizetype(missing.size())}},
+                          lines.join('\n'));
 }
 
 } // namespace fugue::cli

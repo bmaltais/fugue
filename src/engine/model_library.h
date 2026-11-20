@@ -56,7 +56,8 @@ struct Document;
 struct MissingModel {
     QJsonObject handle; // resource, hash, name
     QString source;     // where it can be had, as the workflow's `requires` records it; may be empty
-    QString folder;     // the folder it goes in: its type's first folder under Fugue's own root
+    QString folder;     // the folder it goes in: downloadFolder() of its type
+    qint64 size = -1;   // in bytes, as `requires` records it; -1 when it does not
 };
 
 class ModelLibrary {
@@ -85,8 +86,25 @@ public:
 
     QStringList roots() const { return m_roots; }
 
+    // Where downloads go (#89): one of roots(), the settings' download_folder when it is one
+    // of them, else Fugue's own folder (the first root).
+    QString downloadRoot() const;
+    void setDownloadRoot(const QString &root) { m_downloadRoot = root; }
+    // The folder a download of `type` goes in under downloadRoot(): in ComfyUI's layout, the
+    // type's folder that is there (`text_encoders` before `clip` when both are), else its first;
+    // a root of that one kind is itself. A root of another kind takes none of `type`: then the
+    // folder under Fugue's own root. Empty when `type` is not a resource type here.
+    QString downloadFolder(const PortType &type) const;
+    // The roots a download of all of `types` may go in, in order: those in the layout, and a
+    // root of one kind when every type is that kind.
+    QStringList downloadRoots(const QList<PortType> &types) const;
+
     // The folders the files of `type` are in, under every root in order, whether they exist or not.
     QStringList folders(const PortType &type) const;
+
+    // True when `fileName` has one of the extensions of `type`'s files (else ComfyUI's list plus
+    // .gguf); false when `type` is not a resource type here.
+    bool takesFile(const PortType &type, const QString &fileName) const;
 
     // The model files of `type`, in folder order, each folder's sorted by name. A file reached
     // twice (a link, two roots that overlap) is listed once, where it was first found.
@@ -122,6 +140,7 @@ private:
     QStringList m_roots;
     const Registry *m_registry = nullptr;
     QHash<QString, QString> m_kinds; // set in the settings, by root
+    QString m_downloadRoot;          // empty: the first root
     mutable QHash<QString, QList<ModelFile>> m_listed; // by PortType::toString()
 };
 

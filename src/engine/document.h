@@ -203,13 +203,13 @@ struct Document {
     // out; a type used at two versions records the highest); `models` lists
     // every resource handle with a hash that appears in a literal, including
     // inside lists, group defaults and derived handles, once per hash, sorted
-    // by hash, keeping a `source` already recorded for that hash; `packs`
+    // by hash, keeping a `source` and `size` already recorded for that hash; `packs`
     // keeps the recorded entries of packs still used (adding new ones needs
     // pack data the registry gains in M3). Unknown keys are kept.
     void refreshRequirements(const QString &appVersion);
 
     // The `models` refreshRequirements() writes: every resource handle with a hash in a literal,
-    // once per hash, sorted by hash, with the `source` `requires` records for that hash.
+    // once per hash, sorted by hash, with the `source` and `size` `requires` records for that hash.
     QJsonArray models() const;
 };
 

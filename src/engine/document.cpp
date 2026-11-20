@@ -1021,15 +1021,23 @@ QJsonArray Document::models() const {
             if (input.defaultValue)
                 collectResources(*input.defaultValue, found);
     }
-    QMap<QString, QString> sources;
-    for (const QJsonValue entry : requirements.value("models").toArray())
+    // What `requires` already says of a hash: where it can be had and its size (#89).
+    QMap<QString, QJsonObject> recorded;
+    for (const QJsonValue entry : requirements.value("models").toArray()) {
+        QJsonObject known;
         if (entry.toObject().value("source").isString())
-            sources.insert(entry.toObject().value("hash").toString(), entry.toObject().value("source").toString());
+            known.insert("source", entry.toObject().value("source"));
+        if (const QJsonValue size = entry.toObject().value("size"); size.isDouble() && size.toDouble() >= 0)
+            known.insert("size", size);
+        if (!known.isEmpty())
+            recorded.insert(entry.toObject().value("hash").toString(), known);
+    }
     QJsonArray list;
     for (auto it = found.begin(); it != found.end(); ++it) {
         QJsonObject entry = it.value();
-        if (sources.contains(it.key()))
-            entry.insert("source", sources.value(it.key()));
+        const QJsonObject known = recorded.value(it.key());
+        for (auto field = known.begin(); field != known.end(); ++field)
+            entry.insert(field.key(), field.value());
         list << entry;
     }
     return list;

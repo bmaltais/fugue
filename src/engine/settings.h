@@ -17,6 +17,8 @@
 // | model_folder_kinds | what a model path holds, by the path as  | {}                       |
 // |                  | written: "layout" or a resource type id;  |                          |
 // |                  | unnamed: found by its files (8.9, #86)    |                          |
+// | download_folder  | the model folder downloads go in, one of  | Fugue's own models folder|
+// |                  | the folders above (8.9, #89)              |                          |
 // | pack_paths       | extra pack search paths (6.5)            | []                       |
 // | new_seed         | "random" or "fixed": new seed widgets    | "random"                 |
 // | embed_workflow   | "full", "no-prompts" or "none" (11.7)    | "full"                   |
@@ -39,6 +41,7 @@ struct Settings {
     QString inputsFolder; // as written; empty: the output folder's inputs
     QStringList modelPaths;
     QMap<QString, QString> modelFolderKinds; // by the path as written in modelPaths
+    QString downloadFolder; // as written; empty: Fugue's own models folder
     QStringList packPaths;
     QString newSeed = QStringLiteral("random");
     QString embedWorkflow = QStringLiteral("full");

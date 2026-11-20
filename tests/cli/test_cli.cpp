@@ -14,11 +14,15 @@
 #include <QJsonObject>
 #include <QProcess>
 #include <QProcessEnvironment>
+#include <QSemaphore>
 #include <QTemporaryDir>
+#include <QThread>
 #include <QtTest>
 
+#include "../engine/fake_http.h"
 #include "cli/args.h"
 #include "engine/document.h"
+#include "engine/hash.h"
 #include "engine/run_folder.h"
 
 using namespace fugue;
@@ -83,6 +87,57 @@ QByteArray flow(const char *nodes) {
     bytes += nodes;
     bytes += "}}}";
     return bytes;
+}
+
+// A loopback HTTP server on its own thread, so it answers while the test waits for the
+// fugue process: `files` by path.
+class ServerThread : public QThread {
+public:
+    explicit ServerThread(QHash<QByteArray, QByteArray> files) : m_files(std::move(files)) {}
+    ~ServerThread() override {
+        quit();
+        wait();
+    }
+    QByteArray origin() {
+        start();
+        m_ready.acquire();
+        return m_origin;
+    }
+    int requests() const { return m_requests; }
+
+protected:
+    void run() override {
+        fugue::test::FakeHttpServer server;
+        for (auto it = m_files.cbegin(); it != m_files.cend(); ++it)
+            server.on("GET", it.key(), [this, bytes = it.value()](const fugue::test::HttpRequest &) {
+                ++m_requests;
+                return fugue::test::HttpResponse{200, bytes, "application/octet-stream"};
+            });
+        server.listen();
+        m_origin = server.origin();
+        m_ready.release();
+        exec();
+    }
+
+private:
+    QHash<QByteArray, QByteArray> m_files;
+    QByteArray m_origin;
+    QSemaphore m_ready;
+    std::atomic<int> m_requests{0};
+};
+
+// A workflow naming one fugue/test-lora model by `hash`, with its source.
+QByteArray workflowNamingModel(const QString &hash, const QString &source) {
+    const QJsonObject lora{{"resource", "fugue/test-lora"}, {"hash", hash}, {"name", "m.safetensors"}};
+    QJsonObject recorded = lora;
+    recorded.insert("source", source);
+    const QJsonObject json{
+        {"fugue", 1},
+        {"graph", QJsonObject{{"nodes", QJsonObject{{"c", QJsonObject{{"type", "fugue/shout"},
+                                                                     {"version", "1.0.0"},
+                                                                     {"inputs", QJsonObject{{"in", "hi"}, {"x", lora}}}}}}}}},
+        {"requires", QJsonObject{{"models", QJsonArray{recorded}}}}};
+    return QJsonDocument(json).toJson();
 }
 
 } // namespace
@@ -512,6 +567,53 @@ private slots:
         QCOMPARE(o.exitCode, 1);
         QCOMPARE(o.firstCode(), QString("usage"));
         QVERIFY(!QFile::exists(m_dir.filePath("other.fugue")));
+    }
+
+    // #89: the models a workflow or template names and lacks, downloaded into the model folder,
+    // kept only when the hash is the handle's.
+    void modelGetDownloadsWhatAWorkflowLacks() {
+        const QByteArray bytes = "the model's bytes";
+        ServerThread server({{"/m.safetensors", bytes}, {"/wrong.safetensors", "another file"}});
+        const QString origin = QString::fromLatin1(server.origin());
+        const QString path = m_dir.filePath("needs-model.fugue");
+        write(path, workflowNamingModel(sha256(bytes), origin + "/m.safetensors"));
+
+        Outcome o = fugue({"model", "get", path, "--json"});
+        QVERIFY2(o.exitCode == 0, o.out.constData());
+        const QJsonArray downloaded = o.json().value("data").toObject().value("downloaded").toArray();
+        QCOMPARE(downloaded.size(), 1);
+        const QString file = m_dir.filePath("data/fugue/models/loras/m.safetensors");
+        QCOMPARE(downloaded.at(0).toObject().value("path").toString(), file);
+        QFile got(file);
+        QVERIFY(got.open(QIODevice::ReadOnly));
+        QCOMPARE(got.readAll(), bytes);
+        QVERIFY(o.err.contains("Downloading m.safetensors"));
+
+        // Here now, by its remembered hash: nothing to fetch.
+        o = fugue({"models", "get", path, "--json"});
+        QCOMPARE(o.exitCode, 0);
+        QCOMPARE(o.json().value("data").toObject().value("downloaded").toArray().size(), 0);
+        QCOMPARE(o.json().value("data").toObject().value("here").toInt(), 1);
+        QCOMPARE(server.requests(), 1);
+
+        // Another file at the source is not kept.
+        write(path, workflowNamingModel(sha256("not this"), origin + "/wrong.safetensors"));
+        QFile::remove(file);
+        o = fugue({"model", "get", path, "--json"});
+        QCOMPARE(o.exitCode, 1);
+        QCOMPARE(o.firstCode(), QString("download_mismatch"));
+        QVERIFY(QDir(m_dir.filePath("data/fugue/models/loras")).isEmpty());
+
+        // A template by its id; a folder that is not a model folder; neither file nor template.
+        write(m_dir.filePath("templates/needs/template.json"), R"({"title": "Needs a model"})");
+        write(m_dir.filePath("templates/needs/workflow.fugue"), workflowNamingModel(sha256(bytes), origin + "/m.safetensors"));
+        o = fugue({"model", "get", "needs", "--json"});
+        QVERIFY2(o.exitCode == 0, o.out.constData());
+        QCOMPARE(o.json().value("data").toObject().value("downloaded").toArray().size(), 1);
+        o = fugue({"model", "get", "needs", "--into", m_dir.filePath("elsewhere"), "--json"});
+        QCOMPARE(o.exitCode, 1);
+        QCOMPARE(o.firstCode(), QString("usage"));
+        QCOMPARE(fugue({"model", "get", "nothing-by-this-name", "--json"}).firstCode(), QString("usage"));
     }
 
     void workflowDescribeSummarisesNodesAndLinks() {
