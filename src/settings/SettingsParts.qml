@@ -99,8 +99,8 @@ QtObject {
             text: field.secret ? "" : field.value
             echoMode: field.secret ? TextInput.Password : TextInput.Normal
             color: App.theme.look.text
-            selectionColor: App.theme.look.selectedRow
-            selectedTextColor: App.theme.look.text
+            selectionColor: App.theme.look.accent
+            selectedTextColor: App.theme.look.accentForeground
             font.pixelSize: App.theme.look.textSize
             Accessible.role: Accessible.EditableText
             Accessible.name: field.placeholder

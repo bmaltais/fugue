@@ -14,16 +14,27 @@ Rectangle {
     property bool ready: false
     readonly property real lineHeight: Math.round(host.look.textSize * 4 / 3)
 
-    height: Math.max(rowHeight, Math.min(Math.max(5, edit.lineCount + 1), 12) * lineHeight + 8)
+    height: Math.max(rowHeight, Math.min(Math.max(5, edit.lineCount + 1), 12) * lineHeight + 8 + 16) // + the caption
     color: host.wellColor
     radius: host.smallCorner
     border.width: 1
     border.color: host.error !== "" ? host.look.error : host.look.accent
 
+    // The field's label stays as its caption while it is typed in (#74).
+    Text {
+        x: area.host.pad
+        y: 4
+        height: 16
+        verticalAlignment: Text.AlignVCenter
+        text: area.host.port.label
+        color: area.host.look.label
+        font.pixelSize: area.host.look.labelSize
+    }
     Flickable {
         id: flick
         anchors.fill: parent
         anchors.margins: 4
+        anchors.topMargin: 4 + 16
         anchors.leftMargin: area.host.pad
         anchors.rightMargin: area.host.pad
         contentWidth: width

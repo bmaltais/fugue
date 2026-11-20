@@ -167,8 +167,9 @@ CanvasModel::CanvasModel(const Registry *registry, QObject *parent)
 
 void CanvasModel::setLensNode(const QString &node) {
     // An exact id, or nothing at all (no id holds a newline).
-    m_lensNodes->setFilterRegularExpression(
-        QRegularExpression(node.isEmpty() ? QStringLiteral("\n") : QStringLiteral("^%1$").arg(QRegularExpression::escape(node))));
+    const QString pattern = node.isEmpty() ? QStringLiteral("\n")
+                                           : QRegularExpression::anchoredPattern(QRegularExpression::escape(node));
+    m_lensNodes->setFilterRegularExpression(QRegularExpression(pattern));
 }
 
 CanvasModel::~CanvasModel() = default;
@@ -1169,7 +1170,8 @@ QVariantList CanvasModel::dropTargets(const QString &node) const {
             continue;
         // An output feeds any number of inputs; an input with a link would lose it.
         const bool open = !toInputs || !isWired(node, port.name, false);
-        (open ? free : taken) << QVariantMap{{"port", port.name}, {"label", port.label}, {"output", !toInputs}, {"free", open}};
+        (open ? free : taken) << QVariantMap{
+            {"port", port.name}, {"label", port.label}, {"output", !toInputs}, {"free", open}};
     }
     return free + taken;
 }

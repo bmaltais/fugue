@@ -434,8 +434,13 @@ bool CanvasModel::renameGroup(const QString &name) {
             return fugue::renameGroup(whole, group, name, registryOr(m_registry));
         },
         tr("Rename group"));
-    if (done)
+    if (done) {
         emit scopeChanged(); // the breadcrumb shows the name
+        const GroupDefinition *definition = document().group(scopeGroup());
+        const QString library = definition ? definition->extra.value(QLatin1String(kLibraryKey)).toString() : QString();
+        if (!library.isEmpty())
+            emit libraryRenameOffered(library, name.trimmed());
+    }
     return done;
 }
 
@@ -483,8 +488,9 @@ void CanvasModel::setGroupNotice(const QString &notice) {
 void CanvasModel::renameGroupCard(const QString &node, const QString &name) {
     const QString shown = name.trimmed();
     const QString group = m_document.graph.nodes.value(node).type;
-    if (shown.isEmpty() || !isGroup(node))
-        return;
+    const GroupDefinition *definition = isGroup(node) ? document().group(group) : nullptr;
+    if (shown.isEmpty() || !definition || definition->name == shown)
+        return; // nothing to rename (F2 then Enter): no step, no question
     QString renamedId;
     const Result<Document> renamed = fugue::renameGroup(document(), group, shown, registryOr(m_registry), &renamedId);
     if (!renamed) {
@@ -505,8 +511,9 @@ void CanvasModel::renameGroupCard(const QString &node, const QString &name) {
     }
     endEdit(tr("Rename group"));
     emit scopeChanged(); // the breadcrumb shows the name
-    if (const GroupDefinition *definition = document().group(renamedId))
-        if (const QString library = definition->extra.value(QLatin1String(kLibraryKey)).toString(); !library.isEmpty())
+    if (const GroupDefinition *renamedDefinition = document().group(renamedId))
+        if (const QString library = renamedDefinition->extra.value(QLatin1String(kLibraryKey)).toString();
+            !library.isEmpty())
             emit libraryRenameOffered(library, shown);
 }
 
@@ -518,14 +525,18 @@ bool CanvasModel::renameLibraryGroup(const QString &libraryId, const QString &na
         return false;
     }
     setGroupProblem({});
-    Document whole = document();
-    for (GroupDefinition &definition : whole.groups)
-        if (definition.extra.value(QLatin1String(kLibraryKey)).toString() == libraryId)
-            definition.extra.insert(QLatin1String(kLibraryKey), *renamed);
-    commitWhole(whole, tr("Rename in the library"));
+    followLibraryRename(libraryId, *renamed);
     setGroupNotice(tr("Renamed %1 to %2 in the library.").arg(libraryId, *renamed));
     emit librarySaved();
     return true;
+}
+
+void CanvasModel::followLibraryRename(const QString &from, const QString &to) {
+    rewriteDocuments([&](Document &document) {
+        for (GroupDefinition &definition : document.groups)
+            if (definition.extra.value(QLatin1String(kLibraryKey)).toString() == from)
+                definition.extra.insert(QLatin1String(kLibraryKey), to);
+    });
 }
 
 bool CanvasModel::saveGroupToLibrary() {

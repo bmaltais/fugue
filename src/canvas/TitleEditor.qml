@@ -29,6 +29,8 @@ TextInput {
     }
     Keys.onReturnPressed: finish(true)
     Keys.onEnterPressed: finish(true)
+    // Esc is this field's while it is typed in, not the window's (Leave group, Cancel run).
+    Keys.onShortcutOverride: event => event.accepted = event.key === Qt.Key_Escape
     Keys.onEscapePressed: finish(false)
     onActiveFocusChanged: if (!activeFocus) finish(true)
 }

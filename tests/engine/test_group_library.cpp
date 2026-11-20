@@ -159,6 +159,15 @@ private slots:
         QCOMPARE(groups.size(), 1);
         QCOMPARE(groups.first().id, QStringLiteral("local/pass"));
         QVERIFY(hasErrors(removeFromLibrary("local/two-pass", dir)));
+
+        // A hand-edited pack.json cannot make a removal reach outside the library.
+        QFile pack(dir + "/pack.json");
+        QVERIFY(pack.open(QIODevice::WriteOnly));
+        pack.write(R"({"manifest": 1, "id": "local", "version": "1.0.0", "nodes": ["..", "pass"]})");
+        pack.close();
+        QVERIFY(hasErrors(removeFromLibrary("local/..", dir)));
+        QVERIFY(QFileInfo::exists(dir + "/pass"));
+        QCOMPARE(libraryGroups(dir).size(), 1);
     }
 
     void versionsFollowTheRulesOfThreeSix() {

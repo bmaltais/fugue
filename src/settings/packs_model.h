@@ -76,8 +76,10 @@ public:
     Q_INVOKABLE void update(const QString &id);
     Q_INVOKABLE void remove(const QString &id);
     Q_INVOKABLE void trust(const QString &id);
-    // A library group renamed (its folder and id follow) or removed (the page asks first;
-    // workflows keep their own copy). True when done; `failure` says why not.
+    // A library group renamed (its folder and id follow) or removed (the page asks first, on
+    // itself: these are quick and run on the window's thread, not through `question`; workflows
+    // keep their own copy). Refused while a pack action is under way. True when done; `failure`
+    // says why not, set when this returns.
     Q_INVOKABLE bool renameLibraryGroup(const QString &id, const QString &name);
     Q_INVOKABLE bool removeLibraryGroup(const QString &id);
     // The person's answer to `question`; ignored until questionReady.
@@ -95,12 +97,16 @@ signals:
     void messageChanged();
     // An action changed what is installed or trusted (it is over, and refresh() has run).
     void packsModified();
+    // A library group was renamed here (#74): the workflow shown, when linked to it, follows.
+    void libraryGroupRenamed(const QString &from, const QString &to);
 
 private:
     template <typename Work> void start(Work work);
     PackPrompts prompts();
     Answer ask(const QString &kind, const PackSummary &pack);
     void finish(const QString &message, const Errors &errors, bool changed);
+    QString libraryFolder() const;
+    void reportLibrary(const QString &message, const Errors &errors);
 
     const Registry *m_registry;
     QString m_packsFolder;

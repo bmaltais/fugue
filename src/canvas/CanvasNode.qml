@@ -569,7 +569,8 @@ Item {
                             objectName: "exposedMark"
                             x: modelData.output ? node.width + 2 * face.u : -implicitWidth - 2 * face.u
                             y: modelData.rowTop + (node.canvasModel.rowHeight - height) / 2
-                            text: modelData.output ? "\u2192 " + modelData.exposedLabel : modelData.exposedLabel + " \u2192"
+                            text: modelData.output ? "\u2192 " + modelData.exposedLabel
+                                                   : modelData.exposedLabel + " \u2192"
                             textFormat: Text.PlainText
                             color: node.look.accent
                             font.pixelSize: node.look.captionSize

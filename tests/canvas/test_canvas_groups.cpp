@@ -470,6 +470,22 @@ private slots:
         QCOMPARE(libraryGroups(packs.filePath("local")).first().id, QStringLiteral("local/final-pass"));
         const QString now = canvas.document().graph.nodes.value(instance).type;
         QCOMPARE(canvas.document().group(now)->extra.value(kLibraryKey).toString(), QStringLiteral("local/final-pass"));
+        // The library's folder moved: no undo step brings back the old id.
+        canvas.undo();
+        const QString back = canvas.document().graph.nodes.value(instance).type;
+        QCOMPARE(canvas.document().group(back)->extra.value(kLibraryKey).toString(), QStringLiteral("local/final-pass"));
+        canvas.redo();
+
+        // Renamed from the group's own name field too, the library is offered.
+        QVERIFY(canvas.enterGroup(instance));
+        QVERIFY(canvas.renameGroup("Last pass"));
+        QCOMPARE(offered.size(), 2);
+        QCOMPARE(offered.last().at(0).toString(), QStringLiteral("local/final-pass"));
+        QVERIFY(canvas.leaveGroup());
+        // A rename made in Settings (another window's) reaches this workflow's link to it.
+        canvas.followLibraryRename("local/final-pass", "local/elsewhere");
+        const QString later = canvas.document().graph.nodes.value(instance).type;
+        QCOMPARE(canvas.document().group(later)->extra.value(kLibraryKey).toString(), QStringLiteral("local/elsewhere"));
     }
 
     void theLibraryRoundTrip() {

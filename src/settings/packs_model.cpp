@@ -70,24 +70,42 @@ void PacksModel::refresh() {
     }
     m_packs = list;
     m_library.clear();
-    for (const LibraryGroup &group : libraryGroups(m_packsFolder + QStringLiteral("/local")))
+    for (const LibraryGroup &group : libraryGroups(libraryFolder()))
         m_library << QVariantMap{{"id", group.id}, {"name", group.name}, {"version", group.version.toString()}};
     emit packsChanged();
 }
 
+QString PacksModel::libraryFolder() const { return m_packsFolder + QStringLiteral("/local"); }
+
+// A library action is quick and runs here, on the window's thread; not while a pack action (with
+// its questions) is under way.
+void PacksModel::reportLibrary(const QString &message, const Errors &errors) {
+    m_message = hasErrors(errors) ? QString() : message;
+    m_failure = hasErrors(errors) ? firstProblem(errors) : QString();
+    emit messageChanged();
+    refresh();
+    if (!hasErrors(errors))
+        emit packsModified();
+}
+
 bool PacksModel::renameLibraryGroup(const QString &id, const QString &name) {
+    if (m_busy)
+        return false;
     const Registry none;
-    const Result<QString> renamed =
-        renameInLibrary(id, name, m_registry ? *m_registry : none, m_packsFolder + QStringLiteral("/local"));
-    finish(renamed ? tr("Renamed %1 to %2. Workflows that use it keep their own copy.").arg(id, *renamed) : QString(),
-           renamed ? Errors() : renamed.errors(), bool(renamed));
+    const Result<QString> renamed = renameInLibrary(id, name, m_registry ? *m_registry : none, libraryFolder());
+    const QString message =
+        renamed ? tr("Renamed %1 to %2. Workflows that use it keep their own copy.").arg(id, *renamed) : QString();
+    reportLibrary(message, renamed ? Errors() : renamed.errors());
+    if (renamed)
+        emit libraryGroupRenamed(id, *renamed);
     return bool(renamed);
 }
 
 bool PacksModel::removeLibraryGroup(const QString &id) {
-    const Errors removed = removeFromLibrary(id, m_packsFolder + QStringLiteral("/local"));
-    finish(hasErrors(removed) ? QString() : tr("Removed %1 from the library. Workflows that use it keep their own copy.").arg(id),
-           removed, !hasErrors(removed));
+    if (m_busy)
+        return false;
+    const Errors removed = removeFromLibrary(id, libraryFolder());
+    reportLibrary(tr("Removed %1 from the library. Workflows that use it keep their own copy.").arg(id), removed);
     return !hasErrors(removed);
 }
 

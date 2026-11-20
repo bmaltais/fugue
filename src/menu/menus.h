@@ -1,7 +1,8 @@
 #pragma once
 
 // The window's menus as data (issue #50, spec 12.5): the menu bar and the canvas, node and
-// Frame context menus, each a tree of command ids. Names, keys and enabled state come from
+// Frame context menus (and the colors one the selection toolbar opens, #74), each a tree of
+// command ids. Names, keys and enabled state come from
 // the command registry (CommandRegistry::menu() merges them in), so a menu, the `?` overlay
 // and the keymap never disagree, and a command registered later shows up where it is listed.
 //
@@ -15,7 +16,7 @@
 
 namespace fugue::menus {
 
-// bar, canvas, node, frame
+// bar, canvas, node, frame, and colors (the selection toolbar's color button, #74)
 QStringList names();
 QVariantList tree(const QString &name);
 

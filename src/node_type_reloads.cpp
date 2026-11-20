@@ -19,6 +19,9 @@ void followNodeTypeReloads(RegistryReloader &reloader, const AppObjects &objects
                          Qt::QueuedConnection);
     if (objects.settings) {
         QObject::connect(objects.settings->packs(), &PacksModel::packsModified, &reloader, &RegistryReloader::reload);
+        if (objects.canvasModel) // a library group renamed in Settings: the workflow shown follows its new id (#74)
+            QObject::connect(objects.settings->packs(), &PacksModel::libraryGroupRenamed, objects.canvasModel,
+                             &CanvasModel::followLibraryRename);
         QObject::connect(objects.settings, &SettingsModel::changed, &reloader, &RegistryReloader::reloadSoon);
     }
 }

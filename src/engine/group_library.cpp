@@ -13,6 +13,7 @@
 #include <QHash>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QRegularExpression>
 #include <QSet>
 
 #include <algorithm>
@@ -53,10 +54,17 @@ Errors writeLibraryPack(const QString &dir, QStringList folders) {
     return writeJsonFile(dir + QStringLiteral("/pack.json"), pack);
 }
 
+// A folder name as the library writes them (local/<name>, a type id's name): never "..", a slash
+// or anything else that would reach outside the library from a hand-edited pack.json.
+bool isLibraryFolderName(const QString &name) {
+    static const QRegularExpression folderName(QStringLiteral("^[a-z][a-z0-9_-]*$"));
+    return folderName.match(name).hasMatch();
+}
+
 // The folder of a library group's id, local/<name>; empty when it is not one of the library's.
 QString libraryFolder(const QString &id, const QString &dir) {
     const QString name = id.section(QLatin1Char('/'), 1);
-    if (!id.startsWith(QLatin1String("local/")) || name.isEmpty() || !libraryFolders(dir).contains(name))
+    if (!id.startsWith(QLatin1String("local/")) || !isLibraryFolderName(name) || !libraryFolders(dir).contains(name))
         return {};
     return dir + QLatin1Char('/') + name;
 }
@@ -204,7 +212,10 @@ Result<SavedGroup> saveToLibrary(const Document &document, const QString &group,
 QList<LibraryGroup> libraryGroups(const QString &dir) {
     QList<LibraryGroup> groups;
     for (const QString &name : libraryFolders(dir)) {
-        const Result<QJsonObject> manifest = readJsonObject(dir + QLatin1Char('/') + name + QStringLiteral("/node.json"));
+        if (!isLibraryFolderName(name))
+            continue;
+        const Result<QJsonObject> manifest =
+            readJsonObject(dir + QLatin1Char('/') + name + QStringLiteral("/node.json"));
         if (!manifest)
             continue;
         LibraryGroup group;

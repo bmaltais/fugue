@@ -322,6 +322,27 @@ private slots:
         QDir(library).removeRecursively();
     }
 
+    // #74: inside a group Esc drops a title being edited, and only that: it does not leave the
+    // group (whose key it is), which would keep the edit as the field loses focus.
+    void escapeInATitleInsideAGroupDropsTheEdit() {
+        App app(load(kGraph));
+        QVERIFY(app.open());
+        app.model.select({"prompt", "gen"});
+        app.key(Qt::Key_E, Qt::ControlModifier | Qt::ShiftModifier);
+        QTRY_COMPARE(app.model.document().groups.size(), 1);
+        app.key(Qt::Key_Tab);
+        QTRY_VERIFY(app.model.inGroup());
+        app.model.select({"gen"});
+        app.key(Qt::Key_F2);
+        QQuickItem *field = nullptr;
+        QTRY_VERIFY((field = item(app.window->contentItem(), "titleEditor")) && field->hasActiveFocus());
+        field->setProperty("text", QStringLiteral("Dropped"));
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!item(app.window->contentItem(), "titleEditor"));
+        QVERIFY(app.model.inGroup());
+        QCOMPARE(app.model.nodeTitle("gen"), QStringLiteral("Generate Image"));
+    }
+
     // #74: a double-click on a Frame's title edits it in place.
     void aFrameTitleIsEditedInPlace() {
         App app(load(kGraph));

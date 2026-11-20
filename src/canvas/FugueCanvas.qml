@@ -9,7 +9,9 @@ import Fugue
 // draws and turns pointer and key input into calls on it.
 //
 // One MouseArea under the world takes every press, hit-testing ports and nodes through the
-// model, so the node delegates carry no input handlers. Navigation follows 12.3: the legacy
+// model, so the node delegates carry no input handlers but three made only where they show: a
+// node's warning badge (#72), a group card's Enter button and the in-place title editor (#74).
+// Navigation follows 12.3: the legacy
 // preset (ComfyUI's default) pans with a left-drag on empty canvas and zooms with the wheel;
 // the standard preset selects with a left-drag and pans with the wheel. In both, middle-drag
 // and Space+drag pan, a touchpad (a wheel event with a scroll phase;
@@ -180,6 +182,8 @@ FocusScope {
     onViewAreaChanged: {
         updateDetailArea()
         closeLens()
+        if (dropChoice.node !== undefined)
+            chooseDrop(null) // the list sits by the drop on screen
         closeWarnings() // the warnings card sits by its badge on screen: a pan or a zoom takes it away
     }
 
@@ -333,6 +337,10 @@ FocusScope {
         }
     }
 
+    // Esc closes the drop list or a pinned warnings card first, before the window's keys (Leave
+    // group, Cancel run) see it.
+    Keys.onShortcutOverride: event => event.accepted = event.key === Qt.Key_Escape
+                                                       && (dropChoice.node !== undefined || warningsNode !== "")
     Keys.onPressed: event => {
         if (event.key === Qt.Key_Escape && canvas.dropChoice.node !== undefined) {
             canvas.chooseDrop(null)
@@ -1149,9 +1157,6 @@ FocusScope {
         }
     }
 
-    // A node's warnings (docs/canvas-look.md 9, #72): one card for the canvas, shown while a
-    // node's warning count is hovered, kept up by a click until a click elsewhere, Esc or a change
-    // of level. Its text can be selected and copied.
     // A wire let go on a node's body (#74, as ComfyUI): it connects to the one port there that
     // fits (the one free one, when an input has a link already), and when several free ones do a
     // short list asks which; the drag stays open until a pick, Esc or a click elsewhere.
@@ -1160,7 +1165,9 @@ FocusScope {
         id: lens
         objectName: "lens"
         readonly property real pad: 2 * canvas.look.unit
-        readonly property rect box: canvas.lensOpen ? canvas.model.nodeRect(canvas.lensNode) : Qt.rect(0, 0, 0, 0)
+        // Read again when a node changes (a resize).
+        readonly property rect box: canvas.lensOpen && canvas.nodesTick >= 0 ? canvas.model.nodeRect(canvas.lensNode)
+                                                                               : Qt.rect(0, 0, 0, 0)
         // Centred on the node where it sits on screen, inside the canvas.
         readonly property real cx: world.x + (box.x + box.width / 2) * world.scale
         readonly property real cy: world.y + (box.y + box.height / 2) * world.scale
@@ -1224,6 +1231,14 @@ FocusScope {
             return
         }
         dropChoice = {node: node, targets: targets, x: px, y: py}
+    }
+    // The drag ended another way (an edit, an undo): the list goes with it.
+    Connections {
+        target: canvas.model
+        function onLinkDragChanged() {
+            if (canvas.dropChoice.node !== undefined && canvas.model.linkDrag.node === undefined)
+                canvas.dropChoice = ({})
+        }
     }
     function chooseDrop(target) {
         const node = dropChoice.node
@@ -1294,21 +1309,22 @@ FocusScope {
     // The selection toolbar (#74, as ComfyUI's selection toolbox): over the selection, its common
     // commands, Enter on a group and Open Image on a node with one, and "…" for the node's menu.
     // Each button is a command, shown and enabled as the menus say. Made only while shown.
-    property int toolbarTick: 0 // the nodes' changes (a move, a bypass, a new image): read again
+    property int nodesTick: 0 // the nodes' changes (a move, a bypass, a new image): read again
     Connections {
         target: canvas.model.nodes
-        function onDataChanged() { canvas.toolbarTick++ }
-        function onRowsInserted() { canvas.toolbarTick++ }
-        function onRowsRemoved() { canvas.toolbarTick++ }
-        function onModelReset() { canvas.toolbarTick++ }
+        function onDataChanged() { canvas.nodesTick++ }
+        function onRowsInserted() { canvas.nodesTick++ }
+        function onRowsRemoved() { canvas.nodesTick++ }
+        function onModelReset() { canvas.nodesTick++ }
     }
     // A new selection changes which commands apply once the registry has heard of it too.
     Connections {
         target: canvas.model
-        function onSelectionChanged() { Qt.callLater(() => canvas.toolbarTick++) }
+        function onSelectionChanged() { Qt.callLater(() => canvas.nodesTick++) }
     }
     Loader {
         active: canvas.model.selection.length > 0 && canvas.gesture === "" && canvas.renamingNode === ""
+                && canvas.renamingFrame === ""
                 && canvas.dropChoice.node === undefined && !canvas.lensOpen
         z: 8
         sourceComponent: Item {
@@ -1316,8 +1332,8 @@ FocusScope {
             objectName: "selectionToolbar"
             readonly property var selection: canvas.model.selection
             readonly property var target: selection.length === 1 ? {node: selection[0]} : ({})
-            // The selection's box on screen, read again when a node changes (toolbarTick).
-            readonly property rect box: canvas.toolbarTick >= 0 ? boxOf(selection) : Qt.rect(0, 0, 0, 0)
+            // The selection's box on screen, read again when a node changes (nodesTick).
+            readonly property rect box: canvas.nodesTick >= 0 ? boxOf(selection) : Qt.rect(0, 0, 0, 0)
             function boxOf(ids) {
                 let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity
                 for (const id of ids) {
@@ -1358,7 +1374,8 @@ FocusScope {
                 Repeater {
                     // Always there: Bypass, Frame, Delete (off when they cannot act), the colors and
                     // the menu; the rest only where they apply.
-                    model: [{command: "run.to-here", glyph: "play"}, {command: "node.bypass", glyph: "corner-down-right"},
+                    model: [{command: "run.to-here", glyph: "play"},
+                            {command: "node.bypass", glyph: "corner-down-right"},
                             {command: "colors", glyph: "palette"}, {command: "frame.make", glyph: "frame"},
                             {command: "group.enter", glyph: "log-in"}, {command: "node.open-image", glyph: "image"},
                             {command: "edit.delete", glyph: "trash-2"}, {command: "more", glyph: "ellipsis"}]
@@ -1366,12 +1383,12 @@ FocusScope {
                         id: button
                         required property var modelData
                         readonly property bool menu: modelData.command === "colors" || modelData.command === "more"
-                        // Read again when a node or the selection changes (toolbarTick).
-                        readonly property var entry: canvas.toolbarTick < 0 ? ({})
+                        // Read again when a node or the selection changes (nodesTick).
+                        readonly property var entry: canvas.nodesTick < 0 ? ({})
                             : menu ? ({available: true, enabled: true, label: ""})
                             : App.commands.entry(modelData.command, toolbar.target)
-                        readonly property bool always: menu || modelData.command === "node.bypass"
-                                                        || modelData.command === "frame.make" || modelData.command === "edit.delete"
+                        readonly property bool always: menu || ["node.bypass", "frame.make", "edit.delete"]
+                                                                 .indexOf(modelData.command) >= 0
                         objectName: "toolbar-" + modelData.command
                         visible: entry.available === true && (always || entry.enabled === true)
                         width: 7 * canvas.look.unit
@@ -1385,7 +1402,8 @@ FocusScope {
                             anchors.centerIn: parent
                             look: canvas.look
                             name: button.modelData.glyph
-                            color: buttonArea.containsMouse && button.entry.enabled ? canvas.look.text : canvas.look.label
+                            color: buttonArea.containsMouse && button.entry.enabled ? canvas.look.text
+                                                                                    : canvas.look.label
                         }
                         MouseArea {
                             id: buttonArea
@@ -1417,6 +1435,9 @@ FocusScope {
         function onNodeRenameRequested(node) { canvas.renamingNode = node }
         function onFrameRenameRequested(frame) { canvas.renamingFrame = frame }
     }
+    // A node's warnings (docs/canvas-look.md 9, #72): one card for the canvas, shown while a
+    // node's warning count is hovered, kept up by a click until a click elsewhere, Esc or a change
+    // of level. Its text can be selected and copied.
     property string warningsNode: ""
     property bool warningsPinned: false
     function showWarnings(nodeId, warnings, badge, pin) {

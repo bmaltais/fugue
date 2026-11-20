@@ -240,8 +240,8 @@ Item {
                         clip: true
                         selectByMouse: true
                         color: root.look.text
-                        selectionColor: root.look.selectedRow
-                        selectedTextColor: root.look.text
+                        selectionColor: root.look.accent
+                        selectedTextColor: root.look.accentForeground
                         font.pixelSize: root.look.textSize
                         Accessible.role: Accessible.EditableText
                         Accessible.name: qsTr("Filter the shortcuts")

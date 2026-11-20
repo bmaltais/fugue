@@ -104,7 +104,8 @@ Rectangle {
         y: root.tall ? Math.round(1.5 * root.look.unit) + 16 : 0 // under the caption line (#74)
         z: 1
         width: root.width - x - root.pad - root.decorWidth - (glyphMark.visible ? glyphMark.width + root.look.unit : 0)
-        height: root.tall ? root.height - 2 * y : root.height
+        // Under the caption line, 1.5u above the bottom (as above the caption).
+        height: root.tall ? root.height - y - Math.round(1.5 * root.look.unit) : root.height
         verticalAlignment: root.tall ? Text.AlignTop : Text.AlignVCenter
         horizontalAlignment: root.tall ? Text.AlignLeft : Text.AlignRight
         text: root.valueText

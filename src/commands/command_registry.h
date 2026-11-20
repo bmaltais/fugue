@@ -136,7 +136,7 @@ public:
     // label and description (translated), keys, available (has a handler), enabled,
     // checkable, checked. Empty for an unknown id. A menu asks again each time it opens.
     Q_INVOKABLE QVariantMap entry(const QString &id, const QVariantMap &target = {}) const;
-    // A menu tree of menus.h (bar, canvas, node, frame), each command item merged with its
+    // A menu tree of menus.h (bar, canvas, node, frame, colors), each command item merged with its
     // entry() and titles translated; commands not registered are left out. A context menu (any
     // but the bar) also leaves out commands not built and `hideWhenOff` ones that are off (#72),
     // and never starts, ends or doubles a separator.

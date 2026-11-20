@@ -144,8 +144,8 @@ Popup {
                     anchors.verticalCenter: parent.verticalCenter
                     clip: true
                     color: root.look.text
-                    selectionColor: root.look.selectedRow
-                    selectedTextColor: root.look.text
+                    selectionColor: root.look.accent
+                    selectedTextColor: root.look.accentForeground
                     selectByMouse: true
                     font.pixelSize: root.look.searchFieldSize
                     Accessible.role: Accessible.EditableText

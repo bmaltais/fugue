@@ -214,12 +214,14 @@ ColumnLayout {
             }
             SettingsParts.SmallButton {
                 objectName: "libraryRename-" + entry.modelData.id
+                enabled: !page.model.busy
                 visible: !entry.renaming && !entry.confirming
                 text: qsTr("Rename…")
                 onClicked: entry.renaming = true
             }
             SettingsParts.SmallButton {
                 objectName: "libraryRemove-" + entry.modelData.id
+                enabled: !page.model.busy
                 visible: !entry.renaming && !entry.confirming
                 text: qsTr("Remove…")
                 onClicked: entry.confirming = true
@@ -232,6 +234,7 @@ ColumnLayout {
             }
             SettingsParts.SmallButton {
                 objectName: "libraryRemoveYes-" + entry.modelData.id
+                enabled: !page.model.busy
                 visible: entry.confirming
                 highlighted: true
                 text: qsTr("Remove")

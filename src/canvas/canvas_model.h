@@ -462,6 +462,9 @@ public:
     Q_INVOKABLE void renameNode(const QString &node, const QString &title);
     // Renames a library group and points this workflow's definitions at its new id (#74).
     Q_INVOKABLE bool renameLibraryGroup(const QString &libraryId, const QString &name);
+    // A library group's id changed (renamed here or in Settings): every definition linked to it
+    // follows, in every undo step too, as the old folder is gone.
+    void followLibraryRename(const QString &from, const QString &to);
     // True when the selection is not empty and every selected node has the state the toggle
     // commands act on: "bypass", "mute", "collapsed" or "pinned" (what they would remove).
     bool selectionAll(const QString &state) const;
