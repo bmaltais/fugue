@@ -36,6 +36,75 @@ QJsonObject withoutPos(QJsonObject entry) {
     return entry;
 }
 
+// A layout.links key (4.5): "<node>.<input>", or "<node>.<input>#<item>" for a list item.
+struct LinkKey {
+    QString node, input;
+    int item = -1;
+    QString text() const { return node + '.' + input + (item >= 0 ? '#' + QString::number(item) : QString()); }
+};
+
+LinkKey parseLinkKey(const QString &key) {
+    const QString rest = key.section('.', 1);
+    const qsizetype hash = rest.indexOf('#');
+    return {key.section('.', 0, 0), hash < 0 ? rest : rest.left(hash), hash < 0 ? -1 : rest.mid(hash + 1).toInt()};
+}
+
+// The links into an input, as (source, item) pairs.
+QList<std::pair<PortRef, int>> linksInto(const Document &document, const QString &node, const QString &input) {
+    const auto it = document.graph.nodes.constFind(node);
+    return it == document.graph.nodes.constEnd() ? QList<std::pair<PortRef, int>>() : linksIn(it->inputs.value(input));
+}
+
+// Reroute points belong to their link: after an edit from `before` to `after`, each key of
+// after's layout.links names the same link (same source, same input) or goes. A list item's
+// points follow it when items before it go; a new link into the same slot gets none.
+void followReroutes(const Document &before, Document &after) {
+    const QJsonObject was = before.layout.value("links").toObject();
+    const QJsonObject now = after.layout.value("links").toObject();
+    if (now.isEmpty())
+        return;
+    QJsonObject kept;
+    QSet<QString> taken;
+    // Each key's link before the edit, when it had one; then where that link is now.
+    auto source = [](const Document &document, const LinkKey &key) -> std::optional<PortRef> {
+        for (const auto &[from, item] : linksInto(document, key.node, key.input))
+            if (item == key.item)
+                return from;
+        return std::nullopt;
+    };
+    for (auto it = now.constBegin(); it != now.constEnd(); ++it) {
+        const LinkKey key = parseLinkKey(it.key());
+        const std::optional<PortRef> old = was.contains(it.key()) ? source(before, key) : std::nullopt;
+        if (!old) {
+            // Not there before (a paste brings its own): kept while it names a link.
+            if (source(after, key))
+                kept.insert(it.key(), it.value());
+            continue;
+        }
+        std::optional<int> at;
+        for (const auto &[from, item] : linksInto(after, key.node, key.input)) {
+            const QString text = LinkKey{key.node, key.input, item}.text();
+            if (!(from == *old) || taken.contains(text))
+                continue;
+            if (!at || item == key.item)
+                at = item;
+            if (item == key.item)
+                break;
+        }
+        if (!at)
+            continue;
+        const QString text = LinkKey{key.node, key.input, *at}.text();
+        taken.insert(text);
+        kept.insert(text, it.value());
+    }
+    if (kept == now)
+        return;
+    if (kept.isEmpty())
+        after.layout.remove("links");
+    else
+        after.layout.insert("links", kept);
+}
+
 } // namespace
 
 // One undo step: the document before and after. Pushing it does nothing more, since the edit
@@ -283,7 +352,9 @@ void CanvasModel::commit(const Document &document, const QString &text) {
     QStringList order;
     for (const NodeRow &row : m_rows)
         order << row.id;
-    restore({document, order}, false);
+    Document made = document;
+    followReroutes(m_document, made);
+    restore({made, order}, false);
     endEdit(text);
 }
 
@@ -389,7 +460,8 @@ void CanvasModel::deleteSelection() {
     for (Node &node : document.graph.nodes)
         stripLinks(node, [&](const PortRef &from) { return gone.contains(from.node); });
 
-    // Their layout goes too: entries, reroute points into them, places in Frames.
+    // Their layout goes too: entries and places in Frames (commit drops the reroute points
+    // of the links that went).
     QJsonObject layout = document.layout;
     QJsonObject entries = layout.value("nodes").toObject();
     for (const QString &id : ids)
@@ -400,13 +472,6 @@ void CanvasModel::deleteSelection() {
         layout.remove("nodes");
     else
         layout.insert("nodes", entries);
-    if (layout.contains("links")) {
-        QJsonObject links = layout.value("links").toObject();
-        for (const QString &key : links.keys())
-            if (gone.contains(key.section('.', 0, 0)))
-                links.remove(key);
-        layout.insert("links", links);
-    }
     if (layout.contains("frames")) {
         QJsonArray frames;
         for (const QJsonValue &value : layout.value("frames").toArray()) {

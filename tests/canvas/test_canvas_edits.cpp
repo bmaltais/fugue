@@ -445,6 +445,41 @@ private slots:
         QVERIFY(canvas.canRedo());
     }
 
+    // Reroute points (layout.links) belong to a link: they go with it, never to the next
+    // link into the same input, and a list item's points follow it when items before it go.
+    void reroutePointsGoWithTheirLink() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(chain));
+        auto points = [&] { return canvas.document().layout.value("links").toObject(); };
+        QVERIFY(canvas.disconnectInput("save", "image"));
+        QVERIFY(!points().contains("save.image"));
+        QVERIFY(canvas.connectPorts("gen", "image", "save", "image"));
+        QVERIFY(canvas.reroutes().isEmpty());
+        canvas.undo();
+        canvas.undo();
+        QVERIFY(points().contains("save.image")); // undo brings them back
+        // The source going takes them too.
+        canvas.select({"gen"});
+        canvas.deleteSelection();
+        QVERIFY(!points().contains("save.image"));
+        canvas.undo();
+        QVERIFY(canvas.disconnectPort("gen", "image", true));
+        QVERIFY(!points().contains("save.image"));
+
+        Document listed = document(R"({"fugue": 1, "graph": {"nodes": {
+            "a": {"type": "fugue/load-image", "version": "1.0.0", "inputs": {}},
+            "b": {"type": "fugue/load-image", "version": "1.0.0", "inputs": {}},
+            "edit": {"type": "fugue/edit-image", "version": "1.0.0",
+                     "inputs": {"images": [{"from": "a.image"}, {"from": "b.image"}]}}}},
+          "layout": {"nodes": {"a": {"pos": [0, 0]}, "b": {"pos": [0, 300]}, "edit": {"pos": [400, 0]}}}})");
+        // The second item's points (built here: moc misreads a '#' inside a raw string).
+        listed.layout.insert("links", QJsonObject{{QStringLiteral("edit.images") + QChar('#') + "1",
+                                                   QJsonObject{{"points", QJsonArray{QJsonArray{300, 400}}}}}});
+        canvas.setDocument(listed);
+        QVERIFY(canvas.disconnectInput("edit", "images", 0));
+        QCOMPARE(points().keys(), QStringList{QStringLiteral("edit.images") + QChar('#') + "0"});
+        QCOMPARE(canvas.reroutes().size(), 1);
+    }
 
     // A gesture's undo step holds the gesture alone: an edit made while it is open (a key,
     // a run's seeds) ends it first and is a step of its own.
