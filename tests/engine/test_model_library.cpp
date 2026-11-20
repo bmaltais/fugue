@@ -7,8 +7,13 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QTemporaryDir>
 #include <QtTest>
+
+#include <tuple>
 
 #include "engine/file_hashes.h"
 #include "engine/model_library.h"
@@ -55,6 +60,34 @@ QJsonObject handle(const QString &resource, const QString &hash, const QString &
     if (!hash.isEmpty())
         object.insert("hash", hash);
     return object;
+}
+
+// A safetensors header with these tensor names (shapes do not matter here), for a file's kind.
+QByteArray safetensors(const QStringList &tensors) {
+    QJsonObject header;
+    for (const QString &name : tensors)
+        header.insert(name, QJsonObject{{"dtype", "F16"}, {"shape", QJsonArray{4, 4}}, {"data_offsets", QJsonArray{0, 0}}});
+    const QByteArray json = QJsonDocument(header).toJson(QJsonDocument::Compact);
+    QByteArray out;
+    for (int i = 0; i < 8; ++i)
+        out.append(char((quint64(json.size()) >> (8 * i)) & 0xff));
+    return out + json;
+}
+const QStringList kLora{"diffusion_model.double_blocks.0.img_attn.proj.lora_A.weight",
+                        "diffusion_model.double_blocks.0.img_attn.proj.lora_B.weight"};
+const QStringList kVae{"decoder.conv_in.weight"};
+
+// The generation types as the built-in pack declares them (only their folders matter here).
+void declareGenerationTypes(Registry &registry) {
+    for (const auto &[id, folder, files] : {std::tuple{"fugue/lora", "loras", "lora"}, std::tuple{"fugue/vae", "vae", "vae"}}) {
+        DeclaredPortType declared;
+        declared.type = type(QString::fromLatin1(id));
+        declared.kind = PortKind::Resource;
+        declared.name = QStringLiteral("A model");
+        declared.folders = {QString::fromLatin1(folder)};
+        declared.files = QString::fromLatin1(files); // what a folder of one kind is told by (pack.json "files")
+        QVERIFY(registry.add(declared).isEmpty());
+    }
 }
 
 } // namespace
@@ -247,6 +280,59 @@ private slots:
         QVERIFY(QFile::remove(root.filePath("encoder/qwen.gguf")));
         const ModelLibrary again({root.path()}, &registry);
         QCOMPARE(again.withPaths(derived, hashes).error().code, QStringLiteral("model_missing"));
+    }
+
+    // #86: a model path that is itself a LoRA folder (the owner's /mnt/windows/lora/flux.2).
+    void aFolderOfOneKindIsFoundByItsFiles() {
+        QTemporaryDir own, loras;
+        Registry registry;
+        declareGenerationTypes(registry);
+        writeFile(loras.filePath("klein-restore.safetensors"), safetensors(kLora));
+        writeFile(loras.filePath("styles/ink.safetensors"), safetensors(kLora));
+        const ModelLibrary library({own.path(), loras.path()}, &registry);
+        QCOMPARE(names(library.list(type("fugue/lora"))), (QStringList{"klein-restore.safetensors", "styles/ink.safetensors"}));
+        QCOMPARE(library.list(type("fugue/lora")).value(0).folder, loras.path());
+        QVERIFY(library.list(type("fugue/vae")).isEmpty());
+        // Fugue's own folder keeps its layout, where a missing model's hint sends it.
+        QCOMPARE(library.folders(type("fugue/vae")), QStringList{own.path() + "/vae"});
+    }
+
+    void aKindSetInTheSettingsWinsOverTheFiles() {
+        QTemporaryDir own, folder;
+        Registry registry;
+        declareGenerationTypes(registry);
+        writeFile(folder.filePath("odd.safetensors"), safetensors(kLora));
+        const ModelLibrary library({own.path(), folder.path()}, &registry, {{folder.path(), "fugue/vae"}});
+        QCOMPARE(names(library.list(type("fugue/vae"))), QStringList{"odd.safetensors"});
+        QVERIFY(library.list(type("fugue/lora")).isEmpty());
+        // "layout": ComfyUI's folders inside, whatever the files say.
+        writeFile(folder.filePath("loras/x.safetensors"), safetensors(kLora));
+        const ModelLibrary laidOut({own.path(), folder.path()}, &registry, {{folder.path(), ModelLibrary::kLayout}});
+        QCOMPARE(names(laidOut.list(type("fugue/lora"))), QStringList{"x.safetensors"});
+    }
+
+    // No kind most of its files share, and nothing is listed from it rather than a guess.
+    void aMixedFolderHoldsNothingFugueCanTell() {
+        QTemporaryDir own, folder;
+        Registry registry;
+        declareGenerationTypes(registry);
+        writeFile(folder.filePath("a.safetensors"), safetensors(kLora));
+        writeFile(folder.filePath("b.safetensors"), safetensors(kVae));
+        writeFile(folder.filePath("c.safetensors"), "not a model");
+        const ModelLibrary library({own.path(), folder.path()}, &registry);
+        QVERIFY(library.list(type("fugue/lora")).isEmpty());
+        QVERIFY(library.list(type("fugue/vae")).isEmpty());
+    }
+
+    void theSettingsSayWhatAModelPathHolds() {
+        Settings settings;
+        settings.modelPaths = {"~/loras/flux.2", "/mnt/models"};
+        settings.modelFolderKinds = {{"~/loras/flux.2", "fugue/lora"}, {"/mnt/models/", "layout"}};
+        const QHash<QString, QString> kinds = ModelLibrary::rootKinds(settings);
+        QCOMPARE(kinds.value(QDir::homePath() + "/loras/flux.2"), QStringLiteral("fugue/lora"));
+        QCOMPARE(kinds.value("/mnt/models"), QStringLiteral("layout"));
+        QVERIFY(checkSetting("model_folder_kinds", QJsonObject{{"/x", "fugue/lora"}, {"/y", "layout"}}).isEmpty());
+        QVERIFY(!checkSetting("model_folder_kinds", QJsonObject{{"/x", "loras please"}}).isEmpty());
     }
 
     void aChangedFileNoLongerMatchesItsRememberedHash() {

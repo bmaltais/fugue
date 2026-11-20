@@ -70,6 +70,13 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 - New: the files that fit the picked diffusion model first, under their folder; then an "Other" heading with the rest, those that do not fit in the label color (`dim`), still pickable.
 - Rule: Gaps (one heading per chunk, as the folders already are). Posture: no new decision; the likely pick is the first row once the files' headers are read, at once on a later open, a few ms after the first.
 
+### 2026-11-20 what an extra model folder holds (#86)
+
+- Control: under each Extra model folder, `src/settings/PathsSetting.qml` (`model_paths-holds-<n>-<kind>`), a row of choices (`Choices.qml`, the settings' segmented buttons), then `model_paths-found-<n>`, what its files say.
+- Old: a path and its remove button.
+- New: the path, then its choices (Found by its files, ComfyUI layout, LoRAs, VAEs, Diffusion models, Text encoders, Checkpoints), then "Found: LoRAs" in the label color while the choice is Found by its files.
+- Rule: Floor (each choice is a SmallButton, 7u = 28px tall). Gaps (one unit inside the folder's chunk, as the folders' list keeps). Posture: the default needs no decision; the choices are there for a wrong guess.
+
 ## Unread
 
 Settings, the shortcuts overlay, the quit question, About, every menu except Run, the context menus, the workflow dialogs and their questions (those questions are a row of buttons), the group dialogs, image save, the widget pickers (but their search field), the magnifier.

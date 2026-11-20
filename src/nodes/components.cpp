@@ -74,16 +74,15 @@ QJsonObject modelHandle(const QJsonObject &derived) { return QJsonObject{{"resou
 
 // model_mismatch when a model's text encoder or VAE does not fit its diffusion model, by their
 // headers (engine/model_shape.h): said here, before the helper fails to load them with less to say.
-// The files' headers, kept for the process: Load Models' check reads them on every canvas check.
-ModelShapes &modelShapes() {
-    static ModelShapes shapes;
-    return shapes;
-}
+// The inputs a mismatch of each part is blamed on.
+struct PartInputs {
+    QString textEncoder, vae, lora;
+};
 
-// `encoderInput` and `vaeInput` are the inputs blamed for each part.
-std::optional<Error> partsMismatch(const QJsonObject &derived, const QJsonObject &paths, const QString &encoderInput,
-                                   const QString &vaeInput) {
-    ModelShapes &shapes = modelShapes();
+// `loras` are the model's LoRAs with their paths, as ModelFiles has them, in Apply LoRA's order.
+std::optional<Error> partsMismatch(const QJsonObject &derived, const QJsonObject &paths, const PartInputs &inputs,
+                                   const QJsonArray &loras = {}) {
+    ModelShapes &shapes = ModelShapes::shared(); // Load Models' check reads them on every canvas check
     const std::optional<ModelShape> diffusion = shapes.of(paths.value(QStringLiteral("diffusion_model_path")).toString());
     if (!diffusion)
         return std::nullopt;
@@ -110,7 +109,7 @@ std::optional<Error> partsMismatch(const QJsonObject &derived, const QJsonObject
                                 : QStringLiteral("it is %1 wide, and the model reads %2.")
                                       .arg(encoder->hiddenSize.value_or(0))
                                       .arg(diffusion->textWidth.value_or(0));
-        return mismatch(encoderInput, QStringLiteral("The text encoder %1 does not fit %2: %3").arg(name("text_encoder"), name("base"), why),
+        return mismatch(inputs.textEncoder, QStringLiteral("The text encoder %1 does not fit %2: %3").arg(name("text_encoder"), name("base"), why),
                         QStringLiteral("Pick another in Load Models: its list shows the text encoders that fit first."));
     }
     const std::optional<ModelShape> vae = shapes.of(paths.value(QStringLiteral("vae_path")).toString());
@@ -121,8 +120,26 @@ std::optional<Error> partsMismatch(const QJsonObject &derived, const QJsonObject
                                 : QStringLiteral("it takes %1-channel latents, and the model makes %2.")
                                       .arg(vae->latentChannels.value_or(0))
                                       .arg(diffusion->latentChannels.value_or(0));
-        return mismatch(vaeInput, QStringLiteral("The VAE %1 does not fit %2: %3").arg(name("vae"), name("base"), why),
+        return mismatch(inputs.vae, QStringLiteral("The VAE %1 does not fit %2: %3").arg(name("vae"), name("base"), why),
                         QStringLiteral("Pick another in Load Models: its list shows the VAEs that fit first."));
+    }
+    // Each LoRA of the model (Apply LoRA's steps, in order), against the diffusion model's layers.
+    const QJsonArray steps = derived.value(QStringLiteral("apply")).toArray();
+    for (qsizetype i = 0; i < steps.size() && i < loras.size(); ++i) {
+        const std::optional<ModelShape> lora = shapes.of(loras.at(i).toObject().value(QStringLiteral("path")).toString());
+        LayerMismatch layer;
+        if (!lora || loraFits(*diffusion, *lora, &layer) != Fit::DoesNotFit)
+            continue;
+        const QString loraName = steps.at(i).toObject().value(QStringLiteral("lora")).toObject().value(QStringLiteral("name")).toString();
+        return mismatch(inputs.lora,
+                        QStringLiteral("The LoRA %1 does not fit %2: it changes a layer %3 to %4 wide that is %5 to %6 "
+                                       "in the model.")
+                            .arg(loraName, name("base"))
+                            .arg(layer.lora.in)
+                            .arg(layer.lora.out)
+                            .arg(layer.model.in)
+                            .arg(layer.model.out),
+                        QStringLiteral("Pick another in Apply LoRA: its list shows the LoRAs that fit first."));
     }
     return std::nullopt;
 }
@@ -156,7 +173,7 @@ Result<ModelFiles> modelFiles(const QJsonObject &model, const QString &input, co
     }
     if (missing)
         return *missing;
-    if (const std::optional<Error> mismatch = partsMismatch(derived, files.context, input, input))
+    if (const std::optional<Error> mismatch = partsMismatch(derived, files.context, {input, input, input}, files.loras))
         return *mismatch;
     return files;
 }
@@ -236,7 +253,7 @@ public:
                                   {"vae", context.input(QStringLiteral("vae")).json()}};
         // Blamed on the part that does not fit, where its picker is.
         if (const std::optional<Error> mismatch =
-                partsMismatch(derived, paths, QStringLiteral("text_encoder"), QStringLiteral("vae")))
+                partsMismatch(derived, paths, {QStringLiteral("text_encoder"), QStringLiteral("vae"), QString()}))
             return {*mismatch};
         return {};
     }

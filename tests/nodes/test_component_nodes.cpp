@@ -81,7 +81,8 @@ public:
         QDir().mkpath(workDir());
     }
 
-    // A model file in a folder of Fugue's models folder (the test's own data folder), and its handle.
+    // A model file in a folder of Fugue's models folder (the test's own data folder), and its
+    // handle.
     QJsonObject model(const QString &type, const QString &file, const QByteArray &bytes = {}) {
         const QByteArray content = bytes.isEmpty() ? file.toUtf8() + " weights" : bytes;
         writeFile(modelPath(file), content);
@@ -278,6 +279,36 @@ private slots:
         QVERIFY(!channels);
         QCOMPARE(channels.error().message, QStringLiteral("The VAE flux2-vae.safetensors does not fit z.safetensors: "
                                                           "it takes 32-channel latents, and the model makes 16."));
+    }
+
+    // #86: a LoRA whose layers are another width than the model's (a Klein 4B LoRA on Klein 9B).
+    void aLoraThatDoesNotFitIsModelMismatch() {
+        Bench bench;
+        const QJsonObject klein9b = bench.model("fugue/diffusion-model", "diffusion_models/klein9b.safetensors",
+                                                safetensors({{"txt_in.weight", QJsonArray{4096, 12288}},
+                                                             {"img_in.weight", QJsonArray{4096, 128}},
+                                                             {"double_blocks.0.img_attn.proj.weight", QJsonArray{4096, 4096}}}));
+        const QJsonObject parts{{"diffusion_model", klein9b},
+                                {"text_encoder", bench.model("fugue/text-encoder", "text_encoders/qwen_3_8b.safetensors",
+                                                             safetensors({{"model.embed_tokens.weight", QJsonArray{151936, 4096}}}))},
+                                {"vae", bench.model("fugue/vae", "vae/flux2-vae.safetensors",
+                                                    safetensors({{"decoder.conv_in.weight", QJsonArray{512, 32, 3, 3}}}))}};
+        const auto lora = [&](const QString &file, int width) {
+            return bench.model("fugue/lora", "loras/" + file,
+                               safetensors({{"diffusion_model.double_blocks.0.img_attn.proj.lora_A.weight", QJsonArray{16, width}},
+                                            {"diffusion_model.double_blocks.0.img_attn.proj.lora_B.weight", QJsonArray{width, 16}}}));
+        };
+        const auto encode = [&](const QJsonObject &with) {
+            const Result<Values> applied =
+                bench.run(kApplyLora, {{"model", Value(bench.loaded(parts))}, {"lora", Value(with)}});
+            return bench.request(kTextEncode, {{"model", applied->value("model")}, {"prompt", Value("a fox")}});
+        };
+        QVERIFY(encode(lora("klein9b-turbo.safetensors", 4096)));
+        const Result<JobRequest> wrong = encode(lora("klein4b-rhc.safetensors", 3072));
+        QVERIFY(!wrong);
+        QCOMPARE(wrong.error().code, QStringLiteral("model_mismatch"));
+        QCOMPARE(wrong.error().message, QStringLiteral("The LoRA klein4b-rhc.safetensors does not fit klein9b.safetensors: "
+                                                       "it changes a layer 3072 to 3072 wide that is 4096 to 4096 in the model."));
     }
 
     // ... and the canvas check says so before a run, on the part that does not fit (8.5).

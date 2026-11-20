@@ -42,7 +42,8 @@
       "name": "Model",
       "folders": [
         "checkpoints"
-      ]
+      ],
+      "files": "checkpoint"
     },
     {
       "id": "fugue/diffusion-model",
@@ -53,7 +54,8 @@
         "diffusion-model",
         "diffusion_models",
         "unet"
-      ]
+      ],
+      "files": "diffusion-model"
     },
     {
       "id": "fugue/text-encoder",
@@ -64,7 +66,8 @@
         "text-encoder",
         "text_encoders",
         "clip"
-      ]
+      ],
+      "files": "text-encoder"
     },
     {
       "id": "fugue/vae",
@@ -73,7 +76,8 @@
       "name": "VAE",
       "folders": [
         "vae"
-      ]
+      ],
+      "files": "vae"
     },
     {
       "id": "fugue/lora",
@@ -83,7 +87,8 @@
       "folders": [
         "lora",
         "loras"
-      ]
+      ],
+      "files": "lora"
     },
     {
       "id": "fugue/latent",

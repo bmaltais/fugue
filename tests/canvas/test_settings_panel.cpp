@@ -161,6 +161,39 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // #86: an extra model folder says what it holds: what its files say, or a kind set here.
+    void aModelFolderShowsWhatItHoldsAndTakesAKind() {
+        QTemporaryDir loras;
+        const QByteArray json = "{\"x.lora_A.weight\": {\"dtype\": \"F16\", \"shape\": [4, 4], \"data_offsets\": [0, 0]}}";
+        QByteArray header;
+        for (int i = 0; i < 8; ++i)
+            header.append(char((quint64(json.size()) >> (8 * i)) & 0xff));
+        for (const char *name : {"a.safetensors", "b.safetensors"}) {
+            QFile file(loras.filePath(QString::fromLatin1(name)));
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write(header + json);
+        }
+        App app(load(emptyDoc));
+        QVERIFY(app.open());
+        app.commands.trigger("app.settings");
+        QTRY_VERIFY(panelOpen(app.window));
+        click(app, NEED("settingsPage-1"));
+        type(app, NEED("model_paths-add"), loras.path());
+        QTRY_COMPARE(fugue::SettingsModel(app.settings.path()).modelPaths(), QStringList{loras.path()});
+        QTRY_COMPARE(NEED("model_paths-found-0")->property("text").toString(), QStringLiteral("Found: LoRAs"));
+        click(app, NEED("model_paths-holds-0-fugue/vae"));
+        QTRY_COMPARE(fugue::SettingsModel(app.settings.path()).modelFolderKind(loras.path()), QStringLiteral("fugue/vae"));
+        QTRY_VERIFY(!find(app.window, "model_paths-found-0")); // a set kind needs no finding: hidden
+        click(app, NEED("model_paths-holds-0-"));
+        QTRY_VERIFY(fugue::SettingsModel(app.settings.path()).modelFolderKind(loras.path()).isEmpty());
+        click(app, NEED("model_paths-holds-0-layout"));
+        QTRY_COMPARE(fugue::SettingsModel(app.settings.path()).modelFolderKind(loras.path()), QStringLiteral("layout"));
+        click(app, NEED("model_paths-remove-0")); // its kind goes with it
+        QTRY_VERIFY(fugue::SettingsModel(app.settings.path()).modelPaths().isEmpty());
+        QTRY_VERIFY(fugue::SettingsModel(app.settings.path()).modelFolderKind(loras.path()).isEmpty());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void runOptionsReachNewNodes() {
         App app(load(emptyDoc));
         QVERIFY(app.open());

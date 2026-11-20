@@ -533,9 +533,33 @@ void WidgetEdit::requestModels(const QString &node, const QString &input) {
 
 namespace {
 const QString kDiffusionModel = QStringLiteral("fugue/diffusion-model");
+const QString kModel = QStringLiteral("fugue/model");
 const QString kTextEncoder = QStringLiteral("fugue/text-encoder");
 const QString kVae = QStringLiteral("fugue/vae");
+const QString kLora = QStringLiteral("fugue/lora");
 } // namespace
+
+// The most links followed back to a diffusion model: a chain of Apply LoRAs longer than that
+// gets no list order.
+constexpr int kMostModelSteps = 16;
+
+QJsonObject WidgetEdit::diffusionModelOf(const QString &node, int depth) const {
+    if (depth > kMostModelSteps)
+        return {};
+    const auto &inputs = m_canvas->scopeDocument().graph.nodes.value(node).inputs;
+    for (auto it = inputs.begin(); it != inputs.end(); ++it) {
+        const InputSpec *spec = m_canvas->inputSpec(node, it.key());
+        if (!spec)
+            continue;
+        const QString type = spec->type.type.toString();
+        if (type == kDiffusionModel && it.value().kind() == InputValue::Kind::Resource)
+            return it.value().handle();
+        if (type == kModel && it.value().kind() == InputValue::Kind::Link) // Apply LoRA's, from Load Models
+            if (QJsonObject found = diffusionModelOf(it.value().from().node, depth + 1); !found.isEmpty())
+                return found;
+    }
+    return {};
+}
 
 QString WidgetEdit::fitsKey(const QString &node, const QString &input) { return node + QLatin1Char('\n') + input; }
 
@@ -543,18 +567,13 @@ void WidgetEdit::requestFits(const QString &node, const QString &input) {
     const QString key = fitsKey(node, input);
     const Target t = target(node, input);
     const QString part = t.spec->type.type.toString();
-    if (part != kTextEncoder && part != kVae) {
+    if (part != kTextEncoder && part != kVae && part != kLora) {
         m_fits.remove(key);
         return;
     }
-    // The node's diffusion model on the level shown, when one is picked (Load Models).
-    QJsonObject handle;
-    const auto &inputs = m_canvas->scopeDocument().graph.nodes.value(node).inputs;
-    for (auto it = inputs.begin(); it != inputs.end(); ++it) {
-        const InputSpec *spec = m_canvas->inputSpec(node, it.key());
-        if (spec && spec->type.type.toString() == kDiffusionModel && it.value().kind() == InputValue::Kind::Resource)
-            handle = it.value().toJson().toObject();
-    }
+    // The diffusion model on the level shown: the node's (Load Models), or the one its model
+    // comes from (Apply LoRA).
+    const QJsonObject handle = diffusionModelOf(node);
     // A check reads no model file to find it: the one with the handle's name will do.
     const Result<QString> diffusion =
         handle.isEmpty() ? Result<QString>(Error{}) : library().resolve(handle, hashes(), ModelLibrary::Hashing::RememberedOnly);
@@ -566,12 +585,13 @@ void WidgetEdit::requestFits(const QString &node, const QString &input) {
     QStringList paths;
     for (const Model &model : m_diskModels.value(modelsKey(node, input)))
         paths << model.path;
-    const bool encoder = part == kTextEncoder;
+    using Rule = Fit (*)(const ModelShape &, const ModelShape &);
+    const Rule rule = part == kTextEncoder ? Rule(loadableTextEncoderFits)
+                      : part == kVae        ? Rule(vaeFits)
+                                            : Rule([](const ModelShape &model, const ModelShape &lora) { return loraFits(model, lora); });
     // Whether `shape` fits `wanted`; nothing when its header tells nothing.
-    const auto judge = [encoder](const std::optional<ModelShape> &wanted, const std::optional<ModelShape> &shape) {
-        const Fit fit = !wanted || !shape ? Fit::Unknown
-                        : encoder         ? loadableTextEncoderFits(*wanted, *shape)
-                                          : vaeFits(*wanted, *shape);
+    const auto judge = [rule](const std::optional<ModelShape> &wanted, const std::optional<ModelShape> &shape) {
+        const Fit fit = !wanted || !shape ? Fit::Unknown : rule(*wanted, *shape);
         return fit == Fit::Unknown ? std::optional<bool>() : std::optional<bool>(fit == Fit::Fits);
     };
 
@@ -594,7 +614,7 @@ void WidgetEdit::requestFits(const QString &node, const QString &input) {
     }
     // Else read on the pool; a later request, or the window closing, makes this one moot.
     QPointer<WidgetEdit> self(this);
-    std::shared_ptr<ModelShapes> shapes = m_shapes;
+    ModelShapes *shapes = m_shapes;
     std::shared_ptr<std::atomic_bool> stop = m_stopHashing;
     const int asked = fits.asked;
     m_shapePool.start([self, shapes, stop, judge, key, asked, model = diffusion.value(), paths] {
@@ -676,7 +696,9 @@ QString WidgetEdit::setModelName(const QString &node, const QString &input, cons
 // --- files on disk -------------------------------------------------------------
 
 ModelLibrary WidgetEdit::library() const {
-    return ModelLibrary(m_modelRoots ? *m_modelRoots : ModelLibrary::roots(currentSettings()), m_registry);
+    if (m_modelRoots)
+        return ModelLibrary(*m_modelRoots, m_registry);
+    return ModelLibrary::current(m_registry); // with what each model folder is set to hold (#86)
 }
 
 FileHashes &WidgetEdit::hashes() {

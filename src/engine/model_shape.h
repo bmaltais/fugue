@@ -23,6 +23,12 @@
 //                    (time_text_embed beside txt_in)
 //   VAE              a video VAE when its first decoder convolution is 3D (Qwen-Image, Wan)
 //
+// A LoRA fits a model whose layers it changes are there with the same input widths (loraFits).
+//
+// What a file is (ModelShape::kind): a LoRA by its low-rank tensors (lora_A/lora_B, lora_up/
+// lora_down, LoKr, LoHa), a checkpoint by a diffusion model and a VAE decoder in one file, else
+// a diffusion model, a VAE or a text encoder by the figures above.
+//
 // A text encoder fits a diffusion model of its kind whose text width is 1 to 3 times its hidden
 // size (FLUX.2 Klein reads three Qwen3 layers stacked: 7680 = 3 x 2560); a VAE fits one of its
 // kind whose latent channels are its own. A figure the header does not give leaves the fit
@@ -38,6 +44,9 @@ namespace fugue {
 
 enum class TextKind { Llm, T5, Clip };
 
+// What a file is, by its tensor names (#86): for a folder of one kind of model.
+enum class ModelKind { DiffusionModel, TextEncoder, Vae, Lora, Checkpoint };
+
 struct ModelShape {
     std::optional<int> textWidth;      // a diffusion model's
     std::optional<int> latentChannels; // a diffusion model's or a VAE's
@@ -46,7 +55,30 @@ struct ModelShape {
     std::optional<TextKind> textKind;
     // A VAE's: whether it is a video VAE; a diffusion model's: whether it wants one.
     std::optional<bool> videoVae;
+    std::optional<ModelKind> kind;
+    // A diffusion model's linear and convolution layers, a LoRA's changed ones (up to
+    // kLoraLayersKept, spread over its names): the widths of each, by layerKey().
+    struct Widths {
+        int in = 0;
+        int out = 0;
+        bool operator==(const Widths &other) const { return in == other.in && out == other.out; }
+    };
+    QHash<QString, Widths> layers;
 };
+
+// What a file is, as a pack.json resource type names the files it holds ("files", 6.4):
+// "diffusion-model", "text-encoder", "vae", "lora" or "checkpoint".
+QString modelKindName(ModelKind kind);
+
+// How many of a LoRA's layers a shape keeps: enough to see its blocks and widths, few enough
+// for a folder of hundreds.
+inline constexpr int kLoraLayersKept = 64;
+
+// A layer's name as both a model and a LoRA write it: without the usual prefixes
+// (model.diffusion_model., diffusion_model., transformer., lora_unet_, ...) and the tensor's
+// suffix (.weight, .lora_A.weight, ...), every run of "." and "_" one ".", so kohya's
+// lora_unet_double_blocks_0_x and double_blocks.0.x meet, and blocks.1.10 is not blocks.11.0.
+QString layerKey(const QString &tensorName);
 
 // The shape of the file at `path`; nothing when it is neither GGUF nor safetensors or cannot be
 // read. Reads only the header (megabytes at most, for a tokenizer held in GGUF metadata).
@@ -59,11 +91,23 @@ Fit textEncoderFits(const ModelShape &diffusionModel, const ModelShape &textEnco
 // CLIP encoder does not fit there, whatever its width (FLUX.1 and SD3 come later).
 Fit loadableTextEncoderFits(const ModelShape &diffusionModel, const ModelShape &textEncoder);
 Fit vaeFits(const ModelShape &diffusionModel, const ModelShape &vae);
+// A LoRA fits a diffusion model when the layers it changes that the model has are as wide in
+// both, and at least one is found; none found tells nothing (another naming, as kohya's SDXL
+// names against a UNet's); one of another width does not fit (a Klein 4B LoRA on Klein 9B).
+// `mismatch`, when given, gets the first layer that is another width: its key and both widths.
+struct LayerMismatch {
+    QString layer;
+    ModelShape::Widths lora, model;
+};
+Fit loraFits(const ModelShape &diffusionModel, const ModelShape &lora, LayerMismatch *mismatch = nullptr);
 
 // readModelShape remembered per file, for as long as its size and modification time stay.
 // Thread-safe.
 class ModelShapes {
 public:
+    // The process's: every reader of headers shares it, so a file is read once.
+    static ModelShapes &shared();
+
     std::optional<ModelShape> of(const QString &path);
     // What of() remembers for `path`, without reading it: false when it would have to read.
     bool known(const QString &path, std::optional<ModelShape> *shape);

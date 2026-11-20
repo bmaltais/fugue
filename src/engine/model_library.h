@@ -11,6 +11,11 @@
 // searched with its subfolders; a folder or file whose name starts with "." is skipped, and a file
 // is a model when its extension is one of the type's `extensions` (else ComfyUI's list plus .gguf).
 //
+// A root in a model path of the settings may hold one kind of model instead, its files directly
+// in it (a LoRA folder, #86): `model_folder_kinds` says so, else it is found by its files. A root
+// with any type's folder inside is in ComfyUI's layout; one with none has a few of its files'
+// headers read (engine/model_shape.h), and the type whose `files` most of them are is the root's.
+//
 // A handle never holds a path: resolve() finds the file by its content hash. It looks at the
 // hashes already remembered (engine/file_hashes) and at the files whose name is the handle's
 // `name`, hashing those once. It never hashes every file, so a model renamed since its handle was
@@ -54,7 +59,10 @@ public:
 
     // `roots` are absolute folders, searched in order; `registry` gives each resource type's
     // folders and extensions and must outlive the library.
-    ModelLibrary(QStringList roots, const Registry *registry);
+    // `kinds` says what a root holds, by its path as roots() gives it: kLayout, or a resource
+    // type id; a root not named is found by its files.
+    ModelLibrary(QStringList roots, const Registry *registry, QHash<QString, QString> kinds = {});
+    static inline const QString kLayout = QStringLiteral("layout");
 
     // The library of the settings in effect now (currentSettings()).
     static ModelLibrary current(const Registry *registry);
@@ -62,6 +70,8 @@ public:
     // dataDir()/models, then each model path of `settings` with "~" expanded; a relative path is
     // left out (as pack paths are), and a folder named twice counts once.
     static QStringList roots(const Settings &settings);
+    // The settings' model_folder_kinds, by the paths roots() gives.
+    static QHash<QString, QString> rootKinds(const Settings &settings);
 
     QStringList roots() const { return m_roots; }
 
@@ -84,12 +94,18 @@ public:
     // handle not found.
     Result<QJsonValue> withPaths(const QJsonValue &value, FileHashes &hashes, Hashing hashing = Hashing::Read) const;
 
+    // What `root` holds: kLayout, a resource type id, or empty (nothing Fugue can tell): set in
+    // the settings, else ComfyUI's layout when a type's folder is in it, else what most of a few
+    // of its files are.
+    QString kindOf(const QString &root) const;
+
 private:
     // The declared type when it is a resource type, else null.
     const DeclaredPortType *resourceType(const PortType &type) const;
 
     QStringList m_roots;
     const Registry *m_registry = nullptr;
+    QHash<QString, QString> m_kinds; // set in the settings, by root
     mutable QHash<QString, QList<ModelFile>> m_listed; // by PortType::toString()
 };
 

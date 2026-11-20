@@ -132,12 +132,16 @@ std::optional<PackManifest> parsePack(const QJsonObject &json, PackOrigin origin
                 bool extensionsOk = extensions.isUndefined() || extensions.isArray();
                 for (const QJsonValue &extension : extensions.toArray())
                     extensionsOk = extensionsOk && extension.isString() && !extension.toString().isEmpty();
-                // Model folder names under each models root (8.9): one plain name each, as ComfyUI's
-                // ("text_encoders"), and only on a resource type.
+                // Model folder names under each models root (8.9): one plain name each, as
+                // ComfyUI's ("text_encoders"), and only on a resource type.
                 const QJsonValue folders = type.value("folders");
                 bool foldersOk = folders.isUndefined() || (folders.isArray() && kind == QLatin1String("resource"));
                 for (const QJsonValue &folder : folders.toArray())
                     foldersOk = foldersOk && isModelFolderName(folder.toString());
+                // What its files are, for a model folder of one kind (8.9, #86).
+                const QJsonValue files = type.value("files");
+                static const QStringList kinds{"diffusion-model", "text-encoder", "vae", "lora", "checkpoint"};
+                foldersOk = foldersOk && (files.isUndefined() || (kind == QLatin1String("resource") && kinds.contains(files.toString())));
                 if (!entry.isObject() || !extensionsOk || !foldersOk || id.contains(QLatin1Char('@')) || !parsed || parsed->isBuiltin() || parsed->isAny() ||
                     !id.startsWith(pack.id + QLatin1Char('/')) || !versionValue.isDouble() || version < 1 ||
                     (kind != QLatin1String("resource") && kind != QLatin1String("data")) ||
@@ -145,7 +149,8 @@ std::optional<PackManifest> parsePack(const QJsonObject &json, PackOrigin origin
                     errors << invalid(QStringLiteral("pack.json \"types\" entry %1 needs an id %2/<name>, a version "
                                                      "of 1 or more, a kind of \"resource\" or \"data\", a name and, if any, "
                                                      "extensions as a list of text and (for a resource) folders as a list of "
-                                                     "plain folder names.")
+                                                     "plain folder names and files as one of diffusion-model, "
+                                                     "text-encoder, vae, lora or checkpoint.")
                                           .arg(id.isEmpty() ? QStringLiteral("(no id)") : QStringLiteral("\"%1\"").arg(id), pack.id));
                     continue;
                 }
@@ -156,6 +161,7 @@ std::optional<PackManifest> parsePack(const QJsonObject &json, PackOrigin origin
                     declared.extensions << extension.toString();
                 for (const QJsonValue &folder : folders.toArray())
                     declared.folders << folder.toString();
+                declared.files = files.toString();
                 pack.types << declared;
             }
         }

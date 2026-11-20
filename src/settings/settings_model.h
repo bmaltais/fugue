@@ -49,6 +49,8 @@ class SettingsModel : public QObject {
     Q_PROPERTY(bool inputsFolderIsDefault READ inputsFolderIsDefault NOTIFY changed)
     Q_PROPERTY(QStringList modelPaths READ modelPaths NOTIFY changed)
     Q_PROPERTY(QStringList packPaths READ packPaths NOTIFY changed)
+    // model_folder_kinds: what each extra model folder is set to hold, by its path (#86).
+    Q_PROPERTY(QVariantMap modelFolderKindsSet READ modelFolderKindsSet NOTIFY changed)
     Q_PROPERTY(QString newSeed READ newSeed NOTIFY changed)
     Q_PROPERTY(QString embedWorkflow READ embedWorkflow NOTIFY changed)
     // The canvas corners (#63): px from 0 to maxCornerRadius, or -1 to follow Omarchy.
@@ -107,11 +109,21 @@ public:
     PacksModel *packs() { return &m_packs; }
 
     // Sets one setting (a settings.json key) and writes the file. For a folder, empty text
-    // goes back to the default; a folder may be text or the folder picker's URL. Empty when done, else why not (nothing is written).
+    // goes back to the default; a folder may be text or the folder picker's URL. Empty when done,
+    // else why not (nothing is written).
     Q_INVOKABLE QString set(const QString &key, const QVariant &value);
     // Adds a folder to, or removes one from, model_paths or pack_paths.
     Q_INVOKABLE QString addPath(const QString &key, const QVariant &path);
     Q_INVOKABLE QString removePath(const QString &key, int index);
+    // What an extra model folder holds (#86): "" (found by its files), "layout" or a model type
+    // id, as model_folder_kinds says; setting "" takes the folder's entry out.
+    Q_INVOKABLE QString modelFolderKind(const QString &path) const;
+    QVariantMap modelFolderKindsSet() const;
+    Q_INVOKABLE QString setModelFolderKind(const QString &path, const QString &kind);
+    // What a folder's files say it holds, as a person reads it ("LoRAs").
+    Q_INVOKABLE QString modelFolderFound(const QString &path) const;
+    // The kinds a folder can be set to hold: {value, text}, "" first.
+    Q_INVOKABLE QVariantList modelFolderKinds() const;
     // Reads both files again.
     Q_INVOKABLE void reload();
 
@@ -153,6 +165,7 @@ private:
     CanvasModel *m_canvas = nullptr;
     Theme *m_theme = nullptr;
     CommandRegistry *m_registry = nullptr;
+    const Registry *m_types = nullptr; // the node types and port types, for what a folder holds
     std::function<void(const QUrl &)> m_openUrl;
 };
 

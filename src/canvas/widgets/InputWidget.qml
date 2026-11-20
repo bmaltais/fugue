@@ -343,9 +343,10 @@ Rectangle {
         // Grouped by provider instance (this machine, a paired host), each under its name. A
         // model that is not ready says so, and its note says how to make it ready: Fugue never
         // starts one by itself (8.4). Then the files on disk, under the folder each is in.
-        // A text encoder or VAE of a picked diffusion model (#85): the files that fit it first,
-        // under their folders, then the other files under one "Other" heading, those that do not
-        // fit dimmed (one whose header tells nothing is not). Offered models keep their place.
+        // A text encoder, VAE or LoRA of a picked diffusion model (#85, #86): the files that fit
+        // it first, under their folders, then the other files under one "Other" heading, those that
+        // do not fit dimmed (one whose header tells nothing is not). Offered models keep their
+        // place.
         let listed = edits.models(nodeId, name)
         const fitsKnown = listed.some(m => m.fits !== undefined)
         const isOther = m => fitsKnown && m.path !== undefined && m.fits !== true

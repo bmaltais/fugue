@@ -75,7 +75,7 @@ void addManifestFolder(Registry &registry, const QString &folder) {
 int main(int argc, char **argv) {
     cli::Hooks hooks;
     hooks.addNodeTypes = [](Registry &registry) {
-        registry.add(DeclaredPortType{*PortType::parse("fugue/test-lora"), PortKind::Resource, "Test LoRA", {}, {"loras"}});
+        registry.add(DeclaredPortType{*PortType::parse("fugue/test-lora"), PortKind::Resource, "Test LoRA", {}, {"loras"}, {}});
         addManifestFolder(registry, qEnvironmentVariable("FUGUE_NODE_MANIFESTS"));
     };
     hooks.addKernels = [](Kernels &kernels) {

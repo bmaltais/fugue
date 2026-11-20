@@ -36,6 +36,7 @@ struct DeclaredPortType {
     QString name;                   // display name
     QStringList extensions;         // resources: file extensions in the models folder
     QStringList folders;            // resources: folder names under each models root (8.9); empty: the id's name
+    QString files;                  // resources: what its files are, by their headers (modelKindName, #86)
 };
 
 // A configured provider instance (8.2) and the provider made for it.

@@ -14,6 +14,9 @@
 // | output_folder    | an absolute or ~ path                    | ~/Pictures/Fugue         |
 // | inputs_folder    | an absolute or ~ path                    | <output folder>/inputs   |
 // | model_paths      | extra model search paths (8.9)           | []                       |
+// | model_folder_kinds | what a model path holds, by the path as  | {}                       |
+// |                  | written: "layout" or a resource type id;  |                          |
+// |                  | unnamed: found by its files (8.9, #86)    |                          |
 // | pack_paths       | extra pack search paths (6.5)            | []                       |
 // | new_seed         | "random" or "fixed": new seed widgets    | "random"                 |
 // | embed_workflow   | "full", "no-prompts" or "none" (11.7)    | "full"                   |
@@ -21,6 +24,7 @@
 
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QMap>
 #include <QString>
 #include <QStringList>
 
@@ -34,6 +38,7 @@ struct Settings {
     QString outputFolder; // as written (may start with ~); empty: the default
     QString inputsFolder; // as written; empty: the output folder's inputs
     QStringList modelPaths;
+    QMap<QString, QString> modelFolderKinds; // by the path as written in modelPaths
     QStringList packPaths;
     QString newSeed = QStringLiteral("random");
     QString embedWorkflow = QStringLiteral("full");

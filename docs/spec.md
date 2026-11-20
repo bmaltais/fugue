@@ -211,7 +211,8 @@ Rules:
 - An unwired input of a resource type shows a model picker listing the models of that type found
   on disk and offered by providers, with a search field that filters them by every word typed
   (name, folder or provider, #84). In Load Models, once a diffusion model is picked, the text
-  encoder and VAE lists put the files that fit it first, and the rest under "Other", those that
+  encoder and VAE lists put the files that fit it first; so does Apply LoRA's list for the model
+  it is given (#86). The rest are under "Other", those that
   do not fit dimmed, by what the files' headers say (#85, `engine/model_shape.h`). The canvas check
   warns `model_mismatch` on a Load Models whose parts do not fit, and a stage given them fails
   with it before the helper loads them. The chosen
@@ -807,7 +808,7 @@ holding that node's `node.json`.
 | `manifest`, `id`, `version`, `name` | yes | The id is lowercase reverse-DNS. |
 | `license`, `source`, `description` | no | |
 | `nodes` | yes | Subfolder names, each with a `node.json`. |
-| `types` | no | Declared port types ([2.2](#22-declared-types)): `id`, `version`, `kind` (`resource` or `data`), `name`, and for resources `extensions` (file extensions found in the models folder; default ComfyUI's list plus `.gguf`) and `folders` (the folder names under each models root, such as `["upscaler", "upscale_models"]`; default the last part of the id, [8.9](#89-models-on-disk)). |
+| `types` | no | Declared port types ([2.2](#22-declared-types)): `id`, `version`, `kind` (`resource` or `data`), `name`, and for resources `extensions` (file extensions found in the models folder; default ComfyUI's list plus `.gguf`), `folders` (the folder names under each models root, such as `["upscaler", "upscale_models"]`; default the last part of the id, [8.9](#89-models-on-disk)) and `files` (what its files are by their headers, so a model folder of one kind is told: `diffusion-model`, `text-encoder`, `vae`, `lora` or `checkpoint`). |
 | `setup` | no | A command that prepares the pack's private environment ([6.8](#68-per-pack-environments)). |
 | `converters` | no | Import and export converters ([11.9](#119-converters)). |
 
@@ -1248,6 +1249,12 @@ reference. A new inference runtime is a new provider module.
   part, with their subfolders. A type that declares ComfyUI's folder names (`text_encoders`, `clip`)
   lets a ComfyUI `models/` folder be added as it is. Names starting with "." are skipped; a file
   reached twice (a link, overlapping roots) counts once.
+- An extra path may instead hold one kind of model, its files directly in it (a LoRA folder,
+  #86). Settings say what each path holds (`model_folder_kinds`: `layout` or a resource type);
+  unsaid, a path with any type's folder inside is in ComfyUI's layout, and one with none is the
+  kind most of a few of its files are, by their headers (LoRA, VAE, text encoder, diffusion
+  model, checkpoint; the type whose pack.json `files` says so). Fugue's own folder is always in the
+  layout.
 - Finding a handle's file looks at the remembered hashes, then hashes the files with the handle's
   `name` (once). Other files are not hashed to find a model: hashing every model of a large folder
   takes minutes. A missing model is `model_missing`, with the folder to put it in. A check
@@ -1881,7 +1888,7 @@ Codes in v0.1:
 | --- | --- |
 | Files | `file_not_found`, `invalid_json`, `invalid_document`, `unsupported_format_version`, `permission_denied`, `media_unreadable` |
 | Graph | `unknown_node_type`, `node_version_mismatch`, `unknown_input`, `missing_input`, `unknown_link_source`, `unknown_output`, `type_mismatch`, `value_out_of_range`, `value_not_in_choices`, `cycle`, `group_recursion`, `unknown_provider` |
-| Warnings | `not_part_of_output`, `model_missing` (an error when a run reaches the node, 8.5), `model_mismatch` (a text encoder or VAE that does not fit its diffusion model, by the files' headers, #85; an error when a run reaches a stage), `frozen_result_missing`, `pack_update_available`, `workflow_not_embedded`, `node_bad_preview` |
+| Warnings | `not_part_of_output`, `model_missing` (an error when a run reaches the node, 8.5), `model_mismatch` (a text encoder, VAE or LoRA that does not fit its diffusion model, by the files' headers, #85, #86; an error when a run reaches a stage), `frozen_result_missing`, `pack_update_available`, `workflow_not_embedded`, `node_bad_preview` |
 | Trust | `pack_untrusted`, `needs_confirmation` |
 | Packs | `pack_invalid`, `pack_exists`, `unknown_pack`, `fetch_failed`, `setup_failed` |
 | Groups | `group_invalid` (an edit a group cannot take: a list input fed from both sides of the selection, a name taken or not valid, a port exposed already) |
@@ -2265,6 +2272,7 @@ Building M2 made these further choices.
 | Stage hooks as image options (`fugue.*`) of stable-diffusion.cpp's option API, in place of the spike's environment variables; the extensions' encode-time state crosses through two virtual methods on its extension interface | 8.10 | medium-high |
 | No pixel-parity test was built for the first pin (#77): the spike showed identical pixels at this commit (spikes/02), and the owner judged that enough. #77 ran these staged once: Z-Image, FLUX.2 Klein 4B and 9B, FLUX.1, SDXL, SD 1.5, Qwen-Image Edit 2511 (the Qwen-Image 2.1 files at hand did not load, stable-diffusion.cpp failing on them before any stage), image-to-image from a latent, and IP-Adapter. PhotoMaker and PuLID were not run (no ID images or embedding at hand), so their carried state is unverified. A pin move runs only the few checks 8.10 lists, by hand (GPU and model files), as the owner asked: the families are stable-diffusion.cpp's to test | 8.10 | medium-high |
 | Sources pinned as GitHub commit archives with SHA-256 (stable-diffusion.cpp, ggml, CUTLASS), not git submodules: verifiable, and a package lists them as its own sources | 8.10 | high |
+| A model path that is one kind's folder is told by its files when the settings do not say (#86, the owner chose both): a path with any type's folder inside keeps ComfyUI's layout, else up to 8 files are read and the kind more than half share is the path's; a mixed folder holds nothing until set. A LoRA fits a model when the layers it changes that the model has are as wide (names matched without prefixes and separators, so kohya's and PEFT's meet); no layer found tells nothing (diffusers names, an SDXL UNet's), so it is not dimmed. What a folder holds is its own key, `model_folder_kinds` by path, not `{"path", "holds"}` entries in `model_paths` as #86 first said: model_paths stays a plain list an older Fugue reads, and a kind for a path no longer listed is ignored. A LoRA's fit is not checked by the canvas (its model comes from a node that has not run then), only by the stage | 8.9, 2.5, 6.4 | medium-high |
 | Which text encoder and VAE fit a diffusion model is read from the files' headers (tensor shapes, and the tensor names that tell a T5, CLIP or LLM encoder and an image or video VAE apart), never from a table of file names or hashes: it holds for any finetune, quantization or renamed file with no list to keep (#85, the owner asked whether a table would help). An encoder fits when the model's text width is 1 to 3 times its hidden size (FLUX.2 Klein stacks three Qwen3 layers). Files that do not fit stay pickable, dimmed under "Other": a family the reader does not know must not be hidden. Load Models takes only an LLM encoder, so T5 and CLIP never fit there (FLUX.1 comes later). Headers are remembered in memory per file (size and time), not on disk as hashes are: a read takes 0 to 21 ms (the owner's folder). Known limit: two LLMs of one width (Qwen3-8B, Qwen3.5-9B) both read as fitting. A NodeKernel may say before a run what its inputs would fail on (`check`, the canvas check's warnings) | 2.5, 14.3 | medium-high |
 | The component nodes take one `fugue/model`, made by Load Models from the three files, not ComfyUI's separate MODEL, CLIP and VAE wires (#79): stable-diffusion.cpp fails to load a context missing any component ("model metadata validation failed"), so every stage needs all three, and one handle keeps one helper context warm. VAE Decode takes only the latent, which carries the model | 2.6, 14.3, 8.10 | high |
 | Text Encode takes the prompt and the negative prompt and gives one conditioning (#79, the owner's choice over ComfyUI's positive and negative wires, which would need a patch change): stable-diffusion.cpp encodes both sets in one call. It always makes the negative set (guidance other than 1 at encode), the Sampler's guidance being unknown to it; sampling at 1 skips it, so the pixels match a single run, at the cost of a second, short encode of the (often empty) negative prompt | 14.3 | high |

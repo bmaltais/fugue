@@ -1,5 +1,6 @@
 #include "settings/settings_model.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -14,6 +15,7 @@
 #include "commands/command_registry.h"
 #include "engine/atomic_file.h"
 #include "engine/json.h"
+#include "engine/model_library.h"
 #include "engine/paths.h"
 #include "engine/providers_file.h"
 #include "theme.h"
@@ -90,6 +92,7 @@ SettingsModel::SettingsModel(const QString &settingsFile, const QString &provide
 
 void SettingsModel::attach(Translator *translator, CanvasModel *canvas, const Registry *registry, Theme *theme) {
     m_packs.setRegistry(registry);
+    m_types = registry;
     m_translator = translator;
     m_canvas = canvas;
     m_theme = theme;
@@ -152,7 +155,8 @@ void SettingsModel::reload() {
 QVariantList SettingsModel::languages() const {
     QVariantList list;
     for (const QString &code : Translator::catalogs()) {
-        // A bare code names the language, not a country's variant ("English", not "American English").
+        // A bare code names the language, not a country's variant ("English", not "American
+        // English").
         QString name = code == QLatin1String("en") ? QStringLiteral("English") : QLocale(code).nativeLanguageName();
         if (!name.isEmpty())
             name[0] = name[0].toUpper();
@@ -210,8 +214,61 @@ QString SettingsModel::removePath(const QString &key, int index) {
     QStringList list = key == QLatin1String("model_paths") ? modelPaths() : packPaths();
     if (index < 0 || index >= list.size())
         return tr("There is no folder %1 in the list.").arg(index + 1);
-    list.removeAt(index);
-    return set(key, QJsonArray::fromStringList(list).toVariantList());
+    const QString removed = list.takeAt(index);
+    if (const QString problem = set(key, QJsonArray::fromStringList(list).toVariantList()); !problem.isEmpty())
+        return problem;
+    if (key == QLatin1String("model_paths") && !modelFolderKind(removed).isEmpty())
+        return setModelFolderKind(removed, QString());
+    return {};
+}
+
+namespace {
+// The kinds of model a folder can be set to hold, and how they read.
+QList<std::pair<QString, QString>> folderKinds() {
+    return {{QString(), QCoreApplication::translate("fugue::SettingsModel", "Found by its files")},
+            {ModelLibrary::kLayout, QCoreApplication::translate("fugue::SettingsModel", "Model folders (ComfyUI layout)")},
+            {QStringLiteral("fugue/lora"), QCoreApplication::translate("fugue::SettingsModel", "LoRAs")},
+            {QStringLiteral("fugue/vae"), QCoreApplication::translate("fugue::SettingsModel", "VAEs")},
+            {QStringLiteral("fugue/diffusion-model"), QCoreApplication::translate("fugue::SettingsModel", "Diffusion models")},
+            {QStringLiteral("fugue/text-encoder"), QCoreApplication::translate("fugue::SettingsModel", "Text encoders")},
+            {QStringLiteral("fugue/model"), QCoreApplication::translate("fugue::SettingsModel", "Checkpoints")}};
+}
+} // namespace
+
+QString SettingsModel::modelFolderKind(const QString &path) const { return m_file.settings.modelFolderKinds.value(path); }
+
+QVariantMap SettingsModel::modelFolderKindsSet() const {
+    QVariantMap map;
+    for (auto it = m_file.settings.modelFolderKinds.begin(); it != m_file.settings.modelFolderKinds.end(); ++it)
+        map.insert(it.key(), it.value());
+    return map;
+}
+
+QString SettingsModel::setModelFolderKind(const QString &path, const QString &kind) {
+    QJsonObject kinds = m_file.document.value(QStringLiteral("model_folder_kinds")).toObject();
+    if (kind.isEmpty())
+        kinds.remove(path);
+    else
+        kinds.insert(path, kind);
+    return set(QStringLiteral("model_folder_kinds"), kinds.toVariantMap());
+}
+
+QString SettingsModel::modelFolderFound(const QString &path) const {
+    const ModelLibrary library(ModelLibrary::roots(m_file.settings), m_types);
+    const QString kind = library.kindOf(QDir::cleanPath(expandHome(path)));
+    if (kind.isEmpty())
+        return tr("Nothing Fugue can tell: set what it holds");
+    for (const auto &[value, text] : folderKinds())
+        if (value == kind)
+            return kind == ModelLibrary::kLayout ? tr("Found: ComfyUI's model folders") : tr("Found: %1").arg(text);
+    return tr("Found: %1").arg(kind);
+}
+
+QVariantList SettingsModel::modelFolderKinds() const {
+    QVariantList list;
+    for (const auto &[value, text] : folderKinds())
+        list.append(QVariantMap{{"value", value}, {"text", text}});
+    return list;
 }
 
 // --- providers -----------------------------------------------------------------------

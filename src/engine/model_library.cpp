@@ -3,12 +3,15 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QSet>
 
 #include <algorithm>
 
 #include "engine/file_hashes.h"
 #include "engine/hash.h"
+#include "engine/model_shape.h"
 #include "engine/paths.h"
 #include "engine/registry.h"
 #include "engine/settings.h"
@@ -23,7 +26,8 @@ const QStringList defaultExtensions{QStringLiteral(".safetensors"), QStringLiter
                                     QStringLiteral(".pt"),          QStringLiteral(".pt2"),  QStringLiteral(".pth"),
                                     QStringLiteral(".bin"),         QStringLiteral(".sft"),  QStringLiteral(".pkl")};
 
-// An extension matches the whole suffix after a dot: "pt" and ".pt" both match "x.pt", neither "x.ckpt".
+// An extension matches the whole suffix after a dot: "pt" and ".pt" both match "x.pt", neither
+// "x.ckpt".
 bool hasExtension(const QString &fileName, const QStringList &extensions) {
     for (const QString &extension : extensions) {
         const QString dotted = extension.startsWith(QLatin1Char('.')) ? extension : QLatin1Char('.') + extension;
@@ -60,15 +64,115 @@ Error missing(const QString &message, const QString &hint) {
 
 } // namespace
 
-ModelLibrary::ModelLibrary(QStringList roots, const Registry *registry)
-    : m_roots(std::move(roots)), m_registry(registry) {}
+ModelLibrary::ModelLibrary(QStringList roots, const Registry *registry, QHash<QString, QString> kinds)
+    : m_roots(std::move(roots)), m_registry(registry), m_kinds(std::move(kinds)) {}
 
 ModelLibrary ModelLibrary::current(const Registry *registry) {
-    return ModelLibrary(roots(currentSettings()), registry);
+    const Settings settings = currentSettings();
+    return ModelLibrary(roots(settings), registry, rootKinds(settings));
 }
 
 QStringList ModelLibrary::roots(const Settings &settings) {
     return searchPaths(dataDir() + QStringLiteral("/models"), settings.modelPaths);
+}
+
+QHash<QString, QString> ModelLibrary::rootKinds(const Settings &settings) {
+    QHash<QString, QString> kinds;
+    for (auto it = settings.modelFolderKinds.begin(); it != settings.modelFolderKinds.end(); ++it)
+        kinds.insert(QDir::cleanPath(expandHome(it.key())), it.value());
+    return kinds;
+}
+
+namespace {
+
+// A resource type's folder names under each root (8.9): its pack's, else its id's last part.
+QStringList folderNames(const DeclaredPortType &declared) {
+    return declared.folders.isEmpty() ? QStringList{declared.type.id.section(QLatin1Char('/'), -1)} : declared.folders;
+}
+
+// How many files of a folder are read to tell what it holds, and how deep they are looked for.
+constexpr int kFilesRead = 8;
+constexpr int kSampleDepth = 3;
+
+// Up to kFilesRead model files under `folder`, in name order, depth first.
+void sample(const QString &folder, int depth, QStringList &out) {
+    const QFileInfoList entries = QDir(folder).entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+    for (const QFileInfo &entry : entries) {
+        if (out.size() >= kFilesRead)
+            return;
+        if (entry.isDir()) {
+            if (depth < kSampleDepth)
+                sample(entry.filePath(), depth + 1, out);
+        } else if (hasExtension(entry.fileName(), {QStringLiteral(".safetensors"), QStringLiteral(".gguf")})) {
+            out << entry.absoluteFilePath();
+        }
+    }
+}
+
+// What a folder's files say it holds, for the process: a library is made for each use, the
+// window makes one each time a picker opens. Again when the folder itself changes.
+class FoundKinds {
+public:
+    std::optional<QString> find(const QString &root, qint64 modified) {
+        QMutexLocker lock(&m_mutex);
+        const auto it = m_kinds.constFind(root);
+        return it != m_kinds.constEnd() && it->first == modified ? std::optional<QString>(it->second) : std::nullopt;
+    }
+    void keep(const QString &root, qint64 modified, const QString &kind) {
+        QMutexLocker lock(&m_mutex);
+        m_kinds.insert(root, {modified, kind});
+    }
+
+private:
+    QMutex m_mutex;
+    QHash<QString, std::pair<qint64, QString>> m_kinds;
+};
+
+FoundKinds &foundKinds() {
+    static FoundKinds kinds;
+    return kinds;
+}
+
+} // namespace
+
+QString ModelLibrary::kindOf(const QString &root) const {
+    if (const QString set = m_kinds.value(root); !set.isEmpty())
+        return set;
+    // Fugue's own folder (roots() puts it first) keeps the layout: a missing model's hint names
+    // the folder to put it in there.
+    if (root == m_roots.value(0) || !m_registry)
+        return kLayout;
+    const qint64 modified = QFileInfo(root).lastModified().toMSecsSinceEpoch();
+    if (const std::optional<QString> found = foundKinds().find(root, modified))
+        return *found;
+    const QList<const DeclaredPortType *> types = m_registry->portTypes();
+    QString kind;
+    // ComfyUI's layout when any resource type's folder is there.
+    for (const DeclaredPortType *declared : types) {
+        if (declared->kind != PortKind::Resource)
+            continue;
+        for (const QString &name : folderNames(*declared))
+            if (QFileInfo(root + QLatin1Char('/') + name).isDir())
+                kind = kLayout;
+        if (!kind.isEmpty())
+            break;
+    }
+    // Else the type whose files most of a few of its files are (pack.json "files").
+    if (kind.isEmpty()) {
+        QStringList files;
+        sample(root, 0, files);
+        QHash<QString, int> votes;
+        for (const QString &file : std::as_const(files))
+            if (const std::optional<ModelShape> shape = ModelShapes::shared().of(file); shape && shape->kind)
+                ++votes[modelKindName(*shape->kind)];
+        for (auto it = votes.begin(); it != votes.end() && kind.isEmpty(); ++it)
+            if (it.value() * 2 > files.size())
+                for (const DeclaredPortType *declared : types)
+                    if (declared->kind == PortKind::Resource && declared->files == it.key())
+                        kind = declared->type.toString();
+    }
+    foundKinds().keep(root, modified, kind);
+    return kind;
 }
 
 const DeclaredPortType *ModelLibrary::resourceType(const PortType &type) const {
@@ -80,12 +184,16 @@ QStringList ModelLibrary::folders(const PortType &type) const {
     const DeclaredPortType *declared = resourceType(type);
     if (!declared)
         return {};
-    const QStringList names = declared->folders.isEmpty() ? QStringList{type.id.section(QLatin1Char('/'), -1)}
-                                                          : declared->folders;
+    const QStringList names = folderNames(*declared);
     QStringList out;
-    for (const QString &root : m_roots)
-        for (const QString &name : names)
-            out << QDir::cleanPath(root + QLatin1Char('/') + name);
+    for (const QString &root : m_roots) {
+        const QString kind = kindOf(root);
+        if (kind == kLayout)
+            for (const QString &name : names)
+                out << QDir::cleanPath(root + QLatin1Char('/') + name);
+        else if (kind == type.toString())
+            out << root;
+    }
     return out;
 }
 

@@ -1,13 +1,18 @@
 #include "model_shape.h"
 
+#include <QCollator>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMutexLocker>
+#include <QRegularExpression>
 #include <QStringList>
 #include <QtEndian>
+
+#include <algorithm>
+#include <cstring>
 
 namespace fugue {
 
@@ -179,9 +184,56 @@ std::optional<int> inputWidth(const std::optional<QList<qint64>> &shape) {
     return int(shape->at(1));
 }
 
+// A LoRA or LyCORIS file: low-rank pieces named for the layers they change (kohya's lora_up and
+// lora_down, PEFT's lora_A and lora_B, LoKr, LoHa).
+bool isLora(const Shapes &shapes) {
+    static const QStringList marks{QStringLiteral("lora_up."),  QStringLiteral("lora_down."), QStringLiteral("lora_A."),
+                                   QStringLiteral("lora_B."),   QStringLiteral("lokr_w1"),    QStringLiteral("hada_w1")};
+    for (auto it = shapes.begin(); it != shapes.end(); ++it)
+        for (const QString &mark : marks)
+            if (it.key().contains(mark))
+                return true;
+    return false;
+}
+
+// The layers a LoRA changes and their input widths: the low-rank down piece (lora_A,
+// lora_down) is [rank, input, ...]. Text-encoder layers are left out. Kept: kLoraLayersKept,
+// spread over the names in order, so the first and last blocks are among them.
+QHash<QString, ModelShape::Widths> loraLayers(const Shapes &shapes) {
+    static const QRegularExpression down(QStringLiteral("^(.*)\\.(lora_A|lora_down)\\.weight$"));
+    QStringList names;
+    for (auto it = shapes.begin(); it != shapes.end(); ++it)
+        if (down.match(it.key()).hasMatch() && !it.key().startsWith(QLatin1String("lora_te"))
+            && !it.key().contains(QLatin1String("text_encoder")))
+            names << it.key();
+    QCollator collator; // blocks.2 before blocks.10, so the spread reaches the last block
+    collator.setNumericMode(true);
+    std::sort(names.begin(), names.end(), collator);
+    QHash<QString, ModelShape::Widths> layers;
+    const qsizetype count = names.size();
+    const qsizetype kept = std::min<qsizetype>(count, kLoraLayersKept);
+    for (qsizetype i = 0; i < kept; ++i) {
+        const QString &name = names.at(kept > 1 ? i * (count - 1) / (kept - 1) : 0);
+        const QString layer = down.match(name).captured(1);
+        // The up piece (lora_B, lora_up) is [output, rank, ...].
+        const QString upName = name.contains(QLatin1String(".lora_A.")) ? layer + QStringLiteral(".lora_B.weight")
+                                                                         : layer + QStringLiteral(".lora_up.weight");
+        const QList<qint64> up = shapes.value(upName);
+        const std::optional<int> in = inputWidth(shapes.value(name));
+        if (in && !up.isEmpty() && up.at(0) > 0)
+            layers.insert(layerKey(layer), ModelShape::Widths{*in, int(up.at(0))});
+    }
+    return layers;
+}
+
 ModelShape shapeOf(const Header &header) {
     const Shapes &shapes = header.shapes;
     ModelShape shape;
+    if (isLora(shapes)) { // its tensors are named after the model's: none of the figures below
+        shape.kind = ModelKind::Lora;
+        shape.layers = loraLayers(shapes);
+        return shape;
+    }
     shape.textWidth = inputWidth(
         tensor(shapes, {QStringLiteral("cap_embedder.1.weight"), QStringLiteral("txt_in.weight"),
                         QStringLiteral("context_embedder.weight")}));
@@ -198,16 +250,25 @@ ModelShape shapeOf(const Header &header) {
                         || (hasTensor(shapes, QStringLiteral("context_embedder.")) && hasTensor(shapes, QStringLiteral("joint_blocks.")));
         shape.textKind = t5 ? TextKind::T5 : TextKind::Llm;
         shape.videoVae = hasTensor(shapes, QStringLiteral("time_text_embed.")) && hasTensor(shapes, QStringLiteral("txt_in."));
+        // A checkpoint carries its VAE (first_stage_model.decoder) beside the diffusion model.
+        shape.kind = tensor(shapes, {QStringLiteral("decoder.conv_in.weight")}) ? ModelKind::Checkpoint : ModelKind::DiffusionModel;
+        for (auto it = shapes.begin(); it != shapes.end(); ++it) // what a LoRA may change
+            if (it.key().endsWith(QLatin1String(".weight")) && it.value().size() >= 2 && it.value().at(0) > 0)
+                if (const std::optional<int> in = inputWidth(it.value()))
+                    shape.layers.insert(layerKey(it.key().chopped(7)), ModelShape::Widths{*in, int(it.value().at(0))});
     } else if (const std::optional<QList<qint64>> decoder =
                    tensor(shapes, {QStringLiteral("decoder.conv_in.weight"), QStringLiteral("decoder.conv1.weight")})) {
         shape.latentChannels = inputWidth(decoder);
         shape.videoVae = decoder->size() == 5;
+        shape.kind = ModelKind::Vae;
     }
     shape.hiddenSize = header.embeddingLength;
     if (!shape.hiddenSize)
         shape.hiddenSize = inputWidth(tensor(shapes, {QStringLiteral("embed_tokens.weight"), QStringLiteral("token_embd.weight"),
                                                    QStringLiteral("token_embedding.weight"), QStringLiteral("shared.weight")}));
     if (shape.hiddenSize && !diffusion) {
+        if (!shape.kind)
+            shape.kind = ModelKind::TextEncoder;
         const QByteArray &arch = header.architecture;
         if (arch.startsWith("t5") || hasTensor(shapes, QStringLiteral("encoder.block.")))
             shape.textKind = TextKind::T5;
@@ -220,6 +281,26 @@ ModelShape shapeOf(const Header &header) {
 }
 
 } // namespace
+
+QString layerKey(const QString &tensorName) {
+    QString name = tensorName;
+    for (const char *prefix : {"model.diffusion_model.", "diffusion_model.", "base_model.model.", "transformer.", "lora_unet_"})
+        if (name.startsWith(QLatin1String(prefix)))
+            name.remove(0, qsizetype(std::strlen(prefix)));
+    static const QRegularExpression separators(QStringLiteral("[._]+"));
+    return name.replace(separators, QStringLiteral("."));
+}
+
+QString modelKindName(ModelKind kind) {
+    switch (kind) {
+    case ModelKind::DiffusionModel: return QStringLiteral("diffusion-model");
+    case ModelKind::TextEncoder: return QStringLiteral("text-encoder");
+    case ModelKind::Vae: return QStringLiteral("vae");
+    case ModelKind::Lora: return QStringLiteral("lora");
+    case ModelKind::Checkpoint: return QStringLiteral("checkpoint");
+    }
+    return {};
+}
 
 std::optional<ModelShape> readModelShape(const QString &path) {
     QFile file(path);
@@ -269,6 +350,27 @@ bool ModelShapes::known(const QString &path, std::optional<ModelShape> *shape) {
         return false;
     *shape = found->shape;
     return true;
+}
+
+Fit loraFits(const ModelShape &diffusionModel, const ModelShape &lora, LayerMismatch *mismatch) {
+    int matched = 0;
+    for (auto it = lora.layers.begin(); it != lora.layers.end(); ++it) {
+        const auto found = diffusionModel.layers.constFind(it.key());
+        if (found == diffusionModel.layers.constEnd())
+            continue;
+        if (!(*found == it.value())) {
+            if (mismatch)
+                *mismatch = LayerMismatch{it.key(), it.value(), *found};
+            return Fit::DoesNotFit;
+        }
+        ++matched;
+    }
+    return matched > 0 ? Fit::Fits : Fit::Unknown;
+}
+
+ModelShapes &ModelShapes::shared() {
+    static ModelShapes shapes;
+    return shapes;
 }
 
 std::optional<ModelShape> ModelShapes::of(const QString &path) {

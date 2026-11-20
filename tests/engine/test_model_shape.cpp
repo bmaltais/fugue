@@ -113,6 +113,31 @@ ModelShape shape(const QString &path) {
     return *read;
 }
 
+// Shapes as the reader gives them, by role.
+ModelShape diffusionModel(int textWidth, int latentChannels, TextKind reads = TextKind::Llm, bool videoVae = false) {
+    ModelShape shape;
+    shape.textWidth = textWidth;
+    shape.latentChannels = latentChannels;
+    shape.textKind = reads;
+    shape.videoVae = videoVae;
+    shape.kind = ModelKind::DiffusionModel;
+    return shape;
+}
+ModelShape textEncoder(int hiddenSize, TextKind kind = TextKind::Llm) {
+    ModelShape shape;
+    shape.hiddenSize = hiddenSize;
+    shape.textKind = kind;
+    shape.kind = ModelKind::TextEncoder;
+    return shape;
+}
+ModelShape vae(int latentChannels, bool video = false) {
+    ModelShape shape;
+    shape.latentChannels = latentChannels;
+    shape.videoVae = video;
+    shape.kind = ModelKind::Vae;
+    return shape;
+}
+
 } // namespace
 
 class TestModelShape : public QObject {
@@ -180,16 +205,16 @@ private slots:
     // The owner's pairs (helper.md): Z-Image and Klein 4B read Qwen3-4B, Klein 9B Qwen3-8B; Z-Image
     // decodes with ae (16 channels), Klein with flux2-vae (32).
     void theFitRulesPairTheOwnersModels() {
-        const ModelShape zImage{2560, 16, {}, TextKind::Llm, false}, klein4b{7680, 32, {}, TextKind::Llm, false},
-            klein9b{12288, 32, {}, TextKind::Llm, false};
-        const ModelShape qwen4b{{}, {}, 2560, TextKind::Llm, {}}, qwen8b{{}, {}, 4096, TextKind::Llm, {}};
+        const ModelShape zImage = diffusionModel(2560, 16), klein4b = diffusionModel(7680, 32),
+                         klein9b = diffusionModel(12288, 32);
+        const ModelShape qwen4b = textEncoder(2560), qwen8b = textEncoder(4096);
         QCOMPARE(textEncoderFits(zImage, qwen4b), Fit::Fits);
         QCOMPARE(textEncoderFits(zImage, qwen8b), Fit::DoesNotFit);
         QCOMPARE(textEncoderFits(klein4b, qwen4b), Fit::Fits);
         QCOMPARE(textEncoderFits(klein4b, qwen8b), Fit::DoesNotFit);
         QCOMPARE(textEncoderFits(klein9b, qwen8b), Fit::Fits);
         QCOMPARE(textEncoderFits(klein9b, qwen4b), Fit::DoesNotFit); // 12288 is 4.8 x 2560
-        const ModelShape ae{{}, 16, {}, {}, false}, flux2vae{{}, 32, {}, {}, false};
+        const ModelShape ae = vae(16), flux2vae = vae(32);
         QCOMPARE(vaeFits(zImage, ae), Fit::Fits);
         QCOMPARE(vaeFits(zImage, flux2vae), Fit::DoesNotFit);
         QCOMPARE(vaeFits(klein9b, flux2vae), Fit::Fits);
@@ -220,7 +245,7 @@ private slots:
         QCOMPARE(t5.textKind, std::optional<TextKind>(TextKind::T5));
         QCOMPARE(qwen8b.textKind, std::optional<TextKind>(TextKind::Llm));
         QCOMPARE(shape(file("clip_l.safetensors")).textKind, std::optional<TextKind>(TextKind::Clip));
-        const ModelShape klein9b{12288, 32, {}, TextKind::Llm, false};
+        const ModelShape klein9b = diffusionModel(12288, 32);
         QCOMPARE(textEncoderFits(klein9b, qwen8b), Fit::Fits);
         QCOMPARE(textEncoderFits(klein9b, t5), Fit::DoesNotFit); // 4096 wide too, but T5
         const ModelShape flux1 = shape(file("flux1-dev.safetensors"));
@@ -258,13 +283,14 @@ private slots:
         QVERIFY(!readModelShape(this->file("nested.gguf")));
     }
 
-    // Load Models loads one LLM encoder (llm_path): FLUX.1's T5 is no fit there, whatever its width.
+    // Load Models loads one LLM encoder (llm_path): FLUX.1's T5 is no fit there, whatever its
+    // width.
     void loadModelsTakesOnlyALanguageModelEncoder() {
-        const ModelShape flux1{4096, 16, {}, TextKind::T5, false};
-        const ModelShape t5{{}, {}, 4096, TextKind::T5, {}};
+        const ModelShape flux1 = diffusionModel(4096, 16, TextKind::T5);
+        const ModelShape t5 = textEncoder(4096, TextKind::T5);
         QCOMPARE(textEncoderFits(flux1, t5), Fit::Fits);
         QCOMPARE(loadableTextEncoderFits(flux1, t5), Fit::DoesNotFit);
-        const ModelShape klein4b{7680, 32, {}, TextKind::Llm, false}, qwen4b{{}, {}, 2560, TextKind::Llm, {}};
+        const ModelShape klein4b = diffusionModel(7680, 32), qwen4b = textEncoder(2560);
         QCOMPARE(loadableTextEncoderFits(klein4b, qwen4b), Fit::Fits);
     }
 
@@ -279,6 +305,63 @@ private slots:
         writeSafetensors(file("sd3.safetensors"), {{"context_embedder.weight", QJsonArray{1536, 4096}},
                                                    {"joint_blocks.0.x_block.attn.qkv.weight", QJsonArray{4608, 1536}}});
         QCOMPARE(shape(file("sd3.safetensors")).textKind, std::optional<TextKind>(TextKind::T5));
+    }
+
+    // #86: what a file is, for a folder of one kind. Names as in the owner's LoRA folders.
+    void aFilesKindComesFromItsTensorNames() {
+        writeSafetensors(file("klein-lora.safetensors"),
+                         {{"diffusion_model.double_blocks.0.img_attn.proj.lora_A.weight", QJsonArray{16, 3072}},
+                          {"diffusion_model.double_blocks.0.img_attn.proj.lora_B.weight", QJsonArray{3072, 16}}});
+        writeSafetensors(file("sdxl-lora.safetensors"),
+                         {{"lora_te1_text_model_encoder_layers_0_mlp_fc1.lora_down.weight", QJsonArray{8, 768}},
+                          {"lora_unet_down_blocks_0_attentions_0_proj_in.lora_up.weight", QJsonArray{320, 8}}});
+        writeSafetensors(file("lokr.safetensors"), {{"diffusion_model.double_blocks.0.img_attn.proj.lokr_w1", QJsonArray{4, 4}},
+                                                    {"diffusion_model.txt_in.weight", QJsonArray{3072, 7680}}}); // not read as a model
+        writeSafetensors(file("sdxl.safetensors"), {{"model.diffusion_model.input_blocks.0.0.weight", QJsonArray{320, 4, 3, 3}},
+                                                    {"first_stage_model.decoder.conv_in.weight", QJsonArray{512, 4, 3, 3}}});
+        writeSafetensors(file("unet.safetensors"), {{"txt_in.weight", QJsonArray{3072, 7680}}, {"img_in.weight", QJsonArray{3072, 128}}});
+        writeSafetensors(file("vae.safetensors"), {{"decoder.conv_in.weight", QJsonArray{512, 16, 3, 3}}});
+        writeSafetensors(file("encoder.safetensors"), {{"model.embed_tokens.weight", QJsonArray{151936, 2560}}});
+        const auto kind = [&](const char *name) { return shape(file(QString::fromLatin1(name))).kind; };
+        QCOMPARE(kind("klein-lora.safetensors"), std::optional<ModelKind>(ModelKind::Lora));
+        QCOMPARE(kind("sdxl-lora.safetensors"), std::optional<ModelKind>(ModelKind::Lora));
+        QCOMPARE(kind("lokr.safetensors"), std::optional<ModelKind>(ModelKind::Lora));
+        QCOMPARE(shape(file("lokr.safetensors")).textWidth, std::optional<int>());
+        QCOMPARE(kind("sdxl.safetensors"), std::optional<ModelKind>(ModelKind::Checkpoint));
+        QCOMPARE(kind("unet.safetensors"), std::optional<ModelKind>(ModelKind::DiffusionModel));
+        QCOMPARE(kind("vae.safetensors"), std::optional<ModelKind>(ModelKind::Vae));
+        QCOMPARE(kind("encoder.safetensors"), std::optional<ModelKind>(ModelKind::TextEncoder));
+    }
+
+    // #86: a LoRA fits a model whose layers it changes are there, as wide. Names and widths as in
+    // the owner's files (Klein 9B is 4096 wide, Klein 4B 3072).
+    void aLoraFitsTheModelWhoseLayersItChanges() {
+        Gguf().text("general.architecture", "flux")
+            .tensor("txt_in.weight", {4096, 12288})
+            .tensor("img_in.weight", {4096, 128})
+            .tensor("double_blocks.0.img_attn.proj.weight", {4096, 4096})
+            .tensor("double_blocks.0.img_mlp.0.weight", {24576, 4096})
+            .write(file("klein-9b.gguf"));
+        writeSafetensors(file("klein9b-turbo.safetensors"),
+                         {{"diffusion_model.double_blocks.0.img_attn.proj.lora_A.weight", QJsonArray{128, 4096}},
+                          {"diffusion_model.double_blocks.0.img_attn.proj.lora_B.weight", QJsonArray{4096, 128}}});
+        writeSafetensors(file("klein4b-rhc.safetensors"),
+                         {{"diffusion_model.double_blocks.0.img_attn.proj.lora_A.weight", QJsonArray{32, 3072}},
+                          {"diffusion_model.double_blocks.0.img_attn.proj.lora_B.weight", QJsonArray{3072, 32}}});
+        // kohya's names: underscores for dots, a lora_unet_ prefix.
+        writeSafetensors(file("kohya.safetensors"),
+                         {{"lora_unet_double_blocks_0_img_mlp_0.lora_down.weight", QJsonArray{16, 4096}},
+                          {"lora_unet_double_blocks_0_img_mlp_0.lora_up.weight", QJsonArray{24576, 16}},
+                          {"lora_te1_text_model_encoder_layers_0_mlp_fc1.lora_down.weight", QJsonArray{16, 768}}});
+        // A diffusers FLUX.1 LoRA: named so nothing in the model matches.
+        writeSafetensors(file("flux1-diffusers.safetensors"),
+                         {{"transformer.single_transformer_blocks.0.attn.to_k.lora_A.weight", QJsonArray{16, 3072}}});
+        const ModelShape klein9b = shape(file("klein-9b.gguf"));
+        QCOMPARE(loraFits(klein9b, shape(file("klein9b-turbo.safetensors"))), Fit::Fits);
+        QCOMPARE(loraFits(klein9b, shape(file("klein4b-rhc.safetensors"))), Fit::DoesNotFit);
+        QCOMPARE(loraFits(klein9b, shape(file("kohya.safetensors"))), Fit::Fits);
+        QCOMPARE(loraFits(klein9b, shape(file("flux1-diffusers.safetensors"))), Fit::Unknown);
+        QCOMPARE(layerKey("lora_unet_double_blocks_0_img_mlp_0"), layerKey("model.diffusion_model.double_blocks.0.img_mlp.0"));
     }
 
     void aShapeIsReadAgainOnlyWhenTheFileChanges() {

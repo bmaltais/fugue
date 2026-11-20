@@ -274,10 +274,13 @@ private:
     };
     QHash<QString, Fits> m_fits;
     int m_fitsAsked = 0;
-    std::shared_ptr<fugue::ModelShapes> m_shapes = std::make_shared<fugue::ModelShapes>();
+    fugue::ModelShapes *m_shapes = &fugue::ModelShapes::shared(); // lives as long as the process
     QThreadPool m_shapePool;
     static QString fitsKey(const QString &node, const QString &input);
-    // For a text encoder or VAE input of a node that has a diffusion model picked: which of the
-    // listed files fit it, at once from the headers read before, else read on the pool.
+    // The diffusion model handle of `node` on the level shown, or of the node its model links
+    // from (Apply LoRA from Load Models, through other Apply LoRAs); empty when none is picked.
+    QJsonObject diffusionModelOf(const QString &node, int depth = 0) const;
+    // For a text encoder, VAE or LoRA input of a node whose diffusion model is picked: which of
+    // the listed files fit it, at once from the headers read before, else read on the pool.
     void requestFits(const QString &node, const QString &input);
 };

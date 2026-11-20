@@ -252,10 +252,11 @@ Popup {
                     PathsSetting {
                         visible: panel.page === 1
                         title: qsTr("Extra model folders")
-                        note: qsTr("Searched for models besides Fugue's own, so an existing ComfyUI models folder can be shared without copying.")
+                        note: qsTr("Searched for models besides Fugue's own: a ComfyUI models folder as it is, or a folder of one kind of model, such as LoRAs.")
                         host: panel
                         key: "model_paths"
                         value: panel.model.modelPaths
+                        kinds: true
                     }
                     PathsSetting {
                         visible: panel.page === 1

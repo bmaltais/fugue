@@ -128,7 +128,7 @@ struct App {
         model.search()->registerCommands(commands);
         registerCanvasCommands(commands, model);
         fugue::bindMenuCommands(commands, model, [this](const QUrl &url) { openedUrls << url; });
-        settings.attach(&translator, &model, nullptr, &theme);
+        settings.attach(&translator, &model, &registry, &theme); // as main.cpp does
         settings.registerCommands(commands, [this](const QUrl &url) { openedUrls << url; });
         // Opened as a file is: one tab, nothing unsaved.
         workflows.openText(QString::fromUtf8(document.save()));

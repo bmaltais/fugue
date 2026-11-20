@@ -16,8 +16,10 @@ namespace fugue {
 
 namespace {
 
-const QStringList kKeys{"navigation", "language", "output_folder",  "inputs_folder", "model_paths",
-                        "pack_paths", "new_seed", "embed_workflow", "corner_radius"};
+const QStringList kKeys{"navigation",     "language",       "output_folder",
+                        "inputs_folder",  "model_paths",    "model_folder_kinds",
+                        "pack_paths",     "new_seed",       "embed_workflow",
+                        "corner_radius"};
 
 QString oneOf(const QJsonValue &value, const QStringList &choices, const QString &key) {
     if (value.isString() && choices.contains(value.toString()))
@@ -72,7 +74,11 @@ void apply(Settings &settings, const QString &key, const QJsonValue &value) {
         settings.inputsFolder = value.toString();
     else if (key == QLatin1String("model_paths"))
         settings.modelPaths = strings(value);
-    else if (key == QLatin1String("pack_paths"))
+    else if (key == QLatin1String("model_folder_kinds")) {
+        const QJsonObject kinds = value.toObject();
+        for (auto it = kinds.begin(); it != kinds.end(); ++it)
+            settings.modelFolderKinds.insert(it.key(), it.value().toString());
+    } else if (key == QLatin1String("pack_paths"))
         settings.packPaths = strings(value);
     else if (key == QLatin1String("new_seed"))
         settings.newSeed = value.toString();
@@ -99,6 +105,8 @@ QJsonValue settingDefault(const QString &key) {
         return 8;
     if (key == QLatin1String("model_paths") || key == QLatin1String("pack_paths"))
         return QJsonArray();
+    if (key == QLatin1String("model_folder_kinds"))
+        return QJsonObject();
     return QJsonValue(QJsonValue::Undefined); // language and folders: absent
 }
 
@@ -127,6 +135,18 @@ QString checkSetting(const QString &key, const QJsonValue &value) {
         return checkFolder(value, key);
     if (key == QLatin1String("model_paths") || key == QLatin1String("pack_paths"))
         return checkFolders(value, key);
+    if (key == QLatin1String("model_folder_kinds")) {
+        static const QRegularExpression typeId(QStringLiteral("^[a-z0-9.-]+/[a-z0-9.-]+$"));
+        if (!value.isObject())
+            return QStringLiteral("model_folder_kinds must map model paths to what they hold.");
+        const QJsonObject kinds = value.toObject();
+        for (auto it = kinds.begin(); it != kinds.end(); ++it)
+            if (!it.value().isString() || (it.value().toString() != QLatin1String("layout")
+                                           && !typeId.match(it.value().toString()).hasMatch()))
+                return QStringLiteral("model_folder_kinds: %1 must hold layout or a model type such as fugue/lora.")
+                    .arg(it.key());
+        return {};
+    }
     return QStringLiteral("%1 is not a setting.").arg(key);
 }
 

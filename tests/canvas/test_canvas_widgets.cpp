@@ -630,6 +630,59 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // #86: Apply LoRA, its model from Load Models with Klein 9B picked: the Klein 9B LoRA first,
+    // the Klein 4B one (3072 wide) dimmed under "Other".
+    void applyLoraListsTheLorasThatFitFirst() {
+        QTemporaryDir models;
+        const auto header = [](const QJsonObject &shapes) {
+            QJsonObject tensors;
+            for (auto it = shapes.begin(); it != shapes.end(); ++it)
+                tensors.insert(it.key(), QJsonObject{{"dtype", "F16"}, {"shape", it.value()}, {"data_offsets", QJsonArray{0, 0}}});
+            const QByteArray json = QJsonDocument(tensors).toJson(QJsonDocument::Compact);
+            QByteArray out;
+            for (int i = 0; i < 8; ++i)
+                out.append(char((quint64(json.size()) >> (8 * i)) & 0xff));
+            return out + json;
+        };
+        const QByteArray klein9b = header({{"txt_in.weight", QJsonArray{4096, 12288}},
+                                           {"img_in.weight", QJsonArray{4096, 128}},
+                                           {"double_blocks.0.img_attn.proj.weight", QJsonArray{4096, 4096}}});
+        QVERIFY(test::writeFixtureFile(models.filePath("diffusion_models/klein9b.safetensors"), klein9b));
+        const auto lora = [&](int width) {
+            return header({{"diffusion_model.double_blocks.0.img_attn.proj.lora_A.weight", QJsonArray{16, width}},
+                           {"diffusion_model.double_blocks.0.img_attn.proj.lora_B.weight", QJsonArray{width, 16}}});
+        };
+        QVERIFY(test::writeFixtureFile(models.filePath("loras/a-klein4b.safetensors"), lora(3072)));
+        QVERIFY(test::writeFixtureFile(models.filePath("loras/b-klein9b.safetensors"), lora(4096)));
+        const QByteArray document = R"({"fugue": 1,
+          "graph": {"nodes": {
+            "models": {"type": "fugue/load-models", "version": "1.0.0",
+              "inputs": {"diffusion_model": {"resource": "fugue/diffusion-model", "name": "klein9b.safetensors", "hash": "HASH"}}},
+            "lora": {"type": "fugue/apply-lora", "version": "1.0.0", "inputs": {"model": {"from": "models.model"}}}}},
+          "layout": {"nodes": {"models": {"pos": [20, 20]}, "lora": {"pos": [360, 20]}},
+                     "view": {"center": [480, 340], "zoom": 1}}})";
+        WidgetApp app(QByteArray(document).replace("HASH", sha256(klein9b).toUtf8()).constData());
+        app.model.widgets()->setModelRoots({models.path()});
+        app.model.widgets()->setModelSource([](const QString &, const QStringList &,
+                                               std::function<void(QList<WidgetEdit::Model>)> done) { done({}); });
+        QVERIFY(app.open());
+        app.click(app.in("lora", "lora"));
+        QTRY_VERIFY2(app.menuOpen(), qPrintable(app.warnings.join('\n')));
+        QObject *menu = app.popup("widgetMenu");
+        const auto rows = [&] {
+            QStringList out;
+            for (const QVariant &entry : menu->property("entries").toList()) {
+                const QVariantMap e = entry.toMap();
+                out << (e.value("heading").toBool() ? "# " : "") + e.value("text").toString()
+                           + (e.value("dim").toBool() ? " (dim)" : "");
+            }
+            return out;
+        };
+        QTRY_COMPARE(rows(), (QStringList{"# " + models.filePath("loras"), "b-klein9b.safetensors", "# Other",
+                                          "a-klein4b.safetensors (dim)", "Type a name…"}));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void onFirstRunThePickerListsThePairedHostsModelsByHost() {
         // No providers.json, this machine with only text models, studio paired and running
         // two image models, lab paired and offline (spec 8.2's default): the real model
