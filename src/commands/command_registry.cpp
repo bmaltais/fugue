@@ -41,7 +41,7 @@ QString CommandRegistry::canonicalKey(const QString &key, QString *problem) {
     const QKeySequence sequence(key.trimmed(), QKeySequence::PortableText);
     if (key.trimmed().isEmpty() || sequence.isEmpty() || sequence.count() != 1 || sequence[0].toCombined() == 0) {
         if (problem)
-            *problem = QStringLiteral("\"%1\" is not a key (one chord such as Ctrl+S)").arg(key);
+            *problem = tr("\"%1\" is not a key (one chord such as Ctrl+S)").arg(key);
         return {};
     }
     return sequence.toString(QKeySequence::PortableText);
@@ -258,13 +258,13 @@ void CommandRegistry::loadKeymap(const QString &path) {
         return;
     }
     if (!info.isFile() || info.size() > kMaxKeymapBytes) {
-        m_fileProblems << QStringLiteral("%1 is not a keymap file (not a file, or over 1 MB); using the default keys").arg(name);
+        m_fileProblems << tr("%1 is not a keymap file (not a file, or over 1 MB); using the default keys").arg(name);
         rebuild();
         return;
     }
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
-        m_fileProblems << QStringLiteral("%1 cannot be read (%2); using the default keys").arg(name, file.errorString());
+        m_fileProblems << tr("%1 cannot be read (%2); using the default keys").arg(name, file.errorString());
         rebuild();
         return;
     }
@@ -279,9 +279,9 @@ void CommandRegistry::applyKeymap(const QByteArray &json, const QString &source)
     const QJsonDocument document = QJsonDocument::fromJson(json, &error);
     if (error.error != QJsonParseError::NoError || !document.isObject()) {
         m_fileProblems << (error.error != QJsonParseError::NoError
-                               ? QStringLiteral("%1 is not valid JSON (%2, at byte %3); using the default keys")
+                               ? tr("%1 is not valid JSON (%2, at byte %3); using the default keys")
                                      .arg(source, error.errorString()).arg(error.offset)
-                               : QStringLiteral("%1 must hold a JSON object like {\"add\": [], \"unset\": []}; using the default keys")
+                               : tr("%1 must hold a JSON object like {\"add\": [], \"unset\": []}; using the default keys")
                                      .arg(source));
         rebuild();
         return;
@@ -289,13 +289,13 @@ void CommandRegistry::applyKeymap(const QByteArray &json, const QString &source)
     const QJsonObject root = document.object();
     for (const QString &name : root.keys())
         if (name != QLatin1String("add") && name != QLatin1String("unset"))
-            m_fileProblems << QStringLiteral("%1: unknown entry \"%2\" ignored").arg(source, name);
+            m_fileProblems << tr("%1: unknown entry \"%2\" ignored").arg(source, name);
     auto readList = [&](const QString &listName, QList<Edit> *into) {
         const QJsonValue value = root.value(listName);
         if (value.isUndefined())
             return;
         if (!value.isArray()) {
-            m_fileProblems << QStringLiteral("%1: \"%2\" must be a list; ignored").arg(source, listName);
+            m_fileProblems << tr("%1: \"%2\" must be a list; ignored").arg(source, listName);
             return;
         }
         int number = 0;
@@ -304,13 +304,13 @@ void CommandRegistry::applyKeymap(const QByteArray &json, const QString &source)
             const QString where = QStringLiteral("%1: %2 #%3").arg(source, listName).arg(number);
             const QJsonObject object = item.toObject();
             if (!item.isObject() || !object.value("command").isString() || !object.value("key").isString()) {
-                m_fileProblems << where + QStringLiteral(" needs a \"command\" and a \"key\", both text; skipped");
+                m_fileProblems << tr("%1 needs a \"command\" and a \"key\", both text; skipped").arg(where);
                 continue;
             }
             QString problem;
             const QString key = canonicalKey(object.value("key").toString(), &problem);
             if (key.isEmpty()) {
-                m_fileProblems << where + ": " + problem + "; skipped";
+                m_fileProblems << tr("%1: %2; skipped").arg(where, problem);
                 continue;
             }
             into->append({object.value("command").toString(), key});
@@ -332,15 +332,15 @@ void CommandRegistry::rebuild() {
     for (const Edit &edit : std::as_const(m_unsets)) {
         const auto it = m_index.constFind(edit.command);
         if (it == m_index.constEnd()) {
-            m_keymapProblems << QStringLiteral("unset: no command \"%1\"").arg(edit.command);
+            m_keymapProblems << tr("unset: no command \"%1\"").arg(edit.command);
         } else if (!m_entries[*it].keys.removeOne(edit.key)) {
-            m_keymapProblems << QStringLiteral("unset: %1 is not bound to %2").arg(edit.key, edit.command);
+            m_keymapProblems << tr("unset: %1 is not bound to %2").arg(edit.key, edit.command);
         }
     }
     for (const Edit &edit : std::as_const(m_adds)) {
         const auto it = m_index.constFind(edit.command);
         if (it == m_index.constEnd()) {
-            m_keymapProblems << QStringLiteral("add: no command \"%1\"").arg(edit.command);
+            m_keymapProblems << tr("add: no command \"%1\"").arg(edit.command);
             continue;
         }
         Entry &entry = m_entries[*it];
@@ -358,8 +358,8 @@ void CommandRegistry::rebuild() {
     for (auto it = owners.constBegin(); it != owners.constEnd(); ++it)
         if (it->size() > 1) {
             const auto [context, key] = std::pair(it.key().section('\n', 0, 0), it.key().section('\n', 1));
-            m_keymapProblems << QStringLiteral("%1 is bound to %2 in the same place (%3)")
-                                    .arg(key, it->join(QStringLiteral(" and ")), context);
+            m_keymapProblems << tr("%1 is bound to %2 in the same place (%3)")
+                                    .arg(key, it->join(tr(" and ")), context);
         }
     m_keymapProblems.sort();
     emit changed();

@@ -62,7 +62,7 @@ Item {
                                            ? qsTr("Running %1").arg(pill.runs.activeNode) + pill.percent(pill.runs.progress)
                                            : qsTr("Running"))
                       : pill.runs.busy ? qsTr("Waiting for the GPU")
-                      : pill.errorCount === 1 ? qsTr("1 error") : qsTr("%1 errors").arg(pill.errorCount)
+                      : qsTr("%n errors", "", pill.errorCount)
                 textFormat: Text.PlainText
                 color: pill.look.text
                 font.pixelSize: pill.look.labelSize

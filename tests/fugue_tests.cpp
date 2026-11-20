@@ -16,6 +16,7 @@
 
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
+#include "menu/menus.h"
 #include "qml_app.h"
 #include "theme.h"
 #include "workflow/workflows.h"
@@ -584,6 +585,37 @@ private slots:
                 }
             }
         }
+        QVERIFY2(problems.isEmpty(), qPrintable(problems.join('\n')));
+    }
+
+    void menuMnemonicsNeverTakeACommandsAltKey() {
+        // A top menu's Alt+letter comes from its translated title (MenuBar.qml); a letter
+        // that is also a command's Alt key (Alt+C collapses, 12.4) would take it away.
+        fugue::CommandRegistry commands;
+        fugue::registerDefaultCommands(commands);
+        QSet<QString> altKeys;
+        for (const QString &id : commands.ids())
+            for (const QString &key : commands.keys(id))
+                if (key.startsWith("Alt+") && key.size() == 5)
+                    altKeys << key;
+        auto clashes = [&](const QString &code, const QJsonObject &catalog) {
+            QStringList found;
+            for (const QVariant &menu : fugue::menus::tree("bar")) {
+                const QString english = menu.toMap().value("title").toString();
+                const QString title = catalog.value(english).toString(english);
+                const qsizetype at = title.indexOf('&');
+                const QString key = at >= 0 && at + 1 < title.size() ? "Alt+" + QString(title.at(at + 1).toUpper()) : QString();
+                if (altKeys.contains(key))
+                    found << code + ": " + title + " takes " + key;
+            }
+            return found;
+        };
+        // The check itself sees a clash.
+        QCOMPARE(clashes("xx", QJsonObject{{"&File", "&Clé"}}).size(), 1);
+        const QString folder = QFileInfo(QFINDTESTDATA("../src/i18n/en.json")).absolutePath();
+        QStringList problems;
+        for (const QFileInfo &file : QDir(folder).entryInfoList({"*.json"}, QDir::Files))
+            problems << clashes(file.completeBaseName(), readCatalog(file.filePath()));
         QVERIFY2(problems.isEmpty(), qPrintable(problems.join('\n')));
     }
 

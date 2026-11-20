@@ -122,7 +122,11 @@ struct App {
         });
     }
 
+    ~App() { QCoreApplication::removeTranslator(&translator); }
+
     bool open() {
+        // As main() does: the English catalog gives counted strings their plural forms.
+        QCoreApplication::installTranslator(&translator);
         fugue::exposeToQml(engine, {&translator, &theme, &commands, &model, &workflows, &settings, runs, imageActions});
         engine.load(QUrl("qrc:/Main.qml"));
         if (engine.rootObjects().isEmpty())
