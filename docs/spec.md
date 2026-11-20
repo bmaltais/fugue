@@ -958,7 +958,12 @@ The program writes zero or more progress lines and then exactly one result or er
 - Input files are read-only to the node by convention: they are shared with the result cache.
 - Other outputs are JSON values. An optional output may be left out (empty).
 - `progress.value` is 0 to 1. Optional `{"op": "preview", "image": {"path": …}}` shows an
-  intermediate image.
+  intermediate image on the node until the next preview or the result, as a `node.preview` event
+  ([9.4](#94-events)). The path follows the outputs' rule (inside `work_dir`, relative to it). The
+  file is read after the line is read, so each preview writes a new file, or writes elsewhere and
+  renames over the last. Previews that come faster than the canvas shows them are dropped, all but
+  the newest. A bad preview (no path, no such file, outside `work_dir`) is not shown and the run
+  goes on; the first one of a run is the warning `node_bad_preview`.
 - A result may include `"stats": {"peak_memory_mb": …, "peak_vram_mb": …}`.
 - Exit 0 with a result is success. A nonzero exit, or exit 0 without a result, is a failure; the
   last 20 lines of stderr become the error message. Outputs are checked against the manifest;
@@ -1777,7 +1782,7 @@ Codes in v0.1:
 | --- | --- |
 | Files | `file_not_found`, `invalid_json`, `invalid_document`, `unsupported_format_version`, `permission_denied`, `media_unreadable` |
 | Graph | `unknown_node_type`, `node_version_mismatch`, `unknown_input`, `missing_input`, `unknown_link_source`, `unknown_output`, `type_mismatch`, `value_out_of_range`, `value_not_in_choices`, `cycle`, `group_recursion`, `unknown_provider` |
-| Warnings | `not_part_of_output`, `model_missing`, `frozen_result_missing`, `pack_update_available`, `workflow_not_embedded` |
+| Warnings | `not_part_of_output`, `model_missing`, `frozen_result_missing`, `pack_update_available`, `workflow_not_embedded`, `node_bad_preview` |
 | Trust | `pack_untrusted`, `needs_confirmation` |
 | Packs | `pack_invalid`, `pack_exists`, `unknown_pack`, `fetch_failed`, `setup_failed` |
 | Groups | `group_invalid` (an edit a group cannot take: a list input fed from both sides of the selection, a name taken or not valid, a port exposed already) |
@@ -2127,6 +2132,7 @@ Building M2 made these further choices.
 | `language`: follow Omarchy (default) or a shipped catalog, live. `output_folder` and `inputs_folder` are read afresh by every run and the CLI | 1.4, 12.11 | high |
 | Providers page: the effective instances in preference order; with no providers.json the defaults show as "default, not saved", and the first change writes them all (mode 0600, atomically). Keys and secret module fields reach the panel only as set or not set | 8.2, 8.8 | medium |
 | ComfyUI settings not taken: custom navigation mix, zoom and pointer tuning, link render modes, node opacity and badges, palettes and background images (the Omarchy theme), auto save (recovery, 11.3), server flags (each provider owns its engine's), accounts. Later: minimap, snap to grid, side panel layout, reduce motion, keys edited in place, pack enable/disable. Full table in the #51 pull request | 12 | medium |
+| Command-node previews (#65). ComfyUI sends a sampler's latent preview as a binary websocket message and the frontend shows only the newest one, in the running node's image slot at full strength, until the node's output images replace it. We match: one slot, the newest preview, full strength while it is this run's, the result taking its place. We differ: a node sends a file path, not bytes (the protocol is lines of JSON, and the file stays in the run folder for Open Image); previews queue at most one deep, so a fast node cannot hold up the run thread; a bad preview is a warning, never a failure; the last run's picture is dimmed while the node runs again, until the new preview comes | 7.2, 9.4 | medium-high |
 
 ## Appendix B: issue to section map
 
