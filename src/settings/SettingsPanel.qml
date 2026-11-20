@@ -209,7 +209,7 @@ Popup {
                                     objectName: "cornerMore"
                                     text: "+"
                                     Accessible.name: qsTr("Rounder")
-                                    enabled: corners.radius < 16
+                                    enabled: corners.radius < panel.model.maxCornerRadius
                                     opacity: enabled ? 1 : 0.5
                                     onClicked: panel.apply(panel.model.set("corner_radius", corners.radius + 1))
                                 }

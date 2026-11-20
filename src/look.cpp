@@ -287,6 +287,7 @@ std::vector<ShadowLayer> shadowLayers(int level, bool light) {
     case 1: return light ? Layers{{1, 3, .12}, {6, 18, .12}} : Layers{{2, 4, .75}, {8, 24, .65}};
     case 2: return light ? Layers{{2, 5, .14}, {12, 32, .18}} : Layers{{3, 8, .80}, {16, 40, .75}};
     case 4: return light ? Layers{{3, 8, .14}, {20, 48, .24}} : Layers{{4, 10, .80}, {24, 60, .80}};
+    case 3:
     default: return light ? Layers{{4, 10, .08}, {18, 48, .20}} : Layers{{6, 16, .50}, {20, 56, .55}};
     }
 }

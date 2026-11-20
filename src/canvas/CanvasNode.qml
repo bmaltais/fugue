@@ -388,23 +388,22 @@ Item {
                     opacity: face.running || node.thumbnailDim ? 0.5 : 1
                 }
             }
-            // The resize marks (#49, #63): every corner resizes; the bottom right one shows its mark
-            // while the node is hovered or selected, quietly, and the corner under the pointer or
-            // being dragged shows its own in the text color. FugueCanvas takes the press and
-            // the double click.
+            // The resize marks (#49, #63): every corner resizes, and all four show their mark while
+            // the node is hovered or selected (as ComfyUI's Vue nodes), in `label`, which reads at
+            // 4.5:1 on the body and the header; the corner under the pointer or being dragged is
+            // in `text`. FugueCanvas takes the press and the double click.
             Loader {
                 active: face.full && !node.collapsed && (node.hovered || node.selected || node.activeCorner !== "")
                 anchors.fill: parent
                 sourceComponent: Item {
                     Repeater {
-                        model: node.activeCorner === "" || node.activeCorner === "se" ? ["se"] : ["se", node.activeCorner]
+                        model: ["nw", "ne", "sw", "se"]
                         ResizeMark {
                             required property string modelData
-                            readonly property bool current: modelData === node.activeCorner
                             corner: modelData
                             nodeCorner: face.corner
-                            color: current ? node.look.text : node.look.label
-                            opacity: current ? 1 : 0.7
+                            unit: face.u
+                            color: modelData === node.activeCorner ? node.look.text : node.look.label
                             x: modelData.endsWith("w") ? 0 : node.width - width
                             y: modelData.startsWith("n") ? 0 : node.height - height
                         }

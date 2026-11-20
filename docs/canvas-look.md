@@ -110,7 +110,7 @@ the mockups use the same.
 | Part | Value |
 | --- | --- |
 | Width | default 60u (240), minimum 40u (160), maximum 120u; auto-sized (longer text values widen it) until a resize pins it; double-click on a corner returns to auto |
-| Resize | from any of the four corners (as ComfyUI): a square 4u wide (at least 12 screen px) inside each corner, with the matching diagonal resize cursor before the press; a top or left corner moves the node so the opposite corner stays put. The mark: a 1.5 px stroke 3 px inside the edge, concentric with the corner (an L at `r` = 0, an arc of `r` − 3 with short legs beyond), in `label` at 70% in the bottom right corner while the node is hovered or selected, and in `text` in the corner under the pointer or being dragged |
+| Resize | from any of the four corners (as ComfyUI): a square 4u wide (at least 12 screen px) inside each corner, with the matching diagonal resize cursor before the press; a top or left corner moves the node so the opposite corner stays put. The mark: a 1.5 px stroke 3 px inside the edge, concentric with the corner (an L at `r` = 0, an arc of `r` − 3 with short legs beyond), in all four corners while the node is hovered or selected (as ComfyUI's Vue nodes), in `label` (4.5:1 on the body and the header, 6.1), and in `text` in the corner under the pointer or being dragged; a port in a corner wins over it (a press there drags a link). Sizes in `u`: inset 0.75u, legs at least 0.75u, stroke 0.375u |
 | Edge | 1 px `hairline` inside the box; `hairline-strong` on hover |
 | Fill | `body` |
 | Corner | `r` (header top corners `r − 1` inside the edge) |
@@ -346,7 +346,10 @@ Each node level is a tight contact shadow under the edge plus a large soft ambie
 downward, and the texture lives in world coordinates, so it grows with the zoom. Retuned in #63:
 ComfyUI's litegraph draws every node, selected or not, on one black 50% shadow offset (2, 2) with
 blur 3, all times the zoom, off in its low quality mode; its Vue nodes use one constant
-`drop-shadow-lg`. Fugue's stays as cheap (one texture per level) and adds elevation: selected
+`drop-shadow-lg`. Unreal's graph nodes draw a shadow brush per node with a selected variant
+(`SNode::GetShadowBrush`, `SGraphNodeK2Base::GetShadowBrush(bSelected)` in its API docs); the
+docs of Substance 3D Designer's graph view and of Krea Nodes say nothing about node shadows, and
+neither was checked further. Fugue's stays as cheap (one texture per level) and adds elevation: selected
 higher, dragged higher still. On a dark theme black over a near-black canvas only reads when it
 is deep, so the dark values are strong, and the card's top edge carries a 1 px highlight
 (`bevel`, the text color at 10%). [The comparison board](canvas-look/shots/compare-shadows.png)
@@ -359,7 +362,7 @@ their shadow and 12.1 wins.
 
 **How, in QML.** C++ (`look::shadowImage`) paints each shadow once into a small QImage: a
 rounded rect of the node's corner, blurred, with the level's two layers, handed to QML as a
-`data:` URL (`theme.look.shadow1` to `shadow3`; the plan was an image provider, which each
+`data:` URL (`theme.look.shadow1` to `shadow4`; the plan was an image provider, which each
 engine would have to register). Each node shows it through a `BorderImage` (9-slice) stretched to
 the node plus the blur margin. All nodes at one level share one texture.
 

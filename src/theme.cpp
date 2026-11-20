@@ -275,7 +275,6 @@ void Theme::setCornerRadius(int setting) {
         return;
     m_cornerSetting = setting;
     refreshLook();
-    emit changed();
 }
 
 QColor Theme::mix(const QColor &a, const QColor &b, double toB) {

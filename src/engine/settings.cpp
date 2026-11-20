@@ -18,7 +18,6 @@ namespace {
 
 const QStringList kKeys{"navigation", "language", "output_folder",  "inputs_folder", "model_paths",
                         "pack_paths", "new_seed", "embed_workflow", "corner_radius"};
-constexpr int kMaxCornerRadius = 16;
 
 QString oneOf(const QJsonValue &value, const QStringList &choices, const QString &key) {
     if (value.isString() && choices.contains(value.toString()))
@@ -113,10 +112,10 @@ QString checkSetting(const QString &key, const QJsonValue &value) {
     if (key == QLatin1String("corner_radius")) {
         const double px = value.toDouble(-1);
         if (value == QJsonValue(QStringLiteral("omarchy"))
-            || (value.isDouble() && px == std::floor(px) && px >= 0 && px <= kMaxCornerRadius))
+            || (value.isDouble() && px == std::floor(px) && px >= 0 && px <= Settings::maxCornerRadius))
             return {};
         return QStringLiteral("corner_radius must be a whole number of px from 0 to %1, or omarchy.")
-            .arg(kMaxCornerRadius);
+            .arg(Settings::maxCornerRadius);
     }
     if (key == QLatin1String("language")) {
         static const QRegularExpression code(QStringLiteral("^[a-z]{2,3}(-[A-Za-z]{2})?$"));

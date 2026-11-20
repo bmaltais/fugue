@@ -51,8 +51,9 @@ class SettingsModel : public QObject {
     Q_PROPERTY(QStringList packPaths READ packPaths NOTIFY changed)
     Q_PROPERTY(QString newSeed READ newSeed NOTIFY changed)
     Q_PROPERTY(QString embedWorkflow READ embedWorkflow NOTIFY changed)
-    // The canvas corners (#63): px from 0 to 16, or -1 to follow Omarchy (corner_radius).
+    // The canvas corners (#63): px from 0 to maxCornerRadius, or -1 to follow Omarchy.
     Q_PROPERTY(int cornerRadius READ cornerRadius NOTIFY changed)
+    Q_PROPERTY(int maxCornerRadius READ maxCornerRadius CONSTANT)
     // What is wrong with settings.json, one line each, and whether the panel may write it.
     Q_PROPERTY(QStringList problems READ problems NOTIFY changed)
     Q_PROPERTY(bool writable READ writable NOTIFY changed)
@@ -95,6 +96,7 @@ public:
     QString newSeed() const { return m_file.settings.newSeed; }
     QString embedWorkflow() const { return m_file.settings.embedWorkflow; }
     int cornerRadius() const { return m_file.settings.cornerRadius; }
+    static int maxCornerRadius() { return Settings::maxCornerRadius; }
     QStringList problems() const { return m_file.problems; }
     bool writable() const { return m_file.writable; }
 

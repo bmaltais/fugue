@@ -1,18 +1,19 @@
 import QtQuick
 import QtQuick.Shapes
 
-// The mark of a node's resize corner (#63, docs/canvas-look.md 4.1): a short stroke `inset`
+// The mark of a node's resize corner (#63, docs/canvas-look.md 4.1): a short stroke 0.75u
 // inside the node's edge, concentric with its corner, so an L on square corners and an arc
 // with short legs on round ones. Drawn for the bottom right corner and mirrored for the rest;
-// the node places it in its corner.
+// the node places it in its corner. Sizes follow the unit u (theme.look.unit, 4 px at 12).
 Shape {
     id: mark
     required property string corner // "nw", "ne", "sw" or "se"
     required property real nodeCorner
     required property color color
-    readonly property real inset: 3
+    required property real unit
+    readonly property real inset: 0.75 * unit
     readonly property real arc: Math.max(0, nodeCorner - inset)
-    readonly property real leg: Math.max(3, 9 - arc)
+    readonly property real leg: Math.max(inset, 2.25 * unit - arc)
     readonly property real end: arc + leg // where the stroke ends, from the inset corner
 
     width: end + inset
@@ -27,7 +28,7 @@ Shape {
 
     ShapePath {
         strokeColor: mark.color
-        strokeWidth: 1.5
+        strokeWidth: 0.375 * mark.unit
         fillColor: "transparent"
         capStyle: ShapePath.RoundCap
         startX: 0

@@ -356,7 +356,7 @@ private slots:
         QTemporaryDir dir;
         Theme theme(dir.path());
         QCOMPARE(theme.look()->property("corner").toInt(), 8);
-        QSignalSpy changed(&theme, &Theme::changed);
+        QSignalSpy changed(theme.look(), &CanvasLook::changed);
         theme.setCornerRadius(Settings::followOmarchy);
         QCOMPARE(theme.look()->property("corner").toInt(), 0);
         QCOMPARE(changed.count(), 1);

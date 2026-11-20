@@ -144,6 +144,27 @@ private slots:
         QVERIFY(app.warnings.isEmpty());
     }
 
+    // A port wins over the corner it sits in: a press on the last input of a node, inside its
+    // bottom left corner's square, drags a link, not the node's size.
+    void aPortInACornerStillStartsALink() {
+        App app(load(sheet));
+        QVERIFY(app.open());
+        const QRectF box(nodeItem(app, "gen")->position(), nodeItem(app, "gen")->size());
+        QVariantMap port;
+        qreal y = box.bottom();
+        while (port.isEmpty() && y > box.bottom() - 40)
+            port = app.model.portAt(box.left(), --y, 8);
+        QVERIFY(!port.isEmpty());
+        QVERIFY(!app.model.resizeCornerAt(box.left() + 2, y, 16).isEmpty()); // inside the square
+        const QPoint at = app.screen(box.left() + 2, y);
+        QTest::mousePress(app.window, Qt::LeftButton, {}, at);
+        QTest::mouseMove(app.window, at + QPoint(-30, 10));
+        QTest::mouseMove(app.window, at + QPoint(-60, 20));
+        QCOMPARE(app.canvas->property("gesture").toString(), QStringLiteral("link"));
+        QTest::mouseRelease(app.window, Qt::LeftButton, {}, at + QPoint(-60, 20));
+        QCOMPARE(nodeItem(app, "gen")->size(), box.size());
+    }
+
     // Each corner shows the resize cursor of its diagonal before the press; the body does not.
     void eachCornerShowsItsResizeCursor() {
         App app(load(sheet));

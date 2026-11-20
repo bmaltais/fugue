@@ -79,9 +79,9 @@ public:
     // (docs/canvas-look.md 6.2).
     Q_INVOKABLE QColor portColor(const QString &type) const;
     CanvasLook *look() const { return m_look; }
-    // settings.json's corner_radius: px, or Settings::followOmarchy (look::corners).
+    // settings.json's corner_radius: px, or Settings::followOmarchy (look::corners). Only
+    // the look changes (and says so); Theme's own properties stay.
     void setCornerRadius(int setting);
-    int cornerRadius() const { return m_cornerSetting; }
     // A straight sRGB blend, `toB` of the way from a to b.
     static QColor mix(const QColor &a, const QColor &b, double toB);
 

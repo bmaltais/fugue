@@ -77,11 +77,14 @@ FocusScope {
     property var hoverPort: ({})
     property var hoverLink: ({})
     // The resize corner the pointer is on, {node, corner} (#49, #63): any corner of an open
-    // node, a square 4u wide (at least 12 screen px) inside it; and the one being dragged.
+    // node, a square 4u wide (at least 12 screen px) inside it, unless a port is there too
+    // (a port wins: a link drag from it); and the one being dragged.
     property var hoverCorner: ({})
     property string resizeCorner: ""
     function cornerAt(w) {
-        return tier === 0 ? model.resizeCornerAt(w.x, w.y, Math.max(4 * model.unit, 12 / world.scale)) : ({})
+        if (tier !== 0 || model.portAt(w.x, w.y, Math.max(8, 10 / world.scale)).node !== undefined)
+            return ({})
+        return model.resizeCornerAt(w.x, w.y, Math.max(4 * model.unit, 12 / world.scale))
     }
     // The resize cursor of a corner: diagonal one way for nw and se, the other for ne and sw.
     function cornerCursor(corner) {
