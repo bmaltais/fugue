@@ -473,6 +473,17 @@ private slots:
         QCOMPARE(canvas.undoText(), QString("Resize"));
     }
 
+    // A new workflow that gets a node and loses it again is as it was: not unsaved.
+    void deletingEveryNodeLeavesNoEmptyLayout() {
+        CanvasModel canvas(&m_registry);
+        const Document empty = document(R"({"fugue": 1, "graph": {"nodes": {}}})");
+        canvas.setDocument(empty);
+        const QString id = canvas.addNode("fugue/text", 0, 0);
+        canvas.select({id});
+        canvas.deleteSelection();
+        QCOMPARE(contentHash(canvas.document()), contentHash(empty));
+        QVERIFY(!canvas.document().layout.contains("nodes"));
+    }
 
 
     void fitFramesTheSelectionOrEverything() {

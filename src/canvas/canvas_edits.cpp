@@ -394,7 +394,12 @@ void CanvasModel::deleteSelection() {
     QJsonObject entries = layout.value("nodes").toObject();
     for (const QString &id : ids)
         entries.remove(id);
-    layout.insert("nodes", entries);
+    // None left: no empty entry either, so a workflow that gets a node and loses it again is
+    // as it was, not unsaved.
+    if (entries.isEmpty())
+        layout.remove("nodes");
+    else
+        layout.insert("nodes", entries);
     if (layout.contains("links")) {
         QJsonObject links = layout.value("links").toObject();
         for (const QString &key : links.keys())

@@ -343,6 +343,21 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // A new tab that gets a node and loses it is as it was: nothing unsaved, and opening a
+    // file still replaces it.
+    void deletingTheOnlyNodeOfANewTabLeavesNothingUnsaved() {
+        App app(load(linked));
+        QVERIFY(app.open());
+        app.key(Qt::Key_N, Qt::ControlModifier);
+        QCOMPARE(app.workflows.count(), 2);
+        const QString id = app.model.addNode("fugue/text", 100, 100);
+        QVERIFY(app.workflows.unsaved());
+        app.model.select({id});
+        app.key(Qt::Key_Delete);
+        QCOMPARE(app.model.nodes()->rowCount(), 0);
+        QVERIFY(!app.workflows.unsaved());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
 
     // The hovered wire is worked out again when the wires change under a still pointer: a
     // link a key took away has no cut handle left to click.
