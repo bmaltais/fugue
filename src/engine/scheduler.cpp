@@ -2,13 +2,16 @@
 
 #include <algorithm>
 #include <exception>
+#include <memory>
 #include <new>
+#include <utility>
 
 #include <QCoreApplication>
 #include <QEventLoop>
 #include <QFile>
 #include <QHash>
 #include <QJsonArray>
+#include <QMutex>
 #include <QPointer>
 #include <QSet>
 #include <QRandomGenerator>
@@ -871,6 +874,32 @@ private:
         context.progress = [this, path](double value, const QString &stage, const QString &message) {
             later([this, path, value, stage, message] { progress(path, value, stage, message); });
         };
+        // The newest preview not yet shown: one is posted at a time, and those that come in
+        // the meantime replace it.
+        struct Pending {
+            QMutex mutex;
+            QString file;
+        };
+        const auto pending = std::make_shared<Pending>();
+        context.preview = [this, path, pending](const QString &file) {
+            if (file.isEmpty())
+                return;
+            bool post = false;
+            {
+                QMutexLocker lock(&pending->mutex);
+                post = pending->file.isEmpty();
+                pending->file = file;
+            }
+            if (post)
+                later([this, path, pending] {
+                    QString newest;
+                    {
+                        QMutexLocker lock(&pending->mutex);
+                        newest = std::exchange(pending->file, QString());
+                    }
+                    preview(path, QJsonObject{{"path", newest}});
+                });
+        };
         context.cancelled = [flag = m_cancel] { return flag->load(); };
         return context;
     }
@@ -915,6 +944,13 @@ private:
                    {"value", qBound(0.0, value, 1.0)},
                    {"stage", stage},
                    {"message", message}});
+    }
+
+    // An intermediate image of a running node (9.4): {"path": …}, and its "format" when known.
+    void preview(const QString &path, const QJsonObject &image) {
+        if (m_nodes[path].phase != Phase::Running)
+            return;
+        emitEvent({{"event", "node.preview"}, {"node", path}, {"image", image}});
     }
 
     // --- provider jobs ---
@@ -967,9 +1003,7 @@ private:
                 const QString file = n.workDir + QStringLiteral("/preview.png");
                 QFile preview(file);
                 if (preview.open(QIODevice::WriteOnly) && preview.write(status.preview) == status.preview.size())
-                    emitEvent({{"event", "node.preview"},
-                               {"node", path},
-                               {"image", QJsonObject{{"path", file}, {"format", "png"}}}});
+                    this->preview(path, QJsonObject{{"path", file}, {"format", "png"}});
             }
             return;
         }

@@ -132,6 +132,7 @@ private:
     int m_counter = 0;
     std::shared_ptr<std::atomic<bool>> m_cancel;
     QStringList m_progress;
+    QStringList m_previews;
 
     NodeContext contextFor(const Node &node, const Values &inputs = {}) {
         NodeContext context;
@@ -148,6 +149,7 @@ private:
         context.progress = [this](double value, const QString &, const QString &message) {
             m_progress << QStringLiteral("%1 %2").arg(value).arg(message);
         };
+        context.preview = [this](const QString &file) { m_previews << file; };
         return context;
     }
 
@@ -177,6 +179,7 @@ private slots:
         m_hashes = std::make_unique<FileHashes>(m_root.path() + "/hashes.json");
         m_cancel = std::make_shared<std::atomic<bool>>(false);
         m_progress.clear();
+        m_previews.clear();
     }
 
     // --- one-shot ---
@@ -246,6 +249,41 @@ private slots:
         QVERIFY(!linked.ok());
         QCOMPARE(linked.error().code, QString("node_bad_output"));
         QVERIFY2(linked.error().message.contains("outside"), qPrintable(linked.error().message));
+    }
+
+    // A `preview` line (7.2) shows an image the program wrote in its work_dir: a relative path
+    // resolves against work_dir, as an output's does.
+    void aPreviewLineShowsTheImageItNames() {
+        const Node node = makeNode(m_root.path(), "steps", QByteArray("cat > /dev/null\necho ") + kPng +
+                                                               " | base64 -d > step.png\n"
+                                                               "echo '{\"op\": \"preview\", \"image\": {\"path\": \"step.png\"}}'\n"
+                                                               "echo '{\"outputs\": {\"text\": \"done\"}}'\n");
+        CommandKernel kernel(kGraceMs);
+        const NodeContext context = contextFor(node);
+        const Result<Values> result = kernel.run(context);
+        QVERIFY2(result.ok(), qPrintable(result.error().message));
+        QCOMPARE(m_previews, QStringList{QFileInfo(context.workDir + "/step.png").canonicalFilePath()});
+        QVERIFY(result.warnings().isEmpty());
+    }
+
+    // A preview is only a picture: one that names no file, or a file outside work_dir, is left
+    // out and the run goes on, with one warning that says why (the node's author sees it in
+    // run.json and the CLI's run.done).
+    void aBadPreviewLineIsLeftOutWithAWarning() {
+        const Node node = makeNode(m_root.path(), "badsteps",
+                                   "cat > /dev/null\n"
+                                   "echo '{\"op\": \"preview\", \"image\": {\"path\": \"../secret.txt\"}}'\n"
+                                   "echo '{\"op\": \"preview\", \"image\": {\"path\": \"missing.png\"}}'\n"
+                                   "echo '{\"op\": \"preview\"}'\n"
+                                   "echo '{\"outputs\": {\"text\": \"done\"}}'\n");
+        CommandKernel kernel(kGraceMs);
+        const Result<Values> result = kernel.run(contextFor(node));
+        QVERIFY2(result.ok(), qPrintable(result.error().message));
+        QCOMPARE(result->value("text").text(), QString("done"));
+        QVERIFY(m_previews.isEmpty());
+        QCOMPARE(result.warnings().size(), 1);
+        QCOMPARE(result.warnings().first().code, QString("node_bad_preview"));
+        QVERIFY2(result.warnings().first().message.contains("outside"), qPrintable(result.warnings().first().message));
     }
 
     void anErrorLineFailsTheNodeWithItsMessage() {
@@ -434,6 +472,16 @@ wait
         cancel.join();
         QVERIFY(!result.ok());
         QCOMPARE(m_progress, QStringList{"0.5 working"});
+    }
+
+    // A persistent node's preview carries its run's id; one for another run is not shown.
+    void aPersistentNodeShowsThePreviewsOfItsRun() {
+        const Node node = makeNode(m_root.path(), "persview", persistentScript(), {{"mode", "persistent"}});
+        CommandKernel kernel(kGraceMs);
+        const NodeContext context = contextFor(node, {{"mode", Value("preview")}});
+        const Result<Values> result = kernel.run(context);
+        QVERIFY2(result.ok(), qPrintable(result.error().message));
+        QCOMPARE(m_previews, QStringList{QFileInfo(context.workDir + "/step.png").canonicalFilePath()});
     }
 
     void cancelAsksAPersistentNodeAndKeepsItRunning() {

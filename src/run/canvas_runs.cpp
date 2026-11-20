@@ -279,6 +279,10 @@ void CanvasRuns::show(const QString &tab, const QString &node) {
         text(tr("File not found"), 0.5, true);
     else if (info.showsResult && aggregate(view) != QLatin1String("running"))
         text(tr("No result yet"), 0.5, true);
+    // While a node runs, what its slot shows is the last run's, at half strength, until this
+    // run's preview comes.
+    if (state.contains("thumbnail") && aggregate(view) == QLatin1String("running") && !view.live)
+        state.insert("thumbnailDim", true);
     m_pendingProgress.remove(node);
     // A check after each edit restates every node; only the ones that changed are laid out.
     auto shown = m_shown.find(node);
@@ -444,6 +448,8 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
         if (kind == QLatin1String("node.running")) {
             setState(QStringLiteral("running"));
             view.progress = -1;
+            if (!inner)
+                view.live = false;
         } else if (kind == QLatin1String("node.preview")) {
             if (inner)
                 continue;
@@ -454,6 +460,7 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
             view.thumbnailWidth = thumbnail.value("width").toInt();
             view.thumbnailHeight = thumbnail.value("height").toInt();
             view.imagePath = thumbnail.value("source").toString();
+            view.live = true;
         } else if (kind == QLatin1String("node.done") || kind == QLatin1String("node.cached")) {
             setState(event.value("frozen").toBool() ? QStringLiteral("frozen") : QStringLiteral("cached"));
             view.progress = -1;

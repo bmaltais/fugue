@@ -74,6 +74,12 @@ struct NodeContext {
     // Reports progress: value 0 to 1, a stage name, a message (9.4). Safe to
     // call from the kernel's thread, as often as wanted.
     std::function<void(double value, const QString &stage, const QString &message)> progress;
+    // Shows an intermediate image: `file`, an image the kernel wrote, becomes a node.preview
+    // event (9.4) and the node's picture until its result comes. Safe to call from the
+    // kernel's thread, as often as wanted: previews that come faster than they are shown are
+    // dropped, all but the newest. The file is read after the call returns, so a later preview
+    // writes another file, or writes elsewhere and renames over this one.
+    std::function<void(const QString &file)> preview;
     // True once the run is cancelled. Poll it at every checkpoint and return
     // early (any error will do: a cancelled node is reported as skipped).
     std::function<bool()> cancelled;

@@ -127,7 +127,8 @@ public:
         ThumbnailFile, // the file a Save Image wrote, shown beside the size
         ThumbnailRect, // where it sits in the node, from the node's top left
         ThumbnailText, // text in the thumbnail's place: a shown text or number, a label ("Video · 0:04")
-        ThumbnailDim,  // the slot is a placeholder ("No result yet"): drawn dimmed
+        ThumbnailDim,  // drawn at half strength: a placeholder ("No result yet"), or the last run's
+                       // picture while the node runs again, until this run's preview comes
         Notice,        // why the node cannot run now and how to fix it (8.5), from a check
         UpdateAvailable, // a group whose library version is newer: that version (5.3), else empty
         GroupSize,       // a group instance: how many nodes its definition holds (its caption row), else 0

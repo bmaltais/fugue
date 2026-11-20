@@ -17,8 +17,11 @@
 // The program runs in its own process group, so a cancel reaches what a shell script started.
 // What a program writes to stderr is its log: the last 20 lines go into a failure's message.
 //
-// Not yet (7.2, 7.3): `preview` lines are ignored, resource handles are passed on without a
-// resolved `path`, and a persistent process is not stopped when memory is needed.
+// A `preview` line shows its image on the node (NodeContext::preview); a bad one is left out, and
+// the first of a run is a warning (node_bad_preview).
+//
+// Not yet (7.2, 7.3): resource handles are passed on without a resolved `path`, and a persistent
+// process is not stopped when memory is needed.
 
 #include "engine/node_kernel.h"
 

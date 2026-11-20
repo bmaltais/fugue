@@ -613,6 +613,50 @@ private slots:
         QCOMPARE(progress.value("message").toString(), QStringLiteral("step 2 of 4"));
     }
 
+    // A kernel's intermediate image (a command node's `preview` line, 7.2) is a node.preview
+    // event naming the file (9.4).
+    void aKernelsPreviewBecomesAnEvent() {
+        World world;
+        world.kernel("fugue/text", [](const NodeContext &context) -> Result<Values> {
+            context.preview(context.workDir + "/step.png");
+            return Values{{"text", context.input("text")}};
+        });
+        const Ran ran = world.run(world.graph("{'a': {'type': 'fugue/text', 'inputs': {'text': 'x'}},"
+                                              " 's': {'type': 'fugue/save', 'inputs': {'value': {'from': 'a.text'}}}}"));
+        const QJsonObject preview = eventOf(ran.events, "node.preview", "a");
+        QCOMPARE(preview.value("image").toObject().value("path").toString(), ran.path + "/nodes/a/step.png");
+    }
+
+    // Previews that come faster than they are shown are dropped, all but the newest: the last
+    // one always arrives, and before the node's node.done.
+    void previewsThatComeTooFastKeepTheNewest() {
+        World world;
+        world.kernel("fugue/text", [](const NodeContext &context) -> Result<Values> {
+            for (int i = 1; i <= 200; ++i)
+                context.preview(context.workDir + QStringLiteral("/step%1.png").arg(i));
+            return Values{{"text", context.input("text")}};
+        });
+        const Ran ran = world.run(world.graph("{'a': {'type': 'fugue/text', 'inputs': {'text': 'x'}},"
+                                              " 's': {'type': 'fugue/save', 'inputs': {'value': {'from': 'a.text'}}}}"));
+        QStringList shown;
+        qsizetype done = -1, lastPreview = -1;
+        for (qsizetype i = 0; i < ran.events.size(); ++i) {
+            const QJsonObject &event = ran.events.at(i);
+            if (event.value("node").toString() != QLatin1String("a"))
+                continue;
+            if (event.value("event").toString() == QLatin1String("node.preview")) {
+                shown << QFileInfo(event.value("image").toObject().value("path").toString()).fileName();
+                lastPreview = i;
+            } else if (event.value("event").toString() == QLatin1String("node.done")) {
+                done = i;
+            }
+        }
+        QVERIFY(!shown.isEmpty());
+        QCOMPARE(shown.last(), QStringLiteral("step200.png"));
+        QVERIFY2(shown.size() < 200, qPrintable(QString::number(shown.size())));
+        QVERIFY(lastPreview < done);
+    }
+
     // --- outputs into the store (9.7) ---
 
     void aNodesFileGoesIntoTheStoreAndIsPassedOnFromThere() {

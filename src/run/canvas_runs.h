@@ -123,6 +123,7 @@ private:
         QVariantMap values;
         QString thumbnailFile; // the file a sink wrote, named under its picture
         QString imagePath;     // the full image behind `thumbnail`, for Open, Copy and Save Image
+        bool live = false;     // `thumbnail` is a preview of the run going on now (9.4)
         QString text;          // a text, number or media label shown in the slot
         qreal textAspect = 0.5;
         QString inputThumbnail; // the image of the node's input file, before it runs

@@ -40,7 +40,7 @@ Item {
     required property string thumbnailFile
     required property rect thumbnailRect
     required property string thumbnailText // in the image's place (a shown text, a label)
-    required property bool thumbnailDim    // a placeholder: no result yet
+    required property bool thumbnailDim    // half strength: a placeholder, or the last run's while running
     required property string updateAvailable // a group the library has a newer version of (5.3)
     required property int groupSize // a group instance: the nodes it holds (docs/canvas-look.md 9), else 0
 
@@ -382,9 +382,9 @@ Item {
                     text: node.thumbnailText
                     look: node.look
                     full: face.full
-                    // While a node runs, its previous result stays at half strength, as does a
-                    // placeholder.
-                    opacity: face.running || node.thumbnailDim ? 0.5 : 1
+                    // A placeholder, and the last run's picture while the node runs again (not
+                    // this run's preview), are at half strength.
+                    opacity: node.thumbnailDim ? 0.5 : 1
                 }
             }
             // The resize grip (#49): two short diagonals in the bottom right corner, shown while the

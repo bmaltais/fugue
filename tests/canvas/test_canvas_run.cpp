@@ -30,6 +30,7 @@
 
 using namespace canvas_test;
 using pack_fixture::writeSayPack;
+using pack_fixture::writeToolsPack;
 using fugue::CanvasRuns;
 using fugue::FakeProvider;
 using fugue::RunService;
@@ -950,6 +951,68 @@ private slots:
         QCOMPARE(r.runs->errors().first().toMap().value("code").toString(), QStringLiteral("node_version_mismatch"));
         QCOMPARE(r.role("show", NodeList::ThumbnailText).toString(), QStringLiteral("second"));
         QVERIFY(QFile::exists(packs + "/io.example.tools/say/run.sh"));
+        r.close();
+        QDir(packs).removeRecursively();
+    }
+
+    // #65: a command node's `preview` line (7.2) is its picture while it runs, at full strength;
+    // its result has no picture, so the preview stays. When it runs again, that picture is the
+    // last run's and is drawn at half strength until the new run's preview comes.
+    void aCommandNodesPreviewShowsOnTheNodeWhileItRuns() {
+        const QString packs = fugue::packsDir();
+        QDir(packs).removeRecursively();
+        // Run n waits for the file preview<n> in the node's folder, shows step.png, then waits
+        // for result<n>: the test decides when each step happens.
+        const QByteArray script = QByteArray(R"(cat > /dev/null
+n=$(( $(cat "$FUGUE_NODE_DIR/count" 2>/dev/null || echo 0) + 1 )); echo $n > "$FUGUE_NODE_DIR/count"
+wait_for() { for i in $(seq 1 400); do [ -e "$FUGUE_NODE_DIR/$1" ] && return; sleep 0.05; done; }
+wait_for preview$n
+echo iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg== | base64 -d > step$n.png
+echo '{"op": "preview", "image": {"path": "step'$n'.png"}}'
+wait_for result$n
+echo '{"outputs": {"text": "painted"}}'
+)");
+        QVERIFY(writeToolsPack(packs, "paint", script, "1.0.0", {{"deterministic", false}}));
+        fugue::TrustStore trust;
+        QVERIFY(trust.trust("io.example.tools", "1.0.0").isEmpty());
+        RunApp r(R"({
+  "fugue": 1,
+  "graph": {"nodes": {
+    "paint": {"type": "io.example.tools/paint", "version": "1.0.0"},
+    "show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "paint.text"}}}
+  }},
+  "layout": {"nodes": {"paint": {"pos": [0, 0]}, "show": {"pos": [300, 0]}}}
+})");
+        QVERIFY(r.app.open());
+        const QString dir = packs + "/io.example.tools/paint/";
+        auto touch = [&](const QString &name) { QVERIFY(pack_fixture::writeFile(dir + name, "")); };
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+
+        r.runs->start();
+        QTRY_COMPARE(r.state("paint"), QStringLiteral("running"));
+        QVERIFY(r.role("paint", NodeList::Thumbnail).toString().isEmpty());
+        touch("preview1");
+        QTRY_VERIFY(!r.role("paint", NodeList::Thumbnail).toString().isEmpty());
+        const QString first = r.role("paint", NodeList::Thumbnail).toString();
+        QVERIFY(!QImage(QUrl(first).toLocalFile()).isNull());
+        QCOMPARE(r.state("paint"), QStringLiteral("running"));
+        QVERIFY(!r.role("paint", NodeList::ThumbnailDim).toBool());
+        touch("result1");
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(finished.at(0).at(1).toString(), QStringLiteral("ok"));
+        QCOMPARE(r.role("paint", NodeList::Thumbnail).toString(), first);
+        QVERIFY(!r.role("paint", NodeList::ThumbnailDim).toBool());
+
+        r.runs->start();
+        QTRY_COMPARE(r.state("paint"), QStringLiteral("running"));
+        QCOMPARE(r.role("paint", NodeList::Thumbnail).toString(), first);
+        QVERIFY(r.role("paint", NodeList::ThumbnailDim).toBool());
+        touch("preview2");
+        QTRY_VERIFY(r.role("paint", NodeList::Thumbnail).toString() != first);
+        QVERIFY(!r.role("paint", NodeList::ThumbnailDim).toBool());
+        touch("result2");
+        QTRY_COMPARE(finished.size(), 2);
+        QVERIFY(r.app.warnings.isEmpty());
         r.close();
         QDir(packs).removeRecursively();
     }
