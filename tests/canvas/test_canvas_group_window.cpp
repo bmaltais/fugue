@@ -3,6 +3,9 @@
 // Ctrl+Shift+G ungroups, a Frame's title drags it with its nodes, and the Advanced header opens
 // and folds. Driven by keys and the mouse on the real Main.qml, offscreen.
 
+#include <QFont>
+
+#include <functional>
 #include <QtTest>
 
 #include "canvas_app.h"
@@ -159,6 +162,39 @@ private slots:
         answer("Picture");
         QTRY_COMPARE(app.model.portToRename(instance, "image", true).value("label").toString(), QStringLiteral("Picture"));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // #72: a Frame's title zooms with the canvas, as ComfyUI's group titles do, down to 10 px on
+    // screen, where it stops so it still reads; it no longer keeps its full size when zoomed out.
+    void aFrameTitleShrinksWithTheZoomToTenPixels() {
+        App app(load(kGraph));
+        QVERIFY(app.open());
+        app.model.select({"prompt"});
+        app.key(Qt::Key_G, Qt::ControlModifier);
+        QTRY_COMPARE(app.model.frames().size(), 1);
+        auto onScreen = [&] {
+            QQuickItem *title = nullptr;
+            std::function<void(QQuickItem *)> walk = [&](QQuickItem *from) {
+                for (QQuickItem *child : from->childItems()) {
+                    if (child->objectName() == QLatin1String("frameTitleText") && child->isVisible())
+                        title = child;
+                    walk(child);
+                }
+            };
+            walk(app.window->contentItem());
+            if (!title)
+                return -1.0;
+            return title->property("font").value<QFont>().pixelSize() * item(app.window->contentItem(), "world")->scale();
+        };
+        const qreal full = app.theme.look()->property("frameTitleSize").toReal();
+        QTRY_COMPARE(onScreen(), full);
+        const QVariantMap frame = app.model.frames().first().toMap();
+        app.model.setView(frame.value("x").toReal(), frame.value("y").toReal(), 0.7);
+        QMetaObject::invokeMethod(app.canvas, "applyView");
+        QTRY_VERIFY2(qAbs(onScreen() - full * 0.7) < 1, qPrintable(QString::number(onScreen()) + " at " + QString::number(item(app.window->contentItem(), "world")->scale())));
+        app.model.setView(frame.value("x").toReal(), frame.value("y").toReal(), 0.3);
+        QMetaObject::invokeMethod(app.canvas, "applyView");
+        QTRY_VERIFY2(qAbs(onScreen() - 10) < 1, qPrintable(QString::number(onScreen())));
     }
 
     void aFrameMovesWithItsNodesAndAdvancedOpensOnClick() {

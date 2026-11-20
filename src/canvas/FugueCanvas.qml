@@ -536,10 +536,14 @@ FocusScope {
         }
     }
 
+    // A Frame title's size in world units (#72): it zooms with the canvas, as ComfyUI's group
+    // titles do, down to 10 px on screen, where it stops so it still reads.
+    readonly property real frameTitleWorld: Math.max(look.frameTitleSize, 10 / world.scale)
+
     // The Frame whose title band (as tall as its title, at least a node header) holds the world
     // point, or "".
     function frameTitleAt(w) {
-        const band = Math.max(model.headerHeight, (look.frameTitleSize + 4 * look.unit) / Math.min(1, world.scale))
+        const band = Math.max(model.headerHeight, frameTitleWorld + 4 * look.unit / Math.min(1, world.scale))
         return model.frameAt(w.x, w.y, band)
     }
 
@@ -644,9 +648,9 @@ FocusScope {
                     text: parent.modelData.title
                     elide: Text.ElideRight
                     textFormat: Text.PlainText
+                    objectName: "frameTitleText"
                     color: parent.role.frameTitle
-                    // Below zoom 1 it keeps its size on screen, so the frames become the map.
-                    font.pixelSize: canvas.look.frameTitleSize / Math.min(1, world.scale)
+                    font.pixelSize: canvas.frameTitleWorld
                     font.weight: Font.DemiBold
                 }
             }
@@ -852,8 +856,8 @@ FocusScope {
             }
         }
 
-        // Zoomed out, frame titles sit above the nodes on their frame's fill, at a constant
-        // size on screen, so the frames become the map.
+        // Zoomed out, frame titles sit above the nodes on their frame's fill, so the frames
+        // read as the map; at least 10 px on screen.
         Repeater {
             model: canvas.tier > 0 ? canvas.model.frames : []
             delegate: Rectangle {
@@ -872,8 +876,9 @@ FocusScope {
                     text: parent.modelData.title
                     elide: Text.ElideRight
                     textFormat: Text.PlainText
+                    objectName: "frameTitleText"
                     color: parent.role.frameTitle
-                    font.pixelSize: canvas.look.frameTitleSize * parent.s
+                    font.pixelSize: canvas.frameTitleWorld
                     font.weight: Font.DemiBold
                 }
             }

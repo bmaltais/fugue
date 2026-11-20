@@ -490,10 +490,12 @@ A dashed edge in QML is a `Shape` with `strokeStyle: ShapePath.DashLine` around 
   `frame-<role>-edge`, corner `r`, no shadow, no header bar. Title at (3u, 2u), frame-title size,
   `frame-<role>-title`. Selected: the node's accent ring. A frame never looks like a node: no
   fill change on hover, no header.
-- **Frame titles when zoomed out**: below zoom 1 the title's `font.pixelSize` is
-  `round(t × 4/3) / zoom`, so it keeps its screen size and the frames become the map; in the map
-  and overview tiers the title draws above the nodes on a `frame-<role>` backing. Frames are few,
-  so the relayout per zoom step is cheap.
+- **Frame titles when zoomed out** (#72): the title zooms with the canvas, as ComfyUI's group
+  titles do, down to 10 px on screen, where it stops so it still reads: its size in world units is
+  `max(round(t × 4/3), 10 / zoom)`. It never runs past the frame's width (elided). In the map and
+  overview tiers it draws above the nodes on a `frame-<role>` backing. (Before #72 it kept its full
+  size on screen, and outgrew small frames.) Frames are few, so the relayout per zoom step is
+  cheap.
 - **Group node** (spec 5.2): a stacked card (4.2, section 9), so it reads as "holds nodes" and is
   never mistaken for a frame.
 - **Breadcrumb** inside a group: a pill 4u from the top-left corner, height 7u, `popup` fill,
