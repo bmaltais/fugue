@@ -1,6 +1,6 @@
 #pragma once
 
-// A pack on disk for the window tests of live node types (#70): io.example.tools with one
+// A pack on disk for the tests of live node types (#70): io.example.tools with one
 // command node, `say`, a one-shot program that answers with the text `says` on its output.
 
 #include <QDir>
@@ -9,7 +9,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 
-namespace canvas_test {
+namespace pack_fixture {
 
 inline bool writeFile(const QString &path, const QByteArray &bytes) {
     QDir().mkpath(QFileInfo(path).absolutePath());
@@ -40,4 +40,4 @@ inline bool writeSayPack(const QString &packs, const QString &says, const QStrin
     return QFile::setPermissions(dir + "/say/run.sh", QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
 }
 
-} // namespace canvas_test
+} // namespace pack_fixture

@@ -45,17 +45,24 @@ bool alive(qint64 pid) {
     QFile stat(QStringLiteral("/proc/%1/stat").arg(pid));
     if (!stat.open(QIODevice::ReadOnly))
         return false;
+    // Read while its zombie is being reaped, the file opens but reads empty: gone too.
     const QByteArray text = stat.readAll();
     const int close = text.lastIndexOf(')'); // "pid (name) S ..."; the name may hold spaces
-    return close < 0 || text.mid(close + 2, 1) != "Z";
+    return close >= 0 && text.mid(close + 2, 1) != "Z";
 }
 
+// Once seen dead (a zombie, or reaped) it is dead: not looked at again, as /proc can say
+// odd things about a pid while it is being reaped.
 bool waitGone(qint64 pid, int ms = 3000) {
     QElapsedTimer clock;
     clock.start();
-    while (alive(pid) && clock.elapsed() < ms)
+    for (;;) {
+        if (!alive(pid))
+            return true;
+        if (clock.elapsed() >= ms)
+            return false;
         QTest::qWait(20);
-    return !alive(pid);
+    }
 }
 
 QList<qint64> pidsIn(const QString &path) {

@@ -8,11 +8,12 @@
 #include <QtTest>
 
 #include "canvas_app.h"
-#include "disk_pack.h"
+#include "../disk_pack.h"
 #include "engine/group_library.h"
 #include "engine/pack_loader.h"
 
 using namespace canvas_test;
+using pack_fixture::writeSayPack;
 
 namespace {
 
@@ -80,6 +81,11 @@ private slots:
         QCOMPARE(search->count(), 1); // node search, open all along, lists it
         QVERIFY(app.workflows.notice().isEmpty()); // nothing is missing any more
         QVERIFY(!app.model.canUndo()); // nothing of the document changed
+        // Its pack is not trusted: the window asks, as when a workflow opens (6.7).
+        QCOMPARE(app.workflows.pendingTrust().size(), 1);
+        QCOMPARE(app.workflows.pendingTrust().first().toMap().value("id").toString(), QStringLiteral("io.example.tools"));
+        QCOMPARE(app.workflows.pendingTrust().first().toMap().value("version").toString(), QStringLiteral("1.0.0"));
+        app.workflows.dismissPendingTrust();
 
         // Removed: a placeholder again, which keeps its inputs and links.
         QVERIFY(QDir(fugue::packsDir() + "/io.example.tools").removeRecursively());
@@ -88,6 +94,12 @@ private slots:
         QCOMPARE(app.model.document().graph.nodes.value("say").inputs.value("words").kind(),
                  fugue::InputValue::Kind::Link);
         QCOMPARE(search->count(), 0);
+        QVERIFY(app.workflows.notice().contains("io.example.tools/say")); // missing again
+
+        // Back at the version the person said "not now" to: not asked again.
+        QVERIFY(writeSayPack(fugue::packsDir(), "v1"));
+        QTRY_VERIFY_WITH_TIMEOUT(!role(app.model, "say", NodeList::Missing).toBool(), 5000);
+        QVERIFY(app.workflows.pendingTrust().isEmpty());
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 

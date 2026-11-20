@@ -1,10 +1,13 @@
 #include "registry_reloader.h"
 
+#include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
 
 #include "engine/pack_loader.h"
 #include "engine/registry.h"
+
+#include <utility>
 
 namespace fugue {
 
@@ -14,9 +17,47 @@ RegistryReloader::RegistryReloader(Registry *registry, Fill fill, std::function<
     m_settle.setSingleShot(true);
     m_settle.setInterval(500);
     connect(&m_settle, &QTimer::timeout, this, [this] { load(false); });
-    connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this, &RegistryReloader::reloadSoon);
-    connect(&m_watcher, &QFileSystemWatcher::fileChanged, this, &RegistryReloader::reloadSoon);
+    connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this, &RegistryReloader::onDirectory);
+    connect(&m_watcher, &QFileSystemWatcher::fileChanged, this, &RegistryReloader::onFile);
     watch();
+}
+
+void RegistryReloader::setTrustFile(const QString &path) {
+    m_trustFile = path;
+    m_trustStamp = trustStamp();
+    watch();
+}
+
+QString RegistryReloader::trustStamp() const {
+    const QFileInfo info(m_trustFile);
+    return info.exists() ? QStringLiteral("%1 %2").arg(info.lastModified().toMSecsSinceEpoch()).arg(info.size()) : QString();
+}
+
+void RegistryReloader::onDirectory(const QString &path) {
+    // The trust file's folder (the state folder) changes with every run: only the file counts.
+    if (!m_trustFile.isEmpty() && path == QFileInfo(m_trustFile).absolutePath()) {
+        trustTouched();
+        // A pack path may be the same folder; it is filled again too then.
+        if (!m_folders().contains(path))
+            return;
+    }
+    reloadSoon();
+}
+
+void RegistryReloader::onFile(const QString &path) {
+    if (path == m_trustFile)
+        trustTouched();
+    else
+        reloadSoon();
+}
+
+void RegistryReloader::trustTouched() {
+    const QString stamp = trustStamp();
+    if (stamp == m_trustStamp)
+        return;
+    m_trustStamp = stamp;
+    m_trustChanged = true;
+    reloadSoon();
 }
 
 void RegistryReloader::reload() {
@@ -33,7 +74,8 @@ void RegistryReloader::load(bool always) {
     if (changed)
         m_registry->replaceTypes(std::move(fresh));
     watch();
-    if (changed || always)
+    m_trustStamp = trustStamp(); // a trust given here asked for this reload itself
+    if (changed || always || std::exchange(m_trustChanged, false))
         emit reloaded();
 }
 
@@ -67,6 +109,8 @@ void RegistryReloader::watch() {
         if (!type->dir.isEmpty() && !entry.isEmpty())
             paths << QDir(type->dir).absoluteFilePath(entry);
     }
+    if (!m_trustFile.isEmpty())
+        paths << m_trustFile << QFileInfo(m_trustFile).absolutePath(); // the folder sees it made
     paths.removeDuplicates();
     QStringList present;
     for (const QString &path : std::as_const(paths))

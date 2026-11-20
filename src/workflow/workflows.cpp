@@ -391,12 +391,16 @@ QString Workflows::missingNotice(const Document &document, const QString &title)
 
 void Workflows::analyze(const Document &document, const QString &title) {
     m_missingNotice = missingNotice(document, title);
-    m_missingTab = m_missingNotice.isEmpty() ? QString() : m_tabs[size_t(m_current)].id;
     setNotice(m_missingNotice);
+    if (addPendingTrust(m_trust.untrusted(document, *m_registry)))
+        emit pendingTrustChanged();
+}
+
+bool Workflows::addPendingTrust(const QList<PackUse> &uses) {
     bool changed = false;
-    for (const PackUse &use : m_trust.untrusted(document, *m_registry)) {
+    for (const PackUse &use : uses) {
         bool known = false;
-        for (const QVariant &entry : m_pendingTrust)
+        for (const QVariant &entry : std::as_const(m_pendingTrust))
             known |= entry.toMap().value("id") == use.id && entry.toMap().value("version") == use.version;
         if (known)
             continue;
@@ -404,8 +408,7 @@ void Workflows::analyze(const Document &document, const QString &title) {
             {"id", use.id}, {"version", use.version}, {"source", use.source}, {"types", use.types}});
         changed = true;
     }
-    if (changed)
-        emit pendingTrustChanged();
+    return changed;
 }
 
 // --- save and close ---
@@ -588,6 +591,9 @@ void Workflows::allowPendingTrust() {
 }
 
 void Workflows::dismissPendingTrust() {
+    for (const QVariant &entry : std::as_const(m_pendingTrust))
+        m_trustDismissed.insert(entry.toMap().value("id").toString() + QLatin1Char(' ')
+                                + entry.toMap().value("version").toString());
     m_pendingTrust.clear();
     emit pendingTrustChanged();
 }
@@ -597,24 +603,37 @@ bool Workflows::isTrusted(const QString &packId, const QString &version) const {
 }
 
 void Workflows::refreshNodeTypes() {
-    // The banner, while it still lists missing nodes: the ones installed now are not missing.
-    if (!m_missingTab.isEmpty() && m_notice == m_missingNotice) {
-        for (int i = 0; i < count(); ++i) {
-            if (m_tabs[size_t(i)].id != m_missingTab)
-                continue;
-            m_missingNotice = missingNotice(documentOf(i), m_tabs[size_t(i)].title);
-            setNotice(m_missingNotice);
-        }
-    }
-    // A pack trusted meanwhile (the Packs page) is not asked about again.
+    if (m_current < 0)
+        return;
+    const Document shown = documentOf(m_current);
+    // The banner follows the shown workflow's missing nodes (a pack removed adds some, one
+    // installed takes them away), unless it shows another line; a line dismissed comes back
+    // only when what is missing changed.
+    const QString missing = missingNotice(shown, m_tabs[size_t(m_current)].title);
+    if (missing != m_missingNotice && (m_notice.isEmpty() || m_notice == m_missingNotice))
+        setNotice(missing);
+    m_missingNotice = missing;
+
+    // The question follows what is installed and trusted now: a pack trusted meanwhile (the
+    // Packs page, the CLI) is not asked about, nor one at a version no longer installed; a pack
+    // that came, or a new version of one, is asked about (6.6, 6.7), unless the person said
+    // "not now" to that version already.
     QVariantList still;
-    for (const QVariant &entry : std::as_const(m_pendingTrust))
-        if (!m_trust.isTrusted(entry.toMap().value("id").toString(), entry.toMap().value("version").toString()))
+    for (const QVariant &entry : std::as_const(m_pendingTrust)) {
+        const QString id = entry.toMap().value("id").toString(), version = entry.toMap().value("version").toString();
+        const QString installed = m_registry->packVersion(id);
+        if (!m_trust.isTrusted(id, version) && (installed.isEmpty() || installed == version))
             still << entry;
-    if (still.size() != m_pendingTrust.size()) {
-        m_pendingTrust = still;
-        emit pendingTrustChanged();
     }
+    bool changed = still.size() != m_pendingTrust.size();
+    m_pendingTrust = still;
+    QList<PackUse> asked;
+    for (const PackUse &use : m_trust.untrusted(shown, *m_registry))
+        if (!m_trustDismissed.contains(use.id + QLatin1Char(' ') + use.version))
+            asked << use;
+    changed |= addPendingTrust(asked);
+    if (changed)
+        emit pendingTrustChanged();
 }
 
 // --- commands ---

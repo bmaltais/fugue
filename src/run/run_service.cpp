@@ -311,6 +311,34 @@ private:
 
     Queue queue() const { return Queue(m_context.queueDir); }
 
+    // The nodes of a waiting run whose type is gone, is at another version than it was compiled
+    // to, or comes from a pack that is not trusted at the version installed now (6.7): a pack
+    // updated, removed or replaced while the run waited (#70).
+    Errors changedSinceCompiled(const CompiledGraph &graph) const {
+        Errors errors;
+        for (auto it = graph.nodes.cbegin(); it != graph.nodes.cend(); ++it) {
+            const NodeType *type = m_context.registry.nodeType(it->type);
+            const QString pack = TrustStore::packOf(it->type);
+            const QString version = m_context.registry.packVersion(pack);
+            Error error;
+            if (!type || type->version != it->version)
+                error = makeError(QStringLiteral("node_version_mismatch"),
+                                  QStringLiteral("%1 (%2) changed while the run waited: its pack was updated or removed.")
+                                      .arg(it.key(), it->type),
+                                  QStringLiteral("Run again to use what is installed now."));
+            else if (!TrustStore::isBuiltIn(pack) && !m_trust.isTrusted(pack, version))
+                error = makeError(QStringLiteral("pack_untrusted"),
+                                  QStringLiteral("Node %1 is from the pack %2 %3, which you have not allowed to run.")
+                                      .arg(it.key(), pack, version),
+                                  QStringLiteral("Trust %1 on the Packs page, or run `fugue pack trust %1`.").arg(pack));
+            else
+                continue;
+            error.node = it.key();
+            errors << error;
+        }
+        return errors;
+    }
+
     // Fills `registry` again when a reload was asked for since `filled`; called only where nothing
     // uses it (compileRequest: no check under way; begin: no run active).
     void refill(Registry &registry, int &filled) {
@@ -401,9 +429,17 @@ private:
     void begin(Waiting waiting) {
         // The types too, after a reload: no run is active, so nothing holds them.
         refill(m_context.registry, m_runTypes);
+        const QString id = waiting.folder.id();
+        // A reload while it waited may have changed what it was compiled to: it never runs
+        // what it was not compiled and trusted for.
+        if (const Errors changed = changedSinceCompiled(waiting.graph); hasErrors(changed)) {
+            queue().remove(id);
+            emit event(id, waiting.folder.finish(RunStatus::Failed, changed, now()));
+            m_lock->release();
+            return;
+        }
         // providers.json is read now, when the run's turn has come, as the worker does.
         const Errors providerProblems = m_setup.registerProviders(m_context.registry);
-        const QString id = waiting.folder.id();
         if (hasErrors(providerProblems)) {
             queue().remove(id);
             emit event(id, waiting.folder.finish(RunStatus::Failed, providerProblems, now()));

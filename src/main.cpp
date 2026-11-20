@@ -21,6 +21,7 @@
 #include "menu/menu_commands.h"
 #include "engine/pack_loader.h"
 #include "engine/registry.h"
+#include "engine/trust_store.h"
 #include "node_type_reloads.h"
 #include "nodes/builtin.h"
 #include "qml_app.h"
@@ -74,8 +75,6 @@ int main(int argc, char *argv[]) {
     };
     fugue::Registry registry;
     addNodeTypes(registry);
-    // Filled again when the packs change, so they are usable with no restart (#70).
-    fugue::RegistryReloader reloader(&registry, addNodeTypes);
     CanvasModel canvasModel(&registry);
     // The open workflows: tabs, open, save, recovery, import (spec 11). It starts with one
     // empty workflow and has the previous session's recovery copies ready to offer.
@@ -105,6 +104,10 @@ int main(int argc, char *argv[]) {
     QObject::connect(&imageActions, &fugue::ImageActions::message, &workflows, &fugue::Workflows::notify);
 
     const fugue::AppObjects objects{&translator, &theme, &commands, &canvasModel, &workflows, &appSettings, &runs, &imageActions};
+    // The registry is filled again when the packs or the trust change, so what is installed is
+    // usable with no restart (#70). Made after what it refreshes, so it goes first.
+    fugue::RegistryReloader reloader(&registry, addNodeTypes);
+    reloader.setTrustFile(fugue::TrustStore::defaultPath());
     fugue::followNodeTypeReloads(reloader, objects);
 
     QQmlApplicationEngine engine;

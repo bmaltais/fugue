@@ -19,7 +19,7 @@
 #include <atomic>
 
 #include "canvas_app.h"
-#include "disk_pack.h"
+#include "../disk_pack.h"
 #include "engine/fake_provider.h"
 #include "engine/pack_loader.h"
 #include "engine/trust_store.h"
@@ -29,6 +29,7 @@
 #include "run/run_service.h"
 
 using namespace canvas_test;
+using pack_fixture::writeSayPack;
 using fugue::CanvasRuns;
 using fugue::FakeProvider;
 using fugue::RunService;
@@ -929,6 +930,26 @@ private slots:
         QTRY_COMPARE(finished.size(), 3);
         QCOMPARE(finished.at(2).at(1).toString(), QStringLiteral("ok"));
         QCOMPARE(r.role("show", NodeList::ThumbnailText).toString(), QStringLiteral("second"));
+
+        // Updated while a run waits its turn: the run was compiled and trusted for 1.1.0, so it
+        // fails rather than run 1.2.0's files, which nobody trusted (3.6, 6.7).
+        const fugue::Queue queue(r.app.dir.path() + "/queue");
+        QVERIFY(queue.enqueue("cli-run", "/w/a.fugue", false));
+        QVERIFY(queue.activate("cli-run"));
+        fugue::Lock worker(r.app.dir.path() + "/engine.lock");
+        QVERIFY(worker.tryAcquire());
+        r.runs->start();
+        QTRY_COMPARE(queue.entries().size(), 2);
+        QVERIFY(writeSayPack(packs, "third", "1.2.0"));
+        r.app.reloader->reload();
+        QVERIFY(queue.remove(QStringLiteral("cli-run")));
+        worker.release();
+        QTRY_COMPARE(finished.size(), 4);
+        QCOMPARE(finished.at(3).at(1).toString(), QStringLiteral("failed"));
+        QTRY_VERIFY(!r.runs->errors().isEmpty());
+        QCOMPARE(r.runs->errors().first().toMap().value("code").toString(), QStringLiteral("node_version_mismatch"));
+        QCOMPARE(r.role("show", NodeList::ThumbnailText).toString(), QStringLiteral("second"));
+        QVERIFY(QFile::exists(packs + "/io.example.tools/say/run.sh"));
         r.close();
         QDir(packs).removeRecursively();
     }

@@ -25,6 +25,7 @@
 #include "engine/trust_store.h"
 
 #include <QObject>
+#include <QSet>
 #include <QUndoStack>
 #include <QUrl>
 #include <QTimer>
@@ -130,8 +131,9 @@ public:
     Q_INVOKABLE void dismissPendingTrust();
     bool isTrusted(const QString &packId, const QString &version) const;
 
-    // The registry was filled again, or trust given on the Packs page (#70): the banner's
-    // missing nodes are counted again, and packs trusted meanwhile leave pendingTrust.
+    // The registry was filled again, or trust given (#70): the banner's missing nodes are
+    // counted again for the shown workflow, and pendingTrust asks about its packs as they are
+    // installed and trusted now.
     void refreshNodeTypes();
 
     Q_INVOKABLE void dismissNotice();
@@ -178,6 +180,8 @@ private:
     void analyze(const Document &document, const QString &title);
     // The banner's line on the nodes of `document` that are not installed, empty for none.
     QString missingNotice(const Document &document, const QString &title) const;
+    // Adds the packs not asked about yet to pendingTrust; true when one was added.
+    bool addPendingTrust(const QList<PackUse> &uses);
     static QString toPath(const QString &pathOrUrl);
 
     CanvasModel *m_canvas;
@@ -193,9 +197,10 @@ private:
     QVariantList m_recoverable;
     QVariantList m_pendingTrust;
     QString m_notice;
-    // The last missing-nodes line and the tab it is about, to count again on a reload.
+    // The last missing-nodes line, to tell it from the banner's other lines on a reload.
     QString m_missingNotice;
-    QString m_missingTab;
+    // "<pack id> <version>" the person answered "not now" for: a reload does not ask again.
+    QSet<QString> m_trustDismissed;
 };
 
 // Wires the file commands of the keymap (file.new, file.open, file.save, file.save-as,

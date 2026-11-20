@@ -16,8 +16,8 @@
 //
 // What is watched: each pack search path (the nearest folder above it when it is not there
 // yet), each pack folder and its pack.json, each node folder and its node.json, and the entry
-// file of each command node (its seal covers it). The watch is made again after every fill,
-// as a file replaced by a rename is a new file.
+// file of each command node (its seal covers it), and the trust file when one is set. The
+// watch is made again after every fill, as a file replaced by a rename is a new file.
 
 #include <QFileSystemWatcher>
 #include <QObject>
@@ -46,6 +46,10 @@ public:
     void reloadSoon();
     // How long the folders must be quiet before a fill (default 500 ms).
     void setSettleMs(int ms) { m_settle.setInterval(ms); }
+    // trust.json (6.7), watched too: a pack trusted from outside the window (`fugue pack trust`)
+    // is a reload, so what asks for trust asks again. Only the file's own change counts, not
+    // another file of its folder.
+    void setTrustFile(const QString &path);
 
 signals:
     // The registry holds the types read now. Everything that shows node types refreshes.
@@ -54,12 +58,20 @@ signals:
 private:
     void load(bool always);
     void watch();
+    void onDirectory(const QString &path);
+    void onFile(const QString &path);
+    // The trust file changed since it was last seen: a reload, after the settle time.
+    void trustTouched();
+    QString trustStamp() const;
 
     Registry *m_registry;
     Fill m_fill;
     std::function<QStringList()> m_folders;
     QFileSystemWatcher m_watcher;
     QTimer m_settle;
+    QString m_trustFile;
+    QString m_trustStamp; // its time and size when last seen
+    bool m_trustChanged = false; // the next fill says reloaded() even when the types are the same
 };
 
 } // namespace fugue
