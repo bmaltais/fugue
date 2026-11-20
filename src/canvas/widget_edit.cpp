@@ -694,6 +694,8 @@ QString WidgetEdit::modelsEmptyText(const QString &node, const QString &input) c
     });
     if (image)
         return tr("No image model available: start one in omarchy-local-ai or add a provider");
+    if (wanted.contains(QStringLiteral("text.generate")))
+        return tr("No text model available: start one in omarchy-local-ai or add a provider");
     // A model file of this kind goes in its folder in Fugue's models folder (8.9).
     const Target t = target(node, input);
     const QString folder = t.spec ? library().folders(t.spec->type.type).value(0) : QString();

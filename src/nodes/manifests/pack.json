@@ -13,6 +13,7 @@
     "crop",
     "edit-image",
     "empty-latent",
+    "enhance-prompt",
     "generate-image",
     "image-size",
     "load-image",
@@ -25,6 +26,7 @@
     "text",
     "text-concat",
     "text-encode",
+    "text-generate",
     "vae-decode",
     "vae-encode"
   ],
@@ -34,6 +36,12 @@
       "version": 1,
       "kind": "resource",
       "name": "Image model"
+    },
+    {
+      "id": "fugue/text-model",
+      "version": 1,
+      "kind": "resource",
+      "name": "Text model"
     },
     {
       "id": "fugue/model",

@@ -55,7 +55,7 @@ inline OmarchyPaths writeOmarchyState(const QString &home, const QString &origin
     return paths;
 }
 
-// studio's sd-servers through the share proxy: each model's capabilities (api.md "GET
+// studio's servers through the share proxy: each image model's capabilities (api.md "GET
 // /sdcpp/v1/capabilities"), for studio's key only.
 inline void serveStudio(FakeHttpServer &server) {
     const QJsonObject capabilities{
@@ -71,6 +71,12 @@ inline void serveStudio(FakeHttpServer &server) {
                 return HttpResponse{401, "{}"};
             return HttpResponse{200, body};
         });
+    // Its text model's OpenAI-compatible API.
+    server.on("GET", "/local-ai/qwen3.5-2b-mlx-4bit-tensorfold/v1/models", [](const HttpRequest &request) {
+        if (request.headers.value("authorization") != "Bearer studio-test-key")
+            return HttpResponse{401, "{}"};
+        return HttpResponse{200, "{\"object\":\"list\",\"data\":[{\"id\":\"qwen3.5-2b-mlx-4bit-tensorfold\"}]}"};
+    });
 }
 
 // A machine paired with studio, whose image models answer on a fake server, and with no

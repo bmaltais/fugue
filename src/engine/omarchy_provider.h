@@ -25,8 +25,9 @@
 // The instance's own key, when set, replaces the key file.
 //
 // Each row of kind image becomes a model of image.generate, and also of image.edit when its
-// `edit` is true. Video, music and text rows are not offered until their capabilities' nodes
-// are built (M4). A served model is named by its recipe, with no content hash; its row's
+// `edit` is true. Each row of kind text becomes a model of text.generate (a fugue/text-model),
+// served over its OpenAI-compatible API (POST /v1/chat/completions, streamed). Video and music
+// rows are not offered until their nodes are built (M4). A served model is named by its recipe, with no content hash; its row's
 // `name` ("FLUX.2 Klein 4B") is its title, for display only. Without providers.json each
 // paired host is an instance of its own (providers.h defaultProviderInstances).
 
@@ -76,6 +77,7 @@ private:
         QString recipe;
         QString base; // the endpoint without its /v1: the native API's root
         QByteArray key;
+        QString runtime; // the row's runtime (gufo, tensorfold-x86): a text job's engine
     };
     struct Discovery {
         Description description;
@@ -86,6 +88,9 @@ private:
     void discover(std::function<void(const Result<Discovery> &)> done);
     QNetworkReply *send(const Server &server, const QByteArray &method, const QString &path,
                         const QByteArray &body = {});
+    void submitChat(const Server &server, const JobRequest &request, const QJsonObject &model, Reply<QString> reply);
+    void readChat(const QString &id);
+    void finishChat(const QString &id);
     void poll();
     void pollJob(const QString &id);
     void finishJob(const QString &id, const QJsonObject &job);
@@ -101,6 +106,7 @@ private:
     // ended when nobody takes one (forgetOldJobs).
     QHash<QString, std::shared_ptr<Job>> m_jobs;
     std::function<qint64()> m_clock;
+    int m_chats = 0; // chat jobs so far, for their ids
 };
 
 } // namespace fugue

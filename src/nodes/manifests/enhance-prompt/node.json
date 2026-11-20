@@ -1,0 +1,28 @@
+{
+  "manifest": 1,
+  "id": "fugue/enhance-prompt",
+  "version": "1.0.0",
+  "name": "Enhance Prompt",
+  "description": "Turns a short idea into a full image prompt with a language model.",
+  "category": "Text",
+  "keywords": ["prompt", "expand", "rewrite", "improve", "llm", "magic prompt", "prompt enhancer"],
+  "runtime": {"kind": "builtin"},
+  "capabilities": ["text.generate"],
+  "inputs": [
+    {"name": "prompt", "type": "text", "label": "Idea", "widget": "multiline"},
+    {"name": "style", "type": "text", "label": "Style", "default": "detailed",
+     "choices": ["detailed", "photograph", "tags"],
+     "description": "detailed: a paragraph, for models that read sentences (Z-Image, FLUX, Qwen-Image). photograph: the same, as a photo. tags: a tag list, for SDXL and SD 1.5."},
+    {"name": "instructions", "type": "text", "label": "Also", "default": "", "widget": "multiline",
+     "description": "Anything more the model should do, such as \"set it at night\"."},
+    {"name": "model", "type": "fugue/text-model", "label": "Model", "optional": true,
+     "description": "Unset: any ready text model."},
+    {"name": "seed", "type": "number", "label": "Seed", "default": 0, "integer": true, "min": 0,
+     "max": 9007199254740991, "widget": "seed"}
+  ],
+  "outputs": [
+    {"name": "text", "type": "text", "label": "Prompt"},
+    {"name": "seed", "type": "number", "label": "Seed used"},
+    {"name": "model", "type": "fugue/text-model", "label": "Model used"}
+  ]
+}

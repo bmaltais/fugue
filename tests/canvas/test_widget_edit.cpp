@@ -529,6 +529,26 @@ private slots:
                  QString("No image model available: start one in omarchy-local-ai or add a provider"));
     }
 
+    // A text node lists the text models (text.generate), here the paired host's, and none of
+    // the image models.
+    void aTextNodesPickerListsTheTextModels() {
+        test::PairedHome home;
+        Fixture f;
+        f.canvas.setDocument(document(R"({"fugue": 1, "graph": {"nodes": {
+            "enhance": {"type": "fugue/enhance-prompt", "version": "1.0.0", "inputs": {"prompt": "a fox"}}}}})"));
+        f.edits.requestModels("enhance", "model");
+        QTRY_VERIFY(!f.edits.modelsLoading("enhance", "model"));
+        QStringList titles;
+        for (const QVariant &entry : f.edits.models("enhance", "model"))
+            if (entry.toMap().contains("handle"))
+                titles.append(entry.toMap().value("title").toString() + " @ " + entry.toMap().value("provider").toString());
+        QVERIFY2(titles.contains("Qwen3.5 2B @ studio"), qPrintable(titles.join(", ")));
+        for (const QString &title : titles)
+            QVERIFY2(!title.contains("FLUX") && !title.contains("Z-Image"), qPrintable(title));
+        QCOMPARE(f.edits.modelsEmptyText("enhance", "model"),
+                 QString("No text model available: start one in omarchy-local-ai or add a provider"));
+    }
+
     void aLinkedInputShowsItsSource() {
         Fixture f;
         QCOMPARE(f.edits.source("join", "a"), QString("Prompt · Text"));

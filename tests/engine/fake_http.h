@@ -27,6 +27,9 @@ struct HttpResponse {
     int status = 200;
     QByteArray body;
     QByteArray contentType = "application/json";
+    // Never answered: the connection stays open with nothing sent, as a server that is still
+    // working on the request.
+    bool hold = false;
 };
 
 class FakeHttpServer {
@@ -89,6 +92,8 @@ private:
             const HttpResponse response = handler == m_handlers.constEnd()
                                               ? HttpResponse{404, "{\"error\":\"not found\"}"}
                                               : (*handler)(request);
+            if (response.hold)
+                return;
             QByteArray reply = "HTTP/1.1 " + QByteArray::number(response.status) + " X\r\n" +
                                "Content-Type: " + response.contentType + "\r\n" +
                                "Content-Length: " + QByteArray::number(response.body.size()) +

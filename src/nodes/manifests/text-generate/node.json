@@ -1,0 +1,33 @@
+{
+  "manifest": 1,
+  "id": "fugue/text-generate",
+  "version": "1.0.0",
+  "name": "Text Generate",
+  "description": "Writes text with a language model from a prompt, optionally about an image.",
+  "category": "Text",
+  "keywords": ["llm", "chat", "language model", "caption", "describe", "write", "image to prompt"],
+  "runtime": {"kind": "builtin"},
+  "capabilities": ["text.generate"],
+  "inputs": [
+    {"name": "prompt", "type": "text", "label": "Prompt", "widget": "multiline"},
+    {"name": "system", "type": "text", "label": "System prompt", "default": "", "widget": "multiline",
+     "description": "How the model should answer: its role, the form and length of the answer."},
+    {"name": "image", "type": "image", "label": "Image", "optional": true,
+     "description": "Read with the prompt, by a model that takes images. Sent at most 1024 pixels on a side."},
+    {"name": "model", "type": "fugue/text-model", "label": "Model", "optional": true,
+     "description": "Unset: any ready text model."},
+    {"name": "seed", "type": "number", "label": "Seed", "default": 0, "integer": true, "min": 0,
+     "max": 9007199254740991, "widget": "seed"},
+    {"name": "max_tokens", "type": "number", "label": "Longest answer", "optional": true, "integer": true, "min": 1,
+     "max": 1048576, "advanced": true, "description": "In tokens. Unset: the model's own limit."},
+    {"name": "temperature", "type": "number", "label": "Temperature", "optional": true, "min": 0, "max": 2,
+     "step": 0.05, "advanced": true, "description": "Higher answers more freely. Unset: the model's default."},
+    {"name": "thinking", "type": "boolean", "label": "Thinking", "default": false, "advanced": true,
+     "description": "Let a model that reasons do so before it answers: slower, and it uses up the longest answer."}
+  ],
+  "outputs": [
+    {"name": "text", "type": "text", "label": "Text"},
+    {"name": "seed", "type": "number", "label": "Seed used"},
+    {"name": "model", "type": "fugue/text-model", "label": "Model used"}
+  ]
+}

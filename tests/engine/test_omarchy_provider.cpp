@@ -195,6 +195,41 @@ QByteArray readAll(const QString &path) {
     return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray{};
 }
 
+const QString kQwen = QStringLiteral("qwen3.8-27b-gufo");
+
+// An OpenAI-compatible /v1/models answer listing the recipe (omarchy-local-ai's post-start check).
+HttpResponse modelsList(const HttpRequest &request, const QString &recipe) {
+    if (request.headers.value("authorization") != "Bearer " + kKey)
+        return HttpResponse{401, "{\"error\":\"unauthorized\"}"};
+    return HttpResponse{200, json(QJsonObject{{"object", "list"},
+                                              {"data", QJsonArray{QJsonObject{{"id", recipe}, {"object", "model"}}}}})};
+}
+
+// A streamed chat completion (server-sent events): one chunk per piece of the answer, after
+// one of reasoning that is not part of it, then the finish and [DONE].
+QByteArray streamed(const QStringList &pieces, const QString &reasoning = {}) {
+    QByteArray body;
+    const auto chunk = [&body](const QJsonObject &delta, const QJsonValue &finish) {
+        body += "data: " +
+                json(QJsonObject{{"id", "chatcmpl-1"}, {"object", "chat.completion.chunk"},
+                                 {"choices", QJsonArray{QJsonObject{{"index", 0}, {"delta", delta},
+                                                                    {"finish_reason", finish}}}}}) +
+                "\n\n";
+    };
+    chunk(QJsonObject{{"role", "assistant"}, {"content", ""}}, QJsonValue::Null);
+    if (!reasoning.isEmpty())
+        chunk(QJsonObject{{"reasoning_content", reasoning}}, QJsonValue::Null);
+    for (const QString &piece : pieces)
+        chunk(QJsonObject{{"content", piece}}, QJsonValue::Null);
+    chunk(QJsonObject{}, QStringLiteral("stop"));
+    return body + "data: [DONE]\n\n";
+}
+
+QJsonObject chatBody(const FakeHttpServer &server) {
+    const auto posts = server.requestsTo("POST", "/v1/chat/completions");
+    return posts.isEmpty() ? QJsonObject{} : QJsonDocument::fromJson(posts.last().body).object();
+}
+
 } // namespace
 
 class TestOmarchyProvider : public QObject {
@@ -218,7 +253,7 @@ private slots:
         const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
         QVERIFY(described.ok());
         QCOMPARE(described.value().engine, QStringLiteral("sdcpp"));
-        QVERIFY(!described.value().offer("text.generate"));
+        QVERIFY(!findModel(described.value(), "image.generate", "qwen3.8-27b-gufo"));
 
         const OfferedModel *ready = findModel(described.value(), "image.generate", kKlein);
         QVERIFY(ready);
@@ -434,7 +469,15 @@ private slots:
         QVERIFY(!klein->handle.contains("title")); // display only: not part of the handle (2.5)
         QCOMPARE(described.value().offer("image.edit")->models.size(), 1);
         QVERIFY(findModel(described.value(), "image.edit", "flux2-klein-4b-sdcpp-cuda"));
-        QVERIFY(!described.value().offer("text.generate"));
+        // Its text model, with what it takes and how long an answer may be (network.json).
+        const OfferedModel *qwen = findModel(described.value(), "text.generate", "qwen3.5-2b-mlx-4bit-tensorfold");
+        QVERIFY(qwen);
+        QCOMPARE(qwen->status, ModelStatus::Ready);
+        QCOMPARE(qwen->title, QStringLiteral("Qwen3.5 2B"));
+        QCOMPARE(qwen->handle, (QJsonObject{{"resource", "fugue/text-model"}, {"name", "qwen3.5-2b-mlx-4bit-tensorfold"}}));
+        QCOMPARE(qwen->properties.value("input").toArray(), (QJsonArray{"text", "image"}));
+        QCOMPARE(qwen->limits.value("max_tokens").toInt(), 8192);
+        QVERIFY(!findModel(described.value(), "image.generate", "qwen3.5-2b-mlx-4bit-tensorfold"));
 
         // The offline host describes itself: its last-seen model, as unavailable and why.
         OmarchyProvider lab(instances.at(1), paths);
@@ -744,6 +787,202 @@ private slots:
         QTRY_VERIFY((status = await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value()).isTerminal());
         QCOMPARE(status.state, QStringLiteral("error"));
         QCOMPARE(status.error.code, QStringLiteral("node_failed"));
+    }
+
+    // Text models (kind text) serve text.generate over their OpenAI-compatible API
+    // (omarchy-local-ai runtimes' api = "openai").
+    void describeOffersTextModelsForTextGenerate() {
+        Fixture fixture;
+        fixture.server.on("GET", "/v1/models", [](const HttpRequest &request) { return modelsList(request, kQwen); });
+        fixture.writeStatus(QJsonObject{
+            {kQwen, row(kQwen, "text", "active", fixture.endpoint())},
+            {"nemotron-3.5-bolt-tensorfold", row("nemotron-3.5-bolt-tensorfold", "text", "inactive", fixture.endpoint())},
+        });
+        auto provider = fixture.provider();
+
+        const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
+        QVERIFY(described.ok());
+        QVERIFY(!described.value().offer("image.generate"));
+        QCOMPARE(described.value().offer("text.generate")->models.size(), 2);
+        const OfferedModel *ready = findModel(described.value(), "text.generate", kQwen);
+        QCOMPARE(ready->status, ModelStatus::Ready);
+        QCOMPARE(ready->handle, (QJsonObject{{"resource", "fugue/text-model"}, {"name", kQwen}}));
+        // A local row does not say what it takes (agent_local.py model_record has no input).
+        QVERIFY(!ready->properties.contains("input"));
+        const OfferedModel *stopped = findModel(described.value(), "text.generate", "nemotron-3.5-bolt-tensorfold");
+        QCOMPARE(stopped->status, ModelStatus::Unavailable);
+        QVERIFY(stopped->hint.contains("omarchy-agent-local start nemotron-3.5-bolt-tensorfold"));
+        QCOMPARE(fixture.server.requestsTo("GET", "/v1/models").size(), 1);
+    }
+
+    void aTextServerStillLoadingIsLoading() {
+        Fixture fixture;
+        fixture.server.on("GET", "/v1/models", [](const HttpRequest &) {
+            return HttpResponse{503, "{\"error\":{\"message\":\"Loading model\",\"code\":503}}"};
+        });
+        fixture.writeStatus(QJsonObject{{kQwen, row(kQwen, "text", "active", fixture.endpoint())}});
+        auto provider = fixture.provider();
+        const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
+        QCOMPARE(findModel(described.value(), "text.generate", kQwen)->status, ModelStatus::Loading);
+    }
+
+    void aTextJobStreamsItsAnswer() {
+        Fixture fixture;
+        fixture.server.on("GET", "/v1/models", [](const HttpRequest &request) { return modelsList(request, kQwen); });
+        fixture.server.on("POST", "/v1/chat/completions", [](const HttpRequest &) {
+            return HttpResponse{200, streamed({"A red ", "fox at dusk"}, "The user wants a fox."), "text/event-stream"};
+        });
+        fixture.writeStatus(QJsonObject{{kQwen, row(kQwen, "text", "active", fixture.endpoint())}});
+        auto provider = fixture.provider();
+        auto request = fixture.request("text.generate", {{"system", "Be brief."}, {"prompt", "fox"}, {"seed", 7},
+                                                         {"max_tokens", 200}, {"temperature", 0.5}});
+
+        const auto submitted = await<QString>([&](auto reply) { provider->submit(request, reply); });
+        QVERIFY2(submitted.ok(), qPrintable(submitted.ok() ? QString() : submitted.error().message));
+        JobStatus status;
+        QTRY_VERIFY((status = await<JobStatus>([&](auto reply) { provider->status(submitted.value(), reply); }).value()).isTerminal());
+        QCOMPARE(status.state, QStringLiteral("done"));
+        const auto result = await<JobResult>([&](auto reply) { provider->result(submitted.value(), reply); });
+        QVERIFY(result.ok());
+        QCOMPARE(result->outputs.value("text").toString(), QStringLiteral("A red fox at dusk"));
+        QCOMPARE(result->used.value("model").toObject(), (QJsonObject{{"resource", "fugue/text-model"}, {"name", kQwen}}));
+        QCOMPARE(result->used.value("seed").toInt(), 7);
+
+        const auto posts = fixture.server.requestsTo("POST", "/v1/chat/completions");
+        QCOMPARE(posts.size(), 1);
+        QCOMPARE(posts.first().headers.value("authorization"), "Bearer " + kKey);
+        const QJsonObject body = chatBody(fixture.server);
+        QCOMPARE(body.value("model").toString(), kQwen); // the served name is the recipe id
+        QCOMPARE(body.value("stream").toBool(), true);
+        QCOMPARE(body.value("seed").toInt(), 7);
+        QCOMPARE(body.value("max_tokens").toInt(), 200);
+        QCOMPARE(body.value("temperature").toDouble(), 0.5);
+        QCOMPARE(body.value("messages").toArray(),
+                 (QJsonArray{QJsonObject{{"role", "system"}, {"content", "Be brief."}},
+                             QJsonObject{{"role", "user"}, {"content", "fox"}}}));
+    }
+
+    void aTextJobWithNoSystemPromptSendsOnlyTheUsers() {
+        Fixture fixture;
+        fixture.server.on("GET", "/v1/models", [](const HttpRequest &request) { return modelsList(request, kQwen); });
+        fixture.server.on("POST", "/v1/chat/completions", [](const HttpRequest &) {
+            return HttpResponse{200, streamed({"ok"}), "text/event-stream"};
+        });
+        fixture.writeStatus(QJsonObject{{kQwen, row(kQwen, "text", "active", fixture.endpoint())}});
+        auto provider = fixture.provider();
+        auto request = fixture.request("text.generate", {{"prompt", "fox"}});
+        const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value();
+        QTRY_VERIFY(await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value().isTerminal());
+        const QJsonObject body = chatBody(fixture.server);
+        QCOMPARE(body.value("messages").toArray(), (QJsonArray{QJsonObject{{"role", "user"}, {"content", "fox"}}}));
+        // Unset: the server's own.
+        QVERIFY(!body.contains("seed"));
+        QVERIFY(!body.contains("max_tokens"));
+        QVERIFY(!body.contains("temperature"));
+    }
+
+    // Thinking off goes out both ways servers take it: the chat template's switch (Qwen3,
+    // llama.cpp, vLLM) and OpenAI's reasoning_effort (tensorfold reads either).
+    void thinkingCanBeTurnedOff() {
+        Fixture fixture;
+        fixture.server.on("GET", "/v1/models", [](const HttpRequest &request) { return modelsList(request, kQwen); });
+        fixture.server.on("POST", "/v1/chat/completions", [](const HttpRequest &) {
+            return HttpResponse{200, streamed({"ok"}), "text/event-stream"};
+        });
+        fixture.writeStatus(QJsonObject{{kQwen, row(kQwen, "text", "active", fixture.endpoint())}});
+        auto provider = fixture.provider();
+        for (const bool thinking : {false, true}) {
+            auto request = fixture.request("text.generate", {{"prompt", "fox"}, {"thinking", thinking}});
+            const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value();
+            QTRY_VERIFY(await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value().isTerminal());
+            const QJsonObject body = chatBody(fixture.server);
+            QCOMPARE(body.value("chat_template_kwargs").toObject(), (QJsonObject{{"enable_thinking", thinking}}));
+            QCOMPARE(body.contains("reasoning_effort"), !thinking);
+            if (!thinking)
+                QCOMPARE(body.value("reasoning_effort").toString(), QStringLiteral("none"));
+        }
+        // Unsaid: the model's own way.
+        QVERIFY(!QJsonDocument::fromJson(fixture.server.requestsTo("POST", "/v1/chat/completions").first().body)
+                     .object()
+                     .contains("max_tokens"));
+    }
+
+    void aTextJobSendsItsImageAsADataUrl() {
+        Fixture fixture;
+        fixture.server.on("GET", "/v1/models", [](const HttpRequest &request) { return modelsList(request, kQwen); });
+        fixture.server.on("POST", "/v1/chat/completions", [](const HttpRequest &) {
+            return HttpResponse{200, streamed({"a fox"}), "text/event-stream"};
+        });
+        fixture.writeStatus(QJsonObject{{kQwen, row(kQwen, "text", "active", fixture.endpoint())}});
+        auto provider = fixture.provider();
+        const QByteArray png = "\x89PNG fake bytes";
+        const QString path = fixture.writeInput("photo.png", png);
+        auto request = fixture.request("text.generate", {{"prompt", "Describe it."}}, {{"image", QJsonObject{{"path", path}}}});
+        const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value();
+        QTRY_VERIFY(await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value().isTerminal());
+        const QJsonArray messages = chatBody(fixture.server).value("messages").toArray();
+        QCOMPARE(messages.size(), 1);
+        QCOMPARE(messages.first().toObject().value("content").toArray(),
+                 (QJsonArray{QJsonObject{{"type", "text"}, {"text", "Describe it."}},
+                             QJsonObject{{"type", "image_url"},
+                                         {"image_url", QJsonObject{{"url", "data:image/png;base64," +
+                                                                               QString::fromLatin1(png.toBase64())}}}}}));
+    }
+
+    void aServerThatDoesNotStreamStillAnswers() {
+        Fixture fixture;
+        fixture.server.on("GET", "/v1/models", [](const HttpRequest &request) { return modelsList(request, kQwen); });
+        fixture.server.on("POST", "/v1/chat/completions", [](const HttpRequest &) {
+            return HttpResponse{200, json(QJsonObject{{"choices", QJsonArray{QJsonObject{
+                                                                       {"index", 0},
+                                                                       {"message", QJsonObject{{"role", "assistant"}, {"content", "plain answer"}}},
+                                                                       {"finish_reason", "stop"}}}}})};
+        });
+        fixture.writeStatus(QJsonObject{{kQwen, row(kQwen, "text", "active", fixture.endpoint())}});
+        auto provider = fixture.provider();
+        auto request = fixture.request("text.generate", {{"prompt", "fox"}});
+        const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value();
+        QTRY_VERIFY(await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value().isTerminal());
+        const auto result = await<JobResult>([&](auto reply) { provider->result(id, reply); });
+        QVERIFY(result.ok());
+        QCOMPARE(result->outputs.value("text").toString(), QStringLiteral("plain answer"));
+    }
+
+    void aRefusedTextJobSaysWhy() {
+        Fixture fixture;
+        fixture.server.on("GET", "/v1/models", [](const HttpRequest &request) { return modelsList(request, kQwen); });
+        fixture.server.on("POST", "/v1/chat/completions", [](const HttpRequest &) {
+            return HttpResponse{400, "{\"error\":{\"message\":\"the request exceeds the context size\",\"type\":\"exceed_context_size_error\"}}"};
+        });
+        fixture.writeStatus(QJsonObject{{kQwen, row(kQwen, "text", "active", fixture.endpoint())}});
+        auto provider = fixture.provider();
+        auto request = fixture.request("text.generate", {{"prompt", "fox"}});
+        const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value();
+        JobStatus status;
+        QTRY_VERIFY((status = await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value()).isTerminal());
+        QCOMPARE(status.state, QStringLiteral("error"));
+        QCOMPARE(status.error.code, QStringLiteral("node_failed"));
+        QVERIFY2(status.error.message.contains("exceeds the context size"), qPrintable(status.error.message));
+    }
+
+    void cancellingATextJobStopsIt() {
+        Fixture fixture;
+        fixture.server.on("GET", "/v1/models", [](const HttpRequest &request) { return modelsList(request, kQwen); });
+        fixture.server.on("POST", "/v1/chat/completions", [](const HttpRequest &) {
+            HttpResponse working;
+            working.hold = true;
+            return working;
+        });
+        fixture.writeStatus(QJsonObject{{kQwen, row(kQwen, "text", "active", fixture.endpoint())}});
+        auto provider = fixture.provider();
+        auto request = fixture.request("text.generate", {{"prompt", "fox"}});
+        const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value();
+        QTRY_COMPARE(fixture.server.requestsTo("POST", "/v1/chat/completions").size(), 1);
+        QCOMPARE(await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value().state, QStringLiteral("running"));
+        const auto cancelled = await<QString>([&](auto reply) { provider->cancel(id, reply); });
+        QVERIFY(cancelled.ok());
+        QCOMPARE(cancelled.value(), QStringLiteral("cancelled"));
+        QCOMPARE(await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value().state, QStringLiteral("cancelled"));
     }
 };
 

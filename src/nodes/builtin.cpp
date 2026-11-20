@@ -22,6 +22,7 @@ void addBuiltinKernels(Kernels &kernels) {
     addImageGenerationKernels(kernels);
     addImageSizeKernels(kernels);
     addPixelKernels(kernels);
+    addTextGenerationKernels(kernels);
     // The programs of the packs on disk (7).
     kernels.setCommandKernel(std::make_shared<CommandKernel>());
 }
