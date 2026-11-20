@@ -9,6 +9,7 @@
 #include <QtTest>
 
 #include "canvas_app.h"
+#include "look.h"
 #include "../window_grab.h"
 
 using namespace canvas_test;
@@ -195,6 +196,44 @@ private slots:
         app.model.setView(frame.value("x").toReal(), frame.value("y").toReal(), 0.3);
         QMetaObject::invokeMethod(app.canvas, "applyView");
         QTRY_VERIFY2(qAbs(onScreen() - 10) < 1, qPrintable(QString::number(onScreen())));
+    }
+
+    // #74: selected text reads in every field: the interface editor's fields draw their selection
+    // in the theme's colors, its text at 4.5:1 on it (not Material's white on the pale accent).
+    void selectedTextReadsInEveryField() {
+        App app(load(kGraph));
+        QVERIFY(app.open());
+        app.model.select({"gen"});
+        app.key(Qt::Key_E, Qt::ControlModifier | Qt::ShiftModifier);
+        QTRY_COMPARE(app.model.document().groups.size(), 1);
+        QVERIFY(app.commands.trigger("group.interface"));
+        QTRY_VERIFY(app.model.inGroup());
+        int fields = 0;
+        std::function<void(QQuickItem *)> walk = [&](QQuickItem *from) {
+            for (QQuickItem *child : from->childItems()) {
+                const QVariant selection = child->property("selectionColor");
+                // One nobody can select in does not count: read-only, or the label of a ComboBox
+                // that is not editable.
+                const QVariant editable = from->property("editable");
+                const bool selectable = (!child->property("readOnly").toBool() || child->property("selectByMouse").toBool())
+                                        && (!editable.isValid() || editable.toBool());
+                if (child->isVisible() && selectable && selection.isValid()
+                    && child->property("selectedTextColor").isValid()) {
+                    ++fields;
+                    const double ratio = fugue::look::contrast(child->property("selectedTextColor").value<QColor>(),
+                                                               selection.value<QColor>());
+                    QVERIFY2(ratio >= 4.5, qPrintable(QString("%1 %2: %3").arg(child->metaObject()->className(),
+                                                                              child->objectName()).arg(ratio)));
+                }
+                walk(child);
+            }
+        };
+        QTest::qWait(200);
+        QQuickItem *root = app.window->contentItem();
+        while (root->parentItem())
+            root = root->parentItem();
+        walk(root);
+        QVERIFY2(fields >= 3, qPrintable(QString::number(fields)));
     }
 
     void aFrameMovesWithItsNodesAndAdvancedOpensOnClick() {

@@ -215,7 +215,7 @@ Item {
             LayoutMirroring.enabled: root.rightToLeft
             LayoutMirroring.childrenInherit: true
             Label { text: renameAsk.prompt }
-            TextField {
+            ThemedTextField {
                 id: renameField
                 objectName: "renameField"
                 Layout.fillWidth: true
@@ -268,7 +268,7 @@ Item {
             RowLayout {
                 Layout.fillWidth: true
                 Label { text: qsTr("Group name") }
-                TextField {
+                ThemedTextField {
                     objectName: "groupName"
                     Layout.fillWidth: true
                     text: editor.face.name || ""
@@ -331,20 +331,20 @@ Item {
                                 width: parent.width - 4 * root.look.unit
                                 RowLayout {
                                     Layout.fillWidth: true
-                                    TextField {
+                                    ThemedTextField {
                                         objectName: "exposedName" + inputRow.index
                                         Layout.preferredWidth: 35 * root.look.unit
                                         text: inputRow.modelData.name
                                         placeholderText: qsTr("name")
                                         onEditingFinished: if (text !== inputRow.modelData.name) inputRow.change("name", text)
                                     }
-                                    TextField {
+                                    ThemedTextField {
                                         Layout.fillWidth: true
                                         text: inputRow.modelData.label
                                         placeholderText: qsTr("Label")
                                         onEditingFinished: if (text !== inputRow.modelData.label) inputRow.change("label", text)
                                     }
-                                    TextField {
+                                    ThemedTextField {
                                         objectName: "exposedSection" + inputRow.index
                                         Layout.preferredWidth: 30 * root.look.unit
                                         text: inputRow.modelData.section
@@ -357,14 +357,14 @@ Item {
                                     Layout.fillWidth: true
                                     visible: inputRow.modelData.type === "number"
                                     Label { text: qsTr("Range") }
-                                    TextField {
+                                    ThemedTextField {
                                         Layout.preferredWidth: 22 * root.look.unit
                                         text: inputRow.modelData.min === undefined ? "" : String(inputRow.modelData.min)
                                         placeholderText: qsTr("min")
                                         validator: DoubleValidator {}
                                         onEditingFinished: inputRow.change("min", text)
                                     }
-                                    TextField {
+                                    ThemedTextField {
                                         Layout.preferredWidth: 22 * root.look.unit
                                         text: inputRow.modelData.max === undefined ? "" : String(inputRow.modelData.max)
                                         placeholderText: qsTr("max")
@@ -375,7 +375,7 @@ Item {
                                 RowLayout {
                                     Layout.fillWidth: true
                                     Label { text: qsTr("Default") }
-                                    TextField {
+                                    ThemedTextField {
                                         objectName: "exposedDefault" + inputRow.index
                                         Layout.preferredWidth: 30 * root.look.unit
                                         text: inputRow.modelData.default === undefined ? "" : String(inputRow.modelData.default)
@@ -386,7 +386,7 @@ Item {
                                         visible: choicesField.visible
                                         text: qsTr("Choices")
                                     }
-                                    TextField {
+                                    ThemedTextField {
                                         id: choicesField
                                         visible: inputRow.modelData.choices !== "" || inputRow.modelData.innerChoices !== ""
                                         Layout.fillWidth: true
@@ -450,7 +450,7 @@ Item {
                             required property var modelData
                             required property int index
                             Layout.fillWidth: true
-                            TextField {
+                            ThemedTextField {
                                 Layout.preferredWidth: 35 * root.look.unit
                                 text: outputRow.modelData.name
                                 onEditingFinished: if (text !== outputRow.modelData.name)
