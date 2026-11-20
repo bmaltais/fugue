@@ -19,6 +19,7 @@ void addBuiltinNodeTypes(Registry &registry) {
 void addBuiltinKernels(Kernels &kernels) {
     addBasicKernels(kernels);
     addImageGenerationKernels(kernels);
+    addImageSizeKernels(kernels);
     addPixelKernels(kernels);
     // The programs of the packs on disk (7).
     kernels.setCommandKernel(std::make_shared<CommandKernel>());

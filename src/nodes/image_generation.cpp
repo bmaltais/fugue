@@ -2,6 +2,7 @@
 // image.generate and image.edit (8.1). The kernels only translate (node_kernel.h): inputs to a
 // JobRequest, and the JobResult to outputs with the values actually used (3.3).
 
+#include "nodes/image_size.h"
 #include "nodes/kernels.h"
 
 #include <QDir>
@@ -31,13 +32,9 @@ constexpr double kMegapixel = 1024.0 * 1024.0;
 // `max_reference_images`; a reported limit holds, higher or lower.
 constexpr int kReferences = 4;
 
-// The size nearest a megapixel in the shape width x height, in steps of 64 (fitMegapixel).
-QSize fitMegapixel(int width, int height) {
-    const double aspect = double(width) / height;
-    const int w = std::max(1, int(std::lround(std::sqrt(kMegapixel * aspect) / kSizeMultiple))) * kSizeMultiple;
-    const int h = std::max(1, int(std::lround(kMegapixel / w / kSizeMultiple))) * kSizeMultiple;
-    return {w, h};
-}
+// The size nearest a megapixel in the shape width x height, in steps of 64 (fitMegapixel), as
+// Image Size makes it.
+QSize fitMegapixel(int width, int height) { return sizeForMegapixels(double(width) / height, 1.0, kSizeMultiple); }
 
 // A side in the shape of `aspect` (width / height) next to a given one, in steps of 64.
 int alongside(double length, double aspect) {

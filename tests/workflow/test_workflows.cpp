@@ -744,12 +744,16 @@ private slots:
         const QString example = QStringLiteral(FUGUE_SOURCE_DIR "/examples/text-to-image.fugue");
         QVERIFY(f.workflows->openPath(example));
         QVERIFY(f.workflows->notice().isEmpty());
-        QCOMPARE(f.canvas.nodes()->rowCount(), 6);
+        QCOMPARE(f.canvas.nodes()->rowCount(), 7);
         for (int i = 0; i < f.canvas.nodes()->rowCount(); ++i)
             QVERIFY(!f.canvas.nodes()->data(f.canvas.nodes()->index(i), NodeList::Missing).toBool());
-        const Compilation compiled = compile(Document::loadFile(example).value(), f.registry);
+        const Document document = Document::loadFile(example).value();
+        const Compilation compiled = compile(document, f.registry);
         QVERIFY2(compiled.ok(), qPrintable(compiled.error().message));
         QVERIFY(compiled->nodes.contains("generate"));
+        // The size is set, by an Image Size node, never left to a model's default (#72).
+        QCOMPARE(document.graph.nodes.value("generate").inputs.value("width").from().toString(), QString("size.width"));
+        QCOMPARE(document.graph.nodes.value("generate").inputs.value("height").from().toString(), QString("size.height"));
         QVERIFY(!hasErrors(compiled.problems()));
     }
 

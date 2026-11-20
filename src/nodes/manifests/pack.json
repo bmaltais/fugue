@@ -12,6 +12,7 @@
     "crop",
     "edit-image",
     "generate-image",
+    "image-size",
     "load-image",
     "number",
     "preview",
