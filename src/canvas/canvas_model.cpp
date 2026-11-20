@@ -589,12 +589,16 @@ void CanvasModel::layOut(NodeRow &row) const {
             row.thumbnail = QRectF(inset, top + m_padTop, width, height + extra);
             top = row.thumbnail.bottom();
         } else if (grows && extra > 0) {
-            // The last multiline input is taller; what is below it moves down.
+            // The last multiline input is taller; what is below it moves down, section headers too.
             grows->rowHeight += extra;
             bool below = false;
             for (Port &port : row.inputs) {
-                if (below)
-                    port.rowTop += extra, port.y += extra;
+                if (below) {
+                    port.rowTop += extra;
+                    port.y += extra;
+                    if (port.headerTop >= 0)
+                        port.headerTop += extra;
+                }
                 if (&port == grows)
                     below = true;
             }

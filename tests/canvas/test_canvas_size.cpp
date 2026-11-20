@@ -204,6 +204,23 @@ private slots:
         QCOMPARE(port(node(canvas, "prompt"), "outputs", "text").value("y").toDouble(), 28.0 + 4 + 12);
     }
 
+    // #72: the rows under a growing multiline input move down, and so do the section headers
+    // among them: the Advanced header stays between Height and Seed and its click still opens it.
+    void aPinnedHeightMovesTheSectionHeadersWithTheirRows() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(workflow(R"({"gen": {"pos": [300, 80], "size": [240, 700]}})")));
+        const QVariantMap gen = node(canvas, "gen");
+        const QVariantMap height = port(gen, "inputs", "height");
+        const QVariantMap steps = port(gen, "inputs", "steps");
+        const QVariantMap seed = port(gen, "inputs", "seed");
+        QVERIFY(steps.value("advancedHeader").toBool());
+        const qreal header = steps.value("headerTop").toDouble();
+        QCOMPARE(header, height.value("rowTop").toDouble() + height.value("rowHeight").toDouble());
+        QVERIFY(header < seed.value("rowTop").toDouble());
+        QCOMPARE(canvas.advancedHeaderAt(310, 80 + header + 2), QStringLiteral("gen"));
+        QCOMPARE(canvas.advancedHeaderAt(310, 80 + height.value("rowTop").toDouble() + 2), QString());
+    }
+
     void aSavedSizeIsKeptOnReloadAndClampedWhenOutOfRange() {
         CanvasModel canvas(&m_registry);
         canvas.setDocument(document(workflow(R"({"save": {"pos": [0, 0], "size": [333, 0]},
