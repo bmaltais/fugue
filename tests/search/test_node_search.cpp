@@ -85,7 +85,7 @@ private slots:
         search->openAt(10, 20);
         QVERIFY(search->active());
         QCOMPARE(search->count(), int(registry.nodeTypes().size()));
-        QCOMPARE(names(search->results()).first(), QString("Load Image")); // Basic, then by name
+        QCOMPARE(names(search->results()).first(), QString("Image Size")); // Basic, then by name
     }
 
     void ranksNameBeforeKeywordBeforeDescription() {

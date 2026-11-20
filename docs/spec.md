@@ -2137,6 +2137,8 @@ Building M2 made these further choices.
 
 | Image Size (#72): ComfyUI's core has no such node (Empty Latent Image takes a width and a height); people install one (Comfyroll's CR Aspect Ratio, resolution-calculator nodes). Built in here, as it is how a size is picked for every image model, and the shipped text-to-image example sets its size with it. Aspects are written `w:h`, landscape and portrait as separate choices so one pick sets both; the width is the nearest multiple to the exact one and the height the nearest to the area left (2:3 at 1 MP is 832 × 1280) | 14.1 | medium-high |
 
+| Context menus offer what applies (#72): a command for a group, a port or an image is left out of a node's menu when it does not apply, and commands not built yet are left out of context menus; the menu bar keeps every command, dimmed when off (40%), so it can be found. As ComfyUI, whose node menu shows a subgraph's entries only on a subgraph and image entries only on a node with an image. Rules: Run to here needs exactly one node, Make unique a definition other instances share, Paste Fugue's nodes, a JSON object or an image, Run and the exports a node | 12.3 | high |
+
 ## Appendix B: issue to section map
 
 | Issue | Sections |

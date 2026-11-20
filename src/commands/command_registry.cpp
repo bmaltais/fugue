@@ -456,26 +456,36 @@ QVariantMap CommandRegistry::entry(const QString &id, const QVariantMap &target)
     return map;
 }
 
-QVariantList CommandRegistry::resolve(const QVariantList &items, const QVariantMap &target) const {
+QVariantList CommandRegistry::resolve(const QVariantList &items, const QVariantMap &target, bool context) const {
     QVariantList resolved;
     for (const QVariant &value : items) {
         QVariantMap item = value.toMap();
         if (item.contains("items")) {
             item.insert("title", QCoreApplication::translate("Menu", item.value("title").toString().toUtf8().constData()));
-            item.insert("items", resolve(item.value("items").toList(), target));
+            item.insert("items", resolve(item.value("items").toList(), target, context));
         } else if (item.contains("command")) {
             const QVariantMap state = entry(item.value("command").toString(), target);
             if (state.isEmpty())
                 continue; // not registered (a ticket that is not in this build)
+            if (context && (!state.value("available").toBool()
+                            || (item.value("hideWhenOff").toBool() && !state.value("enabled").toBool())))
+                continue;
+            item.remove("hideWhenOff");
             item.insert(state);
+        } else if (item.value("separator").toBool()) {
+            // Never first, never two in a row; a last one goes below.
+            if (resolved.isEmpty() || resolved.last().toMap().value("separator").toBool())
+                continue;
         }
         resolved.append(item);
     }
+    while (!resolved.isEmpty() && resolved.last().toMap().value("separator").toBool())
+        resolved.removeLast();
     return resolved;
 }
 
 QVariantList CommandRegistry::menu(const QString &name, const QVariantMap &target) const {
-    return resolve(menus::tree(name), target);
+    return resolve(menus::tree(name), target, name != QLatin1String("bar"));
 }
 
 } // namespace fugue

@@ -4,6 +4,7 @@
 // open the canvas, node and Frame menus with their colors.
 
 #include <QClipboard>
+#include <QImage>
 #include <QGuiApplication>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -211,7 +212,7 @@ private slots:
         QVERIFY(!NEED("menuItem-edit.delete")->isEnabled());
         QQuickItem *rename = find(app.window, "menuItem-edit.rename");
         QVERIFY(rename && !rename->isEnabled());
-        QCOMPARE(rename->opacity(), 0.5);
+        QVERIFY(rename->opacity() <= 0.5);
         QVERIFY(NEED("menuItem-app.settings")->isEnabled());
         QCOMPARE(NEED("menuItem-edit.undo")->property("text").toString(), QString("Undo"));
         app.key(Qt::Key_Escape);
@@ -252,6 +253,111 @@ private slots:
         app.key(Qt::Key_Escape);
         QTRY_VERIFY(!isOpen(app.window, "about"));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // #72: a context menu offers what applies to what was clicked. Commands for a group, a port
+    // or an image are left out of a plain node's menu, as are commands not built yet; the menu
+    // bar keeps them all, off. Separators never start, end or double up.
+    void contextMenusOfferOnlyWhatApplies() {
+        App app(load(framed));
+        QVERIFY(app.open());
+        auto ids = [](const QVariantList &items) {
+            QStringList list;
+            for (const QVariant &item : items)
+                list << (item.toMap().value("separator").toBool() ? QStringLiteral("|")
+                                                                    : item.toMap().value("command").toString());
+            return list;
+        };
+        auto tidy = [](const QStringList &list) {
+            return !list.isEmpty() && list.first() != "|" && list.last() != "|"
+                   && !list.join(',').contains(QStringLiteral("|,|"));
+        };
+        app.model.select({"c"});
+        QStringList node = ids(app.commands.menu("node", {{"node", "c"}}));
+        for (const char *off : {"group.ungroup", "group.enter", "group.make-unique", "group.update", "group.expose",
+                                "group.unexpose", "node.open-image", "node.copy-image", "node.save-image"})
+            QVERIFY2(!node.contains(QLatin1String(off)), off);
+        for (const QVariant &item : app.commands.menu("node", {{"node", "c"}}))
+            QVERIFY2(!item.toMap().contains("command") || item.toMap().value("available").toBool(),
+                     qPrintable(item.toMap().value("command").toString()));
+        QVERIFY2(tidy(node), qPrintable(node.join(',')));
+        QStringList canvas = ids(app.commands.menu("canvas", {}));
+        QVERIFY(!canvas.contains("group.leave") && !canvas.contains("group.interface"));
+        QVERIFY2(tidy(canvas), qPrintable(canvas.join(',')));
+
+        // A group: Ungroup and Enter are there; Make unique only once another instance shares it.
+        app.model.select({"a", "b"});
+        const QString group = app.model.makeGroup();
+        QVERIFY(app.model.isGroup(group));
+        app.model.select({group});
+        node = ids(app.commands.menu("node", {{"node", group}}));
+        QVERIFY(node.contains("group.ungroup") && node.contains("group.enter"));
+        QVERIFY(!node.contains("group.make-unique"));
+        QVERIFY(app.commands.trigger("edit.clone"));
+        QCOMPARE(app.model.selectedIds().size(), 1);
+        node = ids(app.commands.menu("node", {{"node", app.model.selectedIds().first()}}));
+        QVERIFY2(node.contains("group.make-unique"), qPrintable(node.join(',')));
+        // Inside it, the canvas menu leaves it.
+        QVERIFY(app.model.enterGroup(group));
+        QVERIFY(ids(app.commands.menu("canvas", {})).contains("group.leave"));
+        QVERIFY(app.model.leaveGroup());
+
+        // The menu bar keeps every command, off where it does not apply.
+        app.model.select({"c"});
+        bool listed = false;
+        for (const QVariant &top : app.commands.menu("bar"))
+            for (const QVariant &item : top.toMap().value("items").toList())
+                if (item.toMap().value("command") == QLatin1String("group.enter")) {
+                    listed = true;
+                    QVERIFY(!item.toMap().value("enabled").toBool());
+                }
+        QVERIFY(listed);
+    }
+
+    // #72: a row that is off looks off (dimmed), not merely a little paler than one that is on.
+    void aDisabledRowIsDimmed() {
+        App app(load(framed));
+        QVERIFY(app.open());
+        QTest::keyClick(app.window, 'E', Qt::AltModifier);
+        QTRY_VERIFY(isOpen(app.window, "menuDropdown"));
+        QQuickItem *redo = NEED("menuItem-edit.redo");
+        QVERIFY(!redo->isEnabled());
+        QVERIFY(redo->opacity() <= 0.5);
+        QCOMPARE(NEED("menuItem-app.settings")->opacity(), 1.0);
+        app.key(Qt::Key_Escape);
+    }
+
+    // #72: commands are on only when they can act. Run to here needs exactly one node; Run, Run
+    // first and the exports a node at all; Paste a workflow or an image on the clipboard, not
+    // any text.
+    void commandsAreOnOnlyWhenTheyCanAct() {
+        App app(load(framed));
+        QVERIFY(app.open());
+        for (const char *id : {"run.to-here", "run.start", "run.start-first", "file.export-share", "file.export-compiled"})
+            if (!app.commands.isEnabled(QLatin1String(id)) && !app.commands.entry(QLatin1String(id)).value("available").toBool())
+                app.commands.setHandler(QLatin1String(id), [] {});
+        app.model.select({"a"});
+        QVERIFY(app.commands.isEnabled("run.to-here"));
+        app.model.select({"a", "b"});
+        QVERIFY(!app.commands.isEnabled("run.to-here"));
+        for (const char *id : {"run.start", "run.start-first", "file.export-share", "file.export-compiled"})
+            QVERIFY2(app.commands.isEnabled(QLatin1String(id)), id);
+        app.model.selectAll();
+        app.model.deleteSelection();
+        for (const char *id : {"run.start", "run.start-first", "file.export-share", "file.export-compiled"})
+            QVERIFY2(!app.commands.isEnabled(QLatin1String(id)), id);
+
+        QClipboard *clipboard = QGuiApplication::clipboard();
+        clipboard->setText(QStringLiteral("just some words"));
+        QVERIFY(!app.commands.isEnabled("edit.paste"));
+        QVERIFY(!app.commands.isEnabled("edit.paste-connected"));
+        clipboard->setText(QStringLiteral("{\"fugue\": 1, \"graph\": {\"nodes\": {}}}"));
+        QVERIFY(app.commands.isEnabled("edit.paste"));
+        QImage image(4, 4, QImage::Format_RGB32);
+        image.fill(Qt::red);
+        clipboard->setImage(image);
+        QVERIFY(app.commands.isEnabled("edit.paste"));
+        QVERIFY(!app.commands.isEnabled("edit.paste-connected"));
     }
 
     void bareKeysBelongToAnOpenMenu() {

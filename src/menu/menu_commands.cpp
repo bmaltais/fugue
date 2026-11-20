@@ -14,6 +14,7 @@
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
 #include "menu/menus.h"
+#include "workflow/image_inputs.h"
 
 namespace fugue {
 
@@ -149,16 +150,26 @@ void bindMenuCommands(CommandRegistry &registry, CanvasModel &canvas, std::funct
     registry.setEnabledWhen("edit.undo", [model] { return model->canUndo(); });
     registry.setEnabledWhen("edit.redo", [model] { return model->canRedo(); });
     for (const char *id : {"edit.copy", "edit.clone", "edit.delete", "edit.rename", "node.bypass", "node.mute",
-                           "node.collapse", "node.pin", "frame.make", "group.make", "run.to-here"})
+                           "node.collapse", "node.pin", "frame.make", "group.make"})
         registry.setEnabledWhen(QString::fromLatin1(id), selected);
-    for (const char *id : {"edit.select-all", "edit.clear", "view.fit"})
+    // Run to here runs up to one node (spec 12.4); with several selected it would do nothing.
+    registry.setEnabledWhen("run.to-here", [model] { return model->selectedIds().size() == 1; });
+    for (const char *id : {"edit.select-all", "edit.clear", "view.fit", "run.start", "run.start-first", "file.export-share",
+                           "file.export-compiled"})
         registry.setEnabledWhen(QString::fromLatin1(id), hasNodes);
-    const auto pasteable = [] {
-        const QMimeData *data = QGuiApplication::clipboard()->mimeData();
-        return data && (data->hasFormat(QString::fromLatin1(canvasClipboardType)) || !data->text().trimmed().isEmpty());
+    // Paste takes Fugue's own nodes, a workflow as text (a JSON object, checked cheaply here and
+    // in full by the paste), or an image (a Load Image node, 14.1); not any text (#72).
+    const auto workflowOnClipboard = [](const QMimeData *data) {
+        return data->hasFormat(QString::fromLatin1(canvasClipboardType)) || data->text().trimmed().startsWith(QLatin1Char('{'));
     };
-    registry.setEnabledWhen("edit.paste", pasteable);
-    registry.setEnabledWhen("edit.paste-connected", pasteable);
+    registry.setEnabledWhen("edit.paste", [workflowOnClipboard] {
+        const QMimeData *data = QGuiApplication::clipboard()->mimeData();
+        return data && (workflowOnClipboard(data) || clipboardHasImage(*data));
+    });
+    registry.setEnabledWhen("edit.paste-connected", [workflowOnClipboard] {
+        const QMimeData *data = QGuiApplication::clipboard()->mimeData();
+        return data && workflowOnClipboard(data);
+    });
     // A right-click on a port inside a group: the menu's target names it.
     const auto exposed = [model, &registry] {
         const QVariantMap target = registry.target();
@@ -185,6 +196,12 @@ void bindMenuCommands(CommandRegistry &registry, CanvasModel &canvas, std::funct
     registry.setEnabledWhen("group.save-to-library", [model] {
         const QStringList ids = model->selectedIds();
         return (ids.size() == 1 && model->isGroup(ids.first())) || model->inGroup();
+    });
+    // Make unique detaches an instance from a definition others share (5.3); alone, it has none to
+    // leave.
+    registry.setEnabledWhen("group.make-unique", [model] {
+        const QStringList ids = model->selectedIds();
+        return ids.size() == 1 && model->groupInstances(ids.first()) > 1;
     });
     registry.setEnabledWhen("group.update", [model] {
         const QStringList ids = model->selectedIds();

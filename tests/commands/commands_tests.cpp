@@ -186,9 +186,11 @@ private slots:
         // One command per color, each with its swatch's theme role (spec 4.5).
         for (const QString &role : fugue::menus::colorRoles())
             QVERIFY2(registry.contains("node.color." + role), qPrintable(role));
-        // Every top menu, and every context menu, has something in it.
+        // Every top menu, and every context menu, has something in it. (Resolved, a context menu
+        // leaves out commands with no handler, as every one is here: #72.)
         for (const QString &name : fugue::menus::names())
-            QVERIFY2(!registry.menu(name).isEmpty(), qPrintable(name));
+            QVERIFY2(!fugue::menus::tree(name).isEmpty(), qPrintable(name));
+        QVERIFY(registry.menu("canvas").isEmpty());
     }
 
     void aContextMenuCommandSeesWhatItWasOpenedOn() {

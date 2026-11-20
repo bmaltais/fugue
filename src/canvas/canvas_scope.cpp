@@ -127,6 +127,20 @@ bool CanvasModel::isGroup(const QString &node) const {
     return it != m_document.graph.nodes.constEnd() && m_document.group(it->type);
 }
 
+int CanvasModel::groupInstances(const QString &node) const {
+    if (!isGroup(node))
+        return 0;
+    const QString type = m_document.graph.nodes.value(node).type;
+    const Document whole = document();
+    int count = 0;
+    for (const Node &n : whole.graph.nodes)
+        count += n.type == type ? 1 : 0;
+    for (const GroupDefinition &group : whole.groups)
+        for (const Node &n : group.nodes)
+            count += n.type == type ? 1 : 0;
+    return count;
+}
+
 bool CanvasModel::enterGroup(const QString &instance) {
     if (!isGroup(instance))
         return false;

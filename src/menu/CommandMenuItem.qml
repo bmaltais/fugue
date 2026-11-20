@@ -5,7 +5,7 @@ import Fugue
 // One row of a CommandMenu: a command as the registry shows it (`entry`: label, keys,
 // available, enabled, checkable, checked, and swatch on a color), or the row that opens a
 // submenu. A left gutter holds the check of a toggle or a color's swatch; the first key is
-// at the right in `label`. A command not built yet is at half opacity (the overlay's rule).
+// at the right in `label`. A row that is off, not built yet or not for what is selected, is dimmed.
 MenuItem {
     id: row
 
@@ -24,7 +24,8 @@ MenuItem {
     enabled: entry === undefined || entry.enabled
     checkable: entry !== undefined && entry.checkable
     checked: entry !== undefined && entry.checked
-    opacity: available ? 1 : 0.5
+    // Off (not built yet, or not for what is selected) is dimmed, so it reads as off (#72).
+    opacity: available && enabled ? 1 : 0.4
     implicitWidth: leftPadding + rightPadding + gutter.width + label.implicitWidth
                    + (keys.text !== "" ? keys.implicitWidth + 6 * u : 0) + (subMenu ? 4 * u : 0)
     implicitHeight: 7 * u

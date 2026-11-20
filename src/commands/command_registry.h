@@ -186,7 +186,9 @@ private:
 
     static QString canonicalKey(const QString &key, QString *problem = nullptr);
     void rebuild();
-    QVariantList resolve(const QVariantList &items, const QVariantMap &target) const;
+    // `context`: a context menu, which leaves out commands not built and `hideWhenOff` ones that
+    // are off; the menu bar shows them all.
+    QVariantList resolve(const QVariantList &items, const QVariantMap &target, bool context = false) const;
 
     QList<Entry> m_entries;
     QHash<QString, int> m_index;

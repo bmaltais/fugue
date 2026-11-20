@@ -264,6 +264,9 @@ public:
     bool canAddGroup(const QString &group) const { return canHoldGroup(m_document, group); }
     // Whether the node of the level is a group instance.
     Q_INVOKABLE bool isGroup(const QString &node) const;
+    // How many nodes in the whole workflow (inside groups too) are instances of the group `node`
+    // is one of; 0 when it is not a group.
+    int groupInstances(const QString &node) const;
     // Shows the inside of a group instance of the level (Tab, a double-click on its body).
     Q_INVOKABLE bool enterGroup(const QString &instance);
     // Back to the level above (Escape), with the instance selected; false at the top.

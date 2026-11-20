@@ -8,6 +8,9 @@ namespace fugue::menus {
 namespace {
 
 QVariantMap command(const char *id) { return {{"command", QString::fromLatin1(id)}}; }
+// A context menu's command that is left out where it does not apply (a group's on a plain node,
+// an image's on a node with none), rather than shown off (#72).
+QVariantMap ifOn(const char *id) { return {{"command", QString::fromLatin1(id)}, {"hideWhenOff", true}}; }
 QVariantMap separator() { return {{"separator", true}}; }
 QVariantMap submenu(const char *title, const QVariantList &items) {
     return {{"title", QString::fromUtf8(title)}, {"items", items}};
@@ -54,18 +57,18 @@ QVariantList bar() {
 QVariantList canvas() {
     return {command("node.search"), command("edit.paste"), command("edit.paste-connected"), separator(),
             command("edit.select-all"), command("view.fit"), command("view.toggle-links"), separator(),
-            command("frame.make"), command("group.make"), command("group.leave"), command("group.interface"),
-            command("group.save-to-library")};
+            command("frame.make"), command("group.make"), ifOn("group.leave"), ifOn("group.interface"),
+            ifOn("group.save-to-library")};
 }
 
 // Right-click on a node: it is selected first, so each command acts on the selection.
 QVariantList node() {
-    return {command("group.expose"), command("group.unexpose"), command("edit.rename"), separator(), command("node.bypass"), command("node.mute"),
-            command("node.collapse"), command("node.pin"), colors(), separator(), command("node.open-image"),
-            command("node.copy-image"), command("node.save-image"), separator(), command("edit.copy"),
+    return {ifOn("group.expose"), ifOn("group.unexpose"), command("edit.rename"), separator(), command("node.bypass"),
+            command("node.mute"), command("node.collapse"), command("node.pin"), colors(), separator(),
+            ifOn("node.open-image"), ifOn("node.copy-image"), ifOn("node.save-image"), separator(), command("edit.copy"),
             command("edit.clone"), separator(), command("frame.make"), command("group.make"),
-            command("group.ungroup"), command("group.enter"), command("group.make-unique"),
-            command("group.save-to-library"), command("group.update"), separator(),
+            ifOn("group.ungroup"), ifOn("group.enter"), ifOn("group.make-unique"),
+            ifOn("group.save-to-library"), ifOn("group.update"), separator(),
             command("run.to-here"), separator(),
             command("edit.delete")};
 }
