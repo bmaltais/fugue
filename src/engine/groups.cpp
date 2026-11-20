@@ -62,7 +62,9 @@ struct Faces {
         for (const GroupOutput &exposed : group->outputs) {
             if (std::optional<OutputSpec> spec = output(*group, exposed.from)) {
                 spec->name = exposed.name;
-                if (exposed.name != exposed.from.port)
+                if (!exposed.label.isEmpty())
+                    spec->label = exposed.label;
+                else if (exposed.name != exposed.from.port)
                     spec->label.clear();
                 type.outputs << *spec;
             }
@@ -820,6 +822,29 @@ Result<Document> editExposedInput(const Document &document, const QString &group
     if (newName != name)
         renameInstanceInputs(doc, groupId, name, newName);
     return doc;
+}
+
+Result<Document> relabelExposed(const Document &document, const QString &groupId, bool output, const QString &name,
+                                const QString &label) {
+    Document doc = document;
+    GroupDefinition *group = groupOf(doc, groupId);
+    if (!group)
+        return groupError(QStringLiteral("There is no group %1.").arg(groupId));
+    const QString shown = label.trimmed();
+    if (output) {
+        for (GroupOutput &exposed : group->outputs)
+            if (exposed.name == name) {
+                exposed.label = shown;
+                return doc;
+            }
+        return groupError(QStringLiteral("Group %1 has no exposed output %2.").arg(groupId, name));
+    }
+    for (GroupInput &exposed : group->inputs)
+        if (exposed.name == name) {
+            exposed.label = shown;
+            return doc;
+        }
+    return groupError(QStringLiteral("Group %1 has no exposed input %2.").arg(groupId, name));
 }
 
 Result<Document> renameExposedOutput(const Document &document, const QString &groupId, const QString &name,

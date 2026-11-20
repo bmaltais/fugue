@@ -246,6 +246,48 @@ bool CanvasModel::unexposeOutput(const QString &name) {
         tr("Stop exposing"));
 }
 
+QVariantMap CanvasModel::portToRename(const QString &node, const QString &port, bool output) const {
+    QString group, name;
+    if (isGroup(node)) { // a port of a group card, at this level
+        group = m_document.graph.nodes.value(node).type;
+        name = port;
+    } else if (inGroup()) { // an inner port the group shown exposes
+        group = scopeGroup();
+        name = exposedName(node, port, output);
+    }
+    if (group.isEmpty() || name.isEmpty())
+        return {};
+    const NodeType face = groupFace(document(), registryOr(m_registry), group);
+    QString label;
+    if (output) {
+        const OutputSpec *spec = face.output(name);
+        if (!spec)
+            return {};
+        label = spec->label.isEmpty() ? spec->name : spec->label;
+    } else {
+        const InputSpec *spec = face.input(name);
+        if (!spec)
+            return {};
+        label = spec->label.isEmpty() ? spec->name : spec->label;
+    }
+    return {{"group", group}, {"name", name}, {"output", output}, {"label", label}};
+}
+
+bool CanvasModel::renamePort(const QString &node, const QString &port, bool output, const QString &label) {
+    const QVariantMap target = portToRename(node, port, output);
+    if (target.isEmpty())
+        return false;
+    const Result<Document> done = relabelExposed(document(), target.value("group").toString(), output,
+                                                 target.value("name").toString(), label);
+    if (!done) {
+        setGroupProblem(problemText(done.error()));
+        return false;
+    }
+    setGroupProblem({});
+    commitWhole(*done, output ? tr("Rename output") : tr("Rename input"));
+    return true;
+}
+
 QString CanvasModel::exposedName(const QString &node, const QString &port, bool output) const {
     const GroupDefinition *group = m_document.group(scopeGroup());
     if (!group)

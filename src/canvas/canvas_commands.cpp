@@ -60,6 +60,19 @@ void registerCanvasCommands(fugue::CommandRegistry &commands, CanvasModel &canva
     commands.setHandler("frame.rename", [model, &commands] {
         emit model->frameRenameRequested(commands.target().value("frame").toString());
     });
+    // Rename: the group port the menu was opened on (#72), else the one selected node (#55).
+    commands.setHandler("edit.rename", [model, &commands] {
+        const QVariantMap target = commands.target();
+        const QString node = target.value("node").toString();
+        if (target.contains("port")
+            && !model->portToRename(node, target.value("port").toString(), target.value("output").toBool()).isEmpty()) {
+            emit model->portRenameRequested(node, target.value("port").toString(), target.value("output").toBool());
+            return;
+        }
+        if (model->selectedIds().size() == 1)
+            emit model->nodeRenameRequested(model->selectedIds().first());
+    });
+    commands.setHandler("node.pin", [model] { model->togglePinned(); });
     commands.setHandler("frame.delete", [model, &commands] {
         model->deleteFrame(commands.target().value("frame").toString());
     });

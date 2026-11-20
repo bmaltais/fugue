@@ -443,6 +443,7 @@ exactly one definition, at one version, per group id.
 | `inputs[].targets` | One or more `<inner node id>.<input name>` it drives. All targets must have the same type. |
 | `inputs[].label`, `section`, `default`, `min`, `max`, `choices` | Display name, section, and a default or narrowed constraints. Everything else is taken from the first target. |
 | `outputs[].name`, `outputs[].from` | An output on the face and the inner `<node id>.<output name>` it carries. |
+| `outputs[].label` | Optional display name on the face (#72); else the inner output's. |
 | `nodes` | The inner graph, same shape as `graph.nodes`. Inner ids are local to the definition. |
 | `library` | The library entry (`local/<name>`) the definition was saved to or added from. Saving to the library updates only that entry ([5.3](#53-definitions-copies-and-the-library)). |
 
@@ -2138,6 +2139,9 @@ Building M2 made these further choices.
 | Image Size (#72): ComfyUI's core has no such node (Empty Latent Image takes a width and a height); people install one (Comfyroll's CR Aspect Ratio, resolution-calculator nodes). Built in here, as it is how a size is picked for every image model, and the shipped text-to-image example sets its size with it. Aspects are written `w:h`, landscape and portrait as separate choices so one pick sets both; the width is the nearest multiple to the exact one and the height the nearest to the area left (2:3 at 1 MP is 832 × 1280) | 14.1 | medium-high |
 
 | Context menus offer what applies (#72): a command for a group, a port or an image is left out of a node's menu when it does not apply, and commands not built yet are left out of context menus; the menu bar keeps every command, dimmed when off (40%), so it can be found. As ComfyUI, whose node menu shows a subgraph's entries only on a subgraph and image entries only on a node with an image. Rules: Run to here needs exactly one node, Make unique a definition other instances share, Paste Fugue's nodes, a JSON object or an image, Run and the exports a node | 12.3 | high |
+
+| Renaming a group's port (#72) sets its label, the name on the face, and keeps its `name`, which links and `--set` use, as ComfyUI's Rename Slot sets a slot's label; so outputs gained an optional `label` (an older Fugue keeps it as an unknown key). Reached from the port itself: a double-click on a group card's port or on an inner port's exposed mark, or Rename on its context menu. Node titles (#55) and Frame titles rename through the same small question, not in place on the header: one dialog for the three, and the in-place editor is left for later if wanted | 5.4, 12.4 | medium |
+| Pin (#55): a pinned node stays where it is when a drag or its Frame moves the others, as ComfyUI's pinned nodes | 12.4 | high |
 
 ## Appendix B: issue to section map
 

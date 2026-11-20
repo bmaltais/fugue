@@ -627,25 +627,48 @@ bool CanvasModel::selectionAll(const QString &state) const {
     });
 }
 
-void CanvasModel::toggleCollapsed() {
+void CanvasModel::toggleCollapsed() { toggleLayoutFlag(QStringLiteral("collapsed"), tr("Collapse")); }
+
+void CanvasModel::togglePinned() { toggleLayoutFlag(QStringLiteral("pinned"), tr("Pin")); }
+
+// A flag of the selection's layout entries: set on all, or off on all when all have it. One step.
+void CanvasModel::toggleLayoutFlag(const QString &flag, const QString &text) {
     const QStringList ids = selectedIds();
     if (ids.isEmpty())
         return;
     Document document = this->scopeDocument();
     QJsonObject entries = document.layout.value("nodes").toObject();
     const bool all = std::all_of(ids.begin(), ids.end(), [&](const QString &id) {
-        return entries.value(id).toObject().value("collapsed").toBool();
+        return entries.value(id).toObject().value(flag).toBool();
     });
     for (const QString &id : ids) {
         QJsonObject entry = entries.value(id).toObject();
         if (all)
-            entry.remove("collapsed");
+            entry.remove(flag);
         else
-            entry.insert("collapsed", true);
+            entry.insert(flag, true);
         entries.insert(id, entry);
     }
     document.layout.insert("nodes", entries);
-    commit(document, tr("Collapse"));
+    commit(document, text);
+}
+
+void CanvasModel::renameNode(const QString &node, const QString &title) {
+    if (rowOf(node) < 0)
+        return;
+    Document document = this->scopeDocument();
+    QJsonObject entries = document.layout.value("nodes").toObject();
+    QJsonObject entry = entries.value(node).toObject();
+    const QString shown = title.trimmed();
+    if (shown.isEmpty())
+        entry.remove("title");
+    else
+        entry.insert("title", shown);
+    if (entry == entries.value(node).toObject())
+        return;
+    entries.insert(node, entry);
+    document.layout.insert("nodes", entries);
+    commit(document, tr("Rename"));
 }
 
 // --- clipboard and clones --------------------------------------------------------

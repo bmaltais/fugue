@@ -484,7 +484,20 @@ FocusScope {
                 canvas.model.autoSize(corner.node)
                 return
             }
+            // On a group's port (its card's, or an exposed mark inside): rename it on the face (#72).
+            const port = canvas.portUnder(mouse.x, mouse.y)
+            if (port.node !== undefined && canvas.model.portToRename(port.node, port.port, port.output).name !== undefined) {
+                canvas.model.endLinkDrag()
+                canvas.model.portRenameRequested(port.node, port.port, port.output)
+                return
+            }
             const hit = canvas.model.nodeAt(w.x, w.y)
+            // On a node's title: rename it (#55).
+            if (hit !== "" && port.node === undefined && w.y <= canvas.model.position(hit).y + canvas.model.headerHeight) {
+                canvas.model.endMove()
+                canvas.model.nodeRenameRequested(hit)
+                return
+            }
             // A double click on a group's body enters it (5.2); its title stays for renaming.
             if (hit !== "" && canvas.model.isGroup(hit) && canvas.portUnder(mouse.x, mouse.y).node === undefined
                     && w.y > canvas.model.position(hit).y + canvas.model.headerHeight) {

@@ -290,6 +290,33 @@ private slots:
         QVERIFY(!doc.group(holder->group)->nodes.value("copy").inputs.contains("words"));
     }
 
+    // #72: a port on the face is renamed by its label, as ComfyUI's Rename Slot does: the name,
+    // which links and `--set` use, stays. Outputs take a label too (kept by the file); an empty
+    // label goes back to the inner port's.
+    void relabelingAnExposedPortChangesOnlyWhatTheFaceShows() {
+        const Registry r = registry();
+        Result<GroupMade> made = makeGroup(document(graph), {"gen"}, r);
+        QVERIFY(made.ok());
+        Document doc = made->document;
+        const QString linked = doc.graph.nodes.value("save").inputs.value("image").from().toString();
+        const QString before = groupFace(doc, r, made->group).output("image")->label;
+        doc = *relabelExposed(doc, made->group, false, "negative", "Avoid");
+        doc = *relabelExposed(doc, made->group, true, "image", "Final picture");
+        const NodeType face = groupFace(doc, r, made->group);
+        QCOMPARE(face.input("negative")->label, QStringLiteral("Avoid"));
+        QCOMPARE(face.output("image")->label, QStringLiteral("Final picture"));
+        QCOMPARE(doc.graph.nodes.value("save").inputs.value("image").from().toString(), linked);
+        // Saved and read back, the output's label is there.
+        const Result<Document> again = Document::load(doc.save());
+        QVERIFY2(again.ok(), qPrintable(again.ok() ? QString() : again.error().message));
+        QCOMPARE(again->group(made->group)->outputs.first().label, QStringLiteral("Final picture"));
+        QVERIFY(!again->group(made->group)->outputs.first().extra.contains("label"));
+        // Cleared, the inner port's label is back; an unknown port is group_invalid.
+        doc = *relabelExposed(doc, made->group, true, "image", "");
+        QCOMPARE(groupFace(doc, r, made->group).output("image")->label, before);
+        QCOMPARE(relabelExposed(doc, made->group, true, "nope", "x").error().code, QStringLiteral("group_invalid"));
+    }
+
     void reorderAndPrune() {
         const Registry r = registry();
         Result<GroupMade> made = makeGroup(document(graph), {"gen", "gen2"}, r);

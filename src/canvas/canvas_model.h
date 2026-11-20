@@ -267,6 +267,11 @@ public:
     // How many nodes in the whole workflow (inside groups too) are instances of the group `node`
     // is one of; 0 when it is not a group.
     int groupInstances(const QString &node) const;
+    // A port a rename can relabel (#72): on a group card, or an inner port the group shown
+    // exposes; {group, name, output, label (as shown)}, or empty.
+    Q_INVOKABLE QVariantMap portToRename(const QString &node, const QString &port, bool output) const;
+    // Sets the label the group's face shows for that port; the name stays. One undo step.
+    Q_INVOKABLE bool renamePort(const QString &node, const QString &port, bool output, const QString &label);
     // Shows the inside of a group instance of the level (Tab, a double-click on its body).
     Q_INVOKABLE bool enterGroup(const QString &instance);
     // Back to the level above (Escape), with the instance selected; false at the top.
@@ -437,6 +442,12 @@ public:
     Q_INVOKABLE void toggleMode(const QString &mode);
     // Collapses the selection, or expands it when all of it is collapsed already.
     Q_INVOKABLE void toggleCollapsed();
+    // The node.pin command (#55): pins the selection in place, or unpins it when all are pinned;
+    // a pinned node does not move with a drag or its Frame. One undo step.
+    Q_INVOKABLE void togglePinned();
+    // The edit.rename command (#55): the title the canvas shows, layout.nodes.<id>.title; empty
+    // goes back to the type's name. One undo step.
+    Q_INVOKABLE void renameNode(const QString &node, const QString &title);
     // True when the selection is not empty and every selected node has the state the toggle
     // commands act on: "bypass", "mute", "collapsed" or "pinned" (what they would remove).
     bool selectionAll(const QString &state) const;
@@ -451,7 +462,7 @@ public:
     // Only a running node's progress (0 to 1): one role, no layout, for a run's frequent updates.
     void setRunProgress(const QString &node, qreal progress);
     // The node's title as the canvas shows it; empty when there is no such node.
-    QString nodeTitle(const QString &node) const;
+    Q_INVOKABLE QString nodeTitle(const QString &node) const;
     // The seam for #49 (node size): the pixel size of the node's last image (setRunState's
     // `thumbnailSize`), empty without one. previewSizeChanged(node) fires when a thumbnail
     // comes, goes or changes size, after the node's rows were laid out again with it.
@@ -590,6 +601,10 @@ signals:
     void interfaceEditorRequested();
     // The frame.rename command: the window asks for the title.
     void frameRenameRequested(const QString &frame);
+    // The edit.rename command and a double-click on a title (#55) or on a group's port (#72): the
+    // window asks for the new title or label.
+    void nodeRenameRequested(const QString &node);
+    void portRenameRequested(const QString &node, const QString &port, bool output);
     // saveGroupToLibrary() wrote a new version: the node types are read again (#70).
     void librarySaved();
     // A paste added nodes from this document: the same questions as for opening it (missing
@@ -612,6 +627,7 @@ signals:
     void viewMoveRequested();
 
 private:
+    void toggleLayoutFlag(const QString &flag, const QString &text);
     friend class NodeList;
     friend class LinkList;
     friend class EditCommand;

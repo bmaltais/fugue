@@ -16,7 +16,7 @@ Item {
     readonly property CanvasModel model: App.canvasModel
 
     property alias sinksQuestion: sinksAsk
-    property alias frameRename: frameAsk
+    property alias rename: renameAsk
     property alias interfaceEditor: editor
 
     Connections {
@@ -27,9 +27,15 @@ Item {
         }
         function onFrameRenameRequested(frame) {
             const found = root.model.frames.find(f => f.id === frame)
-            frameAsk.frame = frame
-            frameTitle.text = found ? found.title : ""
-            frameAsk.open()
+            renameAsk.ask("frame", frame, "", false, qsTr("Frame title"), found ? found.title : "")
+        }
+        function onNodeRenameRequested(node) {
+            renameAsk.ask("node", node, "", false, qsTr("Node title"), root.model.nodeTitle(node))
+        }
+        function onPortRenameRequested(node, port, output) {
+            const found = root.model.portToRename(node, port, output)
+            renameAsk.ask("port", node, port, output, output ? qsTr("Output name on the group") : qsTr("Input name on the group"),
+                          found.label || "")
         }
         function onGroupUpdateAsked(node, changes) {
             updateAsk.node = node
@@ -179,32 +185,59 @@ Item {
         }
     }
 
+    // Rename a Frame, a node (#55) or a port on a group's face (#72): one question, its field
+    // filled with what shows now and selected. Empty, a node goes back to its type's name and a
+    // port to its inner port's.
     Question {
-        id: frameAsk
-        objectName: "frameRenameAsk"
-        property string frame: ""
-        onOpened: frameTitle.forceActiveFocus()
+        id: renameAsk
+        objectName: "renameAsk"
+        property string kind: "" // frame, node or port
+        property string target: ""
+        property string port: ""
+        property bool output: false
+        property string prompt: ""
+        function ask(kind, target, port, output, prompt, current) {
+            renameAsk.kind = kind
+            renameAsk.target = target
+            renameAsk.port = port
+            renameAsk.output = output
+            renameAsk.prompt = prompt
+            renameField.text = current
+            renameAsk.open()
+        }
+        onOpened: {
+            renameField.forceActiveFocus()
+            renameField.selectAll()
+        }
         ColumnLayout {
             anchors.fill: parent
             spacing: 3 * root.look.unit
             LayoutMirroring.enabled: root.rightToLeft
             LayoutMirroring.childrenInherit: true
-            Label { text: qsTr("Frame title") }
+            Label { text: renameAsk.prompt }
             TextField {
-                id: frameTitle
-                objectName: "frameTitle"
+                id: renameField
+                objectName: "renameField"
                 Layout.fillWidth: true
-                onAccepted: frameOk.clicked()
+                onAccepted: renameOk.clicked()
             }
             RowLayout {
                 Layout.alignment: Qt.AlignRight
-                Button { text: qsTr("Cancel"); onClicked: frameAsk.close() }
+                Button { text: qsTr("Cancel"); onClicked: renameAsk.close() }
                 Button {
-                    id: frameOk
-                    objectName: "frameRenameOk"
+                    id: renameOk
+                    objectName: "renameOk"
                     text: qsTr("Rename")
                     highlighted: true
-                    onClicked: { frameAsk.close(); root.model.renameFrame(frameAsk.frame, frameTitle.text) }
+                    onClicked: {
+                        renameAsk.close()
+                        if (renameAsk.kind === "frame")
+                            root.model.renameFrame(renameAsk.target, renameField.text)
+                        else if (renameAsk.kind === "node")
+                            root.model.renameNode(renameAsk.target, renameField.text)
+                        else
+                            root.model.renamePort(renameAsk.target, renameAsk.port, renameAsk.output, renameField.text)
+                    }
                 }
             }
         }

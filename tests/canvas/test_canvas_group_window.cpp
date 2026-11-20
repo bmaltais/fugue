@@ -105,6 +105,62 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // #55 and #72: F2 renames the selected node, P pins it (a drag leaves it), and a
+    // double-click on a group card's port renames that port on the group's face.
+    void renameAndPinFromTheWindow() {
+        App app(load(kGraph));
+        QVERIFY(app.open());
+        app.workflows.dismissPendingTrust();
+        app.workflows.dismissNotice();
+        QQuickItem *ask = item(app.window->contentItem(), "renameAsk");
+        auto answer = [&](const QString &text) {
+            QQuickItem *field = nullptr;
+            QTRY_VERIFY((field = item(app.window->contentItem(), "renameField")) && field->isVisible());
+            QTRY_VERIFY(field->hasActiveFocus());
+            field->setProperty("text", text);
+            app.key(Qt::Key_Return);
+        };
+        app.model.select({"gen"});
+        app.key(Qt::Key_F2);
+        answer("Hero shot");
+        QTRY_COMPARE(app.model.nodeTitle("gen"), QStringLiteral("Hero shot"));
+        QVERIFY(!ask || !ask->isVisible());
+
+        app.key(Qt::Key_P);
+        QTRY_VERIFY(app.model.selectionAll("pinned"));
+        const QPointF at = app.model.position("gen") + QPointF(40, 10);
+        app.drag(Qt::LeftButton, app.screen(at.x(), at.y()), app.screen(at.x() + 80, at.y() + 40));
+        QCOMPARE(app.model.position("gen"), QPointF(300, 0));
+        app.key(Qt::Key_P);
+        QTRY_VERIFY(!app.model.selectionAll("pinned"));
+
+        // A double-click on a node's title renames it too.
+        QTest::mouseDClick(app.window, Qt::LeftButton, {}, app.screen(at.x(), at.y()));
+        answer("");
+        QTRY_COMPARE(app.model.nodeTitle("gen"), QStringLiteral("Generate Image"));
+
+        // A group card's output: double-click its port, and the face shows the new label.
+        app.model.select({"prompt", "gen"});
+        app.key(Qt::Key_E, Qt::ControlModifier | Qt::ShiftModifier);
+        QTRY_COMPARE(app.model.document().groups.size(), 1);
+        const QString instance = app.model.selectedIds().value(0);
+        const QVariantMap target = app.model.portToRename(instance, "image", true);
+        QVERIFY(!target.isEmpty());
+        QPointF port;
+        const NodeList *nodes = app.model.nodes();
+        for (int r = 0; r < nodes->rowCount(); ++r)
+            if (nodes->data(nodes->index(r), NodeList::NodeId).toString() == instance)
+                for (const QVariant &p : nodes->data(nodes->index(r), NodeList::Outputs).toList())
+                    if (p.toMap().value("name") == QLatin1String("image"))
+                        port = app.model.position(instance)
+                               + QPointF(nodes->data(nodes->index(r), NodeList::Width).toReal(), p.toMap().value("y").toReal());
+        QVERIFY(!port.isNull());
+        QTest::mouseDClick(app.window, Qt::LeftButton, {}, app.screen(port.x(), port.y()));
+        answer("Picture");
+        QTRY_COMPARE(app.model.portToRename(instance, "image", true).value("label").toString(), QStringLiteral("Picture"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void aFrameMovesWithItsNodesAndAdvancedOpensOnClick() {
         App app(load(kGraph));
         QVERIFY(app.open());

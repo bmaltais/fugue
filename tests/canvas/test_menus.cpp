@@ -797,8 +797,8 @@ private slots:
         app.key(Qt::Key_F10, Qt::ShiftModifier);
         QTRY_VERIFY(isOpen(app.window, "contextMenuPopup"));
         QCOMPARE(popup(app.window, "contextMenu")->property("kind").toString(), QString("node"));
-        // Rename is not built yet, so the first row that can run is current.
-        QTRY_COMPARE(currentRow(app.window, "contextMenuPopup"), QString("menuItem-node.bypass"));
+        // The first row that can run is current: Rename (#55).
+        QTRY_COMPARE(currentRow(app.window, "contextMenuPopup"), QString("menuItem-edit.rename"));
         for (int i = 0; i < 6 && currentRow(app.window, "contextMenuPopup") != "menuItem-node.mute"; ++i)
             app.key(Qt::Key_Down);
         app.key(Qt::Key_Return);

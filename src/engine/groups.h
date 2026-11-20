@@ -118,6 +118,11 @@ struct ExposedChange {
 // not have; a default that does not fit is the literal's own error (value_out_of_range, ...).
 Result<Document> editExposedInput(const Document &document, const QString &group, const QString &name,
                                   const ExposedChange &change, const Registry &registry);
+// Sets what the face shows for an exposed input (`output` false) or output: its label (#72, as
+// ComfyUI's Rename Slot). The name, which links and `--set` use, stays; an empty label goes back to
+// the inner port's. group_invalid for an unknown group or port.
+Result<Document> relabelExposed(const Document &document, const QString &group, bool output, const QString &name,
+                                const QString &label);
 // Renames an exposed output, and every link that reads it from an instance. group_invalid for an
 // unknown group or output, or a name taken or not valid; the same name changes nothing.
 Result<Document> renameExposedOutput(const Document &document, const QString &group, const QString &name,

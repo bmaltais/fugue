@@ -76,6 +76,50 @@ class TestCanvasEdits : public QObject {
 private slots:
     void initTestCase() { nodes::addBuiltinNodeTypes(m_registry); }
 
+    // #55: P pins the selection (layout.nodes.<id>.pinned), one undo step; a pinned node stays
+    // where it is when a drag or its Frame moves the others.
+    void aPinnedNodeStaysPut() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(chain));
+        canvas.select({"gen", "prompt"});
+        canvas.togglePinned();
+        QVERIFY(canvas.document().layout.value("nodes").toObject().value("gen").toObject().value("pinned").toBool());
+        QVERIFY(canvas.selectionAll("pinned"));
+        canvas.select({"gen", "save"});
+        canvas.beginMove("gen");
+        canvas.moveBy(50, 0);
+        canvas.endMove();
+        QCOMPARE(canvas.position("gen"), QPointF(300, 80));
+        QCOMPARE(canvas.position("save"), QPointF(690, 120));
+        canvas.beginFrameMove("f1");
+        canvas.moveBy(0, 40);
+        canvas.endMove();
+        QCOMPARE(canvas.position("prompt"), QPointF(0, 100));
+        QCOMPARE(canvas.position("other"), QPointF(0, 440));
+        // Pinned again with all pinned: unpinned, and the pin is one step back.
+        canvas.select({"gen", "prompt"});
+        canvas.togglePinned();
+        QVERIFY(!canvas.selectionAll("pinned"));
+        canvas.undo();
+        QVERIFY(canvas.selectionAll("pinned"));
+    }
+
+    // #55: a rename sets the title the canvas shows (layout.nodes.<id>.title), one undo step;
+    // an empty one goes back to the type's name.
+    void aRenameSetsTheTitle() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(chain));
+        canvas.renameNode("gen", "  Hero shot ");
+        QCOMPARE(canvas.nodeTitle("gen"), QStringLiteral("Hero shot"));
+        QCOMPARE(canvas.document().layout.value("nodes").toObject().value("gen").toObject().value("title").toString(),
+                 QStringLiteral("Hero shot"));
+        canvas.undo();
+        QCOMPARE(canvas.nodeTitle("gen"), QStringLiteral("Generate Image"));
+        canvas.renameNode("prompt", "");
+        QVERIFY(!canvas.document().layout.value("nodes").toObject().value("prompt").toObject().contains("title"));
+        QCOMPARE(canvas.nodeTitle("prompt"), QStringLiteral("Text"));
+    }
+
     void aConnectIsUndoneAndRedone() {
         CanvasModel canvas(&m_registry);
         canvas.setDocument(document(chain));

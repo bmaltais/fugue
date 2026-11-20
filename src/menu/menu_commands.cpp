@@ -149,9 +149,18 @@ void bindMenuCommands(CommandRegistry &registry, CanvasModel &canvas, std::funct
     const auto hasNodes = [model] { return model->nodes()->rowCount() > 0; };
     registry.setEnabledWhen("edit.undo", [model] { return model->canUndo(); });
     registry.setEnabledWhen("edit.redo", [model] { return model->canRedo(); });
-    for (const char *id : {"edit.copy", "edit.clone", "edit.delete", "edit.rename", "node.bypass", "node.mute",
+    for (const char *id : {"edit.copy", "edit.clone", "edit.delete", "node.bypass", "node.mute",
                            "node.collapse", "node.pin", "frame.make", "group.make"})
         registry.setEnabledWhen(QString::fromLatin1(id), selected);
+    // Rename: one node (#55), or a group's port the menu was opened on (#72).
+    registry.setEnabledWhen("edit.rename", [model, &registry] {
+        const QVariantMap target = registry.target();
+        if (target.contains("port")
+            && !model->portToRename(target.value("node").toString(), target.value("port").toString(),
+                                    target.value("output").toBool()).isEmpty())
+            return true;
+        return model->selectedIds().size() == 1;
+    });
     // Run to here runs up to one node (spec 12.4); with several selected it would do nothing.
     registry.setEnabledWhen("run.to-here", [model] { return model->selectedIds().size() == 1; });
     for (const char *id : {"edit.select-all", "edit.clear", "view.fit", "run.start", "run.start-first", "file.export-share",

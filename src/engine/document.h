@@ -132,7 +132,8 @@ struct GroupInput {
 
 struct GroupOutput {
     QString name;
-    PortRef from; // inner "<node id>.<output name>"
+    PortRef from;  // inner "<node id>.<output name>"
+    QString label; // shown on the face instead of the inner output's (#72); empty: that one
     QJsonObject extra;
 };
 

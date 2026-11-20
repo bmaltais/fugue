@@ -231,6 +231,28 @@ private slots:
         QCOMPARE(port(canvas, "gen", "seed").value("exposedAs").toString(), QString());
     }
 
+    // #72: a port of a group's face is renamed where it shows: on the group card (outside) or on
+    // the exposed mark of the inner port (inside). The label changes, the name stays, one step.
+    void anExposedPortIsRenamedWhereItShows() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(chain));
+        canvas.select({"gen"});
+        const QString instance = canvas.makeGroup();
+        QCOMPARE(canvas.portToRename(instance, "image", true).value("name").toString(), QStringLiteral("image"));
+        QVERIFY(canvas.portToRename("prompt", "text", true).isEmpty()); // not a group's port
+        QVERIFY(canvas.renamePort(instance, "image", true, "Picture"));
+        QCOMPARE(port(canvas, instance, "image", true).value("label").toString(), QStringLiteral("Picture"));
+        QCOMPARE(canvas.portToRename(instance, "image", true).value("label").toString(), QStringLiteral("Picture"));
+        canvas.undo();
+        QVERIFY(port(canvas, instance, "image", true).value("label").toString() != QStringLiteral("Picture"));
+        QVERIFY(canvas.enterGroup(instance));
+        QCOMPARE(canvas.portToRename("gen", "image", true).value("name").toString(), QStringLiteral("image"));
+        QVERIFY(canvas.portToRename("gen", "steps", false).isEmpty()); // not exposed
+        QVERIFY(canvas.renamePort("gen", "image", true, "Result"));
+        QVERIFY(canvas.leaveGroup());
+        QCOMPARE(port(canvas, instance, "image", true).value("label").toString(), QStringLiteral("Result"));
+    }
+
     void exposedPortsShowOnTheFaceAndInterfaceEditsReachInstances() {
         CanvasModel canvas(&m_registry);
         canvas.setDocument(document(chain));

@@ -1500,6 +1500,8 @@ void CanvasModel::beginMove(const QString &node) {
     m_moveOpen = true;
     const QStringList ids = m_selected.contains(node) ? selectedIds() : QStringList{node};
     for (const QString &id : ids) {
+        if (m_rows[size_t(rowOf(id))].pinned)
+            continue; // pinned in place (#55)
         m_moving << id;
         m_moveStart.push_back(m_rows[size_t(rowOf(id))].pos);
     }

@@ -389,8 +389,13 @@ std::optional<GroupDefinition> readGroup(Checker &c, const QString &id, const QJ
             continue;
         }
         output.from = *from;
+        if (e.contains("label")) {
+            if (!e.value("label").isString())
+                fail(place, at + QStringLiteral("\"label\" must be text, not %1.").arg(shown(e.value("label"))));
+            output.label = e.value("label").toString();
+        }
         for (auto it = e.begin(); it != e.end(); ++it)
-            if (it.key() != "name" && it.key() != "from")
+            if (it.key() != "name" && it.key() != "from" && it.key() != "label")
                 output.extra.insert(it.key(), it.value());
         group.outputs << output;
     }
@@ -647,6 +652,8 @@ QJsonObject groupJson(const GroupDefinition &group) {
         QJsonObject out = output.extra;
         out.insert("name", output.name);
         out.insert("from", output.from.toString());
+        if (!output.label.isEmpty())
+            out.insert("label", output.label);
         outputs << out;
     }
     o.insert("outputs", outputs);
