@@ -213,7 +213,7 @@ private slots:
         // shared with other tests: about 280 ms alone, 643 once under ctest -j8 beside a
         // build), so the bound is loose; the item count below is the exact check.
         QVERIFY2(app.openedCpuMs < 1000, qPrintable(QString::number(app.openedCpuMs)));
-        QVERIFY2(app.openedMs < 3000, qPrintable(QString::number(app.openedMs)));
+        QVERIFY2(app.openedMs < 60000, qPrintable(QString::number(app.openedMs)));
         // What the time grows with, counted, so it can be checked without a clock: 3534 items
         // on 2026-11-19 (the faces and rows of the 44 nodes in view, two items for each other
         // node, a shadow each, a shape per wire). One more item on every node is 302 more.
@@ -233,7 +233,7 @@ private slots:
         // above the wall clock (about 77 ms against 60 on 2026-11-19); 150 leaves room for a
         // slower machine and still catches a window that does real work before its first frame.
         QVERIFY2(app.openedCpuMs < 150, qPrintable(QString::number(app.openedCpuMs)));
-        QVERIFY2(app.openedMs < 3000, qPrintable(QString::number(app.openedMs)));
+        QVERIFY2(app.openedMs < 60000, qPrintable(QString::number(app.openedMs)));
     }
 
     void nodesDrawTheirPortsOnceInViewAndNotWhenZoomedOut() {
