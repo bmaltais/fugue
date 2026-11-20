@@ -1996,11 +1996,18 @@ The spike passed ([spikes/02](spikes/02-sdcpp-split.md)). Shipped (#79), each st
 helper's stage capabilities: Load Models (diffusion model, text encoder and VAE picked from disk,
 one `fugue/model`, [2.6](#26-data-values-latents-and-conditioning)), Apply LoRA (strength,
 stacking; the result is a derived handle, [2.5](#25-resource-handles)), Text Encode (prompt and
-negative prompt, one conditioning), Empty Latent, Sampler (seed, steps, guidance, sampler,
+negative prompt, one conditioning; optional reference pictures for an edit, #88), Empty Latent, Sampler (seed, steps, guidance, sampler,
 scheduler, denoise), VAE Decode and VAE Encode. A text-to-image graph of them gave the same
 pixels as one `generate` run of the same helper for Z-Image Turbo and FLUX.2 Klein 4B at guidance
 1, checked by hand on an RTX 3090 (SDXL's size conditioning differs: Appendix A);
-`examples/z-image-turbo.fugue`, `examples/flux2-klein-4b.fugue` and `examples/flux2-klein-9b.fugue` are ready to open. Then text
+`examples/z-image-turbo.fugue`, `examples/flux2-klein-4b.fugue` and `examples/flux2-klein-9b.fugue` are ready to open.
+Image editing (#88), as ComfyUI's FLUX.2 Klein 9B templates do it: Load Image, Resize to
+Megapixels (1 MP), Text Encode's references, an Empty Latent of the resized size, Sampler, VAE
+Decode; `examples/flux2-klein-9b-edit.fugue` (distilled: 4 steps, guidance 1),
+`examples/flux2-klein-9b-base-edit.fugue` (base: 20 steps, guidance 5, empty negative prompt) and
+`examples/flux2-klein-9b-edit-2-refs.fugue`. Checked on an RTX 3090: staged equals one `generate`
+run with the same reference, byte for byte. Not built: ComfyUI's KV-cache edit (FluxKVCache) and
+its outpaint template (pad, mask, color match). Then text
 encoders other than one LLM (FLUX.1's CLIP-L and T5, SD3), ControlNet, upscale with a model,
 hires fix as a group, inpaint models. A coarse Generate Image can later be rebuilt as a group of
 these.
@@ -2311,6 +2318,7 @@ Building M4 made these further choices.
 | Thinking is off unless asked for: Enhance Prompt never thinks, Text Generate has a Thinking switch (Advanced, off). It is sent as the chat template's switch (`chat_template_kwargs.enable_thinking`), not OpenAI's `reasoning_effort`, whose `"none"` a strict server refuses. Checked on the DGX (Qwen3.5 2B, tensorfold, 2026-11-20): thinking spent the whole default answer (4096 tokens, "low" effort too) and wrote nothing; off, a good prompt in 41 tokens. ComfyUI's Qwen3 prompt node has the same switch | 8.1, 14.2 | high |
 | A text job waits up to 300 seconds of silence (image jobs: 15 s per request): reading a long prompt or an image, or reasoning, can stream nothing for a while | 8.7 | medium |
 | Resize to Megapixels defaults its multiple to 16 (ComfyUI's resolution_steps defaults to 1): sizes then match a latent of the same picture | 14.1 | medium-high |
+| Text Encode takes an edit's reference pictures and carries them on its conditioning (`meta.references`) to the Sampler, which sends them again (#88). stable-diffusion.cpp's flux2 preset gives references to the model, not the text encoder, but every stage of one generation must send the same options (the guidance sets an edit makes are chosen at encode), so both stages send `ref_images`. ComfyUI attaches reference latents to the conditioning (ReferenceLatent) on the positive and negative branch, after a VAE Encode of each: one wire here does all of it. The Sampler's cache follows the pictures, since the conditioning's descriptor holds them. The encode VAE-encodes them too, unused (a few hundred ms) | 14.3 | high |
 
 ## Appendix B: issue to section map
 
@@ -2344,6 +2352,7 @@ Building M4 made these further choices.
 | #27 user docs | 16, 6.11 |
 | #28 video, song and text nodes | 14.2, 8.1, 8.7 |
 | #87 Text Generate, Enhance Prompt | 14.2, 8.1, 8.7 |
+| #88 Klein 9B edit: references, Resize to Megapixels | 14.1, 14.3 |
 | #29 more pixel and mask nodes | 14.2, 2.1 |
 | #30 agent skill | 13.4, 13.5 |
 | #31 providers as modules | 8.8 |
