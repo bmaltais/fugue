@@ -8,7 +8,7 @@ nodes as a folder with a `node.json` and a program, in any language.
 
 **Status: in progress.** The CLI runs workflows; the window edits workflows on the canvas, with node search, input widgets, undo, tabs and saving, and runs them (Ctrl+Enter) with each node's state, progress and results shown; settings (Ctrl+,) apply live. The design is
 in [docs/spec.md](docs/spec.md), the vocabulary in [docs/GLOSSARY.md](docs/GLOSSARY.md),
-placement notes that grow with the window are in [docs/ui-ergonomics.md](docs/ui-ergonomics.md), and
+window UI, changed or new, follows [docs/ui-ergonomics.md](docs/ui-ergonomics.md), and
 the work is tracked in the [issues](https://github.com/bmaltais/fugue/issues) by milestone.
 
 ## Build
