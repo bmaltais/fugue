@@ -45,14 +45,15 @@ QString styleRules(const QString &style) {
                           "style. ");
 }
 
-// The answer without the model's reasoning: <think> blocks, or everything up to a closing
-// tag whose opening the chat template put in the prompt (Qwen3).
+// The answer without the model's reasoning ahead of it: a leading <think> block, or everything
+// up to a first closing tag with no opening before it (the chat template wrote the opening,
+// Qwen3). Tags later in an answer are part of it.
 QString withoutReasoning(QString text) {
-    static const QRegularExpression block(QStringLiteral("<think>.*?</think>"),
+    static const QRegularExpression block(QStringLiteral(R"(^\s*<think>.*?</think>)"),
                                           QRegularExpression::DotMatchesEverythingOption);
     text.remove(block);
-    const qsizetype close = text.lastIndexOf(QLatin1String("</think>"));
-    if (close >= 0)
+    const qsizetype close = text.indexOf(QLatin1String("</think>"));
+    if (close >= 0 && !text.left(close).contains(QLatin1String("<think>")))
         text = text.mid(close + 8);
     if (text.trimmed().startsWith(QLatin1String("<think>")))
         return {}; // cut off while still thinking
@@ -63,7 +64,7 @@ QString withoutReasoning(QString text) {
 // prompt:"), no code fence, no quotes around the whole.
 QString barePrompt(QString text) {
     static const QRegularExpression label(
-        QStringLiteral(R"(^[*_#\s]*(?:(?:enhanced|improved|final|expanded|rewritten|new)\s+)?prompt\s*[*_]*\s*[:：]\s*[*_]*\s*|^here(?:'s| is)[^:\n]{0,60}:\s*)"),
+        QStringLiteral(R"(^[*_#\s]*(?:(?:enhanced|improved|final|expanded|rewritten|new)\s+)?prompt\s*[*_]*\s*[:：]\s*[*_]*\s*|^here(?:'s|\x{2019}s| is)\s+(?:the|your|an?)\s+(?:\w+\s+)?prompt\b[^:\n]{0,30}:\s*)"),
         QRegularExpression::CaseInsensitiveOption);
     static const QRegularExpression fence(QStringLiteral(R"(^```[a-z]*\s*([\s\S]*?)\s*```$)"));
     text = text.trimmed();
@@ -105,42 +106,42 @@ public:
         if (!system.isEmpty())
             params.insert(QStringLiteral("system"), system);
         for (const QString &key : {QStringLiteral("seed"), QStringLiteral("max_tokens"), QStringLiteral("temperature")}) {
-            const Value set = context.input(key);
-            if (!set.isEmpty())
-                params.insert(key, set.json());
+            const Value given = context.input(key);
+            if (!given.isEmpty())
+                params.insert(key, given.json());
         }
         // Enhance Prompt never thinks: Qwen3.5 2B on the DGX spent its whole default answer
         // (4096 tokens) reasoning about a fox and wrote nothing; without it, 41 tokens.
         params.insert(QStringLiteral("thinking"), !m_enhance && context.input(QStringLiteral("thinking")).json().toBool());
 
-        const int most = selection.model.limits.value(QStringLiteral("max_tokens")).toInt(0);
-        if (most > 0 && params.value(QStringLiteral("max_tokens")).toInt(0) > most)
+        const int longest = selection.model.limits.value(QStringLiteral("max_tokens")).toInt(0);
+        if (longest > 0 && params.value(QStringLiteral("max_tokens")).toInt(0) > longest)
             return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("max_tokens"),
                                   QStringLiteral("%1 answers with at most %2 tokens, not %3.")
                                       .arg(modelName(selection))
-                                      .arg(most)
+                                      .arg(longest)
                                       .arg(params.value(QStringLiteral("max_tokens")).toInt()),
                                   QStringLiteral("Ask for a shorter answer, or leave it unset."));
 
         if (!m_enhance && context.inputs.contains(QStringLiteral("image"))) {
-            const QJsonValue takes = selection.model.properties.value(QStringLiteral("input"));
-            if (takes.isArray() && !takes.toArray().contains(QStringLiteral("image")))
+            const QJsonValue accepted = selection.model.properties.value(QStringLiteral("input"));
+            if (accepted.isArray() && !accepted.toArray().contains(QStringLiteral("image")))
                 return makeInputError(QStringLiteral("capability_unavailable"), QStringLiteral("image"),
                                       QStringLiteral("%1 does not take images.").arg(modelName(selection)),
                                       QStringLiteral("Pick a model that reads images, or remove the image."));
             if (!initVips())
                 return vipsUnavailable();
-            Result<QString> path = QString();
+            Result<QJsonObject> image = QJsonObject();
             try {
-                path = fitted(context.input(QStringLiteral("image")).media(), QDir(context.workDir).filePath("image.png"));
+                image = fitted(context.input(QStringLiteral("image")).media(), QDir(context.workDir).filePath("image.png"));
             } catch (const vips::VError &error) {
                 Error unreadable = vipsError(error, QStringLiteral("media_unreadable"));
                 unreadable.message = QStringLiteral("Cannot prepare the image: %1").arg(unreadable.message);
                 return unreadable;
             }
-            if (!path)
-                return path.errors();
-            request.inputs.insert(QStringLiteral("image"), QJsonObject{{"path", path.value()}});
+            if (!image)
+                return image.errors();
+            request.inputs.insert(QStringLiteral("image"), image.value());
         }
         return request;
     }
@@ -162,21 +163,22 @@ public:
 private:
     static QString enhanceSystem(const NodeContext &context) {
         QString system = kRules + styleRules(context.input(QStringLiteral("style")).text()) + kAnswer;
-        const QString more = context.input(QStringLiteral("instructions")).text().trimmed();
-        if (!more.isEmpty())
-            system += QStringLiteral("\n\nAlso: ") + more;
+        const QString extra = context.input(QStringLiteral("instructions")).text().trimmed();
+        if (!extra.isEmpty())
+            system += QStringLiteral("\n\nAlso: ") + extra;
         return system;
     }
 
-    // The picture as it is when it is a PNG or JPEG standing upright within the square, else
-    // shrunk to fit it (never enlarged) and written as an 8-bit RGB PNG to `path`.
-    static Result<QString> fitted(const MediaHandle &image, const QString &path) {
+    // The picture to send, {path, format}: as it is when it is a PNG or JPEG standing upright
+    // within the square, else shrunk to fit it (never enlarged) and written as an 8-bit RGB PNG
+    // to `path`. The format is the one read from the bytes (MediaHandle), not the file's name.
+    static Result<QJsonObject> fitted(const MediaHandle &image, const QString &path) {
         const bool small = image.width() <= kLongestSide && image.height() <= kLongestSide;
         if (small && image.hasFile() &&
             (image.format() == QLatin1String("png") || image.format() == QLatin1String("jpeg"))) {
             vips::VImage header = vips::VImage::new_from_file(QFile::encodeName(image.path()).constData());
             if (header.get_typeof("orientation") == 0 || header.get_int("orientation") == 1)
-                return image.path();
+                return QJsonObject{{"path", image.path()}, {"format", image.format()}};
         }
         const auto options = [] {
             return vips::VImage::option()->set("height", kLongestSide)->set("size", VIPS_SIZE_DOWN);
@@ -194,7 +196,7 @@ private:
         if (shrunk.bands() > 3)
             shrunk = shrunk.extract_band(0, vips::VImage::option()->set("n", 3));
         shrunk.cast(VIPS_FORMAT_UCHAR).write_to_file(QFile::encodeName(path).constData());
-        return path;
+        return QJsonObject{{"path", path}, {"format", "png"}};
     }
 
     static QString modelName(const Selection &selection) { return selection.model.handle.value("name").toString(); }

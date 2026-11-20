@@ -5,7 +5,6 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
-#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QNetworkReply>
@@ -99,10 +98,12 @@ struct OmarchyProvider::Job {
     int failures = 0;    // polls in a row that got no answer
     qint64 endedAt = 0;  // when it reached a terminal state, in ms
     // A chat job (text.generate) is one streamed request, not a job polled on the server.
-    QPointer<QNetworkReply> chat;
-    QByteArray unread;  // the stream's bytes after its last whole line
-    QString text;       // the answer so far
-    int chunks = 0;     // pieces of the answer so far, for progress
+    bool chat = false;
+    QPointer<QNetworkReply> stream;
+    QByteArray unread;     // the stream's bytes after its last whole line
+    QString text;          // the answer so far
+    int chunks = 0;        // pieces of the answer so far, for progress
+    bool finished = false; // the stream said it is over ([DONE] or a finish_reason)
 };
 
 namespace {
@@ -120,12 +121,31 @@ QString serverMessage(const QJsonObject &body) {
     return error.isObject() ? error.toObject().value("message").toString() : error.toString();
 }
 
-Error jobError(const QString &message) {
+// `text`: a text model's job, whose way to need less memory is a shorter prompt or answer.
+Error jobError(const QString &message, bool text = false) {
     const bool memory = message.contains(QLatin1String("out of memory"), Qt::CaseInsensitive);
     return makeError(memory ? QStringLiteral("out_of_memory") : QStringLiteral("node_failed"),
                          message.isEmpty() ? QStringLiteral("The model server failed the job.") : message,
-                         memory ? QStringLiteral("Stop other models to free memory, or ask for a smaller image.")
-                                : QString());
+                         !memory ? QString()
+                         : text  ? QStringLiteral("Stop other models to free memory, or ask for a shorter answer.")
+                                 : QStringLiteral("Stop other models to free memory, or ask for a smaller image."));
+}
+
+// A server's answer to a job it did not take: not there, the key refused, still loading, or
+// the job refused with the server's own words.
+Error refusal(const QString &recipe, const QString &base, int code, const QJsonObject &answer, bool text) {
+    if (code == 0)
+        return makeError(QStringLiteral("provider_unreachable"), QStringLiteral("%1 is not answering at %2.").arg(recipe, base),
+                         QStringLiteral("Check that it is running: omarchy-agent-local status."));
+    if (code == 401 || code == 403)
+        return makeError(QStringLiteral("provider_unreachable"), QStringLiteral("%1 refused the key.").arg(recipe),
+                         QStringLiteral("Check the key, or pair again."));
+    if (code == 503)
+        return makeError(QStringLiteral("model_not_running"), QStringLiteral("%1 has no model loaded yet.").arg(recipe),
+                         QStringLiteral("Wait for it to finish loading."));
+    const QString said = serverMessage(answer);
+    return jobError(QStringLiteral("%1 refused the job: %2").arg(recipe, said.isEmpty() ? QStringLiteral("HTTP %1").arg(code) : said),
+                    text);
 }
 
 // One sd-server job (async_jobs.cpp make_async_job_json) as a status (8.8). A completed job is
@@ -236,10 +256,10 @@ QJsonObject chatBody(const QString &recipe, const JobRequest &request, Errors *e
         QString encoded;
         if (!encodeInput(request.inputs.value("image"), &encoded, errors))
             return {};
-        const QString suffix = QFileInfo(request.inputs.value("image").toObject().value("path").toString()).suffix().toLower();
-        const QString mime = suffix == QLatin1String("jpg") || suffix == QLatin1String("jpeg") ? QStringLiteral("image/jpeg")
-                             : suffix == QLatin1String("webp")                                 ? QStringLiteral("image/webp")
-                                                                                               : QStringLiteral("image/png");
+        // The node sends a PNG, or a JPEG as it is, and says which (MediaHandle::format, from
+        // the bytes, not the name).
+        const bool jpeg = request.inputs.value("image").toObject().value("format").toString() == QLatin1String("jpeg");
+        const QString mime = jpeg ? QStringLiteral("image/jpeg") : QStringLiteral("image/png");
         messages.append(QJsonObject{
             {"role", "user"},
             {"content", QJsonArray{QJsonObject{{"type", "text"}, {"text", prompt}},
@@ -252,14 +272,10 @@ QJsonObject chatBody(const QString &recipe, const JobRequest &request, Errors *e
     for (const char *key : {"seed", "max_tokens", "temperature"})
         if (params.contains(QLatin1String(key)))
             body.insert(QLatin1String(key), params.value(QLatin1String(key)));
-    // Both ways servers take it: the chat template's switch (Qwen3 templates, llama.cpp, vLLM)
-    // and OpenAI's reasoning_effort; tensorfold reads either. Unsaid: the model's own way.
-    if (params.value("thinking").isBool()) {
-        const bool thinking = params.value("thinking").toBool();
-        body.insert("chat_template_kwargs", QJsonObject{{"enable_thinking", thinking}});
-        if (!thinking)
-            body.insert("reasoning_effort", "none");
-    }
+    // The chat template's switch (Qwen3 templates; llama.cpp, vLLM and tensorfold take it). Not
+    // OpenAI's reasoning_effort, whose "none" a strict server refuses. Unsaid: the model's way.
+    if (params.value("thinking").isBool())
+        body.insert("chat_template_kwargs", QJsonObject{{"enable_thinking", params.value("thinking").toBool()}});
     return body;
 }
 
@@ -280,8 +296,10 @@ OmarchyProvider::OmarchyProvider(ProviderInstance instance, OmarchyPaths paths, 
 OmarchyProvider::~OmarchyProvider() = default;
 
 QNetworkReply *OmarchyProvider::send(const Server &server, const QByteArray &method,
-                                     const QString &path, const QByteArray &body) {
+                                     const QString &path, const QByteArray &body, int timeoutMs) {
     QNetworkRequest request(QUrl(server.base + path));
+    if (timeoutMs > 0)
+        request.setTransferTimeout(timeoutMs);
     request.setRawHeader("Authorization", "Bearer " + server.key);
     if (!body.isEmpty())
         request.setHeader(QNetworkRequest::ContentTypeHeader, QByteArrayLiteral("application/json"));
@@ -567,25 +585,7 @@ void OmarchyProvider::submit(const JobRequest &request, Reply<QString> reply) {
                     self->m_poll.start();
                 return reply(Result<QString>(id));
             }
-            Error error;
-            if (code == 0)
-                error = makeError(QStringLiteral("provider_unreachable"),
-                                      QStringLiteral("%1 is not answering at %2.").arg(server.recipe, server.base),
-                                      QStringLiteral("Check that it is running: omarchy-agent-local status."));
-            else if (code == 401 || code == 403)
-                error = makeError(QStringLiteral("provider_unreachable"),
-                                      QStringLiteral("%1 refused the key.").arg(server.recipe),
-                                      QStringLiteral("Check the key, or pair again."));
-            else if (code == 503)
-                error = makeError(QStringLiteral("model_not_running"),
-                                      QStringLiteral("%1 has no model loaded yet.").arg(server.recipe),
-                                      QStringLiteral("Wait for it to finish loading."));
-            else
-                error = jobError(QStringLiteral("%1 refused the job: %2")
-                                     .arg(server.recipe, serverMessage(answer).isEmpty()
-                                                             ? QStringLiteral("HTTP %1").arg(code)
-                                                             : serverMessage(answer)));
-            reply(Result<QString>(error));
+            reply(Result<QString>(refusal(server.recipe, server.base, code, answer, false)));
         });
     });
 }
@@ -596,13 +596,8 @@ void OmarchyProvider::submitChat(const Server &server, const JobRequest &request
     const QJsonObject body = chatBody(server.recipe, request, &errors);
     if (hasErrors(errors))
         return reply(Result<QString>(errors));
-    QNetworkRequest post(QUrl(server.base + QStringLiteral("/v1/chat/completions")));
-    post.setRawHeader("Authorization", "Bearer " + server.key);
-    post.setHeader(QNetworkRequest::ContentTypeHeader, QByteArrayLiteral("application/json"));
-    post.setRawHeader("Accept", "text/event-stream");
-    post.setTransferTimeout(kChatTransferTimeoutMs);
-
     auto job = std::make_shared<Job>();
+    job->chat = true;
     job->server = server;
     job->request = request;
     job->model = model;
@@ -610,22 +605,26 @@ void OmarchyProvider::submitChat(const Server &server, const JobRequest &request
     job->status.stage = QStringLiteral("reading");
     const QString id = QStringLiteral("%1/chat-%2").arg(server.recipe).arg(++m_chats);
     m_jobs.insert(id, job);
-    job->chat = m_network.post(post, QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(job->chat, &QNetworkReply::readyRead, this, [this, id] { readChat(id); });
-    connect(job->chat, &QNetworkReply::finished, this, [this, id] { finishChat(id); });
+    job->stream = send(server, "POST", QStringLiteral("/v1/chat/completions"),
+                       QJsonDocument(body).toJson(QJsonDocument::Compact), kChatTransferTimeoutMs);
+    connect(job->stream, &QNetworkReply::readyRead, this, [this, id] { readChat(id); });
+    connect(job->stream, &QNetworkReply::finished, this, [this, id] { finishChat(id); });
     reply(Result<QString>(id));
 }
 
 // The stream's whole lines so far (server-sent events): each `data:` line is a chunk whose
-// delta adds to the answer. Reasoning (`reasoning_content`) is not part of it.
-void OmarchyProvider::readChat(const QString &id) {
+// delta adds to the answer. Reasoning (`reasoning_content`) is not part of it. At the end the
+// last line counts without its line end.
+void OmarchyProvider::readChat(const QString &id, bool atEnd) {
     const auto job = m_jobs.value(id);
-    if (!job || !job->chat || job->status.isTerminal())
+    if (!job || !job->stream || job->status.isTerminal())
         return;
-    const QByteArray type = job->chat->header(QNetworkRequest::ContentTypeHeader).toByteArray();
-    if (!type.contains("event-stream") || httpStatus(job->chat) >= 400)
+    const QByteArray type = job->stream->header(QNetworkRequest::ContentTypeHeader).toByteArray();
+    if (!type.contains("event-stream") || httpStatus(job->stream) >= 400)
         return; // a whole JSON answer, read when it is over
-    job->unread += job->chat->readAll();
+    job->unread += job->stream->readAll();
+    if (atEnd && !job->unread.isEmpty())
+        job->unread += '\n';
     JobStatus status = job->status;
     qsizetype end;
     while ((end = job->unread.indexOf('\n')) >= 0) {
@@ -634,15 +633,20 @@ void OmarchyProvider::readChat(const QString &id) {
         if (!line.startsWith("data:"))
             continue;
         const QByteArray data = line.mid(5).trimmed();
-        if (data == "[DONE]")
+        if (data == "[DONE]") {
+            job->finished = true;
             continue;
+        }
         const QJsonObject chunk = QJsonDocument::fromJson(data).object();
         if (chunk.contains("error")) {
             status.state = QStringLiteral("error");
-            status.error = jobError(QStringLiteral("%1 failed the job: %2").arg(job->server.recipe, serverMessage(chunk)));
+            status.error = jobError(QStringLiteral("%1 failed the job: %2").arg(job->server.recipe, serverMessage(chunk)), true);
             break;
         }
-        const QJsonObject delta = chunk.value("choices").toArray().first().toObject().value("delta").toObject();
+        const QJsonObject choice = chunk.value("choices").toArray().first().toObject();
+        if (choice.value("finish_reason").isString())
+            job->finished = true;
+        const QJsonObject delta = choice.value("delta").toObject();
         const QString content = delta.value("content").toString();
         if (!content.isEmpty()) {
             job->text += content;
@@ -653,57 +657,50 @@ void OmarchyProvider::readChat(const QString &id) {
         }
     }
     // Progress against the longest answer allowed, when one is known, in whole percent.
-    const int most = job->request.params.value("max_tokens").toInt(0);
-    if (most > 0)
-        status.progress = std::min(0.99, std::floor(100.0 * job->chunks / most) / 100.0);
+    const int longest = job->request.params.value("max_tokens").toInt(0);
+    if (longest > 0)
+        status.progress = std::min(0.99, std::floor(100.0 * job->chunks / longest) / 100.0);
     change(id, status);
     if (status.state == QLatin1String("error"))
-        job->chat->abort();
+        job->stream->abort();
 }
 
 void OmarchyProvider::finishChat(const QString &id) {
     const auto job = m_jobs.value(id);
-    if (!job || !job->chat)
+    if (!job || !job->stream)
         return;
-    QNetworkReply *reply = job->chat;
+    QNetworkReply *reply = job->stream;
     reply->deleteLater();
     if (job->status.isTerminal())
         return; // cancelled, or failed by an error event
-    readChat(id);
+    readChat(id, true);
     if (job->status.isTerminal())
         return;
+    const Server &server = job->server;
     const int code = httpStatus(reply);
-    const QByteArray rest = reply->readAll();
-    const QJsonObject answer = QJsonDocument::fromJson(rest).object();
+    const QJsonObject answer = QJsonDocument::fromJson(reply->readAll()).object();
+    const bool streamed = reply->header(QNetworkRequest::ContentTypeHeader).toByteArray().contains("event-stream");
     JobStatus status;
     status.state = QStringLiteral("error");
-    const Server &server = job->server;
-    if (code == 0) {
+    if (code == 0 || code >= 300) {
+        const bool silent = reply->error() == QNetworkReply::OperationCanceledError || reply->error() == QNetworkReply::TimeoutError;
+        status.error = code == 0 && silent
+                           ? makeError(QStringLiteral("provider_unreachable"),
+                                       QStringLiteral("%1 said nothing for %2 seconds.").arg(server.recipe).arg(kChatTransferTimeoutMs / 1000),
+                                       QStringLiteral("Check that it is running: omarchy-agent-local status."))
+                           : refusal(server.recipe, server.base, code, answer, true);
+        return change(id, status);
+    }
+    // Headers came, then the stream broke off (the server died, the proxy dropped it, or it
+    // went silent): half an answer is not an answer.
+    if (reply->error() != QNetworkReply::NoError || (streamed && !job->finished)) {
         status.error = makeError(QStringLiteral("provider_unreachable"),
-                                 reply->error() == QNetworkReply::OperationCanceledError || reply->error() == QNetworkReply::TimeoutError
-                                     ? QStringLiteral("%1 said nothing for %2 seconds.").arg(server.recipe).arg(kChatTransferTimeoutMs / 1000)
-                                     : QStringLiteral("%1 is not answering at %2.").arg(server.recipe, server.base),
-                                 QStringLiteral("Check that it is running: omarchy-agent-local status."));
-        return change(id, status);
-    }
-    if (code == 401 || code == 403) {
-        status.error = makeError(QStringLiteral("provider_unreachable"), QStringLiteral("%1 refused the key.").arg(server.recipe),
-                                 QStringLiteral("Check the key, or pair again."));
-        return change(id, status);
-    }
-    if (code == 503) {
-        status.error = makeError(QStringLiteral("model_not_running"), QStringLiteral("%1 has no model loaded yet.").arg(server.recipe),
-                                 QStringLiteral("Wait for it to finish loading."));
-        return change(id, status);
-    }
-    if (code >= 400) {
-        const QString message = serverMessage(answer);
-        status.error = jobError(QStringLiteral("%1 refused the job: %2")
-                                    .arg(server.recipe, message.isEmpty() ? QStringLiteral("HTTP %1").arg(code) : message));
+                                 QStringLiteral("%1 stopped in the middle of its answer.").arg(server.recipe),
+                                 QStringLiteral("Run the node again; if it happens again, check the model: omarchy-agent-local status."));
         return change(id, status);
     }
     // A server that ignored `stream` answers in one JSON object.
-    if (job->chunks == 0 && answer.contains("choices"))
+    if (!streamed)
         job->text = answer.value("choices").toArray().first().toObject().value("message").toObject().value("content").toString();
 
     QJsonObject used{{"model", job->model}};
@@ -732,13 +729,13 @@ void OmarchyProvider::cancel(const QString &job, Reply<QString> reply) {
         return later(std::move(reply), Result<QString>(makeError("internal", "No job " + job + ".")));
     if (found->status.isTerminal())
         return later(std::move(reply), Result<QString>(found->status.state));
-    if (found->serverId.isEmpty()) {
+    if (found->chat) {
         // A chat job ends with its request: closing the stream stops the server's generation.
         JobStatus cancelled;
         cancelled.state = QStringLiteral("cancelled");
         change(job, cancelled);
-        if (found->chat)
-            found->chat->abort();
+        if (found->stream)
+            found->stream->abort();
         return later(std::move(reply), Result<QString>(found->status.state));
     }
     // Cooperative (api.md "POST /sdcpp/v1/jobs/{id}/cancel"): a generating job stays generating
@@ -774,7 +771,7 @@ void OmarchyProvider::result(const QString &job, Reply<JobResult> reply) {
 void OmarchyProvider::poll() {
     bool active = false;
     for (auto it = m_jobs.begin(); it != m_jobs.end(); ++it) {
-        if (it.value()->status.isTerminal() || it.value()->serverId.isEmpty())
+        if (it.value()->status.isTerminal() || it.value()->chat)
             continue; // a chat job is followed by its stream, not polled
         active = true;
         if (!it.value()->asking)

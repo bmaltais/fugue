@@ -881,8 +881,8 @@ private slots:
         QVERIFY(!body.contains("temperature"));
     }
 
-    // Thinking off goes out both ways servers take it: the chat template's switch (Qwen3,
-    // llama.cpp, vLLM) and OpenAI's reasoning_effort (tensorfold reads either).
+    // Thinking goes out as the chat template's switch (Qwen3 templates; llama.cpp, vLLM and
+    // tensorfold take it). Not OpenAI's reasoning_effort: a strict server refuses "none".
     void thinkingCanBeTurnedOff() {
         Fixture fixture;
         fixture.server.on("GET", "/v1/models", [](const HttpRequest &request) { return modelsList(request, kQwen); });
@@ -897,9 +897,7 @@ private slots:
             QTRY_VERIFY(await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value().isTerminal());
             const QJsonObject body = chatBody(fixture.server);
             QCOMPARE(body.value("chat_template_kwargs").toObject(), (QJsonObject{{"enable_thinking", thinking}}));
-            QCOMPARE(body.contains("reasoning_effort"), !thinking);
-            if (!thinking)
-                QCOMPARE(body.value("reasoning_effort").toString(), QStringLiteral("none"));
+            QVERIFY(!body.contains("reasoning_effort"));
         }
         // Unsaid: the model's own way.
         QVERIFY(!QJsonDocument::fromJson(fixture.server.requestsTo("POST", "/v1/chat/completions").first().body)
@@ -983,6 +981,83 @@ private slots:
         QVERIFY(cancelled.ok());
         QCOMPARE(cancelled.value(), QStringLiteral("cancelled"));
         QCOMPARE(await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value().state, QStringLiteral("cancelled"));
+    }
+
+    // The node says what the picture is (MediaHandle::format, from its bytes); the name may not.
+    void aTextJobsImageTypeIsTheOneTheNodeSays() {
+        Fixture fixture;
+        fixture.server.on("GET", "/v1/models", [](const HttpRequest &request) { return modelsList(request, kQwen); });
+        fixture.server.on("POST", "/v1/chat/completions", [](const HttpRequest &) {
+            return HttpResponse{200, streamed({"a fox"}), "text/event-stream"};
+        });
+        fixture.writeStatus(QJsonObject{{kQwen, row(kQwen, "text", "active", fixture.endpoint())}});
+        auto provider = fixture.provider();
+        const QString path = fixture.writeInput("photo.jfif", "\xff\xd8 jpeg bytes");
+        auto request = fixture.request("text.generate", {{"prompt", "Describe it."}},
+                                       {{"image", QJsonObject{{"path", path}, {"format", "jpeg"}}}});
+        const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value();
+        QTRY_VERIFY(await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value().isTerminal());
+        const QString url = chatBody(fixture.server).value("messages").toArray().first().toObject().value("content")
+                                .toArray().at(1).toObject().value("image_url").toObject().value("url").toString();
+        QVERIFY2(url.startsWith("data:image/jpeg;base64,"), qPrintable(url.left(40)));
+    }
+
+    // A stream that ends without its finish ([DONE] or a finish_reason) was cut off: the server
+    // died or the proxy dropped it. Half an answer is not an answer.
+    void aStreamCutOffMidwayIsAnError() {
+        Fixture fixture;
+        fixture.server.on("GET", "/v1/models", [](const HttpRequest &request) { return modelsList(request, kQwen); });
+        fixture.server.on("POST", "/v1/chat/completions", [](const HttpRequest &) {
+            QByteArray cut = streamed({"A red ", "fox"});
+            cut.truncate(cut.indexOf("fox") + 10); // inside the second piece's chunk, no finish
+            cut.truncate(cut.lastIndexOf("data:"));
+            return HttpResponse{200, cut, "text/event-stream"};
+        });
+        fixture.writeStatus(QJsonObject{{kQwen, row(kQwen, "text", "active", fixture.endpoint())}});
+        auto provider = fixture.provider();
+        auto request = fixture.request("text.generate", {{"prompt", "fox"}});
+        const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value();
+        JobStatus status;
+        QTRY_VERIFY((status = await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value()).isTerminal());
+        QCOMPARE(status.state, QStringLiteral("error"));
+        QCOMPARE(status.error.code, QStringLiteral("provider_unreachable"));
+        QVERIFY2(status.error.message.contains("stopped in the middle"), qPrintable(status.error.message));
+    }
+
+    // The last line of a stream may have no line end.
+    void theLastChunkCountsWithoutALineEnd() {
+        Fixture fixture;
+        fixture.server.on("GET", "/v1/models", [](const HttpRequest &request) { return modelsList(request, kQwen); });
+        fixture.server.on("POST", "/v1/chat/completions", [](const HttpRequest &) {
+            QByteArray body = streamed({"A red fox"});
+            body.chop(QByteArray("data: [DONE]\n\n").size());
+            return HttpResponse{200, body.trimmed(), "text/event-stream"}; // ends on the finish chunk
+        });
+        fixture.writeStatus(QJsonObject{{kQwen, row(kQwen, "text", "active", fixture.endpoint())}});
+        auto provider = fixture.provider();
+        auto request = fixture.request("text.generate", {{"prompt", "fox"}});
+        const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value();
+        JobStatus status;
+        QTRY_VERIFY((status = await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value()).isTerminal());
+        QCOMPARE(status.state, QStringLiteral("done"));
+        QCOMPARE(await<JobResult>([&](auto reply) { provider->result(id, reply); })->outputs.value("text").toString(),
+                 QStringLiteral("A red fox"));
+    }
+
+    void aTextModelOutOfMemoryIsNotToldToMakeASmallerImage() {
+        Fixture fixture;
+        fixture.server.on("GET", "/v1/models", [](const HttpRequest &request) { return modelsList(request, kQwen); });
+        fixture.server.on("POST", "/v1/chat/completions", [](const HttpRequest &) {
+            return HttpResponse{500, "{\"error\":{\"message\":\"CUDA error: out of memory\"}}"};
+        });
+        fixture.writeStatus(QJsonObject{{kQwen, row(kQwen, "text", "active", fixture.endpoint())}});
+        auto provider = fixture.provider();
+        auto request = fixture.request("text.generate", {{"prompt", "fox"}});
+        const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value();
+        JobStatus status;
+        QTRY_VERIFY((status = await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value()).isTerminal());
+        QCOMPARE(status.error.code, QStringLiteral("out_of_memory"));
+        QVERIFY2(!status.error.hint.contains("image"), qPrintable(status.error.hint));
     }
 };
 

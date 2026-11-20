@@ -1185,7 +1185,9 @@ omarchy-local-ai at commit 703ae0c when the provider was built):
   the recipe). Ready is asked with `GET /v1/models` (503 while the weights load). A job is one
   `POST /v1/chat/completions` with `stream: true`, read as server-sent events: content adds to
   the answer, `reasoning_content` does not; a server that ignores `stream` answers in one JSON
-  object. An image goes as a data URL (`image_url` content part). Cancel closes the stream.
+  object; a stream that ends without its finish (`[DONE]` or a `finish_reason`) was cut off and
+  fails the job. An image goes as a data URL (`image_url` content part), PNG or JPEG as the node
+  read it. Cancel closes the stream.
   A paired host's row gives `input` and `max_tokens`; a local row gives neither (#87). The
   share proxy streams the events through, so a paired host's text models (the DGX's) serve
   exactly like its image models.
@@ -1980,7 +1982,9 @@ choice; a limit the provider reports for the model replaces it, higher or lower.
 - Shipped (#87): Text Generate (`fugue/text-generate`: prompt, system prompt, optional image,
   model, seed, and in Advanced the longest answer, temperature and thinking (off); outputs `text`, `seed`,
   `model`) and Enhance Prompt (`fugue/enhance-prompt`: an idea, a style, more instructions,
-  model, seed; outputs the prompt as `text`), both on `text.generate` (8.1, 8.7).
+  model, seed; outputs the prompt as `text`, with `seed` and `model`), both on `text.generate`
+  (8.1, 8.7). `examples/enhance-prompt.fugue` (Generate Image, any model) and
+  `examples/z-image-turbo-enhance.fugue` (the component nodes) are ready to open.
 - Pad (for outpainting), Rotate, Flip, Blur, Sharpen, Invert.
 - Mask tools: grow, shrink, invert, from alpha, solid.
 - Number Math.
@@ -2295,10 +2299,15 @@ Building M2 made these further choices.
 | Text Encode takes the prompt and the negative prompt and gives one conditioning (#79, the owner's choice over ComfyUI's positive and negative wires, which would need a patch change): stable-diffusion.cpp encodes both sets in one call. It always makes the negative set (guidance other than 1 at encode), the Sampler's guidance being unknown to it; sampling at 1 skips it, so the pixels match a single run, at the cost of a second, short encode of the (often empty) negative prompt | 14.3 | high |
 | Load Models' text encoder is the model's one LLM encoder (`llm_path`: Qwen3 for Z-Image and FLUX.2 Klein, Qwen2.5-VL for Qwen-Image); families with CLIP and T5 encoders (FLUX.1, SD3) come later. A plain `fugue/model` is a checkpoint (`model_path`, the `checkpoints` folder) | 14.3 | medium-high |
 | An Empty Latent is a size in a small file, not a tensor: the helper makes the noise from the seed, as a single run does. The Sampler's guidance defaults to 1 (the distilled models the examples use); sampler and scheduler unset are the model's own. Text Encode sends no image size, so SDXL's size conditioning is the model's default size, as ComfyUI's plain CLIPTextEncode uses a fixed one | 14.3 | medium |
+
+Building M4 made these further choices.
+
+| Choice made in M4 | Section | Confidence |
+| --- | --- | --- |
 | Enhance Prompt (#87) is a node of its own with three styles, not a Text Generate preset: `detailed` (a paragraph, for models that read sentences: Z-Image, FLUX, Qwen-Image), `photograph`, and `tags` (SDXL, SD 1.5), plus free instructions. ComfyUI's enhancer nodes (custom nodes on Ollama or LM Studio) work this way; its built-in TextGenerate instead runs the Qwen3 encoder file as an LLM, which stable-diffusion.cpp cannot do (llama.cpp in the helper: not now) | 14.2 | medium-high |
-| Text answers lose the model's reasoning (`<think>` blocks, `reasoning_content`) on every text node; Enhance Prompt also drops a leading label ("Enhanced prompt:", "Here is …:"), a code fence and quotes around the whole, the chatty filler ComfyUI's enhancers report. An empty answer fails the node (a thinking model can spend all its tokens thinking) | 14.2 | medium-high |
+| Text answers lose the model's reasoning ahead of the answer (a leading `<think>` block, or text up to a first `</think>` the chat template opened; `reasoning_content`) on every text node; Enhance Prompt also drops a leading label ("Enhanced prompt:", "Here is …:"), a code fence and quotes around the whole, the chatty filler ComfyUI's enhancers report. An empty answer fails the node (a thinking model can spend all its tokens thinking) | 14.2 | medium-high |
 | An image to a text model is sent at most 1024 pixels on a side (as it is when a PNG or JPEG within that), since it travels as base64. It is refused before the job only when the model says it takes no image; a local model says nothing (status.json has no `input`) and is asked | 8.1, 8.7 | medium |
-| Thinking is off unless asked for: Enhance Prompt never thinks, Text Generate has a Thinking switch (Advanced, off). Off is sent both ways servers take it (`chat_template_kwargs.enable_thinking` and `reasoning_effort: "none"`). Checked on the DGX (Qwen3.5 2B, tensorfold, 2026-11-20): thinking spent the whole default answer (4096 tokens, "low" effort too) and wrote nothing; off, a good prompt in 41 tokens. ComfyUI's Qwen3 prompt node has the same switch | 8.1, 14.2 | high |
+| Thinking is off unless asked for: Enhance Prompt never thinks, Text Generate has a Thinking switch (Advanced, off). It is sent as the chat template's switch (`chat_template_kwargs.enable_thinking`), not OpenAI's `reasoning_effort`, whose `"none"` a strict server refuses. Checked on the DGX (Qwen3.5 2B, tensorfold, 2026-11-20): thinking spent the whole default answer (4096 tokens, "low" effort too) and wrote nothing; off, a good prompt in 41 tokens. ComfyUI's Qwen3 prompt node has the same switch | 8.1, 14.2 | high |
 | A text job waits up to 300 seconds of silence (image jobs: 15 s per request): reading a long prompt or an image, or reasoning, can stream nothing for a while | 8.7 | medium |
 
 ## Appendix B: issue to section map

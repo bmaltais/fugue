@@ -303,10 +303,18 @@ private slots:
         const QString sent = large->inputs.value("image").toObject().value("path").toString();
         QVERIFY(sent.startsWith(bench.workDir()));
         QCOMPARE(sizeOf(sent), QSize(1024, 768));
+        QCOMPARE(large->inputs.value("image").toObject().value("format").toString(), QStringLiteral("png"));
 
         const QString small = writePng(bench.file("small.png"), 512, 384);
         const Result<JobRequest> asItIs = bench.request(kTextGenerate, {{"prompt", "Describe it."}, {"image", bench.image(small)}});
         QCOMPARE(asItIs->inputs.value("image").toObject().value("path").toString(), small);
+
+        // A JPEG within the square goes as it is, said to be a JPEG whatever its name.
+        initVips();
+        const QString jfif = bench.file("photo.jfif");
+        vips::VImage::new_from_file(small.toUtf8().constData()).jpegsave(jfif.toUtf8().constData());
+        const Result<JobRequest> jpeg = bench.request(kTextGenerate, {{"prompt", "Describe it."}, {"image", bench.image(jfif)}});
+        QCOMPARE(jpeg->inputs.value("image").toObject(), (QJsonObject{{"path", jfif}, {"format", "jpeg"}}));
     }
 
     void anImageToAModelThatSaysItTakesNoneIsRefused() {
@@ -351,9 +359,23 @@ private slots:
         QCOMPARE(bench.outputs(kEnhance, "Enhanced prompt: \"A red fox in deep snow.\"")->value("text").text(),
                  QStringLiteral("A red fox in deep snow."));
         QCOMPARE(bench.outputs(kEnhance, "**Prompt:**\n“A red fox.”")->value("text").text(), QStringLiteral("A red fox."));
+        QCOMPARE(bench.outputs(kEnhance, "Here\u2019s the enhanced prompt: A red fox.")->value("text").text(),
+                 QStringLiteral("A red fox."));
         // Words of the prompt that only look like a label stay.
         QCOMPARE(bench.outputs(kEnhance, "A fox: red, small, in snow")->value("text").text(),
                  QStringLiteral("A fox: red, small, in snow"));
+        QCOMPARE(bench.outputs(kEnhance, "Here is a lighthouse at dusk: waves break below.")->value("text").text(),
+                 QStringLiteral("Here is a lighthouse at dusk: waves break below."));
+    }
+
+    // A closing tag whose opening the chat template wrote (Qwen3) ends the reasoning; one in the
+    // middle of an answer that had no reasoning before it is part of the answer.
+    void onlyALeadingReasoningIsLeftOut() {
+        Bench bench;
+        QCOMPARE(bench.outputs(kTextGenerate, "The user wants a fox.\n</think>\n\nA red fox.")->value("text").text(),
+                 QStringLiteral("A red fox."));
+        QCOMPARE(bench.outputs(kTextGenerate, "Use <think> and </think> tags.")->value("text").text(),
+                 QStringLiteral("Use <think> and </think> tags."));
     }
 
     void anEmptyAnswerIsAFailure() {

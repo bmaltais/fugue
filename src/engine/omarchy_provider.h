@@ -26,8 +26,9 @@
 //
 // Each row of kind image becomes a model of image.generate, and also of image.edit when its
 // `edit` is true. Each row of kind text becomes a model of text.generate (a fugue/text-model),
-// served over its OpenAI-compatible API (POST /v1/chat/completions, streamed). Video and music
-// rows are not offered until their nodes are built (M4). A served model is named by its recipe, with no content hash; its row's
+// served over its OpenAI-compatible API (POST /v1/chat/completions, streamed). Video and
+// music rows are not offered until their nodes are built (M4). A served model is named by
+// its recipe, with no content hash; its row's
 // `name` ("FLUX.2 Klein 4B") is its title, for display only. Without providers.json each
 // paired host is an instance of its own (providers.h defaultProviderInstances).
 
@@ -86,10 +87,11 @@ private:
     struct Job;
 
     void discover(std::function<void(const Result<Discovery> &)> done);
+    // `timeoutMs`: how long the transfer may go silent; 0 keeps the network's 15 seconds.
     QNetworkReply *send(const Server &server, const QByteArray &method, const QString &path,
-                        const QByteArray &body = {});
+                        const QByteArray &body = {}, int timeoutMs = 0);
     void submitChat(const Server &server, const JobRequest &request, const QJsonObject &model, Reply<QString> reply);
-    void readChat(const QString &id);
+    void readChat(const QString &id, bool atEnd = false);
     void finishChat(const QString &id);
     void poll();
     void pollJob(const QString &id);
