@@ -41,6 +41,8 @@ Item {
     required property rect thumbnailRect
     required property string thumbnailText // in the image's place (a shown text, a label)
     required property bool thumbnailDim    // a placeholder: no result yet
+    required property string updateAvailable // a group the library has a newer version of (5.3)
+    required property int groupSize // a group instance: the nodes it holds (docs/canvas-look.md 9), else 0
 
     // Set by the canvas.
     property CanvasModel canvasModel
@@ -149,6 +151,19 @@ Item {
                 border.color: node.look.accent
             }
 
+            // A group is a stacked card (docs/canvas-look.md 9, 10): a second card 1u down and right
+            // behind it, so it reads as "holds nodes" and never as a Frame.
+            Rectangle {
+                visible: node.groupSize > 0
+                x: face.u
+                y: face.u
+                width: parent.width
+                height: parent.height
+                radius: face.corner
+                color: node.look.body
+                border.width: 1
+                border.color: node.look.hairline
+            }
             // The box: body fill and a 1 px edge (dashed for bypassed and missing nodes, below).
             Rectangle {
                 anchors.fill: parent
@@ -181,7 +196,7 @@ Item {
                 Rectangle {
                     id: kind
                     readonly property string shape: face.kindPort ? face.kindPort.shape : ""
-                    visible: face.kindPort !== null
+                    visible: face.kindPort !== null && node.groupSize === 0
                     x: 3 * face.u - 1
                     anchors.verticalCenter: parent.verticalCenter
                     width: 8
@@ -195,7 +210,9 @@ Item {
                 }
                 Text {
                     visible: face.full
-                    x: kind.visible ? kind.x + kind.width + 1.5 * face.u : 3 * face.u - 1
+                    // A group's kind mark is the layers glyph (drawn with the decor), 12 px.
+                    x: node.groupSize > 0 ? 3 * face.u - 1 + 12 + 1.5 * face.u
+                     : kind.visible ? kind.x + kind.width + 1.5 * face.u : 3 * face.u - 1
                     width: parent.width - x - (decor.item ? decor.metaWidth + 1.5 * face.u : 0) - 2.5 * face.u
                     anchors.verticalCenter: parent.verticalCenter
                     text: node.title
@@ -292,6 +309,8 @@ Item {
                     readonly property bool hasWidget: modelData.widget
                     readonly property bool showsWidget: hasWidget && !modelData.wired
                     readonly property bool tall: showsWidget && modelData.widgetType === "multiline"
+                    // A folded Advanced input has no row (6.1, 5.4).
+                    readonly property bool shown: !modelData.hidden
                     y: modelData.rowTop
                     width: node.width
                     height: modelData.rowHeight
@@ -299,7 +318,7 @@ Item {
 
                     Loader {
                         objectName: "widgetLoader"
-                        active: input.hasWidget
+                        active: input.hasWidget && input.shown
                         visible: face.full
                         // Under the label, except while typed into.
                         z: item && (item as InputWidget).editingText ? 1 : -1
@@ -319,7 +338,7 @@ Item {
                     }
                     Text {
                         // A tall (multiline) well shows its text instead, and the label only while empty.
-                        visible: face.full && (!input.tall || input.modelData.value === "" || input.modelData.value === undefined)
+                        visible: face.full && input.shown && (!input.tall || input.modelData.value === "" || input.modelData.value === undefined)
                         x: input.showsWidget ? 5 * face.u : 3 * face.u
                         y: input.tall ? Math.round(2 * face.u) : 0
                         width: (input.hasWidget ? 0.45 : 1) * (node.width - 6 * face.u) - (input.showsWidget ? 2 * face.u : 0)
@@ -333,7 +352,7 @@ Item {
                     }
                     // An unlinked widget input shows its mark only on hover or to a compatible link.
                     PortDot {
-                        visible: node.tier <= 1 && (!input.showsWidget || node.hovered || (face.dragging && !input.dim))
+                        visible: input.shown && node.tier <= 1 && (!input.showsWidget || node.hovered || (face.dragging && !input.dim))
                         x: -width / 2
                         y: node.canvasModel.rowHeight / 2 - height / 2
                         shape: input.modelData.shape
@@ -401,13 +420,95 @@ Item {
             Loader {
                 id: decor
                 active: face.stateGlyph !== "" || face.caption !== "" || node.warnings.length > 0 || node.pinned
-                        || face.dashed || node.collapsed
+                        || face.dashed || node.collapsed || extrasNeeded || node.groupSize > 0
+                // What only some nodes have, made here too so a big graph pays nothing for it
+                // (test_canvas_window counts items): section headers (6.1, 5.4; the Advanced one
+                // opens and folds with a click, which FugueCanvas takes), the names an entered
+                // group's face gives its inner ports (5.4), and the update chip of a group the library
+                // has a newer version of (5.3).
+                readonly property bool extrasNeeded: face.full && node.rowsMade && !node.collapsed
+                    && (node.updateAvailable !== ""
+                        || node.inputs.some(p => p.headerTop !== undefined || p.exposedAs !== undefined)
+                        || node.outputs.some(p => p.exposedAs !== undefined))
                 anchors.fill: parent
                 // The width its meta text takes from the title, set by the item while it is there.
                 property real metaWidth: 0
                 sourceComponent: Item {
                     Binding {
                         decor.metaWidth: meta.visible ? meta.width : 0
+                    }
+                    Repeater {
+                        model: decor.extrasNeeded ? node.inputs.filter(p => p.headerTop !== undefined) : []
+                        delegate: Row {
+                            id: header
+                            required property var modelData
+                            objectName: "sectionHeader"
+                            readonly property bool advanced: modelData.advancedHeader === true
+                            x: 3 * face.u
+                            y: modelData.headerTop
+                            height: node.canvasModel.rowHeight
+                            spacing: face.u
+                            Glyph {
+                                visible: header.advanced
+                                anchors.verticalCenter: parent.verticalCenter
+                                look: node.look
+                                name: header.modelData.advancedOpen ? "chevron-down" : "chevron-right"
+                                color: node.look.label
+                                font.pixelSize: 12
+                            }
+                            Text {
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: Math.min(implicitWidth, node.width - 6 * face.u - (header.advanced ? 12 + face.u : 0))
+                                text: !header.advanced ? header.modelData.header
+                                    : header.modelData.advancedOpen ? qsTr("Advanced")
+                                    : qsTr("Advanced (%1)").arg(header.modelData.folded)
+                                elide: Text.ElideRight
+                                textFormat: Text.PlainText
+                                color: node.look.label
+                                font.pixelSize: node.look.captionSize
+                                font.weight: Font.DemiBold
+                            }
+                        }
+                    }
+                    Repeater {
+                        model: !decor.extrasNeeded ? [] : node.inputs.filter(p => p.exposedAs !== undefined && !p.hidden)
+                            .concat(node.outputs.filter(p => p.exposedAs !== undefined))
+                        delegate: Text {
+                            required property var modelData
+                            objectName: "exposedMark"
+                            x: modelData.output ? node.width + 2 * face.u : -implicitWidth - 2 * face.u
+                            y: modelData.rowTop + (node.canvasModel.rowHeight - height) / 2
+                            text: modelData.output ? "\u2192 " + modelData.exposedAs : modelData.exposedAs + " \u2192"
+                            textFormat: Text.PlainText
+                            color: node.look.accent
+                            font.pixelSize: node.look.captionSize
+                        }
+                    }
+                    Rectangle {
+                        objectName: "updateChip"
+                        visible: decor.extrasNeeded && node.updateAvailable !== ""
+                        x: node.width - width
+                        y: -height - Math.round(face.u)
+                        width: updateText.implicitWidth + 3 * face.u
+                        height: updateText.implicitHeight + face.u
+                        radius: node.look.smallCorner
+                        color: node.look.accent
+                        Text {
+                            id: updateText
+                            anchors.centerIn: parent
+                            text: parent.visible ? qsTr("Update to %1").arg(node.updateAvailable) : ""
+                            textFormat: Text.PlainText
+                            color: node.look.accentForeground
+                            font.pixelSize: node.look.captionSize
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                node.canvasModel.select([node.nodeId], "replace")
+                                node.canvasModel.requestGroupUpdate()
+                            }
+                        }
                     }
 
                     // Collapsed: every input meets at the header's left end and every output at its
@@ -560,6 +661,29 @@ Item {
                                 }
                             }
                         }
+                    }
+
+                    // A group: the layers glyph as its kind mark, and how many nodes it holds.
+                    Glyph {
+                        visible: node.groupSize > 0
+                        x: 3 * face.u - 1
+                        y: (node.canvasModel.headerHeight - height) / 2
+                        look: node.look
+                        name: "layers"
+                        color: node.look.label
+                        font.pixelSize: 12
+                    }
+                    Text {
+                        visible: node.groupSize > 0 && face.full && !node.collapsed
+                        x: 3 * face.u
+                        y: node.height - 2 * face.u - node.canvasModel.rowHeight
+                        width: node.width - 6 * face.u
+                        height: node.canvasModel.rowHeight
+                        verticalAlignment: Text.AlignVCenter
+                        text: visible ? qsTr("%n nodes · Tab to enter", "", node.groupSize) : ""
+                        elide: Text.ElideRight
+                        color: node.look.label
+                        font.pixelSize: node.look.captionSize
                     }
 
                     // A placeholder's note (spec 11.6).

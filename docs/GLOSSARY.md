@@ -100,6 +100,22 @@ _Avoid_: subgraph, macro, compound node
 An input on a group's face that drives one or more inputs inside it. Keeps the inner input's type, default and constraints.
 _Avoid_: promoted widget, proxy input
 
+**Face**:
+What a group shows as a node: its exposed inputs and outputs, typed by the inner ports they lead to.
+_Avoid_: interface node, proxy
+
+**Level**:
+One graph the canvas shows: the workflow's own, or the inside of a group entered. The groups entered, outside in, are the canvas's scope (`scopePath`, the breadcrumb).
+_Avoid_: layer, depth
+
+**Section**:
+A named run of inputs on a node face, under a header row. The section "Advanced" is folded until opened.
+_Avoid_: tab, panel
+
+**Library**:
+The groups the user saved from workflows, kept as node types in the reserved `local` pack.
+_Avoid_: templates, favorites
+
 **Pack**:
 A folder or repository that supplies node types and groups, with its own id and version. Packs are installed and trusted as a unit.
 _Avoid_: plugin, extension, custom node folder

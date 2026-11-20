@@ -367,6 +367,14 @@ FocusScope {
                     canvas.model.beginLinkDrag(port.node, port.port, port.output)
                 return
             }
+            // The Advanced section's header opens and folds it (5.4, 6.1).
+            if (mouse.button === Qt.LeftButton && canvas.tier === 0) {
+                const folded = canvas.model.advancedHeaderAt(canvas.pressWorld.x, canvas.pressWorld.y)
+                if (folded !== "") {
+                    canvas.model.toggleAdvanced(folded)
+                    return
+                }
+            }
             const hit = canvas.model.nodeAt(canvas.pressWorld.x, canvas.pressWorld.y)
             if (hit !== "") {
                 canvas.pressedNode = hit
@@ -381,6 +389,14 @@ FocusScope {
                     canvas.model.select([hit], "replace")
                 canvas.gesture = "move"
                 canvas.model.beginMove(hit)
+                return
+            }
+            // A Frame's title band moves it with what it holds (5.1).
+            const frame = mouse.button === Qt.LeftButton ? canvas.frameTitleAt(canvas.pressWorld) : ""
+            if (frame !== "") {
+                canvas.pressedNode = ""
+                canvas.gesture = "move"
+                canvas.model.beginFrameMove(frame)
                 return
             }
             const marquee = canvas.navigation === "standard" || (mouse.modifiers & Qt.ControlModifier)
@@ -451,7 +467,22 @@ FocusScope {
                 canvas.model.autoSize(grip)
                 return
             }
-            if (canvas.model.nodeAt(w.x, w.y) === "" && canvas.portUnder(mouse.x, mouse.y).node === undefined)
+            const hit = canvas.model.nodeAt(w.x, w.y)
+            // A double click on a group's body enters it (5.2); its title stays for renaming.
+            if (hit !== "" && canvas.model.isGroup(hit) && canvas.portUnder(mouse.x, mouse.y).node === undefined
+                    && w.y > canvas.model.position(hit).y + canvas.model.headerHeight) {
+                canvas.model.endMove()
+                canvas.model.enterGroup(hit)
+                return
+            }
+            // On a Frame's title: rename it.
+            const frame = hit === "" ? canvas.frameTitleAt(w) : ""
+            if (frame !== "") {
+                canvas.model.endMove()
+                canvas.model.frameRenameRequested(frame)
+                return
+            }
+            if (hit === "" && canvas.portUnder(mouse.x, mouse.y).node === undefined)
                 canvas.searchRequested(w.x, w.y)
         }
 
@@ -475,6 +506,13 @@ FocusScope {
         }
     }
 
+    // The Frame whose title band (as tall as its title, at least a node header) holds the world
+    // point, or "".
+    function frameTitleAt(w) {
+        const band = Math.max(model.headerHeight, (look.frameTitleSize + 4 * look.unit) / Math.min(1, world.scale))
+        return model.frameAt(w.x, w.y, band)
+    }
+
     function startPan() {
         gesture = "pan"
         panStart = Qt.point(world.x, world.y)
@@ -496,7 +534,7 @@ FocusScope {
             break
         case "move":
             model.endMove()
-            if (!travelled) {
+            if (!travelled && pressedNode !== "") {
                 if (!(pressModifiers & (Qt.ShiftModifier | Qt.ControlModifier)))
                     model.select([pressedNode], "replace")
                 else if (pressedWasSelected)
@@ -975,6 +1013,80 @@ FocusScope {
         if (pill)
             pill.listOpen = true
         canvas.windowRuns.showError(nodeId)
+    }
+
+    // Inside a group (5.2, docs/canvas-look.md 10): where the canvas is, outside in, a pill as the
+    // zoom and run ones are; a click on a level goes back to it.
+    Item {
+        objectName: "breadcrumb"
+        visible: canvas.model.inGroup
+        x: 4 * canvas.look.unit
+        y: 4 * canvas.look.unit
+        width: crumbBox.width
+        height: crumbBox.height
+        Shadow {
+            target: crumbBox
+            level: 2
+            look: canvas.look
+        }
+        Rectangle {
+            id: crumbBox
+            width: crumbs.implicitWidth + 6 * canvas.look.unit
+            height: 7 * canvas.look.unit
+            radius: Math.min(canvas.look.popupCorner, 14)
+            color: canvas.look.popup
+            border.width: 1
+            border.color: canvas.look.hairline
+        }
+        Row {
+            id: crumbs
+            x: 3 * canvas.look.unit
+            anchors.verticalCenter: crumbBox.verticalCenter
+            spacing: canvas.look.unit
+            Repeater {
+                model: [{id: "", title: qsTr("Workflow")}].concat(canvas.model.breadcrumb)
+                delegate: Row {
+                    id: crumb
+                    required property var modelData
+                    required property int index
+                    readonly property bool last: index === canvas.model.breadcrumb.length
+                    spacing: canvas.look.unit
+                    Text {
+                        visible: crumb.index > 0
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "\u203a"
+                        color: canvas.look.label
+                        font.pixelSize: canvas.look.labelSize
+                    }
+                    Glyph {
+                        visible: crumb.index > 0
+                        anchors.verticalCenter: parent.verticalCenter
+                        look: canvas.look
+                        name: "layers"
+                        color: crumb.last ? canvas.look.text : canvas.look.label
+                        font.pixelSize: 12
+                    }
+                    Text {
+                        objectName: "crumb" + crumb.index
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: crumb.modelData.title
+                        textFormat: Text.PlainText
+                        color: crumb.last ? canvas.look.text : canvas.look.label
+                        font.pixelSize: canvas.look.labelSize
+                        font.weight: crumb.last ? Font.DemiBold : Font.Normal
+                        font.underline: !crumb.last && crumbArea.containsMouse
+                        MouseArea {
+                            id: crumbArea
+                            anchors.fill: parent
+                            enabled: !crumb.last
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: canvas.model.leaveTo(crumb.index)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // The run, top right (11).

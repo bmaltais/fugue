@@ -395,6 +395,19 @@ void Compiler::build(Scope *scope) {
             continue;
         }
         if (const NodeType *type = m_registry.nodeType(node.type)) {
+            // A library group (6.1, runtime.kind "group") runs from the definition the workflow
+            // embeds (5.3); without one there is nothing to run.
+            if (type->runtime.value("kind") == QLatin1String("group")) {
+                m_status[path] = Status::Broken;
+                Error error = nodeError(QStringLiteral("unknown_node_type"), path,
+                                        QStringLiteral("Node %1 is an instance of the group %2, which this workflow "
+                                                       "does not hold.")
+                                            .arg(path, node.type));
+                error.hint = QStringLiteral("Add the group from the library in the canvas, which puts its definition "
+                                            "in the workflow's groups.");
+                fail(error);
+                continue;
+            }
             if (!checkVersion(path, node, type->id, type->version)) {
                 m_status[path] = Status::Broken;
                 continue;
@@ -1000,9 +1013,11 @@ CompiledGraph Compiler::shape() {
         flat.inputs = rewired;
     }
 
-    // Sinks inside a group never run (5.5), unless the run stops at one.
+    // Sinks inside a group never run (5.5), unless the run stops at one, or the user has
+    // entered the instance that holds it.
     for (auto it = live.begin(); it != live.end();) {
-        if (it->inGroup && it->spec().sink && it.key() != m_options.target)
+        const bool entered = !m_options.entered.isEmpty() && it.key().section(QLatin1Char('/'), 0, -2) == m_options.entered;
+        if (it->inGroup && it->spec().sink && it.key() != m_options.target && !entered)
             it = live.erase(it);
         else
             ++it;

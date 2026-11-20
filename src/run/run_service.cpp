@@ -18,6 +18,7 @@
 #include "cli/process.h"
 #include "cli/runs.h"
 #include "engine/compiler.h"
+#include "engine/group_library.h"
 #include "engine/trust_store.h"
 #include "engine/file_hashes.h"
 #include "engine/paths.h"
@@ -316,11 +317,15 @@ private:
             return Compilation(providerProblems);
         CompileOptions options;
         options.target = request.target;
+        options.entered = request.entered;
         options.providers = m_compileRegistry.providerNames();
         options.trusted = [store = m_trust](const QString &pack, const QString &version) {
             return store.isTrusted(pack, version);
         };
-        const Compilation compilation = compile(request.document, m_compileRegistry, options);
+        // A library or pack group named only by its type id runs from its definition (5.3, 6.1).
+        Document document = request.document;
+        embedGroupTypes(document, m_compileRegistry);
+        const Compilation compilation = compile(document, m_compileRegistry, options);
         const Errors problems = providerProblems + compilation.problems();
         return compilation ? Compilation(compilation.value(), problems) : Compilation(problems);
     }

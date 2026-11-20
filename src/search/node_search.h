@@ -7,13 +7,15 @@
 //
 // Search opens four ways: the `node.search` command (Tab, Shift+A) and a double-click on
 // empty canvas open it at a world point; a link let go on empty canvas opens it filtered to
-// the node types with a compatible port. Results show category, ports and version. Groups
-// appear like any node type once they are registered as one (#26).
+// the node types with a compatible port. Results show category, ports and version. The groups
+// of the workflow appear too (5.2), as their face, under their category or "Groups"; one the
+// level shown is inside of is left out, since adding it would make it hold itself.
 //
 // Accepting a result adds the node through CanvasModel::addNode and, for a dragged link,
 // connects it with CanvasModel::connectPorts, and nothing else touches the document, so
 // #17 (undo) can wrap those two calls as one undoable command: it should wrap accept().
 
+#include "engine/node_type.h"
 #include "engine/port_type.h"
 
 #include <QAbstractListModel>
@@ -153,6 +155,8 @@ signals:
 
 private:
     void refresh();
+    // The faces of the workflow's groups that can go in the level shown.
+    std::vector<NodeType> groupFaces() const;
 
     const Registry *m_registry;
     CanvasModel *m_canvas;
@@ -164,6 +168,7 @@ private:
     QString m_filterText;
     QString m_filterChip;
     QPointF m_point;
+    std::vector<NodeType> m_groups; // what the group rows point at, until the next refresh
 };
 
 } // namespace fugue

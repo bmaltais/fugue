@@ -22,6 +22,10 @@
 
 namespace fugue {
 
+// The section whose inputs a node face folds until opened (6.1, 5.4); an `advanced` input
+// with no section is in it.
+inline constexpr char kAdvancedSection[] = "Advanced";
+
 struct InputSpec {
     QString name;           // [a-z][a-z0-9_]*, unique among the inputs
     PortSpec type;          // port type and the `list` modifier

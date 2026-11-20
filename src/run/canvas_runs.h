@@ -130,13 +130,18 @@ private:
         QHash<QString, qreal> innerSeconds;
     };
     struct TabRuns {
-        QHash<QString, NodeView> nodes; // by canvas node id
+        QHash<QString, NodeView> nodes; // by path id: every node, and each group instance holding one
         QVariantList errors;
         QString lastStatus;
         int busy = 0;   // its runs waiting or active
         int epoch = 0;  // runs started, so an older check does not undo a run's states
     };
 
+    // Path ids and the level shown: a path's card (empty when the level has none for it), and
+    // the path of a card.
+    QString rowFor(const QString &key) const;
+    QString keyFor(const QString &node) const;
+    static qreal progressOf(const NodeView &view);
     QString startRun(const QString &target, bool first);
     QString currentTab() const;
     void onEvent(const QString &run, const QJsonObject &event);

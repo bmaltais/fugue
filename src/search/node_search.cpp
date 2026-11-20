@@ -2,6 +2,7 @@
 
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
+#include "engine/groups.h"
 #include "engine/registry.h"
 
 #include <QCoreApplication>
@@ -192,11 +193,37 @@ void NodeSearch::setQuery(const QString &query) {
     refresh();
 }
 
+std::vector<NodeType> NodeSearch::groupFaces() const {
+    std::vector<NodeType> faces;
+    if (!m_canvas || !m_registry)
+        return faces;
+    const Document document = m_canvas->scopeDocument();
+    for (auto it = document.groups.cbegin(); it != document.groups.cend(); ++it) {
+        if (!m_canvas->canAddGroup(it.key()))
+            continue;
+        NodeType face = groupFace(document, *m_registry, it.key());
+        if (face.category.isEmpty())
+            face.category = QCoreApplication::translate("NodeSearch", "Groups");
+        faces.push_back(std::move(face));
+    }
+    return faces;
+}
+
 void NodeSearch::refresh() {
     std::vector<SearchResults::Row> rows;
+    // Rows point into it: it is made whole before any row takes a pointer.
+    m_groups = groupFaces();
     if (m_registry && !(m_link.contains("node") && !m_linkType)) {
         const bool draggedIsOutput = m_link.value("output").toBool();
-        for (const NodeType *type : m_registry->nodeTypes()) {
+        QList<const NodeType *> types = m_registry->nodeTypes();
+        for (const NodeType &face : m_groups)
+            types << &face;
+        for (const NodeType *type : std::as_const(types)) {
+            // A workflow's own definition stands for its id (4.4), over a library type of it.
+            if (type->runtime.value("kind") == QLatin1String("group") && m_canvas
+                && m_canvas->scopeDocument().groups.contains(type->id)
+                && std::none_of(m_groups.begin(), m_groups.end(), [type](const NodeType &face) { return &face == type; }))
+                continue;
             SearchResults::Row row;
             row.type = type;
             if (m_linkType) {
@@ -279,7 +306,7 @@ void NodeSearch::clearFilter() {
     emit activeChanged();
 }
 
-int NodeSearch::total() const { return m_registry ? int(m_registry->nodeTypes().size()) : 0; }
+int NodeSearch::total() const { return m_registry ? int(m_registry->nodeTypes().size() + m_groups.size()) : 0; }
 
 void NodeSearch::close() {
     if (!m_active)

@@ -280,7 +280,7 @@ QString WidgetEdit::check(const QString &node, const QString &input, const QStri
 }
 
 void WidgetEdit::write(const QString &node, const QString &input, const QJsonValue &value, const QString &text) {
-    Document document = m_canvas->document();
+    Document document = m_canvas->scopeDocument();
     if (!document.graph.nodes.contains(node))
         return;
     Node &n = document.graph.nodes[node];
@@ -476,7 +476,7 @@ void WidgetEdit::setSeedMode(const QString &node, const QString &input, const QS
     const Target t = target(node, input);
     if (t.widget != QLatin1String("seed") || !QStringList{"fixed", "random", "increment"}.contains(mode))
         return;
-    Document document = m_canvas->document();
+    Document document = m_canvas->scopeDocument();
     Node &n = document.graph.nodes[node];
     if (n.inputs.value(input).kind() == InputValue::Kind::Link)
         return;
@@ -496,7 +496,7 @@ std::optional<double> WidgetEdit::lastSeed(const QString &node, const QString &i
 }
 
 void WidgetEdit::advanceSeeds() {
-    Document document = m_canvas->document();
+    Document document = m_canvas->scopeDocument();
     for (auto it = document.graph.nodes.begin(); it != document.graph.nodes.end(); ++it) {
         for (const QString &input : incrementing(document, it.key())) {
             const Target t = target(it.key(), input);
@@ -519,7 +519,7 @@ void WidgetEdit::advanceSeeds() {
 QStringList WidgetEdit::capabilities(const QString &node, const QString &input) const {
     if (!m_registry)
         return {};
-    const Document &document = m_canvas->document();
+    const Document &document = m_canvas->scopeDocument();
     QString type = document.graph.nodes.value(node).type;
     if (!m_registry->nodeType(type)) {
         // A group's exposed input: the node type of the inner input it drives.

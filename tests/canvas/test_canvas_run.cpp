@@ -54,7 +54,7 @@ const QByteArray kGraph = R"({
   }},
   "layout": {"nodes": {
     "words": {"pos": [0, 0]}, "gen": {"pos": [300, 0]}, "show": {"pos": [600, 0]},
-    "grp": {"pos": [300, 300]}, "show2": {"pos": [600, 300]}
+    "grp": {"pos": [300, 700]}, "show2": {"pos": [600, 700]}
   }}
 })";
 
@@ -289,6 +289,8 @@ private slots:
         QQuickItem *list = item(r.app.window->contentItem(), "runErrors");
         QVERIFY(!list || !list->isVisible());
         const QPointF before = r.app.pan();
+        { QQuickItem *g = item(r.app.window->contentItem(), "node-grp");
+          qWarning() << "DBG chip" << chip->mapRectToScene(QRectF(0,0,chip->width(),chip->height())) << "grp" << (g ? g->mapRectToScene(QRectF(0,0,g->width(),g->height())) : QRectF()) << "gen" << card->mapRectToScene(QRectF(0,0,card->width(),card->height())); }
 
         QTest::mouseClick(r.app.window, Qt::LeftButton, {},
                           chip->mapToScene(QPointF(chip->width() / 2, chip->height() / 2)).toPoint());

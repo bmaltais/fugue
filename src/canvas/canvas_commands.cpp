@@ -56,5 +56,34 @@ void registerCanvasCommands(fugue::CommandRegistry &commands, CanvasModel &canva
     commands.setHandler("view.zoom-in", [model] { model->requestZoom(zoomStep); });
     commands.setHandler("view.zoom-out", [model] { model->requestZoom(1 / zoomStep); });
     commands.setHandler("view.toggle-links", [model] { model->setLinksHidden(!model->linksHidden()); });
+    commands.setHandler("frame.make", [model] { model->frameSelection(); });
+    commands.setHandler("frame.rename", [model, &commands] {
+        emit model->frameRenameRequested(commands.target().value("frame").toString());
+    });
+    commands.setHandler("frame.delete", [model, &commands] {
+        model->deleteFrame(commands.target().value("frame").toString());
+    });
+    commands.setHandler("group.make", [model] { model->requestMakeGroup(); });
+    commands.setHandler("group.ungroup", [model] { model->ungroupSelection(); });
+    commands.setHandler("group.enter", [model] {
+        const QStringList selected = model->selectedIds();
+        if (selected.size() == 1)
+            model->enterGroup(selected.first());
+    });
+    commands.setHandler("group.leave", [model] { model->leaveGroup(); });
+    commands.setHandler("group.make-unique", [model] { model->makeUnique(); });
+    commands.setHandler("group.interface", [model] { emit model->interfaceEditorRequested(); });
+    commands.setHandler("group.save-to-library", [model] { model->saveGroupToLibrary(); });
+    commands.setHandler("group.update", [model] { model->requestGroupUpdate(); });
     commands.setContextActive(QStringLiteral("canvas"), true);
+    // group-selected: one group instance is selected (Tab enters it); group: one is entered.
+    auto contexts = [model, &commands] {
+        const QStringList selected = model->selectedIds();
+        commands.setContextActive(QStringLiteral("group-selected"), selected.size() == 1 && model->isGroup(selected.first()));
+        commands.setContextActive(QStringLiteral("group"), model->inGroup());
+    };
+    QObject::connect(model, &CanvasModel::selectionChanged, &commands, contexts);
+    QObject::connect(model, &CanvasModel::scopeChanged, &commands, contexts);
+    QObject::connect(model, &CanvasModel::documentReset, &commands, contexts);
+    contexts();
 }
