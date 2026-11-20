@@ -2,6 +2,7 @@
 
 #include <cstdio>
 
+#include "engine/command_node.h"
 #include "engine/pack_loader.h"
 #include "nodes/kernels.h"
 
@@ -19,6 +20,8 @@ void addBuiltinKernels(Kernels &kernels) {
     addBasicKernels(kernels);
     addImageGenerationKernels(kernels);
     addPixelKernels(kernels);
+    // The programs of the packs on disk (7).
+    kernels.setCommandKernel(std::make_shared<CommandKernel>());
 }
 
 } // namespace fugue::nodes

@@ -256,6 +256,7 @@ QString loadNode(Registry &registry, const PackManifest &pack, const QString &fo
         }
     if (hasErrors(errors))
         return reasonOf(errors);
+    registry.setNodeDir(id, folder + QLatin1Char('/') + name);
     typeId = id;
     return {};
 }

@@ -66,6 +66,9 @@ struct NodeType {
     QStringList aliases; // old ids this type answers to (3.6)
     bool sink = false;
     bool deterministic = true;
+    // The folder holding node.json: set by the pack loader, empty for a type that has none
+    // (the built-ins' resources). Not part of the manifest, so toJson() leaves it out.
+    QString dir;
     QJsonObject runtime; // has at least "kind"
     QJsonObject needs;   // 6.3, raw
     QJsonValue capabilities = QJsonValue::Undefined; // 8.1, raw

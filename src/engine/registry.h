@@ -60,6 +60,10 @@ public:
     // fromJson() then add(): the path a node.json takes.
     Errors addManifest(const QJsonObject &manifest);
 
+    // Records the folder a type's node.json was read from (NodeType::dir). No effect for an id
+    // that is not a type here.
+    void setNodeDir(const QString &typeId, const QString &dir);
+
     // The version of each installed pack, which trust is asked for and given at (6.7). The
     // workflow's own `requires.packs` is only what its author had, never what runs. A pack
     // not set here has no installed version: "".

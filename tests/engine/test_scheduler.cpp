@@ -14,6 +14,7 @@
 
 #include <vips/vips8>
 
+#include "engine/command_node.h"
 #include "engine/hash.h"
 #include "engine/vips.h"
 #include "scheduler_support.h"
@@ -97,6 +98,39 @@ private slots:
         QCOMPARE(ran.outcome.status, RunStatus::Failed);
         QCOMPARE(ran.outcome.errors.first().code, QStringLiteral("out_of_memory"));
         QCOMPARE(ran.outcome.errors.first().node, QStringLiteral("h"));
+    }
+
+    // A node of a pack on disk runs through the command runner (7), feeds the nodes after it,
+    // and its result is cached like any other.
+    void aCommandNodeRunsInAChainAndIsCached() {
+        World world;
+        const QString folder = world.dir.filePath("pack/shout");
+        QDir().mkpath(folder);
+        QFile script(folder + "/run.sh");
+        QVERIFY(script.open(QIODevice::WriteOnly));
+        script.write("#!/bin/bash\n"
+                     "request=$(cat)\n"
+                     "case \"$request\" in *'\"text\":\"fox\"'*) ;; *) echo 'no fox' >&2; exit 1 ;; esac\n"
+                     "echo '{\"outputs\": {\"text\": \"FOX\"}}'\n");
+        script.close();
+        script.setPermissions(script.permissions() | QFileDevice::ExeUser);
+        QVERIFY(!hasErrors(world.registry.addManifest(
+            json("{'manifest': 1, 'id': 'io.github.test.tools/shout', 'version': '1.0.0', 'name': 'Shout',"
+                 " 'runtime': {'kind': 'command', 'entry': './run.sh'},"
+                 " 'inputs': [{'name': 'text', 'type': 'text'}], 'outputs': [{'name': 'text', 'type': 'text'}]}"))));
+        world.registry.setNodeDir("io.github.test.tools/shout", folder);
+        world.kernels.setCommandKernel(std::make_shared<CommandKernel>(300));
+
+        const QByteArray nodes = "{'a': {'type': 'fugue/text', 'inputs': {'text': 'fox'}},"
+                                 " 'c': {'type': 'io.github.test.tools/shout', 'inputs': {'text': {'from': 'a.text'}}},"
+                                 " 's': {'type': 'fugue/save', 'inputs': {'value': {'from': 'c.text'}}}}";
+        const Ran first = world.run(world.graph(nodes));
+        QCOMPARE(first.outcome.status, RunStatus::Ok);
+        QCOMPARE(first.outcome.outputs.value("c").value("text").text(), QStringLiteral("FOX"));
+
+        const Ran second = world.run(world.graph(nodes));
+        QCOMPARE(second.outcome.status, RunStatus::Ok);
+        QVERIFY(second.outcome.ran.isEmpty()); // everything came from the cache
     }
 
     void aChainRunsInDependencyOrder() {

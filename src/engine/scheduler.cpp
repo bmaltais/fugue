@@ -285,7 +285,7 @@ public:
             n.dependencies = m_graph.dependencies(path);
             n.type = m_env.registry ? m_env.registry->nodeType(n.node->type) : nullptr;
             if (n.type && m_env.kernels) {
-                n.kernel = m_env.kernels->node(n.type->id);
+                n.kernel = m_env.kernels->node(*n.type);
                 n.providerKernel = m_env.kernels->provider(n.type->id);
             }
             needsProviders = needsProviders || n.providerKernel;
