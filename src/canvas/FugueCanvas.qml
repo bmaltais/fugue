@@ -93,6 +93,7 @@ FocusScope {
     // `wiresChanged`: the wires changed under a still pointer, so the hovered one is looked up
     // again even when its row number is the same (that row may hold another link now).
     function updateHover(px, py, wiresChanged) {
+        followLens(px, py)
         const w = toWorld(px, py)
         const n = gesture === "" ? model.nodeAt(w.x, w.y) : ""
         if (n !== hoveredNode)
@@ -100,8 +101,8 @@ FocusScope {
         const c = n !== "" ? cornerAt(w) : ({})
         if (c.node !== hoverCorner.node || c.corner !== hoverCorner.corner)
             hoverCorner = c
-        const p = tier <= 1 && (gesture === "" || gesture === "link")
-            ? model.portAt(w.x, w.y, Math.max(8, 10 / world.scale)) : ({})
+        const p = (tier <= 1 || inLens(px, py)) && (gesture === "" || gesture === "link")
+            ? model.portAt(w.x, w.y, Math.max(8, 10 / scaleAt(px, py))) : ({})
         if (p.node !== hoverPort.node || p.port !== hoverPort.port || p.output !== hoverPort.output)
             hoverPort = p
         const l = tier === 0 && gesture === "" && n === "" && p.node === undefined && !model.linksHidden
@@ -176,12 +177,71 @@ FocusScope {
     }
     onViewAreaChanged: {
         updateDetailArea()
+        closeLens()
         closeWarnings() // the warnings card sits by its badge on screen: a pan or a zoom takes it away
     }
 
     function toWorld(px, py) {
+        if (inLens(px, py))
+            return lensWorld.mapFromItem(canvas, px, py) // the magnified node's world (#74)
         return Qt.point((px - world.x) / world.scale, (py - world.y) / world.scale)
     }
+    // The zoom a point is seen at: the magnifier's inside it, else the canvas's.
+    function scaleAt(px, py) { return inLens(px, py) ? lensWorld.scale : world.scale }
+
+    // The magnifier (#74): far out (the map tier and beyond), a short hover over a node shows it
+    // at zoom 1 over itself, its ports live, so a wire can start there; during a drag the node
+    // under the pointer shows its own, to drop on. Inside it, toWorld() goes through it, so hover,
+    // press and drop work as on the canvas. The view never moves; leaving it, a pan or a zoom, or
+    // a press off its ports closes it.
+    property string lensNode: ""
+    property string lensCandidate: ""
+    // A wire started in the magnifier: once it travels, that magnifier goes, so the canvas around
+    // (and the next node's magnifier) can be reached.
+    property bool lensSource: false
+    readonly property bool lensOpen: lensNode !== ""
+    function inLens(px, py) {
+        return lensOpen && px >= lens.x && py >= lens.y && px < lens.x + lens.width && py < lens.y + lens.height
+    }
+    function openLens(node) {
+        lensNode = node
+        model.setLensNode(node)
+    }
+    function closeLens() {
+        if (lensNode === "")
+            return
+        lensNode = ""
+        model.setLensNode("")
+    }
+    // Called with the pointer: inside the magnifier it stays; elsewhere the node under it, far out,
+    // is the next one to magnify after a short hover.
+    function followLens(px, py) {
+        if (gesture === "link" && lensSource && travelled) {
+            lensSource = false
+            closeLens()
+        }
+        if (inLens(px, py))
+            return
+        closeLens()
+        const w = Qt.point((px - world.x) / world.scale, (py - world.y) / world.scale)
+        const n = tier >= 1 && (gesture === "" || gesture === "link") ? model.nodeAt(w.x, w.y) : ""
+        if (n !== lensCandidate) {
+            lensCandidate = n
+            if (n !== "")
+                lensTimer.restart()
+            else
+                lensTimer.stop()
+        }
+    }
+    Timer {
+        id: lensTimer
+        interval: canvas.gesture === "link" ? 300 : 400
+        onTriggered: {
+            if (canvas.tier >= 1 && canvas.lensCandidate !== "" && canvas.lensCandidate !== canvas.lensNode)
+                canvas.openLens(canvas.lensCandidate)
+        }
+    }
+    onTierChanged: if (tier === 0) closeLens()
     // Where the pointer is, in world coordinates; the middle of the view when it is outside.
     // The `node.search` command (Tab, Shift+A) opens search here.
     function pointerWorld() {
@@ -247,10 +307,10 @@ FocusScope {
     // A port is hit within 10 pixels on screen, and never less than its own size, wherever ports
     // are drawn: the map tier too (#74, as ComfyUI). In the overview a press is on the node.
     function portUnder(px, py) {
-        if (tier > 1)
+        if (tier > 1 && !inLens(px, py))
             return ({})
         const w = toWorld(px, py)
-        return model.portAt(w.x, w.y, Math.max(8, 10 / world.scale))
+        return model.portAt(w.x, w.y, Math.max(8, 10 / scaleAt(px, py)))
     }
 
     clip: true
@@ -349,6 +409,10 @@ FocusScope {
             if (canvas.Window.activeFocusItem)
                 canvas.Window.activeFocusItem.focus = false
             canvas.forceActiveFocus()
+            // In the magnifier only a port is taken (a wire starts); a press anywhere else closes
+            // it and is a press on the canvas under it.
+            if (canvas.inLens(mouse.x, mouse.y) && canvas.portUnder(mouse.x, mouse.y).node === undefined)
+                canvas.closeLens()
             if (mouse.button === Qt.RightButton) {
                 canvas.rightPressAt = Qt.point(mouse.x, mouse.y) // a click opens the menu on release
                 return
@@ -387,6 +451,7 @@ FocusScope {
                     return
                 }
                 canvas.gesture = "link"
+                canvas.lensSource = canvas.inLens(mouse.x, mouse.y)
                 canvas.hoverProblem = ""
                 if (port.output && (mouse.modifiers & Qt.ShiftModifier))
                     canvas.model.beginLinksMove(port.node, port.port)
@@ -1089,6 +1154,61 @@ FocusScope {
     // fits (the one free one, when an input has a link already), and when several free ones do a
     // short list asks which; the drag stays open until a pick, Esc or a click elsewhere.
     property var dropChoice: ({})
+    Item {
+        id: lens
+        objectName: "lens"
+        readonly property real pad: 2 * canvas.look.unit
+        readonly property rect box: canvas.lensOpen ? canvas.model.nodeRect(canvas.lensNode) : Qt.rect(0, 0, 0, 0)
+        // Centred on the node where it sits on screen, inside the canvas.
+        readonly property real cx: world.x + (box.x + box.width / 2) * world.scale
+        readonly property real cy: world.y + (box.y + box.height / 2) * world.scale
+        visible: canvas.lensOpen
+        z: 9
+        width: box.width * lensWorld.scale + 2 * pad
+        height: box.height * lensWorld.scale + 2 * pad
+        x: Math.max(8, Math.min(cx - width / 2, canvas.width - width - 8))
+        y: Math.max(8, Math.min(cy - height / 2, canvas.height - height - 8))
+        Shadow {
+            target: lensBox
+            level: 3
+            look: canvas.look
+        }
+        Rectangle {
+            id: lensBox
+            anchors.fill: parent
+            radius: Math.min(canvas.look.popupCorner, 12)
+            color: canvas.look.canvas
+            border.width: 1
+            border.color: canvas.look.hairlineStrong
+        }
+        Item {
+            anchors.fill: parent
+            clip: true
+            Item {
+                id: lensWorld
+                objectName: "lensWorld"
+                transformOrigin: Item.TopLeft
+                scale: 1 // readable: the node at zoom 1
+                x: lens.pad - lens.box.x * scale
+                y: lens.pad - lens.box.y * scale
+                Repeater {
+                    model: canvas.lensOpen ? canvas.model.lensNodes : null
+                    delegate: CanvasNode {
+                        canvasModel: canvas.model
+                        canvasView: canvas
+                        look: canvas.look
+                        linkDrag: canvas.linkDrag
+                        detailArea: Qt.rect(-1e7, -1e7, 2e7, 2e7)
+                        tier: 0
+                        hovered: canvas.hoveredNode === nodeId
+                        hoverKey: canvas.hoverPort.node === nodeId
+                                  ? (canvas.hoverPort.output ? "o:" : "i:") + canvas.hoverPort.port : ""
+                        activeCorner: ""
+                    }
+                }
+            }
+        }
+    }
     function dropOnNode(node, px, py) {
         const targets = model.dropTargets(node)
         const free = targets.filter(t => t.free)

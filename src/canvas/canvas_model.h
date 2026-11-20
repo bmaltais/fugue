@@ -68,6 +68,7 @@
 #include "search/node_search.h"
 
 #include <QAbstractListModel>
+#include <QSortFilterProxyModel>
 #include <functional>
 #include <QHash>
 #include <QObject>
@@ -181,6 +182,9 @@ class CanvasModel : public QObject {
     QML_ELEMENT
     QML_UNCREATABLE("made in C++, read through App")
     Q_PROPERTY(NodeList *nodes READ nodes CONSTANT)
+    // The one node the canvas's magnifier shows (#74), as a model of the same rows: the node
+    // setLensNode() names, or none.
+    Q_PROPERTY(QAbstractItemModel *lensNodes READ lensNodes CONSTANT)
     Q_PROPERTY(LinkList *links READ links CONSTANT)
     Q_PROPERTY(QVariantList frames READ frames NOTIFY framesChanged)
     // Comments ({id, text, x, y, width}) and reroute points ({x, y, color}) from the layout.
@@ -219,6 +223,8 @@ public:
     ~CanvasModel() override;
 
     NodeList *nodes() const { return m_nodeList; }
+    QAbstractItemModel *lensNodes() const { return m_lensNodes; }
+    Q_INVOKABLE void setLensNode(const QString &node);
     LinkList *links() const { return m_linkList; }
     fugue::NodeSearch *search() const { return m_search; }
     WidgetEdit *widgets() const { return m_widgets; }
@@ -581,6 +587,8 @@ public:
     Q_INVOKABLE void moveBy(qreal dx, qreal dy);
     Q_INVOKABLE void endMove();
     Q_INVOKABLE QPointF position(const QString &node) const;
+    // The node's box in the world, as drawn (a collapsed one is its header); empty for none.
+    Q_INVOKABLE QRectF nodeRect(const QString &node) const;
 
     // --- selection ---
 
@@ -841,6 +849,7 @@ private:
     std::vector<QVariantMap> m_outerViews;
     QString m_groupProblem;
     QString m_groupNotice;
+    QSortFilterProxyModel *m_lensNodes = nullptr;
     QString m_libraryDir;
     QStringList m_movingFrames; // Frames a move carries (beginFrameMove)
     std::vector<QRectF> m_frameStart;

@@ -675,6 +675,50 @@ private slots:
                  QString("prompt.text"));
     }
 
+    // #74: far out, a short hover over a node shows it at a readable size over itself, its ports
+    // live; during a drag the node under the pointer shows its own, to drop on. The view stays.
+    void theMagnifierLetsAWireBeDrawnFarOut() {
+        App app(load(small));
+        QVERIFY(app.open());
+        app.workflows.dismissPendingTrust();
+        app.workflows.dismissNotice();
+        app.model.setView(480, 340, 0.3);
+        QMetaObject::invokeMethod(app.canvas, "applyView");
+        QTRY_VERIFY(qAbs(app.zoom() - 0.3) < 0.01);
+        const QPointF view(app.world->x(), app.world->y());
+        QQuickItem *lens = item(app.window->contentItem(), "lens");
+        QQuickItem *lensWorld = item(app.window->contentItem(), "lensWorld");
+        QVERIFY(lens && lensWorld);
+        QVERIFY(!lens->isVisible());
+        const QPointF genMiddle = app.model.position("gen") + QPointF(60, 60);
+        QTest::mouseMove(app.window, app.screen(genMiddle.x(), genMiddle.y()));
+        QTRY_VERIFY(lens->isVisible());
+        QCOMPARE(app.canvas->property("lensNode").toString(), QStringLiteral("gen"));
+        QCOMPARE(lensWorld->scale(), 1.0);
+        // Where a world point shows in the magnifier.
+        auto inLens = [&](QPointF w) {
+            return lensWorld->mapToScene(QPointF(w.x(), w.y())).toPoint();
+        };
+        const QPoint from = inLens(portAt(app, "gen", "image", true));
+        QTest::mouseMove(app.window, from);
+        QTRY_COMPARE(app.canvas->property("hoverPort").toMap().value("port").toString(), QStringLiteral("image"));
+        QTest::mousePress(app.window, Qt::LeftButton, {}, from);
+        QTRY_VERIFY(app.canvas->property("dragging").toBool());
+        // To Save Image: its own magnifier comes up, and the drop is on its input there.
+        const QPointF saveMiddle = app.model.position("save") + QPointF(60, 40);
+        const QPoint over = app.screen(saveMiddle.x(), saveMiddle.y());
+        for (int i = 1; i <= 8; ++i)
+            QTest::mouseMove(app.window, from + (over - from) * i / 8);
+        QTRY_COMPARE(app.canvas->property("lensNode").toString(), QStringLiteral("save"));
+        const QPoint to = inLens(portAt(app, "save", "image", false));
+        QTest::mouseMove(app.window, to);
+        QTest::mouseRelease(app.window, Qt::LeftButton, {}, to);
+        QCOMPARE(app.model.document().graph.nodes.value("save").inputs.value("image").from().toString(),
+                 QString("gen.image"));
+        QCOMPARE(QPointF(app.world->x(), app.world->y()), view); // the view never moved
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     // #74: a wire let go on a node's body connects to the one port there that fits, and asks
     // which when several free ones do.
     void aWireDroppedOnANodeConnectsOrAsks() {

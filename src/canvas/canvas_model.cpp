@@ -1,4 +1,6 @@
 #include "canvas/canvas_model.h"
+
+#include <QRegularExpression>
 #include "canvas/input_links.h"
 #include "canvas/node_size.h"
 
@@ -157,6 +159,16 @@ CanvasModel::CanvasModel(const Registry *registry, QObject *parent)
       m_search(new NodeSearch(registry, this, this)), m_widgets(new WidgetEdit(registry, this, this)),
       m_undo(makeUndoStack()) {
     watchUndoStack();
+    m_lensNodes = new QSortFilterProxyModel(this);
+    m_lensNodes->setSourceModel(m_nodeList);
+    m_lensNodes->setFilterRole(NodeList::NodeId);
+    setLensNode({});
+}
+
+void CanvasModel::setLensNode(const QString &node) {
+    // An exact id, or nothing at all (no id holds a newline).
+    m_lensNodes->setFilterRegularExpression(
+        QRegularExpression(node.isEmpty() ? QStringLiteral("\n") : QStringLiteral("^%1$").arg(QRegularExpression::escape(node))));
 }
 
 CanvasModel::~CanvasModel() = default;
@@ -1682,6 +1694,14 @@ void CanvasModel::setRunProgress(const QString &node, qreal progress) {
         return;
     run->progress = progress;
     emitNodeChanged(r, {NodeList::Progress});
+}
+
+QRectF CanvasModel::nodeRect(const QString &node) const {
+    const int r = rowOf(node);
+    if (r < 0)
+        return {};
+    const NodeRow &row = m_rows[size_t(r)];
+    return QRectF(row.pos, QSizeF(row.shownWidth(), row.height));
 }
 
 QString CanvasModel::nodeTitle(const QString &node) const {
