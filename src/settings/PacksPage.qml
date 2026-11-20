@@ -101,7 +101,7 @@ ColumnLayout {
                 Text {
                     Layout.fillWidth: true
                     elide: Text.ElideMiddle
-                    text: qsTr("%1 · %n node(s)", "", card.modelData.nodes).arg(card.modelData.path)
+                    text: qsTr("%1 · %n nodes", "", card.modelData.nodes).arg(card.modelData.path)
                     color: page.look.label
                     font.pixelSize: page.look.captionSize
                 }

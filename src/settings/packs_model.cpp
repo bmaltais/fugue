@@ -182,7 +182,7 @@ void PacksModel::update(const QString &id) {
             finish({}, changed.errors(), false);
             return;
         }
-        finish(changed->isEmpty() ? tr("Nothing to update.") : tr("Updated %n pack(s). Restart Fugue to use them.", nullptr, int(changed->size())),
+        finish(changed->isEmpty() ? tr("Nothing to update.") : tr("%n packs updated. Restart Fugue to use them.", nullptr, int(changed->size())),
                changed.warnings(), !changed->isEmpty());
     });
 }
