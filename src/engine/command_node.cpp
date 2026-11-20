@@ -562,8 +562,10 @@ Result<QJsonObject> requestFor(const NodeContext &context, const QString &id) {
 QString nodeSeal(const QString &dir, const QString &entry) {
     QCryptographicHash hash(QCryptographicHash::Sha256);
     for (const QString &name : {QStringLiteral("node.json"), entry}) {
-        QFile file(QFileInfo(QDir(dir).absoluteFilePath(name)).canonicalFilePath());
-        if (name.isEmpty() || !file.open(QIODevice::ReadOnly))
+        // A file that does not exist has no canonical path; QFile would warn about an empty name.
+        const QString path = name.isEmpty() ? QString() : QFileInfo(QDir(dir).absoluteFilePath(name)).canonicalFilePath();
+        QFile file(path);
+        if (path.isEmpty() || !file.open(QIODevice::ReadOnly))
             return {};
         hash.addData(file.readAll());
         hash.addData(QByteArrayView("\0", 1));

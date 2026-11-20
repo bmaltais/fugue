@@ -80,7 +80,8 @@ SettingsModel::SettingsModel(const QString &settingsFile, const QString &provide
     loadProviders();
 }
 
-void SettingsModel::attach(Translator *translator, CanvasModel *canvas) {
+void SettingsModel::attach(Translator *translator, CanvasModel *canvas, const Registry *registry) {
+    m_packs.setRegistry(registry);
     m_translator = translator;
     m_canvas = canvas;
     pushLive();

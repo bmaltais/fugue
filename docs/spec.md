@@ -777,6 +777,10 @@ holding that node's `node.json`.
   has no source and cannot be updated.
 - `pack remove` removes a pack from the packs folder (not one found through a settings path)
   and forgets its trust.
+- The window does the same on the Packs page of the settings panel (`Ctrl+,`): the installed
+  packs with why a pack or node did not load, add (folder or pinned git address), update, trust
+  and remove. It asks the same questions on the page, with the same details, and acts only after
+  a yes. The running window keeps the node types it started with, so it says to restart Fugue.
 - No registry or catalog in v0.1. No signing in v0.1.
 
 ### 6.7 Trust

@@ -20,6 +20,7 @@
 #include <functional>
 
 #include "engine/providers.h"
+#include "settings/packs_model.h"
 #include "engine/settings.h"
 
 class CanvasModel;
@@ -28,6 +29,7 @@ class Translator;
 namespace fugue {
 
 class CommandRegistry;
+class Registry;
 
 class SettingsModel : public QObject {
     Q_OBJECT
@@ -60,6 +62,8 @@ class SettingsModel : public QObject {
     Q_PROPERTY(QString providersProblem READ providersProblem NOTIFY providersChanged)
     // The provider types an instance can be added as.
     Q_PROPERTY(QStringList providerTypes READ providerTypes CONSTANT)
+    // The Packs page: install, trust and remove (#25).
+    Q_PROPERTY(fugue::PacksModel *packs READ packs CONSTANT)
 
 public:
     // `settingsFile` and `providersFile` are settings.json and providers.json (the standard
@@ -69,7 +73,7 @@ public:
 
     // Where the settings that apply live go. Any may be null. Each gets the current values
     // at once.
-    void attach(Translator *translator, CanvasModel *canvas);
+    void attach(Translator *translator, CanvasModel *canvas, const Registry *registry = nullptr);
     // app.settings opens the panel; the keymap page opens files with `openUrl`.
     void registerCommands(CommandRegistry &registry, std::function<void(const QUrl &)> openUrl);
 
@@ -92,6 +96,7 @@ public:
     QVariantList providers() const;
     QString providersProblem() const { return m_providersProblem; }
     QStringList providerTypes() const;
+    PacksModel *packs() { return &m_packs; }
 
     // Sets one setting (a settings.json key) and writes the file. For a folder, empty text
     // goes back to the default; a folder may be text or the folder picker's URL. Empty when done, else why not (nothing is written).
@@ -126,6 +131,7 @@ private:
     QString saveProviders(const QList<ProviderInstance> &instances);
     QByteArray providersSnapshot() const;
 
+    PacksModel m_packs;
     QString m_path;
     QString m_providersPath;
     SettingsFile m_file;
