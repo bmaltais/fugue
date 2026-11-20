@@ -201,9 +201,9 @@ private slots:
         const QImage shot = test_support::grab(app.window);
         const CanvasLook *look = app.theme.look();
         auto at = [&](qreal x, qreal y) { return QColor(shot.pixel(app.screen(x, y))).name(); };
-        // The canvas between nodes, a node's body, its header, an error's header (cached sits at
-        // column 0, row 0: x 56 to 256, y 60 on; error at column 1, row 1).
-        QCOMPARE(at(40, 400), look->tokens().canvas.name());
+        // The canvas left of the nodes, past their shadows, a node's body, its header, an error's
+        // header (cached sits at column 0, row 0: x 56 to 256, y 60 on; error at column 1, row 1).
+        QCOMPARE(at(12, 400), look->tokens().canvas.name());
         QCOMPARE(at(56 + 100, 60 + 28 + 4 + 24 + 12 + 2), look->tokens().body.name()); // between rows, left of the label
         QCOMPARE(at(56 + 120, 60 + 6), look->tokens().header.name());
         QCOMPARE(at(56 + 252 + 120, 360 + 6), look->tokens().errorHeader.name());
@@ -213,12 +213,15 @@ private slots:
     }
 
     // Bypassed reads at a glance, as in ComfyUI: the whole node tinted magenta; muted is faded
-    // toward the canvas and not tinted. On a dark and a light theme, square and round.
+    // toward the canvas and not tinted. On a dark and a light theme, at every corner radius the
+    // setting allows (0, the default 8, and 16; #63), and with Theme's fallback palette. The
+    // selection ring's corner follows the node's: square at 0, rounded away beyond.
     void bypassedAndMutedAreDistinct_data() {
         QTest::addColumn<QString>("theme");
         QTest::addColumn<int>("radius");
-        QTest::addRow("dark, round") << "ethereal" << 8;
-        QTest::addRow("light, square") << "flexoki-light" << 0;
+        for (const char *theme : {"ethereal", "flexoki-light"})
+            for (const int radius : {0, 8, 16})
+                QTest::addRow("%s, r%d", theme, radius) << theme << radius;
         QTest::addRow("fallback palette") << "" << -1;
     }
 
@@ -250,6 +253,11 @@ private slots:
         QVERIFY2(fugue::look::deltaE(faded, t.canvas) < fugue::look::deltaE(faded, t.body), qPrintable(faded.name()));
         QVERIFY(fugue::look::deltaE(faded, t.canvas) > 0.005);
         QVERIFY(fugue::look::deltaE(body(812, 360), body(560, 360)) > 0.02);
+        // The selected node sits at (560, 60): its ring, 2 px wide outside a 2 px gap, is accent
+        // along its sides, and in its corner only when the corners are square.
+        const auto ring = [&](qreal x, qreal y) { return near(shot.pixelColor(app.screen(x, y)), app.theme.look()->property("accent").value<QColor>()); };
+        QVERIFY(ring(560 - 3, 60 + 100));
+        QCOMPARE(ring(560 - 3, 60 - 3), radius == 0);
         if (const QString out = qEnvironmentVariable("FUGUE_LOOK_SHOTS"); !out.isEmpty())
             QVERIFY(shot.save(QStringLiteral("%1/bypass-%2-r%3.png").arg(out, theme.isEmpty() ? "default" : theme).arg(radius)));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
@@ -260,8 +268,9 @@ private slots:
         QTest::addColumn<QString>("theme");
         QTest::addColumn<int>("radius");
         for (const char *board : {"canvas", "states", "search", "overlay"})
-            for (const auto &[theme, radius] : {std::pair{"ethereal", 0}, {"ethereal", 8}, {"flexoki-light", 0},
-                                                {"flexoki-light", 8}, {"rose-pine", 8}, {"tokyo-night", 8}, {"white", 0}})
+            for (const auto &[theme, radius] : {std::pair{"ethereal", 0}, {"ethereal", 8}, {"ethereal", 16}, {"flexoki-light", 0},
+                                                {"flexoki-light", 8}, {"flexoki-light", 16}, {"rose-pine", 8},
+                                                {"tokyo-night", 8}, {"white", 0}})
                 QTest::newRow(qPrintable(QStringLiteral("%1-%2-r%3").arg(board, theme).arg(radius)))
                     << QString(board) << QString(theme) << radius;
     }

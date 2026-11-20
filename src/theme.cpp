@@ -267,7 +267,14 @@ void Theme::refreshLook() {
     const QVariantMap all = this->colors();
     for (auto it = all.cbegin(); it != all.cend(); ++it)
         colors.insert(it.key(), it.value().value<QColor>());
-    m_look->update(colors, m_light, m_radius, m_textSize);
+    m_look->update(colors, m_light, fugue::look::corners(m_cornerSetting, m_radius), m_textSize);
+}
+
+void Theme::setCornerRadius(int setting) {
+    if (setting == m_cornerSetting)
+        return;
+    m_cornerSetting = setting;
+    refreshLook();
 }
 
 QColor Theme::mix(const QColor &a, const QColor &b, double toB) {

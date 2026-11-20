@@ -282,7 +282,9 @@ private slots:
     // worst gap 19 to 27 ms; render 0.3 to 1.7 ms panning, 2.1 to 2.5 ms dragging, 0.15 to
     // 0.33 ms zoomed out. The shadows cost 0.45 ms at most (drag 2.54 on, 2.08 off; the other
     // runs 2.31 and 2.41, 2.39 and 2.28), inside docs/canvas-look.md 7's 1 ms, so nodes at rest
-    // keep theirs.
+    // keep theirs. After #63 (8 px corners, larger shadows), three runs: dragging 2.35, 2.53,
+    // 2.64 ms on against 2.19, 2.37, 2.33 off (0.16 to 0.31 ms); panning no measurable cost
+    // (1.85 to 1.97 on, 1.95 to 2.20 off); zoomed out 0.15 to 0.18 ms; all at 60 fps.
     void benchmark() {
         if (!qEnvironmentVariableIsSet("FUGUE_CANVAS_BENCH"))
             QSKIP("set FUGUE_CANVAS_BENCH=1 and run on a real display");

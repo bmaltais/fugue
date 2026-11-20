@@ -55,6 +55,7 @@ Item {
     property int tier: 0
     property bool hovered: false
     property string hoverKey: "" // the port under the pointer: "o:<name>" or "i:<name>"
+    property string activeCorner: "" // the resize corner under the pointer or being dragged
 
     // Port rows are made the first time the node is in view at the full or map tier and kept
     // after that, so a big graph opens at the cost of what is on screen.
@@ -387,27 +388,24 @@ Item {
                     opacity: node.thumbnailDim ? 0.5 : 1
                 }
             }
-            // The resize grip (#49): two short diagonals in the bottom right corner, shown while the
-            // node is hovered or selected. FugueCanvas takes the press and the double click.
+            // The resize marks (#49, #63): every corner resizes, and all four show their mark while
+            // the node is hovered or selected (as ComfyUI's Vue nodes), in `label`, which reads at
+            // 4.5:1 on the body and the header; the corner under the pointer or being dragged is
+            // in `text`. FugueCanvas takes the press and the double click.
             Loader {
-                active: face.full && !node.collapsed && (node.hovered || node.selected)
-                x: parent.width - width - 2
-                y: parent.height - height - 2
-                width: 10
-                height: 10
+                active: face.full && !node.collapsed && (node.hovered || node.selected || node.activeCorner !== "")
+                anchors.fill: parent
                 sourceComponent: Item {
                     Repeater {
-                        model: 2
-                        Rectangle {
-                            required property int index
-                            width: index === 0 ? 10 : 6
-                            height: 1
-                            x: index === 0 ? 0 : 4
-                            y: index === 0 ? 10 : 10
-                            transformOrigin: Item.BottomRight
-                            rotation: -45
-                            color: node.look.label
-                            opacity: 0.8
+                        model: ["nw", "ne", "sw", "se"]
+                        ResizeMark {
+                            required property string modelData
+                            corner: modelData
+                            nodeCorner: face.corner
+                            unit: face.u
+                            color: modelData === node.activeCorner ? node.look.text : node.look.label
+                            x: modelData.endsWith("w") ? 0 : node.width - width
+                            y: modelData.startsWith("n") ? 0 : node.height - height
                         }
                     }
                 }

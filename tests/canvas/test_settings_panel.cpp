@@ -112,6 +112,35 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // General > Corner radius (#63): fixed at 8 px by default, a step at a time from 0 to 16, or
+    // Omarchy's rounding (none here: square); the canvas redraws at once and the file keeps it.
+    void theCornerRadiusChangesLiveAndPersists() {
+        App app(load(emptyDoc));
+        QVERIFY(app.open());
+        const auto corner = [&] { return app.theme.look()->property("corner").toInt(); };
+        QCOMPARE(corner(), 8);
+        app.commands.trigger("app.settings");
+        QTRY_VERIFY(panelOpen(app.window));
+        QCOMPARE(NEED("cornerValue")->property("text").toString(), QStringLiteral("8 px"));
+        click(app, NEED("cornerMore"));
+        QTRY_COMPARE(corner(), 9);
+        click(app, NEED("cornerLess"));
+        click(app, NEED("cornerLess"));
+        QTRY_COMPARE(corner(), 7);
+        QCOMPARE(fugue::SettingsModel(app.settings.path()).cornerRadius(), 7);
+        click(app, NEED("corner-omarchy"));
+        QTRY_COMPARE(corner(), 0);
+        QTRY_VERIFY(!find(app.window, "cornerValue"));
+        click(app, NEED("corner-fixed"));
+        QTRY_COMPARE(corner(), 8);
+        // Held to the range at its ends.
+        for (int i = 0; i < 10; ++i)
+            click(app, NEED("cornerMore"));
+        QTRY_COMPARE(corner(), 16);
+        QVERIFY(!NEED("cornerMore")->isEnabled());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void aTypedFolderIsCheckedAndPersists() {
         App app(load(emptyDoc));
         QVERIFY(app.open());

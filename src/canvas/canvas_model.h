@@ -535,12 +535,14 @@ public:
     // Resizing (#49). A node is auto-sized unless the layout pins its size: it grows to fit
     // its content (longer text values, multiline text, the run's thumbnail) and is
     // recomputed only when that changes. A resize pins the width and height (never below
-    // what the content needs, 40u to 120u wide); autoSize() unpins them. resizeGripAt finds
-    // the node whose bottom-right grip (size world units square) holds the point. A
+    // what the content needs, 40u to 120u wide); autoSize() unpins them. Any corner of an
+    // open node resizes it (#63): resizeCornerAt finds the node and corner ("nw", "ne",
+    // "sw", "se") whose square of `size` world units, inside the node, holds the point, or
+    // empty. A top or left corner moves the node too, so the opposite corner stays put. A
     // resize, begin to end, is one undo step.
-    Q_INVOKABLE QString resizeGripAt(qreal x, qreal y, qreal size) const;
-    Q_INVOKABLE void beginResize(const QString &node);
-    Q_INVOKABLE void resizeBy(qreal dx, qreal dy); // from the size at beginResize
+    Q_INVOKABLE QVariantMap resizeCornerAt(qreal x, qreal y, qreal size) const;
+    Q_INVOKABLE void beginResize(const QString &node, const QString &corner = QStringLiteral("se"));
+    Q_INVOKABLE void resizeBy(qreal dx, qreal dy); // the corner's travel since beginResize
     Q_INVOKABLE void endResize();
     Q_INVOKABLE bool autoSize(const QString &node);
     // The hook for anything that changes what a node's content needs without a document
@@ -794,7 +796,8 @@ private:
     bool m_resizeOpen = false; // a resize holds one too
     bool m_gestureEditing = false; // a gesture makes its own edits (a link put down, a clone)
     QString m_resizeNode;
-    QSizeF m_resizeStart;     // its size when the resize began
+    bool m_resizeWest = false, m_resizeNorth = false; // the corner dragged
+    QRectF m_resizeStart;     // its box when the resize began
     bool m_resizeWasSized = false;
     qreal m_resizeWasWidth = 0, m_resizeWasHeight = 0;
 

@@ -18,6 +18,7 @@
 #include "engine/registry.h"
 #include "nodes/builtin.h"
 #include "settings/settings_model.h"
+#include "theme.h"
 #include "translator.h"
 
 using namespace fugue;
@@ -146,6 +147,28 @@ private slots:
         QCOMPARE(canvas.document().graph.nodes.value(id).inputs.value("seed").kind(), InputValue::Kind::Literal);
         id = canvas.addNode("fugue/save-image", 0, 0);
         QCOMPARE(canvas.document().graph.nodes.value(id).inputs.value("embed").literal(), QJsonValue("no-prompts"));
+    }
+
+    // The corner radius (#63) reaches the Theme at once: 8 px by default, a fixed radius, or
+    // Omarchy's rounding again.
+    void theCornerRadiusAppliesLive() {
+        QTemporaryDir omarchy;
+        Theme theme(omarchy.path());
+        theme.setCornerRadius(3);
+        SettingsModel model;
+        model.attach(nullptr, nullptr, nullptr, &theme);
+        QCOMPARE(model.cornerRadius(), 8);
+        QCOMPARE(theme.look()->property("corner").toInt(), 8);
+        QCOMPARE(model.set("corner_radius", 12), QString());
+        QCOMPARE(model.cornerRadius(), 12);
+        QCOMPARE(theme.look()->property("corner").toInt(), 12);
+        QVERIFY(!model.set("corner_radius", 30).isEmpty());
+        QCOMPARE(theme.look()->property("corner").toInt(), 12);
+        QCOMPARE(model.set("corner_radius", "omarchy"), QString());
+        QCOMPARE(model.cornerRadius(), Settings::followOmarchy);
+        QCOMPARE(theme.look()->property("corner").toInt(), 0); // no Hyprland here: square
+        QCOMPARE(model.set("corner_radius", 8), QString()); // the default leaves the file
+        QVERIFY(!readSettings(settingsFile()).document.contains("corner_radius"));
     }
 
     // --- providers ---

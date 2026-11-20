@@ -243,17 +243,90 @@ private slots:
         QCOMPARE(canvas.nodeAt(635, 100), QString());
     }
 
-    void theGripIsTheBottomRightCornerOfAnOpenNode() {
+    // Any corner of an open node resizes it (#63, as ComfyUI): a square of `size` inside each
+    // corner. Edges do not, and neither does a collapsed node.
+    void theResizeCornersAreTheFourCornersOfAnOpenNode() {
         CanvasModel canvas(&m_registry);
         canvas.setDocument(document(workflow(placed)));
         const QVariantMap save = node(canvas, "save");
-        const qreal right = 640 + save.value("nodeWidth").toDouble(), bottom = 120 + save.value("nodeHeight").toDouble();
-        QCOMPARE(canvas.resizeGripAt(right - 3, bottom - 3, 12), QString("save"));
-        QCOMPARE(canvas.resizeGripAt(right - 3, bottom - 30, 12), QString());
-        QCOMPARE(canvas.resizeGripAt(right + 3, bottom - 3, 12), QString());
+        const qreal left = 640, top = 120;
+        const qreal right = left + save.value("nodeWidth").toDouble(), bottom = top + save.value("nodeHeight").toDouble();
+        const auto corner = [&](qreal x, qreal y) {
+            const QVariantMap at = canvas.resizeCornerAt(x, y, 12);
+            return at.isEmpty() ? QString() : at.value("node").toString() + " " + at.value("corner").toString();
+        };
+        QCOMPARE(corner(right - 3, bottom - 3), QString("save se"));
+        QCOMPARE(corner(left + 3, bottom - 3), QString("save sw"));
+        QCOMPARE(corner(right - 3, top + 3), QString("save ne"));
+        QCOMPARE(corner(left + 3, top + 3), QString("save nw"));
+        QCOMPARE(corner(right - 3, bottom - 30), QString()); // the right edge
+        QCOMPARE(corner((left + right) / 2, bottom - 3), QString()); // the bottom edge
+        QCOMPARE(corner(right + 3, bottom - 3), QString()); // outside
         canvas.select({"save"});
         canvas.toggleCollapsed();
-        QCOMPARE(canvas.resizeGripAt(right - 3, bottom - 3, 12), QString());
+        QCOMPARE(corner(right - 3, bottom - 3), QString());
+        QCOMPARE(corner(left + 3, top + 3), QString());
+    }
+
+    // A top or left corner moves the node too, so the opposite corner stays where it was; the
+    // limits are the bottom right corner's, and the whole drag is one undo step that takes the
+    // position back as well.
+    void aResizeFromAnyCornerKeepsTheOppositeCornerInPlace_data() {
+        QTest::addColumn<QString>("corner");
+        QTest::addColumn<QPointF>("drag");
+        QTest::addColumn<QPointF>("pos");
+        QTest::addColumn<QSizeF>("grown");
+        QTest::newRow("nw") << "nw" << QPointF(-40, -30) << QPointF(600, 90) << QSizeF(40, 30);
+        QTest::newRow("ne") << "ne" << QPointF(30, -20) << QPointF(640, 100) << QSizeF(30, 20);
+        QTest::newRow("sw") << "sw" << QPointF(-30, 20) << QPointF(610, 120) << QSizeF(30, 20);
+        QTest::newRow("se") << "se" << QPointF(30, 20) << QPointF(640, 120) << QSizeF(30, 20);
+    }
+    void aResizeFromAnyCornerKeepsTheOppositeCornerInPlace() {
+        QFETCH(QString, corner);
+        QFETCH(QPointF, drag);
+        QFETCH(QPointF, pos);
+        QFETCH(QSizeF, grown);
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(workflow(placed)));
+        const qreal height = node(canvas, "save").value("nodeHeight").toDouble();
+        const int steps = canvas.undoStack()->count();
+        canvas.beginResize("save", corner);
+        canvas.resizeBy(drag.x() / 2, drag.y() / 2);
+        canvas.resizeBy(drag.x(), drag.y());
+        canvas.endResize();
+        QCOMPARE(canvas.undoStack()->count(), steps + 1);
+        QCOMPARE(canvas.position("save"), pos);
+        QCOMPARE(node(canvas, "save").value("nodeWidth").toDouble(), 240 + grown.width());
+        QCOMPARE(node(canvas, "save").value("nodeHeight").toDouble(), height + grown.height());
+        const QJsonObject saved = canvas.document().layout.value("nodes").toObject().value("save").toObject();
+        QCOMPARE(saved.value("pos").toArray(), (QJsonArray{pos.x(), pos.y()}));
+        QCOMPARE(saved.value("size").toArray(), (QJsonArray{240 + grown.width(), height + grown.height()}));
+        // The wire into its input follows the left edge and the port.
+        QCOMPARE(link(canvas, "save.image").value("x2").toDouble(), pos.x());
+        canvas.undo();
+        QCOMPARE(canvas.position("save"), QPointF(640, 120));
+        QCOMPARE(node(canvas, "save").value("nodeWidth").toDouble(), 240.0);
+        QCOMPARE(link(canvas, "save.image").value("x2").toDouble(), 640.0);
+        canvas.redo();
+        QCOMPARE(canvas.position("save"), pos);
+    }
+
+    void aTopLeftResizeHeldByItsLimitsStillKeepsTheBottomRightCorner() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(workflow(placed)));
+        const qreal height = node(canvas, "save").value("nodeHeight").toDouble();
+        canvas.beginResize("save", "nw");
+        canvas.resizeBy(1000, 1000); // smaller than the minimum width and the content
+        QCOMPARE(node(canvas, "save").value("nodeWidth").toDouble(), 160.0);
+        QCOMPARE(node(canvas, "save").value("nodeHeight").toDouble(), height);
+        QCOMPARE(canvas.position("save"), QPointF(640 + 240 - 160, 120));
+        canvas.resizeBy(-1000, 0); // wider than the maximum
+        QCOMPARE(node(canvas, "save").value("nodeWidth").toDouble(), 480.0);
+        QCOMPARE(canvas.position("save"), QPointF(640 + 240 - 480, 120));
+        canvas.resizeBy(0, 0); // back where it began: nothing changed
+        canvas.endResize();
+        QCOMPARE(canvas.position("save"), QPointF(640, 120));
+        QVERIFY(!canvas.document().layout.value("nodes").toObject().value("save").toObject().contains("size"));
     }
 
     // #19 gives a node its thumbnail from a run; the size follows the image's aspect, and the
