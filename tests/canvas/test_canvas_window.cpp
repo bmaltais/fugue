@@ -582,12 +582,48 @@ private slots:
         QVERIFY(y > 60);
         QQuickItem *dot = item(app.window->contentItem(), "inputDot-width");
         QVERIFY(dot);
-        QTest::mouseMove(app.window, app.screen(600, 700)); // nowhere
+        QTest::mouseMove(app.window, app.screen(150, 450)); // empty canvas
         QTRY_VERIFY(!dot->isVisible());
         QTest::mouseMove(app.window, app.screen(340 - 6, y));
         QTRY_COMPARE(app.canvas->property("hoverPort").toMap().value("port").toString(), QStringLiteral("width"));
         QTRY_VERIFY(dot->isVisible());
         QVERIFY(dot->property("hovered").toBool());
+    }
+
+    // #72: a node's warnings read from its header: hovering the count and triangle shows them,
+    // a click keeps them up until a click elsewhere or Esc.
+    void aNodesWarningsShowOnHoverAndStayOnClick() {
+        App app(load(small));
+        QVERIFY(app.open());
+        app.workflows.dismissPendingTrust();
+        app.workflows.dismissNotice();
+        app.model.setRunState("gen", {{"state", "cached"}, {"warnings", QStringList{"The seed was too large and was wrapped.", "Steps were held to 50."}}});
+        QQuickItem *badge = nullptr;
+        QTRY_VERIFY((badge = item(app.window->contentItem(), "warningsBadge")) && badge->isVisible());
+        QQuickItem *tip = item(app.window->contentItem(), "warningsTip");
+        QVERIFY(tip);
+        QVERIFY(!tip->isVisible());
+        QTest::qWait(100); // the header's meta row lays out once the badge shows
+        const QPoint on = badge->mapToScene(QPointF(badge->width() / 2, badge->height() / 2)).toPoint();
+        QTest::mouseMove(app.window, on);
+        QTRY_VERIFY(tip->isVisible());
+        QVERIFY(tip->property("text").toString().contains("The seed was too large"));
+        QVERIFY(tip->property("text").toString().contains("Steps were held to 50."));
+        QTest::mouseMove(app.window, app.screen(150, 450));
+        QTRY_VERIFY(!tip->isVisible());
+        // A click keeps it up when the pointer leaves; Esc closes it, and so does a click elsewhere.
+        QTest::mouseMove(app.window, on);
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, on);
+        QTest::mouseMove(app.window, app.screen(150, 450));
+        QTest::qWait(100);
+        QVERIFY(tip->isVisible());
+        QTest::keyClick(app.window, Qt::Key_Escape);
+        QTRY_VERIFY(!tip->isVisible());
+        QTest::mouseMove(app.window, on);
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, on);
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, app.screen(150, 450));
+        QTRY_VERIFY(!tip->isVisible());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
     void draggingFromAnOutputToAnInputConnectsThem() {

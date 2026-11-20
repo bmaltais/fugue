@@ -455,7 +455,7 @@ Glyphs are [Lucide](https://lucide.dev) icons (ISC license), bundled as a subset
 | Muted | `hairline` | | `ban` | "Muted" | 0.4 | the whole node faded, untinted; its outgoing wires 0.4 |
 | Skipped | `hairline` | | `skip-forward` | "Skipped" | 0.6 | an upstream node is muted |
 | Missing type | dashed `error` | title in `error`: the type id | `circle-help` | | 1 | ports kept from the file; a body line "Not installed. Find it in packs…" (spec 11.6) |
-| Warning | | | `triangle-alert`, `label`, with a count | | 1 | the warnings in a tooltip |
+| Warning | | | `triangle-alert`, `label`, with a count | | 1 | hovering the count and triangle shows the warnings in one card of the canvas (`popup`, a `hairline-strong` edge); a click keeps it up until a click elsewhere, Esc or a change of level; its text can be selected and copied (#72) |
 | Pinned | | | `pin`, `label` | | 1 | |
 | Collapsed | | header only, corner `r` all round | | | 1 | width fits the title plus 24u (kind mark, meta, padding), at most 60u; one port mark at each end |
 | Group (a node type) | `hairline` | layers glyph for the kind mark | `layers` | | 1 | a second card offset (1u, 1u) behind it; a caption row "4 nodes · Tab to enter" |

@@ -614,20 +614,39 @@ Item {
                             font.pixelSize: node.look.captionSize
                             font.features: { "tnum": 1 }
                         }
-                        Text {
-                            // Warnings: a count and the triangle, in the label color.
+                        // Warnings: a count and the triangle, in the label color. Hovered, they
+                        // show the warnings; a click keeps them up (#72; the canvas's one card).
+                        Item {
+                            id: warningsBadge
+                            objectName: "warningsBadge"
                             visible: node.warnings.length > 0
                             anchors.verticalCenter: parent.verticalCenter
-                            text: node.warnings.length
-                            color: node.look.label
-                            font.pixelSize: node.look.captionSize
-                        }
-                        Glyph {
-                            visible: node.warnings.length > 0
-                            anchors.verticalCenter: parent.verticalCenter
-                            name: "triangle-alert"
-                            look: node.look
-                            color: node.look.label
+                            width: warningsRow.implicitWidth
+                            height: warningsRow.implicitHeight
+                            Row {
+                                id: warningsRow
+                                spacing: face.u
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: node.warnings.length
+                                    color: node.look.label
+                                    font.pixelSize: node.look.captionSize
+                                }
+                                Glyph {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    name: "triangle-alert"
+                                    look: node.look
+                                    color: node.look.label
+                                }
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onEntered: node.canvasView.showWarnings(node.nodeId, node.warnings, warningsBadge, false)
+                                onExited: node.canvasView.hideWarnings()
+                                onClicked: node.canvasView.showWarnings(node.nodeId, node.warnings, warningsBadge, true)
+                            }
                         }
                         Glyph {
                             visible: node.pinned

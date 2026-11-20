@@ -298,8 +298,6 @@ private slots:
         QQuickItem *list = item(r.app.window->contentItem(), "runErrors");
         QVERIFY(!list || !list->isVisible());
         const QPointF before = r.app.pan();
-        { QQuickItem *g = item(r.app.window->contentItem(), "node-grp");
-          qWarning() << "DBG chip" << chip->mapRectToScene(QRectF(0,0,chip->width(),chip->height())) << "grp" << (g ? g->mapRectToScene(QRectF(0,0,g->width(),g->height())) : QRectF()) << "gen" << card->mapRectToScene(QRectF(0,0,card->width(),card->height())); }
 
         QTest::mouseClick(r.app.window, Qt::LeftButton, {},
                           chip->mapToScene(QPointF(chip->width() / 2, chip->height() / 2)).toPoint());

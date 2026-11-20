@@ -269,6 +269,11 @@ FocusScope {
     }
 
     Keys.onPressed: event => {
+        if (event.key === Qt.Key_Escape && canvas.warningsNode !== "") {
+            canvas.closeWarnings()
+            event.accepted = true
+            return
+        }
         if (event.key === Qt.Key_Space) {
             // A Space press alone does nothing; held, a drag pans (12.3).
             if (!event.isAutoRepeat)
@@ -319,6 +324,7 @@ FocusScope {
                    : canvas.spaceHeld ? Qt.OpenHandCursor : Qt.ArrowCursor
 
         onPressed: mouse => {
+            canvas.closeWarnings() // a pinned warnings card goes at a click elsewhere
             // A second button while one holds a gesture is left out of it: the gesture goes
             // on, and that button's release does nothing (no context menu mid-drag).
             if (canvas.gesture !== "") {
@@ -1016,6 +1022,76 @@ FocusScope {
                 textFormat: Text.StyledText
                 wrapMode: Text.Wrap
                 color: canvas.look.text
+                font.pixelSize: canvas.look.labelSize
+            }
+        }
+    }
+
+    // A node's warnings (docs/canvas-look.md 9, #72): one card for the canvas, shown while a
+    // node's warning count is hovered, kept up by a click until a click elsewhere, Esc or a change
+    // of level. Its text can be selected and copied.
+    property string warningsNode: ""
+    property bool warningsPinned: false
+    function showWarnings(nodeId, warnings, badge, pin) {
+        if (pin || warningsNode !== nodeId)
+            warningsPinned = pin || (warningsPinned && warningsNode === nodeId)
+        warningsNode = nodeId
+        warningsTip.text = warnings.join("\n")
+        const at = badge.mapToItem(canvas, badge.width, badge.height)
+        warningsTip.x = Math.max(8, Math.min(at.x - warningsTip.width, canvas.width - warningsTip.width - 8))
+        warningsTip.y = Math.min(at.y + canvas.look.unit, canvas.height - warningsTip.height - 8)
+    }
+    function hideWarnings() {
+        if (!warningsPinned)
+            warningsNode = ""
+    }
+    function closeWarnings() {
+        warningsPinned = false
+        warningsNode = ""
+    }
+    Connections {
+        target: canvas.model
+        function onScopeChanged() { canvas.closeWarnings() }
+    }
+    Item {
+        id: warningsTip
+        objectName: "warningsTip"
+        property alias text: warningsText.text
+        visible: canvas.warningsNode !== ""
+        z: 10
+        width: Math.min(warningsText.implicitWidth, 360) + 3.5 * canvas.look.unit + 14 + 2
+        height: warningsText.height + 2.5 * canvas.look.unit + 2
+        Shadow {
+            target: warningsBox
+            level: 3
+            look: canvas.look
+        }
+        Rectangle {
+            id: warningsBox
+            anchors.fill: parent
+            radius: Math.min(canvas.look.popupCorner, 6)
+            color: canvas.look.popup
+            border.width: 1
+            border.color: canvas.look.hairlineStrong
+            Glyph {
+                x: 1.75 * canvas.look.unit
+                y: 1.25 * canvas.look.unit + 1
+                name: "triangle-alert"
+                look: canvas.look
+                color: canvas.look.label
+            }
+            TextEdit {
+                id: warningsText
+                x: 1.75 * canvas.look.unit + 14 + 1.5 * canvas.look.unit
+                y: 1.25 * canvas.look.unit + 1
+                width: Math.min(implicitWidth, 360)
+                readOnly: true
+                selectByMouse: true
+                wrapMode: TextEdit.Wrap
+                textFormat: TextEdit.PlainText
+                color: canvas.look.text
+                selectionColor: canvas.look.accent
+                selectedTextColor: canvas.look.accentForeground
                 font.pixelSize: canvas.look.labelSize
             }
         }
