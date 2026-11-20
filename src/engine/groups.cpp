@@ -616,7 +616,7 @@ Result<Ungrouped> ungroup(const Document &document, const QString &instanceId) {
         layout.insert("frames", frames);
     }
     doc.layout = layout;
-    return Ungrouped{doc, added};
+    return Ungrouped{doc, added, ids};
 }
 
 Result<GroupMade> makeUnique(const Document &document, const QString &instanceId, const Registry &registry) {
@@ -792,6 +792,41 @@ Result<Document> renameExposedOutput(const Document &document, const QString &gr
                     return instances.contains(from.node) && from.port == name ? PortRef{from.node, newName} : from;
                 });
     });
+    return doc;
+}
+
+Result<Document> renameGroup(const Document &document, const QString &groupId, const QString &name,
+                             const Registry &registry, QString *newId) {
+    Document doc = document;
+    GroupDefinition *group = groupOf(doc, groupId);
+    if (!group)
+        return groupError(QStringLiteral("There is no group %1.").arg(groupId));
+    const QString shown = name.trimmed();
+    if (shown.isEmpty())
+        return groupError(QStringLiteral("A group needs a name."));
+    group->name = shown;
+    QString id = groupId;
+    if (groupId.startsWith(QLatin1String("local/"))) {
+        Document without = doc;
+        without.groups.remove(groupId);
+        const QString wanted = uniqueGroupId(without, registry, shown);
+        if (wanted != groupId && !registry.nodeType(wanted))
+            id = wanted;
+    }
+    if (id != groupId) {
+        doc.groups.insert(id, doc.groups.take(groupId));
+        forEachNodes(doc, [&](Nodes &nodes) {
+            for (Node &node : nodes)
+                if (node.type == groupId)
+                    node.type = id;
+        });
+        const QJsonObject inner = groupLayout(doc, groupId);
+        setGroupLayout(doc, groupId, {});
+        if (!inner.isEmpty())
+            setGroupLayout(doc, id, inner);
+    }
+    if (newId)
+        *newId = id;
     return doc;
 }
 

@@ -262,6 +262,17 @@ Item {
                             }
                         }
                     }
+                    // Inside a group: the output its face carries out, named outside the node (5.4).
+                    Text {
+                        objectName: "exposedMark"
+                        visible: face.full && output.modelData.exposedAs !== undefined
+                        x: node.width + 2 * face.u
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: visible ? "\u2192 " + output.modelData.exposedAs : ""
+                        textFormat: Text.PlainText
+                        color: node.look.accent
+                        font.pixelSize: node.look.captionSize
+                    }
                     PortDot {
                         visible: node.tier <= 1
                         x: node.width - width / 2
@@ -292,14 +303,52 @@ Item {
                     readonly property bool hasWidget: modelData.widget
                     readonly property bool showsWidget: hasWidget && !modelData.wired
                     readonly property bool tall: showsWidget && modelData.widgetType === "multiline"
+                    // A folded Advanced input has no row (6.1, 5.4).
+                    readonly property bool shown: !modelData.hidden
                     y: modelData.rowTop
                     width: node.width
                     height: modelData.rowHeight
                     opacity: dim ? 0.25 : 1
 
+                    // A section starts with its header row, just above the first input in it; the
+                    // Advanced one opens and folds with a click (FugueCanvas takes it).
+                    Item {
+                        objectName: "sectionHeader"
+                        visible: face.full && input.modelData.headerTop !== undefined
+                        y: visible ? input.modelData.headerTop - input.modelData.rowTop : 0
+                        width: node.width
+                        height: node.canvasModel.rowHeight
+                        Text {
+                            x: 3 * face.u
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: parent.width - 6 * face.u
+                            readonly property bool advanced: input.modelData.header === "Advanced"
+                            text: !parent.visible ? ""
+                                : !advanced ? input.modelData.header
+                                : input.modelData.advancedOpen ? "\u25be " + qsTr("Advanced")
+                                : "\u25b8 " + qsTr("Advanced (%1)").arg(input.modelData.folded)
+                            elide: Text.ElideRight
+                            textFormat: Text.PlainText
+                            color: node.look.label
+                            font.pixelSize: node.look.captionSize
+                            font.weight: Font.DemiBold
+                        }
+                    }
+                    // Inside a group: the input its face drives, named outside the node (5.4).
+                    Text {
+                        objectName: "exposedMark"
+                        visible: face.full && input.shown && input.modelData.exposedAs !== undefined
+                        x: -implicitWidth - 2 * face.u
+                        y: (node.canvasModel.rowHeight - height) / 2
+                        text: visible ? input.modelData.exposedAs + " \u2192" : ""
+                        textFormat: Text.PlainText
+                        color: node.look.accent
+                        font.pixelSize: node.look.captionSize
+                    }
+
                     Loader {
                         objectName: "widgetLoader"
-                        active: input.hasWidget
+                        active: input.hasWidget && input.shown
                         visible: face.full
                         // Under the label, except while typed into.
                         z: item && (item as InputWidget).editingText ? 1 : -1
@@ -319,7 +368,7 @@ Item {
                     }
                     Text {
                         // A tall (multiline) well shows its text instead, and the label only while empty.
-                        visible: face.full && (!input.tall || input.modelData.value === "" || input.modelData.value === undefined)
+                        visible: face.full && input.shown && (!input.tall || input.modelData.value === "" || input.modelData.value === undefined)
                         x: input.showsWidget ? 5 * face.u : 3 * face.u
                         y: input.tall ? Math.round(2 * face.u) : 0
                         width: (input.hasWidget ? 0.45 : 1) * (node.width - 6 * face.u) - (input.showsWidget ? 2 * face.u : 0)
@@ -333,7 +382,7 @@ Item {
                     }
                     // An unlinked widget input shows its mark only on hover or to a compatible link.
                     PortDot {
-                        visible: node.tier <= 1 && (!input.showsWidget || node.hovered || (face.dragging && !input.dim))
+                        visible: input.shown && node.tier <= 1 && (!input.showsWidget || node.hovered || (face.dragging && !input.dim))
                         x: -width / 2
                         y: node.canvasModel.rowHeight / 2 - height / 2
                         shape: input.modelData.shape

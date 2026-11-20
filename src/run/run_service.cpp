@@ -316,6 +316,7 @@ private:
             return Compilation(providerProblems);
         CompileOptions options;
         options.target = request.target;
+        options.entered = request.entered;
         options.providers = m_compileRegistry.providerNames();
         options.trusted = [store = m_trust](const QString &pack, const QString &version) {
             return store.isTrusted(pack, version);

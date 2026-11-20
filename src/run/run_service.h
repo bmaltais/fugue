@@ -85,6 +85,7 @@ struct RunRequest {
     Document document;
     QString workflow; // the file it came from, absolute, or empty for an unsaved one
     QString target;   // "run to here": the path id to stop at, or empty
+    QString entered;  // the group instance the canvas shows, as a path id: its sinks work (5.5)
     bool first = false; // ahead of the waiting runs ("run first")
 };
 

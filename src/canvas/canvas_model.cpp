@@ -3,6 +3,7 @@
 #include "canvas/node_size.h"
 
 #include "engine/compiler.h"
+#include "engine/groups.h"
 #include "engine/node_type.h"
 #include "engine/registry.h"
 #include "search/node_search.h"
@@ -177,6 +178,17 @@ QString CanvasModel::shape(const std::optional<PortSpec> &type, PortKind kind) {
 }
 
 void CanvasModel::setDocument(const Document &document) {
+    const bool wasInGroup = !m_scope.isEmpty();
+    m_scope.clear();
+    m_outerViews.clear();
+    m_root = Document();
+    m_undo->clear();
+    loadLevel(document);
+    if (wasInGroup)
+        emit scopeChanged();
+}
+
+void CanvasModel::loadLevel(const Document &document, const QVariantMap *view) {
     m_nodeList->beginResetModel();
     m_linkList->beginResetModel();
     m_document = document;
@@ -188,8 +200,9 @@ void CanvasModel::setDocument(const Document &document) {
     m_moving.clear();
     m_moveStart.clear();
     m_moveOpen = m_cloneOpen = m_dragOpen = false;
+    m_movingFrames.clear();
+    m_frameStart.clear();
     m_editDepth = 0;
-    m_undo->clear();
 
     const QJsonObject layoutNodes = m_document.layout.value("nodes").toObject();
     QSet<QString> unplaced;
@@ -206,9 +219,13 @@ void CanvasModel::setDocument(const Document &document) {
         autoPlace(unplaced);
 
     m_view.clear();
-    const QJsonObject view = m_document.layout.value("view").toObject();
-    if (const auto center = point(view.value("center")); center && view.value("zoom").toDouble() > 0)
-        m_view = {{"center", QVariantList{center->x(), center->y()}}, {"zoom", view.value("zoom").toDouble()}};
+    if (view) {
+        m_view = *view;
+    } else {
+        const QJsonObject saved = m_document.layout.value("view").toObject();
+        if (const auto center = point(saved.value("center")); center && saved.value("zoom").toDouble() > 0)
+            m_view = {{"center", QVariantList{center->x(), center->y()}}, {"zoom", saved.value("zoom").toDouble()}};
+    }
 
     m_links.clear();
     rebuildLinks();
@@ -222,6 +239,10 @@ void CanvasModel::setDocument(const Document &document) {
 }
 
 Document CanvasModel::document() const {
+    return m_scope.isEmpty() ? scopeDocument() : merged(scopeDocument());
+}
+
+Document CanvasModel::scopeDocument() const {
     Document document = m_document;
     QJsonObject layout = document.layout;
     QJsonObject nodes = layout.value("nodes").toObject();
@@ -377,6 +398,7 @@ CanvasModel::NodeRow CanvasModel::makeRow(const QString &id) const {
     row.collapsed = layout.value("collapsed").toBool();
     row.color = layout.value("color").toString();
     row.pinned = layout.value("pinned").toBool();
+    row.advancedOpen = layout.value("advanced").toBool();
     layOut(row);
     return row;
 }
@@ -394,6 +416,8 @@ void CanvasModel::portsFromType(NodeRow &row, const Node &node) const {
             port.widgetType = port.kind == PortKind::Resource ? QStringLiteral("model") : spec.widget();
         port.widget = !port.widgetType.isEmpty() || (spec.type.list && !spec.widget().isEmpty());
         port.required = spec.required();
+        port.section = spec.section;
+        port.advanced = spec.advanced || spec.section == QLatin1String("Advanced");
         port.defaultValue = spec.defaultValue;
         port.min = spec.min;
         port.max = spec.max;
@@ -409,45 +433,27 @@ void CanvasModel::portsFromType(NodeRow &row, const Node &node) const {
         return port;
     };
 
-    if (const NodeType *type = m_registry ? m_registry->nodeType(node.type) : nullptr) {
-        row.title = type->name;
-        for (const InputSpec &spec : type->inputs)
-            row.inputs.push_back(fromInput(spec, spec.name, {}));
-        for (const OutputSpec &spec : type->outputs)
-            row.outputs.push_back(fromOutput(spec, spec.name));
-        return;
-    }
-    if (const GroupDefinition *group = m_document.group(node.type)) {
-        // The face of a group instance: its exposed inputs and outputs, typed by the inner
-        // ports they lead to. One level deep; a port inside a nested group stays untyped
-        // until groups are built (#26).
-        row.title = group->name.isEmpty() ? node.type : group->name;
-        auto innerType = [&](const QString &innerNode) -> const NodeType * {
-            return m_registry ? m_registry->nodeType(group->nodes.value(innerNode).type) : nullptr;
-        };
+    if (m_document.group(node.type)) {
+        // The face of a group instance (engine/groups.h): its exposed inputs and outputs, typed
+        // by the inner ports they lead to through every level, in its order and sections. An
+        // exposed port that does not resolve keeps its row, untyped.
+        static const Registry none;
+        const NodeType face = groupFace(m_document, m_registry ? *m_registry : none, node.type);
+        const GroupDefinition *group = m_document.group(node.type);
+        row.title = face.name;
         for (const GroupInput &exposed : group->inputs) {
-            const PortRef target = exposed.targets.value(0);
-            const NodeType *type = innerType(target.node);
-            const InputSpec *inner = type ? type->input(target.port) : nullptr;
-            if (inner) {
-                // Narrowed as the compiler checks it (4.4); unset with no group default, the
-                // instance falls back to the inner input's own value, so the face shows that.
-                InputSpec spec = exposedInputSpec(*inner, exposed);
-                const InputValue own = group->nodes.value(target.node).inputs.value(target.port);
-                if (!exposed.defaultValue && own.kind() == InputValue::Kind::Literal)
-                    spec.defaultValue = own.literal();
-                row.exposed.insert_or_assign(exposed.name, spec);
-                row.inputs.push_back(fromInput(spec, exposed.name, exposed.label));
+            if (const InputSpec *spec = face.input(exposed.name)) {
+                row.exposed.insert_or_assign(exposed.name, *spec);
+                row.inputs.push_back(fromInput(*spec, exposed.name, spec->label));
             } else {
                 Port port;
                 port.name = port.label = exposed.name;
+                port.section = exposed.section;
                 row.inputs.push_back(port);
             }
         }
         for (const GroupOutput &exposed : group->outputs) {
-            const NodeType *type = innerType(exposed.from.node);
-            const OutputSpec *spec = type ? type->output(exposed.from.port) : nullptr;
-            if (spec) {
+            if (const OutputSpec *spec = face.output(exposed.name)) {
                 row.outputs.push_back(fromOutput(*spec, exposed.name));
             } else {
                 Port port;
@@ -456,6 +462,14 @@ void CanvasModel::portsFromType(NodeRow &row, const Node &node) const {
                 row.outputs.push_back(port);
             }
         }
+        return;
+    }
+    if (const NodeType *type = m_registry ? m_registry->nodeType(node.type) : nullptr) {
+        row.title = type->name;
+        for (const InputSpec &spec : type->inputs)
+            row.inputs.push_back(fromInput(spec, spec.name, {}));
+        for (const OutputSpec &spec : type->outputs)
+            row.outputs.push_back(fromOutput(spec, spec.name));
         return;
     }
     // Not installed: a placeholder keeping what the document has (3.6).
@@ -521,8 +535,27 @@ void CanvasModel::layOut(NodeRow &row) const {
         for (Port &port : row.outputs)
             place(port, m_rowHeight);
         Port *grows = nullptr;
+        QString section;
         for (Port &port : row.inputs) {
             const InputValue value = node.inputs.value(port.name);
+            // A section starts with its header row; Advanced stays folded unless open or linked.
+            const QString portSection = port.advanced && port.section.isEmpty() ? QStringLiteral("Advanced") : port.section;
+            port.headerTop = -1;
+            port.header.clear();
+            port.hidden = false;
+            if (!portSection.isEmpty() && portSection != section) {
+                port.headerTop = top;
+                port.header = portSection;
+                top += m_rowHeight;
+            }
+            section = portSection;
+            if (port.advanced && !row.advancedOpen && linksIn(value).isEmpty()) {
+                port.hidden = true;
+                port.rowTop = top;
+                port.rowHeight = 0;
+                port.y = top - m_rowHeight / 2;
+                continue;
+            }
             const bool tall = port.widgetType == QLatin1String("multiline") && port.widget && linksIn(value).isEmpty();
             qreal height = m_rowHeight;
             if (tall) {
@@ -707,7 +740,34 @@ QVariantMap CanvasModel::portMap(const NodeRow &row, const Port &port) const {
                     {"wired", isWired(row.id, port.name, port.output)},
                     {"widget", port.widget},
                     {"widgetType", port.widgetType},
-                    {"required", port.required}};
+                    {"required", port.required},
+                    {"hidden", port.hidden}};
+    if (port.headerTop >= 0) {
+        map.insert("headerTop", port.headerTop);
+        map.insert("header", port.header);
+        // The Advanced header shows whether it is open and how many it folds.
+        if (port.header == QLatin1String("Advanced")) {
+            map.insert("advancedOpen", row.advancedOpen);
+            int folded = 0;
+            for (const Port &other : row.inputs)
+                folded += other.hidden ? 1 : 0;
+            map.insert("folded", folded);
+        }
+    }
+    // Inside a group: the inner port the group's face exposes, under that name (5.4).
+    if (!m_scope.isEmpty()) {
+        if (const GroupDefinition *group = m_document.group(scopeGroup())) {
+            if (port.output) {
+                for (const GroupOutput &exposed : group->outputs)
+                    if (exposed.from == PortRef{row.id, port.name})
+                        map.insert("exposedAs", exposed.name);
+            } else {
+                for (const GroupInput &exposed : group->inputs)
+                    if (exposed.targets.contains(PortRef{row.id, port.name}))
+                        map.insert("exposedAs", exposed.name);
+            }
+        }
+    }
     const Node &node = m_document.graph.nodes.value(row.id);
     if (port.widget) {
         bool isDefault = false;
@@ -964,7 +1024,7 @@ bool CanvasModel::connectPorts(const QString &fromNode, const QString &output, c
     if (!problem(fromNode, output, toNode, input, false).isEmpty())
         return false;
     const Port *in = findPort(toNode, input, false);
-    Document document = this->document();
+    Document document = this->scopeDocument();
     Node &node = document.graph.nodes[toNode];
     const InputValue link = InputValue::link({fromNode, output});
     const InputValue old = node.inputs.value(input);
@@ -987,7 +1047,7 @@ bool CanvasModel::disconnectInput(const QString &nodeId, const QString &input, i
     const auto links = linksIn(old);
     if (std::none_of(links.begin(), links.end(), [&](const auto &link) { return item < 0 || link.second == item; }))
         return false;
-    Document document = this->document();
+    Document document = this->scopeDocument();
     Node &node = document.graph.nodes[nodeId];
     if (old.kind() == InputValue::Kind::List) {
         QList<InputValue> items = old.items();
@@ -1087,7 +1147,7 @@ bool CanvasModel::endLinkDrag(const QString &node, const QString &port, bool out
         // Moving an output's links: each one now comes from the new output.
         if (allowed) {
             const PortRef old{source.value("node").toString(), source.value("port").toString()};
-            Document document = this->document();
+            Document document = this->scopeDocument();
             for (const QVariant &target : targets) {
                 const QVariantMap t = target.toMap();
                 Node &into = document.graph.nodes[t.value("node").toString()];
@@ -1159,7 +1219,7 @@ bool CanvasModel::disconnectPort(const QString &nodeId, const QString &port, boo
     if (!output)
         return disconnectInput(nodeId, port);
     const PortRef source{nodeId, port};
-    Document document = this->document();
+    Document document = this->scopeDocument();
     bool any = false;
     for (Node &node : document.graph.nodes)
         any |= stripLinks(node, [&](const PortRef &from) { return from == source; });
@@ -1256,10 +1316,30 @@ double newFixedSeed(const InputSpec &spec) {
 } // namespace
 
 QString CanvasModel::addNode(const QString &typeId, qreal x, qreal y) {
+    // A group of this workflow: one more instance of its definition (5.3), unless the level
+    // shown is inside it.
+    if (const GroupDefinition *group = m_document.group(typeId)) {
+        if (!canHoldGroup(m_document, typeId)) {
+            setGroupProblem(tr("A group cannot hold itself: %1 holds the group shown.")
+                                .arg(group->name.isEmpty() ? typeId : group->name));
+            return {};
+        }
+        Document document = scopeDocument();
+        const QString id = newNodeId(document.graph.nodes);
+        Node node;
+        node.type = typeId;
+        node.version = group->version;
+        document.graph.nodes.insert(id, node);
+        QJsonObject layoutNodes = document.layout.value("nodes").toObject();
+        layoutNodes.insert(id, QJsonObject{{"pos", QJsonArray{x, y}}});
+        document.layout.insert("nodes", layoutNodes);
+        commit(document, tr("Add node"));
+        return id;
+    }
     const NodeType *type = m_registry ? m_registry->nodeType(typeId) : nullptr;
     if (!type)
         return {};
-    Document document = this->document();
+    Document document = this->scopeDocument();
     const QString id = newNodeId(document.graph.nodes);
     Node node;
     node.type = type->id;
@@ -1399,9 +1479,47 @@ void CanvasModel::moveBy(qreal dx, qreal dy) {
         emit m_linkList->dataChanged(index, index,
                                      {LinkList::X1, LinkList::Y1, LinkList::X2, LinkList::Y2, LinkList::Path});
     }
+    if (!m_movingFrames.isEmpty()) {
+        // The Frames a Frame move carries (beginFrameMove) go along, whole units.
+        QJsonArray frames = m_document.layout.value("frames").toArray();
+        for (qsizetype i = 0; i < frames.size(); ++i) {
+            QJsonObject frame = frames.at(i).toObject();
+            const qsizetype at = m_movingFrames.indexOf(frame.value("id").toString());
+            if (at < 0)
+                continue;
+            const QRectF rect = m_frameStart[size_t(at)].translated(dx, dy);
+            frame.insert("rect", QJsonArray{qRound64(rect.x()), qRound64(rect.y()), qRound64(rect.width()),
+                                            qRound64(rect.height())});
+            frames.replace(i, frame);
+        }
+        m_document.layout.insert("frames", frames);
+        emit framesChanged();
+    }
 }
 
 void CanvasModel::endMove() {
+    if (!m_movingFrames.isEmpty()) {
+        // Each Frame moved holds the moved nodes that are in it now.
+        QJsonArray frames = m_document.layout.value("frames").toArray();
+        for (qsizetype i = 0; i < frames.size(); ++i) {
+            QJsonObject frame = frames.at(i).toObject();
+            if (!m_movingFrames.contains(frame.value("id").toString()))
+                continue;
+            const QJsonArray r = frame.value("rect").toArray();
+            const QRectF rect(r.at(0).toDouble(), r.at(1).toDouble(), r.at(2).toDouble(), r.at(3).toDouble());
+            QJsonArray members;
+            for (const QString &id : std::as_const(m_moving))
+                if (const int row = rowOf(id); row >= 0
+                    && rect.contains(QRectF(m_rows[size_t(row)].pos, QSizeF(m_rows[size_t(row)].shownWidth(),
+                                                                            m_rows[size_t(row)].height)).center()))
+                    members.append(id);
+            frame.insert("nodes", members);
+            frames.replace(i, frame);
+        }
+        m_document.layout.insert("frames", frames);
+        m_movingFrames.clear();
+        m_frameStart.clear();
+    }
     m_moving.clear();
     m_moveStart.clear();
     if (m_moveOpen) {

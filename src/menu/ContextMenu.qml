@@ -39,11 +39,18 @@ Item {
         const w = canvas.toWorld(px, py)
         const node = App.canvasModel.nodeAt(w.x, w.y)
         const target = {x: w.x, y: w.y}
-        if (node !== "") {
-            if (App.canvasModel.selection.indexOf(node) < 0)
-                App.canvasModel.select([node], "replace")
+        // On a port: the commands that act on one (expose it on the group, 5.4) see which.
+        const port = byKey ? ({}) : canvas.portUnder(px, py)
+        if (port.node !== undefined) {
+            target.port = port.port
+            target.output = port.output
+        }
+        if (node !== "" || port.node !== undefined) {
+            const hit = node !== "" ? node : port.node
+            if (App.canvasModel.selection.indexOf(hit) < 0)
+                App.canvasModel.select([hit], "replace")
             kind = "node"
-            target.node = node
+            target.node = hit
         } else {
             const frame = frameAt(w.x, w.y)
             if (frame !== "")

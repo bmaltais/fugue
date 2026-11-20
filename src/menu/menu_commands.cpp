@@ -1,5 +1,6 @@
 #include "menu/menu_commands.h"
 
+#include <algorithm>
 #include <QClipboard>
 #include <QCoreApplication>
 #include <QDebug>
@@ -61,6 +62,17 @@ QList<Row> menuRows() {
         {"help.docs", QT_TRANSLATE_NOOP("Command", "Open the documentation"), QT_TRANSLATE_NOOP("Command", "Documentation"), {}, "app", "same"},
         {"help.report-issue", QT_TRANSLATE_NOOP("Command", "Report an issue"), nullptr, {}, "app", "same"},
         {"help.about", QT_TRANSLATE_NOOP("Command", "About Fugue"), nullptr, {}, "app", "same"},
+        {"group.make-unique", QT_TRANSLATE_NOOP("Command", "Make the selected group unique (its own copy of the definition)"),
+         QT_TRANSLATE_NOOP("Command", "Make unique"), {}, "group-selected", "same"},
+        {"group.interface", QT_TRANSLATE_NOOP("Command", "Edit the inputs and outputs of the group shown"),
+         QT_TRANSLATE_NOOP("Command", "Group inputs and outputs…"), {}, "group", "added"},
+        {"group.expose", QT_TRANSLATE_NOOP("Command", "Expose the port on the group's face"),
+         QT_TRANSLATE_NOOP("Command", "Expose on the group"), {}, "group", "same"},
+        {"group.unexpose", QT_TRANSLATE_NOOP("Command", "Stop exposing the port on the group's face"),
+         QT_TRANSLATE_NOOP("Command", "Stop exposing"), {}, "group", "same"},
+        {"frame.rename", QT_TRANSLATE_NOOP("Command", "Rename the Frame"), QT_TRANSLATE_NOOP("Command", "Rename Frame…"), {}, "canvas", "same"},
+        {"frame.delete", QT_TRANSLATE_NOOP("Command", "Delete the Frame (its nodes stay)"),
+         QT_TRANSLATE_NOOP("Command", "Delete Frame"), {}, "canvas", "same"},
         {"app.menu-bar", QT_TRANSLATE_NOOP("Command", "Open the menu bar"), nullptr, {"F10"}, "app", "added"},
         {"app.context-menu", QT_TRANSLATE_NOOP("Command", "Open the context menu"), nullptr, {"Shift+F10", "Menu"}, "canvas", "added"},
     };
@@ -143,6 +155,36 @@ void bindMenuCommands(CommandRegistry &registry, CanvasModel &canvas, std::funct
     };
     registry.setEnabledWhen("edit.paste", pasteable);
     registry.setEnabledWhen("edit.paste-connected", pasteable);
+    // A right-click on a port inside a group: the menu's target names it.
+    const auto exposed = [model, &registry] {
+        const QVariantMap target = registry.target();
+        return model->exposedName(target.value("node").toString(), target.value("port").toString(),
+                                  target.value("output").toBool());
+    };
+    const auto onPort = [model, &registry] { return model->inGroup() && registry.target().contains("port"); };
+    registry.setEnabledWhen("group.expose", [onPort, exposed] { return onPort() && exposed().isEmpty(); });
+    registry.setEnabledWhen("group.unexpose", [onPort, exposed] { return onPort() && !exposed().isEmpty(); });
+    registry.setHandler("group.expose", [model, &registry] {
+        const QVariantMap target = registry.target();
+        if (target.value("output").toBool())
+            model->exposeOutput(target.value("node").toString(), target.value("port").toString());
+        else
+            model->exposeInput(target.value("node").toString(), target.value("port").toString());
+    });
+    registry.setHandler("group.unexpose", [model, &registry, exposed] {
+        const QVariantMap target = registry.target();
+        if (target.value("output").toBool())
+            model->unexposeOutput(exposed());
+        else
+            model->unexposeInput(target.value("node").toString(), target.value("port").toString());
+    });
+    const auto onFrame = [&registry] { return !registry.target().value("frame").toString().isEmpty(); };
+    registry.setEnabledWhen("frame.rename", onFrame);
+    registry.setEnabledWhen("frame.delete", onFrame);
+    registry.setEnabledWhen("group.ungroup", [model] {
+        const QStringList ids = model->selectedIds();
+        return std::any_of(ids.begin(), ids.end(), [model](const QString &id) { return model->isGroup(id); });
+    });
     for (const QString &role : menus::colorRoles())
         registry.setEnabledWhen(QStringLiteral("node.color.") + role, [model, &registry] {
             return !model->selectedIds().isEmpty() || !registry.target().value("frame").toString().isEmpty();
@@ -162,7 +204,7 @@ void bindMenuCommands(CommandRegistry &registry, CanvasModel &canvas, std::funct
 }
 
 void applyLayoutColor(CanvasModel &canvas, const QString &role, const QString &frame) {
-    Document document = canvas.document();
+    Document document = canvas.scopeDocument();
     QJsonObject nodes = document.layout.value("nodes").toObject();
     const auto paint = [&role](QJsonObject entry) {
         if (role == QLatin1String("none"))

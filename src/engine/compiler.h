@@ -122,6 +122,9 @@ struct CompileOptions {
     // are kept, and no sink is added. A path id that is not a node of the
     // flattened graph is the error `usage`.
     QString target;
+    // The canvas's entered group instance (5.5), as a path id ("g7", "g7/inner3"): while the
+    // user is inside it, its own sinks work (not those of groups nested in it).
+    QString entered;
     // `fugue run --provider <name>`: replaces the workflow's pin (graph.provider)
     // for this compile.
     QString provider;

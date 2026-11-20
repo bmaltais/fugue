@@ -6,6 +6,7 @@
 #include "canvas/canvas_model.h"
 #include "canvas/input_links.h"
 
+#include "engine/groups.h"
 #include "workflow/content_hash.h"
 
 #include <QJsonArray>
@@ -159,7 +160,27 @@ CanvasModel::Snapshot CanvasModel::snapshot() const {
 }
 
 void CanvasModel::restore(const Snapshot &target, bool selectAdded) {
-    const Document &doc = target.document;
+    // The snapshot is the whole workflow; the canvas shows its level, or the nearest level up
+    // that is still there (an undo of the Make group of a group entered since).
+    if (!m_scope.isEmpty()) {
+        m_root = target.document;
+        if (!levelOf(m_root, m_scope)) {
+            while (!m_scope.isEmpty() && !levelOf(m_root, m_scope)) {
+                m_scope.removeLast();
+                if (!m_outerViews.empty()) {
+                    m_view = m_outerViews.back();
+                    m_outerViews.pop_back();
+                }
+            }
+            const QVariantMap view = m_view;
+            loadLevel(m_scope.isEmpty() ? m_root : *levelOf(m_root, m_scope), &view);
+            if (m_scope.isEmpty())
+                m_root = Document();
+            emit scopeChanged();
+            return;
+        }
+    }
+    const Document doc = m_scope.isEmpty() ? target.document : *levelOf(m_root, m_scope);
     const Nodes oldNodes = m_document.graph.nodes;
     const QJsonObject oldLayout = m_document.layout;
     const QJsonObject oldEntries = oldLayout.value("nodes").toObject();
@@ -191,6 +212,34 @@ void CanvasModel::restore(const Snapshot &target, bool selectAdded) {
         r = first;
     }
 
+    // Group definitions that changed (a face edit, an edit inside): their instances show a new
+    // face, and inside a group the exposed marks follow its definition.
+    QSet<QString> changedGroups;
+    for (auto it = doc.groups.cbegin(); it != doc.groups.cend(); ++it)
+        if (!m_document.groups.contains(it.key()) || groupJson(m_document.groups.value(it.key())) != groupJson(it.value()))
+            changedGroups.insert(it.key());
+    for (auto it = m_document.groups.cbegin(); it != m_document.groups.cend(); ++it)
+        if (!doc.groups.contains(it.key()))
+            changedGroups.insert(it.key());
+    // Inside a group its nodes change with every edit; the marks only follow its face.
+    const QString level = scopeGroup();
+    auto faceJson = [](const GroupDefinition *group) {
+        QJsonObject face = group ? groupJson(*group).toObject() : QJsonObject();
+        face.remove("nodes");
+        return face;
+    };
+    const bool levelChanged = !level.isEmpty() && changedGroups.contains(level)
+                              && faceJson(m_document.group(level)) != faceJson(doc.group(level));
+    changedGroups.remove(level);
+    auto faceChanged = [&](const QString &type) {
+        if (levelChanged)
+            return true;
+        for (const QString &group : changedGroups)
+            if (groupContains(doc, type, group) || groupContains(m_document, type, group))
+                return true;
+        return false;
+    };
+
     // The viewport is not part of an edit: keep the one on screen.
     m_document = doc;
 
@@ -199,6 +248,7 @@ void CanvasModel::restore(const Snapshot &target, bool selectAdded) {
         NodeRow &row = m_rows[size_t(r)];
         const QPointF pos = point(newEntries.value(row.id).toObject().value("pos")).value_or(row.pos);
         if (!sameNode(oldNodes.value(row.id), doc.graph.nodes.value(row.id))
+            || (!changedGroups.isEmpty() && faceChanged(doc.graph.nodes.value(row.id).type))
             || withoutPos(oldEntries.value(row.id).toObject()) != withoutPos(newEntries.value(row.id).toObject())
             || pinnedSize(newEntries.value(row.id).toObject())
                    != std::pair<qreal, qreal>{row.sized ? row.width : 0, row.pinnedHeight}) {
@@ -381,7 +431,16 @@ void CanvasModel::commit(const Document &document, const QString &text) {
         order << row.id;
     Document made = document;
     followReroutes(m_document, made);
-    restore({made, order}, false);
+    restore({m_scope.isEmpty() ? made : merged(made), order}, false);
+    endEdit(text);
+}
+
+void CanvasModel::commitWhole(const Document &whole, const QString &text) {
+    beginEdit();
+    QStringList order;
+    for (const NodeRow &row : m_rows)
+        order << row.id;
+    restore({whole, order}, false);
     endEdit(text);
 }
 
@@ -390,7 +449,7 @@ void CanvasModel::rewriteDocuments(const std::function<void(Document &)> &rewrit
     for (int i = 0; i < m_undo->count(); ++i)
         if (auto *step = dynamic_cast<const EditCommand *>(m_undo->command(i)))
             const_cast<EditCommand *>(step)->rewrite(rewrite);
-    Document document = m_document;
+    Document document = this->document();
     rewrite(document);
     QStringList order;
     for (const NodeRow &row : m_rows)
@@ -481,7 +540,7 @@ void CanvasModel::deleteSelection() {
     if (ids.isEmpty())
         return;
     const QSet<QString> gone(ids.begin(), ids.end());
-    Document document = this->document();
+    Document document = this->scopeDocument();
     for (const QString &id : ids)
         document.graph.nodes.remove(id);
     for (Node &node : document.graph.nodes)
@@ -523,7 +582,7 @@ void CanvasModel::toggleMode(const QString &modeName) {
     const QStringList ids = selectedIds();
     if (!mode || *mode == NodeMode::Normal || ids.isEmpty())
         return;
-    Document document = this->document();
+    Document document = this->scopeDocument();
     const bool all = std::all_of(ids.begin(), ids.end(),
                                  [&](const QString &id) { return document.graph.nodes.value(id).mode == *mode; });
     for (const QString &id : ids)
@@ -553,7 +612,7 @@ void CanvasModel::toggleCollapsed() {
     const QStringList ids = selectedIds();
     if (ids.isEmpty())
         return;
-    Document document = this->document();
+    Document document = this->scopeDocument();
     QJsonObject entries = document.layout.value("nodes").toObject();
     const bool all = std::all_of(ids.begin(), ids.end(), [&](const QString &id) {
         return entries.value(id).toObject().value("collapsed").toBool();
@@ -573,7 +632,7 @@ void CanvasModel::toggleCollapsed() {
 // --- clipboard and clones --------------------------------------------------------
 
 Document CanvasModel::copyOf(const QStringList &ids) const {
-    const Document all = document();
+    const Document all = scopeDocument();
     const QJsonObject entries = all.layout.value("nodes").toObject();
     Document copy;
     QJsonObject copied;
@@ -674,7 +733,7 @@ void CanvasModel::beginCloneMove(const QString &node) {
 
 QStringList CanvasModel::insertCopy(const Document &copy, QPointF topLeft, bool connected, const QString &text,
                                     QHash<QString, QString> *idMap) {
-    Document document = this->document();
+    Document document = this->scopeDocument();
     const QJsonObject entries = copy.layout.value("nodes").toObject();
 
     // Where each node goes: the copy's own layout, moved so its top left is at topLeft.
@@ -788,11 +847,22 @@ QStringList CanvasModel::insertCopy(const Document &copy, QPointF topLeft, bool 
         document.layout.insert("links", links);
     }
 
+    // Inside a group, a copy holding an instance of that group (or of one around it) would
+    // make it contain itself (5.2): nothing is pasted.
+    for (const QString &id : std::as_const(fresh)) {
+        const QString type = document.graph.nodes.value(id).type;
+        if (document.group(type) && !canHoldGroup(document, type)) {
+            setGroupProblem(tr("A group cannot hold itself: the copy has an instance of %1, which holds the group shown.")
+                                .arg(document.group(type)->name.isEmpty() ? type : document.group(type)->name));
+            return {};
+        }
+    }
+
     beginEdit();
     commit(document, text);
     if (!external.isEmpty()) {
         // A link from outside that cannot feed its input (another type, a cycle) is dropped.
-        Document checked = this->document();
+        Document checked = this->scopeDocument();
         bool dropped = false;
         for (const auto &[id, input] : external) {
             Node &node = checked.graph.nodes[id];

@@ -18,6 +18,7 @@
 #include "engine/node_type.h"
 #include "engine/result.h"
 
+#include <QHash>
 #include <QSet>
 #include <QString>
 #include <QStringList>
@@ -70,7 +71,8 @@ Result<GroupMade> makeGroup(const Document &document, const QStringList &nodes, 
 
 struct Ungrouped {
     Document document;
-    QStringList nodes; // the inner nodes in the level, by their new ids
+    QStringList nodes;             // the inner nodes in the level, by their new ids
+    QHash<QString, QString> ids;   // inner id -> its id in the level
 };
 
 // Ungroup (5.2): the instance's inner nodes come back into the level, keeping their ids where
@@ -110,6 +112,11 @@ Result<Document> editExposedInput(const Document &document, const QString &group
                                   const ExposedChange &change);
 Result<Document> renameExposedOutput(const Document &document, const QString &group, const QString &name,
                                      const QString &newName);
+// Renames a group (its display name); its id follows (local/<name>, 5.3) when that is free,
+// on every instance and in the layout. The id it has after in `newId`.
+Result<Document> renameGroup(const Document &document, const QString &group, const QString &name,
+                             const Registry &registry, QString *newId = nullptr);
+
 // Moves an exposed input (or output) to position `to` of its list.
 Result<Document> moveExposed(const Document &document, const QString &group, bool output, const QString &name, int to);
 

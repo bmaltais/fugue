@@ -1000,9 +1000,11 @@ CompiledGraph Compiler::shape() {
         flat.inputs = rewired;
     }
 
-    // Sinks inside a group never run (5.5), unless the run stops at one.
+    // Sinks inside a group never run (5.5), unless the run stops at one, or the user has
+    // entered the instance that holds it.
     for (auto it = live.begin(); it != live.end();) {
-        if (it->inGroup && it->spec().sink && it.key() != m_options.target)
+        const bool entered = !m_options.entered.isEmpty() && it.key().section(QLatin1Char('/'), 0, -2) == m_options.entered;
+        if (it->inGroup && it->spec().sink && it.key() != m_options.target && !entered)
             it = live.erase(it);
         else
             ++it;

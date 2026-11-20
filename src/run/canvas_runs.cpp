@@ -5,6 +5,7 @@
 #include <QFileInfo>
 #include <QSizeF>
 
+#include <algorithm>
 #include <cmath>
 #include <utility>
 
@@ -20,6 +21,17 @@ namespace fugue {
 namespace {
 
 QString topOf(const QString &path) { return path.section('/', 0, 0); }
+
+// The path ids from the outermost group instance down to the node: "g7", "g7/inner3",
+// "g7/inner3/s2". Each level keeps its own view, so a group shows what its inside does and,
+// entered, its inner nodes show their own.
+QStringList levelsOf(const QString &path) {
+    QStringList levels;
+    const QStringList parts = path.split('/');
+    for (qsizetype i = 1; i <= parts.size(); ++i)
+        levels << QStringList(parts.mid(0, i)).join('/');
+    return levels;
+}
 
 // The errors of 8.5: nothing can serve the node's capability, its model is not running or
 // missing, its provider cannot be reached or is not configured. The node shows what is
@@ -75,7 +87,7 @@ CanvasRuns::CanvasRuns(CanvasModel *canvas, Workflows *workflows, RunService *se
     connect(m_canvas->nodes(), &QAbstractItemModel::modelAboutToBeReset, this, [this] { m_rowsMade.clear(); });
     connect(m_canvas, &CanvasModel::rowsMade, this, [this](const QString &node) {
         m_rowsMade.insert(node);
-        requestInputPreview(node);
+        requestInputPreview(keyFor(node));
     });
     connect(m_service, &RunService::event, this, &CanvasRuns::onEvent);
     connect(m_service, &RunService::checked, this, &CanvasRuns::onChecked);
@@ -113,7 +125,7 @@ QString CanvasRuns::start(bool first) { return startRun({}, first); }
 
 QString CanvasRuns::runToSelected() {
     const QStringList selected = m_canvas->selectedIds();
-    return selected.size() == 1 ? startRun(selected.first(), false) : QString();
+    return selected.size() == 1 ? startRun(keyFor(selected.first()), false) : QString();
 }
 
 QString CanvasRuns::startRun(const QString &target, bool first) {
@@ -124,6 +136,7 @@ QString CanvasRuns::startRun(const QString &target, bool first) {
     request.document = m_canvas->document();
     request.workflow = m_workflows->pathOf(m_workflows->current());
     request.target = target;
+    request.entered = m_canvas->scopePath();
     request.first = first;
     const QString id = m_service->start(request);
     // The run has the numbers shown; the next one gets the next (spec 6.2).
@@ -187,18 +200,56 @@ QString CanvasRuns::aggregate(const NodeView &view) {
     return stale ? QStringLiteral("stale") : cached ? QStringLiteral("cached") : view.state;
 }
 
+// A group's progress is its inside's (5.6): the share of its nodes done, the running one counted
+// by its own progress.
+qreal CanvasRuns::progressOf(const NodeView &view) {
+    if (view.inner.isEmpty())
+        return view.progress;
+    if (aggregate(view) != QLatin1String("running"))
+        return -1;
+    qreal done = 0;
+    for (const QString &state : view.inner)
+        if (state != QLatin1String("running") && state != QLatin1String("stale") && !state.isEmpty())
+            done += 1;
+    return std::clamp((done + std::max<qreal>(0, view.progress)) / qreal(view.inner.size()), 0.0, 1.0);
+}
+
+QString CanvasRuns::keyFor(const QString &node) const {
+    const QString scope = m_canvas->scopePath();
+    return scope.isEmpty() ? node : scope + QLatin1Char('/') + node;
+}
+
+QString CanvasRuns::rowFor(const QString &key) const {
+    const QString scope = m_canvas->scopePath();
+    const QString rest = scope.isEmpty() ? key : key.startsWith(scope + QLatin1Char('/')) ? key.mid(scope.size() + 1) : QString();
+    return rest.contains('/') ? QString() : rest;
+}
+
 QString CanvasRuns::nodeTitle(const QString &tab, const QString &path) const {
-    const QString title = tab == m_shownTab ? m_canvas->nodeTitle(topOf(path)) : QString();
-    if (title.isEmpty())
+    if (tab != m_shownTab)
         return path;
-    return path.contains('/') ? title + QStringLiteral(" › ") + path.section('/', 1) : title;
+    // The node as the level shown has it: itself, or the group instance holding it.
+    for (const QString &level : levelsOf(path)) {
+        const QString row = rowFor(level);
+        if (row.isEmpty())
+            continue;
+        const QString title = m_canvas->nodeTitle(row);
+        if (title.isEmpty())
+            return path;
+        return level == path ? title : title + QStringLiteral(" › ") + path.mid(level.size() + 1);
+    }
+    return path;
 }
 
 void CanvasRuns::show(const QString &tab, const QString &node) {
     if (tab != m_shownTab)
         return;
+    // `node` is a path id; only the nodes of the level shown have a card.
+    const QString row = rowFor(node);
+    if (row.isEmpty())
+        return;
     const NodeView view = m_tabs.value(tab).nodes.value(node);
-    QVariantMap state{{"state", aggregate(view)}, {"progress", view.progress}, {"seconds", view.seconds},
+    QVariantMap state{{"state", aggregate(view)}, {"progress", progressOf(view)}, {"seconds", view.seconds},
                       {"error", view.error},      {"warnings", view.warnings}, {"values", view.values},
                       {"notice", view.notice}};
     const auto image = [&](const QString &url, int width, int height, const QString &file) {
@@ -234,7 +285,7 @@ void CanvasRuns::show(const QString &tab, const QString &node) {
     if (shown != m_shown.end() && shown.value() == state)
         return;
     m_shown.insert(node, state);
-    m_canvas->setRunState(node, state);
+    m_canvas->setRunState(row, state);
 }
 
 void CanvasRuns::showTab() {
@@ -242,7 +293,7 @@ void CanvasRuns::showTab() {
     readNodes();
     // The cards made already asked with the last tab's files.
     for (const QString &node : std::as_const(m_rowsMade))
-        requestInputPreview(node);
+        requestInputPreview(keyFor(node));
     m_pendingProgress.clear();
     m_shown.clear();
     m_canvas->clearRunState();
@@ -257,7 +308,8 @@ void CanvasRuns::showTab() {
 
 void CanvasRuns::flushProgress() {
     for (auto it = m_pendingProgress.cbegin(); it != m_pendingProgress.cend(); ++it) {
-        m_canvas->setRunProgress(it.key(), it.value());
+        if (const QString row = rowFor(it.key()); !row.isEmpty())
+            m_canvas->setRunProgress(row, it.value());
         if (auto shown = m_shown.find(it.key()); shown != m_shown.end())
             shown->insert("progress", it.value());
     }
@@ -270,8 +322,6 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
     TabRuns &runs = m_tabs[tab];
     const QString kind = event.value("event").toString();
     const QString path = event.value("node").toString();
-    const QString top = topOf(path);
-    const bool inner = path.contains('/');
 
     if (kind == QLatin1String("run.started")) {
         m_active = run;
@@ -284,10 +334,11 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
             const Error error = Error::fromJson(value.toObject());
             const QString shown = topOf(error.node);
             if (error.severity == Error::Severity::Warning) {
-                if (!shown.isEmpty() && !runs.nodes[shown].warnings.contains(error.message)) {
-                    runs.nodes[shown].warnings << error.message;
-                    show(tab, shown);
-                }
+                for (const QString &level : error.node.isEmpty() ? QStringList() : levelsOf(error.node))
+                    if (!runs.nodes[level].warnings.contains(error.message)) {
+                        runs.nodes[level].warnings << error.message;
+                        show(tab, level);
+                    }
                 continue;
             }
             // The scheduler's node errors came as node.error already; the compiler's did not.
@@ -298,12 +349,12 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
                 continue;
             runs.errors << QVariantMap{{"node", error.node}, {"shown", shown}, {"message", error.message},
                                        {"code", error.code}, {"hint", error.hint}};
-            if (!shown.isEmpty()) {
-                NodeView &view = runs.nodes[shown];
+            // The error shows on the node and on every group holding it (5.6).
+            for (const QString &level : error.node.isEmpty() ? QStringList() : levelsOf(error.node)) {
+                NodeView &view = runs.nodes[level];
                 view.state = QStringLiteral("error");
-                view.error = error.node.contains('/') ? error.node + QStringLiteral(": ") + shownMessage(error)
-                                                      : shownMessage(error);
-                show(tab, shown);
+                view.error = level != error.node ? error.node + QStringLiteral(": ") + shownMessage(error) : shownMessage(error);
+                show(tab, level);
             }
         }
         // Whatever was still running when the run ended would run again.
@@ -346,109 +397,128 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
     if (path.isEmpty())
         return;
 
-    NodeView &view = runs.nodes[top];
-    // A run that reaches the node knows better than the last check: it runs, or its error
-    // says what is missing.
-    view.notice.clear();
-    auto setState = [&](const QString &state) {
-        if (inner)
-            view.inner.insert(path, state);
-        else
-            view.state = state;
-    };
+    const QStringList levels = levelsOf(path);
+    if (kind == QLatin1String("node.progress")) {
+        for (const QString &top : levels) {
+            NodeView &view = runs.nodes[top];
+            view.notice.clear();
+            view.progress = event.value("value").toDouble();
+            if (tab == m_shownTab)
+                m_pendingProgress.insert(top, progressOf(view));
+        }
+        if (path == m_activeNodePath)
+            m_activeProgress = event.value("value").toDouble();
+        if (!m_progressTimer.isActive())
+            m_progressTimer.start();
+        return; // the canvas gets it with the next flush
+    }
+    static const QStringList known{"node.running", "node.preview", "node.done", "node.cached", "node.skipped", "node.error"};
+    if (!known.contains(kind))
+        return;
     if (kind == QLatin1String("node.running")) {
-        setState(QStringLiteral("running"));
-        view.progress = -1;
         m_activeNodePath = path;
         m_activeNode = nodeTitle(tab, path);
         m_activeProgress = -1;
         emit progressChanged();
-    } else if (kind == QLatin1String("node.progress")) {
-        view.progress = event.value("value").toDouble();
-        if (path == m_activeNodePath)
-            m_activeProgress = view.progress;
+    } else if (kind == QLatin1String("node.error")) {
+        const Error error = Error::fromJson(event.value("error").toObject());
+        runs.errors << QVariantMap{{"node", path}, {"shown", topOf(path)}, {"message", error.message},
+                                   {"code", error.code}, {"hint", error.hint}};
         if (tab == m_shownTab)
-            m_pendingProgress.insert(top, view.progress);
-        if (!m_progressTimer.isActive())
-            m_progressTimer.start();
-        return; // the canvas gets it with the next flush
-    } else if (kind == QLatin1String("node.preview")) {
-        const QJsonObject thumbnail = event.value("thumbnails").toObject().value("preview").toObject();
-        if (thumbnail.isEmpty())
-            return;
-        view.thumbnail = thumbnail.value("url").toString();
-        view.thumbnailWidth = thumbnail.value("width").toInt();
-        view.thumbnailHeight = thumbnail.value("height").toInt();
-        view.imagePath = thumbnail.value("source").toString();
-    } else if (kind == QLatin1String("node.done") || kind == QLatin1String("node.cached")) {
-        setState(event.value("frozen").toBool() ? QStringLiteral("frozen") : QStringLiteral("cached"));
-        view.progress = -1;
-        if (kind == QLatin1String("node.done")) {
-            const qreal seconds = event.value("seconds").toDouble();
-            if (inner) {
-                view.innerSeconds.insert(path, seconds);
-                qreal sum = 0;
-                for (const qreal s : std::as_const(view.innerSeconds))
-                    sum += s;
-                view.seconds = sum;
-            } else {
-                view.seconds = seconds;
-            }
-        }
-        if (!inner) {
-            const QJsonObject outputs = event.value("outputs").toObject();
-            for (auto it = outputs.begin(); it != outputs.end(); ++it)
-                if (const QString text = chipText(it.value()); !text.isEmpty())
-                    view.values.insert(it.key(), text);
-        }
-        const QJsonObject thumbnails = event.value("thumbnails").toObject();
-        if (!thumbnails.isEmpty() && !inner) {
-            const QJsonObject thumbnail = thumbnails.contains("image")  ? thumbnails.value("image").toObject()
-                                          : thumbnails.contains("file") ? thumbnails.value("file").toObject()
-                                                                        : thumbnails.begin().value().toObject();
+            emit errorsChanged();
+    }
+    // Each level holding the node takes the event: the node itself, and each group around it
+    // as its inside's state.
+    for (const QString &top : levels) {
+        const bool inner = top != path;
+        NodeView &view = runs.nodes[top];
+        // A run that reaches the node knows better than the last check: it runs, or its error
+        // says what is missing.
+        view.notice.clear();
+        auto setState = [&](const QString &state) {
+            if (inner)
+                view.inner.insert(path, state);
+            else
+                view.state = state;
+        };
+        if (kind == QLatin1String("node.running")) {
+            setState(QStringLiteral("running"));
+            view.progress = -1;
+        } else if (kind == QLatin1String("node.preview")) {
+            if (inner)
+                continue;
+            const QJsonObject thumbnail = event.value("thumbnails").toObject().value("preview").toObject();
+            if (thumbnail.isEmpty())
+                continue;
             view.thumbnail = thumbnail.value("url").toString();
             view.thumbnailWidth = thumbnail.value("width").toInt();
             view.thumbnailHeight = thumbnail.value("height").toInt();
             view.imagePath = thumbnail.value("source").toString();
-            view.thumbnailFile = m_nodeInfo.value(top).savesFile ? thumbnail.value("file").toString() : QString();
-            view.text = thumbnail.value("label").toString();
-            view.textAspect = view.thumbnailWidth > 0 && view.thumbnail.isEmpty()
-                                  ? qreal(view.thumbnailHeight) / view.thumbnailWidth : 0.5;
-        } else if (!inner) {
-            // What a Preview shows when it is a text or a number: its excerpt in the slot.
-            const QJsonObject shown = event.value("shown").toObject();
-            for (auto it = shown.begin(); it != shown.end(); ++it) {
-                if (it.value().isObject() || it.value().isArray())
-                    continue;
-                QString excerpt = it.value().isString() ? it.value().toString() : chipText(it.value());
-                if (excerpt.size() > 240)
-                    excerpt = excerpt.left(239) + QChar(0x2026);
-                view.text = excerpt;
-                view.textAspect = 0.5;
-                view.thumbnail.clear();
-                view.imagePath.clear();
-                break;
+        } else if (kind == QLatin1String("node.done") || kind == QLatin1String("node.cached")) {
+            setState(event.value("frozen").toBool() ? QStringLiteral("frozen") : QStringLiteral("cached"));
+            view.progress = -1;
+            if (kind == QLatin1String("node.done")) {
+                const qreal seconds = event.value("seconds").toDouble();
+                if (inner) {
+                    view.innerSeconds.insert(path, seconds);
+                    qreal sum = 0;
+                    for (const qreal s : std::as_const(view.innerSeconds))
+                        sum += s;
+                    view.seconds = sum;
+                } else {
+                    view.seconds = seconds;
+                }
             }
+            if (!inner) {
+                const QJsonObject outputs = event.value("outputs").toObject();
+                for (auto it = outputs.begin(); it != outputs.end(); ++it)
+                    if (const QString text = chipText(it.value()); !text.isEmpty())
+                        view.values.insert(it.key(), text);
+            }
+            const QJsonObject thumbnails = event.value("thumbnails").toObject();
+            if (!thumbnails.isEmpty() && !inner) {
+                const QJsonObject thumbnail = thumbnails.contains("image")  ? thumbnails.value("image").toObject()
+                                              : thumbnails.contains("file") ? thumbnails.value("file").toObject()
+                                                                            : thumbnails.begin().value().toObject();
+                view.thumbnail = thumbnail.value("url").toString();
+                view.thumbnailWidth = thumbnail.value("width").toInt();
+                view.thumbnailHeight = thumbnail.value("height").toInt();
+                view.imagePath = thumbnail.value("source").toString();
+                view.thumbnailFile = m_nodeInfo.value(top).savesFile ? thumbnail.value("file").toString() : QString();
+                view.text = thumbnail.value("label").toString();
+                view.textAspect = view.thumbnailWidth > 0 && view.thumbnail.isEmpty()
+                                      ? qreal(view.thumbnailHeight) / view.thumbnailWidth : 0.5;
+            } else if (!inner) {
+                // What a Preview shows when it is a text or a number: its excerpt in the slot.
+                const QJsonObject shown = event.value("shown").toObject();
+                for (auto it = shown.begin(); it != shown.end(); ++it) {
+                    if (it.value().isObject() || it.value().isArray())
+                        continue;
+                    QString excerpt = it.value().isString() ? it.value().toString() : chipText(it.value());
+                    if (excerpt.size() > 240)
+                        excerpt = excerpt.left(239) + QChar(0x2026);
+                    view.text = excerpt;
+                    view.textAspect = 0.5;
+                    view.thumbnail.clear();
+                    view.imagePath.clear();
+                    break;
+                }
+            }
+        } else if (kind == QLatin1String("node.skipped")) {
+            // Cancelled before it started: it would still run.
+            setState(event.value("reason") == QLatin1String("cancelled") ? QStringLiteral("stale") : QStringLiteral("skipped"));
+            view.progress = -1;
+        } else if (kind == QLatin1String("node.error")) {
+            const Error error = Error::fromJson(event.value("error").toObject());
+            setState(QStringLiteral("error"));
+            view.progress = -1;
+            // An inner node's error names its path id (5.6).
+            view.error = inner ? path + QStringLiteral(": ") + shownMessage(error) : shownMessage(error);
         }
-    } else if (kind == QLatin1String("node.skipped")) {
-        // Cancelled before it started: it would still run.
-        setState(event.value("reason") == QLatin1String("cancelled") ? QStringLiteral("stale") : QStringLiteral("skipped"));
-        view.progress = -1;
-    } else if (kind == QLatin1String("node.error")) {
-        const Error error = Error::fromJson(event.value("error").toObject());
-        setState(QStringLiteral("error"));
-        view.progress = -1;
-        view.error = inner ? path + QStringLiteral(": ") + shownMessage(error) : shownMessage(error);
-        runs.errors << QVariantMap{{"node", path}, {"shown", top}, {"message", error.message},
-                                   {"code", error.code}, {"hint", error.hint}};
-        if (tab == m_shownTab)
-            emit errorsChanged();
-    } else {
-        return;
+        show(tab, top);
     }
     if (tab == m_shownTab)
         updateRunning();
-    show(tab, top);
 }
 
 void CanvasRuns::scheduleCheck(bool edit) {
@@ -469,6 +539,7 @@ void CanvasRuns::checkNow() {
     RunRequest request;
     request.document = m_canvas->document();
     request.workflow = m_workflows->pathOf(m_workflows->current());
+    request.entered = m_canvas->scopePath();
     m_service->check(request, ticket);
 }
 
@@ -482,7 +553,7 @@ void CanvasRuns::onChecked(int ticket, const QJsonObject &nodes, const QJsonArra
         return;
     QHash<QString, NodeView> next;
     for (auto it = nodes.begin(); it != nodes.end(); ++it) {
-        const QString top = topOf(it.key());
+      for (const QString &top : levelsOf(it.key())) {
         if (!next.contains(top)) {
             NodeView view = runs.nodes.value(top);
             // An error stays until the workflow is edited, a group's inner one too.
@@ -500,17 +571,21 @@ void CanvasRuns::onChecked(int ticket, const QJsonObject &nodes, const QJsonArra
         }
         NodeView &view = next[top];
         const QString state = it.value().toObject().value("state").toString();
-        if (it.key().contains('/')) {
+        if (top != it.key()) {
             const bool failed = runs.nodes.value(top).inner.value(it.key()) == QLatin1String("error");
             view.inner.insert(it.key(), failed && !asked.edit ? QStringLiteral("error") : state);
         } else if (view.state != QLatin1String("error")) {
             view.state = state;
         }
+      }
     }
     for (const QJsonValue &value : problems) {
         const Error error = Error::fromJson(value.toObject());
-        const QString top = topOf(error.node);
-        if (error.severity == Error::Severity::Warning && next.contains(top)) {
+        if (error.severity != Error::Severity::Warning || error.node.isEmpty())
+            continue;
+        for (const QString &top : levelsOf(error.node)) {
+            if (!next.contains(top))
+                continue;
             next[top].warnings << error.message;
             if (next[top].notice.isEmpty() && cannotRunNow(error))
                 next[top].notice = shownMessage(error);
@@ -548,8 +623,8 @@ QStringList CanvasRuns::runningNodes() const {
     QStringList list;
     const TabRuns runs = m_tabs.value(m_shownTab);
     for (auto it = runs.nodes.cbegin(); it != runs.nodes.cend(); ++it)
-        if (aggregate(it.value()) == QLatin1String("running"))
-            list << it.key();
+        if (const QString row = rowFor(it.key()); !row.isEmpty() && aggregate(it.value()) == QLatin1String("running"))
+            list << row;
     return list;
 }
 
@@ -591,7 +666,8 @@ void CanvasRuns::readNodes() {
     m_nodeInfo.clear();
     if (!m_registry)
         return;
-    const Document document = m_canvas->document();
+    // The level shown: its cards are the ones with a slot.
+    const Document document = m_canvas->scopeDocument();
     for (auto it = document.graph.nodes.cbegin(); it != document.graph.nodes.cend(); ++it) {
         NodeInfo info;
         info.savesFile = it->type == QLatin1String("fugue/save-image");
@@ -610,7 +686,7 @@ void CanvasRuns::readNodes() {
             }
         }
         if (info.showsResult || !info.imageFile.isEmpty())
-            m_nodeInfo.insert(it.key(), info);
+            m_nodeInfo.insert(keyFor(it.key()), info);
     }
     TabRuns &runs = m_tabs[m_shownTab];
     for (auto it = m_nodeInfo.cbegin(); it != m_nodeInfo.cend(); ++it)
@@ -651,7 +727,7 @@ void CanvasRuns::refreshInputs() {
 
 void CanvasRuns::requestInputPreview(const QString &node) {
     const QString file = m_nodeInfo.value(node).imageFile;
-    if (file.isEmpty() || !m_rowsMade.contains(node))
+    if (file.isEmpty() || !m_rowsMade.contains(rowFor(node)))
         return;
     m_service->previewFile(m_shownTab + '\n' + node, file);
 }
@@ -666,10 +742,11 @@ void CanvasRuns::onFilePreviewed(const QString &token, const QString &path, cons
     view.inputWidth = thumbnail.value("width").toInt();
     view.inputHeight = thumbnail.value("height").toInt();
     show(tab, node);
-    emit inputPreviewed(node);
+    emit inputPreviewed(rowFor(node));
 }
 
-QString CanvasRuns::imageFile(const QString &node) const {
+QString CanvasRuns::imageFile(const QString &row) const {
+    const QString node = keyFor(row);
     const NodeView view = m_tabs.value(m_shownTab).nodes.value(node);
     QString path;
     if (!view.thumbnail.isEmpty() && !view.imagePath.isEmpty())

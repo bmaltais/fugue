@@ -205,6 +205,10 @@ class CanvasModel : public QObject {
     Q_PROPERTY(bool linksHidden READ linksHidden WRITE setLinksHidden NOTIFY linksHiddenChanged)
     // The selected node ids, in drawing order.
     Q_PROPERTY(QStringList selection READ selectedIds NOTIFY selectionChanged)
+    // The group levels entered (spec 5.2): [{id, title}] from the outside in; empty at the top.
+    Q_PROPERTY(QVariantList breadcrumb READ breadcrumb NOTIFY scopeChanged)
+    Q_PROPERTY(bool inGroup READ inGroup NOTIFY scopeChanged)
+    Q_PROPERTY(QString groupProblem READ groupProblem NOTIFY groupProblemChanged)
 
 public:
     explicit CanvasModel(const fugue::Registry *registry, QObject *parent = nullptr);
@@ -219,9 +223,90 @@ public:
     fugue::ImageInputs *images() const { return m_images; }
     void setImages(fugue::ImageInputs *images) { m_images = images; }
 
+    // Starts the workflow at its top level, with an empty undo stack.
     void setDocument(const fugue::Document &document);
-    // The document with the canvas's positions and viewport in its layout.
+    // The whole workflow, with the canvas's positions and viewport in its layout: what is
+    // saved and run. While a group is entered, the level on screen is in its definition.
     fugue::Document document() const;
+    // The level on screen (spec 5.2), with its positions: the whole workflow at the top; inside
+    // a group, a document whose graph.nodes are the group's inner nodes and whose layout is the
+    // group's layout.groups entry, with every definition in `groups`. Every edit starts from
+    // it and hands it to commit(), which puts it back where it belongs.
+    fugue::Document scopeDocument() const;
+
+    // --- groups (spec 5) ---
+    //
+    // Entering a group shows its definition's inside; editing it edits the definition, so every
+    // instance changes (5.3). Entering and leaving are not edits, like the viewport; an undo
+    // restores the whole workflow and the canvas stays on its level, or goes up to the nearest
+    // level that is still there. canvas_groups.cpp has the group edits.
+
+    // The instances entered, outside in ({id, title}), for the breadcrumb; empty at the top.
+    QVariantList breadcrumb() const;
+    bool inGroup() const { return !m_scope.isEmpty(); }
+    QStringList scope() const { return m_scope; }
+    // The level's path id prefix (4.8): the instance ids joined with '/', empty at the top.
+    QString scopePath() const { return m_scope.join(QLatin1Char('/')); }
+    // The id of the group whose inside is shown, empty at the top.
+    QString scopeGroup() const;
+    // Whether the node of the level is a group instance.
+    Q_INVOKABLE bool isGroup(const QString &node) const;
+    // Shows the inside of a group instance of the level (Tab, a double-click on its body).
+    Q_INVOKABLE bool enterGroup(const QString &instance);
+    // Back to the level above (Escape), with the instance selected; false at the top.
+    Q_INVOKABLE bool leaveGroup();
+    // Back to the level `depth` (0: the top), as a breadcrumb click does.
+    Q_INVOKABLE void leaveTo(int depth);
+
+    // Frame the selection (5.1, Ctrl+G): a Frame around the selected nodes, holding them.
+    Q_INVOKABLE QString frameSelection();
+    // Moving a Frame moves the nodes it holds with it (5.1): beginFrameMove, then moveBy and
+    // endMove as for nodes.
+    Q_INVOKABLE void beginFrameMove(const QString &frame);
+    // The topmost Frame whose title bar (its top `band` world units) holds the point.
+    Q_INVOKABLE QString frameAt(qreal x, qreal y, qreal band) const;
+    Q_INVOKABLE void renameFrame(const QString &frame, const QString &title);
+    Q_INVOKABLE void deleteFrame(const QString &frame);
+
+    // Make group (Ctrl+Shift+E) from the selection; `leaveSinks` leaves its sinks outside,
+    // wired to the group's outputs (5.5). The instance's id, or empty (then groupProblem says
+    // why). Inside a group, the exposed inputs and outputs of the group shown that led to the
+    // nodes now lead through the new one.
+    Q_INVOKABLE QString makeGroup(bool leaveSinks = true);
+    // The sinks among the selected nodes, for the question Make group asks first.
+    Q_INVOKABLE QStringList selectedSinks() const;
+    // The group.make command: with sinks selected, makeGroupAsked(their titles) first, for the
+    // window to ask whether they stay outside (5.5); without, makeGroup() at once.
+    void requestMakeGroup();
+    // Ungroup (Ctrl+Shift+G) the selected group instances; their inner nodes are selected.
+    Q_INVOKABLE QStringList ungroupSelection();
+    // Make unique (5.3): the selected instance gets its own copy of its definition.
+    Q_INVOKABLE QString makeUnique();
+    // Inside a group: expose an inner input (into: as one more target of that exposed input) or
+    // output, and stop exposing it. False with groupProblem set when refused.
+    Q_INVOKABLE bool exposeInput(const QString &node, const QString &input, const QString &into = {});
+    Q_INVOKABLE bool unexposeInput(const QString &node, const QString &input);
+    Q_INVOKABLE bool exposeOutput(const QString &node, const QString &output);
+    Q_INVOKABLE bool unexposeOutput(const QString &name);
+    // Inside a group: the name the face exposes an inner port under, or empty.
+    Q_INVOKABLE QString exposedName(const QString &node, const QString &port, bool output) const;
+    // Stops exposing an exposed input altogether (every target).
+    Q_INVOKABLE bool removeExposedInput(const QString &name);
+    // The inner inputs that could join an exposed input (one-to-many, 5.4): of its type and not
+    // exposed yet, as [{node, input, title}].
+    Q_INVOKABLE QVariantList exposeCandidates(const QString &name) const;
+    // The interface of the group shown (the interface editor): {name, version, inputs: [{name,
+    // label, section, min, max, targets: ["node.input"], type}], outputs: [{name, from, type}]};
+    // empty at the top.
+    Q_INVOKABLE QVariantMap groupInterface() const;
+    // Interface edits of the group shown, each one undo step. False with groupProblem set when refused.
+    Q_INVOKABLE bool editExposedInput(const QString &name, const QVariantMap &change);
+    Q_INVOKABLE bool renameExposedOutput(const QString &name, const QString &newName);
+    Q_INVOKABLE bool moveExposed(bool output, const QString &name, int to);
+    Q_INVOKABLE bool renameGroup(const QString &name);
+    // Why the last group edit was refused, one sentence; empty after one that worked.
+    QString groupProblem() const { return m_groupProblem; }
+    Q_INVOKABLE void dismissGroupProblem() { setGroupProblem({}); }
 
     QVariantList frames() const;
     QVariantList comments() const;
@@ -429,6 +514,11 @@ public:
     // moved (size, thumbnail, ports) and brings its wires along. False when nothing changed.
     Q_INVOKABLE bool refreshSize(const QString &node);
 
+    // The node whose Advanced section header (5.4, 6.1) holds the point, or empty; and showing
+    // or folding that section (layout only, one undo step).
+    Q_INVOKABLE QString advancedHeaderAt(qreal x, qreal y) const;
+    Q_INVOKABLE void toggleAdvanced(const QString &node);
+
     Q_INVOKABLE void beginMove(const QString &node);
     Q_INVOKABLE void moveBy(qreal dx, qreal dy);
     Q_INVOKABLE void endMove();
@@ -451,6 +541,14 @@ public:
 
 signals:
     void documentReset();
+    // The level shown changed: a group was entered or left (the rows were reset just before).
+    void scopeChanged();
+    void groupProblemChanged();
+    void makeGroupAsked(const QStringList &sinks);
+    // The group.interface command: the window opens the interface editor of the group shown.
+    void interfaceEditorRequested();
+    // The frame.rename command: the window asks for the title.
+    void frameRenameRequested(const QString &frame);
     // A paste added nodes from this document: the same questions as for opening it (missing
     // nodes, packs to trust) are asked of it (Workflows).
     void pasted(const fugue::Document &document);
@@ -496,6 +594,14 @@ private:
         qreal y = 0;         // the port's center, from the node's top
         qreal rowTop = 0;    // its row
         qreal rowHeight = 0;
+        // Sections (6.1, 5.4): an input starting a section has its header row above it, at
+        // headerTop; an advanced input stays folded (no row) until the node's Advanced section
+        // is open, unless it is linked.
+        QString section;
+        bool advanced = false;
+        qreal headerTop = -1; // -1: no header above it
+        QString header;       // the header's section name
+        bool hidden = false;
     };
     struct NodeRow {
         QString id;
@@ -516,6 +622,7 @@ private:
         qreal shownWidth() const { return collapsed ? collapsedWidth : width; }
         QString color;      // layout color
         bool pinned = false;
+        bool advancedOpen = false; // layout: the Advanced section shown (layout.nodes.<id>.advanced)
         QRectF thumbnail;   // where the run's thumbnail goes, empty without one
         std::vector<Port> inputs;
         std::vector<Port> outputs;
@@ -552,6 +659,20 @@ private:
     };
 
     Snapshot snapshot() const;
+    // The level `scope` of the whole workflow `root` (scopeDocument's form), or nothing when the
+    // scope does not lead through group instances of it.
+    static std::optional<fugue::Document> levelOf(const fugue::Document &root, const QStringList &scope);
+    // The whole workflow with this level (of the current scope) put back into its definition;
+    // the group's face is pruned of what the level no longer has.
+    fugue::Document merged(const fugue::Document &level) const;
+    // Shows a level: the rows and links made again from it (setDocument without the undo), at
+    // `view` (else the level's saved view, else none).
+    void loadLevel(const fugue::Document &level, const QVariantMap *view = nullptr);
+    // Commits a change of the whole workflow (a face edit, which instances elsewhere follow).
+    void commitWhole(const fugue::Document &whole, const QString &text);
+    void setGroupProblem(const QString &problem);
+    // An instance of `group` may go in the level shown: false when it would hold itself (5.2).
+    bool canHoldGroup(const fugue::Document &document, const QString &group) const;
     // Makes the document this one: only nodes that differ are touched, and their links.
     // With selectAdded, nodes that come back are selected (undo of a delete, redo of a paste).
     void restore(const Snapshot &target, bool selectAdded);
@@ -634,6 +755,15 @@ private:
     QSizeF m_resizeStart;     // its size when the resize began
     bool m_resizeWasSized = false;
     qreal m_resizeWasWidth = 0, m_resizeWasHeight = 0;
+
+    // The whole workflow while a group is entered (its entered level is stale: m_document has
+    // it); m_scope the instances entered, m_outerViews the view of each level left behind.
+    fugue::Document m_root;
+    QStringList m_scope;
+    std::vector<QVariantMap> m_outerViews;
+    QString m_groupProblem;
+    QStringList m_movingFrames; // Frames a move carries (beginFrameMove)
+    std::vector<QRectF> m_frameStart;
 
     std::unique_ptr<QUndoStack> m_undo;
     int m_editDepth = 0;

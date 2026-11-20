@@ -461,7 +461,7 @@ bool ImageInputs::use(const QString &node, const QString &path) {
 }
 
 bool ImageInputs::accepts(const QString &node, const QString &input) const {
-    const Document document = m_canvas->document();
+    const Document document = m_canvas->scopeDocument();
     return input == QLatin1String("file") && document.graph.nodes.value(node).type == QLatin1String(loadImageType);
 }
 
@@ -478,7 +478,7 @@ QPointF ImageInputs::pastePoint() const {
     const QVariant pointer = m_canvas->pointer();
     if (pointer.isValid())
         return pointer.toPointF();
-    const QJsonArray center = m_canvas->document().layout.value("view").toObject().value("center").toArray();
+    const QJsonArray center = m_canvas->scopeDocument().layout.value("view").toObject().value("center").toArray();
     return center.size() == 2 ? QPointF(center.at(0).toDouble(), center.at(1).toDouble()) : QPointF(80, 80);
 }
 
@@ -521,7 +521,7 @@ bool ImageInputs::take(const QStringList &files, const QString &replace, QPointF
     if (files.isEmpty())
         return false;
     if (!replace.isEmpty()
-        && m_canvas->document().graph.nodes.value(replace).inputs.value(QStringLiteral("file")).kind()
+        && m_canvas->scopeDocument().graph.nodes.value(replace).inputs.value(QStringLiteral("file")).kind()
                == InputValue::Kind::Link) {
         emit message(tr("The file of this node comes from a link; take the link out to paste an image."));
         return false;
@@ -536,7 +536,7 @@ bool ImageInputs::take(const QStringList &files, const QString &replace, QPointF
             node = m_canvas->addNode(QLatin1String(loadImageType), at.x(), at.y() + made++ * newNodeStep);
         if (node.isEmpty())
             continue;
-        Document document = m_canvas->document();
+        Document document = m_canvas->scopeDocument();
         document.graph.nodes[node].inputs.insert(QStringLiteral("file"), InputValue::literal(files.at(i)));
         m_canvas->commit(document, {});
         nodes.append(node);
