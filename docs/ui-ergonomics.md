@@ -63,6 +63,13 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 - Why: a long unordered list is found by recall, not by scanning (Hick); the field takes the keys at once, so no extra click comes before typing.
 - Rule: Floor (the field is 26px tall at text size 12: the row height, 24, plus 2). Posture: a transient popover, with no new decision: typing narrows, Enter picks as before.
 
+### 2026-11-20 model menu order by fit (#85)
+
+- Control: the entries of a text encoder or VAE menu in Load Models, `src/canvas/widgets/InputWidget.qml` (`modelEntries`), drawn by `WidgetMenu.qml`.
+- Old: every file under its folder, in name order.
+- New: the files that fit the picked diffusion model first, under their folder; then an "Other" heading with the rest, those that do not fit in the label color (`dim`), still pickable.
+- Rule: Gaps (one heading per chunk, as the folders already are). Posture: no new decision; the likely pick is the first row once the files' headers are read, at once on a later open, a few ms after the first.
+
 ## Unread
 
 Settings, the shortcuts overlay, the quit question, About, every menu except Run, the context menus, the workflow dialogs and their questions (those questions are a row of buttons), the group dialogs, image save, the widget pickers (but their search field), the magnifier.

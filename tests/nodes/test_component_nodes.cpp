@@ -46,6 +46,18 @@ void writeFile(const QString &path, const QByteArray &bytes) {
         qFatal("cannot write %s", qPrintable(path));
 }
 
+// A safetensors file's header with these tensor shapes, and no data: what model_shape.h reads.
+QByteArray safetensors(const QJsonObject &shapes) {
+    QJsonObject header;
+    for (auto it = shapes.begin(); it != shapes.end(); ++it)
+        header.insert(it.key(), QJsonObject{{"dtype", "F16"}, {"shape", it.value()}, {"data_offsets", QJsonArray{0, 0}}});
+    const QByteArray json = QJsonDocument(header).toJson(QJsonDocument::Compact);
+    QByteArray out;
+    for (int i = 0; i < 8; ++i) // the header's length, little-endian
+        out.append(char((quint64(json.size()) >> (8 * i)) & 0xff));
+    return out + json;
+}
+
 QByteArray readFile(const QString &path) {
     QFile file(path);
     return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
@@ -235,6 +247,66 @@ private slots:
         QVERIFY(!request);
         QCOMPARE(request.error().code, QStringLiteral("model_missing"));
         QCOMPARE(request.error().input, QStringLiteral("model"));
+    }
+
+    // #85: parts whose headers say they do not fit fail before the helper is asked.
+    void aTextEncoderOrVaeThatDoesNotFitIsModelMismatch() {
+        Bench bench;
+        const QJsonObject zImage = bench.model("fugue/diffusion-model", "diffusion_models/z.safetensors",
+                                               safetensors({{"cap_embedder.1.weight", QJsonArray{3840, 2560}},
+                                                            {"x_embedder.weight", QJsonArray{3840, 64}}}));
+        const QJsonObject qwen4b = bench.model("fugue/text-encoder", "text_encoders/qwen_3_4b.safetensors",
+                                               safetensors({{"model.embed_tokens.weight", QJsonArray{151936, 2560}}}));
+        const QJsonObject qwen8b = bench.model("fugue/text-encoder", "text_encoders/qwen_3_8b.safetensors",
+                                               safetensors({{"model.embed_tokens.weight", QJsonArray{151936, 4096}}}));
+        const QJsonObject ae = bench.model("fugue/vae", "vae/ae.safetensors",
+                                           safetensors({{"decoder.conv_in.weight", QJsonArray{512, 16, 3, 3}}}));
+        const QJsonObject flux2vae = bench.model("fugue/vae", "vae/flux2-vae.safetensors",
+                                                 safetensors({{"decoder.conv_in.weight", QJsonArray{512, 32, 3, 3}}}));
+        const auto encode = [&](const QJsonObject &encoder, const QJsonObject &vae) {
+            const QJsonObject model = bench.loaded({{"diffusion_model", zImage}, {"text_encoder", encoder}, {"vae", vae}});
+            return bench.request(kTextEncode, {{"model", Value(model)}, {"prompt", Value("a fox")}});
+        };
+        QVERIFY(encode(qwen4b, ae));
+        const Result<JobRequest> wide = encode(qwen8b, ae);
+        QVERIFY(!wide);
+        QCOMPARE(wide.error().code, QStringLiteral("model_mismatch"));
+        QCOMPARE(wide.error().input, QStringLiteral("model"));
+        QCOMPARE(wide.error().message, QStringLiteral("The text encoder qwen_3_8b.safetensors does not fit z.safetensors: "
+                                                      "it is 4096 wide, and the model reads 2560."));
+        const Result<JobRequest> channels = encode(qwen4b, flux2vae);
+        QVERIFY(!channels);
+        QCOMPARE(channels.error().message, QStringLiteral("The VAE flux2-vae.safetensors does not fit z.safetensors: "
+                                                          "it takes 32-channel latents, and the model makes 16."));
+    }
+
+    // ... and the canvas check says so before a run, on the part that does not fit (8.5).
+    void fugueValidateWarnsOfPartsThatDoNotFit() {
+        Bench bench;
+        const auto file = [&](const QString &type, const QString &path, const QJsonObject &shapes) {
+            return bench.model(type, path, safetensors(shapes));
+        };
+        const QJsonObject parts{
+            {"diffusion_model", file("fugue/diffusion-model", "diffusion_models/z.safetensors",
+                                     {{"cap_embedder.1.weight", QJsonArray{3840, 2560}}, {"x_embedder.weight", QJsonArray{3840, 64}}})},
+            {"text_encoder", file("fugue/text-encoder", "text_encoders/qwen_3_4b.safetensors",
+                                  {{"model.embed_tokens.weight", QJsonArray{151936, 2560}}})},
+            {"vae", file("fugue/vae", "vae/flux2-vae.safetensors", {{"decoder.conv_in.weight", QJsonArray{512, 32, 3, 3}}})}};
+        const QString flow = bench.dir.filePath("mismatch.fugue");
+        writeFile(flow, QJsonDocument(QJsonObject{{"fugue", 1},
+                                                  {"graph", QJsonObject{{"nodes", QJsonObject{
+                                                      {"models", QJsonObject{{"type", kLoadModels}, {"version", "1.0.0"}, {"inputs", parts}}},
+                                                      {"show", QJsonObject{{"type", "fugue/preview"}, {"version", "1.0.0"},
+                                                                           {"inputs", QJsonObject{{"value", QJsonObject{{"from", "models.model"}}}}}}}}}}}})
+                            .toJson(QJsonDocument::Compact));
+        const QList<QJsonObject> out = fugue(bench, bench.dir.filePath("helper.log"), {"validate", flow, "--json"});
+        QVERIFY(!out.isEmpty());
+        const QJsonArray warnings = out.first().value("warnings").toArray();
+        QVERIFY2(warnings.size() == 1, QJsonDocument(out.first()).toJson().constData());
+        const QJsonObject warning = warnings.at(0).toObject();
+        QCOMPARE(warning.value("code").toString(), QStringLiteral("model_mismatch"));
+        QCOMPARE(warning.value("node").toString(), QStringLiteral("models"));
+        QCOMPARE(warning.value("input").toString(), QStringLiteral("vae"));
     }
 
     void aCheckpointIsOneFile() {

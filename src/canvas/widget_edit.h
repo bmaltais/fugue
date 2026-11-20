@@ -61,6 +61,7 @@
 #include <QtQmlIntegration/qqmlintegration.h>
 
 #include "engine/model_offers.h"
+#include "engine/model_shape.h"
 
 #include <QThreadPool>
 
@@ -264,4 +265,19 @@ private:
     std::shared_ptr<fugue::FileHashes> m_hashes;
     std::shared_ptr<std::atomic_bool> m_stopHashing = std::make_shared<std::atomic_bool>(false);
     QThreadPool m_hashPool;
+    // Which listed files fit the node's diffusion model (#85), by node and input (fitsKey): by
+    // path, read from the files' headers on m_shapePool (not behind a long hash). `asked` is the
+    // request the answer belongs to; one that comes after a later request is dropped.
+    struct Fits {
+        int asked = 0;
+        QHash<QString, bool> byPath;
+    };
+    QHash<QString, Fits> m_fits;
+    int m_fitsAsked = 0;
+    std::shared_ptr<fugue::ModelShapes> m_shapes = std::make_shared<fugue::ModelShapes>();
+    QThreadPool m_shapePool;
+    static QString fitsKey(const QString &node, const QString &input);
+    // For a text encoder or VAE input of a node that has a diffusion model picked: which of the
+    // listed files fit it, at once from the headers read before, else read on the pool.
+    void requestFits(const QString &node, const QString &input);
 };

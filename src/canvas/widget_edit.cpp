@@ -230,7 +230,8 @@ QString WidgetEdit::check(const QString &node, const QString &input, const QStri
 }
 
 WidgetEdit::~WidgetEdit() {
-    // A model being hashed is not waited for: the next pick hashes it again.
+    // A model being hashed, or headers being read, are not waited for: the next pick or open
+    // reads them again.
     m_stopHashing->store(true);
     m_hashPool.waitForDone();
 }
@@ -513,6 +514,7 @@ void WidgetEdit::requestModels(const QString &node, const QString &input) {
     const PortType &portType = target(node, input).spec->type.type;
     const QString type = portType.toString();
     m_diskModels.insert(key, listDiskModels(library(), portType, hashes()));
+    requestFits(node, input);
     if (!m_source)
         m_source = listOfferedModels;
     m_loading.insert(key);
@@ -529,10 +531,96 @@ void WidgetEdit::requestModels(const QString &node, const QString &input) {
     });
 }
 
+namespace {
+const QString kDiffusionModel = QStringLiteral("fugue/diffusion-model");
+const QString kTextEncoder = QStringLiteral("fugue/text-encoder");
+const QString kVae = QStringLiteral("fugue/vae");
+} // namespace
+
+QString WidgetEdit::fitsKey(const QString &node, const QString &input) { return node + QLatin1Char('\n') + input; }
+
+void WidgetEdit::requestFits(const QString &node, const QString &input) {
+    const QString key = fitsKey(node, input);
+    const Target t = target(node, input);
+    const QString part = t.spec->type.type.toString();
+    if (part != kTextEncoder && part != kVae) {
+        m_fits.remove(key);
+        return;
+    }
+    // The node's diffusion model on the level shown, when one is picked (Load Models).
+    QJsonObject handle;
+    const auto &inputs = m_canvas->scopeDocument().graph.nodes.value(node).inputs;
+    for (auto it = inputs.begin(); it != inputs.end(); ++it) {
+        const InputSpec *spec = m_canvas->inputSpec(node, it.key());
+        if (spec && spec->type.type.toString() == kDiffusionModel && it.value().kind() == InputValue::Kind::Resource)
+            handle = it.value().toJson().toObject();
+    }
+    // A check reads no model file to find it: the one with the handle's name will do.
+    const Result<QString> diffusion =
+        handle.isEmpty() ? Result<QString>(Error{}) : library().resolve(handle, hashes(), ModelLibrary::Hashing::RememberedOnly);
+    Fits &fits = m_fits[key];
+    fits.byPath.clear(); // those of another diffusion model, or files no longer listed
+    fits.asked = ++m_fitsAsked;
+    if (!diffusion)
+        return;
+    QStringList paths;
+    for (const Model &model : m_diskModels.value(modelsKey(node, input)))
+        paths << model.path;
+    const bool encoder = part == kTextEncoder;
+    // Whether `shape` fits `wanted`; nothing when its header tells nothing.
+    const auto judge = [encoder](const std::optional<ModelShape> &wanted, const std::optional<ModelShape> &shape) {
+        const Fit fit = !wanted || !shape ? Fit::Unknown
+                        : encoder         ? loadableTextEncoderFits(*wanted, *shape)
+                                          : vaeFits(*wanted, *shape);
+        return fit == Fit::Unknown ? std::optional<bool>() : std::optional<bool>(fit == Fit::Fits);
+    };
+
+    // Headers read before: at once, so a menu opened again does not reorder under the pointer.
+    std::optional<ModelShape> wanted;
+    bool allKnown = m_shapes->known(diffusion.value(), &wanted);
+    QHash<QString, bool> known;
+    for (const QString &path : std::as_const(paths)) {
+        std::optional<ModelShape> shape;
+        if (!allKnown || !m_shapes->known(path, &shape)) {
+            allKnown = false;
+            break;
+        }
+        if (const std::optional<bool> fit = judge(wanted, shape))
+            known.insert(path, *fit);
+    }
+    if (allKnown) {
+        fits.byPath = known;
+        return;
+    }
+    // Else read on the pool; a later request, or the window closing, makes this one moot.
+    QPointer<WidgetEdit> self(this);
+    std::shared_ptr<ModelShapes> shapes = m_shapes;
+    std::shared_ptr<std::atomic_bool> stop = m_stopHashing;
+    const int asked = fits.asked;
+    m_shapePool.start([self, shapes, stop, judge, key, asked, model = diffusion.value(), paths] {
+        const std::optional<ModelShape> wanted = shapes->of(model);
+        QHash<QString, bool> read;
+        for (const QString &path : paths) {
+            if (stop->load())
+                return;
+            if (const std::optional<bool> fit = judge(wanted, shapes->of(path)))
+                read.insert(path, *fit);
+        }
+        QMetaObject::invokeMethod(self, [self, key, asked, read] {
+            if (!self || self->m_fits.value(key).asked != asked)
+                return;
+            self->m_fits[key].byPath = read;
+            ++self->m_modelsRevision;
+            emit self->modelsChanged();
+        });
+    });
+}
+
 QVariantList WidgetEdit::models(const QString &node, const QString &input) const {
     const QString key = modelsKey(node, input);
     if (key.isEmpty())
         return {};
+    const QHash<QString, bool> fits = m_fits.value(fitsKey(node, input)).byPath;
     QVariantList list;
     for (const Model &model : m_models.value(key) + m_diskModels.value(key)) {
         QVariantMap entry{{"name", model.name},
@@ -545,6 +633,8 @@ QVariantList WidgetEdit::models(const QString &node, const QString &input) const
             entry.insert("path", model.path);
             entry.insert("folder", model.folder);
             entry.insert("size", model.size);
+            if (const auto fit = fits.constFind(model.path); fit != fits.constEnd())
+                entry.insert("fits", *fit); // absent when the file's header tells nothing
         }
         list.append(entry);
     }

@@ -3,6 +3,7 @@
 namespace fugue {
 
 NodeKernel::~NodeKernel() = default;
+Errors NodeKernel::check(const NodeContext &) const { return {}; }
 ProviderKernel::~ProviderKernel() = default;
 
 void Kernels::add(const QString &typeId, std::shared_ptr<NodeKernel> kernel) {

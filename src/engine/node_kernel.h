@@ -116,6 +116,12 @@ class NodeKernel {
 public:
     virtual ~NodeKernel();
     virtual Result<Values> run(const NodeContext &context) = 0;
+
+    // Under validate (the canvas check, `fugue validate`): what a run of these inputs would fail
+    // on and can be told cheaply, with no model loaded and no file hashed, as errors the scheduler
+    // reports as warnings on the node (8.5). Only `node`, `type`, `inputs`, `hashes` and
+    // `registry` are set, and an input not known yet is absent. Called on the scheduler's thread.
+    virtual Errors check(const NodeContext &context) const;
 };
 
 class ProviderKernel {

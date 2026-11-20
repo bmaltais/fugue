@@ -574,6 +574,62 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // #85: with FLUX.2 Klein 9B picked in Load Models, its text-encoder list puts Qwen3-8B first;
+    // Qwen3-4B (too narrow) and T5-XXL (as wide, but T5) follow under "Other", dimmed; a file
+    // whose header tells nothing is under "Other" too, not dimmed.
+    void loadModelsListsTheTextEncodersThatFitFirst() {
+        QTemporaryDir models;
+        const auto header = [](const QJsonObject &shapes) {
+            QJsonObject tensors;
+            for (auto it = shapes.begin(); it != shapes.end(); ++it)
+                tensors.insert(it.key(), QJsonObject{{"dtype", "F16"}, {"shape", it.value()}, {"data_offsets", QJsonArray{0, 0}}});
+            const QByteArray json = QJsonDocument(tensors).toJson(QJsonDocument::Compact);
+            QByteArray out;
+            for (int i = 0; i < 8; ++i)
+                out.append(char((quint64(json.size()) >> (8 * i)) & 0xff));
+            return out + json;
+        };
+        const QByteArray klein9b = header({{"txt_in.weight", QJsonArray{4096, 12288}}, {"img_in.weight", QJsonArray{4096, 128}}});
+        QVERIFY(test::writeFixtureFile(models.filePath("diffusion_models/klein9b.safetensors"), klein9b));
+        QVERIFY(test::writeFixtureFile(models.filePath("text_encoders/qwen_3_4b.safetensors"),
+                                       header({{"model.embed_tokens.weight", QJsonArray{151936, 2560}}})));
+        QVERIFY(test::writeFixtureFile(models.filePath("text_encoders/qwen_3_8b.safetensors"),
+                                       header({{"model.embed_tokens.weight", QJsonArray{151936, 4096}}})));
+        QVERIFY(test::writeFixtureFile(models.filePath("text_encoders/t5xxl.safetensors"),
+                                       header({{"encoder.embed_tokens.weight", QJsonArray{32128, 4096}},
+                                               {"encoder.block.0.layer.0.SelfAttention.q.weight", QJsonArray{4096, 4096}}})));
+        QVERIFY(test::writeFixtureFile(models.filePath("text_encoders/mystery.safetensors"), "not a header"));
+        // Picked as the picker stores it: by hash (2.5).
+        const QByteArray document = R"({"fugue": 1,
+          "graph": {"nodes": {"models": {"type": "fugue/load-models", "version": "1.0.0",
+            "inputs": {"diffusion_model": {"resource": "fugue/diffusion-model", "name": "klein9b.safetensors",
+                                           "hash": "HASH"}}}}},
+          "layout": {"nodes": {"models": {"pos": [20, 20]}}, "view": {"center": [480, 340], "zoom": 1}}})";
+        WidgetApp app(QByteArray(document).replace("HASH", sha256(klein9b).toUtf8()).constData());
+        app.model.widgets()->setModelRoots({models.path()});
+        app.model.widgets()->setModelSource([](const QString &, const QStringList &,
+                                               std::function<void(QList<WidgetEdit::Model>)> done) { done({}); });
+        QVERIFY(app.open());
+        app.click(app.in("models", "text_encoder"));
+        QTRY_VERIFY2(app.menuOpen(), qPrintable(app.warnings.join('\n')));
+        QObject *menu = app.popup("widgetMenu");
+        const auto rows = [&] {
+            QStringList out;
+            for (const QVariant &entry : menu->property("entries").toList()) {
+                const QVariantMap e = entry.toMap();
+                out << (e.value("heading").toBool() ? "# " : "") + e.value("text").toString()
+                           + (e.value("dim").toBool() ? " (dim)" : "");
+            }
+            return out;
+        };
+        QTRY_COMPARE(rows(), (QStringList{"# " + models.filePath("text_encoders"), "qwen_3_8b.safetensors", "# Other",
+                                          "mystery.safetensors", "qwen_3_4b.safetensors (dim)", "t5xxl.safetensors (dim)",
+                                          "Type a name…"}));
+        app.key(Qt::Key_Return); // the first is the one that fits
+        QTRY_COMPARE(app.stored("models", "text_encoder").toObject().value("name").toString(), QString("qwen_3_8b.safetensors"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void onFirstRunThePickerListsThePairedHostsModelsByHost() {
         // No providers.json, this machine with only text models, studio paired and running
         // two image models, lab paired and offline (spec 8.2's default): the real model

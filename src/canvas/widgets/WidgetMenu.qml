@@ -6,8 +6,9 @@ import ".."
 import "../../menu/placement.js" as Placement
 
 // The list a choice, seed or model widget opens: entries of {text, value, detail, note,
-// checked, enabled, heading, keep}. A `heading` names the group of entries below it; a `note` is a
-// second, smaller line. Modal, so the window's keys sleep while it is open; Up and Down move
+// checked, enabled, heading, keep, dim}. A `heading` names the group of entries below it; a
+// `note` is a second, smaller line; a `dim` entry can be chosen but reads as one the list
+// advises against. Modal, so the window's keys sleep while it is open; Up and Down move
 // between the entries that can be chosen, Enter chooses, Escape or a press outside closes it.
 //
 // `searchable` puts a search field on top, holding the keys (#84): what is typed filters the
@@ -184,7 +185,7 @@ Popup {
                 elide: Text.ElideRight
                 textFormat: Text.PlainText
                 text: entry.modelData.text
-                color: entry.usable ? menu.look.text : menu.look.label
+                color: entry.usable && entry.modelData.dim !== true ? menu.look.text : menu.look.label
                 font.pixelSize: entry.heading ? menu.look.captionSize : menu.look.labelSize
                 font.weight: entry.heading ? Font.DemiBold : Font.Normal
             }

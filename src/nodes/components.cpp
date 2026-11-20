@@ -38,6 +38,7 @@
 
 #include "engine/media.h"
 #include "engine/model_library.h"
+#include "engine/model_shape.h"
 #include "engine/vips.h"
 
 namespace fugue::nodes {
@@ -71,6 +72,61 @@ QJsonObject derivedOf(const QJsonObject &model) {
 
 QJsonObject modelHandle(const QJsonObject &derived) { return QJsonObject{{"resource", kModelType}, {"derived", derived}}; }
 
+// model_mismatch when a model's text encoder or VAE does not fit its diffusion model, by their
+// headers (engine/model_shape.h): said here, before the helper fails to load them with less to say.
+// The files' headers, kept for the process: Load Models' check reads them on every canvas check.
+ModelShapes &modelShapes() {
+    static ModelShapes shapes;
+    return shapes;
+}
+
+// `encoderInput` and `vaeInput` are the inputs blamed for each part.
+std::optional<Error> partsMismatch(const QJsonObject &derived, const QJsonObject &paths, const QString &encoderInput,
+                                   const QString &vaeInput) {
+    ModelShapes &shapes = modelShapes();
+    const std::optional<ModelShape> diffusion = shapes.of(paths.value(QStringLiteral("diffusion_model_path")).toString());
+    if (!diffusion)
+        return std::nullopt;
+    const auto name = [&](const char *part) {
+        return derived.value(QLatin1String(part)).toObject().value(QStringLiteral("name")).toString();
+    };
+    const auto mismatch = [](const QString &input, const QString &message, const QString &hint) {
+        Error error = makeError(QStringLiteral("model_mismatch"), message, hint);
+        error.input = input;
+        return error;
+    };
+    const auto kind = [](TextKind k) {
+        return k == TextKind::T5 ? QStringLiteral("a T5 encoder") : k == TextKind::Clip ? QStringLiteral("a CLIP encoder")
+                                                                                        : QStringLiteral("a language model");
+    };
+    const std::optional<ModelShape> encoder = shapes.of(paths.value(QStringLiteral("llm_path")).toString());
+    if (encoder && loadableTextEncoderFits(*diffusion, *encoder) == Fit::DoesNotFit) {
+        const TextKind is = encoder->textKind.value_or(TextKind::Llm);
+        const QString why = is != TextKind::Llm
+                                ? QStringLiteral("it is %1, and Load Models takes a language model.").arg(kind(is))
+                            : is != diffusion->textKind.value_or(TextKind::Llm)
+                                ? QStringLiteral("it is %1, and the model reads %2.")
+                                      .arg(kind(is), kind(diffusion->textKind.value_or(TextKind::Llm)))
+                                : QStringLiteral("it is %1 wide, and the model reads %2.")
+                                      .arg(encoder->hiddenSize.value_or(0))
+                                      .arg(diffusion->textWidth.value_or(0));
+        return mismatch(encoderInput, QStringLiteral("The text encoder %1 does not fit %2: %3").arg(name("text_encoder"), name("base"), why),
+                        QStringLiteral("Pick another in Load Models: its list shows the text encoders that fit first."));
+    }
+    const std::optional<ModelShape> vae = shapes.of(paths.value(QStringLiteral("vae_path")).toString());
+    if (vae && vaeFits(*diffusion, *vae) == Fit::DoesNotFit) {
+        const QString why = vae->videoVae != diffusion->videoVae
+                                ? (vae->videoVae.value_or(false) ? QStringLiteral("it is a video VAE, and the model takes an image one.")
+                                                                 : QStringLiteral("the model takes a video VAE (Qwen-Image's or Wan's)."))
+                                : QStringLiteral("it takes %1-channel latents, and the model makes %2.")
+                                      .arg(vae->latentChannels.value_or(0))
+                                      .arg(diffusion->latentChannels.value_or(0));
+        return mismatch(vaeInput, QStringLiteral("The VAE %1 does not fit %2: %3").arg(name("vae"), name("base"), why),
+                        QStringLiteral("Pick another in Load Models: its list shows the VAEs that fit first."));
+    }
+    return std::nullopt;
+}
+
 // The files of the `fugue/model` handle in `input`, found on this machine (8.9). model_missing,
 // blamed on the input, when one is not here.
 Result<ModelFiles> modelFiles(const QJsonObject &model, const QString &input, const NodeContext &context) {
@@ -100,6 +156,8 @@ Result<ModelFiles> modelFiles(const QJsonObject &model, const QString &input, co
     }
     if (missing)
         return *missing;
+    if (const std::optional<Error> mismatch = partsMismatch(derived, files.context, input, input))
+        return *mismatch;
     return files;
 }
 
@@ -160,6 +218,29 @@ Result<Values> latentOutput(const JobResult &result, int width, int height, cons
 
 class LoadModelsKernel : public NodeKernel {
 public:
+    // A text encoder or VAE that does not fit the diffusion model, from the files' headers, so
+    // the node says so before a run (#85). Reads no file to find them: one with the handle's
+    // name is taken to be it, as any check does (8.9).
+    Errors check(const NodeContext &context) const override {
+        const ModelLibrary library = ModelLibrary::current(context.registry);
+        const auto path = [&](const char *input) {
+            const Result<QString> found = library.resolve(context.input(QLatin1String(input)).json().toObject(),
+                                                          *context.hashes, ModelLibrary::Hashing::RememberedOnly);
+            return found ? found.value() : QString();
+        };
+        const QJsonObject paths{{"diffusion_model_path", path("diffusion_model")},
+                                {"llm_path", path("text_encoder")},
+                                {"vae_path", path("vae")}};
+        const QJsonObject derived{{"base", context.input(QStringLiteral("diffusion_model")).json()},
+                                  {"text_encoder", context.input(QStringLiteral("text_encoder")).json()},
+                                  {"vae", context.input(QStringLiteral("vae")).json()}};
+        // Blamed on the part that does not fit, where its picker is.
+        if (const std::optional<Error> mismatch =
+                partsMismatch(derived, paths, QStringLiteral("text_encoder"), QStringLiteral("vae")))
+            return {*mismatch};
+        return {};
+    }
+
     Result<Values> run(const NodeContext &context) override {
         const QJsonObject derived{{"base", context.input(QStringLiteral("diffusion_model")).json()},
                                   {"text_encoder", context.input(QStringLiteral("text_encoder")).json()},

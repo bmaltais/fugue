@@ -210,7 +210,12 @@ Rules:
   ([9.3](#93-residency)).
 - An unwired input of a resource type shows a model picker listing the models of that type found
   on disk and offered by providers, with a search field that filters them by every word typed
-  (name, folder or provider, #84). The chosen handle is stored as the input's literal. A file on
+  (name, folder or provider, #84). In Load Models, once a diffusion model is picked, the text
+  encoder and VAE lists put the files that fit it first, and the rest under "Other", those that
+  do not fit dimmed, by what the files' headers say (#85, `engine/model_shape.h`). The canvas check
+  warns `model_mismatch` on a Load Models whose parts do not fit, and a stage given them fails
+  with it before the helper loads them. The chosen
+  handle is stored as the input's literal. A file on
   disk is hashed when it is picked, on a worker thread, with the input showing how far; the hash
   is remembered, so each file is read once.
 
@@ -1107,7 +1112,8 @@ before a run the canvas check's warning is a chip under the node, and a run's er
 carries its fix.
 Error codes: `capability_unavailable`, `model_not_running`, `model_missing`,
 `provider_unreachable`. `fugue validate` reports a missing model as a warning; a run that reaches
-the node reports it as an error.
+the node reports it as an error. `model_mismatch`, parts of a model that do not fit together
+(#85), is reported the same way.
 
 ### 8.6 Results
 
@@ -1875,7 +1881,7 @@ Codes in v0.1:
 | --- | --- |
 | Files | `file_not_found`, `invalid_json`, `invalid_document`, `unsupported_format_version`, `permission_denied`, `media_unreadable` |
 | Graph | `unknown_node_type`, `node_version_mismatch`, `unknown_input`, `missing_input`, `unknown_link_source`, `unknown_output`, `type_mismatch`, `value_out_of_range`, `value_not_in_choices`, `cycle`, `group_recursion`, `unknown_provider` |
-| Warnings | `not_part_of_output`, `model_missing` (an error when a run reaches the node, 8.5), `frozen_result_missing`, `pack_update_available`, `workflow_not_embedded`, `node_bad_preview` |
+| Warnings | `not_part_of_output`, `model_missing` (an error when a run reaches the node, 8.5), `model_mismatch` (a text encoder or VAE that does not fit its diffusion model, by the files' headers, #85; an error when a run reaches a stage), `frozen_result_missing`, `pack_update_available`, `workflow_not_embedded`, `node_bad_preview` |
 | Trust | `pack_untrusted`, `needs_confirmation` |
 | Packs | `pack_invalid`, `pack_exists`, `unknown_pack`, `fetch_failed`, `setup_failed` |
 | Groups | `group_invalid` (an edit a group cannot take: a list input fed from both sides of the selection, a name taken or not valid, a port exposed already) |
@@ -2259,6 +2265,7 @@ Building M2 made these further choices.
 | Stage hooks as image options (`fugue.*`) of stable-diffusion.cpp's option API, in place of the spike's environment variables; the extensions' encode-time state crosses through two virtual methods on its extension interface | 8.10 | medium-high |
 | No pixel-parity test was built for the first pin (#77): the spike showed identical pixels at this commit (spikes/02), and the owner judged that enough. #77 ran these staged once: Z-Image, FLUX.2 Klein 4B and 9B, FLUX.1, SDXL, SD 1.5, Qwen-Image Edit 2511 (the Qwen-Image 2.1 files at hand did not load, stable-diffusion.cpp failing on them before any stage), image-to-image from a latent, and IP-Adapter. PhotoMaker and PuLID were not run (no ID images or embedding at hand), so their carried state is unverified. A pin move runs only the few checks 8.10 lists, by hand (GPU and model files), as the owner asked: the families are stable-diffusion.cpp's to test | 8.10 | medium-high |
 | Sources pinned as GitHub commit archives with SHA-256 (stable-diffusion.cpp, ggml, CUTLASS), not git submodules: verifiable, and a package lists them as its own sources | 8.10 | high |
+| Which text encoder and VAE fit a diffusion model is read from the files' headers (tensor shapes, and the tensor names that tell a T5, CLIP or LLM encoder and an image or video VAE apart), never from a table of file names or hashes: it holds for any finetune, quantization or renamed file with no list to keep (#85, the owner asked whether a table would help). An encoder fits when the model's text width is 1 to 3 times its hidden size (FLUX.2 Klein stacks three Qwen3 layers). Files that do not fit stay pickable, dimmed under "Other": a family the reader does not know must not be hidden. Load Models takes only an LLM encoder, so T5 and CLIP never fit there (FLUX.1 comes later). Headers are remembered in memory per file (size and time), not on disk as hashes are: a read takes 0 to 21 ms (the owner's folder). Known limit: two LLMs of one width (Qwen3-8B, Qwen3.5-9B) both read as fitting. A NodeKernel may say before a run what its inputs would fail on (`check`, the canvas check's warnings) | 2.5, 14.3 | medium-high |
 | The component nodes take one `fugue/model`, made by Load Models from the three files, not ComfyUI's separate MODEL, CLIP and VAE wires (#79): stable-diffusion.cpp fails to load a context missing any component ("model metadata validation failed"), so every stage needs all three, and one handle keeps one helper context warm. VAE Decode takes only the latent, which carries the model | 2.6, 14.3, 8.10 | high |
 | Text Encode takes the prompt and the negative prompt and gives one conditioning (#79, the owner's choice over ComfyUI's positive and negative wires, which would need a patch change): stable-diffusion.cpp encodes both sets in one call. It always makes the negative set (guidance other than 1 at encode), the Sampler's guidance being unknown to it; sampling at 1 skips it, so the pixels match a single run, at the cost of a second, short encode of the (often empty) negative prompt | 14.3 | high |
 | Load Models' text encoder is the model's one LLM encoder (`llm_path`: Qwen3 for Z-Image and FLUX.2 Klein, Qwen2.5-VL for Qwen-Image); families with CLIP and T5 encoders (FLUX.1, SD3) come later. A plain `fugue/model` is a checkpoint (`model_path`, the `checkpoints` folder) | 14.3 | medium-high |

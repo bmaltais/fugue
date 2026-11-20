@@ -565,8 +565,10 @@ private:
                 n.models.append(program);
             // Under validate a model file that is not on this machine is a warning (8.5, 8.9); a
             // kernel that needs the file reports model_missing as its error.
-            if (m_dry)
+            if (m_dry) {
                 warnMissingModels(n);
+                warnFromKernel(n);
+            }
         }
         if (unknown)
             return stale(n);
@@ -592,6 +594,21 @@ private:
         if (m_dry)
             return stale(n);
         n.phase = Phase::Ready;
+    }
+
+    // What the node's kernel can tell before a run (NodeKernel::check), as warnings.
+    void warnFromKernel(const NodeRun &n) {
+        NodeContext context;
+        context.node = n.path;
+        context.type = n.type;
+        context.inputs = n.inputs;
+        context.hashes = m_env.hashes;
+        context.registry = m_env.registry;
+        for (Error warning : n.kernel->check(context)) {
+            warning.severity = Error::Severity::Warning;
+            warning.node = n.path;
+            m_outcome.errors.append(warning);
+        }
     }
 
     void warnMissingModels(const NodeRun &n) {
