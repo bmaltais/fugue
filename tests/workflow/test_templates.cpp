@@ -579,7 +579,7 @@ private slots:
 
     // The bundled templates (the templates submodule, fugue-workflows at the pinned commit): this
     // Fugue lists every one with nothing wrong, each compiles and opens with every node known,
-    // and each model it names has a source.
+    // and each model it names has a source and a size.
     void theBundledTemplatesAreWholeAndCompile() {
         const QString root = QStringLiteral(FUGUE_SOURCE_DIR "/templates");
         QVERIFY2(QFileInfo(root + "/categories.json").isFile(),
@@ -601,8 +601,10 @@ private slots:
         for (const Template &t : listed) {
             QVERIFY2(t.neededPacks.isEmpty(), qPrintable(t.id));
             QVERIFY2(!t.preview.isEmpty(), qPrintable(t.id));
-            for (const QJsonValue model : t.models)
+            for (const QJsonValue model : t.models) {
                 QVERIFY2(model.toObject().value("source").toString().startsWith("https://"), qPrintable(t.id));
+                QVERIFY2(model.toObject().value("size").toDouble() > 0, qPrintable(t.id)); // the Download button's total
+            }
             const Document document = Document::loadFile(t.workflow).value();
             const Compilation compiled = compile(document, f.registry);
             QVERIFY2(compiled.ok(), qPrintable(t.id + ": " + compiled.error().message));
