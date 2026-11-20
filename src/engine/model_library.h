@@ -13,10 +13,15 @@
 //
 // A handle never holds a path: resolve() finds the file by its content hash. It looks at the
 // hashes already remembered (engine/file_hashes) and at the files whose name is the handle's
-// `name`, hashing those once. It never hashes every file: a model renamed since its handle was
-// made is found once its hash is remembered (the model picker hashes the file it is given).
+// `name`, hashing those once. It never hashes every file, so a model renamed since its handle was
+// made is found only once its hash is remembered.
+//
+// A library lists each type's folders once and keeps that list: make one for each use (a run of a
+// node, a check), not one for the life of the process. Not thread-safe.
 
+#include <QHash>
 #include <QJsonObject>
+#include <QJsonValue>
 #include <QList>
 #include <QString>
 #include <QStringList>
@@ -28,6 +33,7 @@ namespace fugue {
 
 class FileHashes;
 class Registry;
+struct DeclaredPortType;
 struct Settings;
 
 // One model file.
@@ -39,6 +45,12 @@ struct ModelFile {
 
 class ModelLibrary {
 public:
+    // How far resolve() may go to tell a handle's file.
+    enum class Hashing {
+        Read,           // hash a file with the handle's name that has no remembered hash (a run)
+        RememberedOnly, // read no file: such a file is taken to be the one (a check, which must be quick)
+    };
+
     // `roots` are absolute folders, searched in order; `registry` gives each resource type's
     // folders and extensions and must outlive the library.
     ModelLibrary(QStringList roots, const Registry *registry);
@@ -60,18 +72,23 @@ public:
     QList<ModelFile> list(const PortType &type) const;
 
     // The file `handle` names (2.5): its `resource` type's file whose content hash is the handle's
-    // `hash`. Fails with model_missing (the folders searched, and where to put the file) when no
-    // such file is found, the handle has no hash, or its type is not a resource type here.
-    Result<QString> resolve(const QJsonObject &handle, FileHashes &hashes) const;
+    // `hash`. Fails with model_missing, saying where to put the file, when no such file is found,
+    // the handle has no hash (a model a provider serves), or its type is not a resource type here.
+    Result<QString> resolve(const QJsonObject &handle, FileHashes &hashes, Hashing hashing = Hashing::Read) const;
 
-    // `handle` with the `path` of its file added, as a command node gets it (7.2). A derived
-    // handle (2.5) has no file of its own: the handles inside it (its base, and each one in its
-    // `apply` steps) get theirs. Fails as resolve() does, for the first handle not found.
-    Result<QJsonObject> withPaths(const QJsonObject &handle, FileHashes &hashes) const;
+    // A resource input's value as a command node gets it (7.2): each handle with the `path` of its
+    // file added, a list item by item. A derived handle (2.5) has no file of its own: its `base`
+    // and the `lora` of each `apply` step get theirs. Fails as resolve() does, for the first
+    // handle not found.
+    Result<QJsonValue> withPaths(const QJsonValue &value, FileHashes &hashes, Hashing hashing = Hashing::Read) const;
 
 private:
+    // The declared type when it is a resource type, else null.
+    const DeclaredPortType *resourceType(const PortType &type) const;
+
     QStringList m_roots;
     const Registry *m_registry = nullptr;
+    mutable QHash<QString, QList<ModelFile>> m_listed; // by PortType::toString()
 };
 
 } // namespace fugue

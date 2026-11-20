@@ -590,24 +590,25 @@ private:
     }
 
     void warnMissingModels(const NodeRun &n) {
-        const ModelLibrary library = ModelLibrary::current(m_env.registry);
+        std::optional<ModelLibrary> library; // read from the settings for the first resource input
         for (auto it = n.inputs.begin(); it != n.inputs.end(); ++it) {
             const InputSpec *spec = n.type->input(it.key());
             if (!spec || !m_env.registry || m_env.registry->portKind(spec->type.type) != PortKind::Resource)
                 continue;
-            const QList<Value> handles = it.value().isList() ? it.value().items() : QList<Value>{it.value()};
-            for (const Value &handle : handles) {
-                if (handle.kind() != Value::Kind::Json || !handle.json().isObject())
-                    continue; // not known yet (a link from a node that has not run)
-                const Result<QJsonObject> found = library.withPaths(handle.json().toObject(), *m_env.hashes);
-                if (found)
-                    continue;
-                Error warning = found.error();
-                warning.severity = Error::Severity::Warning;
-                warning.node = n.path;
-                warning.input = it.key();
-                m_outcome.errors.append(warning);
-            }
+            if (!library)
+                library.emplace(ModelLibrary::current(m_env.registry));
+            if (it.value().isEmpty())
+                continue; // not known yet (a link from a node that has not run)
+            // A check reads no model file: one with the handle's name is taken to be it.
+            const Result<QJsonValue> found =
+                library->withPaths(it.value().toJson(), *m_env.hashes, ModelLibrary::Hashing::RememberedOnly);
+            if (found)
+                continue;
+            Error warning = found.error();
+            warning.severity = Error::Severity::Warning;
+            warning.node = n.path;
+            warning.input = it.key();
+            m_outcome.errors.append(warning);
         }
     }
 

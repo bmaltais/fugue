@@ -294,11 +294,7 @@ QString loadNode(Registry &registry, const PackManifest &pack, const QString &fo
 QString packsDir() { return dataDir() + QStringLiteral("/packs"); }
 
 QStringList packSearchPaths() {
-    QStringList paths{packsDir()};
-    for (const QString &extra : currentSettings().packPaths)
-        if (const QString path = QDir::cleanPath(expandHome(extra)); QDir::isAbsolutePath(path))
-            paths << path; // a relative path would mean a different folder to the window and the CLI
-    return paths;
+    return searchPaths(packsDir(), currentSettings().packPaths);
 }
 
 bool PackReport::hasProblems() const {

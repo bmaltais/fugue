@@ -167,9 +167,9 @@ public:
         options.clock = [this] { return clock.now(); };
         cache = std::make_unique<ResultCache>(dir.filePath("results"), options);
 
-        must(registry.add(DeclaredPortType{*PortType::parse("fugue/latent"), PortKind::Data, "Latent", {}}));
-        must(registry.add(DeclaredPortType{*PortType::parse("fugue/lora"), PortKind::Resource, "LoRA", {}}));
-        must(registry.add(DeclaredPortType{*PortType::parse("fugue/image-model"), PortKind::Resource, "Image model", {}}));
+        must(registry.add(DeclaredPortType{*PortType::parse("fugue/latent"), PortKind::Data, "Latent", {}, {}}));
+        must(registry.add(DeclaredPortType{*PortType::parse("fugue/lora"), PortKind::Resource, "LoRA", {}, {}}));
+        must(registry.add(DeclaredPortType{*PortType::parse("fugue/image-model"), PortKind::Resource, "Image model", {}, {}}));
 
         const QByteArray text = "'inputs': [{'name': 'text', 'type': 'text'}], 'outputs': [{'name': 'text', 'type': 'text'}]";
         auto echo = [](const NodeContext &context) -> Result<Values> { return Values{{"text", context.input("text")}}; };

@@ -1,4 +1,4 @@
-// Linked into every test that makes a QGuiApplication, so it holds when a test binary is run
+// Linked into every test that makes a QGuiApplication, and every engine test, so it holds when a test binary is run
 // by hand too, not only under ctest (CMakeLists.txt sets the same for ctest). It runs before
 // main(), so before Qt reads the environment.
 //

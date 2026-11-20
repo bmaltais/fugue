@@ -1205,7 +1205,9 @@ reference. A new inference runtime is a new provider module.
   reached twice (a link, overlapping roots) counts once.
 - Finding a handle's file looks at the remembered hashes, then hashes the files with the handle's
   `name` (once). Other files are not hashed to find a model: hashing every model of a large folder
-  takes minutes. A missing model is `model_missing`, with the folder to put it in.
+  takes minutes. A missing model is `model_missing`, with the folder to put it in. A check
+  (`fugue validate`, the canvas) reads no model file: a file with the handle's name that has no
+  remembered hash is taken to be the one, and the run that reaches the node finds out.
 - No downloads in v0.1. Fugue shows where a missing model can be had and which folder it goes in.
 - Fugue never modifies or deletes a model file.
 
@@ -1791,7 +1793,7 @@ Codes in v0.1:
 | --- | --- |
 | Files | `file_not_found`, `invalid_json`, `invalid_document`, `unsupported_format_version`, `permission_denied`, `media_unreadable` |
 | Graph | `unknown_node_type`, `node_version_mismatch`, `unknown_input`, `missing_input`, `unknown_link_source`, `unknown_output`, `type_mismatch`, `value_out_of_range`, `value_not_in_choices`, `cycle`, `group_recursion`, `unknown_provider` |
-| Warnings | `not_part_of_output`, `model_missing`, `frozen_result_missing`, `pack_update_available`, `workflow_not_embedded`, `node_bad_preview` |
+| Warnings | `not_part_of_output`, `model_missing` (an error when a run reaches the node, 8.5), `frozen_result_missing`, `pack_update_available`, `workflow_not_embedded`, `node_bad_preview` |
 | Trust | `pack_untrusted`, `needs_confirmation` |
 | Packs | `pack_invalid`, `pack_exists`, `unknown_pack`, `fetch_failed`, `setup_failed` |
 | Groups | `group_invalid` (an edit a group cannot take: a list input fed from both sides of the selection, a name taken or not valid, a port exposed already) |

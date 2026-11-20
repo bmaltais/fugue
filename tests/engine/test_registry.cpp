@@ -368,7 +368,7 @@ private slots:
         QVERIFY2(dump(unknown).contains("io.github.alice.tools/latent@2"), qPrintable(dump(unknown)));
 
         QVERIFY(registry.add(DeclaredPortType{*PortType::parse("io.github.alice.tools/latent@2"),
-                                              PortKind::Data, "Latent", {}})
+                                              PortKind::Data, "Latent", {}, {}})
                     .isEmpty());
         QVERIFY(registry.add(sampler).isEmpty());
         QCOMPARE(registry.portKind(*PortType::parse("io.github.alice.tools/latent@2")), PortKind::Data);
@@ -378,9 +378,9 @@ private slots:
 
         // The same declared type twice is refused; the built-ins cannot be declared.
         QVERIFY(hasErrors(registry.add(DeclaredPortType{
-            *PortType::parse("io.github.alice.tools/latent@2"), PortKind::Data, "Latent", {}})));
-        QVERIFY(hasErrors(registry.add(DeclaredPortType{*PortType::parse("image"), PortKind::Data, "", {}})));
-        QVERIFY(hasErrors(registry.add(DeclaredPortType{*PortType::parse("fugue/x"), PortKind::Any, "", {}})));
+            *PortType::parse("io.github.alice.tools/latent@2"), PortKind::Data, "Latent", {}, {}})));
+        QVERIFY(hasErrors(registry.add(DeclaredPortType{*PortType::parse("image"), PortKind::Data, "", {}, {}})));
+        QVERIFY(hasErrors(registry.add(DeclaredPortType{*PortType::parse("fugue/x"), PortKind::Any, "", {}, {}})));
     }
 
     void onlyBuiltInInputsMayBeAny() {

@@ -109,6 +109,16 @@ private slots:
                  (QStringList{"a.safetensors", "b.gguf", "c.ckpt", "d.pt", "e.pth", "f.bin", "g.sft"}));
     }
 
+    void anExtensionMatchesTheWholeSuffixWithOrWithoutItsDot() {
+        QTemporaryDir root;
+        Registry registry;
+        declare(registry, "io.test.pack/net", {"pt"});
+        writeFile(root.filePath("net/a.pt"));
+        writeFile(root.filePath("net/b.ckpt"));
+        const ModelLibrary library({root.path()}, &registry);
+        QCOMPARE(names(library.list(type("io.test.pack/net"))), QStringList{"a.pt"});
+    }
+
     void aFileReachedTwiceIsListedOnce() {
         QTemporaryDir root;
         Registry registry;
@@ -179,6 +189,36 @@ private slots:
         QCOMPARE(found.error().code, QStringLiteral("model_missing"));
         QVERIFY2(found.error().message.contains("detail.safetensors"), qPrintable(found.error().message));
         QVERIFY2(found.error().hint.contains(root.filePath("lora")), qPrintable(found.error().hint));
+    }
+
+    void aCheckReadsNoFileAndTakesTheOneWithTheHandlesName() {
+        QTemporaryDir root, state;
+        Registry registry;
+        declare(registry, "io.test.pack/lora", {".safetensors"});
+        writeFile(root.filePath("lora/detail.safetensors"), "other bytes");
+        FileHashes hashes(state.filePath("hashes.json"));
+        const ModelLibrary library({root.path()}, &registry);
+        const QJsonObject wanted = handle("io.test.pack/lora", abcHash, "detail.safetensors");
+
+        QVERIFY(library.resolve(wanted, hashes, ModelLibrary::Hashing::RememberedOnly));
+        QVERIFY(hashes.known(root.filePath("lora/detail.safetensors")).isEmpty()); // not read
+        QVERIFY(!library.resolve(wanted, hashes)); // a run reads it: not the one
+        // Once its hash is remembered, a check knows it is not the one either.
+        QVERIFY(!library.resolve(wanted, hashes, ModelLibrary::Hashing::RememberedOnly));
+        QVERIFY(!library.resolve(handle("io.test.pack/lora", abcHash, "absent.safetensors"), hashes,
+                                 ModelLibrary::Hashing::RememberedOnly));
+    }
+
+    void aDerivedHandleWithABadBaseIsMissing() {
+        QTemporaryDir root, state;
+        Registry registry;
+        declare(registry, "io.test.pack/lora", {".safetensors"});
+        FileHashes hashes(state.filePath("hashes.json"));
+        const ModelLibrary library({root.path()}, &registry);
+        const QJsonObject derived{{"resource", "io.test.pack/lora"}, {"derived", QJsonObject{{"base", "not a handle"}}}};
+        const Result<QJsonValue> made = library.withPaths(derived, hashes);
+        QVERIFY(!made);
+        QCOMPARE(made.error().code, QStringLiteral("model_missing"));
     }
 
     void aChangedFileNoLongerMatchesItsRememberedHash() {
