@@ -10,6 +10,7 @@
 #include <QtTest>
 
 #include "canvas_app.h"
+#include "engine/group_library.h"
 #include "look.h"
 #include "../window_grab.h"
 
@@ -291,6 +292,34 @@ private slots:
         QTest::mouseClick(app.window, Qt::LeftButton, {},
                           enter->mapToScene(QPointF(enter->width() / 2, enter->height() / 2)).toPoint());
         QTRY_VERIFY(app.model.inGroup());
+    }
+
+    // #74: renaming a library group's card in place asks whether to rename it in the library too.
+    void renamingALibraryGroupsCardOffersTheLibrary() {
+        App app(load(kGraph));
+        QVERIFY(app.open());
+        app.workflows.dismissPendingTrust();
+        app.workflows.dismissNotice();
+        app.model.select({"prompt", "gen"});
+        app.key(Qt::Key_E, Qt::ControlModifier | Qt::ShiftModifier);
+        QTRY_COMPARE(app.model.document().groups.size(), 1);
+        const QString instance = app.model.selectedIds().value(0);
+        QVERIFY2(app.model.saveGroupToLibrary(), qPrintable(app.model.groupProblem()));
+        const QString library = fugue::libraryDir();
+        QVERIFY(QFileInfo(library + "/group/node.json").isFile());
+        app.model.select({instance});
+        app.key(Qt::Key_F2);
+        QQuickItem *field = nullptr;
+        QTRY_VERIFY((field = item(app.window->contentItem(), "titleEditor")) && field->hasActiveFocus());
+        field->setProperty("text", QStringLiteral("Fox pass"));
+        app.key(Qt::Key_Return);
+        QQuickItem *yes = nullptr;
+        QTRY_VERIFY((yes = item(app.window->contentItem(), "libraryRenameYes")) && yes->isVisible());
+        QTest::qWait(100);
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, yes->mapToScene(QPointF(yes->width() / 2, yes->height() / 2)).toPoint());
+        QTRY_VERIFY(QFileInfo(library + "/fox-pass/node.json").isFile());
+        QVERIFY(!QFileInfo(library + "/group").exists());
+        QDir(library).removeRecursively();
     }
 
     // #74: a double-click on a Frame's title edits it in place.

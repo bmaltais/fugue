@@ -25,6 +25,11 @@ Item {
             sinksAsk.sinks = sinks
             sinksAsk.open()
         }
+        function onLibraryRenameOffered(libraryId, name) {
+            libraryAsk.libraryId = libraryId
+            libraryAsk.name = name
+            libraryAsk.open()
+        }
         function onPortRenameRequested(node, port, output) {
             const found = root.model.portToRename(node, port, output)
             const prompt = output ? qsTr("Output name on the group") : qsTr("Input name on the group")
@@ -164,6 +169,39 @@ Item {
                     text: qsTr("Update")
                     highlighted: true
                     onClicked: { updateAsk.close(); root.model.updateGroupInstance(updateAsk.node) }
+                }
+            }
+        }
+    }
+
+    // A group of the library was renamed in this workflow: rename it there too (#74)? Its folder
+    // and id follow; other workflows keep their copy and lose their link to it.
+    Question {
+        id: libraryAsk
+        objectName: "libraryRenameAsk"
+        property string libraryId: ""
+        property string name: ""
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 4 * root.look.unit
+            LayoutMirroring.enabled: root.rightToLeft
+            LayoutMirroring.childrenInherit: true
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                text: qsTr("%1 is in the library. Rename it there too, as \u201c%2\u201d?").arg(libraryAsk.libraryId, libraryAsk.name)
+            }
+            RowLayout {
+                Layout.alignment: Qt.AlignRight
+                ThemedButton { text: qsTr("Only here"); onClicked: libraryAsk.close() }
+                ThemedButton {
+                    objectName: "libraryRenameYes"
+                    text: qsTr("Rename in the library")
+                    highlighted: true
+                    onClicked: {
+                        libraryAsk.close()
+                        root.model.renameLibraryGroup(libraryAsk.libraryId, libraryAsk.name)
+                    }
                 }
             }
         }

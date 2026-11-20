@@ -167,6 +167,39 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // #74: the library's groups are listed on the page, renamed and removed there (removing
+    // asks first), and the window's node types follow at once.
+    void theLibrarysGroupsAreRenamedAndRemovedOnThePage() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {
+            "words": {"type": "fugue/text", "version": "1.0.0", "inputs": {"text": "a fox"}}}},
+            "layout": {"nodes": {"words": {"pos": [0, 0]}}}})"));
+        QVERIFY(app.open());
+        app.model.select({"words"});
+        const QString instance = app.model.makeGroup();
+        app.model.select({instance});
+        QVERIFY2(app.model.saveGroupToLibrary(), qPrintable(app.model.groupProblem()));
+        QVERIFY(QFileInfo(packs() + "/local/group/node.json").isFile());
+        app.commands.trigger("app.settings");
+        QTRY_VERIFY(panelOpen(app.window));
+        click(app, NEED("settingsPage-6"));
+        QTRY_VERIFY(find(app.window, "libraryGroup-local/group"));
+
+        click(app, NEED("libraryRename-local/group"));
+        type(app, NEED("libraryName-local/group"), "renamed");
+        QTRY_VERIFY(QFileInfo(packs() + "/local/renamed/node.json").isFile());
+        QVERIFY(!QFileInfo(packs() + "/local/group").exists());
+        QTRY_VERIFY(find(app.window, "libraryGroup-local/renamed"));
+        QTRY_VERIFY(app.registry.nodeType("local/renamed"));
+
+        click(app, NEED("libraryRemove-local/renamed"));
+        QVERIFY(QFileInfo(packs() + "/local/renamed").isDir()); // nothing before the yes
+        click(app, NEED("libraryRemoveYes-local/renamed"));
+        QTRY_VERIFY(!QFileInfo(packs() + "/local/renamed").exists());
+        QTRY_VERIFY(!find(app.window, "libraryGroup-local/renamed"));
+        QTRY_VERIFY(!app.registry.nodeType("local/renamed"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void aStaleAnswerCannotAnswerTheNextQuestion() {
         App app(load(emptyDoc));
         QVERIFY(app.open());

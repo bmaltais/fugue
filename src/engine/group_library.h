@@ -48,6 +48,23 @@ struct SavedGroup {
 Result<SavedGroup> saveToLibrary(const Document &document, const QString &group, const Registry &registry,
                                  const QString &dir = libraryDir());
 
+// A group of the library, as listed by its pack.json (#74).
+struct LibraryGroup {
+    QString id; // local/<name>
+    QString name;
+    Version version;
+};
+QList<LibraryGroup> libraryGroups(const QString &dir = libraryDir());
+
+// Removes a library group: its folder, and its line in pack.json. Workflows that use it keep their
+// own copy of its definition (5.3). group_invalid for a group the library does not have.
+Errors removeFromLibrary(const QString &id, const QString &dir = libraryDir());
+
+// Renames a library group: its display name, and its id and folder with it (local/<name>, as in a
+// workflow). The new id; group_invalid for an unknown group or a name another library group has.
+Result<QString> renameInLibrary(const QString &id, const QString &name, const Registry &registry,
+                                const QString &dir = libraryDir());
+
 // The definition file of a library group type (runtime.kind "group"): a document whose groups
 // hold `type.id` and what it uses. file_not_found or invalid_document when it cannot be read.
 Result<Document> loadLibraryGroup(const NodeType &type);

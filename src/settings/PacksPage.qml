@@ -177,6 +177,72 @@ ColumnLayout {
         }
     }
 
+    // The library's groups (#74): renamed here (folder and id follow) or removed after a yes.
+    // Workflows keep their own copy of a group, so neither changes any of them.
+    SettingsParts.Setting {
+        visible: page.model.library.length > 0
+        title: qsTr("Library")
+        note: qsTr("Groups saved from workflows. A workflow keeps its own copy of each group it uses, so renaming or removing one here changes no workflow.")
+    }
+    Repeater {
+        model: page.model.library
+        delegate: RowLayout {
+            id: entry
+            required property var modelData
+            property bool renaming: false
+            property bool confirming: false
+            objectName: "libraryGroup-" + modelData.id
+            Layout.fillWidth: true
+            spacing: page.u
+            Text {
+                visible: !entry.renaming
+                Layout.fillWidth: true
+                elide: Text.ElideRight
+                text: entry.confirming ? qsTr("Remove %1 from the library?").arg(entry.modelData.name)
+                                       : entry.modelData.name + " " + entry.modelData.version
+                color: page.look.text
+                font.pixelSize: page.look.textSize
+            }
+            SettingsParts.Field {
+                visible: entry.renaming
+                objectName: "libraryName-" + entry.modelData.id
+                value: entry.modelData.name
+                onCommitted: text => {
+                    entry.renaming = false
+                    page.model.renameLibraryGroup(entry.modelData.id, text)
+                }
+            }
+            SettingsParts.SmallButton {
+                objectName: "libraryRename-" + entry.modelData.id
+                visible: !entry.renaming && !entry.confirming
+                text: qsTr("Rename…")
+                onClicked: entry.renaming = true
+            }
+            SettingsParts.SmallButton {
+                objectName: "libraryRemove-" + entry.modelData.id
+                visible: !entry.renaming && !entry.confirming
+                text: qsTr("Remove…")
+                onClicked: entry.confirming = true
+            }
+            SettingsParts.SmallButton {
+                objectName: "libraryRemoveNo-" + entry.modelData.id
+                visible: entry.confirming
+                text: qsTr("Keep")
+                onClicked: entry.confirming = false
+            }
+            SettingsParts.SmallButton {
+                objectName: "libraryRemoveYes-" + entry.modelData.id
+                visible: entry.confirming
+                highlighted: true
+                text: qsTr("Remove")
+                onClicked: {
+                    entry.confirming = false
+                    page.model.removeLibraryGroup(entry.modelData.id)
+                }
+            }
+        }
+    }
+
     SettingsParts.Setting {
         title: qsTr("Add a pack")
         note: qsTr("A folder with a pack.json, or a git address pinned to a tag or a commit.")

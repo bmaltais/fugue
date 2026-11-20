@@ -447,7 +447,11 @@ public:
     Q_INVOKABLE void togglePinned();
     // The edit.rename command (#55): the title the canvas shows, layout.nodes.<id>.title; empty
     // goes back to the type's name. One undo step.
+    // On a group card it renames the group (#74, as ComfyUI renames a subgraph from its node's
+    // title), and when the group is in the library offers to rename it there (libraryRenameOffered).
     Q_INVOKABLE void renameNode(const QString &node, const QString &title);
+    // Renames a library group and points this workflow's definitions at its new id (#74).
+    Q_INVOKABLE bool renameLibraryGroup(const QString &libraryId, const QString &name);
     // True when the selection is not empty and every selected node has the state the toggle
     // commands act on: "bypass", "mute", "collapsed" or "pinned" (what they would remove).
     bool selectionAll(const QString &state) const;
@@ -607,6 +611,8 @@ signals:
     void portRenameRequested(const QString &node, const QString &port, bool output);
     // saveGroupToLibrary() wrote a new version: the node types are read again (#70).
     void librarySaved();
+    // A group of the library was renamed in this workflow: rename it there too? (#74)
+    void libraryRenameOffered(const QString &libraryId, const QString &name);
     // A paste added nodes from this document: the same questions as for opening it (missing
     // nodes, packs to trust) are asked of it (Workflows).
     void pasted(const fugue::Document &document);
@@ -628,6 +634,7 @@ signals:
 
 private:
     void toggleLayoutFlag(const QString &flag, const QString &text);
+    void renameGroupCard(const QString &node, const QString &name);
     // Starts moving these nodes: all but the pinned ones (#55), which are returned.
     QStringList startMoving(const QStringList &ids);
     friend class NodeList;

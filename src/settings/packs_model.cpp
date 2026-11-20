@@ -8,6 +8,7 @@
 #include <QThread>
 #include <QTimer>
 
+#include "engine/group_library.h"
 #include "engine/pack_loader.h"
 #include "engine/registry.h"
 #include "engine/trust_store.h"
@@ -68,7 +69,26 @@ void PacksModel::refresh() {
             {"active", m_registry && pack.enabled && m_registry->packVersion(pack.id) == pack.version}};
     }
     m_packs = list;
+    m_library.clear();
+    for (const LibraryGroup &group : libraryGroups(m_packsFolder + QStringLiteral("/local")))
+        m_library << QVariantMap{{"id", group.id}, {"name", group.name}, {"version", group.version.toString()}};
     emit packsChanged();
+}
+
+bool PacksModel::renameLibraryGroup(const QString &id, const QString &name) {
+    const Registry none;
+    const Result<QString> renamed =
+        renameInLibrary(id, name, m_registry ? *m_registry : none, m_packsFolder + QStringLiteral("/local"));
+    finish(renamed ? tr("Renamed %1 to %2. Workflows that use it keep their own copy.").arg(id, *renamed) : QString(),
+           renamed ? Errors() : renamed.errors(), bool(renamed));
+    return bool(renamed);
+}
+
+bool PacksModel::removeLibraryGroup(const QString &id) {
+    const Errors removed = removeFromLibrary(id, m_packsFolder + QStringLiteral("/local"));
+    finish(hasErrors(removed) ? QString() : tr("Removed %1 from the library. Workflows that use it keep their own copy.").arg(id),
+           removed, !hasErrors(removed));
+    return !hasErrors(removed);
 }
 
 Answer PacksModel::ask(const QString &kind, const PackSummary &pack) {

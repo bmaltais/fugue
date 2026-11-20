@@ -480,6 +480,54 @@ void CanvasModel::setGroupNotice(const QString &notice) {
     emit groupNoticeChanged();
 }
 
+void CanvasModel::renameGroupCard(const QString &node, const QString &name) {
+    const QString shown = name.trimmed();
+    const QString group = m_document.graph.nodes.value(node).type;
+    if (shown.isEmpty() || !isGroup(node))
+        return;
+    QString renamedId;
+    const Result<Document> renamed = fugue::renameGroup(document(), group, shown, registryOr(m_registry), &renamedId);
+    if (!renamed) {
+        setGroupProblem(problemText(renamed.error()));
+        return;
+    }
+    setGroupProblem({});
+    beginEdit();
+    commitWhole(*renamed, tr("Rename group"));
+    // The card shows the group's name: a title of its own would hide the new one.
+    Document level = scopeDocument();
+    QJsonObject entries = level.layout.value("nodes").toObject();
+    if (QJsonObject entry = entries.value(node).toObject(); entry.contains("title")) {
+        entry.remove("title");
+        entries.insert(node, entry);
+        level.layout.insert("nodes", entries);
+        commit(level, tr("Rename group"));
+    }
+    endEdit(tr("Rename group"));
+    emit scopeChanged(); // the breadcrumb shows the name
+    if (const GroupDefinition *definition = document().group(renamedId))
+        if (const QString library = definition->extra.value(QLatin1String(kLibraryKey)).toString(); !library.isEmpty())
+            emit libraryRenameOffered(library, shown);
+}
+
+bool CanvasModel::renameLibraryGroup(const QString &libraryId, const QString &name) {
+    const Result<QString> renamed = renameInLibrary(libraryId, name, registryOr(m_registry),
+                                                    m_libraryDir.isEmpty() ? libraryDir() : m_libraryDir);
+    if (!renamed) {
+        setGroupProblem(problemText(renamed.error()));
+        return false;
+    }
+    setGroupProblem({});
+    Document whole = document();
+    for (GroupDefinition &definition : whole.groups)
+        if (definition.extra.value(QLatin1String(kLibraryKey)).toString() == libraryId)
+            definition.extra.insert(QLatin1String(kLibraryKey), *renamed);
+    commitWhole(whole, tr("Rename in the library"));
+    setGroupNotice(tr("Renamed %1 to %2 in the library.").arg(libraryId, *renamed));
+    emit librarySaved();
+    return true;
+}
+
 bool CanvasModel::saveGroupToLibrary() {
     QString group;
     const QStringList ids = selectedIds();

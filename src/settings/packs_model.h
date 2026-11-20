@@ -34,6 +34,8 @@ class PacksModel : public QObject {
     // removable (it is in the packs folder), nodes (count), source, problems (lines), active
     // (this window has loaded it).
     Q_PROPERTY(QVariantList packs READ packs NOTIFY packsChanged)
+    // The library's groups (#74): one map each, id (local/<name>), name, version.
+    Q_PROPERTY(QVariantList library READ library NOTIFY packsChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
     // The question waiting for a person, empty when none: kind (install, update, remove,
     // trust, setup), id, name, version, oldVersion, source, runtime, permissions, nodes,
@@ -58,6 +60,7 @@ public:
     void setRegistry(const Registry *registry) { m_registry = registry; refresh(); }
 
     QVariantList packs() const { return m_packs; }
+    QVariantList library() const { return m_library; }
     bool busy() const { return m_busy; }
     QVariantMap question() const { return m_question; }
     QStringList log() const { return m_log; }
@@ -73,6 +76,10 @@ public:
     Q_INVOKABLE void update(const QString &id);
     Q_INVOKABLE void remove(const QString &id);
     Q_INVOKABLE void trust(const QString &id);
+    // A library group renamed (its folder and id follow) or removed (the page asks first;
+    // workflows keep their own copy). True when done; `failure` says why not.
+    Q_INVOKABLE bool renameLibraryGroup(const QString &id, const QString &name);
+    Q_INVOKABLE bool removeLibraryGroup(const QString &id);
     // The person's answer to `question`; ignored until questionReady.
     Q_INVOKABLE void answer(bool yes);
     // Stops the work: a question is answered no, git and a setup are killed.
@@ -99,6 +106,7 @@ private:
     QString m_packsFolder;
     QString m_trustFile;
     QVariantList m_packs;
+    QVariantList m_library;
     QVariantMap m_question;
     QStringList m_log;
     QString m_message;

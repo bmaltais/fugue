@@ -31,6 +31,36 @@ Error libraryError(const QString &message, const QString &hint = {}) {
     return error;
 }
 
+// The folders pack.json lists.
+QStringList libraryFolders(const QString &dir) {
+    QStringList nodes;
+    if (const Result<QJsonObject> old = readJsonObject(dir + QStringLiteral("/pack.json")); old.ok())
+        for (const QJsonValue &node : old->value("nodes").toArray())
+            nodes << node.toString();
+    return nodes;
+}
+
+// Writes the library's pack.json, listing `folders`.
+Errors writeLibraryPack(const QString &dir, QStringList folders) {
+    QJsonObject pack{{"manifest", 1},
+                     {"id", "local"},
+                     {"version", "1.0.0"},
+                     {"name", "Library"},
+                     {"description", "Groups saved from workflows."}};
+    folders.removeDuplicates();
+    folders.sort();
+    pack.insert("nodes", QJsonArray::fromStringList(folders));
+    return writeJsonFile(dir + QStringLiteral("/pack.json"), pack);
+}
+
+// The folder of a library group's id, local/<name>; empty when it is not one of the library's.
+QString libraryFolder(const QString &id, const QString &dir) {
+    const QString name = id.section(QLatin1Char('/'), 1);
+    if (!id.startsWith(QLatin1String("local/")) || name.isEmpty() || !libraryFolders(dir).contains(name))
+        return {};
+    return dir + QLatin1Char('/') + name;
+}
+
 // A definition as a file writes it, to tell two apart.
 QJsonValue definitionJson(const GroupDefinition &group) {
     Document holder;
@@ -166,22 +196,61 @@ Result<SavedGroup> saveToLibrary(const Document &document, const QString &group,
         return written;
 
     // pack.json lists every folder.
-    QJsonObject pack{{"manifest", 1},
-                     {"id", "local"},
-                     {"version", "1.0.0"},
-                     {"name", "Library"},
-                     {"description", "Groups saved from workflows."}};
-    QStringList nodes;
-    if (const Result<QJsonObject> old = readJsonObject(dir + QStringLiteral("/pack.json")); old.ok())
-        for (const QJsonValue &node : old->value("nodes").toArray())
-            nodes << node.toString();
-    if (!nodes.contains(name))
-        nodes << name;
-    nodes.sort();
-    pack.insert("nodes", QJsonArray::fromStringList(nodes));
-    if (Errors written = writeJsonFile(dir + QStringLiteral("/pack.json"), pack); hasErrors(written))
+    if (Errors written = writeLibraryPack(dir, libraryFolders(dir) << name); hasErrors(written))
         return written;
     return saved;
+}
+
+QList<LibraryGroup> libraryGroups(const QString &dir) {
+    QList<LibraryGroup> groups;
+    for (const QString &name : libraryFolders(dir)) {
+        const Result<QJsonObject> manifest = readJsonObject(dir + QLatin1Char('/') + name + QStringLiteral("/node.json"));
+        if (!manifest)
+            continue;
+        LibraryGroup group;
+        group.id = QStringLiteral("local/") + name;
+        group.name = manifest->value("name").toString(name);
+        group.version = Version::parse(manifest->value("version").toString()).value_or(Version{});
+        groups << group;
+    }
+    return groups;
+}
+
+Errors removeFromLibrary(const QString &id, const QString &dir) {
+    const QString folder = libraryFolder(id, dir);
+    if (folder.isEmpty())
+        return {libraryError(QStringLiteral("The library has no group %1.").arg(id))};
+    if (!QDir(folder).removeRecursively())
+        return {libraryError(QStringLiteral("%1 could not be removed from the library.").arg(id))};
+    QStringList folders = libraryFolders(dir);
+    folders.removeAll(id.section(QLatin1Char('/'), 1));
+    return writeLibraryPack(dir, folders);
+}
+
+Result<QString> renameInLibrary(const QString &id, const QString &name, const Registry &registry, const QString &dir) {
+    const QString folder = libraryFolder(id, dir);
+    if (folder.isEmpty())
+        return libraryError(QStringLiteral("The library has no group %1.").arg(id));
+    const Result<Document> file = Document::loadFile(folder + QLatin1Char('/') + QLatin1String(kDefinition));
+    if (!file)
+        return file.errors();
+    QString renamedId;
+    Result<Document> renamed = renameGroup(*file, id, name, registry, &renamedId);
+    if (!renamed)
+        return renamed.errors();
+    // Its folder follows the id; a name another library group has is refused.
+    if (renamedId != id && libraryFolders(dir).contains(renamedId.section(QLatin1Char('/'), 1)))
+        return libraryError(QStringLiteral("The library has a group named %1 already.").arg(name.trimmed()),
+                            QStringLiteral("Choose another name, or remove that group first."));
+    // Saved as the entry it is (so the same id may be written over), then the old folder goes.
+    renamed->groups[renamedId].extra.insert(QLatin1String(kLibraryKey), renamedId);
+    const Result<SavedGroup> saved = saveToLibrary(*renamed, renamedId, registry, dir);
+    if (!saved)
+        return saved.errors();
+    if (renamedId != id)
+        if (Errors removed = removeFromLibrary(id, dir); hasErrors(removed))
+            return removed;
+    return renamedId;
 }
 
 Result<Document> loadLibraryGroup(const NodeType &type) {

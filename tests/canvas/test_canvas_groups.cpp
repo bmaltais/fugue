@@ -437,6 +437,41 @@ private slots:
         QVERIFY(inputsOf(canvas, "gen").size() > 0);
     }
 
+    // #74: renaming a group card's title renames the group, as ComfyUI renames a subgraph from
+    // its node's title; when the group is in the library, the window is offered to rename it
+    // there too, which renames the library entry and keeps the workflow pointing at it.
+    void renamingAGroupCardRenamesTheGroupAndOffersTheLibrary() {
+        QTemporaryDir packs;
+        CanvasModel canvas(&m_registry);
+        canvas.setLibraryDir(packs.filePath("local"));
+        canvas.setDocument(document(chain));
+        canvas.select({"gen"});
+        const QString instance = canvas.makeGroup();
+        QSignalSpy offered(&canvas, &CanvasModel::libraryRenameOffered);
+        canvas.renameNode(instance, "Two pass");
+        QCOMPARE(canvas.nodeTitle(instance), QStringLiteral("Two pass"));
+        const QString type = canvas.document().graph.nodes.value(instance).type;
+        QCOMPARE(canvas.document().group(type)->name, QStringLiteral("Two pass"));
+        QCOMPARE(offered.size(), 0); // not in the library: nothing to offer
+        QVERIFY(!canvas.document().layout.value("nodes").toObject().value(instance).toObject().contains("title"));
+        // One undo step.
+        canvas.undo();
+        QCOMPARE(canvas.nodeTitle(instance), QStringLiteral("Group"));
+        canvas.redo();
+        QCOMPARE(canvas.nodeTitle(instance), QStringLiteral("Two pass"));
+
+        canvas.select({instance});
+        QVERIFY(canvas.saveGroupToLibrary());
+        canvas.renameNode(instance, "Final pass");
+        QCOMPARE(offered.size(), 1);
+        const QString libraryId = offered.first().at(0).toString();
+        QCOMPARE(libraryId, QStringLiteral("local/two-pass"));
+        QVERIFY2(canvas.renameLibraryGroup(libraryId, "Final pass"), qPrintable(canvas.groupProblem()));
+        QCOMPARE(libraryGroups(packs.filePath("local")).first().id, QStringLiteral("local/final-pass"));
+        const QString now = canvas.document().graph.nodes.value(instance).type;
+        QCOMPARE(canvas.document().group(now)->extra.value(kLibraryKey).toString(), QStringLiteral("local/final-pass"));
+    }
+
     void theLibraryRoundTrip() {
         QTemporaryDir packs;
         CanvasModel canvas(&m_registry);

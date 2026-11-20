@@ -119,6 +119,48 @@ private slots:
         QCOMPARE(again->version.toString(), QStringLiteral("1.0.0"));
     }
 
+    // #74: the library lists its groups, renames one (its folder and id follow the name, as a
+    // group's id does in a workflow) and removes one, keeping pack.json in step.
+    void theLibraryListsRenamesAndRemovesItsGroups() {
+        QTemporaryDir packs;
+        const QString dir = packs.filePath("local");
+        QString instance;
+        Document doc = workflow(m_registry, &instance);
+        QVERIFY(saveToLibrary(doc, "local/pass", m_registry, dir).ok());
+        QList<LibraryGroup> groups = libraryGroups(dir);
+        QCOMPARE(groups.size(), 1);
+        QCOMPARE(groups.first().id, QStringLiteral("local/pass"));
+        QCOMPARE(groups.first().name, QStringLiteral("Pass"));
+        QCOMPARE(groups.first().version.toString(), QStringLiteral("1.0.0"));
+
+        const Result<QString> renamed = renameInLibrary("local/pass", "Two pass", m_registry, dir);
+        QVERIFY2(renamed.ok(), qPrintable(dump(renamed.errors())));
+        QCOMPARE(*renamed, QStringLiteral("local/two-pass"));
+        QVERIFY(!QFileInfo::exists(dir + "/pass"));
+        groups = libraryGroups(dir);
+        QCOMPARE(groups.size(), 1);
+        QCOMPARE(groups.first().id, QStringLiteral("local/two-pass"));
+        QCOMPARE(groups.first().name, QStringLiteral("Two pass"));
+        Registry library;
+        addTypes(library);
+        loadPacks(library, {packs.path()});
+        QVERIFY(library.nodeType("local/two-pass"));
+        QVERIFY(!library.nodeType("local/pass"));
+        QVERIFY(loadLibraryGroup(*library.nodeType("local/two-pass")).ok());
+
+        // A name another library group has is refused; so is an unknown group.
+        QVERIFY(saveToLibrary(doc, "local/pass", m_registry, dir).ok());
+        QCOMPARE(renameInLibrary("local/pass", "Two pass", m_registry, dir).error().code, QStringLiteral("group_invalid"));
+        QCOMPARE(renameInLibrary("local/none", "X", m_registry, dir).error().code, QStringLiteral("group_invalid"));
+
+        QVERIFY(!hasErrors(removeFromLibrary("local/two-pass", dir)));
+        QVERIFY(!QFileInfo::exists(dir + "/two-pass"));
+        groups = libraryGroups(dir);
+        QCOMPARE(groups.size(), 1);
+        QCOMPARE(groups.first().id, QStringLiteral("local/pass"));
+        QVERIFY(hasErrors(removeFromLibrary("local/two-pass", dir)));
+    }
+
     void versionsFollowTheRulesOfThreeSix() {
         QTemporaryDir packs;
         const QString dir = packs.filePath("local");

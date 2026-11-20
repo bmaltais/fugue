@@ -656,6 +656,10 @@ void CanvasModel::toggleLayoutFlag(const QString &flag, const QString &text) {
 void CanvasModel::renameNode(const QString &node, const QString &title) {
     if (rowOf(node) < 0)
         return;
+    if (isGroup(node)) {
+        renameGroupCard(node, title);
+        return;
+    }
     Document document = this->scopeDocument();
     QJsonObject entries = document.layout.value("nodes").toObject();
     QJsonObject entry = entries.value(node).toObject();
