@@ -410,6 +410,10 @@ public:
     // chip: the type names bold (docs/canvas-look.md 8.2), everything else escaped.
     Q_INVOKABLE QString dragProblem(const QString &node, const QString &port, bool output,
                                     bool styled = false) const;
+    // A drag let go on a node's body (#74): the ports of `node` it can end on, free ones first
+    // (an input with no link; any output), as [{port, label, output, free}]. Empty for the node
+    // the drag comes from, or with no drag.
+    Q_INVOKABLE QVariantList dropTargets(const QString &node) const;
     // Ends the drag on a port (connecting when allowed), or anywhere else with an empty node.
     Q_INVOKABLE bool endLinkDrag(const QString &node = {}, const QString &port = {}, bool output = false);
 

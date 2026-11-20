@@ -647,6 +647,62 @@ private slots:
         QVERIFY(shown);
     }
 
+    // Where a port sits in the world: its node's left edge (an input) or right edge (an output).
+    static QPointF portAt(App &app, const QString &node, const QString &port, bool output) {
+        const NodeList *nodes = app.model.nodes();
+        for (int r = 0; r < nodes->rowCount(); ++r) {
+            if (nodes->data(nodes->index(r), NodeList::NodeId).toString() != node)
+                continue;
+            for (const QVariant &p : nodes->data(nodes->index(r), output ? NodeList::Outputs : NodeList::Inputs).toList())
+                if (p.toMap().value("name") == port)
+                    return app.model.position(node)
+                           + QPointF(output ? nodes->data(nodes->index(r), NodeList::Width).toReal() : 0,
+                                     p.toMap().value("y").toReal());
+        }
+        return {};
+    }
+
+    // #74: zoomed out to the map (ports drawn, no text), a wire is still drawn port to port.
+    void portsConnectAtTheMapZoom() {
+        App app(load(small));
+        QVERIFY(app.open());
+        app.model.setView(480, 340, 0.35);
+        QMetaObject::invokeMethod(app.canvas, "applyView");
+        QTRY_VERIFY(qAbs(app.zoom() - 0.35) < 0.01);
+        const QPointF from = portAt(app, "prompt", "text", true), to = portAt(app, "gen", "prompt", false);
+        app.drag(Qt::LeftButton, app.screen(from.x(), from.y()), app.screen(to.x(), to.y()));
+        QCOMPARE(app.model.document().graph.nodes.value("gen").inputs.value("prompt").from().toString(),
+                 QString("prompt.text"));
+    }
+
+    // #74: a wire let go on a node's body connects to the one port there that fits, and asks
+    // which when several free ones do.
+    void aWireDroppedOnANodeConnectsOrAsks() {
+        App app(load(small));
+        QVERIFY(app.open());
+        app.workflows.dismissPendingTrust();
+        app.workflows.dismissNotice();
+        // gen.image onto Save Image's body: its image input is the one that fits.
+        const QPointF image = portAt(app, "gen", "image", true);
+        const QPointF saveBody = app.model.position("save") + QPointF(60, 60);
+        app.drag(Qt::LeftButton, app.screen(image.x(), image.y()), app.screen(saveBody.x(), saveBody.y()));
+        QCOMPARE(app.model.document().graph.nodes.value("save").inputs.value("image").from().toString(),
+                 QString("gen.image"));
+        // prompt.text onto Generate Image's body: Prompt and Negative prompt both fit: a list asks.
+        const QPointF text = portAt(app, "prompt", "text", true);
+        const QPointF genBody = app.model.position("gen") + QPointF(120, 40);
+        app.drag(Qt::LeftButton, app.screen(text.x(), text.y()), app.screen(genBody.x(), genBody.y()));
+        QQuickItem *choice = nullptr;
+        QTRY_VERIFY((choice = item(app.window->contentItem(), "dropTarget-negative_prompt")) && choice->isVisible());
+        QVERIFY(app.model.document().graph.nodes.value("gen").inputs.value("prompt").from().toString().isEmpty() || app.model.document().graph.nodes.value("gen").inputs.value("prompt").from().node.isEmpty());
+        QTest::qWait(100);
+        QTest::mouseClick(app.window, Qt::LeftButton, {},
+                          choice->mapToScene(QPointF(choice->width() / 2, choice->height() / 2)).toPoint());
+        QTRY_COMPARE(app.model.document().graph.nodes.value("gen").inputs.value("negative_prompt").from().toString(),
+                     QString("prompt.text"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void draggingFromAnOutputToAnInputConnectsThem() {
         App app(load(small));
         QVERIFY(app.open());

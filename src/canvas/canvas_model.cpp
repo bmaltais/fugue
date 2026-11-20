@@ -1145,6 +1145,23 @@ QString CanvasModel::dragProblem(const QString &node, const QString &port, bool 
                       : problem(node, port, dragNode, dragPort, true, styled);
 }
 
+QVariantList CanvasModel::dropTargets(const QString &node) const {
+    const int r = rowOf(node);
+    if (m_drag.isEmpty() || r < 0 || node == m_drag.value("node").toString())
+        return {};
+    const bool toInputs = m_drag.value("output").toBool();
+    const NodeRow &row = m_rows[size_t(r)];
+    QVariantList free, taken;
+    for (const Port &port : toInputs ? row.inputs : row.outputs) {
+        if (!dragProblem(node, port.name, !toInputs).isEmpty())
+            continue;
+        // An output feeds any number of inputs; an input with a link would lose it.
+        const bool open = !toInputs || !isWired(node, port.name, false);
+        (open ? free : taken) << QVariantMap{{"port", port.name}, {"label", port.label}, {"output", !toInputs}, {"free", open}};
+    }
+    return free + taken;
+}
+
 bool CanvasModel::endLinkDrag(const QString &node, const QString &port, bool output) {
     if (m_drag.isEmpty())
         return false;

@@ -100,7 +100,7 @@ FocusScope {
         const c = n !== "" ? cornerAt(w) : ({})
         if (c.node !== hoverCorner.node || c.corner !== hoverCorner.corner)
             hoverCorner = c
-        const p = tier === 0 && (gesture === "" || gesture === "link")
+        const p = tier <= 1 && (gesture === "" || gesture === "link")
             ? model.portAt(w.x, w.y, Math.max(8, 10 / world.scale)) : ({})
         if (p.node !== hoverPort.node || p.port !== hoverPort.port || p.output !== hoverPort.output)
             hoverPort = p
@@ -244,10 +244,10 @@ FocusScope {
     // Nodes follow the desktop text size.
     Binding { target: canvas.model; property: "textSize"; value: App.theme.textSize }
 
-    // A port is hit within 10 pixels on screen, and never less than its own size. Zoomed out
-    // past readableZoom ports are not drawn, so a press there is on the node.
+    // A port is hit within 10 pixels on screen, and never less than its own size, wherever ports
+    // are drawn: the map tier too (#74, as ComfyUI). In the overview a press is on the node.
     function portUnder(px, py) {
-        if (world.scale < readableZoom)
+        if (tier > 1)
             return ({})
         const w = toWorld(px, py)
         return model.portAt(w.x, w.y, Math.max(8, 10 / world.scale))
@@ -272,6 +272,11 @@ FocusScope {
     }
 
     Keys.onPressed: event => {
+        if (event.key === Qt.Key_Escape && canvas.dropChoice.node !== undefined) {
+            canvas.chooseDrop(null)
+            event.accepted = true
+            return
+        }
         if (event.key === Qt.Key_Escape && canvas.warningsNode !== "") {
             canvas.closeWarnings()
             event.accepted = true
@@ -328,6 +333,8 @@ FocusScope {
 
         onPressed: mouse => {
             canvas.closeWarnings() // a pinned warnings card goes at a click elsewhere
+            if (canvas.dropChoice.node !== undefined)
+                canvas.chooseDrop(null) // so does a wire waiting for its port
             // A second button while one holds a gesture is left out of it: the gesture goes
             // on, and that button's release does nothing (no context menu mid-drag).
             if (canvas.gesture !== "") {
@@ -595,12 +602,15 @@ FocusScope {
             // Links being moved (Shift+drag) let go on nothing stay as they were: no search.
             const moving = linkDrag.targets !== undefined
             const port = portUnder(px, py)
+            const w = toWorld(px, py)
+            const onNode = model.nodeAt(w.x, w.y)
             if (port.node !== undefined) {
                 model.endLinkDrag(port.node, port.port, port.output)
+            } else if (onNode !== "" && travelled && !moving) {
+                dropOnNode(onNode, px, py)
             } else {
                 model.endLinkDrag()
-                const w = toWorld(px, py)
-                if (travelled && !moving && model.nodeAt(w.x, w.y) === "")
+                if (travelled && !moving && onNode === "")
                     linkReleased(from, w.x, w.y)
             }
             hoverProblem = ""
@@ -1075,6 +1085,90 @@ FocusScope {
     // A node's warnings (docs/canvas-look.md 9, #72): one card for the canvas, shown while a
     // node's warning count is hovered, kept up by a click until a click elsewhere, Esc or a change
     // of level. Its text can be selected and copied.
+    // A wire let go on a node's body (#74, as ComfyUI): it connects to the one port there that
+    // fits (the one free one, when an input has a link already), and when several free ones do a
+    // short list asks which; the drag stays open until a pick, Esc or a click elsewhere.
+    property var dropChoice: ({})
+    function dropOnNode(node, px, py) {
+        const targets = model.dropTargets(node)
+        const free = targets.filter(t => t.free)
+        if (targets.length === 0) {
+            model.endLinkDrag()
+            return
+        }
+        if (targets.length === 1 || free.length === 1) {
+            const t = free.length === 1 ? free[0] : targets[0]
+            model.endLinkDrag(node, t.port, t.output)
+            return
+        }
+        dropChoice = {node: node, targets: targets, x: px, y: py}
+    }
+    function chooseDrop(target) {
+        const node = dropChoice.node
+        dropChoice = ({})
+        if (target)
+            model.endLinkDrag(node, target.port, target.output)
+        else
+            model.endLinkDrag()
+    }
+    Item {
+        id: dropMenu
+        objectName: "dropChooser"
+        visible: canvas.dropChoice.node !== undefined
+        z: 10
+        x: Math.max(8, Math.min((canvas.dropChoice.x || 0) + 8, canvas.width - width - 8))
+        y: Math.max(8, Math.min((canvas.dropChoice.y || 0) + 8, canvas.height - height - 8))
+        width: 52 * canvas.look.unit
+        height: dropColumn.implicitHeight + 2 * canvas.look.unit
+        Shadow {
+            target: dropBox
+            level: 3
+            look: canvas.look
+        }
+        Rectangle {
+            id: dropBox
+            anchors.fill: parent
+            radius: Math.min(canvas.look.popupCorner, 8)
+            color: canvas.look.popup
+            border.width: 1
+            border.color: canvas.look.hairlineStrong
+            Column {
+                id: dropColumn
+                x: canvas.look.unit
+                y: canvas.look.unit
+                width: parent.width - 2 * canvas.look.unit
+                Repeater {
+                    model: canvas.dropChoice.targets || []
+                    delegate: Rectangle {
+                        id: dropRow
+                        required property var modelData
+                        objectName: "dropTarget-" + modelData.port
+                        width: dropColumn.width
+                        height: 7 * canvas.look.unit
+                        radius: canvas.look.smallCorner
+                        color: dropArea.containsMouse ? canvas.look.menuRow : "transparent"
+                        Text {
+                            x: 2 * canvas.look.unit
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: parent.width - 4 * canvas.look.unit
+                            elide: Text.ElideRight
+                            text: dropRow.modelData.free ? dropRow.modelData.label
+                                                         : qsTr("%1 (replaces its link)").arg(dropRow.modelData.label)
+                            color: canvas.look.text
+                            font.pixelSize: canvas.look.labelSize
+                        }
+                        MouseArea {
+                            id: dropArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onClicked: canvas.chooseDrop(dropRow.modelData)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // The node or Frame whose title is edited in place (#74), or "".
     property string renamingNode: ""
     property string renamingFrame: ""

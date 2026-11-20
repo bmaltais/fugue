@@ -3,6 +3,7 @@
   "\"%1\" is not a key (one chord such as Ctrl+S)": "\"%1\" is not a key (one chord such as Ctrl+S)",
   "%1\nIn %2, this command runs as you:\n%3": "%1\nIn %2, this command runs as you:\n%3",
   "%1\nRuns as: %2\nDeclares: %3\nNo sandbox: a trusted pack runs programs as you.": "%1\nRuns as: %2\nDeclares: %3\nNo sandbox: a trusted pack runs programs as you.",
+  "%1 (replaces its link)": "%1 (replaces its link)",
   "%1 cannot be edited here.": "%1 cannot be edited here.",
   "%1 cannot be read (%2); using the default keys": "%1 cannot be read (%2); using the default keys",
   "%1 cannot be read, so nothing here can change until it is fixed: %2": "%1 cannot be read, so nothing here can change until it is fixed: %2",

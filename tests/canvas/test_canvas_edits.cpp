@@ -124,6 +124,32 @@ private slots:
         QCOMPARE(canvas.nodeTitle("prompt"), QStringLiteral("Text"));
     }
 
+    // #74: a wire dropped on a node's body: the ports it could end on there, free ones first, so
+    // a drop connects to the first and asks only when several free ones fit.
+    void aWireDroppedOnANodeFindsItsPorts() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(chain));
+        canvas.beginLinkDrag("other", "text", true);
+        QStringList names;
+        for (const QVariant &target : canvas.dropTargets("gen"))
+            names << target.toMap().value("port").toString() + (target.toMap().value("free").toBool() ? "" : "*");
+        // prompt is linked already (prompt.text); negative_prompt is free.
+        QCOMPARE(names, (QStringList{"negative_prompt", "prompt*"}));
+        for (const QVariant &target : canvas.dropTargets("save")) // its text inputs, never its image
+            QVERIFY(target.toMap().value("port").toString() != QLatin1String("image"));
+        QVERIFY(canvas.dropTargets("other").isEmpty()); // not the node the wire comes from
+        canvas.endLinkDrag();
+        // From an input: the outputs that can feed it.
+        canvas.beginLinkDrag("save", "image", false); // linked: the link is picked up, from gen.image
+        canvas.endLinkDrag();
+        canvas.beginLinkDrag("join", "b", false);
+        names.clear();
+        for (const QVariant &target : canvas.dropTargets("other"))
+            names << target.toMap().value("port").toString();
+        QCOMPARE(names, QStringList{"text"});
+        canvas.endLinkDrag();
+    }
+
     void aConnectIsUndoneAndRedone() {
         CanvasModel canvas(&m_registry);
         canvas.setDocument(document(chain));
