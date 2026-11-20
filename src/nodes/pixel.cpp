@@ -311,6 +311,42 @@ public:
     }
 };
 
+// ComfyUI's ImageScaleToTotalPixels (crop "disabled"): scale to megapixels * 1024 * 1024 pixels,
+// each side rounded half to even to a multiple, then stretch to that size. The aspect can drift
+// by the rounding. ComfyUI fails on a side that rounds to 0; here it becomes one multiple.
+class ResizeMegapixelsKernel : public NodeKernel {
+public:
+    Result<Values> run(const NodeContext &context) override {
+        const Result<Pixels> loaded = pixelsOf(context.input("image"), "image");
+        if (!loaded.ok())
+            return Result<Values>(loaded.errors());
+        const Result<ResizeMethod> method = choice(context, QStringLiteral("method"), kResizeMethods);
+        if (!method)
+            return method.errors();
+        const Pixels &in = loaded.value();
+        const double megapixels = context.input("megapixels").number();
+        const int multiple = std::max(1, toInt(context.input("multiple")));
+        const double total = megapixels * 1024 * 1024;
+        const double scale = std::sqrt(total / (double(in.width) * in.height));
+        const double width = std::nearbyint(in.width * scale / multiple) * multiple;
+        const double height = std::nearbyint(in.height * scale / multiple) * multiple;
+        for (const auto &[side, value] : {std::pair{"width", width}, std::pair{"height", height}})
+            if (!(value <= kMaxSide))
+                return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("megapixels"),
+                                      QStringLiteral("%1 megapixels makes a %2 of %3, above %4.")
+                                          .arg(megapixels).arg(QString::fromLatin1(side)).arg(value).arg(kMaxSide));
+        const int w = width < 1 ? multiple : int(width);
+        const int h = height < 1 ? multiple : int(height);
+        const Result<Values> image = imageOutput(resample(in, w, h, *method));
+        if (!image.ok())
+            return image;
+        Values out = image.value();
+        out.insert("width", Value(double(w)));
+        out.insert("height", Value(double(h)));
+        return out;
+    }
+};
+
 class CropKernel : public NodeKernel {
 public:
     Result<Values> run(const NodeContext &context) override {
@@ -437,6 +473,7 @@ public:
 
 void addPixelKernels(Kernels &kernels) {
     kernels.add("fugue/resize", std::make_shared<ResizeKernel>());
+    kernels.add("fugue/resize-megapixels", std::make_shared<ResizeMegapixelsKernel>());
     kernels.add("fugue/crop", std::make_shared<CropKernel>());
     kernels.add("fugue/brightness-contrast", std::make_shared<BrightnessContrastKernel>());
     kernels.add("fugue/blend", std::make_shared<BlendKernel>());

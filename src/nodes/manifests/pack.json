@@ -21,6 +21,7 @@
     "number",
     "preview",
     "resize",
+    "resize-megapixels",
     "sampler",
     "save-image",
     "text",

@@ -116,7 +116,7 @@ private slots:
         search->openAt(0, 0);
         search->setQuery("transform");
         const QStringList found = names(search->results());
-        QCOMPARE(QSet<QString>(found.begin(), found.end()), (QSet<QString>{"Crop", "Resize"}));
+        QCOMPARE(QSet<QString>(found.begin(), found.end()), (QSet<QString>{"Crop", "Resize", "Resize to Megapixels"}));
     }
 
     void noMatchGivesNoResults() {

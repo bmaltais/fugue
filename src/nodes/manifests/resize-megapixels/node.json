@@ -1,0 +1,22 @@
+{
+  "manifest": 1,
+  "id": "fugue/resize-megapixels",
+  "version": "1.0.0",
+  "name": "Resize to Megapixels",
+  "description": "Scale an image so it has about this many megapixels, keeping its shape. Each side is a multiple of the step, so the size can also set an Empty Latent. The shape can drift by the rounding; nothing is cropped.",
+  "category": "Image/Transform",
+  "keywords": ["scale to total pixels", "megapixel", "ImageScaleToTotalPixels", "downscale", "upscale", "scale", "size"],
+  "runtime": {"kind": "builtin"},
+  "inputs": [
+    {"name": "image", "type": "image", "label": "Image"},
+    {"name": "megapixels", "type": "number", "label": "Megapixels", "default": 1, "min": 0.01, "max": 16, "step": 0.05},
+    {"name": "multiple", "type": "number", "label": "Multiple of", "default": 16, "min": 1, "max": 256, "step": 1, "integer": true,
+     "advanced": true, "description": "Each side is a multiple of this. 16 is the step the diffusion models work in, so the image can set a latent of the same size."},
+    {"name": "method", "type": "text", "label": "Method", "default": "lanczos", "choices": ["nearest", "bilinear", "bicubic", "lanczos", "area"]}
+  ],
+  "outputs": [
+    {"name": "image", "type": "image", "label": "Image"},
+    {"name": "width", "type": "number", "label": "Width"},
+    {"name": "height", "type": "number", "label": "Height"}
+  ]
+}

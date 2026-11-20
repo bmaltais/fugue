@@ -292,6 +292,16 @@ class TestPixel : public QObject {
         return r.ok() ? imgOf(r.value()) : Img();
     }
 
+    // Runs Resize to Megapixels; the whole result, so the width and height outputs can be read.
+    Result<Values> toMegapixels(const Img &in, double megapixels, int multiple, const QString &method) {
+        NodeContext context;
+        context.node = "n";
+        context.inputs = {{"image", handleOf(in)}, {"megapixels", megapixels}, {"multiple", multiple}, {"method", method}};
+        context.progress = [](double, const QString &, const QString &) {};
+        context.cancelled = [] { return false; };
+        return m_kernels.node("fugue/resize-megapixels")->run(context);
+    }
+
 private slots:
     void initTestCase() {
         initVips();
@@ -357,6 +367,56 @@ private slots:
         const Img out = resized(in, w, h, "stretch", method);
         const Img expected = resample(in, w, h, method);
         QVERIFY2(maxDiff(out, expected) <= float(tolerance), qPrintable(QString::number(maxDiff(out, expected))));
+    }
+
+    // ---- resize to megapixels: sizes from ComfyUI's formula, evaluated in Python
+    //   total = mp * 1024 * 1024; scale = sqrt(total / (W * H)); side = round(side * scale / m) * m ----
+
+    void megapixelsSizesMatchComfysFormula_data() {
+        QTest::addColumn<int>("w");
+        QTest::addColumn<int>("h");
+        QTest::addColumn<double>("megapixels");
+        QTest::addColumn<int>("multiple");
+        QTest::addColumn<int>("outW");
+        QTest::addColumn<int>("outH");
+        QTest::newRow("1920x1080, 1 MP, multiple 1") << 1920 << 1080 << 1.0 << 1 << 1365 << 768;
+        QTest::newRow("1920x1080, 1 MP, multiple 16") << 1920 << 1080 << 1.0 << 16 << 1360 << 768;
+        // 1600 / 128 = 12.5 on both sides: half to even gives 12 (1536), half up would give 13 (1664)
+        QTest::newRow("a .5 case rounds half to even") << 2 << 2 << 2.44140625 << 128 << 1536 << 1536;
+        // the height is 0.2 multiples: it becomes one multiple (ComfyUI would fail)
+        QTest::newRow("a side that rounds to 0 is one multiple") << 1000 << 1 << 0.01 << 16 << 3232 << 16;
+    }
+    void megapixelsSizesMatchComfysFormula() {
+        QFETCH(int, w);
+        QFETCH(int, h);
+        QFETCH(double, megapixels);
+        QFETCH(int, multiple);
+        QFETCH(int, outW);
+        QFETCH(int, outH);
+        const Result<Values> r = toMegapixels(synthetic(w, h, 1, 2), megapixels, multiple, "nearest");
+        QVERIFY(r.ok());
+        QCOMPARE(r.value().value("width").number(), double(outW));
+        QCOMPARE(r.value().value("height").number(), double(outH));
+        const Img out = imgOf(r.value().value("image").media());
+        QCOMPARE(out.w, outW);
+        QCOMPARE(out.h, outH);
+    }
+
+    void megapixelsPixelsEqualResizeForTheSameSizeAndMethod_data() {
+        QTest::addColumn<QString>("method");
+        for (const char *m : {"nearest", "bilinear", "bicubic", "area", "lanczos"})
+            QTest::addRow("%s", m) << m;
+    }
+    void megapixelsPixelsEqualResizeForTheSameSizeAndMethod() {
+        QFETCH(QString, method);
+        const Img in = synthetic(7, 5, 4, 3);
+        // 7x5 at 0.01 MP, multiple 16: 128x80 (Python: 7.57 and 5.41 multiples)
+        const Result<Values> r = toMegapixels(in, 0.01, 16, method);
+        QVERIFY(r.ok());
+        const Img out = imgOf(r.value().value("image").media());
+        QCOMPARE(out.w, 128);
+        QCOMPARE(out.h, 80);
+        QVERIFY(maxDiff(out, resized(in, 128, 80, "stretch", method)) == 0.0f);
     }
 
     void zeroWidthOrHeightKeepsTheAspect() {
