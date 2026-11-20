@@ -6,7 +6,8 @@
 // QML only asks: each change goes through set(), the list and provider calls, which check the
 // value here (never trusting the panel) and write the file at once; a refused change returns
 // why and writes nothing. What applies live is pushed out from here: the language to the
-// Translator, what new nodes start with to the CanvasModel; the canvas binds `navigation`.
+// Translator, what new nodes start with to the CanvasModel, the corner radius to the Theme;
+// the canvas binds `navigation`.
 //
 // Provider keys and other secret fields never reach QML: an instance shows only whether
 // one is set. The panel sends a new one once, to setProviderField(), and it goes only to
@@ -24,6 +25,7 @@
 #include "engine/settings.h"
 
 class CanvasModel;
+class Theme;
 class Translator;
 
 namespace fugue {
@@ -49,6 +51,8 @@ class SettingsModel : public QObject {
     Q_PROPERTY(QStringList packPaths READ packPaths NOTIFY changed)
     Q_PROPERTY(QString newSeed READ newSeed NOTIFY changed)
     Q_PROPERTY(QString embedWorkflow READ embedWorkflow NOTIFY changed)
+    // The canvas corners (#63): px from 0 to 16, or -1 to follow Omarchy (corner_radius).
+    Q_PROPERTY(int cornerRadius READ cornerRadius NOTIFY changed)
     // What is wrong with settings.json, one line each, and whether the panel may write it.
     Q_PROPERTY(QStringList problems READ problems NOTIFY changed)
     Q_PROPERTY(bool writable READ writable NOTIFY changed)
@@ -73,7 +77,8 @@ public:
 
     // Where the settings that apply live go. Any may be null. Each gets the current values
     // at once.
-    void attach(Translator *translator, CanvasModel *canvas, const Registry *registry = nullptr);
+    void attach(Translator *translator, CanvasModel *canvas, const Registry *registry = nullptr,
+                Theme *theme = nullptr);
     // app.settings opens the panel; the keymap page opens files with `openUrl`.
     void registerCommands(CommandRegistry &registry, std::function<void(const QUrl &)> openUrl);
 
@@ -89,6 +94,7 @@ public:
     QStringList packPaths() const { return m_file.settings.packPaths; }
     QString newSeed() const { return m_file.settings.newSeed; }
     QString embedWorkflow() const { return m_file.settings.embedWorkflow; }
+    int cornerRadius() const { return m_file.settings.cornerRadius; }
     QStringList problems() const { return m_file.problems; }
     bool writable() const { return m_file.writable; }
 
@@ -143,6 +149,7 @@ private:
     QString m_providersProblem;
     Translator *m_translator = nullptr;
     CanvasModel *m_canvas = nullptr;
+    Theme *m_theme = nullptr;
     CommandRegistry *m_registry = nullptr;
     std::function<void(const QUrl &)> m_openUrl;
 };

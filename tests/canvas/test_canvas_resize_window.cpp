@@ -103,6 +103,7 @@ private slots:
     }
 
     // FUGUE_SIZE_SHOT=<file.png> QT_QUICK_BACKEND=rhi build/test_canvas_resize_window screenshot
+    // with the corner radius FUGUE_SIZE_RADIUS (0 when unset)
     void screenshot() {
         const QString out = qEnvironmentVariable("FUGUE_SIZE_SHOT");
         if (out.isEmpty())
@@ -111,11 +112,55 @@ private slots:
           "p":{"type":"fugue/text","version":"1.0.0","inputs":{"text":"a red fox in a misty birch wood at dawn, soft light, a long prompt that wraps over several lines of the node"}},
           "g":{"type":"fugue/generate-image","version":"1.0.0","inputs":{"prompt":{"from":"p.text"}}},
           "x":{"type":"acme.tools/ghost","version":"1.0.0","inputs":{"in":{"from":"p.text"}}}}},
-          "layout":{"nodes":{"p":{"pos":[0,0]},"g":{"pos":[300,0]},"x":{"pos":[0,200]}},"view":{"center":[300,150],"zoom":1}}})"));
+          "layout":{"nodes":{"p":{"pos":[0,0]},"g":{"pos":[300,0]},"x":{"pos":[0,200]}},"view":{"center":[300,150],"zoom":1}}})"),
+                {}, canvas_test::Look{{}, qEnvironmentVariableIntValue("FUGUE_SIZE_RADIUS")});
         QVERIFY(app.open());
-        QTest::mouseMove(app.window, grip(app, "g"));
+        app.workflows.dismissPendingTrust(); // the placeholder's pack: not what this shows
+        app.workflows.dismissNotice();
+        // "p" selected shows its quiet mark; the pointer on "g"'s top left corner shows that one.
+        app.model.select({"p"});
+        const QPointF g = app.model.position("g");
+        QTest::mouseMove(app.window, app.screen(g.x() + 4, g.y() + 4));
         QTest::qWait(200);
         QVERIFY(test_support::grab(app.window).save(out));
+    }
+
+    // Any corner resizes (#63); the top left one moves the node too, so its bottom right corner
+    // stays where it was, and one undo takes both back.
+    void draggingTheTopLeftCornerResizesAndMovesTheNode() {
+        App app(load(sheet));
+        QVERIFY(app.open());
+        const QSizeF before = nodeItem(app, "gen")->size();
+        const QPoint from = app.screen(100 + 4, 100 + 4);
+        app.drag(Qt::LeftButton, from, from + QPoint(-40, -30));
+        QVERIFY(qAbs(app.model.position("gen").x() - 60) < 1);
+        QVERIFY(qAbs(app.model.position("gen").y() - 70) < 1);
+        QVERIFY(qAbs(nodeItem(app, "gen")->width() - (before.width() + 40)) < 1);
+        QVERIFY(qAbs(nodeItem(app, "gen")->height() - (before.height() + 30)) < 1);
+        QVERIFY(qAbs(nodeItem(app, "gen")->x() + nodeItem(app, "gen")->width() - (100 + before.width())) < 1);
+        app.model.undo();
+        QCOMPARE(app.model.position("gen"), QPointF(100, 100));
+        QCOMPARE(nodeItem(app, "gen")->size(), before);
+        QVERIFY(app.warnings.isEmpty());
+    }
+
+    // Each corner shows the resize cursor of its diagonal before the press; the body does not.
+    void eachCornerShowsItsResizeCursor() {
+        App app(load(sheet));
+        QVERIFY(app.open());
+        QQuickItem *input = item(app.window->contentItem(), "canvasInput");
+        QVERIFY(input);
+        const QRectF box(nodeItem(app, "gen")->position(), nodeItem(app, "gen")->size());
+        const QList<std::pair<QPointF, Qt::CursorShape>> corners{
+            {box.topLeft() + QPointF(4, 4), Qt::SizeFDiagCursor},
+            {box.bottomRight() - QPointF(4, 4), Qt::SizeFDiagCursor},
+            {box.topRight() + QPointF(-4, 4), Qt::SizeBDiagCursor},
+            {box.bottomLeft() + QPointF(4, -4), Qt::SizeBDiagCursor},
+            {box.center(), Qt::ArrowCursor}};
+        for (const auto &[at, shape] : corners) {
+            QTest::mouseMove(app.window, app.screen(at.x(), at.y()));
+            QTRY_COMPARE(input->cursor().shape(), shape);
+        }
     }
 
     void aPressOnTheBodyStillMovesTheNode() {

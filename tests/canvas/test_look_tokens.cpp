@@ -10,6 +10,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "engine/settings.h"
 #include "look.h"
 #include "theme.h"
 
@@ -85,7 +86,7 @@ private slots:
         COMPARE_COLOR(t.selectedRow, "#292a45");
         QCOMPARE(t.labelShare, 0.80);
         // A 1 px highlight of the text color along the header's top, on dark themes only.
-        QVERIFY(std::abs(t.bevel.alphaF() - 0.06) < 0.01);
+        QVERIFY(std::abs(t.bevel.alphaF() - 0.10) < 0.01);
         QVERIFY(std::abs(t.scrim.alphaF() - 0.45) < 0.01);
 
         const look::RoleTokens blue = look::roleTokens(t, ethereal.value("blue"), ethereal.value("foreground"), false);
@@ -220,7 +221,7 @@ private slots:
         // One shared shadow texture per elevation level, as a data URL.
         QVERIFY(look->property("shadow1").toString().startsWith("data:image/png;base64,"));
         QVERIFY(look->property("shadow1").toString() != look->property("shadow2").toString());
-        QVERIFY(look->property("shadowMargins").toList().size() == 3);
+        QVERIFY(look->property("shadowMargins").toList().size() == 4);
         // Glyphs come from the bundled Lucide subset (16).
         QCOMPARE(look->property("iconFont").toString(), QString("lucide"));
         QCOMPARE(look->glyph("check"), QString(QChar(0xe070)));
@@ -268,6 +269,102 @@ private slots:
             QVERIFY2(look::contrast(text, r.tint) >= 4.5, qPrintable(role));
             QVERIFY2(look::contrast(r.frameTitle, r.frame) >= 4.5, qPrintable(role));
         }
+    }
+
+    // The corner radius setting (#63): a fixed radius for nodes and popups alike, or Omarchy's
+    // (Hyprland's rounding) as before, the node corner then held to 8.
+    void cornersComeFromTheSettingOrFromOmarchy() {
+        const auto is = [](look::Corners c, int node, int popup) { return c.node == node && c.popup == popup; };
+        QVERIFY(is(look::corners(8, 0), 8, 8));
+        QVERIFY(is(look::corners(16, 3), 16, 16));
+        QVERIFY(is(look::corners(0, 10), 0, 0));
+        QVERIFY(is(look::corners(Settings::followOmarchy, 10), 8, 10));
+        QVERIFY(is(look::corners(Settings::followOmarchy, 4), 4, 4));
+        QVERIFY(is(look::corners(Settings::followOmarchy, 0), 0, 0));
+    }
+
+    // Every corner derives from the node corner r, inner ones concentric (docs/canvas-look.md 3),
+    // and the shadows are painted for it, at 0, 8 and 16 on a dark and a light theme.
+    void theCornersAndShadowsFollowTheRadius_data() {
+        QTest::addColumn<int>("radius");
+        QTest::addColumn<bool>("light");
+        for (const int radius : {0, 8, 16})
+            for (const bool light : {false, true})
+                QTest::newRow(qPrintable(QStringLiteral("r%1-%2").arg(radius).arg(light ? "light" : "dark")))
+                    << radius << light;
+    }
+    void theCornersAndShadowsFollowTheRadius() {
+        QFETCH(int, radius);
+        QFETCH(bool, light);
+        CanvasLook canvasLook;
+        canvasLook.update(light ? flexokiLight : ethereal, light, look::corners(radius, 0), 12);
+        QCOMPARE(canvasLook.property("corner").toInt(), radius);
+        QCOMPARE(canvasLook.property("popupCorner").toInt(), radius);
+        QCOMPARE(canvasLook.property("smallCorner").toInt(), std::min(radius, 4));
+        QCOMPARE(canvasLook.property("thumbCorner").toInt(), std::max(0, radius - 6));
+        const QVariantList margins = canvasLook.property("shadowMargins").toList();
+        for (int level = 1; level <= 4; ++level) {
+            int margin = 0;
+            const QImage shadow = look::shadowImage(level, radius, light, &margin);
+            QCOMPARE(margin, margins.at(level - 1).toInt());
+            // A 9-slice: the margin, the corner, a 1 px middle that stretches, and back.
+            QCOMPARE(shadow.width(), 2 * margin + 2 * radius + 3);
+            QCOMPARE(shadow.height(), shadow.width());
+        }
+    }
+
+    // The shadows (docs/canvas-look.md 7): a tight contact shadow and a soft ambient one, cast
+    // downward; a selected node (level 2) sits higher, so its shadow is darker and reaches
+    // further than a node at rest, and a node being dragged (level 4) higher still. On a dark theme the shadow is strong enough to read
+    // over a near-black canvas.
+    void shadowsFallDownwardAndRiseWithElevation_data() {
+        QTest::addColumn<bool>("light");
+        QTest::newRow("dark") << false;
+        QTest::newRow("light") << true;
+    }
+    void shadowsFallDownwardAndRiseWithElevation() {
+        QFETCH(bool, light);
+        const int corner = 8;
+        int rest = 0, raised = 0, lifted = 0;
+        const QImage one = look::shadowImage(1, corner, light, &rest);
+        const QImage two = look::shadowImage(2, corner, light, &raised);
+        const QImage four = look::shadowImage(4, corner, light, &lifted);
+        QVERIFY(raised > rest);
+        QVERIFY(lifted > raised);
+        // Alpha `d` px outside the box's bottom and top, along its middle.
+        const auto below = [&](const QImage &image, int margin, int d) {
+            return qAlpha(image.pixel(image.width() / 2, margin + 2 * corner + 3 + d - 1));
+        };
+        const auto above = [&](const QImage &image, int margin, int d) {
+            return qAlpha(image.pixel(image.width() / 2, margin - d));
+        };
+        for (const int d : {2, 6, 12}) {
+            QVERIFY2(below(one, rest, d) > above(one, rest, d), qPrintable(QString::number(d)));
+            QVERIFY2(below(two, raised, d) > below(one, rest, d), qPrintable(QString::number(d)));
+        }
+        QVERIFY(below(four, lifted, 24) > below(two, raised, 24));
+        if (!light) {
+            QVERIFY2(below(one, rest, 2) >= 150, qPrintable(QString::number(below(one, rest, 2))));
+            QVERIFY2(below(one, rest, 12) >= 60, qPrintable(QString::number(below(one, rest, 12))));
+            QVERIFY(rest >= 24);
+        }
+    }
+
+    // The Theme draws with the setting: 8 px by default, even where Hyprland's rounding is 0;
+    // following Omarchy takes Hyprland's (none here, so square).
+    void theThemeDrawsWithTheCornerSetting() {
+        QTemporaryDir dir;
+        Theme theme(dir.path());
+        QCOMPARE(theme.look()->property("corner").toInt(), 8);
+        QSignalSpy changed(&theme, &Theme::changed);
+        theme.setCornerRadius(Settings::followOmarchy);
+        QCOMPARE(theme.look()->property("corner").toInt(), 0);
+        QCOMPARE(changed.count(), 1);
+        theme.setCornerRadius(16);
+        QCOMPARE(theme.look()->property("corner").toInt(), 16);
+        QCOMPARE(theme.look()->property("popupCorner").toInt(), 16);
+        theme.setCornerRadius(16);
+        QCOMPARE(changed.count(), 2);
     }
 };
 

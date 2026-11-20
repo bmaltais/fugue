@@ -5,8 +5,9 @@ Issue #47. Date: 2026-11-19. Status: **approved** by the owner; step 2 built it,
 
 [spec 12](spec.md#12-canvas) fixes how the canvas behaves, and its feel is approved. This document
 fixes how it looks: every size, color, state and motion the restyle (#47 step 2, on top of #16)
-builds. Everything derives from three theme inputs, the palette, `theme.radius` and
+builds. Everything derives from three inputs, the theme's palette, the corner radius setting and
 `theme.textSize`, so it holds on every Omarchy theme, light or dark, with square or round corners.
+#63 (2026-11-20) made corners 8 px by default, retuned the shadows and let every corner resize.
 
 Mockups are in [canvas-look/](canvas-look/): open an `.html` file in a browser and pick a theme and
 radius in the corner. Screenshots of each are in [canvas-look/shots/](canvas-look/shots/).
@@ -21,7 +22,7 @@ contrast table from the installed themes, so the three cannot drift apart.
 | [search.html](canvas-look/search.html) | Node search from Tab, and from a dropped link |
 | [overlay.html](canvas-look/overlay.html) | The `?` shortcuts overlay |
 
-![The canvas on the owner's theme (ethereal), square corners](canvas-look/shots/canvas-ethereal-r0.png)
+![The canvas on the owner's theme (ethereal), 8 px corners (the default)](canvas-look/shots/canvas-ethereal-r8.png)
 
 ## 1. Principles
 
@@ -33,8 +34,10 @@ contrast table from the installed themes, so the three cannot drift apart.
    gently and never fights the type colors.
 3. **One elevation order:** canvas, frame, node, selected node, popup. Dark themes lift a surface
    with a lighter fill; light themes with a white card and a soft shadow.
-4. **Square corners are the main case.** Omarchy's default rounding is 0, and the owner runs it.
-   Every radius is a function of `theme.radius`, and nested radii follow outer = inner + padding.
+4. **Round corners by default, any radius holds.** Corners are 8 px unless the corner radius
+   setting (General page) says otherwise: 0 to 16 px, or "Follow Omarchy" (Hyprland's rounding, 0
+   on Omarchy's default). Every radius is a function of `r`, and nested radii follow
+   outer = inner + padding.
 5. **Calm at rest, rich on intent.** Port marks on widget rows, wire highlights, the cut handle
    and the drag reasons appear on hover, selection or a drag, not all the time.
 6. **Cheap by construction.** A node is a fixed, small set of items; shadows are one shared
@@ -63,10 +66,10 @@ in `u` and in px at `t = 12`; round to whole pixels.
 
 | Name | Value | At t = 12 |
 | --- | --- | --- |
-| `r`, node corner | `min(theme.radius, 8)` | 0 on Omarchy's default |
-| `R`, popup corner | `theme.radius` | 0 |
-| small corner (wells, chips, keycaps) | `min(r, 4)` | 0 |
-| thumbnail corner | `max(0, r − 6)` | 0 |
+| `r`, node corner | the corner radius setting (`corner_radius`, 0 to 16); following Omarchy, `min(theme.radius, 8)` | 8 |
+| `R`, popup corner | the same setting; following Omarchy, `theme.radius` | 8 |
+| small corner (wells, chips, keycaps) | `min(r, 4)` | 4 |
+| thumbnail corner | `max(0, r − 6)` | 2 |
 
 | Role | Size | Weight | Color |
 | --- | --- | --- | --- |
@@ -106,7 +109,8 @@ the mockups use the same.
 
 | Part | Value |
 | --- | --- |
-| Width | default 60u (240), minimum 40u (160), maximum 120u; auto-sized (longer text values widen it) until a resize pins it; a grip in the bottom right corner, 3u square, two short diagonals shown on hover and selection; double-click returns to auto |
+| Width | default 60u (240), minimum 40u (160), maximum 120u; auto-sized (longer text values widen it) until a resize pins it; double-click on a corner returns to auto |
+| Resize | from any of the four corners (as ComfyUI): a square 4u wide (at least 12 screen px) inside each corner, with the matching diagonal resize cursor before the press; a top or left corner moves the node so the opposite corner stays put. The mark: a 1.5 px stroke 3 px inside the edge, concentric with the corner (an L at `r` = 0, an arc of `r` − 3 with short legs beyond), in `label` at 70% in the bottom right corner while the node is hovered or selected, and in `text` in the corner under the pointer or being dragged |
 | Edge | 1 px `hairline` inside the box; `hairline-strong` on hover |
 | Fill | `body` |
 | Corner | `r` (header top corners `r − 1` inside the edge) |
@@ -119,7 +123,7 @@ the mockups use the same.
 | --- | --- |
 | Height | 7u (28) |
 | Fill | `header`; `tint-<role>` when the node has a layout color |
-| Top highlight | dark themes only: a 1 px line of `text` at 6% along the top edge, inside |
+| Top highlight | dark themes only: a 1 px line of `text` at 10% along the top edge, inside, so the card's elevation reads where a shadow on a near-black canvas cannot (#63) |
 | Padding | 3u left, 2.5u right; 1.5u between parts |
 | Kind mark | 8 px: the shape and color of the node's first output type (a sink: its first input); a group shows the layers glyph instead |
 | Title | elides at the right; the display title from layout when set |
@@ -333,11 +337,20 @@ What still falls short, and what covers it:
 | --- | --- | --- | --- |
 | 0 | canvas | `canvas` | `canvas` |
 | 0.5 | frame | `frame-<role>`, no shadow | same |
-| 1 | node at rest | `body` + y 1 blur 2 black 45%, y 4 blur 12 black 30% | `body` + y 1 blur 2 black 7%, y 3 blur 10 black 7% |
-| 2 | node selected or dragged; pills | y 2 blur 6 black 50%, y 12 blur 32 black 45% | y 2 blur 4 black 8%, y 10 blur 28 black 14% |
+| 1 | node at rest | `body` + y 2 blur 4 black 75%, y 8 blur 24 black 65% | `body` + y 1 blur 3 black 12%, y 6 blur 18 black 12% |
+| 2 | node selected; pills | y 3 blur 8 black 80%, y 16 blur 40 black 75% | y 2 blur 5 black 14%, y 12 blur 32 black 18% |
 | 3 | search, overlay, menus, reason chip | `popup` + y 6 blur 16 black 50%, y 20 blur 56 black 55% | `popup` + y 4 blur 10 black 8%, y 18 blur 48 black 20% |
+| 4 | selected nodes while they are dragged | y 4 blur 10 black 80%, y 24 blur 60 black 80% | y 3 blur 8 black 14%, y 20 blur 48 black 24% |
 
-On dark themes the shadow mostly reads as a soft edge; the lighter fill does the lifting.
+Each node level is a tight contact shadow under the edge plus a large soft ambient one, both cast
+downward, and the texture lives in world coordinates, so it grows with the zoom. Retuned in #63:
+ComfyUI's litegraph draws every node, selected or not, on one black 50% shadow offset (2, 2) with
+blur 3, all times the zoom, off in its low quality mode; its Vue nodes use one constant
+`drop-shadow-lg`. Fugue's stays as cheap (one texture per level) and adds elevation: selected
+higher, dragged higher still. On a dark theme black over a near-black canvas only reads when it
+is deep, so the dark values are strong, and the card's top edge carries a 1 px highlight
+(`bevel`, the text color at 10%). [The comparison board](canvas-look/shots/compare-shadows.png)
+shows the shadows before and after on two dark themes and a light one.
 
 Spec 12.1 rules out costly effects on nodes at scale. A shadow here is not an effect: it is one
 pre-painted texture shared by every node, drawn in one batch, off below the readable zoom, with a
@@ -357,7 +370,11 @@ the node plus the blur margin. All nodes at one level share one texture.
 - Budget: the shadow layer adds at most 1 ms of render-thread time at 300 nodes, measured with
   `QSG_RENDER_TIMING=1` as in spike 05. If it costs more, drop level 1 and keep level 2 for the
   selection only. Measured after step 2 (`test_canvas_window benchmark`, 302 nodes, 600 wires,
-  RTX 3090): 0.45 ms at most, so nodes at rest keep their shadow.
+  RTX 3090): 0.45 ms at most, so nodes at rest keep their shadow. After #63's larger shadows and
+  8 px corners: 0.16 to 0.31 ms while dragging (three runs), nothing measurable while panning.
+- The texture is painted around a box wider than its blur and cut down to the 9-slice, so its
+  stretched middle is as dark as a real node's; the blur is three box blurs (Kovesi), a few
+  milliseconds for all four levels on a theme or setting change.
 
 ## 8. Wires
 
@@ -422,7 +439,7 @@ Glyphs are [Lucide](https://lucide.dev) icons (ISC license), bundled as a subset
 | --- | --- | --- | --- | --- | --- | --- |
 | Cached (default) | `hairline` | `header` | `check`, `label` | time taken (`6.2 s`) | 1 | the quiet case: most nodes look like this |
 | Hover | `hairline-strong` | | | | 1 | widget port marks appear |
-| Selected | 2 px `accent` ring outside a 2 px gap, its outer corner `r + 4` (0 when `r` is 0) | | | | 1 | shadow level 2; attached wires highlight |
+| Selected | 2 px `accent` ring outside a 2 px gap, its outer corner `r + 4` (0 when `r` is 0) | | | | 1 | shadow level 2 (level 4 while dragged); attached wires highlight |
 | Stale (would run) | `hairline` | | `refresh-cw`, `label` | none | 1 | |
 | Running | `accent`, its opacity pulsing 1 to 0.45 | progress bar | `loader-circle`, rotating | percent | 1 | dots travel the incoming wires |
 | Frozen | `hairline` | | `snowflake`, `text` | "Frozen" | 1 | |
@@ -622,4 +639,5 @@ python3 docs/canvas-look/derive.py --write    # refresh tokens and shared code i
 
 The mockups' shared CSS and JavaScript live in `canvas-look/src/`; `--write` inlines them so each
 `.html` file stays self-contained. Screenshots: headless Chromium at 1600 × 1000,
-`file://…/canvas.html#theme=ethereal&r=0&shot`.
+`file://…/canvas.html#theme=ethereal&r=8&shot` (`r` is the corner radius setting, 8 when left out).
+The real window's screenshots: `FUGUE_LOOK_SHOTS=<folder> QT_QUICK_BACKEND=rhi build/test_canvas_look screenshots`.

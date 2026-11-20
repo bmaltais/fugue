@@ -94,6 +94,27 @@ private slots:
         QVERIFY(!checkSetting("no_such_setting", 1).isEmpty());
     }
 
+    // The canvas corners (#63): 8 px unless set, any whole number of px from 0 to 16, or
+    // "omarchy" to follow Hyprland's rounding as Fugue did before.
+    void theCornerRadiusIsFixedOrFollowsOmarchy() {
+        QTemporaryDir dir;
+        QCOMPARE(readSettings(dir.filePath("settings.json")).settings.cornerRadius, 8);
+        QCOMPARE(settingDefault("corner_radius"), QJsonValue(8));
+        for (const QJsonValue &good : {QJsonValue(0), QJsonValue(12), QJsonValue(16), QJsonValue("omarchy")})
+            QCOMPARE(checkSetting("corner_radius", good), QString());
+        for (const QJsonValue &bad : {QJsonValue(-1), QJsonValue(17), QJsonValue(8.5), QJsonValue("round"), QJsonValue(true)})
+            QVERIFY(!checkSetting("corner_radius", bad).isEmpty());
+
+        write(dir.filePath("settings.json"), R"({"corner_radius": 12})");
+        QCOMPARE(readSettings(dir.filePath("settings.json")).settings.cornerRadius, 12);
+        write(dir.filePath("settings.json"), R"({"corner_radius": "omarchy"})");
+        QCOMPARE(readSettings(dir.filePath("settings.json")).settings.cornerRadius, Settings::followOmarchy);
+        write(dir.filePath("settings.json"), R"({"corner_radius": 40})");
+        const SettingsFile bad = readSettings(dir.filePath("settings.json"));
+        QCOMPARE(bad.problems.size(), 1);
+        QCOMPARE(bad.settings.cornerRadius, 8);
+    }
+
     void changingOneKeepsTheKeysItDoesNotKnow() {
         QTemporaryDir dir;
         const QString path = dir.filePath("fugue/settings.json");

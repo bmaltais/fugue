@@ -17,6 +17,8 @@
 // | pack_paths       | extra pack search paths (6.5)            | []                       |
 // | new_seed         | "random" or "fixed": new seed widgets    | "random"                 |
 // | embed_workflow   | "full", "no-prompts" or "none" (11.7)    | "full"                   |
+// | corner_radius    | canvas corners, 0 to 16 px, or "omarchy" | 8                        |
+//                      to follow Hyprland's rounding (#63)
 
 #include <QJsonObject>
 #include <QJsonValue>
@@ -36,6 +38,8 @@ struct Settings {
     QStringList packPaths;
     QString newSeed = QStringLiteral("random");
     QString embedWorkflow = QStringLiteral("full");
+    static constexpr int followOmarchy = -1;
+    int cornerRadius = 8; // px, or followOmarchy
 };
 
 // What a settings.json holds.

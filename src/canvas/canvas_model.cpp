@@ -1403,7 +1403,7 @@ std::pair<qreal, qreal> CanvasModel::pinnedSize(const QJsonObject &entry) const 
 
 // --- resizing (#49) ----------------------------------------------------------------
 
-QString CanvasModel::resizeGripAt(qreal x, qreal y, qreal size) const {
+QVariantMap CanvasModel::resizeCornerAt(qreal x, qreal y, qreal size) const {
     const QString id = nodeAt(x, y);
     if (id.isEmpty())
         return {};
@@ -1411,10 +1411,14 @@ QString CanvasModel::resizeGripAt(qreal x, qreal y, qreal size) const {
     if (row.collapsed)
         return {};
     const qreal reach = std::min({size, row.width / 2, row.height / 2});
-    return x >= row.pos.x() + row.width - reach && y >= row.pos.y() + row.height - reach ? id : QString();
+    const bool west = x < row.pos.x() + reach, east = x >= row.pos.x() + row.width - reach;
+    const bool north = y < row.pos.y() + reach, south = y >= row.pos.y() + row.height - reach;
+    if (!(west || east) || !(north || south))
+        return {};
+    return {{"node", id}, {"corner", QString(north ? "n" : "s") + (west ? "w" : "e")}};
 }
 
-void CanvasModel::beginResize(const QString &node) {
+void CanvasModel::beginResize(const QString &node, const QString &corner) {
     if (m_resizeOpen)
         endResize();
     const int r = rowOf(node);
@@ -1424,7 +1428,9 @@ void CanvasModel::beginResize(const QString &node) {
     m_resizeOpen = true;
     const NodeRow &row = m_rows[size_t(r)];
     m_resizeNode = node;
-    m_resizeStart = QSizeF(row.width, row.height);
+    m_resizeWest = corner.endsWith('w');
+    m_resizeNorth = corner.startsWith('n');
+    m_resizeStart = QRectF(row.pos, QSizeF(row.width, row.height));
     m_resizeWasSized = row.sized;
     m_resizeWasWidth = row.width;
     m_resizeWasHeight = row.pinnedHeight;
@@ -1441,13 +1447,21 @@ void CanvasModel::resizeBy(qreal dx, qreal dy) {
         row.pinnedHeight = m_resizeWasHeight;
     } else {
         row.sized = true;
-        row.width = std::round(std::clamp(m_resizeStart.width() + dx, minWidth(), maxWidth()));
-        row.pinnedHeight = std::round(m_resizeStart.height() + dy);
+        row.width = std::round(std::clamp(m_resizeStart.width() + (m_resizeWest ? -dx : dx), minWidth(), maxWidth()));
+        row.pinnedHeight = std::round(m_resizeStart.height() + (m_resizeNorth ? -dy : dy));
     }
     row.pinnedOver = 0; // pinned over the content as it is now
     relayOut(r, {}, true);
     if (row.pinnedHeight > 0)
         row.pinnedHeight = std::round(row.height); // never stored below what the content needs
+    // The opposite corner stays where it was, whatever size the limits allowed.
+    const QPointF pos(m_resizeWest ? m_resizeStart.right() - row.width : m_resizeStart.x(),
+                      m_resizeNorth ? m_resizeStart.bottom() - row.height : m_resizeStart.y());
+    if (pos != row.pos) {
+        row.pos = pos;
+        emitNodeChanged(r, {NodeList::X, NodeList::Y});
+        refreshLinksOf(row.id);
+    }
 }
 
 void CanvasModel::endResize() {

@@ -168,6 +168,55 @@ Popup {
                         }
                     }
                     SettingsParts.Setting {
+                        id: corners
+                        readonly property int radius: panel.model.cornerRadius // -1: follow Omarchy
+                        visible: panel.page === 0
+                        title: qsTr("Corner radius")
+                        note: radius < 0 ? qsTr("Nodes, menus and popups follow Omarchy's window rounding.")
+                                         : qsTr("Nodes, menus and popups are rounded by this much.")
+                        Flow {
+                            Layout.fillWidth: true
+                            spacing: 2 * panel.u
+                            Choices {
+                                name: "corner"
+                                current: corners.radius < 0 ? "omarchy" : "fixed"
+                                options: [{value: "fixed", text: qsTr("Fixed")}, {value: "omarchy", text: qsTr("Follow Omarchy")}]
+                                onPicked: value => panel.apply(panel.model.set("corner_radius",
+                                    value === "omarchy" ? "omarchy" : corners.radius >= 0 ? corners.radius : 8))
+                            }
+                            Row {
+                                visible: corners.radius >= 0
+                                spacing: panel.u
+                                SettingsParts.SmallButton {
+                                    objectName: "cornerLess"
+                                    text: "\u2212"
+                                    Accessible.name: qsTr("Less round")
+                                    enabled: corners.radius > 0
+                                    opacity: enabled ? 1 : 0.5
+                                    onClicked: panel.apply(panel.model.set("corner_radius", corners.radius - 1))
+                                }
+                                Text {
+                                    objectName: "cornerValue"
+                                    width: 10 * panel.u
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    horizontalAlignment: Text.AlignHCenter
+                                    text: qsTr("%1 px").arg(corners.radius)
+                                    color: panel.look.text
+                                    font.pixelSize: panel.look.labelSize
+                                    font.features: { "tnum": 1 }
+                                }
+                                SettingsParts.SmallButton {
+                                    objectName: "cornerMore"
+                                    text: "+"
+                                    Accessible.name: qsTr("Rounder")
+                                    enabled: corners.radius < 16
+                                    opacity: enabled ? 1 : 0.5
+                                    onClicked: panel.apply(panel.model.set("corner_radius", corners.radius + 1))
+                                }
+                            }
+                        }
+                    }
+                    SettingsParts.Setting {
                         visible: panel.page === 0
                         title: qsTr("Language")
                         note: qsTr("Follows Omarchy's language unless you pick one here.")
@@ -309,7 +358,7 @@ Popup {
                     SettingsParts.Setting {
                         visible: panel.page === 5
                         title: qsTr("Theme")
-                        note: qsTr("Fugue follows the Omarchy theme, its corner radius and the desktop text size. Change them in Omarchy.")
+                        note: qsTr("Fugue follows the Omarchy theme and the desktop text size. Change them in Omarchy. The canvas corners are set on the General page.")
                         GridLayout {
                             Layout.fillWidth: true
                             columns: 2
@@ -321,7 +370,7 @@ Popup {
                                 color: panel.look.text
                                 font.pixelSize: panel.look.textSize
                             }
-                            Text { text: qsTr("Corner radius"); color: panel.look.label; font.pixelSize: panel.look.labelSize }
+                            Text { text: qsTr("Window rounding"); color: panel.look.label; font.pixelSize: panel.look.labelSize }
                             Text { text: App.theme.radius; color: panel.look.text; font.pixelSize: panel.look.textSize }
                             Text { text: qsTr("Text size"); color: panel.look.label; font.pixelSize: panel.look.labelSize }
                             Text { text: App.theme.textSize; color: panel.look.text; font.pixelSize: panel.look.textSize }

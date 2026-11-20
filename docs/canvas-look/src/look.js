@@ -162,10 +162,10 @@ const LOOK = (() => {
   function applyHash() {
     const h = new URLSearchParams(location.hash.slice(1));
     const theme = THEMES.includes(h.get("theme")) ? h.get("theme") : "ethereal";
-    const r = h.has("r") ? parseInt(h.get("r"), 10) : 0;
+    const r = h.has("r") ? parseInt(h.get("r"), 10) : 8; // the corner_radius setting (#63)
     document.documentElement.dataset.theme = theme;
     document.documentElement.dataset.mode = LIGHT[theme] ? "light" : "dark";
-    document.documentElement.style.setProperty("--r", Math.min(r, 8) + "px");
+    document.documentElement.style.setProperty("--r", r + "px");
     document.documentElement.style.setProperty("--R", r + "px");
     document.body.classList.toggle("shot", h.has("shot"));
     return { theme, r };
@@ -175,7 +175,7 @@ const LOOK = (() => {
     const el = document.createElement("div");
     el.className = "switcher";
     el.innerHTML = `<select id="th">${THEMES.map(t => `<option ${t === s.theme ? "selected" : ""}>${t}</option>`).join("")}</select>` +
-      `<select id="rd">${[0, 4, 8, 12].map(v => `<option value="${v}" ${v === s.r ? "selected" : ""}>radius ${v}</option>`).join("")}</select>`;
+      `<select id="rd">${[0, 4, 8, 12, 16].map(v => `<option value="${v}" ${v === s.r ? "selected" : ""}>radius ${v}</option>`).join("")}</select>`;
     document.body.appendChild(el);
     const go = () => { location.hash = `theme=${el.querySelector("#th").value}&r=${el.querySelector("#rd").value}`; };
     el.querySelector("#th").onchange = go;

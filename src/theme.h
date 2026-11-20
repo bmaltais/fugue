@@ -25,7 +25,9 @@
 //                         "image", "video", "audio"; anything else, a declared
 //                         type, gets "declared"); portColors is the whole map.
 //                         Color is never the only signal (spec 12.6)
-//   radius                corner radius in px (Hyprland rounding)
+//   radius                Hyprland's window rounding in px; the canvas surfaces draw
+//                         with look.corner and look.popupCorner instead, which follow
+//                         the corner_radius setting (8 px unless set, #63)
 //   textSize              desktop base text size in px (12 by default);
 //                         derive other sizes from it, e.g. textSize * 1.2
 //   light                 true on a light theme
@@ -77,6 +79,9 @@ public:
     // (docs/canvas-look.md 6.2).
     Q_INVOKABLE QColor portColor(const QString &type) const;
     CanvasLook *look() const { return m_look; }
+    // settings.json's corner_radius: px, or Settings::followOmarchy (look::corners).
+    void setCornerRadius(int setting);
+    int cornerRadius() const { return m_cornerSetting; }
     // A straight sRGB blend, `toB` of the way from a to b.
     static QColor mix(const QColor &a, const QColor &b, double toB);
 
@@ -106,6 +111,7 @@ private:
     QTimer m_debounce;
     QString m_hyprctl;
     int m_radius = 0;
+    int m_cornerSetting = 8;
     bool m_roundingAgain = false;
     QProcess m_roundingProcess;
     QTimer m_roundingTimeout;

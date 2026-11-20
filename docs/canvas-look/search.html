@@ -16,7 +16,7 @@
   --well: #0f1223;
   --dot: #262431;
   --dot-major: #3d363d;
-  --bevel: rgba(255, 206, 173, 0.06);
+  --bevel: rgba(255, 206, 173, 0.1);
   --scrim: rgba(0, 0, 0, 0.45);
   --text: #ffcead;
   --accent: #7d82d9;
@@ -61,9 +61,10 @@
   --role-blue: #7d82d9;
   --role-magenta: #c89dc1;
   --role-cyan: #a3bfd1;
-  --shadow-1: 0 1px 2px rgba(0,0,0,.45), 0 4px 12px rgba(0,0,0,.30);
-  --shadow-2: 0 2px 6px rgba(0,0,0,.50), 0 12px 32px rgba(0,0,0,.45);
+  --shadow-1: 0 2px 4px rgba(0,0,0,.75), 0 8px 24px rgba(0,0,0,.65);
+  --shadow-2: 0 3px 8px rgba(0,0,0,.80), 0 16px 40px rgba(0,0,0,.75);
   --shadow-3: 0 6px 16px rgba(0,0,0,.50), 0 20px 56px rgba(0,0,0,.55);
+  --shadow-4: 0 4px 10px rgba(0,0,0,.80), 0 24px 60px rgba(0,0,0,.80);
 }
 [data-theme="tokyo-night"] {
   color-scheme: dark;
@@ -75,7 +76,7 @@
   --well: #1f202c;
   --dot: #2d2f3d;
   --dot-major: #393c4d;
-  --bevel: rgba(169, 177, 214, 0.06);
+  --bevel: rgba(169, 177, 214, 0.1);
   --scrim: rgba(0, 0, 0, 0.45);
   --text: #a9b1d6;
   --accent: #7aa2f7;
@@ -120,9 +121,10 @@
   --role-blue: #7aa2f7;
   --role-magenta: #ad8ee6;
   --role-cyan: #449dab;
-  --shadow-1: 0 1px 2px rgba(0,0,0,.45), 0 4px 12px rgba(0,0,0,.30);
-  --shadow-2: 0 2px 6px rgba(0,0,0,.50), 0 12px 32px rgba(0,0,0,.45);
+  --shadow-1: 0 2px 4px rgba(0,0,0,.75), 0 8px 24px rgba(0,0,0,.65);
+  --shadow-2: 0 3px 8px rgba(0,0,0,.80), 0 16px 40px rgba(0,0,0,.75);
   --shadow-3: 0 6px 16px rgba(0,0,0,.50), 0 20px 56px rgba(0,0,0,.55);
+  --shadow-4: 0 4px 10px rgba(0,0,0,.80), 0 24px 60px rgba(0,0,0,.80);
 }
 [data-theme="rose-pine"] {
   color-scheme: light;
@@ -179,9 +181,10 @@
   --role-blue: #56949f;
   --role-magenta: #907aa9;
   --role-cyan: #d7827e;
-  --shadow-1: 0 1px 2px rgba(0,0,0,.07), 0 3px 10px rgba(0,0,0,.07);
-  --shadow-2: 0 2px 4px rgba(0,0,0,.08), 0 10px 28px rgba(0,0,0,.14);
+  --shadow-1: 0 1px 3px rgba(0,0,0,.12), 0 6px 18px rgba(0,0,0,.12);
+  --shadow-2: 0 2px 5px rgba(0,0,0,.14), 0 12px 32px rgba(0,0,0,.18);
   --shadow-3: 0 4px 10px rgba(0,0,0,.08), 0 18px 48px rgba(0,0,0,.20);
+  --shadow-4: 0 3px 8px rgba(0,0,0,.14), 0 20px 48px rgba(0,0,0,.24);
 }
 [data-theme="flexoki-light"] {
   color-scheme: light;
@@ -238,9 +241,10 @@
   --role-blue: #205ea6;
   --role-magenta: #ce5d97;
   --role-cyan: #3aa99f;
-  --shadow-1: 0 1px 2px rgba(0,0,0,.07), 0 3px 10px rgba(0,0,0,.07);
-  --shadow-2: 0 2px 4px rgba(0,0,0,.08), 0 10px 28px rgba(0,0,0,.14);
+  --shadow-1: 0 1px 3px rgba(0,0,0,.12), 0 6px 18px rgba(0,0,0,.12);
+  --shadow-2: 0 2px 5px rgba(0,0,0,.14), 0 12px 32px rgba(0,0,0,.18);
   --shadow-3: 0 4px 10px rgba(0,0,0,.08), 0 18px 48px rgba(0,0,0,.20);
+  --shadow-4: 0 3px 8px rgba(0,0,0,.14), 0 20px 48px rgba(0,0,0,.24);
 }
 [data-theme="white"] {
   color-scheme: light;
@@ -297,19 +301,20 @@
   --role-blue: #1a1a1a;
   --role-magenta: #2e2e2e;
   --role-cyan: #3e3e3e;
-  --shadow-1: 0 1px 2px rgba(0,0,0,.07), 0 3px 10px rgba(0,0,0,.07);
-  --shadow-2: 0 2px 4px rgba(0,0,0,.08), 0 10px 28px rgba(0,0,0,.14);
+  --shadow-1: 0 1px 3px rgba(0,0,0,.12), 0 6px 18px rgba(0,0,0,.12);
+  --shadow-2: 0 2px 5px rgba(0,0,0,.14), 0 12px 32px rgba(0,0,0,.18);
   --shadow-3: 0 4px 10px rgba(0,0,0,.08), 0 18px 48px rgba(0,0,0,.20);
+  --shadow-4: 0 3px 8px rgba(0,0,0,.14), 0 20px 48px rgba(0,0,0,.24);
 }
 /* tokens:end */
 /* look-css:begin (src/look.css, inlined by derive.py --write) */
 /* Shared mockup styles for docs/canvas-look/*.html; derive.py --write inlines this file.
    Every value here is the spec's (docs/canvas-look.md): t = 12 px text size, u = t / 3 = 4 px,
-   r = min(theme radius, 8). Colors come only from the generated [data-theme] tokens. */
+   r = the corner_radius setting (8 px unless set, #63). Colors come only from the generated [data-theme] tokens. */
 :root {
   --t: 12px;
-  --r: 0px;           /* node, frame and chip corner: min(theme.radius, 8) */
-  --R: 0px;           /* window-level surfaces (popups, overlay): theme.radius, uncapped */
+  --r: 8px;           /* node, frame and chip corner: the corner_radius setting */
+  --R: 8px;           /* window-level surfaces (popups, overlay): the same setting */
   --font: "Liberation Sans", "Noto Sans", sans-serif; /* what Qt resolves sans-serif to here */
 }
 * { box-sizing: border-box; }
@@ -369,6 +374,14 @@ svg.wires.over { z-index: 30; }
 }
 .node.hover { border-color: var(--hairline-strong); }
 .node.sel { box-shadow: var(--shadow-2); outline: 2px solid var(--accent); outline-offset: 2px; z-index: 12; }
+/* the resize mark (#63): 3 px inside the bottom right corner, concentric with it, on hover and
+   selection (every corner resizes; the one under the pointer shows its own mark, in --text) */
+.node.hover:not(.collapsed)::after, .node.sel:not(.collapsed)::after {
+  content: ""; position: absolute; right: 3px; bottom: 3px; pointer-events: none; opacity: .7;
+  width: calc(max(0px, var(--r) - 3px) + max(3px, 9px - max(0px, var(--r) - 3px)));
+  height: calc(max(0px, var(--r) - 3px) + max(3px, 9px - max(0px, var(--r) - 3px)));
+  border: solid var(--label); border-width: 0 1.5px 1.5px 0; border-bottom-right-radius: max(0px, calc(var(--r) - 3px));
+}
 .node .hd {
   position: relative; height: 28px; display: flex; align-items: center; gap: 6px; padding: 0 10px 0 12px;
   background: var(--header); border-radius: calc(var(--r) - 1px) calc(var(--r) - 1px) 0 0;
@@ -746,10 +759,10 @@ const LOOK = (() => {
   function applyHash() {
     const h = new URLSearchParams(location.hash.slice(1));
     const theme = THEMES.includes(h.get("theme")) ? h.get("theme") : "ethereal";
-    const r = h.has("r") ? parseInt(h.get("r"), 10) : 0;
+    const r = h.has("r") ? parseInt(h.get("r"), 10) : 8; // the corner_radius setting (#63)
     document.documentElement.dataset.theme = theme;
     document.documentElement.dataset.mode = LIGHT[theme] ? "light" : "dark";
-    document.documentElement.style.setProperty("--r", Math.min(r, 8) + "px");
+    document.documentElement.style.setProperty("--r", r + "px");
     document.documentElement.style.setProperty("--R", r + "px");
     document.body.classList.toggle("shot", h.has("shot"));
     return { theme, r };
@@ -759,7 +772,7 @@ const LOOK = (() => {
     const el = document.createElement("div");
     el.className = "switcher";
     el.innerHTML = `<select id="th">${THEMES.map(t => `<option ${t === s.theme ? "selected" : ""}>${t}</option>`).join("")}</select>` +
-      `<select id="rd">${[0, 4, 8, 12].map(v => `<option value="${v}" ${v === s.r ? "selected" : ""}>radius ${v}</option>`).join("")}</select>`;
+      `<select id="rd">${[0, 4, 8, 12, 16].map(v => `<option value="${v}" ${v === s.r ? "selected" : ""}>radius ${v}</option>`).join("")}</select>`;
     document.body.appendChild(el);
     const go = () => { location.hash = `theme=${el.querySelector("#th").value}&r=${el.querySelector("#rd").value}`; };
     el.querySelector("#th").onchange = go;

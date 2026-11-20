@@ -1,8 +1,8 @@
 #pragma once
 
 // The canvas look (docs/canvas-look.md): every color, size and shadow the canvas, node search
-// and the `?` overlay draw with, derived from three theme inputs (the palette, the corner
-// radius and the text size), so it holds on every Omarchy theme, light or dark.
+// and the `?` overlay draw with, derived from three inputs (the theme's palette, the corner
+// radius setting and the desktop text size), so it holds on every Omarchy theme, light or dark.
 //
 // The color rules are docs/canvas-look/derive.py's, which is the reference: tests compare the
 // two (tests/canvas/test_look_tokens.cpp). Change both together.
@@ -69,10 +69,20 @@ RoleTokens roleTokens(const Tokens &tokens, const QColor &role, const QColor &te
 QHash<QString, QColor> portColors(const QHash<QString, QColor> &colors, bool light, const Tokens &tokens,
                                   bool *mono = nullptr);
 
+// --- corners (3) ---
+
+// The node corner r and the popup corner R. `setting` is settings.json's corner_radius (#63):
+// a fixed radius in px for both, or Settings::followOmarchy for Hyprland's rounding `omarchy`,
+// as before the setting: R is the rounding and r is held to 8.
+struct Corners {
+    int node = 0, popup = 0;
+};
+Corners corners(int setting, int omarchy);
+
 // --- shadows (7) ---
 
-// One elevation level's shadow (1: node, 2: selected node and pills, 3: popups) for a box with
-// this corner, painted once: a 9-slice whose middle is the box. `margin` is how far it reaches
+// One elevation level's shadow (1: node, 2: selected node and pills, 3: popups, 4: a node being
+// dragged) for a box with this corner, painted once: a 9-slice whose middle is the box. `margin` is how far it reaches
 // past the box on every side; the 9-slice borders are margin + corner + 1.
 QImage shadowImage(int level, int corner, bool light, int *margin);
 
@@ -126,12 +136,13 @@ class CanvasLook : public QObject {
     Q_PROPERTY(int resultSize MEMBER m_resultSize NOTIFY changed)
     Q_PROPERTY(int overlayTitleSize MEMBER m_overlayTitleSize NOTIFY changed)
 
-    // Shadows (7): one 9-slice texture per level, shared by everything at that level. Levels 1
-    // and 2 have the node corner, level 3 the popup corner. shadowMargins[level - 1] is how far
-    // each reaches past its box; its 9-slice border is that plus the corner plus 1.
+    // Shadows (7): one 9-slice texture per level, shared by everything at that level. Levels 1,
+    // 2 and 4 have the node corner, level 3 the popup corner. shadowMargins[level - 1] is how
+    // far each reaches past its box; its 9-slice border is that plus the corner plus 1.
     Q_PROPERTY(QString shadow1 MEMBER m_shadow1 NOTIFY changed)
     Q_PROPERTY(QString shadow2 MEMBER m_shadow2 NOTIFY changed)
     Q_PROPERTY(QString shadow3 MEMBER m_shadow3 NOTIFY changed)
+    Q_PROPERTY(QString shadow4 MEMBER m_shadow4 NOTIFY changed)
     Q_PROPERTY(QVariantList shadowMargins MEMBER m_shadowMargins NOTIFY changed)
 
     // Glyphs (16): Lucide icons as a font, drawn with Text { font.family: theme.look.iconFont;
@@ -142,7 +153,7 @@ public:
     explicit CanvasLook(QObject *parent = nullptr);
 
     // Recomputes everything; `colors` has Theme's fallbacks applied.
-    void update(const QHash<QString, QColor> &colors, bool light, int radius, int textSize);
+    void update(const QHash<QString, QColor> &colors, bool light, fugue::look::Corners corners, int textSize);
 
     // A layout color (spec 4.5: a theme role, a palette name such as "blue" or a semantic one
     // such as "accent" or "muted") as {frame, frameEdge, frameTitle, tint}; an unknown role is
@@ -177,6 +188,6 @@ private:
     int m_corner = 0, m_popupCorner = 0, m_smallCorner = 0, m_thumbCorner = 0;
     int m_labelSize = 11, m_captionSize = 10, m_frameTitleSize = 16, m_searchFieldSize = 15, m_resultSize = 13,
         m_overlayTitleSize = 18;
-    QString m_shadow1, m_shadow2, m_shadow3;
+    QString m_shadow1, m_shadow2, m_shadow3, m_shadow4;
     QVariantList m_shadowMargins;
 };
