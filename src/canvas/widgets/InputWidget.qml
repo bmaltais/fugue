@@ -343,30 +343,38 @@ Rectangle {
         // Grouped by provider instance (this machine, a paired host), each under its name. A
         // model that is not ready says so, and its note says how to make it ready: Fugue never
         // starts one by itself (8.4). Then the files on disk, under the folder each is in.
-        // A text encoder, VAE or LoRA of a picked diffusion model (#85, #86): the files that fit
-        // it first, under their folders, then the other files under one "Other" heading, those that
-        // do not fit dimmed (one whose header tells nothing is not). Offered models keep their
-        // place.
+        // Judged files (#85, #86): for a text encoder, VAE or LoRA of a picked diffusion model,
+        // those that fit it first under "Fits <model>", the others under "Other", dimmed when
+        // they do not fit (one whose header tells nothing is not); for a diffusion model, the
+        // files the helper cannot load under "Other", dimmed, with why. Offered models keep
+        // their place.
         let listed = edits.models(nodeId, name)
-        const fitsKnown = listed.some(m => m.fits !== undefined)
-        const isOther = m => fitsKnown && m.path !== undefined && m.fits !== true
-        if (fitsKnown)
-            listed = listed.filter(m => !isOther(m)).concat(listed.filter(isOther))
+        const fitsFor = edits.fitsModel(nodeId, name)
+        const anyFits = listed.some(m => m.fits === true)
+        const isOther = m => m.path !== undefined && (anyFits ? m.fits !== true : m.fits === false)
+        listed = listed.filter(m => !isOther(m)).concat(listed.filter(isOther))
         let group = null
         let other = false
+        let fitsShown = false
         for (const m of listed) {
             if (isOther(m) && !other) {
                 other = true
                 entries.push({ text: qsTr("Other"), heading: true, enabled: false })
             }
+            if (anyFits && m.fits === true && !fitsShown) {
+                fitsShown = true
+                group = m.folder // one heading for them all
+                entries.push({ text: qsTr("Fits %1").arg(fitsFor), heading: true, enabled: false })
+            }
             const heading = m.path !== undefined ? m.folder : m.provider
-            if (heading !== group && !other) {
+            if (heading !== group && !other && !(anyFits && m.fits === true)) {
                 group = heading
                 entries.push({ text: heading, heading: true, enabled: false })
             }
             if (m.path !== undefined) {
                 // The file a stored handle names is the one with its hash, not only its name.
                 entries.push({ text: m.title, detail: sizeText(m.size), value: { disk: m.path }, dim: m.fits === false,
+                               note: m.fitNote,
                                checked: currentHash !== undefined && m.handle.hash === currentHash })
                 continue
             }

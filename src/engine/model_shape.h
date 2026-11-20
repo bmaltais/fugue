@@ -25,6 +25,20 @@
 //
 // A LoRA fits a model whose layers it changes are there with the same input widths (loraFits).
 //
+// A LoRA that changes a layer of a block family the model has, at an index it does not (FLUX.1's
+// double_blocks.18 on Klein 4B, as wide but shallower), does not fit either.
+//
+// A LoRA none of whose layers is found in the model, under any naming, does not fit when it is
+// for a UNet and the model is not (or the other way round), or when most of its layers take a
+// width the model's blocks do not (a 3072-wide FLUX.1 LoRA on the 4096-wide Klein 9B).
+//
+// Families and formats, from tensor names too: an LLM encoder is Qwen3 (q_norm in its
+// attention), Qwen3.5 (linear_attn layers) or Qwen2.5 (neither); Z-Image and FLUX.2 read Qwen3,
+// Qwen-Image Qwen2.5-VL, so another family does not fit. A file in a quantization
+// stable-diffusion.cpp cannot load fits nothing: ComfyUI's mixed quantization (comfy_quant
+// tensors: int8 ConvRot, fp8mixed; the helper aborts on them), GPTQ (weight_codebook), SVDQuant
+// (Nunchaku: qweight with proj_down), AWQ (qweight with scaled_zeros).
+//
 // What a file is (ModelShape::kind): a LoRA by its low-rank tensors (lora_A/lora_B, lora_up/
 // lora_down, LoKr, LoHa), a checkpoint by a diffusion model and a VAE decoder in one file, else
 // a diffusion model, a VAE or a text encoder by the figures above.
@@ -36,6 +50,7 @@
 
 #include <QHash>
 #include <QMutex>
+#include <QSet>
 #include <QString>
 
 #include <optional>
@@ -64,6 +79,24 @@ struct ModelShape {
         bool operator==(const Widths &other) const { return in == other.in && out == other.out; }
     };
     QHash<QString, Widths> layers;
+    // A diffusion model's layer keys with every number "#" (double.blocks.#.img.attn.proj): a
+    // LoRA's layer of such a family at an index the model lacks is for a deeper model.
+    QSet<QString> layerFamilies;
+    // A LoRA named as ComfyUI saves one (diffusion_model.<layer>), which stable-diffusion.cpp
+    // applies as it is: none of its layers in a model means it is for another model.
+    bool nativeLoraNames = false;
+    // Whether a diffusion model is a UNet (SD 1.5, SDXL: input_blocks, down_blocks) or a LoRA
+    // changes one; nothing when not told.
+    std::optional<bool> unet;
+    // A transformer diffusion model's block width (its image projection's output), or the width
+    // most of a LoRA's layers take; nothing when not told.
+    std::optional<int> hidden;
+    // A language model text encoder's family ("qwen3", "qwen3.5", "qwen2.5"), or the one a
+    // diffusion model reads; empty when not known.
+    QString llmFamily;
+    // The quantization stable-diffusion.cpp has no kernels for that the file is in ("ComfyUI
+    // mixed quantization", "GPTQ"); empty when it can load it.
+    QString unloadable;
 };
 
 // What a file is, as a pack.json resource type names the files it holds ("files", 6.4):
@@ -79,6 +112,8 @@ inline constexpr int kLoraLayersKept = 64;
 // suffix (.weight, .lora_A.weight, ...), every run of "." and "_" one ".", so kohya's
 // lora_unet_double_blocks_0_x and double_blocks.0.x meet, and blocks.1.10 is not blocks.11.0.
 QString layerKey(const QString &tensorName);
+// layerKey() with every number "#": the family a layer belongs to.
+QString layerFamily(const QString &key);
 
 // The shape of the file at `path`; nothing when it is neither GGUF nor safetensors or cannot be
 // read. Reads only the header (megabytes at most, for a tokenizer held in GGUF metadata).

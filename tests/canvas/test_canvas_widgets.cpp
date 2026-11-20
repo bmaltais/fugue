@@ -622,7 +622,7 @@ private slots:
             }
             return out;
         };
-        QTRY_COMPARE(rows(), (QStringList{"# " + models.filePath("text_encoders"), "qwen_3_8b.safetensors", "# Other",
+        QTRY_COMPARE(rows(), (QStringList{"# Fits klein9b.safetensors", "qwen_3_8b.safetensors", "# Other",
                                           "mystery.safetensors", "qwen_3_4b.safetensors (dim)", "t5xxl.safetensors (dim)",
                                           "Type a name…"}));
         app.key(Qt::Key_Return); // the first is the one that fits
@@ -678,9 +678,61 @@ private slots:
             }
             return out;
         };
-        QTRY_COMPARE(rows(), (QStringList{"# " + models.filePath("loras"), "b-klein9b.safetensors", "# Other",
+        QTRY_COMPARE(rows(), (QStringList{"# Fits klein9b.safetensors", "b-klein9b.safetensors", "# Other",
                                           "a-klein4b.safetensors (dim)", "Type a name…"}));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // By hand, against a real models folder (#85, #86): FUGUE_REAL_MODELS=<folders, ":" between>
+    // and FUGUE_REAL_DIFFUSION=<a diffusion model's file name>:<its sha256> open Load Models and an
+    // Apply LoRA wired from it, then each picker; every row is logged, and with FUGUE_REAL_SHOTS=<a
+    // folder> each open menu is saved as a PNG there.
+    void realModelPickersByHand() {
+        const QString roots = qEnvironmentVariable("FUGUE_REAL_MODELS");
+        const QStringList diffusion = qEnvironmentVariable("FUGUE_REAL_DIFFUSION").split(':');
+        if (roots.isEmpty() || diffusion.size() != 2)
+            QSKIP("set FUGUE_REAL_MODELS and FUGUE_REAL_DIFFUSION to look at real model folders");
+        const QByteArray document = R"({"fugue": 1,
+          "graph": {"nodes": {
+            "models": {"type": "fugue/load-models", "version": "1.0.0",
+              "inputs": {"diffusion_model": {"resource": "fugue/diffusion-model", "name": "NAME", "hash": "sha256:HASH"}}},
+            "lora": {"type": "fugue/apply-lora", "version": "1.0.0", "inputs": {"model": {"from": "models.model"}}}}},
+          "layout": {"nodes": {"models": {"pos": [20, 20]}, "lora": {"pos": [520, 20]}},
+                     "view": {"center": [480, 340], "zoom": 1}}})";
+        WidgetApp app(QByteArray(document).replace("NAME", diffusion.at(0).toUtf8()).replace("HASH", diffusion.at(1).toUtf8()).constData());
+        app.model.widgets()->setModelRoots(roots.split(':'));
+        app.model.widgets()->setModelSource([](const QString &, const QStringList &,
+                                               std::function<void(QList<WidgetEdit::Model>)> done) { done({}); });
+        QVERIFY(app.open());
+        const QString shots = qEnvironmentVariable("FUGUE_REAL_SHOTS");
+        for (const auto &[node, input] : {std::pair{"models", "diffusion_model"}, std::pair{"models", "text_encoder"},
+                                          std::pair{"models", "vae"}, std::pair{"lora", "lora"}}) {
+            app.click(app.in(node, input));
+            QTRY_VERIFY2(app.menuOpen(), qPrintable(app.warnings.join('\n')));
+            QObject *menu = app.popup("widgetMenu");
+            // The headers are read on the pool: until a heading says what was judged, or 30 s.
+            const auto judged = [&] {
+                for (const QVariant &entry : menu->property("entries").toList())
+                    if (entry.toMap().value("heading").toBool()
+                        && (entry.toMap().value("text").toString().startsWith("Fits ") || entry.toMap().value("text") == "Other"))
+                        return true;
+                return false;
+            };
+            if (!QTest::qWaitFor(judged, 30000))
+                qInfo("(nothing judged in 30 s)");
+            qInfo("=== %s.%s", node, input);
+            for (const QVariant &entry : menu->property("entries").toList()) {
+                const QVariantMap e = entry.toMap();
+                qInfo("%s%s%s%s", e.value("heading").toBool() ? "# " : "   ", qPrintable(e.value("text").toString()),
+                      e.value("dim").toBool() ? "  (dim)" : "",
+                      e.value("note").toString().isEmpty() ? "" : qPrintable("  -- " + e.value("note").toString()));
+            }
+            if (!shots.isEmpty())
+                app.window->grabWindow().save(QStringLiteral("%1/%2-%3.png").arg(shots, QLatin1String(node), QLatin1String(input)));
+            app.key(Qt::Key_Escape);
+            app.key(Qt::Key_Escape);
+            QTRY_VERIFY(!app.menuOpen());
+        }
     }
 
     void onFirstRunThePickerListsThePairedHostsModelsByHost() {

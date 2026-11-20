@@ -67,7 +67,7 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 
 - Control: the entries of a text encoder or VAE menu in Load Models, `src/canvas/widgets/InputWidget.qml` (`modelEntries`), drawn by `WidgetMenu.qml`.
 - Old: every file under its folder, in name order.
-- New: the files that fit the picked diffusion model first, under their folder; then an "Other" heading with the rest, those that do not fit in the label color (`dim`), still pickable.
+- New: the files that fit the picked diffusion model first, under one "Fits <model>" heading (2026-11-20, the owner asked for a clear compatible section); then an "Other" heading with the rest, those that do not fit in the label color (`dim`), still pickable, a file the helper cannot load with a one-line note saying so.
 - Rule: Gaps (one heading per chunk, as the folders already are). Posture: no new decision; the likely pick is the first row once the files' headers are read, at once on a later open, a few ms after the first.
 
 ### 2026-11-20 what an extra model folder holds (#86)

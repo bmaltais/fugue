@@ -199,39 +199,119 @@ bool isLora(const Shapes &shapes) {
 // The layers a LoRA changes and their input widths: the low-rank down piece (lora_A,
 // lora_down) is [rank, input, ...]. Text-encoder layers are left out. Kept: kLoraLayersKept,
 // spread over the names in order, so the first and last blocks are among them.
-QHash<QString, ModelShape::Widths> loraLayers(const Shapes &shapes) {
-    static const QRegularExpression down(QStringLiteral("^(.*)\\.(lora_A|lora_down)\\.weight$"));
-    QStringList names;
-    for (auto it = shapes.begin(); it != shapes.end(); ++it)
-        if (down.match(it.key()).hasMatch() && !it.key().startsWith(QLatin1String("lora_te"))
-            && !it.key().contains(QLatin1String("text_encoder")))
-            names << it.key();
-    QCollator collator; // blocks.2 before blocks.10, so the spread reaches the last block
-    collator.setNumericMode(true);
-    std::sort(names.begin(), names.end(), collator);
-    QHash<QString, ModelShape::Widths> layers;
-    const qsizetype count = names.size();
-    const qsizetype kept = std::min<qsizetype>(count, kLoraLayersKept);
-    for (qsizetype i = 0; i < kept; ++i) {
-        const QString &name = names.at(kept > 1 ? i * (count - 1) / (kept - 1) : 0);
-        const QString layer = down.match(name).captured(1);
-        // The up piece (lora_B, lora_up) is [output, rank, ...].
-        const QString upName = name.contains(QLatin1String(".lora_A.")) ? layer + QStringLiteral(".lora_B.weight")
-                                                                         : layer + QStringLiteral(".lora_up.weight");
-        const QList<qint64> up = shapes.value(upName);
-        const std::optional<int> in = inputWidth(shapes.value(name));
-        if (in && !up.isEmpty() && up.at(0) > 0)
-            layers.insert(layerKey(layer), ModelShape::Widths{*in, int(up.at(0))});
+// Every layer a LoRA changes, with its widths, by tensor name (text-encoder layers left out):
+// PEFT's lora_A [rank, input] and lora_B [output, rank] (".default" between, as PEFT saves),
+// kohya's lora_down and lora_up the same, LoHa's hada_w1_a [output, rank] and hada_w1_b [rank,
+// input], and LoKr's lokr_w1 and lokr_w2, whose Kronecker product is the layer (4x4 and
+// 1024x1024 make 4096x4096).
+QList<std::pair<QString, ModelShape::Widths>> changedLayers(const Shapes &shapes) {
+    static const QRegularExpression piece(
+        QStringLiteral("^(.*)\\.(lora_A|lora_down)(\\.default)?\\.weight$|^(.*)\\.lokr_w1$|^(.*)\\.hada_w1_a$"));
+    QList<std::pair<QString, ModelShape::Widths>> layers;
+    for (auto it = shapes.begin(); it != shapes.end(); ++it) {
+        const QString &name = it.key();
+        if (name.startsWith(QLatin1String("lora_te")) || name.contains(QLatin1String("text_encoder")))
+            continue;
+        const QRegularExpressionMatch match = piece.match(name);
+        if (!match.hasMatch())
+            continue;
+        if (!match.captured(5).isEmpty()) { // LoHa: w1_a [output, rank], w1_b [rank, input]
+            const QList<qint64> a = it.value(), b = shapes.value(match.captured(5) + QStringLiteral(".hada_w1_b"));
+            if (!a.isEmpty() && a.at(0) > 0)
+                if (const std::optional<int> in = inputWidth(b))
+                    layers.append({match.captured(5), ModelShape::Widths{*in, int(a.at(0))}});
+            continue;
+        }
+        if (!match.captured(4).isEmpty()) { // LoKr
+            const QList<qint64> w1 = it.value(), w2 = shapes.value(match.captured(4) + QStringLiteral(".lokr_w2"));
+            if (w1.size() == 2 && w2.size() == 2 && w1.at(0) > 0 && w1.at(1) > 0 && w2.at(0) > 0 && w2.at(1) > 0)
+                layers.append({match.captured(4), ModelShape::Widths{int(w1.at(1) * w2.at(1)), int(w1.at(0) * w2.at(0))}});
+            continue;
+        }
+        const QString layer = match.captured(1);
+        const QString up = layer + (match.captured(2) == QLatin1String("lora_A") ? QStringLiteral(".lora_B") : QStringLiteral(".lora_up"))
+                           + match.captured(3) + QStringLiteral(".weight");
+        const QList<qint64> upShape = shapes.value(up);
+        if (const std::optional<int> in = inputWidth(it.value()); in && !upShape.isEmpty() && upShape.at(0) > 0)
+            layers.append({layer, ModelShape::Widths{*in, int(upShape.at(0))}});
     }
     return layers;
+}
+
+// The layers a LoRA changes, as a shape keeps them: kLoraLayersKept, spread over the names in
+// number order (blocks.2 before blocks.10), so the first and last blocks are among them.
+QHash<QString, ModelShape::Widths> loraLayers(QList<std::pair<QString, ModelShape::Widths>> changed) {
+    QCollator collator;
+    collator.setNumericMode(true);
+    std::sort(changed.begin(), changed.end(), [&](const auto &a, const auto &b) { return collator.compare(a.first, b.first) < 0; });
+    QHash<QString, ModelShape::Widths> layers;
+    const qsizetype count = changed.size();
+    const qsizetype kept = std::min<qsizetype>(count, kLoraLayersKept);
+    for (qsizetype i = 0; i < kept; ++i) {
+        const auto &[layer, widths] = changed.at(kept > 1 ? i * (count - 1) / (kept - 1) : 0);
+        layers.insert(layerKey(layer), widths);
+    }
+    return layers;
+}
+
+// Why stable-diffusion.cpp at the pin cannot load these tensors, or empty (ModelShape::unloadable).
+QString unloadableFormat(const Shapes &shapes) {
+    bool comfyQuant = false, qweight = false, projDown = false, scaledZeros = false;
+    for (auto it = shapes.begin(); it != shapes.end(); ++it) {
+        const QString &name = it.key();
+        if (name.endsWith(QLatin1String(".weight_codebook"))) // GPTQ files carry comfy_quant too
+            return QStringLiteral("GPTQ");
+        comfyQuant = comfyQuant || name.endsWith(QLatin1String(".comfy_quant"));
+        qweight = qweight || name.endsWith(QLatin1String(".qweight"));
+        projDown = projDown || name.endsWith(QLatin1String(".proj_down"));
+        scaledZeros = scaledZeros || name.endsWith(QLatin1String(".scaled_zeros"));
+    }
+    if (comfyQuant)
+        return QStringLiteral("ComfyUI mixed quantization");
+    if (qweight && projDown)
+        return QStringLiteral("SVDQuant (Nunchaku)");
+    if (qweight && scaledZeros)
+        return QStringLiteral("AWQ");
+    return {};
+}
+
+// A UNet's layer, as SD 1.5 and SDXL name them (LDM or diffusers, kohya's underscores too).
+bool isUnetLayer(const QString &name) {
+    for (const char *part : {"input_blocks", "output_blocks", "down_blocks", "up_blocks", "mid_block", "middle_block"})
+        if (name.contains(QLatin1String(part)))
+            return true;
+    return false;
 }
 
 ModelShape shapeOf(const Header &header) {
     const Shapes &shapes = header.shapes;
     ModelShape shape;
+    shape.unloadable = unloadableFormat(shapes);
     if (isLora(shapes)) { // its tensors are named after the model's: none of the figures below
         shape.kind = ModelKind::Lora;
-        shape.layers = loraLayers(shapes);
+        const QList<std::pair<QString, ModelShape::Widths>> changed = changedLayers(shapes);
+        shape.layers = loraLayers(changed);
+        QHash<int, int> widths; // how many layers take each input width
+        for (const auto &[layer, width] : changed)
+            ++widths[width.in];
+        // A UNet's or a transformer's, by every tensor's name, the text encoder's left out.
+        bool unet = false, any = false;
+        for (auto it = shapes.begin(); it != shapes.end(); ++it) {
+            const QString &name = it.key();
+            shape.nativeLoraNames = shape.nativeLoraNames || name.startsWith(QLatin1String("diffusion_model."));
+            if (name.startsWith(QLatin1String("lora_te")) || name.contains(QLatin1String("text_encoder")))
+                continue;
+            any = true;
+            unet = unet || isUnetLayer(name);
+        }
+        if (any)
+            shape.unet = unet;
+        int most = 0;
+        for (auto it = widths.begin(); it != widths.end(); ++it)
+            if (it.value() > most) {
+                most = it.value();
+                shape.hidden = it.key();
+            }
         return shape;
     }
     shape.textWidth = inputWidth(
@@ -240,6 +320,8 @@ ModelShape shapeOf(const Header &header) {
     const std::optional<QList<qint64>> image =
         tensor(shapes, {QStringLiteral("x_embedder.weight"), QStringLiteral("all_x_embedder.2-1.weight"), QStringLiteral("img_in.weight"),
                         QStringLiteral("x_embedder.proj.weight"), QStringLiteral("input_blocks.0.0.weight")});
+    if (image && image->size() == 2 && image->at(0) > 0) // a transformer's: its block width
+        shape.hidden = int(image->at(0));
     if (const std::optional<int> in = inputWidth(image)) // a linear layer takes 2x2 patches of the channels
         shape.latentChannels = image->size() == 2 ? (*in % 4 == 0 ? std::optional<int>(*in / 4) : std::nullopt) : in;
     const bool diffusion = shape.textWidth || shape.latentChannels;
@@ -250,12 +332,22 @@ ModelShape shapeOf(const Header &header) {
                         || (hasTensor(shapes, QStringLiteral("context_embedder.")) && hasTensor(shapes, QStringLiteral("joint_blocks.")));
         shape.textKind = t5 ? TextKind::T5 : TextKind::Llm;
         shape.videoVae = hasTensor(shapes, QStringLiteral("time_text_embed.")) && hasTensor(shapes, QStringLiteral("txt_in."));
+        // The LLM it reads: Qwen-Image Qwen2.5-VL; Z-Image (cap_embedder) and FLUX.2 (txt_in with
+        // no vector_in) Qwen3.
+        if (*shape.videoVae)
+            shape.llmFamily = QStringLiteral("qwen2.5");
+        else if (!t5 && (hasTensor(shapes, QStringLiteral("cap_embedder.")) || hasTensor(shapes, QStringLiteral("txt_in."))))
+            shape.llmFamily = QStringLiteral("qwen3");
+        shape.unet = hasTensor(shapes, QStringLiteral("input_blocks.")) || hasTensor(shapes, QStringLiteral("down_blocks."));
         // A checkpoint carries its VAE (first_stage_model.decoder) beside the diffusion model.
         shape.kind = tensor(shapes, {QStringLiteral("decoder.conv_in.weight")}) ? ModelKind::Checkpoint : ModelKind::DiffusionModel;
         for (auto it = shapes.begin(); it != shapes.end(); ++it) // what a LoRA may change
             if (it.key().endsWith(QLatin1String(".weight")) && it.value().size() >= 2 && it.value().at(0) > 0)
-                if (const std::optional<int> in = inputWidth(it.value()))
-                    shape.layers.insert(layerKey(it.key().chopped(7)), ModelShape::Widths{*in, int(it.value().at(0))});
+                if (const std::optional<int> in = inputWidth(it.value())) {
+                    const QString key = layerKey(it.key().chopped(7));
+                    shape.layers.insert(key, ModelShape::Widths{*in, int(it.value().at(0))});
+                    shape.layerFamilies.insert(layerFamily(key));
+                }
     } else if (const std::optional<QList<qint64>> decoder =
                    tensor(shapes, {QStringLiteral("decoder.conv_in.weight"), QStringLiteral("decoder.conv1.weight")})) {
         shape.latentChannels = inputWidth(decoder);
@@ -276,6 +368,17 @@ ModelShape shapeOf(const Header &header) {
             shape.textKind = TextKind::Clip;
         else
             shape.textKind = TextKind::Llm;
+        if (shape.textKind == TextKind::Llm) {
+            // GGUF says its architecture; safetensors' layers tell (8.10's pairings, helper.md).
+            if (arch == "qwen3" || (arch.isEmpty() && hasTensor(shapes, QStringLiteral("self_attn.q_norm.")) &&
+                                    !hasTensor(shapes, QStringLiteral("linear_attn."))))
+                shape.llmFamily = QStringLiteral("qwen3");
+            else if (arch.startsWith("qwen35") || (arch.isEmpty() && hasTensor(shapes, QStringLiteral("linear_attn."))))
+                shape.llmFamily = QStringLiteral("qwen3.5");
+            else if (arch.startsWith("qwen2") || (arch.isEmpty() && hasTensor(shapes, QStringLiteral("model.layers.")) &&
+                                                  hasTensor(shapes, QStringLiteral("visual."))))
+                shape.llmFamily = QStringLiteral("qwen2.5");
+        }
     }
     return shape;
 }
@@ -289,6 +392,11 @@ QString layerKey(const QString &tensorName) {
             name.remove(0, qsizetype(std::strlen(prefix)));
     static const QRegularExpression separators(QStringLiteral("[._]+"));
     return name.replace(separators, QStringLiteral("."));
+}
+
+QString layerFamily(const QString &key) {
+    static const QRegularExpression number(QStringLiteral("\\d+"));
+    return QString(key).replace(number, QStringLiteral("#"));
 }
 
 QString modelKindName(ModelKind kind) {
@@ -328,12 +436,17 @@ Fit textEncoderFits(const ModelShape &diffusionModel, const ModelShape &textEnco
 }
 
 Fit loadableTextEncoderFits(const ModelShape &diffusionModel, const ModelShape &textEncoder) {
-    if (textEncoder.textKind && *textEncoder.textKind != TextKind::Llm)
+    if (!textEncoder.unloadable.isEmpty() || (textEncoder.textKind && *textEncoder.textKind != TextKind::Llm))
+        return Fit::DoesNotFit;
+    if (!diffusionModel.llmFamily.isEmpty() && !textEncoder.llmFamily.isEmpty()
+        && diffusionModel.llmFamily != textEncoder.llmFamily)
         return Fit::DoesNotFit;
     return textEncoderFits(diffusionModel, textEncoder);
 }
 
 Fit vaeFits(const ModelShape &diffusionModel, const ModelShape &vae) {
+    if (!vae.unloadable.isEmpty())
+        return Fit::DoesNotFit;
     if (diffusionModel.videoVae && vae.videoVae && *diffusionModel.videoVae != *vae.videoVae)
         return Fit::DoesNotFit;
     if (!diffusionModel.latentChannels || !vae.latentChannels)
@@ -356,8 +469,15 @@ Fit loraFits(const ModelShape &diffusionModel, const ModelShape &lora, LayerMism
     int matched = 0;
     for (auto it = lora.layers.begin(); it != lora.layers.end(); ++it) {
         const auto found = diffusionModel.layers.constFind(it.key());
-        if (found == diffusionModel.layers.constEnd())
+        if (found == diffusionModel.layers.constEnd()) {
+            // A block of a family the model has, at an index it lacks: made for a deeper model.
+            if (diffusionModel.layerFamilies.contains(layerFamily(it.key()))) {
+                if (mismatch)
+                    *mismatch = LayerMismatch{it.key(), it.value(), {}};
+                return Fit::DoesNotFit;
+            }
             continue;
+        }
         if (!(*found == it.value())) {
             if (mismatch)
                 *mismatch = LayerMismatch{it.key(), it.value(), *found};
@@ -365,7 +485,18 @@ Fit loraFits(const ModelShape &diffusionModel, const ModelShape &lora, LayerMism
         }
         ++matched;
     }
-    return matched > 0 ? Fit::Fits : Fit::Unknown;
+    if (matched > 0)
+        return Fit::Fits;
+    // Named as ComfyUI saves one and none of it found: made for another model.
+    if (lora.nativeLoraNames && !diffusionModel.layers.isEmpty() && !lora.layers.isEmpty())
+        return Fit::DoesNotFit;
+    // Other namings (kohya's, diffusers') stable-diffusion.cpp renames itself; their structure
+    // still tells: a UNet's LoRA on a transformer (or the other way round), or another width.
+    if (lora.unet && diffusionModel.unet && *lora.unet != *diffusionModel.unet)
+        return Fit::DoesNotFit;
+    if (lora.hidden && diffusionModel.hidden && !diffusionModel.unet.value_or(true) && *lora.hidden != *diffusionModel.hidden)
+        return Fit::DoesNotFit;
+    return Fit::Unknown;
 }
 
 ModelShapes &ModelShapes::shared() {

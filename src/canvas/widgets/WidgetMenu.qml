@@ -186,6 +186,8 @@ Popup {
                 textFormat: Text.PlainText
                 text: entry.modelData.text
                 color: entry.usable && entry.modelData.dim !== true ? menu.look.text : menu.look.label
+                // Fainter still: the label color alone reads close to the text's in a dark theme.
+                opacity: entry.modelData.dim === true ? 0.55 : 1
                 font.pixelSize: entry.heading ? menu.look.captionSize : menu.look.labelSize
                 font.weight: entry.heading ? Font.DemiBold : Font.Normal
             }

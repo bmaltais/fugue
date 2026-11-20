@@ -72,17 +72,35 @@ QJsonObject derivedOf(const QJsonObject &model) {
 
 QJsonObject modelHandle(const QJsonObject &derived) { return QJsonObject{{"resource", kModelType}, {"derived", derived}}; }
 
-// model_mismatch when a model's text encoder or VAE does not fit its diffusion model, by their
-// headers (engine/model_shape.h): said here, before the helper fails to load them with less to say.
+// model_unsupported when a part is in a format the helper cannot load, model_mismatch when a
+// model's text encoder, VAE or LoRA does not fit its diffusion model, by their headers
+// (engine/model_shape.h): said here, before the helper fails to load them with less to say.
 // The inputs a mismatch of each part is blamed on.
 struct PartInputs {
-    QString textEncoder, vae, lora;
+    QString diffusionModel, textEncoder, vae, lora;
 };
 
 // `loras` are the model's LoRAs with their paths, as ModelFiles has them, in Apply LoRA's order.
 std::optional<Error> partsMismatch(const QJsonObject &derived, const QJsonObject &paths, const PartInputs &inputs,
                                    const QJsonArray &loras = {}) {
     ModelShapes &shapes = ModelShapes::shared(); // Load Models' check reads them on every canvas check
+    // A file in a format the helper cannot load (the helper would abort building the model).
+    const QList<std::pair<QString, QString>> parts{{QStringLiteral("diffusion_model_path"), inputs.diffusionModel},
+                                                   {QStringLiteral("llm_path"), inputs.textEncoder},
+                                                   {QStringLiteral("vae_path"), inputs.vae}};
+    const QStringList partNames{QStringLiteral("base"), QStringLiteral("text_encoder"), QStringLiteral("vae")};
+    for (qsizetype i = 0; i < parts.size(); ++i) {
+        const std::optional<ModelShape> part = shapes.of(paths.value(parts.at(i).first).toString());
+        if (part && !part->unloadable.isEmpty()) {
+            Error error = makeError(
+                QStringLiteral("model_unsupported"),
+                QStringLiteral("Fugue's helper cannot load %1: it is in %2, a quantization it has no support for.")
+                    .arg(derived.value(partNames.at(i)).toObject().value(QStringLiteral("name")).toString(), part->unloadable),
+                QStringLiteral("Pick the same model in another format (bf16, fp16, fp8_scaled or GGUF) in Load Models."));
+            error.input = parts.at(i).second;
+            return error;
+        }
+    }
     const std::optional<ModelShape> diffusion = shapes.of(paths.value(QStringLiteral("diffusion_model_path")).toString());
     if (!diffusion)
         return std::nullopt;
@@ -131,14 +149,17 @@ std::optional<Error> partsMismatch(const QJsonObject &derived, const QJsonObject
         if (!lora || loraFits(*diffusion, *lora, &layer) != Fit::DoesNotFit)
             continue;
         const QString loraName = steps.at(i).toObject().value(QStringLiteral("lora")).toObject().value(QStringLiteral("name")).toString();
-        return mismatch(inputs.lora,
-                        QStringLiteral("The LoRA %1 does not fit %2: it changes a layer %3 to %4 wide that is %5 to %6 "
-                                       "in the model.")
-                            .arg(loraName, name("base"))
-                            .arg(layer.lora.in)
-                            .arg(layer.lora.out)
-                            .arg(layer.model.in)
-                            .arg(layer.model.out),
+        const QString why = layer.layer.isEmpty() // none of its layers is in the model
+                                ? QStringLiteral("the layers it changes are not in the model; it was made for another.")
+                            : layer.model.in == 0 // a block the model does not have
+                                ? QStringLiteral("it changes %1, a block the model does not have; it was made for a deeper one.")
+                                      .arg(layer.layer)
+                                : QStringLiteral("it changes a layer %1 to %2 wide that is %3 to %4 in the model.")
+                                      .arg(layer.lora.in)
+                                      .arg(layer.lora.out)
+                                      .arg(layer.model.in)
+                                      .arg(layer.model.out);
+        return mismatch(inputs.lora, QStringLiteral("The LoRA %1 does not fit %2: %3").arg(loraName, name("base"), why),
                         QStringLiteral("Pick another in Apply LoRA: its list shows the LoRAs that fit first."));
     }
     return std::nullopt;
@@ -173,7 +194,7 @@ Result<ModelFiles> modelFiles(const QJsonObject &model, const QString &input, co
     }
     if (missing)
         return *missing;
-    if (const std::optional<Error> mismatch = partsMismatch(derived, files.context, {input, input, input}, files.loras))
+    if (const std::optional<Error> mismatch = partsMismatch(derived, files.context, {input, input, input, input}, files.loras))
         return *mismatch;
     return files;
 }
@@ -253,7 +274,8 @@ public:
                                   {"vae", context.input(QStringLiteral("vae")).json()}};
         // Blamed on the part that does not fit, where its picker is.
         if (const std::optional<Error> mismatch =
-                partsMismatch(derived, paths, {QStringLiteral("text_encoder"), QStringLiteral("vae"), QString()}))
+                partsMismatch(derived, paths,
+                              {QStringLiteral("diffusion_model"), QStringLiteral("text_encoder"), QStringLiteral("vae"), QString()}))
             return {*mismatch};
         return {};
     }

@@ -567,46 +567,60 @@ void WidgetEdit::requestFits(const QString &node, const QString &input) {
     const QString key = fitsKey(node, input);
     const Target t = target(node, input);
     const QString part = t.spec->type.type.toString();
-    if (part != kTextEncoder && part != kVae && part != kLora) {
+    // A part is judged against the diffusion model; a diffusion model or checkpoint only by
+    // whether the helper can load it at all.
+    const bool judgedAlone = part == kDiffusionModel || part == kModel;
+    if (part != kTextEncoder && part != kVae && part != kLora && !judgedAlone) {
         m_fits.remove(key);
         return;
     }
-    // The diffusion model on the level shown: the node's (Load Models), or the one its model
-    // comes from (Apply LoRA).
-    const QJsonObject handle = diffusionModelOf(node);
-    // A check reads no model file to find it: the one with the handle's name will do.
-    const Result<QString> diffusion =
-        handle.isEmpty() ? Result<QString>(Error{}) : library().resolve(handle, hashes(), ModelLibrary::Hashing::RememberedOnly);
     Fits &fits = m_fits[key];
     fits.byPath.clear(); // those of another diffusion model, or files no longer listed
+    fits.model.clear();
     fits.asked = ++m_fitsAsked;
-    if (!diffusion)
-        return;
+    // The diffusion model on the level shown: the node's (Load Models), or the one its model
+    // comes from (Apply LoRA). A check reads no model file to find it: the one with the
+    // handle's name will do.
+    QString diffusion;
+    if (!judgedAlone) {
+        const QJsonObject handle = diffusionModelOf(node);
+        const Result<QString> found =
+            handle.isEmpty() ? Result<QString>(Error{}) : library().resolve(handle, hashes(), ModelLibrary::Hashing::RememberedOnly);
+        if (!found)
+            return;
+        diffusion = found.value();
+        fits.model = handle.value(QStringLiteral("name")).toString();
+    }
     QStringList paths;
     for (const Model &model : m_diskModels.value(modelsKey(node, input)))
         paths << model.path;
     using Rule = Fit (*)(const ModelShape &, const ModelShape &);
     const Rule rule = part == kTextEncoder ? Rule(loadableTextEncoderFits)
                       : part == kVae        ? Rule(vaeFits)
-                                            : Rule([](const ModelShape &model, const ModelShape &lora) { return loraFits(model, lora); });
-    // Whether `shape` fits `wanted`; nothing when its header tells nothing.
-    const auto judge = [rule](const std::optional<ModelShape> &wanted, const std::optional<ModelShape> &shape) {
-        const Fit fit = !wanted || !shape ? Fit::Unknown : rule(*wanted, *shape);
-        return fit == Fit::Unknown ? std::optional<bool>() : std::optional<bool>(fit == Fit::Fits);
+                      : part == kLora       ? Rule([](const ModelShape &model, const ModelShape &lora) { return loraFits(model, lora); })
+                                            : nullptr;
+    // Whether `shape` fits `wanted`, and why not when it cannot be loaded; nothing when its
+    // header tells nothing.
+    const auto judge = [rule](const std::optional<ModelShape> &wanted,
+                              const std::optional<ModelShape> &shape) -> std::optional<Judged> {
+        if (shape && !shape->unloadable.isEmpty())
+            return Judged{false, tr("Can't load: %1").arg(shape->unloadable)};
+        const Fit fit = !rule || !wanted || !shape ? Fit::Unknown : rule(*wanted, *shape);
+        return fit == Fit::Unknown ? std::nullopt : std::optional<Judged>(Judged{fit == Fit::Fits, {}});
     };
 
     // Headers read before: at once, so a menu opened again does not reorder under the pointer.
     std::optional<ModelShape> wanted;
-    bool allKnown = m_shapes->known(diffusion.value(), &wanted);
-    QHash<QString, bool> known;
+    bool allKnown = diffusion.isEmpty() || m_shapes->known(diffusion, &wanted);
+    QHash<QString, Judged> known;
     for (const QString &path : std::as_const(paths)) {
         std::optional<ModelShape> shape;
         if (!allKnown || !m_shapes->known(path, &shape)) {
             allKnown = false;
             break;
         }
-        if (const std::optional<bool> fit = judge(wanted, shape))
-            known.insert(path, *fit);
+        if (const std::optional<Judged> judged = judge(wanted, shape))
+            known.insert(path, *judged);
     }
     if (allKnown) {
         fits.byPath = known;
@@ -617,14 +631,14 @@ void WidgetEdit::requestFits(const QString &node, const QString &input) {
     ModelShapes *shapes = m_shapes;
     std::shared_ptr<std::atomic_bool> stop = m_stopHashing;
     const int asked = fits.asked;
-    m_shapePool.start([self, shapes, stop, judge, key, asked, model = diffusion.value(), paths] {
-        const std::optional<ModelShape> wanted = shapes->of(model);
-        QHash<QString, bool> read;
+    m_shapePool.start([self, shapes, stop, judge, key, asked, diffusion, paths] {
+        const std::optional<ModelShape> wanted = diffusion.isEmpty() ? std::nullopt : shapes->of(diffusion);
+        QHash<QString, Judged> read;
         for (const QString &path : paths) {
             if (stop->load())
                 return;
-            if (const std::optional<bool> fit = judge(wanted, shapes->of(path)))
-                read.insert(path, *fit);
+            if (const std::optional<Judged> judged = judge(wanted, shapes->of(path)))
+                read.insert(path, *judged);
         }
         QMetaObject::invokeMethod(self, [self, key, asked, read] {
             if (!self || self->m_fits.value(key).asked != asked)
@@ -636,11 +650,15 @@ void WidgetEdit::requestFits(const QString &node, const QString &input) {
     });
 }
 
+QString WidgetEdit::fitsModel(const QString &node, const QString &input) const {
+    return m_fits.value(fitsKey(node, input)).model;
+}
+
 QVariantList WidgetEdit::models(const QString &node, const QString &input) const {
     const QString key = modelsKey(node, input);
     if (key.isEmpty())
         return {};
-    const QHash<QString, bool> fits = m_fits.value(fitsKey(node, input)).byPath;
+    const QHash<QString, Judged> fits = m_fits.value(fitsKey(node, input)).byPath;
     QVariantList list;
     for (const Model &model : m_models.value(key) + m_diskModels.value(key)) {
         QVariantMap entry{{"name", model.name},
@@ -653,8 +671,11 @@ QVariantList WidgetEdit::models(const QString &node, const QString &input) const
             entry.insert("path", model.path);
             entry.insert("folder", model.folder);
             entry.insert("size", model.size);
-            if (const auto fit = fits.constFind(model.path); fit != fits.constEnd())
-                entry.insert("fits", *fit); // absent when the file's header tells nothing
+            if (const auto fit = fits.constFind(model.path); fit != fits.constEnd()) {
+                entry.insert("fits", fit->fits); // absent when the file's header tells nothing
+                if (!fit->why.isEmpty())
+                    entry.insert("fitNote", fit->why);
+            }
         }
         list.append(entry);
     }

@@ -353,15 +353,81 @@ private slots:
                          {{"lora_unet_double_blocks_0_img_mlp_0.lora_down.weight", QJsonArray{16, 4096}},
                           {"lora_unet_double_blocks_0_img_mlp_0.lora_up.weight", QJsonArray{24576, 16}},
                           {"lora_te1_text_model_encoder_layers_0_mlp_fc1.lora_down.weight", QJsonArray{16, 768}}});
-        // A diffusers FLUX.1 LoRA: named so nothing in the model matches.
+        // A diffusers FLUX.1 LoRA: named so nothing in the model matches, but 3072 wide.
         writeSafetensors(file("flux1-diffusers.safetensors"),
-                         {{"transformer.single_transformer_blocks.0.attn.to_k.lora_A.weight", QJsonArray{16, 3072}}});
+                         {{"transformer.single_transformer_blocks.0.attn.to_k.lora_A.weight", QJsonArray{16, 3072}},
+                          {"transformer.single_transformer_blocks.0.attn.to_k.lora_B.weight", QJsonArray{3072, 16}}});
+        // ... and one as wide as Klein 9B: nothing is told.
+        writeSafetensors(file("diffusers-4096.safetensors"),
+                         {{"transformer.single_transformer_blocks.0.attn.to_k.lora_A.weight", QJsonArray{16, 4096}},
+                          {"transformer.single_transformer_blocks.0.attn.to_k.lora_B.weight", QJsonArray{4096, 16}}});
+        // A kohya SDXL LoRA: a UNet's layers, and Klein is a transformer.
+        writeSafetensors(file("sdxl-kohya.safetensors"),
+                         {{"lora_unet_down_blocks_1_attentions_0_proj_in.lora_down.weight", QJsonArray{8, 640}},
+                          {"lora_unet_down_blocks_1_attentions_0_proj_in.lora_up.weight", QJsonArray{640, 8}}});
+        // LoKr (Klein LoRAs in the owner's folder): 4x4 (x) 1024x1024 is 4096x4096; LoHa: w1_a, w1_b.
+        writeSafetensors(file("klein-lokr.safetensors"),
+                         {{"diffusion_model.double_blocks.0.img_attn.proj.lokr_w1", QJsonArray{4, 4}},
+                          {"diffusion_model.double_blocks.0.img_attn.proj.lokr_w2", QJsonArray{1024, 1024}}});
+        writeSafetensors(file("sdxl-loha.safetensors"),
+                         {{"lora_unet_input_blocks_4_1_proj_in.hada_w1_a", QJsonArray{640, 8}},
+                          {"lora_unet_input_blocks_4_1_proj_in.hada_w1_b", QJsonArray{8, 640}}});
         const ModelShape klein9b = shape(file("klein-9b.gguf"));
         QCOMPARE(loraFits(klein9b, shape(file("klein9b-turbo.safetensors"))), Fit::Fits);
         QCOMPARE(loraFits(klein9b, shape(file("klein4b-rhc.safetensors"))), Fit::DoesNotFit);
         QCOMPARE(loraFits(klein9b, shape(file("kohya.safetensors"))), Fit::Fits);
-        QCOMPARE(loraFits(klein9b, shape(file("flux1-diffusers.safetensors"))), Fit::Unknown);
+        QCOMPARE(loraFits(klein9b, shape(file("flux1-diffusers.safetensors"))), Fit::DoesNotFit);
+        QCOMPARE(loraFits(klein9b, shape(file("diffusers-4096.safetensors"))), Fit::Unknown);
+        QCOMPARE(loraFits(klein9b, shape(file("sdxl-kohya.safetensors"))), Fit::DoesNotFit);
+        QCOMPARE(loraFits(klein9b, shape(file("klein-lokr.safetensors"))), Fit::Fits);
+        // FLUX.1 (19 double blocks) on a model as wide with fewer: block 18 is not there.
+        writeSafetensors(file("flux1-deep.safetensors"),
+                         {{"diffusion_model.double_blocks.0.img_attn.proj.lora_A.weight", QJsonArray{16, 4096}},
+                          {"diffusion_model.double_blocks.0.img_attn.proj.lora_B.weight", QJsonArray{4096, 16}},
+                          {"diffusion_model.double_blocks.18.img_attn.proj.lora_A.weight", QJsonArray{16, 4096}},
+                          {"diffusion_model.double_blocks.18.img_attn.proj.lora_B.weight", QJsonArray{4096, 16}}});
+        QCOMPARE(loraFits(klein9b, shape(file("flux1-deep.safetensors"))), Fit::DoesNotFit);
+        QCOMPARE(loraFits(klein9b, shape(file("sdxl-loha.safetensors"))), Fit::DoesNotFit);
         QCOMPARE(layerKey("lora_unet_double_blocks_0_img_mlp_0"), layerKey("model.diffusion_model.double_blocks.0.img_mlp.0"));
+    }
+
+    // What the owner's runs crashed the helper on (2026-11-20): ComfyUI's mixed quantization, and a
+    // Qwen3.5 encoder as wide as Klein 9B's Qwen3-8B.
+    void formatsTheHelperCannotLoadAndLlmFamiliesAreTold() {
+        writeSafetensors(file("qwen3.5_9b_int8_convrot.safetensors"),
+                         {{"model.embed_tokens.weight", QJsonArray{248320, 4096}},
+                          {"model.layers.0.linear_attn.in_proj_qkv.weight", QJsonArray{8192, 4096}},
+                          {"model.layers.0.linear_attn.in_proj_qkv.comfy_quant", QJsonArray{3}}});
+        writeSafetensors(file("qwen_3_8b.safetensors"), {{"model.embed_tokens.weight", QJsonArray{151936, 4096}},
+                                                         {"model.layers.0.self_attn.q_norm.weight", QJsonArray{128}}});
+        writeSafetensors(file("qwen_3_8b_fp8mixed.safetensors"),
+                         {{"model.embed_tokens.weight", QJsonArray{151936, 4096}},
+                          {"model.layers.0.self_attn.q_norm.weight", QJsonArray{128}},
+                          {"model.layers.0.self_attn.q_proj.comfy_quant", QJsonArray{3}}});
+        writeSafetensors(file("qwen3.5_9b.safetensors"), {{"model.embed_tokens.weight", QJsonArray{248320, 4096}},
+                                                          {"model.layers.0.linear_attn.A_log", QJsonArray{32}}});
+        writeSafetensors(file("svdq-z-image.safetensors"), {{"layers.0.attention.qkv.qweight", QJsonArray{4, 4}},
+                                                            {"layers.0.attention.qkv.proj_down", QJsonArray{4, 4}},
+                                                            {"cap_embedder.1.weight", QJsonArray{3840, 2560}}});
+        const ModelShape klein9b = [] {
+            ModelShape shape = diffusionModel(12288, 32);
+            shape.llmFamily = QStringLiteral("qwen3");
+            return shape;
+        }();
+        QVERIFY(shape(file("qwen3.5_9b_int8_convrot.safetensors")).unloadable.contains("ComfyUI"));
+        QCOMPARE(loadableTextEncoderFits(klein9b, shape(file("qwen3.5_9b_int8_convrot.safetensors"))), Fit::DoesNotFit);
+        QCOMPARE(loadableTextEncoderFits(klein9b, shape(file("qwen_3_8b_fp8mixed.safetensors"))), Fit::DoesNotFit);
+        QCOMPARE(shape(file("qwen_3_8b.safetensors")).llmFamily, QStringLiteral("qwen3"));
+        QCOMPARE(loadableTextEncoderFits(klein9b, shape(file("qwen_3_8b.safetensors"))), Fit::Fits);
+        QCOMPARE(shape(file("qwen3.5_9b.safetensors")).llmFamily, QStringLiteral("qwen3.5"));
+        QCOMPARE(loadableTextEncoderFits(klein9b, shape(file("qwen3.5_9b.safetensors"))), Fit::DoesNotFit); // 4096 wide too
+        QVERIFY(shape(file("svdq-z-image.safetensors")).unloadable.contains("SVDQuant"));
+        // A Z-Image LoRA, named as ComfyUI saves one, on Klein: none of its layers are there.
+        writeSafetensors(file("z-image-lora.safetensors"), {{"diffusion_model.layers.0.attention.to_k.lora_A.weight", QJsonArray{16, 3840}},
+                                                            {"diffusion_model.layers.0.attention.to_k.lora_B.weight", QJsonArray{3840, 16}}});
+        ModelShape klein = klein9b;
+        klein.layers.insert(layerKey("double_blocks.0.img_attn.proj"), ModelShape::Widths{4096, 4096});
+        QCOMPARE(loraFits(klein, shape(file("z-image-lora.safetensors"))), Fit::DoesNotFit);
     }
 
     void aShapeIsReadAgainOnlyWhenTheFileChanges() {

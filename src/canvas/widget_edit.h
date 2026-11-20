@@ -178,6 +178,9 @@ public:
     // first, then the files.
     Q_INVOKABLE QVariantList models(const QString &node, const QString &input) const;
     Q_INVOKABLE bool modelsLoading(const QString &node, const QString &input) const;
+    // The diffusion model a text encoder, VAE or LoRA list is judged against (#85, #86): its
+    // name, for the "Fits …" heading; empty when the list is not judged against one.
+    Q_INVOKABLE QString fitsModel(const QString &node, const QString &input) const;
     // What the picker says when no model is listed: what kind is missing and how to get one.
     Q_INVOKABLE QString modelsEmptyText(const QString &node, const QString &input) const;
     int modelsRevision() const { return m_modelsRevision; }
@@ -268,9 +271,14 @@ private:
     // Which listed files fit the node's diffusion model (#85), by node and input (fitsKey): by
     // path, read from the files' headers on m_shapePool (not behind a long hash). `asked` is the
     // request the answer belongs to; one that comes after a later request is dropped.
+    struct Judged {
+        bool fits = false;
+        QString why; // why it does not, when that is worth a line (a format the helper cannot load)
+    };
     struct Fits {
         int asked = 0;
-        QHash<QString, bool> byPath;
+        QString model; // the diffusion model's name, for the list's heading; empty for a diffusion model's own list
+        QHash<QString, Judged> byPath;
     };
     QHash<QString, Fits> m_fits;
     int m_fitsAsked = 0;
