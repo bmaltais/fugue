@@ -958,8 +958,8 @@ The program writes zero or more progress lines and then exactly one result or er
 - Input files are read-only to the node by convention: they are shared with the result cache.
 - Other outputs are JSON values. An optional output may be left out (empty).
 - `progress.value` is 0 to 1. Optional `{"op": "preview", "image": {"path": …}}` shows an
-  intermediate image on the node until the next preview or the result, as a `node.preview` event
-  ([9.4](#94-events)). The path follows the outputs' rule (inside `work_dir`, relative to it). The
+  intermediate image on the node, as a `node.preview` event ([9.4](#94-events)), until the next
+  preview or a result with a picture; a result without one leaves the last preview in the slot. The path follows the outputs' rule (inside `work_dir`, relative to it). The
   file is read after the line is read, so each preview writes a new file, or writes elsewhere and
   renames over the last. Previews that come faster than the canvas shows them are dropped, all but
   the newest. A bad preview (no path, no such file, outside `work_dir`) is not shown and the run
@@ -2132,7 +2132,7 @@ Building M2 made these further choices.
 | `language`: follow Omarchy (default) or a shipped catalog, live. `output_folder` and `inputs_folder` are read afresh by every run and the CLI | 1.4, 12.11 | high |
 | Providers page: the effective instances in preference order; with no providers.json the defaults show as "default, not saved", and the first change writes them all (mode 0600, atomically). Keys and secret module fields reach the panel only as set or not set | 8.2, 8.8 | medium |
 | ComfyUI settings not taken: custom navigation mix, zoom and pointer tuning, link render modes, node opacity and badges, palettes and background images (the Omarchy theme), auto save (recovery, 11.3), server flags (each provider owns its engine's), accounts. Later: minimap, snap to grid, side panel layout, reduce motion, keys edited in place, pack enable/disable. Full table in the #51 pull request | 12 | medium |
-| Command-node previews (#65). ComfyUI sends a sampler's latent preview as a binary websocket message and the frontend shows only the newest one, in the running node's image slot at full strength, until the node's output images replace it. We match: one slot, the newest preview, full strength while it is this run's, the result taking its place. We differ: a node sends a file path, not bytes (the protocol is lines of JSON, and the file stays in the run folder for Open Image); previews queue at most one deep, so a fast node cannot hold up the run thread; a bad preview is a warning, never a failure; the last run's picture is dimmed while the node runs again, until the new preview comes | 7.2, 9.4 | medium-high |
+| Command-node previews (#65). ComfyUI (ComfyUI_frontend `app.ts`, `nodeOutputStore.ts`, read at main on 2026-11-20) sends a sampler's latent preview as a binary websocket message (`b_preview_with_metadata`); the frontend revokes the node's last preview and shows the new one in its image slot; nothing clears it when the node finishes or a new run starts, so a KSampler keeps its last preview, and previews are drawn before output images. We match: one slot, the newest preview, full strength while it is this run's, an image result taking its place, and a result with no image leaving the last preview (as a sampler's preview stays on ComfyUI's node). We differ: a node sends a file path, not bytes (the protocol is lines of JSON, and the file stays in the run folder for Open Image); previews queue at most one deep, so a fast node cannot hold up the run thread; a bad preview is a warning, never a failure; the last run's picture is dimmed while the node runs again, until the new preview comes, and a provider's sampling preview (8) follows the same rule, so it is no longer drawn dimmed while it streams | 7.2, 9.4 | medium-high |
 
 ## Appendix B: issue to section map
 

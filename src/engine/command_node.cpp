@@ -314,16 +314,22 @@ Error reportedError(const QJsonObject &line) {
 
 // The file a line names with {"path": …}: one the program wrote inside `workDir` (canonical; a
 // relative path resolves against it), after symlinks. Else an error with `code` whose message
-// starts with `what` ("Output image", "A preview's image").
-Result<QString> fileInWorkDir(const QJsonValue &value, const QString &workDir, const QString &code, const QString &what) {
+// starts with `what` ("Output image", "A preview's image"). A work_dir that is gone (empty)
+// holds nothing.
+Result<QString> fileInWorkDir(const QJsonValue &value, const QString &workDir, const QString &code,
+                              const QString &what) {
+    if (workDir.isEmpty())
+        return nodeError(code, QStringLiteral("%1 cannot be read: the node's work_dir is gone.").arg(what));
     const QString path = value.isObject() ? value.toObject().value("path").toString() : QString();
     if (path.isEmpty())
-        return nodeError(code, QStringLiteral("%1 must be {\"path\": …}, a file the node wrote in its work_dir.").arg(what));
+        return nodeError(code,
+                         QStringLiteral("%1 must be {\"path\": …}, a file the node wrote in its work_dir.").arg(what));
     const QString file = QFileInfo(QDir(workDir).absoluteFilePath(path)).canonicalFilePath();
     if (file.isEmpty())
         return nodeError(code, QStringLiteral("%1 names a file that does not exist: %2.").arg(what, path));
     if (!file.startsWith(workDir + QLatin1Char('/')))
-        return nodeError(code, QStringLiteral("%1 names a file outside the node's work_dir: %2.").arg(what, path));
+        return nodeError(code,
+                         QStringLiteral("%1 names a file outside the node's work_dir: %2.").arg(what, path));
     return file;
 }
 
@@ -425,7 +431,9 @@ Result<QJsonObject> await(Process &process, const NodeContext &context, const QS
                         context.progress(qBound(0.0, line.value("value").toDouble(), 1.0), QString(),
                                          line.value("message").toString());
                 } else if (op == QLatin1String("preview") && mine && expect == Expect::Result) {
-                    showPreview(line, context, warnings);
+                    // Once a one-shot program has given its answer, what it shows no longer counts.
+                    if (!result && !reported)
+                        showPreview(line, context, warnings);
                 } else if (op == QLatin1String("result") && mine && expect == Expect::Result) {
                     if (persistent)
                         return line;
@@ -549,8 +557,6 @@ Result<Values> outputsFrom(const QJsonObject &result, const NodeContext &context
     return values;
 }
 
-// An input as the program gets it: a media handle with nothing pending, so `path` is the whole
-// value (7.2).
 // The outputs with the run's warnings (a bad preview) beside their own; a failure stays one.
 Result<Values> withWarnings(Result<Values> outputs, const Errors &warnings) {
     if (!outputs || warnings.isEmpty())
@@ -558,6 +564,8 @@ Result<Values> withWarnings(Result<Values> outputs, const Errors &warnings) {
     return Result<Values>(outputs.value(), warnings + outputs.warnings());
 }
 
+// An input as the program gets it: a media handle with nothing pending, so `path` is the whole
+// value (7.2).
 Result<QJsonValue> plainJson(const QString &name, const Value &value, const NodeContext &context) {
     if (value.isMedia()) {
         const Result<MediaHandle> plain = value.media().plainFile(context.workDir, name, *context.hashes);

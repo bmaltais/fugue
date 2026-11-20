@@ -257,11 +257,13 @@ private slots:
         const Node node = makeNode(m_root.path(), "steps", QByteArray("cat > /dev/null\necho ") + kPng +
                                                                " | base64 -d > step.png\n"
                                                                "echo '{\"op\": \"preview\", \"image\": {\"path\": \"step.png\"}}'\n"
-                                                               "echo '{\"outputs\": {\"text\": \"done\"}}'\n");
+                                                               "echo '{\"outputs\": {\"text\": \"done\"}}'\n"
+                                   "echo '{\"op\": \"preview\", \"image\": {\"path\": \"step.png\"}}'\n");
         CommandKernel kernel(kGraceMs);
         const NodeContext context = contextFor(node);
         const Result<Values> result = kernel.run(context);
         QVERIFY2(result.ok(), qPrintable(result.error().message));
+        // The preview after the result is not shown.
         QCOMPARE(m_previews, QStringList{QFileInfo(context.workDir + "/step.png").canonicalFilePath()});
         QVERIFY(result.warnings().isEmpty());
     }
@@ -284,6 +286,18 @@ private slots:
         QCOMPARE(result.warnings().size(), 1);
         QCOMPARE(result.warnings().first().code, QString("node_bad_preview"));
         QVERIFY2(result.warnings().first().message.contains("outside"), qPrintable(result.warnings().first().message));
+    }
+
+    // With its work_dir gone, a preview has no folder to be inside of: none is shown, not even
+    // a file named by an absolute path.
+    void aPreviewIsNotShownOnceTheWorkDirIsGone() {
+        const Node node = makeNode(m_root.path(), "gone",
+                                   "cat > /dev/null\nd=$PWD\ncd ..\nrm -rf \"$d\"\n"
+                                   "echo \"{\\\"op\\\": \\\"preview\\\", \\\"image\\\": {\\\"path\\\": \\\"$PWD/secret.txt\\\"}}\"\n"
+                                   "echo '{\"outputs\": {}}'\n");
+        CommandKernel kernel(kGraceMs);
+        kernel.run(contextFor(node));
+        QVERIFY(m_previews.isEmpty());
     }
 
     void anErrorLineFailsTheNodeWithItsMessage() {
@@ -474,10 +488,12 @@ wait
         QCOMPARE(m_progress, QStringList{"0.5 working"});
     }
 
-    // A persistent node's preview carries its run's id; one for another run is not shown.
+    // A persistent node's preview carries its run's id; one for another run is not shown. Its
+    // relative path is against this run's work_dir, not the program's folder (the first run's).
     void aPersistentNodeShowsThePreviewsOfItsRun() {
         const Node node = makeNode(m_root.path(), "persview", persistentScript(), {{"mode", "persistent"}});
         CommandKernel kernel(kGraceMs);
+        QVERIFY(kernel.run(contextFor(node)).ok()); // starts the program in the first work_dir
         const NodeContext context = contextFor(node, {{"mode", Value("preview")}});
         const Result<Values> result = kernel.run(context);
         QVERIFY2(result.ok(), qPrintable(result.error().message));
