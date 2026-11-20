@@ -20,6 +20,12 @@ bin/build fugue  # only the app; any CMake target works, e.g. bin/build test_men
 
 The app is `build/fugue`.
 
+The generation helper, stable-diffusion.cpp with Fugue's stage patch, builds on its own:
+
+```sh
+bin/build-helper cuda    # or vulkan, cpu; into build-helper-<backend>/
+```
+
 ## License
 
 MIT.

@@ -1,0 +1,54 @@
+name: Helper
+
+# stable-diffusion.cpp with Fugue's stage patch (helper/). It takes long to build, so it runs
+# only when the helper or its packaging changes, and keeps ccache's folder between runs.
+on:
+  pull_request:
+    paths: [helper/**, bin/build-helper, packaging/PKGBUILD, .github/workflows/helper.yml]
+  push:
+    branches: [main, master]
+    paths: [helper/**, bin/build-helper, packaging/PKGBUILD, .github/workflows/helper.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  vulkan:
+    name: Build the helper (Vulkan)
+    runs-on: ubuntu-latest
+    # The CUDA helper needs a multi-gigabyte toolkit and is built where it runs; Vulkan checks
+    # the patch and the code.
+    container: archlinux:latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+    steps:
+      - name: Install git for the checkout
+        run: pacman -Syu --noconfirm --needed git
+
+      - uses: actions/checkout@v4
+
+      - name: Check the PKGBUILD pins the helper's sources at the same commits
+        run: |
+          source packaging/PKGBUILD
+          for commit in "$_sdcpp" "$_ggml" "$_cutlass"; do
+            grep -q "$commit" helper/CMakeLists.txt || { echo "PKGBUILD pins $commit, helper/CMakeLists.txt does not"; exit 1; }
+          done
+
+      - name: Install the helper's build dependencies
+        run: pacman -S --noconfirm --needed base-devel ccache cmake shaderc spirv-headers vulkan-headers vulkan-icd-loader
+
+      - name: Restore the compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: helper-vulkan-${{ hashFiles('helper/**') }}
+          restore-keys: helper-vulkan-
+
+      - name: Build
+        run: bin/build-helper vulkan
+
+      - name: Compiler cache use
+        run: ccache -s

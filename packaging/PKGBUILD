@@ -3,8 +3,14 @@
 # CI (.github/workflows/test.yml) reads this file for the dependency lists, so
 # a new dependency goes here and nowhere else. Once a recipe lives in
 # omarchy-pkgs, move it there and point the workflow back at it.
+#
+# Two packages: fugue, with the helper built for Vulkan (any GPU), and
+# fugue-helper-cuda, the faster helper for NVIDIA cards (spec 8.10). The helper's
+# stable-diffusion.cpp sources are the pin of helper/CMakeLists.txt: move both
+# together.
 
-pkgname=fugue
+pkgbase=fugue
+pkgname=('fugue' 'fugue-helper-cuda')
 pkgver=0.1.0
 pkgrel=1
 pkgdesc='Node-based workflows for local AI'
@@ -19,37 +25,75 @@ depends=(
   'qt6-base'
   'qt6-declarative'
   'qt6-wayland'
+  'vulkan-icd-loader'
 )
 makedepends=(
+  'clang'
   'cmake'
+  'cuda'
   'gcc'
   'git'
   'make'
   'pkgconf'
   'qt6-shadertools'
+  'shaderc'
+  'spirv-headers'
+  'vulkan-headers'
 )
 checkdepends=(
   'noto-fonts'
 )
-source=("$pkgname::git+$url.git")
-sha256sums=('SKIP')
+_sdcpp=532d2c15c430a785a712b2d94281f04e733008a4
+_ggml=eeda9ec48fc84a3df0bb9dcc19ae9053075a2539
+_cutlass=ad7b2f5e84fcfa124cb02b91d5bd26d238c0459e
+source=("$pkgbase::git+$url.git"
+        "sdcpp-$_sdcpp.tar.gz::https://github.com/leejet/stable-diffusion.cpp/archive/$_sdcpp.tar.gz"
+        "ggml-$_ggml.tar.gz::https://github.com/leejet/ggml/archive/$_ggml.tar.gz"
+        "cutlass-$_cutlass.tar.gz::https://github.com/NVIDIA/cutlass/archive/$_cutlass.tar.gz")
+sha256sums=('SKIP'
+            '0278dc8e6e180adc4b43b3ace515eeef870dd76533a34fa1edcfa071ce7d7812'
+            '8bd7adc7eb1366d31670467951d21eb1a5f55e8f6d89b9b91909ffb0246ac5d2'
+            '36429479df2ab1cd1c7981c2d34e786106326ccfefc8846f902f76151a65e112')
 
 pkgver() {
-  cd "$srcdir/$pkgname"
+  cd "$srcdir/$pkgbase"
   printf '0.1.0.r%s.g%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
 }
 
+prepare() {
+  cd "$srcdir/stable-diffusion.cpp-$_sdcpp"
+  patch -p1 --forward --input="$srcdir/$pkgbase/helper/sdcpp.patch"
+}
+
+# The helper for one backend, from the sources above rather than a download.
+_helper() {
+  "$srcdir/$pkgbase/bin/build-helper" "$1" \
+    -DFETCHCONTENT_SOURCE_DIR_SDCPP="$srcdir/stable-diffusion.cpp-$_sdcpp" \
+    -DFETCHCONTENT_SOURCE_DIR_SDCPP_GGML="$srcdir/ggml-$_ggml" \
+    -DFETCHCONTENT_SOURCE_DIR_SDCPP_CUTLASS="$srcdir/cutlass-$_cutlass"
+}
+
 build() {
-  cd "$srcdir/$pkgname"
+  cd "$srcdir/$pkgbase"
   ./bin/build
+  _helper vulkan
+  _helper cuda
 }
 
 check() {
-  cd "$srcdir/$pkgname"
+  cd "$srcdir/$pkgbase"
   QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure --no-tests=error
 }
 
-package() {
-  cd "$srcdir/$pkgname"
+package_fugue() {
+  cd "$srcdir/$pkgbase"
   DESTDIR="$pkgdir" cmake --install build --prefix /usr
+  DESTDIR="$pkgdir" cmake --install build-helper-vulkan --prefix /usr --component fugue-helper
+}
+
+package_fugue-helper-cuda() {
+  pkgdesc='Generation helper of Fugue for NVIDIA cards (CUDA)'
+  depends=('fugue' 'cuda')
+  cd "$srcdir/$pkgbase"
+  DESTDIR="$pkgdir" cmake --install build-helper-cuda --prefix /usr --component fugue-helper
 }
