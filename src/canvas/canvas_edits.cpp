@@ -55,6 +55,14 @@ QList<std::pair<PortRef, int>> linksInto(const Document &document, const QString
     return it == document.graph.nodes.constEnd() ? QList<std::pair<PortRef, int>>() : linksIn(it->inputs.value(input));
 }
 
+// A group definition as the file writes it, to tell two apart.
+QJsonValue groupJson(const GroupDefinition &group) {
+    Document holder;
+    holder.groups.insert(QStringLiteral("g"), group);
+    holder.present.groups = true;
+    return holder.toJson().value("groups").toObject().value("g");
+}
+
 // Reroute points belong to their link: after an edit from `before` to `after`, each key of
 // after's layout.links names the same link (same source, same input) or goes. A list item's
 // points follow it when items before it go; a new link into the same slot gets none.
@@ -569,6 +577,28 @@ Document CanvasModel::copyOf(const QStringList &ids) const {
             types << inner.type;
     }
     copy.present.groups = !copy.groups.isEmpty();
+    // The reroute points of the links between the copied nodes, and the inner layout of the
+    // copied groups, so the copy looks as the original does.
+    const QSet<QString> inCopy(ids.begin(), ids.end());
+    const QJsonObject links = all.layout.value("links").toObject();
+    QJsonObject copiedLinks;
+    for (auto it = links.constBegin(); it != links.constEnd(); ++it) {
+        const LinkKey key = parseLinkKey(it.key());
+        if (!inCopy.contains(key.node))
+            continue;
+        for (const auto &[from, item] : linksInto(all, key.node, key.input))
+            if (item == key.item && inCopy.contains(from.node))
+                copiedLinks.insert(it.key(), it.value());
+    }
+    if (!copiedLinks.isEmpty())
+        copy.layout.insert("links", copiedLinks);
+    const QJsonObject groupLayouts = all.layout.value("groups").toObject();
+    QJsonObject copiedGroups;
+    for (const QString &id : copy.groups.keys())
+        if (groupLayouts.contains(id))
+            copiedGroups.insert(id, groupLayouts.value(id));
+    if (!copiedGroups.isEmpty())
+        copy.layout.insert("groups", copiedGroups);
     return copy;
 }
 
@@ -635,6 +665,20 @@ QStringList CanvasModel::insertCopy(const Document &copy, QPointF topLeft, bool 
     for (const QPointF &p : pos)
         corner = QPointF(std::min(corner.x(), p.x()), std::min(corner.y(), p.y()));
 
+    // A group the copy brings under an id this workflow already uses for another definition
+    // comes in under a new id, so the pasted instance keeps its own ports (a workflow holds
+    // one definition per id, 4.4).
+    QHash<QString, QString> renamed;
+    for (auto it = copy.groups.cbegin(); it != copy.groups.cend(); ++it) {
+        if (!document.groups.contains(it.key()) || groupJson(document.groups.value(it.key())) == groupJson(it.value()))
+            continue;
+        QString id;
+        for (int n = 2; id.isEmpty() || document.groups.contains(id) || copy.groups.contains(id); ++n)
+            id = QStringLiteral("%1-%2").arg(it.key()).arg(n);
+        renamed.insert(it.key(), id);
+    }
+    auto typeOf = [&renamed](const QString &type) { return renamed.value(type, type); };
+
     QHash<QString, QString> ids; // copied id -> new id
     QSet<QString> fresh;
     for (auto it = copy.graph.nodes.cbegin(); it != copy.graph.nodes.cend(); ++it) {
@@ -647,6 +691,7 @@ QStringList CanvasModel::insertCopy(const Document &copy, QPointF topLeft, bool 
     QList<std::pair<QString, QString>> external; // (new node, input) holding a link from outside
     for (auto it = copy.graph.nodes.cbegin(); it != copy.graph.nodes.cend(); ++it) {
         Node node = it.value();
+        node.type = typeOf(node.type);
         const QString id = ids.value(it.key());
         for (auto in = node.inputs.begin(); in != node.inputs.end(); ++in) {
             // A link between copied nodes follows them; one from outside stays only with
@@ -684,11 +729,41 @@ QStringList CanvasModel::insertCopy(const Document &copy, QPointF topLeft, bool 
         layoutNodes.insert(id, entry);
     }
     document.layout.insert("nodes", layoutNodes);
+    QJsonObject groupLayouts = document.layout.value("groups").toObject();
+    const QJsonObject copiedLayouts = copy.layout.value("groups").toObject();
     for (auto it = copy.groups.cbegin(); it != copy.groups.cend(); ++it) {
-        if (!document.groups.contains(it.key())) {
-            document.groups.insert(it.key(), it.value());
-            document.present.groups = true;
+        const QString id = typeOf(it.key());
+        if (document.groups.contains(id))
+            continue;
+        GroupDefinition group = it.value();
+        for (Node &inner : group.nodes)
+            inner.type = typeOf(inner.type);
+        document.groups.insert(id, group);
+        document.present.groups = true;
+        if (copiedLayouts.contains(it.key()) && !groupLayouts.contains(id))
+            groupLayouts.insert(id, copiedLayouts.value(it.key()));
+    }
+    if (!groupLayouts.isEmpty())
+        document.layout.insert("groups", groupLayouts);
+    // The copy's reroute points, on its new ids, moved with its nodes.
+    const QJsonObject copiedLinks = copy.layout.value("links").toObject();
+    if (!copiedLinks.isEmpty()) {
+        QJsonObject links = document.layout.value("links").toObject();
+        const QPointF shift = topLeft - corner;
+        for (auto it = copiedLinks.constBegin(); it != copiedLinks.constEnd(); ++it) {
+            LinkKey key = parseLinkKey(it.key());
+            if (!ids.contains(key.node))
+                continue;
+            key.node = ids.value(key.node);
+            QJsonObject entry = it.value().toObject();
+            QJsonArray points;
+            for (const QJsonValue &p : entry.value("points").toArray())
+                if (const auto at = point(p))
+                    points.append(QJsonArray{qRound64(at->x() + shift.x()), qRound64(at->y() + shift.y())});
+            entry.insert("points", points);
+            links.insert(key.text(), entry);
         }
+        document.layout.insert("links", links);
     }
 
     beginEdit();

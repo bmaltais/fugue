@@ -235,7 +235,50 @@ private slots:
         QCOMPARE(canvas.undoStack()->count(), 1);
     }
 
+    // A pasted group instance keeps the definition it was copied with: when this workflow
+    // holds another definition under the same id, the pasted one comes in under a new id.
+    void aPasteKeepsItsOwnGroupDefinition() {
+        const char *mine = R"({"fugue": 1, "graph": {"nodes": {
+            "g": {"type": "local/pass", "version": "1.0.0", "inputs": {}}}},
+          "groups": {"local/pass": {"version": "1.0.0", "name": "Pass",
+            "inputs": [{"name": "x", "targets": ["first.prompt"]}],
+            "outputs": [{"name": "image", "from": "first.image"}],
+            "nodes": {"first": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {}}}}}})";
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(mine));
+        // The same definition: the instance shares it.
+        canvas.select({"g"});
+        const QStringList same = canvas.paste(canvas.copySelection());
+        QCOMPARE(canvas.document().graph.nodes.value(same.value(0)).type, QString("local/pass"));
+        QCOMPARE(canvas.document().groups.size(), 1);
 
+        const QStringList other = canvas.paste(R"({"fugue": 1, "graph": {"nodes": {
+            "p": {"type": "local/pass", "version": "1.0.0", "inputs": {}}}},
+          "groups": {"local/pass": {"version": "1.0.0", "name": "Pass",
+            "inputs": [{"name": "y", "targets": ["first.steps"]}],
+            "outputs": [{"name": "image", "from": "first.image"}],
+            "nodes": {"first": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {}}}}}})");
+        QCOMPARE(other.size(), 1);
+        const Document after = canvas.document();
+        const QString type = after.graph.nodes.value(other[0]).type;
+        QVERIFY(type != "local/pass");
+        QCOMPARE(after.groups.value(type).inputs.value(0).name, QString("y"));
+        QCOMPARE(after.groups.value("local/pass").inputs.value(0).name, QString("x"));
+        QCOMPARE(after.groups.size(), 2);
+    }
+
+    // A copy takes the reroute points of the links between its nodes, moved with them.
+    void aCopyKeepsTheReroutePointsOfItsLinks() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(chain));
+        canvas.select({"gen", "save"});
+        canvas.setPointer(1300, 1080); // gen's place, 1000 down and right
+        const QStringList pasted = canvas.paste(canvas.copySelection());
+        const QString save = canvas.document().graph.nodes.value(pasted[0]).type == "fugue/save-image" ? pasted[0] : pasted[1];
+        const QJsonArray points = canvas.document().layout.value("links").toObject().value(save + ".image")
+                                      .toObject().value("points").toArray();
+        QCOMPARE(points, (QJsonArray{QJsonArray{1600, 1200}}));
+    }
 
     void pastingTextThatIsNotAWorkflowDoesNothing() {
         CanvasModel canvas(&m_registry);
