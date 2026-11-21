@@ -12,8 +12,6 @@ name: Package
 # runner, so fugue-helper-cuda is built where there is an NVIDIA card (`makepkg -si` in packaging/).
 on:
   push:
-    branches: [main, master]
-    paths: [packaging/**, share/**, bin/build, bin/build-helper, bin/package-helper, helper/**, CMakeLists.txt, .github/workflows/package.yml]
     tags: ['v*']
   workflow_dispatch:
 
