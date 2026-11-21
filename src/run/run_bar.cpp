@@ -7,6 +7,7 @@
 
 #include "commands/command_registry.h"
 #include "engine/json.h"
+#include "panels/chrome_visibility.h"
 #include "run/canvas_runs.h"
 
 namespace fugue {
@@ -21,9 +22,16 @@ QPointF clampedPlace(QPointF p) {
 
 } // namespace
 
-RunBar::RunBar(CanvasRuns *runs, QString path, QObject *parent) : QObject(parent), m_runs(runs), m_path(std::move(path)) {
+RunBar::RunBar(CanvasRuns *runs, QString path, ChromeVisibility *chrome)
+    : m_runs(runs), m_path(std::move(path)), m_chrome(chrome ? chrome : new ChromeVisibility({}, this)) {
+    m_chrome->add(kChromeId);
+    connect(m_chrome, &ChromeVisibility::visibilityChanged, this, [this](const QString &id) {
+        if (id == QLatin1String(kChromeId))
+            emit visibleChanged();
+    });
     if (const Result<QJsonObject> read = readJsonObject(m_path)) {
-        m_visible = read->value("visible").toBool(true);
+        if (read->contains("visible"))
+            m_chrome->seed(kChromeId, read->value("visible").toBool(true));
         if (const QJsonObject place = read->value("place").toObject(); !place.isEmpty())
             m_place = clampedPlace({place.value("x").toDouble(0.5), place.value("y").toDouble(0)});
         else if (read->value("dock").toString() == QLatin1String("bottom"))
@@ -35,13 +43,9 @@ RunBar::RunBar(CanvasRuns *runs, QString path, QObject *parent) : QObject(parent
         connect(m_runs, &CanvasRuns::batchChanged, this, &RunBar::save);
 }
 
-void RunBar::setVisible(bool visible) {
-    if (visible == m_visible)
-        return;
-    m_visible = visible;
-    save();
-    emit visibleChanged();
-}
+bool RunBar::visible() const { return m_chrome->isVisible(kChromeId); }
+
+void RunBar::setVisible(bool visible) { m_chrome->setVisible(kChromeId, visible); }
 
 void RunBar::setPlace(const QPointF &place) {
     const QPointF wanted = clampedPlace(place);
@@ -62,12 +66,11 @@ void RunBar::setQueueOpen(bool open) {
 void RunBar::save() const {
     if (m_path.isEmpty())
         return;
-    writeJsonFile(m_path, QJsonObject{{"visible", m_visible}, {"place", QJsonObject{{"x", m_place.x()}, {"y", m_place.y()}}}, {"batch", m_runs ? m_runs->batch() : 1}});
+    writeJsonFile(m_path, QJsonObject{{"place", QJsonObject{{"x", m_place.x()}, {"y", m_place.y()}}}, {"batch", m_runs ? m_runs->batch() : 1}});
 }
 
 void RunBar::registerCommands(CommandRegistry &commands) {
-    commands.setHandler("view.toggle-run-toolbar", [this] { setVisible(!m_visible); });
-    commands.setCheckedWhen("view.toggle-run-toolbar", [this] { return m_visible; });
+    // view.toggle-run-toolbar is the registry's (panels/chrome_commands.h).
     // Opening the panel shows the toolbar it hangs from.
     commands.setHandler("panel.queue", [this] {
         if (!m_queueOpen)

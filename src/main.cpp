@@ -30,6 +30,8 @@
 #include "nodes/builtin.h"
 #include "qml_app.h"
 #include "run/canvas_runs.h"
+#include "panels/chrome_commands.h"
+#include "panels/chrome_visibility.h"
 #include "panels/side_panels.h"
 #include "run/run_bar.h"
 #include "search/node_library.h"
@@ -119,7 +121,10 @@ int main(int argc, char *argv[]) {
     fugue::CanvasRuns runs(&canvasModel, &workflows, &runService, &registry);
     runs.registerCommands(commands);
     // The run toolbar's state and the queue panel's list (#60): the same queue the CLI's runs are in.
-    fugue::RunBar runBar(&runs, fugue::stateDir() + "/run-bar.json");
+    // Which bars and panels are shown (#129): each registers with this, and the Bars and panels menu, focus
+    // mode and the file that remembers it are its.
+    fugue::ChromeVisibility chrome(fugue::stateDir() + "/chrome.json");
+    fugue::RunBar runBar(&runs, fugue::stateDir() + "/run-bar.json", &chrome);
     runBar.registerCommands(commands);
     fugue::RunQueue runQueue({}, &runService);
     // Open, Copy and Save Image on a node's menu (#57); failures go to the window banner.
@@ -131,15 +136,16 @@ int main(int argc, char *argv[]) {
     fugue::LayoutColors layoutColors(canvasModel);
 
     // The side panels (#56): which is open and how wide, the node library's rows, the files lately open.
-    fugue::SidePanels sidePanels(fugue::stateDir() + "/side-panels.json");
+    fugue::SidePanels sidePanels(fugue::stateDir() + "/side-panels.json", &chrome);
     sidePanels.registerCommands(commands);
+    fugue::registerChromeCommands(commands, chrome);
     fugue::NodeLibrary nodeLibrary(&registry);
     fugue::RecentFiles recentFiles(fugue::stateDir() + "/recent-files.json");
     recentFiles.follow(&workflows);
 
     const fugue::AppObjects objects{&translator, &theme,   &commands, &canvasModel,  &workflows,
                                     &appSettings, &runs, &imageActions, &colorHistory, &layoutColors,
-                                    &runBar,      &runQueue,    &sidePanels,   &nodeLibrary,  &recentFiles};
+                                    &runBar,      &runQueue,    &sidePanels,   &nodeLibrary,  &recentFiles,  &chrome};
     // The registry is filled again when the packs or the trust change, so what is installed is
     // usable with no restart (#70). Made after what it refreshes, so it goes first.
     fugue::RegistryReloader reloader(&registry, addNodeTypes);

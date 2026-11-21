@@ -18,7 +18,9 @@ Rectangle {
     objectName: "workflowTabs"
     // Shown from the second workflow on; one workflow needs no tabs, and the window title
     // carries its name and unsaved mark.
-    visible: App.workflows.tabs.length > 1
+    // Off while the Bars and panels menu has them hidden (#129).
+    property bool allowed: true
+    visible: allowed && App.workflows.tabs.length > 1
     implicitHeight: visible ? 9 * look.unit : 0
     color: look.well
 

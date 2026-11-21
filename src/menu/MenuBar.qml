@@ -144,7 +144,7 @@ Rectangle {
             required property int index
             Shortcut {
                 sequence: bar.mnemonic(mnemonicKey.index) !== "" ? "Alt+" + bar.mnemonic(mnemonicKey.index) : ""
-                enabled: sequence !== ""
+                enabled: sequence !== "" && bar.visible // a hidden bar has no Alt keys
                 onActivated: bar.openMenu(mnemonicKey.index, true)
             }
         }

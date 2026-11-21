@@ -15,6 +15,7 @@
 #include "menu/color_history.h"
 #include "menu/image_actions.h"
 #include "menu/layout_colors.h"
+#include "panels/chrome_visibility.h"
 #include "panels/side_panels.h"
 #include "run/canvas_runs.h"
 #include "run/run_bar.h"
@@ -46,6 +47,7 @@ struct AppObjects {
     SidePanels *sidePanels = nullptr;     // optional: the side panels (#56)
     NodeLibrary *nodeLibrary = nullptr;   // optional, with sidePanels
     RecentFiles *recentFiles = nullptr;   // optional, with sidePanels
+    ChromeVisibility *chrome = nullptr;   // optional: which bars and panels are shown (#129)
 };
 
 class QmlApp : public QObject {
@@ -68,6 +70,7 @@ class QmlApp : public QObject {
     Q_PROPERTY(fugue::SidePanels *sidePanels READ sidePanels CONSTANT)
     Q_PROPERTY(fugue::NodeLibrary *nodeLibrary READ nodeLibrary CONSTANT)
     Q_PROPERTY(fugue::RecentFiles *recentFiles READ recentFiles CONSTANT)
+    Q_PROPERTY(fugue::ChromeVisibility *chrome READ chrome CONSTANT)
 
 public:
     explicit QmlApp(const AppObjects &objects, QObject *parent = nullptr) : QObject(parent), m_objects(objects) {}
@@ -87,6 +90,7 @@ public:
     SidePanels *sidePanels() const { return m_objects.sidePanels; }
     NodeLibrary *nodeLibrary() const { return m_objects.nodeLibrary; }
     RecentFiles *recentFiles() const { return m_objects.recentFiles; }
+    ChromeVisibility *chrome() const { return m_objects.chrome; }
 
 private:
     AppObjects m_objects;

@@ -50,6 +50,22 @@ QVariantList runItems() {
     return {command("run.start"), command("run.start-first"), command("run.to-here"), separator(), command("run.cancel")};
 }
 
+// The Bars and panels submenu (#129), as Photoshop's Window menu: every bar and panel with a check
+// while it is shown, then focus mode and the way back. In the View menu, and a submenu of the canvas's
+// menu too, so a hidden menu bar can be found again with a right click. (A top menu of its own
+// would add items to the window, which keeps a budget.)
+QVariantList windowItems() {
+    return {command("view.toggle-menu-bar"), command("view.toggle-tabs"), command("view.toggle-run-toolbar"),
+            command("view.toggle-selection-toolbar"), command("view.toggle-breadcrumb"), command("view.toggle-run-status"),
+            command("view.toggle-zoom-readout"), separator(),
+            command("panel.nodes"), command("panel.workflows"), command("panel.queue"), separator(),
+            command("view.focus-mode"), command("view.reset-bars")};
+}
+
+QVariantMap barsMenu() {
+    return submenu(QT_TRANSLATE_NOOP("Menu", "&Bars and panels"), windowItems());
+}
+
 QVariantList bar() {
     return {
         submenu(QT_TRANSLATE_NOOP("Menu", "&File"),
@@ -64,8 +80,7 @@ QVariantList bar() {
                  separator(), command("app.settings")}),
         submenu(QT_TRANSLATE_NOOP("Menu", "&View"),
                 {command("view.fit"), command("view.zoom-in"), command("view.zoom-out"), separator(),
-                 command("view.toggle-links"), separator(), command("panel.nodes"), command("panel.workflows"),
-                 command("panel.queue"), command("view.toggle-run-toolbar")}),
+                 command("view.toggle-links"), separator(), barsMenu(), command("view.focus-mode")}),
         submenu(QT_TRANSLATE_NOOP("Menu", "&Node"),
                 {command("node.search"), separator(), command("node.bypass"), command("node.mute"),
                  command("node.collapse"), command("node.pin"), align(false), distribute(false),
@@ -90,7 +105,8 @@ QVariantList tab() {
 // Right-click on empty canvas: what adds to it, then the view.
 QVariantList canvas() {
     return {command("node.search"), command("edit.paste"), command("edit.paste-connected"), separator(),
-            command("edit.select-all"), command("view.fit"), command("view.toggle-links"), separator(),
+            command("edit.select-all"), command("view.fit"), command("view.toggle-links"),
+            barsMenu(), separator(),
             command("frame.make"), command("group.make"), ifOn("group.leave"), ifOn("group.interface"),
             ifOn("group.save-to-library")};
 }

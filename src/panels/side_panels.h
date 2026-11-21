@@ -7,8 +7,12 @@
 // contents (NodeLibraryPanel.qml, WorkflowsPanel.qml) are QML that know nothing of this;
 // Main.qml binds them to App.sidePanels.
 //
-// Kept in a small file of the state folder: {"tab": "nodes"|"workflows"|"", "dock": "left"|"right",
-// "width"}. A window starts with the panel it closed with.
+// Which panel is open is the visibility registry's (ids "node-library" and "workflows-panel", one of
+// them at a time; panels/chrome_visibility.h), so focus mode hides the panel and brings it back and
+// the registry's file remembers it: a window starts with the panel it closed with. A "tab" in this
+// file from before is read once, when the registry has nothing for the panels.
+//
+// Kept in a small file of the state folder: {"dock": "left"|"right", "width"}.
 //
 // Commands: panel.nodes (N) and panel.workflows (W), each toggling its panel and checked in the
 // View menu while it is the open one.
@@ -19,6 +23,7 @@
 
 namespace fugue {
 
+class ChromeVisibility;
 class CommandRegistry;
 
 class SidePanels : public QObject {
@@ -38,10 +43,11 @@ public:
     static constexpr int kMaxWidth = 640;
     static constexpr int kDefaultWidth = 288;
 
-    // `path` is the file it is kept in (empty: not kept).
-    explicit SidePanels(QString path, QObject *parent = nullptr);
+    // `path` is the file it is kept in (empty: not kept). `chrome` is the registry the panels
+    // register with; none: a registry of its own, which keeps nothing.
+    explicit SidePanels(QString path, ChromeVisibility *chrome = nullptr);
 
-    QString tab() const { return m_tab; }
+    QString tab() const; // "" while none is shown (focus mode included)
     QString dock() const { return m_dock; }
     int width() const { return m_width; }
     int minWidth() const { return kMinWidth; }
@@ -66,7 +72,8 @@ private:
     void save() const;
 
     QString m_path;
-    QString m_tab;
+    ChromeVisibility *m_chrome;
+    QString m_shownTab;
     QString m_dock = QStringLiteral("left");
     int m_width = kDefaultWidth;
 };
