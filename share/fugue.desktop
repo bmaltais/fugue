@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=Fugue
-Comment=One line on what it does
+Comment=Node-based workflows for local AI
 Exec=fugue %f
 Icon=fugue
 Terminal=false
