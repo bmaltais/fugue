@@ -1,0 +1,34 @@
+#!/bin/bash
+# Makes the portable CUDA helper as a release asset for a host the Arch package cannot serve, such as
+# a DGX Spark (Ubuntu aarch64, CUDA 13, sm_121). Run it on that host, from a checkout of the tag:
+#
+#   bin/package-helper [outdir]      # -> <outdir>/fugue-helper-cuda-<arch>-linux.tar.zst and SHA256SUMS
+#
+# The binary links the host's CUDA runtime and cuBLAS dynamically and is not signed. It is built
+# with the portable settings (no -march=native; sm_121 machine code plus its PTX), so it runs on any
+# GB10 host, not only the one that built it. Upload both files with `gh release upload <tag>`.
+set -euo pipefail
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+out="$(realpath -m "${1:-$root/dist}")"
+arch="$(uname -m)"
+case $arch in
+  aarch64) archs='121-real;121-virtual' ;;
+  *) echo "package-helper: only aarch64 is built this way; x86_64 has the fugue-helper-cuda package" >&2; exit 2 ;;
+esac
+
+"$root/bin/build-helper" cuda -DGGML_NATIVE=OFF -DCMAKE_CUDA_ARCHITECTURES="$archs"
+
+name="fugue-helper-cuda-$arch-linux"
+stage="$(mktemp -d)"
+trap 'rm -rf "$stage"' EXIT
+mkdir -p "$stage/$name" "$out"
+install -m755 "$root/build-helper-cuda/fugue-helper-cuda" "$stage/$name/fugue-helper-cuda"
+install -m644 "$root/helper/fugue-helper.service" "$stage/$name/fugue-helper.service"
+tar -C "$stage" --zstd -cf "$out/$name.tar.zst" "$name"
+# SHA256SUMS keeps the other assets' lines: replace only this archive's.
+touch "$out/SHA256SUMS"
+grep -v " $name.tar.zst\$" "$out/SHA256SUMS" > "$stage/sums" || true
+(cd "$out" && sha256sum "$name.tar.zst") >> "$stage/sums"
+cp "$stage/sums" "$out/SHA256SUMS"
+echo "$out/$name.tar.zst"

@@ -6,12 +6,14 @@ name: Package
 # the package and its checksum, and by hand. Not on pull requests: it is slow. Tests are test.yml's job,
 # so makepkg skips them here (and does not compile them).
 #
+# fugue-helper-cuda-aarch64-linux.tar.zst (the CUDA helper for a DGX Spark) is built on an arm runner.
+#
 # Only `fugue` (the Vulkan helper, any GPU) is built here: the CUDA toolkit is too big for a hosted
 # runner, so fugue-helper-cuda is built where there is an NVIDIA card (`makepkg -si` in packaging/).
 on:
   push:
     branches: [main, master]
-    paths: [packaging/**, share/**, bin/build, bin/build-helper, CMakeLists.txt, .github/workflows/package.yml]
+    paths: [packaging/**, share/**, bin/build, bin/build-helper, bin/package-helper, helper/**, CMakeLists.txt, .github/workflows/package.yml]
     tags: ['v*']
   workflow_dispatch:
 
@@ -81,9 +83,49 @@ jobs:
           name: package
           path: dist/*
 
+  helper-aarch64:
+    name: CUDA helper for aarch64 hosts
+    # A DGX Spark (Ubuntu aarch64, CUDA 13, sm_121) cannot take the Arch x86 package. nvcc compiles
+    # without a GPU, so a hosted arm runner builds the portable binary (bin/package-helper).
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 360
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 1500M
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the build tools and the CUDA 13 toolkit (compiler and libraries only)
+        run: |
+          wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/sbsa/cuda-keyring_1.1-1_all.deb
+          sudo dpkg -i cuda-keyring_1.1-1_all.deb
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ccache g++ patch zstd \
+            cuda-nvcc-13-0 cuda-cudart-dev-13-0 libcublas-dev-13-0
+          sudo ln -sfn /usr/local/cuda-13.0 /usr/local/cuda
+
+      - name: Restore the compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: helper-aarch64-ccache-${{ github.sha }}
+          restore-keys: helper-aarch64-ccache-
+
+      - name: Build the helper
+        run: bin/package-helper dist
+
+      - name: Compiler cache use
+        if: always()
+        run: ccache -s || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: helper-aarch64
+          path: dist/*
+
   release:
     name: Make the release
-    needs: package
+    needs: [package, helper-aarch64]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
@@ -91,8 +133,13 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: package
-          path: dist
+          pattern: '*'
+          path: parts
+      - name: Gather the assets
+        run: |
+          mkdir dist
+          cp parts/package/*.pkg.tar.zst parts/helper-aarch64/*.tar.zst dist/
+          cat parts/package/SHA256SUMS parts/helper-aarch64/SHA256SUMS > dist/SHA256SUMS
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}

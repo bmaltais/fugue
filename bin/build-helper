@@ -26,10 +26,11 @@ fi
 if [[ $backend == cuda ]]; then
   # Arch's nvcc asks for an older GCC than the system one; clang++ works (docs/spikes/02). An
   # NVCC_CCBIN naming a compiler that is not installed (a GCC since removed) is passed over.
+  # Without clang++ (a DGX Spark's Ubuntu) the system g++ is the one the toolkit supports.
   if [[ ! -x ${NVCC_CCBIN:-} ]]; then
-    export NVCC_CCBIN=/usr/bin/clang++
+    if [[ -x /usr/bin/clang++ ]]; then export NVCC_CCBIN=/usr/bin/clang++; else export NVCC_CCBIN=/usr/bin/g++; fi
   fi
-  export PATH="/opt/cuda/bin:$PATH"
+  export PATH="/opt/cuda/bin:/usr/local/cuda/bin:$PATH"
   args+=(-DCMAKE_CUDA_HOST_COMPILER="$NVCC_CCBIN")
 fi
 # Quiet unless it fails.
