@@ -38,6 +38,10 @@ Result<QByteArray> runWatched(const QStringList &args, const QString &code,
     const Result<QString> path = program(QStringLiteral("ffmpeg"));
     if (!path)
         return path.error();
+    // Already cancelled: do not start. A short job can end inside the first poll, so the loop
+    // below would never have seen the cancel (a flaky test of Upscale Video with Model).
+    if (cancelled && cancelled())
+        return makeError(QStringLiteral("cancelled"), QStringLiteral("The node was cancelled."));
     QProcess process;
     process.setStandardInputFile(QProcess::nullDevice());
     process.setProcessChannelMode(QProcess::SeparateChannels);
