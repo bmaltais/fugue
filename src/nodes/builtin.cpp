@@ -28,6 +28,7 @@ void addBuiltinKernels(Kernels &kernels) {
     addComponentKernels(kernels);
     addImageGenerationKernels(kernels);
     addImageSizeKernels(kernels);
+    addMaskKernels(kernels);
     addMediaGenerationKernels(kernels);
     addPixelKernels(kernels);
     addSaveMediaKernels(kernels);

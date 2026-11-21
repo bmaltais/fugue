@@ -26,6 +26,9 @@ namespace fugue {
 // with no section is in it.
 inline constexpr char kAdvancedSection[] = "Advanced";
 
+// The one port role there is (6.1): a mask is an image with one channel, and its port is marked.
+inline constexpr char kMaskRole[] = "mask";
+
 struct InputSpec {
     QString name;           // [a-z][a-z0-9_]*, unique among the inputs
     PortSpec type;          // port type and the `list` modifier
@@ -43,6 +46,7 @@ struct InputSpec {
     QString widgetName; // as declared; empty means the type's default (6.2)
     QString section;
     bool advanced = false;
+    QString role; // "mask" on an image input that takes a mask (6.1, 14.4); empty for none
 
     // Required unless it has a default or is optional (3.2).
     bool required() const;
@@ -58,6 +62,7 @@ struct OutputSpec {
     QString label;
     QString description;
     bool optional = false; // may come back empty (3.3)
+    QString role;          // "mask" on an image output that holds a mask (6.1, 14.4); empty for none
 };
 
 struct NodeType {

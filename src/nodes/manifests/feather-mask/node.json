@@ -1,0 +1,56 @@
+{
+  "manifest": 1,
+  "id": "fugue/feather-mask",
+  "version": "1.0.0",
+  "name": "Feather Mask",
+  "description": "Give a mask a soft edge Radius pixels wide, so an edit fits into its surroundings. Outward keeps all that is painted and fades into the rest; inward never reaches a pixel outside the paint; centered blurs both ways. Not ComfyUI's Feather Mask, which fades from the picture's borders.",
+  "category": "Image/Mask",
+  "keywords": [
+    "blur",
+    "soften",
+    "edge",
+    "seam",
+    "smooth",
+    "fade"
+  ],
+  "runtime": {
+    "kind": "builtin"
+  },
+  "inputs": [
+    {
+      "name": "mask",
+      "type": "image",
+      "role": "mask",
+      "label": "Mask"
+    },
+    {
+      "name": "radius",
+      "type": "number",
+      "label": "Radius",
+      "default": 16,
+      "min": 0,
+      "max": 512,
+      "step": 1,
+      "integer": true
+    },
+    {
+      "name": "direction",
+      "type": "text",
+      "label": "Direction",
+      "default": "outward",
+      "choices": [
+        "outward",
+        "inward",
+        "centered"
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "name": "mask",
+      "type": "image",
+      "role": "mask",
+      "label": "Mask"
+    }
+  ]
+}

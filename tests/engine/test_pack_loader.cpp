@@ -154,6 +154,51 @@ private slots:
         QCOMPARE(declared->folders, (QStringList{"upscaler", "upscale_models", "ESRGAN"}));
     }
 
+    void aMaskRoleIsKeptOnImagePortsAndSurvivesDescribe() {
+        QTemporaryDir root;
+        const QString id = "io.github.alice.tools";
+        QJsonObject node = nodeJson(id + "/mix");
+        node["inputs"] = QJsonArray{QJsonObject{{"name", "image"}, {"type", "image"}},
+                                    QJsonObject{{"name", "mask"}, {"type", "image"}, {"role", "mask"}}};
+        node["outputs"] = QJsonArray{QJsonObject{{"name", "mask"}, {"type", "image"}, {"role", "mask"}}};
+        const QString dir = makePack(root.path(), id, packJson(id, {"mix"}), {{"mix", node}});
+        Registry registry;
+        const LoadedPack loaded = loadPack(registry, dir);
+        QVERIFY2(loaded.enabled && loaded.disabled.isEmpty(), qPrintable(reasonOf(loaded, "mix")));
+        const NodeType *type = registry.nodeType(id + "/mix");
+        QVERIFY(type);
+        QCOMPARE(type->inputs.at(0).role, QString());
+        QCOMPARE(type->inputs.at(1).role, QString("mask"));
+        QCOMPARE(type->outputs.at(0).role, QString("mask"));
+        // `fugue node describe` writes it back, and reading that gives the same type.
+        const QJsonObject described = type->toJson();
+        QCOMPARE(described.value("inputs").toArray().at(1).toObject().value("role").toString(), QString("mask"));
+        QVERIFY(!described.value("inputs").toArray().at(0).toObject().contains("role"));
+        QCOMPARE(described.value("outputs").toArray().at(0).toObject().value("role").toString(), QString("mask"));
+        const Result<NodeType> again = NodeType::fromJson(described);
+        QVERIFY(again.ok());
+        QCOMPARE(again.value().inputs.at(1).role, QString("mask"));
+        QCOMPARE(again.value().outputs.at(0).role, QString("mask"));
+    }
+
+    void aRoleOtherThanMaskOrOnAnotherTypeDisablesTheNode() {
+        QTemporaryDir root;
+        const QString id = "io.github.alice.tools";
+        QJsonObject other = nodeJson(id + "/other");
+        other["inputs"] = QJsonArray{QJsonObject{{"name", "image"}, {"type", "image"}, {"role", "alpha"}}};
+        QJsonObject onNumber = nodeJson(id + "/number");
+        onNumber["inputs"] = QJsonArray{QJsonObject{{"name", "n"}, {"type", "number"}, {"role", "mask"}}};
+        QJsonObject onOutput = nodeJson(id + "/output");
+        onOutput["outputs"] = QJsonArray{QJsonObject{{"name", "text"}, {"type", "text"}, {"role", "mask"}}};
+        const QString dir = makePack(root.path(), id, packJson(id, {"other", "number", "output"}),
+                                     {{"other", other}, {"number", onNumber}, {"output", onOutput}});
+        Registry registry;
+        const LoadedPack loaded = loadPack(registry, dir);
+        for (const char *name : {"other", "number", "output"})
+            QVERIFY2(reasonOf(loaded, name).contains("role"), name);
+        QVERIFY(!registry.nodeType(id + "/other"));
+    }
+
     void aBadNodeDisablesOnlyThatNode() {
         QTemporaryDir root;
         const QString id = "io.github.alice.tools";

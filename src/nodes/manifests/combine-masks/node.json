@@ -1,0 +1,78 @@
+{
+  "manifest": 1,
+  "id": "fugue/combine-masks",
+  "version": "1.0.0",
+  "name": "Combine Masks",
+  "description": "Combine two masks (ComfyUI's Mask Composite): the source goes into the destination with its top left corner at x, y, by multiply, add, subtract, and, or or xor, and the result is held to 0..1. And, or and xor round each pixel to 0 or 1 first. Outside the source the destination is unchanged.",
+  "category": "Image/Mask",
+  "keywords": [
+    "union",
+    "intersect",
+    "merge",
+    "add",
+    "subtract",
+    "and",
+    "or",
+    "xor",
+    "multiply"
+  ],
+  "runtime": {
+    "kind": "builtin"
+  },
+  "inputs": [
+    {
+      "name": "destination",
+      "type": "image",
+      "role": "mask",
+      "label": "Destination"
+    },
+    {
+      "name": "source",
+      "type": "image",
+      "role": "mask",
+      "label": "Source"
+    },
+    {
+      "name": "operation",
+      "type": "text",
+      "label": "Operation",
+      "default": "multiply",
+      "choices": [
+        "multiply",
+        "add",
+        "subtract",
+        "and",
+        "or",
+        "xor"
+      ]
+    },
+    {
+      "name": "x",
+      "type": "number",
+      "label": "X",
+      "default": 0,
+      "min": 0,
+      "max": 16384,
+      "step": 1,
+      "integer": true
+    },
+    {
+      "name": "y",
+      "type": "number",
+      "label": "Y",
+      "default": 0,
+      "min": 0,
+      "max": 16384,
+      "step": 1,
+      "integer": true
+    }
+  ],
+  "outputs": [
+    {
+      "name": "mask",
+      "type": "image",
+      "role": "mask",
+      "label": "Mask"
+    }
+  ]
+}

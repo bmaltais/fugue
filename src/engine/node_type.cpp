@@ -204,6 +204,7 @@ std::optional<InputSpec> readInput(Reader &r, const QJsonValue &value, int index
     r.string(o, "widget", input.widgetName, where, n);
     r.string(o, "section", input.section, where, n);
     r.boolean(o, "advanced", input.advanced, where, n);
+    r.string(o, "role", input.role, where, n);
     if (o.contains("choices")) {
         QStringList choices;
         r.strings(o, "choices", choices, where, n);
@@ -215,7 +216,7 @@ std::optional<InputSpec> readInput(Reader &r, const QJsonValue &value, int index
     r.unknownFields(o,
                     {"name", "type", "label", "description", "default", "optional", "list", "min_items",
                      "max_items", "min", "max", "step", "integer", "choices", "widget", "section",
-                     "advanced"},
+                     "advanced", "role"},
                     where, n);
 
     if (parsed) {
@@ -228,6 +229,10 @@ std::optional<InputSpec> readInput(Reader &r, const QJsonValue &value, int index
                     r.fail(where + QStringLiteral(" is %1, but \"%2\" only applies to number inputs.")
                                        .arg(id, QLatin1String(key)),
                            n);
+        if (!input.role.isEmpty() && (input.role != QLatin1String(kMaskRole) || id != "image"))
+            r.fail(where + QStringLiteral(" has the role \"%1\"; the only role is \"mask\", on an image port.")
+                               .arg(input.role),
+                   n);
         if (input.choices && id != "text")
             r.fail(where + QStringLiteral(" is %1, but \"choices\" only applies to text inputs.").arg(id), n);
         if (!input.type.list && (input.minItems || input.maxItems))
@@ -299,7 +304,12 @@ std::optional<OutputSpec> readOutput(Reader &r, const QJsonValue &value, int ind
     r.string(o, "label", output.label, where, {}, n);
     r.string(o, "description", output.description, where, {}, n);
     r.boolean(o, "optional", output.optional, where, {}, n);
-    r.unknownFields(o, {"name", "type", "label", "description", "list", "optional"}, where, {}, n);
+    r.string(o, "role", output.role, where, {}, n);
+    r.unknownFields(o, {"name", "type", "label", "description", "list", "optional", "role"}, where, {}, n);
+    if (!output.role.isEmpty() && (output.role != QLatin1String(kMaskRole) || !parsed || parsed->id != "image"))
+        r.fail(where + QStringLiteral(" has the role \"%1\"; the only role is \"mask\", on an image port.")
+                           .arg(output.role),
+               {}, n);
 
     if (bad || r.count() != before)
         return std::nullopt;
@@ -501,6 +511,7 @@ QJsonObject NodeType::toJson() const {
         putIf(i, "widget", input.widgetName);
         putIf(i, "section", input.section);
         putIfTrue(i, "advanced", input.advanced);
+        putIf(i, "role", input.role);
         inputList << i;
     }
     o.insert("inputs", inputList);
@@ -512,6 +523,7 @@ QJsonObject NodeType::toJson() const {
         putIf(out, "label", output.label);
         putIf(out, "description", output.description);
         putIfTrue(out, "optional", output.optional);
+        putIf(out, "role", output.role);
         outputList << out;
     }
     o.insert("outputs", outputList);

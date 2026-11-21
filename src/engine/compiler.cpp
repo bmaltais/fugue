@@ -602,7 +602,7 @@ NodeType Compiler::faceOf(Scope *child, const Node &instance) const {
     for (const GroupOutput &output : child->definition->outputs) {
         const Source source = resolve(child, output.from);
         if (source.status == Source::Status::Ok)
-            face.outputs << OutputSpec{output.name, source.spec, {}, {}, false};
+            face.outputs << OutputSpec{output.name, source.spec, {}, {}, false, {}};
     }
     return face;
 }

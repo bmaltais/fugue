@@ -1,0 +1,55 @@
+{
+  "manifest": 1,
+  "id": "fugue/overlay-mask",
+  "version": "1.0.0",
+  "name": "Overlay Mask",
+  "description": "Draw a mask over a picture in a color, to check or save what is masked. A mask on its own already shows as a gray picture.",
+  "category": "Image/Mask",
+  "keywords": [
+    "show",
+    "highlight",
+    "visualize",
+    "tint",
+    "check"
+  ],
+  "runtime": {
+    "kind": "builtin"
+  },
+  "inputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    },
+    {
+      "name": "mask",
+      "type": "image",
+      "role": "mask",
+      "label": "Mask"
+    },
+    {
+      "name": "color",
+      "type": "text",
+      "label": "Color",
+      "default": "#ff3b30",
+      "widget": "color"
+    },
+    {
+      "name": "opacity",
+      "type": "number",
+      "label": "Opacity",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "widget": "slider"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    }
+  ]
+}
