@@ -100,6 +100,10 @@ file(GLOB fugue_cli_sources CONFIGURE_DEPENDS src/cli/*.cpp src/cli/*.h)
 add_library(fugue_cli STATIC ${fugue_cli_sources})
 target_include_directories(fugue_cli PUBLIC src)
 target_link_libraries(fugue_cli PUBLIC fugue_engine)
+# The agent skill (spec 13.5) is compiled in, so the one binary installs it wherever it is.
+# qt_add_resources on a static library links its initializer into every executable using it.
+set_source_files_properties(share/skills/fugue/SKILL.md PROPERTIES QT_RESOURCE_ALIAS fugue/SKILL.md)
+qt_add_resources(fugue_cli fugue_skill PREFIX /fugue/skills FILES share/skills/fugue/SKILL.md)
 
 # The built-in nodes (spec 14.1): kernels in src/nodes/*.cpp, and one node.json per node
 # in src/nodes/manifests/<name>/, compiled in as Qt resources under :/fugue/nodes, which is the

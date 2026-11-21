@@ -4,6 +4,7 @@
 // in the table once, with the arguments it takes and the handler that runs it
 // (commands.h), so there is no second list of commands to keep in step.
 
+#include <QList>
 #include <QMap>
 #include <QString>
 #include <QStringList>
@@ -35,6 +36,16 @@ struct Command {
     bool has(const QString &option) const { return options.contains(option); }
     QString value(const QString &option) const { return options.value(option).value(0); }
 };
+
+// A command that has a handler, as the table of 13.1 holds it: its canonical name and the options
+// it takes (without dashes). The tests check the bundled agent skill (13.5) against this list, so a
+// command or option added to the table has to be taught to agents.
+struct CommandInfo {
+    QString name;
+    QStringList valueOptions;
+    QStringList flagOptions;
+};
+QList<CommandInfo> implementedCommands();
 
 // `args` is argv without the program name. `--json` may stand anywhere.
 // Failures are `usage` errors.

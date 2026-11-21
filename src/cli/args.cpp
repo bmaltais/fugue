@@ -5,6 +5,7 @@
 
 #include <QFileInfo>
 #include <QJsonArray>
+#include <QSet>
 
 namespace fugue::cli {
 
@@ -58,7 +59,9 @@ const QMap<QString, QMap<QString, Spec>> &table() {
         {"template", {{"list", {0, 0, {}, {}, templateList}}}},
         {"cache", {{"status", {0, 0, {}, {}, nullptr}}, {"clear", {0, 0, {"workflow", "node"}, {}, nullptr}}}},
         {"command", {{"list", {0, 0, {}, {}, nullptr}}}},
-        {"skill", {{"install", {0, 0, {}, {}, nullptr}}}},
+        {"skill",
+         {{"install", {0, 0, {"target"}, {"dry-run", "force"}, skillInstall}},
+          {"uninstall", {0, 0, {"target"}, {"dry-run", "force"}, skillUninstall}}}},
         // Not for people: what `fugue run` starts, detached, to run one queued run.
         {"__worker", {{"", {1, 1, {}, {}, runWorker}}}},
     };
@@ -82,6 +85,25 @@ Error usage(const QString &message, const QString &hint = {}, const QStringList 
 QString quoted(const QString &text) { return QStringLiteral("\"%1\"").arg(text); }
 
 } // namespace
+
+QList<CommandInfo> implementedCommands() {
+    QList<CommandInfo> listed;
+    QSet<QString> seen;
+    for (auto group = table().constBegin(); group != table().constEnd(); ++group) {
+        if (group.key().startsWith("__"))
+            continue;
+        for (auto sub = group->constBegin(); sub != group->constEnd(); ++sub) {
+            // `workflow run|validate|compile` are `run|validate|compile`, listed once.
+            const bool alias = group.key() == "workflow" && (sub.key() == "run" || sub.key() == "validate" || sub.key() == "compile");
+            const QString name = sub.key().isEmpty() ? group.key() : group.key() + "." + sub.key();
+            if (!sub->handler || alias || seen.contains(name))
+                continue;
+            seen.insert(name);
+            listed.append({name, sub->valueOptions, sub->flagOptions});
+        }
+    }
+    return listed;
+}
 
 Result<Command> parseArguments(const QStringList &rawArgs) {
     Command command;

@@ -65,7 +65,8 @@ const char *helpText =
     "  pack list | pack add <folder|git-url> [--ref <tag|commit>] | pack update [id] [--ref ...] | pack remove|trust <id>\n"
     "  model list [--type <resource type>] [--hash]\n"
     "  template list\n"
-    "  provider, cache, command, skill (later releases)\n"
+    "  skill install|uninstall [--target agents|claude|all] [--dry-run] [--force]\n"
+    "  provider, cache, command (later releases)\n"
     "With no command, fugue opens the window.\n";
 
 } // namespace
