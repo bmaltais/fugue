@@ -240,6 +240,24 @@ private slots:
         QCOMPARE(image.value("format").toString(), QStringLiteral("png"));
     }
 
+    // #173: a sample's mask and its picture are PNG files the host reads from the job's work dir.
+    void aMaskAndItsPictureGoAsPngData() {
+        Host host;
+        host.op("submit", [](const QJsonObject &) { return HttpResponse{200, json({{"job", "j1"}})}; });
+        const auto remote = provider(host);
+        const QString mask = m_dir.filePath("mask.png"), picture = m_dir.filePath("masked-image.png");
+        writeFile(mask, "MASK");
+        writeFile(picture, "PICTURE");
+        JobRequest request = sample(newDir("out1c"));
+        request.inputs = QJsonObject{{"mask", QJsonObject{{"path", mask}}}, {"image", QJsonObject{{"path", picture}}}};
+        QVERIFY(await<QString>([&](Reply<QString> r) { remote->submit(request, r); }).ok());
+        const QJsonObject inputs = host.last("submit").value("inputs").toObject();
+        QCOMPARE(QByteArray::fromBase64(inputs.value("mask").toObject().value("data").toString().toLatin1()), QByteArray("MASK"));
+        QCOMPARE(inputs.value("mask").toObject().value("format").toString(), QStringLiteral("png"));
+        QCOMPARE(QByteArray::fromBase64(inputs.value("image").toObject().value("data").toString().toLatin1()), QByteArray("PICTURE"));
+        QCOMPARE(inputs.value("image").toObject().value("format").toString(), QStringLiteral("png"));
+    }
+
     void aMissingInputFileFailsTheSubmit() {
         Host host;
         host.op("submit", [](const QJsonObject &) { return HttpResponse{200, json({{"job", "j1"}})}; });

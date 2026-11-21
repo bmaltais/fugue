@@ -610,7 +610,7 @@ index f2cdcea..68a8cb6 100644
  #include "model/vae/vae.hpp"
  #include "pipeline/image_upscale.h"
  #include "request.h"
-@@ -197,7 +199,7 @@ namespace sd::pipeline {
+@@ -197,7 +199,7 @@
          sd::Tensor<float> mask_image_tensor;
          int image_channels = sd->get_image_channels();
  
@@ -619,7 +619,7 @@ index f2cdcea..68a8cb6 100644
              LOG_INFO("IMG2IMG");
  
              if (request->strength < 1.f) {
-@@ -255,8 +257,10 @@ namespace sd::pipeline {
+@@ -255,8 +257,10 @@
                  plan->sample_steps = static_cast<int>(plan->sigmas.size() - 1);
              }
  
@@ -632,7 +632,7 @@ index f2cdcea..68a8cb6 100644
          }
  
          if (sd_img_gen_params->mask_image.data != nullptr) {
-@@ -974,20 +978,69 @@ namespace sd::pipeline {
+@@ -974,20 +978,81 @@
              return false;
          }
          ImageGenerationLatents latents = std::move(*latents_opt);
@@ -682,6 +682,18 @@ index f2cdcea..68a8cb6 100644
 +        if (fugue.cond_in != nullptr) {
 +            if (!fugue_load_cond(sd, embeds, fugue.cond_in))
 +                return false;
++            // An inpaint model's masked picture is part of its conditioning (c_concat), which the
++            // encode made without this call's picture and mask. Set it from this call's latents, as
++            // prepare_image_generation_embeds does in a single run.
++            if (sd_version_is_inpaint(sd->version) && ref_image_params.pass_to_dit) {
++                embeds.cond.c_concat = latents.concat_latent;
++                if (!embeds.uncond.empty()) {
++                    embeds.uncond.c_concat = latents.concat_latent;
++                }
++                if (!embeds.img_uncond.empty()) {
++                    embeds.img_uncond.c_concat = latents.img_uncond_concat_latent;
++                }
++            }
 +        } else if (fugue.latent_in == nullptr) {
 +            auto embeds_opt = prepare_image_generation_embeds(sd,
 +                                                              sd_img_gen_params,
@@ -712,7 +724,7 @@ index f2cdcea..68a8cb6 100644
              sd_cancel_mode_t cancel = sd->get_cancel_flag();
              if (cancel == SD_CANCEL_ALL) {
                  LOG_ERROR("cancelling generation");
-@@ -1055,7 +1108,7 @@ namespace sd::pipeline {
+@@ -1055,7 +1120,7 @@
              return false;
          }
  
@@ -721,7 +733,7 @@ index f2cdcea..68a8cb6 100644
              if (sd->get_cancel_flag() == SD_CANCEL_ALL) {
                  LOG_ERROR("cancelling generation before hires fix");
                  return false;
-@@ -1201,6 +1254,13 @@ namespace sd::pipeline {
+@@ -1201,6 +1266,13 @@
  
              final_latents = std::move(hires_final_latents);
          }

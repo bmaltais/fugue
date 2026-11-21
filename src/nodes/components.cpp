@@ -262,14 +262,20 @@ struct LatentMeta {
     bool empty = false;
     int frames = 0; // a video latent's length and rate (2.6); 0 for an image
     int fps = 0;
+    // A latent VAE Encode made with a mask (14.4): the picture it encoded and the mask, as media
+    // handles. The Sampler sends them to the helper again, so a latent that was sampled has none.
+    QJsonObject image;
+    QJsonObject mask;
 
     bool isVideo() const { return frames > 0; }
+    bool hasMask() const { return !mask.isEmpty(); }
 
     static LatentMeta of(const Value &latent) {
         const QJsonObject meta = latent.json().toObject().value(QStringLiteral("meta")).toObject();
         return {meta.value(QStringLiteral("width")).toInt(), meta.value(QStringLiteral("height")).toInt(),
                 meta.value(QStringLiteral("model")).toObject(), meta.value(QStringLiteral("empty")).toBool(),
-                meta.value(QStringLiteral("frames")).toInt(), meta.value(QStringLiteral("fps")).toInt()};
+                meta.value(QStringLiteral("frames")).toInt(), meta.value(QStringLiteral("fps")).toInt(),
+                meta.value(QStringLiteral("image")).toObject(), meta.value(QStringLiteral("mask")).toObject()};
     }
     QJsonObject toJson() const {
         QJsonObject meta{{"width", width}, {"height", height}};
@@ -280,6 +286,10 @@ struct LatentMeta {
         if (isVideo()) {
             meta.insert(QStringLiteral("frames"), frames);
             meta.insert(QStringLiteral("fps"), fps);
+        }
+        if (hasMask()) {
+            meta.insert(QStringLiteral("image"), image);
+            meta.insert(QStringLiteral("mask"), mask);
         }
         return meta;
     }
@@ -427,6 +437,107 @@ Result<CarriedFrame> firstFrameOf(const Value &conditioning, FileHashes &hashes)
                               QStringLiteral("Run Text Encode again with the picture as it is now."));
     carried.frame = frame.value();
     carried.clip = clipOf(meta.value(QStringLiteral("clip")).toObject());
+    carried.present = true;
+    return carried;
+}
+
+// --- a mask on a latent (14.4) ---
+
+// The first channel of `mask` as floats from 0 to 1 (a mask is an image, 2.1; gray is its own).
+Result<vips::VImage> maskValues(const MediaHandle &mask) {
+    if (!initVips())
+        return vipsUnavailable();
+    const Result<vips::VImage> loaded = mask.image();
+    if (!loaded)
+        return loaded.errors();
+    try {
+        double divisor = 1.0;
+        switch (loaded->format()) {
+        case VIPS_FORMAT_UCHAR:
+        case VIPS_FORMAT_CHAR:
+            divisor = 255.0;
+            break;
+        case VIPS_FORMAT_USHORT:
+        case VIPS_FORMAT_SHORT:
+            divisor = 65535.0;
+            break;
+        default:
+            break;
+        }
+        return loaded->extract_band(0).cast(VIPS_FORMAT_FLOAT) / divisor;
+    } catch (const vips::VError &error) {
+        return vipsError(error, QStringLiteral("media_unreadable"));
+    }
+}
+
+// What a mask holds: nothing painted, or all of it (the checks of 14.4).
+struct MaskRange {
+    bool empty = false;
+    bool full = false;
+};
+Result<MaskRange> maskRange(const MediaHandle &mask) {
+    const Result<vips::VImage> values = maskValues(mask);
+    if (!values)
+        return values.errors();
+    try {
+        MaskRange range;
+        range.empty = values->max() <= 0.0;
+        range.full = values->min() >= 0.999;
+        return range;
+    } catch (const vips::VError &error) {
+        return vipsError(error, QStringLiteral("media_unreadable"));
+    }
+}
+
+// `mask`'s first channel as the 8-bit gray PNG the helper reads, scaled to `size` by the nearest
+// pixel (the library makes a mask 0 or 1 and scales it to the latent the same way: no soft edge
+// is lost that it would keep).
+Result<QString> maskToFile(const MediaHandle &mask, QSize size, const QString &path) {
+    const Result<vips::VImage> values = maskValues(mask);
+    if (!values)
+        return values.errors();
+    try {
+        vips::VImage gray = (values.value() * 255.0 + 0.5).cast(VIPS_FORMAT_UCHAR);
+        if (gray.width() != size.width() || gray.height() != size.height()) {
+            gray = gray.resize(double(size.width()) / gray.width(),
+                               vips::VImage::option()->set("vscale", double(size.height()) / gray.height())
+                                   ->set("kernel", VIPS_KERNEL_NEAREST));
+            if (gray.width() != size.width() || gray.height() != size.height())
+                gray = gray.embed(0, 0, size.width(), size.height(), vips::VImage::option()->set("extend", VIPS_EXTEND_COPY));
+        }
+        gray.copy(vips::VImage::option()->set("interpretation", VIPS_INTERPRETATION_B_W))
+            .write_to_file(QFile::encodeName(path).constData());
+        return path;
+    } catch (const vips::VError &error) {
+        return vipsError(error, QStringLiteral("media_unreadable"));
+    }
+}
+
+// The picture and mask a latent carries, each of which must still be the file VAE Encode read;
+// none (invalid handles) for a latent without a mask.
+struct CarriedMask {
+    MediaHandle image;
+    MediaHandle mask;
+    bool present = false;
+};
+Result<CarriedMask> carriedMaskOf(const Value &latent, FileHashes &hashes) {
+    const LatentMeta meta = LatentMeta::of(latent);
+    CarriedMask carried;
+    if (!meta.hasMask())
+        return carried;
+    const Result<MediaHandle> image = MediaHandle::fromJson(meta.image);
+    if (!image)
+        return image.errors();
+    const Result<MediaHandle> mask = MediaHandle::fromJson(meta.mask);
+    if (!mask)
+        return mask.errors();
+    for (const MediaHandle &file : {image.value(), mask.value()})
+        if (hashes.hash(file.path()) != file.hash())
+            return makeInputError(QStringLiteral("file_not_found"), QStringLiteral("latent"),
+                                  QStringLiteral("The picture or mask %1 is gone or changed since VAE Encode read it.").arg(file.path()),
+                                  QStringLiteral("Run VAE Encode again."));
+    carried.image = image.value();
+    carried.mask = mask.value();
     carried.present = true;
     return carried;
 }
@@ -696,8 +807,24 @@ public:
                                       .arg(carried->clip.width).arg(carried->clip.height).arg(carried->clip.frames).arg(carried->clip.fps)
                                       .arg(from.width).arg(from.height).arg(from.frames).arg(from.fps),
                                   QStringLiteral("Wire the same Empty Video Latent to Text Encode's Clip and to the Sampler."));
+        // A latent VAE Encode made with a mask: the mask at the latent's size and the picture, for
+        // the helper to use as the model needs (an inpaint model the picture, any other the latent).
+        const Result<CarriedMask> masked = carriedMaskOf(latent, *context.hashes);
+        if (!masked)
+            return masked.errors();
         JobRequest request = job(*files, params, true);
         request.inputs.insert(QStringLiteral("conditioning"), fileOf(context.input(QStringLiteral("conditioning"))));
+        if (masked->present) {
+            const Result<QString> mask = maskToFile(masked->mask, QSize(from.width, from.height),
+                                                    QDir(context.workDir).filePath(QStringLiteral("mask.png")));
+            if (!mask)
+                return mask.errors();
+            const Result<QString> picture = readable(masked->image, QDir(context.workDir).filePath(QStringLiteral("masked-image.png")));
+            if (!picture)
+                return picture.errors();
+            request.inputs.insert(QStringLiteral("mask"), QJsonObject{{"path", mask.value()}});
+            request.inputs.insert(QStringLiteral("image"), QJsonObject{{"path", picture.value()}});
+        }
         if (carried->present) {
             const Result<QString> frame = firstFrameFile(carried->frame, from, context.workDir, QStringLiteral("conditioning"));
             if (!frame)
@@ -712,8 +839,10 @@ public:
     }
 
     Result<Values> outputs(const NodeContext &context, const Selection &, const JobResult &result) override {
-        return latentOutput(result, LatentMeta::of(context.input(QStringLiteral("latent"))),
-                            context.input(QStringLiteral("model")).json());
+        LatentMeta sampled = LatentMeta::of(context.input(QStringLiteral("latent")));
+        sampled.image = {}; // the result is a new picture: the mask is spent
+        sampled.mask = {};
+        return latentOutput(result, sampled, context.input(QStringLiteral("model")).json());
     }
 };
 
@@ -798,6 +927,20 @@ public:
             return file.errors();
         // The helper scales the image to the size it is given: its own, in steps of 16.
         const QSize size = sizeOf(image);
+        // A mask is not sent: it stays with the latent for the Sampler. It is checked here.
+        if (const Value mask = context.input(QStringLiteral("mask")); !mask.isEmpty()) {
+            if (!mask.isMedia() || mask.media().width() != image.width() || mask.media().height() != image.height())
+                return makeInputError(QStringLiteral("node_failed"), QStringLiteral("mask"),
+                                      QStringLiteral("The mask is not the size of the picture (%1 x %2).").arg(image.width()).arg(image.height()),
+                                      QStringLiteral("Paint or make the mask on this picture."));
+            const Result<MaskRange> range = maskRange(mask.media());
+            if (!range)
+                return range.errors();
+            if (range->empty)
+                return makeInputError(QStringLiteral("mask_empty"), QStringLiteral("mask"),
+                                      QStringLiteral("Nothing is painted in the mask."),
+                                      QStringLiteral("Paint the part to change, or leave the mask unwired."));
+        }
         JobRequest request = job(*files, QJsonObject{{"width", size.width()}, {"height", size.height()}});
         request.inputs.insert(QStringLiteral("image"), QJsonObject{{"path", file.value()}});
         return request;
@@ -808,7 +951,26 @@ public:
         LatentMeta meta;
         meta.width = size.width();
         meta.height = size.height();
-        return latentOutput(result, meta, context.input(QStringLiteral("model")).json());
+        Errors warnings;
+        if (const Value mask = context.input(QStringLiteral("mask")); !mask.isEmpty()) {
+            // The Sampler needs both again: the latent carries them as handles.
+            meta.image = context.input(QStringLiteral("image")).media().toJson();
+            meta.mask = mask.media().toJson();
+            const Result<MaskRange> range = maskRange(mask.media());
+            if (!range)
+                return range.errors();
+            if (range->full) {
+                Error full = makeInputError(QStringLiteral("mask_full"), QStringLiteral("mask"),
+                                            QStringLiteral("Everything is masked: this redraws the whole picture, as plain image to image."),
+                                            QStringLiteral("Paint only the part to change."));
+                full.severity = Error::Severity::Warning;
+                warnings << full;
+            }
+        }
+        const Result<Values> made = latentOutput(result, meta, context.input(QStringLiteral("model")).json());
+        if (!made || warnings.isEmpty())
+            return made;
+        return Result<Values>(made.value(), warnings);
     }
 
 private:

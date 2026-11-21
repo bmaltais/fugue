@@ -12,11 +12,13 @@
 //                        "image": IN (optional)}               model's "image" is its first frame
 //   {"op": "sample",     "conditioning": IN, "latent": OUT,    conditioning -> latent; with
 //                        "init_latent": IN (optional),         init_latent, image-to-image from it;
-//                        "image": IN (optional)}               "image" as in encode (video only)
+//                        "image": IN (optional),               "image" as in encode (a video's first
+//                        "mask": IN (optional)}                frame), or with a mask (below)
 //   {"op": "decode",     "latent": IN, "image": OUT,           latent -> PNG; for a video model
 //                        "video": OUT}                         "video" is written instead (below)
 //   {"op": "vae_encode", "image": IN, "latent": OUT}           PNG -> latent
-//   {"op": "generate",   "image": OUT, "video": OUT}           all stages in one call
+//   {"op": "generate",   "image": OUT, "video": OUT,           all stages in one call; with a
+//                        "mask": IN (optional)}                mask, params.init_image is the picture
 //   {"op": "upscale",    "image": IN, "output": OUT}           PNG -> PNG through an upscale model;
 //                        "context": {"model_path"}, "params": {"tile_size"} (no sd context: the
 //                        upscaler stays loaded between calls); "frames": DIR, "frames_output":
@@ -26,6 +28,15 @@
 // options (video_frames, fps, high_noise_*) and sd_generate_video; the latent is the clip's, and
 // decode writes the "video" file, YUV4MPEG2 (4:2:0, which every ffmpeg reads; the helper links no
 // codec), not an image. vae_encode and a start latent are refused for a video.
+//
+// A "mask" (sample, generate; image models only, else input_invalid) is a PNG read with one channel
+// at the request's width and height (white is redrawn), checked before any model loads. The library
+// rounds it to 0 or 1. Its start picture depends on the model, by sd_get_model_version_name: an
+// inpaint model (INPAINT_VERSIONS below) takes the picture, "image" of a sample, as init_image and
+// ignores a start latent (its masked picture is part of the conditioning; the patch refreshes it
+// when a sample reads the encode's conditioning); any other image model takes the start latent
+// ("init_latent", the one vae_encode made) and ignores "image". A mask with neither, an inpaint
+// model without the picture, is input_invalid.
 //
 // plus "context" (the model files and context options) and "params" (the generation options),
 // passed to stable-diffusion.cpp by key as they are (docs/guides/c_api.md at the pin). A value
@@ -46,8 +57,8 @@
 //
 // The capability is the operation: text.encode (encode), latent.sample (sample),
 // latent.decode (decode), latent.encode (vae_encode), image.upscale (upscale). params.context is the request's
-// "context" and the other params its "params"; inputs.conditioning, .latent, .init_latent and
-// .image and .frames ({"path"}) are its input files, and its outputs are written into output_dir
+// "context" and the other params its "params"; inputs.conditioning, .latent, .init_latent,
+// .image, .mask and .frames ({"path"}) are its input files, and its outputs are written into output_dir
 // as conditioning.bin, latent.bin, image.png (an upscale of frames: the folder frames-out/). Jobs
 // run one at a time, in order. Unasked, it writes
 // {"op": "status", "job", "state", "progress", "stage", "error"?} lines as a job moves.
@@ -147,6 +158,36 @@ Tensor loadImage(const std::string &path) {
     if (!t)
         fail("helper_failed", "cannot make a tensor of " + path + ": " + lastError());
     return t;
+}
+
+// A mask: one channel (stbi converts a color file to gray), at the request's size. The library
+// reads a mask with one channel (a color one would break FLUX.1 Fill's packing of it).
+Tensor loadMask(const std::string &path, int width, int height) {
+    int w = 0, h = 0, channels = 0;
+    unsigned char *pixels = stbi_load(path.c_str(), &w, &h, &channels, 1);
+    if (!pixels)
+        fail("input_invalid", "cannot read the mask " + path);
+    if (w != width || h != height) {
+        stbi_image_free(pixels);
+        fail("input_invalid", "the mask is " + std::to_string(w) + "x" + std::to_string(h) + ", the request " +
+                                  std::to_string(width) + "x" + std::to_string(height));
+    }
+    const int64_t shape[3] = {1, w, h};
+    Tensor t(sd_tensor_create(SD_TENSOR_U8, 3, shape, pixels, static_cast<size_t>(w) * h));
+    stbi_image_free(pixels);
+    if (!t)
+        fail("helper_failed", "cannot make a tensor of " + path + ": " + lastError());
+    return t;
+}
+
+// The library's version names of the inpaint models (sd_get_model_version_name, at the pin): they
+// take the masked picture as part of the conditioning. README.md: re-check them when the pin moves.
+bool isInpaintVersion(const char *name) {
+    static const char *const names[] = {"SD 1.x Inpaint", "SD 2.x Inpaint", "SDXL Inpaint", "Flux Fill", "Flex.2"};
+    for (const char *n : names)
+        if (name && std::string(name) == n)
+            return true;
+    return false;
 }
 
 void saveImage(const sd_tensor_t *image, const std::string &path) {
@@ -496,6 +537,15 @@ json run(const json &request, Contexts &contexts, const Hooks &hooks = {}) {
     if (op != "encode" && op != "sample" && op != "decode" && op != "vae_encode" && op != "generate")
         fail("input_invalid", "unknown op \"" + op + "\"; use encode, sample, decode, vae_encode, generate or upscale");
 
+    // A mask is read and checked first, so a wrong one is refused before any model loads.
+    const json params = request.value("params", json::object());
+    Tensor mask;
+    if (request.contains("mask")) {
+        if (op != "sample" && op != "generate")
+            fail("input_invalid", "a mask is for sample or generate");
+        mask = loadMask(required(request, "mask"), params.value("width", 512), params.value("height", 512));
+    }
+
     // The context first: whether it makes video (Wan, ...) says which options and which call.
     sd_ctx_t *ctx = contexts.get(request.value("context", json::object()));
     const bool video = sd_ctx_supports_video_generation(ctx);
@@ -504,13 +554,23 @@ json run(const json &request, Contexts &contexts, const Hooks &hooks = {}) {
     Opt options(video ? sd_vid_gen_opt_create() : sd_img_gen_opt_create());
     if (!options)
         fail("out_of_memory", "cannot create the options");
-    const json params = request.value("params", json::object());
     for (const auto &[key, value] : params.items())
         setOption(options.get(), key, value);
 
+    // A mask: the start picture, or the start latent, by the model (see the header).
+    const bool inpaint = mask && isInpaintVersion(sd_get_model_version_name(ctx));
+    if (mask) {
+        if (video)
+            fail("input_invalid", "a mask is for an image model; a video has none");
+        if (op == "generate" ? !params.contains("init_image") : !request.contains(inpaint ? "image" : "init_latent"))
+            fail("input_invalid", inpaint ? sd_get_model_version_name(ctx) + std::string(" needs the picture to redraw (image, init_image) with its mask")
+                                          : "a mask needs the picture or its latent to redraw");
+        check(sd_opt_set_tensor(options.get(), "mask_image", mask.get()), "mask_image");
+    }
+
     // A start picture (image-to-video: Wan 2.2 I2V's first frame, which the encode turns into its
     // conditioning, and Wan 2.2 TI2V's, which the sample reads): "image" of encode and sample.
-    if ((op == "encode" || op == "sample") && request.contains("image")) {
+    if ((op == "encode" || op == "sample") && request.contains("image") && !mask) {
         if (!video)
             fail("input_invalid", "a start image is for a video model; an image model starts from a latent (vae_encode, then sample)");
         check(sd_opt_set_tensor(options.get(), "init_image", loadImage(required(request, "image")).get()), "init_image");
@@ -532,8 +592,12 @@ json run(const json &request, Contexts &contexts, const Hooks &hooks = {}) {
         if (request.contains("init_latent")) {
             if (video)
                 fail("input_invalid", "a video cannot start from a latent here: it starts from noise");
-            setPath("fugue.init_latent_in", required(request, "init_latent"));
+            // An inpaint model starts from the picture (its masked picture is built from it).
+            if (!inpaint)
+                setPath("fugue.init_latent_in", required(request, "init_latent"));
         }
+        if (inpaint)
+            check(sd_opt_set_tensor(options.get(), "init_image", loadImage(required(request, "image")).get()), "init_image");
         setPath("fugue.latent_out", latent);
         setPath("fugue.stop_after", "sample");
         outputs.push_back({{"latent", latent}});
@@ -1421,7 +1485,7 @@ private:
         params.erase("context");
         request["params"] = params;
         const json inputs = message.value("inputs", json::object());
-        for (const char *name : {"conditioning", "latent", "init_latent", "image", "frames"})
+        for (const char *name : {"conditioning", "latent", "init_latent", "image", "mask", "frames"})
             if (inputs.contains(name) && inputs[name].is_object() && inputs[name].contains("path"))
                 request[name] = inputs[name]["path"];
         const std::filesystem::path dir = message.value("output_dir", "");

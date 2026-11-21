@@ -49,7 +49,7 @@ check "wrong key: 401" 401 "$(code -X POST -H 'Authorization: Bearer nope' -d '{
 check "the 401 body" unauthorized "$(curl -s -X POST -d '{}' "$url/describe" | python3 -c 'import json,sys; print(json.load(sys.stdin)["error"]["code"])')"
 describe="$(curl -s "${auth[@]}" -X POST -d '{}' "$url/describe")"
 check "describe" "1 sdcpp False True" "$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(d["protocol"], d["engine"], d["shares_filesystem"], d["free_memory_bytes"] > 0)' "$describe")"
-check "describe capabilities" "text.encode latent.sample latent.decode latent.encode" "$(python3 -c 'import json,sys; print(" ".join(json.loads(sys.argv[1])["capabilities"]))' "$describe")"
+check "describe capabilities" "text.encode latent.sample latent.decode latent.encode image.upscale" "$(python3 -c 'import json,sys; print(" ".join(json.loads(sys.argv[1])["capabilities"]))' "$describe")"
 check "bad JSON: 400" 400 "$(code "${auth[@]}" -X POST -d '{nope' "$url/describe")"
 check "unknown capability: 400" 400 "$(code "${auth[@]}" -X POST -d '{"capability":"x.y"}' "$url/submit")"
 miss='{"capability":"latent.decode","params":{"context":{"vae_path":{"name":"vae/absent.safetensors","size":5}}},"inputs":{"latent":{"data":"AAAA","format":"latent"}}}'
@@ -90,5 +90,27 @@ sleep 0.5
 status="$(curl -s "${auth[@]}" -X POST -d "{\"job\":\"$job\"}" "$url/status")"
 check "the right sha256 passes the models stage" no "$(python3 -c 'import json,sys; e=json.loads(sys.argv[1]).get("error"); print("yes" if e and e["code"]=="model_missing" else "no")' "$status")"
 check "the hash is kept for a restart" "$good" "$(python3 -c 'import json,sys; print(next(iter(json.load(open(sys.argv[1])).values()))["sha256"])' "$work/state/fugue/model-hashes.json")"
+
+# A mask is read and checked before any model loads: one of another size than the request and one
+# that is no image are input_invalid. (A mask on a video model and an inpaint model without its
+# picture need a loaded model: helper/README.md, "Moving the pin".)
+mask4="$(python3 -c 'import base64, struct, zlib
+def chunk(t, d): return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d))
+png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 4, 4, 8, 0, 0, 0, 0)) + chunk(b"IDAT", zlib.compress((b"\0" + b"\xff" * 4) * 4)) + chunk(b"IEND", b"")
+print(base64.b64encode(png).decode())')"
+maskjob() { # base64 mask, request width and height -> the job's error as "code: message"
+  local body id st
+  body="{\"capability\":\"latent.sample\",\"params\":{\"width\":$2,\"height\":$2,\"context\":{\"vae_path\":{\"name\":\"small.safetensors\",\"size\":1000}}},\"inputs\":{\"mask\":{\"data\":\"$1\",\"format\":\"png\"},\"conditioning\":{\"data\":\"AAAA\",\"format\":\"conditioning\"}}}"
+  id="$(curl -s "${auth[@]}" -X POST -d "$body" "$url/submit" | python3 -c 'import json,sys; print(json.load(sys.stdin)["job"])')"
+  for _ in $(seq 50); do
+    st="$(curl -s "${auth[@]}" -X POST -d "{\"job\":\"$id\"}" "$url/status")"
+    [[ $(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["state"])' "$st") == error ]] && break; sleep 0.1
+  done
+  python3 -c 'import json,sys; e=json.loads(sys.argv[1])["error"]; print(e["code"] + ": " + e["message"])' "$st"
+}
+check "a mask of another size than the request" "input_invalid: the mask is 4x4, the request 8x8" "$(maskjob "$mask4" 8)"
+check "a mask that is no image" input_invalid "$(maskjob QUJD 4 | cut -d: -f1)"
+check "... saying so" yes "$(maskjob QUJD 4 | grep -q 'cannot read the mask' && echo yes || echo no)"
+check "a mask of the request's size passes the mask check" no "$(maskjob "$mask4" 4 | grep -q 'mask' && echo yes || echo no)"
 
 ((failures == 0)) && echo "all passed" || { echo "$failures failed"; exit 1; }

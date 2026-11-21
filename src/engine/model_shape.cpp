@@ -317,14 +317,31 @@ ModelShape shapeOf(const Header &header) {
     shape.textWidth = inputWidth(
         tensor(shapes, {QStringLiteral("cap_embedder.1.weight"), QStringLiteral("txt_in.weight"),
                         QStringLiteral("context_embedder.weight"), QStringLiteral("text_embedding.0.weight")}));
-    const std::optional<QList<qint64>> image =
+    std::optional<QList<qint64>> image =
         tensor(shapes, {QStringLiteral("x_embedder.weight"), QStringLiteral("all_x_embedder.2-1.weight"), QStringLiteral("img_in.weight"),
                         QStringLiteral("x_embedder.proj.weight"), QStringLiteral("input_blocks.0.0.weight"),
                         QStringLiteral("patch_embedding.weight")});
+    // A diffusers UNet names its input convolution conv_in (a VAE has encoder.conv_in and
+    // decoder.conv_in): only SDXL Inpaint's, which takes 9 channels, is read from it.
+    if (!image) {
+        const auto it = shapes.constFind(QStringLiteral("conv_in.weight"));
+        if (it != shapes.constEnd() && it->size() == 4 && it->at(1) == 9 && hasTensor(shapes, QStringLiteral("down_blocks.")))
+            image = *it;
+    }
     if (image && image->size() == 2 && image->at(0) > 0) // a transformer's: its block width
         shape.hidden = int(image->at(0));
     if (const std::optional<int> in = inputWidth(image)) // a linear layer takes 2x2 patches of the channels
         shape.latentChannels = image->size() == 2 ? (*in % 4 == 0 ? std::optional<int>(*in / 4) : std::nullopt) : in;
+    // An inpaint model takes the masked picture in its input beside the noise (14.4), as Wan's
+    // image-to-video takes its first frame, and makes the channels its VAE has: SD 1.x, 2.x and SDXL
+    // Inpaint read 9 (4 noise, 4 masked picture, 1 mask) through the convolution and make 4; FLUX.1
+    // Fill reads 96 (16 noise, 16 masked picture, 64 for the mask packed in patches) and Flex.2
+    // 49 (the same with a mask of 1 channel and 16 of control) and make 16.
+    if (image && image->size() == 4 && shape.latentChannels == 9)
+        shape.latentChannels = 4;
+    else if (image && image->size() == 2 && hasTensor(shapes, QStringLiteral("vector_in.")) &&
+             (shape.latentChannels == 96 || shape.latentChannels == 49))
+        shape.latentChannels = 16;
     const bool diffusion = shape.textWidth || shape.latentChannels;
     if (diffusion) {
         // Wan (text_embedding and a 3D patch_embedding) reads UMT5, a T5, and takes a video VAE.
