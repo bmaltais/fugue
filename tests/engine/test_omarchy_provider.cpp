@@ -1068,6 +1068,7 @@ private slots:
         Fixture fixture;
         fixture.server.on("GET", "/sdcpp/v1/capabilities", [](const HttpRequest &) {
             QJsonObject caps = capabilities();
+            caps.insert("supported_modes", QJsonArray{"vid_gen"});
             caps.insert("defaults_by_mode",
                         QJsonObject{{"vid_gen", QJsonObject{{"width", 832}, {"height", 480}, {"fps", 16},
                                                             {"sample_params", QJsonObject{{"sample_steps", 4}}}}}});
@@ -1097,8 +1098,76 @@ private slots:
 
         // Neither is an image model, and the image model is neither.
         QVERIFY(!findModel(described.value(), "image.generate", kVideoModel));
-        QVERIFY(!findModel(described.value(), "video.generate", kKlein));
         QVERIFY(!findModel(described.value(), "audio.generate", kVideoModel));
+    }
+
+    // What MiniMax H3's server reported on the DGX (identifiers and paths removed): only vid_gen,
+    // though the model family has image variants. A model is offered for the modes its server
+    // lists, so this one stays a video model.
+    void aVideoOnlyServerOffersNoImageCapability() {
+        Fixture fixture;
+        fixture.server.on("GET", "/sdcpp/v1/capabilities", [](const HttpRequest &) {
+            QJsonObject caps = capabilities();
+            caps.insert("supported_modes", QJsonArray{"vid_gen"});
+            caps.insert("current_mode", "vid_gen");
+            caps.insert("features_by_mode",
+                        QJsonObject{{"vid_gen", QJsonObject{{"init_image", true}, {"end_image", true},
+                                                            {"ref_images", true}}}});
+            caps.insert("defaults_by_mode", QJsonObject{{"vid_gen", QJsonObject{{"sample_params", QJsonObject{{"sample_steps", 4}}}}}});
+            return HttpResponse{200, json(caps)};
+        });
+        fixture.writeStatus(QJsonObject{{kVideoModel, row(kVideoModel, "video", "active", fixture.endpoint())}});
+        auto provider = fixture.provider();
+        const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
+        QVERIFY(described.ok());
+        QVERIFY(findModel(described.value(), "video.generate", kVideoModel));
+        QVERIFY(!findModel(described.value(), "image.generate", kVideoModel));
+        QVERIFY(!findModel(described.value(), "image.edit", kVideoModel));
+    }
+
+    // A server that serves img_gen and vid_gen offers its model for both, whichever kind its row
+    // has; reference images (features_by_mode.img_gen.ref_images) make it an edit model.
+    void aModelIsOfferedForEveryModeItsServerServes() {
+        Fixture fixture;
+        fixture.server.on("GET", "/sdcpp/v1/capabilities", [](const HttpRequest &) {
+            QJsonObject caps = capabilities();
+            caps.insert("supported_modes", QJsonArray{"img_gen", "vid_gen"});
+            caps.insert("features_by_mode", QJsonObject{{"img_gen", QJsonObject{{"init_image", true}, {"ref_images", true}}},
+                                                        {"vid_gen", QJsonObject{{"init_image", true}}}});
+            caps.insert("defaults_by_mode",
+                        QJsonObject{{"img_gen", QJsonObject{{"width", 1024}, {"height", 1024}}},
+                                    {"vid_gen", QJsonObject{{"width", 832}, {"height", 480}, {"fps", 24}}}});
+            return HttpResponse{200, json(caps)};
+        });
+        fixture.acceptJobs("img_1");
+        fixture.writeStatus(QJsonObject{{kVideoModel, row(kVideoModel, "video", "active", fixture.endpoint())},
+                                        {kKlein, row(kKlein, "image", "active", fixture.endpoint())}});
+        auto provider = fixture.provider();
+        const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
+        QVERIFY(described.ok());
+
+        const OfferedModel *video = findModel(described.value(), "video.generate", kVideoModel);
+        QVERIFY(video);
+        QCOMPARE(video->handle.value("resource").toString(), QStringLiteral("fugue/video-model"));
+        QCOMPARE(video->defaults.value("width").toInt(), 832);
+        const OfferedModel *image = findModel(described.value(), "image.generate", kVideoModel);
+        QVERIFY(image);
+        QCOMPARE(image->handle.value("resource").toString(), QStringLiteral("fugue/image-model"));
+        QCOMPARE(image->defaults.value("width").toInt(), 1024);
+        QVERIFY(findModel(described.value(), "image.edit", kVideoModel));
+        // The image row that serves vid_gen is a video model too; it is not an edit model (its
+        // row says edit is false and it has no ref_images of its own: the row decides).
+        QVERIFY(findModel(described.value(), "video.generate", kKlein));
+        QVERIFY(findModel(described.value(), "image.generate", kKlein));
+        QVERIFY(!findModel(described.value(), "image.edit", kKlein));
+
+        // A job for the image capability goes to img_gen with that model.
+        JobRequest request = fixture.request("image.generate", {{"prompt", "a cat"}});
+        request.model = image->handle;
+        const auto submitted = await<QString>([&](auto reply) { provider->submit(request, reply); });
+        QVERIFY2(submitted.ok(), "submit failed");
+        QCOMPARE(fixture.server.requestsTo("POST", "/sdcpp/v1/img_gen").size(), 1);
+        QCOMPARE(fixture.server.requestsTo("POST", "/sdcpp/v1/vid_gen").size(), 0);
     }
 
     void aVideoJobSendsEveryLoraAndTheFirstFrameAndKeepsTheClipAsAFile() {
