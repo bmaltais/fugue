@@ -370,6 +370,32 @@ private slots:
         QTRY_COMPARE(app.model.nodeTitle("c"), QStringLiteral("Far away"));
     }
 
+    // #59: a right click on a workflow tab opens its menu; Close other tabs closes the rest, Duplicate copies.
+    void theTabMenuDuplicatesAndClosesTheOthers() {
+        App app(load(framed));
+        QVERIFY(app.open());
+        app.workflows.dismissPendingTrust();
+        app.workflows.dismissNotice();
+        app.workflows.newWorkflow();
+        app.workflows.newWorkflow();
+        QTRY_COMPARE(app.workflows.tabs().size(), 3);
+        QTest::qWait(100);
+        QQuickItem *tab = find(app.window, "tab-1");
+        QVERIFY(tab);
+        QTest::mouseClick(app.window, Qt::RightButton, {}, tab->mapToScene(QPointF(tab->width() / 2, tab->height() / 2)).toPoint());
+        QTRY_VERIFY(isOpen(app.window, "tabMenuPopup"));
+        QCOMPARE(app.workflows.current(), 1); // the tab is current first
+        for (const char *id : {"file.rename", "file.duplicate", "file.tab-color", "file.save", "file.close", "file.close-others"})
+            QVERIFY2(find(app.window, QString("menuItem-") + id), id);
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("menuItem-file.close-others")));
+        QTRY_COMPARE(app.workflows.tabs().size(), 1);
+        QTRY_VERIFY(!isOpen(app.window, "tabMenuPopup"));
+        // One tab: no tab bar, so the commands run from the File menu; Duplicate adds the copy.
+        QVERIFY(app.commands.run("file.duplicate"));
+        QCOMPARE(app.workflows.tabs().size(), 2);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     // #72: a row that is off looks off (dimmed), not merely a little paler than one that is on.
     void aDisabledRowIsDimmed() {
         App app(load(framed));

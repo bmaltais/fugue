@@ -43,6 +43,13 @@ QList<Row> menuRows() {
          QT_TRANSLATE_NOOP("Command", "Export for sharing…"), {}, "app", "same"},
         {"file.export-compiled", QT_TRANSLATE_NOOP("Command", "Export the compiled graph, for the CLI"),
          QT_TRANSLATE_NOOP("Command", "Export compiled graph…"), {}, "app", "same"},
+        // The tab menu's (#59); also registered by registerFileCommands (workflows.h) when this has not run.
+        {"file.rename", QT_TRANSLATE_NOOP("Command", "Rename the workflow"), QT_TRANSLATE_NOOP("Command", "Rename…"), {}, "app", "added"},
+        {"file.duplicate", QT_TRANSLATE_NOOP("Command", "Duplicate the workflow into a new tab"),
+         QT_TRANSLATE_NOOP("Command", "Duplicate"), {}, "app", "added"},
+        {"file.close-others", QT_TRANSLATE_NOOP("Command", "Close the other workflows"),
+         QT_TRANSLATE_NOOP("Command", "Close other tabs"), {}, "app", "added"},
+        {"file.tab-color", QT_TRANSLATE_NOOP("Command", "Pick the tab's color"), QT_TRANSLATE_NOOP("Command", "Tab color…"), {}, "app", "added"},
         {"edit.clear", QT_TRANSLATE_NOOP("Command", "Clear the workflow (remove every node)"),
          QT_TRANSLATE_NOOP("Command", "Clear workflow"), {}, "canvas", "same"},
         {"node.color.none", QT_TRANSLATE_NOOP("Command", "Color: none"), QT_TRANSLATE_NOOP("Command", "No color"), {}, "canvas", "same"},

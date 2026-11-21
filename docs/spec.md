@@ -1322,6 +1322,14 @@ reference. A new inference runtime is a new provider module.
   package, so it runs on any GPU; and for CUDA, against the system CUDA package, in the
   `fugue-helper-cuda` package, the faster one on NVIDIA cards. Both install to `lib/fugue/`
   (`fugue-helper-vulkan`, `fugue-helper-cuda`).
+- On an NVIDIA card (the kernel driver is loaded) where `fugue-helper-vulkan` is the helper found
+  and no `fugue-helper-cuda` is installed, the window shows a dismissible notice under the tabs:
+  "Faster generation on your NVIDIA card: install fugue-helper-cuda", with a button that copies
+  `sudo pacman -S fugue-helper-cuda` to the clipboard (#97). It shows at every start until it is
+  dismissed; the dismissal is a marker file in Fugue's state folder
+  (`cuda-helper-notice-dismissed`). With the CUDA helper installed, no NVIDIA card, no helper, or
+  `FUGUE_HELPER` set, nothing shows. Fugue downloads no helper: the package is the signed,
+  updatable way to install it.
 - If memory is short, Fugue names the processes holding it (`nvidia-smi --query-compute-apps` on
   NVIDIA, including the GB10) and offers to stop Omarchy's model
   servers, only with confirmation. It never kills another application. In v0.1 the offer is the

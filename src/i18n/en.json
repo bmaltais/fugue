@@ -530,5 +530,23 @@
   "to close": "to close",
   "trusted": "trusted",
   "unset: %1 is not bound to %2": "unset: %1 is not bound to %2",
-  "unset: no command \"%1\"": "unset: no command \"%1\""
+  "unset: no command \"%1\"": "unset: no command \"%1\"",
+  "%1 already exists in that folder.": "%1 already exists in that folder.",
+  "%1 copy": "%1 copy",
+  "A workflow's name cannot hold a slash.": "A workflow's name cannot hold a slash.",
+  "Close other tabs": "Close other tabs",
+  "Close the other workflows": "Close the other workflows",
+  "Copy %1": "Copy %1",
+  "Could not rename %1 to %2.": "Could not rename %1 to %2.",
+  "Duplicate": "Duplicate",
+  "Duplicate the workflow into a new tab": "Duplicate the workflow into a new tab",
+  "Faster generation on your NVIDIA card: install fugue-helper-cuda": "Faster generation on your NVIDIA card: install fugue-helper-cuda",
+  "Pick the tab's color": "Pick the tab's color",
+  "Rename the workflow": "Rename the workflow",
+  "Tab color…": "Tab color…",
+  "Workflow name": "Workflow name",
+  "Kept %n tabs with unsaved changes.": {
+    "one": "Kept %n tab with unsaved changes.",
+    "other": "Kept %n tabs with unsaved changes."
+  }
 }

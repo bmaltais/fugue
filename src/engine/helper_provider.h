@@ -39,10 +39,24 @@ QStringList helperCapabilities();
 // (`fugue-helper-cuda`) wins on an NVIDIA GPU, then the Vulkan one, then a CPU one (a developer
 // build). Empty when there is none.
 QString helperProgram(bool nvidia);
+// The folders helperProgram(bool) looks in, in order.
+QStringList helperFolders();
 QString helperProgram(const QStringList &folders, bool nvidia);
 
 // Whether this machine has an NVIDIA GPU (its kernel driver is loaded).
 bool hasNvidiaGpu();
+
+// The faster-CUDA-helper notice (#97, spec 8.10): due when the machine has an NVIDIA card, the
+// Vulkan helper is the one found in `folders` (no `fugue-helper-cuda` in any folder before it),
+// and the person has not dismissed it. The dismissal is a marker file in `stateFolder`.
+struct CudaHelperNotice {
+    static QString command(); // `sudo pacman -S fugue-helper-cuda`
+    static bool due(const QStringList &folders, bool nvidia, const QString &stateFolder);
+    static void dismiss(const QString &stateFolder);
+    // On this machine; never due when FUGUE_HELPER names the helper.
+    static bool due();
+    static void dismiss();
+};
 
 class HelperProvider : public Provider {
     Q_OBJECT

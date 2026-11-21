@@ -27,8 +27,9 @@ QVariantList bar() {
     return {
         submenu(QT_TRANSLATE_NOOP("Menu", "&File"),
                 {command("file.new"), command("file.open"), command("file.open-clipboard"), command("file.templates"), separator(),
-                 command("file.save"), command("file.save-as"), command("file.export-share"),
-                 command("file.export-compiled"), separator(), command("file.close"), command("app.quit")}),
+                 command("file.save"), command("file.save-as"), command("file.rename"), command("file.duplicate"),
+                 command("file.export-share"), command("file.export-compiled"), separator(), command("file.close"),
+                 command("file.close-others"), command("app.quit")}),
         submenu(QT_TRANSLATE_NOOP("Menu", "&Edit"),
                 {command("edit.undo"), command("edit.redo"), separator(), command("edit.copy"), command("edit.paste"),
                  command("edit.paste-connected"), command("edit.clone"), command("edit.delete"), separator(),
@@ -51,6 +52,13 @@ QVariantList bar() {
                 {command("app.shortcuts"), command("help.docs"), command("help.report-issue"), separator(),
                  command("help.about")}),
     };
+}
+
+// Right-click on a workflow tab (#59): the tab is made current first, so each command acts on it.
+QVariantList tab() {
+    return {command("file.rename"), command("file.duplicate"), command("file.tab-color"), separator(),
+            command("file.save"), command("file.save-as"), command("file.export-share"), separator(),
+            command("file.close"), command("file.close-others")};
 }
 
 // Right-click on empty canvas: what adds to it, then the view.
@@ -84,7 +92,7 @@ QVariantList frame() {
 
 QStringList names() {
     return {QStringLiteral("bar"), QStringLiteral("canvas"), QStringLiteral("node"), QStringLiteral("frame"),
-            QStringLiteral("colors")};
+            QStringLiteral("tab"), QStringLiteral("colors")};
 }
 
 QVariantList tree(const QString &name) {
@@ -96,6 +104,8 @@ QVariantList tree(const QString &name) {
         return node();
     if (name == QLatin1String("frame"))
         return frame();
+    if (name == QLatin1String("tab"))
+        return tab();
     if (name == QLatin1String("colors")) // the selection toolbar's color button (#74)
         return colors().value("items").toList();
     return {};

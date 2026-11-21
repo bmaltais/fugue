@@ -16,7 +16,7 @@
 
 namespace fugue::menus {
 
-// bar, canvas, node, frame, and colors (the selection toolbar's color button, #74)
+// bar, canvas, node, frame, tab (a workflow tab's, #59), and colors (the selection toolbar's color button, #74)
 QStringList names();
 QVariantList tree(const QString &name);
 
