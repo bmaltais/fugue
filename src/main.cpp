@@ -59,8 +59,12 @@ int main(int argc, char *argv[]) {
     app.setApplicationVersion("0.1.0");
     // Qt Multimedia's FFmpeg backend prints ffmpeg's whole stream dump to stderr for every file a
     // player opens (the player on a video or song node, #116), which drowns the real messages.
-    // QT_LOGGING_RULES still beats this.
-    QLoggingCategory::setFilterRules(QStringLiteral("qt.multimedia.ffmpeg.mediadataholder.info=false"));
+    // Started from a terminal or a launcher that already holds an application ID, Qt's try to
+    // register the app with the desktop portal fails with "Connection already associated with an
+    // application ID" on every start; nothing is lost (file dialogs and the rest work), so that
+    // category stays quiet too. QT_LOGGING_RULES still beats this.
+    QLoggingCategory::setFilterRules(QStringLiteral("qt.multimedia.ffmpeg.mediadataholder.info=false\n"
+                                                    "qt.qpa.services.warning=false"));
 
     // Matches the window to fugue.desktop, so the compositor (Wayland app_id)
     // and the launcher pick up the installed icon. The window's own icon follows the
