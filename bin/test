@@ -1,7 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
-# Arguments go to ctest, so `bin/test -V` shows every Qt test function as it runs.
+# Arguments go to ctest, so `bin/test -V` shows every Qt test function as it runs. The tests run in
+# parallel, one per core (each has its own HOME and XDG folders); `bin/test -j1` runs them in turn,
+# the last -j wins.
 root="$(cd "$(dirname "$0")/.." && pwd)"
 "$root/bin/build"
-QT_QPA_PLATFORM=offscreen ctest --test-dir "$root/build" --output-on-failure --no-tests=error "$@"
+QT_QPA_PLATFORM=offscreen ctest --test-dir "$root/build" --output-on-failure --no-tests=error -j"$(nproc)" "$@"
