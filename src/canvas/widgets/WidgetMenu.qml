@@ -129,8 +129,16 @@ Popup {
         model: menu.shown
         focus: !menu.searchable
         clip: true
+        // The width the scroll bar covers, kept clear by the rows' right-hand text.
+        readonly property real edge: ScrollBar.vertical.visible ? ScrollBar.vertical.width : 0
         keyNavigationEnabled: true
         boundsBehavior: Flickable.StopAtBounds
+        ScrollBar.vertical: FugueScrollBar { look: menu.look }
+        // Home and End reach the ends of a long list when the list has the keys.
+        Keys.onPressed: event => {
+            if (event.key === Qt.Key_Home) { currentIndex = Math.max(0, menu.nextUsable(-1, 1)); event.accepted = true }
+            else if (event.key === Qt.Key_End) { currentIndex = Math.max(0, menu.nextUsable(menu.shown.length, -1)); event.accepted = true }
+        }
         // Up and Down keep the current entry in view when the list is capped and scrolls.
         onCurrentIndexChanged: if (currentIndex >= 0) positionViewAtIndex(currentIndex, ListView.Contain)
         // The checked entry, else the first that can be chosen; again whenever the query changes.
@@ -178,7 +186,7 @@ Popup {
             }
             Text {
                 x: entry.hasThumbnail ? parent.height + 4 : entry.heading ? 8 : 8 + 12 + 6
-                width: parent.width - x - 8 - detail.width
+                width: parent.width - x - 8 - detail.width - list.edge
                 height: entry.hasThumbnail ? parent.height : menu.rowHeight
                 verticalAlignment: entry.heading ? Text.AlignBottom : Text.AlignVCenter
                 bottomPadding: entry.heading ? 2 : 0
@@ -197,7 +205,7 @@ Popup {
                 visible: entry.note !== ""
                 x: 8 + 12 + 6
                 y: menu.rowHeight - 4
-                width: parent.width - x - 8
+                width: parent.width - x - 8 - list.edge
                 wrapMode: Text.Wrap
                 textFormat: Text.PlainText
                 text: entry.note
@@ -208,7 +216,7 @@ Popup {
             Text {
                 id: detail
                 anchors.right: parent.right
-                anchors.rightMargin: 8
+                anchors.rightMargin: 8 + list.edge
                 height: menu.rowHeight
                 verticalAlignment: Text.AlignVCenter
                 textFormat: Text.PlainText

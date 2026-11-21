@@ -324,6 +324,7 @@ Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
+                ScrollBar.vertical: FugueScrollBar { look: root.look }
                 ColumnLayout {
                     width: editor.availableWidth
                     spacing: 2 * root.look.unit

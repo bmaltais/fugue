@@ -1,4 +1,6 @@
 import QtQuick
+import QtQuick.Controls
+import ".."
 
 // A multiline widget's field while it is typed into: it opens over the rows below with room
 // for several lines, so a prompt can be read whole. Enter is a new line; leaving the field,
@@ -42,6 +44,7 @@ Rectangle {
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         interactive: contentHeight > height
+        ScrollBar.vertical: FugueScrollBar { look: area.host.look }
 
         TextEdit {
             id: edit

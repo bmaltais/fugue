@@ -309,3 +309,11 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Rules: Floor (all targets 28px or more). Gaps (1u inside each row; the rows are the chunks, separated by 1u as the panel's lists are, the switch row above the list by 2u). Primary: none on this surface; browsing has no main action, and Open is the first of the three actions on the current item, in the order of how often a file is wanted. Destructive: none (delete is a follow-up and will be its own chunk). Posture: a docked panel, so the canvas's density.
 - Keys: the browser takes Left, Right, Up, Down, PageUp, PageDown, Home, End, Enter, Escape and I through `onShortcutOverride`, so the window's own shortcuts (Home fits the view) do not take them while it has the focus; Escape goes back to the grid, then closes the panel.
 - Not checked by a person: the layout at the panel's narrowest width (200px: the buttons wrap) and in a light theme.
+
+### 2026-11-21 scroll bars on every scrolling surface
+
+- Control: `src/canvas/FugueScrollBar.qml` (`fugueScrollBar`), on the lists and panels named in canvas-look 16.1; replaces the plain Material `ScrollBar {}`, the AlwaysOn-when-long copies and the CommandMenu's ScrollIndicator. The widget menu's list also takes Home and End when it has the keys (a menu with no search field).
+- Old: the model picker, the other widget menus, the command menus, the multiline editor, the run queue, the group editor, the media details and the filmstrip scrolled with no visible bar; some panels had one in the style's default look, hidden until moved.
+- New: one themed bar, visible whenever the content overflows, a draggable thumb of at least 32px, a press on the track pages.
+- Why: a long list (hundreds of model files) was found by wheel or arrow keys only; a bar shows where the person is and drags to the far end at once (Fitts: the thumb is a target as long as the list is long).
+- Rule: Floor, with an exception: the bar is a 10px gutter along the whole edge of its view, hit along its length, a 24px circle on it would cover the rows it borders; the wheel and keys do the same scrolling. Posture: no new decision, nothing to choose.

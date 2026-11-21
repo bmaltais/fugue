@@ -663,6 +663,10 @@ selection toolbar (#74) trash-2, ellipsis, frame, image, log-in; the full list w
 `share/fonts/lucide-fugue.txt`. About 37 glyphs, about 11 KB. Text glyphs recolor through `color`, render through the same distance-field text as
 labels and batch with them; an SVG `Image` would need a separate texture per color.
 
+### 16.1 Scroll bars
+
+One component, `src/canvas/FugueScrollBar.qml`, attached as `ScrollBar.vertical` or `.horizontal` on every list, grid, Flickable and ScrollView that can overflow (node library, workflows panel, media grid, details and filmstrip, node search, templates, settings pages, the command help, the run queue, the group editor, the widget menus, the multiline editor, command menus). 10px wide gutter over the view's edge (it takes no width; a row that must not run under it subtracts `width` while `visible`), track `well` at 60%, a 6px round thumb in `label` at 45% (70% hovered, 90% pressed). It shows while the content is longer than the view, whether or not the pointer is near, and hides when it fits. The thumb is never shorter than 32px, so a list of hundreds of rows keeps one to grab; a press on the track outside the thumb moves one page toward it. Wheel and keys are unchanged.
+
 ## 17. What step 2 changes
 
 Most of it is in #16's files, which step 2 restyles once #16 lands:

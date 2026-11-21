@@ -1,5 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import QtQuick.Controls
 import Fugue
 import "../canvas"
 
@@ -118,6 +119,7 @@ Item {
         contentHeight: column.implicitHeight
         clip: true
         boundsBehavior: Flickable.StopAtBounds
+        ScrollBar.vertical: FugueScrollBar { look: panel.look }
         Column {
             id: column
             width: flick.width

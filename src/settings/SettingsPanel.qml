@@ -133,7 +133,7 @@ Popup {
                 contentWidth: width
                 contentHeight: pageColumn.implicitHeight + 12 * panel.u
                 boundsBehavior: Flickable.StopAtBounds
-                ScrollBar.vertical: ScrollBar {}
+                ScrollBar.vertical: FugueScrollBar { look: panel.look }
                 ColumnLayout {
                     id: pageColumn
                     x: 6 * panel.u

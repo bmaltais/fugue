@@ -253,9 +253,7 @@ FocusScope {
             clip: true
             model: root.mode === "grid" ? root.gridRows : []
             boundsBehavior: Flickable.StopAtBounds
-            ScrollBar.vertical: ScrollBar {
-                policy: gridList.contentHeight > gridList.height ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
-            }
+            ScrollBar.vertical: FugueScrollBar { look: root.look }
             Accessible.role: Accessible.List
             Accessible.name: qsTr("Results")
             delegate: Item {
@@ -322,9 +320,7 @@ FocusScope {
                 model: root.items
                 boundsBehavior: Flickable.StopAtBounds
                 Component.onCompleted: positionViewAtIndex(Math.max(0, root.currentIndex), ListView.Contain)
-                ScrollBar.horizontal: ScrollBar {
-                    policy: ScrollBar.AsNeeded
-                }
+                ScrollBar.horizontal: FugueScrollBar { look: root.look }
                 Accessible.role: Accessible.List
                 Accessible.name: qsTr("Filmstrip")
                 delegate: MediaThumb {
@@ -357,6 +353,7 @@ FocusScope {
             contentHeight: infoColumn.height
             clip: true
             boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: FugueScrollBar { look: root.look }
             Column {
                 id: infoColumn
                 width: infoBox.width

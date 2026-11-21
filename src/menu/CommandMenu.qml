@@ -92,7 +92,7 @@ Menu {
         currentIndex: menu.currentIndex
         // Up and Down keep the current row in view when the menu is capped and scrolls.
         onCurrentIndexChanged: if (currentIndex >= 0) positionViewAtIndex(currentIndex, ListView.Contain)
-        ScrollIndicator.vertical: ScrollIndicator {}
+        ScrollBar.vertical: FugueScrollBar { look: menu.look }
         Keys.onPressed: event => {
             if (menu.sub || menu.onSubMenuRow || (event.key !== Qt.Key_Left && event.key !== Qt.Key_Right))
                 return
