@@ -30,6 +30,52 @@ QtObject {
         }
     }
 
+    // An on/off switch with its label, the same track and knob as a toggle widget (canvas-look
+    // 4.4) and Providers' "Use" switch. The whole row is the press target, 7u = 28px tall.
+    component Toggle: Rectangle {
+        id: toggle
+        property bool on: false
+        property string text
+        signal toggled(bool value)
+        implicitWidth: 22 + App.theme.look.unit * 2 + label.implicitWidth
+        implicitHeight: 7 * App.theme.look.unit
+        color: "transparent"
+        activeFocusOnTab: true
+        Accessible.role: Accessible.CheckBox
+        Accessible.name: text
+        Accessible.checked: on
+        Keys.onSpacePressed: toggle.toggled(!on)
+        Keys.onReturnPressed: toggle.toggled(!on)
+        TapHandler { onTapped: toggle.toggled(!toggle.on) }
+        Rectangle {
+            id: track
+            anchors.verticalCenter: parent.verticalCenter
+            width: 22
+            height: 12
+            radius: 6
+            color: toggle.on ? App.theme.look.accent : App.theme.look.hairlineStrong
+            border.width: toggle.activeFocus ? 1 : 0
+            border.color: App.theme.look.accent
+            Rectangle {
+                x: toggle.on ? track.width - width - 2 : 2
+                y: 2
+                width: 8
+                height: 8
+                radius: 4
+                color: toggle.on ? App.theme.look.accentForeground : App.theme.look.body
+            }
+        }
+        Text {
+            id: label
+            anchors.left: track.right
+            anchors.leftMargin: 2 * App.theme.look.unit
+            anchors.verticalCenter: parent.verticalCenter
+            text: toggle.text
+            color: App.theme.look.text
+            font.pixelSize: App.theme.look.labelSize
+        }
+    }
+
     // A small button: a hairline edge on `well`, its label or glyph inside.
     component SmallButton: Rectangle {
         id: button

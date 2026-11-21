@@ -23,6 +23,8 @@
 // | new_seed         | "random" or "fixed": new seed widgets    | "random"                 |
 // | embed_workflow   | "full", "no-prompts" or "none" (11.7)    | "full"                   |
 // | corner_radius    | 0 to 16 px, or "omarchy" (#63)           | 8                        |
+// | hover_magnifier  | true or false: far out, a short hover    | false                    |
+// |                  | shows a node at zoom 1 (12.6, #74, #123)  |                          |
 
 #include <QJsonObject>
 #include <QJsonValue>
@@ -49,6 +51,7 @@ struct Settings {
     static constexpr int followOmarchy = -1;
     static constexpr int maxCornerRadius = 16;
     int cornerRadius = 8;
+    bool hoverMagnifier = false; // the hover magnifier (#74), off unless set (#123)
 };
 
 // What a settings.json holds.
