@@ -73,35 +73,18 @@ jobs:
   test-aarch64:
     name: Build and test (aarch64)
     # The same build and tests on an arm64 runner, so a pull request covers both architectures (#61).
-    # Arch has no official arm64 container (Arch Linux ARM is a separate, third-party distribution), so
-    # this uses Ubuntu 26.04: it has Qt 6.10, which the app needs (QQmlEngine::setExternalSingletonInstance),
-    # where Ubuntu 24.04 has 6.4 and Debian 13 has 6.8. See docs/aarch64-ci.md.
+    # Arch has no official arm64 container, so the job makes one from Arch Linux ARM's own root
+    # filesystem (the same pacman packages, the PKGBUILD's dependency lists, and a Qt the app needs:
+    # 6.11 or newer, which Ubuntu 26.04 (6.10) and Debian 13 (6.8) lack). See docs/aarch64-ci.md.
     runs-on: ubuntu-24.04-arm
-    container: ubuntu:26.04
-    defaults:
-      run:
-        shell: bash
     env:
-      DEBIAN_FRONTEND: noninteractive
+      # bin/build uses ccache when it is installed; its folder is kept between runs below.
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 800M
     steps:
-      - name: Install the build and test dependencies
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends git ca-certificates build-essential cmake pkg-config ccache \
-            dbus jq locales fonts-noto-core libvips-dev libarchive-dev libvulkan-dev glslc spirv-headers \
-            qt6-base-dev qt6-base-private-dev qt6-declarative-dev qt6-declarative-private-dev \
-            qt6-shadertools-dev qt6-multimedia-dev qt6-wayland qt6-tools-dev qt6-tools-dev-tools \
-            libgl-dev libxkbcommon-dev \
-            qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-templates \
-            qml6-module-qtquick-layouts qml6-module-qtquick-window qml6-module-qtquick-dialogs \
-            qml6-module-qtqml qml6-module-qtqml-workerscript qml6-module-qtqml-models \
-            qml6-module-qtquick-shapes qml6-module-qtmultimedia qml6-module-qttest
-
       - uses: actions/checkout@v7
         with:
-          submodules: true
+          submodules: true # the bundled templates: bmaltais/fugue-workflows, a public repo
 
       - name: Restore the compiler cache
         uses: actions/cache@v6
@@ -110,21 +93,50 @@ jobs:
           key: test-aarch64-ccache-${{ github.sha }}
           restore-keys: test-aarch64-ccache-
 
-      - name: Set up a user and a locale like a desktop's
+      - name: Make the Arch Linux ARM container
         run: |
-          useradd -m tester
-          groupadd other
-          usermod -aG other tester
-          chown -R tester .
-          sed -i 's/^# *en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen
-          locale-gen
+          mkdir -p .ccache
+          cd "$RUNNER_TEMP"
+          base=http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz
+          curl -fsSL --retry 3 -O "$base" -O "$base.md5"
+          md5sum -c ArchLinuxARM-aarch64-latest.tar.gz.md5
+          docker import ArchLinuxARM-aarch64-latest.tar.gz archlinuxarm
+          rm ArchLinuxARM-aarch64-latest.tar.gz
+          docker run -d --name arch -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE" \
+            -e CCACHE_DIR -e CCACHE_MAXSIZE archlinuxarm sleep infinity
+
+      - name: Install the package's dependencies
+        # The same lists as the x86 job: the PKGBUILD is the one place they live. cuda is left out (see above).
+        run: |
+          docker exec arch bash -c '
+            set -euo pipefail
+            sed -i "s/^CheckSpace/#CheckSpace/" /etc/pacman.conf
+            pacman-key --init && pacman-key --populate archlinuxarm
+            pacman -Syu --noconfirm --needed git
+            source packaging/PKGBUILD
+            deps=("${depends[@]}" "${makedepends[@]}" "${checkdepends[@]}")
+            wanted=()
+            for dep in "${deps[@]%%[<>=]*}"; do [[ $dep == cuda ]] || wanted+=("$dep"); done
+            pacman -S --noconfirm --needed base-devel ccache cmake dbus "${wanted[@]}"
+            git config --system --add safe.directory "*"
+            useradd -m tester
+            groupadd other
+            usermod -aG other tester
+            chown -R tester .
+            sed -i "s/^#en_US.UTF-8/en_US.UTF-8/" /etc/locale.gen
+            locale-gen'
 
       - name: Build
-        run: su tester -c bin/build
+        run: docker exec arch su tester -c bin/build
 
       - name: Test
-        run: su tester -c 'LANG=en_US.UTF-8 dbus-run-session -- bin/test'
+        run: docker exec arch su tester -c 'LANG=en_US.UTF-8 dbus-run-session -- bin/test'
 
       - name: Compiler cache use
         if: always()
-        run: su tester -c 'ccache -s'
+        run: docker exec arch su tester -c 'ccache -s' || true
+
+      - name: Give the files back to the runner
+        # So the cache step after this job can read the compiler cache, and the workspace can be cleaned.
+        if: always()
+        run: docker exec arch chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" || true
