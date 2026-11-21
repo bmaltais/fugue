@@ -268,8 +268,10 @@ private slots:
         const Errors errors = runToEnd(download);
         QVERIFY2(errors.isEmpty(), qPrintable(errors.isEmpty() ? QString() : errors.first().message));
         QCOMPARE(readFile(m_root.filePath("loras/m.safetensors")), bytes);
-        QCOMPARE(m_server->requests().size(), 2);
-        QCOMPARE(m_server->requests().at(1).headers.value("range"), QByteArray("bytes=70000-"));
+        // Two requests of the download. Qt resends one by itself when the connection closes early
+        // (#127), so the server may have seen more: its last one is the range request.
+        QCOMPARE(download.requestCount(), 2);
+        QCOMPARE(m_server->requests().last().headers.value("range"), QByteArray("bytes=70000-"));
     }
 
     void aPartLeftByAnEarlierFugueIsHashedAndResumed() {
@@ -408,7 +410,7 @@ private slots:
         const Errors errors = runToEnd(download);
         QCOMPARE(errors.size(), 1);
         QCOMPARE(errors.first().code, QStringLiteral("download_failed"));
-        QCOMPARE(m_server->requests().size(), 3);
+        QCOMPARE(download.requestCount(), 3); // Qt's own resends (#127) are not the download's
         QVERIFY(QFileInfo::exists(m_root.filePath("loras/m.safetensors.part")));
     }
 

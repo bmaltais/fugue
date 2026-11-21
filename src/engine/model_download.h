@@ -78,6 +78,9 @@ public:
     const DownloadTarget &target() const { return m_target; }
     qint64 received() const { return m_received; }
     qint64 total() const { return m_total; } // -1 until the server says
+    // How many requests this download made. Qt may resend one on its own when a connection closes
+    // early, so a server's count can be higher.
+    int requestCount() const { return m_requests; }
 
     // How many times a break is taken up again, and the wait before the first (it doubles).
     void setRetries(int count, int firstDelayMs);
@@ -123,6 +126,7 @@ private:
     int m_retryDelayMs = 2000;
     int m_stallMs = 60000;
     int m_attempt = 0;
+    int m_requests = 0;
     bool m_headersRead = false;
     bool m_partWhole = false; // the server says the part already holds the whole file (416)
     bool m_cancelled = false;

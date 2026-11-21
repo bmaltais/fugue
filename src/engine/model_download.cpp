@@ -212,6 +212,7 @@ void ModelDownload::request() {
     if (m_cancelled || m_ended)
         return;
     m_headersRead = false;
+    ++m_requests;
     QNetworkRequest request(m_target.source);
     // Follows redirects (a model host hands off to its storage) to what a source may be, never
     // from https to http: from http on this machine only to this machine.
