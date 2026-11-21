@@ -54,15 +54,25 @@ bool panelOpen(QQuickWindow *window) {
     }()
 
 // Clicks an item once the layouts have placed it: a list that just changed moves its rows
-// when the next frame is polished, so the item must stay put for a few frames first.
+// when the next frame is polished, so the item must stay put for a few frames first. A refresh
+// of the packs list also rebuilds the rows (the item found a moment ago is deleted, #127): the
+// item is looked up again by name after every wait, never held across one.
 void click(App &app, QQuickItem *item) {
+    const QString name = item->objectName();
     QPoint at = centerOf(item);
-    for (int still = 0, i = 0; still < 3 && i < 50; ++i) {
+    int still = 0;
+    for (int i = 0; still < 3 && i < 500; ++i) {
         QTest::qWait(20);
-        const QPoint now = centerOf(item);
-        still = now == at ? still + 1 : 0;
-        at = now;
+        QQuickItem *now = find(app.window, name);
+        if (!now) {
+            still = 0; // gone for now: wait for the rebuilt row
+            continue;
+        }
+        const QPoint here = centerOf(now);
+        still = here == at ? still + 1 : 0;
+        at = here;
     }
+    QVERIFY2(still >= 3, qPrintable(QStringLiteral("%1 never settled").arg(name)));
     QTest::mouseClick(app.window, Qt::LeftButton, {}, at);
 }
 
