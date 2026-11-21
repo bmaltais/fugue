@@ -128,6 +128,7 @@ Every failure has a stable `code`. Fix by code, not by message text:
 - Providers: `capability_unavailable`, `model_not_running`, `provider_unreachable`
 - Running: `node_failed`, `node_bad_output`, `node_timeout`, `out_of_memory`, `cancelled`,
   `node_test_failed`
+- Masks: `mask_empty` (paint the part to change), `mask_unsupported` (the provider or model cannot take a mask), `stitch_mismatch` (Stitch got a picture of another shape than its crop); warnings `mask_full` (everything is masked: plain generation), `mask_resized` (the mask was stretched to the picture)
 - Cache: `cache_busy` (a warning: a run is going, so `cache clear` left its results and previews alone)
 - Skill: `skill_modified`
 - Other: `unknown_run`, `usage`, `internal`
