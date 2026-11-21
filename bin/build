@@ -2,6 +2,17 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
+# One big build at a time on this machine, across all worktrees and agents: each build runs one
+# compile per core, so several at once only oversubscribe the CPU (a load of 20 on 12 cores, each
+# build slower than if they had queued). A second build waits here. bin/test holds the same lock
+# for its whole run and says so in FUGUE_BUILD_LOCKED, so it does not wait on itself.
+if [[ -z ${FUGUE_BUILD_LOCKED:-} ]]; then
+  exec 9>"${XDG_RUNTIME_DIR:-/tmp}/fugue-test.lock"
+  if ! flock -n 9; then
+    echo "bin/build: another build or test run is in progress, waiting for it..." >&2
+    flock 9
+  fi
+fi
 launcher=()
 if command -v ccache >/dev/null; then
   # Reuse compiled objects, also across git worktrees. Every worktree has its own
