@@ -23,6 +23,9 @@
 // window's runs is waiting or active). Cancel takes the active run, else the last waiting.
 // Each start takes the document as it is and then advances the seeds set to increment
 // (WidgetEdit::advanceSeeds), so the run uses the number shown and the next run the next one.
+// `batch` is how many runs one start makes (ComfyUI's batch count, #60): each takes the
+// document as it is then, so a seed set to increment gives each its own number; they queue
+// together, in order, also ahead of the queue with run.start-first. start() returns the first id.
 
 #include <QHash>
 #include <QJsonObject>
@@ -63,6 +66,11 @@ class CanvasRuns : public QObject {
     Q_PROPERTY(QVariantList errors READ errors NOTIFY errorsChanged)
     // How the last run of the shown workflow ended: "", "ok", "failed" or "cancelled".
     Q_PROPERTY(QString lastStatus READ lastStatus NOTIFY errorsChanged)
+    // True while something that is not the canvas holds the keys the `run` context owns (the queue
+    // panel has the focus, and Escape closes it): run.cancel's keys sleep until it is false again.
+    Q_PROPERTY(bool yieldKeys READ yieldKeys WRITE setYieldKeys NOTIFY yieldKeysChanged)
+    // How many runs one start makes, 1 to maxBatch (#60).
+    Q_PROPERTY(int batch READ batch WRITE setBatch NOTIFY batchChanged)
 
 public:
     // `registry` tells which inputs are image files (a Load Image's) for their thumbnails.
@@ -81,6 +89,11 @@ public:
     QVariantList runningWires() const;
     QVariantList errors() const;
     QString lastStatus() const;
+    static constexpr int maxBatch = 99;
+    bool yieldKeys() const { return m_yieldKeys; }
+    void setYieldKeys(bool yield);
+    int batch() const { return m_batch; }
+    void setBatch(int batch);
 
     // The run ids started here, waiting or active, in queue order.
     QStringList runs() const { return m_order; }
@@ -88,6 +101,11 @@ public:
     Q_INVOKABLE QString start(bool first = false);
     Q_INVOKABLE QString runToSelected();
     Q_INVOKABLE void cancel();
+    // Shows the results of a run that ended on the nodes of the shown workflow, as they were when it
+    // ended (the queue panel's history): `workflow` is the file the run started from. False,
+    // and nothing shown, when that is not the file of the shown tab (a run's node ids mean
+    // something only in its own workflow) or the tab is not a saved one.
+    Q_INVOKABLE bool showResults(const QString &run, const QString &workflow);
     // A check now rather than after the edit pause (tests).
     Q_INVOKABLE void checkNow();
     // The registry was filled again, or trust given (#70): the run thread reloads too, and the
@@ -110,6 +128,8 @@ public:
 
 signals:
     void changed();
+    void batchChanged();
+    void yieldKeysChanged();
     void progressChanged();
     void runningNodesChanged();
     void errorsChanged();
@@ -156,6 +176,7 @@ private:
     QString keyFor(const QString &node) const;
     static qreal progressOf(const NodeView &view);
     QString startRun(const QString &target, bool first);
+    QString startOne(const QString &tab, const QString &target, bool first);
     QString currentTab() const;
     void onEvent(const QString &run, const QJsonObject &event);
     void onChecked(int ticket, const QJsonObject &nodes, const QJsonArray &problems);
@@ -198,6 +219,9 @@ private:
     QHash<QString, TabRuns> m_tabs;
     QHash<QString, QString> m_tabOf; // run id -> tab id
     QStringList m_order;
+    QSet<QString> m_first; // the waiting runs started ahead of the queue (they keep their order)
+    int m_batch = 1;
+    bool m_yieldKeys = false;
     QString m_active;
     QString m_activeNode;
     QString m_activeNodePath;

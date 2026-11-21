@@ -6,6 +6,8 @@
 #include <QFileInfo>
 #include <QRegularExpression>
 
+#include <algorithm>
+
 #include <cerrno>
 #include <ctime>
 #include <fcntl.h>
@@ -145,6 +147,32 @@ bool Queue::activate(const QString &run) const {
         return true;
     // 0-<time>-<run>: the time part stays, only the class changes.
     return QFile::rename(m_dir + '/' + entry.file, m_dir + '/' + QStringLiteral("0") + entry.file.mid(1));
+}
+
+bool Queue::moveToFront(const QString &run) const {
+    const Guard guard(m_dir);
+    QList<QueueEntry> all = entries();
+    const auto self = std::find_if(all.begin(), all.end(), [&](const QueueEntry &e) { return e.run == run; });
+    if (self == all.end() || self->active)
+        return false;
+    // The earliest time among the other entries of class 3: one before it sorts first. With none
+    // there, class 3 alone puts the entry ahead of the class 5 ones.
+    qint64 earliest = self->file.mid(2, 14).toLongLong();
+    bool others = false;
+    for (const QueueEntry &entry : all) {
+        if (&entry == &*self || entry.file.startsWith(QLatin1String("0-")) || !entry.file.startsWith(QLatin1String("3-")))
+            continue;
+        const qint64 at = entry.file.mid(2, 14).toLongLong();
+        earliest = others ? std::min(earliest, at) : at;
+        others = true;
+    }
+    if (!others)
+        return self->file.startsWith(QLatin1String("3-"))
+               || QFile::rename(m_dir + '/' + self->file, m_dir + '/' + fileName(3, earliest, run));
+    // Already ahead of the rest of class 3: nothing to rename.
+    if (self->file.startsWith(QLatin1String("3-")) && self->file.mid(2, 14).toLongLong() < earliest)
+        return true;
+    return QFile::rename(m_dir + '/' + self->file, m_dir + '/' + fileName(3, std::max<qint64>(0, earliest - 1), run));
 }
 
 bool Queue::remove(const QString &run) const {

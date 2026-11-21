@@ -6,6 +6,7 @@ import QtQuick.Layouts
 import Fugue
 import "canvas"
 import "menu"
+import "run"
 import "search"
 import "settings"
 import "workflow"
@@ -116,6 +117,7 @@ ApplicationWindow {
                     anchors.fill: parent
                     canvas: fugueCanvas
                 }
+
             }
         }
 
@@ -170,6 +172,85 @@ ApplicationWindow {
     Component {
         id: settingsComponent
         SettingsPanel { model: win.appSettingsModel }
+    }
+
+    // The run toolbar and the queue panel (#60), floating over the canvas. Each is made when it is
+    // shown and dropped when it is not, and neither at all in a window without runs: the window
+    // keeps few items (#5), and not even a Loader is left standing for them.
+    property Item runToolbarItem: null
+    property Item runQueueItem: null
+    readonly property bool runBarWanted: App.runBar !== null && App.runs !== null && App.runQueue !== null
+    function syncRunBar() {
+        const toolbar = runBarWanted && App.runBar.visible
+        if (toolbar && !runToolbarItem)
+            runToolbarItem = runToolbarComponent.createObject(fugueCanvas) as Item
+        else if (!toolbar && runToolbarItem) {
+            runToolbarItem.destroy()
+            runToolbarItem = null
+        }
+        const panel = toolbar && App.runBar.queueOpen
+        if (panel && !runQueueItem) {
+            runQueueItem = runQueueComponent.createObject(fugueCanvas) as Item
+            App.runQueue.watching = true
+        } else if (!panel && runQueueItem) {
+            runQueueItem.destroy()
+            runQueueItem = null
+            App.runQueue.watching = false
+        }
+    }
+    Component.onCompleted: syncRunBar()
+    Connections {
+        target: App.runBar
+        function onVisibleChanged() { win.syncRunBar() }
+        function onQueueOpenChanged() { win.syncRunBar() }
+        function onQueueFocusRequested() { (win.runQueueItem as RunQueuePanel)?.focusFirst() }
+    }
+    Component {
+        id: runToolbarComponent
+        RunToolbar {
+            look: App.theme.look
+            busy: App.runs.busy
+            canCancel: App.runs.busy
+            pending: App.runQueue.count
+            progress: App.runs.running ? App.runs.progress : -1
+            batch: App.runs.batch
+            maxBatch: 99
+            dock: App.runBar.dock
+            queueOpen: App.runBar.queueOpen
+            onMenuAboutToOpen: menuItems = App.commands.menu("run")
+            onRunRequested: App.commands.trigger("run.start")
+            onCancelRequested: App.commands.trigger("run.cancel")
+            onBatchRequested: value => App.runs.batch = value
+            onQueueToggled: App.runBar.queueOpen = !App.runBar.queueOpen
+            onDockRequested: dock => App.runBar.dock = dock
+        }
+    }
+    Component {
+        id: runQueueComponent
+        RunQueuePanel {
+            id: runQueuePanel
+            look: App.theme.look
+            entries: App.runQueue.entries
+            history: App.runQueue.history
+            maxHeight: Math.max(30 * look.unit, fugueCanvas.height - 24 * look.unit)
+            readonly property Item bar: (win.runToolbarItem as RunToolbar)?.surface ?? null
+            x: bar ? bar.x + (bar.width - width) / 2 : 0
+            y: !bar ? 0 : App.runBar.dock === "bottom" ? bar.y - height - 2 * look.unit : bar.y + bar.height + 2 * look.unit
+            onCancelRequested: run => App.runQueue.cancel(run)
+            onFrontRequested: run => App.runQueue.moveToFront(run)
+            onFolderRequested: run => App.runQueue.openFolder(run)
+            onCloseRequested: App.runBar.queueOpen = false
+            onResultsRequested: run => {
+                if (!App.runs.showResults(run, App.runQueue.workflowOf(run)))
+                    App.workflows.notify(qsTr("Open the workflow that run started from to see its results."))
+            }
+            // Escape closes it while it has the focus, so the run's cancel keys sleep then.
+            Binding {
+                target: App.runs
+                property: "yieldKeys"
+                value: runQueuePanel.activeFocus
+            }
+        }
     }
 
     NodeSearchPopup {

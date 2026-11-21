@@ -66,6 +66,40 @@ private slots:
         QCOMPARE(entries.at(2).workflow, QString("/w/b.fugue"));
     }
 
+    void moveToFrontPutsAWaitingRunAheadOfTheOtherWaitingOnesButNotTheActiveOne() {
+        QTemporaryDir dir;
+        const Queue queue(dir.filePath("queue"));
+        QVERIFY(queue.enqueue("run-a", "/w/a.fugue", false));
+        QVERIFY(queue.activate("run-a"));
+        QVERIFY(queue.enqueue("run-b", "/w/b.fugue", false));
+        QVERIFY(queue.enqueue("run-c", "/w/c.fugue", true));
+        QVERIFY(queue.enqueue("run-d", "/w/d.fugue", false));
+        QCOMPARE(runs(queue), (QStringList{"run-a", "run-c", "run-b", "run-d"}));
+        QVERIFY(queue.moveToFront("run-d"));
+        QCOMPARE(runs(queue), (QStringList{"run-a", "run-d", "run-c", "run-b"}));
+        // Again, and for the one already first: nothing changes.
+        QVERIFY(queue.moveToFront("run-d"));
+        QCOMPARE(runs(queue), (QStringList{"run-a", "run-d", "run-c", "run-b"}));
+        // The next one moved goes ahead of the last one moved.
+        QVERIFY(queue.moveToFront("run-b"));
+        QCOMPARE(runs(queue), (QStringList{"run-a", "run-b", "run-d", "run-c"}));
+        // The entry still holds what it did.
+        QueueEntry entry;
+        QVERIFY(queue.find("run-b", &entry));
+        QCOMPARE(entry.workflow, QStringLiteral("/w/b.fugue"));
+        QVERIFY(!entry.active);
+    }
+
+    void moveToFrontFailsForTheActiveRunAndForARunThatIsGone() {
+        QTemporaryDir dir;
+        const Queue queue(dir.filePath("queue"));
+        QVERIFY(queue.enqueue("run-a", "/w/a.fugue", false));
+        QVERIFY(queue.activate("run-a"));
+        QVERIFY(!queue.moveToFront("run-a"));
+        QVERIFY(!queue.moveToFront("run-nobody"));
+        QCOMPARE(runs(queue), (QStringList{"run-a"}));
+    }
+
     void anEntryIsWrittenInTheOnDiskJsonForm() {
         QTemporaryDir dir;
         const Queue queue(dir.filePath("queue"));

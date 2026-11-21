@@ -108,6 +108,8 @@ QList<Row> menuRows() {
         {"frame.rename", QT_TRANSLATE_NOOP("Command", "Rename the Frame"), QT_TRANSLATE_NOOP("Command", "Rename Frame…"), {}, "canvas", "same"},
         {"frame.delete", QT_TRANSLATE_NOOP("Command", "Delete the Frame (its nodes stay)"),
          QT_TRANSLATE_NOOP("Command", "Delete Frame"), {}, "canvas", "same"},
+        {"view.toggle-run-toolbar", QT_TRANSLATE_NOOP("Command", "Show or hide the run toolbar"),
+         QT_TRANSLATE_NOOP("Command", "Show run toolbar"), {}, "app", "added"},
         {"app.menu-bar", QT_TRANSLATE_NOOP("Command", "Open the menu bar"), nullptr, {"F10"}, "app", "added"},
         {"app.context-menu", QT_TRANSLATE_NOOP("Command", "Open the context menu"), nullptr, {"Shift+F10", "Menu"}, "canvas", "added"},
     };
@@ -128,6 +130,7 @@ QList<QPair<const char *, const char *>> menuLabels() {
         {"group.enter", QT_TRANSLATE_NOOP("Command", "Enter group")},
         {"group.leave", QT_TRANSLATE_NOOP("Command", "Leave group")},
         {"view.toggle-links", QT_TRANSLATE_NOOP("Command", "Show links")},
+        {"panel.queue", QT_TRANSLATE_NOOP("Command", "Run queue")},
         {"run.start-first", QT_TRANSLATE_NOOP("Command", "Run first in the queue")},
         {"run.to-here", QT_TRANSLATE_NOOP("Command", "Run to here")},
         {"run.cancel", QT_TRANSLATE_NOOP("Command", "Cancel run")},

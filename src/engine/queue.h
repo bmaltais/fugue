@@ -63,6 +63,10 @@ public:
     bool setPid(const QString &run, qint64 pid) const;
     // Moves the run's entry to the active class. False when the entry is gone.
     bool activate(const QString &run) const;
+    // Moves a waiting run's entry ahead of every other waiting one (the queue's "Queue Front"):
+    // class 3 and a time before the earliest of the entries already in that class. True when it
+    // is first among the waiting runs now; false for the active run and for a run with no entry.
+    bool moveToFront(const QString &run) const;
     // Removes the run's entry, whatever its class: for the process that owns it.
     bool remove(const QString &run) const;
     // Removes exactly the entry that was seen, by its file. False when that file is gone:

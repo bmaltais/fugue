@@ -79,6 +79,8 @@ fugue_add_qml(fugue_menu_qml src/menu /menu)
 fugue_add_qml(fugue_settings_qml src/settings /settings)
 # The workflows (spec 11, 12.10): tabs, open, save, recovery and import.
 fugue_add_qml(fugue_workflow_qml src/workflow /workflow)
+# The run toolbar and the queue panel (#60).
+fugue_add_qml(fugue_run_qml src/run /run)
 
 # The command line (spec 13): the same `fugue` binary, but it needs nothing
 # beyond the engine, so it is its own library with no Gui, Quick or QML. main.cpp
@@ -174,6 +176,17 @@ endforeach()
 # Search tests: each tests/search/<name>.cpp is its own QtTest executable, like the canvas ones.
 file(GLOB fugue_search_tests CONFIGURE_DEPENDS tests/search/*.cpp)
 foreach(test_source ${fugue_search_tests})
+  get_filename_component(test_name ${test_source} NAME_WE)
+  add_executable(${test_name} ${test_source} tests/test_environment.cpp src/resources.qrc)
+  target_link_libraries(${test_name} PRIVATE fugue_core fugue_nodes Qt6::Test)
+  add_test(NAME ${test_name} COMMAND ${test_name})
+  set_tests_properties(${test_name} PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+endforeach()
+
+# Run tests: each tests/run/<name>.cpp is its own QtTest executable with the app's code (the run
+# queue, the run toolbar's state), like the canvas ones.
+file(GLOB fugue_run_tests CONFIGURE_DEPENDS tests/run/*.cpp)
+foreach(test_source ${fugue_run_tests})
   get_filename_component(test_name ${test_source} NAME_WE)
   add_executable(${test_name} ${test_source} tests/test_environment.cpp src/resources.qrc)
   target_link_libraries(${test_name} PRIVATE fugue_core fugue_nodes Qt6::Test)

@@ -22,12 +22,15 @@
 #include "menu/layout_colors.h"
 #include "menu/menu_commands.h"
 #include "engine/pack_loader.h"
+#include "engine/paths.h"
 #include "engine/registry.h"
 #include "engine/trust_store.h"
 #include "node_type_reloads.h"
 #include "nodes/builtin.h"
 #include "qml_app.h"
 #include "run/canvas_runs.h"
+#include "run/run_bar.h"
+#include "run/run_queue.h"
 #include "run/run_service.h"
 #include "settings/settings_model.h"
 #include "theme.h"
@@ -107,6 +110,10 @@ int main(int argc, char *argv[]) {
     fugue::RunService runService(runSetup);
     fugue::CanvasRuns runs(&canvasModel, &workflows, &runService, &registry);
     runs.registerCommands(commands);
+    // The run toolbar's state and the queue panel's list (#60): the same queue the CLI's runs are in.
+    fugue::RunBar runBar(&runs, fugue::stateDir() + "/run-bar.json");
+    runBar.registerCommands(commands);
+    fugue::RunQueue runQueue({}, &runService);
     // Open, Copy and Save Image on a node's menu (#57); failures go to the window banner.
     fugue::ImageActions imageActions(commands, canvasModel, runs);
     QObject::connect(&imageActions, &fugue::ImageActions::message, &workflows, &fugue::Workflows::notify);
@@ -116,7 +123,8 @@ int main(int argc, char *argv[]) {
     fugue::LayoutColors layoutColors(canvasModel);
 
     const fugue::AppObjects objects{&translator, &theme,   &commands, &canvasModel,  &workflows,
-                                    &appSettings, &runs, &imageActions, &colorHistory, &layoutColors};
+                                    &appSettings, &runs, &imageActions, &colorHistory, &layoutColors,
+                                    &runBar,      &runQueue};
     // The registry is filled again when the packs or the trust change, so what is installed is
     // usable with no restart (#70). Made after what it refreshes, so it goes first.
     fugue::RegistryReloader reloader(&registry, addNodeTypes);
