@@ -158,7 +158,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 // The side panel (#56) takes its width from the canvas, on the side it docks.
-                Layout.leftMargin: win.sidePanelMargin("left")
+                Layout.leftMargin: win.stripWidth + win.sidePanelMargin("left")
                 Layout.rightMargin: win.sidePanelMargin("right")
                 model: App.canvasModel
                 navigation: win.appSettingsModel ? win.appSettingsModel.navigation : "legacy"
@@ -340,6 +340,12 @@ ApplicationWindow {
     // open and dropped when none is, and not at all in a window without them: the window keeps
     // few items (#5). The panels know nothing of the canvas or of App; what they ask is done here.
     property Item sidePanelItem: null
+    // The tab strip (#159) on the left edge under the bars: made while the registry shows it
+    // (focus mode hides it), and not at all in a window without side panels.
+    readonly property bool stripWanted: sidePanelsWanted && win.chromeIsShown("side-tabs")
+    readonly property real stripWidth: stripWanted && stripLoader.item ? (stripLoader.item as Item).width : 0
+    // The most of the window the panel may take: the canvas keeps at least 160px.
+    readonly property real sidePanelWidth: Math.max(0, Math.min(App.sidePanels ? App.sidePanels.width : 0, windowRoot.width - stripWidth - 160))
     property Item sidePanelContent: null
     property string sidePanelShown: ""
     readonly property bool sidePanelsWanted: App.sidePanels !== null && App.nodeLibrary !== null && App.recentFiles !== null
@@ -348,7 +354,7 @@ ApplicationWindow {
     function sidePanelMargin(side) {
         if (!sidePanelItem || App.sidePanels.dock !== side)
             return 0
-        return App.sidePanels.width
+        return sidePanelWidth
     }
     function syncSidePanel() {
         const tab = sidePanelsWanted ? App.sidePanels.tab : ""
@@ -374,6 +380,19 @@ ApplicationWindow {
         }
         sidePanelShown = tab
     }
+    Loader {
+        id: stripLoader
+        parent: windowRoot
+        active: win.stripWanted
+        y: fugueCanvas.y
+        height: fugueCanvas.height
+        sourceComponent: SideTabStrip {
+            look: App.theme.look
+            panels: App.sidePanels.panels
+            onTabRequested: tab => App.sidePanels.toggle(tab)
+        }
+        onLoaded: (item as Item).height = Qt.binding(() => stripLoader.height)
+    }
     Connections {
         target: App.sidePanels
         function onTabChanged() { win.syncSidePanel() }
@@ -388,10 +407,10 @@ ApplicationWindow {
             look: App.theme.look
             title: App.sidePanels.tab === "nodes" ? qsTr("Node library") : qsTr("Workflows")
             dock: App.sidePanels.dock
-            width: App.sidePanels.width
+            width: win.sidePanelWidth
             minWidth: App.sidePanels.minWidth
             maxWidth: App.sidePanels.maxWidth
-            x: dock === "right" ? windowRoot.width - width : 0
+            x: dock === "right" ? windowRoot.width - width : win.stripWidth
             y: fugueCanvas.y
             height: fugueCanvas.height
             onCloseRequested: App.sidePanels.tab = ""
