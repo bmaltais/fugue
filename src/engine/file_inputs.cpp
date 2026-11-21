@@ -14,7 +14,7 @@ void forEachFileLiteral(Document &document, const Registry &registry,
                 continue;
             for (auto in = it->inputs.begin(); in != it->inputs.end(); ++in) {
                 const InputSpec *spec = type->input(in.key());
-                if (spec && spec->widget() == QLatin1String("file") && in->kind() == InputValue::Kind::Literal &&
+                if (spec && spec->holdsInputFile() && in->kind() == InputValue::Kind::Literal &&
                     in->literal().isString())
                     visit(it.key(), in.key(), *in);
             }

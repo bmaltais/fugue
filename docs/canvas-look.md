@@ -228,6 +228,7 @@ edit says more.
 | `image`, `video`, `audio` | square (corner `min(r, 2)`) | `portColor(type)` |
 | a declared type | diamond (a square rotated 45°, 8 px across) | `portColor("declared")` |
 | `any` (Preview only) | ring, 2 px | `label` |
+| an `image` port with `role: mask` (spec 14.4) | hollow square (the ring on the square): 3 px stroke in the image color, `body` inside, wired or not; the wire reaches the frame | `portColor(type)` |
 
 | Aspect | Value |
 | --- | --- |

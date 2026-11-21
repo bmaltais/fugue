@@ -311,10 +311,12 @@ Item {
                         }
                     }
                     PortDot {
+                        objectName: "outputDot-" + output.modelData.name
                         visible: node.tier <= 1
                         x: node.width - width / 2
                         y: node.canvasModel.rowHeight / 2 - height / 2
                         shape: output.modelData.shape
+                        mask: output.modelData.role === "mask"
                         fill: node.canvasView.portColor(output.modelData.color)
                         body: node.look.body
                         corner: face.corner
@@ -392,6 +394,7 @@ Item {
                         x: -width / 2
                         y: node.canvasModel.rowHeight / 2 - height / 2
                         shape: input.modelData.shape
+                        mask: input.modelData.role === "mask"
                         fill: node.canvasView.portColor(input.modelData.color)
                         body: node.look.body
                         corner: face.corner
@@ -409,6 +412,11 @@ Item {
             readonly property bool comparing: node.compare.a !== undefined
             // Crop (#73): the picture arriving at its input, with the frame over it, at full detail.
             readonly property bool cropping: node.canvasModel.isCrop(node.nodeId) && node.thumbnailText === ""
+            // A node with a painted mask (Load Image, Paint Mask, #174): its picture with the mask over it, at full detail.
+            readonly property var maskPort: node.inputs.find(p => p.widgetType === "mask")
+            readonly property string maskFile: maskPort && !maskPort.wired && typeof maskPort.literal === "string" && App.runs
+                                               ? App.runs.inputFile(maskPort.literal) : ""
+            readonly property bool masked: maskFile !== "" && node.thumbnailText === ""
             // A video or a sound result (Save Video, Save Audio, Preview): a player in the slot at full detail.
             readonly property bool playable: node.media.url !== undefined
             // One Loader, so a node costs the one item it always did (#5).
@@ -421,7 +429,8 @@ Item {
                 height: node.thumbnailRect.height
                 objectName: "thumbnail"
                 sourceComponent: !face.full ? thumbnailComponent : face.comparing ? compareComponent
-                                 : face.cropping ? cropComponent : face.playable ? mediaComponent : thumbnailComponent
+                                 : face.cropping ? cropComponent : face.masked ? maskComponent
+                                 : face.playable ? mediaComponent : thumbnailComponent
                 onItemChanged: node.compareItem = face.comparing && face.full ? item : null
                 Component {
                     id: thumbnailComponent
@@ -448,6 +457,20 @@ Item {
                         wheelModifiers: Qt.AltModifier // a plain wheel moves the canvas
                         onPressed: node.canvasModel.select([node.nodeId])
                         onActivated: node.canvasView.openCrop(node.nodeId)
+                        opacity: node.thumbnailDim ? 0.5 : 1
+                    }
+                }
+                Component {
+                    id: maskComponent
+                    MaskNodeView {
+                        objectName: "maskViewer"
+                        canvasModel: node.canvasModel
+                        nodeId: node.nodeId
+                        look: node.look
+                        source: node.thumbnail
+                        info: node.thumbnailInfo
+                        text: node.thumbnailText
+                        maskFile: face.maskFile
                         opacity: node.thumbnailDim ? 0.5 : 1
                     }
                 }

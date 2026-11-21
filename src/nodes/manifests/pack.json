@@ -41,6 +41,7 @@
     "number-math",
     "overlay-mask",
     "pad",
+    "paint-mask",
     "preview",
     "resize",
     "resize-megapixels",

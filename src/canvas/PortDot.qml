@@ -7,7 +7,9 @@ import QtQuick
 // around its 10 px, which keeps it apart from the node's edge and the wire; a hollow one (no
 // wire to keep apart from) is the 10 px mark alone. Place it by its center. Two items (the
 // list outline hidden but for list ports), as the canvas makes one per port in view; the
-// valid-target ring is drawn once by the canvas, not per port.
+// valid-target ring is drawn once by the canvas, not per port. A mask port (`mask`, role "mask",
+// spec 14.4) is a square that is never filled: a hollow square with a 3 px frame, wired or not, so
+// a mask and a picture differ before and after they are wired.
 Rectangle {
     id: dot
     property string shape: "circle"
@@ -17,10 +19,11 @@ Rectangle {
     property bool wired: true
     property bool hot: false     // a valid target under a dragged link
     property bool hovered: false
+    property bool mask: false    // role "mask": a hollow square, drawn as a ring on the square
     property int corner: 0       // the node corner r; squares round to min(r, 2)
 
     readonly property bool round: shape === "circle" || shape === "ring"
-    readonly property bool solid: wired && shape !== "ring"
+    readonly property bool solid: wired && shape !== "ring" && !mask
     readonly property real markRadius: round ? 5 : Math.min(corner, 2)
     readonly property int inset: solid ? 2 : 0 // the body ring around a filled mark
 
@@ -30,7 +33,7 @@ Rectangle {
     rotation: shape === "diamond" ? 45 : 0
     scale: (shape === "diamond" ? 0.8 : 1) * (hot ? 1.4 : hovered ? 1.25 : 1)
     color: solid ? fill : body
-    border.width: 2
+    border.width: mask ? 3 : 2
     border.color: solid ? body : fill
 
     // A list port's second outline, offset up and right, at 70%.

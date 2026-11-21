@@ -5,9 +5,11 @@
 // the built-in node types, zips made with libarchive for the ones Fugue must refuse, and
 // Workflows::exportShare / openPath for the window.
 
+#include <QBuffer>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QImage>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -173,6 +175,60 @@ private slots:
         const QString quietFolder = unpackSharePackage(dir.filePath("quiet.zip"), quiet.path()).value();
         QCOMPARE(readJson(quietFolder + "/workflow.fugue").value("graph").toObject().value("nodes").toObject()
                      .value("prompt").toObject().value("inputs").toObject().value("text").toString(), QString());
+    }
+
+    // A painted mask is an input file (#174): the package carries it beside the picture, the workflow in
+    // it names both under `inputs/`, and opening the package takes both into the inputs folder.
+    void aPaintedMaskTravelsInThePackage() {
+        QTemporaryDir dir, state;
+        // Two pictures that differ, so the picture and the mask are two files.
+        QImage gray(6, 4, QImage::Format_Grayscale8);
+        gray.fill(200);
+        QByteArray maskBytes;
+        {
+            QBuffer buffer(&maskBytes);
+            buffer.open(QIODevice::WriteOnly);
+            gray.save(&buffer, "PNG");
+        }
+        writeFile(dir.filePath("cat.png"), png());
+        writeFile(dir.filePath("cat-mask.png"), maskBytes);
+        const QString flowText = QStringLiteral(R"({"fugue": 1, "graph": {"nodes": {
+            "load": {"type": "fugue/load-image", "version": "1.1.0", "inputs": {"file": "%1", "mask": "%2"}},
+            "paint": {"type": "fugue/paint-mask", "version": "1.0.0",
+                      "inputs": {"image": {"from": "load.image"}, "mask": "%2"}}}}})")
+                                     .arg(dir.filePath("cat.png"), dir.filePath("cat-mask.png"));
+        const Document document = Document::load(flowText.toUtf8()).value();
+
+        ShareRequest request;
+        request.title = "Painted";
+        request.appVersion = "0.1.0";
+        QStringList included;
+        const QString zip = dir.filePath("painted.zip");
+        QVERIFY(!hasErrors(writeSharePackage(document, m_registry, request, zip, &included)));
+        QCOMPARE(included.size(), 2);
+        QVERIFY(included.contains("cat-mask.png"));
+        QTemporaryDir out;
+        const QString folder = unpackSharePackage(zip, out.path()).value();
+        QCOMPARE(readFile(folder + "/inputs/cat-mask.png"), maskBytes);
+        const QJsonObject nodes = readJson(folder + "/workflow.fugue").value("graph").toObject().value("nodes").toObject();
+        QCOMPARE(nodes.value("load").toObject().value("inputs").toObject().value("mask").toString(), QString("inputs/cat-mask.png"));
+        QCOMPARE(nodes.value("paint").toObject().value("inputs").toObject().value("mask").toString(), QString("inputs/cat-mask.png"));
+
+        // Opened: the mask is in the inputs folder, named by the node, the same bytes.
+        CanvasModel canvas(&m_registry);
+        CommandRegistry commands;
+        registerMenuCommands(commands);
+        WorkflowLocations locations;
+        locations.recoveryDir = state.filePath("recovery");
+        locations.trustPath = state.filePath("trust.json");
+        locations.templateRoots = {};
+        Workflows workflows(&canvas, &m_registry, &commands, locations);
+        registerFileCommands(commands, workflows);
+        QVERIFY2(workflows.openPath(zip), qPrintable(workflows.notice()));
+        const QString mask = canvas.document().graph.nodes.value("load").inputs.value("mask").literal().toString();
+        QVERIFY2(mask.startsWith(inputsDir() + "/"), qPrintable(mask));
+        QCOMPARE(readFile(mask), maskBytes);
+        QCOMPARE(canvas.document().graph.nodes.value("paint").inputs.value("mask").literal().toString(), mask);
     }
 
     void unpackingRefusesWhatWouldLeaveItsFolder() {

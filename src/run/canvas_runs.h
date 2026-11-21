@@ -117,6 +117,9 @@ public:
     Q_INVOKABLE QString imageFile(const QString &node) const;
     // The same as a file URL, for QML (empty without one).
     Q_INVOKABLE QUrl imageUrl(const QString &node) const;
+    // The file an input-file literal names (a painted mask, `inputs/x.png`), as the run reads it: a
+    // relative path is the workflow folder's. Empty when the literal is empty or the file is not there.
+    Q_INVOKABLE QString inputFile(const QString &literal) const;
     // The full file of one picture of a Compare Images node ("a", "b", "difference" or
     // "composite"), empty when there is none or the file is gone.
     Q_INVOKABLE QString compareFile(const QString &node, const QString &which) const;
@@ -212,7 +215,10 @@ private:
         QString labelA, labelB;   // what produced A and B: the linked node's title
         QString imageFile;        // the image file its file input names
         bool crops = false;       // Crop: its slot shows the picture arriving at its input, under the frame (#73)
-        QString cropFrom;         // the path id of the node that feeds that input, if one does
+        QString paintsOver;       // a node with a mask widget over an image input (Paint Mask): that input's name
+        QString cropFrom;         // the path id of the node that feeds the followed input, if one does
+        // The slot shows the picture arriving at an input of the node, not its own result.
+        bool followsInput() const { return crops || !paintsOver.isEmpty(); }
     };
     QHash<QString, NodeInfo> m_nodeInfo; // of the shown workflow
     QSet<QString> m_rowsMade;            // its nodes whose cards made their rows

@@ -255,6 +255,32 @@ private slots:
         QVERIFY(run(flow(second)).outcome.ran.contains("l"));
     }
 
+    // A painted mask (Load Image's `mask` input) is read by path and keyed by its content, as the picture is
+    // (#174): the same bytes under another path are a hit, other bytes under the same path a miss.
+    void loadImageMaskIsKeyedByItsContent() {
+        const QString file = makePng("masked", 4, 4);
+        const auto grayPng = [&](const QString &name, double level) {
+            const QString where = path("fixtures/" + name);
+            (vips::VImage::black(4, 4) + level).cast(VIPS_FORMAT_UCHAR).write_to_file(where.toUtf8().constData());
+            return where;
+        };
+        const auto flow = [&](const QString &mask) {
+            return QByteArray("{'l': {'type': 'fugue/load-image', 'inputs': {'file': '") + file.toUtf8() + "', 'mask': '" + mask.toUtf8()
+                   + "'}}, 'p': {'type': 'fugue/preview', 'inputs': {'value': {'from': 'l.mask'}}}}";
+        };
+        const QString first = grayPng("mask-a.png", 255);
+        const Ran made = run(flow(first));
+        QVERIFY2(made.error.isEmpty(), qPrintable(made.error));
+        QVERIFY(made.outcome.ran.contains("l"));
+        QVERIFY(made.outcome.outputs.value("l").value("mask").isMedia());
+        const QString copy = path("fixtures/mask-copy.png");
+        QVERIFY(QFile::copy(first, copy));
+        QVERIFY(!run(flow(copy)).outcome.ran.contains("l"));
+        QVERIFY(QFile::remove(copy));
+        grayPng("mask-copy.png", 100);
+        QVERIFY(run(flow(copy)).outcome.ran.contains("l"));
+    }
+
     // "~/..." is the home folder, and the file there is keyed by its content like any other:
     // the same file by its absolute path is a hit, other bytes under the same "~" path a miss.
     void loadImageUnderHomeIsKeyedByContent() {

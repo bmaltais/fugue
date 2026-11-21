@@ -12,7 +12,7 @@ Mask ports are drawn as hollow squares, and picture ports as filled squares.
 
 You get a mask from:
 
-- **Load Image**: paint on it (Paint mask under the picture). With nothing painted, a picture
+- **Load Image**: paint on it (the Paint mask row on the node). With nothing painted, a picture
   with transparency gives its transparent part as the mask, as in ComfyUI.
 - **Paint Mask**: paint over any picture, a generated one too.
 - **Pad**: the new border of an outpaint.

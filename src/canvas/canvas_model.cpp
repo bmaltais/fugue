@@ -437,6 +437,8 @@ void CanvasModel::portsFromType(NodeRow &row, const Node &node) const {
         if (!spec.type.list)
             port.widgetType = port.kind == PortKind::Resource ? QStringLiteral("model") : spec.widget();
         port.widget = !port.widgetType.isEmpty() || (spec.type.list && !spec.widget().isEmpty());
+        port.role = spec.role;
+        port.over = spec.over;
         port.required = spec.required();
         port.section = spec.section;
         port.advanced = spec.advanced || spec.section == QLatin1String(kAdvancedSection);
@@ -451,6 +453,7 @@ void CanvasModel::portsFromType(NodeRow &row, const Node &node) const {
         port.label = spec.label.isEmpty() ? spec.name : spec.label;
         port.output = true;
         port.type = spec.type;
+        port.role = spec.role;
         port.kind = m_registry ? m_registry->portKind(spec.type.type) : PortKind::Unknown;
         return port;
     };
@@ -773,6 +776,10 @@ QVariantMap CanvasModel::portMap(const NodeRow &row, const Port &port) const {
                     {"widgetType", port.widgetType},
                     {"required", port.required},
                     {"hidden", port.hidden}};
+    if (!port.role.isEmpty())
+        map.insert("role", port.role);
+    if (!port.over.isEmpty())
+        map.insert("over", port.over);
     if (port.headerTop >= 0) {
         map.insert("headerTop", port.headerTop);
         map.insert("header", port.header);
@@ -852,6 +859,12 @@ QString CanvasModel::displayValue(const InputValue &value, const Port &port, boo
         return json.toString().section('\n', 0, 0);
     };
     *isDefault = false;
+    // A painted mask shows the state of it, not the file's name.
+    if (port.widgetType == QLatin1String("mask")) {
+        const bool painted = value.kind() == InputValue::Kind::Literal && !value.literal().toString().isEmpty();
+        *isDefault = !painted;
+        return painted ? tr("Painted") : tr("None");
+    }
     if (value.isEmpty()) {
         *isDefault = true;
         if (!port.defaultValue.isUndefined())
@@ -1300,7 +1313,7 @@ QVariantMap CanvasModel::portAt(qreal x, qreal y, qreal radius) const {
                 if (d <= bestDistance) {
                     bestDistance = d;
                     best = {{"node", row.id}, {"port", port.name}, {"output", output},
-                            {"x", p.x()},       {"y", p.y()},          {"shape", shape(port.type, port.kind)}};
+                            {"x", p.x()},       {"y", p.y()},          {"shape", shape(port.type, port.kind)}, {"role", port.role}};
                 }
             }
         }

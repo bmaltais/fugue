@@ -152,7 +152,7 @@ bool widgetFits(const QString &widget, const InputSpec &input) {
     if (widget == "spin" || widget == "slider" || widget == "seed")
         return type == "number";
     if (widget == "line" || widget == "multiline" || widget == "file" || widget == "folder" ||
-        widget == "color")
+        widget == "color" || widget == "mask")
         return type == "text";
     if (widget == "toggle")
         return type == "boolean";
@@ -205,6 +205,7 @@ std::optional<InputSpec> readInput(Reader &r, const QJsonValue &value, int index
     r.string(o, "section", input.section, where, n);
     r.boolean(o, "advanced", input.advanced, where, n);
     r.string(o, "role", input.role, where, n);
+    r.string(o, "over", input.over, where, n);
     if (o.contains("choices")) {
         QStringList choices;
         r.strings(o, "choices", choices, where, n);
@@ -216,7 +217,7 @@ std::optional<InputSpec> readInput(Reader &r, const QJsonValue &value, int index
     r.unknownFields(o,
                     {"name", "type", "label", "description", "default", "optional", "list", "min_items",
                      "max_items", "min", "max", "step", "integer", "choices", "widget", "section",
-                     "advanced", "role"},
+                     "advanced", "role", "over"},
                     where, n);
 
     if (parsed) {
@@ -243,6 +244,8 @@ std::optional<InputSpec> readInput(Reader &r, const QJsonValue &value, int index
             r.fail(where + QStringLiteral(" has a \"step\" that is not above 0."), n);
         if (input.minItems && input.maxItems && *input.minItems > *input.maxItems)
             r.fail(where + QStringLiteral(" has \"min_items\" above \"max_items\"."), n);
+        if (!input.over.isEmpty() && input.widgetName != QLatin1String("mask"))
+            r.fail(where + QStringLiteral(" has \"over\", which only applies to the widget \"mask\"."), n);
         if (!input.widgetName.isEmpty() && !widgetFits(input.widgetName, input))
             r.fail(where + QStringLiteral(" is %1 and cannot use the widget \"%2\".")
                                .arg(input.type.toString(), input.widgetName),
@@ -355,6 +358,11 @@ QString InputSpec::widget() const {
     return {};
 }
 
+bool InputSpec::holdsInputFile() const {
+    const QString w = widget();
+    return w == QLatin1String("file") || w == QLatin1String("mask");
+}
+
 const InputSpec *NodeType::input(const QString &name) const {
     for (const InputSpec &each : inputs)
         if (each.name == name)
@@ -446,6 +454,20 @@ std::optional<NodeType> readManifest(const QJsonObject &manifest, Errors &errors
             type.inputs << *input;
     }
 
+    // A mask is painted over an image input of the same node.
+    for (const InputSpec &input : std::as_const(type.inputs)) {
+        if (input.over.isEmpty())
+            continue;
+        const InputSpec *over = nullptr;
+        for (const InputSpec &other : std::as_const(type.inputs))
+            if (other.name == input.over)
+                over = &other;
+        if (!over || over->type.type.id != QLatin1String("image") || over->type.list)
+            r.fail(QStringLiteral("input %1 is painted \"over\" %2, which is not an image input of this node.")
+                       .arg(input.name, input.over),
+                   input.name);
+    }
+
     seen.clear();
     const QJsonValue outputs = manifest.value("outputs");
     if (!outputs.isArray())
@@ -512,6 +534,7 @@ QJsonObject NodeType::toJson() const {
         putIf(i, "section", input.section);
         putIfTrue(i, "advanced", input.advanced);
         putIf(i, "role", input.role);
+        putIf(i, "over", input.over);
         inputList << i;
     }
     o.insert("inputs", inputList);
