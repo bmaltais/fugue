@@ -4,6 +4,7 @@
 #include "engine/atomic_file.h"
 #include "engine/file_inputs.h"
 #include "engine/hash.h"
+#include "engine/image_format.h"
 #include "engine/paths.h"
 #include "engine/vips.h"
 
@@ -391,6 +392,13 @@ void makeInputsAbsolute(Document &document, const Registry &registry, const QStr
     });
 }
 
+namespace {
+bool startsLikeAnImage(const QString &path) {
+    QFile file(path);
+    return file.open(QIODevice::ReadOnly) && sniffImage(file.read(64)).has_value();
+}
+} // namespace
+
 Errors takeInputsFrom(Document &document, const Registry &registry, const QString &folder) {
     const QString root = canonicalPath(folder);
     if (root.isEmpty())
@@ -401,6 +409,9 @@ Errors takeInputsFrom(Document &document, const Registry &registry, const QStrin
     forEachFileLiteral(changed, registry, [&](const QString &, const QString &, InputValue &value) {
         const QString path = canonicalPath(value.literal().toString());
         if (path.isEmpty() || !isInside(path, root) || !QFileInfo(path).isFile())
+            return;
+        // Only pictures are taken in; a video or a song a template ships stays where it is.
+        if (!startsLikeAnImage(path))
             return;
         const Result<QString> stored = storeImageFile(path, inputsDir(), roots);
         if (stored)

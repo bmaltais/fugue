@@ -623,8 +623,9 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
                     if (it.value().isObject() || it.value().isArray())
                         continue;
                     QString excerpt = it.value().isString() ? it.value().toString() : chipText(it.value());
-                    if (excerpt.size() > 240)
-                        excerpt = excerpt.left(239) + QChar(0x2026);
+                    // The slot wraps and elides what does not fit its box; this only bounds a huge text.
+                    if (excerpt.size() > 8000)
+                        excerpt = excerpt.left(7999) + QChar(0x2026);
                     view.text = excerpt;
                     view.textAspect = 0.5;
                     view.media.clear();
