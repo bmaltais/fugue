@@ -64,8 +64,11 @@ QString pairedHostsProblem(const OmarchyPaths &omarchy);
 // Without an address it is the helper on this machine.
 //
 // Makes the provider an instance is a use of: omarchy and fugue-helper are compiled in (8.7);
-// any other type is unknown_provider until provider modules arrive (M4).
+// any other type is a provider module (8.8) installed in `modulesRoot` (providerModulesDir() when
+// not given) whose id it is: a stdio one is a HelperProvider that describes itself, an http one a
+// RemoteHelperProvider. No other type is unknown_provider, with every module id as `valid`.
 Result<std::shared_ptr<Provider>> createProvider(const ProviderInstance &instance);
+Result<std::shared_ptr<Provider>> createProvider(const ProviderInstance &instance, const QString &modulesRoot);
 
 // An instance with the outcome of its describe(). A disabled instance need not be described.
 struct Candidate {

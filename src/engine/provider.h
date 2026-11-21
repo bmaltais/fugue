@@ -75,6 +75,17 @@ struct Description {
     const CapabilityOffer *offer(const QString &capability) const;
 };
 
+// The reply of describe (8.8) as the kernel's Description. `capabilities` is a list of ids (one
+// ready, anonymous model each: a provider that takes its model files in the job, shown as
+// `filesTitle`), or an object by id: {"status", "reason", "hint", "properties", "limits",
+// "defaults", "models": [...]}. A model is a string (its name), or {"name", "hash", "resource",
+// "title", "status", "reason", "hint", "properties", "limits", "defaults"}, or has a "handle"
+// object; what the capability gives for properties, limits and defaults the model has not.
+// Without "models" the capability is one anonymous model with the capability's status.
+// A status other than ready or loading is unavailable; absent is ready. `engine` of the reply,
+// else `defaultEngine`, with "@host" added when the reply names its host.
+Description parseDescription(const QJsonObject &reply, const QString &defaultEngine, const QString &filesTitle);
+
 // The request of submit (8.8), plus where to put the results.
 struct JobRequest {
     QString capability;

@@ -19,6 +19,8 @@
 
 #include <QHash>
 #include <QNetworkAccessManager>
+#include <QProcess>
+#include <QStringList>
 #include <QTimer>
 
 #include <functional>
@@ -29,11 +31,34 @@ class QNetworkReply;
 
 namespace fugue {
 
+// What makes this the provider of an http module (spec 8.8) rather than the helper of a paired
+// host. The defaults are the paired helper's.
+struct RemoteProviderOptions {
+    QString where = QStringLiteral("the paired host"); // in messages
+    QString filesTitle = QStringLiteral("Model files on the paired host");
+    QString defaultEngine = QStringLiteral("sdcpp");
+    // What describe offers when its reply names no capabilities at all.
+    QStringList defaultCapabilities;
+
+    // A module Fugue starts: the program and its arguments ({port} in them and in
+    // `addressTemplate` is a free loopback port), started by the first describe or submit, asked
+    // to shut down and ended after `idleMs` without a job (0: never), and given `startTimeoutMs`
+    // to answer describe. Used only when the instance has no address of its own.
+    QString program;
+    QStringList arguments;
+    QString workingDirectory;
+    QString addressTemplate;
+    int idleMs = 0;
+    int startTimeoutMs = 30000;
+};
+
 class RemoteHelperProvider : public Provider {
     Q_OBJECT
 
 public:
     explicit RemoteHelperProvider(const ProviderInstance &instance, int pollMs = 500, QObject *parent = nullptr);
+    RemoteHelperProvider(const ProviderInstance &instance, RemoteProviderOptions options, int pollMs = 500,
+                         QObject *parent = nullptr);
     ~RemoteHelperProvider() override;
 
     void describe(Reply<Description> reply) override;
@@ -41,6 +66,8 @@ public:
     void status(const QString &job, Reply<JobStatus> reply) override;
     void cancel(const QString &job, Reply<QString> reply) override;
     void result(const QString &job, Reply<JobResult> reply) override;
+    // Only for a provider Fugue started: asks it to shut down and ends it; returns once it is gone.
+    void shutdown(Reply<Nothing> reply) override;
 
 private:
     struct Job {
@@ -54,7 +81,20 @@ private:
 
     using Answer = std::function<void(const Result<QJsonObject> &)>;
 
-    void post(const QString &op, const QJsonObject &body, Answer answer);
+    // `mayStart`: describe and submit start a module that is not running; the other operations
+    // belong to a job of the running one, which has died if it is not (its jobs then fail).
+    void post(const QString &op, const QJsonObject &body, Answer answer, bool mayStart = false);
+    void sendPost(const QString &op, const QJsonObject &body, Answer answer);
+    QString address() const;
+    bool launched() const { return !m_options.program.isEmpty() && m_instance.address.isEmpty(); }
+    using Ready = std::function<void(const QString &why)>;
+    void whenUp(Ready ready);
+    void probe();
+    void startDone(const QString &why);
+    void touch();
+    // Ends the process: shutdown asked, terminated, killed after the grace period. Returns it
+    // while it still runs.
+    QProcess *stopServer();
     QNetworkReply *request(const QString &method, const QString &path, const QByteArray &body);
     Error unreachable(const QString &why) const;
     // The reply as JSON, or why it is not.
@@ -65,9 +105,20 @@ private:
     void fail(const QString &job, const Error &error);
 
     ProviderInstance m_instance;
+    RemoteProviderOptions m_options;
     QNetworkAccessManager m_network;
     QTimer m_poll;
     QHash<QString, Job> m_jobs;
+
+    // The module's process, while Fugue runs one (launched()).
+    QProcess *m_process = nullptr;
+    bool m_up = false;       // it answered describe
+    bool m_starting = false;
+    QString m_runAddress;    // addressTemplate with its port
+    QList<Ready> m_waiters;  // operations that wait for it to be up
+    QStringList m_log;       // its last output lines
+    QTimer m_idle;
+    QTimer m_startLimit;
 };
 
 } // namespace fugue

@@ -5,6 +5,7 @@
 #include "engine/paths.h"
 #include "engine/remote_helper_provider.h"
 #include "omarchy_provider.h"
+#include "engine/provider_module.h"
 
 #include <QDir>
 #include <QFileInfo>
@@ -299,6 +300,47 @@ QList<ProviderInstance> defaultProviderInstances(const OmarchyPaths &omarchy) {
 }
 
 Result<std::shared_ptr<Provider>> createProvider(const ProviderInstance &instance) {
+    return createProvider(instance, providerModulesDir());
+}
+
+namespace {
+
+// The provider of an installed module (8.8): the instance's own address wins over the module's
+// default; a module Fugue starts is started by its first describe or submit.
+std::shared_ptr<Provider> moduleProvider(const ProviderInstance &given, const ProviderModule &module) {
+    ProviderInstance instance = given;
+    if (!instance.settings.contains("idle_timeout_s"))
+        instance.settings.insert("idle_timeout_s", module.idleTimeoutS);
+    if (module.transport == QLatin1String("stdio")) {
+        StdioLaunch launch;
+        launch.program = module.program();
+        launch.arguments = module.arguments();
+        launch.workingDirectory = module.folder;
+        launch.label = module.name;
+        launch.hint = QStringLiteral("Check the files of the provider in %1.").arg(module.folder);
+        launch.describeOverProtocol = true;
+        launch.engine = module.id;
+        return std::make_shared<HelperProvider>(instance, launch);
+    }
+    RemoteProviderOptions options;
+    options.where = module.name;
+    options.defaultEngine = module.id;
+    if (instance.address.isEmpty() && !module.address.contains(QStringLiteral("{port}")))
+        instance.address = module.address;
+    if (instance.address.isEmpty()) { // the module starts it, on a port of its own
+        options.program = module.program();
+        options.arguments = module.arguments();
+        options.workingDirectory = module.folder;
+        options.addressTemplate = module.address;
+        options.idleMs = module.idleTimeoutS > 0 ? module.idleTimeoutS * 1000 : 0;
+        options.startTimeoutMs = module.startTimeoutS * 1000;
+    }
+    return std::make_shared<RemoteHelperProvider>(instance, options);
+}
+
+} // namespace
+
+Result<std::shared_ptr<Provider>> createProvider(const ProviderInstance &instance, const QString &modulesRoot) {
     if (instance.type == QLatin1String("omarchy"))
         return Result<std::shared_ptr<Provider>>(
             std::make_shared<OmarchyProvider>(instance, OmarchyPaths::standard()));
@@ -307,11 +349,26 @@ Result<std::shared_ptr<Provider>> createProvider(const ProviderInstance &instanc
     if (instance.type == QLatin1String("fugue-helper"))
         return Result<std::shared_ptr<Provider>>(
             std::make_shared<HelperProvider>(instance, helperProgram(hasNvidiaGpu())));
+    const Result<QList<ProviderModule>> modules = providerModules(modulesRoot);
+    QStringList names;
+    for (const ProviderModule &module : modules.value()) {
+        if (module.id == instance.type && !module.isBuiltin())
+            return Result<std::shared_ptr<Provider>>(moduleProvider(instance, module));
+        names.append(module.id);
+    }
+    names.sort();
+    QJsonArray ids;
+    for (const QString &name : std::as_const(names))
+        ids.append(name);
+    QString message = QStringLiteral("%1 has the provider type %2, which this Fugue does not have.").arg(instance.name, instance.type);
+    // A module that is there but does not read is why its type is unknown: say so.
+    for (const Error &problem : modules.warnings())
+        if (problem.message.contains(QStringLiteral("/%1/").arg(instance.type)))
+            message += QLatin1Char(' ') + problem.message;
     Error error = makeError(
-        QStringLiteral("unknown_provider"),
-        QStringLiteral("%1 has the provider type %2, which this Fugue does not have.").arg(instance.name, instance.type),
-        QStringLiteral("Change its type in %1.").arg(kProvidersFile));
-    error.valid = QJsonArray{"fugue-helper", "omarchy"};
+        QStringLiteral("unknown_provider"), message,
+        QStringLiteral("Change its type in %1, or install the module in %2.").arg(kProvidersFile, modulesRoot));
+    error.valid = ids;
     return Result<std::shared_ptr<Provider>>(error);
 }
 
