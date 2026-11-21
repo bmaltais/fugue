@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Fugue's file types (spec 11.1, 11.5): installed to share/mime/packages, where the desktop
+     learns them, so a file manager opens them with Fugue (share/fugue.desktop MimeType). -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-fugue-workflow">
+    <comment>Fugue workflow</comment>
+    <sub-class-of type="application/json"/>
+    <glob pattern="*.fugue"/>
+  </mime-type>
+  <mime-type type="application/x-fugue-package">
+    <comment>Fugue package</comment>
+    <sub-class-of type="application/zip"/>
+    <glob pattern="*.fuguepack"/>
+  </mime-type>
+</mime-info>

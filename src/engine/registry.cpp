@@ -159,6 +159,7 @@ void Registry::replaceTypes(Registry &&from) {
     m_aliases = std::move(from.m_aliases);
     m_portTypes = std::move(from.m_portTypes);
     m_packVersions = std::move(from.m_packVersions);
+    m_packSources = std::move(from.m_packSources);
 }
 
 bool Registry::sameTypes(const Registry &other) const {
@@ -170,7 +171,7 @@ bool Registry::sameTypes(const Registry &other) const {
         return a.first == b.first && a.second.kind == b.second.kind && a.second.name == b.second.name
                && a.second.extensions == b.second.extensions && a.second.folders == b.second.folders;
     };
-    return m_packVersions == other.m_packVersions && m_aliases == other.m_aliases
+    return m_packVersions == other.m_packVersions && m_packSources == other.m_packSources && m_aliases == other.m_aliases
            && std::equal(m_nodeTypes.begin(), m_nodeTypes.end(), other.m_nodeTypes.begin(), other.m_nodeTypes.end(), sameNode)
            && std::equal(m_portTypes.begin(), m_portTypes.end(), other.m_portTypes.begin(), other.m_portTypes.end(), samePort);
 }

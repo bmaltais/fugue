@@ -34,6 +34,8 @@
 
 namespace fugue {
 
+class Registry;
+
 // "<node>.<port>": a link source (`from`), an exposed input's target, or a
 // group output's `from`. parse() checks only that both parts are non-empty
 // and that there is one '.'; the node part may be a path id ("g7/first").
@@ -204,9 +206,10 @@ struct Document {
     // every resource handle with a hash that appears in a literal, including
     // inside lists, group defaults and derived handles, once per hash, sorted
     // by hash, keeping a `source` and `size` already recorded for that hash; `packs`
-    // keeps the recorded entries of packs still used (adding new ones needs
-    // pack data the registry gains in M3). Unknown keys are kept.
-    void refreshRequirements(const QString &appVersion);
+    // keeps the recorded entries of packs still used, and with a `registry` names each used
+    // pack it has installed at its version, with its `source` when it knows one (else the one
+    // recorded), so a person who gets the file can install it (#91). Unknown keys are kept.
+    void refreshRequirements(const QString &appVersion, const Registry *registry = nullptr);
 
     // The `models` refreshRequirements() writes: every resource handle with a hash in a literal,
     // once per hash, sorted by hash, with the `source` and `size` `requires` records for that hash.

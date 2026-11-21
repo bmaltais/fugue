@@ -769,6 +769,23 @@ QString CanvasRuns::imageFile(const QString &row) const {
     return QDir::isAbsolutePath(path) && QFileInfo(path).isFile() ? path : QString();
 }
 
+QString CanvasRuns::lastPicture() const {
+    const auto nodes = m_tabs.value(m_shownTab).nodes;
+    // The newest picture a Save Image or a Preview shows, by its file's time.
+    QString newest;
+    QDateTime when;
+    for (auto it = nodes.cbegin(); it != nodes.cend(); ++it) {
+        const QFileInfo file(it->imagePath);
+        if (!m_nodeInfo.value(it.key()).showsResult || it->thumbnail.isEmpty() || !file.isFile())
+            continue;
+        if (newest.isEmpty() || file.lastModified() > when) {
+            newest = it->imagePath;
+            when = file.lastModified();
+        }
+    }
+    return newest;
+}
+
 QVariantList CanvasRuns::errors() const { return m_tabs.value(m_shownTab).errors; }
 
 QString CanvasRuns::lastStatus() const { return m_tabs.value(m_shownTab).lastStatus; }

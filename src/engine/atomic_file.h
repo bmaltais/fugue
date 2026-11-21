@@ -65,6 +65,10 @@ private:
     bool m_committed = false;
 };
 
+// Writes `bytes` as a new file at `path` through a PartialFile, never over a file there (an
+// export, #91): permission_denied naming it when one is, or comes meanwhile.
+Errors createFile(const QString &path, const QByteArray &bytes, const QString &what);
+
 // Who may read a file replaceFile writes.
 enum class FileMode {
     Usual,     // as the umask allows (0644 on most systems)

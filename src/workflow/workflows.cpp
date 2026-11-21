@@ -1,13 +1,18 @@
 #include "workflow/workflows.h"
 
 #include "engine/atomic_file.h"
+#include "engine/compiler.h"
 #include "engine/embed.h"
+#include "engine/file_inputs.h"
+#include "engine/file_roots.h"
+#include "engine/group_library.h"
 #include "engine/file_hashes.h"
 #include "engine/json.h"
 #include "engine/model_download.h"
 #include "engine/model_library.h"
 #include "engine/paths.h"
 #include "engine/settings.h"
+#include "engine/share_package.h"
 #include "workflow/content_hash.h"
 #include "workflow/workflow_io.h"
 
@@ -18,6 +23,7 @@
 #include <QGuiApplication>
 #include <QClipboard>
 #include <QStandardPaths>
+#include <QTemporaryDir>
 #include <QUuid>
 
 namespace fugue {
@@ -372,6 +378,8 @@ bool Workflows::openPath(const QString &pathOrUrl) {
             }
         }
     }
+    if (info.isFile() && isSharePackage(path))
+        return openPackage(path);
     const Result<ImportedWorkflow> imported = readWorkflowFile(path);
     if (!imported.ok()) {
         setNotice(tr("Could not open %1: %2").arg(info.fileName().isEmpty() ? path : info.fileName(),
@@ -384,6 +392,85 @@ bool Workflows::openPath(const QString &pathOrUrl) {
     addTab(document, fromImage ? QString() : info.absoluteFilePath(),
            fromImage ? info.completeBaseName() : info.fileName(), false, true);
     analyze(document, m_tabs[size_t(m_current)].title);
+    return true;
+}
+
+bool Workflows::openPackage(const QString &path) {
+    const QString shown = QFileInfo(path).fileName();
+    // Unpacked only for as long as it opens: its samples go into the inputs folder (openTemplate).
+    // Under the cache, not /tmp, which is memory on Arch.
+    QDir().mkpath(cacheDir());
+    QTemporaryDir unpacked(cacheDir() + QStringLiteral("/package-XXXXXX"));
+    if (!unpacked.isValid()) {
+        setNotice(tr("Could not open %1: %2").arg(shown, unpacked.errorString()));
+        return false;
+    }
+    const Result<QString> folder = unpackSharePackage(path, unpacked.path());
+    if (!folder) {
+        setNotice(tr("Could not open %1: %2").arg(shown, firstMessage(folder.errors())));
+        return false;
+    }
+    const TemplateLibrary library({{QFileInfo(folder.value()).absolutePath(), false}}, m_registry);
+    const std::optional<Template> chosen = library.find(QFileInfo(folder.value()).fileName());
+    if (!chosen) {
+        const Errors problems = library.problems();
+        setNotice(tr("Could not open %1: %2")
+                      .arg(shown, problems.isEmpty() ? tr("it was made by a newer Fugue; update Fugue to open it.")
+                                                     : firstMessage(problems)));
+        return false;
+    }
+    return openTemplate(*chosen, true);
+}
+
+bool Workflows::exportShare(const QString &pathOrUrl, const QString &preview) {
+    if (m_current < 0)
+        return false;
+    QString path = toPath(pathOrUrl);
+    if (QFileInfo(path).suffix().compare(QLatin1String("fuguepack"), Qt::CaseInsensitive) != 0)
+        path += QStringLiteral(".fuguepack");
+    const Tab &tab = m_tabs[size_t(m_current)];
+    ShareRequest request;
+    request.title = tab.title.endsWith(QStringLiteral(".fugue")) ? tab.title.chopped(6) : tab.title;
+    request.workflowPath = tab.path;
+    request.preview = preview;
+    request.appVersion = appVersion();
+    QStringList included;
+    const Errors errors = writeSharePackage(documentOf(m_current), *m_registry, request, path, &included);
+    if (hasErrors(errors)) {
+        setNotice(tr("Could not export %1: %2").arg(request.title, withHints(errors)));
+        return false;
+    }
+    QString line = tr("Exported %1 for sharing to %2. Models are not in it: who opens it can download them.")
+                       .arg(request.title, path);
+    if (!included.isEmpty())
+        line += QLatin1Char(' ') + tr("Images in it: %1.").arg(included.join(QStringLiteral(", ")));
+    if (!errors.isEmpty())
+        line += QLatin1Char(' ') + withHints(errors);
+    setNotice(line);
+    return true;
+}
+
+bool Workflows::exportCompiled(const QString &pathOrUrl) {
+    if (m_current < 0)
+        return false;
+    QString path = toPath(pathOrUrl);
+    if (QFileInfo(path).suffix().isEmpty())
+        path += QStringLiteral(".json");
+    const QString title = m_tabs[size_t(m_current)].title;
+    // As a run compiles it: a library or pack group named only by its type runs from its definition.
+    Document document = documentOf(m_current);
+    embedGroupTypes(document, *m_registry);
+    const Compilation compilation = compile(document, *m_registry);
+    if (!compilation) {
+        setNotice(tr("%1 does not compile: %2").arg(title, withHints(compilation.errors())));
+        return false;
+    }
+    const Errors errors = createFile(path, writeJson(compilation->toJson()), QFileInfo(path).fileName());
+    if (hasErrors(errors)) {
+        setNotice(tr("Could not export %1: %2").arg(title, withHints(errors)));
+        return false;
+    }
+    setNotice(tr("Exported the compiled graph of %1 to %2.").arg(title, path));
     return true;
 }
 
@@ -443,12 +530,42 @@ bool Workflows::openText(const QString &text) {
     return true;
 }
 
-bool Workflows::openTemplate(const Template &chosen) {
+bool Workflows::openTemplate(const Template &chosen, bool fromPackage) {
     Result<Document> document = Document::loadFile(chosen.workflow);
     Errors errors = document ? Errors() : document.errors();
     if (document) {
         makeInputsAbsolute(document.value(), *m_registry, chosen.workflow);
         errors = takeInputsFrom(document.value(), *m_registry, chosen.folder);
+    }
+    if (document && fromPackage && errors.isEmpty()) {
+        const QString folder = canonicalPath(chosen.folder);
+        forEachFileLiteral(document.value(), *m_registry, [&](const QString &, const QString &, InputValue &value) {
+            const QString path = canonicalPath(value.literal().toString());
+            if (!path.isEmpty() && isInside(path, folder))
+                value = InputValue::literal(QFileInfo(path).fileName());
+        });
+        // A node of a pack not installed here: which inputs are files is not known, so any text
+        // naming one of the package's images is taken in too, to be there once the pack is.
+        const FileRoots roots = FileRoots::forInputs();
+        const auto takeUnknown = [&](Nodes &nodes) {
+            for (Node &node : nodes) {
+                if (m_registry->nodeType(node.type))
+                    continue;
+                for (InputValue &value : node.inputs) {
+                    if (value.kind() != InputValue::Kind::Literal || !value.literal().isString()
+                        || !value.literal().toString().startsWith(QStringLiteral("inputs/")))
+                        continue;
+                    const QString path = canonicalPath(folder + QLatin1Char('/') + value.literal().toString());
+                    if (path.isEmpty() || !isInside(path, folder) || !QFileInfo(path).isFile())
+                        continue;
+                    if (const Result<QString> stored = storeImageFile(path, inputsDir(), roots))
+                        value = InputValue::literal(stored.value());
+                }
+            }
+        };
+        takeUnknown(document->graph.nodes);
+        for (GroupDefinition &group : document->groups)
+            takeUnknown(group.nodes);
     }
     if (!errors.isEmpty()) {
         setNotice(tr("Could not open the template %1: %2").arg(chosen.title, firstMessage(errors)));
@@ -535,6 +652,20 @@ QString Workflows::missingNotice(const Document &document, const QString &title,
     if (!models.isEmpty())
         lines << tr("%1 needs models that are not in the model folders: %2.").arg(title, models.join(QStringLiteral("; ")));
     if (offer) {
+        // The first missing pack the workflow says where to get (4.3).
+        offer->pack.clear();
+        const QJsonObject packs = document.requirements.value(QStringLiteral("packs")).toObject();
+        for (const QString &type : missing) {
+            const QString pack = type.section(QLatin1Char('/'), 0, 0);
+            const QJsonObject entry = packs.value(pack).toObject();
+            if (entry.value(QStringLiteral("source")).toString().isEmpty() || !m_registry->packVersion(pack).isEmpty())
+                continue;
+            offer->pack = QVariantMap{{"id", pack},
+                                      {"source", entry.value(QStringLiteral("source")).toString()},
+                                      {"ref", entry.value(QStringLiteral("ref")).toString()},
+                                      {"text", tr("Install %1…").arg(pack)}};
+            break;
+        }
         offer->text = offerText(absent);
         offer->models = document.models();
         offer->root = library.downloadRoot();
@@ -555,6 +686,16 @@ void Workflows::refreshMissing(bool force) {
     if (force || shown)
         setNotice(missing);
     emit noticeChanged(); // the offer may differ with the same line
+}
+
+QVariantMap Workflows::packOffer() const {
+    return !m_notice.isEmpty() && m_notice == m_missingNotice ? m_offer.pack : QVariantMap();
+}
+
+void Workflows::installPack() {
+    const QVariantMap pack = packOffer();
+    if (!pack.isEmpty())
+        emit packInstallRequested(pack.value("source").toString(), pack.value("ref").toString());
 }
 
 QString Workflows::downloadOffer() const {
@@ -672,7 +813,7 @@ bool Workflows::saveTab(int index, const QString &path, bool replace) {
     }
     const bool moved = contentHash(document) != contentHash(before);
     const Document relocated = document;
-    document.refreshRequirements(appVersion());
+    document.refreshRequirements(appVersion(), m_registry);
     const Result<bool> written = writeWorkflow(document, path, replace);
     if (written && !*written) {
         setNotice(taken);
@@ -892,6 +1033,8 @@ void registerFileCommands(CommandRegistry &registry, Workflows &workflows) {
         registry.setHandler("file.templates", browseTemplates);
     }
     registry.setHandler("file.save-as", [&workflows] { emit workflows.saveAsRequested(); });
+    registry.setHandler("file.export-share", [&workflows] { emit workflows.exportShareRequested(); });
+    registry.setHandler("file.export-compiled", [&workflows] { emit workflows.exportCompiledRequested(); });
     if (!registry.contains("file.open-clipboard")) {
         CommandSpec spec;
         spec.id = QStringLiteral("file.open-clipboard");

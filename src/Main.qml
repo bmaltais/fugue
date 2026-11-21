@@ -107,6 +107,20 @@ ApplicationWindow {
         }
     }
     property var settingsPanel: null
+    // The banner's Install for a workflow's missing pack (#91): Settings > Packs, which shows
+    // what it is and asks before it installs and before it is trusted.
+    Connections {
+        target: App.workflows
+        function onPackInstallRequested(source, ref) {
+            if (!win.appSettingsModel)
+                return
+            if (!win.settingsPanel)
+                win.settingsPanel = settingsComponent.createObject(win.contentItem)
+            win.settingsPanel.page = win.settingsPanel.pages.length - 1 // Packs, the last page
+            win.settingsPanel.open()
+            win.appSettingsModel.packs.add(source, ref)
+        }
+    }
     // The Templates dialog (#83), made the first time file.templates asks for it.
     property var templatesDialog: null
     Component {

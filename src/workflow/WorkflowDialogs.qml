@@ -30,7 +30,7 @@ Item {
         title: qsTr("Open a workflow")
         fileMode: FileDialog.OpenFiles
         currentFolder: App.workflows.suggestedFolder
-        nameFilters: [qsTr("Fugue workflows and images with one (*.fugue *.png *.webp)"), qsTr("All files (*)")]
+        nameFilters: [qsTr("Fugue workflows, packages and images with one (*.fugue *.fuguepack *.png *.webp)"), qsTr("All files (*)")]
         onAccepted: App.workflows.openUrls(selectedFiles)
     }
 
@@ -46,9 +46,34 @@ Item {
         onRejected: App.workflows.cancelPendingClose()
     }
 
+    // File > Export for sharing (#91): where the .fuguepack goes; its preview is the last picture made.
+    FileDialog {
+        id: exportDialog
+        objectName: "exportDialog"
+        title: qsTr("Export for sharing")
+        fileMode: FileDialog.SaveFile
+        currentFolder: App.workflows.suggestedFolder
+        defaultSuffix: "fuguepack"
+        nameFilters: [qsTr("Fugue packages (*.fuguepack)")]
+        onAccepted: App.workflows.exportShare(selectedFile.toString(), App.runs ? App.runs.lastPicture() : "")
+    }
+
+    FileDialog {
+        id: compiledDialog
+        objectName: "compiledDialog"
+        title: qsTr("Export the compiled graph")
+        fileMode: FileDialog.SaveFile
+        currentFolder: App.workflows.suggestedFolder
+        defaultSuffix: "json"
+        nameFilters: [qsTr("JSON (*.json)")]
+        onAccepted: App.workflows.exportCompiled(selectedFile.toString())
+    }
+
     Connections {
         target: App.workflows
         function onOpenDialogRequested() { openDialog.open() }
+        function onExportShareRequested() { exportDialog.open() }
+        function onExportCompiledRequested() { compiledDialog.open() }
         function onSaveAsRequested() { saveDialog.open() }
         function onCloseConfirmationRequested(index, title) {
             closeAsk.index = index
@@ -111,6 +136,15 @@ Item {
                         currentIndex: Math.max(0, App.workflows.downloadRoots.findIndex(r => r.path === App.workflows.downloadRoot))
                         onActivated: index => App.workflows.setDownloadRoot(App.workflows.downloadRoots[index].path)
                         Accessible.name: qsTr("Download into")
+                    }
+                }
+                // A pack its nodes come from, where the workflow says it can be had (#91).
+                Loader {
+                    active: App.workflows.packOffer.id !== undefined
+                    sourceComponent: ThemedButton {
+                        objectName: "installPack"
+                        text: App.workflows.packOffer.text
+                        onClicked: App.workflows.installPack()
                     }
                 }
                 Loader {

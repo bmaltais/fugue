@@ -634,12 +634,18 @@ private slots:
         QCOMPARE(data.value("links").toArray().size(), 1);
     }
 
-    // Export is M2: it parses, and says so the way every later-milestone command does.
-    void workflowExportIsNotAvailableYet() {
-        const Outcome o = fugue({"workflow", "export", workflow(), "--share", "--no-prompts", "--no-layout", "--json"});
-        QCOMPARE(o.exitCode, 1);
-        QCOMPARE(o.firstCode(), QString("usage"));
-        QVERIFY(o.firstMessage().contains("not available in this version"));
+    // #91: the workflow packed to share, as File > Export for sharing writes it.
+    void workflowExportWritesAPackageToShare() {
+        const QString out = m_dir.filePath("shared.fuguepack");
+        Outcome o = fugue({"workflow", "export", workflow(), "--share", "--no-prompts", "--no-layout", "--out", out, "--json"});
+        QVERIFY2(o.exitCode == 0, o.out.constData());
+        QCOMPARE(o.json().value("data").toObject().value("file").toString(), out);
+        QFile zip(out);
+        QVERIFY(zip.open(QIODevice::ReadOnly));
+        QCOMPARE(zip.read(4), QByteArray("PK\x03\x04", 4));
+        // Never over a file; only the share copy is an export.
+        QCOMPARE(fugue({"workflow", "export", workflow(), "--share", "--out", out, "--json"}).exitCode, 1);
+        QCOMPARE(fugue({"workflow", "export", workflow(), "--json"}).firstCode(), QString("usage"));
     }
 
     // --- models (8.9, 13.1) ---
