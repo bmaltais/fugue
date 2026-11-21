@@ -10,6 +10,7 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonArray>
+#include <QProcess>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -328,6 +329,75 @@ private slots:
         QCOMPARE(helper->pid(), pid); // one helper, warm
         if (qEnvironmentVariableIsSet("FUGUE_REAL_HELPER_KEEP"))
             QFile::copy(image, qEnvironmentVariable("FUGUE_REAL_HELPER_KEEP"));
+    }
+
+    // #173, spec 14.4: staged inpainting equals one `generate` run, byte for byte. By hand on a
+    // GPU, as the test above: the stages through the provider (text.encode, latent.encode of the
+    // picture, latent.sample with the mask, the picture and the start latent, latent.decode), then
+    // the one-shot helper's `generate` with params.init_image and the mask. FUGUE_REAL_HELPER names
+    // the helper, FUGUE_REAL_HELPER_REQUEST a JSON file of the params with their "context" (a
+    // width and height too), FUGUE_REAL_HELPER_IMAGE a PNG of that size and FUGUE_REAL_HELPER_MASK
+    // a gray PNG of it. Run for FLUX.2 Klein 4B (a start latent and the mask per step) and for an
+    // inpaint model (FLUX.1 Fill, SDXL Inpaint: the picture, and the c_concat hook).
+    void aRealHelperInpaintsStagedAsInOneRun() {
+        const QString program = qEnvironmentVariable("FUGUE_REAL_HELPER");
+        const QString requestFile = qEnvironmentVariable("FUGUE_REAL_HELPER_REQUEST");
+        const QString picture = qEnvironmentVariable("FUGUE_REAL_HELPER_IMAGE");
+        const QString mask = qEnvironmentVariable("FUGUE_REAL_HELPER_MASK");
+        if (program.isEmpty() || requestFile.isEmpty() || picture.isEmpty() || mask.isEmpty())
+            QSKIP("set FUGUE_REAL_HELPER, _REQUEST, _IMAGE and _MASK to run the real helper");
+        QFile file(requestFile);
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        QJsonObject params = QJsonDocument::fromJson(file.readAll()).object();
+        params.insert("seed", 42);
+        auto helper = provider(60, program);
+        const auto stage = [&](const QString &capability, const QJsonObject &inputs, const QString &output) -> QString {
+            JobRequest request;
+            request.capability = capability;
+            request.params = params;
+            request.inputs = inputs;
+            request.outputDir = m_dir.filePath(capability);
+            QDir().mkpath(request.outputDir);
+            QString job;
+            const JobStatus status = run(*helper, request, &job, nullptr, 600000);
+            if (status.state != QLatin1String("done"))
+                return QStringLiteral("failed: ") + status.error.message;
+            const auto result = await<JobResult>([&](Reply<JobResult> reply) { helper->result(job, std::move(reply)); });
+            return result->outputs.value(output).toObject().value("path").toString();
+        };
+        const auto path = [](const QString &file) { return QJsonObject{{"path", file}}; };
+        const QString conditioning = stage("text.encode", {}, "conditioning");
+        QVERIFY2(QFileInfo::exists(conditioning), qPrintable(conditioning));
+        const QString start = stage("latent.encode", {{"image", path(picture)}}, "latent");
+        QVERIFY2(QFileInfo::exists(start), qPrintable(start));
+        const QString sampled = stage("latent.sample", {{"conditioning", path(conditioning)}, {"init_latent", path(start)},
+                                                        {"image", path(picture)}, {"mask", path(mask)}}, "latent");
+        QVERIFY2(QFileInfo::exists(sampled), qPrintable(sampled));
+        const QString staged = stage("latent.decode", {{"latent", path(sampled)}}, "image");
+        QVERIFY2(QFileInfo::exists(staged), qPrintable(staged));
+
+        // One generate run of the same build: the one-shot helper (no warm models to disturb).
+        QJsonObject generate = params;
+        const QJsonObject context = generate.take("context").toObject();
+        generate.insert("init_image", QJsonObject{{"image", picture}});
+        const QString single = m_dir.filePath("single.png");
+        QFile requestOut(m_dir.filePath("generate.json"));
+        QVERIFY(requestOut.open(QIODevice::WriteOnly));
+        requestOut.write(QJsonDocument(QJsonObject{{"op", "generate"}, {"image", single}, {"mask", mask},
+                                                   {"params", generate}, {"context", context}}).toJson());
+        requestOut.close();
+        helper.reset(); // free the GPU first
+        QProcess oneShot;
+        oneShot.start(program, {requestOut.fileName()});
+        QVERIFY(oneShot.waitForFinished(600000));
+        const auto bytes = [](const QString &name) {
+            QFile in(name);
+            return in.open(QIODevice::ReadOnly) ? in.readAll() : QByteArray();
+        };
+        QVERIFY2(!bytes(single).isEmpty(), oneShot.readAllStandardOutput().constData());
+        QCOMPARE(bytes(staged), bytes(single));
+        if (qEnvironmentVariableIsSet("FUGUE_REAL_HELPER_KEEP"))
+            QFile::copy(staged, qEnvironmentVariable("FUGUE_REAL_HELPER_KEEP"));
     }
 
     void theProgramIsTheCudaBuildOnNvidiaElseVulkan() {

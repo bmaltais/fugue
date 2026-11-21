@@ -6,7 +6,7 @@ run as separate calls ([spec 8.10](../docs/spec.md#810-gpu-memory-and-the-helper
 | File | What it is |
 | --- | --- |
 | `CMakeLists.txt` | The pin: stable-diffusion.cpp, ggml and CUTLASS commits with their SHA-256 |
-| `sdcpp.patch` | The stage patch: `fugue.*` image and video options, the stage file format (`src/pipeline/fugue_stages.h`) and its reading and writing (`fugue_stage_io.h`), hooks in `generate_image` and `generate_video` |
+| `sdcpp.patch` | The stage patch: `fugue.*` image and video options, the stage file format (`src/pipeline/fugue_stages.h`) and its reading and writing (`fugue_stage_io.h`), hooks in `generate_image` and `generate_video` (for an inpaint model, `generate_image` also refreshes `c_concat` when a sample reads its conditioning) |
 | `src/main.cpp` | `fugue-helper <request.json>` (one operation, then exit) `fugue-helper --serve` (the provider protocol over stdio, for Fugue's `fugue-helper` provider) and `fugue-helper --serve-http` (the same over HTTP, for a paired host); the formats are at its top |
 | `smoke-http.sh` | `curl` checks of `--serve-http` that need no model |
 | `fugue-helper.service` | A systemd user unit for a paired host |
@@ -119,7 +119,31 @@ and cannot start from a latent; the helper answers `input_invalid`.
 An image-to-video model (Wan 2.2 I2V, TI2V) takes its first frame as `"image": "start.png"` in the
 `encode` and the `sample` request (job input `image` through `--serve`; data over HTTP), the same
 picture in both, with the clip's `width`, `height` and `video_frames` in `params`: the encode makes the model's extra input
-from it. An image model given an `image` answers `input_invalid`.
+from it. An image model given an `image` and no mask answers `input_invalid` (with a mask, see Masks).
+
+## Masks (inpainting)
+
+`sample` and `generate` of an image model take `"mask": "mask.png"` (job input `mask` through `--serve`,
+data `{"data", "format": "png"}` over HTTP; in a `generate` request the picture is `params.init_image`,
+`{"image": PATH}`). The mask is read with one channel (`stbi_load(..., 1)`: a color PNG becomes gray)
+and must be the request's `width` and `height`; it is checked before any model loads. White is redrawn;
+the library rounds it to 0 or 1 and scales it to the latent's size, so a soft mask is hard here.
+
+What the helper does with it depends on the model, by `sd_get_model_version_name`:
+
+- An inpaint model (`SD 1.x Inpaint`, `SD 2.x Inpaint`, `SDXL Inpaint`, `Flux Fill`, `Flex.2`): the
+  `sample` needs `"image"` (the picture, as `init_image`) and ignores `init_latent`. The model's
+  masked picture is part of the conditioning (`c_concat`), which the `encode` made without a picture
+  or mask, so the patch refreshes it from the sample's own latents after it reads the conditioning
+  (`generate_image`, after `fugue_load_cond`), as a single run does.
+- Any other image model (FLUX.2 Klein, Qwen-Image Edit, FLUX.1 dev, Z-Image, SDXL, SD 1.5): the
+  `sample` needs `init_latent` (the one `vae_encode` made); `image` is ignored. The library puts the
+  start latent back outside the mask at every step.
+
+`input_invalid`: a mask for a video model, for `encode`, `decode` or `vae_encode`, one of another size
+than the request, an unreadable one, an inpaint model without `image`, a mask with neither
+`init_latent` nor `init_image`. `smoke-http.sh` checks the size and the unreadable mask without a
+model; the others need a loaded one (see the pin-move checklist).
 
 ## Upscaling (`image.upscale`)
 
@@ -175,6 +199,16 @@ The pin moves only on purpose (spec 8.10).
      run of the same request: the frames must be the same;
    - Wan 2.2 I2V the same way, with `"image"` in the encode and the sample and `params.init_image`
      (`{"image": PATH}`) in the `generate` run.
+
+   - an inpaint model staged equals one `generate` run: `encode`, `vae_encode` (not used by an inpaint
+     model, but the stage runs), `sample` with `"mask"`, `"image"` and `"init_latent"`, `decode`,
+     against one `generate` with `params.init_image` and `"mask"`; the pixels must be the same (FLUX.1 Fill
+     `fluxFillFP8_v10.safetensors`, SDXL Inpaint as `model_path` plus its `diffusion_model_path`).
+     Without the `c_concat` hook the FLUX.1 Fill pictures differ: that is the check that the hook is
+     still reached. Also staged FLUX.2 Klein 4B with a mask and `init_latent` against `generate`;
+   - the version names: `grep -rn 'definition.name' src/model/integrations/` at the new commit, and
+     which of them set `traits.is_inpaint` (`sd.cpp`, `flux.cpp` at the pin): `isInpaintVersion` in
+     `src/main.cpp` and the list above must be the same set.
 
    These need a GPU and model files, so they are run by hand, not in CI.
 4. Run the stages once through Fugue's provider, as the app does (`--serve`, models kept loaded):

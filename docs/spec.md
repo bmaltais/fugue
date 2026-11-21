@@ -1569,11 +1569,19 @@ it as a module folder and run it with no code of its own in Fugue.
   images (init, reference, control), so `sample` takes the reference images as `encode` does, and
   a stage with images loads the VAE beside its own component. An inpaint model cannot start from
   a latent alone (its extra input is made from the init image).
-- **Masks (#167, designed):** `sample` and `generate` take a one-channel `mask`, and an image
-  model's `sample` with a mask takes the picture too: an inpaint model starts from the picture,
-  another from its start latent with the mask applied at every step. One patch hook refreshes an
-  inpaint model's `c_concat` when a sample reads its conditioning. The design and what the library
-  does with a mask are in [14.4](#144-masking-and-inpainting-167).
+- **Masks (#167, #173):** `sample` and `generate` take a one-channel `mask` (`stbi_load` with one
+  channel, checked against the request's width and height before any model loads), and an image
+  model's `sample` with a mask takes the picture too (`image`): an inpaint model (the version names
+  `SD 1.x Inpaint`, `SD 2.x Inpaint`, `SDXL Inpaint`, `Flux Fill`, `Flex.2`, from
+  `sd_get_model_version_name`) starts from the picture as `init_image` and ignores a start latent,
+  another image model from its start latent (`init_latent`) with the mask applied at every step, and
+  ignores the picture. A mask on a video model, an inpaint model without its picture and a mask with
+  neither picture nor latent are `input_invalid`. One patch hook, at the seam where a sample reads
+  its conditioning (after `fugue_load_cond`), sets an inpaint model's `c_concat` (the conditioning's,
+  the unconditional's and the image-unconditional's) from the call's own latents, as
+  `prepare_image_generation_embeds` does in a single run, because the encode had no picture and mask;
+  no sampling or model code changes. The design and what the library does with a mask are in
+  [14.4](#144-masking-and-inpainting-167).
 - **Video (#105)** is the same stages on the same capabilities, no parallel path. A context that
   makes video (`sd_ctx_supports_video_generation`: Wan 2.1 and 2.2, as the pin supports them) is run
   with the library's video options and `sd_generate_video`; the patch gives the `fugue.*` options to
@@ -2676,12 +2684,24 @@ Decode; the templates `flux2-klein-9b-edit` (distilled: 4 steps, guidance 1),
 run with the same reference, byte for byte. Not built: ComfyUI's KV-cache edit (FluxKVCache) and
 its outpaint template (pad, mask, color match). Then text
 encoders other than one LLM (FLUX.1's CLIP-L and T5, SD3), ControlNet,
-hires fix as a group, inpaint models (designed in [14.4](#144-masking-and-inpainting-167)). A coarse Generate Image can later be rebuilt as a group of
+hires fix as a group. A coarse Generate Image can later be rebuilt as a group of
 these.
+
+Masks (#173, [14.4](#144-masking-and-inpainting-167)): VAE Encode 1.1.0 takes an optional `mask` and
+the latent carries it with the picture (`meta.mask`, `meta.image`, media handles); the Sampler sends
+them (`mask` as an 8-bit gray PNG scaled by the nearest pixel to the latent's size, `image` as the
+picture, which the library scales as it does at the encode) and a latent it samples carries neither.
+An inpaint model's input width reads as the latent it makes (SD and SDXL Inpaint 9 channels in, 4
+out; FLUX.1 Fill 96 and Flex.2 49 in, 16 out), so FLUX.1 Fill with `ae` and SDXL Inpaint with its VAE are no
+longer `model_mismatch`. Checked on an RTX 3090 (512 x 512): VAE Encode with the mask, Sampler and
+VAE Decode as separate jobs give the same PNG, byte for byte, as one `generate` with the same
+`init_image` and `mask`, for FLUX.2 Klein 4B (Q8_0, 4 steps), FLUX.1 Fill (`fluxFillFP8_v10`, 6
+steps) and SDXL Inpaint (RealVisXL V4.0 with the SDXL Inpaint UNet, 8 steps); without the hook the
+FLUX.1 Fill staged picture differs from the single run's.
 
 ### 14.4 Masking and inpainting (#167)
 
-Designed; the parts are the issues at the end of this section, and each part says here what has
+Designed; the staged path in the helper and the nodes is built (#173) and the nodes of #171 are built; the parts are the issues at the end of this section, and each part says here what has
 shipped. The research and each choice with its confidence are in Appendix A (the rows marked
 #167); the person's guide is [masking.md](masking.md).
 
@@ -2783,8 +2803,10 @@ out: `image`.
   all-0 mask is `mask_empty`; an all-1 mask is the warning `mask_full` (that is plain
   image-to-image).
 - The Sampler, given such a latent, sends the job inputs `mask` (one channel, scaled nearest to
-  the latent's size) and `image` (the picture at that size), with `denoise` as the strength.
-  Text Encode does not change.
+  the latent's size) and `image` (the picture, which the library scales to the request's size as
+  it does at the encode), with `denoise` as the strength. Text Encode does not change. The mask
+  must be the size of the picture (else `node_failed` on `mask`); a latent the Sampler makes carries
+  no mask.
 - Helper (8.10): `sample` and `generate` take `"mask": IN` (job input `mask`), read as one channel
   at the request's size; the three-channel reader used for pictures would break FLUX.1 Fill's
   packing of the mask, and stable-diffusion.cpp's own CLI reads it as one channel. An image
@@ -3272,6 +3294,7 @@ Building M4 made these further choices.
 | The brush paints with max and erases with min, sizes in picture pixels, undo as the 64 px tiles a step changed, at least 100 steps; defaults size 64, hardness 0.8 (owner's taste). The editor is the crop window's frame (`LargeViewDialog`, `CompareView` single) with a `QQuickItem` layer, so zoom and pan are the viewer's. Load Image's double click keeps the large view (learned place); Paint Mask's opens the editor, as Crop's opens its window | 12.7, 14.4 | medium-high |
 | The mask enters the staged graph at VAE Encode (the latent carries it, as ComfyUI's Set Latent Noise Mask does), not at Text Encode or the Sampler: one place for every model. An inpaint model's masked picture lives in the conditioning in stable-diffusion.cpp, so one patch hook sets `c_concat` from the sample's own latents when it reads a conditioning, as a single run does; the alternative, giving Text Encode the picture and mask as well, would ask for the same wire twice | 8.10, 14.4 | medium-high |
 | The helper, not Fugue, decides how an image model uses a mask, by the library's version name (inpaint models: the picture; others: the start latent): it owns stable-diffusion.cpp's behaviour, and the names are checked when the pin moves. Fugue's `model_shape` only learns the inpaint models' wider input so it stops calling them mismatched | 8.10, 14.4 | medium |
+| Staged masks as built (#173, 2026-11-21): the Sampler sends the picture as VAE Encode did (the library scales both the same way) rather than pre-scaling it, and the mask pre-scaled by the nearest pixel, which the helper checks against the request's size; a mask of another size than the picture is `node_failed` on `mask`, not scaled; `mask_empty` is an error at VAE Encode and `mask_full` a warning there, not flags on the latent; an inpaint model ignores the start latent it is sent (its sample re-encodes the picture, so the VAE's noise draw is the one a single run makes); the hook sets `c_concat` only where a single run would (the unconditional and image-unconditional when the conditioning has them). Staged equals one `generate`, byte for byte, on an RTX 3090 for FLUX.2 Klein 4B, FLUX.1 Fill (fp8) and SDXL Inpaint; the FLUX.1 Fill staged picture without the hook differs, which is what the hook is for. The diffusers SDXL Inpaint UNet is read for its 9 channels from `conv_in.weight` only when it has 9 and `down_blocks.` (a VAE and a 4-channel UNet are not) | 8.10, 14.3, 14.4 | high |
 | Composite back is a node in staged graphs (Composite Masked, Stitch), and built into Generate Image, the coarse node whose promise is that the outside is unchanged. Soft edges come from Feather Mask and Stitch's blend, in pixels, because the library rounds the mask in the latent | 14.4 | medium |
 | Names and defaults the owner may change: Feather Mask (`fugue/feather-mask`, a blur of the mask outward by default; ComfyUI's FeatherMask, which fades from the picture's borders, would convert to another node), Combine Masks for MaskComposite, Crop to Mask's padding 64 px and 1 megapixel, Stitch's blend 16 px, the overlay in the accent at 50% | 14.4 | medium |
 | Both templates run FLUX.2 Klein 9B, the files the edit templates already use, by masked sampling with the picture as a reference: the owner has the files and they are checked staged; Klein 4B (Apache-2.0) is the alternative with a licence for commercial use, FLUX.1 Fill the dedicated model once its file is at hand. Whether the reference helps or makes Klein keep the old content is checked on the 3090 when the template is built | 11.10, 14.4 | medium |

@@ -326,6 +326,39 @@ private slots:
         QCOMPARE(loadableTextEncoderFits(diffusionModel(4096, 16, TextKind::T5), umt5), Fit::DoesNotFit);
     }
 
+    // #173: an inpaint model takes the masked picture in its input beside the noise, so its input
+    // is wider than the latent it makes; it must still fit the VAE of its family.
+    void anInpaintModelMakesTheChannelsItsVaeHas() {
+        writeSafetensors(file("ae.safetensors"), {{"decoder.conv_in.weight", QJsonArray{512, 16, 3, 3}}});
+        writeSafetensors(file("sdxl_vae.safetensors"), {{"decoder.conv_in.weight", QJsonArray{512, 4, 3, 3}}});
+        // SDXL Inpaint, in a checkpoint's names and in diffusers': 9 channels in (4 noise, 4 masked picture, 1 mask).
+        writeSafetensors(file("sdxl-inpaint-ldm.safetensors"),
+                         {{"model.diffusion_model.input_blocks.0.0.weight", QJsonArray{320, 9, 3, 3}}});
+        writeSafetensors(file("sdxl-inpaint-diffusers.safetensors"), {{"conv_in.weight", QJsonArray{320, 9, 3, 3}},
+                                                                      {"down_blocks.0.resnets.0.conv1.weight", QJsonArray{320, 320, 3, 3}}});
+        // A diffusers UNet of 4 channels is not read from conv_in, nor is a VAE's.
+        writeSafetensors(file("sdxl-diffusers.safetensors"), {{"conv_in.weight", QJsonArray{320, 4, 3, 3}},
+                                                              {"down_blocks.0.resnets.0.conv1.weight", QJsonArray{320, 320, 3, 3}}});
+        for (const char *name : {"sdxl-inpaint-ldm.safetensors", "sdxl-inpaint-diffusers.safetensors"}) {
+            QCOMPARE(shape(file(name)).latentChannels, std::optional<int>(4));
+            QCOMPARE(vaeFits(shape(file(name)), shape(file("sdxl_vae.safetensors"))), Fit::Fits);
+            QCOMPARE(vaeFits(shape(file(name)), shape(file("ae.safetensors"))), Fit::DoesNotFit);
+        }
+        QVERIFY(!shape(file("sdxl-diffusers.safetensors")).latentChannels);
+        // FLUX.1 Fill: 96 channels in (16, 16 and 64 for the mask packed in patches), 384 through the
+        // linear layer, as FLUX.1 dev's 64 are its 16; Flex.2's 49 are 196.
+        const QJsonObject flux{{"vector_in.in_layer.weight", QJsonArray{3072, 768}}, {"txt_in.weight", QJsonArray{3072, 4096}}};
+        for (const auto &[name, in] : {std::pair{"flux-dev", 64}, std::pair{"flux-fill", 384}, std::pair{"flex2", 196}}) {
+            QJsonObject tensors = flux;
+            tensors.insert(QStringLiteral("img_in.weight"), QJsonArray{3072, in});
+            writeSafetensors(file(QString::fromLatin1(name) + QStringLiteral(".safetensors")), tensors);
+            const ModelShape model = shape(file(QString::fromLatin1(name) + QStringLiteral(".safetensors")));
+            QCOMPARE(model.latentChannels, std::optional<int>(16));
+            QCOMPARE(vaeFits(model, shape(file("ae.safetensors"))), Fit::Fits);
+            QCOMPARE(vaeFits(model, shape(file("sdxl_vae.safetensors"))), Fit::DoesNotFit);
+        }
+    }
+
     // A diffusers FLUX.2 names its text input context_embedder, as SD3 does, but reads an LLM.
     void aDiffusersFlux2ReadsALanguageModel() {
         writeSafetensors(file("flux2-diffusers.safetensors"), {{"context_embedder.weight", QJsonArray{3072, 7680}},

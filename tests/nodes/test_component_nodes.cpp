@@ -185,6 +185,21 @@ MediaHandle picture(Bench &bench, const QString &name, int width, int height, in
     return image.value();
 }
 
+// A one-channel mask of this size with the rectangle `painted` white (255), probed as a picture.
+MediaHandle maskPicture(Bench &bench, const QString &name, int width, int height, const QRect &painted) {
+    initVips();
+    const QString path = bench.dir.filePath(name);
+    vips::VImage mask = vips::VImage::black(width, height).copy_memory();
+    if (!painted.isEmpty())
+        mask.draw_rect(std::vector<double>{255.0}, painted.left(), painted.top(), painted.width(), painted.height(),
+                       vips::VImage::option()->set("fill", true));
+    mask.write_to_file(path.toUtf8().constData());
+    const Result<MediaHandle> image = MediaHandle::probe(MediaType::Image, path, bench.hashes);
+    if (!image)
+        qFatal("cannot probe %s", qPrintable(path));
+    return image.value();
+}
+
 } // namespace
 
 class TestComponentNodes : public QObject {
@@ -824,6 +839,129 @@ private slots:
             kVaeEncode, inputs, JobResult{QJsonObject{{"latent", QJsonObject{{"path", bench.workDir() + "/latent.bin"}}}}, {}});
         QVERIFY(out);
         QCOMPARE(out->value("latent").json().toObject().value("meta").toObject().value("width").toInt(), 336);
+    }
+
+    // --- a mask (#173, spec 14.4): VAE Encode keeps it on the latent, the Sampler sends it ---
+
+    // The mask is not sent to the encode (the helper has no use for it there): the latent carries it
+    // with the picture, as handles, and the hash of the latent changes with the mask.
+    void vaeEncodeCarriesTheMaskAndThePictureOnTheLatent() {
+        Bench bench;
+        const MediaHandle image = picture(bench, "start.png", 330, 200);
+        const MediaHandle mask = maskPicture(bench, "mask.png", 330, 200, QRect(100, 50, 80, 60));
+        const QJsonObject model = bench.loaded(bench.zImage());
+        const Values inputs{{"model", Value(model)}, {"image", Value(image)}, {"mask", Value(mask)}};
+        const Result<JobRequest> request = bench.request(kVaeEncode, inputs);
+        QVERIFY2(request, request ? "" : qPrintable(request.error().message));
+        QVERIFY(!request->inputs.contains("mask"));
+        const Result<Values> out = bench.outputs(
+            kVaeEncode, inputs, JobResult{QJsonObject{{"latent", QJsonObject{{"path", bench.workDir() + "/latent.bin"}}}}, {}});
+        QVERIFY(out);
+        QVERIFY(out.warnings().isEmpty());
+        const QJsonObject meta = out->value("latent").json().toObject().value("meta").toObject();
+        QCOMPARE(meta.value("width").toInt(), 336);
+        QCOMPARE(meta.value("image").toObject(), image.toJson());
+        QCOMPARE(meta.value("mask").toObject(), mask.toJson());
+    }
+
+    void aMaskWithNothingPaintedIsMaskEmpty() {
+        Bench bench;
+        const MediaHandle image = picture(bench, "start.png", 64, 64);
+        const Result<JobRequest> request = bench.request(
+            kVaeEncode, {{"model", Value(bench.loaded(bench.zImage()))}, {"image", Value(image)},
+                         {"mask", Value(maskPicture(bench, "mask.png", 64, 64, QRect()))}});
+        QVERIFY(!request);
+        QCOMPARE(request.error().code, QStringLiteral("mask_empty"));
+        QCOMPARE(request.error().input, QStringLiteral("mask"));
+    }
+
+    void aMaskOfAnotherSizeThanThePictureIsRefused() {
+        Bench bench;
+        const MediaHandle image = picture(bench, "start.png", 64, 64);
+        const Result<JobRequest> request = bench.request(
+            kVaeEncode, {{"model", Value(bench.loaded(bench.zImage()))}, {"image", Value(image)},
+                         {"mask", Value(maskPicture(bench, "mask.png", 32, 64, QRect(0, 0, 8, 8)))}});
+        QVERIFY(!request);
+        QCOMPARE(request.error().input, QStringLiteral("mask"));
+    }
+
+    void aMaskOfAllWhiteIsTheWarningMaskFull() {
+        Bench bench;
+        const MediaHandle image = picture(bench, "start.png", 64, 64);
+        const Values inputs{{"model", Value(bench.loaded(bench.zImage()))}, {"image", Value(image)},
+                            {"mask", Value(maskPicture(bench, "mask.png", 64, 64, QRect(0, 0, 64, 64)))}};
+        QVERIFY(bench.request(kVaeEncode, inputs));
+        const Result<Values> out = bench.outputs(
+            kVaeEncode, inputs, JobResult{QJsonObject{{"latent", QJsonObject{{"path", bench.workDir() + "/latent.bin"}}}}, {}});
+        QVERIFY(out);
+        QCOMPARE(out.warnings().size(), qsizetype(1));
+        QCOMPARE(out.warnings().first().code, QStringLiteral("mask_full"));
+        QCOMPARE(out.warnings().first().severity, Error::Severity::Warning);
+    }
+
+    // The Sampler sends the mask as a gray PNG at the latent's size (the picture's, in steps of 16),
+    // scaled by the nearest pixel, and the picture; the start latent and the strength as before.
+    void theSamplerSendsTheMaskAndThePictureAtTheLatentsSize() {
+        Bench bench;
+        const MediaHandle image = picture(bench, "start.png", 330, 200);
+        const MediaHandle mask = maskPicture(bench, "mask.png", 330, 200, QRect(0, 0, 165, 200));
+        const QJsonObject model = bench.loaded(bench.zImage());
+        const Result<Values> encoded = bench.outputs(
+            kVaeEncode, {{"model", Value(model)}, {"image", Value(image)}, {"mask", Value(mask)}},
+            JobResult{QJsonObject{{"latent", QJsonObject{{"path", bench.workDir() + "/latent.bin"}}}}, {}});
+        QVERIFY(encoded);
+        const Values sampling{{"model", Value(model)},
+                              {"conditioning", Value(QJsonObject{{"data", "fugue/conditioning"}, {"path", "/c.bin"}})},
+                              {"latent", encoded->value("latent")}, {"denoise", Value(0.8)}};
+        const Result<JobRequest> request = bench.request(kSampler, sampling);
+        QVERIFY2(request, request ? "" : qPrintable(request.error().message));
+        QCOMPARE(request->params.value("width").toInt(), 336);
+        QCOMPARE(request->params.value("strength").toDouble(), 0.8);
+        QCOMPARE(request->inputs.value("init_latent").toObject(), (QJsonObject{{"path", bench.workDir() + "/latent.bin"}}));
+        const QString sentMask = request->inputs.value("mask").toObject().value("path").toString();
+        const vips::VImage gray = vips::VImage::new_from_file(sentMask.toUtf8().constData());
+        QCOMPARE(QSize(gray.width(), gray.height()), QSize(336, 208));
+        QCOMPARE(gray.bands(), 1);
+        QCOMPARE(gray.format(), VIPS_FORMAT_UCHAR);
+        QCOMPARE(gray(10, 100)[0], 255.0);
+        QCOMPARE(gray(300, 100)[0], 0.0);
+        QCOMPARE(gray.min(), 0.0);
+        QCOMPARE(gray.max(), 255.0); // nothing between: a hard mask stays hard
+        const QString sentImage = request->inputs.value("image").toObject().value("path").toString();
+        QCOMPARE(sentImage, image.path()); // the helper scales it to the request's size, as it does the encode's
+
+        // The result is a new picture: it carries no mask.
+        const Result<Values> sampled = bench.outputs(
+            kSampler, sampling, JobResult{QJsonObject{{"latent", QJsonObject{{"path", bench.workDir() + "/sampled.bin"}}}}, {}});
+        QVERIFY(sampled);
+        QCOMPARE(sampled->value("latent").json().toObject().value("meta").toObject(),
+                 (QJsonObject{{"width", 336}, {"height", 208}, {"model", model}}));
+
+        // The mask is the file VAE Encode read: another one at its path is an error.
+        maskPicture(bench, "mask.png", 330, 200, QRect(0, 0, 10, 10));
+        const Result<JobRequest> changed = bench.request(kSampler, sampling);
+        QVERIFY(!changed);
+        QCOMPARE(changed.error().code, QStringLiteral("file_not_found"));
+    }
+
+    // Without a mask the Sampler sends what it sent before (the regression guard of #173).
+    void theSamplerWithoutAMaskSendsNoMaskAndNoPicture() {
+        Bench bench;
+        const MediaHandle image = picture(bench, "start.png", 64, 64);
+        const QJsonObject model = bench.loaded(bench.zImage());
+        const Values encoding{{"model", Value(model)}, {"image", Value(image)}};
+        const Result<Values> encoded = bench.outputs(
+            kVaeEncode, encoding, JobResult{QJsonObject{{"latent", QJsonObject{{"path", "/runs/r/latent.bin"}}}}, {}});
+        QVERIFY(encoded);
+        QVERIFY(!encoded->value("latent").json().toObject().value("meta").toObject().contains("mask"));
+        QVERIFY(!encoded->value("latent").json().toObject().value("meta").toObject().contains("image"));
+        const Result<JobRequest> request =
+            bench.request(kSampler, {{"model", Value(model)},
+                                     {"conditioning", Value(QJsonObject{{"data", "fugue/conditioning"}, {"path", "/c.bin"}})},
+                                     {"latent", encoded->value("latent")}});
+        QVERIFY(request);
+        QCOMPARE(request->inputs, (QJsonObject{{"conditioning", QJsonObject{{"path", "/c.bin"}}},
+                                               {"init_latent", QJsonObject{{"path", "/runs/r/latent.bin"}}}}));
     }
 
     // --- references (image editing: FLUX.2 Klein, Qwen-Image Edit) ---

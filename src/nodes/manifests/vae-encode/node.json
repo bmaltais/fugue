@@ -1,16 +1,18 @@
 {
   "manifest": 1,
   "id": "fugue/vae-encode",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "VAE Encode",
-  "description": "Turns an image into a latent with the model's VAE, for a Sampler to redraw from (image to image).",
+  "description": "Turns an image into a latent with the model's VAE, for a Sampler to redraw from (image to image). With a mask, the latent carries it and the picture, and the Sampler redraws only the masked part.",
   "category": "Diffusion",
   "keywords": ["encode", "image to latent", "img2img", "vae"],
   "runtime": {"kind": "builtin"},
   "capabilities": ["latent.encode"],
   "inputs": [
     {"name": "model", "type": "fugue/model", "label": "Model"},
-    {"name": "image", "type": "image", "label": "Image"}
+    {"name": "image", "type": "image", "label": "Image"},
+    {"name": "mask", "type": "image", "label": "Mask", "optional": true, "role": "mask",
+     "description": "The part to redraw, white; the rest stays as it is. A picture model made for inpainting (FLUX.1 Fill, SDXL Inpaint) reads it as it is; any other redraws only this part at each step. It must be the size of the image. Nothing painted is an error."}
   ],
   "outputs": [
     {"name": "latent", "type": "fugue/latent", "label": "Latent"}
