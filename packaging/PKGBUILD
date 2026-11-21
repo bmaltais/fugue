@@ -83,6 +83,10 @@ prepare() {
   git submodule init templates
   git config submodule.templates.url "$srcdir/fugue-workflows"
   git -c protocol.file.allow=always submodule update templates
+  # A second makepkg run (no -C) re-extracts the tarballs over the patched tree: the files turn
+  # pristine again but the file the patch adds stays, and the patch refuses it. Start from a clean tree.
+  rm -rf "$srcdir/stable-diffusion.cpp-$_sdcpp"
+  bsdtar -xf "$srcdir/sdcpp-$_sdcpp.tar.gz" -C "$srcdir"
   cd "$srcdir/stable-diffusion.cpp-$_sdcpp"
   patch -p1 --forward --input="$srcdir/$pkgbase/helper/sdcpp.patch"
 }
