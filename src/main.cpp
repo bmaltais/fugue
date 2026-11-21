@@ -48,10 +48,9 @@ int main(int argc, char *argv[]) {
     app.setApplicationVersion("0.1.0");
 
     // Matches the window to fugue.desktop, so the compositor (Wayland app_id)
-    // and the launcher pick up the installed icon. The compiled-in copy covers
-    // a run from build/, and needs qt6-svg's icon engine.
+    // and the launcher pick up the installed icon. The window's own icon follows the
+    // Omarchy theme (set below, once the theme is read): the dark art on a dark theme.
     app.setDesktopFileName("fugue");
-    app.setWindowIcon(QIcon::fromTheme("fugue", QIcon(":/fugue.svg")));
 
     QQuickStyle::setStyle("Material");
 
@@ -61,6 +60,13 @@ int main(int argc, char *argv[]) {
     app.installTranslator(&translator);
 
     Theme theme;
+    const auto setIcon = [&theme, &app] {
+        const bool light = theme.light();
+        app.setWindowIcon(QIcon::fromTheme(light ? "fugue" : "fugue-dark",
+                                           QIcon(light ? ":/fugue-light.png" : ":/fugue-dark.png")));
+    };
+    setIcon();
+    QObject::connect(&theme, &Theme::changed, &app, setIcon);
     // The command registry: the default keymap, then the user's changes to it (spec 12.5).
     fugue::CommandRegistry commands;
     fugue::registerDefaultCommands(commands);
