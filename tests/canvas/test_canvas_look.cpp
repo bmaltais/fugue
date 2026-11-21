@@ -246,6 +246,24 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // A hex layout color (#52) is derived like a role: the same five tokens, mixed into this
+    // theme's surfaces, so one stored value reads on a dark theme and on a light one.
+    void aHexLayoutColorIsDerivedLikeARole() {
+        for (const char *theme : {"ethereal", "flexoki-light"}) {
+            App app(statesBoard(), {}, {theme, 8});
+            const CanvasLook *look = app.theme.look();
+            const QVariantMap hex = look->role("#ff8800");
+            const fugue::look::RoleTokens want =
+                fugue::look::roleTokens(look->tokens(), QColor("#ff8800"), app.theme.text(), app.theme.light());
+            QCOMPARE(hex.value("tint").value<QColor>(), want.tint);
+            QCOMPARE(hex.value("tintBody").value<QColor>(), want.tintBody);
+            QCOMPARE(hex.value("frame").value<QColor>(), want.frame);
+            QVERIFY(hex.value("tint").value<QColor>() != look->role("muted").value("tint").value<QColor>());
+            // Case and the short form name the same color.
+            QCOMPARE(look->role("#FF8800"), hex);
+        }
+    }
+
     // Bypassed reads at a glance, as in ComfyUI: the whole node tinted magenta; muted is faded
     // toward the canvas and not tinted. On a dark and a light theme, at every corner radius the
     // setting allows (0, the default 8, and 16; #63), and with Theme's fallback palette. The

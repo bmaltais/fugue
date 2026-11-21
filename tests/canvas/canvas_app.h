@@ -99,6 +99,9 @@ struct App {
     // A test's own runs (test_canvas_run), set before open(); the window runs without them.
     fugue::CanvasRuns *runs = nullptr;
     fugue::ImageActions *imageActions = nullptr; // likewise (test_canvas_image_actions)
+    // The color picker's recent colors (#52), in the test's own folder, and layout coloring.
+    fugue::ColorHistory colorHistory{dir.path() + "/recent-colors.json"};
+    fugue::LayoutColors layoutColors{model};
     QQmlApplicationEngine engine;
     QStringList warnings;
     QList<QUrl> openedUrls; // what help.docs and help.report-issue opened
@@ -143,7 +146,7 @@ struct App {
     bool open() {
         // As main() does: the English catalog gives counted strings their plural forms.
         QCoreApplication::installTranslator(&translator);
-        const fugue::AppObjects objects{&translator, &theme, &commands, &model, &workflows, &settings, runs, imageActions};
+        const fugue::AppObjects objects{&translator, &theme, &commands, &model, &workflows, &settings, runs, imageActions, &colorHistory, &layoutColors};
         fugue::followNodeTypeReloads(*reloader, objects);
         fugue::exposeToQml(engine, objects);
         engine.load(QUrl("qrc:/Main.qml"));

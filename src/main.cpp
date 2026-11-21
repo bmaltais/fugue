@@ -17,7 +17,9 @@
 #include "commands/command_registry.h"
 #include "cli/args.h"
 #include "cli/cli.h"
+#include "menu/color_history.h"
 #include "menu/image_actions.h"
+#include "menu/layout_colors.h"
 #include "menu/menu_commands.h"
 #include "engine/pack_loader.h"
 #include "engine/registry.h"
@@ -109,7 +111,12 @@ int main(int argc, char *argv[]) {
     fugue::ImageActions imageActions(commands, canvasModel, runs);
     QObject::connect(&imageActions, &fugue::ImageActions::message, &workflows, &fugue::Workflows::notify);
 
-    const fugue::AppObjects objects{&translator, &theme, &commands, &canvasModel, &workflows, &appSettings, &runs, &imageActions};
+    // The color picker's recent colors (#52), kept in the state folder, and node and Frame coloring with it.
+    fugue::ColorHistory colorHistory(fugue::TrustStore::defaultPath().section('/', 0, -2) + "/recent-colors.json");
+    fugue::LayoutColors layoutColors(canvasModel);
+
+    const fugue::AppObjects objects{&translator, &theme,   &commands, &canvasModel,  &workflows,
+                                    &appSettings, &runs, &imageActions, &colorHistory, &layoutColors};
     // The registry is filled again when the packs or the trust change, so what is installed is
     // usable with no restart (#70). Made after what it refreshes, so it goes first.
     fugue::RegistryReloader reloader(&registry, addNodeTypes);

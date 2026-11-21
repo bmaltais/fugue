@@ -122,6 +122,7 @@ ApplicationWindow {
         // The file pickers, the save and trust and recovery questions, the drop area.
         WorkflowDialogs { anchors.fill: parent; canvasView: fugueCanvas }
         GroupDialogs { anchors.fill: parent }
+        LayoutColorPicker {}
         ImageSaveDialog {}
     }
 

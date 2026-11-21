@@ -627,6 +627,9 @@ signals:
     void interfaceEditorRequested();
     // The frame.rename command: the window asks for the title.
     void frameRenameRequested(const QString &frame);
+    // The node.color.custom command (#52): the window opens the color wheel for the Frame
+    // `frame`, or for the selected nodes when it is empty.
+    void colorPickRequested(const QString &frame);
     // The edit.rename command and a double-click on a title (#55) or on a group's port (#72): the
     // window asks for the new title or label.
     void nodeRenameRequested(const QString &node);

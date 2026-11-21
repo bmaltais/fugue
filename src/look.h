@@ -175,8 +175,8 @@ public:
     void update(const QHash<QString, QColor> &colors, bool light, fugue::look::Corners corners, int textSize);
 
     // A layout color (spec 4.5: a theme role, a palette name such as "blue" or a semantic one
-    // such as "accent" or "muted") as {frame, frameEdge, frameTitle, tint, tintBody}; an unknown role is
-    // muted.
+    // such as "accent" or "muted", or a hex value "#rrggbb", #52) as {frame, frameEdge, frameTitle, tint,
+    // tintBody}; an unknown role is muted.
     Q_INVOKABLE QVariantMap role(const QString &name) const;
     // The color a port color key stands for: the type colors, "any" (the label color) and
     // "unknown" (a placeholder's port: the label color too).

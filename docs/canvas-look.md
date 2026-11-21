@@ -262,7 +262,9 @@ light design tools lay cards on a gray table.
 
 `text`, `accent`, `accentForeground` and `error` are the theme's own. The neutral role `muted`
 uses `label` as its color. Theme roles for layout colors are the palette names (`blue`, `green`,
-...), as spec 4.5 says.
+...), as spec 4.5 says. A hex layout color (`#rrggbb`, from the color picker, #52) takes the same
+formulas with the hex value as the role's color, so its tints step down until the text reads on
+this theme, and one stored value reads on a dark and a light theme.
 
 `label` exists because `Theme::muted` (`mix(background, text, .65)`) reads at under 4.5:1 against
 a node's body on 8 of the 23 themes, light and dark (lowest rose-pine, 3.18), too faint for 11 px

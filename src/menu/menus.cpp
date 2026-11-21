@@ -20,6 +20,9 @@ QVariantMap colors() {
     QVariantList items;
     for (const QString &role : colorRoles())
         items.append(QVariantMap{{"command", QStringLiteral("node.color.") + role}, {"swatch", role}});
+    // The color wheel (#52), after the roles, in a chunk of its own.
+    items.append(QVariantMap{{"separator", true}});
+    items.append(QVariantMap{{"command", QStringLiteral("node.color.custom")}});
     return {{"title", QStringLiteral(QT_TRANSLATE_NOOP("Menu", "&Colors"))}, {"items", items}, {"swatches", true}};
 }
 

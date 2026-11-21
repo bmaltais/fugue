@@ -8,6 +8,7 @@
 #include <QGuiApplication>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QQmlComponent>
 #include <QQuickStyle>
 #include <QSignalSpy>
 #include <QUndoStack>
@@ -606,6 +607,131 @@ private slots:
         app.model.undo();
         QCOMPARE(y("a"), 80.0);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // The color wheel (#52): Colors > Custom… opens it, a click on the disk sets hue and
+    // saturation, Apply is one undo step that stores "#rrggbb", and the color comes back as a
+    // recent one. Escape leaves everything as it was.
+    void theColorWheelAppliesAHexColorAndRemembersIt() {
+        App app(load(framed));
+        QVERIFY(app.open());
+        app.model.select({"a", "b"});
+        const int steps = app.model.undoStack()->count();
+        auto color = [&](const QString &id) {
+            return app.model.document().layout.value("nodes").toObject().value(id).toObject().value("color").toString();
+        };
+
+        QTest::mouseClick(app.window, Qt::RightButton, {}, app.screen(60, 90));
+        QTRY_VERIFY(isOpen(app.window, "contextMenuPopup"));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("subMenu-Colors")));
+        QTRY_VERIFY(find(app.window, "menuItem-node.color.custom"));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("menuItem-node.color.custom")));
+        QTRY_VERIFY(isOpen(app.window, "colorPickerPopup"));
+        QVERIFY(app.colorHistory.recent().isEmpty());
+        QVERIFY(!find(app.window, "colorRecent")); // no recent colors yet, none shown
+
+        // Escape: nothing applied.
+        QTest::keyClick(app.window, Qt::Key_Escape);
+        QTRY_VERIFY(!isOpen(app.window, "colorPickerPopup"));
+        QCOMPARE(color("a"), QString());
+        QCOMPARE(app.model.undoStack()->count(), steps);
+
+        // Open again and click the disk half way out at the right: hue 0, saturation .5.
+        app.commands.triggerOn("node.color.custom", {});
+        QTRY_VERIFY(isOpen(app.window, "colorPickerPopup"));
+        QQuickItem *wheel = NEED("colorWheel");
+        const QPointF origin = wheel->mapToScene(QPointF(0, 0));
+        QTest::mouseClick(app.window, Qt::LeftButton, {},
+                          (origin + QPointF(wheel->width() * 0.75, wheel->height() / 2)).toPoint());
+        auto *hexField = qobject_cast<QQuickItem *>(popup(app.window, "colorHex"));
+        QVERIFY(hexField);
+        QTRY_COMPARE(hexField->property("text").toString(), QString("#ff8080"));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("colorApply")));
+        QTRY_VERIFY(!isOpen(app.window, "colorPickerPopup"));
+        QCOMPARE(color("a"), QString("#ff8080"));
+        QCOMPARE(color("b"), QString("#ff8080"));
+        QCOMPARE(color("c"), QString());
+        QCOMPARE(app.model.undoStack()->count(), steps + 1);
+        QCOMPARE(app.colorHistory.recent(), (QStringList{"#ff8080"}));
+        app.model.undo();
+        QCOMPARE(color("a"), QString());
+
+        // Typing a hex value moves the disk's handle; a bad value cannot be applied.
+        app.commands.triggerOn("node.color.custom", {});
+        QTRY_VERIFY(isOpen(app.window, "colorPickerPopup"));
+        QQuickItem *recent = find(app.window, "colorRecent-0");
+        QVERIFY(recent); // the color just used is offered again, and the field starts on it
+        QCOMPARE(popup(app.window, "colorHex")->property("text").toString(), QString("#ff8080"));
+        popup(app.window, "colorHex")->setProperty("text", "");
+        for (const char *key : {"1", "2", "a", "b", "9", "f"})
+            QTest::keyClick(app.window, key[0]);
+        QTRY_COMPARE(popup(app.window, "colorHex")->property("text").toString(), QString("12ab9f"));
+        QTRY_COMPARE(NEED("colorPreview")->property("color").value<QColor>(), QColor("#12ab9f"));
+        QTest::keyClick(app.window, Qt::Key_Return);
+        QTRY_VERIFY(!isOpen(app.window, "colorPickerPopup"));
+        QCOMPARE(color("a"), QString("#12ab9f"));
+        QCOMPARE(app.colorHistory.recent(), (QStringList{"#12ab9f", "#ff8080"}));
+
+        // A click on a recent color applies it at once.
+        app.commands.triggerOn("node.color.custom", {});
+        QTRY_VERIFY(isOpen(app.window, "colorPickerPopup"));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("colorRecent-1")));
+        QTRY_VERIFY(!isOpen(app.window, "colorPickerPopup"));
+        QCOMPARE(color("a"), QString("#ff8080"));
+        QCOMPARE(app.colorHistory.recent(), (QStringList{"#ff8080", "#12ab9f"}));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // The picker knows nothing of the canvas (#52): made on its own, it starts on a color, reports
+    // the one chosen, and says `picked` only on a confirm.
+    void theColorPickerWorksOnItsOwn() {
+        App app(load(framed));
+        QVERIFY(app.open());
+        QQmlComponent component(&app.engine, QUrl("qrc:/canvas/ColorPickerPane.qml"));
+        QScopedPointer<QObject> made(component.create());
+        QVERIFY2(made, qPrintable(component.errorString()));
+        auto *pane = qobject_cast<QQuickItem *>(made.data());
+        QVERIFY(pane);
+        pane->setParentItem(app.window->contentItem());
+        QSignalSpy picked(pane, SIGNAL(picked(QString)));
+
+        QVERIFY(QMetaObject::invokeMethod(pane, "setColor", Q_ARG(QVariant, QString("#336699"))));
+        QCOMPARE(pane->property("color").toString(), QString("#336699"));
+        QVERIFY(QMetaObject::invokeMethod(pane, "setColor", Q_ARG(QVariant, QString("nonsense")))); // ignored
+        QCOMPARE(pane->property("color").toString(), QString("#336699"));
+        QCOMPARE(picked.count(), 0); // choosing is not picking
+
+        QVERIFY(QMetaObject::invokeMethod(pane, "confirm", Q_ARG(QVariant, QString("#336699"))));
+        QCOMPARE(picked.count(), 1);
+        QCOMPARE(picked.first().first().toString(), QString("#336699"));
+        QCOMPARE(app.colorHistory.recent(), (QStringList{"#336699"}));
+        // Nothing of the document was touched.
+        QVERIFY(app.model.document().layout.value("nodes").toObject().value("a").toObject().value("color").isUndefined());
+
+        pane->setProperty("remember", false);
+        QVERIFY(QMetaObject::invokeMethod(pane, "confirm", Q_ARG(QVariant, QString("#aa0000"))));
+        QCOMPARE(picked.count(), 2);
+        QCOMPARE(app.colorHistory.recent(), (QStringList{"#336699"}));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    void theColorWheelColorsAFrameAloneAndNothingWithoutATarget() {
+        App app(load(framed));
+        QVERIFY(app.open());
+        // With nothing selected and no Frame, the command cannot run.
+        app.model.select({});
+        QVERIFY(!app.commands.entry("node.color.custom").value("enabled").toBool());
+        app.model.select({"c"});
+        QVERIFY(app.layoutColors.apply("#336699", "f1"));
+        QCOMPARE(app.model.frames().first().toMap().value("color").toString(), QString("#336699"));
+        QCOMPARE(app.model.document().layout.value("nodes").toObject().value("c").toObject().value("color").toString(),
+                 QString());
+        QCOMPARE(app.layoutColors.current("f1"), QString("#336699"));
+        QCOMPARE(app.layoutColors.current(), QString());
+        QVERIFY(!app.layoutColors.apply("blue", "f1")); // a role goes through its own commands
+        QCOMPARE(app.model.frames().first().toMap().value("color").toString(), QString("#336699"));
+        // The saved file keeps the one string.
+        QVERIFY(QString::fromUtf8(app.model.document().save()).contains("\"color\": \"#336699\""));
     }
 
     void colorsApplyToTheSelectionOrTheFrameAsOneStep() {
