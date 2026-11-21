@@ -249,7 +249,10 @@ The built-in pack declares the generation types (#79): data `fugue/latent` and
 derived handle Load Models makes, `{"base": <diffusion model>, "text_encoder": …, "vae": …}`, with
 Apply LoRA's `apply` steps. A latent's `meta` holds the image size, and for a sampled or encoded
 latent the model, which VAE Decode decodes with; an Empty Latent's is only the size
-(`"empty": true`), the Sampler starting from noise. `fugue/controlnet` and
+(`"empty": true`), the Sampler starting from noise. A video latent (#105) is the same file kind
+with `frames` and `fps` in its `meta` too; the tensor has the time axis, tens of MB for a few
+seconds, and travels to a paired host like any latent. Wan's 4 n + 1 frames: the model rounds
+another count to one. `fugue/controlnet` and
 `fugue/upscale-model` come with their nodes.
 
 ---
@@ -1085,7 +1088,7 @@ A node asks for a capability, never a server.
 | `audio.generate` | Music from a prompt and optional lyrics | M4 (#28) |
 | `text.generate` | LLM text, optionally with image input | M4 |
 | `image.upscale` | Model upscaling | M5 |
-| `text.encode`, `latent.sample`, `latent.decode`, `latent.encode` | Component-level generation | M5 |
+| `text.encode`, `latent.sample`, `latent.decode`, `latent.encode` | Component-level generation; for a video model (Wan) the same capabilities make and decode a video latent (#105, [8.10](#810-gpu-memory-and-the-helper)) | M5 |
 
 Capability ids are open: a provider module can advertise a new one and a node pack can ask for it.
 
@@ -1473,6 +1476,25 @@ reference. A new inference runtime is a new provider module.
   images (init, reference, control), so `sample` takes the reference images as `encode` does, and
   a stage with images loads the VAE beside its own component. An inpaint model cannot start from
   a latent alone (its extra input is made from the init image).
+- **Video (#105)** is the same stages on the same capabilities, no parallel path. A context that
+  makes video (`sd_ctx_supports_video_generation`: Wan 2.1 and 2.2, as the pin supports them) is run
+  with the library's video options and `sd_generate_video`; the patch gives the `fugue.*` options to
+  video too (`cond_in`/`_out`, `latent_in`/`_out`, `stop_after` `cond` or `sample`; a video has no
+  `init` stage), shares the file code with the image path (`src/pipeline/fugue_stage_io.h`), and
+  hooks `generate_video` at the same three seams: after the text encode, after the sampling loop
+  (both Wan 2.2 passes, high noise then low), and before the VAE decode. The conditioning file is
+  the same (its `c_concat` and `c_vector` already carry an image-to-video model's extra inputs);
+  the latent file's descriptor gains `frames` and `fps`. `encode` and `sample` take the generation
+  options of the video (`video_frames`, `fps`, `width`, `height`, `sample.*`; a Wan 2.2 14B
+  context also `high_noise_diffusion_model_path`, its UMT5 as `t5xxl_path`); `decode` writes
+  `video.y4m` instead of `image.png`, a YUV4MPEG2 file (4:2:0, one `FRAME` per frame) that every
+  ffmpeg reads and the helper needs no codec for; over HTTP its format is `y4m`. Fugue's VAE Decode
+  Video turns it into the engine's lossless intermediate (FFV1 in Matroska, [2.4](#24-media-handles)).
+  Not staged yet: a first frame (image-to-video: its start image needs the size and length in Text
+  Encode), `vae_encode` of a clip, a latent as the start of a Sampler, S2V and the audio models, and
+  LTX/MiniMax (audio and hires latent upscale in the same call); the helper says so (`input_invalid`).
+  A video latent split across machines (text encoder and VAE decode on a GB10, the sampling loop on
+  a discrete card, or two clips at once on two hosts) uses the paired-host transport as it is.
 
 ### 8.11 The provider interface
 
@@ -2303,6 +2325,10 @@ scheduler, denoise), VAE Decode and VAE Encode. A text-to-image graph of them ga
 pixels as one `generate` run of the same helper for Z-Image Turbo and FLUX.2 Klein 4B at guidance
 1, checked by hand on an RTX 3090 (SDXL's size conditioning differs: Appendix A);
 the templates `z-image-turbo`, `flux2-klein-4b` and `flux2-klein-9b` are ready to open (11.10).
+Video (#105): the same nodes on a video model, with Empty Video Latent (width, height, frames, rate)
+in place of Empty Latent, VAE Decode Video in place of VAE Decode, and Load Models' optional
+high-noise diffusion model for Wan 2.2 14B. Text Encode and Sampler are unchanged: the latent says
+it is a video. A latent of the other kind at a decode is `node_failed` naming the right node. Checked on an RTX 3090 with Wan 2.2 T2V A14B (Q4_K_S, both passes, UMT5 fp8, Wan 2.1 VAE; 320 x 192, 9 frames, 4 steps): the three stages as separate helper processes give a video byte for byte the same as one `generate` run, and the graph above gives the same through Fugue, locally and through `--serve-http` (conditioning and latent files identical). Not yet measured: the split across the GB10 and the 3090 (#105 stays open).
 Image editing (#88), as ComfyUI's FLUX.2 Klein 9B templates do it: Load Image, Resize to
 Megapixels (1 MP), Text Encode's references, an Empty Latent of the resized size, Sampler, VAE
 Decode; the templates `flux2-klein-9b-edit` (distilled: 4 steps, guidance 1),
@@ -2634,6 +2660,10 @@ Building M4 made these further choices.
 | The player uses Qt Multimedia (QML `MediaPlayer`, `AudioOutput`, `VideoOutput`; LGPL-3.0, as the rest of Qt), the FFmpeg backend. This is a new runtime dependency: `qt6-multimedia` and `qt6-multimedia-ffmpeg` in the PKGBUILD's `depends` (CI installs from that list, so it follows). The alternative was no player or a second app opened per file; Qt Multimedia is the one piece of Qt that plays, with the same API on every theme and no process per node. It is a QML plugin loaded when the player is first made, so a window with no video or sound, and the command line, load nothing more. Qt's FFmpeg backend logs a stream dump to stderr for every file; `main.cpp` turns that one category off (`QT_LOGGING_RULES` still wins) | 12.7, 14.2 | medium-high |
 | The player is `MediaView.qml`: a source, a kind and a label in; play state, position and signals out; it knows no canvas, node or run. The face and the large view each make one. A video holds a decoder from the moment its source is set (it shows its first frame paused), so the face sets the source only while the node is in view. No volume slider (mute only; the system's volume is the level), no loop, no speed, no fullscreen, no waveform (canvas-look 4.5 sketched one; it needs peaks the engine does not report). A Preview or Save Video of a video with pending trim or crop plays the whole file, not the edit: the edits are applied only in a saved file | 12.7, 14.2 | medium |
 | Research for #28: ComfyUI's video nodes (LoadVideo, SaveVideo, CreateVideo, GetVideoComponents, trim) and audio nodes (LoadAudio, PreviewAudio, VAE audio) were read as documentation and in the workbench note `map/research/14-comfyui-media-handling.md`; Fantasi (the Omarchy image app) and omarchy-local-ai, stable-diffusion.cpp `api.md` and acestep.cpp `docs/ARCHITECTURE.md` (MIT) for the servers. Fantasi's code was read for the protocol only; Fugue's provider is written for Fugue | 14.2, 8.7 | high |
+| Video stages (#105) reuse the image stage capabilities, the stage file format, the nodes (Text Encode, Sampler) and the provider and transports as they are: the helper picks the video call from the context, a latent's descriptor says it is a video, and only two small nodes are new (Empty Video Latent, VAE Decode Video), because an output port has one type. ComfyUI does the same: one KSampler and CLIPTextEncode for image and video, EmptyHunyuanLatentVideo / Wan22ImageToVideoLatent for the empty latent, VAEDecode giving frames that CreateVideo/SaveVideo assemble | 8.10, 14.3 | high |
+| The video leaves the helper as YUV4MPEG2 (`video.y4m`), not an encoded file or PNG frames: no codec in the helper (its build stays the pinned patch), one file for the transport, half the bytes of RGB, and ffmpeg (already required) reads it. Lossless FFV1/Matroska afterwards, as the engine keeps every intermediate video (2.4) | 8.10, 14.3 | medium-high |
+| Wan 2.2 14B's two diffusion models are one more optional part of Load Models (`high_noise`), not a second model input on the Sampler: stable-diffusion.cpp loads both in one context and switches at its `moe_boundary` itself, where ComfyUI chains two KSamplerAdvanced nodes by hand. Wan's UMT5 goes in as `t5xxl_path`, told by the file's tensors | 14.3, 8.10 | medium-high |
+| Research for #105: stable-diffusion.cpp (MIT) `docs/models/wan.md` and `docs/guides/c_api.md` at the pin (Wan 2.1 and 2.2 T2V, I2V, TI2V, VACE, S2V; `sd_generate_video`; `video_frames`, `fps`, `high_noise_*`); `src/pipeline/video.cpp` read to place the seams, as the image ones were. ComfyUI's Wan example workflows and node docs read for how it splits encode, sample and decode (its code is GPL-3.0 and was not read or copied) | 8.10, 14.3 | high |
 | Thinking is off unless asked for: Enhance Prompt never thinks, Text Generate has a Thinking switch (Advanced, off). It is sent as the chat template's switch (`chat_template_kwargs.enable_thinking`), not OpenAI's `reasoning_effort`, whose `"none"` a strict server refuses. Checked on the DGX (Qwen3.5 2B, tensorfold, 2026-11-20): thinking spent the whole default answer (4096 tokens, "low" effort too) and wrote nothing; off, a good prompt in 41 tokens. ComfyUI's Qwen3 prompt node has the same switch | 8.1, 14.2 | high |
 | A text job waits up to 300 seconds of silence (image jobs: 15 s per request): reading a long prompt or an image, or reasoning, can stream nothing for a while | 8.7 | medium |
 | Resize to Megapixels defaults its multiple to 16 (ComfyUI's resolution_steps defaults to 1): sizes then match a latent of the same picture | 14.1 | medium-high |
@@ -2709,3 +2739,4 @@ Building M4 made these further choices.
 | #32 component-level helper | 8.10, 2.6 |
 | #33 component nodes | 14.3, 2.5, 2.6, 8.9 |
 | #34 CI recipe | 17 |
+| #105 video stages in the helper and nodes | 8.10, 8.1, 2.6, 14.3 |

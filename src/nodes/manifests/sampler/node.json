@@ -3,7 +3,7 @@
   "id": "fugue/sampler",
   "version": "1.0.0",
   "name": "Sampler",
-  "description": "Denoises a latent with the model, following the conditioning: from noise for an Empty Latent, else from the latent given, by the amount Denoise sets.",
+  "description": "Denoises a latent with the model, following the conditioning: from noise for an Empty Latent or an Empty Video Latent (a clip), else from the latent given, by the amount Denoise sets.",
   "category": "Diffusion",
   "keywords": ["ksampler", "sample", "denoise", "steps", "cfg", "seed", "diffusion"],
   "runtime": {"kind": "builtin"},

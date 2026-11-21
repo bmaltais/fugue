@@ -1,0 +1,17 @@
+{
+  "manifest": 1,
+  "id": "fugue/vae-decode-video",
+  "version": "1.0.0",
+  "name": "VAE Decode Video",
+  "description": "Turns a sampled video latent into a clip, with the VAE of the model that sampled it. Lossless; Save Video encodes it.",
+  "category": "Diffusion",
+  "keywords": ["decode", "latent to video", "vae", "wan", "clip"],
+  "runtime": {"kind": "builtin"},
+  "capabilities": ["latent.decode"],
+  "inputs": [
+    {"name": "latent", "type": "fugue/latent", "label": "Latent"}
+  ],
+  "outputs": [
+    {"name": "video", "type": "video", "label": "Video"}
+  ]
+}

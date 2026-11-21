@@ -1,5 +1,5 @@
 diff --git i/src/api/options.cpp w/src/api/options.cpp
-index 591cce3..a672edd 100644
+index 591cce3..1b7f723 100644
 --- i/src/api/options.cpp
 +++ w/src/api/options.cpp
 @@ -502,6 +502,19 @@ static void add_hires_specs(std::vector<ParamSpec>& specs) {
@@ -8,7 +8,7 @@ index 591cce3..a672edd 100644
  
 +static void add_fugue_specs(std::vector<ParamSpec>& specs) {
 +    using namespace sd::api;
-+    ParamGroup fugue(specs, Image, [](sd::OptConfig& config) { return std::tie(config.image.fugue); });
++    ParamGroup fugue(specs, Image | Video, [](sd::OptConfig& config) { return std::tie(config.image.fugue, config.video.fugue); });
 +
 +    fugue.string("fugue.init_latent_in", &sd::FugueStageConfig::init_latent_in);
 +    fugue.string("fugue.init_latent_out", &sd::FugueStageConfig::init_latent_out);
@@ -31,15 +31,16 @@ index 591cce3..a672edd 100644
      add_postprocess_specs(specs);
      return specs;
 diff --git i/src/config.h w/src/config.h
-index 7331ccc..a0cd51f 100644
+index 7331ccc..40b03c1 100644
 --- i/src/config.h
 +++ w/src/config.h
-@@ -172,6 +172,18 @@ namespace sd {
+@@ -172,6 +172,19 @@ namespace sd {
          ContextConfig();
      };
  
-+    // Fugue's stage split (pipeline/fugue_stages.h): files generate_image reads in place of a
-+    // stage or writes after one, and the stage it stops after ("init", "cond" or "sample").
++    // Fugue's stage split (pipeline/fugue_stages.h): files generate_image and generate_video read in
++    // place of a stage or write after one, and the stage they stop after ("init", "cond" or
++    // "sample"; a video has no "init").
 +    struct FugueStageConfig {
 +        const char* init_latent_in{};
 +        const char* init_latent_out{};
@@ -53,13 +54,21 @@ index 7331ccc..a0cd51f 100644
      struct ImageConfig {
          const sd_lora_t* loras{};
          uint32_t lora_count{};
-@@ -203,6 +215,7 @@ namespace sd {
+@@ -203,6 +216,7 @@ namespace sd {
          bool circular_y{};
          sd::ImagePreprocessConfig image_preprocess{};
          enum sd_control_type_t control_type {};
 +        sd::FugueStageConfig fugue{};
  
          ImageConfig();
+     };
+@@ -240,6 +254,7 @@ namespace sd {
+         bool circular_y{};
+         sd::ImagePreprocessConfig image_preprocess{};
+         const char* ref_image_args{};
++        sd::FugueStageConfig fugue{};
+ 
+         VideoConfig();
      };
 diff --git i/src/extensions/generation_extension.h w/src/extensions/generation_extension.h
 index 018092e..1c15a4c 100644
@@ -153,6 +162,119 @@ index fa660c3..6809531 100644
      void before_diffusion(DiffusionParams& params, int /*step*/) const override {
          if (!enabled || id_embedding.empty()) {
              return;
+diff --git i/src/pipeline/fugue_stage_io.h w/src/pipeline/fugue_stage_io.h
+new file mode 100644
+index 0000000..a4b149e
+--- /dev/null
++++ w/src/pipeline/fugue_stage_io.h
+@@ -0,0 +1,107 @@
++// Fugue's stage split, shared by generate_image and generate_video (spec 8.10): the conditioning
++// and latent files a stage writes after it ran or reads in place of running it. The file layout is
++// fugue_stages.h.
++#ifndef __SD_PIPELINE_FUGUE_STAGE_IO_H__
++#define __SD_PIPELINE_FUGUE_STAGE_IO_H__
++
++#include <string>
++#include <vector>
++
++#include "diffusion_engine.h"
++#include "extensions/generation_extension.h"
++#include "fugue_stages.h"
++#include "generation.h"
++#include "request.h"
++
++namespace sd::pipeline {
++
++    // Fugue's stage split (fugue_stages.h): conditioning and latents written after a stage of
++    // generate_image, or read in place of running it.
++    inline bool fugue_fail(const fugue_stages::File& f, const char* what, const char* path) {
++        LOG_ERROR("fugue: %s '%s': %s", what, path, f.error.empty() ? "cannot write" : f.error.c_str());
++        return false;
++    }
++
++    inline bool fugue_check_kind(fugue_stages::File& f, StableDiffusionGGML* sd, const char* kind) {
++        if (f.meta["kind"] != kind) {
++            return f.fail(std::string("not a ") + kind + " file");
++        }
++        if (f.meta["version"] != sd_version_name(sd->version)) {
++            return f.fail("made for " + f.meta["version"] + ", not " + sd_version_name(sd->version));
++        }
++        return true;
++    }
++
++    inline bool fugue_save_cond(StableDiffusionGGML* sd, const ImageGenerationEmbeds& embeds, const char* path) {
++        fugue_stages::File f;
++        f.meta["kind"]    = "fugue/conditioning";
++        f.meta["version"] = sd_version_name(sd->version);
++        fugue_stages::put_cond(f, "cond", embeds.cond);
++        fugue_stages::put_cond(f, "uncond", embeds.uncond);
++        fugue_stages::put_cond(f, "img_uncond", embeds.img_uncond);
++        if (!sd->ip_adapter_tokens.empty()) {
++            fugue_stages::put(f, "ip_adapter.tokens", sd->ip_adapter_tokens);
++            fugue_stages::put(f, "ip_adapter.uncond_tokens", sd->ip_adapter_uncond_tokens);
++            fugue_stages::put_float(f, "ip_adapter.strength", sd->ip_adapter_strength);
++        }
++        for (const auto& extension : sd->generation_extensions) {
++            extension->save_condition(f);
++        }
++        return fugue_stages::write_file(path, f) || fugue_fail(f, "cannot write conditioning", path);
++    }
++
++    inline bool fugue_load_cond(StableDiffusionGGML* sd, ImageGenerationEmbeds& embeds, const char* path) {
++        fugue_stages::File f;
++        sd->reset_generation_extensions();
++        sd->ip_adapter_tokens        = {};
++        sd->ip_adapter_uncond_tokens = {};
++        bool ok = fugue_stages::read_file(path, f) && fugue_check_kind(f, sd, "fugue/conditioning") &&
++                  fugue_stages::get_cond(f, "cond", embeds.cond) && fugue_stages::get_cond(f, "uncond", embeds.uncond) &&
++                  fugue_stages::get_cond(f, "img_uncond", embeds.img_uncond) &&
++                  fugue_stages::get(f, "ip_adapter.tokens", sd->ip_adapter_tokens) &&
++                  fugue_stages::get(f, "ip_adapter.uncond_tokens", sd->ip_adapter_uncond_tokens) &&
++                  fugue_stages::get_float(f, "ip_adapter.strength", sd->ip_adapter_strength);
++        if (ok && !sd->ip_adapter_tokens.empty() && sd->ip_adapter == nullptr) {
++            ok = f.fail("the conditioning uses IP-Adapter, which this context did not load");
++        }
++        for (const auto& extension : sd->generation_extensions) {
++            ok = ok && extension->load_condition(f);
++        }
++        return ok || fugue_fail(f, "cannot read conditioning", path);
++    }
++
++    // `video_frames` > 0 for a video latent: its frame count and rate go to the descriptor too.
++    inline bool fugue_save_latents(StableDiffusionGGML* sd,
++                                   const std::vector<sd::Tensor<float>>& latents,
++                                   const GenerationRequest& request,
++                                   const char* path,
++                                   int video_frames = 0,
++                                   int video_fps    = 0) {
++        fugue_stages::File f;
++        f.meta["kind"]    = "fugue/latent";
++        f.meta["version"] = sd_version_name(sd->version);
++        // The image size, for Fugue's latent descriptor (spec 2.6); decoding reads the tensor's shape.
++        f.meta["width"]   = std::to_string(request.width);
++        f.meta["height"]  = std::to_string(request.height);
++        if (video_frames > 0) {
++            f.meta["frames"] = std::to_string(video_frames);
++            f.meta["fps"]    = std::to_string(video_fps);
++        }
++        fugue_stages::put_list(f, "latent", latents);
++        return fugue_stages::write_file(path, f) || fugue_fail(f, "cannot write latent", path);
++    }
++
++    inline bool fugue_load_latents(StableDiffusionGGML* sd, std::vector<sd::Tensor<float>>& latents, const char* path) {
++        fugue_stages::File f;
++        bool ok = fugue_stages::read_file(path, f) && fugue_check_kind(f, sd, "fugue/latent") &&
++                  fugue_stages::get_list(f, "latent", latents);
++        for (const auto& latent : latents) {
++            ok = ok && (!latent.empty() || f.fail("an empty latent"));
++        }
++        ok = ok && (!latents.empty() || f.fail("no latent"));
++        return ok || fugue_fail(f, "cannot read latent", path);
++    }
++
++}  // namespace sd::pipeline
++
++#endif  // __SD_PIPELINE_FUGUE_STAGE_IO_H__
 diff --git i/src/pipeline/fugue_stages.h w/src/pipeline/fugue_stages.h
 new file mode 100644
 index 0000000..2febfec
@@ -476,7 +598,7 @@ index 0000000..2febfec
 +
 +#endif  // __SD_PIPELINE_FUGUE_STAGES_H__
 diff --git i/src/pipeline/image.cpp w/src/pipeline/image.cpp
-index f2cdcea..1a3c0c1 100644
+index f2cdcea..68a8cb6 100644
 --- i/src/pipeline/image.cpp
 +++ w/src/pipeline/image.cpp
 @@ -10,6 +10,8 @@
@@ -484,7 +606,7 @@ index f2cdcea..1a3c0c1 100644
  #include "core/rng.hpp"
  #include "diffusion_engine.h"
 +#include "extensions/generation_extension.h"
-+#include "fugue_stages.h"
++#include "fugue_stage_io.h"
  #include "model/vae/vae.hpp"
  #include "pipeline/image_upscale.h"
  #include "request.h"
@@ -510,94 +632,7 @@ index f2cdcea..1a3c0c1 100644
          }
  
          if (sd_img_gen_params->mask_image.data != nullptr) {
-@@ -916,6 +920,86 @@ namespace sd::pipeline {
-         return {};
-     }
- 
-+    // Fugue's stage split (fugue_stages.h): conditioning and latents written after a stage of
-+    // generate_image, or read in place of running it.
-+    static bool fugue_fail(const fugue_stages::File& f, const char* what, const char* path) {
-+        LOG_ERROR("fugue: %s '%s': %s", what, path, f.error.empty() ? "cannot write" : f.error.c_str());
-+        return false;
-+    }
-+
-+    static bool fugue_check_kind(fugue_stages::File& f, StableDiffusionGGML* sd, const char* kind) {
-+        if (f.meta["kind"] != kind) {
-+            return f.fail(std::string("not a ") + kind + " file");
-+        }
-+        if (f.meta["version"] != sd_version_name(sd->version)) {
-+            return f.fail("made for " + f.meta["version"] + ", not " + sd_version_name(sd->version));
-+        }
-+        return true;
-+    }
-+
-+    static bool fugue_save_cond(StableDiffusionGGML* sd, const ImageGenerationEmbeds& embeds, const char* path) {
-+        fugue_stages::File f;
-+        f.meta["kind"]    = "fugue/conditioning";
-+        f.meta["version"] = sd_version_name(sd->version);
-+        fugue_stages::put_cond(f, "cond", embeds.cond);
-+        fugue_stages::put_cond(f, "uncond", embeds.uncond);
-+        fugue_stages::put_cond(f, "img_uncond", embeds.img_uncond);
-+        if (!sd->ip_adapter_tokens.empty()) {
-+            fugue_stages::put(f, "ip_adapter.tokens", sd->ip_adapter_tokens);
-+            fugue_stages::put(f, "ip_adapter.uncond_tokens", sd->ip_adapter_uncond_tokens);
-+            fugue_stages::put_float(f, "ip_adapter.strength", sd->ip_adapter_strength);
-+        }
-+        for (const auto& extension : sd->generation_extensions) {
-+            extension->save_condition(f);
-+        }
-+        return fugue_stages::write_file(path, f) || fugue_fail(f, "cannot write conditioning", path);
-+    }
-+
-+    static bool fugue_load_cond(StableDiffusionGGML* sd, ImageGenerationEmbeds& embeds, const char* path) {
-+        fugue_stages::File f;
-+        sd->reset_generation_extensions();
-+        sd->ip_adapter_tokens        = {};
-+        sd->ip_adapter_uncond_tokens = {};
-+        bool ok = fugue_stages::read_file(path, f) && fugue_check_kind(f, sd, "fugue/conditioning") &&
-+                  fugue_stages::get_cond(f, "cond", embeds.cond) && fugue_stages::get_cond(f, "uncond", embeds.uncond) &&
-+                  fugue_stages::get_cond(f, "img_uncond", embeds.img_uncond) &&
-+                  fugue_stages::get(f, "ip_adapter.tokens", sd->ip_adapter_tokens) &&
-+                  fugue_stages::get(f, "ip_adapter.uncond_tokens", sd->ip_adapter_uncond_tokens) &&
-+                  fugue_stages::get_float(f, "ip_adapter.strength", sd->ip_adapter_strength);
-+        if (ok && !sd->ip_adapter_tokens.empty() && sd->ip_adapter == nullptr) {
-+            ok = f.fail("the conditioning uses IP-Adapter, which this context did not load");
-+        }
-+        for (const auto& extension : sd->generation_extensions) {
-+            ok = ok && extension->load_condition(f);
-+        }
-+        return ok || fugue_fail(f, "cannot read conditioning", path);
-+    }
-+
-+    static bool fugue_save_latents(StableDiffusionGGML* sd,
-+                                   const std::vector<sd::Tensor<float>>& latents,
-+                                   const GenerationRequest& request,
-+                                   const char* path) {
-+        fugue_stages::File f;
-+        f.meta["kind"]    = "fugue/latent";
-+        f.meta["version"] = sd_version_name(sd->version);
-+        // The image size, for Fugue's latent descriptor (spec 2.6); decoding reads the tensor's shape.
-+        f.meta["width"]   = std::to_string(request.width);
-+        f.meta["height"]  = std::to_string(request.height);
-+        fugue_stages::put_list(f, "latent", latents);
-+        return fugue_stages::write_file(path, f) || fugue_fail(f, "cannot write latent", path);
-+    }
-+
-+    static bool fugue_load_latents(StableDiffusionGGML* sd, std::vector<sd::Tensor<float>>& latents, const char* path) {
-+        fugue_stages::File f;
-+        bool ok = fugue_stages::read_file(path, f) && fugue_check_kind(f, sd, "fugue/latent") &&
-+                  fugue_stages::get_list(f, "latent", latents);
-+        for (const auto& latent : latents) {
-+            ok = ok && (!latent.empty() || f.fail("an empty latent"));
-+        }
-+        ok = ok && (!latents.empty() || f.fail("no latent"));
-+        return ok || fugue_fail(f, "cannot read latent", path);
-+    }
-+
-     bool generate_image(StableDiffusionGGML* sd,
-                         const sd::ImageConfig* sd_img_gen_params,
-                         sd::Image** images_out,
-@@ -974,20 +1058,69 @@ namespace sd::pipeline {
+@@ -974,20 +978,69 @@ namespace sd::pipeline {
              return false;
          }
          ImageGenerationLatents latents = std::move(*latents_opt);
@@ -677,7 +712,7 @@ index f2cdcea..1a3c0c1 100644
              sd_cancel_mode_t cancel = sd->get_cancel_flag();
              if (cancel == SD_CANCEL_ALL) {
                  LOG_ERROR("cancelling generation");
-@@ -1055,7 +1188,7 @@ namespace sd::pipeline {
+@@ -1055,7 +1108,7 @@ namespace sd::pipeline {
              return false;
          }
  
@@ -686,7 +721,7 @@ index f2cdcea..1a3c0c1 100644
              if (sd->get_cancel_flag() == SD_CANCEL_ALL) {
                  LOG_ERROR("cancelling generation before hires fix");
                  return false;
-@@ -1201,6 +1334,13 @@ namespace sd::pipeline {
+@@ -1201,6 +1254,13 @@ namespace sd::pipeline {
  
              final_latents = std::move(hires_final_latents);
          }
@@ -700,6 +735,128 @@ index f2cdcea..1a3c0c1 100644
  
          int num_images = 0;
          auto result    = decode_image_outputs(sd, request, final_latents, &num_images);
+diff --git i/src/pipeline/video.cpp w/src/pipeline/video.cpp
+index 529bbb6..1791351 100644
+--- i/src/pipeline/video.cpp
++++ w/src/pipeline/video.cpp
+@@ -1,3 +1,4 @@
++#include "api/result.h"
+ #include "core/option_types.h"
+ #include "generation.h"
+ #include "generation_info.h"
+@@ -12,6 +13,7 @@
+ #include "core/rng.hpp"
+ #include "core/rng_philox.hpp"
+ #include "diffusion_engine.h"
++#include "fugue_stage_io.h"
+ #include "model/diffusion/minimax_h3.hpp"
+ #include "model/upscaler/h3_latent_upscaler.hpp"
+ #include "model/upscaler/ltx_latent_upscaler.hpp"
+@@ -1902,6 +1904,52 @@ namespace sd::pipeline {
+             return false;
+         sd->reset_generation_extensions();
+ 
++        // Fugue's stage split (fugue_stage_io.h): encode stops after the conditioning, sample reads
++        // it and stops after the latent, decode reads the latent. Video has no init stage.
++        const sd::FugueStageConfig& fugue = sd_vid_gen_params->fugue;
++        const std::string stop_after      = SAFE_STR(fugue.stop_after);
++        const bool staged                 = fugue.cond_in != nullptr || fugue.cond_out != nullptr || fugue.latent_in != nullptr ||
++                            fugue.latent_out != nullptr || !stop_after.empty();
++        if (!stop_after.empty() && stop_after != "cond" && stop_after != "sample") {
++            LOG_ERROR("fugue: unknown stage '%s' to stop after for a video; use cond or sample", stop_after.c_str());
++            return false;
++        }
++        if (fugue.init_latent_in != nullptr || fugue.init_latent_out != nullptr) {
++            LOG_ERROR("fugue: a video has no init latent stage");
++            return false;
++        }
++        if (staged && (latent_upscale_enabled || sd_version_is_ltxav(sd->version) || sd_version_is_minimax_h3(sd->version) ||
++                       sd->version == VERSION_WAN2_2_S2V)) {
++            LOG_ERROR("fugue: %s cannot run in stages (latent upscale or audio)", sd_version_name(sd->version));
++            return false;
++        }
++        const auto stage_done = [&]() {
++            if (info_out)
++                *info_out = info;
++            return true;
++        };
++        if (fugue.latent_in != nullptr) {
++            std::vector<sd::Tensor<float>> loaded;
++            if (!fugue_load_latents(sd, loaded, fugue.latent_in))
++                return false;
++            if (loaded.size() != 1) {
++                LOG_ERROR("fugue: the latent '%s' holds %zu latents, not one", fugue.latent_in, loaded.size());
++                return false;
++            }
++            auto decoded = decode_video_outputs(sd, request, loaded[0], num_frames_out);
++            if (decoded == nullptr)
++                return false;
++            if (info_out)
++                *info_out = info;
++            if (frames_out != nullptr) {
++                *frames_out = decoded;
++            } else {
++                sd::free_images(decoded, num_frames_out != nullptr ? *num_frames_out : 0);
++            }
++            LOG_INFO("generate_video (decode) completed in %.2fs", (ggml_time_ms() - t0) * 1.0f / 1000);
++            return true;
++        }
++
+         SamplePlan plan(sd, sd_vid_gen_params, request);
+         sd->generation_progress.report("preparing", "inputs");
+         auto latent_inputs_opt = prepare_video_generation_latents(sd, sd_vid_gen_params, &request, ref_image_params);
+@@ -1910,15 +1958,28 @@ namespace sd::pipeline {
+         }
+         ImageGenerationLatents latents = std::move(*latent_inputs_opt);
+ 
+-        auto embeds_opt = prepare_video_generation_embeds(sd,
+-                                                          sd_vid_gen_params,
+-                                                          request,
+-                                                          latents,
+-                                                          ref_image_params);
+-        if (!embeds_opt) {
+-            return false;
++        ImageGenerationEmbeds embeds;
++        if (fugue.cond_in != nullptr) {
++            if (!fugue_load_cond(sd, embeds, fugue.cond_in))
++                return false;
++        } else {
++            auto embeds_opt = prepare_video_generation_embeds(sd,
++                                                              sd_vid_gen_params,
++                                                              request,
++                                                              latents,
++                                                              ref_image_params);
++            if (!embeds_opt) {
++                return false;
++            }
++            embeds = std::move(*embeds_opt);
++        }
++        if (fugue.cond_out != nullptr) {
++            if (!fugue_save_cond(sd, embeds, fugue.cond_out))
++                return false;
++        }
++        if (stop_after == "cond") {
++            return stage_done();
+         }
+-        ImageGenerationEmbeds embeds = std::move(*embeds_opt);
+         if (latent_upscale_enabled) {
+             LOG_INFO("generate_video %dx%dx%d -> video latent spatial upscale",
+                      request.width,
+@@ -2027,6 +2088,14 @@ namespace sd::pipeline {
+         }
+         LOG_INFO("sampling completed, taking %.2fs", (sampling_end - sampling_start) * 1.0f / 1000);
+ 
++        if (fugue.latent_out != nullptr) {
++            if (!fugue_save_latents(sd, {final_latent}, request, fugue.latent_out, request.frames, request.fps))
++                return false;
++        }
++        if (stop_after == "sample") {
++            return stage_done();
++        }
++
+         if (latent_upscale_enabled) {
+             if (sd->get_cancel_flag() == SD_CANCEL_ALL) {
+                 LOG_ERROR("cancelling generation before latent upscale");
 diff --git i/src/stable-diffusion.cpp w/src/stable-diffusion.cpp
 index acc3672..f7ad89c 100644
 --- i/src/stable-diffusion.cpp

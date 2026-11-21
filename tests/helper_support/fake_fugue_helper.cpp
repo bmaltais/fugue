@@ -11,6 +11,8 @@
 // A finished job writes one file into output_dir, named by what the capability makes
 // (conditioning.bin, latent.bin, image.png). The .bin files hold the job's params without
 // "fake" as compact JSON, so a file differs whenever what made it does; the image is a 1x1 PNG.
+// A decode with a "video_frames" param (a video model) writes video.y4m instead, as the real
+// helper does: two 16x16 gray frames at 8 a second.
 // With FAKE_HELPER_LOG set, it appends "start <pid>", "job <capability>" and "shutdown" lines
 // to that file.
 
@@ -175,16 +177,24 @@ private:
             return over(QStringLiteral("error"),
                         {{"error", QJsonObject{{"code", fake.value("fail")}, {"message", "the fake failed as asked"}}}});
         const QString capability = job->request.value("capability").toString();
-        const QString name = capability == QLatin1String("text.encode")    ? QStringLiteral("conditioning")
+        const bool video = capability == QLatin1String("latent.decode") && params.contains("video_frames");
+        const QString name = capability == QLatin1String("text.encode") ? QStringLiteral("conditioning")
+                             : video                                      ? QStringLiteral("video")
                              : capability == QLatin1String("latent.decode") ? QStringLiteral("image")
                                                                             : QStringLiteral("latent");
         const QString file = QDir(job->request.value("output_dir").toString())
-                                 .filePath(name + (name == QLatin1String("image") ? ".png" : ".bin"));
+                                 .filePath(name + (video ? ".y4m" : name == QLatin1String("image") ? ".png" : ".bin"));
         QFile out(file);
         if (!out.open(QIODevice::WriteOnly))
             return over(QStringLiteral("error"),
                         {{"error", QJsonObject{{"code", "helper_failed"}, {"message", "cannot write " + file}}}});
-        if (name == QLatin1String("image")) {
+        if (video) {
+            out.write("YUV4MPEG2 W16 H16 F8:1 Ip A1:1 C420jpeg\n");
+            for (int frame = 0; frame < 2; ++frame) {
+                out.write("FRAME\n");
+                out.write(QByteArray(16 * 16 + 2 * 8 * 8, char(128)));
+            }
+        } else if (name == QLatin1String("image")) {
             out.write(QByteArray::fromBase64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="));
         } else {
             QJsonObject made = params;
