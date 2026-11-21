@@ -43,6 +43,13 @@ FocusScope {
     property bool breadcrumbShown: true
     property bool runPillShown: true
     property bool zoomPillShown: true
+    // What floats over the canvas, the run toolbar's box (an Item in this canvas's coordinates),
+    // or null: Fit keeps the nodes out from under it (reservedTop, reservedBottom).
+    property Item floatingBar: null
+    readonly property real barGap: 2 * look.unit
+    readonly property bool barAtTop: floatingBar !== null && floatingBar.y + floatingBar.height / 2 < height / 2
+    readonly property real reservedTop: barAtTop ? floatingBar.y + floatingBar.height + barGap : 0
+    readonly property real reservedBottom: floatingBar !== null && !barAtTop ? height - floatingBar.y + barGap : 0
     readonly property real minZoom: 0.1
     readonly property real maxZoom: 4
     readonly property alias zoom: world.scale
@@ -299,6 +306,15 @@ FocusScope {
         const c = toWorld(width / 2, height / 2)
         model.setView(c.x, c.y, world.scale)
     }
+    property bool fitOnReset: false
+    function fitUnlessViewed() {
+        if (model.view.zoom === undefined)
+            fit()
+    }
+    function fit() {
+        if (model.fitView(width, height, reservedTop, reservedBottom))
+            applyView()
+    }
     function applyView() {
         const v = model.view
         world.scale = v.zoom !== undefined ? v.zoom : 1
@@ -345,13 +361,20 @@ FocusScope {
     Component.onCompleted: applyView()
     Connections {
         target: canvas.model
-        function onDocumentReset() { canvas.applyView() }
+        // A workflow put in (opened, or a tab switched to) with no saved view is fitted, as View > Fit
+        // does (#162); documentReplaced comes just before the documentReset that follows it.
+        function onDocumentReplaced() { canvas.fitOnReset = true }
+        function onDocumentReset() {
+            canvas.applyView()
+            // Not at once: the opener goes on (it checks the workflow, which changes the nodes' heights)
+            // and the fit comes after, if the view is still unset then.
+            if (canvas.fitOnReset && canvas.model.view.zoom === undefined)
+                Qt.callLater(canvas.fitUnlessViewed)
+            canvas.fitOnReset = false
+        }
         function onViewMoveRequested() { canvas.applyView() }
         function onZoomRequested(factor) { canvas.zoomAt(canvas.width / 2, canvas.height / 2, factor) }
-        function onFitRequested() {
-            if (canvas.model.fitView(canvas.width, canvas.height))
-                canvas.applyView()
-        }
+        function onFitRequested() { canvas.fit() }
     }
 
     // Esc closes the drop list or a pinned warnings card first, before the window's keys (Leave

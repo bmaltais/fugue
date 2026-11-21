@@ -329,6 +329,14 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Keys: the browser takes Left, Right, Up, Down, PageUp, PageDown, Home, End, Enter, Escape and I through `onShortcutOverride`, so the window's own shortcuts (Home fits the view) do not take them while it has the focus; Escape goes back to the grid, then closes the panel.
 - Not checked by a person: the layout at the panel's narrowest width (200px: the buttons wrap) and in a light theme.
 
+### 2026-11-21 fit on open, clear of the run toolbar (#162)
+
+- Control: none added. `FugueCanvas.qml` `fit()` (View > Fit, `view.fit`) and the same fit when a workflow with no saved view is put in; `floatingBar` is the run toolbar's box, set by `Main.qml`.
+- Old: a template opened at 100%, nodes cut off at the edge and under the run toolbar; Fit used the whole canvas, so the bar still covered the top row.
+- New: the nodes fill three quarters of the canvas without the band the bar covers (its box and 2u, on the top or bottom edge, whichever it is on); the canvas already starts after the 44px tab strip and a docked panel. A saved view is kept.
+- Why: the first look at a workflow is recognition (Hick): the whole graph is in view and none of it is behind a control (Fitts: a node under the bar cannot be reached by the pointer).
+- Rule: no new control, so Floor, Primary, Gaps and Destructive do not apply. Learned place: Fit's key and menu entry are unchanged. Posture: the canvas keeps its density.
+
 ### 2026-11-21 scroll bars on every scrolling surface
 
 - Control: `src/canvas/FugueScrollBar.qml` (`fugueScrollBar`), on the lists and panels named in canvas-look 16.1; replaces the plain Material `ScrollBar {}`, the AlwaysOn-when-long copies and the CommandMenu's ScrollIndicator. The widget menu's list also takes Home and End when it has the keys (a menu with no search field).

@@ -161,6 +161,7 @@ ApplicationWindow {
                 Layout.leftMargin: win.stripWidth + win.sidePanelMargin("left")
                 Layout.rightMargin: win.sidePanelMargin("right")
                 model: App.canvasModel
+                floatingBar: (win.runToolbarItem as RunToolbar)?.surface ?? null
                 navigation: win.appSettingsModel ? win.appSettingsModel.navigation : "legacy"
                 hoverMagnifier: win.appSettingsModel ? win.appSettingsModel.hoverMagnifier : false
                 selectionToolbarShown: win.chromeIsShown("selection-toolbar")

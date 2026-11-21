@@ -1006,16 +1006,21 @@ void CanvasModel::setPointer(const QVariant &point) {
 
 // --- view ----------------------------------------------------------------------
 
-bool CanvasModel::fitView(qreal width, qreal height) {
+bool CanvasModel::fitView(qreal width, qreal height, qreal reservedTop, qreal reservedBottom) {
     QStringList ids = selectedIds();
     if (ids.isEmpty())
         for (const NodeRow &row : m_rows)
             ids << row.id;
     const QRectF bounds = boundsOf(ids);
-    if (bounds.isEmpty() || width <= 0 || height <= 0)
+    // What floats over the canvas's top or bottom edge (the run toolbar) is not room for nodes.
+    const qreal room = height - reservedTop - reservedBottom;
+    if (bounds.isEmpty() || width <= 0 || room <= 0)
         return false;
-    // The bounds fill three quarters of the canvas, a margin all round.
-    const qreal zoom = std::clamp(std::min(width / bounds.width(), height / bounds.height()) * 0.75, minZoom, maxZoom);
-    m_view = {{"center", QVariantList{bounds.center().x(), bounds.center().y()}}, {"zoom", zoom}};
+    // The bounds fill three quarters of the room, a margin all round.
+    const qreal zoom = std::clamp(std::min(width / bounds.width(), room / bounds.height()) * 0.75, minZoom, maxZoom);
+    // The room's middle is not the canvas's: the world point at the canvas's middle sits that far
+    // (in pixels) from the bounds' center.
+    const qreal shift = (reservedTop - reservedBottom) / 2 / zoom;
+    m_view = {{"center", QVariantList{bounds.center().x(), bounds.center().y() - shift}}, {"zoom", zoom}};
     return true;
 }
