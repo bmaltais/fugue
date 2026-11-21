@@ -10,6 +10,7 @@
     "apply-lora",
     "blend",
     "blur",
+    "compare-images",
     "brightness-contrast",
     "crop",
     "edit-image",

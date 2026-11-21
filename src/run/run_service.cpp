@@ -497,8 +497,13 @@ private:
             if (const QJsonObject t = thumbnailOf(image, dir); !t.isEmpty())
                 thumbnails.insert("preview", t);
         } else if (kind == QLatin1String("node.done") || kind == QLatin1String("node.cached")) {
+            // A sink with outputs (Compare Images) shows its inputs beside them: those thumbnails
+            // come as `inputThumbnails`, so they never stand in for an output's.
+            QJsonObject inputThumbnails;
+            const bool hasOutputs = !e.value("outputs").toObject().isEmpty();
             for (const char *part : {"outputs", "shown"}) {
                 const QJsonObject values = e.value(QLatin1String(part)).toObject();
+                QJsonObject &into = hasOutputs && QLatin1String(part) == QLatin1String("shown") ? inputThumbnails : thumbnails;
                 for (auto it = values.begin(); it != values.end(); ++it) {
                     QJsonObject t = isImage(it.value()) ? thumbnailOf(it.value().toObject(), m_thumbnails)
                                                         : mediaLabel(it.value().toObject());
@@ -507,9 +512,11 @@ private:
                     // The file a sink wrote (Save Image): its name goes under the picture.
                     if (it.value().toObject().contains("path"))
                         t.insert("file", QFileInfo(it.value().toObject().value("path").toString()).fileName());
-                    thumbnails.insert(it.key(), t);
+                    into.insert(it.key(), t);
                 }
             }
+            if (!inputThumbnails.isEmpty())
+                e.insert("inputThumbnails", inputThumbnails);
         }
         if (!thumbnails.isEmpty())
             e.insert("thumbnails", thumbnails);

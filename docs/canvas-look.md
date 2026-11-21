@@ -187,6 +187,12 @@ in `text`, Medium, elided.
 | Loading | `asynchronous: true`, `sourceSize.width = min(512, 2 × displayed width)`, `mipmap: true`, `cache: false` |
 | New result | cross-fades over the old one (150 ms); while a node runs, the previous result stays at 50% opacity |
 
+A Compare Images node (#62) puts its viewer (`CompareView.qml`) in this slot, same position and size
+(A's aspect), at full detail only; zoomed out, A's thumbnail is drawn as above. The viewer is square
+(no rounded corner, as it clips two pictures), its picture on `well`; the divider is a 2 px white line
+with a 60% black grip; the A and B labels and the size notice are chips like the info chip, the notice
+amber when the sizes differ.
+
 Rounding an `Image` needs a mask: use one small `ShaderEffect` (a rounded-rect alpha in the fragment
 shader, compiled with `qt_add_shaders`) only when the thumbnail corner is above 0. Never
 `layer.enabled` or `MultiEffect` masking per thumbnail.

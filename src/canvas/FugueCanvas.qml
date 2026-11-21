@@ -599,6 +599,13 @@ FocusScope {
                 canvas.model.frameRenameRequested(frame)
                 return
             }
+            // A double click on a Compare Images node's picture opens the large view (#62).
+            if (hit !== "" && port.node === undefined && canvas.model.isCompare(hit)
+                    && canvas.model.compareResult(hit).a !== undefined) {
+                canvas.model.endMove()
+                canvas.openCompare(hit)
+                return
+            }
             if (hit === "" && port.node === undefined)
                 canvas.searchRequested(w.x, w.y)
         }
@@ -632,6 +639,34 @@ FocusScope {
     function frameTitleAt(w) {
         const band = Math.max(model.headerHeight, frameTitleWorld + 4 * look.unit / Math.min(1, world.scale))
         return model.frameAt(w.x, w.y, band)
+    }
+
+    // The large view of a Compare Images node (#62): its viewer on the full files.
+    function openCompare(node) {
+        // Made on the first use: the window keeps its item budget (#5).
+        if (!compareDialog)
+            compareDialog = compareDialogComponent.createObject(canvas, {canvasModel: canvas.model})
+        compareDialog.openFor(node)
+    }
+    function copyCompareView(node) {
+        let viewer = compareDialog && compareDialog.visible && compareDialog.nodeId === node ? compareDialog.viewer : null
+        for (let i = 0; !viewer && i < nodes.count; ++i) {
+            const item = nodes.itemAt(i) as CanvasNode
+            if (item && item.nodeId === node)
+                viewer = item.compareItem
+        }
+        if (viewer)
+            viewer.grab(result => App.imageActions.copyImage(result.image))
+    }
+    // Copy view (compare.copy-view): the viewer open in the large view, else the node's own.
+    Connections {
+        target: App.imageActions
+        function onViewCopyRequested(node) { canvas.copyCompareView(node) }
+    }
+    property var compareDialog: null
+    Component {
+        id: compareDialogComponent
+        CompareDialog {}
     }
 
     function startPan() {

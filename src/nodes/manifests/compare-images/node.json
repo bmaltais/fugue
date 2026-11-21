@@ -1,0 +1,22 @@
+{
+  "manifest": 1,
+  "id": "fugue/compare-images",
+  "version": "1.0.0",
+  "name": "Compare Images",
+  "description": "Compare two images, A and B, on the node: wipe with a slider, side by side, flip between them, or see the difference, with linked zoom and pan. B is fitted to A (bicubic, center crop, as the nodes that take two images do). The outputs are the amplified difference |A - B| and the composite of the chosen mode, for saving; the node writes no file itself.",
+  "category": "Image",
+  "keywords": ["ab", "a/b", "diff", "difference", "before", "after", "slider", "wipe", "viewer", "side by side"],
+  "sink": true,
+  "runtime": {"kind": "builtin"},
+  "inputs": [
+    {"name": "a", "type": "image", "label": "A"},
+    {"name": "b", "type": "image", "label": "B"},
+    {"name": "mode", "type": "text", "label": "Mode", "default": "slider", "choices": ["slider", "slider_horizontal", "side_by_side", "a", "b", "difference"]},
+    {"name": "position", "type": "number", "label": "Position", "default": 0.5, "min": 0, "max": 1, "step": 0.01, "widget": "slider"},
+    {"name": "gain", "type": "number", "label": "Difference gain", "default": 4, "min": 0, "max": 64, "step": 0.5}
+  ],
+  "outputs": [
+    {"name": "difference", "type": "image", "label": "Difference"},
+    {"name": "composite", "type": "image", "label": "Composite"}
+  ]
+}

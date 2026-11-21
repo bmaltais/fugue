@@ -130,6 +130,8 @@ public:
         ThumbnailText, // text in the thumbnail's place: a shown text or number, a label ("Video · 0:04")
         ThumbnailDim,  // drawn at half strength: a placeholder ("No result yet"), or the last run's
                        // picture while the node runs again, until this run's preview comes
+        Compare,       // a Compare Images node's result: {a, b, difference, composite: {url, source, width, height}, labelA, labelB}, else empty
+        CompareView,   // its viewer's state (compareView), session only
         Notice,        // why the node cannot run now and how to fix it (8.5), from a check
         UpdateAvailable, // a group whose library version is newer: that version (5.3), else empty
         GroupSize,       // a group instance: how many nodes its definition holds (its caption row), else 0
@@ -484,6 +486,26 @@ public:
     void setRunProgress(const QString &node, qreal progress);
     // The node's title as the canvas shows it; empty when there is no such node.
     Q_INVOKABLE QString nodeTitle(const QString &node) const;
+
+    // A Compare Images node's viewer (#62): what a person changed on it, kept here so the node's
+    // face, the large view and the keys share one state. It is session state, like a node's
+    // last result: no undo step, no unsaved mark, not in the workflow file. Keys: mode
+    // ("slider", "slider_horizontal", "side_by_side", "flip", "difference"), position (0..1),
+    // showB, zoom (1 = fit), actual (1:1), centerX, centerY. Unset keys start from the node's own
+    // Mode and Position widgets.
+    Q_INVOKABLE bool isCompare(const QString &node) const;
+    Q_INVOKABLE QVariantMap compareView(const QString &node) const;
+    // Its last result's pictures (the `compare` role): a, b, difference, composite and the labels.
+    Q_INVOKABLE QVariantMap compareResult(const QString &node) const { return m_run.value(node).compare; }
+    Q_INVOKABLE void setCompareView(const QString &node, const QVariantMap &changes);
+    // One of "flip", "next-mode", "fit", "actual" on the node, as the keys do. False when the
+    // node is no Compare Images or the step is unknown.
+    bool compareStep(const QString &node, const QString &step);
+    // The one selected node when it is a Compare Images, else empty.
+    QString selectedCompare() const;
+signals:
+    void compareViewChanged(const QString &node);
+public:
     // The seam for #49 (node size): the pixel size of the node's last image (setRunState's
     // `thumbnailSize`), empty without one. previewSizeChanged(node) fires when a thumbnail
     // comes, goes or changes size, after the node's rows were laid out again with it.
@@ -748,6 +770,7 @@ private:
         QString thumbnailFile;
         QString thumbnailText;
         bool thumbnailDim = false;
+        QVariantMap compare;
         QVariantMap values;
         QString notice;
     };
@@ -837,6 +860,7 @@ private:
     qreal m_padBottom = 8;      // 2u
     qreal m_defaultWidth = 240; // 60u
     QHash<QString, RunInfo> m_run;
+    QHash<QString, QVariantMap> m_compareView; // a Compare Images node's viewer state, never saved
 
     QVariantMap m_drag;
     QSet<QString> m_dragUnreachable; // nodes the dragged link would make a cycle with

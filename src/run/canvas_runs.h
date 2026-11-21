@@ -97,6 +97,9 @@ public:
     // names), for Open, Copy and Save Image; empty when it shows none or the file is gone.
     // Never the thumbnail, which is a 512 px copy.
     Q_INVOKABLE QString imageFile(const QString &node) const;
+    // The full file of one picture of a Compare Images node ("a", "b", "difference" or
+    // "composite"), empty when there is none or the file is gone.
+    Q_INVOKABLE QString compareFile(const QString &node, const QString &which) const;
     // The picture the shown workflow last made, for a shared package's preview (#91): the newest
     // result a Save Image or Preview shows; empty when none shows one.
     Q_INVOKABLE QString lastPicture() const;
@@ -126,6 +129,7 @@ private:
         QVariantMap values;
         QString thumbnailFile; // the file a sink wrote, named under its picture
         QString imagePath;     // the full image behind `thumbnail`, for Open, Copy and Save Image
+        QVariantMap compare;   // Compare Images: a, b, difference, composite ({url, source, width, height})
         bool live = false;     // `thumbnail` is a preview of the run going on now (9.4)
         QString text;          // a text, number or media label shown in the slot
         qreal textAspect = 0.5;
@@ -173,6 +177,8 @@ private:
     struct NodeInfo {
         bool showsResult = false; // Preview, Save Image: a placeholder until a result comes
         bool savesFile = false;   // Save Image: its chip names the file it wrote
+        bool compares = false;    // Compare Images: its slot is a viewer of A and B (#62)
+        QString labelA, labelB;   // what produced A and B: the linked node's title
         QString imageFile;        // the image file its file input names
     };
     QHash<QString, NodeInfo> m_nodeInfo; // of the shown workflow

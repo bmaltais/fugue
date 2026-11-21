@@ -101,6 +101,8 @@ QVariant NodeList::data(const QModelIndex &index, int role) const {
     case ThumbnailFile: return run.thumbnailFile;
     case ThumbnailText: return run.thumbnailText;
     case ThumbnailDim: return run.thumbnailDim;
+    case Compare: return run.compare;
+    case CompareView: return m_canvas->isCompare(row.id) ? QVariant(m_canvas->compareView(row.id)) : QVariant(QVariantMap());
     case Notice: return run.notice;
     default: return {};
     }
@@ -113,6 +115,7 @@ QHash<int, QByteArray> NodeList::roleNames() const {
             {Color, "color"}, {Pinned, "pinned"}, {RunState, "runState"}, {Progress, "progress"},
             {Seconds, "seconds"}, {Error, "error"}, {Warnings, "warnings"}, {Thumbnail, "thumbnail"},
             {ThumbnailInfo, "thumbnailInfo"}, {ThumbnailFile, "thumbnailFile"}, {ThumbnailRect, "thumbnailRect"}, {ThumbnailText, "thumbnailText"}, {ThumbnailDim, "thumbnailDim"},
+            {Compare, "compare"}, {CompareView, "compareView"},
             {Notice, "notice"}, {UpdateAvailable, "updateAvailable"}, {GroupSize, "groupSize"}};
 }
 
@@ -1676,6 +1679,7 @@ void CanvasModel::setRunState(const QString &node, const QVariantMap &state) {
     run.thumbnailSize = state.value("thumbnailSize").toSizeF();
     run.thumbnailText = state.value("thumbnailText").toString();
     run.thumbnailDim = state.value("thumbnailDim").toBool();
+    run.compare = state.value("compare").toMap();
     run.values = state.value("values").toMap();
     run.notice = state.value("notice").toString();
     const RunInfo before = m_run.value(node);
@@ -1685,7 +1689,7 @@ void CanvasModel::setRunState(const QString &node, const QVariantMap &state) {
     m_run.insert(node, run);
     relayOut(r, {NodeList::RunState, NodeList::Progress, NodeList::Seconds, NodeList::Error, NodeList::Warnings,
                  NodeList::Thumbnail, NodeList::ThumbnailInfo, NodeList::ThumbnailFile, NodeList::ThumbnailText, NodeList::ThumbnailDim,
-                 NodeList::Outputs, NodeList::Notice});
+                 NodeList::Compare, NodeList::Outputs, NodeList::Notice});
     if (previewChanged)
         emit previewSizeChanged(node);
 }
@@ -1710,6 +1714,73 @@ QRectF CanvasModel::nodeRect(const QString &node) const {
 QString CanvasModel::nodeTitle(const QString &node) const {
     const int r = rowOf(node);
     return r < 0 ? QString() : m_rows[size_t(r)].title;
+}
+
+bool CanvasModel::isCompare(const QString &node) const {
+    return m_document.graph.nodes.value(node).type == QLatin1String("fugue/compare-images");
+}
+
+QString CanvasModel::selectedCompare() const {
+    return m_selected.size() == 1 && isCompare(*m_selected.constBegin()) ? *m_selected.constBegin() : QString();
+}
+
+QVariantMap CanvasModel::compareView(const QString &node) const {
+    // The node's widgets say how it starts: a Mode of A or B is the flip mode on that image.
+    const fugue::Node &spec = m_document.graph.nodes.value(node);
+    const auto literal = [&](const char *name) {
+        const fugue::InputValue value = spec.inputs.value(QLatin1String(name));
+        return value.kind() == fugue::InputValue::Kind::Literal ? value.literal() : QJsonValue();
+    };
+    const QString widgetMode = literal("mode").toString(QStringLiteral("slider"));
+    const bool flipped = widgetMode == QLatin1String("a") || widgetMode == QLatin1String("b");
+    QVariantMap view{{"mode", flipped ? QStringLiteral("flip") : widgetMode},
+                     {"position", literal("position").toDouble(0.5)},
+                     {"showB", widgetMode == QLatin1String("b")},
+                     {"zoom", 1.0}, {"actual", false}, {"centerX", 0.5}, {"centerY", 0.5}};
+    const QVariantMap changed = m_compareView.value(node);
+    for (auto it = changed.cbegin(); it != changed.cend(); ++it)
+        view.insert(it.key(), it.value());
+    return view;
+}
+
+void CanvasModel::setCompareView(const QString &node, const QVariantMap &changes) {
+    const int r = rowOf(node);
+    if (r < 0 || !isCompare(node))
+        return;
+    QVariantMap now = m_compareView.value(node);
+    bool differs = false;
+    for (auto it = changes.cbegin(); it != changes.cend(); ++it) {
+        if (compareView(node).value(it.key()) != it.value())
+            differs = true;
+        now.insert(it.key(), it.value());
+    }
+    if (!differs)
+        return;
+    m_compareView.insert(node, now);
+    emitNodeChanged(r, {NodeList::CompareView});
+    emit compareViewChanged(node);
+}
+
+bool CanvasModel::compareStep(const QString &node, const QString &step) {
+    if (!isCompare(node))
+        return false;
+    static const QStringList modes{"slider", "slider_horizontal", "side_by_side", "flip", "difference"};
+    const QVariantMap view = compareView(node);
+    const QString mode = view.value("mode").toString();
+    if (step == QLatin1String("flip")) {
+        // From another mode: the flip mode at A; in it, the other image.
+        setCompareView(node, mode == QLatin1String("flip") ? QVariantMap{{"showB", !view.value("showB").toBool()}}
+                                                            : QVariantMap{{"mode", "flip"}, {"showB", false}});
+    } else if (step == QLatin1String("next-mode")) {
+        setCompareView(node, {{"mode", modes.value((modes.indexOf(mode) + 1) % modes.size())}});
+    } else if (step == QLatin1String("fit")) {
+        setCompareView(node, {{"zoom", 1.0}, {"actual", false}, {"centerX", 0.5}, {"centerY", 0.5}});
+    } else if (step == QLatin1String("actual")) {
+        setCompareView(node, {{"actual", true}});
+    } else {
+        return false;
+    }
+    return true;
 }
 
 QSizeF CanvasModel::previewSize(const QString &node) const {

@@ -420,6 +420,22 @@ Mix mixFor(BlendMode mode) {
     return [](float, float b) { return b; };
 }
 
+// node_helpers.image_alpha_fix: `top` takes the base's channel count (a missing alpha is 1); a
+// different size is resized to the base's (bicubic, center crop). Blend and Compare Images share it.
+Pixels matchedTo(const Pixels &base, Pixels top) {
+    if (top.channels != base.channels) {
+        Pixels fixed(top.width, top.height, base.channels, 1.0f);
+        for (int y = 0; y < top.height; ++y)
+            for (int x = 0; x < top.width; ++x)
+                for (int ch = 0; ch < std::min(top.channels, base.channels); ++ch)
+                    fixed.at(x, y, ch) = top.at(x, y, ch);
+        top = std::move(fixed);
+    }
+    if (top.width != base.width || top.height != base.height)
+        top = resample(centerCrop(top, base.width, base.height), base.width, base.height, ResizeMethod::Bicubic);
+    return top;
+}
+
 class BlendKernel : public NodeKernel {
 public:
     Result<Values> run(const NodeContext &context) override {
@@ -437,17 +453,7 @@ public:
         const Mix mix = mixFor(*mode);
         const float opacity = float(context.input("opacity").number());
 
-        // node_helpers.image_alpha_fix: the top takes the base's channel count; a missing alpha is 1.
-        if (top.channels != base.channels) {
-            Pixels fixed(top.width, top.height, base.channels, 1.0f);
-            for (int y = 0; y < top.height; ++y)
-                for (int x = 0; x < top.width; ++x)
-                    for (int ch = 0; ch < std::min(top.channels, base.channels); ++ch)
-                        fixed.at(x, y, ch) = top.at(x, y, ch);
-            top = std::move(fixed);
-        }
-        if (top.width != base.width || top.height != base.height)
-            top = resample(centerCrop(top, base.width, base.height), base.width, base.height, ResizeMethod::Bicubic);
+        top = matchedTo(base, std::move(top));
 
         Pixels out = base;
         for (size_t i = 0; i < out.data.size(); ++i) {
@@ -459,6 +465,100 @@ public:
                 for (int x = 0; x < base.width; ++x)
                     out.at(x, y, 3) = base.at(x, y, 3);
         return imageOutput(std::move(out));
+    }
+};
+
+// ---- compare images ------------------------------------------------------------------
+
+// The colors only: alpha is left off, so a comparison is of what the pictures show.
+Pixels opaque(const Pixels &in) {
+    if (in.channels == 3)
+        return in;
+    Pixels out(in.width, in.height, 3);
+    for (int y = 0; y < in.height; ++y)
+        for (int x = 0; x < in.width; ++x)
+            for (int ch = 0; ch < 3; ++ch)
+                out.at(x, y, ch) = in.at(x, y, ch);
+    return out;
+}
+
+enum class CompareMode { Slider, SliderHorizontal, SideBySide, A, B, Difference };
+
+constexpr std::pair<const char *, CompareMode> kCompareModes[] = {
+    {"slider", CompareMode::Slider},       {"slider_horizontal", CompareMode::SliderHorizontal},
+    {"side_by_side", CompareMode::SideBySide}, {"a", CompareMode::A},
+    {"b", CompareMode::B},                 {"difference", CompareMode::Difference},
+};
+
+// Compare Images (#62): B is fitted to A as Blend fits its top (bicubic, center crop), then the
+// difference is |A - B| times the gain (Blend's difference formula) and the composite is the
+// picture of `mode` at `position`. The window's viewer shows these files and the inputs; it
+// flips and wipes without running again.
+class CompareImagesKernel : public NodeKernel {
+public:
+    Result<Values> run(const NodeContext &context) override {
+        Result<Pixels> aLoaded = pixelsOf(context.input("a"), "a");
+        if (!aLoaded.ok())
+            return Result<Values>(aLoaded.errors());
+        Result<Pixels> bLoaded = pixelsOf(context.input("b"), "b");
+        if (!bLoaded.ok())
+            return Result<Values>(bLoaded.errors());
+        const Result<CompareMode> mode = choice(context, QStringLiteral("mode"), kCompareModes);
+        if (!mode)
+            return mode.errors();
+        const float position = float(std::clamp(context.input("position").number(), 0.0, 1.0));
+        const float gain = float(std::max(0.0, context.input("gain").number()));
+
+        const Pixels a = opaque(aLoaded.value());
+        const Pixels b = matchedTo(a, opaque(bLoaded.value()));
+        const Mix mix = mixFor(BlendMode::Difference);
+        Pixels difference(a.width, a.height, 3);
+        for (size_t i = 0; i < difference.data.size(); ++i)
+            difference.data[i] = mix(a.data[i], b.data[i]) * gain;
+
+        Pixels composite;
+        switch (*mode) {
+        case CompareMode::A:
+            composite = a;
+            break;
+        case CompareMode::B:
+            composite = b;
+            break;
+        case CompareMode::Difference:
+            composite = difference;
+            break;
+        case CompareMode::SideBySide:
+            composite = Pixels(2 * a.width, a.height, 3);
+            for (int y = 0; y < a.height; ++y)
+                for (int x = 0; x < a.width; ++x)
+                    for (int ch = 0; ch < 3; ++ch) {
+                        composite.at(x, y, ch) = a.at(x, y, ch);
+                        composite.at(a.width + x, y, ch) = b.at(x, y, ch);
+                    }
+            break;
+        case CompareMode::Slider:
+        case CompareMode::SliderHorizontal: {
+            composite = Pixels(a.width, a.height, 3);
+            const bool vertical = *mode == CompareMode::Slider; // a vertical divider: A left of it, B right
+            const int edge = int(std::lround((vertical ? a.width : a.height) * position));
+            for (int y = 0; y < a.height; ++y)
+                for (int x = 0; x < a.width; ++x) {
+                    const Pixels &from = (vertical ? x : y) < edge ? a : b;
+                    for (int ch = 0; ch < 3; ++ch)
+                        composite.at(x, y, ch) = from.at(x, y, ch);
+                }
+            break;
+        }
+        }
+
+        Result<Values> differenceOut = imageOutput(std::move(difference));
+        if (!differenceOut.ok())
+            return differenceOut;
+        Result<Values> compositeOut = imageOutput(std::move(composite));
+        if (!compositeOut.ok())
+            return compositeOut;
+        return Values{{"difference", differenceOut.value().value("image")},
+                      {"composite", compositeOut.value().value("image")}};
     }
 };
 
@@ -872,6 +972,7 @@ void addPixelKernels(Kernels &kernels) {
     kernels.add("fugue/crop", std::make_shared<CropKernel>());
     kernels.add("fugue/brightness-contrast", std::make_shared<BrightnessContrastKernel>());
     kernels.add("fugue/blend", std::make_shared<BlendKernel>());
+    kernels.add("fugue/compare-images", std::make_shared<CompareImagesKernel>());
     kernels.add("fugue/text-concat", std::make_shared<TextConcatKernel>());
     kernels.add("fugue/pad", std::make_shared<PadKernel>());
     kernels.add("fugue/rotate", std::make_shared<RotateKernel>());

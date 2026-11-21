@@ -21,7 +21,7 @@ namespace {
 
 // Least to most specific (12.4: the more specific context owns the key).
 const QStringList kContexts = {QStringLiteral("app"), QStringLiteral("canvas"), QStringLiteral("group-selected"),
-                               QStringLiteral("group"), QStringLiteral("run")};
+                               QStringLiteral("compare"), QStringLiteral("group"), QStringLiteral("run")};
 
 // A keymap file is a few lines; this keeps a wrong file (a log, a binary) from being read whole.
 constexpr qint64 kMaxKeymapBytes = 1024 * 1024;

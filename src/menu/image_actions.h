@@ -18,6 +18,8 @@
 //                    it as it is. No decoded QImage: qtwayland would serve every image/* type
 //                    by re-encoding it. Reading and decoding happen on a worker thread: a big
 //                    image never holds the window.
+//   compare.copy-a, compare.copy-b, compare.copy-view (#62): A's or B's full file as node.copy-image
+//                    puts it, and the view as drawn (grabbed by the window).
 //   node.save-image  asks the window for a save dialog (`saveRequested`); the answer comes to
 //                    saveTo, which copies the original bytes (the embedded workflow stays)
 //                    atomically. The dialog has already asked about an existing file; a name
@@ -26,6 +28,7 @@
 //
 // A failure is a `message` for the window banner (Workflows notice).
 
+#include <QImage>
 #include <QObject>
 #include <QString>
 #include <QThreadPool>
@@ -59,8 +62,12 @@ public:
     Q_INVOKABLE void saveTo(const QString &target);
     // Nothing was chosen: forgets the image the dialog was for.
     Q_INVOKABLE void cancelSave() { m_pendingSource.clear(); }
+    // The picture of a Compare Images view the window grabbed (compare.copy-view).
+    Q_INVOKABLE void copyImage(const QImage &image);
 
 signals:
+    // compare.copy-view: the window should grab the node's viewer and call copyImage.
+    void viewCopyRequested(const QString &node);
     // The window should ask where to save: the folder to start in, the suggested file in it
     // (file URLs made from paths, so any name survives) and the extension of the image's real
     // format (the dialog's default suffix and filter).
@@ -73,6 +80,7 @@ signals:
 private:
     void open();
     void copy();
+    void copyFile(const QString &path);
     void save();
 
     CommandRegistry &m_commands;
