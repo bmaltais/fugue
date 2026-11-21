@@ -1,7 +1,7 @@
 {
   "manifest": 1,
   "id": "fugue/invert-mask",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "name": "Invert Mask",
   "description": "1 minus the mask.",
   "category": "Image/Mask",
@@ -16,6 +16,7 @@
     {
       "name": "mask",
       "type": "image",
+      "role": "mask",
       "label": "Mask"
     }
   ],
@@ -23,6 +24,7 @@
     {
       "name": "mask",
       "type": "image",
+      "role": "mask",
       "label": "Mask"
     }
   ]

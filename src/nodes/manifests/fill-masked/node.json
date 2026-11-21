@@ -1,0 +1,49 @@
+{
+  "manifest": 1,
+  "id": "fugue/fill-masked",
+  "version": "1.0.0",
+  "name": "Fill Masked",
+  "description": "Fill what lies under a mask before a redraw below denoise 1, so the old content does not show through. Gray is a flat 0.5; blur spreads the colors around the mask into it. Where the mask is 0 the picture is unchanged.",
+  "category": "Image/Mask",
+  "keywords": [
+    "inpaint",
+    "pre-fill",
+    "masked content",
+    "neutral",
+    "blur",
+    "remove"
+  ],
+  "runtime": {
+    "kind": "builtin"
+  },
+  "inputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    },
+    {
+      "name": "mask",
+      "type": "image",
+      "role": "mask",
+      "label": "Mask"
+    },
+    {
+      "name": "mode",
+      "type": "text",
+      "label": "Mode",
+      "default": "blur",
+      "choices": [
+        "gray",
+        "blur"
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    }
+  ]
+}

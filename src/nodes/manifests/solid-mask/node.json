@@ -1,7 +1,7 @@
 {
   "manifest": 1,
   "id": "fugue/solid-mask",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "name": "Solid Mask",
   "description": "A mask of one value, width by height.",
   "category": "Image/Mask",
@@ -49,6 +49,7 @@
     {
       "name": "mask",
       "type": "image",
+      "role": "mask",
       "label": "Mask"
     }
   ]

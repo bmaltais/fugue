@@ -1,7 +1,7 @@
 {
   "manifest": 1,
   "id": "fugue/image-to-mask",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "name": "Image to Mask",
   "description": "One channel of an image as a mask. Alpha is 1 where the image is opaque; an image with no alpha channel gives 1 everywhere.",
   "category": "Image/Mask",
@@ -36,6 +36,7 @@
     {
       "name": "mask",
       "type": "image",
+      "role": "mask",
       "label": "Mask"
     }
   ]

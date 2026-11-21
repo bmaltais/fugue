@@ -1,0 +1,43 @@
+{
+  "manifest": 1,
+  "id": "fugue/threshold-mask",
+  "version": "1.0.0",
+  "name": "Threshold Mask",
+  "description": "Make a mask hard: 1 where the mask is above Value, else 0 (ComfyUI's Threshold Mask).",
+  "category": "Image/Mask",
+  "keywords": [
+    "binarize",
+    "cutoff",
+    "hard",
+    "black and white"
+  ],
+  "runtime": {
+    "kind": "builtin"
+  },
+  "inputs": [
+    {
+      "name": "mask",
+      "type": "image",
+      "role": "mask",
+      "label": "Mask"
+    },
+    {
+      "name": "value",
+      "type": "number",
+      "label": "Value",
+      "default": 0.5,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "widget": "slider"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "mask",
+      "type": "image",
+      "role": "mask",
+      "label": "Mask"
+    }
+  ]
+}

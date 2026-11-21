@@ -74,6 +74,7 @@ and in `fugue pack list`. It never stops Fugue.
 | `choices` | Allowed values of a `text` input; it becomes a choice. |
 | `widget` | One of the set below. |
 | `section`, `advanced` | Group inputs on the node face; `advanced` ones start folded. |
+| `role` | `"mask"` on an `image` input that takes a mask (a one-channel image, 1 is the part to change). Only marks the port; an image still connects to it. Any other value is an error. |
 
 Widgets come from a fixed set: no pack ships UI code, so every node looks alike.
 
@@ -87,6 +88,6 @@ Widgets come from a fixed set: no pack ships UI code, so every node looks alike.
 | `color` | text: `#rrggbb` or `#rrggbbaa` |
 | `seed` | number: fixed, randomize or increment |
 
-Outputs have `name`, `type`, `label`, `description`, `list` and `optional`.
+Outputs have `name`, `type`, `label`, `description`, `list`, `optional` and `role` (`"mask"` on an `image` output that holds a mask).
 
 Unknown fields are a warning, not an error. `ui` must be absent.

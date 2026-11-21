@@ -1,7 +1,7 @@
 {
   "manifest": 1,
   "id": "fugue/pad",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "name": "Pad",
   "description": "Add room around an image for outpainting. The new area is gray; the mask is 1 over the new area and 0 over the original. Feathering fades the mask inward from the padded edges (ComfyUI's Pad Image for Outpainting).",
   "category": "Image/Transform",
@@ -81,6 +81,7 @@
     {
       "name": "mask",
       "type": "image",
+      "role": "mask",
       "label": "Mask"
     }
   ]

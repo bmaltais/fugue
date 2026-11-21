@@ -1,0 +1,71 @@
+{
+  "manifest": 1,
+  "id": "fugue/composite-masked",
+  "version": "1.0.0",
+  "name": "Composite Masked",
+  "description": "Paste one image onto another through a mask (ComfyUI's Image Composite Masked): out = destination x (1 - mask) + source x mask, with the source's top left corner at x, y. No mask pastes all of the source; the part past the destination's edge is cut. Resize source stretches the source to the destination first. A mask of another size is stretched to the source.",
+  "category": "Image/Adjust",
+  "keywords": [
+    "paste",
+    "overlay",
+    "merge",
+    "layer",
+    "inpaint"
+  ],
+  "runtime": {
+    "kind": "builtin"
+  },
+  "inputs": [
+    {
+      "name": "destination",
+      "type": "image",
+      "label": "Destination"
+    },
+    {
+      "name": "source",
+      "type": "image",
+      "label": "Source"
+    },
+    {
+      "name": "mask",
+      "type": "image",
+      "role": "mask",
+      "label": "Mask",
+      "optional": true
+    },
+    {
+      "name": "x",
+      "type": "number",
+      "label": "X",
+      "default": 0,
+      "min": 0,
+      "max": 16384,
+      "step": 1,
+      "integer": true
+    },
+    {
+      "name": "y",
+      "type": "number",
+      "label": "Y",
+      "default": 0,
+      "min": 0,
+      "max": 16384,
+      "step": 1,
+      "integer": true
+    },
+    {
+      "name": "resize_source",
+      "type": "boolean",
+      "label": "Resize source",
+      "default": false,
+      "advanced": true
+    }
+  ],
+  "outputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    }
+  ]
+}
