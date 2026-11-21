@@ -26,11 +26,15 @@ vocabulary in [docs/GLOSSARY.md](docs/GLOSSARY.md).
   <img src="docs/images/results.png" alt="A finished run: the generated picture shows on the Generate Image and Preview nodes" width="520">
 </picture></p>
 
+<p align="center"><picture><img alt="Wiring a node: the node search adds a Number and a Preview node, and a drag connects their ports" src="docs/images/tour-wire.avif" width="720"></picture></p>
+
 - **Templates.** File > Browse templates lists ready-to-run workflows (text to image, image
   edits, prompt enhancing and more) with a preview each; open one and run it. The CLI does the
   same: `fugue template list`, `fugue workflow new <file> --template <id>`.
 
 <p align="center"><img src="docs/images/templates.png" alt="The templates dialog: cards with a preview, description and what to download" width="720"></p>
+
+<p align="center"><picture><img alt="File > Browse templates, FLUX.2 Klein 4B opens, Run: the picture shows on the nodes" src="docs/images/tour-run-template.avif" width="720"></picture></p>
 
 - **Groups.** Select nodes and make a group (Ctrl+Shift+E): it collapses into one reusable
   node with the inputs and outputs you choose, and can be entered, nested and ungrouped. Frames
@@ -38,6 +42,8 @@ vocabulary in [docs/GLOSSARY.md](docs/GLOSSARY.md).
   node to drag in.
 
 <p align="center"><img src="docs/images/group.png" alt="Three nodes made into one Group node" width="720"></p>
+
+<p align="center"><picture><img alt="Three nodes selected with a marquee and made into one Group node from the Node menu" src="docs/images/tour-group.avif" width="720"></picture></p>
 
 <p align="center"><img src="docs/images/node-library.png" alt="The node library panel beside a workflow" width="720"></p>
 

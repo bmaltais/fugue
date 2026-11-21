@@ -1,3 +1,6 @@
 [submodule "templates"]
 	path = templates
 	url = https://github.com/bmaltais/fugue-workflows.git
+[submodule "scripts/devkit"]
+	path = scripts/devkit
+	url = https://github.com/bmaltais/omarchy-plugin-devkit
