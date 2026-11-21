@@ -6,8 +6,8 @@ on:
   pull_request:
     paths: [helper/**, bin/build-helper, packaging/PKGBUILD, .github/workflows/helper.yml]
   push:
-    tags: ['v*']
-  workflow_dispatch:
+    branches: [main, master]
+    paths: [helper/**, bin/build-helper, packaging/PKGBUILD, .github/workflows/helper.yml]
 
 permissions:
   contents: read
