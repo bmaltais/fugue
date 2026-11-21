@@ -7,6 +7,10 @@
 //   <id>/workflow.fugue  the workflow; its `requires.models` give each model's `source`
 //   <id>/preview.webp    (or .png, .jpg) what it makes; optional
 //   <id>/inputs/         sample images its Load Image nodes name as `inputs/<name>`; optional
+//   <id>/packs/<pack id>/ the exact pack its nodes need, a pack folder as 6.2 has it; optional.
+//                        It is offered, never installed on its own: the person is asked and the
+//                        pack trusted as for any pack (6.6, 6.7). The workflow's `requires.packs`
+//                        stays the record of its version and where else to get it (4.3, #118).
 // and a root of templates may hold a categories.json, {"categories": [{"id", "title"}]}, the
 // order and titles of its categories. Nothing lists the templates: a root's folders are its
 // templates, so there is no index to keep in step with them.
@@ -32,11 +36,19 @@
 
 namespace fugue {
 
+class Document;
 class Registry;
 
 struct TemplateRoot {
     QString path;
     bool own = false; // the person's own templates (listed first, under "Your templates")
+};
+
+// A pack a template folder carries (`packs/<id>/`): its id and version as its pack.json says.
+struct CarriedPack {
+    QString id;
+    QString version;
+    QString folder; // absolute: what `fugue pack add` takes
 };
 
 struct Template {
@@ -52,7 +64,13 @@ struct Template {
     bool own = false;
     QJsonArray models;         // Document::models(): resource, hash, name, source
     QStringList neededPacks;   // namespaces of its packs not installed, or installed at another version
+    QList<CarriedPack> carriedPacks; // the packs the folder holds, whether or not installed here
 };
+
+// The namespaces (pack ids) of the node types `document` uses that are not installed at the
+// major it recorded with at least its minor (3.6), built-in `fugue` excluded. What a window
+// asks of a template's carried pack: still needed here, or installed now.
+QStringList packsNeeded(const Document &document, const Registry &registry);
 
 class TemplateLibrary {
 public:

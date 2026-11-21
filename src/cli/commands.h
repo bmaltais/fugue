@@ -76,4 +76,8 @@ Reply packRemove(const Command &command, Context &context);
 Reply packUpdate(const Command &command, Context &context);
 Reply packTrust(const Command &command, Context &context);
 
+// skill.cpp: `skill install` and `skill uninstall` (13.5).
+Reply skillInstall(const Command &command, Context &context);
+Reply skillUninstall(const Command &command, Context &context);
+
 } // namespace fugue::cli

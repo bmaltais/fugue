@@ -276,7 +276,7 @@ private slots:
         };
         app.model.select({"c"});
         QStringList node = ids(app.commands.menu("node", {{"node", "c"}}));
-        for (const char *off : {"group.ungroup", "group.enter", "group.make-unique", "group.update", "group.expose",
+        for (const char *off : {"group.ungroup", "group.enter", "group.make-unique", "group.update", "node.move-version", "group.expose",
                                 "group.unexpose", "node.open-image", "node.copy-image", "node.save-image"})
             QVERIFY2(!node.contains(QLatin1String(off)), off);
         for (const QVariant &item : app.commands.menu("node", {{"node", "c"}}))

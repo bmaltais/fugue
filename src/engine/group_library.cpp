@@ -5,6 +5,7 @@
 #include "engine/ids.h"
 #include "engine/json.h"
 #include "engine/links.h"
+#include "engine/node_versions.h"
 #include "engine/pack_loader.h"
 #include "engine/registry.h"
 
@@ -289,19 +290,11 @@ GroupChanges groupChanges(const Document &workflow, const Document &library, con
         changes.to = theirs->version;
     const NodeType before = groupFace(workflow, registry, group);
     const NodeType after = groupFace(library, registry, group);
-    auto diff = [](const QHash<QString, QString> &a, const QHash<QString, QString> &b, QStringList *added,
-                   QStringList *removed) {
-        for (auto it = a.cbegin(); it != a.cend(); ++it)
-            if (!b.contains(it.key()) || b.value(it.key()) != it.value())
-                *removed << it.key();
-        for (auto it = b.cbegin(); it != b.cend(); ++it)
-            if (!a.contains(it.key()) || a.value(it.key()) != it.value())
-                *added << it.key();
-        added->sort();
-        removed->sort();
-    };
-    diff(ports(before.inputs), ports(after.inputs), &changes.addedInputs, &changes.removedInputs);
-    diff(ports(before.outputs), ports(after.outputs), &changes.addedOutputs, &changes.removedOutputs);
+    const PortChanges ports = portChanges(before, after);
+    changes.addedInputs = ports.addedInputs;
+    changes.removedInputs = ports.removedInputs;
+    changes.addedOutputs = ports.addedOutputs;
+    changes.removedOutputs = ports.removedOutputs;
     return changes;
 }
 

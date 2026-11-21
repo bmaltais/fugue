@@ -45,6 +45,7 @@ Item {
     required property var compareView      // its viewer's state
     required property var media            // a video or sound result's player (#116): {type, url, label, file, ...}, else empty
     required property string updateAvailable // a group the library has a newer version of (5.3)
+    required property string newerMajor // a node on an older installed major: the newest version to move to (3.6)
     required property int groupSize // a group instance: the nodes it holds (docs/canvas-look.md 9), else 0
 
     // Set by the canvas.
@@ -517,9 +518,9 @@ Item {
                 // (test_canvas_window counts items): section headers (6.1, 5.4; the Advanced one
                 // opens and folds with a click, which FugueCanvas takes), the names an entered
                 // group's face gives its inner ports (5.4), and the update chip of a group the library
-                // has a newer version of (5.3).
+                // has a newer version of (5.3), or the chip of a node that has a newer major (3.6, #118).
                 readonly property bool extrasNeeded: face.full && node.rowsMade && !node.collapsed
-                    && (node.updateAvailable !== ""
+                    && (node.updateAvailable !== "" || node.newerMajor !== ""
                         || node.inputs.some(p => p.headerTop !== undefined || p.exposedAs !== undefined)
                         || node.outputs.some(p => p.exposedAs !== undefined))
                 anchors.fill: parent
@@ -642,7 +643,7 @@ Item {
                     }
                     Rectangle {
                         objectName: "updateChip"
-                        visible: decor.extrasNeeded && node.updateAvailable !== ""
+                        visible: decor.extrasNeeded && (node.updateAvailable !== "" || node.newerMajor !== "")
                         x: node.width - width
                         y: -height - Math.round(face.u)
                         width: updateText.implicitWidth + 3 * face.u
@@ -652,7 +653,9 @@ Item {
                         Text {
                             id: updateText
                             anchors.centerIn: parent
-                            text: parent.visible ? qsTr("Update to %1").arg(node.updateAvailable) : ""
+                            text: !parent.visible ? ""
+                                  : node.updateAvailable !== "" ? qsTr("Update to %1").arg(node.updateAvailable)
+                                  : qsTr("Move to %1").arg(node.newerMajor)
                             textFormat: Text.PlainText
                             color: node.look.accentForeground
                             font.pixelSize: node.look.captionSize
@@ -662,7 +665,10 @@ Item {
                             cursorShape: Qt.PointingHandCursor
                             onClicked: {
                                 node.canvasModel.select([node.nodeId], "replace")
-                                node.canvasModel.requestGroupUpdate()
+                                if (node.updateAvailable !== "")
+                                    node.canvasModel.requestGroupUpdate()
+                                else
+                                    node.canvasModel.requestMajorMove()
                             }
                         }
                     }

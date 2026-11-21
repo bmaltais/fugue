@@ -100,6 +100,7 @@ void registerCanvasCommands(fugue::CommandRegistry &commands, CanvasModel &canva
     });
     commands.setHandler("group.save-to-library", [model] { model->saveGroupToLibrary(); });
     commands.setHandler("group.update", [model] { model->requestGroupUpdate(); });
+    commands.setHandler("node.move-version", [model] { model->requestMajorMove(); });
     // Compare Images (#62): the node the menu was opened on, else the one selected.
     for (const auto &[id, step] : {std::pair{"compare.flip", "flip"}, {"compare.next-mode", "next-mode"},
                                    {"compare.fit", "fit"}, {"compare.actual", "actual"}})

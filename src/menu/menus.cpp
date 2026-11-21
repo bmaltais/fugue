@@ -87,7 +87,7 @@ QVariantList bar() {
                  separator(), command("node.open-image"), command("node.copy-image"), command("node.save-image"), separator(), command("frame.make"),
                  command("group.make"), command("group.ungroup"), command("group.enter"), command("group.leave"),
                  command("group.make-unique"), command("group.interface"), command("group.save-to-library"),
-                 command("group.update")}),
+                 command("group.update"), command("node.move-version")}),
         submenu(QT_TRANSLATE_NOOP("Menu", "&Run"), runItems()),
         submenu(QT_TRANSLATE_NOOP("Menu", "&Help"),
                 {command("app.shortcuts"), command("help.docs"), command("help.report-issue"), separator(),
@@ -120,7 +120,7 @@ QVariantList node() {
             command("edit.copy"),
             command("edit.clone"), separator(), command("frame.make"), command("group.make"),
             ifOn("group.ungroup"), ifOn("group.enter"), ifOn("group.interface"), ifOn("group.make-unique"),
-            ifOn("group.save-to-library"), ifOn("group.update"), separator(),
+            ifOn("group.save-to-library"), ifOn("group.update"), ifOn("node.move-version"), separator(),
             command("run.to-here"), separator(),
             command("edit.delete")};
 }

@@ -38,6 +38,14 @@ Item {
         function onGroupUpdateAsked(node, changes) {
             updateAsk.node = node
             updateAsk.changes = changes
+            updateAsk.major = false
+            updateAsk.open()
+        }
+        // A node's newer major version (3.6, #118): the same question, said for one node.
+        function onNodeMoveAsked(node, changes) {
+            updateAsk.node = node
+            updateAsk.changes = changes
+            updateAsk.major = true
             updateAsk.open()
         }
         function onInterfaceEditorRequested() {
@@ -127,11 +135,13 @@ Item {
     }
 
     // An update from the library (5.3) says what it changes first (3.6); every instance moves.
+    // The same question moves one node to a newer major of its type (#118).
     Question {
         id: updateAsk
         objectName: "groupUpdateAsk"
         property string node: ""
         property var changes: ({})
+        property bool major: false // one node's newer major, not a group's library update
         function line(label, names) { return names && names.length > 0 ? label.arg(names.join(", ")) : "" }
         ColumnLayout {
             anchors.fill: parent
@@ -142,7 +152,8 @@ Item {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
                 font.bold: true
-                text: qsTr("Update %1 from %2 to %3?").arg(updateAsk.changes.name || "")
+                text: (updateAsk.major ? qsTr("Move %1 from %2 to %3?") : qsTr("Update %1 from %2 to %3?"))
+                          .arg(updateAsk.changes.name || "")
                           .arg(updateAsk.changes.from || "").arg(updateAsk.changes.to || "")
             }
             Label {
@@ -159,16 +170,24 @@ Item {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
                 color: root.look.label
-                text: qsTr("Every instance of the group in this workflow moves to the new version; values and links of inputs and outputs that go are dropped.")
+                text: updateAsk.major
+                      ? qsTr("The node keeps its values and links, and runs on the new version. Inputs and outputs that go are flagged where they no longer fit; undo moves it back.")
+                      : qsTr("Every instance of the group in this workflow moves to the new version; values and links of inputs and outputs that go are dropped.")
             }
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 ThemedButton { text: qsTr("Cancel"); onClicked: updateAsk.close() }
                 ThemedButton {
                     objectName: "groupUpdateOk"
-                    text: qsTr("Update")
+                    text: updateAsk.major ? qsTr("Move") : qsTr("Update")
                     highlighted: true
-                    onClicked: { updateAsk.close(); root.model.updateGroupInstance(updateAsk.node) }
+                    onClicked: {
+                        updateAsk.close()
+                        if (updateAsk.major)
+                            root.model.moveToNewerMajor(updateAsk.node)
+                        else
+                            root.model.updateGroupInstance(updateAsk.node)
+                    }
                 }
             }
         }

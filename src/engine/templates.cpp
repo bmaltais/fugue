@@ -80,33 +80,71 @@ QString sampleIn(const QString &folder, const QString &text) {
     return !root.isEmpty() && !path.isEmpty() && isInside(path, root) && QFileInfo(path).isFile() ? path : QString();
 }
 
-// Whether this Fugue can open `document` as it was made (3.6), and the packs it needs: not
-// installed, or installed at another major or an older minor. A built-in node this Fugue lacks,
-// or has at such a version, means a newer Fugue made it.
-bool opensHere(const Document &document, const Registry &registry, QStringList *neededPacks) {
-    QSet<QString> packs;
-    bool fits = true;
+// The namespaces of the node types of `document` that are not installed at the major it
+// recorded with at least its minor (3.6), `fugue` included.
+QSet<QString> unmetNamespaces(const Document &document, const Registry &registry) {
+    QSet<QString> unmet;
     const auto scan = [&](const Nodes &nodes) {
         for (const Node &node : nodes) {
             if (document.groups.contains(node.type))
                 continue;
             const NodeType *type = registry.nodeTypeAt(node.type, node.version.major);
-            const bool same = type && type->version.minor >= node.version.minor;
-            if (same)
-                continue;
-            const QString pack = typeNamespace(node.type);
-            if (pack == QLatin1String("fugue"))
-                fits = false;
-            else
-                packs.insert(pack);
+            if (!type || type->version.minor < node.version.minor)
+                unmet.insert(typeNamespace(node.type));
         }
     };
     scan(document.graph.nodes);
     for (const GroupDefinition &group : document.groups)
         scan(group.nodes);
-    *neededPacks = QStringList(packs.begin(), packs.end());
-    neededPacks->sort();
+    return unmet;
+}
+
+QStringList sorted(QSet<QString> set) {
+    QStringList list(set.begin(), set.end());
+    list.sort();
+    return list;
+}
+
+// Whether this Fugue can open `document` as it was made (3.6), and the packs it needs: not
+// installed, or installed at another major or an older minor. A built-in node this Fugue lacks,
+// or has at such a version, means a newer Fugue made it.
+bool opensHere(const Document &document, const Registry &registry, QStringList *neededPacks) {
+    QSet<QString> packs = unmetNamespaces(document, registry);
+    const bool fits = !packs.remove(QStringLiteral("fugue"));
+    *neededPacks = sorted(packs);
     return fits;
+}
+
+// The packs `<folder>/packs/<id>/` holds, by what each pack.json says. A folder that is not
+// `<id>` (or has no readable id) is reported through `problems` as 11.10 says it must be.
+QList<CarriedPack> carriedPacksOf(const QString &templateId, const QString &folder, const QJsonObject &recordedNeeds,
+                                  Errors *problems) {
+    QList<CarriedPack> out;
+    const QDir packs(QDir(folder).filePath(QStringLiteral("packs")));
+    for (const QFileInfo &entry : packs.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
+        const Result<QJsonObject> read = readObject(QDir(entry.absoluteFilePath()).filePath(QStringLiteral("pack.json")));
+        if (!read) {
+            if (problems)
+                problems->append(named(templateId, read.error()));
+            continue;
+        }
+        const CarriedPack pack{read->value(QStringLiteral("id")).toString(), read->value(QStringLiteral("version")).toString(),
+                               entry.absoluteFilePath()};
+        if (pack.id != entry.fileName() || pack.version.isEmpty()) {
+            if (problems)
+                problems->append(problem(QStringLiteral("Template %1: packs/%2 must hold the pack %2 with a version in its pack.json.")
+                                             .arg(templateId, entry.fileName())));
+            continue;
+        }
+        const QString recorded = recordedNeeds.value(QStringLiteral("packs")).toObject().value(pack.id).toObject()
+                                     .value(QStringLiteral("version")).toString();
+        if (problems && !recorded.isEmpty() && recorded != pack.version)
+            problems->append(problem(QStringLiteral("Template %1: packs/%2 is version %3, but the workflow's requires.packs records %4.")
+                                         .arg(templateId, pack.id, pack.version, recorded),
+                                     QStringLiteral("Carry the pack version the workflow was made with.")));
+        out.append(pack);
+    }
+    return out;
 }
 
 QString previewOf(const QString &folder) {
@@ -229,6 +267,8 @@ void TemplateLibrary::scan(QList<Template> *out, Errors *problems) const {
             for (const QJsonValue tag : about.value(QStringLiteral("tags")).toArray())
                 t.tags << tag.toString();
             t.models = document->models();
+            if (entry.isDir()) // not a loose .fugue file: its folder is the person's own
+                t.carriedPacks = carriedPacksOf(t.id, t.folder, document->requirements, problems);
             found.append({t, category != categories.end() ? category->first : int(categories.size())});
         }
     }
@@ -245,6 +285,12 @@ void TemplateLibrary::scan(QList<Template> *out, Errors *problems) const {
     });
     for (const auto &entry : found)
         out->append(entry.first);
+}
+
+QStringList packsNeeded(const Document &document, const Registry &registry) {
+    QSet<QString> packs = unmetNamespaces(document, registry);
+    packs.remove(QStringLiteral("fugue"));
+    return sorted(packs);
 }
 
 QList<Template> TemplateLibrary::list() const {

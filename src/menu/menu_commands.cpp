@@ -102,6 +102,8 @@ QList<Row> menuRows() {
          QT_TRANSLATE_NOOP("Command", "Save to library"), {}, "canvas", "added"},
         {"group.update", QT_TRANSLATE_NOOP("Command", "Update the selected group from the library"),
          QT_TRANSLATE_NOOP("Command", "Update group…"), {}, "group-selected", "added"},
+        {"node.move-version", QT_TRANSLATE_NOOP("Command", "Move the selected node to the newer major version of its type"),
+         QT_TRANSLATE_NOOP("Command", "Move to newer version…"), {}, "canvas", "added"},
         {"group.expose", QT_TRANSLATE_NOOP("Command", "Expose the port on the group's face"),
          QT_TRANSLATE_NOOP("Command", "Expose on the group"), {}, "group", "same"},
         {"group.unexpose", QT_TRANSLATE_NOOP("Command", "Stop exposing the port on the group's face"),
@@ -258,6 +260,10 @@ void bindMenuCommands(CommandRegistry &registry, CanvasModel &canvas, std::funct
     registry.setEnabledWhen("group.interface", [model] {
         const QStringList ids = model->selectedIds();
         return model->inGroup() || (ids.size() == 1 && model->isGroup(ids.first()));
+    });
+    registry.setEnabledWhen("node.move-version", [model] {
+        const QStringList ids = model->selectedIds();
+        return ids.size() == 1 && !model->newerMajor(ids.first()).isEmpty();
     });
     registry.setEnabledWhen("group.update", [model] {
         const QStringList ids = model->selectedIds();

@@ -245,6 +245,7 @@ private:
         bool unsaved = false;
         int color = 0; // index into the look's tabColors
         std::unique_ptr<QUndoStack> undo; // while the tab is not shown
+        QList<CarriedPack> carried; // the packs the template it was opened from carries (#118), else none
     };
 
     // Adds a tab and shows it. A current tab that is still an empty "Untitled" is replaced
@@ -272,6 +273,9 @@ private:
     };
     // The banner's line on the nodes and models of `document` that are not here, empty for none;
     // with what it may offer to download.
+    // The first pack the shown tab's template carries that `document` still needs, as the banner
+    // offers it: id, source (the folder in the template), ref (empty), text. Empty for none.
+    QVariantMap carriedPackOffer(const Document &document) const;
     QString missingNotice(const Document &document, const QString &title, DownloadOffer *offer = nullptr) const;
     // The shown workflow's missing line and offer again, after its models may have changed.
     // The banner shows it when it showed the last one, or `force`.
