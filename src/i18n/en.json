@@ -656,5 +656,10 @@
   "Turn": "Turn",
   "Width": "Width",
   "X": "X",
-  "Y": "Y"
+  "Y": "Y",
+  "Cannot play this file": "Cannot play this file",
+  "Open large": "Open large",
+  "Pause": "Pause",
+  "Play": "Play",
+  "Position": "Position"
 }

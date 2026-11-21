@@ -132,6 +132,7 @@ public:
                        // picture while the node runs again, until this run's preview comes
         Compare,       // a Compare Images node's result: {a, b, difference, composite: {url, source, width, height}, labelA, labelB}, else empty
         CompareView,   // its viewer's state (compareView), session only
+        Media,         // a video or sound result's player: {type, url, label, width, height, duration, file}, else empty
         Notice,        // why the node cannot run now and how to fix it (8.5), from a check
         UpdateAvailable, // a group whose library version is newer: that version (5.3), else empty
         GroupSize,       // a group instance: how many nodes its definition holds (its caption row), else 0
@@ -497,6 +498,8 @@ public:
     Q_INVOKABLE QVariantMap compareView(const QString &node) const;
     // Its last result's pictures (the `compare` role): a, b, difference, composite and the labels.
     Q_INVOKABLE QVariantMap compareResult(const QString &node) const { return m_run.value(node).compare; }
+    // A video or sound result's player data (the `media` role): what the large view plays.
+    Q_INVOKABLE QVariantMap mediaResult(const QString &node) const { return m_run.value(node).media; }
     Q_INVOKABLE void setCompareView(const QString &node, const QVariantMap &changes);
     // One of "flip", "next-mode", "fit", "actual" on the node, as the keys do. False when the
     // node is no Compare Images or the step is unknown.
@@ -784,6 +787,7 @@ private:
         QString thumbnailText;
         bool thumbnailDim = false;
         QVariantMap compare;
+        QVariantMap media;
         QVariantMap values;
         QString notice;
     };

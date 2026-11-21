@@ -9,6 +9,7 @@
 #include <QClipboard>
 #include <QGuiApplication>
 #include <QMimeData>
+#include <QProcess>
 #include <QTemporaryDir>
 #include <QImage>
 #include <QJsonDocument>
@@ -240,6 +241,32 @@ QByteArray sinksGraph(const QString &folder) {
 })").arg(folder).toUtf8();
 }
 
+// A Load Video and a Load Audio into Save Video, Save Audio and a Preview of the clip; the files are
+// made with ffmpeg (no media is committed) and the saves go into the test's folder.
+QByteArray mediaGraph(const QString &clip, const QString &song, const QString &folder) {
+    return QStringLiteral(R"({
+  "fugue": 1,
+  "graph": {"nodes": {
+    "clip": {"type": "fugue/load-video", "version": "1.0.0", "inputs": {"file": "%1"}},
+    "song": {"type": "fugue/load-audio", "version": "1.0.0", "inputs": {"file": "%2"}},
+    "save-clip": {"type": "fugue/save-video", "version": "1.0.0",
+                  "inputs": {"video": {"from": "clip.video"}, "name": "fox", "format": "webm", "folder": "%3", "embed": "none"}},
+    "save-song": {"type": "fugue/save-audio", "version": "1.0.0",
+                  "inputs": {"audio": {"from": "song.audio"}, "name": "tune", "format": "flac", "folder": "%3", "embed": "none"}},
+    "show-clip": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "clip.video"}}}
+  }},
+  "layout": {"nodes": {"clip": {"pos": [0, 0]}, "song": {"pos": [0, 300]}, "save-clip": {"pos": [300, 0]},
+                       "save-song": {"pos": [300, 300]}, "show-clip": {"pos": [600, 0]}},
+             "view": {"center": [400, 300], "zoom": 0.6}}
+})").arg(clip, song, folder).toUtf8();
+}
+
+bool makeMedia(const QStringList &args) {
+    QProcess ffmpeg;
+    ffmpeg.start("ffmpeg", QStringList{"-nostdin", "-hide_banner", "-loglevel", "error", "-y"} + args);
+    return ffmpeg.waitForFinished(60000) && ffmpeg.exitCode() == 0;
+}
+
 class TestCanvasRun : public QObject {
     Q_OBJECT
 
@@ -428,6 +455,77 @@ private slots:
         QTRY_COMPARE(r.role("src", NodeList::ThumbnailText).toString(), QStringLiteral("File not found"));
         QVERIFY(r.role("src", NodeList::ThumbnailDim).toBool());
         QVERIFY(r.app.warnings.isEmpty());
+    }
+
+    // Save Video, Save Audio and a Preview of a video show a player in the slot (#116): the label
+    // before a run, the result's file and kind after, a bar with the play button, the time and, for
+    // a video, the button that opens the large view, which plays the same file.
+    void saveVideoSaveAudioAndPreviewShowAPlayerOnTheirFace() {
+        QTemporaryDir out;
+        const QString clip = out.filePath("in.webm"), song = out.filePath("in.wav");
+        QVERIFY(makeMedia({"-f", "lavfi", "-i", "testsrc=size=96x64:rate=12:duration=2", "-c:v", "libvpx", clip}));
+        QVERIFY(makeMedia({"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=22050:duration=2", song}));
+        RunApp r(mediaGraph(clip, song, out.filePath("saved")));
+        QVERIFY(r.app.open());
+        QCOMPARE(r.role("save-clip", NodeList::ThumbnailText).toString(), QStringLiteral("No result yet"));
+        QVERIFY(r.role("save-clip", NodeList::Media).toMap().isEmpty());
+
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(finished.first().at(1).toString(), QStringLiteral("ok"));
+
+        const QVariantMap saved = r.role("save-clip", NodeList::Media).toMap();
+        QCOMPARE(saved.value("type").toString(), QStringLiteral("video"));
+        QCOMPARE(saved.value("file").toString(), QStringLiteral("fox.webm"));
+        QCOMPARE(QUrl(saved.value("url").toString()).toLocalFile(), out.filePath("saved/fox.webm"));
+        QCOMPARE(r.role("save-clip", NodeList::ThumbnailText).toString(), QStringLiteral("Video \u00b7 0:02"));
+        const QVariantMap sound = r.role("save-song", NodeList::Media).toMap();
+        QCOMPARE(sound.value("type").toString(), QStringLiteral("audio"));
+        QCOMPARE(sound.value("file").toString(), QStringLiteral("tune.flac"));
+        // A Preview of the clip plays the clip itself, and names no file.
+        const QVariantMap shown = r.role("show-clip", NodeList::Media).toMap();
+        QCOMPARE(QUrl(shown.value("url").toString()).toLocalFile(), clip);
+        QVERIFY(shown.value("file").toString().isEmpty());
+        // A sound's slot is a bar, not a picture.
+        const QRectF slot = r.role("save-song", NodeList::ThumbnailRect).toRectF();
+        QVERIFY(slot.width() > 0 && slot.height() < 0.3 * slot.width());
+
+        QQuickItem *card = item(r.app.window->contentItem(), "node-save-clip");
+        QVERIFY(card);
+        QQuickItem *player = nullptr;
+        QTRY_VERIFY((player = item(card, "mediaPlayer")));
+        QCOMPARE(player->property("kind").toString(), QStringLiteral("video"));
+        QTRY_VERIFY(player->property("duration").toReal() > 1500);
+        // The play button starts it and pauses it; Space does the same once the player has the focus.
+        QVERIFY(!player->property("playing").toBool());
+        click(r, item(player, "mediaPlay"));
+        QTRY_VERIFY(player->property("playing").toBool());
+        click(r, item(player, "mediaPlay"));
+        QTRY_VERIFY(!player->property("playing").toBool());
+        player->forceActiveFocus();
+        r.app.key(Qt::Key_Space);
+        QTRY_VERIFY(player->property("playing").toBool());
+        r.app.key(Qt::Key_Space);
+        QTRY_VERIFY(!player->property("playing").toBool());
+        QCOMPARE(item(player, "mediaTime")->property("text").toString(), QStringLiteral("0:00 / 0:02"));
+        QVERIFY(item(player, "mediaExpand")->isVisible());
+        QQuickItem *songPlayer = item(item(r.app.window->contentItem(), "node-save-song"), "mediaPlayer");
+        QVERIFY(songPlayer);
+        QCOMPARE(songPlayer->property("kind").toString(), QStringLiteral("audio"));
+        QVERIFY(!item(songPlayer, "mediaExpand")->isVisible());
+
+        // The expand button opens the large view on the same file, with no zoom buttons; closing stops it.
+        click(r, item(player, "mediaExpand"));
+        QQuickItem *dialog = nullptr;
+        QTRY_VERIFY((dialog = named(r, "mediaViewer")));
+        QTRY_COMPARE(QUrl(dialog->property("source").toString()).toLocalFile(), out.filePath("saved/fox.webm"));
+        QTRY_VERIFY(dialog->property("playing").toBool()); // it starts at once
+        QVERIFY(!named(r, "mediaZoom-fit")->isVisible());
+        QVERIFY(named(r, "mediaClose")->isVisible());
+        click(r, named(r, "mediaClose"));
+        QTRY_VERIFY(dialog->property("source").toString().isEmpty());
+        QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
     }
 
     // Preview and Save Image show a dimmed "No result yet" before a run, then the image (Save:

@@ -345,9 +345,13 @@ void CanvasRuns::show(const QString &tab, const QString &node) {
             text(tr("No picture yet"), 0.5, true);
     } else if (!view.thumbnail.isEmpty() && view.thumbnailWidth > 0 && view.thumbnailHeight > 0)
         image(view.thumbnail, view.thumbnailWidth, view.thumbnailHeight, view.thumbnailFile);
-    else if (!view.text.isEmpty())
-        text(view.text, view.textAspect, false);
-    else if (!view.inputThumbnail.isEmpty())
+    else if (!view.text.isEmpty()) {
+        // A video or a sound gets a player: the slot is shaped for it (a bar for a sound).
+        const bool sound = view.media.value("type") == QLatin1String("audio");
+        text(view.text, sound ? 0.25 : view.textAspect, false);
+        if (!view.media.isEmpty())
+            state.insert("media", view.media);
+    } else if (!view.inputThumbnail.isEmpty())
         image(view.inputThumbnail, view.inputWidth, view.inputHeight, {});
     else if (view.inputMissing)
         text(tr("File not found"), 0.5, true);
@@ -581,6 +585,7 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
                 take("b", inputs, "b");
                 take("difference", thumbnails, "difference");
                 take("composite", thumbnails, "composite");
+                view.media.clear();
                 const QVariantMap a = view.compare.value("a").toMap();
                 if (!a.isEmpty()) {
                     view.thumbnail = a.value("url").toString();
@@ -602,6 +607,15 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
                 view.text = thumbnail.value("label").toString();
                 view.textAspect = view.thumbnailWidth > 0 && view.thumbnail.isEmpty()
                                       ? qreal(view.thumbnailHeight) / view.thumbnailWidth : 0.5;
+                view.media.clear();
+                if (const QString media = thumbnail.value("mediaPath").toString(); !media.isEmpty())
+                    view.media = {{"type", thumbnail.value("type").toString()},
+                                  {"url", QUrl::fromLocalFile(media).toString()},
+                                  {"label", view.text},
+                                  {"width", view.thumbnailWidth},
+                                  {"height", view.thumbnailHeight},
+                                  {"duration", thumbnail.value("duration").toDouble()},
+                                  {"file", view.thumbnailFile}};
             } else if (!inner) {
                 // What a Preview shows when it is a text or a number: its excerpt in the slot.
                 const QJsonObject shown = event.value("shown").toObject();
@@ -613,6 +627,7 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
                         excerpt = excerpt.left(239) + QChar(0x2026);
                     view.text = excerpt;
                     view.textAspect = 0.5;
+                    view.media.clear();
                     view.thumbnail.clear();
                     view.imagePath.clear();
                     break;
@@ -790,7 +805,8 @@ void CanvasRuns::readNodes() {
     const Document document = m_canvas->scopeDocument();
     for (auto it = document.graph.nodes.cbegin(); it != document.graph.nodes.cend(); ++it) {
         NodeInfo info;
-        info.savesFile = it->type == QLatin1String("fugue/save-image");
+        info.savesFile = it->type == QLatin1String("fugue/save-image") || it->type == QLatin1String("fugue/save-video")
+                         || it->type == QLatin1String("fugue/save-audio");
         info.compares = it->type == QLatin1String("fugue/compare-images");
         info.crops = it->type == QLatin1String("fugue/crop");
         if (info.crops) {
@@ -798,7 +814,7 @@ void CanvasRuns::readNodes() {
             if (image.kind() == InputValue::Kind::Link)
                 info.cropFrom = keyFor(image.from().node);
         }
-        info.showsResult = it->type == QLatin1String("fugue/preview") || it->type == QLatin1String("fugue/save-image") || info.compares;
+        info.showsResult = it->type == QLatin1String("fugue/preview") || info.savesFile || info.compares;
         if (info.compares) {
             // What made A and B names them: the linked node's title, else the plain letter.
             const auto labelOf = [&](const char *name, const QString &fallback) {
@@ -857,6 +873,7 @@ void CanvasRuns::refreshInputs() {
             view.thumbnail.clear();
             view.imagePath.clear();
             view.text.clear();
+            view.media.clear();
             view.inputThumbnail.clear();
             view.inputMissing = false;
         }

@@ -665,6 +665,17 @@ FocusScope {
             imageDialog = imageDialogComponent.createObject(canvas, {canvasModel: canvas.model})
         imageDialog.openFor(node)
     }
+    // The large view of a video: the same player, bigger (#116), made on first use.
+    function openMedia(node) {
+        if (!mediaDialog)
+            mediaDialog = mediaDialogComponent.createObject(canvas, {canvasModel: canvas.model})
+        mediaDialog.openFor(node)
+    }
+    property var mediaDialog: null
+    Component {
+        id: mediaDialogComponent
+        MediaDialog {}
+    }
     function openCrop(node) {
         if (!cropDialog)
             cropDialog = cropDialogComponent.createObject(canvas, {canvasModel: canvas.model})

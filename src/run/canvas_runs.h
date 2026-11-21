@@ -151,6 +151,7 @@ private:
         QVariantMap values;
         QString thumbnailFile; // the file a sink wrote, named under its picture
         QString imagePath;     // the full image behind `thumbnail`, for Open, Copy and Save Image
+        QVariantMap media;     // a video or sound result's player: type, url, label, width, height, duration, file
         QVariantMap compare;   // Compare Images: a, b, difference, composite ({url, source, width, height})
         bool live = false;     // `thumbnail` is a preview of the run going on now (9.4)
         QString text;          // a text, number or media label shown in the slot
@@ -206,7 +207,7 @@ private:
     const Registry *m_registry;
     struct NodeInfo {
         bool showsResult = false; // Preview, Save Image: a placeholder until a result comes
-        bool savesFile = false;   // Save Image: its chip names the file it wrote
+        bool savesFile = false;   // Save Image, Save Video, Save Audio: its chip or player names the file it wrote
         bool compares = false;    // Compare Images: its slot is a viewer of A and B (#62)
         QString labelA, labelB;   // what produced A and B: the linked node's title
         QString imageFile;        // the image file its file input names

@@ -82,16 +82,20 @@ QJsonObject thumbnailOf(const QJsonObject &handle, const QString &dir) {
     return {{"url", QUrl::fromLocalFile(file).toString()}, {"width", width}, {"height", height}, {"source", path}};
 }
 
-// What stands in for a thumbnail of a video or audio result: a label, and a video's shape.
-// (A video's first frame would need ffmpeg per result; the label is what 4.5 falls back to.)
+// What stands in for a thumbnail of a video or audio result: a label, a video's shape, and the file
+// for the player on the node (a first frame would need ffmpeg per result; the player shows it).
 QJsonObject mediaLabel(const QJsonObject &handle) {
     const QString type = handle.value("type").toString();
     if (type != QLatin1String("video") && type != QLatin1String("audio"))
         return {};
     const int seconds = qRound(handle.value("duration").toDouble());
     const QString length = QStringLiteral("%1:%2").arg(seconds / 60).arg(seconds % 60, 2, 10, QLatin1Char('0'));
+    // `mediaPath` is the file itself, which the node's player plays (a thumbnail's `source` is for pictures).
     QJsonObject label{{"label", (type == QLatin1String("video") ? RunService::tr("Video") : RunService::tr("Audio"))
-                                    + QStringLiteral(" \u00b7 ") + length}};
+                                    + QStringLiteral(" \u00b7 ") + length},
+                      {"type", type},
+                      {"mediaPath", handle.value("path").toString()},
+                      {"duration", handle.value("duration").toDouble()}};
     if (type == QLatin1String("video")) {
         label.insert("width", handle.value("width").toInt());
         label.insert("height", handle.value("height").toInt());

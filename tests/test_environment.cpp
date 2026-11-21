@@ -53,6 +53,9 @@ void isolateFromTheOwnersFiles() {
 void isolateFromTheDesktop() {
     qputenv("QT_QPA_PLATFORMTHEME", "generic");
     qputenv("QT_NO_XDG_DESKTOP_PORTAL", "1");
+    // The FFmpeg backend of Qt Multimedia dumps every file it opens to stderr (main.cpp turns it off in the app).
+    if (!qEnvironmentVariableIsSet("QT_LOGGING_RULES"))
+        qputenv("QT_LOGGING_RULES", "qt.multimedia.ffmpeg.mediadataholder.info=false");
     qputenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent/fugue-tests-have-no-session-bus");
     // Nor the machine's GPU helper (a source checkout's build-helper-*/ sits beside build/): none,
     // unless a test names one (empty FUGUE_HELPER: no helper, engine/helper_provider.h).

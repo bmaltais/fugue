@@ -7,7 +7,8 @@ import Fugue
 // caller's `tools`, then Fit and 100%, then the close button), the viewer filling the rest and an
 // optional `footer` under it. It knows nothing of nodes: give it the `zoomable` (the viewer: anything with `fit()`,
 // `actualSize()`, `zoomAt()`, `actual` and `zoom`, as CompareView has) and the buttons it wants in
-// the bar. Keys: 0 Fit, 1 100%, + and - zoom about the middle, Escape closes (Popup's policy),
+// the bar; a viewer that does not zoom (a player) leaves `zoomable` empty, and the bar then has no
+// Fit and 100%. Keys: 0 Fit, 1 100%, + and - zoom about the middle, Escape closes (Popup's policy),
 // and `confirm` is Enter.
 //
 // `name` prefixes the objectNames of the bar and its buttons ("compare": compareBar, compareZoom-fit,
@@ -61,9 +62,10 @@ Popup {
                 id: toolsRow
                 spacing: root.look.unit
             }
-            Item { width: 2 * root.look.unit; height: 1 } // a gap of its own between the chunks
+            Item { width: 2 * root.look.unit; height: 1; visible: !!root.zoomable } // a gap of its own between the chunks
             ViewButton {
                 objectName: root.name + "Zoom-fit"
+                visible: !!root.zoomable
                 look: root.look
                 text: qsTr("Fit")
                 accented: false
@@ -72,6 +74,7 @@ Popup {
             }
             ViewButton {
                 objectName: root.name + "Zoom-actual"
+                visible: !!root.zoomable
                 look: root.look
                 text: qsTr("100%")
                 accented: false

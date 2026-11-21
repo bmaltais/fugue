@@ -1,0 +1,26 @@
+{
+  "manifest": 1,
+  "id": "fugue/save-video",
+  "version": "1.0.0",
+  "name": "Save Video",
+  "description": "Writes a video to the output folder, with the workflow embedded so the file can be dropped back onto Fugue. Plays on the node.",
+  "category": "Basic",
+  "keywords": ["write", "export", "output", "mp4", "webm", "clip", "movie", "workflow", "player"],
+  "sink": true,
+  "runtime": {"kind": "builtin"},
+  "needs": {"files": true},
+  "inputs": [
+    {"name": "video", "type": "video", "label": "Video"},
+    {"name": "name", "type": "text", "label": "Name", "default": "fugue", "widget": "line"},
+    {"name": "format", "type": "text", "label": "Format", "default": "mp4", "choices": ["mp4", "webm"],
+     "description": "mp4: H.264 and AAC, plays everywhere. webm: VP9 and Opus. A video already in the format is copied as it is."},
+    {"name": "embed", "type": "text", "label": "Embed workflow", "default": "full",
+     "choices": ["full", "no-prompts", "none"],
+     "description": "full: the whole workflow. no-prompts: the workflow with its prompts blanked. none: nothing. Local file paths are never embedded."},
+    {"name": "folder", "type": "text", "label": "Folder", "optional": true, "widget": "folder",
+     "description": "Where to write. Empty means the output folder (~/Pictures/Fugue)."}
+  ],
+  "outputs": [
+    {"name": "file", "type": "video", "label": "File", "description": "The video as written."}
+  ]
+}
