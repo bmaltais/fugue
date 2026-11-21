@@ -636,10 +636,7 @@
   "Space the selected nodes evenly, top to bottom": "Space the selected nodes evenly, top to bottom",
   "Top": "Top",
   "Vertically": "Vertically",
-  "Hue and saturation": "Hue and saturation",
-  "Brightness": "Brightness",
   "Hex color": "Hex color",
-  "Apply": "Apply",
   "Recent colors": "Recent colors",
   "Recent color %1": "Recent color %1",
   "Color: pick any color": "Color: pick any color",
@@ -665,5 +662,15 @@
   "Magnify small nodes on hover": "Magnify small nodes on hover",
   "Zoomed far out, a short hover over a node shows it at full size over itself, so a wire can start there. Off by default.": "Zoomed far out, a short hover over a node shows it at full size over itself, so a wire can start there. Off by default.",
   "On": "On",
-  "Off": "Off"
+  "Off": "Off",
+  "Brightness, percent": "Brightness, percent",
+  "Current": "Current",
+  "Current color %1, click to go back to it": "Current color %1, click to go back to it",
+  "Go back to %1": "Go back to %1",
+  "Hex": "Hex",
+  "Hue": "Hue",
+  "Hue, degrees": "Hue, degrees",
+  "New": "New",
+  "Saturation and brightness": "Saturation and brightness",
+  "Saturation, percent": "Saturation, percent"
 }
