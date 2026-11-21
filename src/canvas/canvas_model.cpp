@@ -601,12 +601,13 @@ void CanvasModel::layOut(NodeRow &row) const {
         if (row.missing || row.groupSize > 0)
             top += m_rowHeight;
         if (hasThumbnail) {
-            // 1.5u in from the sides, 1u under the rows, its height from its aspect (0.5 to 1.5; a sound's, 0.25).
+            // 1.5u in from the sides, 1u under the rows, its height from its aspect (0.5 to 1, so a tall picture
+            // never grows the node over its neighbours, #163; a sound's, 0.2 to 1).
             const qreal inset = qRound(1.5 * unit());
             const qreal width = row.width - 2 * inset;
             // A sound's player is a bar (its aspect is below the least a picture has).
             const qreal least = run->media.value(QStringLiteral("type")) == QLatin1String("audio") ? 0.2 : 0.5;
-            const qreal height = qRound(width * std::clamp(run->thumbnailAspect, least, 1.5));
+            const qreal height = qRound(width * std::clamp(run->thumbnailAspect, least, 1.0));
             row.thumbnail = QRectF(inset, top + m_padTop, width, height + extra);
             top = row.thumbnail.bottom();
         } else if (grows && extra > 0) {

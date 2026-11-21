@@ -179,7 +179,7 @@ in `text`, Medium, elided.
 | Part | Value |
 | --- | --- |
 | Position | after the rows: 1.5u (6) in from the sides, 1u below the last row, the body's 2u padding under it |
-| Size | width = node width − 3u; height from the image's aspect, clamped to 0.5 to 1.5 × width |
+| Size | width = node width − 3u; height from the image's aspect, clamped to 0.5 to 1 × width: a tall picture is letterboxed (`PreserveAspectFit`), so a result never grows a node past a square slot and over its neighbours (#163) |
 | Corner | `max(0, r − 6)`, so square on square themes and concentric on round ones |
 | Fit | `Image.PreserveAspectFit` on `well`; a 16 px checkerboard of `well`/`hairline` under images with alpha |
 | Outline | 1 px inside, white at 10% on dark themes, black at 10% on light (never a tinted color) |
