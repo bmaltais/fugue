@@ -427,6 +427,7 @@ ApplicationWindow {
     Component {
         id: workflowsPanelComponent
         WorkflowsPanel {
+            id: workflowsPanel
             anchors.fill: parent
             look: App.theme.look
             tabs: App.workflows.tabs
@@ -438,6 +439,24 @@ ApplicationWindow {
                     App.recentFiles.forget(path)
             }
             onCloseRequested: App.sidePanels.tab = ""
+            // The results of the current workflow (#133): looked up when the view opens, when the
+            // workflow changes, and when a run ends; the list is replaced only when it differs.
+            function refreshResults() {
+                const rows = App.mediaLibrary.resultsOf(workflowsPanel.workflowPath)
+                if (JSON.stringify(rows.map(r => r.path)) !== JSON.stringify(workflowsPanel.results.map(r => r.path)))
+                    workflowsPanel.results = rows
+            }
+            onResultsRequested: refreshResults()
+            onResultChosen: item => workflowsPanel.resultDetails = App.mediaLibrary.detailsOf(item.path, item.run, item.node)
+            onResultAction: (action, item) => {
+                if (action === "open") App.mediaLibrary.openFile(item.path)
+                else if (action === "folder") App.mediaLibrary.openFolder(item.path)
+                else if (action === "copy") App.mediaLibrary.copyPath(item.path)
+            }
+            Connections {
+                target: App.runQueue
+                function onChanged() { if (workflowsPanel.view === "results") Qt.callLater(workflowsPanel.refreshResults) }
+            }
         }
     }
 
