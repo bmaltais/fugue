@@ -26,19 +26,8 @@ jobs:
         run: pacman -Syu --noconfirm --needed git
 
       - uses: actions/checkout@v4
-
-      - name: Check out the bundled templates (the templates submodule, a private repo)
-        # TEMPLATES_DEPLOY_KEY is a read-only deploy key of bmaltais/fugue-workflows.
-        env:
-          KEY: ${{ secrets.TEMPLATES_DEPLOY_KEY }}
-        run: |
-          pacman -S --noconfirm --needed openssh
-          mkdir -p ~/.ssh && printf '%s\n' "$KEY" > ~/.ssh/templates && chmod 600 ~/.ssh/templates
-          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          # ssh reads the passwd home, not the container's $HOME: name both files.
-          GIT_SSH_COMMAND="ssh -i $HOME/.ssh/templates -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts" \
-            git -c url."git@github.com:".insteadOf="https://github.com/" submodule update --init templates
+        with:
+          submodules: true # the bundled templates: bmaltais/fugue-workflows, a public repo
 
       - name: Install the package's dependencies
         # The PKGBUILD in this repo is the one list of what the app needs, and CI reads it rather than keeping a copy.
