@@ -116,6 +116,11 @@ with `"context": {"diffusion_model_path": "…LowNoise….gguf", "high_noise_dif
 "sample.guidance.txt_cfg", "sample.flow_shift"}`, the same in all three. A video has no `vae_encode`
 and cannot start from a latent; the helper answers `input_invalid`.
 
+An image-to-video model (Wan 2.2 I2V, TI2V) takes its first frame as `"image": "start.png"` in the
+`encode` and the `sample` request (job input `image` through `--serve`; data over HTTP), the same
+picture in both, with the clip's `width`, `height` and `video_frames` in `params`: the encode makes the model's extra input
+from it. An image model given an `image` answers `input_invalid`.
+
 ## Upscaling (`image.upscale`)
 
 An image through an upscale model, with the library's own ESRGAN and MoSR upscaler (spec 8.1). No
@@ -167,7 +172,9 @@ The pin moves only on purpose (spec 8.10).
    - image-to-image from a latent (`vae_encode`, then `sample` with `init_latent`);
    - IP-Adapter, PhotoMaker or PuLID, only when the move changes their code;
    - Wan (T2V) staged: encode, sample and decode as separate processes, and one `generate`
-     run of the same request: the frames must be the same.
+     run of the same request: the frames must be the same;
+   - Wan 2.2 I2V the same way, with `"image"` in the encode and the sample and `params.init_image`
+     (`{"image": PATH}`) in the `generate` run.
 
    These need a GPU and model files, so they are run by hand, not in CI.
 4. Run the stages once through Fugue's provider, as the app does (`--serve`, models kept loaded):

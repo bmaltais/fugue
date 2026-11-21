@@ -1563,9 +1563,16 @@ it as a module folder and run it with no code of its own in Fugue.
   `video.y4m` instead of `image.png`, a YUV4MPEG2 file (4:2:0, one `FRAME` per frame) that every
   ffmpeg reads and the helper needs no codec for; over HTTP its format is `y4m`. Fugue's VAE Decode
   Video turns it into the engine's lossless intermediate (FFV1 in Matroska, [2.4](#24-media-handles)).
-  Not staged yet: a first frame (image-to-video: its start image needs the size and length in Text
-  Encode), `vae_encode` of a clip, a latent as the start of a Sampler, S2V and the audio models, and
-  LTX/MiniMax (audio and hires latent upscale in the same call); the helper says so (`input_invalid`).
+  An image-to-video model (Wan 2.2 I2V; Wan 2.2 TI2V from its first frame) is staged with a start
+  picture, the job input `image` of `text.encode` and `latent.sample` (the library's `init_image`;
+  an image model refuses it with `input_invalid`): the encode turns it into the conditioning's
+  `c_concat` at the clip's width, height and length, so those are the encode's options too, and the
+  sample sends the same picture so the stages make one generation (TI2V starts its sampling from the
+  frame, which is not in the conditioning). Wan 2.1 I2V's CLIP-vision output is made in the same
+  encode.
+  Not staged yet: `vae_encode` of a clip, a latent as the start of a Sampler, S2V and the audio
+  models, and LTX/MiniMax (audio and hires latent upscale in the same call); the helper says so
+  (`input_invalid`).
   A video latent split across machines (text encoder and VAE decode on a GB10, the sampling loop on
   a discrete card, or two clips at once on two hosts) uses the paired-host transport as it is.
 
@@ -2581,7 +2588,10 @@ the templates `z-image-turbo`, `flux2-klein-4b` and `flux2-klein-9b` are ready t
 Video (#105): the same nodes on a video model, with Empty Video Latent (width, height, frames, rate)
 in place of Empty Latent, VAE Decode Video in place of VAE Decode, and Load Models' optional
 high-noise diffusion model for Wan 2.2 14B. Text Encode and Sampler are unchanged: the latent says
-it is a video. A latent of the other kind at a decode is `node_failed` naming the right node. Checked on an RTX 3090 with Wan 2.2 T2V A14B (Q4_K_S, both passes, UMT5 fp8, Wan 2.1 VAE; 320 x 192, 9 frames, 4 steps): the three stages as separate helper processes give a video byte for byte the same as one `generate` run, and the graph above gives the same through Fugue, locally and through `--serve-http` (conditioning and latent files identical). Not yet measured: the split across the GB10 and the 3090 (#105 stays open).
+it is a video, and Text Encode takes an optional First frame and Clip (the Empty Video Latent) for an
+image-to-video model (#130): the picture is cut to the clip's size and goes to the encode, the conditioning carries it
+(`meta.first_frame`, `meta.clip`), and the Sampler sends it again and refuses a latent of another size
+or length; the template `wan22-i2v` (fugue-workflows) is this graph on Wan 2.2 I2V A14B Q4_K_S, checked through the CLI on an RTX 3090 (640 x 384, 33 frames, 20 steps: three minutes). A latent of the other kind at a decode is `node_failed` naming the right node. Checked on an RTX 3090 with Wan 2.2 T2V A14B (Q4_K_S, both passes, UMT5 fp8, Wan 2.1 VAE; 320 x 192, 9 frames, 4 steps): the three stages as separate helper processes give a video byte for byte the same as one `generate` run, and the graph above gives the same through Fugue, locally and through `--serve-http` (conditioning and latent files identical). Not yet measured: the split across the GB10 and the 3090 (#105 stays open).
 Image editing (#88), as ComfyUI's FLUX.2 Klein 9B templates do it: Load Image, Resize to
 Megapixels (1 MP), Text Encode's references, an Empty Latent of the resized size, Sampler, VAE
 Decode; the templates `flux2-klein-9b-edit` (distilled: 4 steps, guidance 1),
@@ -2929,6 +2939,7 @@ Building M4 made these further choices.
 | Thinking is off unless asked for: Enhance Prompt never thinks, Text Generate has a Thinking switch (Advanced, off). It is sent as the chat template's switch (`chat_template_kwargs.enable_thinking`), not OpenAI's `reasoning_effort`, whose `"none"` a strict server refuses. Checked on the DGX (Qwen3.5 2B, tensorfold, 2026-11-20): thinking spent the whole default answer (4096 tokens, "low" effort too) and wrote nothing; off, a good prompt in 41 tokens. ComfyUI's Qwen3 prompt node has the same switch | 8.1, 14.2 | high |
 | A text job waits up to 300 seconds of silence (image jobs: 15 s per request): reading a long prompt or an image, or reasoning, can stream nothing for a while | 8.7 | medium |
 | Resize to Megapixels defaults its multiple to 16 (ComfyUI's resolution_steps defaults to 1): sizes then match a latent of the same picture | 14.1 | medium-high |
+| Image-to-video (#130) composes the nodes that exist: Text Encode gains two optional inputs, First frame (an image) and Clip (a latent, the Empty Video Latent the Sampler starts from), and no node is new. The first frame needs the size and length because the library makes the model's extra input (Wan 2.2 I2V's `c_concat`: 4 mask channels and the 16 of the frame's latent, over every latent frame) in the encode; ComfyUI's WanImageToVideo does the same in one node that also makes the latent, which is the complex node avoided here. The same Empty Video Latent goes to both nodes, and the Sampler checks that the conditioning was made for its clip (a size or length that differs would otherwise fail inside the model). The picture rides the conditioning like the references (`meta.first_frame`, its hash checked at the Sampler), so Wan 2.2 TI2V (frame in the sampled latent, not the conditioning) also stages, with the cost of one more VAE encode in the sample stage; the helper's job input is `image`, not an option, so a paired host receives it as data. Checked on an RTX 3090 (Wan 2.2 I2V A14B Q4_K_S, both passes, 256 x 256, 5 frames, 4 steps): encode, sample and decode as separate helper processes give a video byte for byte the same as one `generate` run | 8.10, 14.3 | high |
 | Text Encode takes an edit's reference pictures and carries them on its conditioning (`meta.references`) to the Sampler, which sends them again (#88). stable-diffusion.cpp's flux2 preset gives references to the model, not the text encoder, but every stage of one generation must send the same options (the guidance sets an edit makes are chosen at encode), so both stages send `ref_images`. ComfyUI attaches reference latents to the conditioning (ReferenceLatent) on the positive and negative branch, after a VAE Encode of each: one wire here does all of it. The Sampler's cache follows the pictures, since the conditioning's descriptor holds them. The encode VAE-encodes them too, unused (a few hundred ms) | 14.3 | high |
 | Templates (#83) are a separate repo, `bmaltais/fugue-workflows` (private, like Fugue), bundled as a submodule at a pinned commit: the owner's call (2026-11-20), so templates can be published and contributed apart from the app. ComfyUI ships its templates as a pip package pinned by version | 11.10 | high |
 | A template is a folder with no index: ComfyUI's `index.json` must be kept in step with the files by a sync script and CI. A template's models and node versions come from its workflow, not from fields written again (ComfyUI repeats the models in the index and on each node) | 11.10 | high |
