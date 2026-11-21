@@ -74,6 +74,10 @@ void registerCanvasCommands(fugue::CommandRegistry &commands, CanvasModel &canva
             emit model->nodeRenameRequested(model->selectedIds().first());
     });
     commands.setHandler("node.pin", [model] { model->togglePinned(); });
+    for (const char *mode : {"left", "right", "top", "bottom"})
+        commands.setHandler(QStringLiteral("node.align-") + QLatin1String(mode), [model, mode] { model->alignSelection(QLatin1String(mode)); });
+    for (const char *mode : {"horizontal", "vertical"})
+        commands.setHandler(QStringLiteral("node.distribute-") + QLatin1String(mode), [model, mode] { model->alignSelection(QLatin1String(mode)); });
     commands.setHandler("frame.delete", [model, &commands] {
         model->deleteFrame(commands.target().value("frame").toString());
     });

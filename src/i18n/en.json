@@ -548,5 +548,21 @@
   "Kept %n tabs with unsaved changes.": {
     "one": "Kept %n tab with unsaved changes.",
     "other": "Kept %n tabs with unsaved changes."
-  }
+  },
+  "&Align": "&Align",
+  "&Distribute": "&Distribute",
+  "Align": "Align",
+  "Align the selected nodes to the bottom edge": "Align the selected nodes to the bottom edge",
+  "Align the selected nodes to the left edge": "Align the selected nodes to the left edge",
+  "Align the selected nodes to the right edge": "Align the selected nodes to the right edge",
+  "Align the selected nodes to the top edge": "Align the selected nodes to the top edge",
+  "Bottom": "Bottom",
+  "Distribute": "Distribute",
+  "Horizontally": "Horizontally",
+  "Left": "Left",
+  "Right": "Right",
+  "Space the selected nodes evenly, left to right": "Space the selected nodes evenly, left to right",
+  "Space the selected nodes evenly, top to bottom": "Space the selected nodes evenly, top to bottom",
+  "Top": "Top",
+  "Vertically": "Vertically"
 }

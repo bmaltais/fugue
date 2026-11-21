@@ -122,3 +122,11 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 ## Unread
 
 Settings, the shortcuts overlay, the quit question, About, every menu except Run, the context menus, the workflow dialogs and their questions (those questions are a row of buttons), the group dialogs, image save, the widget pickers (but their search field), the magnifier.
+
+### 2026-11-21 align and distribute (#58)
+
+- Control: the Node menu, after Pin: `Align` (Left, Right, Top, Bottom) and `Distribute` (Horizontally, Vertically) submenus, and the same two in the node's context menu after Colors (`src/menu/menus.cpp`; commands `node.align-*`, `node.distribute-*` in `src/menu/menu_commands.cpp`).
+- Old: none.
+- New: two submenus, no default keys. In the node's menu a command shows only when it applies (Align from two selected nodes, Distribute from three), and a submenu with nothing left is left out; in the bar they stay and dim, as the other Node items do.
+- Why: ComfyUI offers both as menu items, so recognition not recall; six leaf commands under two headings keep the Node menu from growing by six rows (Hick).
+- Rule: Learned place (the existing Node and node-menu items keep their order; the new rows sit after the toggles, before the image items). Gaps (the two rows join the toggles' chunk; no gap added). Floor (menu rows are the menus' existing height). Destructive: not applicable, and undo reverses each.

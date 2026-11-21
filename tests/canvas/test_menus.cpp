@@ -558,6 +558,56 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    void alignAndDistributeComeFromTheNodeMenuAsOneStepEach() {
+        App app(load(framed));
+        QVERIFY(app.open());
+        auto x = [&](const QString &id) { return app.model.position(id).x(); };
+        auto y = [&](const QString &id) { return app.model.position(id).y(); };
+        // One node: the node's menu has neither submenu; with two, Align only; with three, both.
+        app.model.select({"a"});
+        QTest::mouseClick(app.window, Qt::RightButton, {}, app.screen(60, 90));
+        QTRY_VERIFY(isOpen(app.window, "contextMenuPopup"));
+        QVERIFY(!find(app.window, "subMenu-Align"));
+        QVERIFY(!find(app.window, "subMenu-Distribute"));
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(allClosed(app.window));
+        app.model.select({"a", "c"});
+        QTest::mouseClick(app.window, Qt::RightButton, {}, app.screen(60, 90));
+        QTRY_VERIFY(isOpen(app.window, "contextMenuPopup"));
+        QVERIFY(find(app.window, "subMenu-Align"));
+        QVERIFY(!find(app.window, "subMenu-Distribute"));
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(allClosed(app.window));
+
+        app.model.select({"a", "b", "c"});
+        const int steps = app.model.undoStack()->count();
+        QTest::mouseClick(app.window, Qt::RightButton, {}, app.screen(60, 90));
+        QTRY_VERIFY(isOpen(app.window, "contextMenuPopup"));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("subMenu-Align")));
+        QTRY_VERIFY(find(app.window, "menuItem-node.align-right"));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("menuItem-node.align-right")));
+        QTRY_COMPARE(x("a"), 600.0);
+        QCOMPARE(x("b"), 600.0);
+        QCOMPARE(app.model.undoStack()->count(), steps + 1);
+        app.model.undo();
+        QCOMPARE(x("a"), 40.0);
+
+        // The Node menu of the bar: Distribute > Vertically spreads a, b and c over their rows.
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("menuTitle-3")));
+        QTRY_VERIFY(find(app.window, "subMenu-Distribute"));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("subMenu-Distribute")));
+        QTRY_VERIFY(find(app.window, "menuItem-node.distribute-vertical"));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("menuItem-node.distribute-vertical")));
+        // a and c start at the same height, so they keep their order: a, c, then b.
+        QTRY_VERIFY(y("c") != 80.0);
+        const QRectF ra = app.model.nodeRect("a"), rb = app.model.nodeRect("b"), rc = app.model.nodeRect("c");
+        QCOMPARE(ra.top(), 80.0);
+        QVERIFY(std::abs((rc.top() - ra.bottom()) - (rb.top() - rc.bottom())) <= 1);
+        app.model.undo();
+        QCOMPARE(y("a"), 80.0);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void colorsApplyToTheSelectionOrTheFrameAsOneStep() {
         App app(load(framed));
         QVERIFY(app.open());

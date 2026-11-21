@@ -23,6 +23,25 @@ QVariantMap colors() {
     return {{"title", QStringLiteral(QT_TRANSLATE_NOOP("Menu", "&Colors"))}, {"items", items}, {"swatches", true}};
 }
 
+// Align and Distribute (#58), after the toggles in the Node menu and the node's menu. In the
+// node's menu a command that does not apply is left out, and a submenu left empty with it.
+QVariantMap arrangeMenu(const char *title, std::initializer_list<const char *> ids, bool hideWhenOff) {
+    QVariantList items;
+    for (const char *id : ids)
+        items.append(hideWhenOff ? ifOn(id) : command(id));
+    return {{"title", QString::fromUtf8(title)}, {"items", items}};
+}
+
+QVariantMap align(bool hideWhenOff) {
+    return arrangeMenu(QT_TRANSLATE_NOOP("Menu", "&Align"),
+                       {"node.align-left", "node.align-right", "node.align-top", "node.align-bottom"}, hideWhenOff);
+}
+
+QVariantMap distribute(bool hideWhenOff) {
+    return arrangeMenu(QT_TRANSLATE_NOOP("Menu", "&Distribute"),
+                       {"node.distribute-horizontal", "node.distribute-vertical"}, hideWhenOff);
+}
+
 QVariantList bar() {
     return {
         submenu(QT_TRANSLATE_NOOP("Menu", "&File"),
@@ -40,8 +59,8 @@ QVariantList bar() {
                  command("view.toggle-links"), separator(), command("panel.nodes"), command("panel.workflows")}),
         submenu(QT_TRANSLATE_NOOP("Menu", "&Node"),
                 {command("node.search"), separator(), command("node.bypass"), command("node.mute"),
-                 command("node.collapse"), command("node.pin"), separator(), command("node.open-image"),
-                 command("node.copy-image"), command("node.save-image"), separator(), command("frame.make"),
+                 command("node.collapse"), command("node.pin"), align(false), distribute(false),
+                 separator(), command("node.open-image"), command("node.copy-image"), command("node.save-image"), separator(), command("frame.make"),
                  command("group.make"), command("group.ungroup"), command("group.enter"), command("group.leave"),
                  command("group.make-unique"), command("group.interface"), command("group.save-to-library"),
                  command("group.update")}),
@@ -72,7 +91,7 @@ QVariantList canvas() {
 // Right-click on a node: it is selected first, so each command acts on the selection.
 QVariantList node() {
     return {ifOn("group.expose"), ifOn("group.unexpose"), command("edit.rename"), separator(), command("node.bypass"),
-            command("node.mute"), command("node.collapse"), command("node.pin"), colors(), separator(),
+            command("node.mute"), command("node.collapse"), command("node.pin"), colors(), align(true), distribute(true), separator(),
             ifOn("node.open-image"), ifOn("node.copy-image"), ifOn("node.save-image"), separator(),
             command("edit.copy"),
             command("edit.clone"), separator(), command("frame.make"), command("group.make"),

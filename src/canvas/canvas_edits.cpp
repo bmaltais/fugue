@@ -3,6 +3,7 @@
 // selection (delete, bypass, mute, collapse, copy, paste, clone). canvas_model.h explains
 // the design.
 
+#include "canvas/align.h"
 #include "canvas/canvas_model.h"
 #include "canvas/input_links.h"
 
@@ -630,6 +631,27 @@ bool CanvasModel::selectionAll(const QString &state) const {
 void CanvasModel::toggleCollapsed() { toggleLayoutFlag(QStringLiteral("collapsed"), tr("Collapse")); }
 
 void CanvasModel::togglePinned() { toggleLayoutFlag(QStringLiteral("pinned"), tr("Pin")); }
+
+bool CanvasModel::alignSelection(const QString &mode) {
+    QList<align::Box> boxes;
+    for (const QString &id : selectedIds())
+        if (const int r = rowOf(id); r >= 0)
+            boxes.append({id, nodeRect(id), m_rows[size_t(r)].pinned});
+    const QHash<QString, QPointF> moves = align::arrange(boxes, mode);
+    if (moves.isEmpty())
+        return false;
+    Document document = this->scopeDocument();
+    QJsonObject entries = document.layout.value("nodes").toObject();
+    for (auto it = moves.cbegin(); it != moves.cend(); ++it) {
+        QJsonObject entry = entries.value(it.key()).toObject();
+        entry.insert("pos", QJsonArray{qRound64(it.value().x()), qRound64(it.value().y())});
+        entries.insert(it.key(), entry);
+    }
+    document.layout.insert("nodes", entries);
+    commit(document, mode == QLatin1String("horizontal") || mode == QLatin1String("vertical") ? tr("Distribute")
+                                                                                              : tr("Align"));
+    return true;
+}
 
 // A flag of the selection's layout entries: set on all, or off on all when all have it. One step.
 void CanvasModel::toggleLayoutFlag(const QString &flag, const QString &text) {

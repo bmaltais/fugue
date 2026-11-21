@@ -463,6 +463,8 @@ QVariantList CommandRegistry::resolve(const QVariantList &items, const QVariantM
         if (item.contains("items")) {
             item.insert("title", QCoreApplication::translate("Menu", item.value("title").toString().toUtf8().constData()));
             item.insert("items", resolve(item.value("items").toList(), target, context));
+            if (context && item.value("items").toList().isEmpty())
+                continue; // everything in it was left out
         } else if (item.contains("command")) {
             const QVariantMap state = entry(item.value("command").toString(), target);
             if (state.isEmpty())
