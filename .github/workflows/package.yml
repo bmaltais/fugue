@@ -1,0 +1,102 @@
+name: Package
+
+# Builds the pacman package from packaging/PKGBUILD in an Arch container. It runs on a push to main that
+# changes the packaging (which also saves the compiler cache a tag build starts from: a cache is only
+# readable from its own branch or the default one), on a v* tag, which also makes a GitHub release with
+# the package and its checksum, and by hand. Not on pull requests: it is slow. Tests are test.yml's job,
+# so makepkg skips them here (and does not compile them).
+#
+# Only `fugue` (the Vulkan helper, any GPU) is built here: the CUDA toolkit is too big for a hosted
+# runner, so fugue-helper-cuda is built where there is an NVIDIA card (`makepkg -si` in packaging/).
+on:
+  push:
+    branches: [main, master]
+    paths: [packaging/**, share/**, bin/build, bin/build-helper, CMakeLists.txt, .github/workflows/package.yml]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Build the package
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 800M
+    steps:
+      - name: Install git for the checkout
+        run: pacman -Syu --noconfirm --needed git
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # tags, for the package version
+
+      - name: Install the build dependencies
+        run: |
+          export FUGUE_SKIP_CUDA=1
+          source packaging/PKGBUILD
+          deps=("${depends[@]}" "${makedepends[@]}")
+          pacman -S --noconfirm --needed base-devel ccache sudo "${deps[@]%%[<>=]*}"
+
+      - name: Restore the compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: package-ccache-${{ github.sha }}
+          restore-keys: package-ccache-
+
+      - name: Build the package
+        # makepkg will not run as root. The commit is put on a branch so the clone makepkg makes of this checkout has it.
+        run: |
+          useradd -m builder
+          mkdir dist
+          chown -R builder .
+          git config --global --add safe.directory '*'
+          su builder -c "git config --global --add safe.directory '*'"
+          if [[ $GITHUB_REF_TYPE == tag ]]; then ref="tag=$GITHUB_REF_NAME"; else
+            git branch -f ci-build HEAD; ref="branch=ci-build"; fi
+          su builder -c "cd packaging && FUGUE_SKIP_CUDA=1 FUGUE_SRC='$GITHUB_WORKSPACE' FUGUE_REF='$ref' \
+            PKGDEST='$GITHUB_WORKSPACE/dist' CCACHE_DIR='$CCACHE_DIR' makepkg --noconfirm --nocheck --nodeps -f"
+
+      - name: Checksums and what is inside
+        run: |
+          cd dist
+          ls -l
+          sha256sum *.pkg.tar.zst | tee SHA256SUMS
+          for pkg in *.pkg.tar.zst; do pacman -Qip "$pkg" | grep -E '^(Name|Version|Depends On)'; done
+          pacman -Qlp *.pkg.tar.zst | grep -E 'bin/fugue|applications/fugue.desktop|icons/.*fugue|fugue-helper' | head
+
+      - name: Compiler cache use
+        if: always()
+        run: su builder -c "CCACHE_DIR='$CCACHE_DIR' ccache -s" || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package
+          path: dist/*
+
+  release:
+    name: Make the release
+    needs: package
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: package
+          path: dist
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=(--generate-notes --verify-tag)
+          [[ $GITHUB_REF_NAME == *-* ]] && flags+=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" "${flags[@]}" --repo "$GITHUB_REPOSITORY" --title "Fugue $GITHUB_REF_NAME" dist/*

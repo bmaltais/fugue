@@ -9,8 +9,13 @@
 # stable-diffusion.cpp sources are the pin of helper/CMakeLists.txt: move both
 # together.
 
+# Environment (all optional; CI sets them, see .github/workflows/package.yml):
+#   FUGUE_SKIP_CUDA=1  build only `fugue`: no CUDA toolkit, no fugue-helper-cuda
+#   FUGUE_SRC=<path>   take the fugue sources from this checkout instead of GitHub
+#   FUGUE_REF=<ref>    what to build: branch=main, tag=v0.1.0 or commit=<sha> (default: GitHub's HEAD)
+
 pkgbase=fugue
-pkgname=('fugue' 'fugue-helper-cuda')
+if [[ -n ${FUGUE_SKIP_CUDA:-} ]]; then pkgname=('fugue'); else pkgname=('fugue' 'fugue-helper-cuda'); fi
 pkgver=0.1.0
 pkgrel=1
 pkgdesc='Node-based workflows for local AI'
@@ -31,7 +36,6 @@ depends=(
 makedepends=(
   'clang'
   'cmake'
-  'cuda'
   'gcc'
   'git'
   'make'
@@ -41,6 +45,7 @@ makedepends=(
   'spirv-headers'
   'vulkan-headers'
 )
+[[ -n ${FUGUE_SKIP_CUDA:-} ]] || makedepends+=('cuda')
 checkdepends=(
   'jq'
   'noto-fonts'
@@ -48,7 +53,9 @@ checkdepends=(
 _sdcpp=532d2c15c430a785a712b2d94281f04e733008a4
 _ggml=eeda9ec48fc84a3df0bb9dcc19ae9053075a2539
 _cutlass=ad7b2f5e84fcfa124cb02b91d5bd26d238c0459e
-source=("$pkgbase::git+$url.git"
+_src=${FUGUE_SRC:+file://$FUGUE_SRC}
+_src=${_src:-$url.git}
+source=("$pkgbase::git+$_src${FUGUE_REF:+#$FUGUE_REF}"
         "fugue-workflows::git+https://github.com/bmaltais/fugue-workflows.git"
         "sdcpp-$_sdcpp.tar.gz::https://github.com/leejet/stable-diffusion.cpp/archive/$_sdcpp.tar.gz"
         "ggml-$_ggml.tar.gz::https://github.com/leejet/ggml/archive/$_ggml.tar.gz"
@@ -61,7 +68,13 @@ sha256sums=('SKIP'
 
 pkgver() {
   cd "$srcdir/$pkgbase"
-  printf '0.1.0.r%s.g%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+  # From the newest v* tag: v0.1.0 is 0.1.0, v0.1.0-test1 is 0.1.0_test1, and commits after it add .rN.gHASH.
+  local described
+  if described=$(git describe --long --tags --match 'v*' 2>/dev/null); then
+    sed -E 's/^v//; s/-0-g[0-9a-f]+$//; s/-([0-9]+)-g([0-9a-f]+)$/.r\1.g\2/; s/-/_/g' <<<"$described"
+  else
+    printf '0.1.0.r%s.g%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+  fi
 }
 
 prepare() {
@@ -84,13 +97,14 @@ _helper() {
 
 build() {
   cd "$srcdir/$pkgbase"
-  ./bin/build
+  ./bin/build fugue # the app only: the tests are built by check(), which a CI package build skips
   _helper vulkan
-  _helper cuda
+  [[ -n ${FUGUE_SKIP_CUDA:-} ]] || _helper cuda
 }
 
 check() {
   cd "$srcdir/$pkgbase"
+  ./bin/build
   QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure --no-tests=error
 }
 
