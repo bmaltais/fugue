@@ -7,6 +7,8 @@
 #include <QString>
 #include <QStringList>
 
+#include <functional>
+
 #include "engine/media.h"
 #include "engine/result.h"
 
@@ -19,6 +21,13 @@ Result<QString> program(const QString &name);
 // Runs a program to the end and returns its stdout. A failure carries the last
 // lines of its stderr, with `code`.
 Result<QByteArray> run(const QString &name, const QStringList &args, const QString &code);
+
+// As run(), for a long job: ffmpeg is given `-progress pipe:1`, `progress` is called with the seconds
+// of output written so far as they advance, and `cancelled` is polled about every 100 ms; when it
+// is true ffmpeg is killed and the result is the error `cancelled`. Call it from a worker thread.
+Result<QByteArray> runWatched(const QStringList &args, const QString &code,
+                              const std::function<void(double seconds)> &progress,
+                              const std::function<bool()> &cancelled);
 
 // The arguments that go before "-i <file>" to apply a pending trim, and the
 // "-vf" filter for a pending crop (empty when there is none).

@@ -29,6 +29,7 @@
     "load-audio",
     "load-image",
     "load-models",
+    "load-upscale-model",
     "load-video",
     "number",
     "number-math",
@@ -47,6 +48,9 @@
     "text-concat",
     "text-encode",
     "text-generate",
+    "upscale-image",
+    "upscale-video",
+    "upscale-with-model",
     "vae-decode",
     "vae-decode-video",
     "vae-encode"
@@ -130,6 +134,22 @@
         "loras"
       ],
       "files": "lora"
+    },
+    {
+      "id": "fugue/upscale-model",
+      "version": 1,
+      "kind": "resource",
+      "name": "Upscale model",
+      "extensions": [
+        ".safetensors",
+        ".pth",
+        ".gguf"
+      ],
+      "folders": [
+        "upscale_models",
+        "upscaler",
+        "ESRGAN"
+      ]
     },
     {
       "id": "fugue/latent",

@@ -18,10 +18,13 @@
 #include "engine/document.h"
 #include "engine/file_hashes.h"
 #include "engine/hash.h"
+#include "engine/model_catalog.h"
 #include "engine/model_library.h"
 #include "engine/registry.h"
 #include "nodes/builtin.h"
 #include "widget_fixture.h"
+#include "workflow/model_downloads.h"
+#include "../engine/fake_http.h"
 #include "../engine/omarchy_fixture.h"
 
 using namespace fugue;
@@ -464,6 +467,108 @@ private slots:
         QTRY_VERIFY(!FileHashes(FileHashes::defaultPath()).known(other).isEmpty());
         QTest::qWait(50);
         QCOMPARE(f.stored("all", "model"), QJsonValue(QJsonValue::Undefined));
+    }
+
+    // ---- models to download from the catalog (#134) ----
+
+    static ModelCatalog catalogOf(const QString &url, const QByteArray &bytes, bool commercial = true) {
+        const QJsonObject entry{{"id", "cat"}, {"resource", "fugue/image-model"}, {"title", "Catalog model"},
+                                {"description", "Good for tests."}, {"file", "cat.safetensors"}, {"url", url},
+                                {"size", bytes.size()}, {"sha256", sha256(bytes).mid(7)}, {"scale", 4},
+                                {"architecture", "ESRGAN"}, {"license", "MIT"}, {"commercial", commercial}};
+        return ModelCatalog::parse(QJsonDocument(QJsonObject{{"catalog", 1}, {"models", QJsonArray{entry}}}).toJson(), "test");
+    }
+
+    void thePickerListsCatalogModelsNotOnDiskAndNamesWhatFiltersMatch() {
+        QTemporaryDir models;
+        Fixture f;
+        f.edits.setModelRoots({models.path()});
+        f.edits.setModelSource([](const QString &, const QStringList &, std::function<void(QList<WidgetEdit::Model>)> done) { done({}); });
+        f.edits.setCatalog(catalogOf("https://example.org/cat.safetensors", "abc"));
+        f.edits.requestModels("all", "model");
+        QVariantList listed = f.edits.models("all", "model");
+        QCOMPARE(listed.size(), 1);
+        const QVariantMap entry = listed.first().toMap();
+        QCOMPARE(entry.value("catalog").toBool(), true);
+        QCOMPARE(entry.value("id").toString(), QString("cat"));
+        QCOMPARE(entry.value("detail").toString(), QString("4x · ESRGAN · MIT · 1 MB"));
+        QVERIFY(entry.value("keywords").toString().contains("esrgan", Qt::CaseInsensitive));
+        QCOMPARE(entry.value("note").toString(), QString("Good for tests."));
+        QCOMPARE(entry.value("size").toLongLong(), 3);
+        // The question's facts: license, source host, size, and the folder it will be saved in.
+        const QVariantMap info = f.edits.catalogInfo("all", "model", "cat");
+        QCOMPARE(info.value("licenseLine").toString(), QString("MIT"));
+        QCOMPARE(info.value("host").toString(), QString("example.org"));
+        QCOMPARE(info.value("folder").toString(), models.filePath("image-model"));
+        QVERIFY(f.edits.catalogInfo("all", "model", "nope").isEmpty());
+        QVERIFY(f.edits.catalogInfo("all", "count", "cat").isEmpty());
+        // Once a file of that name is on disk it is listed as a file, not offered again.
+        QVERIFY(writeModel(models.filePath("image-model/cat.safetensors"), "abc"));
+        f.edits.requestModels("all", "model");
+        listed = f.edits.models("all", "model");
+        QCOMPARE(listed.size(), 1);
+        QVERIFY(!listed.first().toMap().value("catalog").toBool());
+    }
+
+    void downloadingACatalogModelFetchesItChecksItAndPutsItsHandleInTheInput() {
+        QTemporaryDir models;
+        const QByteArray bytes(200000, 'c');
+        fugue::test::FakeHttpServer server;
+        QVERIFY(server.listen());
+        server.on("GET", "/cat.safetensors", [&](const fugue::test::HttpRequest &) {
+            fugue::test::HttpResponse response;
+            response.body = bytes;
+            return response;
+        });
+        Fixture f;
+        ModelDownloads downloads;
+        f.edits.setDownloads(&downloads);
+        f.edits.setModelRoots({models.path()});
+        f.edits.setCatalog(catalogOf(QString::fromLatin1(server.origin()) + "/cat.safetensors", bytes));
+        f.edits.requestModels("all", "model");
+        const int before = f.steps();
+        QCOMPARE(f.edits.downloadCatalogModel("all", "model", "cat"), QString());
+        QVERIFY(downloads.busy());
+        QCOMPARE(downloads.what(), QString("pick"));
+        QTRY_VERIFY(!downloads.busy());
+        QCOMPARE(f.stored("all", "model"),
+                 QJsonValue(QJsonObject{{"resource", "fugue/image-model"}, {"name", "cat.safetensors"}, {"hash", sha256(bytes)}}));
+        QCOMPARE(f.steps(), before + 1);
+        QVERIFY(QFileInfo::exists(models.filePath("image-model/cat.safetensors")));
+    }
+
+    void aCatalogDownloadWhoseBytesDoNotMatchItsHashPutsNothingInTheInput() {
+        QTemporaryDir models;
+        fugue::test::FakeHttpServer server;
+        QVERIFY(server.listen());
+        server.on("GET", "/cat.safetensors", [](const fugue::test::HttpRequest &) {
+            fugue::test::HttpResponse response;
+            response.body = "something else entirely";
+            return response;
+        });
+        Fixture f;
+        ModelDownloads downloads;
+        f.edits.setDownloads(&downloads);
+        f.edits.setModelRoots({models.path()});
+        f.edits.setCatalog(catalogOf(QString::fromLatin1(server.origin()) + "/cat.safetensors", "the bytes the catalog hashed"));
+        QCOMPARE(f.edits.downloadCatalogModel("all", "model", "cat"), QString());
+        QTRY_VERIFY(!downloads.busy());
+        QVERIFY(!downloads.failure().isEmpty());
+        QCOMPARE(f.stored("all", "model"), QJsonValue(QJsonValue::Undefined));
+        QVERIFY(!QFileInfo::exists(models.filePath("image-model/cat.safetensors")));
+    }
+
+    void aCatalogDownloadIsRefusedForAnotherTypeALinkOrNoDownloadLine() {
+        QTemporaryDir models;
+        Fixture f;
+        f.edits.setModelRoots({models.path()});
+        f.edits.setCatalog(catalogOf("https://example.org/cat.safetensors", "abc"));
+        QVERIFY(!f.edits.downloadCatalogModel("all", "model", "cat").isEmpty()); // no download line
+        ModelDownloads downloads;
+        f.edits.setDownloads(&downloads);
+        QVERIFY(!f.edits.downloadCatalogModel("all", "model", "nope").isEmpty());
+        QVERIFY(!f.edits.downloadCatalogModel("all", "count", "cat").isEmpty());
+        QVERIFY(!downloads.busy());
     }
 
     void aFileThatIsNotAModelOfTheInputsTypeIsRefused() {

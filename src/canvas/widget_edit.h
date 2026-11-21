@@ -60,6 +60,7 @@
 #include <QVariantMap>
 #include <QtQmlIntegration/qqmlintegration.h>
 
+#include "engine/model_catalog.h"
 #include "engine/model_offers.h"
 #include "engine/model_shape.h"
 
@@ -74,6 +75,7 @@ class CanvasModel;
 
 namespace fugue {
 class FileHashes;
+class ModelDownloads;
 class ModelLibrary;
 class Registry;
 }
@@ -197,6 +199,26 @@ public:
     Q_INVOKABLE QVariantMap hashState(const QString &node, const QString &input) const;
     int hashRevision() const { return m_hashRevision; }
 
+    // --- models to download (#134) ---
+    // Every picker of a resource type also lists the catalog's models of that type that are not
+    // on disk (engine/model_catalog.h), under "Download": models() gives them as maps with
+    // `catalog` true, an `id`, the `title`, a `detail` (scale, architecture, license, size), its `size` in bytes, the
+    // `keywords` a filter matches and the `note` (what it is good for). Picking one does not fetch
+    // it: the window shows catalogInfo() (the license, the size, the source, where it will go) and
+    // asks; downloadCatalogModel() is what its Download button calls. The file is fetched by the
+    // window's one download line (workflow/model_downloads.h, shown in the banner), kept only when
+    // its sha256 is the catalog's, and then put in the input, as a file picked from disk is.
+    // Replaces where the catalog comes from (tests).
+    void setCatalog(fugue::ModelCatalog catalog) { m_catalog = std::move(catalog); m_catalogSet = true; }
+    void setDownloads(fugue::ModelDownloads *downloads);
+    // What the question shows about a catalog model of the input's type: {title, description,
+    // scale, architecture, license, licenseLine, licenseUrl, commercial, attribution, author,
+    // source, url, host, size, sizeText, folder (where it will be saved), file}; empty when unknown.
+    Q_INVOKABLE QVariantMap catalogInfo(const QString &node, const QString &input, const QString &id) const;
+    // Queues the download of a catalog model for the input; returns why not, or empty. When the
+    // file arrives its handle is put in the input (one undo step), if the node still has it.
+    Q_INVOKABLE QString downloadCatalogModel(const QString &node, const QString &input, const QString &id);
+
 signals:
     void modelsChanged();
     void hashingChanged();
@@ -238,6 +260,17 @@ private:
     const Pick *pickFor(const QString &node, const QString &input) const;
     // Drops it; true when there was one.
     bool dropPick(const QString &node, const QString &input);
+
+    // The files being fetched for an input: stored once they have arrived (downloadsFinished).
+    struct Download {
+        QString scope, node, input, path, resource, name, hash;
+    };
+    void downloadsFinished();
+    fugue::ModelCatalog m_catalog;
+    bool m_catalogSet = false;
+    QHash<QString, QList<fugue::CatalogModel>> m_catalogMissing; // by modelsKey()
+    fugue::ModelDownloads *m_downloads = nullptr;
+    QList<Download> m_downloading;
 
     const fugue::Registry *m_registry;
     CanvasModel *m_canvas;

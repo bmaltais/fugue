@@ -1,0 +1,22 @@
+{
+  "manifest": 1,
+  "id": "fugue/upscale-with-model",
+  "version": "1.0.0",
+  "name": "Upscale with Model",
+  "description": "Makes an image bigger with an upscale model (Real-ESRGAN and the like), which draws in detail a plain resize cannot. The size grows by the model's own factor, 2 or 4 times. Big images are done in tiles, so they fit in memory. To change the result's size, follow it with Resize or Upscale Image.",
+  "category": "Image/Transform",
+  "keywords": ["upscale", "enlarge", "esrgan", "real-esrgan", "super resolution", "4x", "2x", "detail", "ImageUpscaleWithModel"],
+  "runtime": {"kind": "builtin"},
+  "capabilities": ["image.upscale"],
+  "inputs": [
+    {"name": "image", "type": "image", "label": "Image"},
+    {"name": "model", "type": "fugue/upscale-model", "label": "Upscale model"},
+    {"name": "tile", "type": "number", "label": "Tile size", "default": 512, "min": 64, "max": 2048, "step": 32, "integer": true,
+     "advanced": true, "description": "Pixels per side of the pieces a big image is cut in (they overlap and are blended). Smaller uses less memory and is slower; an image no bigger than a tile is done whole. Lower it if memory runs out."}
+  ],
+  "outputs": [
+    {"name": "image", "type": "image", "label": "Image"},
+    {"name": "width", "type": "number", "label": "Width"},
+    {"name": "height", "type": "number", "label": "Height"}
+  ]
+}

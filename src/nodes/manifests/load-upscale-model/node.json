@@ -1,0 +1,16 @@
+{
+  "manifest": 1,
+  "id": "fugue/load-upscale-model",
+  "version": "1.0.0",
+  "name": "Load Upscale Model",
+  "description": "Picks an upscale model: the ones in your model folders, and a catalog of ones to download, each with its license shown before anything is fetched. Wire it to Upscale with Model, or several of them to share one choice.",
+  "category": "Image/Transform",
+  "keywords": ["upscale", "model", "esrgan", "real-esrgan", "ultrasharp", "loader", "download", "super resolution", "UpscaleModelLoader"],
+  "runtime": {"kind": "builtin"},
+  "inputs": [
+    {"name": "model", "type": "fugue/upscale-model", "label": "Upscale model"}
+  ],
+  "outputs": [
+    {"name": "model", "type": "fugue/upscale-model", "label": "Upscale model"}
+  ]
+}

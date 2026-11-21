@@ -92,8 +92,10 @@ private slots:
         search->openAt(0, 0);
         search->setQuery("blend");
         QCOMPARE(names(search->results()).first(), QString("Blend"));
-        search->setQuery("upscale"); // a keyword of Resize
+        search->setQuery("downscale"); // a keyword of Resize only
         QCOMPARE(names(search->results()).first(), QString("Resize"));
+        search->setQuery("upscale"); // the name of Upscale Image beats Resize's keyword
+        QCOMPARE(names(search->results()).first(), QString("Upscale Image"));
         search->setQuery("bright");
         QCOMPARE(names(search->results()).first(), QString("Brightness and Contrast"));
     }
@@ -116,7 +118,7 @@ private slots:
         search->openAt(0, 0);
         search->setQuery("transform");
         const QStringList found = names(search->results());
-        QCOMPARE(QSet<QString>(found.begin(), found.end()), (QSet<QString>{"Crop", "Flip", "Pad", "Resize", "Resize to Megapixels", "Rotate"}));
+        QCOMPARE(QSet<QString>(found.begin(), found.end()), (QSet<QString>{"Crop", "Flip", "Load Upscale Model", "Pad", "Resize", "Resize to Megapixels", "Rotate", "Upscale Image", "Upscale with Model"}));
     }
 
     void noMatchGivesNoResults() {

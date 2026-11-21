@@ -24,6 +24,14 @@ add_library(fugue_engine STATIC ${fugue_engine_sources})
 target_include_directories(fugue_engine PUBLIC src)
 target_link_libraries(fugue_engine PUBLIC Qt6::Core Qt6::Network PkgConfig::VIPS PRIVATE Vulkan::Vulkan PkgConfig::ARCHIVE)
 target_compile_options(fugue_engine PUBLIC -Wall -Wextra)
+# The model catalogs (spec 8.9, #134) are compiled in: src/catalog/*.json under :/fugue/catalog.
+file(GLOB fugue_catalogs CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/src/catalog src/catalog/*.json)
+set(fugue_catalog_files)
+foreach(catalog ${fugue_catalogs})
+  set_source_files_properties(src/catalog/${catalog} PROPERTIES QT_RESOURCE_ALIAS ${catalog})
+  list(APPEND fugue_catalog_files src/catalog/${catalog})
+endforeach()
+qt_add_resources(fugue_engine fugue_catalogs PREFIX /fugue/catalog FILES ${fugue_catalog_files})
 
 # Everything else but main.cpp, shared by the app and the tests, so each source
 # compiles once and a new file in src/ needs no line here.

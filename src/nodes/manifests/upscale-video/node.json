@@ -1,0 +1,21 @@
+{
+  "manifest": 1,
+  "id": "fugue/upscale-video",
+  "version": "1.0.0",
+  "name": "Upscale Video",
+  "description": "Makes a video bigger by a factor, with no model: ffmpeg resamples every frame as it streams, so a long video is never held in memory. The frame rate, the length and the sound are kept. It adds no detail; for that, use Upscale Video with Model.",
+  "category": "Video",
+  "keywords": ["upscale", "enlarge", "scale", "zoom", "bigger", "2x", "4x", "resolution", "clip", "movie"],
+  "runtime": {"kind": "builtin"},
+  "needs": {"files": true},
+  "inputs": [
+    {"name": "video", "type": "video", "label": "Video"},
+    {"name": "scale", "type": "number", "label": "Scale", "default": 2, "min": 0.1, "max": 8, "step": 0.1,
+     "description": "The factor of each side. Each side is rounded down to an even number of pixels, as H.264 needs."},
+    {"name": "method", "type": "text", "label": "Method", "default": "lanczos", "choices": ["nearest", "bilinear", "bicubic", "lanczos", "area"],
+     "description": "lanczos: sharp, for photos. bicubic: softer. nearest: hard pixels, for pixel art."}
+  ],
+  "outputs": [
+    {"name": "video", "type": "video", "label": "Video"}
+  ]
+}

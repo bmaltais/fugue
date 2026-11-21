@@ -349,6 +349,9 @@ Rectangle {
         // files the helper cannot load under "Other", dimmed, with why. Offered models keep
         // their place.
         let listed = edits.models(nodeId, name)
+        // The catalog's models not on disk come last, under "Download" (#134).
+        const downloadable = listed.filter(m => m.catalog === true)
+        listed = listed.filter(m => m.catalog !== true)
         const fitsFor = edits.fitsModel(nodeId, name)
         const anyFits = listed.some(m => m.fits === true)
         const isOther = m => m.path !== undefined && (anyFits ? m.fits !== true : m.fits === false)
@@ -382,9 +385,16 @@ Rectangle {
             entries.push({ text: m.title, detail: status, note: m.note, value: { handle: m.handle },
                            checked: m.name === current && currentHash === undefined })
         }
+        if (downloadable.length > 0)
+            entries.push({ text: qsTr("Download"), heading: true, enabled: false })
+        // The row says the size; the note, what it is and its license; a filter also reads `keywords`.
+        // Picking one asks first (the license, the source), it never downloads by itself.
+        for (const m of downloadable)
+            entries.push({ text: m.title, detail: sizeText(m.size), note: m.detail + "\n" + m.note,
+                           keywords: m.keywords, value: { download: m.id } })
         if (edits.modelsLoading(nodeId, name))
             entries.push({ text: qsTr("Looking for models…"), enabled: false })
-        else if (listed.length === 0)
+        else if (listed.length === 0 && downloadable.length === 0)
             entries.push({ text: edits.modelsEmptyText(nodeId, name), enabled: false, note: "" })
         entries.push({ text: qsTr("Type a name…"), value: { typeName: true }, keep: true })
         return entries
@@ -417,6 +427,8 @@ Rectangle {
                 return edits.unset(nodeId, name)
             if (value.typeName)
                 return openEditor()
+            if (value.download !== undefined)
+                return picker().confirmDownload(value.download)
             if (value.disk !== undefined)
                 return edits.setDiskModel(nodeId, name, value.disk)
             return edits.setModel(nodeId, name, value.handle)

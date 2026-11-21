@@ -32,6 +32,51 @@ Result<QByteArray> run(const QString &name, const QStringList &args, const QStri
     return process.readAllStandardOutput();
 }
 
+Result<QByteArray> runWatched(const QStringList &args, const QString &code,
+                              const std::function<void(double seconds)> &progress,
+                              const std::function<bool()> &cancelled) {
+    const Result<QString> path = program(QStringLiteral("ffmpeg"));
+    if (!path)
+        return path.error();
+    QProcess process;
+    process.setStandardInputFile(QProcess::nullDevice());
+    process.setProcessChannelMode(QProcess::SeparateChannels);
+    process.start(*path, QStringList{QStringLiteral("-progress"), QStringLiteral("pipe:1"), QStringLiteral("-nostats")} + args);
+    if (!process.waitForStarted())
+        return makeError(QStringLiteral("internal"), QStringLiteral("ffmpeg could not be started."));
+    QByteArray pending, errors;
+    const auto drain = [&] {
+        pending += process.readAllStandardOutput();
+        errors += process.readAllStandardError();
+        qsizetype end;
+        while ((end = pending.indexOf('\n')) >= 0) {
+            const QByteArray line = pending.left(end).trimmed();
+            pending.remove(0, end + 1);
+            // out_time_us is -9223372036854775807 ("N/A") until the first frame is written.
+            if (line.startsWith("out_time_us=")) {
+                bool ok = false;
+                const qint64 us = line.mid(12).toLongLong(&ok);
+                if (ok && us >= 0 && progress)
+                    progress(double(us) / 1e6);
+            }
+        }
+    };
+    while (!process.waitForFinished(100)) {
+        drain();
+        if (cancelled && cancelled()) {
+            process.kill();
+            process.waitForFinished(3000);
+            return makeError(QStringLiteral("cancelled"), QStringLiteral("The node was cancelled."));
+        }
+    }
+    drain();
+    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+        const QString detail = tail(errors);
+        return makeError(code, detail.isEmpty() ? QStringLiteral("ffmpeg failed.") : detail);
+    }
+    return QByteArray();
+}
+
 QStringList trimArgs(const VideoEdits &edits) {
     if (!edits.trim)
         return {};

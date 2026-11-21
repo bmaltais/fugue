@@ -180,7 +180,7 @@ private:
         const bool video = capability == QLatin1String("latent.decode") && params.contains("video_frames");
         const QString name = capability == QLatin1String("text.encode") ? QStringLiteral("conditioning")
                              : video                                      ? QStringLiteral("video")
-                             : capability == QLatin1String("latent.decode") ? QStringLiteral("image")
+                             : capability == QLatin1String("latent.decode") || capability == QLatin1String("image.upscale") ? QStringLiteral("image")
                                                                             : QStringLiteral("latent");
         const QString file = QDir(job->request.value("output_dir").toString())
                                  .filePath(name + (video ? ".y4m" : name == QLatin1String("image") ? ".png" : ".bin"));
