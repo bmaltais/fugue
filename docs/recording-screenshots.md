@@ -20,6 +20,7 @@ build/test_canvas_run savesFinishedWorkflowsWhenAsked     # results.png, results
 | `node-library.png` | `test_readme_shots nodeLibrary` |
 | `group.png` | `test_readme_shots group` |
 | `results.png`, `results-light.png` | `test_canvas_run savesFinishedWorkflowsWhenAsked` |
+| `menubar-out.png`, `menubar-handle-hover.png`, `menubar-in.png`, `menubar-in-menu.png` | `test_chrome_window picturesOfTheBarOutAndIn` (top-left crops for reading, not committed) |
 
 The graph shots are trimmed to the nodes in the test (`tests/readme_shot.h`). The results come
 from the fake provider, which hands back the picture the z-image-turbo template ships as its

@@ -57,6 +57,14 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 
 ## Decisions
 
+### 2026-11-21 auto-hide menu bar (#160)
+
+- Control: `src/panels/AutoHide.qml` around `MenuBar` in `src/Main.qml`: a hot edge (`autoHideEdge`, 4px tall, the whole window width) and a handle (`autoHideHandle`, 36 x 28px, a menu glyph) hang where the bar was, while it is not shown; the bar slides over the canvas on the pointer at the edge, a press on the handle, F10 and Alt keys; `breadcrumb` in `FugueCanvas.qml` moves right to clear the handle (`leadingClear`).
+- Old: hiding the menu bar removed it; F10, the canvas menu or Reset brought it back, and a 4 s notice said so.
+- New: hiding leaves the edge and the handle. In after 120 ms of pointer on them (a press at once), out after 400 ms off them, on Escape, after a command or when its menu closes; 170 ms, ease out, on `y` not on the layout, over the canvas: the canvas keeps its size and place while it slides.
+- Why: a way back that needs no hidden knowledge (the handle is the cue); the edge is the infinitely deep Fitts target (the pointer pushed to the window's top lands on it), the dwell keeps a passing pointer from opening it, the longer out delay keeps it from flickering while the pointer travels to a menu.
+- Rule: Floor (the handle is 28px tall, 36px wide; the edge is a 4px strip but a long edge target: its exception is that the window edge stops the pointer, and the handle, the press target, meets the floor). Posture: the canvas is sovereign, so the bar overlays it and never resizes it; the handle hangs only 24px into the canvas's corner and the breadcrumb steps aside. Gaps: 1.5u from the strip or window side. Learned place: the menu titles and their order did not change.
+
 ### 2026-11-20 main window, Run menu, node search
 
 - Record: [.ui-ergonomics/2026-11-20-main-window.md](../.ui-ergonomics/2026-11-20-main-window.md)

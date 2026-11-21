@@ -7,7 +7,7 @@ import "../canvas"
 // The menu bar (#50): File, Edit, View, Node, Run and Help, built from the command
 // registry's "bar" tree (menus.h), so names, keys and enabled state are the registry's.
 // Alt+letter opens a menu (the letters after `&` in the titles, none of them bound in 12.4),
-// F10 (app.menu-bar) the first one; Up and Down move in a menu, Left and Right to the next
+// F10 (app.menu-bar) the first one (an auto-hidden bar slides in for both, panels/AutoHide.qml); Up and Down move in a menu, Left and Right to the next
 // menu, Enter runs, Escape closes. A press on another title while one is open moves there,
 // as does hovering it. When the window is too narrow for the titles, one menu button takes
 // their place and opens the same menus as submenus.
@@ -64,6 +64,9 @@ Rectangle {
         color: bar.look.hairline
     }
 
+    // The bar is wanted in the window: an auto-hide container slides it in (panels/AutoHide.qml).
+    signal needed()
+
     function title(index) { return bar.tree[index].title }
     function mnemonic(index) {
         const t = title(index), at = t.indexOf("&")
@@ -74,6 +77,7 @@ Rectangle {
     function openMenu(index, byKey) {
         const count = bar.tree.length
         index = (index + count) % count
+        bar.needed()
         bar.makeMenus()
         const dropdown = bar.dropdown
         bar.everything.close()
@@ -105,6 +109,7 @@ Rectangle {
         dropdown.popupFit(anchor, 0, anchor.height, anchor.width, anchor.height)
     }
     function openEverything(byKey) {
+        bar.needed()
         bar.makeMenus()
         const everything = bar.everything
         bar.dropdown.close()
@@ -144,7 +149,7 @@ Rectangle {
             required property int index
             Shortcut {
                 sequence: bar.mnemonic(mnemonicKey.index) !== "" ? "Alt+" + bar.mnemonic(mnemonicKey.index) : ""
-                enabled: sequence !== "" && bar.visible // a hidden bar has no Alt keys
+                enabled: sequence !== "" // an auto-hidden bar keeps its Alt keys: it slides in (needed)
                 onActivated: bar.openMenu(mnemonicKey.index, true)
             }
         }

@@ -6,8 +6,8 @@
 // library and the workflows panel keep their `panel.nodes` and `panel.workflows` (side_panels.h) and
 // the queue panel its `panel.queue` (run_bar.h). Also `view.focus-mode` (H: hide all the
 // chrome, and the same key brings it back as it was) and `view.reset-bars` (every bar back at
-// its default, from any state). `app.menu-bar` (F10) shows the menu bar first when it is hidden:
-// that is how it comes back.
+// its default, from any state). `app.menu-bar` (F10) slides an auto-hidden menu bar in (the window does that, #160) and opens it; the
+// remembered mode does not change.
 
 namespace fugue {
 

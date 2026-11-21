@@ -20,7 +20,7 @@ struct Row {
 
 QList<Row> rows() {
     return {
-        {"view.toggle-menu-bar", QT_TRANSLATE_NOOP("Command", "Show or hide the menu bar (F10 brings it back)"),
+        {"view.toggle-menu-bar", QT_TRANSLATE_NOOP("Command", "Keep the menu bar shown, or let it auto-hide (F10 slides it in)"),
          QT_TRANSLATE_NOOP("Command", "Menu bar"), "menu-bar", {}},
         {"view.toggle-tabs", QT_TRANSLATE_NOOP("Command", "Show or hide the workflow tabs"),
          QT_TRANSLATE_NOOP("Command", "Workflow tabs"), "workflow-tabs", {}},
@@ -75,6 +75,8 @@ void registerChromeCommands(CommandRegistry &commands, ChromeVisibility &chrome)
     for (const Row &row : rows()) {
         const QString id = QString::fromLatin1(row.chromeId);
         chrome.add(id);
+        if (id == QLatin1String("menu-bar"))
+            chrome.setAutoHide(id); // it slides away to a slim edge, never disappears (#160)
         const QString command = QString::fromLatin1(row.id);
         commands.setHandler(command, [&chrome, id] { chrome.toggle(id); });
         commands.setCheckedWhen(command, [&chrome, id] { return chrome.isVisible(id); });
@@ -83,11 +85,9 @@ void registerChromeCommands(CommandRegistry &commands, ChromeVisibility &chrome)
     commands.setCheckedWhen("view.focus-mode", [&chrome] { return chrome.focusMode(); });
     commands.setHandler("view.reset-bars", [&chrome] { chrome.reset(); });
 
-    // F10 opens the menu bar; when it is hidden it comes back first, then opens.
-    commands.setHandler("app.menu-bar", [&commands, &chrome] {
-        chrome.setVisible(QStringLiteral("menu-bar"), true);
-        emit commands.windowRequested(QStringLiteral("app.menu-bar"));
-    });
+    // F10 opens the menu bar; an auto-hidden bar slides in for it (the window does that) and
+    // slides out again after, so the remembered mode does not change.
+    commands.setHandler("app.menu-bar", [&commands] { emit commands.windowRequested(QStringLiteral("app.menu-bar")); });
 }
 
 } // namespace fugue

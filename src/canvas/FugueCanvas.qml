@@ -41,6 +41,8 @@ FocusScope {
     // run and zoom pills.
     property bool selectionToolbarShown: true
     property bool breadcrumbShown: true
+    // How far from the left the top-left corner is covered (the menu bar's handle, #160); the breadcrumb keeps clear of it.
+    property real leadingClear: 0
     property bool runPillShown: true
     property bool zoomPillShown: true
     // What floats over the canvas, the run toolbar's box (an Item in this canvas's coordinates),
@@ -1641,7 +1643,7 @@ FocusScope {
     Item {
         objectName: "breadcrumb"
         visible: canvas.breadcrumbShown && canvas.model.inGroup
-        x: 4 * canvas.look.unit
+        x: Math.max(4 * canvas.look.unit, canvas.leadingClear + 2 * canvas.look.unit)
         y: 4 * canvas.look.unit
         width: crumbBox.width
         height: crumbBox.height
