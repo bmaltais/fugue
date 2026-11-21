@@ -17,6 +17,7 @@
 #include "engine/document.h"
 #include "engine/file_inputs.h"
 #include "engine/file_roots.h"
+#include "engine/group_library.h"
 #include "engine/image_format.h"
 #include "engine/json.h"
 #include "engine/registry.h"
@@ -225,6 +226,9 @@ Errors writeSharePackage(const Document &document, const Registry &registry, con
     const QString id = folderId(title);
     QList<Entry> entries;
     Document packed = document;
+    // A library or pack group it names only by its type travels as its definition: a group is
+    // a graph of other nodes, no program, so the person needs neither the library nor the pack.
+    embedGroupTypes(packed, registry);
     Errors errors = bundleInputs(packed, registry, request.workflowPath, id, entries, included);
     if (hasErrors(errors))
         return errors;

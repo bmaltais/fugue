@@ -1624,7 +1624,8 @@ start it offers to recover.
 - A **package to share** (#91, File > Export for sharing…, `fugue workflow export --share`): one
   `.fuguepack` file, a zip (MIME type `application/x-fugue-package`, which the desktop entry
   opens with Fugue), holding a template (11.10): `<id>/template.json` (the workflow's name), `workflow.fugue`
-  (the share copy, its `requires` naming the packs it uses and where to get them, 4.3),
+  (the share copy, holding the definition of every group it uses, a library's or a pack's too,
+  and its `requires` naming the packs it uses and where to get them, 4.3),
   `inputs/` (each image a `file` input names that Fugue takes in, 14.1: by its bytes, at most
   256 MB; renamed to letters, digits and `._-`; the input then names `inputs/<name>`) and
   `preview.<ext>` (the newest picture a Save Image or Preview shows). Only such images go in,

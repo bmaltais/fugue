@@ -5,8 +5,9 @@
 // Fugue opens and runs. Opening tells one by its bytes, so a package renamed .zip opens too.
 //
 // The package is a template (11.10), zipped: `<id>/template.json` (the title), `<id>/workflow.fugue`
-// (the share copy, engine/share_copy.h, with `requires` refreshed so it names the packs it uses
-// and where to get them), `<id>/inputs/` (each image a `file` input names that Fugue takes in,
+// (the share copy, engine/share_copy.h, holding the definition of every group it uses, a library's
+// or a pack's included, and with `requires` refreshed so it names the packs it uses and where to
+// get them), `<id>/inputs/` (each image a `file` input names that Fugue takes in,
 // engine/image_format.h, the input then naming `inputs/<name>`) and `<id>/preview.<ext>` when a
 // picture is given. Only such images go in, so a package never carries another file a node
 // names (a key, a document); that file's input keeps its bare name, and the export says so. No
