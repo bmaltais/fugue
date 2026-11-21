@@ -9,11 +9,13 @@
 #include <QQuickStyle>
 #include <QtTest>
 
+#include "../scroll_checks.h"
 #include "../test_home_guard.h"
 #include "../canvas/canvas_app.h"
 #include "engine/group_library.h"
 
 using namespace canvas_test;
+using scroll_checks::wheelAt;
 
 namespace {
 
@@ -61,6 +63,7 @@ QQuickItem *rowOfKey(App &app, QQuickItem *list, const QString &key) {
         }
     return nullptr;
 }
+
 
 } // namespace
 
@@ -268,6 +271,94 @@ private slots:
         app.key(Qt::Key_Escape);
         QTRY_VERIFY(!named(app, "sidePanel"));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+
+    // The list scrolls in the real window (the owner's report: neither the wheel nor the scroll bar did):
+    // the wheel over a row, over a category, over a library group's trash can, the thumb dragged both
+    // ways, and a press on the track.
+    void theLibraryListScrollsByTheWheelAndTheScrollBar() {
+        App app(load(small));
+        QVERIFY(app.open());
+        app.commands.run("panel.nodes");
+        QTRY_VERIFY(named(app, "nodeLibraryList"));
+        QQuickItem *list = named(app, "nodeLibraryList");
+        app.nodeLibrary.setQuery("e"); // every matching category open: far more rows than fit
+        QTRY_VERIFY2(list->property("contentHeight").toDouble() > list->height() * 2,
+                     qPrintable(QStringLiteral("%1 rows, list %2px").arg(rowsOf(app).size()).arg(list->height())));
+        QQuickItem *bar = item(list, "fugueScrollBar");
+        QVERIFY(bar);
+        QTRY_VERIFY(bar->isVisible());
+        const auto y = [&] { return list->property("contentY").toDouble(); };
+        QCOMPARE(y(), 0.0);
+        // The wheel over a node row.
+        QQuickItem *row = rowItem(list, firstRow(app, false));
+        QVERIFY(row);
+        wheelAt(app.window, center(row), -120);
+        QTRY_VERIFY(y() > 0);
+        const qreal afterRow = y();
+        // Over a category row.
+        QQuickItem *category = nullptr;
+        for (int i = 0; i < rowsOf(app).size() && !category; ++i)
+            if (QQuickItem *r = rowItem(list, i); r && rowsOf(app)[i].toMap().value("category").toBool() && r->y() - y() >= 0)
+                category = r;
+        QVERIFY(category);
+        wheelAt(app.window, center(category) + QPoint(0, int(y() - category->y() > 0 ? 0 : 0)), -120);
+        QTRY_VERIFY(y() > afterRow);
+        // Up again.
+        const qreal before = y();
+        wheelAt(app.window, center(list), 120);
+        QTRY_VERIFY(y() < before);
+        // A touchpad: pixel deltas only scroll too.
+        const qreal pad = y();
+        wheelAt(app.window, center(list), 0, -30);
+        QTRY_VERIFY(y() > pad);
+        // The thumb, dragged down and then up.
+        list->setProperty("contentY", 0.0);
+        QTRY_COMPARE(y(), 0.0);
+        QQuickItem *thumb = bar->property("contentItem").value<QQuickItem *>();
+        QVERIFY(thumb);
+        const QPoint grab = thumb->mapToScene(QPointF(thumb->width() / 2, thumb->height() / 2)).toPoint();
+        QTest::mousePress(app.window, Qt::LeftButton, {}, grab);
+        for (int i = 1; i <= 10; ++i)
+            QTest::mouseMove(app.window, grab + QPoint(0, i * 8));
+        QTRY_VERIFY2(y() > 0, "dragging the thumb down must scroll");
+        const qreal down = y();
+        for (int i = 9; i >= 0; --i)
+            QTest::mouseMove(app.window, grab + QPoint(0, i * 8));
+        QTest::mouseRelease(app.window, Qt::LeftButton, {}, grab);
+        QTRY_VERIFY2(y() < down, "dragging the thumb back up must scroll back");
+        // A press on the track below the thumb pages.
+        list->setProperty("contentY", 0.0);
+        const QPoint below = bar->mapToScene(QPointF(bar->width() / 2, bar->height() - 4)).toPoint();
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, below);
+        QTRY_VERIFY(y() > 0);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // With the bar showing, no row's text lies under it and nothing sits under the panel's grip, on
+    // either dock; and a library group's trash can (library row) is clear of the bar too.
+    void theLibraryKeepsItsRowsClearOfTheScrollBarOnBothDocks() {
+        for (const char *dock : {"left", "right"}) {
+            App app(load(small));
+            QVERIFY(app.open());
+            app.sidePanels.setDock(QString::fromLatin1(dock));
+            app.commands.run("panel.nodes");
+            QTRY_VERIFY(named(app, "nodeLibraryList"));
+            QQuickItem *list = named(app, "nodeLibraryList");
+            app.nodeLibrary.setQuery("e");
+            QTRY_VERIFY(scroll_checks::barOf(list) && scroll_checks::barOf(list)->isVisible());
+            QQuickItem *bar = scroll_checks::barOf(list);
+            const QString under = scroll_checks::contentUnderBar(list, bar);
+            QVERIFY2(under.isEmpty(), qPrintable(QString::fromLatin1(dock) + ": " + under));
+            QQuickItem *grip = named(app, "sidePanelGrip");
+            QVERIFY(grip);
+            const QRectF gripRect(grip->mapToScene(QPointF(0, 0)), grip->size());
+            const QRectF barRect(bar->mapToScene(QPointF(0, 0)), bar->size());
+            QVERIFY2(!gripRect.intersects(barRect), dock);
+            const QString failed = scroll_checks::scrollsByWheelAndThumb(app.window, list);
+            QVERIFY2(failed.isEmpty(), qPrintable(QString::fromLatin1(dock) + ": " + failed));
+        }
     }
 
     void aClickOnANodeAddsItInTheMiddleOfTheViewAndUndoTakesItBack() {

@@ -5,8 +5,8 @@ import Fugue
 // The scroll bar of every list and panel that can overflow: attach it as
 // `ScrollBar.vertical: FugueScrollBar { look: ... }` (or `.horizontal`) on a ListView, GridView,
 // Flickable or ScrollView. It shows while the content is longer than the view, always (not only
-// on hover), and hides when it fits. It lies over the view's edge and takes no width from it;
-// a delegate that must not run under it subtracts `width` while `visible`. The thumb never
+// on hover), and hides when it fits. It lies over the view's edge, so every host keeps its
+// content clear of it by `inset` (the bar's breadth while it shows, else 0). The thumb never
 // gets shorter than `minThumb`, so a list of hundreds of rows keeps a thumb to grab, and a press
 // on the track outside the thumb moves one page toward it.
 ScrollBar {
@@ -18,6 +18,10 @@ ScrollBar {
     property int minThumb: 32
     // Breadth of the bar; the thumb is drawn narrower inside it.
     readonly property int breadth: 10
+    // The room the bar takes from the view's edge while it shows, else 0. The bar lies over the
+    // view, so a host pads its content by this (`list.ScrollBar.vertical.inset`): no row, key chip
+    // or button ever sits under the bar.
+    readonly property real inset: visible ? (vertical ? width : height) : 0
 
     policy: size < 1 ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
     minimumSize: (vertical ? height : width) > 0 ? Math.min(1, minThumb / (vertical ? height : width)) : 0

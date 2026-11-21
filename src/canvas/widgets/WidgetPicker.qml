@@ -3,7 +3,6 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
-import Fugue
 import ".."
 
 // What a widget opens beyond its field: the menu of a choice, seed or model widget, and the

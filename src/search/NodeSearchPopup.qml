@@ -274,7 +274,7 @@ Popup {
                     required property string description
                     required property var inputs
                     required property var outputs
-                    width: ListView.view.width - 3 * root.u
+                    width: ListView.view.width - 2 * root.u - (ListView.view.ScrollBar.vertical as FugueScrollBar).inset
                     height: 11 * root.u
 
                     TapHandler { onTapped: root.accept(row.index) }

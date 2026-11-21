@@ -184,8 +184,10 @@ Popup {
                 model: dialog.shown
                 keyNavigationEnabled: true
                 // As many 56u cards as fit, sharing the spare width.
-                readonly property int columns: Math.max(1, Math.floor(width / (56 * dialog.u)))
-                cellWidth: Math.floor(width / columns)
+                // The scroll bar's gutter is kept free always, so cards do not reflow as it appears.
+                readonly property int room: width - (ScrollBar.vertical as FugueScrollBar).breadth
+                readonly property int columns: Math.max(1, Math.floor(room / (56 * dialog.u)))
+                cellWidth: Math.floor(room / columns)
                 cellHeight: cellWidth * 10 / 16 + 25 * dialog.u
                 Keys.onReturnPressed: if (currentIndex >= 0) dialog.openTemplate(dialog.shown[currentIndex].id)
                 Keys.onEnterPressed: if (currentIndex >= 0) dialog.openTemplate(dialog.shown[currentIndex].id)

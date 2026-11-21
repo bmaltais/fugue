@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import Fugue
+import "../canvas"
 
 // One row of a CommandMenu: a command as the registry shows it (`entry`: label, keys,
 // available, enabled, checkable, checked, and swatch on a color), or the row that opens a
@@ -30,7 +31,8 @@ MenuItem {
                    + (keys.text !== "" ? keys.implicitWidth + 6 * u : 0) + (subMenu ? 4 * u : 0)
     implicitHeight: 7 * u
     leftPadding: 2 * u
-    rightPadding: 2.5 * u
+    // The capped menu scrolls (`interactive`) and shows its bar then; the bar's own visibility would loop through the menu's size.
+    rightPadding: 2.5 * u + (ListView.view && ListView.view.interactive ? (ListView.view.ScrollBar.vertical as FugueScrollBar).breadth : 0)
     Accessible.name: text.replace("&", "")
     Accessible.description: entry !== undefined && !entry.available ? qsTr("Not available yet") : ""
 

@@ -168,7 +168,7 @@ Item {
             required property int index
             readonly property string kind: modelData.kind
             readonly property bool pressable: kind === "tab" || kind === "recent"
-            readonly property real edge: list.ScrollBar.vertical.visible ? list.ScrollBar.vertical.width : 0
+            readonly property real edge: (list.ScrollBar.vertical as FugueScrollBar).inset
             width: list.width
             height: kind === "heading" ? 6 * root.u : kind === "empty" ? 7 * root.u : 8 * root.u
 

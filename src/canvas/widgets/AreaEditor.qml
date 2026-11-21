@@ -49,7 +49,7 @@ Rectangle {
         TextEdit {
             id: edit
             objectName: "widgetArea"
-            width: flick.width
+            width: flick.width - (flick.ScrollBar.vertical as FugueScrollBar).inset
             wrapMode: TextEdit.Wrap
             selectByMouse: true
             textFormat: TextEdit.PlainText

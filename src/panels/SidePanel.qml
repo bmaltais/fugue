@@ -108,7 +108,13 @@ Item {
     }
     Item {
         id: body
-        anchors { left: parent.left; right: parent.right; top: bar.bottom; bottom: parent.bottom; topMargin: 1 }
+        // The grip lies on the panel's outer edge and takes the presses there, so the content stops
+        // short of it: a scroll bar or a row button under the grip could not be pressed.
+        anchors {
+            left: parent.left; right: parent.right; top: bar.bottom; bottom: parent.bottom; topMargin: 1
+            leftMargin: panel.onLeft ? 0 : panel.gripWidth
+            rightMargin: panel.onLeft ? panel.gripWidth : 0
+        }
     }
 
     // The width grip: on the canvas's edge, full height; 8 px wide, which is under the 24 px floor
