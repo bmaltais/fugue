@@ -78,7 +78,8 @@ public:
     Q_INVOKABLE void trust(const QString &id);
     // A library group renamed (its folder and id follow) or removed (the page asks first, on
     // itself: these are quick and run on the window's thread, not through `question`; workflows
-    // keep their own copy). Refused while a pack action is under way. True when done; `failure`
+    // keep their own copy). The one call that deletes a library group: the page and the node
+    // library's trash can (#156, Main.qml) both use it. Refused while a pack action is under way. True when done; `failure`
     // says why not, set when this returns.
     Q_INVOKABLE bool renameLibraryGroup(const QString &id, const QString &name);
     Q_INVOKABLE bool removeLibraryGroup(const QString &id);

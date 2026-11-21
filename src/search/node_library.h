@@ -31,6 +31,7 @@ struct LibraryRow {
     int count = 0;       // a category: the nodes under it (all levels), that match the query
     bool open = false;   // a category: its children follow
     QString description; // a node's, for its tooltip
+    bool library = false; // a node: a group of the user's library (`local/<name>`), which can be deleted
 };
 
 // The rows for `types`. Without a query: categories first (by name), then the nodes of a level
@@ -46,7 +47,7 @@ class NodeLibrary : public QObject {
     QML_ELEMENT
     QML_UNCREATABLE("made in C++, read through App")
     Q_PROPERTY(QString query READ query WRITE setQuery NOTIFY queryChanged)
-    // Maps: category, depth, key, label, count, open, description.
+    // Maps: category, depth, key, label, count, open, description, library.
     Q_PROPERTY(QVariantList rows READ rows NOTIFY rowsChanged)
     Q_PROPERTY(int nodeCount READ nodeCount NOTIFY rowsChanged) // nodes shown
 

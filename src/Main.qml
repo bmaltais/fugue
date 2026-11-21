@@ -410,6 +410,16 @@ ApplicationWindow {
             onQueryEdited: query => App.nodeLibrary.query = query
             onCategoryToggled: key => App.nodeLibrary.toggle(key)
             onCloseRequested: App.sidePanels.tab = ""
+            // A group of the library deleted after its question (#156): the one call Settings >
+            // Packs > Library uses; the registry is read again, so the row and the search result
+            // go at once. The window's notice line says it, or why not.
+            onGroupDeleted: (typeId, name) => {
+                const packs = App.settings ? App.settings.packs : null
+                const done = packs !== null && packs.removeLibraryGroup(typeId)
+                App.canvasModel.announceLibraryResult(qsTr("Deleted %1 from the library").arg(name),
+                                                      done ? "" : (packs && packs.failure !== "" ? packs.failure
+                                                                   : qsTr("%1 could not be deleted from the library.").arg(name)))
+            }
             // A click adds the node in the middle of the view; a drop, where it was let go.
             onNodeActivated: typeId => {
                 const p = fugueCanvas.toWorld(fugueCanvas.width / 2, fugueCanvas.height / 2)

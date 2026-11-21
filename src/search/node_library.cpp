@@ -25,6 +25,12 @@ struct Level {
     int total = 0; // nodes in this level and below
 };
 
+// A group the user saved to the library: a group type of the reserved `local` pack (spec 5.3). A
+// pack's own groups, and every other node, are not: a pack is removed from Settings > Packs.
+bool isLibraryGroup(const NodeType &type) {
+    return type.id.startsWith(QLatin1String("local/")) && type.runtime.value(QLatin1String("kind")).toString() == QLatin1String("group");
+}
+
 void appendLevel(const Level &level, const QString &path, int depth, bool query, const QSet<QString> &open, const QCollator &collator,
           std::vector<LibraryRow> &out) {
     QStringList names = level.children.keys();
@@ -55,6 +61,7 @@ void appendLevel(const Level &level, const QString &path, int depth, bool query,
         row.key = node.type->id;
         row.label = node.type->name;
         row.description = node.type->description;
+        row.library = isLibraryGroup(*node.type);
         out.push_back(row);
     }
 }
@@ -115,7 +122,8 @@ void NodeLibrary::refresh() {
                                       {"label", row.label},
                                       {"count", row.count},
                                       {"open", row.open},
-                                      {"description", row.description}});
+                                      {"description", row.description},
+                                      {"library", row.library}});
         }
     }
     emit rowsChanged();
