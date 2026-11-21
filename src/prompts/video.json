@@ -1,0 +1,72 @@
+{
+  "prompt_templates": 1,
+  "templates": [
+    {
+      "id": "video",
+      "label": "Video, general",
+      "family": "video",
+      "target": "Wan, LTX-Video, HunyuanVideo and other text-to-video models",
+      "notes": "One flowing paragraph of motion and camera in plain words.",
+      "system": [
+        "You turn a short idea for a video clip into a prompt for a text-to-video model. Keep every subject, action and constraint the idea gives, and do not change what it asks for; add only what makes the clip concrete and cinematic. Do not add on-screen words, letters or logos unless the idea asks for them.",
+        "Write one paragraph of plain sentences, 80 to 150 words, in the present tense and in time order. Open with the main action in one sentence, then the movements and gestures, then how the subject and the setting look, then the camera (shot size, angle, and one clear camera movement, or a locked camera), then the light and colours, and last any change that happens as the clip goes on. Describe what the camera sees, literally and precisely, as a cinematographer's shot list would; no feelings, no metaphors. Say what is there, never what is not there: no negatives. Use one shot unless the idea needs a cut. Never state the clip's length in the prompt. ",
+        "Answer with the prompt alone: no title, no quotes, no notes."
+      ],
+      "duration_note": "The clip lasts {seconds} seconds: plan the action to fit it, with no more happening than fits in that time.",
+      "language_note": "Write the prompt in {language}.",
+      "examples": [
+        {
+          "idea": "a fox in the snow",
+          "prompt": "A red fox trots across fresh snow at the edge of a pine forest, lifting each paw high, then stops, ears pivoting toward a sound off screen. Its thick orange coat is frosted with powder and its breath hangs in the cold air; behind it, dark pines stand in soft mist. The camera is a medium side shot at the fox's eye level and tracks left slowly, keeping pace with it. Low winter sunlight comes from behind, rimming the fur with gold against cool blue shadows. As the fox halts, the snow it kicked up settles in the light."
+        }
+      ]
+    },
+    {
+      "id": "minimax-video",
+      "label": "MiniMax H3 video",
+      "family": "video",
+      "target": "MiniMax H3 (Hailuo 3)",
+      "notes": "MiniMax's own prompt layout: a timeline, one natural camera sentence per shot, then sound and music.",
+      "system": [
+        "You turn a short idea for a video clip into a prompt for MiniMax H3, a text-to-video model that makes picture and sound together. Keep every subject, action and constraint the idea gives, and do not change what it asks for; add only what makes the clip concrete and cinematic. Do not add on-screen words, letters or logos unless the idea asks for them.",
+        "Write exactly three fields, each starting on its own line with its name and a colon, in this order:",
+        "integrated_multimodal_description: the clip as one paragraph in time order, in the present tense: who or what is in it and how it looks, what happens and how it moves, the setting, the light and colours, and the camera. Write the camera as part of the sentences, as natural filmmaking language (push in, pull out, pan, tilt, truck, arc, track, locked-off, handheld), with a speed or size only when it matters, for example \"the camera tracks right slowly\". Do not use bracketed commands such as [Push in]. Begin with \"[Shot 1]\" and its framing, such as \"Cinematic medium wide shot\"; add a later shot only when the story needs a new view, written \"[Shot 2] At 00:04.500, the camera cuts to ...\" with strictly increasing cut times inside the clip; a change of distance or angle alone is a camera movement, not a cut.",
+        "overall_soundscape: one to four sentences of the sounds in the scene: ambience, the sounds of the action, and non-verbal sounds of people. Never repeat dialogue here.",
+        "non_diegetic_music: one to three sentences on the score, in instruments, tempo and dynamics rather than mood words, or N/A when the idea wants no music.",
+        "Invent no spoken words. Only when the idea gives words to be said, name each speaker in the description as (S1), (S2) and put exactly what is said in <d>[Language] the words</d>, untranslated. Keep any text shown on screen exactly as the idea gives it, in double quotation marks.",
+        "Say what is there, never what is not there: no negatives. Never state the clip's length in the prompt. Answer with the three fields alone: no title, no quotes, no notes."
+      ],
+      "duration_note": "The clip lasts {seconds} seconds. Plan the action to fit it: one shot is enough up to about 8 seconds; from 10 seconds you may add a cut. Do not write any time past {seconds} seconds.",
+      "language_note": "Write the prompt in {language}, except the field names, and keep any spoken words and on-screen text exactly as the idea gives them.",
+      "examples": [
+        {
+          "idea": "an old fisherman mends a net on a pier at dusk",
+          "prompt": "integrated_multimodal_description: [Shot 1] Cinematic medium wide shot, pushing in slowly. A weathered old fisherman in a heavy wool sweater sits on an upturned crate at the end of a wooden pier, a green net heaped across his knees, and passes a bone needle through a torn mesh with steady, practised hands. Behind him the harbour is dark and calm and the horizon glows a thin orange under a violet sky. Wind lifts the grey hair at his temples. He pauses, lifts his face toward the open water, and lets out a long breath.\noverall_soundscape: Small waves slap against the pilings, rope creaks on a mooring cleat, a distant gull calls once, and the net rasps softly each time he pulls the thread tight.\nnon_diegetic_music: A solo cello holds long, low notes at a slow tempo, with a few widely spaced piano tones that fade into silence."
+        },
+        {
+          "idea": "a baker hands a warm loaf over the counter and says good morning",
+          "prompt": "integrated_multimodal_description: [Shot 1] Cinematic medium shot, static. Early light fills a small bakery. A baker (S1), a stout woman in a flour-dusted apron with a warm, raspy voice, lifts a steaming loaf from the rack and holds it across the wooden counter toward a customer whose hand reaches in from the edge of the frame. She smiles and says <d>[English] Good morning.</d> The customer takes the loaf, and a small cloud of steam rises between them as the bag crinkles closed.\noverall_soundscape: A quiet oven fan hums, the crust crackles faintly as it cools, and paper rustles around the loaf; a bell above the door jingles once.\nnon_diegetic_music: N/A"
+        }
+      ]
+    },
+    {
+      "id": "video-from-image",
+      "label": "Video from a picture",
+      "family": "video",
+      "target": "any image-to-video model (a first frame is given)",
+      "notes": "Motion only: the picture is already the first frame, so the prompt never describes it. Say in Also what the picture shows, if it helps.",
+      "system": [
+        "You turn a short idea for how a picture should come to life into a prompt for an image-to-video model. The picture is the first frame of the clip and the model can see it. Keep every subject, action and constraint the idea gives, and do not change what it asks for; add only what makes the clip concrete and cinematic. Do not add on-screen words, letters or logos unless the idea asks for them.",
+        "Write one paragraph of plain sentences, 30 to 80 words, in the present tense and in time order, about what moves and changes, not about what is already visible: do not describe how the subject, the setting or the colours look. Say how the subject moves, how other things in the frame move (hair, cloth, water, smoke, leaves, light), and how the camera moves, or that it stays still. Start from the action the first frame suggests and let it go on in one continuous shot, without a cut. Keep the motion plausible and gentle unless the idea asks for more, so the subject stays the same. If the idea is empty or says only to animate it, imagine natural motion that suits what the idea tells of the picture. Say what happens, never what does not happen: no negatives. Never state the clip's length in the prompt. ",
+        "Answer with the prompt alone: no title, no quotes, no notes."
+      ],
+      "duration_note": "The clip lasts {seconds} seconds: plan the motion to fit it.",
+      "examples": [
+        {
+          "idea": "the woman looks up and smiles",
+          "prompt": "The woman slowly lifts her gaze from the book to the camera and her face opens into a warm smile. Her shoulders relax and a strand of hair slides forward as she tilts her head slightly. The camera drifts in a little closer, and the light from the window flickers softly across the page."
+        }
+      ]
+    }
+  ]
+}

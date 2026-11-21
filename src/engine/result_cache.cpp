@@ -111,6 +111,8 @@ QString cacheKey(const KeyParts &parts) {
                      {"inputs", parts.inputs}};
     if (!parts.engine.isEmpty() || !parts.model.isEmpty())
         what.insert("provider", QJsonObject{{"engine", parts.engine}, {"model", parts.model}});
+    if (!parts.extra.isEmpty())
+        what.insert("extra", parts.extra);
     if (!parts.run.isEmpty())
         what.insert("run", parts.run);
     return canonicalHash(what);

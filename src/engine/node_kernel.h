@@ -142,6 +142,12 @@ public:
     // write files (MediaHandle::plainFile for a video input).
     virtual Result<JobRequest> request(const NodeContext &context, const Selection &selection) = 0;
 
+    // What else decides the job's answer that is not an input or the model: data the kernel reads
+    // itself (the prompt template Enhance Prompt asks with, #140), as text that changes when it
+    // does. It goes into the cache key (10.1), so a changed template is not served from the old
+    // result. Empty (the default) leaves the key as it was. Called on the scheduler's thread.
+    virtual QString keyExtra(const Values &inputs) const { Q_UNUSED(inputs); return {}; }
+
     // The node's outputs from a finished job: file references become media
     // handles (MediaHandle::probe), and the values used (seed, model, engine)
     // become ordinary outputs (3.3). Called on a worker thread.

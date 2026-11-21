@@ -67,6 +67,13 @@ public:
     // that is not a type here. `seal` is NodeType::seal. Applies to the newest major.
     void setNodeDir(const QString &typeId, const QString &dir, const QString &seal = {});
 
+    // Replaces the choices (and the description, unless empty) of one text input of the newest major
+    // of a type, for a list that is data read at start-up rather than written in node.json (the
+    // styles of Enhance Prompt, #140). No effect for a type or input that is not here, or an input
+    // that has no choices; `choices` must not be empty.
+    void setInputChoices(const QString &typeId, const QString &input, const QStringList &choices,
+                         const QString &description = {});
+
     // The versions of each installed pack, which trust is asked for and given at (6.7). Packs
     // install side by side by major (6.6), so a pack id may have several. The workflow's own
     // `requires.packs` is only what its author had, never what runs. A pack not set here has

@@ -122,6 +122,19 @@ void Registry::setNodeDir(const QString &typeId, const QString &dir, const QStri
     }
 }
 
+void Registry::setInputChoices(const QString &typeId, const QString &input, const QStringList &choices,
+                                const QString &description) {
+    const auto found = m_nodeTypes.find(typeId);
+    if (found == m_nodeTypes.end() || choices.isEmpty())
+        return;
+    for (InputSpec &spec : found->second.rbegin()->second.inputs)
+        if (spec.name == input && spec.choices) {
+            spec.choices = choices;
+            if (!description.isEmpty())
+                spec.description = description;
+        }
+}
+
 void Registry::setPackVersion(const QString &packId, const QString &version) {
     if (version.isEmpty()) { // no installed version: forget the pack
         m_packVersions.remove(packId);
