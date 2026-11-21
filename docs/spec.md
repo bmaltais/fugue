@@ -540,7 +540,9 @@ the group's `default`, then to the inner input's own value. Behavior is specifie
 - `links`: reroute points, keyed by the target `<node id>.<input name>`, with `#<index>` added
   for an item of a list input (`merge.images#1`).
 - `comments`: free text notes on the canvas.
-- `view`: the last viewport.
+- `view`: the last viewport. A workflow with none (a template, a file written by hand) is
+  fitted to its nodes as it opens, as Fit does (12.4), so it never opens at 100% with nodes cut
+  off; one with a `view` keeps it.
 - `groups`: the same structure for the inside of each group definition.
 
 Layout holds nothing that changes what a run does.
@@ -2819,7 +2821,7 @@ Building M2 made these further choices.
 | Bypass, mute and collapse on a mixed selection: every node takes the state, unless all have it already, and then all lose it. That is ComfyUI's rule for bypass and mute; its collapse flips each node, which leaves a mixed selection mixed, so collapse follows the other two here | 12.4 | medium-high |
 | Delete removes the nodes, every link into or out of them, and their layout: entries, reroute points into them and their places in Frames | 12.4, 4.5 | high |
 | Shift+drag from an output lets go on another output that can feed every one of its inputs to move them all, and anywhere else to leave them be. Ctrl+Alt+click on an input removes its links (every list item), on an output every link out of it | 12.4 | medium |
-| Zoom keys step 1.1 at the canvas's center (ComfyUI). Fit (`.`, Home) frames the selection, or every node when none is selected, in three quarters of the canvas, within the zoom range | 12.4 | medium-high |
+| Zoom keys step 1.1 at the canvas's center (ComfyUI). Fit (`.`, Home) frames the selection, or every node when none is selected, in three quarters of the canvas, within the zoom range; the run toolbar's box (and the 2u around it) is not part of the canvas for it, so no node ends under the bar. A workflow put in with no saved `view` (opened, a template, a tab switched to) is fitted this way once, before anything is drawn (#162) | 12.4 | medium-high |
 | A bypassed node is tinted magenta (body, header and a dashed edge from the palette's magenta, the share stepped down until the text reads at 4.5:1) with a dashed pass-through line in the type color; a muted one fades to 40% with no tint, its outgoing wires too ([canvas-look.md](canvas-look.md) 9). ComfyUI's litegraph draws bypass as magenta `#FF00FF` at alpha 0.2 and mute as alpha 0.4 (read in LGraphCanvas.getNodeModeAlpha); we keep the magenta and the faded mute, but tint rather than fade so the text stays readable | 3.5, 12.6 | high for ComfyUI's look, medium-high for ours |
 | A toggle command's menu name says what it will do to the target: "Remove bypass" (ComfyUI: "Remove Bypass"), "Unmute", "Expand", "Unpin" when every selected node already has the state, else the plain verb; the `?` overlay keeps the neutral name | 12.4 | medium-high |
 | Node shadows (#47) are painted once per level in C++ and handed to QML as `data:` URLs on `theme.look`, drawn as a 9-slice `BorderImage` per node in a layer of their own, not through an image provider: the same shared texture, with no provider to register in each engine. Measured at 302 nodes: at most 0.45 ms of render time, inside the 1 ms budget, so nodes at rest keep theirs; after #63's larger shadows at most 0.31 ms | 12.1 | high |

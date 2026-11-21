@@ -604,7 +604,7 @@ public:
 
     // Sets the view to fit the selection, or every node when none is selected, in a canvas
     // of this size (ComfyUI's `.`). False when there are no nodes.
-    Q_INVOKABLE bool fitView(qreal width, qreal height);
+    Q_INVOKABLE bool fitView(qreal width, qreal height, qreal reservedTop = 0, qreal reservedBottom = 0);
     // Ask the canvas to zoom by the factor at its center, or to fit (fitRequested).
     void requestZoom(qreal factor) { emit zoomRequested(factor); }
     void requestFit() { emit fitRequested(); }
