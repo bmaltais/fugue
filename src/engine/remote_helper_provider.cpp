@@ -8,6 +8,7 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QPointer>
+#include <QRegularExpression>
 #include <QUrl>
 
 #include "engine/helper_provider.h"
@@ -73,11 +74,21 @@ Result<QJsonValue> dataOf(const QString &input, const QJsonValue &value) {
     return QJsonValue(data.value());
 }
 
-QString extensionOf(const QString &format) {
-    if (format == QLatin1String("conditioning"))
-        return QStringLiteral("conditioning");
-    return format.isEmpty() ? QStringLiteral("bin") : format;
+// What the host names is data: a file name is only letters, digits, - and _, a format is a short
+// word, so no name or format makes a path outside the job's folder.
+QString safeName(const QString &name) {
+    QString out;
+    for (const QChar c : name)
+        out += (c.isLetterOrNumber() && c.unicode() < 128) || c == QLatin1Char('-') || c == QLatin1Char('_') ? c : QLatin1Char('_');
+    return out.isEmpty() ? QStringLiteral("out") : out.left(64);
 }
+
+QString extensionOf(const QString &format) {
+    static const QRegularExpression word(QStringLiteral("^[a-z0-9]{1,12}$"));
+    return word.match(format).hasMatch() ? format : QStringLiteral("bin");
+}
+
+constexpr qint64 kMaxDownloadBytes = qint64(4) << 30; // the largest file taken from a host
 
 } // namespace
 
@@ -100,6 +111,8 @@ Error RemoteHelperProvider::unreachable(const QString &why) const {
 QNetworkReply *RemoteHelperProvider::request(const QString &method, const QString &path, const QByteArray &body) {
     QNetworkRequest request(QUrl(m_instance.address + path));
     request.setRawHeader("Authorization", "Bearer " + m_instance.key.toUtf8());
+    // The host answers where it is asked: a redirect would carry the key elsewhere.
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     if (!body.isEmpty())
         request.setHeader(QNetworkRequest::ContentTypeHeader, QByteArrayLiteral("application/json"));
     return m_network.sendCustomRequest(request, method.toLatin1(), body);
@@ -349,9 +362,17 @@ void RemoteHelperProvider::fetch(const QString &id) {
                 return self->change(id, done);
             }
             const Download &download = pending->files.at(pending->next);
+            if (download.size < 0 || download.size > kMaxDownloadBytes)
+                return self->fail(id, makeError(QStringLiteral("node_failed"),
+                                                QStringLiteral("The paired host gave no usable size for %1.").arg(download.name)));
             QNetworkReply *reply = self->request(QStringLiteral("GET"),
-                                                 QStringLiteral("/fugue/v1/result/%1/%2").arg(id).arg(download.file), {});
+                                                 QStringLiteral("/fugue/v1/result/%1/%2").arg(QString::fromLatin1(QUrl::toPercentEncoding(id))).arg(download.file), {});
             const std::shared_ptr<std::function<void()>> next = again.lock();
+            // A host that sends more than it said is cut off, so a body is never taken whole into memory.
+            connect(reply, &QNetworkReply::downloadProgress, reply, [reply, limit = download.size](qint64 received, qint64) {
+                if (received > limit)
+                    reply->abort();
+            });
             connect(reply, &QNetworkReply::finished, self.data(), [self, id, outputDir, pending, next, reply, download] {
                 if (!self)
                     return;
@@ -369,7 +390,7 @@ void RemoteHelperProvider::fetch(const QString &id) {
                                               ? self->unreachable(QStringLiteral("cannot fetch %1: %2.").arg(download.name, failed))
                                               : makeError(QStringLiteral("node_failed"),
                                                           QStringLiteral("Cannot fetch %1 from the paired host: %2.").arg(download.name, failed)));
-                const QString path = QDir(outputDir).filePath(download.name + QLatin1Char('.') + extensionOf(download.format));
+                const QString path = QDir(outputDir).filePath(QStringLiteral("%1-%2.%3").arg(safeName(download.name)).arg(download.file).arg(extensionOf(download.format)));
                 QFile file(path);
                 if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.flush())
                     return self->fail(id, makeError(QStringLiteral("node_failed"), QStringLiteral("Cannot write %1.").arg(path)));

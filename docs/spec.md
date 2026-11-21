@@ -1188,11 +1188,18 @@ runs (a systemd user unit, `helper/fugue-helper.service`); Fugue never starts or
   conditioning or latent file made on one machine therefore feeds the next stage on the other: a workflow
   can mix the machines (encode on the host, sample here), only if both have the same model.
 - Models go as handles, `{name, sha256, size?}`, in place of paths: the stage nodes do not look for the
-  files on this machine, and do not run the checks that read them (parts that do not fit, LoRAs that do
-  not fit); the host does both. The host resolves a handle in its own model folders (`--models`, any
-  layout): the files with the handle's name, checked against `size` when the handle has one and
-  against `sha256`; no such file is `model_missing`, naming the folders searched (and the files found
-  with another content). A string path outside the host's folders is refused: the host reads no other file.
+  files on this machine, and so do not run the checks that read them (parts that do not fit, LoRAs that do
+  not fit, 2.5). The host does not run them either: a set of files that does not fit fails at its load, as
+  stable-diffusion.cpp reports it (`node_failed`, with the helper's message). The host resolves a handle in
+  its own model folders (`--models`, any layout): the files with the handle's name, checked against `size`
+  when the handle has one, and then against `sha256` (hashed once per file and remembered in
+  `$XDG_STATE_HOME/fugue/model-hashes.json`, inside the job, stage `models`); no such file is `model_missing`,
+  naming the folders searched, and the files found with another content. A string path outside the host's
+  folders is refused: the host reads no other file.
+- Memory: a job on a paired host is not on this machine's GPU lane and Fugue does not measure this machine's
+  memory for it (9.2). The host reports its free memory in `describe` (`free_memory_bytes`), which is shown,
+  not compared with a node's estimate; the host frees its own least recently used contexts before a load and
+  a shortage comes back as `out_of_memory` (8.10). Two jobs, one here and one on the host, run at the same time.
 - Status is polled (500 ms). A job runs on the host one at a time. Errors keep their codes
   (`out_of_memory`, `cancelled`, `model_missing`); the others are `node_failed`.
 

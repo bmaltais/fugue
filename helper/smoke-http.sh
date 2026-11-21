@@ -13,6 +13,8 @@ trap cleanup EXIT
 mkdir -p "$work/models/vae"
 head -c 1000 /dev/zero > "$work/models/vae/small.safetensors"
 echo "secret-key" > "$work/key"
+mkdir -p "$work/tmp"
+export TMPDIR="$work/tmp" # the helper's job folders are made here
 export XDG_STATE_HOME="$work/state" # where the helper keeps its hashes of model files
 chmod 600 "$work/key"
 port=$((20000 + RANDOM % 20000))
@@ -63,6 +65,12 @@ check "still serving" 200 "$(code "${auth[@]}" -X POST -d '{}' "$url/describe")"
 # A handle that is found (the model is not loaded: the job fails, but is accepted).
 ok='{"capability":"latent.decode","params":{"context":{"vae_path":{"name":"small.safetensors","size":1000}}},"inputs":{"latent":{"data":"AAAA","format":"latent"}}}'
 check "a found handle is accepted" 200 "$(code "${auth[@]}" -X POST -d "$ok" "$url/submit")"
+
+# An input named like a path writes inside the job's folder, never outside it.
+evil='{"capability":"latent.decode","params":{"context":{"vae_path":{"name":"small.safetensors","size":1000}}},"inputs":{"../../escaped":{"data":"QUJD","format":"x"},"/abs/key":{"data":"QUJD","format":"x"}}}'
+check "an input named like a path is accepted" 200 "$(code "${auth[@]}" -X POST -d "$evil" "$url/submit")"
+sleep 1
+check "... and writes nothing outside the job folder" none "$(find "$work" -name 'escaped*' -not -path '*/job-*/*' -o -path "$work/abs" | head -1 | grep . || echo none)"
 
 # A handle with a sha256: the file is taken only if its content hashes to it.
 good="$(sha256sum "$work/models/vae/small.safetensors" | cut -d' ' -f1)"

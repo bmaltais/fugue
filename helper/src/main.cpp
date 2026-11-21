@@ -998,7 +998,11 @@ private:
             fail("input_invalid", "input \"" + name + "\" needs {\"data\": base64, \"format\"}");
         const std::string format = input.value("format", "");
         const std::string ext = format == "png" ? ".png" : ".bin";
-        const fs::path path = dir / (name + "-" + std::to_string(index) + ext);
+        // The name is the caller's: only letters, digits, - and _ reach the file's name, so it stays in `dir`.
+        std::string safe;
+        for (const char c : name)
+            safe += (std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_') ? c : '_';
+        const fs::path path = dir / (safe.substr(0, 64) + "-" + std::to_string(index) + ext);
         const std::string bytes = base64Decode(input["data"].get<std::string>());
         std::ofstream out(path, std::ios::binary);
         out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));

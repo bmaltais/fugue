@@ -292,6 +292,47 @@ private slots:
         QCOMPARE(result->used.value("seed").toInt(), 7);
     }
 
+    // A host's names are data: none makes a file outside the job's folder, none is taken without a size.
+    void aHostsOutputNamesNeverLeaveTheOutputFolder() {
+        Host host;
+        host.op("submit", [](const QJsonObject &) { return HttpResponse{200, json({{"job", "j1"}})}; });
+        host.op("status", [](const QJsonObject &) { return HttpResponse{200, json({{"state", "done"}, {"progress", 1.0}})}; });
+        host.op("result", [](const QJsonObject &) {
+            return HttpResponse{200, json({{"outputs", QJsonObject{{"../../escaped", QJsonObject{{"file", 0}, {"format", "../x/png"}, {"size", 3}}},
+                                                                   {"/tmp/absolute", QJsonObject{{"file", 1}, {"format", "png"}, {"size", 3}}}}},
+                                           {"used", QJsonObject{}}})};
+        });
+        host.file("j1", 0, "ONE");
+        host.file("j1", 1, "TWO");
+        const auto remote = provider(host);
+        const QString out = newDir("out-hostile");
+        const Result<QString> job = await<QString>([&](Reply<QString> r) { remote->submit(sample(out), r); });
+        QVERIFY(job.ok());
+        QCOMPARE(waitDone(*remote, *job).state, QStringLiteral("done"));
+        const Result<JobResult> result = await<JobResult>([&](Reply<JobResult> r) { remote->result(*job, r); });
+        QVERIFY(result.ok());
+        for (const QString &name : result->outputs.keys()) {
+            const QString path = result->outputs.value(name).toObject().value("path").toString();
+            QVERIFY2(QFileInfo(path).absolutePath() == QFileInfo(out).absoluteFilePath(), qPrintable(path));
+            QVERIFY(QFileInfo(path).exists());
+        }
+        QVERIFY(!QFileInfo::exists(m_dir.filePath("../escaped.bin")));
+    }
+
+    void aDownloadWithoutASizeFailsTheJob() {
+        Host host;
+        host.op("submit", [](const QJsonObject &) { return HttpResponse{200, json({{"job", "j1"}})}; });
+        host.op("status", [](const QJsonObject &) { return HttpResponse{200, json({{"state", "done"}, {"progress", 1.0}})}; });
+        host.op("result", [](const QJsonObject &) {
+            return HttpResponse{200, json({{"outputs", QJsonObject{{"image", QJsonObject{{"file", 0}, {"format", "png"}}}}}, {"used", QJsonObject{}}})};
+        });
+        host.file("j1", 0, "IMAGE");
+        const auto remote = provider(host);
+        const Result<QString> job = await<QString>([&](Reply<QString> r) { remote->submit(sample(newDir("out-nosize")), r); });
+        QVERIFY(job.ok());
+        QCOMPARE(waitDone(*remote, *job).state, QStringLiteral("error"));
+    }
+
     void aShortDownloadFailsTheJob() {
         Host host;
         host.op("submit", [](const QJsonObject &) { return HttpResponse{200, json({{"job", "j1"}})}; });
