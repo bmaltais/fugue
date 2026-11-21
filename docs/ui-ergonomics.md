@@ -103,6 +103,14 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 - New: the label says what it makes; each dialog asks one thing, where. The banner then says where it went and what it left out, or why the graph does not compile.
 - Rule: Learned place (the File items keep their order; only the label changed). Posture: a transient dialog, one decision.
 
+### 2026-11-20 workflow tab colors (#98)
+
+- Control: the tabs, `src/workflow/WorkflowTabs.qml`: each tab has its own color (a bar along the top, 2px, 4px on the current tab, and a light wash behind it), the top corners take `look.corner`; a right click on a tab opens `tabColorPopup-<i>`, six swatches (`tabColor-<i>-<n>`, 7u = 28px).
+- Old: every tab had the same look, the current one marked by the accent along its top; square corners.
+- New: as above. The color is the six theme hues (red, yellow, green, cyan, blue, magenta), each lifted to 3:1 against the strip and the current tab, so the mark reads on light and dark themes; a theme with no color gets six fixed hues. The name, the unsaved dot and the bold current title stay, so color is never the only signal.
+- Why: the tabs of several workflows were told apart by their names only; a color is recognized before a name is read. The first free color is given, so open tabs differ; a saved workflow keeps its own by path.
+- Rule: Floor (swatches 28px, the tab row 36px). Posture: a transient popover, one decision (pick a swatch). Learned place: no menu changed.
+
 ## Unread
 
 Settings, the shortcuts overlay, the quit question, About, every menu except Run, the context menus, the workflow dialogs and their questions (those questions are a row of buttons), the group dialogs, image save, the widget pickers (but their search field), the magnifier.

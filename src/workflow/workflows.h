@@ -31,6 +31,7 @@
 #include <QUndoStack>
 #include <QUrl>
 #include <QTimer>
+#include <QHash>
 #include <QVariantList>
 #include <QtQmlIntegration/qqmlintegration.h>
 
@@ -43,6 +44,8 @@ struct WorkflowLocations {
     QString recoveryDir = RecoveryStore::defaultDir();
     QString trustPath = TrustStore::defaultPath();
     int recoveryIntervalMs = 30000;
+    // The colors of the tabs of saved workflows, by file path (a view preference, not document content).
+    QString tabColorsPath = TrustStore::defaultPath().section('/', 0, -2) + "/tab-colors.json";
     // Where the templates are (11.10): the person's own folder, then the bundled one.
     QList<TemplateRoot> templateRoots = TemplateLibrary::standardRoots();
 };
@@ -51,7 +54,7 @@ class Workflows : public QObject {
     Q_OBJECT
     QML_ELEMENT
     QML_UNCREATABLE("made in C++, read through App")
-    // One map per tab: id, title, path, unsaved, current.
+    // One map per tab: id, title, path, unsaved, current, color (an index into the look's tabColors).
     Q_PROPERTY(QVariantList tabs READ tabs NOTIFY tabsChanged)
     Q_PROPERTY(int current READ current WRITE setCurrent NOTIFY currentChanged)
     Q_PROPERTY(bool unsaved READ unsaved NOTIFY tabsChanged) // any tab
@@ -160,6 +163,10 @@ public:
     Q_INVOKABLE bool saveAs(const QString &pathOrUrl);
     // Closes a tab, asking first (closeConfirmationRequested) when it has unsaved content.
     Q_INVOKABLE void closeTab(int index);
+    // A tab's color: an index 0 .. kTabColors - 1 into the look's tabColors. A saved workflow's is
+    // remembered by its path (not in the file: a color is not content, so it is no edit and no unsaved mark).
+    Q_INVOKABLE void setTabColor(int index, int color);
+    static constexpr int kTabColors = 6;
     Q_INVOKABLE void closeCurrent() { closeTab(m_current); }
     Q_INVOKABLE void discardAndClose(int index);
     Q_INVOKABLE void saveAndClose(int index);
@@ -225,6 +232,7 @@ private:
         QString savedHash; // empty: never matches, so the tab is unsaved
         QString recoveryHash;
         bool unsaved = false;
+        int color = 0; // index into the look's tabColors
         std::unique_ptr<QUndoStack> undo; // while the tab is not shown
     };
 
@@ -275,6 +283,10 @@ private:
     TrustStore m_trust;
     QTimer m_timer;
     std::vector<Tab> m_tabs;
+    QString m_tabColorsPath;
+    QHash<QString, int> m_tabColors; // by file path
+    int freeTabColor() const;
+    void rememberTabColor(const Tab &tab);
     int m_current = -1;
     QString m_closeAfterSave; // the id of the tab to close once its save-as succeeds
     QVariantList m_recoverable;

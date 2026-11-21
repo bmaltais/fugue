@@ -130,6 +130,24 @@ QColor lift(const QColor &color, const QColor &against, double target) {
     return color;
 }
 
+// The tab colors: the theme's own hues when it has any, else six fixed hues at the accent's lightness.
+QVariantList tabColors(const QHash<QString, QColor> &colors, const Tokens &t) {
+    const QStringList roles{"red", "yellow", "green", "cyan", "blue", "magenta"};
+    const double hues[] = {25, 95, 145, 205, 255, 330};
+    bool chromatic = false;
+    for (const QString &role : roles)
+        chromatic = chromatic || oklch(colors.value(role)).C >= minChroma;
+    const Oklch accent = oklch(colors.value("accent"));
+    QVariantList out;
+    for (int i = 0; i < roles.size(); ++i) {
+        QColor color = colors.value(roles[i]);
+        if (!chromatic || oklch(color).C < minChroma)
+            color = fromOklch(std::clamp(accent.L, .45, .8), .13, hues[i]);
+        out.append(lift(lift(color, t.well, 3.0), t.body, 3.0));
+    }
+    return out;
+}
+
 Tokens tokens(const QHash<QString, QColor> &colors, bool light) {
     const QColor bg = colors.value("background"), fg = colors.value("foreground"), red = colors.value("red");
     const QColor accent = colors.value("accent");
@@ -514,6 +532,7 @@ void CanvasLook::update(const QHash<QString, QColor> &colors, bool light, fugue:
     m_light = light;
 
     m_portColors = portColors(colors, light, t);
+    m_tabColors = tabColors(colors, t);
     m_ports.clear();
     for (auto it = m_portColors.cbegin(); it != m_portColors.cend(); ++it)
         m_ports.insert(it.key(), it.value());

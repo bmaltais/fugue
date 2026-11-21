@@ -76,6 +76,11 @@ RoleTokens roleTokens(const Tokens &tokens, const QColor &role, const QColor &te
 QHash<QString, QColor> portColors(const QHash<QString, QColor> &colors, bool light, const Tokens &tokens,
                                   bool *mono = nullptr);
 
+// The six workflow-tab colors (12.10): the theme's red, yellow, green, cyan, blue and magenta, each
+// lifted to 3:1 against the tab strip and the current tab. A theme without color gets six fixed hues
+// at the accent's lightness, so tabs still differ.
+QVariantList tabColors(const QHash<QString, QColor> &colors, const Tokens &tokens);
+
 // --- corners (3) ---
 
 // The node corner r and the popup corner R. `setting` is settings.json's corner_radius (#63):
@@ -109,6 +114,9 @@ class CanvasLook : public QObject {
     Q_PROPERTY(QColor hairline MEMBER m_hairline NOTIFY changed)
     Q_PROPERTY(QColor hairlineStrong MEMBER m_hairlineStrong NOTIFY changed)
     Q_PROPERTY(QColor well MEMBER m_well NOTIFY changed)
+    // Six colors for the workflow tabs (spec 12.10): the theme's red, yellow, green, cyan, blue and magenta,
+    // each at least 3:1 against the tab strip and the current tab; a theme without color gets six hues.
+    Q_PROPERTY(QVariantList tabColors MEMBER m_tabColors NOTIFY changed)
     Q_PROPERTY(QColor label MEMBER m_label NOTIFY changed)
     Q_PROPERTY(QColor popup MEMBER m_popup NOTIFY changed)
     Q_PROPERTY(QColor errorHeader MEMBER m_errorHeader NOTIFY changed)
@@ -196,6 +204,7 @@ private:
     QColor m_text, m_accent, m_accentForeground, m_error;
     bool m_light = false;
     QVariantMap m_ports;
+    QVariantList m_tabColors;
     int m_textSize = 12;
     qreal m_unit = 4;
     int m_corner = 0, m_popupCorner = 0, m_smallCorner = 0, m_thumbCorner = 0;

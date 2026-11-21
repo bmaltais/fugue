@@ -195,6 +195,12 @@ private slots:
         COMPARE_COLOR(ports.value("number"), "#1a1a1a");
         COMPARE_COLOR(ports.value("image"), "#2e2e2e");
         COMPARE_COLOR(ports.value("declared"), "#6e6e6e");
+        // Tab colors on a theme with no color: still six that differ from each other.
+        const QVariantList tabs = look::tabColors(white, t);
+        QSet<QString> names;
+        for (const QVariant &v : tabs)
+            names.insert(v.value<QColor>().name());
+        QCOMPARE(names.size(), 6);
     }
 
     // The Theme carries the tokens for QML (`theme.look`) and resolves port colors with them.
@@ -266,6 +272,13 @@ private slots:
         for (const QColor &port : look::portColors(colors, read.light, t)) {
             QVERIFY2(look::contrast(port, t.body) >= 2.99, qPrintable(port.name()));
             QVERIFY2(look::contrast(port, t.canvas) >= 2.99, qPrintable(port.name()));
+        }
+        // The tab colors (#98): six, each at least 3:1 against the tab strip and the current tab.
+        const QVariantList tabs = look::tabColors(colors, t);
+        QCOMPARE(tabs.size(), 6);
+        for (const QVariant &v : tabs) {
+            QVERIFY2(look::contrast(v.value<QColor>(), t.well) >= 2.99, qPrintable(v.value<QColor>().name()));
+            QVERIFY2(look::contrast(v.value<QColor>(), t.body) >= 2.99, qPrintable(v.value<QColor>().name()));
         }
         // The sheen (#72): the same small step on every theme, and the labels and text read at
         // both ends of it.

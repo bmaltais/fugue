@@ -102,6 +102,7 @@ struct Fixture {
         registerDefaultCommands(commands);
         locations.recoveryDir = dir.filePath("state/recovery");
         locations.trustPath = dir.filePath("state/trust.json");
+        locations.tabColorsPath = dir.filePath("state/tab-colors.json");
         locations.recoveryIntervalMs = 3600 * 1000; // the tests call writeRecoveryCopies()
         workflows = std::make_unique<Workflows>(&canvas, &registry, &commands, locations);
     }

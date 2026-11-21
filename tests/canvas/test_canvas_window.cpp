@@ -24,6 +24,7 @@
 #include "qml_app.h"
 #include "theme.h"
 #include "workflow/workflows.h"
+#include "../window_grab.h"
 #include "translator.h"
 #include "../cpu_time.h"
 
@@ -588,6 +589,56 @@ private slots:
         QTRY_COMPARE(app.canvas->property("hoverPort").toMap().value("port").toString(), QStringLiteral("width"));
         QTRY_VERIFY(dot->isVisible());
         QVERIFY(dot->property("hovered").toBool());
+    }
+
+    // #98: each workflow tab shows its own color along its top, and a right click picks another.
+    void eachTabShowsItsColorAndARightClickPicksAnother() {
+        App app(load(small));
+        QVERIFY(app.open());
+        app.workflows.dismissPendingTrust();
+        app.workflows.dismissNotice();
+        app.workflows.newWorkflow();
+        app.workflows.newWorkflow();
+        QVERIFY(QTest::qWaitFor([&] { return app.workflows.tabs().size() == 3; }));
+        QTest::qWait(100);
+        QQuickItem *bar = item(app.window->contentItem(), "workflowTabs");
+        QVERIFY(bar && bar->isVisible());
+        const QVariantList colors = app.theme.look()->property("tabColors").toList();
+        QCOMPARE(colors.size(), 6);
+        const auto tabColorAt = [&](int tab) {
+            QQuickItem *button = item(bar, QString("tab-%1").arg(tab));
+            const QImage shot = test_support::grab(app.window);
+            const QPoint at = button->mapToScene(QPointF(button->width() / 2, 1)).toPoint();
+            if (const QByteArray dir = qgetenv("FUGUE_SHOT_DIR"); !dir.isEmpty() && tab == 0)
+                shot.copy(bar->mapToScene(QPointF(0, 0)).toPoint().x(), bar->mapToScene(QPointF(0, 0)).toPoint().y(),
+                          bar->width(), bar->height()).save(QString::fromLocal8Bit(dir) + "/tabs.png");
+            return shot.pixelColor(at);
+        };
+        const auto near = [](const QColor &a, const QColor &b) {
+            return std::abs(a.red() - b.red()) < 3 && std::abs(a.green() - b.green()) < 3 && std::abs(a.blue() - b.blue()) < 3;
+        };
+        QSet<QString> seen;
+        for (int tab = 0; tab < 3; ++tab) {
+            const int color = app.workflows.tabs().at(tab).toMap().value("color").toInt();
+            const QColor shown = tabColorAt(tab);
+            QVERIFY2(near(shown, colors.at(color).value<QColor>()),
+                     qPrintable(QString("tab %1 shows %2, wants %3").arg(tab).arg(shown.name(), colors.at(color).value<QColor>().name())));
+            seen.insert(shown.name());
+        }
+        QCOMPARE(seen.size(), 3); // three tabs, three colors
+
+        const bool unsavedBefore = app.workflows.unsaved();
+        // A right click on the second tab opens six swatches; one pick recolors the tab.
+        QQuickItem *second = item(bar, "tab-1");
+        QTest::mouseClick(app.window, Qt::RightButton, {}, second->mapToScene(QPointF(second->width() / 2, second->height() / 2)).toPoint());
+        QQuickItem *swatch = nullptr;
+        const int current = app.workflows.tabs().at(1).toMap().value("color").toInt();
+        const int pick = (current + 2) % 6;
+        QTRY_VERIFY((swatch = item(app.window->contentItem(), QString("tabColor-1-%1").arg(pick))) && swatch->isVisible());
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, swatch->mapToScene(QPointF(swatch->width() / 2, swatch->height() / 2)).toPoint());
+        QTRY_COMPARE(app.workflows.tabs().at(1).toMap().value("color").toInt(), pick);
+        QCOMPARE(app.workflows.unsaved(), unsavedBefore); // a color is no edit
+        QTRY_VERIFY(near(tabColorAt(1), colors.at(pick).value<QColor>()));
     }
 
     // #72: a node's warnings read from its header: hovering the count and triangle shows them,

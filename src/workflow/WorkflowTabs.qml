@@ -8,8 +8,9 @@ import "../canvas"
 // The tab bar (spec 12.10): one tab per open workflow, a dot on the ones with unsaved
 // content, a close button on each and a button for a new workflow. Reads App.workflows and
 // App.theme. docs/canvas-look.md has no section for it: it takes the same
-// tokens, a recessed strip with the current tab raised in the node body's fill, marked by
-// the accent along its top.
+// tokens, a recessed strip with the current tab raised in the node body's fill. Each tab has
+// its own color (App.workflows.tabs[i].color, an index into look.tabColors): a bar along its top
+// (2px, 4px on the current tab), and a light wash of it behind the tab. A right click picks another.
 Rectangle {
     id: root
     objectName: "workflowTabs"
@@ -21,6 +22,8 @@ Rectangle {
 
     readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
     readonly property CanvasLook look: App.theme.look
+    readonly property var tabColors: look.tabColors
+    function colorOf(index) { return tabColors[((index % tabColors.length) + tabColors.length) % tabColors.length] }
 
     Rectangle {
         anchors.bottom: parent.bottom
@@ -47,21 +50,84 @@ Rectangle {
                 hoverEnabled: true
                 implicitWidth: 44 * root.look.unit
                 Layout.fillHeight: true
+                readonly property color tabColor: root.colorOf(modelData.color)
                 onClicked: App.workflows.current = index
-                background: Rectangle {
-                    color: tabButton.modelData.current ? root.look.body
-                         : tabButton.hovered ? Qt.tint(root.look.well, Qt.alpha(root.look.text, 0.04)) : "transparent"
+                TapHandler {
+                    acceptedButtons: Qt.RightButton
+                    onTapped: colorPopup.open()
+                }
+                // The top corners take the app's corner radius (look.corner, as nodes and frames do). The
+                // tab color is the whole rounded shape, and the fill sits over it a bar's height lower, so
+                // the bar follows the curve; both run below the strip's edge, which clips them square.
+                background: Item {
+                    id: shape
+                    clip: true
+                    readonly property int barHeight: tabButton.modelData.current ? 4 : 2
                     Rectangle {
-                        visible: tabButton.modelData.current
+                        objectName: "tabColorBar"
                         width: parent.width
-                        height: 2
-                        color: root.look.accent
+                        height: parent.height + root.look.corner
+                        radius: root.look.corner
+                        color: tabButton.tabColor
+                    }
+                    Rectangle {
+                        y: shape.barHeight
+                        width: parent.width
+                        height: parent.height + root.look.corner
+                        radius: root.look.corner
+                        color: Qt.tint(tabButton.modelData.current ? root.look.body : root.look.well,
+                                       Qt.alpha(tabButton.tabColor, tabButton.modelData.current ? 0.12 : 0.07))
+                    }
+                    Rectangle {
+                        y: shape.barHeight
+                        width: parent.width
+                        height: parent.height + root.look.corner
+                        radius: root.look.corner
+                        color: Qt.alpha(root.look.text, 0.04)
+                        visible: tabButton.hovered && !tabButton.modelData.current
                     }
                     Rectangle {
                         anchors.right: parent.right
                         width: 1
                         height: parent.height
                         color: root.look.hairline
+                    }
+                }
+                Popup {
+                    id: colorPopup
+                    objectName: "tabColorPopup-" + tabButton.index
+                    y: tabButton.height
+                    padding: root.look.unit * 2
+                    background: Rectangle {
+                        color: root.look.popup
+                        radius: root.look.popupCorner
+                        border.color: root.look.hairlineStrong
+                    }
+                    contentItem: Row {
+                        spacing: root.look.unit
+                        Repeater {
+                            model: root.tabColors.length
+                            delegate: AbstractButton {
+                                id: swatch
+                                required property int index
+                                objectName: "tabColor-" + tabButton.index + "-" + index
+                                implicitWidth: 7 * root.look.unit
+                                implicitHeight: 7 * root.look.unit
+                                focusPolicy: Qt.StrongFocus
+                                Accessible.name: qsTr("Tab color %1").arg(index + 1)
+                                Accessible.checked: tabButton.modelData.color === index
+                                onClicked: {
+                                    App.workflows.setTabColor(tabButton.index, index)
+                                    colorPopup.close()
+                                }
+                                background: Rectangle {
+                                    radius: width / 2
+                                    color: root.colorOf(swatch.index)
+                                    border.width: tabButton.modelData.color === swatch.index || swatch.activeFocus ? 2 : 0
+                                    border.color: root.look.text
+                                }
+                            }
+                        }
                     }
                 }
                 contentItem: RowLayout {

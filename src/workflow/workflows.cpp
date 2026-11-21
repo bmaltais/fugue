@@ -20,6 +20,9 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QSaveFile>
 #include <QGuiApplication>
 #include <QClipboard>
 #include <QStandardPaths>
@@ -130,7 +133,14 @@ QString firstMessage(const Errors &errors) {
 Workflows::Workflows(CanvasModel *canvas, const Registry *registry, CommandRegistry *commands,
                      WorkflowLocations locations, QObject *parent)
     : QObject(parent), m_canvas(canvas), m_registry(registry), m_commands(commands),
-      m_templateRoots(locations.templateRoots), m_recovery(locations.recoveryDir), m_trust(locations.trustPath) {
+      m_templateRoots(locations.templateRoots), m_recovery(locations.recoveryDir), m_trust(locations.trustPath),
+      m_tabColorsPath(locations.tabColorsPath) {
+    if (QFile file(m_tabColorsPath); file.open(QIODevice::ReadOnly)) {
+        const QJsonObject stored = QJsonDocument::fromJson(file.readAll()).object();
+        for (auto it = stored.begin(); it != stored.end(); ++it)
+            if (const int color = it.value().toInt(-1); color >= 0 && color < kTabColors)
+                m_tabColors.insert(it.key(), color);
+    }
     connect(m_canvas, &CanvasModel::edited, this, &Workflows::refreshUnsaved);
     connect(m_canvas, &CanvasModel::pasted, this, [this](const Document &document) {
         if (m_current >= 0)
@@ -177,7 +187,8 @@ QVariantList Workflows::tabs() const {
                                 {"title", tab.title},
                                 {"path", tab.path},
                                 {"unsaved", unsaved(i)},
-                                {"current", i == m_current}});
+                                {"current", i == m_current},
+                                {"color", tab.color}});
     }
     return list;
 }
@@ -303,6 +314,10 @@ int Workflows::addTab(const Document &document, const QString &path, const QStri
     tab.path = path;
     tab.title = title.isEmpty() ? untitledName() : title;
     tab.document = document;
+    // A saved workflow gets its remembered color back; any other tab the first color no open tab has.
+    tab.color = m_tabColors.value(path, -1);
+    if (tab.color < 0)
+        tab.color = freeTabColor();
     m_tabs.insert(m_tabs.begin() + at, std::move(tab));
     m_current = at;
     m_canvas->setDocument(document);
@@ -315,6 +330,42 @@ int Workflows::addTab(const Document &document, const QString &path, const QStri
     emit tabsChanged();
     emit currentChanged(from, at);
     return at;
+}
+
+// The first color no open tab has; when every color is taken, the one the fewest tabs have.
+int Workflows::freeTabColor() const {
+    int used[kTabColors] = {};
+    for (const Tab &tab : m_tabs)
+        if (tab.color >= 0 && tab.color < kTabColors)
+            ++used[tab.color];
+    int best = 0;
+    for (int i = 1; i < kTabColors; ++i)
+        if (used[i] < used[best])
+            best = i;
+    return best;
+}
+
+void Workflows::rememberTabColor(const Tab &tab) {
+    if (tab.path.isEmpty())
+        return;
+    m_tabColors.insert(tab.path, tab.color);
+    QJsonObject stored;
+    for (auto it = m_tabColors.begin(); it != m_tabColors.end(); ++it)
+        stored.insert(it.key(), it.value());
+    QDir().mkpath(QFileInfo(m_tabColorsPath).path());
+    QSaveFile file(m_tabColorsPath);
+    if (file.open(QIODevice::WriteOnly)) {
+        file.write(QJsonDocument(stored).toJson(QJsonDocument::Compact));
+        file.commit();
+    }
+}
+
+void Workflows::setTabColor(int index, int color) {
+    if (index < 0 || index >= count() || color < 0 || color >= kTabColors || m_tabs[size_t(index)].color == color)
+        return;
+    m_tabs[size_t(index)].color = color;
+    rememberTabColor(m_tabs[size_t(index)]);
+    emit tabsChanged();
 }
 
 void Workflows::setCurrent(int index) {
@@ -826,6 +877,7 @@ bool Workflows::saveTab(int index, const QString &path, bool replace) {
     Tab &tab = m_tabs[size_t(index)];
     tab.path = path;
     tab.title = QFileInfo(path).fileName();
+    rememberTabColor(tab); // a saved tab keeps its color under the new name
     // After the path: the repointed inputs are relative to the new place (Appendix A).
     if (index == m_current && moved)
         m_canvas->commit(relocated, tr("Move images"));
