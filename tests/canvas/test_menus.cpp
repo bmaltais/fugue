@@ -16,6 +16,7 @@
 #include "canvas_app.h"
 #include "menu/menu_commands.h"
 #include "menu/menus.h"
+#include "../window_grab.h"
 
 using namespace fugue;
 using canvas_test::App;
@@ -609,8 +610,8 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
-    // The color wheel (#52): Colors > Custom… opens it, a click on the disk sets hue and
-    // saturation, Apply is one undo step that stores "#rrggbb", and the color comes back as a
+    // The color picker (#52): Colors > Custom… opens it, a click on the hue slider and the field sets
+    // the color, OK is one undo step that stores "#rrggbb", and the color comes back as a
     // recent one. Escape leaves everything as it was.
     void theColorWheelAppliesAHexColorAndRemembersIt() {
         App app(load(framed));
@@ -636,17 +637,19 @@ private slots:
         QCOMPARE(color("a"), QString());
         QCOMPARE(app.model.undoStack()->count(), steps);
 
-        // Open again and click the disk half way out at the right: hue 0, saturation .5.
+        // Open again, click the hue slider at its top (hue 0, red), then the field half way
+        // across at the top: saturation .5, brightness 1.
         app.commands.triggerOn("node.color.custom", {});
         QTRY_VERIFY(isOpen(app.window, "colorPickerPopup"));
-        QQuickItem *wheel = NEED("colorWheel");
-        const QPointF origin = wheel->mapToScene(QPointF(0, 0));
-        QTest::mouseClick(app.window, Qt::LeftButton, {},
-                          (origin + QPointF(wheel->width() * 0.75, wheel->height() / 2)).toPoint());
+        QQuickItem *hue = NEED("colorHue");
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, hue->mapToScene(QPointF(hue->width() / 2, 0)).toPoint());
+        QQuickItem *field = NEED("colorField");
+        const QPointF origin = field->mapToScene(QPointF(0, 0));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, (origin + QPointF(field->width() / 2, 0)).toPoint());
         auto *hexField = qobject_cast<QQuickItem *>(popup(app.window, "colorHex"));
         QVERIFY(hexField);
         QTRY_COMPARE(hexField->property("text").toString(), QString("#ff8080"));
-        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("colorApply")));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("colorOk")));
         QTRY_VERIFY(!isOpen(app.window, "colorPickerPopup"));
         QCOMPARE(color("a"), QString("#ff8080"));
         QCOMPARE(color("b"), QString("#ff8080"));
@@ -713,6 +716,124 @@ private slots:
         QCOMPARE(picked.count(), 2);
         QCOMPARE(app.colorHistory.recent(), (QStringList{"#336699"}));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // OK and Cancel are real, labelled buttons (#122); Cancel and Escape leave the caller alone, and
+    // the number fields follow each other and the hex field.
+    void theColorPickerHasLabelledOkAndCancelAndFieldsThatFollowEachOther() {
+        App app(load(framed));
+        QVERIFY(app.open());
+        app.model.select({"a"});
+        auto color = [&] {
+            return app.model.document().layout.value("nodes").toObject().value("a").toObject().value("color").toString();
+        };
+        auto text = [&](const char *name) { return popup(app.window, name)->property("text").toString(); };
+        auto type = [&](const char *name, const char *digits) {
+            QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED(name)));
+            QTest::keyClick(app.window, Qt::Key_A, Qt::ControlModifier);
+            for (const char *c = digits; *c; ++c)
+                QTest::keyClick(app.window, *c);
+        };
+
+        app.commands.triggerOn("node.color.custom", {});
+        QTRY_VERIFY(isOpen(app.window, "colorPickerPopup"));
+        QCOMPARE(NEED("colorOk")->property("text").toString(), QString("OK"));
+        QCOMPARE(NEED("colorCancel")->property("text").toString(), QString("Cancel"));
+
+        // A color typed in the fields shows in every other one, and in the new swatch only.
+        popup(app.window, "colorHex")->setProperty("text", "");
+        for (const char c : QByteArray("ff8000"))
+            QTest::keyClick(app.window, c);
+        QTRY_COMPARE(text("colorChannel-R-field"), QString("255"));
+        QCOMPARE(text("colorChannel-G-field"), QString("128"));
+        QCOMPARE(text("colorChannel-S-field"), QString("100"));
+        QCOMPARE(text("colorChannel-B-field"), QString("100")); // the first B: brightness
+        QCOMPARE(NEED("colorPreview")->property("color").value<QColor>(), QColor("#ff8000"));
+        type("colorChannel-R-field", "0");
+        QTRY_COMPARE(text("colorHex"), QString("#008000"));
+        QCOMPARE(text("colorChannel-H-field"), QString("120"));
+        type("colorChannel-S-field", "50");
+        QTRY_COMPARE(text("colorHex"), QString("#408040"));
+        QCOMPARE(text("colorChannel-G-field"), QString("128"));
+        QCOMPARE(NEED("colorPreview")->property("color").value<QColor>(), QColor("#408040"));
+        // A number past the end becomes the end.
+        type("colorChannel-S-field", "999");
+        QTRY_COMPARE(text("colorChannel-S-field"), QString("100"));
+
+        // Cancel: nothing applied, and the popup closes.
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("colorCancel")));
+        QTRY_VERIFY(!isOpen(app.window, "colorPickerPopup"));
+        QCOMPARE(color(), QString());
+        QVERIFY(app.colorHistory.recent().isEmpty());
+
+        // Enter in a number field is OK.
+        app.commands.triggerOn("node.color.custom", {});
+        QTRY_VERIFY(isOpen(app.window, "colorPickerPopup"));
+        type("colorChannel-R-field", "17");
+        QTest::keyClick(app.window, Qt::Key_Return);
+        QTRY_VERIFY(!isOpen(app.window, "colorPickerPopup"));
+        QCOMPARE(app.colorHistory.recent().size(), 1);
+        QCOMPARE(color(), app.colorHistory.recent().first());
+        QCOMPARE(app.colorHistory.hexFromRgb(17, app.colorHistory.rgb(color()).value("g").toInt(),
+                                             app.colorHistory.rgb(color()).value("b").toInt()), color());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // A bad hex value is shown and cannot be applied; the current swatch puts the start color back.
+    void aBadHexValueDisablesOkAndTheCurrentSwatchGoesBack() {
+        App app(load(framed));
+        QVERIFY(app.open());
+        app.model.select({"a"});
+        QVERIFY(app.layoutColors.apply("#336699", ""));
+        app.commands.triggerOn("node.color.custom", {});
+        QTRY_VERIFY(isOpen(app.window, "colorPickerPopup"));
+        QCOMPARE(NEED("colorPreview")->property("color").value<QColor>(), QColor("#336699"));
+        popup(app.window, "colorHex")->setProperty("text", "#12");
+        QTRY_VERIFY(!NEED("colorOk")->isEnabled());
+        popup(app.window, "colorHex")->setProperty("text", "#336699");
+        QTRY_VERIFY(NEED("colorOk")->isEnabled());
+        QTest::keyClick(app.window, 'x'); // maximum length 7: ignored, the text stays
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("colorField")));
+        QTRY_VERIFY(NEED("colorPreview")->property("color").value<QColor>() != QColor("#336699"));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(NEED("colorCurrent")));
+        QTRY_COMPARE(NEED("colorPreview")->property("color").value<QColor>(), QColor("#336699"));
+        QTRY_COMPARE(popup(app.window, "colorHex")->property("text").toString(), QString("#336699"));
+        QTest::keyClick(app.window, Qt::Key_Escape);
+        QTRY_VERIFY(!isOpen(app.window, "colorPickerPopup"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // Not a check: with FUGUE_SHOT_DIR set, saves the open picker on a dark and a light theme as
+    // <dir>/color-picker-dark.png and color-picker-light.png, to look at (#122).
+    void savesTheColorPickerOnDarkAndLightThemes_data() {
+        QTest::addColumn<QString>("theme");
+        QTest::addColumn<QString>("name");
+        QTest::newRow("dark") << "tokyo-night" << "dark";
+        QTest::newRow("light") << "catppuccin-latte" << "light";
+    }
+    void savesTheColorPickerOnDarkAndLightThemes() {
+        const QByteArray dir = qgetenv("FUGUE_SHOT_DIR");
+        if (dir.isEmpty())
+            QSKIP("set FUGUE_SHOT_DIR to save the color picker's pictures");
+        QFETCH(QString, theme);
+        QFETCH(QString, name);
+        App app(load(framed), {}, canvas_test::Look{theme, 8});
+        QVERIFY(app.open());
+        for (const char *c : {"#ff8000", "#336699", "#12ab9f", "#aa0000", "#ffd400", "#7d3cff", "#808080", "#00bb00"})
+            app.colorHistory.use(c);
+        app.model.select({"a"});
+        QVERIFY(app.layoutColors.apply("#e8590c", ""));
+        app.commands.triggerOn("node.color.custom", {});
+        QTRY_VERIFY(isOpen(app.window, "colorPickerPopup"));
+        // Move off the start color, so the pair of swatches shows a change.
+        QQuickItem *field = NEED("colorField");
+        QTest::mouseClick(app.window, Qt::LeftButton, {},
+                          field->mapToScene(QPointF(field->width() * 0.7, field->height() * 0.3)).toPoint());
+        QTest::mouseMove(app.window, centerOf(NEED("colorRecent-2")));
+        QTest::qWait(150);
+        const QImage shot = test_support::grab(app.window);
+        QVERIFY(!shot.isNull());
+        QVERIFY(shot.save(QStringLiteral("%1/color-picker-%2.png").arg(QString::fromUtf8(dir), name)));
     }
 
     void theColorWheelColorsAFrameAloneAndNothingWithoutATarget() {

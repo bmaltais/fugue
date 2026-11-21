@@ -15,4 +15,14 @@ QVariantMap ColorHistory::hsv(const QString &hex) const {
     return {{"h", value.h}, {"s", value.s}, {"v", value.v}};
 }
 
+QVariantMap ColorHistory::rgb(const QString &hex) const {
+    const Rgb value = rgbFromHex(hex);
+    return {{"r", value.r}, {"g", value.g}, {"b", value.b}};
+}
+
+QVariantMap ColorHistory::hsb(double h, double s, double v) const {
+    const Hsb value = hsbRounded({h, s, v});
+    return {{"h", value.h}, {"s", value.s}, {"b", value.b}};
+}
+
 } // namespace fugue

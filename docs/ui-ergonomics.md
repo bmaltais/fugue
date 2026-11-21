@@ -150,14 +150,16 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 
 Reusable controls other surfaces may call. A component names its input and output here, knows nothing of its caller, and a caller's glue lives in its own file.
 
-### Color picker (#52)
+### Color picker (#52, #122)
 
-- Files: `src/canvas/ColorPickerPane.qml` (the picker), `src/canvas/ColorPickerPopup.qml` (the pane on a popup), `src/menu/color_history.h` (`App.colorHistory`: the recent list and the color math), `src/engine/layout_color.h` (the same in plain C++: `normalizeHex`, `hsvFromHex`, `hexFromHsv`, `RecentColors`). Canvas glue: `src/canvas/LayoutColorPicker.qml` and `src/menu/layout_colors.h` (node and Frame coloring, the first caller).
-- Input: `setColor(c)` starts it on a color ("#rrggbb", "#rgb", or without the "#"; a bad value is ignored). `remember` (true) and `showRecent` (true).
-- Output: `color` (read, the color being chosen now, follows every drag and key), and `picked(color)` on a confirm: Apply, Enter in the hex field, or a click on a recent color. A confirm puts the color first in `App.colorHistory.recent` when `remember` is true. The caller decides what picking does.
-- Popup: `ColorPickerPopup.openWith(color)`, `picked(color)`; Escape or a press outside closes it with no `picked`; it has no open or close fade.
-- Keys: the wheel, the brightness bar, the hex field, Apply and the recent colors take Tab focus. On the wheel, Left and Right turn the hue and Up and Down set saturation, 5 steps (Shift: 1); on the bar, Up and Down.
-- A new caller: a `ColorPickerPane` or `ColorPickerPopup`, `setColor`/`openWith` with its current color, `onPicked`. Needs `App.colorHistory` (null in a window made without it: the picker then picks nothing).
+- Files: `src/canvas/ColorPickerPane.qml` (the picker), `ColorNumberField.qml` (a label and a digits-only field), `src/canvas/ColorPickerPopup.qml` (the pane on a popup), `src/menu/color_history.h` (`App.colorHistory`: the recent list and the color math for QML), `src/engine/layout_color.h` (the same in plain C++: `normalizeHex`, `hsvFromHex`, `hexFromHsv`, `rgbFromHex`, `hexFromRgb`, `hsbRounded`, `RecentColors`; tests `tests/engine/test_layout_color.cpp`). Canvas glue: `src/canvas/LayoutColorPicker.qml` and `src/menu/layout_colors.h` (node and Frame coloring, the first caller).
+- Input: `setColor(c)` starts it on a color ("#rrggbb", "#rgb", or without the "#"; a bad value is ignored); that color is also the "current" swatch. `remember` (true) and `showRecent` (true).
+- Output: `color` (read, the color being chosen now, follows every drag and key), `picked(color)` on a confirm: OK, Enter in a field or on the field or slider, or a click on a recent color; and `canceled()`: Cancel or Escape. A confirm puts the color first in `App.colorHistory.recent` when `remember` is true. The caller decides what picking does; the popup closes on either signal.
+- Popup: `ColorPickerPopup.openWith(color)`, `picked(color)`; Cancel, Escape or a press outside closes it with no `picked`; it has no open or close fade.
+- Look: the saturation and brightness field (48u square, hue color at the top right, white to the left, black below), the hue slider (6u wide) beside it, the New swatch over the Current one with captions (a click on Current puts the start color back), H S B and R G B fields (digits only, capped at 360, 100 and 255; H and S and B show ° and %), the hex field, the recent colors under a caption (6u swatches), and Cancel and OK (`ViewButton`, 28px, OK highlighted) at the bottom right. Handles are double rings (dark, white, dark) with a soft shadow; the fields and sliders have a sunk 1px edge; hover enlarges a handle and rings a swatch; focus is the accent ring. Every color is a `look` token, so it follows light and dark themes.
+- Keys: the field, the hue slider, every number field, the hex field, the recent colors, Cancel and OK take Tab focus. On the field, Left and Right set saturation and Up and Down brightness, 5 steps (Shift: 1); on the slider, Up and Down turn the hue; Enter anywhere confirms; Escape cancels. A hex value that is not a color is drawn in the error color and OK is disabled.
+- Sync: the hue, saturation and brightness are kept as typed or dragged, the fields show them rounded, so a gray keeps its hue; the field being typed in is never rewritten until it loses the focus.
+- A new caller: a `ColorPickerPane` or `ColorPickerPopup`, `setColor`/`openWith` with its current color, `onPicked`, and `onCanceled` for a pane. Needs `App.colorHistory` (null in a window made without it: the picker then picks nothing).
 
 ### Large view and crop frame (#73)
 
@@ -201,6 +203,14 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - New: two submenus, no default keys. In the node's menu a command shows only when it applies (Align from two selected nodes, Distribute from three), and a submenu with nothing left is left out; in the bar they stay and dim, as the other Node items do.
 - Why: ComfyUI offers both as menu items, so recognition not recall; six leaf commands under two headings keep the Node menu from growing by six rows (Hick).
 - Rule: Learned place (the existing Node and node-menu items keep their order; the new rows sit after the toggles, before the image items). Gaps (the two rows join the toggles' chunk; no gap added). Floor (menu rows are the menus' existing height). Destructive: not applicable, and undo reverses each.
+
+### 2026-11-21 color picker OK and Cancel, richer look (#122)
+
+- Control: the color picker (`ColorPickerPane.qml`, in `ColorPickerPopup`): `colorOk`, `colorCancel`, `colorField`, `colorHue`, `colorPreview` and `colorCurrent` (the swatches), `colorChannel-H|S|B|R|G|Blue`, `colorHex`, `colorRecent-<n>`.
+- Old: a hue and saturation disk with a brightness bar, an unlabeled Apply pill beside the hex field, one swatch, the recent colors with no caption.
+- New: the field and slider layout of Adobe's picker, a New and Current swatch pair, six number fields beside the hex one, a captioned recent row, and Cancel and OK as labelled buttons at the bottom right (Cancel first, as CropDialog and the large views have them). Enter and Escape still confirm and cancel. The popup is 94u wide (about 376px).
+- Why: Apply was the one answer and had no name; a person who has seen another picker looks for OK and Cancel (recognition, Hick). Seeing the new color against the current one makes the change visible before it is made, so the one decision (OK) is informed. A field is faster than a disk for aiming at a bright saturated color (Fitts: 192px square, any point is a color), and numbers give a way in for a person who has a value.
+- Rule: Floor (every target is 24px or more: the swatches 24px, the number and hex fields and buttons 28px, the field 192px, the hue slider 24px wide; the handles are marks, not targets). Primary (OK is the one highlighted control; Cancel is plain). Destructive: not applicable, Cancel loses nothing that was applied, and undo reverses OK. Gaps (1u inside a chunk: label and field, swatches; 2u between the field and slider and between the field columns; 3u between chunks: the picking area, the recent colors, the buttons row). Learned place (OK last at the right, Cancel before it, as the other dialogs). Posture: a transient popup, two decisions at most (pick a color, OK). A click on a recent color still applies and closes at once, as before (#52): it is the quick path, and the picker is open to see before it.
 
 ### 2026-11-21 color picker for nodes and Frames (#52)
 
