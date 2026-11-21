@@ -1,5 +1,8 @@
 #include "run/run_bar.h"
 
+#include <algorithm>
+#include <cmath>
+
 #include <QJsonObject>
 
 #include "commands/command_registry.h"
@@ -8,10 +11,23 @@
 
 namespace fugue {
 
+namespace {
+
+QPointF clampedPlace(QPointF p) {
+    // A bad number (NaN reads as 0.5) is the middle, anything else is held to 0..1.
+    const auto unit = [](double v) { return std::isnan(v) ? 0.5 : std::clamp(v, 0.0, 1.0); };
+    return {unit(p.x()), unit(p.y())};
+}
+
+} // namespace
+
 RunBar::RunBar(CanvasRuns *runs, QString path, QObject *parent) : QObject(parent), m_runs(runs), m_path(std::move(path)) {
     if (const Result<QJsonObject> read = readJsonObject(m_path)) {
         m_visible = read->value("visible").toBool(true);
-        m_dock = read->value("dock").toString() == QLatin1String("bottom") ? QStringLiteral("bottom") : QStringLiteral("top");
+        if (const QJsonObject place = read->value("place").toObject(); !place.isEmpty())
+            m_place = clampedPlace({place.value("x").toDouble(0.5), place.value("y").toDouble(0)});
+        else if (read->value("dock").toString() == QLatin1String("bottom"))
+            m_place = {0.5, 1}; // a file from before the bar moved freely
         if (m_runs)
             m_runs->setBatch(read->value("batch").toInt(1));
     }
@@ -27,13 +43,13 @@ void RunBar::setVisible(bool visible) {
     emit visibleChanged();
 }
 
-void RunBar::setDock(const QString &dock) {
-    const QString wanted = dock == QLatin1String("bottom") ? QStringLiteral("bottom") : QStringLiteral("top");
-    if (wanted == m_dock)
+void RunBar::setPlace(const QPointF &place) {
+    const QPointF wanted = clampedPlace(place);
+    if (wanted == m_place)
         return;
-    m_dock = wanted;
+    m_place = wanted;
     save();
-    emit dockChanged();
+    emit placeChanged();
 }
 
 void RunBar::setQueueOpen(bool open) {
@@ -46,7 +62,7 @@ void RunBar::setQueueOpen(bool open) {
 void RunBar::save() const {
     if (m_path.isEmpty())
         return;
-    writeJsonFile(m_path, QJsonObject{{"visible", m_visible}, {"dock", m_dock}, {"batch", m_runs ? m_runs->batch() : 1}});
+    writeJsonFile(m_path, QJsonObject{{"visible", m_visible}, {"place", QJsonObject{{"x", m_place.x()}, {"y", m_place.y()}}}, {"batch", m_runs ? m_runs->batch() : 1}});
 }
 
 void RunBar::registerCommands(CommandRegistry &commands) {

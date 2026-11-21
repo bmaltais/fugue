@@ -62,6 +62,8 @@ Item {
     }
 
     width: 96 * u
+    // The height it wants with room enough, for a caller that picks the side it hangs on.
+    readonly property real wantedHeight: Math.min(80 * u, column.implicitHeight + 2 * u)
     height: Math.min(maxHeight, column.implicitHeight + 2 * u)
     Keys.onEscapePressed: panel.closeRequested()
     // Up and Down move along the buttons (Tab is the window's own key).
@@ -249,6 +251,7 @@ Item {
                         ViewButton {
                             objectName: "queueCancel-" + entry.modelData
                             look: panel.look
+                            danger: true
                             glyph: "x"
                             tip: entry.running ? qsTr("Cancel this run") : qsTr("Take this run out of the queue")
                             onTapped: panel.cancelRequested(entry.modelData)

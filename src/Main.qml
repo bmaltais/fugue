@@ -223,14 +223,14 @@ ApplicationWindow {
             progress: App.runs.running ? App.runs.progress : -1
             batch: App.runs.batch
             maxBatch: 99
-            dock: App.runBar.dock
+            place: App.runBar.place
             queueOpen: App.runBar.queueOpen
             onMenuAboutToOpen: menuItems = App.commands.menu("run")
             onRunRequested: App.commands.trigger("run.start")
             onCancelRequested: App.commands.trigger("run.cancel")
             onBatchRequested: value => App.runs.batch = value
             onQueueToggled: App.runBar.queueOpen = !App.runBar.queueOpen
-            onDockRequested: dock => App.runBar.dock = dock
+            onPlaceRequested: place => App.runBar.place = place
         }
     }
     Component {
@@ -240,10 +240,13 @@ ApplicationWindow {
             look: App.theme.look
             entries: App.runQueue.entries
             history: App.runQueue.history
-            maxHeight: Math.max(30 * look.unit, fugueCanvas.height - 24 * look.unit)
+            // It hangs from the bar on the side with room (src/engine/float_place.h), centered on it.
             readonly property Item bar: (win.runToolbarItem as RunToolbar)?.surface ?? null
-            x: bar ? bar.x + (bar.width - width) / 2 : 0
-            y: !bar ? 0 : App.runBar.dock === "bottom" ? bar.y - height - 2 * look.unit : bar.y + bar.height + 2 * look.unit
+            readonly property rect barRect: bar ? Qt.rect(bar.x, bar.y, bar.width, bar.height) : Qt.rect(0, 0, 0, 0)
+            readonly property size area: Qt.size(fugueCanvas.width, fugueCanvas.height)
+            maxHeight: Math.max(12 * look.unit, FloatPlace.roomOnSide(barRect, wantedHeight, area, 2 * look.unit))
+            x: FloatPlace.panelPlace(barRect, Qt.size(width, height), area, 2 * look.unit, wantedHeight).x
+            y: FloatPlace.panelPlace(barRect, Qt.size(width, height), area, 2 * look.unit, wantedHeight).y
             onCancelRequested: run => App.runQueue.cancel(run)
             onFrontRequested: run => App.runQueue.moveToFront(run)
             onFolderRequested: run => App.runQueue.openFolder(run)

@@ -194,6 +194,18 @@ Tokens tokens(const QHash<QString, QColor> &colors, bool light) {
         if (contrast(fg, t.menuRow) >= 4.5)
             break;
     }
+    // A button that cancels or deletes (#120): the well tinted red on the popup surface, the text
+    // reading on it at 4.5:1; the hover a step redder, lessened by the same rule.
+    for (const double k : {.30, .26, .22, .18, .14, .10}) {
+        t.dangerFill = mix(t.popup, red, k);
+        if (contrast(fg, t.dangerFill) >= 4.5)
+            break;
+    }
+    for (const double k : {.46, .40, .34, .28, .22, .16}) {
+        t.dangerHover = mix(t.popup, red, k);
+        if (contrast(fg, t.dangerHover) >= 4.5)
+            break;
+    }
     // The sheen: the least alpha of light (the text on dark themes, white on light ones) that
     // makes the step; on a fill with no room to lighten, of black at the bottom instead.
     const auto sheen = [&](const QColor &over, double step) {
@@ -518,6 +530,8 @@ void CanvasLook::update(const QHash<QString, QColor> &colors, bool light, fugue:
     m_errorChip = t.errorChip;
     m_selectedRow = t.selectedRow;
     m_menuRow = t.menuRow;
+    m_dangerFill = t.dangerFill;
+    m_dangerHover = t.dangerHover;
     m_bevel = t.bevel;
     m_sheenTop = t.sheenTop;
     m_sheenBottom = t.sheenBottom;
