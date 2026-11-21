@@ -110,7 +110,7 @@ jobs:
         run: |
           docker exec arch bash -c '
             set -euo pipefail
-            sed -i "s/^CheckSpace/#CheckSpace/" /etc/pacman.conf
+            sed -i "s/^CheckSpace/#CheckSpace/; s/^\[options\]/[options]\nDisableSandbox/" /etc/pacman.conf
             pacman-key --init && pacman-key --populate archlinuxarm
             pacman -Syu --noconfirm --needed git
             source packaging/PKGBUILD
