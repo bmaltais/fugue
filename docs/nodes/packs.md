@@ -33,6 +33,10 @@ fugue pack remove io.github.alice.tools
 
 - A git address (`https://`, `ssh://`, `git://`, `file://`, `user@host:path`) is cloned and **must
   be pinned** with `--ref <tag or commit>`.
+- A pack with the same id at another major version goes beside the first, to `packs/<id>@<major>`.
+  Workflows made with the older major keep running on it. `update`, `remove` and `trust` take
+  that folder name (`fugue pack trust io.github.alice.tools@2`); an update stays in its major.
+  Adding a major that is already installed is refused.
 - The pack goes to `packs/<id>` with a `.fugue-source.json` saying where it came from, so
   `update` can fetch it again. A pack copied in by hand has no source and cannot be updated.
 - It is checked in a staging folder first and put in place only when it loads and you agreed. A

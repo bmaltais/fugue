@@ -16,6 +16,7 @@
 #include "engine/compiler.h"
 #include "engine/document.h"
 #include "engine/json.h"
+#include "engine/pack_loader.h"
 #include "engine/run_folder.h"
 
 namespace fugue::cli {
@@ -114,7 +115,9 @@ Reply nodeDescribe(const Command &command, Context &context) {
     QJsonArray nodes;
     Errors errors;
     for (const QString &id : command.positionals) {
-        const NodeType *type = context.registry.nodeType(id);
+        // `<id>@<major>` is that major of the type (3.6); a bare id is the newest.
+        const PackRef ref = parsePackRef(id);
+        const NodeType *type = ref.major >= 0 ? context.registry.nodeTypeAt(ref.id, ref.major) : context.registry.nodeType(id);
         if (!type) {
             Error error = makeError("unknown_node_type", QStringLiteral("There is no node type %1.").arg(id),
                                     "`fugue node list` shows the installed types.");

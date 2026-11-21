@@ -483,16 +483,20 @@ QStringList WidgetEdit::capabilities(const QString &node, const QString &input) 
         return {};
     const Document &document = m_canvas->scopeDocument();
     QString type = document.graph.nodes.value(node).type;
+    int major = document.graph.nodes.value(node).version.major;
     if (!m_registry->nodeType(type)) {
         // A group's exposed input: the node type of the inner input it drives.
         const GroupDefinition *group = document.group(type);
         if (!group)
             return {};
         for (const GroupInput &exposed : group->inputs)
-            if (exposed.name == input)
-                type = group->nodes.value(exposed.targets.value(0).node).type;
+            if (exposed.name == input) {
+                const Node &inner = group->nodes.value(exposed.targets.value(0).node);
+                type = inner.type;
+                major = inner.version.major;
+            }
     }
-    const NodeType *installed = m_registry->nodeType(type);
+    const NodeType *installed = m_registry->nodeTypeFor(type, major);
     QStringList list;
     if (installed)
         for (const QJsonValue &capability : installed->capabilities.toArray())

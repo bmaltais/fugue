@@ -486,7 +486,7 @@ void CanvasModel::portsFromType(NodeRow &row, const Node &node) const {
         }
         return;
     }
-    if (const NodeType *type = m_registry ? m_registry->nodeType(node.type) : nullptr) {
+    if (const NodeType *type = m_registry ? m_registry->nodeTypeFor(node.type, node.version.major) : nullptr) {
         row.title = type->name;
         for (const InputSpec &spec : type->inputs)
             row.inputs.push_back(fromInput(spec, spec.name, {}));
@@ -882,8 +882,9 @@ bool CanvasModel::isWired(const QString &node, const QString &port, bool output)
 const InputSpec *CanvasModel::inputSpec(const QString &node, const QString &input) const {
     if (!m_registry || !m_document.graph.nodes.contains(node))
         return nullptr;
-    const QString type = m_document.graph.nodes.value(node).type;
-    if (const NodeType *installed = m_registry->nodeType(type))
+    const Node &found = m_document.graph.nodes.value(node);
+    const QString type = found.type;
+    if (const NodeType *installed = m_registry->nodeTypeFor(type, found.version.major))
         return installed->input(input);
     // A group instance's input as the group narrows it, kept with the row (valid until the
     // row is made again: callers use it before they edit).

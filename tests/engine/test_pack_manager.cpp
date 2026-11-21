@@ -28,14 +28,14 @@ void writeJson(const QString &path, const QJsonObject &object) { write(path, QJs
 
 // A pack `source/<id>` holding one command node "tool"; `network` and `setup` are optional.
 QString makePack(const QString &root, const QString &id, const QString &version, bool network = false,
-                 const QJsonObject &setup = {}) {
+                 const QJsonObject &setup = {}, const QString &nodeVersion = "1.0.0") {
     const QString dir = root + "/" + id;
     QJsonObject pack{{"manifest", 1}, {"id", id}, {"version", version}, {"name", "Test pack"},
                      {"nodes", QJsonArray{"tool"}}};
     if (!setup.isEmpty())
         pack["setup"] = setup;
     writeJson(dir + "/pack.json", pack);
-    QJsonObject node{{"manifest", 1}, {"id", id + "/tool"}, {"version", "1.0.0"}, {"name", "Tool"},
+    QJsonObject node{{"manifest", 1}, {"id", id + "/tool"}, {"version", nodeVersion}, {"name", "Tool"},
                      {"runtime", QJsonObject{{"kind", "command"}, {"entry", "./run.sh"}}},
                      {"inputs", QJsonArray{QJsonObject{{"name", "image"}, {"type", "image"}}}},
                      {"outputs", QJsonArray{QJsonObject{{"name", "image"}, {"type", "image"}}}}};
@@ -240,6 +240,67 @@ private slots:
         QVERIFY(leftovers().isEmpty()); // not half installed
         QCOMPARE(addPack(makePack(source(), "io.example.gone", "1.0.0", false, {{"command", QJsonArray{"no-such-program-xyz"}}}), {},
                          packs(), trustStore(), answering(Answer::Yes)).error().code, QString("setup_failed"));
+    }
+
+    // 6.6: another major of an installed pack goes beside it, as `<id>@<major>`, and neither
+    // displaces nor untrusts the other.
+    void packsInstallSideBySideByMajor() {
+        const QString id = "io.example.tools";
+        const QString one = makePack(source() + "/one", id, "1.2.0");
+        const QString two = makePack(source() + "/two", id, "2.0.0", false, {}, "2.0.0");
+        QVERIFY(addPack(one, {}, packs(), trustStore(), answering(Answer::Yes)).ok());
+        TrustStore trust(trustFile());
+        QVERIFY(trustPack(id, packs(), trust, answering(Answer::Yes)).ok());
+
+        const Result<PackAdded> added = addPack(two, {}, packs(), trustStore(), answering(Answer::Yes));
+        QVERIFY2(added.ok(), qPrintable(added.error().message));
+        QCOMPARE(QFileInfo(added->pack.folder).fileName(), QString("io.example.tools@2"));
+        QVERIFY(QFileInfo(packs() + "/io.example.tools/tool/node.json").isFile()); // major 1 stayed
+        QVERIFY(QFileInfo(packs() + "/io.example.tools@2/tool/node.json").isFile());
+        QVERIFY(TrustStore(trustFile()).isTrusted(id, "1.2.0")); // and stayed trusted
+        QVERIFY(!TrustStore(trustFile()).isTrusted(id, "2.0.0"));
+
+        // The same major again is still "already installed".
+        QCOMPARE(addPack(makePack(source() + "/three", id, "2.1.0", false, {}, "2.1.0"), {}, packs(), trustStore(), answering(Answer::Yes))
+                     .error().code, QString("pack_exists"));
+
+        // Both load, and each node major runs on the pack it came from.
+        Registry registry;
+        const PackReport report = loadPacks(registry, {packs()});
+        QVERIFY2(!report.hasProblems(), "a pack of each major loads");
+        QCOMPARE(registry.majors(id + "/tool"), (QList<int>{1, 2}));
+        QCOMPARE(registry.nodeTypeAt(id + "/tool", 1)->packVersion, QString("1.2.0"));
+        QCOMPARE(registry.nodeTypeAt(id + "/tool", 2)->packVersion, QString("2.0.0"));
+
+        // Trust is given to the one named, by its folder.
+        QVERIFY(trustPack("io.example.tools@2", packs(), trust, answering(Answer::Yes)).ok());
+        QVERIFY(TrustStore(trustFile()).isTrusted(id, "2.0.0"));
+
+        // Removing one leaves the other installed and trusted.
+        QVERIFY(removePack("io.example.tools@2", packs(), trust, answering(Answer::Yes)).ok());
+        QVERIFY(!QFileInfo(packs() + "/io.example.tools@2").exists());
+        QVERIFY(QFileInfo(packs() + "/io.example.tools").isDir());
+        QVERIFY(TrustStore(trustFile()).isTrusted(id, "1.2.0"));
+        QVERIFY(!TrustStore(trustFile()).isTrusted(id, "2.0.0"));
+    }
+
+    // An update of a side-by-side pack stays in its own major.
+    void updatingASideBySidePackKeepsItsMajor() {
+        const QString id = "io.example.tools";
+        QVERIFY(addPack(makePack(source() + "/one", id, "1.2.0"), {}, packs(), trustStore(), answering(Answer::Yes)).ok());
+        const QString two = makePack(source() + "/two", id, "2.0.0", false, {}, "2.0.0");
+        QVERIFY(addPack(two, {}, packs(), trustStore(), answering(Answer::Yes)).ok());
+        makePack(source() + "/two", id, "2.1.0", false, {}, "2.1.0");
+        const Result<QList<PackAdded>> updated = updatePacks("io.example.tools@2", {}, packs(), trustStore(), answering(Answer::Yes));
+        QVERIFY2(updated.ok(), qPrintable(updated.error().message));
+        QCOMPARE(updated->size(), 1);
+        Registry registry;
+        loadPacks(registry, {packs()});
+        QCOMPARE(registry.packVersions(id), (QStringList{"1.2.0", "2.1.0"}));
+        // A new major does not replace an `@2` folder.
+        makePack(source() + "/two", id, "3.0.0", false, {}, "3.0.0");
+        QVERIFY(!updatePacks("io.example.tools@2", {}, packs(), trustStore(), answering(Answer::Yes)).ok());
+        QVERIFY(QFileInfo(packs() + "/io.example.tools@2/tool/node.json").isFile());
     }
 
     void trustIsAskedAndRecordedPerVersion() {

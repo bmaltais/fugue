@@ -3,6 +3,7 @@
 #include "engine/json.h"
 #include "engine/pack_loader.h"
 #include "engine/registry.h"
+#include "engine/version.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -50,9 +51,27 @@ bool looksLikeGitUrl(const QString &text) {
 }
 
 // Safe as a folder name; whether it is a good pack id is the loader's check (summarizePack).
+// A folder name may end in @<major> (6.6).
 bool validPackId(const QString &id) {
-    static const QRegularExpression pattern(QStringLiteral("^[a-z0-9][a-z0-9.-]*$"));
-    return id.size() <= 128 && pattern.match(id).hasMatch() && !id.contains(QStringLiteral(".."));
+    static const QRegularExpression pattern(QStringLiteral("^[a-z0-9][a-z0-9.-]*(@(0|[1-9][0-9]{0,8}))?$"));
+    return id.size() <= 140 && pattern.match(id).hasMatch() && !id.contains(QStringLiteral(".."));
+}
+
+// The major of the version in the pack.json of a folder, or -1.
+int majorOfFolder(const QString &folder) {
+    const Result<QJsonObject> json = readJsonObject(folder + QStringLiteral("/pack.json"));
+    const std::optional<Version> version = json ? Version::parse(json->value("version").toString()) : std::nullopt;
+    return version ? version->major : -1;
+}
+
+// The folders of `places` holding a pack with this id (named `<id>` or `<id>@<major>`).
+QStringList foldersOfPack(const QString &id, const QStringList &places) {
+    QStringList found;
+    for (const QString &place : places)
+        for (const QFileInfo &entry : QDir(place).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name))
+            if (!entry.fileName().startsWith(QLatin1Char('.')) && parsePackRef(entry.fileName()).id == id)
+                found << entry.filePath();
+    return found;
 }
 
 // Text that reaches a terminal must not carry control characters: an escape sequence could
@@ -378,9 +397,8 @@ Error warningOf(Error error, const QString &prefix = {}) {
 
 // Installs a staged pack into packsDir, replacing the installed folder when `replacing`. The
 // setup question comes before anything changes; a setup that fails puts everything back.
-Result<PackAdded> install(const Staged &staged, PackSummary summary, const QString &packsDir, const PackPrompts &prompts,
-                          bool replacing, TrustStore &trust) {
-    const QString target = packsDir + QLatin1Char('/') + summary.id;
+Result<PackAdded> install(const Staged &staged, PackSummary summary, const QString &packsDir, const QString &target,
+                          const PackPrompts &prompts, bool replacing, TrustStore &trust) {
     summary.source = staged.source;
     summary.folder = target;
     PackAdded added;
@@ -423,19 +441,31 @@ Result<PackAdded> install(const Staged &staged, PackSummary summary, const QStri
     if (replacing)
         QDir(backup).removeRecursively();
     // Trust is per version, and a new version, a new commit or a re-install is new code: it asks again.
-    Errors warnings = trust.forget(summary.id);
+    // Another major of the pack stays trusted: only this version (and the one replaced) is forgotten.
+    const bool beside = foldersOfPack(summary.id, {packsDir}).size() > 1;
+    Errors warnings = beside ? trust.forget(summary.id, summary.version) : trust.forget(summary.id);
+    if (beside && !summary.oldVersion.isEmpty())
+        warnings += trust.forget(summary.id, summary.oldVersion);
     for (Error &warning : warnings)
         warning = warningOf(warning);
     return Result<PackAdded>(added, warnings);
 }
 
-bool inSearchPaths(const QString &id, const QString &packsDir) {
+// Whether a pack with this id and major is installed in the packs folder or a search path.
+bool inSearchPaths(const QString &id, int major, const QString &packsDir) {
     QStringList paths = packSearchPaths();
     paths.prepend(packsDir);
-    for (const QString &path : paths)
-        if (QFileInfo::exists(path + QLatin1Char('/') + id))
+    for (const QString &folder : foldersOfPack(id, paths))
+        if (majorOfFolder(folder) == major)
             return true;
     return false;
+}
+
+// Where a new pack goes (6.6): `<id>`, the way packs always lived, and `<id>@<major>` when the
+// folder of the id is taken by another major.
+QString targetFolder(const QString &id, int major, const QString &packsDir) {
+    const QString plain = packsDir + QLatin1Char('/') + id;
+    return QFileInfo::exists(plain) ? packsDir + QLatin1Char('/') + packFolderName(id, major) : plain;
 }
 
 } // namespace
@@ -475,15 +505,20 @@ Result<PackAdded> addPack(const QString &location, const QString &ref, const QSt
     if (!summary)
         return done(summary.errors());
     summary->source = staged->source;
-    if (inSearchPaths(summary->id, packsDir))
-        return done(Error(fail(QStringLiteral("pack_exists"), QStringLiteral("The pack %1 is already installed.").arg(summary->id),
-                               QStringLiteral("`fugue pack update %1` fetches it again; `fugue pack remove %1` removes it.").arg(summary->id))));
+    const int major = Version::parse(summary->version)->major; // summarizePack loaded it
+    if (inSearchPaths(summary->id, major, packsDir))
+        return done(Error(fail(QStringLiteral("pack_exists"),
+                               QStringLiteral("The pack %1 is already installed at major version %2.").arg(summary->id).arg(major),
+                               QStringLiteral("`fugue pack update %1` fetches it again; `fugue pack remove %1` removes it. "
+                                              "Another major version installs beside it.").arg(summary->id))));
+    const QString target = targetFolder(summary->id, major, packsDir);
+    summary->folder = target;
     const Result<bool> yes = ask(prompts.install, *summary, QStringLiteral("Installing a pack"));
     if (!yes)
         return done(yes.errors());
     if (!*yes)
         return done(Error(fail(QStringLiteral("cancelled"), QStringLiteral("The pack was not installed."))));
-    return done(install(*staged, *summary, packsDir, prompts, false, trust));
+    return done(install(*staged, *summary, packsDir, target, prompts, false, trust));
 }
 
 Result<QList<PackAdded>> updatePacks(const QString &id, const QString &ref, const QString &packsDir, TrustStore &trust,
@@ -552,8 +587,12 @@ Result<QList<PackAdded>> updatePacks(const QString &id, const QString &ref, cons
         Errors why;
         if (!next)
             why = next.errors();
-        else if (next->id != name)
+        else if (next->id != parsePackRef(name).id)
             why = {fail(QStringLiteral("pack_invalid"), QStringLiteral("The pack now says its id is %1, not %2.").arg(next->id, name))};
+        else if (const PackRef ref = parsePackRef(name); ref.major >= 0 && Version::parse(next->version)->major != ref.major)
+            why = {fail(QStringLiteral("pack_invalid"),
+                        QStringLiteral("%1 is now at version %2, another major version than the folder holds.").arg(name, next->version),
+                        QStringLiteral("`fugue pack add` installs that major version beside this one."))};
         if (!why.isEmpty()) {
             cleanup();
             if (const auto stop = problem(name, why))
@@ -578,7 +617,7 @@ Result<QList<PackAdded>> updatePacks(const QString &id, const QString &ref, cons
             cleanup();
             continue;
         }
-        Result<PackAdded> added = install(*staged, *next, packsDir, prompts, true, trust);
+        Result<PackAdded> added = install(*staged, *next, packsDir, folder, prompts, true, trust);
         cleanup();
         if (!added) {
             if (const auto stop = problem(name, added.errors()))
@@ -602,7 +641,7 @@ Result<PackSummary> removePack(const QString &id, const QString &packsDir, Trust
     if (read) {
         summary = *read;
     } else {
-        summary.id = id; // a broken pack can still be removed
+        summary.id = parsePackRef(id).id; // a broken pack can still be removed
         summary.folder = folder;
         summary.name = id;
     }
@@ -613,14 +652,17 @@ Result<PackSummary> removePack(const QString &id, const QString &packsDir, Trust
         return fail(QStringLiteral("cancelled"), QStringLiteral("The pack was not removed."));
     if (!QDir(folder).removeRecursively())
         return fail(QStringLiteral("permission_denied"), QStringLiteral("Cannot remove %1 completely.").arg(folder));
-    const Errors forgotten = trust.forget(id);
+    // Another major of the pack stays trusted.
+    const QString packId = parsePackRef(id).id;
+    const bool beside = !foldersOfPack(packId, {packsDir}).isEmpty();
+    const Errors forgotten = beside && !summary.version.isEmpty() ? trust.forget(packId, summary.version) : trust.forget(packId);
     if (hasErrors(forgotten))
         return forgotten;
     return summary;
 }
 
 Result<PackSummary> trustPack(const QString &id, const QString &packsDir, TrustStore &trust, const PackPrompts &prompts) {
-    if (TrustStore::isBuiltIn(id))
+    if (TrustStore::isBuiltIn(parsePackRef(id).id))
         return fail(QStringLiteral("usage"), QStringLiteral("%1 is part of Fugue and is always trusted.").arg(id));
     // A pack in the packs folder, or in a folder of the settings: trust is for any pack found.
     QString folder;

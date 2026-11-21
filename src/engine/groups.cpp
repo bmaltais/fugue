@@ -84,7 +84,7 @@ struct Faces {
             const std::optional<NodeType> nested = face(node->type);
             if (const InputSpec *found = nested ? nested->input(target.port) : nullptr)
                 spec = *found;
-        } else if (const NodeType *type = registry.nodeType(node->type)) {
+        } else if (const NodeType *type = registry.nodeTypeFor(node->type, node->version.major)) {
             if (const InputSpec *found = type->input(target.port))
                 spec = *found;
         }
@@ -106,7 +106,7 @@ struct Faces {
                 return *found;
             return std::nullopt;
         }
-        if (const NodeType *type = registry.nodeType(node->type))
+        if (const NodeType *type = registry.nodeTypeFor(node->type, node->version.major))
             if (const OutputSpec *found = type->output(from.port))
                 return *found;
         return std::nullopt;
@@ -122,7 +122,7 @@ std::optional<PortSpec> inputPort(const Document &document, const Registry &regi
             return spec->type;
         return std::nullopt;
     }
-    if (const NodeType *type = registry.nodeType(node.type))
+    if (const NodeType *type = registry.nodeTypeFor(node.type, node.version.major))
         if (const InputSpec *spec = type->input(input))
             return spec->type;
     return std::nullopt;
@@ -136,7 +136,7 @@ bool hasPort(const Document &document, const Registry &registry, const Node &nod
                                [&](const GroupOutput &o) { return o.name == port; });
         return std::any_of(group->inputs.begin(), group->inputs.end(), [&](const GroupInput &i) { return i.name == port; });
     }
-    if (const NodeType *type = registry.nodeType(node.type))
+    if (const NodeType *type = registry.nodeTypeFor(node.type, node.version.major))
         return output ? type->output(port) != nullptr : type->input(port) != nullptr;
     return true;
 }
@@ -393,7 +393,7 @@ QStringList sinksAmong(const Document &document, const Registry &registry, const
         const auto node = document.graph.nodes.constFind(id);
         if (node == document.graph.nodes.constEnd() || document.group(node->type))
             continue;
-        if (const NodeType *type = registry.nodeType(node->type); type && type->sink)
+        if (const NodeType *type = registry.nodeTypeFor(node->type, node->version.major); type && type->sink)
             sinks << id;
     }
     return sinks;

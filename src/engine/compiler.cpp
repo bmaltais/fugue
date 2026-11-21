@@ -179,7 +179,8 @@ private:
     void checkTarget();
     void build(Scope *scope);
     bool checkVersion(const QString &path, const Node &node, const QString &typeName, const Version &installed);
-    bool checkTrust(const QString &path, const QString &typeId);
+    bool checkTrust(const QString &path, const NodeType &type);
+    void offerNewerMajor(const QString &path, const Node &node, const NodeType &newest);
     void check(Scope *scope);
     void checkInstance(Scope *scope, const QString &id, Scope *child);
     void checkNode(Scope *scope, const QString &id, Flat &flat, bool face);
@@ -330,7 +331,9 @@ QStringList Compiler::knownTypes() const {
     return ids;
 }
 
-// 3.6: a different major version needs review before the node runs.
+// 3.6: a node runs on the major it was made with when that major is installed. A major that
+// is not installed (the node's type was updated past it, or the workflow is from a newer app)
+// needs review before the node runs.
 bool Compiler::checkVersion(const QString &path, const Node &node, const QString &typeName,
                             const Version &installed) {
     if (node.version.major == installed.major)
@@ -345,16 +348,32 @@ bool Compiler::checkVersion(const QString &path, const Node &node, const QString
     return false;
 }
 
+// 3.6: a node on an older major that is still installed runs on it, and is offered the newer
+// one: a warning, never a block.
+void Compiler::offerNewerMajor(const QString &path, const Node &node, const NodeType &newest) {
+    if (newest.version.major <= node.version.major)
+        return;
+    Error error = nodeError(QStringLiteral("node_newer_major"), path,
+                            QStringLiteral("Node %1 runs on %2 %3; a newer major version, %4, is installed.")
+                                .arg(path, newest.id, node.version.toString(), newest.version.toString()));
+    error.valid = QJsonArray{newest.version.toString()};
+    error.hint = QStringLiteral("Review what changed, then set the node's version to %1 to move to it.")
+                     .arg(newest.version.toString());
+    warn(error);
+}
+
 // 6.7: a node of a pack the user has not allowed does not run. The version asked about is the
-// installed one, not what the workflow says it was made with.
-bool Compiler::checkTrust(const QString &path, const QString &typeId) {
+// installed one of the pack that holds the node's major, not what the workflow says it was made with.
+bool Compiler::checkTrust(const QString &path, const NodeType &type) {
     if (!m_options.trusted)
         return true;
+    const QString &typeId = type.id;
     const int slash = typeId.lastIndexOf(QLatin1Char('/'));
     const QString pack = slash <= 0 ? QString() : typeId.left(slash);
     if (pack.isEmpty() || pack == QLatin1String("fugue") || pack == QLatin1String("local"))
         return true;
-    const QString version = m_registry.packVersion(pack);
+    // The version of the pack this major was loaded from; packs of other majors may be installed.
+    const QString version = type.packVersion.isEmpty() ? m_registry.packVersion(pack) : type.packVersion;
     if (m_options.trusted(pack, version))
         return true;
     Error error = nodeError(QStringLiteral("pack_untrusted"), path,
@@ -394,7 +413,7 @@ void Compiler::build(Scope *scope) {
             build(child);
             continue;
         }
-        if (const NodeType *type = m_registry.nodeType(node.type)) {
+        if (const NodeType *type = m_registry.nodeTypeFor(node.type, node.version.major)) {
             // A library group (6.1, runtime.kind "group") runs from the definition the workflow
             // embeds (5.3); without one there is nothing to run.
             if (type->runtime.value("kind") == QLatin1String("group")) {
@@ -412,10 +431,12 @@ void Compiler::build(Scope *scope) {
                 m_status[path] = Status::Broken;
                 continue;
             }
-            if (!checkTrust(path, type->id)) {
+            if (!checkTrust(path, *type)) {
                 m_status[path] = Status::Broken;
                 continue;
             }
+            if (const NodeType *newest = m_registry.nodeType(type->id))
+                offerNewerMajor(path, node, *newest);
             m_status[path] = Status::Leaf;
             m_types[path] = type;
             continue;

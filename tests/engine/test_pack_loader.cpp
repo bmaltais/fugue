@@ -341,6 +341,62 @@ private slots:
         QCOMPARE(registry.packVersion(id), QString());
     }
 
+    // 6.5, 6.6: a pack folder is named `<id>`, or `<id>@<major>` of its version; the same major
+    // twice loads once, other majors load beside each other.
+    void majorsOfAPackLoadSideBySide() {
+        QTemporaryDir root;
+        const QString id = "io.github.alice.tools";
+        QJsonObject v2 = packJson(id, {"a"});
+        v2["version"] = "2.0.0";
+        QJsonObject node2 = nodeJson(id + "/a");
+        node2["version"] = "2.0.0";
+        makePack(root.path(), id, packJson(id, {"a"}), {{"a", nodeJson(id + "/a")}});
+        makePack(root.path(), id + "@2", v2, {{"a", node2}});
+        Registry registry;
+        const PackReport report = loadPacks(registry, {root.path()});
+        QCOMPARE(report.packs.size(), 2);
+        for (const LoadedPack &pack : report.packs)
+            QVERIFY2(pack.enabled, qPrintable(pack.path));
+        QCOMPARE(registry.packVersions(id), (QStringList{"1.2.0", "2.0.0"}));
+        QCOMPARE(registry.majors(id + "/a"), (QList<int>{1, 2}));
+        QCOMPARE(registry.nodeTypeAt(id + "/a", 1)->packVersion, QString("1.2.0"));
+        QVERIFY(registry.nodeTypeAt(id + "/a", 1)->dir.endsWith("/" + id + "/a"));
+        QCOMPARE(registry.nodeTypeAt(id + "/a", 2)->packVersion, QString("2.0.0"));
+        QVERIFY(registry.nodeTypeAt(id + "/a", 2)->dir.contains("@2/a"));
+    }
+
+    void aFolderSuffixMustBeTheMajorOfThePack() {
+        QTemporaryDir root;
+        const QString id = "io.github.alice.tools";
+        const QString dir = makePack(root.path(), id + "@3", packJson(id, {"a"}), {{"a", nodeJson(id + "/a")}}); // version 1.2.0
+        Registry registry;
+        QVERIFY(!loadPack(registry, dir).enabled);
+        QCOMPARE(parsePackRef(id + "@3").major, 3);
+        QCOMPARE(parsePackRef(id + "@3").id, id);
+        QCOMPARE(parsePackRef(id).major, -1);
+    }
+
+    // 3.6: a pack holds an older major of a node beside the newest, in a folder `<name>@<major>`.
+    void aPackHoldsAnOlderMajorOfANodeInAnAtFolder() {
+        QTemporaryDir root;
+        const QString id = "io.github.alice.tools";
+        QJsonObject old = nodeJson(id + "/a");
+        QJsonObject current = nodeJson(id + "/a");
+        current["version"] = "2.1.0";
+        const QString dir = makePack(root.path(), id, packJson(id, {"a", "a@1"}), {{"a", current}, {"a@1", old}});
+        Registry registry;
+        const LoadedPack pack = loadPack(registry, dir);
+        QVERIFY2(pack.enabled && pack.disabled.isEmpty(), qPrintable(pack.disabled.value(0).reason));
+        QCOMPARE(pack.nodes, QStringList{id + "/a"});
+        QCOMPARE(registry.majors(id + "/a"), (QList<int>{1, 2}));
+        QVERIFY(registry.nodeTypeAt(id + "/a", 1)->dir.endsWith("/a@1"));
+        // The folder's major must be the manifest's.
+        const QString wrong = makePack(root.path(), "io.github.alice.other", packJson("io.github.alice.other", {"b@2"}),
+                                       {{"b@2", nodeJson("io.github.alice.other/b")}});
+        Registry other;
+        QVERIFY(reasonOf(loadPack(other, wrong), "b@2").contains("major version 2"));
+    }
+
     void aSymbolicLinkAsNodeFolderIsRefused() {
         QTemporaryDir root, elsewhere;
         const QString id = "io.github.alice.tools";
@@ -398,7 +454,7 @@ private slots:
         const QString id = "io.github.a.tools";
         makePack(one.path(), id, packJson(id, {"x"}), {{"x", nodeJson(id + "/x")}});
         QJsonObject newer = packJson(id, {"x"});
-        newer["version"] = "9.0.0";
+        newer["version"] = "1.9.0"; // the same major
         makePack(two.path(), id, newer, {{"x", nodeJson(id + "/x")}});
         Registry registry;
         const PackReport report = loadPacks(registry, {one.path(), two.path()});

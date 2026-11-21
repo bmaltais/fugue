@@ -66,7 +66,8 @@ void PacksModel::refresh() {
             {"enabled", pack.enabled}, {"trusted", pack.enabled && trust.isTrusted(pack.id, pack.version)},
             {"removable", QFileInfo(pack.path).absolutePath() == QFileInfo(m_packsFolder).absoluteFilePath()},
             {"nodes", int(pack.nodes.size())}, {"source", source.location}, {"problems", problems},
-            {"active", m_registry && pack.enabled && m_registry->packVersion(pack.id) == pack.version}};
+            {"active", m_registry && pack.enabled && m_registry->hasPackVersion(pack.id, pack.version)},
+            {"folder", QFileInfo(pack.path).fileName()}};
     }
     m_packs = list;
     m_library.clear();

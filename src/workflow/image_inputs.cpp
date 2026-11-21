@@ -308,7 +308,7 @@ Errors relocateInputs(Document &document, const Registry &registry, const QStrin
     QHash<QString, QString> claimed; // name in `target` -> the file copied there
     auto scan = [&](Nodes &nodes) {
         for (auto it = nodes.begin(); it != nodes.end(); ++it) {
-            const NodeType *type = registry.nodeType(it->type);
+            const NodeType *type = registry.nodeTypeFor(it->type, it->version.major);
             if (!type)
                 continue;
             for (auto in = it->inputs.begin(); in != it->inputs.end(); ++in) {

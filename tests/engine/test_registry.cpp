@@ -342,9 +342,56 @@ private slots:
     void registryRefusesADuplicateId() {
         Registry registry;
         QVERIFY(registry.add(fakeType("fugue/text")).isEmpty());
-        const Errors errors = registry.add(fakeType("fugue/text", "2.0.0"));
+        const Errors errors = registry.add(fakeType("fugue/text", "1.4.0"));
         QVERIFY(hasErrors(errors));
         QCOMPARE(registry.nodeType("fugue/text")->version, *Version::parse("1.0.0"));
+    }
+
+    // 3.6: several majors of a type are installed at once; the newest answers by default, a
+    // node recorded at an installed major gets that one, and one at a major that is not
+    // installed gets the newest (it needs review).
+    void severalMajorsOfATypeAreInstalledSideBySide() {
+        Registry registry;
+        QVERIFY(registry.add(fakeType("fugue/text", "2.1.0")).isEmpty());
+        QVERIFY(registry.add(fakeType("fugue/text", "1.3.0")).isEmpty());
+        QVERIFY(registry.add(fakeType("fugue/text", "3.0.0")).isEmpty());
+        QCOMPARE(registry.majors("fugue/text"), (QList<int>{1, 2, 3}));
+        QCOMPARE(registry.nodeType("fugue/text")->version, *Version::parse("3.0.0"));
+        QCOMPARE(registry.nodeTypeAt("fugue/text", 1)->version, *Version::parse("1.3.0"));
+        QVERIFY(!registry.nodeTypeAt("fugue/text", 4));
+        QCOMPARE(registry.nodeTypeFor("fugue/text", 2)->version, *Version::parse("2.1.0"));
+        QCOMPARE(registry.nodeTypeFor("fugue/text", 9)->version, *Version::parse("3.0.0"));
+        QVERIFY(!registry.nodeTypeFor("fugue/none", 1));
+        // Search and the library list each type once, at its newest major.
+        QCOMPARE(registry.nodeTypes().size(), 1);
+        QCOMPARE(registry.allNodeTypes().size(), 3);
+        // The same major twice is still refused.
+        QVERIFY(hasErrors(registry.add(fakeType("fugue/text", "2.2.0"))));
+    }
+
+    void anAliasReachesEveryMajorOfItsType() {
+        Registry registry;
+        NodeType v1 = fakeType("io.github.alice.tools/new", "1.0.0");
+        v1.aliases = QStringList{"io.github.alice.tools/old"};
+        NodeType v2 = fakeType("io.github.alice.tools/new", "2.0.0");
+        v2.aliases = v1.aliases;
+        QVERIFY(registry.add(v1).isEmpty());
+        QVERIFY(registry.add(v2).isEmpty()); // its own alias again is no conflict
+        QCOMPARE(registry.nodeTypeAt("io.github.alice.tools/old", 1)->version, *Version::parse("1.0.0"));
+        QCOMPARE(registry.nodeType("io.github.alice.tools/old")->version, *Version::parse("2.0.0"));
+    }
+
+    void packVersionsAreKeptPerMajor() {
+        Registry registry;
+        registry.setPackVersion("io.github.alice.tools", "2.0.0");
+        registry.setPackVersion("io.github.alice.tools", "1.4.0");
+        QCOMPARE(registry.packVersions("io.github.alice.tools"), (QStringList{"1.4.0", "2.0.0"}));
+        QCOMPARE(registry.packVersion("io.github.alice.tools"), QStringLiteral("2.0.0"));
+        QVERIFY(registry.hasPackMajor("io.github.alice.tools", 1));
+        QVERIFY(!registry.hasPackMajor("io.github.alice.tools", 3));
+        registry.setPackSource("io.github.alice.tools", "1.4.0", "https://example.org/a", "v1.4.0");
+        QCOMPARE(registry.packSource("io.github.alice.tools", "1.4.0"), QStringLiteral("https://example.org/a"));
+        QVERIFY(registry.packSource("io.github.alice.tools").isEmpty()); // the newest has none
     }
 
     void registryRefusesABadManifest() {

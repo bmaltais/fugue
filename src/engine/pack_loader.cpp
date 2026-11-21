@@ -56,8 +56,9 @@ bool isPackId(const QString &id) {
     return pattern.match(id).hasMatch();
 }
 
+// A node folder: its name, or `<name>@<major>` for an older major kept beside the newest (3.6).
 bool isFolderName(const QString &name) {
-    static const QRegularExpression pattern(QStringLiteral("^[a-z][a-z0-9-]*$"));
+    static const QRegularExpression pattern(QStringLiteral("^[a-z][a-z0-9-]*(@(0|[1-9][0-9]{0,8}))?$"));
     return pattern.match(name).hasMatch();
 }
 
@@ -292,12 +293,34 @@ QString loadNode(Registry &registry, const PackManifest &pack, const QString &fo
             return QStringLiteral("The alias \"%1\" must start with \"%2/\": a node can only be known by old ids of its own pack.")
                 .arg(alias.toString(), pack.id);
     const QString id = manifest.value("id").toString();
-    if (id != pack.id + QLatin1Char('/') + name)
+    const PackRef nodeRef = parsePackRef(name); // `<name>@<major>`: an older major beside the newest
+    if (id != pack.id + QLatin1Char('/') + nodeRef.id)
         return QStringLiteral("The node id \"%1\" must be \"%2/%3\": the pack's id, then the folder name.")
-            .arg(id, pack.id, name);
+            .arg(id, pack.id, nodeRef.id);
+    if (nodeRef.major >= 0) {
+        const std::optional<Version> version = Version::parse(manifest.value("version").toString());
+        if (!version || version->major != nodeRef.major)
+            return QStringLiteral("The folder \"%1\" holds major version %2, so node.json's version must be %2.x.y.")
+                .arg(name)
+                .arg(nodeRef.major);
+    }
     if (const QString bad = runtimeProblem(manifest.value("runtime").toObject(), origin); !bad.isEmpty())
         return bad;
-    const Errors errors = registry.addManifest(manifest);
+    const QJsonObject runtime = manifest.value("runtime").toObject();
+    const QString nodeDir = folder + QLatin1Char('/') + name;
+    const Result<NodeType> parsed = NodeType::fromJson(manifest);
+    Errors errors;
+    if (parsed) {
+        NodeType type = *parsed;
+        type.dir = nodeDir;
+        if (origin != PackOrigin::BuiltIn)
+            type.packVersion = pack.version; // the built-ins' versions are the app's, keyed by the node's own
+        if (runtime.value("kind").toString() == QLatin1String("command"))
+            type.seal = nodeSeal(nodeDir, runtime.value("entry").toString());
+        errors = registry.add(type);
+    } else {
+        errors = parsed.errors();
+    }
     for (const Error &error : errors)
         if (error.severity == Error::Severity::Warning) {
             Error warning = error;
@@ -306,17 +329,21 @@ QString loadNode(Registry &registry, const PackManifest &pack, const QString &fo
         }
     if (hasErrors(errors))
         return reasonOf(errors);
-    const QJsonObject runtime = manifest.value("runtime").toObject();
-    const QString nodeDir = folder + QLatin1Char('/') + name;
-    registry.setNodeDir(id, nodeDir,
-                        runtime.value("kind").toString() == QLatin1String("command")
-                            ? nodeSeal(nodeDir, runtime.value("entry").toString())
-                            : QString());
     typeId = id;
     return {};
 }
 
 } // namespace
+
+QString packFolderName(const QString &id, int major) { return QStringLiteral("%1@%2").arg(id).arg(major); }
+
+PackRef parsePackRef(const QString &folderName) {
+    static const QRegularExpression suffix(QStringLiteral("^(.+)@(0|[1-9][0-9]{0,8})$"));
+    const QRegularExpressionMatch match = suffix.match(folderName);
+    if (!match.hasMatch())
+        return {folderName, -1};
+    return {match.captured(1), match.captured(2).toInt()};
+}
 
 QString packsDir() { return dataDir() + QStringLiteral("/packs"); }
 
@@ -346,14 +373,23 @@ LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin
     loaded.name = read.value().value("name").toString();
     if (!pack)
         return loaded;
-    if (origin != PackOrigin::BuiltIn && QFileInfo(folder).fileName() != pack->id) {
-        loaded.errors << invalid(QStringLiteral("The folder is named \"%1\" but pack.json says the id is %2; a pack lives in a "
-                                                "folder named after its id.").arg(QFileInfo(folder).fileName(), pack->id));
-        return loaded;
+    const int major = Version::parse(pack->version)->major; // parsePack checked it
+    if (origin != PackOrigin::BuiltIn) {
+        const QString name = QFileInfo(folder).fileName();
+        const PackRef ref = parsePackRef(name);
+        if (name != pack->id && !(ref.id == pack->id && ref.major == major)) {
+            loaded.errors << invalid(QStringLiteral("The folder is named \"%1\" but pack.json says the id is %2 at version %3; a pack "
+                                                    "lives in a folder named %2, or %2@%4 beside another major.")
+                                         .arg(name, pack->id, pack->version)
+                                         .arg(major));
+            return loaded;
+        }
     }
-    if (!registry.packVersion(pack->id).isEmpty()) {
-        loaded.errors << invalid(QStringLiteral("A pack with the id %1 is already loaded (version %2); this one is skipped.")
-                                     .arg(pack->id, registry.packVersion(pack->id)));
+    if (registry.hasPackMajor(pack->id, major)) {
+        loaded.errors << invalid(QStringLiteral("A pack with the id %1 is already loaded at major version %2 (%3); this one is skipped.")
+                                     .arg(pack->id)
+                                     .arg(major)
+                                     .arg(registry.packVersions(pack->id).value(0)));
         return loaded;
     }
 
@@ -365,10 +401,10 @@ LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin
     for (const QString &name : pack->nodes) {
         QString typeId;
         const QString reason = loadNode(registry, *pack, folder, name, origin, typeId, loaded.errors);
-        if (reason.isEmpty())
-            loaded.nodes << typeId;
-        else
+        if (!reason.isEmpty())
             loaded.disabled << PackProblem{name, reason};
+        else if (!loaded.nodes.contains(typeId))
+            loaded.nodes << typeId; // an older major of a node lists once
     }
     loaded.nodes.sort();
 
@@ -382,7 +418,7 @@ LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin
     registry.setPackVersion(pack->id, pack->version);
     if (const QString shared = shareableSource(readPackSource(folder)); !shared.isEmpty()) {
         const PackSource source = readPackSource(folder);
-        registry.setPackSource(pack->id, shared, source.commit.isEmpty() ? source.ref : source.commit);
+        registry.setPackSource(pack->id, pack->version, shared, source.commit.isEmpty() ? source.ref : source.commit);
     }
     loaded.enabled = true;
     return loaded;

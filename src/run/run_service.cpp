@@ -336,9 +336,9 @@ private:
     Errors changedSinceCompiled(const CompiledGraph &graph) const {
         Errors errors;
         for (auto it = graph.nodes.cbegin(); it != graph.nodes.cend(); ++it) {
-            const NodeType *type = m_context.registry.nodeType(it->type);
+            const NodeType *type = m_context.registry.nodeTypeAt(it->type, it->version.major);
             const QString pack = TrustStore::packOf(it->type);
-            const QString version = m_context.registry.packVersion(pack);
+            const QString version = type && !type->packVersion.isEmpty() ? type->packVersion : m_context.registry.packVersion(pack);
             Error error;
             if (!type || type->version != it->version)
                 error = makeError(QStringLiteral("node_version_mismatch"),

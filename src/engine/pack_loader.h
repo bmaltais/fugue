@@ -26,6 +26,15 @@ namespace fugue {
 constexpr int kHostAbiMajor = 1;
 constexpr int kHostAbiMinor = 0;
 
+// A pack folder is named after the pack's id, or `<id>@<major>` (the major of its version) when
+// another major of the pack is installed beside it (6.6). The first is how packs always lived.
+QString packFolderName(const QString &id, int major);
+struct PackRef {
+    QString id;
+    int major = -1; // -1: no @<major> in the name
+};
+PackRef parsePackRef(const QString &folderName);
+
 // ~/.local/share/fugue/packs (dataDir() in paths.h, then "packs").
 QString packsDir();
 
@@ -70,7 +79,8 @@ struct PackReport {
 LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin = PackOrigin::Disk);
 
 // Loads every pack found under `searchPaths`, each subfolder holding a pack.json. A pack id
-// found twice loads once, from the earlier path; the later one is disabled. A path that does
+// found twice at the same major loads once, from the earlier path; the later one is disabled.
+// Different majors of a pack load side by side (6.5). A path that does
 // not exist is skipped. The first path's folder `local` is the group library (PackOrigin::Library).
 PackReport loadPacks(Registry &registry, const QStringList &searchPaths);
 

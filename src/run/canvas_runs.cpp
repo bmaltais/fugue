@@ -827,7 +827,7 @@ void CanvasRuns::readNodes() {
             info.labelA = labelOf("a", QStringLiteral("A"));
             info.labelB = labelOf("b", QStringLiteral("B"));
         }
-        if (const NodeType *type = m_registry->nodeType(it->type)) {
+        if (const NodeType *type = m_registry->nodeTypeFor(it->type, it->version.major)) {
             for (const InputSpec &input : type->inputs) {
                 const InputValue value = it->inputs.value(input.name);
                 if (input.widget() == QLatin1String("file") && value.kind() == InputValue::Kind::Literal

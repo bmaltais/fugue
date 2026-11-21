@@ -1058,11 +1058,16 @@ void Document::refreshRequirements(const QString &appVersion, const Registry *re
 
     QJsonObject nodes;
     QSet<QString> packsUsed;
+    QMap<QString, QString> packVersionUsed; // the pack version that holds the newest major used
     for (auto it = types.begin(); it != types.end(); ++it) {
         nodes.insert(it.key(), it.value().toString());
         const QString pack = typeNamespace(it.key());
-        if (pack != "fugue" && pack != "local")
+        if (pack != "fugue" && pack != "local") {
             packsUsed.insert(pack);
+            const NodeType *type = registry ? registry->nodeTypeFor(it.key(), it.value().major) : nullptr;
+            if (type && !type->packVersion.isEmpty())
+                packVersionUsed[pack] = type->packVersion;
+        }
     }
     const QJsonArray modelList = models();
 
@@ -1075,11 +1080,12 @@ void Document::refreshRequirements(const QString &appVersion, const Registry *re
     for (const QString &pack : std::as_const(packsUsed)) {
         if (!registry || registry->packVersion(pack).isEmpty())
             continue;
+        const QString version = packVersionUsed.value(pack, registry->packVersion(pack));
         QJsonObject entry = packs.value(pack).toObject();
-        entry.insert("version", registry->packVersion(pack));
-        if (const QString source = registry->packSource(pack); !source.isEmpty()) {
+        entry.insert("version", version);
+        if (const QString source = registry->packSource(pack, version); !source.isEmpty()) {
             entry.insert("source", source);
-            entry.insert("ref", registry->packRef(pack)); // the exact one, so an install gets this version
+            entry.insert("ref", registry->packRef(pack, version)); // the exact one, so an install gets this version
         }
         packs.insert(pack, entry);
     }

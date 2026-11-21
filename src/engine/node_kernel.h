@@ -149,11 +149,16 @@ public:
                                    const JobResult &result) = 0;
 };
 
-// The kernels of a process, by node type id.
+// The kernels of a process, by node type id (and major, for an older major kept beside the newest).
 class Kernels {
 public:
     void add(const QString &typeId, std::shared_ptr<NodeKernel> kernel);
     void add(const QString &typeId, std::shared_ptr<ProviderKernel> kernel);
+
+    // The kernel of an older major of a type kept beside the newest (3.6): a node recorded at
+    // `major` runs on it, a type at any other major on the one added for the id.
+    void addAt(const QString &typeId, int major, std::shared_ptr<NodeKernel> kernel);
+    void addAt(const QString &typeId, int major, std::shared_ptr<ProviderKernel> kernel);
 
     // The kernel that serves every node type whose runtime kind is `command` and that has no
     // kernel of its own (7): one runner for all the packs' programs.
@@ -164,6 +169,8 @@ public:
     // The kernel registered for exactly this id (null for a command type).
     std::shared_ptr<NodeKernel> node(const QString &typeId) const;
     std::shared_ptr<ProviderKernel> provider(const QString &typeId) const;
+    // The provider kernel of this major of a type: its own (addAt), else the one of the id.
+    std::shared_ptr<ProviderKernel> provider(const NodeType &type) const;
 
 private:
     std::map<QString, std::shared_ptr<NodeKernel>> m_nodes;
