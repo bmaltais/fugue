@@ -34,6 +34,13 @@ Done when every added or moved control has a **Decisions** row that names the ru
 - Rule: canvas-look §4 and spec Appendix A. A port inside the corner square starts a wire.
 - Acceptance: at zoom 1, a left press at a port center that lies inside the corner square starts a link and does not call `beginResize`. A press in that square with no port still resizes.
 
+### Mask editor and the Paint mask button (#167, designed in spec 14.4)
+
+- Files to come: `src/canvas/MaskEditor.qml` (in `LargeViewDialog`), `src/canvas/MaskNodeView.qml` (the face), `src/canvas/PortDot.qml` (the hollow mask port).
+- Planned: the bar holds the tools (Brush, Eraser, Lasso, Rectangle), then size and hardness, then the overlay toggle; one chunk each, 2u between chunks; then Fit and 100%, then close, as the crop window's bar. Clear is destructive. It sits in its own chunk at the end of the tools, it is undoable in the editor, and Cancel drops the whole session. Footer: Cancel, then OK (the primary, highlighted). On the face: a Paint mask `ViewButton` (28px) under the picture.
+- Rules to meet: Floor (every bar button 28px; the brush is the pointer, so it has no target size), Primary (OK), Destructive (Clear), Learned place (Load Image's double click keeps the large view; ComfyUI's Alt+drag for size and hardness), Posture (a transient dialog; the face keeps the canvas's density).
+- Acceptance: the change that builds the editor moves this row to **Decisions** with the measured sizes and offscreen screenshots.
+
 ## Not scheduled
 
 Drafts from the 2026-11-20 pass that the rules above already answered. A window change leaves these as they are until the owner moves the row to **Open**.
