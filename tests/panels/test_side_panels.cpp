@@ -106,6 +106,38 @@ private slots:
         QCOMPARE(panels.dock(), QString("left"));
         QCOMPARE(panels.width(), int(SidePanels::kMaxWidth));
     }
+    void thereIsATabPerRegisteredPanelWithItsKeyAndItsOpenMark() {
+        CommandRegistry commands;
+        registerDefaultCommands(commands);
+        registerMenuCommands(commands);
+        SidePanels panels({});
+        panels.registerCommands(commands);
+        QVariantList list = panels.panels();
+        QCOMPARE(list.size(), 2);
+        QCOMPARE(list[0].toMap().value("tab").toString(), QString("nodes"));
+        QCOMPARE(list[0].toMap().value("keys").toStringList(), QStringList{"N"});
+        QCOMPARE(list[1].toMap().value("tab").toString(), QString("workflows"));
+        QCOMPARE(list[1].toMap().value("keys").toStringList(), QStringList{"W"});
+        for (const QVariant &row : list) {
+            QVERIFY(!row.toMap().value("name").toString().isEmpty());
+            QVERIFY(!row.toMap().value("glyph").toString().isEmpty());
+            QVERIFY(!row.toMap().value("open").toBool());
+            QVERIFY(commands.entry(row.toMap().value("command").toString()).value("available").toBool());
+        }
+        QSignalSpy changed(&panels, &SidePanels::tabChanged);
+        commands.run("panel.workflows");
+        list = panels.panels();
+        QVERIFY(!list[0].toMap().value("open").toBool());
+        QVERIFY(list[1].toMap().value("open").toBool());
+        QCOMPARE(changed.count(), 1); // the strip's `panels` binding follows tabChanged
+    }
+    void theStripIsShownButFocusModeHidesIt() {
+        ChromeVisibility chrome({});
+        SidePanels panels({}, &chrome);
+        QVERIFY(chrome.isVisible("side-tabs"));
+        chrome.setFocusMode(true);
+        QVERIFY(!chrome.isVisible("side-tabs"));
+    }
     void theCommandsToggleAndAreChecked() {
         CommandRegistry commands;
         registerDefaultCommands(commands);

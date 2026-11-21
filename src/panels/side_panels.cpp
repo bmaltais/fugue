@@ -1,5 +1,6 @@
 #include "panels/side_panels.h"
 
+#include <QCoreApplication>
 #include <QJsonObject>
 #include <algorithm>
 
@@ -10,25 +11,47 @@
 namespace fugue {
 
 namespace {
-QString knownTab(const QString &tab) {
-    return tab == QLatin1String("nodes") || tab == QLatin1String("workflows") ? tab : QString();
-}
-} // namespace
 
-namespace {
-const QString nodesId = QStringLiteral("node-library");
-const QString workflowsId = QStringLiteral("workflows-panel");
+// The registered panels, in the strip's order. A panel is one row: add it here, give its command
+// a handler (registerCommands does it for every row), and the strip shows its tab.
+struct Panel {
+    const char *tab;
+    const char *chromeId;
+    const char *command;
+    const char *glyph; // Lucide name (share/fonts/lucide-fugue.txt)
+    const char *name;
+};
+constexpr Panel panelTable[] = {
+    {"nodes", "node-library", "panel.nodes", "boxes", QT_TRANSLATE_NOOP("Panel", "Node library")},
+    {"workflows", "workflows-panel", "panel.workflows", "workflow", QT_TRANSLATE_NOOP("Panel", "Workflows")},
+};
+
+const Panel *panelFor(const QString &tab) {
+    for (const Panel &panel : panelTable)
+        if (tab == QLatin1String(panel.tab))
+            return &panel;
+    return nullptr;
+}
+
+QString knownTab(const QString &tab) { return panelFor(tab) ? tab : QString(); }
+
+const QString stripId = QStringLiteral("side-tabs");
+
 } // namespace
 
 SidePanels::SidePanels(QString path, ChromeVisibility *chrome)
     : m_path(std::move(path)), m_chrome(chrome ? chrome : new ChromeVisibility({}, this)) {
-    m_chrome->add(nodesId, false);
-    m_chrome->add(workflowsId, false);
-    m_chrome->setExclusive({nodesId, workflowsId});
+    QStringList ids;
+    for (const Panel &panel : panelTable) {
+        m_chrome->add(QString::fromLatin1(panel.chromeId), false);
+        ids << QString::fromLatin1(panel.chromeId);
+    }
+    m_chrome->setExclusive(ids);
+    m_chrome->add(stripId, true);
     if (const Result<QJsonObject> read = readJsonObject(m_path)) {
         if (const QString old = knownTab(read->value("tab").toString()); !old.isEmpty()) {
-            m_chrome->seed(old == QLatin1String("nodes") ? nodesId : workflowsId, true);
-            m_chrome->setExclusive({nodesId, workflowsId});
+            m_chrome->seed(QString::fromLatin1(panelFor(old)->chromeId), true);
+            m_chrome->setExclusive(ids);
         }
         m_dock = read->value("dock").toString() == QLatin1String("right") ? QStringLiteral("right") : QStringLiteral("left");
         m_width = std::clamp(read->value("width").toInt(kDefaultWidth), kMinWidth, kMaxWidth);
@@ -44,17 +67,36 @@ SidePanels::SidePanels(QString path, ChromeVisibility *chrome)
 }
 
 QString SidePanels::tab() const {
-    return m_chrome->isVisible(nodesId) ? QStringLiteral("nodes") : m_chrome->isVisible(workflowsId) ? QStringLiteral("workflows") : QString();
+    for (const Panel &panel : panelTable)
+        if (m_chrome->isVisible(QString::fromLatin1(panel.chromeId)))
+            return QString::fromLatin1(panel.tab);
+    return {};
+}
+
+QVariantList SidePanels::panels() const {
+    QVariantList list;
+    const QString open = tab();
+    for (const Panel &panel : panelTable) {
+        const QString command = QString::fromLatin1(panel.command);
+        list << QVariantMap{
+            {"tab", QString::fromLatin1(panel.tab)},
+            {"name", QCoreApplication::translate("Panel", panel.name)},
+            {"glyph", QString::fromLatin1(panel.glyph)},
+            {"command", command},
+            {"keys", m_commands ? m_commands->entry(command).value("keys") : QVariant(QStringList())},
+            {"open", open == QLatin1String(panel.tab)},
+        };
+    }
+    return list;
 }
 
 void SidePanels::setTab(const QString &tab) {
-    const QString wanted = knownTab(tab);
-    if (wanted.isEmpty()) {
-        m_chrome->setVisible(nodesId, false);
-        m_chrome->setVisible(workflowsId, false);
-    } else {
-        m_chrome->setVisible(wanted == QLatin1String("nodes") ? nodesId : workflowsId, true);
+    if (const Panel *wanted = panelFor(tab)) {
+        m_chrome->setVisible(QString::fromLatin1(wanted->chromeId), true); // the group hides the others, in one change
+        return;
     }
+    for (const Panel &panel : panelTable)
+        m_chrome->setVisible(QString::fromLatin1(panel.chromeId), false);
 }
 
 void SidePanels::setDock(const QString &dock) {
@@ -88,10 +130,12 @@ void SidePanels::save() const {
 }
 
 void SidePanels::registerCommands(CommandRegistry &commands) {
-    for (const char *name : {"nodes", "workflows"}) {
-        const QString tab = QString::fromLatin1(name);
-        commands.setHandler(QStringLiteral("panel.") + tab, [this, tab] { toggle(tab); });
-        commands.setCheckedWhen(QStringLiteral("panel.") + tab, [this, tab] { return this->tab() == tab; });
+    m_commands = &commands;
+    for (const Panel &panel : panelTable) {
+        const QString tab = QString::fromLatin1(panel.tab);
+        const QString command = QString::fromLatin1(panel.command);
+        commands.setHandler(command, [this, tab] { toggle(tab); });
+        commands.setCheckedWhen(command, [this, tab] { return this->tab() == tab; });
     }
 }
 

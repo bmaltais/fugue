@@ -68,17 +68,27 @@ class TestSidePanelsWindow : public QObject {
 
     static void click(App &app, QQuickItem *item) { QTest::mouseClick(app.window, Qt::LeftButton, {}, center(item)); }
     static QQuickItem *named(App &app, const QString &name) { return item(app.window->contentItem(), name); }
+    // The tab strip's width (#159): the canvas starts after it, and so does a panel docked on the left.
+    static qreal stripWidth(App &app) { return named(app, "sideTabStrip") ? named(app, "sideTabStrip")->width() : 0; }
     static void settle() { QTest::qWait(30); }
 
 private slots:
     void initTestCase() { QQuickStyle::setStyle("Material"); }
+    // The test's home lasts between runs (build/test-home/), so groups an earlier run saved to the
+    // library would still be there: a group's key would be local/group-10, and the tests that count
+    // library rows would see more than their own. Each test starts with an empty library.
+    void init() {
+        QDir library(fugue::libraryDir());
+        for (const QString &group : library.entryList(QDir::Dirs | QDir::NoDotAndDotDot))
+            QDir(library.filePath(group)).removeRecursively();
+    }
 
     void nothingIsMadeWhileClosed() {
         App app(load(small));
         QVERIFY(app.open());
         QVERIFY(!named(app, "sidePanel"));
-        QCOMPARE(app.canvas->x(), 0.0);
-        QCOMPARE(app.canvas->width(), qreal(app.window->width()));
+        QCOMPARE(app.canvas->x(), stripWidth(app));
+        QCOMPARE(app.canvas->width(), app.window->width() - stripWidth(app));
         QVERIFY(!checked(app, "panel.nodes"));
         QVERIFY(!checked(app, "panel.workflows"));
     }
@@ -93,8 +103,8 @@ private slots:
         QVERIFY(!checked(app, "panel.workflows"));
         QCOMPARE(app.sidePanels.tab(), QString("nodes"));
         // The canvas gave up the panel's width.
-        QTRY_COMPARE(app.canvas->x(), qreal(app.sidePanels.width()));
-        QCOMPARE(app.canvas->width(), app.window->width() - qreal(app.sidePanels.width()));
+        QTRY_COMPARE(app.canvas->x(), stripWidth(app) + app.sidePanels.width());
+        QCOMPARE(app.canvas->width(), app.window->width() - stripWidth(app) - qreal(app.sidePanels.width()));
         // The keys went to the search field, so typing a letter does not toggle anything.
         QTRY_VERIFY(named(app, "nodeLibrarySearch")->hasActiveFocus());
         app.key(Qt::Key_W);
@@ -108,14 +118,106 @@ private slots:
         QTRY_VERIFY(!named(app, "nodeLibrary"));
         QVERIFY(checked(app, "panel.workflows"));
         QVERIFY(!checked(app, "panel.nodes"));
-        QTRY_COMPARE(app.canvas->x(), qreal(app.sidePanels.width()));
+        QTRY_COMPARE(app.canvas->x(), stripWidth(app) + app.sidePanels.width());
         // W again closes it, and nothing is left standing.
         app.canvas->forceActiveFocus();
         app.key(Qt::Key_W);
         QTRY_VERIFY(!named(app, "sidePanel"));
-        QTRY_COMPARE(app.canvas->x(), 0.0);
+        QTRY_COMPARE(app.canvas->x(), stripWidth(app));
         QVERIFY(!checked(app, "panel.workflows"));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // The tab strip (#159): an icon per registered panel on the left edge, always there.
+    void theStripHasATabPerPanelAndIsThereWithNothingOpen() {
+        App app(load(small));
+        QVERIFY(app.open());
+        QQuickItem *strip = named(app, "sideTabStrip");
+        QVERIFY(strip);
+        QCOMPARE(strip->x(), 0.0);
+        QCOMPARE(app.canvas->x(), strip->width()); // the canvas starts at the strip's edge
+        const QVariantList panels = app.sidePanels.panels();
+        QCOMPARE(panels.size(), 2);
+        for (const QVariant &panel : panels) {
+            QQuickItem *tab = named(app, "sideTab-" + panel.toMap().value("tab").toString());
+            QVERIFY(tab);
+            // The floors: a 36px hit area, a 28px glyph box.
+            QVERIFY(tab->width() >= 36);
+            QVERIFY(tab->height() >= 36);
+            QVERIFY(tab->activeFocusOnTab());
+            QVERIFY(tab->mapToItem(strip, QPointF(0, 0)).x() >= 0);
+        }
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    void aClickOnATabOpensItAndASecondClickClosesItInStepWithTheKeysAndTheMenu() {
+        App app(load(small));
+        QVERIFY(app.open());
+        click(app, named(app, "sideTab-nodes"));
+        QTRY_VERIFY(named(app, "nodeLibrary"));
+        QVERIFY(checked(app, "panel.nodes"));
+        QVERIFY(named(app, "sideTab-nodes")->property("open").toBool());
+        QVERIFY(!named(app, "sideTab-workflows")->property("open").toBool());
+        // The panel sits beside the strip, and the canvas beside the panel.
+        const qreal strip = named(app, "sideTabStrip")->width();
+        QTRY_COMPARE(named(app, "sidePanel")->x(), strip);
+        QTRY_COMPARE(app.canvas->x(), strip + app.sidePanels.width());
+        // The search field has the focus: a click on a tab asks for it, as the key does.
+        QTRY_VERIFY(named(app, "nodeLibrarySearch")->hasActiveFocus());
+        // Another tab replaces it.
+        click(app, named(app, "sideTab-workflows"));
+        QTRY_VERIFY(named(app, "workflowsPanel"));
+        QTRY_VERIFY(!named(app, "nodeLibrary"));
+        QVERIFY(checked(app, "panel.workflows"));
+        QVERIFY(!checked(app, "panel.nodes"));
+        QTRY_VERIFY(named(app, "sideTab-workflows")->property("open").toBool());
+        QVERIFY(!named(app, "sideTab-nodes")->property("open").toBool());
+        // The same tab again closes it; the strip stays.
+        click(app, named(app, "sideTab-workflows"));
+        QTRY_VERIFY(!named(app, "sidePanel"));
+        QVERIFY(named(app, "sideTabStrip"));
+        QTRY_COMPARE(app.canvas->x(), strip);
+        QVERIFY(!named(app, "sideTab-workflows")->property("open").toBool());
+        // The key and the menu command move the marks too.
+        app.canvas->forceActiveFocus();
+        app.key(Qt::Key_N);
+        QTRY_VERIFY(named(app, "sideTab-nodes")->property("open").toBool());
+        QVERIFY(app.commands.trigger("panel.nodes"));
+        QTRY_VERIFY(!named(app, "sideTab-nodes")->property("open").toBool());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    void aTabIsReachedByTabAndPressedByEnterAndSpace() {
+        App app(load(small));
+        QVERIFY(app.open());
+        QQuickItem *tab = named(app, "sideTab-workflows");
+        tab->forceActiveFocus(Qt::TabFocusReason);
+        QVERIFY(tab->hasActiveFocus());
+        app.key(Qt::Key_Return);
+        QTRY_VERIFY(named(app, "workflowsPanel"));
+        tab->forceActiveFocus(Qt::TabFocusReason);
+        app.key(Qt::Key_Space);
+        QTRY_VERIFY(!named(app, "sidePanel"));
+        // It carries its name for the screen reader, and its tooltip names the key.
+        QCOMPARE(tab->property("tip").toString(), QString("Workflows (W)"));
+    }
+
+    void theStripSurvivesANarrowWindowAndFocusModeHidesIt() {
+        App app(load(small));
+        app.sidePanels.setTab("nodes");
+        app.sidePanels.setWidth(600);
+        QVERIFY(app.open());
+        app.window->resize(420, 500);
+        QTRY_COMPARE(app.window->width(), 420);
+        QQuickItem *strip = named(app, "sideTabStrip");
+        QVERIFY(strip);
+        QTRY_VERIFY(app.canvas->width() >= 160 - 1); // the canvas is never squeezed out by the panel
+        QVERIFY(named(app, "sideTab-nodes")->height() >= 36);
+        app.commands.run("view.focus-mode");
+        QTRY_VERIFY(!named(app, "sideTabStrip"));
+        QTRY_COMPARE(app.canvas->x(), 0.0);
+        app.commands.run("view.focus-mode");
+        QTRY_VERIFY(named(app, "sideTabStrip"));
     }
 
     void theViewMenuTogglesThemToo() {
@@ -271,7 +373,7 @@ private slots:
         const QPoint from = center(grip);
         app.drag(Qt::LeftButton, from, from + QPoint(60, 0));
         QTRY_COMPARE(app.sidePanels.width(), width + 60);
-        QTRY_COMPARE(app.canvas->x(), qreal(width + 60));
+        QTRY_COMPARE(app.canvas->x(), stripWidth(app) + width + 60);
         // The keys do it too, and the width has bounds.
         grip->forceActiveFocus();
         app.key(Qt::Key_Left);
@@ -281,8 +383,8 @@ private slots:
         // To the other side: the canvas is at the left edge, the panel at the right.
         click(app, named(app, "sidePanelDock"));
         QTRY_COMPARE(app.sidePanels.dock(), QString("right"));
-        QTRY_COMPARE(app.canvas->x(), 0.0);
-        QCOMPARE(app.canvas->width(), app.window->width() - qreal(app.sidePanels.width()));
+        QTRY_COMPARE(app.canvas->x(), stripWidth(app));
+        QCOMPARE(app.canvas->width(), app.window->width() - stripWidth(app) - qreal(app.sidePanels.width()));
         QCOMPARE(named(app, "sidePanel")->x(), app.window->width() - qreal(app.sidePanels.width()));
         // Dragging the grip to the left widens it there.
         const QPoint right = center(named(app, "sidePanelGrip"));
@@ -292,7 +394,7 @@ private slots:
         // The close button closes it.
         click(app, named(app, "sidePanelClose"));
         QTRY_VERIFY(!named(app, "sidePanel"));
-        QTRY_COMPARE(app.canvas->width(), qreal(app.window->width()));
+        QTRY_COMPARE(app.canvas->width(), app.window->width() - stripWidth(app));
     }
 
     // A workflow with one group saved to the library as local/group (the library is the test's own).
@@ -413,9 +515,12 @@ private slots:
         QCOMPARE(app.model.groupProblem(), QString());
         app.model.search()->openAt(0, 0);
         app.model.search()->setQuery("group");
-        for (int i = 0; i < app.model.search()->results()->rowCount(); ++i)
-            QVERIFY(app.model.search()->results()->data(app.model.search()->results()->index(i), fugue::SearchResults::TypeId).toString()
-                    != "local/group");
+        // Node search offers the open workflow's own definition of the group (4.4: it stands for its id), so a
+        // row of local/group is there only because the workflow embeds it; the library's copy is gone.
+        for (int i = 0; i < app.model.search()->results()->rowCount(); ++i) {
+            const QString id = app.model.search()->results()->data(app.model.search()->results()->index(i), fugue::SearchResults::TypeId).toString();
+            QVERIFY(id != "local/group" || app.model.document().group(id));
+        }
         app.model.search()->close();
         // The open workflow keeps the definition it embeds, and still compiles to the same thing.
         QVERIFY(app.model.document().group(embedded));
@@ -468,6 +573,32 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // Not a check: with FUGUE_SHOT_DIR set, saves the window with the tab strip, dark and light,
+    // closed and with the node library open (docs/recording-screenshots.md).
+    void savesTheStripShots_data() {
+        QTest::addColumn<QString>("theme");
+        QTest::addColumn<QString>("name");
+        QTest::newRow("dark") << QString() << "side-tabs";
+        QTest::newRow("light") << "catppuccin-latte" << "side-tabs-light";
+    }
+    void savesTheStripShots() {
+        QFETCH(QString, theme);
+        QFETCH(QString, name);
+        const QByteArray dir = qgetenv("FUGUE_SHOT_DIR");
+        if (dir.isEmpty())
+            QSKIP("set FUGUE_SHOT_DIR to save the pictures");
+        App app(load(small), {}, Look{theme, 8});
+        QVERIFY(app.open());
+        app.window->resize(1000, 640);
+        QTest::qWait(300);
+        test_support::grab(app.window).save(QString::fromLocal8Bit(dir) + "/" + name + "-closed.png");
+        click(app, named(app, "sideTab-nodes"));
+        QTRY_VERIFY(named(app, "nodeLibrary"));
+        QTest::mouseMove(app.window, QPoint(700, 500));
+        QTest::qWait(300);
+        test_support::grab(app.window).save(QString::fromLocal8Bit(dir) + "/" + name + "-open.png");
+    }
+
     // Not a check: with FUGUE_SHOT_DIR set, saves the panel with a library group and the question.
     void savesTheLibraryDeleteShots() {
         const QByteArray dir = qgetenv("FUGUE_SHOT_DIR");
@@ -500,12 +631,12 @@ private slots:
             const qreal panel = app.sidePanels.width();
             QVERIFY(named(app, "sidePanel"));
             // The panel is on the left, so the canvas starts at its edge: the canvas never mirrors.
-            QCOMPARE(named(app, "sidePanel")->x(), 0.0);
-            QCOMPARE(app.canvas->x(), panel);
-            QCOMPARE(app.canvas->width(), app.window->width() - panel);
+            QCOMPARE(named(app, "sidePanel")->x(), stripWidth(app));
+            QCOMPARE(app.canvas->x(), stripWidth(app) + panel);
+            QCOMPARE(app.canvas->width(), app.window->width() - stripWidth(app) - panel);
             app.sidePanels.setDock("right");
-            QTRY_COMPARE(app.canvas->x(), 0.0);
-            QCOMPARE(app.canvas->width(), app.window->width() - panel);
+            QTRY_COMPARE(app.canvas->x(), stripWidth(app));
+            QCOMPARE(app.canvas->width(), app.window->width() - stripWidth(app) - panel);
             QCOMPARE(named(app, "sidePanel")->x(), app.window->width() - panel);
         }
         QGuiApplication::setLayoutDirection(Qt::LeftToRight);

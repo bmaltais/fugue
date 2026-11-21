@@ -219,7 +219,9 @@ private slots:
         // on 2026-11-20 (the faces and rows of the 44 nodes in view, each with the group card's
         // second card, two items for each other node, a shadow each, a shape per wire). One more
         // item on every node is 302 more.
-        QVERIFY2(items < 3800, qPrintable(QString::number(items)));
+        // 3820 since the tab strip (#159) added about a dozen to every window: a loader, the strip
+        // and a tab with its glyph and mark for each side panel.
+        QVERIFY2(items < 3820, qPrintable(QString::number(items)));
         QCOMPARE(item(app.window->contentItem(), "nodes")->property("count").toInt(), 302);
         QCOMPARE(item(app.window->contentItem(), "wires")->property("count").toInt(), 600);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));

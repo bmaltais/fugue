@@ -14,11 +14,16 @@
 //
 // Kept in a small file of the state folder: {"dock": "left"|"right", "width"}.
 //
+// The panels are a table in side_panels.cpp (tab id, registry id, command, glyph, name): a new panel
+// is one row there, and the tab strip (src/panels/SideTabStrip.qml, #159) shows `panels` as one
+// icon each, so the strip, the keys and the View menu all read the same list.
+//
 // Commands: panel.nodes (N) and panel.workflows (W), each toggling its panel and checked in the
 // View menu while it is the open one.
 
 #include <QObject>
 #include <QString>
+#include <QVariantList>
 #include <QtQmlIntegration/qqmlintegration.h>
 
 namespace fugue {
@@ -34,6 +39,10 @@ class SidePanels : public QObject {
     Q_PROPERTY(QString tab READ tab WRITE setTab NOTIFY tabChanged)
     // "left" or "right": the side of the window it sits on (the canvas never mirrors, so neither does this).
     Q_PROPERTY(QString dock READ dock WRITE setDock NOTIFY dockChanged)
+    // One map per registered panel, in the strip's order: tab, name (translated), glyph, command,
+    // keys (the command's, as bound now), open.
+    Q_PROPERTY(QVariantList panels READ panels NOTIFY tabChanged)
+    // The strip's own place in the registry (id "side-tabs"): shown, but focus mode hides it.
     Q_PROPERTY(int width READ width WRITE setWidth NOTIFY widthChanged)
     Q_PROPERTY(int minWidth READ minWidth CONSTANT)
     Q_PROPERTY(int maxWidth READ maxWidth CONSTANT)
@@ -52,6 +61,7 @@ public:
     int width() const { return m_width; }
     int minWidth() const { return kMinWidth; }
     int maxWidth() const { return kMaxWidth; }
+    QVariantList panels() const;
     void setTab(const QString &tab); // anything but "nodes" and "workflows" is none
     void setDock(const QString &dock); // anything but "right" is "left"
     void setWidth(int width);          // kept between kMinWidth and kMaxWidth
@@ -72,6 +82,7 @@ private:
     void save() const;
 
     QString m_path;
+    CommandRegistry *m_commands = nullptr;
     ChromeVisibility *m_chrome;
     QString m_shownTab;
     QString m_dock = QStringLiteral("left");

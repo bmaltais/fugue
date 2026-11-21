@@ -92,8 +92,8 @@ private slots:
         prepare(app);
         app.key(Qt::Key_N);
         QTest::qWait(300);
-        QTest::mouseClick(app.window, Qt::LeftButton, {}, QPoint(40, 202)); // Image
-        QTest::mouseClick(app.window, Qt::LeftButton, {}, QPoint(40, 174)); // Generate
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, QPoint(84, 202)); // Image
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, QPoint(84, 174)); // Generate
         QTest::qWait(300);
         QTest::mouseMove(app.window, QPoint(900, 900)); // off the list
         app.model.requestFit(); // the canvas beside the panel

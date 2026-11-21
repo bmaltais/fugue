@@ -552,6 +552,12 @@ A dashed edge in QML is a `Shape` with `strokeStyle: ShapePath.DashLine` around 
   DemiBold, under it caption `label` text (node and percent, or "Waiting", and where it came from; or how it
   ended, how long, how long ago), the time in `tnum` at the right, then 7u buttons (`arrow-up`, `x`;
   `image`, `folder`). `menu-row` under the pointer; a 2px accent bar along the lower edge of the row going.
+- **Side tab strip** (#159, `SideTabStrip.qml`): the left window edge under the bars, 11u (44 px) wide, `popup` fill, one `hairline`
+  on the canvas-facing edge, no shadow and no corner. One tab per side panel, 11u square (a 44 px target), a 24 px glyph
+  centered (`boxes`, `workflow`) in `label`; hovered: `menu-row` wash and `text` glyph; the open tab: `selected-row` wash, the
+  glyph in `accent` and a 3 px `accent` bar on its left edge; a focused tab a 2 px `accent` ring inside it. The first tab is 1u
+  from the top. Tooltip after 600 ms: "Node library (N)". Hidden in focus mode. The strip works in both themes through those
+  tokens alone.
 - **Side panel** (#56, ComfyUI's sidebar): docked at the left or right edge of the canvas, which gives up its
   width (288 px at first, 200 to 640), full height of the canvas, `popup` fill, one `hairline` on the canvas-facing
   edge, no shadow and no corner (it is part of the window, not a floating surface). A 9u title bar: the title at
@@ -659,8 +665,8 @@ A subset of Lucide (ISC) as an icon font in the resources, loaded with `FontLoad
 `Text { font.family: icons.name; text: "\ue..." }`: check, refresh-cw, loader-circle, snowflake,
 triangle-alert, corner-down-right, ban, skip-forward, circle-help, pin, layers, dices,
 chevron-down, chevron-left, chevron-right, folder, box, search, circle-x, x, play, and for the player (#116) pause, volume-2, volume-x, maximize-2, and for the
-selection toolbar (#74) trash-2, ellipsis, frame, image, log-in; the full list with code points in
-`share/fonts/lucide-fugue.txt`. About 37 glyphs, about 11 KB. Text glyphs recolor through `color`, render through the same distance-field text as
+selection toolbar (#74) trash-2, ellipsis, frame, image, log-in, and for the side tab strip (#159) boxes and workflow; the full list with code points in
+`share/fonts/lucide-fugue.txt`. About 39 glyphs, about 12 KB. Text glyphs recolor through `color`, render through the same distance-field text as
 labels and batch with them; an SVG `Image` would need a separate texture per color.
 
 ### 16.1 Scroll bars
