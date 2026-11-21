@@ -98,6 +98,8 @@ struct App {
     fugue::SettingsModel settings{dir.path() + "/config/fugue/settings.json", dir.path() + "/config/fugue/providers.json"};
     // A test's own runs (test_canvas_run), set before open(); the window runs without them.
     fugue::CanvasRuns *runs = nullptr;
+    fugue::RunBar *runBar = nullptr;     // the run toolbar's (test_canvas_run), likewise
+    fugue::RunQueue *runQueue = nullptr;
     fugue::ImageActions *imageActions = nullptr; // likewise (test_canvas_image_actions)
     // The color picker's recent colors (#52), in the test's own folder, and layout coloring.
     fugue::ColorHistory colorHistory{dir.path() + "/recent-colors.json"};
@@ -146,7 +148,7 @@ struct App {
     bool open() {
         // As main() does: the English catalog gives counted strings their plural forms.
         QCoreApplication::installTranslator(&translator);
-        const fugue::AppObjects objects{&translator, &theme, &commands, &model, &workflows, &settings, runs, imageActions, &colorHistory, &layoutColors};
+        const fugue::AppObjects objects{&translator, &theme, &commands, &model, &workflows, &settings, runs, imageActions, &colorHistory, &layoutColors, runBar, runQueue};
         fugue::followNodeTypeReloads(*reloader, objects);
         fugue::exposeToQml(engine, objects);
         engine.load(QUrl("qrc:/Main.qml"));

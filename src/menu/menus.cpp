@@ -45,6 +45,11 @@ QVariantMap distribute(bool hideWhenOff) {
                        {"node.distribute-horizontal", "node.distribute-vertical"}, hideWhenOff);
 }
 
+// The Run menu, and the menu behind the run toolbar's split button (#60): the same rows.
+QVariantList runItems() {
+    return {command("run.start"), command("run.start-first"), command("run.to-here"), separator(), command("run.cancel")};
+}
+
 QVariantList bar() {
     return {
         submenu(QT_TRANSLATE_NOOP("Menu", "&File"),
@@ -59,7 +64,8 @@ QVariantList bar() {
                  separator(), command("app.settings")}),
         submenu(QT_TRANSLATE_NOOP("Menu", "&View"),
                 {command("view.fit"), command("view.zoom-in"), command("view.zoom-out"), separator(),
-                 command("view.toggle-links"), separator(), command("panel.nodes"), command("panel.workflows")}),
+                 command("view.toggle-links"), separator(), command("panel.nodes"), command("panel.workflows"),
+                 command("panel.queue"), command("view.toggle-run-toolbar")}),
         submenu(QT_TRANSLATE_NOOP("Menu", "&Node"),
                 {command("node.search"), separator(), command("node.bypass"), command("node.mute"),
                  command("node.collapse"), command("node.pin"), align(false), distribute(false),
@@ -67,9 +73,7 @@ QVariantList bar() {
                  command("group.make"), command("group.ungroup"), command("group.enter"), command("group.leave"),
                  command("group.make-unique"), command("group.interface"), command("group.save-to-library"),
                  command("group.update")}),
-        submenu(QT_TRANSLATE_NOOP("Menu", "&Run"),
-                {command("run.start"), command("run.start-first"), command("run.to-here"), separator(),
-                 command("run.cancel")}),
+        submenu(QT_TRANSLATE_NOOP("Menu", "&Run"), runItems()),
         submenu(QT_TRANSLATE_NOOP("Menu", "&Help"),
                 {command("app.shortcuts"), command("help.docs"), command("help.report-issue"), separator(),
                  command("help.about")}),
@@ -115,7 +119,7 @@ QVariantList frame() {
 
 QStringList names() {
     return {QStringLiteral("bar"), QStringLiteral("canvas"), QStringLiteral("node"), QStringLiteral("frame"),
-            QStringLiteral("tab"), QStringLiteral("colors")};
+            QStringLiteral("tab"), QStringLiteral("colors"), QStringLiteral("run")};
 }
 
 QVariantList tree(const QString &name) {
@@ -129,6 +133,8 @@ QVariantList tree(const QString &name) {
         return frame();
     if (name == QLatin1String("tab"))
         return tab();
+    if (name == QLatin1String("run")) // the run toolbar's split button (#60)
+        return runItems();
     if (name == QLatin1String("colors")) // the selection toolbar's color button (#74)
         return colors().value("items").toList();
     return {};

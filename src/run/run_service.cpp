@@ -288,6 +288,21 @@ public:
         emit filePreviewed(token, path, t.isEmpty() ? QJsonObject{{"missing", true}} : t);
     }
 
+    // A finished run's results again, from its run folder: its node.done, node.cached, node.skipped and
+    // node.error events and its run.done, with the thumbnails made as a live run's are (the queue
+    // panel's history, "show its results"). No node.running or node.progress: nothing is going.
+    void replay(const QString &id) {
+        if (m_quitting)
+            return;
+        const Result<RunFolder> folder = RunFolder::open(m_context.runsRoot, id);
+        if (!folder)
+            return;
+        static const QStringList kinds{"node.done", "node.cached", "node.skipped", "node.error", "run.done"};
+        for (const QJsonObject &e : folder->events())
+            if (kinds.contains(e.value("event").toString()))
+                emit event(id, withThumbnails(e));
+    }
+
     void reloadNodeTypes() { ++m_typesWanted; }
 
     void check(const RunRequest &request, int ticket) {
@@ -639,6 +654,10 @@ void RunService::check(const RunRequest &request, int ticket) {
 void RunService::previewFile(const QString &token, const QString &path) {
     QMetaObject::invokeMethod(m_worker, [w = m_worker, token, path] { w->previewFile(token, path); },
                               Qt::QueuedConnection);
+}
+
+void RunService::replay(const QString &run) {
+    QMetaObject::invokeMethod(m_worker, [w = m_worker, run] { w->replay(run); }, Qt::QueuedConnection);
 }
 
 void RunService::reloadNodeTypes() {

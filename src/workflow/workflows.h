@@ -215,7 +215,7 @@ public:
 
     Q_INVOKABLE void dismissNotice();
     // A line for the banner from outside (the image actions, #57).
-    void notify(const QString &text) { setNotice(text); }
+    Q_INVOKABLE void notify(const QString &text) { setNotice(text); }
 
 signals:
     void tabsChanged();

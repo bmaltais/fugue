@@ -1843,7 +1843,7 @@ and the `?` overlay marks each one.
 | `run.start` | Run | Ctrl+Enter | same |
 | `run.start-first` | Run, ahead of the queue | Ctrl+Shift+Enter | same |
 | `run.to-here` | Run to the selected node | Shift+Enter | added |
-| `run.cancel` | Cancel the run | Ctrl+Alt+Enter, Escape while running (Escape cancels first, then leaves a group) | Escape added |
+| `run.cancel` | Cancel the run | Ctrl+Alt+Enter, Escape while running (Escape cancels first, then leaves a group; while the queue panel has the focus, Escape closes it instead) | Escape added |
 | `file.new` | New workflow | Ctrl+N | added |
 | `file.open` | Open | Ctrl+O | same |
 | `file.save` | Save | Ctrl+S | same |
@@ -1875,11 +1875,13 @@ and the `?` overlay marks each one.
 | `view.zoom-in`, `view.zoom-out` | Zoom | Alt+=, Alt+-, Ctrl+=, Ctrl+- | Ctrl added |
 | `view.toggle-links` | Hide or show links | L | same |
 | `panel.nodes`, `panel.workflows` | Toggle the node library, the workflows panel | N, W | same |
+| `panel.queue` | Toggle the run queue panel | Alt+Q | added (ComfyUI's `q` is Quit here) |
+| `view.toggle-run-toolbar` | Show or hide the run toolbar | none (View menu) | added |
 | `app.menu-bar` | Open the menu bar | F10 | added |
 | `app.context-menu` | Open the context menu | Shift+F10, Menu | added |
 
 Commands with no default key (the colors `node.color.<role>`, `edit.clear`, the exports, the help
-links) are in the menus, and the keymap file can bind any of them.
+links, `view.toggle-run-toolbar`) are in the menus, and the keymap file can bind any of them.
 
 Align and distribute (#58): `node.align-left`, `-right`, `-top`, `-bottom` put the selected nodes
 on the selection's outermost edge; `node.distribute-horizontal` and `-vertical` even out the gaps
@@ -1959,7 +1961,38 @@ Tabs inside one window. Each tab tracks its own unsaved state and its own undo s
 Run to here; reasons for invalid connections; search filtered by port type; a Frame and a Group
 as separate things; visible cache and frozen state; per-node errors with group paths; one undo
 stack across everything; one file format; on-disk recovery; per-output control of what is
-embedded; versioned node types; no shared Python environment.
+embedded; versioned node types; no shared Python environment; a queue panel that lists runs
+started from a terminal too ([12.13](#1213-run-toolbar-and-queue-panel)).
+
+### 12.13 Run toolbar and queue panel
+
+A toolbar floats over the canvas (#60, M3), as ComfyUI's action bar, and a panel hangs from it. Both
+read and write the queue of [9.8](#98-runs-across-processes) and the commands of [12.4](#124-default-keymap);
+they add no queue of their own.
+
+- **Toolbar** (`RunToolbar.qml`): a grip, the batch count, **Run** with a menu behind it (the Run menu's
+  rows: Run, Run first, Run to here, Cancel), **Cancel**, and the **queue** button with the number
+  of runs going and waiting. It is centered at the top edge of the canvas, or at the bottom edge:
+  dragging the grip to the other half (or Up and Down on the grip) docks it there, and the edge is
+  remembered with the batch count in `~/.local/state/fugue/run-bar.json`. `view.toggle-run-toolbar`
+  (View menu) hides and shows it. A thin bar under it shows the progress of the node going.
+- **Batch count** (1 to 99): one Run makes that many runs, queued together in order, each taking the
+  document as it is then, so a seed set to increment gives each its own number (ComfyUI's batch
+  count). It applies to Run, Run first and Run to here.
+- **Queue panel** (`RunQueuePanel.qml`, `panel.queue`, Alt+Q, or the toolbar's queue button): *running and
+  waiting* lists the run going first, then the waiting ones in queue order, **whoever started them**:
+  this window, or `fugue run` from a terminal. A row has the workflow's name, the node going with its
+  progress or "Waiting", where it came from, the time since it began (or was queued), **move to front**
+  (waiting runs but the first) and **cancel**. *Finished* lists the last eight runs that ended, newest
+  first: how it ended, how long it took, when; a click on the row **shows its results on the nodes**
+  (when it is the workflow of the tab shown: a run's node ids mean something only there), and a
+  button opens its run folder. Cancel of a run of this window goes through the run thread; of any
+  other run it does what `fugue runs cancel` does, so both ways end a run the same way. Move to
+  front renames a waiting entry into class 3 ahead of the other waiting ones (9.8); it never goes
+  ahead of the run going.
+- The panel and the toolbar are made only when shown, and the window keeps its item budget.
+  The panel reads the queue folder (a file watch, nothing at idle); only while it is open does it
+  read the going run's events once a second and list the history.
 
 ---
 
@@ -2431,6 +2464,7 @@ Building M2 made these further choices.
 | A group's id follows its name while it is `local/…`, so library folders are named after what the user called the group | 5.3 | medium |
 | The library is the `local` folder of the first pack path, loaded as a pack of groups only; saving bumps the version by 3.6 from the face; every open window sees a newly saved group at once (#70: the registry is read again, 6.5) | 5.3, 6.5 | medium |
 | Live node types (#70): one registry per window stays in place and takes the types read again (`Registry::replaceTypes`); a reload asked for by the window (Packs page, library save) happens at once, one seen on disk (QFileSystemWatcher on the pack paths, pack and node folders, manifests and command entries) after 500 ms of quiet and only when the types differ. The run thread fills its compile registry before its next compile and its run registry before its next run starts. ComfyUI loads custom nodes only at server start (its Manager says "restart required"); Fugue has no server to restart | 6.5, 6.6 | medium-high |
+| Run toolbar and queue panel (#60). Researched from ComfyUI's documentation (docs.comfy.org interface overview, shortcuts, job history and settings pages; the frontend source was not read, and it is GPL-3.0-only, so no code was looked at or copied): a floating run bar at the top of the canvas, dragged by a handle and docked back to the top; Run with Run (On Change) and Run (Instant); a batch count (default 1, capped at 100 by a setting); Interrupt, disabled when idle; Ctrl+Enter, Ctrl+Shift+Enter (front), Ctrl+Alt+Enter (interrupt), Q (queue sidebar); a job history panel with status, progress and previews, per-job cancel, Clear queue and Clear history, 64 entries by default. Not found in the docs: whether the bar's place is remembered, reordering or moving a queued job to the front, and clicking a job to show its outputs on the canvas. Matched: the batch count (1 to 99) beside Run, Cancel next to it, the bar floating at the canvas edge and movable, the keys, a queue panel with running, waiting and finished runs. Improved: the panel lists runs started from a terminal as well (one shared queue, 9.8) and cancels them the way `fugue runs cancel` does; move to front for any waiting run; a click on a finished run puts its results back on the nodes; the bar's edge and the batch count are remembered; the same Run menu rows behind the arrow. Chosen: the bar docks at the top or the bottom edge (not freely placed: free palettes are #56); the history is the last 8 runs (ComfyUI keeps 64: ours is a glance, the run folders hold the rest for 7 days); Alt+Q opens the panel because `Q` is Quit here; Run (On Change), Run (Instant), a GPU memory readout and a results strip are not built | 12.13 | medium |
 | Corners (#63): 8 px by default for every canvas surface, the node corner `r` and the popup corner `R` alike, from the `corner_radius` setting (General page: Fixed, 0 to 16 px a step at a time, or Follow Omarchy, which keeps the earlier rule: `R` is Hyprland's rounding and `r` is held to 8). ComfyUI's `ROUND_RADIUS` is 8 and its Vue nodes use 0.75 rem; Omarchy's default rounding is 0, which drew square nodes. The setting sits on the General page as the issue asks; the Theme page shows Hyprland's rounding as "Window rounding" | 12.11 | high |
 | Shadows (#63, docs/canvas-look.md 7): a contact and an ambient layer per level, cast downward and growing with the zoom; much stronger on dark themes (black only reads over a near-black canvas when it is deep) plus a 1 px top highlight on the card at 10% of the text color; selected nodes higher (level 2) and the selection being dragged higher still (a new level 4). ComfyUI draws one black 50% shadow at (2, 2) blur 3 for every node, selected or not. The canvas color itself is unchanged (the theme's background); a slightly lighter canvas on dark themes would make the elevation read more and is left for the owner's look review | 12.1 | medium |
 | Resize from any of the four corners (#63), as ComfyUI's canvas and Vue nodes (a 15 px square inside each corner; no edges: its `resizeEdgeSize` is declared and unused); a top or left corner moves the node so the opposite corner stays, after the size limits. Each corner sets its diagonal resize cursor before the press. ComfyUI's canvas draws no mark (its Vue nodes show two short diagonals at each corner on hover); ours is one stroke concentric with the node's corner, in all four corners while hovered or selected (the one under the pointer brighter), so the affordance follows round and square corners alike; a port inside a corner's square wins over it | 12, 4.5 | high |

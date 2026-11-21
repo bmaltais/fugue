@@ -62,6 +62,7 @@ QList<Row> defaultRows() {
         {"view.toggle-links", QT_TRANSLATE_NOOP("Command", "Hide or show links"), {"L"}, {}, "canvas", same},
         {"panel.nodes", QT_TRANSLATE_NOOP("Command", "Toggle the node library"), {"N"}, {}, "canvas", same},
         {"panel.workflows", QT_TRANSLATE_NOOP("Command", "Toggle the workflows panel"), {"W"}, {}, "canvas", same},
+        {"panel.queue", QT_TRANSLATE_NOOP("Command", "Toggle the run queue"), {"Alt+Q"}, {}, "canvas", "added"},
     };
 }
 

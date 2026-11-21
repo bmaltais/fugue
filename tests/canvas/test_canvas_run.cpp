@@ -26,6 +26,8 @@
 #include "engine/queue.h"
 #include "engine/run_folder.h"
 #include "run/canvas_runs.h"
+#include "run/run_bar.h"
+#include "run/run_queue.h"
 #include "run/run_service.h"
 
 using namespace canvas_test;
@@ -124,6 +126,8 @@ struct RunApp {
     std::shared_ptr<FakeProvider> fake;
     std::unique_ptr<RunService> service;
     std::unique_ptr<CanvasRuns> runs;
+    std::unique_ptr<fugue::RunBar> bar;
+    std::unique_ptr<fugue::RunQueue> queue;
 
     explicit RunApp(const QByteArray &graph, bool slow = false, const fugue::Description &offers = imageDescription())
         : app(load(graph)) {
@@ -156,7 +160,16 @@ struct RunApp {
         runs = std::make_unique<CanvasRuns>(&app.model, &app.workflows, service.get(), &app.registry);
         runs->registerCommands(app.commands);
         app.runs = runs.get();
+        // The run toolbar and the queue panel, as main() makes them, with the test's own folders.
+        bar = std::make_unique<fugue::RunBar>(runs.get(), root + "/run-bar.json");
+        bar->registerCommands(app.commands);
+        queue = std::make_unique<fugue::RunQueue>(fugue::RunQueuePaths{root + "/runs", root + "/queue", root + "/engine.lock"},
+                                                  service.get());
+        queue->setOpenUrl([self](const QUrl &url) { self->openedFolders << url; });
+        app.runBar = bar.get();
+        app.runQueue = queue.get();
     }
+    QList<QUrl> openedFolders;
     ~RunApp() { close(); }
     // The window goes before the runs it shows, as in main(), which makes its engine last.
     // The test's folder stays until the RunApp goes.
@@ -164,6 +177,8 @@ struct RunApp {
         if (!service)
             return;
         qDeleteAll(app.engine.rootObjects());
+        queue.reset();
+        bar.reset();
         runs.reset();
         service.reset(); // stops the run thread before the fake goes
     }
@@ -1032,6 +1047,251 @@ echo '{"outputs": {"text": "painted"}}'
             shown |= port.toMap().value("value") == "768";
         QVERIFY(shown);
         QVERIFY(r.app.warnings.isEmpty());
+    }
+
+    // ---- The run toolbar and the queue panel (#60) ----
+
+    static void click(const RunApp &r, QQuickItem *target) {
+        QVERIFY(target);
+        QTest::mouseClick(r.app.window, Qt::LeftButton, {},
+                          target->mapToScene(QPointF(target->width() / 2, target->height() / 2)).toPoint());
+    }
+    // An item by name in the window, the overlay where menus draw included.
+    static QQuickItem *named(const RunApp &r, const QString &name) {
+        QQuickItem *root = r.app.window->contentItem();
+        while (root->parentItem())
+            root = root->parentItem();
+        return item(root, name);
+    }
+
+    // Run and Cancel on the toolbar start and end the window's run as the keys do; the toolbar
+    // floats at the top edge, centered, and its Run is the one highlighted button.
+    void theToolbarStartsARunAndCancelsIt() {
+        RunApp r(kGraph);
+        QVERIFY(r.app.open());
+        QQuickItem *toolbar = qvariant_cast<QQuickItem *>(named(r, "runToolbar")->property("surface"));
+        QVERIFY(toolbar);
+        QCOMPARE(toolbar->y(), 4 * r.app.theme.look()->property("unit").toReal());
+        QVERIFY(qAbs(toolbar->x() + toolbar->width() / 2 - toolbar->parentItem()->width() / 2) <= 1);
+        QVERIFY(!named(r, "runCancelButton")->isEnabled());
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        click(r, named(r, "runButton"));
+        QTRY_COMPARE(r.jobs().size(), 1);
+        QTRY_VERIFY(named(r, "runCancelButton")->isEnabled());
+        click(r, named(r, "runCancelButton"));
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(finished.first().at(1).toString(), QStringLiteral("cancelled"));
+        QTRY_VERIFY(!named(r, "runCancelButton")->isEnabled());
+        QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
+    }
+
+    // The split menu is the Run menu's rows: Run first and Run to here start the run as their keys do.
+    void theSplitMenuHoldsTheRunCommands() {
+        RunApp r(kGraph);
+        QVERIFY(r.app.open());
+        r.app.model.select({"gen"});
+        click(r, named(r, "runMenuButton"));
+        QQuickItem *menu = nullptr;
+        QTRY_VERIFY((menu = named(r, "menuItem-run.to-here")) && menu->isVisible());
+        QVERIFY(named(r, "menuItem-run.start"));
+        QVERIFY(named(r, "menuItem-run.start-first"));
+        QVERIFY(named(r, "menuItem-run.cancel"));
+        QVERIFY(menu->isEnabled());
+        click(r, menu);
+        QTRY_COMPARE(r.jobs().size(), 1);
+        r.runs->cancel();
+        QTRY_VERIFY(!r.runs->busy());
+    }
+
+    // The batch count makes that many runs of one Run, in order, each with the seed shown then.
+    void theBatchCountMakesSeveralRunsInOrder() {
+        RunApp r(kGraph);
+        QVERIFY(r.app.open());
+        click(r, named(r, "runBatchMore"));
+        click(r, named(r, "runBatchMore"));
+        QCOMPARE(r.runs->batch(), 3);
+        QCOMPARE(named(r, "runBatchCount")->property("text").toString(), QString::fromUtf8("\u00d73"));
+        click(r, named(r, "runButton"));
+        QCOMPARE(r.runs->count(), 3);
+        QCOMPARE(r.runs->runs().size(), 3);
+        QTRY_COMPARE(r.jobs().size(), 1);
+        // The count is kept for the next time the window opens.
+        QFile saved(r.app.dir.path() + "/run-bar.json");
+        QVERIFY(saved.open(QIODevice::ReadOnly));
+        QCOMPARE(QJsonDocument::fromJson(saved.readAll()).object().value("batch").toInt(), 3);
+        for (int i = 0; i < 3 && r.runs->busy(); ++i) {
+            r.runs->cancel();
+            QTest::qWait(100);
+        }
+        QTRY_VERIFY(!r.runs->busy());
+
+        // Up to the one node, each run has its own seed, in the order they were asked for.
+        r.app.model.widgets()->setSeedMode("gen", "seed", "increment");
+        r.app.model.select({"gen"});
+        const int base = r.app.model.widgets()->value("gen", "seed").toInt();
+        const int before = r.jobs().size();
+        r.app.key(Qt::Key_Return, Qt::ShiftModifier);
+        QCOMPARE(r.runs->count(), 3);
+        for (int i = 0; i < 3; ++i) {
+            QTRY_COMPARE(r.jobs().size(), before + i + 1);
+            QJsonObject params;
+            r.onFake([&](FakeProvider &f) { params = f.submitted(f.jobs().at(before + i)).params; });
+            QCOMPARE(params.value("seed").toInt(), base + i);
+            r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(before + i), {{"image.png", png(64, 64)}}); });
+        }
+        QTRY_VERIFY(!r.runs->busy());
+        r.runs->setBatch(1);
+        QCOMPARE(r.runs->batch(), 1);
+        click(r, named(r, "runBatchLess"));
+        QCOMPARE(r.runs->batch(), 1); // not below one
+        QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
+    }
+
+    // Dragged to the lower half, the toolbar docks at the bottom edge, and the choice is kept in the
+    // state file for the next window; the View menu's command hides it and shows it again.
+    void theToolbarDocksAtTheOtherEdgeAndCanBeHidden() {
+        RunApp r(kGraph);
+        QVERIFY(r.app.open());
+        QQuickItem *grip = named(r, "runToolbarGrip");
+        QVERIFY(grip);
+        QQuickItem *toolbar = qvariant_cast<QQuickItem *>(named(r, "runToolbar")->property("surface"));
+        QVERIFY(toolbar);
+        const QPoint from = grip->mapToScene(QPointF(grip->width() / 2, grip->height() / 2)).toPoint();
+        QTest::mousePress(r.app.window, Qt::LeftButton, {}, from);
+        for (int i = 1; i <= 10; ++i)
+            QTest::mouseMove(r.app.window, from + QPoint(0, 40 * i));
+        QTest::mouseRelease(r.app.window, Qt::LeftButton, {}, from + QPoint(0, 400));
+        QTRY_COMPARE(r.bar->dock(), QStringLiteral("bottom"));
+        QTRY_VERIFY2(toolbar->y() > toolbar->parentItem()->height() / 2,
+                     qPrintable(QStringLiteral("%1 of %2").arg(toolbar->y()).arg(toolbar->parentItem()->height())));
+        QFile saved(r.app.dir.path() + "/run-bar.json");
+        QVERIFY(saved.open(QIODevice::ReadOnly));
+        QCOMPARE(QJsonDocument::fromJson(saved.readAll()).object().value("dock").toString(), QStringLiteral("bottom"));
+        // The keys do the same from the grip.
+        grip->forceActiveFocus();
+        r.app.key(Qt::Key_Up);
+        QTRY_COMPARE(r.bar->dock(), QStringLiteral("top"));
+
+        QVERIFY(r.app.commands.trigger("view.toggle-run-toolbar"));
+        QTRY_VERIFY(!named(r, "runToolbar"));
+        QVERIFY(r.app.commands.trigger("view.toggle-run-toolbar"));
+        QTRY_VERIFY(named(r, "runToolbar"));
+        QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
+    }
+
+    // The panel lists this window's runs and a CLI run in one queue; "move to front" reorders the
+    // waiting ones, "cancel" takes a run out whoever started it.
+    void theQueuePanelListsCliRunsAndReordersAndCancels() {
+        RunApp r(kGraph);
+        QVERIFY(r.app.open());
+        const QString runs = r.app.dir.path() + "/runs";
+        const fugue::Queue queue(r.app.dir.path() + "/queue");
+        // A CLI run is going: its worker holds the engine lock. Another waits behind it.
+        const auto cliRun = [&](const QString &id) {
+            const fugue::Result<fugue::RunFolder> folder = fugue::RunFolder::create(runs, id);
+            QVERIFY(folder.ok());
+            QVERIFY(folder->queued("/w/cli.fugue"));
+            QVERIFY(queue.enqueue(id, "/w/cli.fugue", false));
+        };
+        cliRun("cli-going");
+        QVERIFY(queue.activate("cli-going"));
+        fugue::Lock worker(r.app.dir.path() + "/engine.lock");
+        QVERIFY(worker.tryAcquire());
+        cliRun("cli-waiting");
+
+        click(r, named(r, "runButton"));
+        click(r, named(r, "runButton"));
+        QTRY_COMPARE(queue.entries().size(), 4);
+        QCOMPARE(r.runs->runs().size(), 2);
+        const QString first = r.runs->runs().at(0), second = r.runs->runs().at(1);
+
+        QVERIFY(!named(r, "runQueuePanel"));
+        click(r, named(r, "runQueueButton"));
+        QQuickItem *panel = nullptr;
+        QTRY_VERIFY((panel = named(r, "runQueuePanel")) && panel->isVisible());
+        QTRY_VERIFY(named(r, "queueEntry-cli-going"));
+        QVERIFY(named(r, "queueEntry-cli-waiting"));
+        QVERIFY(named(r, "queueEntry-" + first));
+        QVERIFY(named(r, "queueEntry-" + second));
+        QCOMPARE(named(r, "queueEntry-cli-going")->findChild<QQuickItem *>("queueDetail")->property("text").toString(),
+                 QStringLiteral("Starting · from the command line"));
+        QVERIFY(named(r, "queueFront-" + first)->isVisible() && !named(r, "queueFront-cli-going")->isVisible());
+        QCOMPARE(r.queue->count(), 4);
+
+        // Move the last run to the front of the waiting ones.
+        QVERIFY(!named(r, "queueFront-cli-waiting")->isEnabled()); // already first of the waiting ones
+        QVERIFY(named(r, "queueFront-" + second)->isEnabled());
+        click(r, named(r, "queueFront-" + second));
+        QTRY_COMPARE(queue.entries().at(1).run, second);
+        QCOMPARE(queue.entries().at(0).run, QStringLiteral("cli-going"));
+        // Cancel the CLI run that waits: its entry goes and its folder ends cancelled.
+        click(r, named(r, "queueCancel-cli-waiting"));
+        QTRY_VERIFY(!queue.find("cli-waiting"));
+        QCOMPARE(fugue::RunFolder::open(runs, "cli-waiting")->status(), fugue::RunStatus::Cancelled);
+        QTRY_VERIFY(!named(r, "queueEntry-cli-waiting"));
+        // And the window's own first run.
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        click(r, named(r, "queueCancel-" + first));
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(finished.first().at(0).toString(), first);
+        QCOMPARE(finished.first().at(1).toString(), QStringLiteral("cancelled"));
+
+        // The panel closes with Escape and with the toolbar's button.
+        QTRY_VERIFY(named(r, "runQueuePanel")->hasActiveFocus() || named(r, "runQueuePanel")->isVisible());
+        named(r, "runQueuePanel")->forceActiveFocus();
+        r.app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!named(r, "runQueuePanel"));
+        QVERIFY(!r.queue->watching());
+
+        QVERIFY(queue.remove(QStringLiteral("cli-going")));
+        worker.release();
+        QTRY_COMPARE(r.jobs().size(), 1);
+        r.runs->cancel();
+        QTRY_VERIFY(!r.runs->busy());
+        QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
+    }
+
+    // A finished run is in the history; a click on it shows its results on the nodes of the saved
+    // workflow it came from, and its folder button opens the run folder. A run of another file
+    // shows nothing and says so.
+    void theHistoryShowsAFinishedRunsResultsAndOpensItsFolder() {
+        RunApp r(kGraph);
+        QVERIFY(r.app.open());
+        QTemporaryDir place;
+        QVERIFY(r.app.workflows.saveAs(place.filePath("flow.fugue")));
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        click(r, named(r, "runButton"));
+        QTRY_COMPARE(r.jobs().size(), 1);
+        r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(0), {{"image.png", png(64, 64)}}); });
+        QTRY_COMPARE(r.jobs().size(), 2); // the group's
+        r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(1), {{"image.png", png(64, 64)}}); });
+        QTRY_COMPARE(finished.size(), 1);
+        const QString run = finished.first().at(0).toString();
+        QCOMPARE(finished.first().at(1).toString(), QStringLiteral("ok"));
+        // A later edit makes the nodes stale; showing the run puts its results back.
+        r.app.model.widgets()->setValue("words", "text", "a dog");
+        r.runs->checkNow();
+        QTRY_COMPARE(r.state("gen"), QStringLiteral("stale"));
+
+        click(r, named(r, "runQueueButton"));
+        QQuickItem *row = nullptr;
+        QTRY_VERIFY((row = named(r, "historyEntry-" + run)) && row->isVisible());
+        QVERIFY(row->findChild<QQuickItem *>("historyDetail")->property("text").toString().startsWith("Done"));
+        // The rows may still be settling as the panel opens: press until the press lands.
+        for (int i = 0; i < 20 && r.openedFolders.isEmpty(); ++i) {
+            click(r, named(r, "historyFolder-" + run));
+            QTest::qWait(50);
+        }
+        QCOMPARE(r.openedFolders.mid(0, 1), QList<QUrl>{QUrl::fromLocalFile(r.app.dir.path() + "/runs/" + run)});
+        click(r, named(r, "historyResults-" + run));
+        QTRY_VERIFY(!r.role("show", NodeList::Thumbnail).toString().isEmpty());
+        QCOMPARE(r.state("gen"), QStringLiteral("cached")); // what it made, as when the run ended
+
+        // Another file's run cannot be shown here.
+        QVERIFY(r.app.workflows.openText(QString::fromUtf8(kGraph)));
+        click(r, named(r, "historyResults-" + run));
+        QTRY_VERIFY(r.app.workflows.notice().contains("Open the workflow"));
+        QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
     }
 };
 

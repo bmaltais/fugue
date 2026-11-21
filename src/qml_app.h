@@ -15,6 +15,8 @@
 #include "menu/image_actions.h"
 #include "menu/layout_colors.h"
 #include "run/canvas_runs.h"
+#include "run/run_bar.h"
+#include "run/run_queue.h"
 #include "settings/settings_model.h"
 #include "theme.h"
 #include "translator.h"
@@ -35,6 +37,8 @@ struct AppObjects {
     ImageActions *imageActions = nullptr; // optional
     ColorHistory *colorHistory = nullptr; // optional
     LayoutColors *layoutColors = nullptr; // optional
+    RunBar *runBar = nullptr;             // optional: the run toolbar and queue panel (#60)
+    RunQueue *runQueue = nullptr;         // optional, with runBar
 };
 
 class QmlApp : public QObject {
@@ -52,6 +56,8 @@ class QmlApp : public QObject {
     Q_PROPERTY(fugue::ImageActions *imageActions READ imageActions CONSTANT)
     Q_PROPERTY(fugue::ColorHistory *colorHistory READ colorHistory CONSTANT)
     Q_PROPERTY(fugue::LayoutColors *layoutColors READ layoutColors CONSTANT)
+    Q_PROPERTY(fugue::RunBar *runBar READ runBar CONSTANT)
+    Q_PROPERTY(fugue::RunQueue *runQueue READ runQueue CONSTANT)
 
 public:
     explicit QmlApp(const AppObjects &objects, QObject *parent = nullptr) : QObject(parent), m_objects(objects) {}
@@ -66,6 +72,8 @@ public:
     ImageActions *imageActions() const { return m_objects.imageActions; }
     ColorHistory *colorHistory() const { return m_objects.colorHistory; }
     LayoutColors *layoutColors() const { return m_objects.layoutColors; }
+    RunBar *runBar() const { return m_objects.runBar; }
+    RunQueue *runQueue() const { return m_objects.runQueue; }
 
 private:
     AppObjects m_objects;

@@ -112,6 +112,10 @@ public:
     // for a file that is gone, unreadable, not an image or outside the runs' file roots.
     void previewFile(const QString &token, const QString &path);
 
+    // The results of a finished run again, answered by event() with the run's own id: its node
+    // and run.done events from the run folder (see RunThread::replay).
+    void replay(const QString &run);
+
     // Calls `call` on the run thread and waits for it (tests: a FakeProvider lives there).
     void onRunThread(const std::function<void()> &call);
 

@@ -133,6 +133,48 @@ QString CanvasRuns::startRun(const QString &target, bool first) {
     const QString tab = currentTab();
     if (tab.isEmpty())
         return {};
+    QString firstId;
+    for (int i = 0; i < m_batch; ++i) {
+        const QString id = startOne(tab, target, first);
+        if (firstId.isEmpty())
+            firstId = id;
+    }
+    return firstId;
+}
+
+void CanvasRuns::setYieldKeys(bool yield) {
+    if (yield == m_yieldKeys)
+        return;
+    m_yieldKeys = yield;
+    setContext();
+    emit yieldKeysChanged();
+}
+
+void CanvasRuns::setBatch(int batch) {
+    batch = std::clamp(batch, 1, maxBatch);
+    if (batch == m_batch)
+        return;
+    m_batch = batch;
+    emit batchChanged();
+}
+
+bool CanvasRuns::showResults(const QString &run, const QString &workflow) {
+    const QString tab = currentTab();
+    if (tab.isEmpty() || workflow.isEmpty() || workflow != m_workflows->pathOf(m_workflows->current()))
+        return false;
+    // What the tab showed of an earlier run goes; the run's own results take its place.
+    TabRuns &runs = m_tabs[tab];
+    runs.errors.clear();
+    ++runs.epoch;
+    m_checkFromEdit = false;
+    m_tabOf.insert(run, tab);
+    m_service->replay(run);
+    if (tab == m_shownTab)
+        emit errorsChanged();
+    return true;
+}
+
+QString CanvasRuns::startOne(const QString &tab, const QString &target, bool first) {
     RunRequest request;
     request.document = m_canvas->document();
     request.workflow = m_workflows->pathOf(m_workflows->current());
@@ -147,10 +189,16 @@ QString CanvasRuns::startRun(const QString &target, bool first) {
     // the run cleared them when it landed after a short run.
     m_checkFromEdit = false;
     m_tabOf.insert(id, tab);
-    if (first)
-        m_order.insert(m_active.isEmpty() ? 0 : 1, id);
-    else
+    if (first) {
+        // After the run going and the ones already started ahead, as the queue sorts them.
+        int at = m_active.isEmpty() ? 0 : 1;
+        while (at < m_order.size() && m_first.contains(m_order.at(at)))
+            ++at;
+        m_order.insert(at, id);
+        m_first.insert(id);
+    } else {
         m_order.append(id);
+    }
     TabRuns &runs = m_tabs[tab];
     ++runs.busy;
     ++runs.epoch;
@@ -183,7 +231,7 @@ void CanvasRuns::cancel() {
 
 void CanvasRuns::setContext() {
     if (m_commands)
-        m_commands->setContextActive(QStringLiteral("run"), busy());
+        m_commands->setContextActive(QStringLiteral("run"), busy() && !m_yieldKeys);
 }
 
 QString CanvasRuns::aggregate(const NodeView &view) {
@@ -413,6 +461,7 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
         runs.lastStatus = status;
         if (m_order.removeAll(run) > 0)
             --runs.busy;
+        m_first.remove(run);
         m_tabOf.remove(run);
         if (m_active == run) {
             m_active.clear();
