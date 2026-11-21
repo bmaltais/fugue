@@ -591,25 +591,6 @@ private slots:
         QVERIFY(dot->property("hovered").toBool());
     }
 
-    // Not a check: with FUGUE_SHOT_DIR set, saves the window showing the bundled text-to-image template
-    // as <dir>/hero.png (the README's picture, #94). FUGUE_SHOT_TEMPLATE names another template folder.
-    void savesAScreenshotWhenAsked() {
-        const QByteArray dir = qgetenv("FUGUE_SHOT_DIR");
-        if (dir.isEmpty())
-            QSKIP("set FUGUE_SHOT_DIR to save the README screenshot");
-        const QString name = qEnvironmentVariable("FUGUE_SHOT_TEMPLATE", "text-to-image");
-        QFile file(QFINDTESTDATA("../../templates/" + name + "/workflow.fugue"));
-        QVERIFY(file.open(QIODevice::ReadOnly));
-        App app(load(file.readAll()));
-        QVERIFY(app.open());
-        app.window->resize(1600, 1000);
-        app.workflows.dismissPendingTrust();
-        app.workflows.dismissNotice();
-        app.model.requestFit();
-        QTest::qWait(800);
-        QVERIFY(test_support::grab(app.window).save(QString::fromLocal8Bit(dir) + "/hero.png"));
-    }
-
     // #98: each workflow tab shows its own color along its top, and a right click picks another.
     void eachTabShowsItsColorAndARightClickPicksAnother() {
         App app(load(small));

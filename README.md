@@ -7,7 +7,10 @@ models [omarchy-local-ai](https://github.com/omacom/omarchy-local-ai) serves, on
 or on a paired host. Add your own nodes as a folder with a `node.json` and a program, in any
 language.
 
-![Fugue: a text-to-image workflow on the canvas](docs/images/hero.png)
+<p align="center"><picture>
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/hero-light.png">
+  <img src="docs/images/hero.png" alt="Fugue: a text-to-image workflow on the canvas">
+</picture></p>
 
 Fugue is at v0.1, a test release. The design is in [docs/spec.md](docs/spec.md) and the
 vocabulary in [docs/GLOSSARY.md](docs/GLOSSARY.md).
@@ -17,12 +20,27 @@ vocabulary in [docs/GLOSSARY.md](docs/GLOSSARY.md).
 - **Canvas.** Place nodes, wire their ports, search for a node, undo, work in tabs and save.
   Run with Ctrl+Enter: each node shows its state, progress and results. Settings (Ctrl+,)
   apply live.
+
+<p align="center"><picture>
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/results-light.png">
+  <img src="docs/images/results.png" alt="A finished run: the generated picture shows on the Generate Image and Preview nodes" width="520">
+</picture></p>
+
 - **Templates.** File > Browse templates lists ready-to-run workflows (text to image, image
   edits, prompt enhancing and more) with a preview each; open one and run it. The CLI does the
   same: `fugue template list`, `fugue workflow new <file> --template <id>`.
+
+<p align="center"><img src="docs/images/templates.png" alt="The templates dialog: cards with a preview, description and what to download" width="720"></p>
+
 - **Groups.** Select nodes and make a group (Ctrl+Shift+E): it collapses into one reusable
   node with the inputs and outputs you choose, and can be entered, nested and ungrouped. Frames
-  (Ctrl+G) are colored boxes that only organize the canvas.
+  (Ctrl+G) are colored boxes that only organize the canvas. The node library (N) lists every
+  node to drag in.
+
+<p align="center"><img src="docs/images/group.png" alt="Three nodes made into one Group node" width="720"></p>
+
+<p align="center"><img src="docs/images/node-library.png" alt="The node library panel beside a workflow" width="720"></p>
+
 - **Providers as modules.** A provider is a folder with a `provider.json` in `~/.local/share/fugue/providers/<id>/`, speaking a small JSON protocol over HTTP or stdio (spec 8.8); no change to Fugue is needed to add one.
 - **Local and paired-host runs.** The `omarchy` provider serves models from this machine and
   from every host paired through omarchy-local-ai, so one graph can use a model on another
@@ -61,6 +79,7 @@ This is a test release and the packages are unsigned.
 - [docs/nodes](docs/nodes/README.md): writing nodes and packs.
 - [docs/GLOSSARY.md](docs/GLOSSARY.md): the vocabulary.
 - [docs/ui-ergonomics.md](docs/ui-ergonomics.md): rules window UI follows.
+- [docs/recording-screenshots.md](docs/recording-screenshots.md): how the pictures above are made again.
 - Work is tracked in the [issues](https://github.com/bmaltais/fugue/issues) by milestone.
 
 ## Build
