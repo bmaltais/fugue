@@ -771,17 +771,19 @@ QString CanvasRuns::imageFile(const QString &row) const {
 
 QString CanvasRuns::lastPicture() const {
     const auto nodes = m_tabs.value(m_shownTab).nodes;
-    QStringList keys = nodes.keys();
-    keys.sort();
-    for (const bool saves : {true, false})
-        for (const QString &key : std::as_const(keys)) {
-            const NodeInfo info = m_nodeInfo.value(key);
-            const NodeView view = nodes.value(key);
-            if (info.showsResult && info.savesFile == saves && !view.thumbnail.isEmpty() && !view.imagePath.isEmpty()
-                && QFileInfo(view.imagePath).isFile())
-                return view.imagePath;
+    // The newest picture a Save Image or a Preview shows, by its file's time.
+    QString newest;
+    QDateTime when;
+    for (auto it = nodes.cbegin(); it != nodes.cend(); ++it) {
+        const QFileInfo file(it->imagePath);
+        if (!m_nodeInfo.value(it.key()).showsResult || it->thumbnail.isEmpty() || !file.isFile())
+            continue;
+        if (newest.isEmpty() || file.lastModified() > when) {
+            newest = it->imagePath;
+            when = file.lastModified();
         }
-    return {};
+    }
+    return newest;
 }
 
 QVariantList CanvasRuns::errors() const { return m_tabs.value(m_shownTab).errors; }

@@ -170,4 +170,24 @@ Errors replaceFile(const QString &path, const QByteArray &bytes, const QString &
     return {};
 }
 
+Errors createFile(const QString &path, const QByteArray &bytes, const QString &what) {
+    const QFileInfo info(path);
+    const auto taken = [&] {
+        return Errors{makeError(QStringLiteral("permission_denied"),
+                                QStringLiteral("%1 is there already; Fugue does not replace it.").arg(path),
+                                QStringLiteral("Pick another name."))};
+    };
+    if (info.exists() || info.isSymLink())
+        return taken();
+    if (Errors errors = makeFolder(info.absolutePath()); !errors.isEmpty())
+        return errors;
+    PartialFile partial(info.absolutePath(), info.fileName());
+    if (Errors errors = partial.write(bytes, what); !errors.isEmpty())
+        return errors;
+    const Result<bool> committed = partial.commit(info.absoluteFilePath(), Overwrite::Never);
+    if (!committed)
+        return committed.errors();
+    return *committed ? Errors() : taken();
+}
+
 } // namespace fugue

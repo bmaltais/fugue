@@ -73,6 +73,10 @@ class Workflows : public QObject {
     // the one they go in now (the settings' download_folder, else Fugue's own).
     Q_PROPERTY(QVariantList downloadRoots READ downloadRoots NOTIFY noticeChanged)
     Q_PROPERTY(QString downloadRoot READ downloadRoot NOTIFY noticeChanged)
+    // While the banner names nodes of the shown workflow that are not installed, and its
+    // `requires.packs` says where the first such pack can be had (#91): {id, source, ref, text}.
+    // installPack() asks the window to install it (Settings > Packs, which asks the person).
+    Q_PROPERTY(QVariantMap packOffer READ packOffer NOTIFY noticeChanged)
 
 public:
     Workflows(CanvasModel *canvas, const Registry *registry, CommandRegistry *commands,
@@ -93,6 +97,7 @@ public:
     QString downloadOffer() const;
     QVariantList downloadRoots() const { return downloadOffer().isEmpty() ? QVariantList() : m_offer.roots; }
     QString downloadRoot() const { return m_offer.root; }
+    QVariantMap packOffer() const;
     QString pathOf(int index) const;
     // Pasting and dropping images into the canvas (workflow/image_inputs.h).
     ImageInputs *images() const { return m_images; }
@@ -115,7 +120,9 @@ public:
     // images it names are taken into the inputs folder as a pasted image is (image_inputs.h),
     // so it runs as it opens and a save copies them beside the file. False (with a notice) when
     // it cannot be read.
-    bool openTemplate(const Template &chosen);
+    // `fromPackage`: its folder goes away once it is open (openPackage), so an input still
+    // naming a file in it (a file the sender lacked, or one not an image) keeps only the bare name.
+    bool openTemplate(const Template &chosen, bool fromPackage = false);
     // The templates for the Templates dialog, in TemplateLibrary::list()'s order, each a map:
     // id, title, description, category, categoryTitle, tags, preview (a file URL or empty),
     // own, missingModels (name, source, folder each), neededPacks (not installed, or at another version), and status, one line: what
@@ -188,6 +195,8 @@ public:
     // Makes `root` (one of downloadRoots) where downloads go from now on: the settings'
     // download_folder.
     Q_INVOKABLE void setDownloadRoot(const QString &root);
+    // Asks for the offered pack to be installed (packInstallRequested).
+    Q_INVOKABLE void installPack();
 
     Q_INVOKABLE void dismissNotice();
     // A line for the banner from outside (the image actions, #57).
@@ -204,6 +213,7 @@ signals:
     void saveAsRequested();
     void exportShareRequested();
     void exportCompiledRequested();
+    void packInstallRequested(const QString &source, const QString &ref);
     void closeConfirmationRequested(int index, const QString &title);
 
 private:
@@ -239,6 +249,7 @@ private:
         QJsonArray models; // the workflow's, as Document::models() gives them
         QVariantList roots;
         QString root; // where they go (ModelLibrary::fitDownloadRoot)
+        QVariantMap pack; // the first missing pack it says where to get: id, source, ref, text
     };
     // The banner's line on the nodes and models of `document` that are not here, empty for none;
     // with what it may offer to download.

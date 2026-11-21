@@ -2,14 +2,11 @@
 
 #include <QDateTime>
 #include <QDir>
-#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
-#include <QJsonArray>
 #include <QJsonObject>
 #include <QRegularExpression>
-#include <QTemporaryDir>
 
 #include <archive.h>
 #include <archive_entry.h>
@@ -18,23 +15,20 @@
 
 #include "engine/atomic_file.h"
 #include "engine/document.h"
+#include "engine/file_inputs.h"
 #include "engine/file_roots.h"
+#include "engine/image_format.h"
 #include "engine/json.h"
-#include "engine/node_type.h"
 #include "engine/registry.h"
 
 namespace fugue {
 
 namespace {
 
-constexpr qint64 kMaxInput = qint64(1) << 30;       // one input file
-constexpr qint64 kMaxUnpacked = qint64(4) << 30;    // a whole package, unpacked
+constexpr qint64 kMaxPacked = qint64(3) << 30;   // every input of one package, written
+constexpr qint64 kMaxUnpacked = qint64(4) << 30; // a whole package, unpacked
 constexpr int kMaxEntries = 10000;
 constexpr qint64 kChunk = 1 << 20;
-
-Error fileError(const QString &code, const QString &message, const QString &hint = {}) {
-    return makeError(code, message, hint);
-}
 
 Error notAPackage(const QString &zip, const QString &why) {
     return makeError(QStringLiteral("invalid_document"),
@@ -53,14 +47,27 @@ QString folderId(const QString &title) {
     return id.isEmpty() ? QStringLiteral("workflow") : id.left(64);
 }
 
-// The name `source` takes in the package's inputs: its own, else `<stem>-2.<ext>`... `claimed`
-// maps the names given so far to their sources (canonical), so a file named twice is copied once.
-QString inputName(const QString &source, QHash<QString, QString> &claimed) {
-    const QFileInfo info(source);
+// A file name every system unpacks and no template check skips: letters, digits, "._-" only,
+// not starting with a dot; the image's own extension when the name has none.
+QString packedName(const QString &source, const ImageFormat &format) {
+    static const QRegularExpression other(QStringLiteral("[^A-Za-z0-9._-]"));
+    QString name = QFileInfo(source).fileName().replace(other, QStringLiteral("_"));
+    while (name.startsWith(QLatin1Char('.')))
+        name.remove(0, 1);
+    if (QFileInfo(name).completeBaseName().isEmpty())
+        name = QStringLiteral("image") + name;
+    if (QFileInfo(name).suffix().isEmpty())
+        name += QLatin1Char('.') + format.extension;
+    return name.left(120);
+}
+
+// The name `source` takes among the package's inputs: its own, else `<stem>-2.<ext>`...
+// `claimed` maps the names given so far to their sources, so a file named twice goes in once.
+QString uniqueName(const QString &wanted, const QString &source, QHash<QString, QString> &claimed) {
+    const QFileInfo info(wanted);
     const QString suffix = info.suffix().isEmpty() ? QString() : QLatin1Char('.') + info.suffix();
     for (int n = 1;; ++n) {
-        const QString name = n == 1 ? info.fileName()
-                                    : QStringLiteral("%1-%2%3").arg(info.completeBaseName()).arg(n).arg(suffix);
+        const QString name = n == 1 ? wanted : QStringLiteral("%1-%2%3").arg(info.completeBaseName()).arg(n).arg(suffix);
         const auto taken = claimed.constFind(name);
         if (taken == claimed.constEnd()) {
             claimed.insert(name, source);
@@ -71,69 +78,80 @@ QString inputName(const QString &source, QHash<QString, QString> &claimed) {
     }
 }
 
-Errors copyFile(const QString &from, const QString &to) {
-    if (!QFile::copy(from, to))
-        return {fileError(QStringLiteral("permission_denied"),
-                          QStringLiteral("Fugue could not copy %1 into the package.").arg(QFileInfo(from).fileName()))};
-    return {};
-}
+// One file of the zip: its name in it, and its bytes or the file they are read from.
+struct Entry {
+    QString name;
+    QByteArray bytes;
+    QString file;
+};
 
-// Copies every file a `file` input of `document` names into `inputs`, and points the input at
-// `inputs/<name>`. A file that is not there is a warning; its input is left for the share copy.
-Errors bundleInputs(Document &document, const Registry &registry, const QString &workflowPath, const QString &inputs) {
+// Points every `file` input of `document` at `inputs/<name>` and lists the file to put there.
+// Only an image Fugue takes in (image_format.h: by its bytes, at most maxImageBytes) goes in, so
+// what is shared is what the person sees on the canvas, never another file a node names;
+// another file, or one not there, is a warning, its input keeping the bare file name.
+Errors bundleInputs(Document &document, const Registry &registry, const QString &workflowPath, const QString &id,
+                    QList<Entry> &entries, QStringList *included) {
     Errors errors;
     QHash<QString, QString> claimed;
-    const auto scan = [&](Nodes &nodes) {
-        for (auto node = nodes.begin(); node != nodes.end(); ++node) {
-            const NodeType *type = registry.nodeType(node->type);
-            if (!type)
-                continue;
-            for (auto in = node->inputs.begin(); in != node->inputs.end(); ++in) {
-                const InputSpec *spec = type->input(in.key());
-                if (!spec || spec->widget() != QLatin1String("file") || in->kind() != InputValue::Kind::Literal
-                    || !in->literal().isString() || in->literal().toString().trimmed().isEmpty())
-                    continue;
-                const Result<QString> located = inputFilePath(in->literal().toString(), workflowPath, in.key());
-                const QString path = located ? canonicalPath(located.value()) : QString();
-                const QFileInfo info(path);
-                if (path.isEmpty() || !info.isFile()) {
-                    Error warning = fileError(QStringLiteral("file_not_found"),
-                                              QStringLiteral("%1 is not there, so it is not in the package.")
-                                                  .arg(QFileInfo(in->literal().toString()).fileName()),
-                                              QStringLiteral("Pick the file again, then export again."));
-                    warning.severity = Error::Severity::Warning;
-                    warning.node = node.key();
-                    warning.input = in.key();
-                    errors << warning;
-                    continue;
-                }
-                if (info.size() > kMaxInput) {
-                    errors << fileError(QStringLiteral("permission_denied"),
-                                        QStringLiteral("%1 is over 1 GB, too large to share in a package.").arg(info.fileName()),
-                                        QStringLiteral("Share that file another way, and export without it."));
-                    continue;
-                }
-                const QString name = inputName(path, claimed);
-                const QString target = inputs + QLatin1Char('/') + name;
-                if (!QFileInfo::exists(target)) {
-                    QDir().mkpath(inputs);
-                    errors << copyFile(path, target);
-                }
-                *in = InputValue::literal(QStringLiteral("inputs/") + name);
-            }
-        }
+    qint64 total = 0;
+    const auto warn = [&](const QString &node, const QString &input, const QString &message) {
+        Error warning = makeError(QStringLiteral("file_not_found"), message,
+                                  QStringLiteral("Pick the image again, then export again."));
+        warning.severity = Error::Severity::Warning;
+        warning.node = node;
+        warning.input = input;
+        errors << warning;
     };
-    scan(document.graph.nodes);
-    for (auto group = document.groups.begin(); group != document.groups.end(); ++group)
-        scan(group->nodes);
+    forEachFileLiteral(document, registry, [&](const QString &node, const QString &input, InputValue &value) {
+        const QString text = value.literal().toString();
+        if (text.trimmed().isEmpty())
+            return;
+        const QString bare = QFileInfo(text.trimmed()).fileName();
+        const Result<QString> located = inputFilePath(text, workflowPath, input);
+        const QString path = located ? canonicalPath(located.value()) : QString();
+        const QFileInfo info(path);
+        QFile file(path);
+        if (path.isEmpty() || !info.isFile() || !file.open(QIODevice::ReadOnly)) {
+            warn(node, input, QStringLiteral("%1 is not there, so it is not in the package.").arg(bare));
+            value = InputValue::literal(bare);
+            return;
+        }
+        const std::optional<ImageFormat> format = sniffImage(file.read(16));
+        if (!format || info.size() > maxImageBytes) {
+            warn(node, input,
+                 format ? QStringLiteral("%1 is over %2 MB, so it is not in the package.").arg(bare).arg(maxImageBytes >> 20)
+                        : QStringLiteral("%1 is not an image, so it is not in the package.").arg(bare));
+            value = InputValue::literal(bare);
+            return;
+        }
+        const QString name = uniqueName(packedName(path, *format), path, claimed);
+        const QString inside = id + QStringLiteral("/inputs/") + name;
+        bool listed = false;
+        for (const Entry &entry : std::as_const(entries))
+            listed = listed || entry.name == inside;
+        if (!listed) {
+            total += info.size();
+            entries << Entry{inside, {}, path};
+            if (included)
+                *included << info.fileName();
+        }
+        value = InputValue::literal(QStringLiteral("inputs/") + name);
+    });
+    if (total > kMaxPacked)
+        errors << makeError(QStringLiteral("value_out_of_range"),
+                            QStringLiteral("Its images come to %1 GB; a package holds at most %2 GB.")
+                                .arg(double(total) / (1 << 30), 0, 'f', 1)
+                                .arg(kMaxPacked >> 30),
+                            QStringLiteral("Share the largest images another way, and export without them."));
     return errors;
 }
 
-// Zips every file under `root` as `<prefix>/<its path under root>` into `zip`.
-Errors zipFolder(const QString &root, const QString &prefix, const QString &zip) {
+// Writes `entries` as the zip `zip`.
+Errors writeZip(const QList<Entry> &entries, const QString &zip) {
     std::unique_ptr<archive, decltype(&archive_write_free)> out(archive_write_new(), archive_write_free);
     const auto failed = [&](const QString &what) {
-        return Errors{fileError(QStringLiteral("permission_denied"),
+        const int error = archive_errno(out.get());
+        return Errors{makeError(writeFailureCode(error > 0 ? error : EIO),
                                 QStringLiteral("Fugue could not write the package %1: %2 (%3).")
                                     .arg(QFileInfo(zip).fileName(), what,
                                          QString::fromLocal8Bit(archive_error_string(out.get()))))};
@@ -141,29 +159,30 @@ Errors zipFolder(const QString &root, const QString &prefix, const QString &zip)
     if (archive_write_set_format_zip(out.get()) != ARCHIVE_OK
         || archive_write_open_filename(out.get(), QFile::encodeName(zip).constData()) != ARCHIVE_OK)
         return failed(QStringLiteral("open"));
-    QStringList files;
-    QDirIterator walk(root, QDir::Files | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
-    while (walk.hasNext())
-        files << walk.next();
-    files.sort(); // the same package for the same files
     const qint64 now = QDateTime::currentSecsSinceEpoch();
-    for (const QString &file : std::as_const(files)) {
-        QFile in(file);
-        if (!in.open(QIODevice::ReadOnly))
-            return failed(in.errorString());
-        const QByteArray name = (prefix + QLatin1Char('/') + QDir(root).relativeFilePath(file)).toUtf8();
+    for (const Entry &item : entries) {
+        QFile in(item.file);
+        if (!item.file.isEmpty() && !in.open(QIODevice::ReadOnly))
+            return {makeError(QStringLiteral("file_not_found"),
+                              QStringLiteral("Fugue could not read %1: %2.").arg(item.file, in.errorString()))};
+        const QByteArray name = item.name.toUtf8();
         std::unique_ptr<archive_entry, decltype(&archive_entry_free)> entry(archive_entry_new(), archive_entry_free);
         archive_entry_set_pathname_utf8(entry.get(), name.constData());
-        archive_entry_set_size(entry.get(), in.size());
+        archive_entry_set_size(entry.get(), item.file.isEmpty() ? item.bytes.size() : in.size());
         archive_entry_set_filetype(entry.get(), AE_IFREG);
         archive_entry_set_perm(entry.get(), 0644);
         archive_entry_set_mtime(entry.get(), now, 0);
         if (archive_write_header(out.get(), entry.get()) != ARCHIVE_OK)
-            return failed(QString::fromUtf8(name));
+            return failed(item.name);
+        if (item.file.isEmpty()) {
+            if (archive_write_data(out.get(), item.bytes.constData(), size_t(item.bytes.size())) < 0)
+                return failed(item.name);
+            continue;
+        }
         while (!in.atEnd()) {
             const QByteArray chunk = in.read(kChunk);
             if (chunk.isEmpty() || archive_write_data(out.get(), chunk.constData(), size_t(chunk.size())) < 0)
-                return failed(QString::fromUtf8(name));
+                return failed(item.name);
         }
     }
     if (archive_write_close(out.get()) != ARCHIVE_OK)
@@ -171,7 +190,8 @@ Errors zipFolder(const QString &root, const QString &prefix, const QString &zip)
     return {};
 }
 
-// An entry's name is taken when it is relative and stays inside: no "..", no empty part, no "\".
+// An entry's name is taken when it is relative and stays inside: no "..", ".", or empty part;
+// no "\" or ":" (a Windows path, a drive), which no package Fugue writes holds.
 bool safeName(const QString &name) {
     if (name.isEmpty() || name.startsWith(QLatin1Char('/')) || name.contains(QLatin1Char('\\'))
         || name.contains(QLatin1Char(':')))
@@ -196,51 +216,40 @@ bool leftOut(const QString &name) {
 } // namespace
 
 Errors writeSharePackage(const Document &document, const Registry &registry, const ShareRequest &request,
-                         const QString &zipPath) {
+                         const QString &zipPath, QStringList *included) {
     if (QFileInfo::exists(zipPath) || QFileInfo(zipPath).isSymLink())
-        return {fileError(QStringLiteral("permission_denied"),
+        return {makeError(QStringLiteral("permission_denied"),
                           QStringLiteral("%1 is there already; Fugue does not replace it.").arg(zipPath),
-                          QStringLiteral("Pick another name.")) };
-    QTemporaryDir staging;
-    if (!staging.isValid())
-        return {fileError(QStringLiteral("permission_denied"),
-                          QStringLiteral("Fugue could not make a folder to pack in: %1.").arg(staging.errorString()))};
-    const QString id = folderId(request.title);
-    const QString folder = staging.filePath(id);
-    QDir().mkpath(folder);
-
+                          QStringLiteral("Pick another name."))};
+    const QString title = request.title.trimmed().isEmpty() ? QStringLiteral("Workflow") : request.title.trimmed();
+    const QString id = folderId(title);
+    QList<Entry> entries;
     Document packed = document;
-    Errors errors = bundleInputs(packed, registry, request.workflowPath, folder + QStringLiteral("/inputs"));
+    Errors errors = bundleInputs(packed, registry, request.workflowPath, id, entries, included);
     if (hasErrors(errors))
         return errors;
     packed.refreshRequirements(request.appVersion, &registry);
-    const QJsonObject shared = shareCopy(packed.toJson(), registry, request.options);
-    for (const auto &[name, value] :
-         {std::pair{QStringLiteral("workflow.fugue"), QJsonValue(shared)},
-          std::pair{QStringLiteral("template.json"),
-                    QJsonValue(QJsonObject{{"title", request.title.trimmed().isEmpty() ? id : request.title.trimmed()}})}})
-        if (const Errors written = writeJsonFile(folder + QLatin1Char('/') + name, value); hasErrors(written))
-            return written;
+    entries.prepend(Entry{id + QStringLiteral("/template.json"), writeJson(QJsonObject{{"title", title}}), {}});
+    entries.prepend(Entry{id + QStringLiteral("/workflow.fugue"),
+                          writeJson(shareCopy(packed.toJson(), registry, request.options)), {}});
     if (!request.preview.isEmpty()) {
-        QString suffix = QFileInfo(request.preview).suffix().toLower();
-        if (suffix == QLatin1String("jpeg"))
-            suffix = QStringLiteral("jpg");
-        if (QStringList{"png", "webp", "jpg"}.contains(suffix) && QFileInfo(request.preview).isFile())
-            if (const Errors copied = copyFile(request.preview, folder + QStringLiteral("/preview.") + suffix);
-                hasErrors(copied))
-                return copied;
+        QFile preview(request.preview);
+        const std::optional<ImageFormat> format =
+            preview.open(QIODevice::ReadOnly) ? sniffImage(preview.read(16)) : std::nullopt;
+        if (format && QStringList{"png", "webp", "jpg"}.contains(format->extension) && preview.size() <= maxImageBytes)
+            entries << Entry{id + QStringLiteral("/preview.") + format->extension, {}, request.preview};
     }
 
     // Written beside the target, then named into place without replacing anything there.
     const QFileInfo target(zipPath);
     PartialFile partial(target.absolutePath(), target.fileName());
-    if (const Errors zipped = zipFolder(folder, id, partial.path()); hasErrors(zipped))
+    if (const Errors zipped = writeZip(entries, partial.path()); hasErrors(zipped))
         return zipped;
     const Result<bool> committed = partial.commit(target.absoluteFilePath(), Overwrite::Never);
     if (!committed)
         return committed.errors();
     if (!*committed)
-        return {fileError(QStringLiteral("permission_denied"),
+        return {makeError(QStringLiteral("permission_denied"),
                           QStringLiteral("A file came to %1 while the package was written; it was left as it is.").arg(zipPath),
                           QStringLiteral("Pick another name."))};
     return errors; // the warnings
@@ -260,9 +269,11 @@ Result<QString> unpackSharePackage(const QString &zipPath, const QString &folder
     int entries = 0;
     qint64 unpacked = 0;
     int read = ARCHIVE_OK;
+    QByteArray buffer(kChunk, Qt::Uninitialized);
     while ((read = archive_read_next_header(in.get(), &entry)) == ARCHIVE_OK) {
         const char *utf8 = archive_entry_pathname_utf8(entry);
-        const QString name = QString::fromUtf8(utf8 ? utf8 : archive_entry_pathname(entry));
+        const char *raw = utf8 ? utf8 : archive_entry_pathname(entry);
+        const QString name = QString::fromUtf8(raw ? raw : "");
         if (!safeName(name))
             return notAPackage(zipPath, QStringLiteral("it names %1, outside its folder").arg(name));
         if (archive_entry_symlink(entry) || archive_entry_hardlink(entry))
@@ -283,30 +294,38 @@ Result<QString> unpackSharePackage(const QString &zipPath, const QString &folder
         QFile out(path);
         if (out.exists() || !out.open(QIODevice::WriteOnly))
             return notAPackage(zipPath, QStringLiteral("%1 cannot be unpacked").arg(name));
-        QByteArray buffer(kChunk, Qt::Uninitialized);
+        qint64 size = 0;
         for (;;) {
             const la_ssize_t got = archive_read_data(in.get(), buffer.data(), size_t(buffer.size()));
             if (got < 0)
                 return notAPackage(zipPath, QString::fromLocal8Bit(archive_error_string(in.get())));
             if (got == 0)
                 break;
+            size += got;
             unpacked += got;
+            // Counted as the bytes come, whatever the entry says of its size.
+            if (size > maxImageBytes)
+                return notAPackage(zipPath, QStringLiteral("%1 is over %2 MB").arg(name).arg(maxImageBytes >> 20));
             if (unpacked > kMaxUnpacked)
                 return notAPackage(zipPath, QStringLiteral("it unpacks to more than 4 GB"));
             if (out.write(buffer.constData(), got) != got)
-                return makeError(QStringLiteral("permission_denied"),
+                return makeError(writeFailureCode(EIO),
                                  QStringLiteral("Fugue could not unpack %1: %2.").arg(name, out.errorString()));
         }
     }
     if (read != ARCHIVE_EOF)
         return notAPackage(zipPath, QString::fromLocal8Bit(archive_error_string(in.get())));
 
-    // Its files at its top: they go in a folder named after the zip, as a template's would be.
+    // Its files at its top: they go in a new folder named after the zip, as a template's would be.
     if (QFileInfo::exists(folder + QStringLiteral("/workflow.fugue"))) {
-        const QString inner = folder + QLatin1Char('/') + folderId(QFileInfo(zipPath).completeBaseName());
+        const QString base = folderId(QFileInfo(zipPath).completeBaseName());
+        QString inner = folder + QLatin1Char('/') + base;
+        for (int n = 2; QFileInfo::exists(inner); ++n)
+            inner = folder + QLatin1Char('/') + base + QLatin1Char('-') + QString::number(n);
+        const QFileInfoList items = QDir(folder).entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot);
         QDir().mkpath(inner);
-        for (const QFileInfo &item : QDir(folder).entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot))
-            if (item.absoluteFilePath() != inner && !QDir().rename(item.absoluteFilePath(), inner + QLatin1Char('/') + item.fileName()))
+        for (const QFileInfo &item : items)
+            if (!QDir().rename(item.absoluteFilePath(), inner + QLatin1Char('/') + item.fileName()))
                 return notAPackage(zipPath, QStringLiteral("%1 cannot be unpacked").arg(item.fileName()));
         return inner;
     }

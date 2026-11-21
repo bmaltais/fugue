@@ -3,6 +3,8 @@
 #include "engine/atomic_file.h"
 #include "engine/compiler.h"
 #include "engine/embed.h"
+#include "engine/file_inputs.h"
+#include "engine/file_roots.h"
 #include "engine/group_library.h"
 #include "engine/file_hashes.h"
 #include "engine/json.h"
@@ -396,7 +398,9 @@ bool Workflows::openPath(const QString &pathOrUrl) {
 bool Workflows::openPackage(const QString &path) {
     const QString shown = QFileInfo(path).fileName();
     // Unpacked only for as long as it opens: its samples go into the inputs folder (openTemplate).
-    QTemporaryDir unpacked;
+    // Under the cache, not /tmp, which is memory on Arch.
+    QDir().mkpath(cacheDir());
+    QTemporaryDir unpacked(cacheDir() + QStringLiteral("/package-XXXXXX"));
     if (!unpacked.isValid()) {
         setNotice(tr("Could not open %1: %2").arg(shown, unpacked.errorString()));
         return false;
@@ -415,14 +419,14 @@ bool Workflows::openPackage(const QString &path) {
                                                      : firstMessage(problems)));
         return false;
     }
-    return openTemplate(*chosen);
+    return openTemplate(*chosen, true);
 }
 
 bool Workflows::exportShare(const QString &pathOrUrl, const QString &preview) {
     if (m_current < 0)
         return false;
     QString path = toPath(pathOrUrl);
-    if (QFileInfo(path).suffix().isEmpty())
+    if (QFileInfo(path).suffix().compare(QLatin1String("zip"), Qt::CaseInsensitive) != 0)
         path += QStringLiteral(".zip");
     const Tab &tab = m_tabs[size_t(m_current)];
     ShareRequest request;
@@ -430,13 +434,16 @@ bool Workflows::exportShare(const QString &pathOrUrl, const QString &preview) {
     request.workflowPath = tab.path;
     request.preview = preview;
     request.appVersion = appVersion();
-    const Errors errors = writeSharePackage(documentOf(m_current), *m_registry, request, path);
+    QStringList included;
+    const Errors errors = writeSharePackage(documentOf(m_current), *m_registry, request, path, &included);
     if (hasErrors(errors)) {
         setNotice(tr("Could not export %1: %2").arg(request.title, withHints(errors)));
         return false;
     }
     QString line = tr("Exported %1 for sharing to %2. Models are not in it: who opens it can download them.")
                        .arg(request.title, path);
+    if (!included.isEmpty())
+        line += QLatin1Char(' ') + tr("Images in it: %1.").arg(included.join(QStringLiteral(", ")));
     if (!errors.isEmpty())
         line += QLatin1Char(' ') + withHints(errors);
     setNotice(line);
@@ -458,17 +465,7 @@ bool Workflows::exportCompiled(const QString &pathOrUrl) {
         setNotice(tr("%1 does not compile: %2").arg(title, withHints(compilation.errors())));
         return false;
     }
-    const QFileInfo target(path);
-    PartialFile partial(target.absolutePath(), target.fileName());
-    Errors errors = partial.write(writeJson(compilation->toJson()), target.fileName());
-    if (!hasErrors(errors)) {
-        const Result<bool> committed = partial.commit(target.absoluteFilePath(), Overwrite::Never);
-        if (!committed)
-            errors = committed.errors();
-        else if (!*committed)
-            errors << makeError(QStringLiteral("permission_denied"),
-                                tr("%1 is there already; Fugue does not replace it.").arg(path));
-    }
+    const Errors errors = createFile(path, writeJson(compilation->toJson()), QFileInfo(path).fileName());
     if (hasErrors(errors)) {
         setNotice(tr("Could not export %1: %2").arg(title, withHints(errors)));
         return false;
@@ -533,12 +530,20 @@ bool Workflows::openText(const QString &text) {
     return true;
 }
 
-bool Workflows::openTemplate(const Template &chosen) {
+bool Workflows::openTemplate(const Template &chosen, bool fromPackage) {
     Result<Document> document = Document::loadFile(chosen.workflow);
     Errors errors = document ? Errors() : document.errors();
     if (document) {
         makeInputsAbsolute(document.value(), *m_registry, chosen.workflow);
         errors = takeInputsFrom(document.value(), *m_registry, chosen.folder);
+    }
+    if (document && fromPackage) {
+        const QString folder = canonicalPath(chosen.folder);
+        forEachFileLiteral(document.value(), *m_registry, [&](const QString &, const QString &, InputValue &value) {
+            const QString path = canonicalPath(value.literal().toString());
+            if (!path.isEmpty() && isInside(path, folder))
+                value = InputValue::literal(QFileInfo(path).fileName());
+        });
     }
     if (!errors.isEmpty()) {
         setNotice(tr("Could not open the template %1: %2").arg(chosen.title, firstMessage(errors)));
@@ -625,6 +630,20 @@ QString Workflows::missingNotice(const Document &document, const QString &title,
     if (!models.isEmpty())
         lines << tr("%1 needs models that are not in the model folders: %2.").arg(title, models.join(QStringLiteral("; ")));
     if (offer) {
+        // The first missing pack the workflow says where to get (4.3).
+        offer->pack.clear();
+        const QJsonObject packs = document.requirements.value(QStringLiteral("packs")).toObject();
+        for (const QString &type : missing) {
+            const QString pack = type.section(QLatin1Char('/'), 0, 0);
+            const QJsonObject entry = packs.value(pack).toObject();
+            if (entry.value(QStringLiteral("source")).toString().isEmpty() || !m_registry->packVersion(pack).isEmpty())
+                continue;
+            offer->pack = QVariantMap{{"id", pack},
+                                      {"source", entry.value(QStringLiteral("source")).toString()},
+                                      {"ref", entry.value(QStringLiteral("ref")).toString()},
+                                      {"text", tr("Install %1…").arg(pack)}};
+            break;
+        }
         offer->text = offerText(absent);
         offer->models = document.models();
         offer->root = library.downloadRoot();
@@ -645,6 +664,16 @@ void Workflows::refreshMissing(bool force) {
     if (force || shown)
         setNotice(missing);
     emit noticeChanged(); // the offer may differ with the same line
+}
+
+QVariantMap Workflows::packOffer() const {
+    return !m_notice.isEmpty() && m_notice == m_missingNotice ? m_offer.pack : QVariantMap();
+}
+
+void Workflows::installPack() {
+    const QVariantMap pack = packOffer();
+    if (!pack.isEmpty())
+        emit packInstallRequested(pack.value("source").toString(), pack.value("ref").toString());
 }
 
 QString Workflows::downloadOffer() const {

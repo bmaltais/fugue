@@ -22,8 +22,8 @@ Reply workflowExport(const Command &command, Context &context) {
         return Reply::failure(document.errors());
     const QFileInfo info(file);
     QString out = command.has("out") ? command.value("out") : info.completeBaseName() + QStringLiteral(".zip");
-    if (QFileInfo(out).suffix().isEmpty())
-        out += QStringLiteral(".zip");
+    if (QFileInfo(out).suffix().compare(QLatin1String("zip"), Qt::CaseInsensitive) != 0)
+        out += QStringLiteral(".zip"); // it is one, whatever the name said
     out = QFileInfo(out).absoluteFilePath();
 
     ShareRequest request;

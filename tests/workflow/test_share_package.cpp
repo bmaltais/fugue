@@ -147,6 +147,24 @@ private slots:
         QCOMPARE(QDir(folder.value()).entryList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot),
                  (QStringList{"inputs", "preview.png", "template.json", "workflow.fugue"}));
 
+        // Only images Fugue takes in go in; a name every system unpacks.
+        writeFile(dir.filePath("secret/id_rsa"), "-----BEGIN OPENSSH PRIVATE KEY-----");
+        writeFile(dir.filePath("pictures/12:30 .shot.png"), png());
+        Document odd = workflowLoading(dir.filePath("pictures/12:30 .shot.png"));
+        odd.graph.nodes["gone"].inputs.insert("file", InputValue::literal(dir.filePath("secret/id_rsa")));
+        QStringList included;
+        const Errors oddErrors = writeSharePackage(odd, m_registry, request, dir.filePath("odd.zip"), &included);
+        QVERIFY(!hasErrors(oddErrors));
+        QCOMPARE(included, QStringList{"12:30 .shot.png"});
+        QVERIFY(oddErrors.first().message.contains("not an image"));
+        QTemporaryDir oddOut;
+        const Result<QString> oddFolder = unpackSharePackage(dir.filePath("odd.zip"), oddOut.path());
+        QVERIFY2(oddFolder, qPrintable(oddFolder ? QString() : oddFolder.error().message));
+        QCOMPARE(QDir(oddFolder.value() + "/inputs").entryList(QDir::Files | QDir::Hidden), QStringList{"12_30_.shot.png"});
+        const QJsonObject oddNodes = readJson(oddFolder.value() + "/workflow.fugue").value("graph").toObject().value("nodes").toObject();
+        QCOMPARE(oddNodes.value("load").toObject().value("inputs").toObject().value("file").toString(), QString("inputs/12_30_.shot.png"));
+        QCOMPARE(oddNodes.value("gone").toObject().value("inputs").toObject().value("file").toString(), QString("id_rsa"));
+
         // Without the prompts, when asked.
         request.options.withoutPrompts = true;
         QVERIFY(!hasErrors(writeSharePackage(workflowLoading(dir.filePath("pictures/cat.png")), m_registry, request,
@@ -164,7 +182,10 @@ private slots:
              {std::tuple{"dots", QList<std::pair<QByteArray, QByteArray>>{{"x/workflow.fugue", flow}, {"x/../../evil", "!"}}, QByteArray()},
               std::tuple{"absolute", QList<std::pair<QByteArray, QByteArray>>{{"x/workflow.fugue", flow}, {"/tmp/evil", "!"}}, QByteArray()},
               std::tuple{"link", QList<std::pair<QByteArray, QByteArray>>{{"x/workflow.fugue", flow}, {"x/link", {}}}, QByteArray("/etc/passwd")},
-              std::tuple{"empty", QList<std::pair<QByteArray, QByteArray>>{{"x/readme.txt", "hi"}}, QByteArray()}}) {
+              std::tuple{"empty", QList<std::pair<QByteArray, QByteArray>>{{"x/readme.txt", "hi"}}, QByteArray()},
+              std::tuple{"backslash", QList<std::pair<QByteArray, QByteArray>>{{"x/workflow.fugue", flow}, {"x\\..\\evil", "!"}}, QByteArray()},
+              std::tuple{"drive", QList<std::pair<QByteArray, QByteArray>>{{"x/workflow.fugue", flow}, {"C:/evil", "!"}}, QByteArray()},
+              std::tuple{"twice", QList<std::pair<QByteArray, QByteArray>>{{"x/workflow.fugue", flow}, {"x/workflow.fugue", "{}"}}, QByteArray()}}) {
             const QString zip = dir.filePath(QString::fromLatin1(name) + ".zip");
             makeZip(zip, entries, link);
             QTemporaryDir out;
@@ -173,6 +194,44 @@ private slots:
             QCOMPARE(folder.error().code, QString("invalid_document"));
             QVERIFY(!QFileInfo::exists(dir.filePath("evil")));
         }
+
+        // A device is not a file. libarchive writes none into a zip, so this one is made by hand:
+        // one empty stored entry whose Unix mode, in the central directory, is a character device.
+        {
+            const QString zip = dir.filePath("device.zip");
+            QFile out(zip);
+            QVERIFY(out.open(QIODevice::WriteOnly));
+            const QByteArray name = "x/tty";
+            const auto le = [](quint32 value, int bytes) {
+                QByteArray b;
+                for (int i = 0; i < bytes; ++i)
+                    b.append(char((value >> (8 * i)) & 0xff));
+                return b;
+            };
+            QByteArray local = le(0x04034b50, 4) + le(20, 2) + le(0, 2) + le(0, 2) + le(0, 4) + le(0, 4) + le(0, 4)
+                               + le(0, 4) + le(quint32(name.size()), 2) + le(0, 2) + name;
+            QByteArray central = le(0x02014b50, 4) + le((3 << 8) | 20, 2) + le(20, 2) + le(0, 2) + le(0, 2) + le(0, 4)
+                                 + le(0, 4) + le(0, 4) + le(0, 4) + le(quint32(name.size()), 2) + le(0, 2) + le(0, 2)
+                                 + le(0, 2) + le(0, 2) + le(quint32(020644) << 16, 4) + le(0, 4) + name;
+            QByteArray end = le(0x06054b50, 4) + le(0, 2) + le(0, 2) + le(1, 2) + le(1, 2)
+                             + le(quint32(central.size()), 4) + le(quint32(local.size()), 4) + le(0, 2);
+            out.write(local + central + end);
+            out.close();
+            QTemporaryDir unpacked;
+            const Result<QString> refused = unpackSharePackage(zip, unpacked.path());
+            QVERIFY(!refused);
+            QVERIFY2(refused.error().message.contains("not a file"), qPrintable(refused.error().message));
+        }
+
+        // A zip named like a folder it holds: its files go in a new folder, not that one.
+        const QString clash = dir.filePath("inputs.zip");
+        makeZip(clash, {{"workflow.fugue", flow}, {"inputs/a.png", png()}});
+        QTemporaryDir clashOut;
+        const Result<QString> clashFolder = unpackSharePackage(clash, clashOut.path());
+        QVERIFY2(clashFolder, qPrintable(clashFolder ? QString() : clashFolder.error().message));
+        QCOMPARE(QFileInfo(clashFolder.value()).fileName(), QString("inputs-2"));
+        QVERIFY(QFileInfo::exists(clashFolder.value() + "/workflow.fugue"));
+        QVERIFY(QFileInfo::exists(clashFolder.value() + "/inputs/a.png"));
 
         // Files at the zip's top (someone zipped the folder's contents), and macOS's extras.
         const QString loose = dir.filePath("My Flow.zip");
@@ -196,7 +255,7 @@ private slots:
             {"outputs", QJsonArray{QJsonObject{{"name", "text"}, {"type", "text"}}}}});
         QVERIFY2(added.isEmpty(), qPrintable(added.isEmpty() ? QString() : added.first().message));
         registry.setPackVersion("io.github.alice.tools", "1.2.0");
-        registry.setPackSource("io.github.alice.tools", "https://github.com/alice/fugue-tools");
+        registry.setPackSource("io.github.alice.tools", "https://github.com/alice/fugue-tools", "0123abcd");
         Document document = Document::fromJson(QJsonObject{
             {"fugue", 1},
             {"graph", QJsonObject{{"nodes", QJsonObject{{"s", QJsonObject{{"type", "io.github.alice.tools/sharpen"},
@@ -204,7 +263,8 @@ private slots:
         document.refreshRequirements("0.1.0", &registry);
         QCOMPARE(document.requirements.value("packs").toObject(),
                  (QJsonObject{{"io.github.alice.tools", QJsonObject{{"version", "1.2.0"},
-                                                                    {"source", "https://github.com/alice/fugue-tools"}}}}));
+                                                                    {"source", "https://github.com/alice/fugue-tools"},
+                                                                    {"ref", "0123abcd"}}}}));
     }
 
     // File > Export for sharing writes the shown workflow; opening the .zip (File > Open, a drop)
@@ -256,6 +316,25 @@ private slots:
         QVERIFY2(file.startsWith(inputsDir() + "/"), qPrintable(file));
         QCOMPARE(readFile(file), png());
         QVERIFY(workflows.notice().contains("m.gguf")); // its model is missing here: the banner says so
+        // The file the sender lacked names no file in the unpacked folder, which is gone.
+        QCOMPARE(canvas.document().graph.nodes.value("gone").inputs.value("file").literal().toString(), QString("lost.png"));
+
+        // A pack it uses that is not here: the banner offers it, pinned to what the sender had.
+        const QJsonObject withPack{
+            {"fugue", 1},
+            {"graph", QJsonObject{{"nodes", QJsonObject{{"s", QJsonObject{{"type", "io.github.alice.tools/sharpen"},
+                                                                           {"version", "1.2.0"}}}}}}},
+            {"requires", QJsonObject{{"packs", QJsonObject{{"io.github.alice.tools",
+                QJsonObject{{"version", "1.2.0"}, {"source", "https://github.com/alice/fugue-tools"}, {"ref", "0123abcd"}}}}}}}};
+        QVERIFY(workflows.openText(QString::fromUtf8(QJsonDocument(withPack).toJson())));
+        QCOMPARE(workflows.packOffer().value("id").toString(), QString("io.github.alice.tools"));
+        QSignalSpy install(&workflows, &Workflows::packInstallRequested);
+        workflows.installPack();
+        QCOMPARE(install.size(), 1);
+        QCOMPARE(install.first().at(0).toString(), QString("https://github.com/alice/fugue-tools"));
+        QCOMPARE(install.first().at(1).toString(), QString("0123abcd"));
+        workflows.dismissNotice();
+        QVERIFY(workflows.packOffer().isEmpty()); // goes with the line
 
         // Not a package: says why.
         writeFile(dir.filePath("other.zip"), "PK\x03\x04 not really");

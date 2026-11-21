@@ -422,7 +422,9 @@ An object is a link if and only if it has the key `from`. `null` is not a value;
 - `nodes`: every node type used, including inside groups, with its version.
 - `packs`: the packs those types come from, with an optional `source` Fugue can offer to install
   from (a prompt; nothing installs silently). A save writes each pack installed here at its
-  version, with the git URL it was added from (`.fugue-source.json`, 6.6) when it was (#91).
+  version, with the git URL it was added from (`.fugue-source.json`, 6.6) and the commit it is
+  at (`ref`), when it was added from git (#91). The URL never carries a credential (https
+  user and password, ssh password are dropped) and a `file://` one is not written.
 - `models`: every resource handle with a hash that appears as a literal, with an optional
   `source` (where its file can be downloaded, 8.9) and `size` (its bytes). On open Fugue checks
   the model folders and reports what is missing without blocking: the banner names each missing
@@ -1622,17 +1624,23 @@ start it offers to recover.
 - A **package to share** (#91, File > Export for sharing…, `fugue workflow export --share`): one
   `.zip` holding a template (11.10): `<id>/template.json` (the workflow's name), `workflow.fugue`
   (the share copy, its `requires` naming the packs it uses and where to get them, 4.3),
-  `inputs/` (every file a `file` input names, copied; the input then names `inputs/<file>`) and
-  `preview.<ext>` (the picture a Save Image, else a Preview, last showed). No model is in it:
-  models stay references by hash, source and size, which the person downloads (8.9). A file
-  input whose file is gone is named in the export's notice and kept as a bare name. Never
-  written over a file.
+  `inputs/` (each image a `file` input names that Fugue takes in, 14.1: by its bytes, at most
+  256 MB; renamed to letters, digits and `._-`; the input then names `inputs/<name>`) and
+  `preview.<ext>` (the newest picture a Save Image or Preview shows). Only such images go in,
+  so a package never carries another file a node names (a key, a document): that input keeps
+  its bare name, as one whose file is gone does, and the export's notice names each, and the
+  images it put in. At most 3 GB of images. No model is in it: models stay references by hash,
+  source and size, which the person downloads (8.9). Never written over a file.
 - Opening a `.zip` (File > Open, a drop; told by its first bytes) unpacks it and opens it as
   its template opens: a new unsaved workflow, its images taken into the inputs folder, the
-  banners naming its missing models and packs. Only plain files and folders with relative
-  names inside it are taken: an absolute name, `..`, a link or a device is refused, and so is
-  more than 4 GB or 10000 entries; macOS's `__MACOSX` and dot files are skipped. A zip of the
-  folder's contents (files at its top) is taken too.
+  banners naming its missing models (Download) and the first pack it says where to get
+  (Install…, which opens Settings > Packs at the recorded source and commit, asking there).
+  It is unpacked under the cache folder, not `/tmp` (memory on Arch), and removed once open;
+  an input naming a file it did not hold keeps the bare name. Only plain files and folders with
+  relative names inside it are taken: an absolute name, `..`, `\` or `:`, a link or a device is
+  refused, and so is a file over 256 MB, more than 4 GB or 10000 entries; macOS's `__MACOSX`
+  and dot files are skipped. A zip of the folder's contents (files at its top) is taken too,
+  into a new folder.
 - The compiled graph, for the CLI (`fugue compile`; File > Export the compiled graph… writes
   the same JSON, never over a file).
 
@@ -2399,6 +2407,8 @@ Building M4 made these further choices.
 | A package holds no model, only references (hash, source, size): models are many GB and their licences forbid passing many on; #89 downloads them, checked by hash | 11.5, 8.9 | high |
 | File > Export for sharing… takes the place of Export share copy…, which the menu listed but nothing ran; the bare share copy stays what an embedded workflow holds (11.7). The window asks only where to write it: prompts and layout are kept, as the person sharing a workflow mostly wants them; the CLI has `--no-prompts`, `--no-layout` | 11.5, 12.5 | medium-high |
 | Zips are read and written with libarchive (a dependency of pacman, so on every Arch system); Qt has no public zip API | 11.5 | high |
+| A package takes only images Fugue takes in (14.1), not every file a `file` input names: a workflow received or pasted may point an input at any file (`~/.ssh/id_rsa`), and the person exporting would not see it go. The notice names what went in and what did not | 11.5, 13.6 | high |
+| A pack's source is written only as an https, ssh or git URL without credentials, with the exact commit: what is shared goes to others, and an install must get the version the workflow was made with | 4.3, 6.6 | high |
 
 ## Appendix B: issue to section map
 

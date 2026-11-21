@@ -1073,13 +1073,14 @@ void Document::refreshRequirements(const QString &appVersion, const Registry *re
             packs.insert(it.key(), it.value());
     // What is installed here: its version, and where to get it when that is known.
     for (const QString &pack : std::as_const(packsUsed)) {
-        const QString version = registry ? registry->packVersion(pack) : QString();
-        if (version.isEmpty())
+        if (!registry || registry->packVersion(pack).isEmpty())
             continue;
         QJsonObject entry = packs.value(pack).toObject();
-        entry.insert("version", version);
-        if (const QString source = registry->packSource(pack); !source.isEmpty())
+        entry.insert("version", registry->packVersion(pack));
+        if (const QString source = registry->packSource(pack); !source.isEmpty()) {
             entry.insert("source", source);
+            entry.insert("ref", registry->packRef(pack)); // the exact one, so an install gets this version
+        }
         packs.insert(pack, entry);
     }
 

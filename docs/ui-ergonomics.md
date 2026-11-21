@@ -98,7 +98,8 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 
 - Control: File > Export for sharing… (`file.export-share`, `src/menu/menus.cpp`), the item that was Export share copy…, in the same place after Save as; it opens `exportDialog`, a save dialog for a `.zip` (`src/workflow/WorkflowDialogs.qml`). The open dialog's filter names packages too.
 - Control: File > Export the compiled graph (`file.export-compiled`), unchanged in place and label; it now opens `compiledDialog`, a save dialog for a `.json`.
-- Old: both items were listed and enabled but did nothing.
+- Control: the banner's `installPack` ("Install <pack>…", plain, before Download), while the line names nodes of a pack the workflow says where to get; it opens Settings > Packs and starts the install there, which asks.
+- Old: both items were listed and enabled but did nothing; a missing pack was named with nowhere to go.
 - New: the label says what it makes; each dialog asks one thing, where. The banner then says where it went and what it left out, or why the graph does not compile.
 - Rule: Learned place (the File items keep their order; only the label changed). Posture: a transient dialog, one decision.
 

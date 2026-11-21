@@ -13,12 +13,32 @@
 #include <QJsonArray>
 #include <QRegularExpression>
 #include <QSet>
+#include <QUrl>
 
 #include <cstdio>
 
 namespace fugue {
 
 namespace {
+
+// A pack's git URL as a workflow may carry it to others (#91): an https, ssh or git URL with no
+// password (and, for https, no user), or git's user@host:path form; none for a local one.
+QString shareableSource(const PackSource &source) {
+    if (source.kind != PackSource::Kind::Git || source.location.isEmpty())
+        return {};
+    static const QRegularExpression scp(QStringLiteral("^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:[^ ]+$"));
+    if (scp.match(source.location).hasMatch())
+        return source.location;
+    QUrl url(source.location, QUrl::StrictMode);
+    if (!url.isValid() || url.host().isEmpty()
+        || !QStringList{"https", "ssh", "git"}.contains(url.scheme()))
+        return {};
+    url.setPassword({});
+    if (url.scheme() == QLatin1String("https"))
+        url.setUserName({});
+    return url.toString();
+}
+
 
 const QStringList knownPackFields = {"manifest", "id",    "version", "name",  "license",   "source",
                                      "description", "nodes", "types", "setup", "converters"};
@@ -360,8 +380,10 @@ LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin
                                      Error::Severity::Warning);
 
     registry.setPackVersion(pack->id, pack->version);
-    if (const PackSource source = readPackSource(folder); source.kind == PackSource::Kind::Git)
-        registry.setPackSource(pack->id, source.location);
+    if (const QString shared = shareableSource(readPackSource(folder)); !shared.isEmpty()) {
+        const PackSource source = readPackSource(folder);
+        registry.setPackSource(pack->id, shared, source.commit.isEmpty() ? source.ref : source.commit);
+    }
     loaded.enabled = true;
     return loaded;
 }

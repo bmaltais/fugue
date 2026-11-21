@@ -99,6 +99,21 @@ private slots:
         Registry fromGit;
         QVERIFY(loadPack(fromGit, dir).enabled);
         QCOMPARE(fromGit.packSource(id), QString("https://github.com/alice/fugue-tools"));
+        QCOMPARE(fromGit.packRef(id), QString("v1.2.0"));
+        // Never a local path or a credential: they would go to everyone the workflow is shared with.
+        for (const auto &[location, shared] :
+             {std::pair{"file:///home/alice/packs/tools", ""},
+              std::pair{"https://alice:ghp_secret@github.com/alice/fugue-tools", "https://github.com/alice/fugue-tools"},
+              std::pair{"ssh://git:pw@github.com/alice/fugue-tools", "ssh://git@github.com/alice/fugue-tools"},
+              std::pair{"git@github.com:alice/fugue-tools.git", "git@github.com:alice/fugue-tools.git"}}) {
+            write(dir + "/.fugue-source.json", QJsonDocument(QJsonObject{{"kind", "git"}, {"location", location},
+                                                                          {"ref", "v1"}, {"commit", "abc123"}}).toJson());
+            Registry again;
+            QVERIFY(loadPack(again, dir).enabled);
+            QCOMPARE(again.packSource(id), QString::fromLatin1(shared));
+            if (!QString::fromLatin1(shared).isEmpty())
+                QCOMPARE(again.packRef(id), QString("abc123")); // the exact commit
+        }
         QFile::remove(dir + "/.fugue-source.json");
         // The node's folder, where its program is found.
         QCOMPARE(registry.nodeType(id + "/sharpen")->dir, dir + "/sharpen");

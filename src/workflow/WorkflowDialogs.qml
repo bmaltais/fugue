@@ -138,6 +138,15 @@ Item {
                         Accessible.name: qsTr("Download into")
                     }
                 }
+                // A pack its nodes come from, where the workflow says it can be had (#91).
+                Loader {
+                    active: App.workflows.packOffer.id !== undefined
+                    sourceComponent: ThemedButton {
+                        objectName: "installPack"
+                        text: App.workflows.packOffer.text
+                        onClicked: App.workflows.installPack()
+                    }
+                }
                 Loader {
                     active: App.workflows.downloadOffer !== ""
                     sourceComponent: ThemedButton {
