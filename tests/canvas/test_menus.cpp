@@ -1014,7 +1014,9 @@ private slots:
         app.window->resize(700, 400);
         QTRY_COMPARE(app.window->width(), 700);
         app.model.select({"c"});
-        const QPoint corners[] = {{4, 60}, {696, 60}, {4, 396}, {696, 396}, {350, 396}, {696, 200}};
+        // The left corners are the canvas's own (the tab strip, #159, takes the window's first 44 px).
+        const int left = 4 + int(app.canvas->x());
+        const QPoint corners[] = {{left, 60}, {696, 60}, {left, 396}, {696, 396}, {350, 396}, {696, 200}};
         for (const QPoint &corner : corners) {
             QTest::mouseClick(app.window, Qt::RightButton, {}, corner);
             QTRY_VERIFY(isOpen(app.window, "contextMenuPopup"));

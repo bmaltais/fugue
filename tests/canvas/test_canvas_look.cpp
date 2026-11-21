@@ -215,7 +215,9 @@ private slots:
         auto at = [&](qreal x, qreal y) { return QColor(shot.pixel(app.screen(x, y))).name(); };
         // The canvas left of the nodes, past their shadows, a node's body, its header, an error's
         // header (cached sits at column 0, row 0: x 56 to 256, y 60 on; error at column 1, row 1).
-        QCOMPARE(at(12, 400), look->tokens().canvas.name());
+        // 12 px in from the world's edge; the canvas starts after the tab strip (#159) and may be panned,
+        // so the sample is 4 px inside the canvas's own left edge when that is further right.
+        QCOMPARE(at(qMax<qreal>(12, 4 - app.pan().x() / app.zoom()), 400), look->tokens().canvas.name());
         // Between rows, left of the label: the body, on its sheen (#72).
         QVERIFY2(onSheen(QColor(at(56 + 100, 60 + 28 + 4 + 24 + 12 + 2)), look->tokens().body, look),
                  qPrintable(at(56 + 100, 60 + 28 + 4 + 24 + 12 + 2)));

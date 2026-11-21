@@ -1305,7 +1305,8 @@ echo '{"outputs": {"text": "painted"}}'
         // A smaller window keeps the bar inside, at the same relative place.
         const QSize before = r.app.window->size();
         r.app.window->resize(before.width() * 3 / 4, before.height() * 3 / 4);
-        QTRY_COMPARE(area->width(), qreal(before.width() * 3 / 4));
+        // The area is the canvas: the window less the tab strip on its left (#159).
+        QTRY_COMPARE(area->width(), qreal(before.width() * 3 / 4) - area->mapToScene(QPointF(0, 0)).x());
         QTRY_COMPARE(toolbar->x() + toolbar->width(), area->width() - 4 * unit);
         QVERIFY(toolbar->y() + toolbar->height() <= area->height());
         r.app.window->resize(before);
