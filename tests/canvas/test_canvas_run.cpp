@@ -29,6 +29,7 @@
 #include "run/canvas_runs.h"
 #include "run/run_bar.h"
 #include "../window_grab.h"
+#include "../readme_shot.h"
 #include "run/run_queue.h"
 #include "run/run_service.h"
 
@@ -1314,6 +1315,58 @@ echo '{"outputs": {"text": "painted"}}'
         QVERIFY(r.app.commands.trigger("view.toggle-run-toolbar"));
         QTRY_VERIFY(named(r, "runToolbar"));
         QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
+    }
+
+    // Not a check: with FUGUE_SHOT_DIR set, saves a finished text-to-image workflow with its pictures
+    // on the nodes as <dir>/results.png and results-light.png (#94). The provider is the fake one, and
+    // the picture it hands back is the one the z-image-turbo template ships as its preview (made with
+    // Fugue from this very prompt, no one's own).
+    void savesFinishedWorkflowsWhenAsked_data() {
+        QTest::addColumn<QString>("theme");
+        QTest::addColumn<QString>("file");
+        QTest::newRow("dark") << QString() << "results.png";
+        QTest::newRow("light") << "catppuccin-latte" << "results-light.png";
+    }
+    void savesFinishedWorkflowsWhenAsked() {
+        const QString dir = qEnvironmentVariable("FUGUE_SHOT_DIR");
+        if (dir.isEmpty())
+            QSKIP("set FUGUE_SHOT_DIR to save the README screenshot");
+        QFETCH(QString, theme);
+        QFETCH(QString, file);
+        const auto picture = [](const QString &template_) {
+            const QImage image(QFINDTESTDATA("../../templates/" + template_ + "/preview.webp"));
+            QByteArray bytes;
+            QBuffer buffer(&bytes);
+            buffer.open(QIODevice::WriteOnly);
+            image.save(&buffer, "PNG");
+            return bytes;
+        };
+        const QByteArray fox = picture("z-image-turbo");
+        QVERIFY(!fox.isEmpty());
+        RunApp r(R"({
+  "fugue": 1,
+  "graph": {"nodes": {
+    "fox-prompt": {"type": "fugue/text", "version": "1.0.0", "inputs": {"text": "a red fox in fresh snow, morning light, photo"}},
+    "fox": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"prompt": {"from": "fox-prompt.text"}, "seed": 7}},
+    "fox-show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "fox.image"}}}
+  }},
+  "layout": {"nodes": {"fox-prompt": {"pos": [0, 0]}, "fox": {"pos": [320, 0]}, "fox-show": {"pos": [640, 0]}}}
+})", false, imageDescription(), Look{theme, 8});
+        QVERIFY(r.app.open());
+        r.app.window->resize(1600, 1000);
+        r.app.workflows.dismissPendingTrust();
+        r.app.workflows.dismissNotice();
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(r.jobs().size(), 1);
+        r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(0), {{"image.png", fox}}); });
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(finished.first().at(1).toString(), QStringLiteral("ok"));
+        QTest::qWait(300);
+        r.app.model.select({});
+        r.app.model.requestFit();
+        QTest::qWait(1200); // the thumbnails load
+        QVERIFY(readme_shot::graphOnly(r.app.window, r.app.canvas).save(dir + "/" + file));
     }
 
     // Not a check: with FUGUE_SHOT_DIR set, saves the run toolbar with Cancel enabled and disabled
