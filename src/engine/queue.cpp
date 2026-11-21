@@ -12,7 +12,7 @@
 #include <ctime>
 #include <fcntl.h>
 #include <sys/file.h>
-#include <sys/pidfd.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 
 #include "engine/json.h"
@@ -252,15 +252,20 @@ qint64 processStartTime(qint64 pid) {
     return fields.size() > 19 ? fields.at(19).toLongLong() : 0;
 }
 
+// The two pidfd calls through syscall(): glibc's <sys/pidfd.h> (2.39+) declares them without
+// extern "C" in some builds (Debian 13's), so a C++ call to them fails to link.
+int pidfdOpen(pid_t pid) { return int(::syscall(SYS_pidfd_open, pid, 0u)); }
+int pidfdSendSignal(int pidfd, int signal) { return int(::syscall(SYS_pidfd_send_signal, pidfd, signal, nullptr, 0u)); }
+
 bool signalRunWorker(qint64 pid, const QString &run, int signal) {
     if (pid <= 0)
         return false;
     // While the pidfd is open the id cannot pass to another process, so the command line
     // read next is this process's. If it died meanwhile, the send fails (ESRCH).
-    const int process = ::pidfd_open(pid_t(pid), 0);
+    const int process = pidfdOpen(pid_t(pid));
     if (process < 0)
         return false; // no such process
-    const bool sent = isRunWorker(pid, run) && ::pidfd_send_signal(process, signal, nullptr, 0) == 0;
+    const bool sent = isRunWorker(pid, run) && pidfdSendSignal(process, signal) == 0;
     ::close(process);
     return sent;
 }
