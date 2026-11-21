@@ -220,6 +220,17 @@ Popup {
                     }
                     SettingsParts.Setting {
                         visible: panel.page === 0
+                        title: qsTr("Magnify small nodes on hover")
+                        note: qsTr("Zoomed far out, a short hover over a node shows it at full size over itself, so a wire can start there. Off by default.")
+                        SettingsParts.Toggle {
+                            objectName: "hoverMagnifier"
+                            text: on ? qsTr("On") : qsTr("Off")
+                            on: panel.model.hoverMagnifier
+                            onToggled: value => panel.apply(panel.model.set("hover_magnifier", value))
+                        }
+                    }
+                    SettingsParts.Setting {
+                        visible: panel.page === 0
                         title: qsTr("Language")
                         note: qsTr("Follows Omarchy's language unless you pick one here.")
                         Choices {

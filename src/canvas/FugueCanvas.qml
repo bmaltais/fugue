@@ -200,6 +200,15 @@ FocusScope {
     // under the pointer shows its own, to drop on. Inside it, toWorld() goes through it, so hover,
     // press and drop work as on the canvas. The view never moves; leaving it, a pan or a zoom, or
     // a press off its ports closes it.
+    // settings.json's hover_magnifier (#123), bound in Main.qml: off unless turned on.
+    property bool hoverMagnifier: false
+    onHoverMagnifierChanged: {
+        if (!hoverMagnifier) {
+            lensTimer.stop()
+            lensCandidate = ""
+            closeLens()
+        }
+    }
     property string lensNode: ""
     property string lensCandidate: ""
     // A wire started in the magnifier: once it travels, that magnifier goes, so the canvas around
@@ -229,6 +238,8 @@ FocusScope {
         if (inLens(px, py))
             return
         closeLens()
+        if (!hoverMagnifier)
+            return
         const w = Qt.point((px - world.x) / world.scale, (py - world.y) / world.scale)
         const n = tier >= 1 && (gesture === "" || gesture === "link") ? model.nodeAt(w.x, w.y) : ""
         if (n !== lensCandidate) {

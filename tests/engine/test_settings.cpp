@@ -35,6 +35,7 @@ private slots:
         QCOMPARE(file.settings.outputFolder, QString());
         QCOMPARE(file.settings.newSeed, QStringLiteral("random"));
         QCOMPARE(file.settings.embedWorkflow, QStringLiteral("full"));
+        QVERIFY(!file.settings.hoverMagnifier); // off by default (#123)
         QVERIFY(file.settings.modelPaths.isEmpty());
     }
 
@@ -92,6 +93,8 @@ private slots:
         QVERIFY(!checkSetting("embed_workflow", "some").isEmpty());
         QVERIFY(!checkSetting("new_seed", "increment").isEmpty());
         QVERIFY(!checkSetting("no_such_setting", 1).isEmpty());
+        QCOMPARE(checkSetting("hover_magnifier", true), QString());
+        QVERIFY(!checkSetting("hover_magnifier", "yes").isEmpty());
     }
 
     // The canvas corners (#63): 8 px unless set, any whole number of px from 0 to 16, or
@@ -113,6 +116,20 @@ private slots:
         const SettingsFile bad = readSettings(dir.filePath("settings.json"));
         QCOMPARE(bad.problems.size(), 1);
         QCOMPARE(bad.settings.cornerRadius, 8);
+    }
+
+    // The hover magnifier (#123): off unless the file says true; a bad value is a problem.
+    void theHoverMagnifierIsOffUnlessSet() {
+        QTemporaryDir dir;
+        QCOMPARE(settingDefault("hover_magnifier"), QJsonValue(false));
+        write(dir.filePath("settings.json"), R"({"navigation": "standard"})"); // an older file: no key
+        QVERIFY(!readSettings(dir.filePath("settings.json")).settings.hoverMagnifier);
+        write(dir.filePath("settings.json"), R"({"hover_magnifier": true})");
+        QVERIFY(readSettings(dir.filePath("settings.json")).settings.hoverMagnifier);
+        write(dir.filePath("settings.json"), R"({"hover_magnifier": "yes"})");
+        const SettingsFile bad = readSettings(dir.filePath("settings.json"));
+        QCOMPARE(bad.problems.size(), 1);
+        QVERIFY(!bad.settings.hoverMagnifier);
     }
 
     void changingOneKeepsTheKeysItDoesNotKnow() {

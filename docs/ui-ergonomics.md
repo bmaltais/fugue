@@ -150,14 +150,16 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 
 Reusable controls other surfaces may call. A component names its input and output here, knows nothing of its caller, and a caller's glue lives in its own file.
 
-### Color picker (#52)
+### Color picker (#52, #122)
 
-- Files: `src/canvas/ColorPickerPane.qml` (the picker), `src/canvas/ColorPickerPopup.qml` (the pane on a popup), `src/menu/color_history.h` (`App.colorHistory`: the recent list and the color math), `src/engine/layout_color.h` (the same in plain C++: `normalizeHex`, `hsvFromHex`, `hexFromHsv`, `RecentColors`). Canvas glue: `src/canvas/LayoutColorPicker.qml` and `src/menu/layout_colors.h` (node and Frame coloring, the first caller).
-- Input: `setColor(c)` starts it on a color ("#rrggbb", "#rgb", or without the "#"; a bad value is ignored). `remember` (true) and `showRecent` (true).
-- Output: `color` (read, the color being chosen now, follows every drag and key), and `picked(color)` on a confirm: Apply, Enter in the hex field, or a click on a recent color. A confirm puts the color first in `App.colorHistory.recent` when `remember` is true. The caller decides what picking does.
-- Popup: `ColorPickerPopup.openWith(color)`, `picked(color)`; Escape or a press outside closes it with no `picked`; it has no open or close fade.
-- Keys: the wheel, the brightness bar, the hex field, Apply and the recent colors take Tab focus. On the wheel, Left and Right turn the hue and Up and Down set saturation, 5 steps (Shift: 1); on the bar, Up and Down.
-- A new caller: a `ColorPickerPane` or `ColorPickerPopup`, `setColor`/`openWith` with its current color, `onPicked`. Needs `App.colorHistory` (null in a window made without it: the picker then picks nothing).
+- Files: `src/canvas/ColorPickerPane.qml` (the picker), `ColorNumberField.qml` (a label and a digits-only field), `src/canvas/ColorPickerPopup.qml` (the pane on a popup), `src/menu/color_history.h` (`App.colorHistory`: the recent list and the color math for QML), `src/engine/layout_color.h` (the same in plain C++: `normalizeHex`, `hsvFromHex`, `hexFromHsv`, `rgbFromHex`, `hexFromRgb`, `hsbRounded`, `RecentColors`; tests `tests/engine/test_layout_color.cpp`). Canvas glue: `src/canvas/LayoutColorPicker.qml` and `src/menu/layout_colors.h` (node and Frame coloring, the first caller).
+- Input: `setColor(c)` starts it on a color ("#rrggbb", "#rgb", or without the "#"; a bad value is ignored); that color is also the "current" swatch. `remember` (true) and `showRecent` (true).
+- Output: `color` (read, the color being chosen now, follows every drag and key), `picked(color)` on a confirm: OK, Enter in a field or on the field or slider, or a click on a recent color; and `canceled()`: Cancel or Escape. A confirm puts the color first in `App.colorHistory.recent` when `remember` is true. The caller decides what picking does; the popup closes on either signal.
+- Popup: `ColorPickerPopup.openWith(color)`, `picked(color)`; Cancel, Escape or a press outside closes it with no `picked`; it has no open or close fade.
+- Look: the saturation and brightness field (48u square, hue color at the top right, white to the left, black below), the hue slider (6u wide) beside it, the New swatch over the Current one with captions (a click on Current puts the start color back), H S B and R G B fields (digits only, capped at 360, 100 and 255; H and S and B show ° and %), the hex field, the recent colors under a caption (6u swatches), and Cancel and OK (`ViewButton`, 28px, OK highlighted) at the bottom right. Handles are double rings (dark, white, dark) with a soft shadow; the fields and sliders have a sunk 1px edge; hover enlarges a handle and rings a swatch; focus is the accent ring. Every color is a `look` token, so it follows light and dark themes.
+- Keys: the field, the hue slider, every number field, the hex field, the recent colors, Cancel and OK take Tab focus. On the field, Left and Right set saturation and Up and Down brightness, 5 steps (Shift: 1); on the slider, Up and Down turn the hue; Enter anywhere confirms; Escape cancels. A hex value that is not a color is drawn in the error color and OK is disabled.
+- Sync: the hue, saturation and brightness are kept as typed or dragged, the fields show them rounded, so a gray keeps its hue; the field being typed in is never rewritten until it loses the focus.
+- A new caller: a `ColorPickerPane` or `ColorPickerPopup`, `setColor`/`openWith` with its current color, `onPicked`, and `onCanceled` for a pane. Needs `App.colorHistory` (null in a window made without it: the picker then picks nothing).
 
 ### Large view and crop frame (#73)
 
@@ -202,6 +204,14 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Why: ComfyUI offers both as menu items, so recognition not recall; six leaf commands under two headings keep the Node menu from growing by six rows (Hick).
 - Rule: Learned place (the existing Node and node-menu items keep their order; the new rows sit after the toggles, before the image items). Gaps (the two rows join the toggles' chunk; no gap added). Floor (menu rows are the menus' existing height). Destructive: not applicable, and undo reverses each.
 
+### 2026-11-21 color picker OK and Cancel, richer look (#122)
+
+- Control: the color picker (`ColorPickerPane.qml`, in `ColorPickerPopup`): `colorOk`, `colorCancel`, `colorField`, `colorHue`, `colorPreview` and `colorCurrent` (the swatches), `colorChannel-H|S|B|R|G|Blue`, `colorHex`, `colorRecent-<n>`.
+- Old: a hue and saturation disk with a brightness bar, an unlabeled Apply pill beside the hex field, one swatch, the recent colors with no caption.
+- New: the field and slider layout of Adobe's picker, a New and Current swatch pair, six number fields beside the hex one, a captioned recent row, and Cancel and OK as labelled buttons at the bottom right (Cancel first, as CropDialog and the large views have them). Enter and Escape still confirm and cancel. The popup is 94u wide (about 376px).
+- Why: Apply was the one answer and had no name; a person who has seen another picker looks for OK and Cancel (recognition, Hick). Seeing the new color against the current one makes the change visible before it is made, so the one decision (OK) is informed. A field is faster than a disk for aiming at a bright saturated color (Fitts: 192px square, any point is a color), and numbers give a way in for a person who has a value.
+- Rule: Floor (every target is 24px or more: the swatches 24px, the number and hex fields and buttons 28px, the field 192px, the hue slider 24px wide; the handles are marks, not targets). Primary (OK is the one highlighted control; Cancel is plain). Destructive: not applicable, Cancel loses nothing that was applied, and undo reverses OK. Gaps (1u inside a chunk: label and field, swatches; 2u between the field and slider and between the field columns; 3u between chunks: the picking area, the recent colors, the buttons row). Learned place (OK last at the right, Cancel before it, as the other dialogs). Posture: a transient popup, two decisions at most (pick a color, OK). A click on a recent color still applies and closes at once, as before (#52): it is the quick path, and the picker is open to see before it.
+
 ### 2026-11-21 color picker for nodes and Frames (#52)
 
 - Control: the last row of the Colors menu (Edit > Colors, the node and Frame context menus and the selection toolbar's color button), `node.color.custom`, "Custom…", after a separator (`src/menu/menus.cpp`); and the popup it opens, `ColorPickerPopup` through `LayoutColorPicker.qml`: the disk 40u (160px), the brightness bar 7u (28px) wide beside it, a row of the color's preview (7u), the hex field (7u tall) and Apply (7u tall, highlighted), and under it the recent colors, 7u swatches 1u apart, six to a row, up to 12.
@@ -242,3 +252,11 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - New: one bar, 7u = 28px tall, over the picture: play and pause first, the time, the seek rail (the rest of the width), then mute and expand. The large view has the same bar and the close button of `LargeViewDialog`, with no Fit and 100% (a player has no zoom).
 - Why: play is the one thing wanted of a player, so it is first and in the same place on the face and the large view, as the dialog's primary; the rail is the widest target, since a seek is by pointing (Fitts); a press on the picture is not play, so it can select the node and a double click can open the large view, as for a picture. Space, Left, Right and M work once it has the focus.
 - Rule: Floor (every button is 28px square; the rail's press area is the bar's whole 28px height, its rail 4px). Primary (play is the first control; the others are quiet). Gaps (one `u` between the time, rail and buttons). Learned place: no menu changed. Posture: on the canvas, a control that is frequent is raised to 28px, over the node's 24px floor; the dialog is transient and starts playing at once, so it asks no decision.
+
+### 2026-11-21 hover magnifier setting (#123)
+
+- Control: Settings > General, `src/settings/SettingsPanel.qml` "Magnify small nodes on hover" (`hoverMagnifier`), a `SettingsParts.Toggle` (`src/settings/SettingsParts.qml`), after Corner radius, before Language. Writes `hover_magnifier` in settings.json.
+- Old: the magnifier (#74) always came up on a short hover far out.
+- New: off by default, so a node never grows under the pointer unasked; on, it behaves as #74. The toggle's label reads On or Off beside the switch. Applies at once; turning it off closes an open magnifier.
+- Why: the owner found a node growing on hover a surprise, not a help; a surprise costs more than the wire it saves, and the choice is one the user makes once.
+- Rule: Floor (the whole row, switch and label, is the press target, 7u = 28px tall; the 22x12 switch is the same drawing as Providers' "Use" switch). Primary: none, a settings page has none. Posture: a setting, no frequent action. The toggle takes Tab focus; Space or Enter flips it.

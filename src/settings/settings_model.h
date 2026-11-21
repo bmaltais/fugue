@@ -56,6 +56,8 @@ class SettingsModel : public QObject {
     // The canvas corners (#63): px from 0 to maxCornerRadius, or -1 to follow Omarchy.
     Q_PROPERTY(int cornerRadius READ cornerRadius NOTIFY changed)
     Q_PROPERTY(int maxCornerRadius READ maxCornerRadius CONSTANT)
+    // The hover magnifier (#74, #123): off unless turned on; the canvas binds it.
+    Q_PROPERTY(bool hoverMagnifier READ hoverMagnifier NOTIFY changed)
     // What is wrong with settings.json, one line each, and whether the panel may write it.
     Q_PROPERTY(QStringList problems READ problems NOTIFY changed)
     Q_PROPERTY(bool writable READ writable NOTIFY changed)
@@ -98,6 +100,7 @@ public:
     QString newSeed() const { return m_file.settings.newSeed; }
     QString embedWorkflow() const { return m_file.settings.embedWorkflow; }
     int cornerRadius() const { return m_file.settings.cornerRadius; }
+    bool hoverMagnifier() const { return m_file.settings.hoverMagnifier; }
     static int maxCornerRadius() { return Settings::maxCornerRadius; }
     QStringList problems() const { return m_file.problems; }
     bool writable() const { return m_file.writable; }

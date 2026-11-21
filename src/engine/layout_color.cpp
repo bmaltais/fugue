@@ -78,6 +78,30 @@ QString hexFromHsv(const Hsv &hsv) {
         .arg(byte(b), 2, 16, QLatin1Char('0'));
 }
 
+Rgb rgbFromHex(const QString &hex) {
+    const QString normal = normalizeHex(hex);
+    if (normal.isEmpty())
+        return {};
+    const auto channel = [&normal](int at) { return normal.mid(at, 2).toInt(nullptr, 16); };
+    return {channel(1), channel(3), channel(5)};
+}
+
+QString hexFromRgb(int r, int g, int b) {
+    const auto byte = [](int c) { return std::clamp(c, 0, 255); };
+    return QStringLiteral("#%1%2%3")
+        .arg(byte(r), 2, 16, QLatin1Char('0'))
+        .arg(byte(g), 2, 16, QLatin1Char('0'))
+        .arg(byte(b), 2, 16, QLatin1Char('0'));
+}
+
+Hsb hsbRounded(const Hsv &hsv) {
+    double h = std::fmod(hsv.h, 360.0);
+    if (h < 0)
+        h += 360;
+    return {int(std::lround(h)) % 360, int(std::lround(std::clamp(hsv.s, 0.0, 1.0) * 100)),
+            int(std::lround(std::clamp(hsv.v, 0.0, 1.0) * 100))};
+}
+
 RecentColors::RecentColors(QString path, int limit) : m_path(std::move(path)), m_limit(limit) {
     QFile file(m_path);
     if (!file.open(QIODevice::ReadOnly))

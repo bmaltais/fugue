@@ -102,6 +102,7 @@ ApplicationWindow {
                 Layout.rightMargin: win.sidePanelMargin("right")
                 model: App.canvasModel
                 navigation: win.appSettingsModel ? win.appSettingsModel.navigation : "legacy"
+                hoverMagnifier: win.appSettingsModel ? win.appSettingsModel.hoverMagnifier : false
                 onSearchRequested: (x, y) => App.canvasModel.search.openAt(x, y)
                 onLinkReleased: (from, x, y) => App.canvasModel.search.openFromLink(from, x, y)
                 onContextMenuRequested: (x, y) => contextMenu.openAt(x, y, false)

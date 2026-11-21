@@ -4,7 +4,7 @@ import Fugue
 
 // ColorPickerPane on a popup, centered in the window. Not tied to any caller: `openWith(color)`
 // opens it started on a color, and `picked(color)` says what was confirmed; the popup closes
-// then. Escape or a press outside closes it with no `picked`. See ColorPickerPane for the rest.
+// then. Cancel, Escape or a press outside closes it with no `picked`. See ColorPickerPane for the rest.
 Popup {
     id: root
     objectName: "colorPickerPopup"
@@ -36,5 +36,6 @@ Popup {
             root.close()
             root.picked(color)
         }
+        onCanceled: root.close()
     }
 }

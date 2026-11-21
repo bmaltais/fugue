@@ -19,7 +19,7 @@ namespace {
 const QStringList kKeys{"navigation",     "language",       "output_folder",
                         "inputs_folder",  "model_paths",    "model_folder_kinds",
                         "download_folder", "pack_paths",    "new_seed",
-                        "embed_workflow", "corner_radius"};
+                        "embed_workflow", "corner_radius",  "hover_magnifier"};
 
 QString oneOf(const QJsonValue &value, const QStringList &choices, const QString &key) {
     if (value.isString() && choices.contains(value.toString()))
@@ -88,6 +88,8 @@ void apply(Settings &settings, const QString &key, const QJsonValue &value) {
         settings.embedWorkflow = value.toString();
     else if (key == QLatin1String("corner_radius"))
         settings.cornerRadius = value.isString() ? Settings::followOmarchy : value.toInt();
+    else if (key == QLatin1String("hover_magnifier"))
+        settings.hoverMagnifier = value.toBool();
 }
 
 } // namespace
@@ -105,6 +107,8 @@ QJsonValue settingDefault(const QString &key) {
         return QStringLiteral("full");
     if (key == QLatin1String("corner_radius"))
         return 8;
+    if (key == QLatin1String("hover_magnifier"))
+        return false;
     if (key == QLatin1String("model_paths") || key == QLatin1String("pack_paths"))
         return QJsonArray();
     if (key == QLatin1String("model_folder_kinds"))
@@ -127,6 +131,8 @@ QString checkSetting(const QString &key, const QJsonValue &value) {
         return QStringLiteral("corner_radius must be a whole number of px from 0 to %1, or omarchy.")
             .arg(Settings::maxCornerRadius);
     }
+    if (key == QLatin1String("hover_magnifier"))
+        return value.isBool() ? QString() : QStringLiteral("hover_magnifier must be true or false.");
     if (key == QLatin1String("language")) {
         static const QRegularExpression code(QStringLiteral("^[a-z]{2,3}(-[A-Za-z]{2})?$"));
         if (value.isString() && code.match(value.toString()).hasMatch())
