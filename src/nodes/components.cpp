@@ -12,6 +12,13 @@
 // the whole graph. The LoRAs go with the generation options of the stages they change (encode
 // and sample), not with the context.
 //
+// Video (#105) is the same stages: a model that makes video (Wan) is run by the same capabilities,
+// the helper telling by the model files. A video latent is a latent whose descriptor also holds
+// `frames` and `fps` (Empty Video Latent makes it), the Sampler sends them on, and VAE Decode Video
+// takes the helper's decoded frames (a YUV4MPEG2 file, 8.10) into a video file. Wan 2.2's two
+// diffusion models (high and low noise) are Load Models' `high_noise` part; its UMT5 text encoder
+// goes in as `t5xxl_path`.
+//
 // The values between stages (2.6) are the helper's files, with a content hash (the scheduler
 // adds it): conditioning, and latents whose `meta` holds the image size and, for a sampled or
 // encoded latent, the model, which VAE Decode decodes with. An Empty Latent is only a size: the
@@ -36,6 +43,7 @@
 
 #include <vips/vips8>
 
+#include "engine/ffmpeg.h"
 #include "engine/file_hashes.h"
 #include "engine/media.h"
 #include "engine/model_library.h"
@@ -78,7 +86,7 @@ QJsonObject modelHandle(const QJsonObject &derived) { return QJsonObject{{"resou
 // (engine/model_shape.h): said here, before the helper fails to load them with less to say.
 // The inputs a mismatch of each part is blamed on.
 struct PartInputs {
-    QString diffusionModel, textEncoder, vae, lora;
+    QString diffusionModel, textEncoder, vae, lora, highNoise;
 };
 
 // `loras` are the model's LoRAs with their paths, as ModelFiles has them, in Apply LoRA's order.
@@ -86,11 +94,17 @@ std::optional<Error> partsMismatch(const QJsonObject &derived, const QJsonObject
                                    const QJsonArray &loras = {}) {
     ModelShapes &shapes = ModelShapes::shared(); // Load Models' check reads them on every canvas check
     // A file in a format the helper cannot load (the helper would abort building the model).
+    // A T5 text encoder (Wan's UMT5) goes in as t5xxl_path, any other as llm_path.
+    const QString encoderKey = paths.contains(QStringLiteral("t5xxl_path")) ? QStringLiteral("t5xxl_path") : QStringLiteral("llm_path");
     const QList<std::pair<QString, QString>> parts{{QStringLiteral("diffusion_model_path"), inputs.diffusionModel},
-                                                   {QStringLiteral("llm_path"), inputs.textEncoder},
-                                                   {QStringLiteral("vae_path"), inputs.vae}};
-    const QStringList partNames{QStringLiteral("base"), QStringLiteral("text_encoder"), QStringLiteral("vae")};
+                                                   {encoderKey, inputs.textEncoder},
+                                                   {QStringLiteral("vae_path"), inputs.vae},
+                                                   {QStringLiteral("high_noise_diffusion_model_path"), inputs.highNoise}};
+    const QStringList partNames{QStringLiteral("base"), QStringLiteral("text_encoder"), QStringLiteral("vae"),
+                                QStringLiteral("high_noise")};
     for (qsizetype i = 0; i < parts.size(); ++i) {
+        if (!paths.contains(parts.at(i).first))
+            continue;
         const std::optional<ModelShape> part = shapes.of(paths.value(parts.at(i).first).toString());
         if (part && !part->unloadable.isEmpty()) {
             Error error = makeError(
@@ -117,11 +131,11 @@ std::optional<Error> partsMismatch(const QJsonObject &derived, const QJsonObject
         return k == TextKind::T5 ? QStringLiteral("a T5 encoder") : k == TextKind::Clip ? QStringLiteral("a CLIP encoder")
                                                                                         : QStringLiteral("a language model");
     };
-    const std::optional<ModelShape> encoder = shapes.of(paths.value(QStringLiteral("llm_path")).toString());
+    const std::optional<ModelShape> encoder = shapes.of(paths.value(encoderKey).toString());
     if (encoder && loadableTextEncoderFits(*diffusion, *encoder) == Fit::DoesNotFit) {
         const TextKind is = encoder->textKind.value_or(TextKind::Llm);
         const QString why = is != TextKind::Llm
-                                ? QStringLiteral("it is %1, and Load Models takes a language model.").arg(kind(is))
+                                ? QStringLiteral("it is %1, and Load Models takes a language model or a T5 encoder.").arg(kind(is))
                             : is != diffusion->textKind.value_or(TextKind::Llm)
                                 ? QStringLiteral("it is %1, and the model reads %2.")
                                       .arg(kind(is), kind(diffusion->textKind.value_or(TextKind::Llm)))
@@ -180,6 +194,19 @@ QJsonObject remoteHandle(const QJsonValue &value, const ModelLibrary &library, F
     return sent;
 }
 
+// The context option a text encoder goes in as: Wan's UMT5 (a T5, by its tensors) as `t5xxl_path`,
+// any other as `llm_path`. Found by name on this machine, without reading it, as for a paired host;
+// a file that is not here is taken for a language model.
+QString encoderKeyOf(const QString &path) {
+    const std::optional<ModelShape> shape = ModelShapes::shared().of(path);
+    return shape && shape->textKind == TextKind::T5 ? QStringLiteral("t5xxl_path") : QStringLiteral("llm_path");
+}
+
+QString textEncoderKey(const QJsonObject &encoder, const ModelLibrary &library, FileHashes &hashes) {
+    const Result<QString> found = library.resolve(encoder, hashes, ModelLibrary::Hashing::RememberedOnly);
+    return found ? encoderKeyOf(found.value()) : QStringLiteral("llm_path");
+}
+
 // The files of the `fugue/model` handle in `input`, found on this machine (8.9). model_missing,
 // blamed on the input, when one is not here. For a provider that does not share the filesystem
 // (`shares` false) the files are handles the host resolves, and nothing is looked for or checked
@@ -203,8 +230,12 @@ Result<ModelFiles> modelFiles(const QJsonObject &model, const QString &input, co
     const bool checkpoint = base.value(QStringLiteral("resource")).toString() == kModelType; // every part in one file
     ModelFiles files;
     files.context.insert(checkpoint ? QStringLiteral("model_path") : QStringLiteral("diffusion_model_path"), path(base));
-    if (derived.contains(QStringLiteral("text_encoder")))
-        files.context.insert(QStringLiteral("llm_path"), path(derived.value(QStringLiteral("text_encoder"))));
+    if (derived.contains(QStringLiteral("high_noise")))
+        files.context.insert(QStringLiteral("high_noise_diffusion_model_path"), path(derived.value(QStringLiteral("high_noise"))));
+    if (derived.contains(QStringLiteral("text_encoder"))) {
+        const QJsonObject encoder = derived.value(QStringLiteral("text_encoder")).toObject();
+        files.context.insert(textEncoderKey(encoder, library, *context.hashes), path(encoder));
+    }
     if (derived.contains(QStringLiteral("vae")))
         files.context.insert(QStringLiteral("vae_path"), path(derived.value(QStringLiteral("vae"))));
     for (const QJsonValue &step : derived.value(QStringLiteral("apply")).toArray()) {
@@ -216,7 +247,7 @@ Result<ModelFiles> modelFiles(const QJsonObject &model, const QString &input, co
         return *missing;
     if (!shares)
         return files;
-    if (const std::optional<Error> mismatch = partsMismatch(derived, files.context, {input, input, input, input}, files.loras))
+    if (const std::optional<Error> mismatch = partsMismatch(derived, files.context, {input, input, input, input, {}}, files.loras))
         return *mismatch;
     return files;
 }
@@ -228,11 +259,16 @@ struct LatentMeta {
     int height = 0;
     QJsonObject model;
     bool empty = false;
+    int frames = 0; // a video latent's length and rate (2.6); 0 for an image
+    int fps = 0;
+
+    bool isVideo() const { return frames > 0; }
 
     static LatentMeta of(const Value &latent) {
         const QJsonObject meta = latent.json().toObject().value(QStringLiteral("meta")).toObject();
         return {meta.value(QStringLiteral("width")).toInt(), meta.value(QStringLiteral("height")).toInt(),
-                meta.value(QStringLiteral("model")).toObject(), meta.value(QStringLiteral("empty")).toBool()};
+                meta.value(QStringLiteral("model")).toObject(), meta.value(QStringLiteral("empty")).toBool(),
+                meta.value(QStringLiteral("frames")).toInt(), meta.value(QStringLiteral("fps")).toInt()};
     }
     QJsonObject toJson() const {
         QJsonObject meta{{"width", width}, {"height", height}};
@@ -240,6 +276,10 @@ struct LatentMeta {
             meta.insert(QStringLiteral("model"), model);
         if (empty)
             meta.insert(QStringLiteral("empty"), true);
+        if (isVideo()) {
+            meta.insert(QStringLiteral("frames"), frames);
+            meta.insert(QStringLiteral("fps"), fps);
+        }
         return meta;
     }
 };
@@ -265,12 +305,15 @@ QJsonObject dataHandle(const QString &type, const QString &path, const QJsonObje
     return handle;
 }
 
-// A latent the helper wrote for a stage of `model`, at `width` x `height`.
-Result<Values> latentOutput(const JobResult &result, int width, int height, const QJsonValue &model) {
+// A latent the helper wrote for a stage of `model`, of the size (and for a video, the length and
+// rate) `size` says.
+Result<Values> latentOutput(const JobResult &result, const LatentMeta &size, const QJsonValue &model) {
     const Result<QString> path = written(result, QStringLiteral("latent"));
     if (!path)
         return path.errors();
-    const LatentMeta made{width, height, model.toObject(), false};
+    LatentMeta made = size;
+    made.model = model.toObject();
+    made.empty = false;
     return Values{{QStringLiteral("latent"), Value(dataHandle(kLatentType, path.value(), made.toJson()))}};
 }
 
@@ -349,25 +392,35 @@ public:
                                                           *context.hashes, ModelLibrary::Hashing::RememberedOnly);
             return found ? found.value() : QString();
         };
-        const QJsonObject paths{{"diffusion_model_path", path("diffusion_model")},
-                                {"llm_path", path("text_encoder")},
-                                {"vae_path", path("vae")}};
-        const QJsonObject derived{{"base", context.input(QStringLiteral("diffusion_model")).json()},
-                                  {"text_encoder", context.input(QStringLiteral("text_encoder")).json()},
-                                  {"vae", context.input(QStringLiteral("vae")).json()}};
+        const QString encoder = path("text_encoder");
+        QJsonObject paths{{"diffusion_model_path", path("diffusion_model")}, {"vae_path", path("vae")}};
+        paths.insert(encoderKeyOf(encoder), encoder);
+        if (hasHighNoise(context))
+            paths.insert(QStringLiteral("high_noise_diffusion_model_path"), path("high_noise_diffusion_model"));
         // Blamed on the part that does not fit, where its picker is.
-        if (const std::optional<Error> mismatch =
-                partsMismatch(derived, paths,
-                              {QStringLiteral("diffusion_model"), QStringLiteral("text_encoder"), QStringLiteral("vae"), QString()}))
+        if (const std::optional<Error> mismatch = partsMismatch(
+                derived(context), paths,
+                {QStringLiteral("diffusion_model"), QStringLiteral("text_encoder"), QStringLiteral("vae"), QString(),
+                 QStringLiteral("high_noise_diffusion_model")}))
             return {*mismatch};
         return {};
     }
 
     Result<Values> run(const NodeContext &context) override {
-        const QJsonObject derived{{"base", context.input(QStringLiteral("diffusion_model")).json()},
-                                  {"text_encoder", context.input(QStringLiteral("text_encoder")).json()},
-                                  {"vae", context.input(QStringLiteral("vae")).json()}};
-        return Values{{QStringLiteral("model"), Value(modelHandle(derived))}};
+        return Values{{QStringLiteral("model"), Value(modelHandle(derived(context)))}};
+    }
+
+private:
+    static bool hasHighNoise(const NodeContext &context) {
+        return !context.input(QStringLiteral("high_noise_diffusion_model")).isEmpty();
+    }
+    static QJsonObject derived(const NodeContext &context) {
+        QJsonObject parts{{"base", context.input(QStringLiteral("diffusion_model")).json()},
+                          {"text_encoder", context.input(QStringLiteral("text_encoder")).json()},
+                          {"vae", context.input(QStringLiteral("vae")).json()}};
+        if (hasHighNoise(context))
+            parts.insert(QStringLiteral("high_noise"), context.input(QStringLiteral("high_noise_diffusion_model")).json());
+        return parts;
     }
 };
 
@@ -383,22 +436,36 @@ public:
     }
 };
 
-// A size and nothing else: the file holds it, so its hash differs by size.
+// A size (and for a video the length and rate) and nothing else: the file holds it, so its hash
+// differs by them.
 class EmptyLatentKernel : public NodeKernel {
 public:
+    explicit EmptyLatentKernel(bool video = false) : m_video(video) {}
+
     Result<Values> run(const NodeContext &context) override {
         LatentMeta size;
         size.width = int(context.input(QStringLiteral("width")).number());
         size.height = int(context.input(QStringLiteral("height")).number());
+        if (m_video) {
+            size.frames = int(context.input(QStringLiteral("frames")).number());
+            size.fps = int(context.input(QStringLiteral("fps")).number());
+        }
         size.empty = true;
-        const QByteArray bytes = QJsonDocument(QJsonObject{{"width", size.width}, {"height", size.height}})
-                                     .toJson(QJsonDocument::Compact);
+        QJsonObject described{{"width", size.width}, {"height", size.height}};
+        if (m_video) {
+            described.insert(QStringLiteral("frames"), size.frames);
+            described.insert(QStringLiteral("fps"), size.fps);
+        }
+        const QByteArray bytes = QJsonDocument(described).toJson(QJsonDocument::Compact);
         const QString path = QDir(context.workDir).filePath(QStringLiteral("latent.json"));
         QFile file(path);
         if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.flush())
             return makeError(QStringLiteral("node_failed"), QStringLiteral("Cannot write %1.").arg(path));
         return Values{{QStringLiteral("latent"), Value(dataHandle(kLatentType, path, size.toJson()))}};
     }
+
+private:
+    const bool m_video;
 };
 
 // --- the stages ---
@@ -493,11 +560,20 @@ public:
             return files.errors();
         const Value latent = context.input(QStringLiteral("latent"));
         const LatentMeta from = LatentMeta::of(latent);
+        // A video starts from noise: nothing makes a sampled video latent a start yet.
+        if (from.isVideo() && !from.empty)
+            return makeInputError(QStringLiteral("node_failed"), QStringLiteral("latent"),
+                                  QStringLiteral("A video cannot be redrawn from a sampled video yet."),
+                                  QStringLiteral("Start from an Empty Video Latent."));
         QJsonObject params{{"width", from.width},
                            {"height", from.height},
                            {"seed", context.input(QStringLiteral("seed")).json().toInteger()},
                            {"sample.steps", int(context.input(QStringLiteral("steps")).number())},
                            {"sample.guidance.txt_cfg", context.input(QStringLiteral("guidance")).number()}};
+        if (from.isVideo()) {
+            params.insert(QStringLiteral("video_frames"), from.frames);
+            params.insert(QStringLiteral("fps"), from.fps);
+        }
         if (const Value method = context.input(QStringLiteral("sampler")); !method.isEmpty())
             params.insert(QStringLiteral("sample.method"), method.text());
         if (const Value scheduler = context.input(QStringLiteral("scheduler")); !scheduler.isEmpty())
@@ -522,14 +598,16 @@ public:
     }
 
     Result<Values> outputs(const NodeContext &context, const Selection &, const JobResult &result) override {
-        const LatentMeta from = LatentMeta::of(context.input(QStringLiteral("latent")));
-        return latentOutput(result, from.width, from.height, context.input(QStringLiteral("model")).json());
+        return latentOutput(result, LatentMeta::of(context.input(QStringLiteral("latent"))),
+                            context.input(QStringLiteral("model")).json());
     }
 };
 
+// VAE Decode (an image) and VAE Decode Video (a clip): one capability, the helper making the kind
+// the model makes. A latent of the other kind is said so here, before the helper decodes it.
 class VaeDecodeKernel : public StageKernel {
 public:
-    VaeDecodeKernel() : StageKernel(QStringLiteral("latent.decode")) {}
+    explicit VaeDecodeKernel(bool video = false) : StageKernel(QStringLiteral("latent.decode")), m_video(video) {}
 
     Result<JobRequest> request(const NodeContext &context, const Selection &selection) override {
         const Value latent = context.input(QStringLiteral("latent"));
@@ -538,15 +616,28 @@ public:
             return makeInputError(QStringLiteral("node_failed"), QStringLiteral("latent"),
                                   QStringLiteral("An Empty Latent has no image in it yet."),
                                   QStringLiteral("Sample it first: wire it through a Sampler."));
+        if (sampled.isVideo() != m_video)
+            return makeInputError(QStringLiteral("node_failed"), QStringLiteral("latent"),
+                                  m_video ? QStringLiteral("This latent is an image, and VAE Decode Video decodes a video.")
+                                          : QStringLiteral("This latent is a video, and VAE Decode decodes an image."),
+                                  m_video ? QStringLiteral("Use VAE Decode, or start from an Empty Video Latent.")
+                                          : QStringLiteral("Use VAE Decode Video."));
         const Result<ModelFiles> files = modelFiles(sampled.model, QStringLiteral("latent"), context, selection.sharesFilesystem);
         if (!files)
             return files.errors();
-        JobRequest request = job(*files, QJsonObject{{"width", sampled.width}, {"height", sampled.height}});
+        QJsonObject params{{"width", sampled.width}, {"height", sampled.height}};
+        if (m_video) { // every stage of a generation takes the same options
+            params.insert(QStringLiteral("video_frames"), sampled.frames);
+            params.insert(QStringLiteral("fps"), sampled.fps);
+        }
+        JobRequest request = job(*files, params);
         request.inputs.insert(QStringLiteral("latent"), fileOf(latent));
         return request;
     }
 
     Result<Values> outputs(const NodeContext &context, const Selection &, const JobResult &result) override {
+        if (m_video)
+            return video(context, result);
         const Result<QString> path = written(result, QStringLiteral("image"));
         if (!path)
             return path.errors();
@@ -555,6 +646,28 @@ public:
             return image.errors();
         return Values{{QStringLiteral("image"), Value(image.value())}};
     }
+
+private:
+    // The helper's frames (YUV4MPEG2, 8.10) as a video file: lossless, as every intermediate video of
+    // the engine is (FFV1 in Matroska), for Save Video to encode as the user chooses.
+    static Result<Values> video(const NodeContext &context, const JobResult &result) {
+        const Result<QString> frames = written(result, QStringLiteral("video"));
+        if (!frames)
+            return frames.errors();
+        const QString path = QDir(context.workDir).filePath(QStringLiteral("video.mkv"));
+        const Result<QByteArray> done = ffmpeg::run(
+            QStringLiteral("ffmpeg"),
+            {"-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", frames.value(), "-c:v", "ffv1", "-f", "matroska", path},
+            QStringLiteral("node_failed"));
+        if (!done)
+            return done.errors();
+        const Result<MediaHandle> clip = MediaHandle::probe(MediaType::Video, path, *context.hashes);
+        if (!clip)
+            return clip.errors();
+        return Values{{QStringLiteral("video"), Value(clip.value())}};
+    }
+
+    const bool m_video;
 };
 
 class VaeEncodeKernel : public StageKernel {
@@ -578,7 +691,10 @@ public:
 
     Result<Values> outputs(const NodeContext &context, const Selection &, const JobResult &result) override {
         const QSize size = sizeOf(context.input(QStringLiteral("image")).media());
-        return latentOutput(result, size.width(), size.height(), context.input(QStringLiteral("model")).json());
+        LatentMeta meta;
+        meta.width = size.width();
+        meta.height = size.height();
+        return latentOutput(result, meta, context.input(QStringLiteral("model")).json());
     }
 
 private:
@@ -595,9 +711,11 @@ void addComponentKernels(Kernels &kernels) {
     kernels.add(QStringLiteral("fugue/load-models"), std::make_shared<LoadModelsKernel>());
     kernels.add(QStringLiteral("fugue/apply-lora"), std::make_shared<ApplyLoraKernel>());
     kernels.add(QStringLiteral("fugue/empty-latent"), std::make_shared<EmptyLatentKernel>());
+    kernels.add(QStringLiteral("fugue/empty-video-latent"), std::make_shared<EmptyLatentKernel>(true));
     kernels.add(QStringLiteral("fugue/text-encode"), std::make_shared<TextEncodeKernel>());
     kernels.add(QStringLiteral("fugue/sampler"), std::make_shared<SamplerKernel>());
     kernels.add(QStringLiteral("fugue/vae-decode"), std::make_shared<VaeDecodeKernel>());
+    kernels.add(QStringLiteral("fugue/vae-decode-video"), std::make_shared<VaeDecodeKernel>(true));
     kernels.add(QStringLiteral("fugue/vae-encode"), std::make_shared<VaeEncodeKernel>());
 }
 

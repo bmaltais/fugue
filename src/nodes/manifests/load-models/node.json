@@ -5,13 +5,15 @@
   "name": "Load Models",
   "description": "A diffusion model with its text encoder and VAE, picked from your model folders, as one model for Text Encode, Sampler and VAE Encode.",
   "category": "Diffusion",
-  "keywords": ["loader", "checkpoint", "unet", "diffusion model", "text encoder", "clip", "vae", "z-image", "flux"],
+  "keywords": ["loader", "checkpoint", "unet", "diffusion model", "text encoder", "clip", "vae", "z-image", "flux", "wan"],
   "runtime": {"kind": "builtin"},
   "inputs": [
     {"name": "diffusion_model", "type": "fugue/diffusion-model", "label": "Diffusion model"},
     {"name": "text_encoder", "type": "fugue/text-encoder", "label": "Text encoder",
-     "description": "The language model the diffusion model reads prompts with: Qwen3 4B for Z-Image Turbo and FLUX.2 Klein 4B, Qwen3 8B for Klein 9B."},
-    {"name": "vae", "type": "fugue/vae", "label": "VAE"}
+     "description": "The language model the diffusion model reads prompts with: Qwen3 4B for Z-Image Turbo and FLUX.2 Klein 4B, Qwen3 8B for Klein 9B; UMT5 for Wan."},
+    {"name": "vae", "type": "fugue/vae", "label": "VAE"},
+    {"name": "high_noise_diffusion_model", "type": "fugue/diffusion-model", "label": "High-noise diffusion model", "optional": true,
+     "description": "Wan 2.2 14B makes a clip with two diffusion models: this one for the first, noisiest steps, and the Diffusion model for the rest."}
   ],
   "outputs": [
     {"name": "model", "type": "fugue/model", "label": "Model"}

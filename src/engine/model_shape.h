@@ -18,9 +18,10 @@
 //
 //   text encoder     T5 (encoder.block.*), CLIP (text_model.*), else an LLM (GGUF's architecture
 //                    says t5 or clip too)
-//   diffusion model  reads T5 when it has vector_in (FLUX.1) or SD3's context_embedder, else an
-//                    LLM (Z-Image, FLUX.2, Qwen-Image); wants a video VAE when it is Qwen-Image
-//                    (time_text_embed beside txt_in)
+//   diffusion model  reads T5 when it has vector_in (FLUX.1), SD3's context_embedder, or is Wan
+//                    (text_embedding beside patch_embedding), else an LLM (Z-Image, FLUX.2,
+//                    Qwen-Image); wants a video VAE when it is Qwen-Image (time_text_embed beside
+//                    txt_in) or Wan
 //   VAE              a video VAE when its first decoder convolution is 3D (Qwen-Image, Wan)
 //
 // A LoRA fits a model whose layers it changes are there with the same input widths (loraFits).
@@ -122,8 +123,9 @@ std::optional<ModelShape> readModelShape(const QString &path);
 enum class Fit { Unknown, Fits, DoesNotFit };
 
 Fit textEncoderFits(const ModelShape &diffusionModel, const ModelShape &textEncoder);
-// textEncoderFits for Load Models, which loads one LLM encoder (`llm_path`, spec 14.3): a T5 or
-// CLIP encoder does not fit there, whatever its width (FLUX.1 and SD3 come later).
+// textEncoderFits for Load Models, which loads one LLM encoder (`llm_path`, spec 14.3), or Wan's
+// UMT5 (`t5xxl_path`): another T5 or a CLIP encoder does not fit there, whatever its width (FLUX.1
+// and SD3 come later).
 Fit loadableTextEncoderFits(const ModelShape &diffusionModel, const ModelShape &textEncoder);
 Fit vaeFits(const ModelShape &diffusionModel, const ModelShape &vae);
 // A LoRA fits a diffusion model when the layers it changes that the model has are as wide in

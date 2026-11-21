@@ -11,9 +11,15 @@
 //   {"op": "encode",     "conditioning": OUT}                  prompts -> conditioning
 //   {"op": "sample",     "conditioning": IN, "latent": OUT,    conditioning -> latent; with
 //                        "init_latent": IN (optional)}         init_latent, image-to-image from it
-//   {"op": "decode",     "latent": IN, "image": OUT}           latent -> PNG
+//   {"op": "decode",     "latent": IN, "image": OUT,           latent -> PNG; for a video model
+//                        "video": OUT}                         "video" is written instead (below)
 //   {"op": "vae_encode", "image": IN, "latent": OUT}           PNG -> latent
-//   {"op": "generate",   "image": OUT}                         all stages in one call
+//   {"op": "generate",   "image": OUT, "video": OUT}           all stages in one call
+//
+// A context of a video model (Wan) makes the same operations on video: the library's video
+// options (video_frames, fps, high_noise_*) and sd_generate_video; the latent is the clip's, and
+// decode writes the "video" file, YUV4MPEG2 (4:2:0, which every ffmpeg reads; the helper links no
+// codec), not an image. vae_encode and a start latent are refused for a video.
 //
 // plus "context" (the model files and context options) and "params" (the generation options),
 // passed to stable-diffusion.cpp by key as they are (docs/guides/c_api.md at the pin). A value
@@ -53,6 +59,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <chrono>
 #include <condition_variable>
 #include <csignal>
@@ -142,6 +149,51 @@ void saveImage(const sd_tensor_t *image, const std::string &path) {
     const int w = static_cast<int>(sd_tensor_dim(image, 1));
     const int h = static_cast<int>(sd_tensor_dim(image, 2));
     if (!stbi_write_png(path.c_str(), w, h, c, sd_tensor_data(image), w * c))
+        fail("helper_failed", "cannot write " + path);
+}
+
+// A video as YUV4MPEG2 (4:2:0, full range, the library's U8 [C,W,H,T] frames): a plain file every
+// ffmpeg reads, with the size and rate in its header. The helper links no video codec; Fugue
+// encodes it (spec 8.10).
+void saveVideo(const sd_video_t &video, const std::string &path) {
+    const sd_tensor_t *frames = video.data;
+    if (!frames || sd_tensor_type(frames) != SD_TENSOR_U8 || sd_tensor_rank(frames) != 4 || sd_tensor_dim(frames, 0) != 3)
+        fail("helper_failed", "the library returned a video of an unexpected shape");
+    const int64_t w = sd_tensor_dim(frames, 1), h = sd_tensor_dim(frames, 2), count = sd_tensor_dim(frames, 3);
+    if (w <= 0 || h <= 0 || count <= 0)
+        fail("helper_failed", "the library returned an empty video");
+    const auto *pixels = static_cast<const unsigned char *>(sd_tensor_data(frames));
+    FILE *out = std::fopen(path.c_str(), "wb");
+    if (!out)
+        fail("helper_failed", "cannot write " + path);
+    const int fps = video.fps > 0 ? video.fps : 16;
+    std::fprintf(out, "YUV4MPEG2 W%lld H%lld F%d:1 Ip A1:1 C420jpeg\n", static_cast<long long>(w), static_cast<long long>(h), fps);
+    const int64_t cw = (w + 1) / 2, ch = (h + 1) / 2;
+    std::vector<unsigned char> y(static_cast<size_t>(w * h)), u(static_cast<size_t>(cw * ch)), v(static_cast<size_t>(cw * ch));
+    bool ok = true;
+    for (int64_t f = 0; f < count && ok; ++f) {
+        const unsigned char *frame = pixels + static_cast<size_t>(f * w * h * 3);
+        for (int64_t j = 0; j < ch; ++j)
+            for (int64_t i = 0; i < cw; ++i) {
+                int su = 0, sv = 0, n = 0; // the chroma of a 2x2 block, averaged
+                for (int64_t dj = 0; dj < 2; ++dj)
+                    for (int64_t di = 0; di < 2; ++di) {
+                        const int64_t jj = std::min(h - 1, 2 * j + dj), ii = std::min(w - 1, 2 * i + di);
+                        const unsigned char *p = frame + (jj * w + ii) * 3;
+                        const float r = p[0], g = p[1], b = p[2];
+                        y[static_cast<size_t>(jj * w + ii)] = static_cast<unsigned char>(std::lround(0.299f * r + 0.587f * g + 0.114f * b));
+                        su += static_cast<int>(std::lround(128 - 0.168736f * r - 0.331264f * g + 0.5f * b));
+                        sv += static_cast<int>(std::lround(128 + 0.5f * r - 0.418688f * g - 0.081312f * b));
+                        ++n;
+                    }
+                u[static_cast<size_t>(j * cw + i)] = static_cast<unsigned char>(std::clamp((su + n / 2) / n, 0, 255));
+                v[static_cast<size_t>(j * cw + i)] = static_cast<unsigned char>(std::clamp((sv + n / 2) / n, 0, 255));
+            }
+        ok = std::fputs("FRAME\n", out) >= 0 && std::fwrite(y.data(), 1, y.size(), out) == y.size() &&
+             std::fwrite(u.data(), 1, u.size(), out) == u.size() && std::fwrite(v.data(), 1, v.size(), out) == v.size();
+    }
+    ok = (std::fclose(out) == 0) && ok;
+    if (!ok)
         fail("helper_failed", "cannot write " + path);
 }
 
@@ -308,7 +360,12 @@ json run(const json &request, Contexts &contexts, const std::function<bool(sd_ct
     if (op != "encode" && op != "sample" && op != "decode" && op != "vae_encode" && op != "generate")
         fail("input_invalid", "unknown op \"" + op + "\"; use encode, sample, decode, vae_encode or generate");
 
-    Opt options(sd_img_gen_opt_create());
+    // The context first: whether it makes video (Wan, ...) says which options and which call.
+    sd_ctx_t *ctx = contexts.get(request.value("context", json::object()));
+    const bool video = sd_ctx_supports_video_generation(ctx);
+    if (video && op == "vae_encode")
+        fail("input_invalid", "a video model has no VAE encode stage here: a video starts from noise");
+    Opt options(video ? sd_vid_gen_opt_create() : sd_img_gen_opt_create());
     if (!options)
         fail("out_of_memory", "cannot create the options");
     const json params = request.value("params", json::object());
@@ -319,7 +376,7 @@ json run(const json &request, Contexts &contexts, const std::function<bool(sd_ct
     auto setPath = [&](const char *key, const std::string &path) {
         check(sd_opt_set_string(options.get(), key, path.c_str()), key);
     };
-    std::string imageOut;
+    std::string imageOut, videoOut;
     if (op == "encode") {
         const std::string cond = required(request, "conditioning");
         setPath("fugue.cond_out", cond);
@@ -328,14 +385,17 @@ json run(const json &request, Contexts &contexts, const std::function<bool(sd_ct
     } else if (op == "sample") {
         const std::string latent = required(request, "latent");
         setPath("fugue.cond_in", required(request, "conditioning"));
-        if (request.contains("init_latent"))
+        if (request.contains("init_latent")) {
+            if (video)
+                fail("input_invalid", "a video cannot start from a latent here: it starts from noise");
             setPath("fugue.init_latent_in", required(request, "init_latent"));
+        }
         setPath("fugue.latent_out", latent);
         setPath("fugue.stop_after", "sample");
         outputs.push_back({{"latent", latent}});
     } else if (op == "decode") {
         setPath("fugue.latent_in", required(request, "latent"));
-        imageOut = required(request, "image");
+        (video ? videoOut : imageOut) = required(request, video ? "video" : "image");
     } else if (op == "vae_encode") {
         const std::string latent = required(request, "latent");
         check(sd_opt_set_tensor(options.get(), "init_image", loadImage(required(request, "image")).get()), "init_image");
@@ -343,24 +403,32 @@ json run(const json &request, Contexts &contexts, const std::function<bool(sd_ct
         setPath("fugue.stop_after", "init");
         outputs.push_back({{"latent", latent}});
     } else {
-        imageOut = required(request, "image");
+        (video ? videoOut : imageOut) = required(request, video ? "video" : "image");
     }
-
-    sd_ctx_t *ctx = contexts.get(request.value("context", json::object()));
 
     sd_result_t *result = nullptr;
     // sd_generate_image clears a cancel asked before it starts, so that one is heard here.
     if (running && !running(ctx))
         fail("cancelled", op + " was cancelled");
-    sd_status_t status = sd_generate_image(ctx, options.get(), &result);
+    const auto generate = [&] {
+        return video ? sd_generate_video(ctx, options.get(), &result) : sd_generate_image(ctx, options.get(), &result);
+    };
+    sd_status_t status = generate();
     if (status == SD_STATUS_OUT_OF_MEMORY && contexts.dropOthers(ctx))
-        status = sd_generate_image(ctx, options.get(), &result);
+        status = generate();
     if (running)
         running(nullptr);
     if (status == SD_STATUS_CANCELLED)
         fail("cancelled", op + " was cancelled");
     check(status, op);
     std::unique_ptr<sd_result_t, void (*)(sd_result_t *)> resultOwner(result, sd_result_free);
+    if (!videoOut.empty()) {
+        const sd_video_t *clip = sd_result_get_video(result);
+        if (!clip)
+            fail("helper_failed", "no video was made: " + lastError());
+        saveVideo(*clip, videoOut);
+        outputs.push_back({{"video", videoOut}});
+    }
     if (!imageOut.empty()) {
         const size_t count = sd_result_get_image_count(result);
         if (count == 0)
@@ -1218,8 +1286,10 @@ private:
             request["conditioning"] = (dir / "conditioning.bin").string();
         else if (op->second == "sample" || op->second == "vae_encode")
             request["latent"] = (dir / "latent.bin").string();
-        else
-            request["image"] = (dir / "image.png").string();
+        else {
+            request["image"] = (dir / "image.png").string(); // a video model writes the video instead
+            request["video"] = (dir / "video.y4m").string();
+        }
 
         std::lock_guard<std::mutex> lock(m_mutex);
         const std::string id = std::to_string(++m_count);
@@ -1302,7 +1372,7 @@ private:
                         if (m_models) { // fetched over HTTP: the file's index, kind and size
                             std::error_code ignored;
                             file = {{"file", job.files.size()},
-                                    {"format", name == "image" ? "png" : name},
+                                    {"format", name == "image" ? "png" : name == "video" ? "y4m" : name},
                                     {"size", fs::file_size(path.get<std::string>(), ignored)}};
                             job.files.push_back(path.get<std::string>());
                         }

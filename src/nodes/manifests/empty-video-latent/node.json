@@ -1,0 +1,21 @@
+{
+  "manifest": 1,
+  "id": "fugue/empty-video-latent",
+  "version": "1.0.0",
+  "name": "Empty Video Latent",
+  "description": "The size, length and rate of the clip to make, for a Sampler to start from noise, on a video model such as Wan.",
+  "category": "Diffusion",
+  "keywords": ["empty hunyuan latent video", "empty latent video", "wan", "clip", "frames", "size", "noise"],
+  "runtime": {"kind": "builtin"},
+  "inputs": [
+    {"name": "width", "type": "number", "label": "Width", "default": 832, "integer": true, "min": 64, "max": 4096, "step": 16},
+    {"name": "height", "type": "number", "label": "Height", "default": 480, "integer": true, "min": 64, "max": 4096, "step": 16},
+    {"name": "frames", "type": "number", "label": "Frames", "default": 33, "integer": true, "min": 1, "max": 241, "step": 4,
+     "description": "Wan makes 4 n + 1 frames (33, 81); the model rounds another count to one."},
+    {"name": "fps", "type": "number", "label": "Frames per second", "default": 16, "integer": true, "min": 1, "max": 60,
+     "description": "Wan 2.1 and 2.2 14B are made for 16, Wan 2.2 5B for 24."}
+  ],
+  "outputs": [
+    {"name": "latent", "type": "fugue/latent", "label": "Latent"}
+  ]
+}

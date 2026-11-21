@@ -292,6 +292,28 @@ private slots:
         QCOMPARE(result->used.value("seed").toInt(), 7);
     }
 
+    // A video latent's decode (#105) is a video file of its own, in the engine's output folder too.
+    void aDecodedVideoIsDownloadedAsAY4mFile() {
+        Host host;
+        host.op("submit", [](const QJsonObject &) { return HttpResponse{200, json({{"job", "j1"}})}; });
+        host.op("status", [](const QJsonObject &) { return HttpResponse{200, json({{"state", "done"}, {"progress", 1.0}})}; });
+        host.op("result", [](const QJsonObject &) {
+            return HttpResponse{200, json({{"outputs", QJsonObject{{"video", QJsonObject{{"file", 0}, {"format", "y4m"}, {"size", 6}}}}}})};
+        });
+        host.file("j1", 0, "FRAMES");
+        const auto remote = provider(host);
+        const QString out = newDir("out-video");
+        const Result<QString> job = await<QString>([&](Reply<QString> r) { remote->submit(sample(out), r); });
+        QVERIFY(job.ok());
+        QCOMPARE(waitDone(*remote, *job).state, QStringLiteral("done"));
+        const Result<JobResult> result = await<JobResult>([&](Reply<JobResult> r) { remote->result(*job, r); });
+        QVERIFY(result.ok());
+        const QJsonObject video = result->outputs.value("video").toObject();
+        QCOMPARE(video.value("format").toString(), QStringLiteral("y4m"));
+        QVERIFY(video.value("path").toString().endsWith(QLatin1String(".y4m")));
+        QCOMPARE(readFile(video.value("path").toString()), QByteArray("FRAMES"));
+    }
+
     // A host's names are data: none makes a file outside the job's folder, none is taken without a size.
     void aHostsOutputNamesNeverLeaveTheOutputFolder() {
         Host host;

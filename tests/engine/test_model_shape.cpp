@@ -294,6 +294,38 @@ private slots:
         QCOMPARE(loadableTextEncoderFits(klein4b, qwen4b), Fit::Fits);
     }
 
+    // Wan (#105): text_embedding beside a 3D patch_embedding, as its GGUF names them. It reads UMT5
+    // (a T5) and wants a video VAE, and its UMT5 is the one T5 Load Models takes (t5xxl_path).
+    void wanReadsUmt5AndTakesAVideoVae() {
+        Gguf().text("general.architecture", "wan")
+            .tensor("patch_embedding.weight", {5120, 16, 1, 2, 2})
+            .tensor("text_embedding.0.weight", {5120, 4096})
+            .write(file("wan2.2-t2v-low.gguf"));
+        writeSafetensors(file("umt5.safetensors"), {{"shared.weight", QJsonArray{256384, 4096}},
+                                                    {"encoder.block.0.layer.0.SelfAttention.q.weight", QJsonArray{4096, 4096}}});
+        writeSafetensors(file("qwen_3_8b.safetensors"), {{"model.embed_tokens.weight", QJsonArray{151936, 4096}},
+                                                         {"model.layers.0.self_attn.q_proj.weight", QJsonArray{4096, 4096}}});
+        writeSafetensors(file("wan_2.1_vae.safetensors"), {{"decoder.conv1.weight", QJsonArray{384, 16, 3, 3, 3}}});
+        writeSafetensors(file("ae.safetensors"), {{"decoder.conv_in.weight", QJsonArray{512, 16, 3, 3}}});
+        const ModelShape wan = shape(file("wan2.2-t2v-low.gguf")), umt5 = shape(file("umt5.safetensors"));
+        QCOMPARE(wan.textKind, std::optional<TextKind>(TextKind::T5));
+        QCOMPARE(wan.videoVae, std::optional<bool>(true));
+        QCOMPARE(wan.textWidth, std::optional<int>(4096));
+        QCOMPARE(wan.latentChannels, std::optional<int>(16));
+        // The image-to-video one takes 36 channels in (noise, mask and the first frame) and makes 16.
+        Gguf().text("general.architecture", "wan")
+            .tensor("patch_embedding.weight", {5120, 36, 1, 2, 2})
+            .tensor("text_embedding.0.weight", {5120, 4096})
+            .write(file("wan2.2-i2v-low.gguf"));
+        QCOMPARE(shape(file("wan2.2-i2v-low.gguf")).latentChannels, std::optional<int>(16));
+        QCOMPARE(loadableTextEncoderFits(wan, umt5), Fit::Fits);
+        QCOMPARE(loadableTextEncoderFits(wan, shape(file("qwen_3_8b.safetensors"))), Fit::DoesNotFit); // an LLM, not T5
+        QCOMPARE(vaeFits(wan, shape(file("wan_2.1_vae.safetensors"))), Fit::Fits);
+        QCOMPARE(vaeFits(wan, shape(file("ae.safetensors"))), Fit::DoesNotFit); // 16 channels, but an image VAE
+        // Only Wan's: FLUX.1's T5 stays out of Load Models.
+        QCOMPARE(loadableTextEncoderFits(diffusionModel(4096, 16, TextKind::T5), umt5), Fit::DoesNotFit);
+    }
+
     // A diffusers FLUX.2 names its text input context_embedder, as SD3 does, but reads an LLM.
     void aDiffusersFlux2ReadsALanguageModel() {
         writeSafetensors(file("flux2-diffusers.safetensors"), {{"context_embedder.weight", QJsonArray{3072, 7680}},

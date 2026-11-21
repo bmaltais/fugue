@@ -316,25 +316,32 @@ ModelShape shapeOf(const Header &header) {
     }
     shape.textWidth = inputWidth(
         tensor(shapes, {QStringLiteral("cap_embedder.1.weight"), QStringLiteral("txt_in.weight"),
-                        QStringLiteral("context_embedder.weight")}));
+                        QStringLiteral("context_embedder.weight"), QStringLiteral("text_embedding.0.weight")}));
     const std::optional<QList<qint64>> image =
         tensor(shapes, {QStringLiteral("x_embedder.weight"), QStringLiteral("all_x_embedder.2-1.weight"), QStringLiteral("img_in.weight"),
-                        QStringLiteral("x_embedder.proj.weight"), QStringLiteral("input_blocks.0.0.weight")});
+                        QStringLiteral("x_embedder.proj.weight"), QStringLiteral("input_blocks.0.0.weight"),
+                        QStringLiteral("patch_embedding.weight")});
     if (image && image->size() == 2 && image->at(0) > 0) // a transformer's: its block width
         shape.hidden = int(image->at(0));
     if (const std::optional<int> in = inputWidth(image)) // a linear layer takes 2x2 patches of the channels
         shape.latentChannels = image->size() == 2 ? (*in % 4 == 0 ? std::optional<int>(*in / 4) : std::nullopt) : in;
     const bool diffusion = shape.textWidth || shape.latentChannels;
     if (diffusion) {
+        // Wan (text_embedding and a 3D patch_embedding) reads UMT5, a T5, and takes a video VAE.
+        const bool wan = hasTensor(shapes, QStringLiteral("text_embedding.0.")) && hasTensor(shapes, QStringLiteral("patch_embedding."));
+        // An image-to-video model takes its start frame in the input: 16 noise channels, 4 for the
+        // mask and 16 for the frame's latent (36), though it makes 16, as Wan's VAE has.
+        if (wan && shape.latentChannels == 36)
+            shape.latentChannels = 16;
         // FLUX.1 (vector_in) and SD3 (context_embedder with joint_blocks); a diffusers FLUX.2 has a
         // context_embedder too, reading an LLM.
-        const bool t5 = hasTensor(shapes, QStringLiteral("vector_in."))
+        const bool t5 = wan || hasTensor(shapes, QStringLiteral("vector_in."))
                         || (hasTensor(shapes, QStringLiteral("context_embedder.")) && hasTensor(shapes, QStringLiteral("joint_blocks.")));
         shape.textKind = t5 ? TextKind::T5 : TextKind::Llm;
-        shape.videoVae = hasTensor(shapes, QStringLiteral("time_text_embed.")) && hasTensor(shapes, QStringLiteral("txt_in."));
+        shape.videoVae = wan || (hasTensor(shapes, QStringLiteral("time_text_embed.")) && hasTensor(shapes, QStringLiteral("txt_in.")));
         // The LLM it reads: Qwen-Image Qwen2.5-VL; Z-Image (cap_embedder) and FLUX.2 (txt_in with
         // no vector_in) Qwen3.
-        if (*shape.videoVae)
+        if (*shape.videoVae && !wan)
             shape.llmFamily = QStringLiteral("qwen2.5");
         else if (!t5 && (hasTensor(shapes, QStringLiteral("cap_embedder.")) || hasTensor(shapes, QStringLiteral("txt_in."))))
             shape.llmFamily = QStringLiteral("qwen3");
@@ -436,7 +443,11 @@ Fit textEncoderFits(const ModelShape &diffusionModel, const ModelShape &textEnco
 }
 
 Fit loadableTextEncoderFits(const ModelShape &diffusionModel, const ModelShape &textEncoder) {
-    if (!textEncoder.unloadable.isEmpty() || (textEncoder.textKind && *textEncoder.textKind != TextKind::Llm))
+    if (!textEncoder.unloadable.isEmpty())
+        return Fit::DoesNotFit;
+    // Wan's UMT5 (t5xxl_path) is the one T5 Load Models takes: a video model that reads T5.
+    const bool wan = diffusionModel.textKind == TextKind::T5 && diffusionModel.videoVae.value_or(false);
+    if (textEncoder.textKind && *textEncoder.textKind != TextKind::Llm && !(wan && *textEncoder.textKind == TextKind::T5))
         return Fit::DoesNotFit;
     if (!diffusionModel.llmFamily.isEmpty() && !textEncoder.llmFamily.isEmpty()
         && diffusionModel.llmFamily != textEncoder.llmFamily)

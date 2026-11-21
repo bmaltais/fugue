@@ -6,7 +6,7 @@ run as separate calls ([spec 8.10](../docs/spec.md#810-gpu-memory-and-the-helper
 | File | What it is |
 | --- | --- |
 | `CMakeLists.txt` | The pin: stable-diffusion.cpp, ggml and CUTLASS commits with their SHA-256 |
-| `sdcpp.patch` | The stage patch: `fugue.*` image options, the stage file format (`src/pipeline/fugue_stages.h`), hooks in `generate_image` |
+| `sdcpp.patch` | The stage patch: `fugue.*` image and video options, the stage file format (`src/pipeline/fugue_stages.h`) and its reading and writing (`fugue_stage_io.h`), hooks in `generate_image` and `generate_video` |
 | `src/main.cpp` | `fugue-helper <request.json>` (one operation, then exit) `fugue-helper --serve` (the provider protocol over stdio, for Fugue's `fugue-helper` provider) and `fugue-helper --serve-http` (the same over HTTP, for a paired host); the formats are at its top |
 | `smoke-http.sh` | `curl` checks of `--serve-http` that need no model |
 | `fugue-helper.service` | A systemd user unit for a paired host |
@@ -95,6 +95,27 @@ jobs have finished.
   once, the job is `running` with stage `models`, and a missing model ends it in state `error`
   with `model_missing`. Handles without `sha256` are still resolved in the request (HTTP 400).
 
+## Video (Wan)
+
+A context that makes video is run with the same operations and capabilities as an image model
+(spec 8.10): `text.encode` writes the conditioning, `latent.sample` the latent (both Wan 2.2 passes
+when the context has `high_noise_diffusion_model_path`), `latent.decode` the video. A video's
+generation options are the library's (`video_frames`, `fps`, `width`, `height`, `sample.*`). The
+decoded video is `video.y4m` (YUV4MPEG2, format `y4m` over HTTP); `ffmpeg -i video.y4m out.mp4` makes
+it a clip. A request for a video model, one operation per process:
+
+```sh
+fugue-helper-cuda enc.json   # {"op": "encode", "conditioning": "c.bin", "params": {...}, "context": {...}}
+fugue-helper-cuda smp.json   # {"op": "sample", "conditioning": "c.bin", "latent": "l.bin", "params": {...}}
+fugue-helper-cuda dec.json   # {"op": "decode", "latent": "l.bin", "video": "out.y4m", "params": {...}}
+```
+
+with `"context": {"diffusion_model_path": "…LowNoise….gguf", "high_noise_diffusion_model_path": "…HighNoise….gguf",
+"t5xxl_path": "umt5_xxl….safetensors", "vae_path": "wan_2.1_vae.safetensors"}` and `"params"`
+`{"prompt", "negative_prompt", "width", "height", "video_frames", "fps", "seed", "sample.steps",
+"sample.guidance.txt_cfg", "sample.flow_shift"}`, the same in all three. A video has no `vae_encode`
+and cannot start from a latent; the helper answers `input_invalid`.
+
 ## Moving the pin
 
 The pin moves only on purpose (spec 8.10).
@@ -116,7 +137,9 @@ The pin moves only on purpose (spec 8.10).
    - Z-Image Turbo, plus one `generate` run with the same request: the pixels must be the same;
    - SDXL with a negative prompt (CLIP conditioning, two sets);
    - image-to-image from a latent (`vae_encode`, then `sample` with `init_latent`);
-   - IP-Adapter, PhotoMaker or PuLID, only when the move changes their code.
+   - IP-Adapter, PhotoMaker or PuLID, only when the move changes their code;
+   - Wan (T2V) staged: encode, sample and decode as separate processes, and one `generate`
+     run of the same request: the frames must be the same.
 
    These need a GPU and model files, so they are run by hand, not in CI.
 4. Run the stages once through Fugue's provider, as the app does (`--serve`, models kept loaded):

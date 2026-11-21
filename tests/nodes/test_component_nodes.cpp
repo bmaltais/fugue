@@ -40,6 +40,8 @@ const QString kTextEncode = QStringLiteral("fugue/text-encode");
 const QString kEmptyLatent = QStringLiteral("fugue/empty-latent");
 const QString kSampler = QStringLiteral("fugue/sampler");
 const QString kVaeDecode = QStringLiteral("fugue/vae-decode");
+const QString kEmptyVideoLatent = QStringLiteral("fugue/empty-video-latent");
+const QString kVaeDecodeVideo = QStringLiteral("fugue/vae-decode-video");
 const QString kVaeEncode = QStringLiteral("fugue/vae-encode");
 
 void writeFile(const QString &path, const QByteArray &bytes) {
@@ -106,6 +108,16 @@ public:
         return QJsonObject{{"diffusion_model", model("fugue/diffusion-model", "diffusion_models/z-image-turbo.gguf")},
                            {"text_encoder", model("fugue/text-encoder", "clip/Qwen3-4B.gguf")},
                            {"vae", model("fugue/vae", "vae/ae.safetensors")}};
+    }
+    // Wan 2.2 14B as the owner's ComfyUI folder has it: a low- and a high-noise diffusion model, UMT5
+    // (a T5, which the header says: the file's name does not) and Wan's VAE.
+    QJsonObject wan() {
+        const QByteArray umt5 = safetensors({{"shared.weight", QJsonArray{256384, 4096}},
+                                             {"encoder.block.0.layer.0.SelfAttention.q.weight", QJsonArray{4096, 4096}}});
+        return QJsonObject{{"diffusion_model", model("fugue/diffusion-model", "unet/Wan2.2-T2V-A14B-LowNoise-Q4_K_S.gguf")},
+                           {"high_noise_diffusion_model", model("fugue/diffusion-model", "unet/Wan2.2-T2V-A14B-HighNoise-Q4_K_S.gguf")},
+                           {"text_encoder", model("fugue/text-encoder", "text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors", umt5)},
+                           {"vae", model("fugue/vae", "vae/wan_2.1_vae.safetensors")}};
     }
     // The model Load Models makes of them.
     QJsonObject loaded(const QJsonObject &parts) {
@@ -560,6 +572,179 @@ private slots:
                  (QJsonObject{{"data", "fugue/latent"},
                               {"path", file},
                               {"meta", QJsonObject{{"width", 1024}, {"height", 1024}, {"model", model}}}}));
+    }
+
+
+    // --- video (#105): the same stages, a video latent between them ---
+
+    void anEmptyVideoLatentIsASizeALengthAndARate() {
+        Bench bench;
+        const Result<Values> out = bench.run(kEmptyVideoLatent, {{"frames", Value(81)}});
+        QVERIFY(out);
+        const QJsonObject latent = out->value("latent").json().toObject();
+        QCOMPARE(latent.value("data").toString(), QStringLiteral("fugue/latent"));
+        QCOMPARE(latent.value("meta").toObject(),
+                 (QJsonObject{{"width", 832}, {"height", 480}, {"frames", 81}, {"fps", 16}, {"empty", true}}));
+        QVERIFY(!readFile(latent.value("path").toString()).isEmpty());
+        QCOMPARE(QJsonDocument::fromJson(readFile(latent.value("path").toString())).object(),
+                 (QJsonObject{{"width", 832}, {"height", 480}, {"frames", 81}, {"fps", 16}})); // so a length has its own hash
+    }
+
+    void loadModelsMakesWansTwoDiffusionModelsAndItsUmt5OneModel() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.wan());
+        const QJsonObject derived = model.value("derived").toObject();
+        QCOMPARE(derived.value("high_noise").toObject().value("name").toString(), QStringLiteral("Wan2.2-T2V-A14B-HighNoise-Q4_K_S.gguf"));
+        const Result<JobRequest> request = bench.request(kTextEncode, {{"model", Value(model)}, {"prompt", Value("a fox runs")}});
+        QVERIFY2(request, request ? "" : qPrintable(request.error().message));
+        const QJsonObject context = request->params.value("context").toObject();
+        QCOMPARE(context.value("diffusion_model_path").toString(), Bench::modelPath("unet/Wan2.2-T2V-A14B-LowNoise-Q4_K_S.gguf"));
+        QCOMPARE(context.value("high_noise_diffusion_model_path").toString(), Bench::modelPath("unet/Wan2.2-T2V-A14B-HighNoise-Q4_K_S.gguf"));
+        QCOMPARE(context.value("t5xxl_path").toString(), Bench::modelPath("text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors"));
+        QVERIFY(!context.contains("llm_path")); // a T5 is not an LLM
+        QCOMPARE(context.value("vae_path").toString(), Bench::modelPath("vae/wan_2.1_vae.safetensors"));
+    }
+
+    void aPairedHostGetsWansT5AsT5Too() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.wan());
+        const Result<JobRequest> request = bench.remoteRequest(kTextEncode, {{"model", Value(model)}, {"prompt", Value("a fox runs")}});
+        QVERIFY2(request, request ? "" : qPrintable(request.error().message));
+        const QJsonObject context = request->params.value("context").toObject();
+        QVERIFY(context.value("t5xxl_path").toObject().contains("sha256"));
+        QVERIFY(context.value("high_noise_diffusion_model_path").toObject().contains("sha256"));
+        QVERIFY(!context.contains("llm_path"));
+    }
+
+    void theSamplerSendsAVideosLengthAndRate() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.wan());
+        const Result<Values> empty = bench.run(kEmptyVideoLatent, {{"frames", Value(49)}, {"fps", Value(24)}});
+        QVERIFY(empty);
+        const QJsonObject conditioning{{"data", "fugue/conditioning"}, {"path", "/runs/r/nodes/encode/conditioning.bin"}};
+        const Result<JobRequest> request =
+            bench.request(kSampler, {{"model", Value(model)}, {"conditioning", Value(conditioning)}, {"latent", empty->value("latent")},
+                                     {"steps", Value(20)}, {"guidance", Value(4)}});
+        QVERIFY2(request, request ? "" : qPrintable(request.error().message));
+        QCOMPARE(request->capability, QStringLiteral("latent.sample"));
+        QCOMPARE(request->params.value("video_frames").toInt(), 49);
+        QCOMPARE(request->params.value("fps").toInt(), 24);
+        QCOMPARE(request->params.value("width").toInt(), 832);
+        QVERIFY(!request->params.contains("strength")); // from noise
+        QVERIFY(!request->inputs.contains("init_latent"));
+    }
+
+    void aSampledVideoLatentKeepsItsLengthAndRate() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.wan());
+        const Result<Values> empty = bench.run(kEmptyVideoLatent, {{"frames", Value(49)}, {"fps", Value(24)}});
+        QVERIFY(empty);
+        const QString file = bench.workDir() + "/latent.bin";
+        const Result<Values> out = bench.outputs(kSampler, {{"model", Value(model)}, {"latent", empty->value("latent")}},
+                                                 JobResult{QJsonObject{{"latent", QJsonObject{{"path", file}}}}, {}});
+        QVERIFY(out);
+        QCOMPARE(out->value("latent").json().toObject().value("meta").toObject(),
+                 (QJsonObject{{"width", 832}, {"height", 480}, {"frames", 49}, {"fps", 24}, {"model", model}}));
+    }
+
+    void aSampledVideoCannotBeRedrawnYet() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.wan());
+        const QJsonObject latent{{"data", "fugue/latent"},
+                                 {"path", "/runs/r/nodes/sample/latent.bin"},
+                                 {"meta", QJsonObject{{"width", 832}, {"height", 480}, {"frames", 33}, {"fps", 16}, {"model", model}}}};
+        const Result<JobRequest> request =
+            bench.request(kSampler, {{"model", Value(model)},
+                                     {"conditioning", Value(QJsonObject{{"data", "fugue/conditioning"}, {"path", "/c.bin"}})},
+                                     {"latent", Value(latent)}});
+        QVERIFY(!request);
+        QCOMPARE(request.error().input, QStringLiteral("latent"));
+    }
+
+    void vaeDecodeVideoSendsTheSameOptionsAsTheOtherStages() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.wan());
+        const QJsonObject latent{{"data", "fugue/latent"},
+                                 {"path", "/runs/r/nodes/sample/latent.bin"},
+                                 {"meta", QJsonObject{{"width", 832}, {"height", 480}, {"frames", 33}, {"fps", 16}, {"model", model}}}};
+        const Result<JobRequest> request = bench.request(kVaeDecodeVideo, {{"latent", Value(latent)}});
+        QVERIFY2(request, request ? "" : qPrintable(request.error().message));
+        QCOMPARE(request->capability, QStringLiteral("latent.decode"));
+        QCOMPARE(request->params.value("video_frames").toInt(), 33);
+        QCOMPARE(request->params.value("fps").toInt(), 16);
+        QCOMPARE(request->params.value("context").toObject().value("high_noise_diffusion_model_path").toString(),
+                 Bench::modelPath("unet/Wan2.2-T2V-A14B-HighNoise-Q4_K_S.gguf"));
+        QCOMPARE(request->inputs, (QJsonObject{{"latent", QJsonObject{{"path", "/runs/r/nodes/sample/latent.bin"}}}}));
+    }
+
+    void aLatentOfTheOtherKindIsSaidSoBeforeTheHelperDecodesIt() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.wan());
+        const QJsonObject video{{"data", "fugue/latent"},
+                                {"path", "/l.bin"},
+                                {"meta", QJsonObject{{"width", 832}, {"height", 480}, {"frames", 33}, {"fps", 16}, {"model", model}}}};
+        const QJsonObject image{{"data", "fugue/latent"},
+                                {"path", "/l.bin"},
+                                {"meta", QJsonObject{{"width", 832}, {"height", 480}, {"model", model}}}};
+        const Result<JobRequest> asImage = bench.request(kVaeDecode, {{"latent", Value(video)}});
+        QVERIFY(!asImage);
+        QVERIFY(asImage.error().hint.contains("VAE Decode Video"));
+        const Result<JobRequest> asVideo = bench.request(kVaeDecodeVideo, {{"latent", Value(image)}});
+        QVERIFY(!asVideo);
+        QCOMPARE(asVideo.error().input, QStringLiteral("latent"));
+    }
+
+    void vaeDecodeVideoMakesAVideoOfTheHelpersFrames() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.wan());
+        const QJsonObject latent{{"data", "fugue/latent"},
+                                 {"path", "/l.bin"},
+                                 {"meta", QJsonObject{{"width", 16}, {"height", 16}, {"frames", 2}, {"fps", 8}, {"model", model}}}};
+        QByteArray y4m = "YUV4MPEG2 W16 H16 F8:1 Ip A1:1 C420jpeg\n";
+        for (int frame = 0; frame < 3; ++frame)
+            y4m += "FRAME\n" + QByteArray(16 * 16 + 2 * 8 * 8, char(100 + frame));
+        const QString file = bench.workDir() + "/video.y4m";
+        writeFile(file, y4m);
+        const Result<Values> out = bench.outputs(kVaeDecodeVideo, {{"latent", Value(latent)}},
+                                                 JobResult{QJsonObject{{"video", QJsonObject{{"path", file}, {"format", "y4m"}}}}, {}});
+        QVERIFY2(out, out ? "" : qPrintable(out.error().message));
+        const MediaHandle clip = out->value("video").media();
+        QCOMPARE(clip.type(), MediaType::Video);
+        QCOMPARE(clip.width(), 16);
+        QCOMPARE(clip.frames(), qint64(3));
+        QCOMPARE(clip.fps(), 8.0);
+        QVERIFY(clip.path().startsWith(bench.workDir()));
+    }
+
+    void aTextToVideoGraphRunsInStagesOnTheHelper() {
+        Bench bench;
+        const QJsonObject parts = bench.wan();
+        const auto node = [](const QString &type, const QJsonObject &inputs) {
+            return QJsonObject{{"type", type}, {"version", "1.0.0"}, {"inputs", inputs}};
+        };
+        const auto from = [](const QString &output) { return QJsonObject{{"from", output}}; };
+        const QJsonObject nodes{
+            {"models", node(kLoadModels, parts)},
+            {"encode", node(kTextEncode, {{"model", from("models.model")}, {"prompt", "a red fox runs in snow"}})},
+            {"size", node(kEmptyVideoLatent, {{"width", 480}, {"height", 272}, {"frames", 33}})},
+            {"sample", node(kSampler, {{"model", from("models.model")},
+                                       {"conditioning", from("encode.conditioning")},
+                                       {"latent", from("size.latent")},
+                                       {"seed", 1},
+                                       {"steps", 4}})},
+            {"decode", node(kVaeDecodeVideo, {{"latent", from("sample.latent")}})}};
+        const QString flow = bench.dir.filePath("video-flow.fugue");
+        writeFile(flow, QJsonDocument(QJsonObject{{"fugue", 1}, {"graph", QJsonObject{{"nodes", nodes}}}})
+                            .toJson(QJsonDocument::Compact));
+        const QString log = bench.dir.filePath("helper.log");
+        const QList<QJsonObject> events = fugue(bench, log, {"run", flow, "--to", "decode", "--wait", "--json"});
+        QVERIFY(!events.isEmpty());
+        QCOMPARE(events.last().value("status").toString(), QStringLiteral("ok"));
+        QCOMPARE(jobs(log), (QStringList{"text.encode", "latent.sample", "latent.decode"}));
+        const QJsonObject clip = doneOutputs(events, "decode").value("video").toObject();
+        QCOMPARE(clip.value("type").toString(), QStringLiteral("video"));
+        QCOMPARE(clip.value("frames").toInt(), 2);
+        QVERIFY(clip.value("hash").toString().startsWith("sha256:"));
     }
 
     // --- VAE Decode and VAE Encode ---
