@@ -5,5 +5,13 @@ set -euo pipefail
 # parallel, one per core (each has its own HOME and XDG folders); `bin/test -j1` runs them in turn,
 # the last -j wins.
 root="$(cd "$(dirname "$0")/.." && pwd)"
+# One full build-and-test run at a time on this machine, across all worktrees and agents: several at
+# once only slow each other down. A second run waits here for the first.
+lock="${XDG_RUNTIME_DIR:-/tmp}/fugue-test.lock"
+exec 9>"$lock"
+if ! flock -n 9; then
+  echo "bin/test: another run is in progress, waiting for it..." >&2
+  flock 9
+fi
 "$root/bin/build"
 QT_QPA_PLATFORM=offscreen ctest --test-dir "$root/build" --output-on-failure --no-tests=error -j"$(nproc)" "$@"
