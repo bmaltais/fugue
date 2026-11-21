@@ -2,6 +2,7 @@ name: Test
 
 on:
   pull_request:
+  workflow_dispatch:
   push:
     branches: [main, master]
 
@@ -68,3 +69,74 @@ jobs:
       - name: Compiler cache use
         if: always()
         run: su tester -c 'ccache -s'
+
+  test-aarch64:
+    name: Build and test (aarch64)
+    # The same build and tests on an arm64 runner, so a pull request covers both architectures (#61).
+    # Arch has no official arm64 container, so the job makes one from Arch Linux ARM's own root
+    # filesystem (the same pacman packages, the PKGBUILD's dependency lists, and a Qt the app needs:
+    # 6.11 or newer, which Ubuntu 26.04 (6.10) and Debian 13 (6.8) lack). See docs/aarch64-ci.md.
+    runs-on: ubuntu-24.04-arm
+    env:
+      # bin/build uses ccache when it is installed; its folder is kept between runs below.
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 800M
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true # the bundled templates: bmaltais/fugue-workflows, a public repo
+
+      - name: Restore the compiler cache
+        uses: actions/cache@v6
+        with:
+          path: .ccache
+          key: test-aarch64-ccache-${{ github.sha }}
+          restore-keys: test-aarch64-ccache-
+
+      - name: Make the Arch Linux ARM container
+        run: |
+          mkdir -p .ccache
+          cd "$RUNNER_TEMP"
+          base=http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz
+          curl -fsSL --retry 3 -O "$base" -O "$base.md5"
+          md5sum -c ArchLinuxARM-aarch64-latest.tar.gz.md5
+          docker import ArchLinuxARM-aarch64-latest.tar.gz archlinuxarm
+          rm ArchLinuxARM-aarch64-latest.tar.gz
+          docker run -d --name arch -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE" \
+            -e CCACHE_DIR -e CCACHE_MAXSIZE archlinuxarm sleep infinity
+
+      - name: Install the package's dependencies
+        # The same lists as the x86 job: the PKGBUILD is the one place they live. cuda is left out (see above).
+        run: |
+          docker exec arch bash -c '
+            set -euo pipefail
+            sed -i "s/^CheckSpace/#CheckSpace/; s/^\[options\]/[options]\nDisableSandbox/" /etc/pacman.conf
+            pacman-key --init && pacman-key --populate archlinuxarm
+            pacman -Syu --noconfirm --needed git
+            source packaging/PKGBUILD
+            deps=("${depends[@]}" "${makedepends[@]}" "${checkdepends[@]}")
+            wanted=()
+            for dep in "${deps[@]%%[<>=]*}"; do [[ $dep == cuda ]] || wanted+=("$dep"); done
+            pacman -S --noconfirm --needed base-devel ccache cmake dbus "${wanted[@]}"
+            git config --system --add safe.directory "*"
+            useradd -m tester
+            groupadd other
+            usermod -aG other tester
+            chown -R tester .
+            sed -i "s/^#en_US.UTF-8/en_US.UTF-8/" /etc/locale.gen
+            locale-gen'
+
+      - name: Build
+        run: docker exec arch su tester -c bin/build
+
+      - name: Test
+        run: docker exec arch su tester -c 'LANG=en_US.UTF-8 dbus-run-session -- bin/test'
+
+      - name: Compiler cache use
+        if: always()
+        run: docker exec arch su tester -c 'ccache -s' || true
+
+      - name: Give the files back to the runner
+        # So the cache step after this job can read the compiler cache, and the workspace can be cleaned.
+        if: always()
+        run: docker exec arch chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" || true
