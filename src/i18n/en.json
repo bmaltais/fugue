@@ -710,5 +710,59 @@
   "New": "New",
   "Saturation and brightness": "Saturation and brightness",
   "Saturation, percent": "Saturation, percent",
-  "Zoom readout": "Zoom readout"
+  "Zoom readout": "Zoom readout",
+  "%1 in all": "%1 in all",
+  "%1 was left alone: %2. Try again when the run has ended.": "%1 was left alone: %2. Try again when the run has ended.",
+  "%n frozen": {
+    "one": "%n frozen",
+    "other": "%n frozen"
+  },
+  "%n going or waiting": {
+    "one": "%n going or waiting",
+    "other": "%n going or waiting"
+  },
+  "%n pictures": {
+    "one": "%n picture",
+    "other": "%n pictures"
+  },
+  "%n results": {
+    "one": "%n result",
+    "other": "%n results"
+  },
+  "%n runs": {
+    "one": "%n run",
+    "other": "%n runs"
+  },
+  "1 GB": "1 GB",
+  "10 GB": "10 GB",
+  "2 GB": "2 GB",
+  "20 GB": "20 GB",
+  "250 MB": "250 MB",
+  "5 GB": "5 GB",
+  "50 GB": "50 GB",
+  "500 MB": "500 MB",
+  "Cache": "Cache",
+  "Clear %1 of %2?": "Clear %1 of %2?",
+  "Clear image preview cache…": "Clear image preview cache…",
+  "Clear the image preview cache": "Clear the image preview cache",
+  "Cleared %1 of %2.": "Cleared %1 of %2.",
+  "Clear…": "Clear…",
+  "Copies Fugue can make again, kept to speed things up. Your saved pictures and the inputs folder are never in this list.": "Copies Fugue can make again, kept to speed things up. Your saved pictures and the inputs folder are never in this list.",
+  "Every node that was run will run again the next time, so what took minutes takes minutes again. Frozen results and your saved pictures are kept.": "Every node that was run will run again the next time, so what took minutes takes minutes again. Frozen results and your saved pictures are kept.",
+  "Image previews": "Image previews",
+  "Image previews limit": "Image previews limit",
+  "Measuring…": "Measuring…",
+  "No limit": "No limit",
+  "Nothing is lost for good. Pictures on the canvas show again after the next run, which is quick for nodes whose results are kept.": "Nothing is lost for good. Pictures on the canvas show again after the next run, which is quick for nodes whose results are kept.",
+  "Over it, the results used longest ago go first. Frozen results stay.": "Over it, the results used longest ago go first. Frozen results stay.",
+  "Results": "Results",
+  "Results limit": "Results limit",
+  "Run history": "Run history",
+  "Runs go a week after they end, except the newest ones, which stay whatever their age.": "Runs go a week after they end, except the newest ones, which stay whatever their age.",
+  "Runs kept": "Runs kept",
+  "The history of past runs (their events and working files) is gone. Results, saved pictures and any run that is going or waiting are kept.": "The history of past runs (their events and working files) is gone. Results, saved pictures and any run that is going or waiting are kept.",
+  "The small pictures nodes show. Over it, or unseen for a week, the oldest go.": "The small pictures nodes show. Over it, or unseen for a week, the oldest go.",
+  "limit %1": "limit %1",
+  "no limit": "no limit",
+  "oldest %1": "oldest %1"
 }

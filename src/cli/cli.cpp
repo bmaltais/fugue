@@ -66,7 +66,9 @@ const char *helpText =
     "  model list [--type <resource type>] [--hash]\n"
     "  template list\n"
     "  skill install|uninstall [--target agents|claude|all] [--dry-run] [--force]\n"
-    "  provider, cache, command (later releases)\n"
+    "  cache status | cache clear [--kind results|thumbnails|runs|all] [--workflow <file>] [--node <id>]\n"
+    "      [--older-than <age, 30d>] [--dry-run]\n"
+    "  provider, command (later releases)\n"
     "With no command, fugue opens the window.\n";
 
 } // namespace

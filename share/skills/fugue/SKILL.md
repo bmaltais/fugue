@@ -102,6 +102,8 @@ fail with `permission_denied`.
 | `fugue model list` | Models on disk and offered by providers (`--type`, `--hash`) |
 | `fugue model get <file or template id>` | Download the missing models a workflow or template names (`--into`) |
 | `fugue template list` | Templates, with the models and packs each needs |
+| `fugue cache status` | What the caches hold (results, thumbnails, runs): bytes, files, oldest, and the results per workflow and node |
+| `fugue cache clear` | Clear a cache, results unless `--kind results\|thumbnails\|runs\|all`; `--workflow`, `--node`, `--older-than 30d`, `--dry-run` first. Saved outputs, frozen results and a run going or queued are never removed |
 | `fugue skill install` | Install or update this skill (`--target`, `--dry-run`, `--force`) |
 | `fugue skill uninstall` | Remove it (`--target`, `--dry-run`, `--force`) |
 
@@ -126,6 +128,7 @@ Every failure has a stable `code`. Fix by code, not by message text:
 - Providers: `capability_unavailable`, `model_not_running`, `provider_unreachable`
 - Running: `node_failed`, `node_bad_output`, `node_timeout`, `out_of_memory`, `cancelled`,
   `node_test_failed`
+- Cache: `cache_busy` (a warning: a run is going, so `cache clear` left its results and previews alone)
 - Skill: `skill_modified`
 - Other: `unknown_run`, `usage`, `internal`
 

@@ -1738,12 +1738,47 @@ validation warns and the node runs normally.
 
 ### 10.5 Eviction and garbage collection
 
-- A size limit, default 20 GiB, configurable. Over the limit, the least recently used entries
-  are evicted. Frozen entries are never evicted.
-- Clear all, per workflow or per node (`fugue cache clear`, and in the canvas).
+- A size limit, default 10 GB (`cache_results_gb`, 0 for none), configurable. Over the limit, the least recently used entries
+  are evicted, when a run ends and when the cache is cleaned ([10.6](#106-cache-management)). Frozen entries are never evicted.
+- Clear all, per workflow or per node (`fugue cache clear`, and Settings > Cache).
 - Garbage is collected after a grace period of 7 days: run folders whose run has ended, blobs no
   key record refers to, and key records whose blobs are gone. A cached result is otherwise kept
   until it is evicted for size or cleared; it does not expire with age.
+
+### 10.6 Cache management
+
+Fugue keeps three kinds of copy under `~/.cache/fugue`, and each can be measured, cleared and
+kept within a limit (#141):
+
+| Kind | Folder | Holds | If it is gone |
+| --- | --- | --- | --- |
+| `results` | `results/` | The result cache ([10.2](#102-store)). | The node runs again. |
+| `thumbnails` | `thumbnails/` | The 512 px pictures nodes show ([12.7](#127-inspection)), one per image by content hash. | Made again when the result is shown (a cached node shows its result at once on the next run). |
+| `runs` | `runs/` | Run folders ([9.7](#97-run-folder)): events, the compiled graph, working files. | The run's history (`fugue runs status|events|result`) is gone; its results are not. |
+
+- **Never removed:** the output folder and the inputs folder (they are not under the cache),
+  frozen results, and a run that is queued or going (the queue's entries, and a folder whose run
+  has not ended). A run folder's files that are links into the store free nothing, so a run is
+  charged only for the files it alone holds.
+- **Safe with the window open.** Results and previews are removed only while the engine lock
+  ([9.8](#98-runs-across-processes)) is held by the cleaner, so a run never loses a file in the
+  middle and a run that waits for its turn starts after the cleaning. When a run is going, `cache
+  clear` leaves results and previews alone and says so (`cache_busy`); run folders are always
+  safe to clear.
+- **Limits** (settings.json, [1.4](#14-files-and-folders)): `cache_results_gb` (default 10; 0 is no limit),
+  `cache_thumbnails_gb` (default 1; 0 for none) and `runs_kept` (default 20). Results over the
+  limit lose the least recently used first, frozen ones excepted, a result being used again
+  counts as used now. Previews over the limit lose the oldest first (a preview is touched each
+  time its picture is shown), and any not shown for 7 days go. An ended run goes 7 days after it
+  ended, except the newest `runs_kept`, which stay whatever their age.
+- **When:** a run's turn (before it starts, at most once an hour), a run's end (the result
+  limit), and the window cleans at start and again every 30 minutes while it is idle. Never
+  while a run is going: the cleaner takes the engine lock and skips when it cannot.
+- **By hand:** `fugue cache status|clear` ([13.1](#131-commands)) and Settings > Cache: the size of
+  each kind with a Clear button that first says what is lost (results: the nodes run again, so
+  what took minutes takes minutes; previews: pictures on the canvas show again after the next
+  run; runs: the history), and the limits. File menu > Clear image preview cache opens that
+  question for previews.
 
 ---
 
@@ -2212,7 +2247,8 @@ Each command works with no display, never opens a dialog, and takes `--json`. Fo
 | `fugue template list` | The templates, each with the models it names (`here` or not, and the folder a missing one goes in) and the packs it lacks; what is wrong with one is a warning. |
 | `fugue model get <file\|template id> [--into <model folder>]` | Download the models a workflow or template names that are not here and have a `source` (8.9, #89), into the model folder downloads go in (`--into` names another, for this call); progress on stderr. Each failure is an error; what arrived stays. |
 | `fugue model list [--type <resource type>] [--hash]` | Models found on disk and offered by providers. A file on disk has a `handle` only once its hash is known (listing reads no model file); `--hash` hashes the others, once each, so every file gets a full handle; a file it cannot read is a `media_unreadable` warning. |
-| `fugue cache status`, `fugue cache clear [--workflow <file>] [--node <id>]` | The result cache. |
+| `fugue cache status` | What Fugue keeps under `~/.cache/fugue` ([10.6](#106-cache-management), #141): per kind (results, thumbnails, runs) the bytes, files, oldest and limit, and the results per workflow and per node. |
+| `fugue cache clear [--kind results\|thumbnails\|runs\|all] [--workflow <file>] [--node <id>] [--older-than <age>] [--dry-run]` | Clear one kind (results unless `--kind` says), narrowed by workflow (results and runs), node (results) and age (`30d`, `12h`, `2w`); `--dry-run` says what would go and changes nothing. Frozen results, saved outputs and a run going or queued are never removed; while a run is going its results and previews are left alone (the `cache_busy` warning). |
 | `fugue command list` | The command registry and current key bindings. |
 | `fugue skill install [--target agents\|claude\|all] [--dry-run] [--force]`, `fugue skill uninstall` (same options) | Install, update or remove the bundled agent skill ([13.5](#135-agent-skill)). |
 
@@ -2278,6 +2314,7 @@ Codes in v0.1:
 | Groups | `group_invalid` (an edit a group cannot take: a list input fed from both sides of the selection, a name taken or not valid, a port exposed already) |
 | Providers | `capability_unavailable`, `model_not_running`, `provider_unreachable` |
 | Running | `node_failed`, `node_bad_output`, `node_timeout`, `out_of_memory`, `cancelled`, `node_test_failed` (`fugue node test`: an output is not what the test expects) |
+| Cache | `cache_busy` (a warning: `fugue cache clear` left the results and previews alone because a run is going) |
 | Skill | `skill_modified` (`fugue skill install\|uninstall`: the installed skill is not the one Fugue wrote, so it is left alone) |
 | Other | `unknown_run`, `usage`, `internal` |
 
@@ -2849,6 +2886,11 @@ Building M4 made these further choices.
 | Not a generated skill, but a checked one: the prose is written for agents, and a test fails when a command or option of the table, or an error code of 13.3, is missing from it, when it names a code 13.3 lacks, or when its example workflow does not validate and run. Node manifests are not copied into it (`fugue node describe` is the source), so the part that changes most cannot rot | 13.5 | medium-high |
 | Edits are detected with a recorded hash (`.fugue-skill.json`), not timestamps or a version compare: the file is Fugue's to update only while it still matches the bundled text or what a past install wrote; anything else is `skill_modified` and needs `--force`, which keeps the old one as `<name>.bak-<time>`. `skill_modified` is a new code, not a reuse of `usage` or `permission_denied`, because an agent should read it as "ask the person" | 13.3, 13.5 | medium-high |
 | `CLAUDE_CONFIG_DIR` moves Claude's skills folder (Claude Code honors it); no flag for an arbitrary folder, `HOME` already moves everything. No MCP server or AGENTS.md snippet is installed: the MCP server is later (13.4) and an edit to a user's AGENTS.md is not Fugue's to make | 13.5 | medium |
+| Cache management (#141), research (documentation and the products' own settings, recalled, not re-fetched this session: the fetches of Adobe's and ComfyUI's help pages failed): ComfyUI offers `--cache-classic` (the default), `--cache-lru <N>` (keep N node results) and `--cache-none` (run every node again), all about memory, with no disk size, no per-workflow view and no clear command; InvokeAI has an "empty model cache" and a clear of its image intermediates; Blender has File > Clean Up > Purge Unused Data and a Preferences cache limit for its memory and disk caches; browsers' Clear browsing data lists each kind with its size, a time range and a checkbox, and says in words what is lost; Lightroom Classic has a Camera Raw cache size setting (default 5 GB) with a Purge Cache button, and sets previews apart. Matched: a size limit per cache with least-recently-used eviction (Lightroom's cap, ComfyUI's LRU), a per-kind list with a size and a Clear button and a time range (browsers' dialog; `--older-than`). Improved: the result cache is on disk and survives restarts, so the limit is in GB, with the size per workflow and per node; a dry run; the question names what is lost in the workflow's words (nodes run again, pictures return on the next run, history) before it clears; the CLI and the window use one module; saved outputs and frozen results are never in the list | 10.5, 10.6, 13.1 | medium-high |
+| Cache defaults (#141): results 10 GB (the owner's 5.1 GB today; the spec said 20 GiB with no setting; a result is a few MB, a video far more, and a re-run costs minutes of GPU, so the limit is generous), previews 1 GB (261 MB for 619 files today; they are cheap to make again), the newest 20 ended runs kept past 7 days (a run folder is small and holds the history `fugue runs` reads). Sizes in decimal GB, as the app shows them. 0 is no limit | 10.5, 10.6 | medium |
+| Clearing and cleaning take the engine lock instead of knowing about runs: a run holds it from its turn to its end, so the cleaner cannot take a file from a running node and a waiting run starts after it. A busy lock skips results and previews with a warning (`cache_busy`); run folders are protected by status (the queue's entries, and any not ended, unless abandoned for a day) | 10.6, 9.8 | medium-high |
+| `fugue cache clear` with no `--kind` clears the results, as 13.1 always said; thumbnails and runs need `--kind`. `--workflow` goes with results and runs, `--node` with results only (a preview belongs to no workflow) | 13.1 | high |
+| A preview cleared while its picture is on the canvas stays blank until the node's result is shown again (the next run, instant for cached nodes), so the Settings question says so; no per-node reload is built | 12.7, 10.6 | medium |
 
 ## Appendix B: issue to section map
 
@@ -2896,4 +2938,5 @@ Building M4 made these further choices.
 | #33 component nodes | 14.3, 2.5, 2.6, 8.9 |
 | #34 CI recipe | 17 |
 | #105 video stages in the helper and nodes | 8.10, 8.1, 2.6, 14.3 |
+| #141 cache management | 10.5, 10.6, 13.1, 12.7, Appendix A |
 | #134 upscaling: Upscale Image and Video, Upscale with Model, the model catalog and picker downloads | 8.1, 8.9, 14.1, Appendix A |

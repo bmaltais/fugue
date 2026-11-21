@@ -77,7 +77,7 @@ QVariantList bar() {
                 {command("edit.undo"), command("edit.redo"), separator(), command("edit.copy"), command("edit.paste"),
                  command("edit.paste-connected"), command("edit.clone"), command("edit.delete"), separator(),
                  command("edit.select-all"), command("edit.rename"), colors(), separator(), command("edit.clear"),
-                 separator(), command("app.settings")}),
+                 separator(), command("cache.clear-previews"), separator(), command("app.settings")}),
         submenu(QT_TRANSLATE_NOOP("Menu", "&View"),
                 {command("view.fit"), command("view.zoom-in"), command("view.zoom-out"), separator(),
                  command("view.toggle-links"), separator(), barsMenu(), command("view.focus-mode")}),

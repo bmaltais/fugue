@@ -91,6 +91,9 @@ QList<Row> menuRows() {
         {"compare.copy-a", QT_TRANSLATE_NOOP("Command", "Copy image A to the clipboard"), QT_TRANSLATE_NOOP("Command", "Copy A"), {}, "canvas", "added"},
         {"compare.copy-b", QT_TRANSLATE_NOOP("Command", "Copy image B to the clipboard"), QT_TRANSLATE_NOOP("Command", "Copy B"), {}, "canvas", "added"},
         {"compare.copy-view", QT_TRANSLATE_NOOP("Command", "Copy the compare view as it is drawn"), QT_TRANSLATE_NOOP("Command", "Copy view"), {}, "canvas", "added"},
+        // Opens Settings > Cache with the question for the image previews (settings_model.cpp, #141).
+        {"cache.clear-previews", QT_TRANSLATE_NOOP("Command", "Clear the image preview cache"),
+         QT_TRANSLATE_NOOP("Command", "Clear image preview cache…"), {}, "app", "added"},
         {"help.docs", QT_TRANSLATE_NOOP("Command", "Open the documentation"), QT_TRANSLATE_NOOP("Command", "Documentation"), {}, "app", "same"},
         {"help.report-issue", QT_TRANSLATE_NOOP("Command", "Report an issue"), nullptr, {}, "app", "same"},
         {"help.about", QT_TRANSLATE_NOOP("Command", "About Fugue"), nullptr, {}, "app", "same"},

@@ -211,10 +211,16 @@ ApplicationWindow {
                 win.templatesDialog.open()
                 return
             }
-            if (id !== "app.settings" || !win.appSettingsModel)
+            if ((id !== "app.settings" && id !== "cache.clear-previews") || !win.appSettingsModel)
                 return
             if (!win.settingsPanel)
                 win.settingsPanel = settingsComponent.createObject(win.contentItem)
+            if (id === "cache.clear-previews") {
+                // Settings > Cache, asking about the previews: what is lost is said there (#141).
+                win.settingsPanel.page = 7 // Cache, the last page
+                win.appSettingsModel.cache.refresh()
+                win.appSettingsModel.cache.ask("thumbnails")
+            }
             win.settingsPanel.open()
         }
     }
@@ -228,7 +234,7 @@ ApplicationWindow {
                 return
             if (!win.settingsPanel)
                 win.settingsPanel = settingsComponent.createObject(win.contentItem)
-            win.settingsPanel.page = win.settingsPanel.pages.length - 1 // Packs, the last page
+            win.settingsPanel.page = 6 // Packs
             win.settingsPanel.open()
             win.appSettingsModel.packs.add(source, ref)
         }

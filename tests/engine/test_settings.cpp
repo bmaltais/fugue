@@ -132,6 +132,27 @@ private slots:
         QVERIFY(!bad.settings.hoverMagnifier);
     }
 
+    // The cache limits (#141): 10 GB of results, 1 GB of previews, 20 runs kept; 0 is no limit.
+    void theCacheLimitsHaveDefaultsAndBounds() {
+        QTemporaryDir dir;
+        const Settings defaults = readSettings(dir.filePath("settings.json")).settings;
+        QCOMPARE(defaults.cacheResultsGb, 10.0);
+        QCOMPARE(defaults.cacheThumbnailsGb, 1.0);
+        QCOMPARE(defaults.runsKept, 20);
+        QCOMPARE(checkSetting("cache_results_gb", 0), QString());
+        QCOMPARE(checkSetting("cache_thumbnails_gb", 0.5), QString());
+        QCOMPARE(checkSetting("runs_kept", 5), QString());
+        for (const QString &key : {QStringLiteral("cache_results_gb"), QStringLiteral("cache_thumbnails_gb"), QStringLiteral("runs_kept")}) {
+            QVERIFY(!checkSetting(key, -1).isEmpty());
+            QVERIFY(!checkSetting(key, "big").isEmpty());
+        }
+        QVERIFY(!checkSetting("runs_kept", 2.5).isEmpty());
+        write(dir.filePath("settings.json"), R"({"cache_results_gb": 2.5, "runs_kept": 0})");
+        const Settings set = readSettings(dir.filePath("settings.json")).settings;
+        QCOMPARE(set.cacheResultsGb, 2.5);
+        QCOMPARE(set.runsKept, 0);
+    }
+
     void changingOneKeepsTheKeysItDoesNotKnow() {
         QTemporaryDir dir;
         const QString path = dir.filePath("fugue/settings.json");

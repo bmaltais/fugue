@@ -153,7 +153,7 @@ Item {
                                          {prefixes: ["frame", "group"], title: qsTr("Frame and group")},
                                          {gestures: true, title: qsTr("Mouse")}],
                                         [{prefixes: ["file", "app.quit", "app.settings"], title: qsTr("File")},
-                                         {prefixes: ["edit"], title: qsTr("Edit")},
+                                         {prefixes: ["edit", "cache"], title: qsTr("Edit")},
                                          {prefixes: ["view", "app.shortcuts", "app.menu-bar", "app.context-menu"],
                                           title: qsTr("View")},
                                          {prefixes: ["panel"], title: qsTr("Panels")}]]

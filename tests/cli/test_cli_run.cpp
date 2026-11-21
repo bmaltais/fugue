@@ -553,6 +553,12 @@ private slots:
             QVERIFY(folder.ok());
             folder->writeState(QJsonObject{{"status", "ok"}, {"ended", "2026-01-01T00:00:00.000"}});
         };
+        // The newest runs_kept ended runs stay whatever their age (10.6): none, so age decides.
+        QDir().mkpath(path("config/fugue"));
+        QFile settings(path("config/fugue/settings.json"));
+        QVERIFY(settings.open(QIODevice::WriteOnly));
+        settings.write(R"({"runs_kept": 0})");
+        settings.close();
         oldRun("20260101-000000-000-old1");
         QCOMPARE(fugue({"run", path("flow.fugue"), "--wait"}).exitCode, 0);
         QVERIFY(!QDir(runsRoot() + "/20260101-000000-000-old1").exists());

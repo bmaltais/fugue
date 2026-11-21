@@ -22,6 +22,7 @@
 #include "engine/trust_store.h"
 #include "engine/file_hashes.h"
 #include "engine/paths.h"
+#include "engine/cache_manager.h"
 #include "engine/queue.h"
 #include "engine/result_cache.h"
 #include "engine/run_folder.h"
@@ -135,7 +136,7 @@ public:
             m_context, m_setup.cacheRoot.isEmpty() ? ResultCache::defaultRoot() : m_setup.cacheRoot,
             m_setup.hashesPath.isEmpty() ? FileHashes::defaultPath() : m_setup.hashesPath);
         m_process->environment.models = &m_models;
-        m_thumbnails = m_setup.thumbnailDir.isEmpty() ? cacheDir() + QStringLiteral("/thumbnails") : m_setup.thumbnailDir;
+        m_thumbnails = m_setup.thumbnailDir.isEmpty() ? thumbnailsDir() : m_setup.thumbnailDir;
         m_lock = std::make_unique<Lock>(m_context.lockPath);
         m_poll = new QTimer(this);
         m_poll->setInterval(50);
@@ -470,6 +471,8 @@ private:
             pruneThumbnails();
         }
         waiting.options.warnings += providerProblems;
+        // The limit may have changed in Settings since the last run (10.6).
+        m_process->cache.setLimit(CachePolicy::current().resultsBytes);
         m_activeId = id;
         m_activeFolder = waiting.folder;
         m_cancelAsked = false;
@@ -492,16 +495,15 @@ private:
     }
 
     // Thumbnails are copies, made again when a result is shown and its copy is gone, so the
-    // ones not made for 7 days go, at most once an hour.
+    // ones not shown for 7 days go, and the oldest past the limit (10.6), at most once an hour.
+    // The run's turn has come and its engine lock is held, so the cleaning takes none.
     void pruneThumbnails() {
         if (m_pruned.isValid() && m_pruned.elapsed() < 3600 * 1000)
             return;
         m_pruned.start();
-        const QDateTime before = QDateTime::currentDateTime().addDays(-7);
-        const QFileInfoList files = QDir(m_thumbnails).entryInfoList(QDir::Files);
-        for (const QFileInfo &file : files)
-            if (file.lastModified() < before)
-                QFile::remove(file.filePath());
+        CacheFolders folders;
+        folders.thumbnails = m_thumbnails;
+        CacheManager(folders).cleanupLocked(CachePolicy::current());
     }
 
     QJsonObject withThumbnails(QJsonObject e) {

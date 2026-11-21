@@ -113,6 +113,8 @@ int main(int argc, char *argv[]) {
     fugue::SettingsModel appSettings;
     appSettings.attach(&translator, &canvasModel, &registry, &theme);
     appSettings.registerCommands(commands, [](const QUrl &url) { QDesktopServices::openUrl(url); });
+    // The cache is kept within its limits at start and while idle, never during a run (10.6, #141).
+    appSettings.cache()->startAutomatic();
     // The window runs its own runs (spec 9.8) on a thread of their own, queued with the CLI's.
     fugue::RunSetup runSetup;
     runSetup.addNodeTypes = addNodeTypes;

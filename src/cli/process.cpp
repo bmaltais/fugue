@@ -7,6 +7,7 @@
 
 #include <limits>
 
+#include "engine/cache_manager.h"
 #include "engine/paths.h"
 
 namespace fugue::cli {
@@ -49,6 +50,7 @@ Process::Process(const Context &context) : Process(context, ResultCache::default
 
 Process::Process(const Context &context, const QString &cacheRoot, const QString &hashesPath)
     : cache(cacheRoot), hashes(hashesPath) {
+    cache.setLimit(CachePolicy::current().resultsBytes);
     environment.registry = &context.registry;
     environment.kernels = &context.kernels;
     environment.cache = &cache;
@@ -65,8 +67,13 @@ void collectGarbageIfDue(const Context &context, Process &process) {
     const QFileInfo info(stamp);
     if (info.exists() && info.lastModified().secsTo(QDateTime::currentDateTime()) < 3600)
         return;
-    process.cache.collectGarbage();
-    removeEndedRunFolders(context.runsRoot, QDateTime::currentDateTimeUtc());
+    // The engine lock is held here (the run's own turn, or `fugue run`'s worker), so this is the
+    // cleaning of 10.6 without taking it: the result store's limit and garbage, and the ended runs.
+    CacheFolders folders;
+    folders.results = process.cache.root();
+    folders.runs = context.runsRoot;
+    folders.queue = context.queueDir;
+    CacheManager(folders).cleanupLocked(CachePolicy::current());
     QFile file(stamp);
     if (QDir().mkpath(info.path()) && file.open(QIODevice::WriteOnly))
         file.write(QDateTime::currentDateTimeUtc().toString(Qt::ISODate).toUtf8());

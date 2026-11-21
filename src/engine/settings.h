@@ -25,6 +25,12 @@
 // | corner_radius    | 0 to 16 px, or "omarchy" (#63)           | 8                        |
 // | hover_magnifier  | true or false: far out, a short hover    | false                    |
 // |                  | shows a node at zoom 1 (12.6, #74, #123)  |                          |
+// | cache_results_gb | size limit of the result cache in GB;    | 10                       |
+// |                  | 0: none (10.5, #141)                     |                          |
+// | cache_thumbnails_gb | size limit of the picture previews in | 1                        |
+// |                  | GB; 0: none (12.7, #141)                  |                          |
+// | runs_kept        | ended runs kept whatever their age (9.7,  | 20                       |
+// |                  | #141)                                     |                          |
 
 #include <QJsonObject>
 #include <QJsonValue>
@@ -52,6 +58,12 @@ struct Settings {
     static constexpr int maxCornerRadius = 16;
     int cornerRadius = 8;
     bool hoverMagnifier = false; // the hover magnifier (#74), off unless set (#123)
+    // The cache limits (#141); the cache manager turns them into bytes. 0 is no limit.
+    static constexpr double maxCacheGb = 100000;
+    static constexpr int maxRunsKept = 100000;
+    double cacheResultsGb = 10;
+    double cacheThumbnailsGb = 1;
+    int runsKept = 20;
 };
 
 // What a settings.json holds.
