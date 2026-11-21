@@ -30,6 +30,11 @@ vocabulary in [docs/GLOSSARY.md](docs/GLOSSARY.md).
   groups, the input images and a preview, with models kept as references (hash, source, size)
   the receiver downloads. From the CLI: `fugue workflow export <file> --share`. The desktop
   opens `.fuguepack` files with Fugue.
+- **Agents.** Everything above works with no window and with `--json`, so an agent can build,
+  validate, run and inspect workflows. `fugue skill install` teaches it how: one copy in
+  `~/.agents/skills/fugue` (Pi and others) linked into Claude Code's skills folder; run it again to
+  update, `--dry-run` to see where it writes, `fugue skill uninstall` to remove. It never
+  overwrites a file you edited. Agents cannot install packs or start models: a person confirms.
 - **Writing nodes.** A node is a program that speaks JSON over stdin and stdout, described by a
   `node.json`. Start with the [five-minute quickstart](docs/nodes/quickstart.md); the rest of
   the guide is in [docs/nodes](docs/nodes/README.md). Fugue enforces no sandbox: install packs

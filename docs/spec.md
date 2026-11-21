@@ -2199,7 +2199,7 @@ Each command works with no display, never opens a dialog, and takes `--json`. Fo
 | `fugue model list [--type <resource type>] [--hash]` | Models found on disk and offered by providers. A file on disk has a `handle` only once its hash is known (listing reads no model file); `--hash` hashes the others, once each, so every file gets a full handle; a file it cannot read is a `media_unreadable` warning. |
 | `fugue cache status`, `fugue cache clear [--workflow <file>] [--node <id>]` | The result cache. |
 | `fugue command list` | The command registry and current key bindings. |
-| `fugue skill install` | Install the bundled agent skill ([13.5](#135-agent-skill)). |
+| `fugue skill install [--target agents\|claude\|all] [--dry-run] [--force]`, `fugue skill uninstall` (same options) | Install, update or remove the bundled agent skill ([13.5](#135-agent-skill)). |
 
 Exit codes: 0 for success, 1 for any failure. A run that ends `failed` or `cancelled` under
 `--wait` exits 1.
@@ -2263,6 +2263,7 @@ Codes in v0.1:
 | Groups | `group_invalid` (an edit a group cannot take: a list input fed from both sides of the selection, a name taken or not valid, a port exposed already) |
 | Providers | `capability_unavailable`, `model_not_running`, `provider_unreachable` |
 | Running | `node_failed`, `node_bad_output`, `node_timeout`, `out_of_memory`, `cancelled`, `node_test_failed` (`fugue node test`: an output is not what the test expects) |
+| Skill | `skill_modified` (`fugue skill install\|uninstall`: the installed skill is not the one Fugue wrote, so it is left alone) |
 | Other | `unknown_run`, `usage`, `internal` |
 
 New codes may be added; existing ones do not change meaning.
@@ -2279,9 +2280,38 @@ New codes may be added; existing ones do not change meaning.
 
 ### 13.5 Agent skill
 
-`fugue skill install` installs a short bundled skill the way Fantasi does: one copy in
-`~/.agents/skills`, linked into Claude's skills directory. It covers discovering node types,
-authoring, validating, running and fetching results.
+The binary carries one skill, `fugue` (`share/skills/fugue/SKILL.md`, compiled in), a folder with a
+`SKILL.md` and `name` and `description` frontmatter, the layout Claude Code, Pi and the other
+agents that read `~/.agents/skills` share. It teaches an agent the loop: discover node types
+(`fugue node list`, `fugue node describe`), write the `.fugue` file (4.2), `fugue validate`,
+`fugue run --wait`, `fugue runs result`, and how to write a node; and it names what an agent cannot
+do (13.6). It does not copy node manifests, which would go stale: it sends the agent to
+`fugue node describe`.
+
+`fugue skill install [--target agents|claude|all] [--dry-run] [--force]`:
+
+- `agents` is `~/.agents/skills/fugue`, the one real copy (Pi reads that folder, so Pi needs no
+  copy of its own; a name in both Pi folders would shadow). `claude` is Claude Code's skills folder,
+  `~/.claude/skills/fugue`, or `$CLAUDE_CONFIG_DIR/skills/fugue` when that variable is set. `all`,
+  the default, writes the agents copy and makes Claude's a link to it, so an update is one write.
+  `--target claude` alone writes a copy of its own.
+- It writes `SKILL.md` and `.fugue-skill.json` (the Fugue version and the SHA-256 of what it wrote).
+  Run again it is an update: an unchanged copy is `unchanged`; a copy that still matches what an
+  earlier install recorded is replaced by the new one.
+- It never overwrites or removes a file the person changed, nor a folder or link it did not make:
+  that is `skill_modified`, and the whole plan fails before anything is written. `--force`
+  sets the old one aside as `<name>.bak-<time>` and goes on. A copy of its own that Claude holds
+  becomes the link when `all` is installed.
+- `--dry-run` prints the plan (`create`, `update`, `link`, `unchanged`, `remove`, ...) and the
+  full paths, and writes nothing. Every run prints where it wrote; `--json` carries the same as
+  `data.actions`.
+- `fugue skill uninstall` takes the same options and removes only what an install made, the link
+  first. Both need no confirmation: they write fixed folders under the home folder, from text the
+  binary carries, so the file roots of 13.6 do not apply.
+
+A test keeps the skill in step: every command of the table and each of its options, every error
+code of 13.3 (and no code that 13.3 lacks) must appear in it, and its example workflow must
+validate and run.
 
 ### 13.6 Safety
 
@@ -2777,6 +2807,11 @@ Building M4 made these further choices.
 | Video with a model is not built in #134: the helper loads the model per job, a frame per job would reload it, so it needs the helper to keep its upscaler loaded between jobs and take a folder of frames (or a chunk) per job, with ffmpeg decoding in chunks and encoding the results, one pass for audio. Designed in #138 rather than shipped half-working; for flicker, RelayVSR and SeedVR2 are the engine's video models, a separate decision | 14.1 | high |
 | Resize's resampling premultiplies RGBA for every method but nearest (it did for lanczos only, as PIL does): a transparent pixel's color no longer leaks into its neighbours when scaling up or down. ComfyUI resamples RGB only, so there is no reference to differ from | 14.1 | high |
 | The video twin encodes H.264 CRF 12 in Matroska, not the engine's FFV1: FFV1 at 4 times the pixels is gigabytes for a short clip, and CRF 12 is visually lossless; Save Video's own encode (CRF 18) follows | 14.1 | medium |
+| Agent skill (#30), research: the layout agents read is a folder with `SKILL.md` and `name`/`description` frontmatter; Claude Code scans `~/.claude/skills`, Pi `~/.pi/agent/skills` and `~/.agents/skills`, and a name in both Pi folders shadows. Existing tools ship one the same way: Superwhisper links `~/.claude/skills/superwhisper` to a folder in its own package, and skillpack (this machine's skill manager) copies or links a skill folder into each agent's scan dir. Chosen: one real copy in `~/.agents/skills/fugue` (read by Pi and others), a link from Claude's folder (the owner's "the way Fantasi does"), no copy under `~/.pi` (it would shadow) | 13.5 | high |
+| The skill is compiled into the binary (a Qt resource) rather than found beside it, so a packaged, AppImage or built-in-tree `fugue` installs the same text with no path to guess, and `fugue skill install` is the whole update path: a newer Fugue brings a newer skill | 13.5 | high |
+| Not a generated skill, but a checked one: the prose is written for agents, and a test fails when a command or option of the table, or an error code of 13.3, is missing from it, when it names a code 13.3 lacks, or when its example workflow does not validate and run. Node manifests are not copied into it (`fugue node describe` is the source), so the part that changes most cannot rot | 13.5 | medium-high |
+| Edits are detected with a recorded hash (`.fugue-skill.json`), not timestamps or a version compare: the file is Fugue's to update only while it still matches the bundled text or what a past install wrote; anything else is `skill_modified` and needs `--force`, which keeps the old one as `<name>.bak-<time>`. `skill_modified` is a new code, not a reuse of `usage` or `permission_denied`, because an agent should read it as "ask the person" | 13.3, 13.5 | medium-high |
+| `CLAUDE_CONFIG_DIR` moves Claude's skills folder (Claude Code honors it); no flag for an arbitrary folder, `HOME` already moves everything. No MCP server or AGENTS.md snippet is installed: the MCP server is later (13.4) and an edit to a user's AGENTS.md is not Fugue's to make | 13.5 | medium |
 
 ## Appendix B: issue to section map
 
