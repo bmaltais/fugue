@@ -21,6 +21,24 @@ bin/build-helper cuda -DCMAKE_CUDA_ARCHITECTURES=native -DGGML_NATIVE=ON   # thi
 A cold CUDA build takes about 15 minutes; ccache makes later ones short. The package builds the
 Vulkan helper into `fugue` and the CUDA one into `fugue-helper-cuda` (`packaging/PKGBUILD`).
 
+### aarch64 CUDA asset (a DGX Spark)
+
+The Arch package cannot serve a paired host that runs Ubuntu on aarch64 (CUDA 13, sm_121). A release
+carries `fugue-helper-cuda-aarch64-linux.tar.zst` for it: the binary (it links the host's CUDA
+runtime and cuBLAS dynamically; unsigned) and `fugue-helper.service`, with its line in `SHA256SUMS`.
+`package.yml` builds it on an arm runner (`helper-aarch64`) for each `v*` tag. By hand, on the host,
+from a checkout of the tag, with the same script (portable settings: no `-march=native`; sm_121 code plus PTX):
+
+```sh
+git clone --branch vX https://github.com/bmaltais/fugue && cd fugue
+bin/package-helper                       # about 40 minutes cold, ccache after; writes dist/
+gh release upload vX dist/fugue-helper-cuda-aarch64-linux.tar.zst dist/SHA256SUMS --clobber
+```
+
+Fetch SHA256SUMS first (`gh release download vX -p SHA256SUMS -D dist`) so the upload keeps the other
+lines. On the host: unpack, put the binary at `~/.local/lib/fugue/fugue-helper-cuda`, and follow
+the paired-host steps below.
+
 Editing the patch: the fetched source is patched once, when the build folder is made. Either
 start a fresh `build-helper-<backend>/`, or make the same edit in
 `build-helper-<backend>/_deps/sdcpp-src` and rebuild.
