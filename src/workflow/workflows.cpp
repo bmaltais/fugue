@@ -29,6 +29,8 @@
 #include <QTemporaryDir>
 #include <QUuid>
 
+#include <functional>
+
 namespace fugue {
 
 namespace {
@@ -931,6 +933,73 @@ void Workflows::closeTab(int index) {
         removeTab(index);
 }
 
+bool Workflows::renameTab(int index, const QString &name) {
+    QString wanted = name.trimmed();
+    if (index < 0 || index >= count() || wanted.isEmpty())
+        return false;
+    if (wanted.contains(QLatin1Char('/')) || wanted == QLatin1String(".") || wanted == QLatin1String("..")) {
+        setNotice(tr("A workflow's name cannot hold a slash."));
+        return false;
+    }
+    Tab &tab = m_tabs[size_t(index)];
+    if (tab.path.isEmpty()) {
+        tab.title = wanted;
+        emit tabsChanged();
+        return true;
+    }
+    if (QFileInfo(wanted).suffix().isEmpty())
+        wanted += QStringLiteral(".fugue");
+    const QFileInfo old(tab.path);
+    if (wanted == old.fileName())
+        return true;
+    const QString path = old.dir().filePath(wanted);
+    if (QFileInfo::exists(path)) {
+        setNotice(tr("%1 already exists in that folder.").arg(wanted));
+        return false;
+    }
+    if (!QFile::rename(tab.path, path)) {
+        setNotice(tr("Could not rename %1 to %2.").arg(old.fileName(), wanted));
+        return false;
+    }
+    tab.path = path;
+    tab.title = wanted;
+    rememberTabColor(tab);
+    setNotice({});
+    emit tabsChanged();
+    return true;
+}
+
+void Workflows::duplicateTab(int index) {
+    if (index < 0 || index >= count())
+        return;
+    const QString base = m_tabs[size_t(index)].title.endsWith(QStringLiteral(".fugue"))
+                             ? m_tabs[size_t(index)].title.chopped(6)
+                             : m_tabs[size_t(index)].title;
+    const Document copy = documentOf(index);
+    addTab(copy, {}, tr("%1 copy").arg(base), true, false);
+}
+
+void Workflows::closeOtherTabs(int index) {
+    if (index < 0 || index >= count())
+        return;
+    const QString keep = m_tabs[size_t(index)].id;
+    refreshUnsaved();
+    int kept = 0;
+    for (int i = count() - 1; i >= 0; --i) {
+        if (m_tabs[size_t(i)].id == keep)
+            continue;
+        if (m_tabs[size_t(i)].unsaved)
+            ++kept;
+        else
+            removeTab(i);
+    }
+    for (int i = 0; i < count(); ++i)
+        if (m_tabs[size_t(i)].id == keep && i != m_current)
+            setCurrent(i);
+    if (kept > 0)
+        setNotice(tr("Kept %n tabs with unsaved changes.", nullptr, kept));
+}
+
 void Workflows::discardAndClose(int index) { removeTab(index); }
 
 void Workflows::saveAndClose(int index) {
@@ -1085,6 +1154,32 @@ void registerFileCommands(CommandRegistry &registry, Workflows &workflows) {
         registry.setHandler("file.templates", browseTemplates);
     }
     registry.setHandler("file.save-as", [&workflows] { emit workflows.saveAsRequested(); });
+    // The tab menu's commands act on the current tab (a right click on a tab makes it current).
+    const auto onCurrent = [&registry](const char *id, const char *description, const char *label,
+                                       std::function<void()> run) {
+        const QString key = QString::fromLatin1(id);
+        if (!registry.contains(key)) {
+            CommandSpec spec;
+            spec.id = key;
+            spec.description = QString::fromUtf8(description);
+            spec.label = QString::fromUtf8(label);
+            spec.context = QStringLiteral("app");
+            spec.versus = QStringLiteral("added");
+            if (const QString problem = registry.add(spec, std::move(run)); !problem.isEmpty())
+                qWarning("Fugue: %s", qPrintable(problem));
+        } else {
+            registry.setHandler(key, std::move(run));
+        }
+    };
+    onCurrent("file.rename", QT_TRANSLATE_NOOP("Command", "Rename the workflow"),
+              QT_TRANSLATE_NOOP("Command", "Rename…"), [&workflows] { emit workflows.tabRenameRequested(workflows.current()); });
+    onCurrent("file.duplicate", QT_TRANSLATE_NOOP("Command", "Duplicate the workflow into a new tab"),
+              QT_TRANSLATE_NOOP("Command", "Duplicate"), [&workflows] { workflows.duplicateTab(workflows.current()); });
+    onCurrent("file.close-others", QT_TRANSLATE_NOOP("Command", "Close the other workflows"),
+              QT_TRANSLATE_NOOP("Command", "Close other tabs"), [&workflows] { workflows.closeOtherTabs(workflows.current()); });
+    onCurrent("file.tab-color", QT_TRANSLATE_NOOP("Command", "Pick the tab's color"),
+              QT_TRANSLATE_NOOP("Command", "Tab color…"), [&workflows] { emit workflows.tabColorRequested(workflows.current()); });
+    registry.setEnabledWhen("file.close-others", [&workflows] { return workflows.count() > 1; });
     registry.setHandler("file.export-share", [&workflows] { emit workflows.exportShareRequested(); });
     registry.setHandler("file.export-compiled", [&workflows] { emit workflows.exportCompiledRequested(); });
     if (!registry.contains("file.open-clipboard")) {

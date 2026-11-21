@@ -2,10 +2,13 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
 
 #include <algorithm>
+
+#include "engine/paths.h"
 
 namespace fugue {
 
@@ -53,15 +56,46 @@ QString helperProgram(const QStringList &folders, bool nvidia) {
     return {};
 }
 
-QString helperProgram(bool nvidia) {
-    if (qEnvironmentVariableIsSet("FUGUE_HELPER")) // empty: none, as the tests have it
-        return qEnvironmentVariable("FUGUE_HELPER");
+QStringList helperFolders() {
     const QString app = QCoreApplication::applicationDirPath();
     QStringList folders{QDir(app).filePath(QStringLiteral("../lib/fugue"))};
     for (const char *backend : {"cuda", "vulkan", "cpu"})
         folders << QDir(app).filePath(QStringLiteral("../build-helper-%1").arg(QLatin1String(backend)));
-    return helperProgram(folders, nvidia);
+    return folders;
 }
+
+QString helperProgram(bool nvidia) {
+    if (qEnvironmentVariableIsSet("FUGUE_HELPER")) // empty: none, as the tests have it
+        return qEnvironmentVariable("FUGUE_HELPER");
+    return helperProgram(helperFolders(), nvidia);
+}
+
+QString CudaHelperNotice::command() { return QStringLiteral("sudo pacman -S fugue-helper-cuda"); }
+
+namespace {
+QString noticeMarker(const QString &stateFolder) {
+    return QDir(stateFolder).filePath(QStringLiteral("cuda-helper-notice-dismissed"));
+}
+} // namespace
+
+bool CudaHelperNotice::due(const QStringList &folders, bool nvidia, const QString &stateFolder) {
+    if (!nvidia || QFileInfo::exists(noticeMarker(stateFolder)))
+        return false;
+    return QFileInfo(helperProgram(folders, true)).fileName() == QLatin1String("fugue-helper-vulkan");
+}
+
+void CudaHelperNotice::dismiss(const QString &stateFolder) {
+    QDir().mkpath(stateFolder);
+    QFile marker(noticeMarker(stateFolder));
+    if (marker.open(QIODevice::WriteOnly))
+        marker.close();
+}
+
+bool CudaHelperNotice::due() {
+    return !qEnvironmentVariableIsSet("FUGUE_HELPER") && due(helperFolders(), hasNvidiaGpu(), stateDir());
+}
+
+void CudaHelperNotice::dismiss() { dismiss(stateDir()); }
 
 HelperProvider::HelperProvider(const ProviderInstance &instance, QString program, int graceMs, QObject *parent)
     : Provider(parent), m_instance(instance), m_program(std::move(program)), m_graceMs(graceMs) {

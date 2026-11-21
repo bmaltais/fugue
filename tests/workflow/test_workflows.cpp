@@ -719,6 +719,49 @@ private slots:
         QCOMPARE(f.canvas.nodes()->rowCount(), 0);
     }
 
+    // #59: the tab menu's commands.
+    void renameDuplicateAndCloseOthersWork() {
+        Fixture f;
+        QVERIFY(write(f.file("a.fugue"), textNode));
+        QVERIFY(write(f.file("taken.fugue"), textNode));
+        QVERIFY(f.workflows->openPath(f.file("a.fugue")));
+        f.workflows->setTabColor(0, 3);
+        // A saved workflow's file is renamed, keeps its color, ".fugue" is added, a taken name is refused.
+        QVERIFY(f.workflows->renameTab(0, "b"));
+        QVERIFY(!QFileInfo::exists(f.file("a.fugue")));
+        QVERIFY(QFileInfo::exists(f.file("b.fugue")));
+        QCOMPARE(f.workflows->pathOf(0), f.file("b.fugue"));
+        QCOMPARE(f.workflows->tabs().first().toMap().value("title").toString(), QString("b.fugue"));
+        QCOMPARE(f.workflows->tabs().first().toMap().value("color").toInt(), 3);
+        QVERIFY(!f.workflows->renameTab(0, "taken.fugue"));
+        QVERIFY(f.workflows->notice().contains("already exists"));
+        QVERIFY(QFileInfo::exists(f.file("b.fugue")));
+        QVERIFY(!f.workflows->renameTab(0, "x/y"));
+        QVERIFY(!f.workflows->renameTab(0, "  "));
+
+        // Duplicate: a new, unsaved tab with the same nodes, shown.
+        const int nodes = f.canvas.nodes()->rowCount();
+        f.workflows->duplicateTab(0);
+        QCOMPARE(f.workflows->count(), 2);
+        QCOMPARE(f.workflows->current(), 1);
+        QCOMPARE(f.canvas.nodes()->rowCount(), nodes);
+        QVERIFY(f.workflows->pathOf(1).isEmpty());
+        QCOMPARE(f.workflows->tabs().at(1).toMap().value("title").toString(), QString("b copy"));
+        QVERIFY(f.workflows->tabs().at(1).toMap().value("unsaved").toBool());
+        // An unsaved tab renames in place.
+        QVERIFY(f.workflows->renameTab(1, "scratch"));
+        QCOMPARE(f.workflows->tabs().at(1).toMap().value("title").toString(), QString("scratch"));
+
+        // Close others keeps the tab and any with unsaved content (and says so).
+        f.workflows->newWorkflow();
+        f.workflows->newWorkflow();
+        QCOMPARE(f.workflows->count(), 4);
+        f.workflows->closeOtherTabs(0);
+        QCOMPARE(f.workflows->count(), 2); // b.fugue and the unsaved copy
+        QCOMPARE(f.workflows->current(), 0);
+        QVERIFY(f.workflows->notice().contains("unsaved"));
+    }
+
     void aCleanTabClosesWithoutAskingAndTheWindowCloseCommandUsesIt() {
         Fixture f;
         registerFileCommands(f.commands, *f.workflows);

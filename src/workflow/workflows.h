@@ -168,6 +168,14 @@ public:
     Q_INVOKABLE void setTabColor(int index, int color);
     static constexpr int kTabColors = 6;
     Q_INVOKABLE void closeCurrent() { closeTab(m_current); }
+    // The tab menu's commands (#59). Rename: a saved workflow's file is renamed in its folder
+    // (".fugue" is added when the name has none, and a name already taken is refused with a
+    // notice); an unsaved one just takes the name. Duplicate: an unsaved copy of the tab's
+    // content in a new tab. Close others: closes the other tabs that have no unsaved content and
+    // says how many it kept.
+    Q_INVOKABLE bool renameTab(int index, const QString &name);
+    Q_INVOKABLE void duplicateTab(int index);
+    Q_INVOKABLE void closeOtherTabs(int index);
     Q_INVOKABLE void discardAndClose(int index);
     Q_INVOKABLE void saveAndClose(int index);
     // The file picker or the question was cancelled.
@@ -222,6 +230,9 @@ signals:
     void exportCompiledRequested();
     void packInstallRequested(const QString &source, const QString &ref);
     void closeConfirmationRequested(int index, const QString &title);
+    // The tab menu's Rename and Tab color (the tab shows its own field and swatches).
+    void tabRenameRequested(int index);
+    void tabColorRequested(int index);
 
 private:
     struct Tab {

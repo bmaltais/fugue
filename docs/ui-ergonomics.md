@@ -111,6 +111,14 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 - Why: the tabs of several workflows were told apart by their names only; a color is recognized before a name is read. The first free color is given, so open tabs differ; a saved workflow keeps its own by path.
 - Rule: Floor (swatches 28px, the tab row 36px). Posture: a transient popover, one decision (pick a swatch). Learned place: no menu changed.
 
+### 2026-11-20 CUDA helper notice (#97)
+
+- Control: `helperNotice` in `src/Main.qml`, a row between the tabs and the canvas, made only while shown (Loader): a line, `helperNoticeCopy` (highlighted, "Copy sudo pacman -S fugue-helper-cuda"), then the dismiss `helperNoticeDismiss` (×).
+- Old: none; an NVIDIA user ran on the slower Vulkan helper without being told.
+- New: the notice above, until dismissed (remembered in the state folder).
+- Why: the command is on the button, so the click costs nothing unknown; one action, then the ×.
+- Rule: Floor (the button and the × are Material's 48px). Primary (Copy is the row's one highlighted control). Gaps (8px inside the row, as the workflow banner). Posture: transient; it asks nothing.
+
 ## Unread
 
 Settings, the shortcuts overlay, the quit question, About, every menu except Run, the context menus, the workflow dialogs and their questions (those questions are a row of buttons), the group dialogs, image save, the widget pickers (but their search field), the magnifier.

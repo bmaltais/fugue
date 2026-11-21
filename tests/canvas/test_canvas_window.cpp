@@ -591,6 +591,25 @@ private slots:
         QVERIFY(dot->property("hovered").toBool());
     }
 
+    // Not a check: with FUGUE_SHOT_DIR set, saves the window showing the bundled text-to-image template
+    // as <dir>/hero.png (the README's picture, #94). FUGUE_SHOT_TEMPLATE names another template folder.
+    void savesAScreenshotWhenAsked() {
+        const QByteArray dir = qgetenv("FUGUE_SHOT_DIR");
+        if (dir.isEmpty())
+            QSKIP("set FUGUE_SHOT_DIR to save the README screenshot");
+        const QString name = qEnvironmentVariable("FUGUE_SHOT_TEMPLATE", "text-to-image");
+        QFile file(QFINDTESTDATA("../../templates/" + name + "/workflow.fugue"));
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        App app(load(file.readAll()));
+        QVERIFY(app.open());
+        app.window->resize(1600, 1000);
+        app.workflows.dismissPendingTrust();
+        app.workflows.dismissNotice();
+        app.model.requestFit();
+        QTest::qWait(800);
+        QVERIFY(test_support::grab(app.window).save(QString::fromLocal8Bit(dir) + "/hero.png"));
+    }
+
     // #98: each workflow tab shows its own color along its top, and a right click picks another.
     void eachTabShowsItsColorAndARightClickPicksAnother() {
         App app(load(small));
@@ -628,9 +647,12 @@ private slots:
         QCOMPARE(seen.size(), 3); // three tabs, three colors
 
         const bool unsavedBefore = app.workflows.unsaved();
-        // A right click on the second tab opens six swatches; one pick recolors the tab.
+        // A right click on the second tab opens its menu; Tab color… opens six swatches; one pick recolors the tab.
         QQuickItem *second = item(bar, "tab-1");
         QTest::mouseClick(app.window, Qt::RightButton, {}, second->mapToScene(QPointF(second->width() / 2, second->height() / 2)).toPoint());
+        // What the menu's Tab color… does (this window has no file commands): the item closes the menu, then asks.
+        QVERIFY(QMetaObject::invokeMethod(app.window->findChild<QObject *>("tabMenuPopup"), "close"));
+        emit app.workflows.tabColorRequested(app.workflows.current());
         QQuickItem *swatch = nullptr;
         const int current = app.workflows.tabs().at(1).toMap().value("color").toInt();
         const int pick = (current + 2) % 6;
@@ -638,7 +660,8 @@ private slots:
         QTest::mouseClick(app.window, Qt::LeftButton, {}, swatch->mapToScene(QPointF(swatch->width() / 2, swatch->height() / 2)).toPoint());
         QTRY_COMPARE(app.workflows.tabs().at(1).toMap().value("color").toInt(), pick);
         QCOMPARE(app.workflows.unsaved(), unsavedBefore); // a color is no edit
-        QTRY_VERIFY(near(tabColorAt(1), colors.at(pick).value<QColor>()));
+        QTRY_VERIFY2(near(tabColorAt(1), colors.at(pick).value<QColor>()),
+                     qPrintable(tabColorAt(1).name() + " wants " + colors.at(pick).value<QColor>().name()));
     }
 
     // #72: a node's warnings read from its header: hovering the count and triangle shows them,

@@ -31,6 +31,8 @@ ApplicationWindow {
     // The settings (settings/settings_model.h); a test window may run without them.
     readonly property SettingsModel appSettingsModel: App.settings
 
+    HelperNotice { id: helperNotice }
+
     // Right-to-left languages mirror the window; the Translator sets the
     // application's layout direction.
     Item {
@@ -49,6 +51,43 @@ ApplicationWindow {
             WorkflowTabs {
                 Layout.fillWidth: true
                 Layout.preferredHeight: implicitHeight
+            }
+            // Faster generation on an NVIDIA card with only the Vulkan helper (#97, spec 8.10).
+            // Made only while shown: the window keeps few items (#5).
+            Loader {
+                Layout.fillWidth: true
+                Layout.preferredHeight: item ? (item as Item).implicitHeight : 0
+                active: helperNotice.shown
+                sourceComponent: Rectangle {
+                    objectName: "helperNotice"
+                    implicitHeight: noticeRow.implicitHeight + 16
+                    color: App.theme.look.popup
+                    border.color: App.theme.look.hairline
+                    RowLayout {
+                        id: noticeRow
+                        anchors { fill: parent; margins: 8 }
+                        spacing: 8
+                        Label {
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            color: App.theme.look.text
+                            text: qsTr("Faster generation on your NVIDIA card: install fugue-helper-cuda")
+                        }
+                        ThemedButton {
+                            objectName: "helperNoticeCopy"
+                            highlighted: true
+                            text: qsTr("Copy %1").arg(helperNotice.command)
+                            onClicked: helperNotice.copy()
+                        }
+                        ToolButton {
+                            objectName: "helperNoticeDismiss"
+                            text: "×"
+                            focusPolicy: Qt.NoFocus
+                            Accessible.name: qsTr("Dismiss")
+                            onClicked: helperNotice.dismiss()
+                        }
+                    }
+                }
             }
             FugueCanvas {
                 id: fugueCanvas

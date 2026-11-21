@@ -10,7 +10,9 @@ import "../canvas"
 // App.theme. docs/canvas-look.md has no section for it: it takes the same
 // tokens, a recessed strip with the current tab raised in the node body's fill. Each tab has
 // its own color (App.workflows.tabs[i].color, an index into look.tabColors): a bar along its top
-// (2px, 4px on the current tab), and a light wash of it behind the tab. A right click picks another.
+// (2px, 4px on the current tab), and a light wash of it behind the tab. A right click makes the tab
+// current and opens its menu (#59, menus.h "tab": rename, duplicate, color, save, close, close others),
+// built from the command registry, so every item is a command that acts on the current tab.
 Rectangle {
     id: root
     objectName: "workflowTabs"
@@ -24,6 +26,20 @@ Rectangle {
     readonly property CanvasLook look: App.theme.look
     readonly property var tabColors: look.tabColors
     function colorOf(index) { return tabColors[((index % tabColors.length) + tabColors.length) % tabColors.length] }
+
+    // Made from the file the first time a tab's menu opens, as the canvas's context menu is.
+    property var menu: null
+    function openMenu(tab, x, y) {
+        if (!root.menu)
+            root.menu = Qt.createComponent("../menu/CommandMenu.qml").createObject(root, {objectName: "tabMenuPopup"})
+        App.workflows.current = tab.index
+        root.menu.close()
+        root.menu.target = {tab: tab.index}
+        root.menu.items = App.commands.menu("tab", root.menu.target)
+        root.menu.byKey = false
+        const p = tab.mapToItem(root, x, y)
+        root.menu.popupFit(root, p.x, p.y, 0, 0)
+    }
 
     Rectangle {
         anchors.bottom: parent.bottom
@@ -54,7 +70,41 @@ Rectangle {
                 onClicked: App.workflows.current = index
                 TapHandler {
                     acceptedButtons: Qt.RightButton
-                    onTapped: colorPopup.open()
+                    onTapped: (point) => root.openMenu(tabButton, point.position.x, point.position.y)
+                }
+                Connections {
+                    target: App.workflows
+                    function onTabColorRequested(index) { if (index === tabButton.index) colorPopup.open() }
+                    function onTabRenameRequested(index) {
+                        if (index !== tabButton.index)
+                            return
+                        renameField.text = tabButton.modelData.title
+                        renamePopup.open()
+                    }
+                }
+                Popup {
+                    id: renamePopup
+                    objectName: "tabRenamePopup-" + tabButton.index
+                    y: tabButton.height
+                    padding: root.look.unit * 2
+                    focus: true
+                    onOpened: { renameField.forceActiveFocus(); renameField.selectAll() }
+                    background: Rectangle {
+                        color: root.look.popup
+                        radius: root.look.popupCorner
+                        border.color: root.look.hairlineStrong
+                    }
+                    contentItem: TextField {
+                        id: renameField
+                        objectName: "tabRenameField-" + tabButton.index
+                        implicitWidth: 40 * root.look.unit
+                        selectByMouse: true
+                        Accessible.name: qsTr("Workflow name")
+                        onAccepted: {
+                            if (App.workflows.renameTab(tabButton.index, text))
+                                renamePopup.close()
+                        }
+                    }
                 }
                 // The top corners take the app's corner radius (look.corner, as nodes and frames do). The
                 // tab color is the whole rounded shape, and the fill sits over it a bar's height lower, so
