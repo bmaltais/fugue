@@ -1,0 +1,22 @@
+# A paired host's helper (helper/README.md): a systemd user unit.
+#
+#   mkdir -p ~/.config/fugue && openssl rand -hex 32 > ~/.config/fugue/helper.key
+#   chmod 600 ~/.config/fugue/helper.key
+#   install -D fugue-helper.service ~/.config/systemd/user/fugue-helper.service
+#   systemctl --user daemon-reload && systemctl --user enable --now fugue-helper
+#   loginctl enable-linger $USER      # to run without a login session
+#
+# Edit --listen to this host's tailnet address (`tailscale ip -4`), not 0.0.0.0, and --models to
+# its model folders, colon-separated. The same key goes in Fugue's paired-host settings.
+[Unit]
+Description=Fugue helper (stable-diffusion.cpp stages over HTTP)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+ExecStart=%h/.local/lib/fugue/fugue-helper-cuda --serve-http --listen 100.64.0.1 --port 8765 --key-file %h/.config/fugue/helper.key --models %h/models:%h/ComfyUI/models
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

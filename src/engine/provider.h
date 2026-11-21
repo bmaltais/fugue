@@ -16,6 +16,7 @@
 #include <QString>
 
 #include <functional>
+#include <optional>
 
 #include "engine/error.h"
 #include "engine/result.h"
@@ -65,6 +66,11 @@ struct Description {
     int protocol = 1;
     QString engine; // stable id of the inference engine, used in cache keys (8.11)
     QList<CapabilityOffer> capabilities;
+    // False for a provider on another machine (a paired helper, 8.10): it cannot read this
+    // machine's files, so media go to it as data and models as handles it resolves itself.
+    bool sharesFilesystem = true;
+    // The memory the provider's machine has free, when it says (8.10).
+    std::optional<qint64> freeMemoryBytes;
 
     const CapabilityOffer *offer(const QString &capability) const;
 };

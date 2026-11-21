@@ -3,6 +3,7 @@
 #include "engine/helper_provider.h"
 #include "engine/json.h"
 #include "engine/paths.h"
+#include "engine/remote_helper_provider.h"
 #include "omarchy_provider.h"
 
 #include <QDir>
@@ -63,7 +64,8 @@ void appendUnique(QStringList &list, const QString &item) {
 
 Result<Selection> chosen(const Match &match) {
     return Result<Selection>(Selection{match.candidate->instance.name,
-                                       match.candidate->description->engine, *match.model});
+                                       match.candidate->description->engine, *match.model,
+                                       match.candidate->description->sharesFilesystem});
 }
 
 Result<Selection> failed(const Error &error) { return Result<Selection>(error); }
@@ -300,6 +302,8 @@ Result<std::shared_ptr<Provider>> createProvider(const ProviderInstance &instanc
     if (instance.type == QLatin1String("omarchy"))
         return Result<std::shared_ptr<Provider>>(
             std::make_shared<OmarchyProvider>(instance, OmarchyPaths::standard()));
+    if (instance.type == QLatin1String("fugue-helper") && !instance.address.isEmpty())
+        return Result<std::shared_ptr<Provider>>(std::make_shared<RemoteHelperProvider>(instance));
     if (instance.type == QLatin1String("fugue-helper"))
         return Result<std::shared_ptr<Provider>>(
             std::make_shared<HelperProvider>(instance, helperProgram(hasNvidiaGpu())));

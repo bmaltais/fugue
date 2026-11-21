@@ -59,6 +59,10 @@ QList<ProviderInstance> defaultProviderInstances(const OmarchyPaths &omarchy);
 QString pairedHostsProblem();
 QString pairedHostsProblem(const OmarchyPaths &omarchy);
 
+// A `fugue-helper` instance with an address is a helper on a paired host (8.10), reached over
+// http: {"name": "gx10", "type": "fugue-helper", "address": "http://host:port", "key": "..."}.
+// Without an address it is the helper on this machine.
+//
 // Makes the provider an instance is a use of: omarchy and fugue-helper are compiled in (8.7);
 // any other type is unknown_provider until provider modules arrive (M4).
 Result<std::shared_ptr<Provider>> createProvider(const ProviderInstance &instance);
@@ -86,6 +90,9 @@ struct Selection {
     QString instance;   // the instance name, which is not part of the cache key (8.3)
     QString engine;     // the engine id, which is (10.1)
     OfferedModel model; // the model resolved, with its limits and defaults
+    // Whether the provider reads this machine's files (Description::sharesFilesystem): when not,
+    // a stage sends model handles, not paths, and leaves the checks of the files to the host.
+    bool sharesFilesystem = true;
 };
 
 // Chooses per 8.3: a pin when there is one, else the first enabled ready instance in the

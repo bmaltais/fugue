@@ -86,6 +86,39 @@ private slots:
         QVERIFY(!parsed.value().at(2).settings.contains("key"));
     }
 
+    void aRemoteHelperEntryHasAnAddressAndAKey() {
+        const Result<QList<ProviderInstance>> parsed = parseProviderInstances(QJsonObject{
+            {"providers", QJsonArray{QJsonObject{{"name", "gx10"}, {"type", "fugue-helper"},
+                                                 {"address", "http://100.84.169.13:8787"}, {"key", "secret"}}}}});
+        QVERIFY(parsed);
+        QCOMPARE(parsed->first().address, QStringLiteral("http://100.84.169.13:8787"));
+        QCOMPARE(parsed->first().key, QStringLiteral("secret"));
+        QVERIFY(parsed->first().settings.isEmpty());
+        QVERIFY(createProvider(parsed->first()));
+    }
+
+    void theSelectionSaysWhetherTheProviderSharesTheFilesystem() {
+        Candidate here = candidate("Fugue helper", {CapabilityOffer{"latent.sample", {model("")}}});
+        Candidate there = candidate("gx10", {CapabilityOffer{"latent.sample", {model("")}}});
+        there.description.value().sharesFilesystem = false;
+        there.description.value().freeMemoryBytes = 96000000000;
+        Requirement requirement = wants("latent.sample");
+        const Result<Selection> first = selectProvider({here, there}, requirement);
+        QVERIFY(first);
+        QVERIFY(first->sharesFilesystem);
+        requirement.nodePin = QStringLiteral("gx10");
+        const Result<Selection> pinned = selectProvider({here, there}, requirement);
+        QVERIFY(pinned);
+        QCOMPARE(pinned->instance, QStringLiteral("gx10"));
+        QVERIFY(!pinned->sharesFilesystem);
+        // With the local one disabled, the host serves "any ready model".
+        here.instance.enabled = false;
+        requirement.nodePin.clear();
+        const Result<Selection> only = selectProvider({here, there}, requirement);
+        QVERIFY(only);
+        QVERIFY(!only->sharesFilesystem);
+    }
+
     void instancesNeedAUniqueNameAndAType() {
         const QJsonArray providers{
             QJsonObject{{"name", "A"}, {"type", "omarchy"}},

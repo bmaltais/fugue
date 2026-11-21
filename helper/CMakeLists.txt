@@ -74,6 +74,9 @@ FetchContent_MakeAvailable(sdcpp)
 
 add_executable(fugue-helper src/main.cpp)
 target_link_libraries(fugue-helper PRIVATE stable-diffusion)
+# cpp-httplib (--serve-http) is in stable-diffusion.cpp's thirdparty/ too.
+target_include_directories(fugue-helper SYSTEM PRIVATE ${sdcpp_SOURCE_DIR}/thirdparty)
+target_compile_definitions(fugue-helper PRIVATE FUGUE_BACKEND="${FUGUE_HELPER_BACKEND}")
 target_compile_options(fugue-helper PRIVATE -Wall -Wextra)
 set_target_properties(fugue-helper PROPERTIES OUTPUT_NAME fugue-helper-${FUGUE_HELPER_BACKEND})
 # The app looks for its helpers in lib/fugue (#78 picks one). Install with

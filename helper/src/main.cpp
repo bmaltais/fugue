@@ -3,6 +3,8 @@
 //
 //   fugue-helper <request.json>     one operation, then exit
 //   fugue-helper --serve            the provider protocol over stdio (8.8), for HelperProvider
+//   fugue-helper --serve-http --listen ADDR --port N --key-file FILE --models DIR[:DIR...]
+//                                   the same operations over HTTP, for a paired host (README.md)
 //
 // A request names an operation and its files:
 //
@@ -42,8 +44,20 @@
 // memory is needed: before loading, the least recently used contexts are freed while the device
 // has less free memory than the new one's files take, and a load or a generation that runs out
 // of memory frees the others and is tried once more.
+//
+// --serve-http serves the same jobs as POST /fugue/v1/{describe,submit,status,cancel,result,
+// shutdown} and GET /fugue/v1/result/<job>/<i>, JSON bodies and a bearer key; the contract is in
+// README.md. There the host makes each job's work dir, inputs arrive as {"data", "format"}, model
+// files are named by handle ({"name", "sha256", "size"}) and found under --models, and the
+// outputs are fetched as files.
 
+#include <algorithm>
+#include <cctype>
+#include <chrono>
 #include <condition_variable>
+#include <csignal>
+#include <cstdint>
+#include <cstring>
 #include <cstdio>
 #include <cstdlib>
 #include <deque>
@@ -56,9 +70,13 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
+
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "ggml-backend.h"
 #include "json.hpp"
@@ -70,6 +88,11 @@
 #include "stb_image.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
+#include "httplib.h"
+
+#ifndef FUGUE_BACKEND
+#define FUGUE_BACKEND "cpu"
+#endif
 
 using nlohmann::json;
 
@@ -370,9 +393,448 @@ json attempt(const std::function<json()> &call) {
     }
 }
 
+namespace fs = std::filesystem;
+
+// SHA-256 (FIPS 180-4) of a file, read in 8 MB chunks. stable-diffusion.cpp has no reusable one.
+class Sha256 {
+public:
+    void update(const unsigned char *data, size_t size) {
+        m_total += size;
+        while (size > 0) {
+            const size_t take = std::min(size, sizeof m_block - m_used);
+            std::memcpy(m_block + m_used, data, take);
+            m_used += take;
+            data += take;
+            size -= take;
+            if (m_used == sizeof m_block) {
+                compress(m_block);
+                m_used = 0;
+            }
+        }
+    }
+
+    std::string hex() {
+        const uint64_t bits = m_total * 8;
+        const unsigned char one = 0x80;
+        update(&one, 1);
+        const unsigned char zero = 0;
+        while (m_used != 56)
+            update(&zero, 1);
+        unsigned char length[8];
+        for (int i = 0; i < 8; ++i)
+            length[i] = static_cast<unsigned char>(bits >> (56 - 8 * i));
+        update(length, 8);
+        static const char digits[] = "0123456789abcdef";
+        std::string out;
+        for (const uint32_t word : m_state)
+            for (int shift = 28; shift >= 0; shift -= 4)
+                out += digits[(word >> shift) & 15];
+        return out;
+    }
+
+private:
+    static uint32_t rotr(uint32_t x, int n) { return (x >> n) | (x << (32 - n)); }
+
+    void compress(const unsigned char *block) {
+        static const uint32_t k[64] = {
+            0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be,
+            0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa,
+            0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85,
+            0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+            0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f,
+            0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
+        uint32_t w[64];
+        for (int i = 0; i < 16; ++i)
+            w[i] = (uint32_t(block[4 * i]) << 24) | (uint32_t(block[4 * i + 1]) << 16) | (uint32_t(block[4 * i + 2]) << 8) | block[4 * i + 3];
+        for (int i = 16; i < 64; ++i) {
+            const uint32_t s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
+            const uint32_t s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+        }
+        uint32_t a = m_state[0], b = m_state[1], c = m_state[2], d = m_state[3], e = m_state[4], f = m_state[5], g = m_state[6], h = m_state[7];
+        for (int i = 0; i < 64; ++i) {
+            const uint32_t t1 = h + (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) + ((e & f) ^ (~e & g)) + k[i] + w[i];
+            const uint32_t t2 = (rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) + ((a & b) ^ (a & c) ^ (b & c));
+            h = g;
+            g = f;
+            f = e;
+            e = d + t1;
+            d = c;
+            c = b;
+            b = a;
+            a = t1 + t2;
+        }
+        m_state[0] += a;
+        m_state[1] += b;
+        m_state[2] += c;
+        m_state[3] += d;
+        m_state[4] += e;
+        m_state[5] += f;
+        m_state[6] += g;
+        m_state[7] += h;
+    }
+
+    uint32_t m_state[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+    unsigned char m_block[64] = {};
+    size_t m_used = 0;
+    uint64_t m_total = 0;
+};
+
+// The hash of a file; empty if `cancelled` says stop or the file cannot be read.
+std::string sha256OfFile(const fs::path &path, const std::function<bool()> &cancelled) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in)
+        return {};
+    std::vector<unsigned char> chunk(8u * 1024 * 1024);
+    Sha256 hash;
+    while (in) {
+        in.read(reinterpret_cast<char *>(chunk.data()), static_cast<std::streamsize>(chunk.size()));
+        hash.update(chunk.data(), static_cast<size_t>(in.gcount()));
+        if (cancelled && cancelled())
+            return {};
+    }
+    return in.eof() ? hash.hex() : std::string();
+}
+
+// A handle's "sha256" ("sha256:<hex>" or bare hex) as lower-case hex; empty if the handle has none.
+std::string wantedSha256(const std::string &key, const json &handle) {
+    if (!handle.contains("sha256") || handle["sha256"].is_null())
+        return {};
+    std::string text = handle["sha256"].is_string() ? handle["sha256"].get<std::string>() : std::string();
+    if (text.compare(0, 7, "sha256:") == 0)
+        text.erase(0, 7);
+    for (char &c : text)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    if (text.size() != 64 || text.find_first_not_of("0123456789abcdef") != std::string::npos)
+        fail("input_invalid", key + ": the model's \"sha256\" is not 64 hex digits");
+    return text;
+}
+
+// --serve-http: the model files of the host, found by handle under the --models roots (8.9).
+class Models {
+public:
+    // `hashFile`: where the hashes of the model files are kept between runs (empty: not kept).
+    explicit Models(const std::vector<fs::path> &roots, fs::path hashFile = {}) : m_hashFile(std::move(hashFile)) {
+        for (const fs::path &root : roots)
+            m_roots.push_back(fs::absolute(root).lexically_normal());
+        scan();
+        loadHashes();
+    }
+
+    const std::vector<fs::path> &roots() const { return m_roots; }
+
+    // A path given as a string is used only inside a root: no other host file is read.
+    bool inside(const fs::path &path) const {
+        if (path.empty() || !path.is_absolute())
+            return false;
+        const fs::path normal = path.lexically_normal();
+        for (const fs::path &root : m_roots) {
+            const fs::path rel = normal.lexically_relative(root);
+            if (!rel.empty() && *rel.begin() != ".." && rel != ".")
+                return true;
+        }
+        return false;
+    }
+
+    // The file a handle names, or a model_missing failure. `key` ("vae_path", "loras") picks the
+    // type folders tried next to the plain name. With a "sha256" only a file of that content is
+    // accepted (8.9): it hashes the candidates, which takes a while the first time; `cancelled`,
+    // when given, is polled while it reads.
+    struct Wanted {
+        std::string name;
+        std::optional<uintmax_t> size;
+        std::string sha; // lower-case hex, or empty
+    };
+
+    // The handle's fields, or input_invalid.
+    static Wanted parse(const std::string &key, const json &handle) {
+        if (!handle.contains("name") || !handle["name"].is_string())
+            fail("input_invalid", key + ": a model handle needs a \"name\"");
+        Wanted w;
+        w.name = handle["name"].get<std::string>();
+        const fs::path path(w.name);
+        if (w.name.empty() || path.is_absolute() || w.name.front() == '/' || w.name.find('\\') != std::string::npos)
+            fail("input_invalid", key + ": the model name \"" + w.name + "\" is not a relative path");
+        for (const fs::path &part : path)
+            if (part == "..")
+                fail("input_invalid", key + ": the model name \"" + w.name + "\" has \"..\"");
+        if (handle.contains("size") && handle["size"].is_number_unsigned())
+            w.size = handle["size"].get<uintmax_t>();
+        w.sha = wantedSha256(key, handle);
+        return w;
+    }
+
+    std::string resolve(const std::string &key, const json &handle, const std::function<bool()> &cancelled = {}) {
+        const Wanted want = parse(key, handle);
+        const std::string &name = want.name;
+        const std::optional<uintmax_t> &size = want.size;
+        const std::string &sha = want.sha;
+        const fs::path wanted(name);
+
+        std::vector<std::string> tried; // the candidates whose content was seen, in order
+        std::vector<std::string> candidates;
+        for (int pass = 0; pass < 2; ++pass) {
+            {
+                std::lock_guard<std::mutex> lock(m_mutex);
+                if (pass == 1)
+                    scan(); // a file added since the start
+                candidates = look(wanted, key, size);
+            }
+            for (const std::string &path : candidates) {
+                if (std::find(tried.begin(), tried.end(), path) != tried.end())
+                    continue;
+                if (sha.empty())
+                    return path;
+                tried.push_back(path);
+                if (hashOf(path, cancelled) == sha)
+                    return path;
+            }
+        }
+        std::string searched;
+        for (const fs::path &root : m_roots)
+            searched += (searched.empty() ? "" : ", ") + root.string();
+        if (tried.empty())
+            fail("model_missing", "the model file \"" + name + "\"" + (size ? " of " + std::to_string(*size) + " bytes" : "") +
+                                      " is not under " + searched);
+        std::string others;
+        for (const std::string &path : tried) {
+            std::error_code ec;
+            others += (others.empty() ? "" : ", ") + path + " (" + std::to_string(fs::file_size(path, ec)) + " bytes)";
+        }
+        fail("model_missing", "no file named \"" + name + "\" has the content asked for (sha256 " + sha + "): the sha256 differs for " + others);
+    }
+
+private:
+    struct Entry {
+        std::string rel; // relative to its root, with '/'
+        fs::path path;
+        uintmax_t size;
+    };
+
+    static std::vector<std::string> folders(const std::string &key) {
+        static const std::map<std::string, std::vector<std::string>> byKey{
+            {"diffusion_model_path", {"diffusion_models", "unet", "checkpoints"}},
+            {"model_path", {"checkpoints", "diffusion_models"}},
+            {"vae_path", {"vae"}},
+            {"taesd_path", {"vae_approx", "vae"}},
+            {"llm_path", {"text_encoders", "clip"}},
+            {"clip_l_path", {"text_encoders", "clip"}},
+            {"clip_g_path", {"text_encoders", "clip"}},
+            {"clip_vision_path", {"clip_vision"}},
+            {"t5xxl_path", {"text_encoders", "clip"}},
+            {"controlnet_path", {"controlnet"}},
+            {"loras", {"loras"}},
+        };
+        const auto it = byKey.find(key);
+        return it == byKey.end() ? std::vector<std::string>{} : it->second;
+    }
+
+    static bool fits(const fs::path &file, std::optional<uintmax_t> size) {
+        std::error_code ec;
+        if (!fs::is_regular_file(file, ec))
+            return false;
+        return !size || fs::file_size(file, ec) == *size;
+    }
+
+    // Every file the handle's name can mean, best match first, without repeats.
+    std::vector<std::string> look(const fs::path &name, const std::string &key, std::optional<uintmax_t> size) const {
+        std::vector<std::string> found;
+        auto add = [&found](const fs::path &path) {
+            const std::string text = path.string();
+            if (std::find(found.begin(), found.end(), text) == found.end())
+                found.push_back(text);
+        };
+        std::vector<fs::path> prefixes{fs::path()};
+        for (const std::string &folder : folders(key))
+            prefixes.push_back(folder);
+        for (const fs::path &root : m_roots)
+            for (const fs::path &prefix : prefixes) {
+                const fs::path candidate = root / prefix / name;
+                if (fits(candidate, size))
+                    add(candidate);
+            }
+        const std::string tail = name.generic_string();
+        for (const Entry &e : m_files) {
+            const bool ends = e.rel == tail || (e.rel.size() > tail.size() && e.rel.compare(e.rel.size() - tail.size(), tail.size(), tail) == 0 &&
+                                                e.rel[e.rel.size() - tail.size() - 1] == '/');
+            if (ends && (!size || e.size == *size))
+                add(e.path);
+        }
+        const std::string base = name.filename().string();
+        for (const Entry &e : m_files)
+            if (fs::path(e.rel).filename() == base && (!size || e.size == *size))
+                add(e.path);
+        return found;
+    }
+
+    struct Hash {
+        uintmax_t size = 0;
+        int64_t mtime = 0;
+        std::string hex;
+    };
+
+    // The SHA-256 of a file, computed once per (path, size, mtime) and kept; empty if cancelled.
+    std::string hashOf(const std::string &path, const std::function<bool()> &cancelled) {
+        std::error_code ec;
+        const uintmax_t size = fs::file_size(path, ec);
+        const int64_t mtime = static_cast<int64_t>(fs::last_write_time(path, ec).time_since_epoch().count());
+        {
+            std::lock_guard<std::mutex> lock(m_hashMutex);
+            const auto known = m_hashes.find(path);
+            if (known != m_hashes.end() && known->second.size == size && known->second.mtime == mtime)
+                return known->second.hex;
+        }
+        std::fprintf(stderr, "fugue-helper: hashing %s (%ju bytes)\n", path.c_str(), static_cast<uintmax_t>(size));
+        const std::string hex = sha256OfFile(path, cancelled);
+        if (hex.empty()) {
+            if (cancelled && cancelled())
+                fail("cancelled", "cancelled while hashing " + path);
+            return {};
+        }
+        std::lock_guard<std::mutex> lock(m_hashMutex);
+        m_hashes[path] = {size, mtime, hex};
+        saveHashes();
+        return hex;
+    }
+
+    void loadHashes() {
+        if (m_hashFile.empty())
+            return;
+        std::ifstream in(m_hashFile);
+        const json doc = json::parse(in, nullptr, false);
+        if (doc.is_discarded() || !doc.is_object())
+            return;
+        for (const auto &[path, entry] : doc.items())
+            if (entry.is_object() && entry.contains("size") && entry.contains("mtime") && entry.contains("sha256") && entry["sha256"].is_string() &&
+                entry["size"].is_number_unsigned() && entry["mtime"].is_number_integer())
+                m_hashes[path] = {entry["size"].get<uintmax_t>(), entry["mtime"].get<int64_t>(), entry["sha256"].get<std::string>()};
+    }
+
+    // Under m_hashMutex. Written next to the file and renamed over it, so a crash leaves the old one.
+    void saveHashes() const {
+        if (m_hashFile.empty())
+            return;
+        json doc = json::object();
+        for (const auto &[path, h] : m_hashes)
+            doc[path] = {{"size", h.size}, {"mtime", h.mtime}, {"sha256", h.hex}};
+        std::error_code ec;
+        fs::create_directories(m_hashFile.parent_path(), ec);
+        const fs::path temp = m_hashFile.string() + ".tmp";
+        {
+            std::ofstream out(temp, std::ios::binary | std::ios::trunc);
+            out << doc.dump(1) << "\n";
+            if (!out.flush())
+                return;
+        }
+        fs::rename(temp, m_hashFile, ec);
+        if (ec)
+            fs::remove(temp, ec);
+    }
+
+    // Recursive, symlinks followed (to a depth, against loops), dot-names skipped.
+    void walk(const fs::path &dir, const std::string &rel, int depth) {
+        if (depth > 12)
+            return;
+        std::error_code ec;
+        std::vector<fs::path> entries;
+        for (fs::directory_iterator it(dir, fs::directory_options::skip_permission_denied, ec), end; !ec && it != end; it.increment(ec))
+            entries.push_back(it->path());
+        std::sort(entries.begin(), entries.end());
+        for (const fs::path &path : entries) {
+            const std::string name = path.filename().string();
+            if (name.empty() || name[0] == '.')
+                continue;
+            const std::string childRel = rel.empty() ? name : rel + "/" + name;
+            if (fs::is_directory(path, ec))
+                walk(path, childRel, depth + 1);
+            else if (fs::is_regular_file(path, ec))
+                m_files.push_back({childRel, path, fs::file_size(path, ec)});
+        }
+    }
+
+    void scan() {
+        m_files.clear();
+        for (const fs::path &root : m_roots)
+            walk(root, "", 0);
+    }
+
+    std::vector<fs::path> m_roots;
+    std::vector<Entry> m_files;
+    std::mutex m_mutex;
+    fs::path m_hashFile;
+    std::map<std::string, Hash> m_hashes;
+    std::mutex m_hashMutex;
+};
+
+// The bytes of a base64 string (RFC 4648, the URL-safe alphabet and white space tolerated).
+std::string base64Decode(const std::string &text) {
+    std::string out;
+    unsigned buffer = 0;
+    int bits = 0;
+    for (const char c : text) {
+        int v;
+        if (c >= 'A' && c <= 'Z')
+            v = c - 'A';
+        else if (c >= 'a' && c <= 'z')
+            v = c - 'a' + 26;
+        else if (c >= '0' && c <= '9')
+            v = c - '0' + 52;
+        else if (c == '+' || c == '-')
+            v = 62;
+        else if (c == '/' || c == '_')
+            v = 63;
+        else if (c == '=' || c == '\n' || c == '\r' || c == ' ')
+            continue;
+        else
+            fail("input_invalid", "an input's data is not base64");
+        buffer = (buffer << 6) | static_cast<unsigned>(v);
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            out.push_back(static_cast<char>((buffer >> bits) & 0xff));
+        }
+    }
+    return out;
+}
+
+// Equal strings, in a time that does not tell where they differ.
+bool sameBytes(const std::string &a, const std::string &b) {
+    unsigned char diff = a.size() == b.size() ? 0 : 1;
+    const size_t n = std::max(a.size(), b.size());
+    for (size_t i = 0; i < n; ++i)
+        diff |= static_cast<unsigned char>((i < a.size() ? a[i] : 0) ^ (i < b.size() ? b[i] : 0));
+    return diff == 0;
+}
+
+// MemAvailable of /proc/meminfo, in bytes (the GB10 shares one memory, spec 8.10); the device's
+// own free memory where there is no such file.
+size_t availableMemory() {
+    std::ifstream in("/proc/meminfo");
+    std::string label;
+    unsigned long long kb = 0;
+    while (in >> label) {
+        if (label == "MemAvailable:" && in >> kb)
+            return static_cast<size_t>(kb) * 1024;
+        in.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    }
+    return freeDeviceMemory();
+}
+
+// A model handle with a sha256, resolved in its job (hashing a big file takes a while): where its
+// path goes in the job's request (a JSON pointer), and the handle.
+struct PendingModel {
+    std::string pointer;
+    std::string key;
+    json handle;
+};
+
 // --serve: the provider protocol of spec 8.8 over stdio.
 class Server {
 public:
+    Server() = default;
+    // Over HTTP: `models` names the model files, `base` holds the jobs' work dirs.
+    Server(Models *models, fs::path base) : m_models(models), m_base(std::move(base)) {}
+
     int serve() {
         sd_set_progress_callback(&Server::progressed, this);
         std::thread worker([this] { work(); });
@@ -399,9 +861,83 @@ public:
         std::_Exit(0);
     }
 
+    int serveHttp(const std::string &address, int port, const std::string &key) {
+        sd_set_progress_callback(&Server::progressed, this);
+        std::thread worker([this] { work(); });
+        worker.detach();
+        httplib::Server http;
+        http.set_payload_max_length(512u * 1024 * 1024);
+        http.set_pre_routing_handler([key](const httplib::Request &req, httplib::Response &res) {
+            const std::string given = req.get_header_value("Authorization");
+            const std::string prefix = "Bearer ";
+            if (given.compare(0, prefix.size(), prefix) == 0 && sameBytes(given.substr(prefix.size()), key))
+                return httplib::Server::HandlerResponse::Unhandled;
+            reply(res, {{"error", errorJson("unauthorized", "a valid \"Authorization: Bearer <key>\" is required")}});
+            return httplib::Server::HandlerResponse::Handled;
+        });
+        http.set_error_handler([](const httplib::Request &, httplib::Response &res) {
+            if (!res.body.empty())
+                return;
+            const std::string code = res.status == 404 ? "not_found" : res.status == 413 ? "payload_too_large" : "input_invalid";
+            reply(res, {{"error", errorJson(code, "HTTP " + std::to_string(res.status))}}, res.status);
+        });
+        http.set_exception_handler([](const httplib::Request &, httplib::Response &res, std::exception_ptr) {
+            reply(res, {{"error", errorJson("helper_failed", "the helper failed on this request")}});
+        });
+        auto post = [&](const char *name, std::function<json(const json &)> call) {
+            http.Post(std::string("/fugue/v1/") + name, [call](const httplib::Request &req, httplib::Response &res) {
+                json body = json::object();
+                if (!req.body.empty()) {
+                    body = json::parse(req.body, nullptr, false);
+                    if (body.is_discarded() || !body.is_object())
+                        return reply(res, {{"error", errorJson("input_invalid", "the body is not a JSON object")}});
+                }
+                reply(res, attempt([&] { return call(body); }));
+            });
+        };
+        post("describe", [this](const json &) {
+            return json{{"protocol", 1},
+                        {"engine", "sdcpp"},
+                        {"shares_filesystem", false},
+                        {"backend", FUGUE_BACKEND},
+                        {"capabilities", {"text.encode", "latent.sample", "latent.decode", "latent.encode"}},
+                        {"free_memory_bytes", availableMemory()},
+                        {"host", hostName()}};
+        });
+        post("submit", [this](const json &body) { return submitHttp(body); });
+        for (const char *op : {"status", "cancel", "result"})
+            post(op, [this, op](const json &body) {
+                json message = body;
+                message["op"] = op;
+                return handle(message);
+            });
+        post("shutdown", [](const json &) { return json::object(); }); // the host runs the server
+        http.Get(R"(/fugue/v1/result/([^/]+)/(\d+))", [this](const httplib::Request &req, httplib::Response &res) {
+            const std::string file = fileOf(req.matches[1], std::stoul(req.matches[2]));
+            std::ifstream in(file, std::ios::binary);
+            if (file.empty() || !in)
+                return reply(res, {{"error", errorJson("input_invalid", "no output file " + req.matches[2].str() + " of job \"" + req.matches[1].str() + "\"")}}, 404);
+            std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+            res.set_content(std::move(bytes), "application/octet-stream");
+        });
+        if (!http.bind_to_port(address, port)) {
+            std::fprintf(stderr, "fugue-helper: cannot listen on %s:%d\n", address.c_str(), port);
+            return 1;
+        }
+        std::fprintf(stderr, "fugue-helper: serving http://%s:%d/fugue/v1/ (models: %zu roots)\n", address.c_str(), port, m_models->roots().size());
+        http.listen_after_bind();
+        return 0;
+    }
+
 private:
     struct Job {
         json request; // the one-shot form
+        fs::path dir; // HTTP: its work dir
+        std::vector<std::string> files; // HTTP: the output files, as result/<job>/<i> indexes them
+        json resolved = json::array(); // HTTP: the model handles it named, and the files they became
+        std::vector<PendingModel> pending; // HTTP: handles with a sha256, resolved when the job starts
+        uint64_t finishedSeq = 0;
+        std::chrono::steady_clock::time_point finishedAt;
         std::string stage;
         std::string state = "queued";
         json outputs = json::object();
@@ -409,7 +945,186 @@ private:
         bool cancel = false;
     };
 
+    // A reply as JSON; an error's HTTP status follows its code.
+    static void reply(httplib::Response &res, const json &body, int status = 0) {
+        if (status == 0) {
+            status = 200;
+            if (body.contains("error")) {
+                const std::string code = body["error"].value("code", "");
+                const std::string message = body["error"].value("message", "");
+                status = code == "unauthorized" ? 401
+                         : code == "input_invalid" && message.compare(0, 6, "no job") == 0 ? 404
+                         : code == "input_invalid" || code == "model_missing" ? 400
+                                                                                : 500;
+            }
+        }
+        res.status = status;
+        res.set_content(body.dump(), "application/json");
+    }
+
+    static std::string hostName() {
+        char name[256] = {};
+        return gethostname(name, sizeof name - 1) == 0 ? name : "";
+    }
+
+    std::string fileOf(const std::string &id, size_t index) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        const auto found = m_jobs.find(id);
+        return found == m_jobs.end() || index >= found->second.files.size() ? std::string() : found->second.files[index];
+    }
+
+    // Under m_mutex: a finished job's files stay for an hour or until 20 newer jobs have finished.
+    void purge() {
+        const auto now = std::chrono::steady_clock::now();
+        std::vector<std::string> done;
+        for (const auto &[id, job] : m_jobs)
+            if (job.finishedSeq)
+                done.push_back(id);
+        std::sort(done.begin(), done.end(), [this](const std::string &a, const std::string &b) { return m_jobs[a].finishedSeq > m_jobs[b].finishedSeq; });
+        for (size_t i = 0; i < done.size(); ++i) {
+            const Job &job = m_jobs[done[i]];
+            if (i < 20 && now - job.finishedAt < std::chrono::hours(1))
+                continue;
+            std::error_code ignored;
+            fs::remove_all(job.dir, ignored);
+            m_progress.erase(done[i]);
+            m_jobs.erase(done[i]);
+        }
+    }
+
+    // Writes one input's data into the job's dir; the {"path"} the stdio protocol takes.
+    json storeInput(const json &input, const fs::path &dir, const std::string &name, size_t index) {
+        if (!input.is_object() || !input.contains("data") || !input["data"].is_string())
+            fail("input_invalid", "input \"" + name + "\" needs {\"data\": base64, \"format\"}");
+        const std::string format = input.value("format", "");
+        const std::string ext = format == "png" ? ".png" : ".bin";
+        // The name is the caller's: only letters, digits, - and _ reach the file's name, so it stays in `dir`.
+        std::string safe;
+        for (const char c : name)
+            safe += (std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_') ? c : '_';
+        const fs::path path = dir / (safe.substr(0, 64) + "-" + std::to_string(index) + ext);
+        const std::string bytes = base64Decode(input["data"].get<std::string>());
+        std::ofstream out(path, std::ios::binary);
+        out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+        if (!out.flush())
+            fail("helper_failed", "cannot write " + path.string());
+        return {{"path", path.string()}};
+    }
+
+    // A model value: a path inside the roots as it is, or a handle's file; recorded in `used`.
+    json modelValue(const std::string &key, const json &value, json &used, const std::string &pointer, std::vector<PendingModel> &pending) {
+        if (value.is_string()) {
+            if (!m_models->inside(value.get<std::string>()))
+                fail("input_invalid", key + ": \"" + value.get<std::string>() + "\" is not inside the model folders; name the file by a handle");
+            return value;
+        }
+        if (!value.is_object())
+            fail("input_invalid", key + ": a model is a path or a handle");
+        if (!Models::parse(key, value).sha.empty()) { // hashed in the job, not in this request
+            pending.push_back({pointer, key, value});
+            return "";
+        }
+        const std::string path = m_models->resolve(key, value);
+        json entry = value;
+        entry["key"] = key;
+        entry["path"] = path;
+        used.push_back(entry);
+        return path;
+    }
+
+    // The request over HTTP made ready for submit(): paths only inside the roots, handles
+    // resolved, input data written into a work dir of the job.
+    json submitHttp(const json &body) {
+        const std::string capability = body.value("capability", "");
+        if (capability.empty())
+            fail("input_invalid", "\"capability\" is required");
+        json message = body;
+        json used = json::array();
+        std::vector<PendingModel> pending;
+        json params = body.value("params", json::object());
+        if (!params.is_object())
+            fail("input_invalid", "\"params\" is not an object");
+        for (auto &[key, value] : params.items()) {
+            if (key == "context" && value.is_object()) {
+                for (auto &[ckey, cvalue] : value.items())
+                    if (ckey.size() > 5 && ckey.compare(ckey.size() - 5, 5, "_path") == 0)
+                        cvalue = modelValue(ckey, cvalue, used, "/context/" + ckey, pending);
+            } else if (key == "loras" && value.is_array()) {
+                size_t index = 0;
+                for (json &lora : value) {
+                    if (!lora.is_object() || !lora.contains("path"))
+                        fail("input_invalid", "a lora needs a \"path\"");
+                    lora["path"] = modelValue("loras", lora["path"], used, "/params/loras/" + std::to_string(index++) + "/path", pending);
+                }
+            } else if (key.size() > 5 && key.compare(key.size() - 5, 5, "_path") == 0 && (value.is_string() || value.is_object())) {
+                value = modelValue(key, value, used, "/params/" + key, pending);
+            }
+        }
+        // Nothing else of the host's is read: an image option names no host file.
+        auto noHostImage = [](const json &v) {
+            if (isImage(v))
+                fail("input_invalid", "an {\"image\": PATH} option reads a host file; send the image as an input");
+        };
+        for (const auto &[key, value] : params.items()) {
+            noHostImage(value);
+            if (value.is_array())
+                for (const json &item : value)
+                    noHostImage(item);
+        }
+
+        std::error_code ec;
+        fs::create_directories(m_base, ec);
+        std::string pattern = (m_base / "job-XXXXXX").string();
+        if (!mkdtemp(pattern.data()))
+            fail("helper_failed", "cannot make a work dir under " + m_base.string());
+        const fs::path dir = pattern;
+        try {
+            // An image option (ref_images, ...) arrives as {"data", "format"}; it becomes the {"image": PATH}
+            // of a file in the job's dir.
+            auto imageOption = [&](const json &v, const std::string &name, size_t index) -> json {
+                return {{"image", storeInput(v, dir, name, index)["path"]}};
+            };
+            auto isData = [](const json &v) { return v.is_object() && v.contains("data"); };
+            for (auto &[key, value] : params.items()) {
+                if (isData(value)) {
+                    value = imageOption(value, "param-" + key, 0);
+                } else if (value.is_array()) {
+                    for (size_t i = 0; i < value.size(); ++i) {
+                        // A list item is {"image": ...} for the engine; the client sends {"image": {data}} or {data}.
+                        if (isData(value[i]))
+                            value[i] = imageOption(value[i], "param-" + key, i);
+                        else if (value[i].is_object() && value[i].contains("image") && isData(value[i]["image"]))
+                            value[i] = imageOption(value[i]["image"], "param-" + key, i);
+                    }
+                }
+            }
+            message["params"] = params;
+            json inputs = body.value("inputs", json::object());
+            if (!inputs.is_object())
+                fail("input_invalid", "\"inputs\" is not an object");
+            for (auto &[name, value] : inputs.items()) {
+                if (value.is_array()) {
+                    json list = json::array();
+                    for (size_t i = 0; i < value.size(); ++i)
+                        list.push_back(storeInput(value[i], dir, name, i));
+                    value = list;
+                } else {
+                    value = storeInput(value, dir, name, 0);
+                }
+            }
+            message["inputs"] = inputs;
+            message["output_dir"] = dir.string();
+            json out = submit(message, dir, used, pending);
+            return out;
+        } catch (...) {
+            fs::remove_all(dir, ec);
+            throw;
+        }
+    }
+
     void say(const json &message) {
+        if (m_models)
+            return; // over HTTP, state is asked for
         const std::string text = message.dump() + "\n";
         std::lock_guard<std::mutex> lock(m_out);
         std::fwrite(text.data(), 1, text.size(), stdout);
@@ -431,6 +1146,8 @@ private:
             return submit(message);
         const std::string id = message.value("job", "");
         std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_models)
+            purge();
         const auto found = m_jobs.find(id);
         if (op != "status" && op != "cancel" && op != "result")
             return {{"error", errorJson("input_invalid", "unknown op \"" + op + "\"")}};
@@ -447,6 +1164,10 @@ private:
             if (job.state == "queued") {
                 job.state = "cancelled";
                 say(statusOf(id, job));
+                if (m_models) {
+                    std::error_code ignored;
+                    fs::remove_all(job.dir, ignored);
+                }
                 m_jobs.erase(found); // work() passes over an id it no longer has
                 m_progress.erase(id);
                 return {{"state", "cancelled"}};
@@ -462,6 +1183,10 @@ private:
         // The options it ran with, as it was given them (the library reports no others).
         json used = job.request.value("params", json::object());
         used["engine"] = "sdcpp";
+        if (m_models) { // the files stay to be fetched, until purge()
+            used["models"] = job.resolved;
+            return {{"outputs", job.outputs}, {"used", used}};
+        }
         const json reply{{"outputs", job.outputs}, {"used", used}};
         // Fugue fetches a result once, at once: the job is done with.
         m_progress.erase(id);
@@ -469,7 +1194,7 @@ private:
         return reply;
     }
 
-    json submit(const json &message) {
+    json submit(const json &message, const fs::path &workDir = {}, const json &resolved = json::array(), const std::vector<PendingModel> &pending = {}) {
         static const std::map<std::string, std::string> ops{{"text.encode", "encode"},
                                                             {"latent.sample", "sample"},
                                                             {"latent.decode", "decode"},
@@ -501,6 +1226,9 @@ private:
         Job job;
         job.request = request;
         job.stage = op->second;
+        job.dir = workDir;
+        job.resolved = resolved;
+        job.pending = pending;
         m_jobs[id] = job;
         m_queue.push_back(id);
         m_wake.notify_one();
@@ -512,6 +1240,7 @@ private:
         for (;;) {
             std::string id;
             json request;
+            std::vector<PendingModel> pending;
             {
                 std::unique_lock<std::mutex> lock(m_mutex);
                 m_wake.wait(lock, [this] { return !m_queue.empty(); });
@@ -524,9 +1253,30 @@ private:
                 job.state = "running";
                 m_current = id;
                 request = job.request;
+                pending = job.pending;
+                if (!pending.empty())
+                    job.stage = "models";
                 say(statusOf(id, job));
             }
             const json reply = attempt([&] {
+                if (!pending.empty()) { // hashing a big file takes a while: not in the request
+                    const auto cancelled = [this, id] {
+                        std::lock_guard<std::mutex> lock(m_mutex);
+                        const auto found = m_jobs.find(id);
+                        return found == m_jobs.end() || found->second.cancel;
+                    };
+                    for (const PendingModel &model : pending) {
+                        const std::string path = m_models->resolve(model.key, model.handle, cancelled);
+                        request[json::json_pointer(model.pointer)] = path;
+                        json entry = model.handle;
+                        entry["key"] = model.key;
+                        entry["path"] = path;
+                        std::lock_guard<std::mutex> lock(m_mutex);
+                        m_jobs[id].resolved.push_back(entry);
+                    }
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    m_jobs[id].stage = request.value("op", "");
+                }
                 return run(request, contexts, [this](sd_ctx_t *ctx) {
                     std::lock_guard<std::mutex> lock(m_mutex);
                     if (ctx && m_jobs[m_current].cancel) // asked while the models loaded
@@ -548,7 +1298,14 @@ private:
                 job.state = "done";
                 for (const json &output : reply["outputs"])
                     for (const auto &[name, path] : output.items()) {
-                        const json file{{"path", path}};
+                        json file{{"path", path}};
+                        if (m_models) { // fetched over HTTP: the file's index, kind and size
+                            std::error_code ignored;
+                            file = {{"file", job.files.size()},
+                                    {"format", name == "image" ? "png" : name},
+                                    {"size", fs::file_size(path.get<std::string>(), ignored)}};
+                            job.files.push_back(path.get<std::string>());
+                        }
                         if (!job.outputs.contains(name))
                             job.outputs[name] = file;
                         else if (job.outputs[name].is_array())
@@ -557,8 +1314,13 @@ private:
                             job.outputs[name] = json::array({job.outputs[name], file});
                     }
             }
+            if (m_models) {
+                job.finishedSeq = ++m_finished;
+                job.finishedAt = std::chrono::steady_clock::now();
+                purge();
+            }
             say(statusOf(id, job));
-            if (job.state != "done") { // Fugue asks nothing more of it
+            if (job.state != "done" && !m_models) { // Fugue asks nothing more of it (over HTTP it polls, and purge() ends it)
                 m_progress.erase(id);
                 m_jobs.erase(id);
             }
@@ -584,15 +1346,113 @@ private:
     std::string m_current;         // the running job
     sd_ctx_t *m_running = nullptr; // its context while it generates, for cancel
     int m_count = 0;
+    uint64_t m_finished = 0;
+    Models *m_models = nullptr; // set over HTTP
+    fs::path m_base;
 };
 
 void logToStderr(enum sd_log_level_t, const char *text, void *) { std::fputs(text, stderr); }
 
 } // namespace
 
+// --serve-http: reads the key and the model roots, then serves until killed.
+int serveHttp(int argc, char **argv) {
+    std::string address, keyFile, models;
+    int port = 0;
+    for (int i = 2; i < argc; ++i) {
+        const std::string flag = argv[i];
+        if (i + 1 >= argc) {
+            std::fprintf(stderr, "fugue-helper: %s needs a value\n", flag.c_str());
+            return 2;
+        }
+        const std::string value = argv[++i];
+        if (flag == "--listen")
+            address = value;
+        else if (flag == "--port")
+            port = std::atoi(value.c_str());
+        else if (flag == "--key-file")
+            keyFile = value;
+        else if (flag == "--models")
+            models = value;
+        else {
+            std::fprintf(stderr, "fugue-helper: unknown option %s\n", flag.c_str());
+            return 2;
+        }
+    }
+    if (address.empty() || port <= 0 || port > 65535 || keyFile.empty() || models.empty()) {
+        std::fprintf(stderr, "usage: fugue-helper --serve-http --listen ADDR --port N --key-file FILE --models DIR[:DIR...]\n");
+        return 2;
+    }
+    struct stat info {};
+    if (stat(keyFile.c_str(), &info) != 0 || !S_ISREG(info.st_mode)) {
+        std::fprintf(stderr, "fugue-helper: cannot read the key file %s\n", keyFile.c_str());
+        return 1;
+    }
+    if (info.st_mode & (S_IRWXG | S_IRWXO)) {
+        std::fprintf(stderr, "fugue-helper: the key file %s is readable by others; chmod 600 it\n", keyFile.c_str());
+        return 1;
+    }
+    std::string key;
+    {
+        std::ifstream in(keyFile);
+        std::getline(in, key);
+    }
+    const size_t first = key.find_first_not_of(" \t\r\n");
+    key = first == std::string::npos ? "" : key.substr(first, key.find_last_not_of(" \t\r\n") - first + 1);
+    if (key.empty()) {
+        std::fprintf(stderr, "fugue-helper: the key file %s is empty\n", keyFile.c_str());
+        return 1;
+    }
+    std::vector<fs::path> roots;
+    for (size_t start = 0; start <= models.size();) {
+        size_t end = models.find(':', start);
+        if (end == std::string::npos)
+            end = models.size();
+        if (end > start)
+            roots.emplace_back(models.substr(start, end - start));
+        start = end + 1;
+    }
+    if (roots.empty()) {
+        std::fprintf(stderr, "fugue-helper: --models names no folder\n");
+        return 2;
+    }
+    // Work dirs live in one private folder of this process, removed on SIGINT and SIGTERM.
+    std::error_code ec;
+    std::string base = (fs::temp_directory_path(ec) / "fugue-helper-XXXXXX").string();
+    if (!mkdtemp(base.data())) {
+        std::fprintf(stderr, "fugue-helper: cannot make a work folder under the temp folder\n");
+        return 1;
+    }
+    sigset_t signals;
+    sigemptyset(&signals);
+    sigaddset(&signals, SIGINT);
+    sigaddset(&signals, SIGTERM);
+    pthread_sigmask(SIG_BLOCK, &signals, nullptr);
+    std::thread([signals, base]() mutable {
+        int received = 0;
+        sigwait(&signals, &received);
+        std::error_code ignored;
+        fs::remove_all(base, ignored);
+        std::_Exit(0);
+    }).detach();
+    // The hashes of the model files outlive the process (the work folder does not): $XDG_STATE_HOME or ~/.local/state.
+    fs::path state;
+    if (const char *xdg = std::getenv("XDG_STATE_HOME"); xdg && *xdg)
+        state = xdg;
+    else if (const char *home = std::getenv("HOME"); home && *home)
+        state = fs::path(home) / ".local" / "state";
+    Models index(roots, state.empty() ? fs::path() : state / "fugue" / "model-hashes.json");
+    Server server(&index, base);
+    return server.serveHttp(address, port, key);
+}
+
 int main(int argc, char **argv) {
+    if (argc >= 2 && std::string(argv[1]) == "--serve-http") {
+        sd_set_log_callback(logToStderr, nullptr);
+        return serveHttp(argc, argv);
+    }
     if (argc != 2) {
-        std::fprintf(stderr, "usage: fugue-helper <request.json> | --serve\n");
+        std::fprintf(stderr, "usage: fugue-helper <request.json> | --serve | --serve-http --listen ADDR --port N --key-file FILE --models DIR[:DIR...]\n");
         return 2;
     }
     sd_set_log_callback(logToStderr, nullptr);
