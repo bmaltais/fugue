@@ -769,6 +769,21 @@ QString CanvasRuns::imageFile(const QString &row) const {
     return QDir::isAbsolutePath(path) && QFileInfo(path).isFile() ? path : QString();
 }
 
+QString CanvasRuns::lastPicture() const {
+    const auto nodes = m_tabs.value(m_shownTab).nodes;
+    QStringList keys = nodes.keys();
+    keys.sort();
+    for (const bool saves : {true, false})
+        for (const QString &key : std::as_const(keys)) {
+            const NodeInfo info = m_nodeInfo.value(key);
+            const NodeView view = nodes.value(key);
+            if (info.showsResult && info.savesFile == saves && !view.thumbnail.isEmpty() && !view.imagePath.isEmpty()
+                && QFileInfo(view.imagePath).isFile())
+                return view.imagePath;
+        }
+    return {};
+}
+
 QVariantList CanvasRuns::errors() const { return m_tabs.value(m_shownTab).errors; }
 
 QString CanvasRuns::lastStatus() const { return m_tabs.value(m_shownTab).lastStatus; }

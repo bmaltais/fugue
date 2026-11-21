@@ -92,6 +92,14 @@ private slots:
         QVERIFY(pack.disabled.isEmpty());
         QVERIFY(registry.nodeType(id + "/sharpen") != nullptr);
         QCOMPARE(registry.packVersion(id), QString("1.2.0"));
+        QVERIFY(registry.packSource(id).isEmpty()); // copied in by hand: nowhere to get it
+        // A pack added from git says where it came from, for a workflow's requires.packs (#91).
+        write(dir + "/.fugue-source.json",
+              "{\"kind\": \"git\", \"location\": \"https://github.com/alice/fugue-tools\", \"ref\": \"v1.2.0\"}");
+        Registry fromGit;
+        QVERIFY(loadPack(fromGit, dir).enabled);
+        QCOMPARE(fromGit.packSource(id), QString("https://github.com/alice/fugue-tools"));
+        QFile::remove(dir + "/.fugue-source.json");
         // The node's folder, where its program is found.
         QCOMPARE(registry.nodeType(id + "/sharpen")->dir, dir + "/sharpen");
         QVERIFY(registry.nodeType(id + "/sharpen")->seal.isEmpty()); // no run.sh in this fixture

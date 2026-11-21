@@ -126,6 +126,17 @@ public:
     Q_INVOKABLE bool openTemplateById(const QString &id);
     // The person's own templates folder, as the dialog names it.
     Q_INVOKABLE QString ownTemplatesFolder() const { return TemplateLibrary::ownFolder(); }
+    // A package another Fugue exported (engine/share_package.h, #91), unpacked and opened as
+    // its template is (openTemplate). openPath() takes one by its contents.
+    bool openPackage(const QString &path);
+    // Writes the shown workflow as a package at a path or file URL (".zip" added when the name
+    // has none), never over a file; `preview` is a picture it made, or empty. The banner says
+    // where it went, and what it left out. False when nothing was written.
+    Q_INVOKABLE bool exportShare(const QString &pathOrUrl, const QString &preview);
+    // Writes the shown workflow's compiled graph (4.8), as `fugue compile` prints it, at a path
+    // or file URL (".json" added when the name has none), never over a file. A workflow that
+    // does not compile says why in the banner. False when nothing was written.
+    Q_INVOKABLE bool exportCompiled(const QString &pathOrUrl);
     // JSON text, as pasted: a workflow document, opened as a new tab with no file.
     Q_INVOKABLE bool openText(const QString &text);
     Q_INVOKABLE bool openClipboard();
@@ -191,6 +202,8 @@ signals:
     void noticeChanged();
     void openDialogRequested();
     void saveAsRequested();
+    void exportShareRequested();
+    void exportCompiledRequested();
     void closeConfirmationRequested(int index, const QString &title);
 
 private:

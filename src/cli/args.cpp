@@ -32,7 +32,7 @@ const QMap<QString, QMap<QString, Spec>> &table() {
         {"workflow",
          {{"new", {1, 1, {"template"}, {}, workflowNew}},
           {"describe", {1, 1, {}, {}, workflowDescribe}},
-          {"export", {1, 1, {}, {"share", "no-prompts", "no-layout"}, nullptr}}, // M2
+          {"export", {1, 1, {"out"}, {"share", "no-prompts", "no-layout"}, workflowExport}},
           {"run", runSpec},
           {"validate", validateSpec},
           {"compile", compileSpec}}},

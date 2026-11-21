@@ -12,6 +12,8 @@ endif()
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickControls2 DBus Test ShaderTools)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(VIPS REQUIRED IMPORTED_TARGET vips-cpp)
+# Shared packages are zips (engine/share_package.h); pacman itself needs libarchive.
+pkg_check_modules(ARCHIVE REQUIRED IMPORTED_TARGET libarchive)
 find_package(Vulkan REQUIRED) # free GPU memory by device type (spec 8.10); no device is created
 
 # The engine: documents, compiler, scheduler, cache, providers. It runs with
@@ -20,7 +22,7 @@ find_package(Vulkan REQUIRED) # free GPU memory by device type (spec 8.10); no d
 file(GLOB fugue_engine_sources CONFIGURE_DEPENDS src/engine/*.cpp src/engine/*.h)
 add_library(fugue_engine STATIC ${fugue_engine_sources})
 target_include_directories(fugue_engine PUBLIC src)
-target_link_libraries(fugue_engine PUBLIC Qt6::Core Qt6::Network PkgConfig::VIPS PRIVATE Vulkan::Vulkan)
+target_link_libraries(fugue_engine PUBLIC Qt6::Core Qt6::Network PkgConfig::VIPS PRIVATE Vulkan::Vulkan PkgConfig::ARCHIVE)
 target_compile_options(fugue_engine PUBLIC -Wall -Wextra)
 
 # Everything else but main.cpp, shared by the app and the tests, so each source
@@ -190,7 +192,7 @@ file(GLOB fugue_workflow_tests CONFIGURE_DEPENDS tests/workflow/*.cpp)
 foreach(test_source ${fugue_workflow_tests})
   get_filename_component(test_name ${test_source} NAME_WE)
   add_executable(${test_name} ${test_source} tests/test_environment.cpp src/resources.qrc)
-  target_link_libraries(${test_name} PRIVATE fugue_core fugue_nodes Qt6::Test)
+  target_link_libraries(${test_name} PRIVATE fugue_core fugue_nodes Qt6::Test PkgConfig::ARCHIVE) # test_share_package makes zips
   target_compile_definitions(${test_name} PRIVATE FUGUE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
   add_test(NAME ${test_name} COMMAND ${test_name})
   set_tests_properties(${test_name} PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)

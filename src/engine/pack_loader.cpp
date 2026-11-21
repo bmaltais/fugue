@@ -2,6 +2,7 @@
 #include "engine/command_node.h"
 
 #include "engine/json.h"
+#include "engine/pack_manager.h"
 #include "engine/paths.h"
 #include "engine/settings.h"
 #include "engine/trust_store.h"
@@ -359,6 +360,8 @@ LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin
                                      Error::Severity::Warning);
 
     registry.setPackVersion(pack->id, pack->version);
+    if (const PackSource source = readPackSource(folder); source.kind == PackSource::Kind::Git)
+        registry.setPackSource(pack->id, source.location);
     loaded.enabled = true;
     return loaded;
 }

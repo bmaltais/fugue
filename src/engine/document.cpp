@@ -1,5 +1,7 @@
 #include "document.h"
 
+#include "engine/registry.h"
+
 #include "engine/canonical.h"
 #include "engine/hash.h"
 #include "engine/ids.h"
@@ -1043,7 +1045,7 @@ QJsonArray Document::models() const {
     return list;
 }
 
-void Document::refreshRequirements(const QString &appVersion) {
+void Document::refreshRequirements(const QString &appVersion, const Registry *registry) {
     QMap<QString, Version> types;
     const auto addNodes = [&](const Nodes &nodes) {
         for (const Node &node : nodes)
@@ -1069,6 +1071,17 @@ void Document::refreshRequirements(const QString &appVersion) {
     for (auto it = oldPacks.begin(); it != oldPacks.end(); ++it)
         if (packsUsed.contains(it.key()))
             packs.insert(it.key(), it.value());
+    // What is installed here: its version, and where to get it when that is known.
+    for (const QString &pack : std::as_const(packsUsed)) {
+        const QString version = registry ? registry->packVersion(pack) : QString();
+        if (version.isEmpty())
+            continue;
+        QJsonObject entry = packs.value(pack).toObject();
+        entry.insert("version", version);
+        if (const QString source = registry->packSource(pack); !source.isEmpty())
+            entry.insert("source", source);
+        packs.insert(pack, entry);
+    }
 
     requirements.insert("fugue", appVersion);
     requirements.insert("nodes", nodes);

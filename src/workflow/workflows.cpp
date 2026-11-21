@@ -1,13 +1,16 @@
 #include "workflow/workflows.h"
 
 #include "engine/atomic_file.h"
+#include "engine/compiler.h"
 #include "engine/embed.h"
+#include "engine/group_library.h"
 #include "engine/file_hashes.h"
 #include "engine/json.h"
 #include "engine/model_download.h"
 #include "engine/model_library.h"
 #include "engine/paths.h"
 #include "engine/settings.h"
+#include "engine/share_package.h"
 #include "workflow/content_hash.h"
 #include "workflow/workflow_io.h"
 
@@ -18,6 +21,7 @@
 #include <QGuiApplication>
 #include <QClipboard>
 #include <QStandardPaths>
+#include <QTemporaryDir>
 #include <QUuid>
 
 namespace fugue {
@@ -372,6 +376,8 @@ bool Workflows::openPath(const QString &pathOrUrl) {
             }
         }
     }
+    if (info.isFile() && isSharePackage(path))
+        return openPackage(path);
     const Result<ImportedWorkflow> imported = readWorkflowFile(path);
     if (!imported.ok()) {
         setNotice(tr("Could not open %1: %2").arg(info.fileName().isEmpty() ? path : info.fileName(),
@@ -384,6 +390,90 @@ bool Workflows::openPath(const QString &pathOrUrl) {
     addTab(document, fromImage ? QString() : info.absoluteFilePath(),
            fromImage ? info.completeBaseName() : info.fileName(), false, true);
     analyze(document, m_tabs[size_t(m_current)].title);
+    return true;
+}
+
+bool Workflows::openPackage(const QString &path) {
+    const QString shown = QFileInfo(path).fileName();
+    // Unpacked only for as long as it opens: its samples go into the inputs folder (openTemplate).
+    QTemporaryDir unpacked;
+    if (!unpacked.isValid()) {
+        setNotice(tr("Could not open %1: %2").arg(shown, unpacked.errorString()));
+        return false;
+    }
+    const Result<QString> folder = unpackSharePackage(path, unpacked.path());
+    if (!folder) {
+        setNotice(tr("Could not open %1: %2").arg(shown, firstMessage(folder.errors())));
+        return false;
+    }
+    const TemplateLibrary library({{QFileInfo(folder.value()).absolutePath(), false}}, m_registry);
+    const std::optional<Template> chosen = library.find(QFileInfo(folder.value()).fileName());
+    if (!chosen) {
+        const Errors problems = library.problems();
+        setNotice(tr("Could not open %1: %2")
+                      .arg(shown, problems.isEmpty() ? tr("it was made by a newer Fugue; update Fugue to open it.")
+                                                     : firstMessage(problems)));
+        return false;
+    }
+    return openTemplate(*chosen);
+}
+
+bool Workflows::exportShare(const QString &pathOrUrl, const QString &preview) {
+    if (m_current < 0)
+        return false;
+    QString path = toPath(pathOrUrl);
+    if (QFileInfo(path).suffix().isEmpty())
+        path += QStringLiteral(".zip");
+    const Tab &tab = m_tabs[size_t(m_current)];
+    ShareRequest request;
+    request.title = tab.title.endsWith(QStringLiteral(".fugue")) ? tab.title.chopped(6) : tab.title;
+    request.workflowPath = tab.path;
+    request.preview = preview;
+    request.appVersion = appVersion();
+    const Errors errors = writeSharePackage(documentOf(m_current), *m_registry, request, path);
+    if (hasErrors(errors)) {
+        setNotice(tr("Could not export %1: %2").arg(request.title, withHints(errors)));
+        return false;
+    }
+    QString line = tr("Exported %1 for sharing to %2. Models are not in it: who opens it can download them.")
+                       .arg(request.title, path);
+    if (!errors.isEmpty())
+        line += QLatin1Char(' ') + withHints(errors);
+    setNotice(line);
+    return true;
+}
+
+bool Workflows::exportCompiled(const QString &pathOrUrl) {
+    if (m_current < 0)
+        return false;
+    QString path = toPath(pathOrUrl);
+    if (QFileInfo(path).suffix().isEmpty())
+        path += QStringLiteral(".json");
+    const QString title = m_tabs[size_t(m_current)].title;
+    // As a run compiles it: a library or pack group named only by its type runs from its definition.
+    Document document = documentOf(m_current);
+    embedGroupTypes(document, *m_registry);
+    const Compilation compilation = compile(document, *m_registry);
+    if (!compilation) {
+        setNotice(tr("%1 does not compile: %2").arg(title, withHints(compilation.errors())));
+        return false;
+    }
+    const QFileInfo target(path);
+    PartialFile partial(target.absolutePath(), target.fileName());
+    Errors errors = partial.write(writeJson(compilation->toJson()), target.fileName());
+    if (!hasErrors(errors)) {
+        const Result<bool> committed = partial.commit(target.absoluteFilePath(), Overwrite::Never);
+        if (!committed)
+            errors = committed.errors();
+        else if (!*committed)
+            errors << makeError(QStringLiteral("permission_denied"),
+                                tr("%1 is there already; Fugue does not replace it.").arg(path));
+    }
+    if (hasErrors(errors)) {
+        setNotice(tr("Could not export %1: %2").arg(title, withHints(errors)));
+        return false;
+    }
+    setNotice(tr("Exported the compiled graph of %1 to %2.").arg(title, path));
     return true;
 }
 
@@ -672,7 +762,7 @@ bool Workflows::saveTab(int index, const QString &path, bool replace) {
     }
     const bool moved = contentHash(document) != contentHash(before);
     const Document relocated = document;
-    document.refreshRequirements(appVersion());
+    document.refreshRequirements(appVersion(), m_registry);
     const Result<bool> written = writeWorkflow(document, path, replace);
     if (written && !*written) {
         setNotice(taken);
@@ -892,6 +982,8 @@ void registerFileCommands(CommandRegistry &registry, Workflows &workflows) {
         registry.setHandler("file.templates", browseTemplates);
     }
     registry.setHandler("file.save-as", [&workflows] { emit workflows.saveAsRequested(); });
+    registry.setHandler("file.export-share", [&workflows] { emit workflows.exportShareRequested(); });
+    registry.setHandler("file.export-compiled", [&workflows] { emit workflows.exportCompiledRequested(); });
     if (!registry.contains("file.open-clipboard")) {
         CommandSpec spec;
         spec.id = QStringLiteral("file.open-clipboard");

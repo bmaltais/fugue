@@ -94,6 +94,14 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 - Why: the button sits where the eye already is (the line that says what is missing), and the count and size say what the click costs before it is made. One button for all, not one per model: a template's models are wanted together (Hick: one decision, not three). Progress stays at the bottom edge, off the canvas.
 - Rule: Floor (the banner's buttons and choice are Material's 48px; the card's button 7u = 28px). Primary (Download is the banner's one highlighted control; on a card, opening it stays the primary and Download is flat). Gaps (8px inside a row, 16 between the line's row and the progress row; px as the banner had). Destructive (Cancel, which drops the part, is its row's last control with 16px before it, twice the row's 8; on a card 2u before it, twice the row's 1u). Posture: the banner is transient; it asks nothing the person did not start.
 
+### 2026-11-20 export for sharing (#91)
+
+- Control: File > Export for sharing… (`file.export-share`, `src/menu/menus.cpp`), the item that was Export share copy…, in the same place after Save as; it opens `exportDialog`, a save dialog for a `.zip` (`src/workflow/WorkflowDialogs.qml`). The open dialog's filter names packages too.
+- Control: File > Export the compiled graph (`file.export-compiled`), unchanged in place and label; it now opens `compiledDialog`, a save dialog for a `.json`.
+- Old: both items were listed and enabled but did nothing.
+- New: the label says what it makes; each dialog asks one thing, where. The banner then says where it went and what it left out, or why the graph does not compile.
+- Rule: Learned place (the File items keep their order; only the label changed). Posture: a transient dialog, one decision.
+
 ## Unread
 
 Settings, the shortcuts overlay, the quit question, About, every menu except Run, the context menus, the workflow dialogs and their questions (those questions are a row of buttons), the group dialogs, image save, the widget pickers (but their search field), the magnifier.

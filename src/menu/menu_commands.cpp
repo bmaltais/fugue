@@ -39,8 +39,8 @@ QList<Row> menuRows() {
          QT_TRANSLATE_NOOP("Command", "Open from clipboard"), {}, "app", "added"},
         // Also registered by registerFileCommands (workflows.h) when this has not run (#83).
         {"file.templates", QT_TRANSLATE_NOOP("Command", "Browse templates"), nullptr, {}, "app", "same"},
-        {"file.export-share", QT_TRANSLATE_NOOP("Command", "Export a share copy (local paths removed)"),
-         QT_TRANSLATE_NOOP("Command", "Export share copy…"), {}, "app", "same"},
+        {"file.export-share", QT_TRANSLATE_NOOP("Command", "Export for sharing: a .zip with its images, local paths removed"),
+         QT_TRANSLATE_NOOP("Command", "Export for sharing…"), {}, "app", "same"},
         {"file.export-compiled", QT_TRANSLATE_NOOP("Command", "Export the compiled graph, for the CLI"),
          QT_TRANSLATE_NOOP("Command", "Export compiled graph…"), {}, "app", "same"},
         {"edit.clear", QT_TRANSLATE_NOOP("Command", "Clear the workflow (remove every node)"),

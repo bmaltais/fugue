@@ -21,6 +21,7 @@ options=('!debug')
 depends=(
   'ffmpeg'
   'hicolor-icon-theme'
+  'libarchive'
   'libvips'
   'qt6-base'
   'qt6-declarative'

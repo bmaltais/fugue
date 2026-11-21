@@ -30,7 +30,7 @@ Item {
         title: qsTr("Open a workflow")
         fileMode: FileDialog.OpenFiles
         currentFolder: App.workflows.suggestedFolder
-        nameFilters: [qsTr("Fugue workflows and images with one (*.fugue *.png *.webp)"), qsTr("All files (*)")]
+        nameFilters: [qsTr("Fugue workflows, packages and images with one (*.fugue *.zip *.png *.webp)"), qsTr("All files (*)")]
         onAccepted: App.workflows.openUrls(selectedFiles)
     }
 
@@ -46,9 +46,34 @@ Item {
         onRejected: App.workflows.cancelPendingClose()
     }
 
+    // File > Export for sharing (#91): where the .zip goes; its preview is the last picture made.
+    FileDialog {
+        id: exportDialog
+        objectName: "exportDialog"
+        title: qsTr("Export for sharing")
+        fileMode: FileDialog.SaveFile
+        currentFolder: App.workflows.suggestedFolder
+        defaultSuffix: "zip"
+        nameFilters: [qsTr("Fugue packages (*.zip)")]
+        onAccepted: App.workflows.exportShare(selectedFile.toString(), App.runs ? App.runs.lastPicture() : "")
+    }
+
+    FileDialog {
+        id: compiledDialog
+        objectName: "compiledDialog"
+        title: qsTr("Export the compiled graph")
+        fileMode: FileDialog.SaveFile
+        currentFolder: App.workflows.suggestedFolder
+        defaultSuffix: "json"
+        nameFilters: [qsTr("JSON (*.json)")]
+        onAccepted: App.workflows.exportCompiled(selectedFile.toString())
+    }
+
     Connections {
         target: App.workflows
         function onOpenDialogRequested() { openDialog.open() }
+        function onExportShareRequested() { exportDialog.open() }
+        function onExportCompiledRequested() { compiledDialog.open() }
         function onSaveAsRequested() { saveDialog.open() }
         function onCloseConfirmationRequested(index, title) {
             closeAsk.index = index

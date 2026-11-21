@@ -97,6 +97,9 @@ public:
     // names), for Open, Copy and Save Image; empty when it shows none or the file is gone.
     // Never the thumbnail, which is a 512 px copy.
     Q_INVOKABLE QString imageFile(const QString &node) const;
+    // The picture the shown workflow last made, for a shared package's preview (#91): a Save
+    // Image's last result, else a Preview's (each in node id order); empty when none shows one.
+    Q_INVOKABLE QString lastPicture() const;
     // Selects the canvas node an error is shown on and puts it in view (the error list).
     Q_INVOKABLE void showError(const QString &node);
 

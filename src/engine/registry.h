@@ -72,6 +72,10 @@ public:
     // not set here has no installed version: "".
     void setPackVersion(const QString &packId, const QString &version) { m_packVersions[packId] = version; }
     QString packVersion(const QString &packId) const { return m_packVersions.value(packId); }
+    // Where an installed pack can be had (its git URL, from `.fugue-source.json`), for a
+    // workflow's `requires.packs` (4.3, #91). Empty for a pack copied in by hand or from a folder.
+    void setPackSource(const QString &packId, const QString &source) { m_packSources[packId] = source; }
+    QString packSource(const QString &packId) const { return m_packSources.value(packId); }
 
     // The type with this id, else the type that has it as an alias, else null.
     // The pointer stays valid as long as the registry.
@@ -104,6 +108,7 @@ public:
 private:
     QList<ProviderEntry> m_providers;
     QHash<QString, QString> m_packVersions;
+    QHash<QString, QString> m_packSources;
     std::map<QString, NodeType> m_nodeTypes;
     std::map<QString, QString> m_aliases; // alias -> owning type id
     std::map<QString, DeclaredPortType> m_portTypes; // keyed by PortType::toString()
