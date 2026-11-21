@@ -1,16 +1,19 @@
 name: Package
 
-# Builds the pacman package from packaging/PKGBUILD in an Arch container. A pull request that
-# touches the packaging only checks that it builds; a v* tag also makes a GitHub release with the
-# package and its checksum. Tests are test.yml's job, so makepkg skips them here.
+# Builds the pacman package from packaging/PKGBUILD in an Arch container. It runs on a push to main that
+# changes the packaging (which also saves the compiler cache a tag build starts from: a cache is only
+# readable from its own branch or the default one), on a v* tag, which also makes a GitHub release with
+# the package and its checksum, and by hand. Not on pull requests: it is slow. Tests are test.yml's job,
+# so makepkg skips them here (and does not compile them).
 #
 # Only `fugue` (the Vulkan helper, any GPU) is built here: the CUDA toolkit is too big for a hosted
 # runner, so fugue-helper-cuda is built where there is an NVIDIA card (`makepkg -si` in packaging/).
 on:
-  pull_request:
-    paths: [packaging/**, share/**, bin/build, bin/build-helper, CMakeLists.txt, .github/workflows/package.yml]
   push:
+    branches: [main, master]
+    paths: [packaging/**, share/**, bin/build, bin/build-helper, CMakeLists.txt, .github/workflows/package.yml]
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: read
