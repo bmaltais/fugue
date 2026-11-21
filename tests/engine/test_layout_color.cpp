@@ -79,6 +79,61 @@ private slots:
         QCOMPARE(hexFromHsv({0, -1, -1}), QString("#000000"));  // and at 0
     }
 
+    void rgbOfAHexColorAndBack() {
+        const Rgb c = rgbFromHex("#12ab9f");
+        QCOMPARE(c.r, 0x12);
+        QCOMPARE(c.g, 0xab);
+        QCOMPARE(c.b, 0x9f);
+        QCOMPARE(hexFromRgb(c.r, c.g, c.b), QString("#12ab9f"));
+        QCOMPARE(rgbFromHex("#f80").g, 0x88); // the short form is widened
+        const Rgb none = rgbFromHex("nonsense"); // not a color: black
+        QCOMPARE(none.r + none.g + none.b, 0);
+    }
+
+    void hexFromRgbStopsEachChannelAtItsEnds() {
+        QCOMPARE(hexFromRgb(300, -5, 255), QString("#ff00ff"));
+        QCOMPARE(hexFromRgb(0, 0, 0), QString("#000000"));
+        QCOMPARE(hexFromRgb(1, 2, 3), QString("#010203")); // two digits each
+    }
+
+    void everyRgbColorSurvivesAHexToHsvAndBackTrip() {
+        // A number field edit goes RGB -> HSV (stored) -> RGB (shown): no channel may drift by one.
+        for (int r = 0; r < 256; r += 5)
+            for (int g = 0; g < 256; g += 5)
+                for (int b = 0; b < 256; b += 5) {
+                    const QString hex = hexFromRgb(r, g, b);
+                    QCOMPARE(hexFromHsv(hsvFromHex(hex)), hex);
+                }
+    }
+
+    void hsbShowsWholeDegreesAndPercent_data() {
+        QTest::addColumn<double>("h");
+        QTest::addColumn<double>("s");
+        QTest::addColumn<double>("v");
+        QTest::addColumn<int>("shownH");
+        QTest::addColumn<int>("shownS");
+        QTest::addColumn<int>("shownB");
+        QTest::newRow("red") << 0.0 << 1.0 << 1.0 << 0 << 100 << 100;
+        QTest::newRow("rounds up") << 120.6 << 0.505 << 0.994 << 121 << 51 << 99;
+        QTest::newRow("rounds down") << 120.4 << 0.504 << 0.996 << 120 << 50 << 100;
+        QTest::newRow("359.6 is 0 not 360") << 359.6 << 0.5 << 0.5 << 0 << 50 << 50;
+        QTest::newRow("359.4 stays") << 359.4 << 0.5 << 0.5 << 359 << 50 << 50;
+        QTest::newRow("wraps below zero") << -90.0 << 0.5 << 0.5 << 270 << 50 << 50;
+        QTest::newRow("clamps s and v") << 10.0 << 1.5 << -0.5 << 10 << 100 << 0;
+    }
+    void hsbShowsWholeDegreesAndPercent() {
+        QFETCH(double, h);
+        QFETCH(double, s);
+        QFETCH(double, v);
+        QFETCH(int, shownH);
+        QFETCH(int, shownS);
+        QFETCH(int, shownB);
+        const Hsb shown = hsbRounded({h, s, v});
+        QCOMPARE(shown.h, shownH);
+        QCOMPARE(shown.s, shownS);
+        QCOMPARE(shown.b, shownB);
+    }
+
     void recentColorsKeepTheNewestFirstWithoutRepeats() {
         QTemporaryDir dir;
         RecentColors recent(dir.filePath("recent.json"), 3);

@@ -33,6 +33,30 @@ Hsv hsvFromHex(const QString &hex);
 // "#rrggbb" for an Hsv; the hue wraps around, saturation and value stop at 0 and 1.
 QString hexFromHsv(const Hsv &hsv);
 
+// The three channels of a color, 0 to 255.
+struct Rgb {
+    int r = 0;
+    int g = 0;
+    int b = 0;
+};
+
+// What a picker's number fields show for an Hsv: hue in whole degrees [0, 359] (359.6 rounds to 0,
+// not 360), saturation and brightness in whole percent [0, 100].
+struct Hsb {
+    int h = 0;
+    int s = 0;
+    int b = 0;
+};
+
+// The channels of a hex color; black when the text is not one.
+Rgb rgbFromHex(const QString &hex);
+
+// "#rrggbb" for channels; each stops at 0 and 255.
+QString hexFromRgb(int r, int g, int b);
+
+// The whole numbers a picker shows for an Hsv (see Hsb).
+Hsb hsbRounded(const Hsv &hsv);
+
 // The colors last applied, newest first, with no repeats, kept in a small JSON file (a list of
 // "#rrggbb") so they outlast the session. A file that cannot be read starts the list empty.
 class RecentColors {
