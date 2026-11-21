@@ -12,6 +12,9 @@ namespace fugue {
 void exposeToQml(QQmlEngine &engine, const AppObjects &objects) {
     volatile auto registration = &qml_register_types_Fugue;
     Q_UNUSED(registration);
+    // The media browser's thumbnails (#133); the engine owns the provider.
+    if (objects.mediaLibrary)
+        engine.addImageProvider(QLatin1String(MediaLibrary::providerName), objects.mediaLibrary->makeProvider());
     auto *app = new QmlApp(objects, &engine);
     if (!engine.setExternalSingletonInstance("Fugue", "App", app))
         qFatal("the Fugue QML module has no App singleton to set");

@@ -3,12 +3,19 @@ import QtQuick
 import QtQuick.Controls
 import Fugue
 import "../canvas"
+import "../media"
 
 // The workflows panel (#56, ComfyUI's Workflows tab): the workflows open in tabs (a click shows one,
 // × closes it), then the files opened or saved lately that are not open (a click opens one). The
 // library of groups (#26) will be a third list here. It shows the caller's `tabs` (the maps of
 // Workflows::tabs) and `recent` (RecentFiles::entries) and says what a person asked; it knows
 // nothing of files or of the canvas.
+//
+// A switch at the top changes the view from the files to the results (#133): the images, videos and
+// sounds the current workflow's runs made, in a MediaBrowser. The caller supplies `results` when
+// `resultsRequested` says the view needs them (it was opened, the workflow changed, or the caller
+// knows a run ended), `details` of the browser's current item when `resultChosen` says it changed,
+// and does what `resultAction` asks.
 //
 //   Up and Down move along the rows, Enter does a row's action, Delete or Ctrl+W closes an open
 //   workflow, Escape closes the panel
@@ -18,16 +25,30 @@ Item {
     required property CanvasLook look
     property var tabs: []
     property var recent: []
+    property string view: "files" // "files" or "results"
+    property var results: []
+    property var resultDetails: []
+    property string resultsMode: "grid"
     // For SidePanel.focusTarget.
-    readonly property Item focusTarget: list
+    readonly property Item focusTarget: view === "results" && resultsLoader.item ? (resultsLoader.item as Item) : list
+    // The current workflow's file and name; "" for one never saved.
+    readonly property var currentTab: tabs.find(t => t.current) ?? null
+    readonly property string workflowPath: currentTab?.path ?? ""
 
     signal tabRequested(int index)
     signal tabCloseRequested(int index)
     signal fileRequested(string path)
     signal closeRequested
+    signal resultsRequested
+    signal resultChosen(var item)
+    signal resultAction(string action, var item)
 
     readonly property real u: look.unit
     property alias rowList: list
+    readonly property real switchHeight: 7 * u
+
+    onViewChanged: if (view === "results") resultsRequested()
+    onWorkflowPathChanged: if (view === "results") resultsRequested()
 
     // The rows: a heading, then its entries, for each of the two lists. A heading is never current.
     readonly property var rows: {
@@ -62,10 +83,65 @@ Item {
             fileRequested(row.path)
     }
 
+    // Files or results: two buttons, one chunk, the same height as the browser's.
+    Row {
+        id: viewSwitch
+        objectName: "workflowsViewSwitch"
+        x: root.u
+        y: root.u
+        spacing: root.u
+        ViewButton {
+            objectName: "workflowsView-files"
+            look: root.look
+            text: qsTr("Files")
+            current: root.view === "files"
+            onTapped: root.view = "files"
+        }
+        ViewButton {
+            objectName: "workflowsView-results"
+            look: root.look
+            text: qsTr("Results")
+            tip: qsTr("The images, videos and sounds this workflow made")
+            current: root.view === "results"
+            onTapped: root.view = "results"
+        }
+        ViewButton {
+            objectName: "workflowsResultsRefresh"
+            look: root.look
+            glyph: "refresh-cw"
+            tip: qsTr("Look for new results")
+            visible: root.view === "results"
+            onTapped: root.resultsRequested()
+        }
+    }
+    // Made only while the results are shown (the item budget).
+    Loader {
+        id: resultsLoader
+        active: root.view === "results"
+        anchors { left: parent.left; right: parent.right; top: viewSwitch.bottom; bottom: parent.bottom; topMargin: root.u }
+        sourceComponent: MediaBrowser {
+            objectName: "workflowsResults"
+            look: root.look
+            items: root.results
+            details: root.resultDetails
+            mode: root.resultsMode
+            actions: [{id: "open", label: qsTr("Open")}, {id: "folder", label: qsTr("Show folder")},
+                      {id: "copy", label: qsTr("Copy path")}]
+            emptyText: root.workflowPath === "" ? qsTr("Save the workflow, then run it: its results show here.")
+                                                : qsTr("Run this workflow: its images, videos and sounds show here.")
+            onModeChanged: root.resultsMode = mode
+            onCurrentItemChanged: if (currentItem) root.resultChosen(currentItem)
+            onActionRequested: (action, item) => root.resultAction(action, item)
+            onCloseRequested: root.closeRequested()
+            Component.onCompleted: forceActiveFocus()
+        }
+    }
+
     ListView {
         id: list
         objectName: "workflowsList"
-        anchors { fill: parent; topMargin: root.u; bottomMargin: root.u }
+        visible: root.view === "files"
+        anchors { fill: parent; topMargin: root.switchHeight + 2 * root.u; bottomMargin: root.u }
         clip: true
         model: root.rows
         currentIndex: -1

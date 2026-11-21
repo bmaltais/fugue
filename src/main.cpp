@@ -144,10 +144,12 @@ int main(int argc, char *argv[]) {
     fugue::NodeLibrary nodeLibrary(&registry);
     fugue::RecentFiles recentFiles(fugue::stateDir() + "/recent-files.json");
     recentFiles.follow(&workflows);
+    fugue::MediaLibrary mediaLibrary;
 
     const fugue::AppObjects objects{&translator, &theme,   &commands, &canvasModel,  &workflows,
                                     &appSettings, &runs, &imageActions, &colorHistory, &layoutColors,
-                                    &runBar,      &runQueue,    &sidePanels,   &nodeLibrary,  &recentFiles,  &chrome};
+                                    &runBar,      &runQueue,    &sidePanels,   &nodeLibrary,  &recentFiles,  &chrome,
+                                    &mediaLibrary};
     // The registry is filled again when the packs or the trust change, so what is installed is
     // usable with no restart (#70). Made after what it refreshes, so it goes first.
     fugue::RegistryReloader reloader(&registry, addNodeTypes);

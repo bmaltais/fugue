@@ -14,6 +14,7 @@
 #include "commands/command_registry.h"
 #include "menu/color_history.h"
 #include "menu/image_actions.h"
+#include "media/media_library.h"
 #include "menu/layout_colors.h"
 #include "panels/chrome_visibility.h"
 #include "panels/side_panels.h"
@@ -48,6 +49,7 @@ struct AppObjects {
     NodeLibrary *nodeLibrary = nullptr;   // optional, with sidePanels
     RecentFiles *recentFiles = nullptr;   // optional, with sidePanels
     ChromeVisibility *chrome = nullptr;   // optional: which bars and panels are shown (#129)
+    MediaLibrary *mediaLibrary = nullptr; // optional: the media browser's results and thumbnails (#133)
 };
 
 class QmlApp : public QObject {
@@ -71,6 +73,7 @@ class QmlApp : public QObject {
     Q_PROPERTY(fugue::NodeLibrary *nodeLibrary READ nodeLibrary CONSTANT)
     Q_PROPERTY(fugue::RecentFiles *recentFiles READ recentFiles CONSTANT)
     Q_PROPERTY(fugue::ChromeVisibility *chrome READ chrome CONSTANT)
+    Q_PROPERTY(fugue::MediaLibrary *mediaLibrary READ mediaLibrary CONSTANT)
 
 public:
     explicit QmlApp(const AppObjects &objects, QObject *parent = nullptr) : QObject(parent), m_objects(objects) {}
@@ -91,6 +94,7 @@ public:
     NodeLibrary *nodeLibrary() const { return m_objects.nodeLibrary; }
     RecentFiles *recentFiles() const { return m_objects.recentFiles; }
     ChromeVisibility *chrome() const { return m_objects.chrome; }
+    MediaLibrary *mediaLibrary() const { return m_objects.mediaLibrary; }
 
 private:
     AppObjects m_objects;
