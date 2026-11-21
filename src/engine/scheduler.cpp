@@ -83,6 +83,8 @@ struct NodeRun {
     int instance = -1;
     QString job;
     bool jobOver = false;
+    double progressFrom = 0; // the part of the bar the job in flight covers (JobRequest)
+    double progressSpan = 1;
 
     // What it holds while running.
     bool holdsCpu = false;
@@ -1063,6 +1065,10 @@ private:
             return failed(n, nodeError(QStringLiteral("cancelled"), QStringLiteral("The run was cancelled.")));
         JobRequest request = made.value();
         request.outputDir = n.workDir;
+        n.job.clear();
+        n.jobOver = false;
+        n.progressFrom = request.progressFrom;
+        n.progressSpan = request.progressSpan;
         const QPointer<Scheduler> self(this);
         m_providers.at(n.instance).provider->submit(request, [self, path](const Result<QString> &job) {
             if (self)
@@ -1098,7 +1104,7 @@ private:
             return;
         if (!status.isTerminal()) {
             if (status.state == QLatin1String("running"))
-                progress(path, status.progress, status.stage, QString());
+                progress(path, n.progressFrom + n.progressSpan * status.progress, status.stage, QString());
             if (!status.preview.isEmpty()) {
                 const QString file = n.workDir + QStringLiteral("/preview.png");
                 QFile preview(file);
@@ -1134,6 +1140,14 @@ private:
         const JobResult job = result.value();
         FileHashes *hashes = m_env.hashes;
         m_pool.start([this, kernel, context, selection, job, path, hashes] {
+            // A node of several jobs (ProviderKernel::next) goes on with the next one.
+            const Result<std::optional<JobRequest>> more =
+                guarded<std::optional<JobRequest>>([&] { return kernel->next(context, selection, job); });
+            if (!more || more.value()) {
+                const Result<JobRequest> request = more ? Result<JobRequest>(*more.value()) : Result<JobRequest>(more.error());
+                later([this, path, request] { submit(path, request); });
+                return;
+            }
             const Result<Values> outputs = filed(guarded<Values>([&] { return kernel->outputs(context, selection, job); }),
                                                  context.workDir, *hashes);
             later([this, path, outputs] { returned(path, outputs); });
@@ -1237,6 +1251,8 @@ private:
 
     // A running node came back with an error.
     void failed(NodeRun &n, const Error &error) {
+        if (n.providerKernel && !n.workDir.isEmpty())
+            n.providerKernel->abandon(contextFor(n));
         const bool lane = n.holdsGpu || n.holdsInstance;
         const bool gpu = n.holdsGpu;
         release(n);

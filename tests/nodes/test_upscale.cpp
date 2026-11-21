@@ -30,6 +30,23 @@ bool ffmpegRuns(const QStringList &args) {
     return process.waitForFinished(60000) && process.exitCode() == 0;
 }
 
+// The frames a video file has, counted by decoding it.
+int frameCount(const QString &path) {
+    QProcess process;
+    process.start(QStringLiteral("ffprobe"), {"-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries",
+                                              "stream=nb_read_frames", "-of", "csv=p=0", path});
+    return process.waitForFinished(60000) ? process.readAllStandardOutput().trimmed().toInt() : -1;
+}
+
+// What driving Upscale Video with Model as the scheduler does leaves: request, then next after each
+// job, then outputs.
+struct VideoRun {
+    Result<Values> values{Values{}};
+    QList<JobRequest> jobs;
+    QList<int> frames; // in each job
+    QStringList left;  // what the folder holds at the end, besides the result
+};
+
 } // namespace
 
 class TestUpscale : public QObject {
@@ -197,6 +214,117 @@ private slots:
         QCOMPARE(image.width(), 32);
         QCOMPARE(int(image.extract_band(3).avg() + 0.5), 100);
     }
+    // ---- Upscale Video with Model: chunks through a job each, joined at the end ----
+
+    // What the helper does to a job's frames, as the real one does it: every PNG of the folder, the
+    // same name, in frames-out of the job's folder; here doubled in size.
+    int helperDoubles(const JobRequest &job, const QString &outputDir) {
+        const QString in = job.inputs.value("frames").toObject().value("path").toString();
+        QDir().mkpath(outputDir + "/frames-out");
+        int frames = 0;
+        for (const QString &name : QDir(in).entryList({"*.png"}, QDir::Files)) {
+            const vips::VImage image = vips::VImage::new_from_file(QFile::encodeName(in + "/" + name).constData());
+            image.resize(2.0).write_to_file(QFile::encodeName(outputDir + "/frames-out/" + name).constData());
+            ++frames;
+        }
+        return frames;
+    }
+
+    VideoRun runVideoWithModel(const MediaHandle &in, const QString &workName, int stopAfterJobs = -1) {
+        VideoRun run;
+        const QJsonObject model = modelFile("video.safetensors");
+        NodeContext c = context("fugue/upscale-video-with-model", {{"video", Value(in)}, {"model", Value(model)}});
+        c.workDir = m_dir.filePath(workName);
+        QDir().mkpath(c.workDir);
+        const auto kernel = m_kernels.provider("fugue/upscale-video-with-model");
+        Result<JobRequest> request = kernel->request(c, selection());
+        if (!request) {
+            run.values = request.errors();
+            return run;
+        }
+        for (;;) {
+            run.jobs << request.value();
+            run.frames << helperDoubles(request.value(), c.workDir);
+            if (stopAfterJobs > 0 && run.jobs.size() == stopAfterJobs) {
+                run.values = makeError("cancelled", "stopped");
+                kernel->abandon(c);
+                break;
+            }
+            const Result<std::optional<JobRequest>> more = kernel->next(c, selection(), JobResult{});
+            if (!more) {
+                run.values = more.errors();
+                break;
+            }
+            if (!more.value()) {
+                run.values = kernel->outputs(c, selection(), JobResult{});
+                break;
+            }
+            request = *more.value();
+        }
+        for (const QString &name : QDir(c.workDir).entryList(QDir::AllEntries | QDir::NoDotAndDotDot))
+            if (name != "source.mkv" && name != "video.mkv" && !name.startsWith("source"))
+                run.left << name;
+        return run;
+    }
+
+    void upscaleVideoWithModelMakesAJobPerChunkAndKeepsFramesRateLengthAndSound() {
+        const MediaHandle in = clip(64, 48, 12.0, true); // 144 frames: chunks of 64, 64 and 16
+        const VideoRun run = runVideoWithModel(in, "vwm-whole");
+        QVERIFY2(run.values.ok(), qPrintable(run.values.errors().value(0).message));
+        QCOMPARE(run.frames, (QList<int>{64, 64, 16}));
+        const MediaHandle out = run.values.value().value("video").media();
+        QCOMPARE(out.width(), 128);
+        QCOMPARE(out.height(), 96);
+        QCOMPARE(out.fps(), in.fps());
+        QCOMPARE(frameCount(out.path()), 144);
+        QVERIFY(qAbs(out.duration() - in.duration()) < 0.1);
+        QVERIFY(out.hasAudio());
+        QVERIFY2(run.left.isEmpty(), qPrintable(run.left.join(", "))); // no frames, segments or state are left
+    }
+    void upscaleVideoWithModelSpreadsItsJobsOverTheWholeBar() {
+        const MediaHandle in = clip(64, 48, 12.0, false);
+        const VideoRun run = runVideoWithModel(in, "vwm-bar");
+        QVERIFY(run.values.ok());
+        double covered = 0;
+        for (const JobRequest &job : run.jobs) {
+            QVERIFY(qAbs(job.progressFrom - covered) < 0.01);
+            covered = job.progressFrom + job.progressSpan;
+        }
+        QVERIFY(qAbs(covered - 1.0) < 0.01);
+    }
+    void upscaleVideoWithModelSendsTheModelOnceInEachJobAndAFolderOfFrames() {
+        const MediaHandle in = clip(64, 48, 6.0, false);
+        const VideoRun run = runVideoWithModel(in, "vwm-job");
+        QVERIFY(run.values.ok());
+        QCOMPARE(run.jobs.first().capability, QString("image.upscale"));
+        QCOMPARE(run.jobs.first().params.value("context").toObject().value("model_path").toString(),
+                 dataDir() + "/models/upscale_models/video.safetensors");
+        QVERIFY(run.jobs.first().inputs.value("frames").toObject().contains("path"));
+    }
+    void upscaleVideoWithModelAbandonedLeavesNothingBehind() {
+        const MediaHandle in = clip(64, 48, 12.0, false);
+        const VideoRun run = runVideoWithModel(in, "vwm-abandon", 2);
+        QVERIFY(!run.values.ok());
+        QVERIFY2(run.left.isEmpty(), qPrintable(run.left.join(", ")));
+    }
+    void upscaleVideoWithModelNeedsAHelperOnThisMachine() {
+        const MediaHandle in = clip(64, 48, 1.0, false);
+        NodeContext c = context("fugue/upscale-video-with-model", {{"video", Value(in)}, {"model", Value(modelFile("remote.safetensors"))}});
+        const Result<JobRequest> request = m_kernels.provider("fugue/upscale-video-with-model")->request(c, selection(false));
+        QVERIFY(!request.ok());
+        QCOMPARE(request.errors().value(0).code, QString("capability_unavailable"));
+    }
+    void upscaleVideoWithModelStopsWhenCancelled() {
+        const MediaHandle in = clip(320, 240, 2.0, false);
+        NodeContext c = context("fugue/upscale-video-with-model", {{"video", Value(in)}, {"model", Value(modelFile("cancel.safetensors"))}});
+        c.workDir = m_dir.filePath("vwm-cancel");
+        QDir().mkpath(c.workDir);
+        m_cancel = true;
+        const Result<JobRequest> request = m_kernels.provider("fugue/upscale-video-with-model")->request(c, selection());
+        QVERIFY(!request.ok());
+        QCOMPARE(request.errors().value(0).code, QString("cancelled"));
+    }
+
     void loadUpscaleModelPassesTheHandleOn() {
         const QJsonObject model = modelFile("pass.safetensors");
         const Result<Values> out = m_kernels.node("fugue/load-upscale-model")->run(context("fugue/load-upscale-model", {{"model", Value(model)}}));

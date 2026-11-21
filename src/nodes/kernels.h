@@ -17,5 +17,6 @@ void addPixelKernels(Kernels &kernels);           // pixel.cpp
 void addSaveMediaKernels(Kernels &kernels);       // save_media.cpp
 void addTextGenerationKernels(Kernels &kernels);  // text_generation.cpp
 void addUpscaleKernels(Kernels &kernels);         // upscale.cpp
+void addUpscaleVideoModelKernels(Kernels &kernels); // upscale_video_model.cpp
 
 } // namespace fugue::nodes

@@ -19,9 +19,9 @@
 #include "engine/ffmpeg.h"
 #include "engine/file_hashes.h"
 #include "engine/media.h"
-#include "engine/model_library.h"
 #include "engine/vips.h"
 #include "nodes/kernels.h"
+#include "nodes/upscale_model.h"
 
 namespace fugue::nodes {
 
@@ -95,43 +95,20 @@ public:
 class UpscaleWithModelKernel : public ProviderKernel {
 public:
     Requirement requirement(const NodeType &, const Values &) const override {
-        Requirement requirement;
-        requirement.capability = QStringLiteral("image.upscale"); // the helper offers it for any model file
-        return requirement;
+        return upscaleRequirement();
     }
 
     Result<JobRequest> request(const NodeContext &context, const Selection &selection) override {
-        const QJsonObject model = context.input(QStringLiteral("model")).json().toObject();
-        if (model.isEmpty())
-            return makeInputError(QStringLiteral("missing_input"), QStringLiteral("model"),
-                                  QStringLiteral("No upscale model is picked."),
-                                  QStringLiteral("Pick one in Upscale with Model, or wire a Load Upscale Model."));
-        QJsonValue modelPath;
-        const ModelLibrary library = ModelLibrary::current(context.registry);
-        if (selection.sharesFilesystem) {
-            const Result<QString> found = library.resolve(model, *context.hashes);
-            if (!found) {
-                Error missing = found.error();
-                missing.input = QStringLiteral("model");
-                return missing;
-            }
-            modelPath = found.value();
-        } else { // a paired host finds the file in its own folders (8.10)
-            QJsonObject sent{{"name", model.value(QStringLiteral("name")).toString()}};
-            if (const QString hash = model.value(QStringLiteral("hash")).toString(); !hash.isEmpty())
-                sent.insert(QStringLiteral("sha256"), hash);
-            if (const Result<QString> found = library.resolve(model, *context.hashes, ModelLibrary::Hashing::RememberedOnly))
-                sent.insert(QStringLiteral("size"), double(QFileInfo(found.value()).size()));
-            modelPath = sent;
-        }
+        const Result<QJsonObject> params = upscaleParams(context, selection);
+        if (!params)
+            return params.errors();
         const Result<QString> file = writeRgb(context.input(QStringLiteral("image")).media(),
                                               QDir(context.workDir).filePath(QStringLiteral("input.png")));
         if (!file)
             return file.errors();
         JobRequest request;
         request.capability = QStringLiteral("image.upscale");
-        request.params = QJsonObject{{"context", QJsonObject{{"model_path", modelPath}}},
-                                     {"tile_size", int(context.input(QStringLiteral("tile")).number())}};
+        request.params = params.value();
         request.inputs.insert(QStringLiteral("image"), QJsonObject{{"path", file.value()}});
         return request;
     }
