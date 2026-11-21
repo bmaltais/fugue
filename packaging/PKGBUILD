@@ -30,6 +30,8 @@ depends=(
   'libvips'
   'qt6-base'
   'qt6-declarative'
+  'qt6-multimedia' # the QtMultimedia QML module: the player on a video or song node (#116)
+  'qt6-multimedia-ffmpeg' # its backend, named so pacman does not ask gstreamer or ffmpeg; ffmpeg is already a dependency
   'qt6-wayland'
   'vulkan-icd-loader'
 )

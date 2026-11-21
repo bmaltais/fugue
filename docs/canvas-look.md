@@ -169,8 +169,8 @@ in `text`, Medium, elided.
 | Output type | Shown |
 | --- | --- |
 | Image | thumbnail (4.6) |
-| Video | thumbnail of the first frame, a play glyph centered, a duration chip (`0:04`) |
-| Audio | a 10u waveform bar strip in the port color on `well` (from the peaks the engine reports) |
+| Video | a player (`MediaView.qml`, #116): the first frame, paused, with the bar below; zoomed out, the label (`Video · 0:04`) |
+| Audio | a player bar (#116) on `well`: the file's name, the bar below, a quarter as tall as wide; a waveform is not built (it needs peaks the engine does not report) |
 | Number | value chip in the output row |
 | Text | an excerpt below the rows: `well`, small corner, two lines, `label` color |
 
@@ -192,6 +192,12 @@ A Compare Images node (#62) puts its viewer (`CompareView.qml`) in this slot, sa
 (no rounded corner, as it clips two pictures), its picture on `well`; the divider is a 2 px white line
 with a 60% black grip; the A and B labels and the size notice are chips like the info chip, the notice
 amber when the sizes differ.
+
+A video or sound result (Save Video, Save Audio, Preview; #116) puts a player (`MediaView.qml`) in the same slot at
+full detail. The bar sits on the picture like the info chip: 7u (28 px) tall, black at 60%, white glyphs
+(play or pause, mute, and for a video a button for the large view), the time in caption size, and a 4 px
+seek rail in white at 30% with the accent for what has played. A sound's slot is a quarter as tall as wide (a
+picture's least is a half) and shows the file's name over `well`. Press targets are 28 px square.
 
 A Crop node (#73) puts its viewer (`CropNodeView.qml`) in the same slot at full detail: the picture arriving
 at its input, the area outside the frame dimmed (black at 55%), the frame a white line on a 60% black one,
@@ -648,9 +654,9 @@ same information. Nothing animates when no run is in progress (spec 12.1: no CPU
 A subset of Lucide (ISC) as an icon font in the resources, loaded with `FontLoader`, drawn with
 `Text { font.family: icons.name; text: "\ue..." }`: check, refresh-cw, loader-circle, snowflake,
 triangle-alert, corner-down-right, ban, skip-forward, circle-help, pin, layers, dices,
-chevron-down, chevron-left, chevron-right, folder, box, search, circle-x, x, play, and for the
+chevron-down, chevron-left, chevron-right, folder, box, search, circle-x, x, play, and for the player (#116) pause, volume-2, volume-x, maximize-2, and for the
 selection toolbar (#74) trash-2, ellipsis, frame, image, log-in; the full list with code points in
-`share/fonts/lucide-fugue.txt`. About 33 glyphs, under 10 KB. Text glyphs recolor through `color`, render through the same distance-field text as
+`share/fonts/lucide-fugue.txt`. About 37 glyphs, about 11 KB. Text glyphs recolor through `color`, render through the same distance-field text as
 labels and batch with them; an SVG `Image` would need a separate texture per color.
 
 ## 17. What step 2 changes

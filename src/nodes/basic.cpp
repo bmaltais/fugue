@@ -5,14 +5,11 @@
 #include <QFile>
 #include <QFileInfo>
 
-#include "engine/atomic_file.h"
 #include "engine/embed.h"
 #include "engine/file_hashes.h"
-#include "engine/json.h"
 #include "engine/media.h"
-#include "engine/paths.h"
-#include "engine/share_copy.h"
 #include "nodes/kernels.h"
+#include "nodes/save_files.h"
 
 namespace fugue::nodes {
 
@@ -76,103 +73,17 @@ private:
     const MediaType m_type;
 };
 
-// The workflow text Save Image embeds: the share copy (11.5) with a `run` section holding
-// what was used upstream (11.7). `embed` is full, no-prompts or none. Empty for none, and
-// empty with a warning when the run did not start from a document (a compiled graph), so
-// the image is saved and the run says why it holds no workflow.
-Result<QByteArray> workflowToEmbed(const NodeContext &context, const QString &embed) {
-    if (embed == QLatin1String("none"))
-        return QByteArray();
-    if (context.document.isEmpty() || !context.registry) {
-        Error warning = makeError(QStringLiteral("workflow_not_embedded"),
-                                  QStringLiteral("The image holds no workflow: the run started from a compiled graph, "
-                                                 "which has none to embed."),
-                                  QStringLiteral("Run the workflow file itself to embed it."));
-        warning.severity = Error::Severity::Warning;
-        return Result<QByteArray>(QByteArray(), Errors{warning});
-    }
-    ShareOptions options;
-    options.withoutPrompts = embed == QLatin1String("no-prompts");
-    QJsonObject document = shareCopy(context.document, *context.registry, options);
-    document.insert("run", QJsonObject{{"nodes", context.usedUpstream}});
-    return compactJson(document);
-}
-
-// The file names a save tries in turn: `<name>.<ext>`, then `<name>-2.<ext>`, `-3`, ...
-QString numberedName(const QString &name, int n, const QString &extension) {
-    return n == 1 ? QStringLiteral("%1.%2").arg(name, extension) : QStringLiteral("%1-%2.%3").arg(name).arg(n).arg(extension);
-}
-
-// Writes `bytes` under the first free numbered name in `folder` and returns its path. The
-// name is claimed in the same step as the file appears, so a save never overwrites a file
-// (it may be the user's), not even one another Save node wrote a moment before.
-Result<QString> saveAsNew(const QString &folder, const QString &name, const QString &extension, const QByteArray &bytes) {
-    PartialFile::removeStale(folder); // what a save that died here left behind
-    PartialFile partial(folder, numberedName(name, 1, extension));
-    if (const Errors written = partial.write(bytes, QDir(folder).filePath(numberedName(name, 1, extension)));
-        hasErrors(written))
-        return written;
-    for (int n = 1; n <= 100000; ++n) {
-        const QString target = QDir(folder).filePath(numberedName(name, n, extension));
-        const Result<bool> committed = partial.commit(target, Overwrite::Never);
-        if (!committed)
-            return committed.errors();
-        if (*committed)
-            return target;
-    }
-    return makeError(QStringLiteral("node_failed"), QStringLiteral("No free name for %1 in %2.").arg(name, folder),
-                     QStringLiteral("Pick another name or folder in the node."));
-}
-
 class SaveImageKernel : public NodeKernel {
 public:
     Result<Values> run(const NodeContext &context) override {
-        const QString name = context.input("name").text().trimmed();
-        if (name.isEmpty() || name.contains(QLatin1Char('/')) || name.contains(QLatin1Char('\\')) || name.startsWith(QLatin1Char('.')))
-            return makeInputError(QStringLiteral("node_failed"), QStringLiteral("name"),
-                                  QStringLiteral("\"%1\" cannot be a file name.").arg(name),
-                                  QStringLiteral("Use a plain name without folders; the folder input says where."));
         const QString format = context.input("format").text();
-        // A file name holds at most 255 bytes (NAME_MAX) with its extension.
-        if (const qsizetype bytes = QFile::encodeName(name + QLatin1Char('.') + format).size(); bytes > 255)
-            return makeInputError(QStringLiteral("node_failed"), QStringLiteral("name"),
-                                  QStringLiteral("The name is too long for a file name: %1 bytes with .%2, at most 255.")
-                                      .arg(bytes)
-                                      .arg(format),
-                                  QStringLiteral("Use a shorter name."));
+        const Result<QString> name = saveName(context, format);
+        if (!name)
+            return name.errors();
         const QString embed = context.input("embed").text();
-
-        // Relative folders are under the output folder, so a workflow made elsewhere cannot
-        // write outside it by accident.
-        QString folder = context.input("folder").text().trimmed();
-        if (folder.isEmpty()) {
-            folder = outputDir();
-        } else if (QDir::isRelativePath(folder)) {
-            folder = outputDir() + QLatin1Char('/') + folder;
-            if (!isInside(canonicalPath(folder), canonicalPath(outputDir())))
-                return makeInputError(QStringLiteral("permission_denied"), QStringLiteral("folder"),
-                                      QStringLiteral("%1 leads out of the output folder %2.").arg(context.input("folder").text().trimmed(), outputDir()),
-                                      QStringLiteral("A relative folder is under the output folder; write an absolute one to go elsewhere."));
-        }
-        // The folder as the system resolves it (links followed where they stand, then `..`),
-        // so making it, writing in it and checking it are about one folder. QDir::mkpath
-        // would clean `link/..` away on paper while the write follows the link.
-        folder = canonicalPath(folder);
-        if (folder.isEmpty())
-            return makeInputError(QStringLiteral("node_failed"), QStringLiteral("folder"),
-                                  QStringLiteral("The folder %1 goes through links that loop.").arg(context.input("folder").text().trimmed()));
-        if (context.roots) {
-            // Write into the path that was checked.
-            const Result<QString> writable = context.roots->checkWrite(folder, QStringLiteral("folder"));
-            if (!writable)
-                return writable.errors();
-            folder = writable.value();
-        }
-        if (Errors made = makeFolder(folder); !made.isEmpty()) {
-            made.first().input = QStringLiteral("folder");
-            made.first().hint = QStringLiteral("Pick another folder in the node.");
-            return made;
-        }
+        const Result<QString> folder = saveFolder(context);
+        if (!folder)
+            return folder.errors();
 
         // The pixels as a PNG the engine can write (8 or 16 bit), made from a copy so an input
         // file is never the one read and written.
@@ -186,7 +97,7 @@ public:
         if (!scratch)
             return scratch.errors();
 
-        const Result<QByteArray> embedded = workflowToEmbed(context, embed);
+        const Result<QByteArray> embedded = workflowToEmbed(context, embed, QStringLiteral("image"));
         const QByteArray workflow = embedded.value();
         QByteArray bytes;
         if (format == QLatin1String("webp")) {
@@ -215,7 +126,7 @@ public:
             }
         }
         QFile::remove(scratch->path());
-        const Result<QString> target = saveAsNew(folder, name, format, bytes);
+        const Result<QString> target = saveAsNew(folder.value(), name.value(), format, bytes);
         if (!target)
             return target.errors();
 

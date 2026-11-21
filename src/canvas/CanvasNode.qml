@@ -43,6 +43,7 @@ Item {
     required property bool thumbnailDim    // half strength: a placeholder, or the last run's while running
     required property var compare          // Compare Images: its result's pictures (#62), else empty
     required property var compareView      // its viewer's state
+    required property var media            // a video or sound result's player (#116): {type, url, label, file, ...}, else empty
     required property string updateAvailable // a group the library has a newer version of (5.3)
     required property int groupSize // a group instance: the nodes it holds (docs/canvas-look.md 9), else 0
 
@@ -407,6 +408,8 @@ Item {
             readonly property bool comparing: node.compare.a !== undefined
             // Crop (#73): the picture arriving at its input, with the frame over it, at full detail.
             readonly property bool cropping: node.canvasModel.isCrop(node.nodeId) && node.thumbnailText === ""
+            // A video or a sound result (Save Video, Save Audio, Preview): a player in the slot at full detail.
+            readonly property bool playable: node.media.url !== undefined
             // One Loader, so a node costs the one item it always did (#5).
             Loader {
                 id: pictureLoader
@@ -417,7 +420,7 @@ Item {
                 height: node.thumbnailRect.height
                 objectName: "thumbnail"
                 sourceComponent: !face.full ? thumbnailComponent : face.comparing ? compareComponent
-                                 : face.cropping ? cropComponent : thumbnailComponent
+                                 : face.cropping ? cropComponent : face.playable ? mediaComponent : thumbnailComponent
                 onItemChanged: node.compareItem = face.comparing && face.full ? item : null
                 Component {
                     id: thumbnailComponent
@@ -444,6 +447,22 @@ Item {
                         wheelModifiers: Qt.AltModifier // a plain wheel moves the canvas
                         onPressed: node.canvasModel.select([node.nodeId])
                         onActivated: node.canvasView.openCrop(node.nodeId)
+                        opacity: node.thumbnailDim ? 0.5 : 1
+                    }
+                }
+                Component {
+                    id: mediaComponent
+                    MediaView {
+                        objectName: "mediaPlayer"
+                        look: node.look
+                        kind: node.media.type
+                        label: node.media.file || node.media.label || ""
+                        // The file is opened only while the node is in view: a decoder per video is held from then on.
+                        source: node.inView ? node.media.url : ""
+                        expandable: node.media.type === "video"
+                        onPressed: node.canvasModel.select([node.nodeId])
+                        onActivated: node.canvasView.openMedia(node.nodeId)
+                        onExpandRequested: node.canvasView.openMedia(node.nodeId)
                         opacity: node.thumbnailDim ? 0.5 : 1
                     }
                 }

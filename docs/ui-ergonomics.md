@@ -217,3 +217,11 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Input: `look`, `title`, `dock` ("left" or "right"), `minWidth`, `maxWidth`, `width` (the caller's), and the content as its children (or `contentArea` for content made later). `focusTarget` is the content's item that takes the focus first.
 - Output: `closeRequested`, `dockRequested(dock)`, `widthRequested(width)`. The panel changes none of them itself.
 - A new panel: a content component with its own signals, a tab name in `SidePanels` (`knownTab`), a command, and a branch in `Main.qml`'s `syncSidePanel`. The container needs no change.
+
+### 2026-11-21 player on a video or song node (#116)
+
+- Control: `src/canvas/MediaView.qml`, in a node's picture slot (`CanvasNode.qml`, `mediaPlayer`) and in the large view (`MediaDialog.qml`, `mediaViewer`): the bar's `mediaPlay`, `mediaSeek`, `mediaMute` and `mediaExpand` (a video only), and the picture's double click.
+- Old: none; a video or song result showed a label ("Video · 0:04").
+- New: one bar, 7u = 28px tall, over the picture: play and pause first, the time, the seek rail (the rest of the width), then mute and expand. The large view has the same bar and the close button of `LargeViewDialog`, with no Fit and 100% (a player has no zoom).
+- Why: play is the one thing wanted of a player, so it is first and in the same place on the face and the large view, as the dialog's primary; the rail is the widest target, since a seek is by pointing (Fitts); a press on the picture is not play, so it can select the node and a double click can open the large view, as for a picture. Space, Left, Right and M work once it has the focus.
+- Rule: Floor (every button is 28px square; the rail's press area is the bar's whole 28px height, its rail 4px). Primary (play is the first control; the others are quiet). Gaps (one `u` between the time, rail and buttons). Learned place: no menu changed. Posture: on the canvas, a control that is frequent is raised to 28px, over the node's 24px floor; the dialog is transient and starts playing at once, so it asks no decision.

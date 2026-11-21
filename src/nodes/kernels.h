@@ -14,6 +14,7 @@ void addImageGenerationKernels(Kernels &kernels); // image_generation.cpp
 void addImageSizeKernels(Kernels &kernels);       // image_size.cpp
 void addMediaGenerationKernels(Kernels &kernels); // media_generation.cpp
 void addPixelKernels(Kernels &kernels);           // pixel.cpp
+void addSaveMediaKernels(Kernels &kernels);       // save_media.cpp
 void addTextGenerationKernels(Kernels &kernels);  // text_generation.cpp
 
 } // namespace fugue::nodes

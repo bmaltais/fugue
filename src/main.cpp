@@ -5,6 +5,7 @@
 #include <QGuiApplication>
 #include <QIcon>
 #include <QKeySequence>
+#include <QLoggingCategory>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
 #include <QQuickWindow>
@@ -54,6 +55,10 @@ int main(int argc, char *argv[]) {
     QGuiApplication app(argc, argv);
     app.setApplicationName("fugue");
     app.setApplicationVersion("0.1.0");
+    // Qt Multimedia's FFmpeg backend prints ffmpeg's whole stream dump to stderr for every file a
+    // player opens (the player on a video or song node, #116), which drowns the real messages.
+    // QT_LOGGING_RULES still beats this.
+    QLoggingCategory::setFilterRules(QStringLiteral("qt.multimedia.ffmpeg.mediadataholder.info=false"));
 
     // Matches the window to fugue.desktop, so the compositor (Wayland app_id)
     // and the launcher pick up the installed icon. The window's own icon follows the

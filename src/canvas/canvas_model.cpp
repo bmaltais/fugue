@@ -102,6 +102,7 @@ QVariant NodeList::data(const QModelIndex &index, int role) const {
     case ThumbnailText: return run.thumbnailText;
     case ThumbnailDim: return run.thumbnailDim;
     case Compare: return run.compare;
+    case Media: return run.media;
     case CompareView: return m_canvas->isCompare(row.id) ? QVariant(m_canvas->compareView(row.id)) : QVariant(QVariantMap());
     case Notice: return run.notice;
     default: return {};
@@ -115,7 +116,7 @@ QHash<int, QByteArray> NodeList::roleNames() const {
             {Color, "color"}, {Pinned, "pinned"}, {RunState, "runState"}, {Progress, "progress"},
             {Seconds, "seconds"}, {Error, "error"}, {Warnings, "warnings"}, {Thumbnail, "thumbnail"},
             {ThumbnailInfo, "thumbnailInfo"}, {ThumbnailFile, "thumbnailFile"}, {ThumbnailRect, "thumbnailRect"}, {ThumbnailText, "thumbnailText"}, {ThumbnailDim, "thumbnailDim"},
-            {Compare, "compare"}, {CompareView, "compareView"},
+            {Compare, "compare"}, {CompareView, "compareView"}, {Media, "media"},
             {Notice, "notice"}, {UpdateAvailable, "updateAvailable"}, {GroupSize, "groupSize"}};
 }
 
@@ -599,10 +600,12 @@ void CanvasModel::layOut(NodeRow &row) const {
         if (row.missing || row.groupSize > 0)
             top += m_rowHeight;
         if (hasThumbnail) {
-            // 1.5u in from the sides, 1u under the rows, its height from its aspect (0.5 to 1.5).
+            // 1.5u in from the sides, 1u under the rows, its height from its aspect (0.5 to 1.5; a sound's, 0.25).
             const qreal inset = qRound(1.5 * unit());
             const qreal width = row.width - 2 * inset;
-            const qreal height = qRound(width * std::clamp(run->thumbnailAspect, 0.5, 1.5));
+            // A sound's player is a bar (its aspect is below the least a picture has).
+            const qreal least = run->media.value(QStringLiteral("type")) == QLatin1String("audio") ? 0.2 : 0.5;
+            const qreal height = qRound(width * std::clamp(run->thumbnailAspect, least, 1.5));
             row.thumbnail = QRectF(inset, top + m_padTop, width, height + extra);
             top = row.thumbnail.bottom();
         } else if (grows && extra > 0) {
@@ -1680,6 +1683,7 @@ void CanvasModel::setRunState(const QString &node, const QVariantMap &state) {
     run.thumbnailText = state.value("thumbnailText").toString();
     run.thumbnailDim = state.value("thumbnailDim").toBool();
     run.compare = state.value("compare").toMap();
+    run.media = state.value("media").toMap();
     run.values = state.value("values").toMap();
     run.notice = state.value("notice").toString();
     const RunInfo before = m_run.value(node);
@@ -1689,7 +1693,7 @@ void CanvasModel::setRunState(const QString &node, const QVariantMap &state) {
     m_run.insert(node, run);
     relayOut(r, {NodeList::RunState, NodeList::Progress, NodeList::Seconds, NodeList::Error, NodeList::Warnings,
                  NodeList::Thumbnail, NodeList::ThumbnailInfo, NodeList::ThumbnailFile, NodeList::ThumbnailText, NodeList::ThumbnailDim,
-                 NodeList::Compare, NodeList::Outputs, NodeList::Notice});
+                 NodeList::Compare, NodeList::Media, NodeList::Outputs, NodeList::Notice});
     if (previewChanged)
         emit previewSizeChanged(node);
 }
