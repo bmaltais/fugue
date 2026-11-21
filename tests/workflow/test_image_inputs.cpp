@@ -230,6 +230,24 @@ private slots:
         QVERIFY(QFileInfo(place.filePath("inputs/" + name)).isSymLink());
     }
 
+    // A template that ships a video (or a song) keeps it where it is: only pictures are taken in.
+    void aTemplatesVideoIsNotTakenInAsAnImage() {
+        Pictures p;
+        QTemporaryDir folder;
+        QVERIFY(QDir().mkpath(folder.filePath("inputs")));
+        const QString video = QDir(folder.path()).canonicalPath() + "/inputs/clip.mp4";
+        QVERIFY(write(video, QByteArray("\0\0\0\x18" "ftypmp42", 12) + QByteArray(100, 'x')));
+        Registry registry;
+        nodes::addBuiltinNodeTypes(registry);
+        Document document = Document::load(QStringLiteral(R"({"fugue": 1, "graph": {"nodes": {
+            "src": {"type": "fugue/load-video", "version": "1.0.0", "inputs": {"file": "%1"}}}}})")
+                                               .arg(video).toUtf8()).value();
+        const Errors errors = takeInputsFrom(document, registry, folder.path());
+        QVERIFY2(!hasErrors(errors), qPrintable(errors.isEmpty() ? QString() : errors.first().message));
+        QCOMPARE(document.graph.nodes.value("src").inputs.value("file").literal().toString(), video);
+        QVERIFY(names(p.inputs()).isEmpty());
+    }
+
     // A file manager's copy also offers decoded pixels: the file, byte for byte, is taken
     // before them (Appendix A: encoded bytes, then files, then pixels).
     void aCopiedFileIsTakenBeforeDecodedPixels() {
