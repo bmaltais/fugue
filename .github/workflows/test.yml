@@ -1,10 +1,12 @@
 name: Test
 
+# Not on every push to main: the suite is run locally before a merge (the repo's own workflow), so
+# the hosted runs are for a release (a v* tag), a pull request and by hand (workflow_dispatch).
 on:
   pull_request:
   workflow_dispatch:
   push:
-    branches: [main, master]
+    tags: ['v*']
 
 permissions:
   contents: read
