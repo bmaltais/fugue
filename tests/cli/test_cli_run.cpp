@@ -400,7 +400,7 @@ private slots:
         const Outcome o = fugue({"run", path("flow.fugue"), "--wait"});
         QCOMPARE(o.exitCode, 0);
         QCOMPARE(statusOf(dead), QString("failed"));
-        QVERIFY(queued().isEmpty());
+        QTRY_VERIFY(queued().isEmpty()); // the worker drops its own entry just after run.done (a CI run caught it first)
     }
 
     void followingARunWhoseWorkerWasKilledEndsInsteadOfHanging() {
