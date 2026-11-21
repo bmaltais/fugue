@@ -1,6 +1,7 @@
 #include "remote_helper_provider.h"
 
 #include <QDir>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -9,6 +10,7 @@
 #include <QNetworkRequest>
 #include <QPointer>
 #include <QRegularExpression>
+#include <QTcpServer>
 #include <QUrl>
 
 #include "engine/helper_provider.h"
@@ -23,7 +25,7 @@ constexpr int kLostPolls = 3;              // status requests in a row that may 
 
 Error hostError(const QJsonObject &error) {
     const QString code = error.value("code").toString();
-    const QString message = error.value("message").toString(QStringLiteral("The helper on the paired host failed."));
+    const QString message = error.value("message").toString(QStringLiteral("The provider failed."));
     // These keep their codes (8.5, 8.8, 9.5); everything else the host says is about this job's work.
     if (code == QLatin1String("out_of_memory") || code == QLatin1String("cancelled") ||
         code == QLatin1String("model_missing"))
@@ -93,24 +95,55 @@ constexpr qint64 kMaxDownloadBytes = qint64(4) << 30; // the largest file taken 
 } // namespace
 
 RemoteHelperProvider::RemoteHelperProvider(const ProviderInstance &instance, int pollMs, QObject *parent)
-    : Provider(parent), m_instance(instance) {
+    : RemoteHelperProvider(instance, [] {
+          RemoteProviderOptions options; // the paired helper's
+          options.defaultCapabilities = helperCapabilities();
+          return options;
+      }(), pollMs, parent) {}
+
+RemoteHelperProvider::RemoteHelperProvider(const ProviderInstance &instance, RemoteProviderOptions options, int pollMs,
+                                           QObject *parent)
+    : Provider(parent), m_instance(instance), m_options(std::move(options)) {
     m_network.setTransferTimeout(kTransferTimeoutMs);
     m_poll.setInterval(pollMs > 0 ? pollMs : kDefaultPollMs);
     connect(&m_poll, &QTimer::timeout, this, &RemoteHelperProvider::poll);
+    m_idle.setSingleShot(true);
+    connect(&m_idle, &QTimer::timeout, this, [this] {
+        for (const Job &job : std::as_const(m_jobs))
+            if (!job.status.isTerminal())
+                return touch(); // a job is still out: wait again
+        stopServer();
+    });
+    m_startLimit.setSingleShot(true);
+    connect(&m_startLimit, &QTimer::timeout, this, [this] {
+        startDone(QStringLiteral("it did not answer describe in %1 seconds.").arg(m_options.startTimeoutMs / 1000));
+    });
 }
 
-RemoteHelperProvider::~RemoteHelperProvider() = default;
+RemoteHelperProvider::~RemoteHelperProvider() {
+    if (!m_process)
+        return;
+    m_process->disconnect();
+    m_process->kill();
+    m_process->waitForFinished(3000);
+}
+
+QString RemoteHelperProvider::address() const { return launched() ? m_runAddress : m_instance.address; }
 
 Error RemoteHelperProvider::unreachable(const QString &why) const {
     return makeError(QStringLiteral("provider_unreachable"),
-                     QStringLiteral("%1 (%2): %3").arg(m_instance.name, m_instance.address, why),
-                     QStringLiteral("Check that the Fugue helper is running on the host and that its address and key in "
-                                    "providers.json are right."));
+                     QStringLiteral("%1 (%2): %3").arg(m_instance.name, address(), why),
+                     launched() ? QStringLiteral("Check the provider's own log; Fugue starts it when it is needed.")
+                                : QStringLiteral("Check that %1 is running and that its address and key in providers.json "
+                                                 "are right.")
+                                      .arg(m_options.where == QLatin1String("the paired host") ? QStringLiteral("the Fugue helper on the host")
+                                                                                              : QStringLiteral("the provider")));
 }
 
 QNetworkReply *RemoteHelperProvider::request(const QString &method, const QString &path, const QByteArray &body) {
-    QNetworkRequest request(QUrl(m_instance.address + path));
-    request.setRawHeader("Authorization", "Bearer " + m_instance.key.toUtf8());
+    QNetworkRequest request(QUrl(address() + path));
+    if (!m_instance.key.isEmpty())
+        request.setRawHeader("Authorization", "Bearer " + m_instance.key.toUtf8());
     // The host answers where it is asked: a redirect would carry the key elsewhere.
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
     if (!body.isEmpty())
@@ -129,11 +162,11 @@ Result<QJsonObject> RemoteHelperProvider::parse(QNetworkReply *reply) const {
     if (status == 0)
         return unreachable(QStringLiteral("cannot reach it: %1.").arg(reply->errorString()));
     if (status >= 400 || reply->error() != QNetworkReply::NoError)
-        return makeError(QStringLiteral("node_failed"), QStringLiteral("The paired host answered HTTP %1.").arg(status));
+        return makeError(QStringLiteral("node_failed"), QStringLiteral("%1 answered HTTP %2.").arg(m_options.where, QString::number(status)));
     return object;
 }
 
-void RemoteHelperProvider::post(const QString &op, const QJsonObject &body, Answer answer) {
+void RemoteHelperProvider::sendPost(const QString &op, const QJsonObject &body, Answer answer) {
     QNetworkReply *reply = request(QStringLiteral("POST"), QStringLiteral("/fugue/v1/") + op,
                                    QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, this, [this, reply, answer = std::move(answer)] {
@@ -144,32 +177,14 @@ void RemoteHelperProvider::post(const QString &op, const QJsonObject &body, Answ
 }
 
 void RemoteHelperProvider::describe(Reply<Description> reply) {
-    post(QStringLiteral("describe"), {}, [reply](const Result<QJsonObject> &answer) {
+    post(QStringLiteral("describe"), {}, [this, reply](const Result<QJsonObject> &answer) {
         if (!answer)
             return reply(Result<Description>(answer.errors()));
-        Description description;
-        description.protocol = answer->value("protocol").toInt(1);
-        // Per host: results are deterministic per machine and build (spec 8.10), so a stage run on the
-        // host never answers from, or for, an entry made by another machine's helper (the cache key has the engine).
-        description.engine = answer->value("engine").toString(QStringLiteral("sdcpp"));
-        if (const QString host = answer->value("host").toString(); !host.isEmpty())
-            description.engine += QLatin1Char('@') + host;
-        description.sharesFilesystem = answer->value("shares_filesystem").toBool(false);
-        if (answer->value("free_memory_bytes").isDouble())
-            description.freeMemoryBytes = qint64(answer->value("free_memory_bytes").toDouble());
-        QStringList names;
-        for (const QJsonValue &name : answer->value("capabilities").toArray())
-            names.append(name.toString());
-        if (names.isEmpty())
-            names = helperCapabilities();
-        for (const QString &capability : std::as_const(names)) {
-            OfferedModel files;
-            files.title = QStringLiteral("Model files on the paired host");
-            files.status = ModelStatus::Ready;
-            description.capabilities.append(CapabilityOffer{capability, {files}});
-        }
-        reply(Result<Description>(description));
-    });
+        QJsonObject described = answer.value();
+        if (!described.contains("capabilities") && !m_options.defaultCapabilities.isEmpty())
+            described.insert("capabilities", QJsonArray::fromStringList(m_options.defaultCapabilities));
+        reply(Result<Description>(parseDescription(described, m_options.defaultEngine, m_options.filesTitle)));
+    }, true);
 }
 
 void RemoteHelperProvider::submit(const JobRequest &request, Reply<QString> reply) {
@@ -198,8 +213,10 @@ void RemoteHelperProvider::submit(const JobRequest &request, Reply<QString> repl
         params.insert("ref_images", references);
     }
     const QString outputDir = request.outputDir;
-    post(QStringLiteral("submit"),
-         QJsonObject{{"capability", request.capability}, {"params", params}, {"inputs", inputs}},
+    QJsonObject message{{"capability", request.capability}, {"params", params}, {"inputs", inputs}};
+    if (!request.model.isEmpty())
+        message.insert("model", request.model);
+    post(QStringLiteral("submit"), message,
          [this, reply, outputDir](const Result<QJsonObject> &answer) {
              if (!answer)
                  return reply(Result<QString>(answer.errors()));
@@ -212,7 +229,7 @@ void RemoteHelperProvider::submit(const JobRequest &request, Reply<QString> repl
              if (!m_poll.isActive())
                  m_poll.start();
              reply(Result<QString>(hostJob));
-         });
+         }, true);
 }
 
 void RemoteHelperProvider::status(const QString &job, Reply<JobStatus> reply) {
@@ -295,6 +312,8 @@ void RemoteHelperProvider::change(const QString &job, const JobStatus &status) {
     Job &held = m_jobs[job];
     held.status = status;
     held.polling = false;
+    if (status.isTerminal())
+        touch();
     emit statusChanged(job, status);
 }
 
@@ -364,7 +383,7 @@ void RemoteHelperProvider::fetch(const QString &id) {
             const Download &download = pending->files.at(pending->next);
             if (download.size < 0 || download.size > kMaxDownloadBytes)
                 return self->fail(id, makeError(QStringLiteral("node_failed"),
-                                                QStringLiteral("The paired host gave no usable size for %1.").arg(download.name)));
+                                                QStringLiteral("%2 gave no usable size for %1.").arg(download.name, self->m_options.where)));
             QNetworkReply *reply = self->request(QStringLiteral("GET"),
                                                  QStringLiteral("/fugue/v1/result/%1/%2").arg(QString::fromLatin1(QUrl::toPercentEncoding(id))).arg(download.file), {});
             const std::shared_ptr<std::function<void()>> next = again.lock();
@@ -378,7 +397,7 @@ void RemoteHelperProvider::fetch(const QString &id) {
                     return;
                 const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
                 const QByteArray bytes = reply->readAll();
-                const QString failed = status == 401 || status == 403 ? QStringLiteral("the host refused the key")
+                const QString failed = status == 401 || status == 403 ? QStringLiteral("the key was refused")
                                        : status == 0                  ? reply->errorString()
                                        : status >= 400                ? QStringLiteral("HTTP %1").arg(status)
                                        : download.size >= 0 && bytes.size() != download.size
@@ -389,7 +408,7 @@ void RemoteHelperProvider::fetch(const QString &id) {
                     return self->fail(id, status == 0 || status == 401 || status == 403
                                               ? self->unreachable(QStringLiteral("cannot fetch %1: %2.").arg(download.name, failed))
                                               : makeError(QStringLiteral("node_failed"),
-                                                          QStringLiteral("Cannot fetch %1 from the paired host: %2.").arg(download.name, failed)));
+                                                          QStringLiteral("Cannot fetch %1 from %2: %3.").arg(download.name, self->m_options.where, failed)));
                 const QString path = QDir(outputDir).filePath(QStringLiteral("%1-%2.%3").arg(safeName(download.name)).arg(download.file).arg(extensionOf(download.format)));
                 QFile file(path);
                 if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.flush())
@@ -409,6 +428,150 @@ void RemoteHelperProvider::fetch(const QString &id) {
         };
         (*step)();
     });
+}
+
+void RemoteHelperProvider::post(const QString &op, const QJsonObject &body, Answer answer, bool mayStart) {
+    if (!launched())
+        return sendPost(op, body, std::move(answer));
+    if (!mayStart && !m_up)
+        return later(Reply<QJsonObject>(answer),
+                     Result<QJsonObject>(unreachable(QStringLiteral("it is not running (it stopped, and starts again on the next job)."))));
+    if (mayStart)
+        touch();
+    if (m_up)
+        return sendPost(op, body, std::move(answer));
+    whenUp([this, op, body, answer = std::move(answer)](const QString &why) {
+        if (!why.isEmpty())
+            return answer(Result<QJsonObject>(unreachable(why)));
+        sendPost(op, body, answer);
+    });
+}
+
+void RemoteHelperProvider::whenUp(Ready ready) {
+    m_waiters.append(std::move(ready));
+    if (m_starting)
+        return;
+    m_starting = true;
+    // A free loopback port: bind one, read it, let go. Another process could take it in between;
+    // the module then fails to start, and the next request tries a new one.
+    QTcpServer finder;
+    if (!finder.listen(QHostAddress::LocalHost, 0))
+        return startDone(QStringLiteral("no free port on this machine: %1.").arg(finder.errorString()));
+    const QString port = QString::number(finder.serverPort());
+    finder.close();
+    m_runAddress = QString(m_options.addressTemplate).replace(QStringLiteral("{port}"), port);
+    QStringList arguments;
+    for (const QString &argument : std::as_const(m_options.arguments))
+        arguments.append(QString(argument).replace(QStringLiteral("{port}"), port));
+    m_log.clear();
+    m_process = new QProcess(this);
+    QProcess *process = m_process;
+    process->setProcessChannelMode(QProcess::MergedChannels);
+    if (!m_options.workingDirectory.isEmpty())
+        process->setWorkingDirectory(m_options.workingDirectory);
+    connect(process, &QProcess::readyRead, this, [this, process] {
+        for (const QByteArray &line : process->readAll().split('\n')) {
+            const QString text = QString::fromUtf8(line).trimmed();
+            if (!text.isEmpty() && process == m_process)
+                m_log.append(text.left(500));
+        }
+        while (m_log.size() > 20)
+            m_log.removeFirst();
+    });
+    connect(process, &QProcess::finished, this, [this, process] {
+        if (process != m_process)
+            return;
+        m_process = nullptr;
+        m_up = false;
+        process->deleteLater();
+        if (m_starting)
+            startDone(QStringLiteral("it exited before it answered."));
+    });
+    connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError error) {
+        if (process == m_process && error == QProcess::FailedToStart) {
+            const QString why = QStringLiteral("it could not be started: %1.").arg(process->errorString());
+            m_process = nullptr;
+            process->deleteLater();
+            startDone(why);
+        }
+    });
+    process->start(m_options.program, arguments);
+    m_startLimit.start(m_options.startTimeoutMs);
+    QTimer::singleShot(0, this, &RemoteHelperProvider::probe);
+}
+
+void RemoteHelperProvider::probe() {
+    if (!m_starting || !m_process)
+        return;
+    QProcess *process = m_process;
+    sendPost(QStringLiteral("describe"), {}, [this, process](const Result<QJsonObject> &answer) {
+        if (!m_starting || process != m_process)
+            return;
+        // Anything the server says, even an error, means it is listening.
+        if (answer || answer.error().code != QLatin1String("provider_unreachable"))
+            return startDone({});
+        QTimer::singleShot(100, this, &RemoteHelperProvider::probe);
+    });
+}
+
+void RemoteHelperProvider::startDone(const QString &why) {
+    m_starting = false;
+    m_startLimit.stop();
+    m_up = why.isEmpty();
+    QString reason = why;
+    if (!why.isEmpty()) {
+        if (!m_log.isEmpty())
+            reason += QStringLiteral(" Its log ends:\n") + m_log.join(QLatin1Char('\n'));
+        stopServer();
+    }
+    const QList<Ready> waiters = std::exchange(m_waiters, {});
+    for (const Ready &ready : waiters)
+        ready(reason);
+}
+
+void RemoteHelperProvider::touch() {
+    if (launched() && m_options.idleMs > 0 && m_process)
+        m_idle.start(m_options.idleMs);
+}
+
+QProcess *RemoteHelperProvider::stopServer() {
+    m_idle.stop();
+    if (!m_process)
+        return nullptr;
+    // Let go of it now, so a job submitted meanwhile starts a new one.
+    QProcess *process = std::exchange(m_process, nullptr);
+    const bool wasUp = std::exchange(m_up, false);
+    const QString where = m_runAddress;
+    process->disconnect(this);
+    if (process->state() == QProcess::NotRunning) {
+        process->deleteLater();
+        return nullptr;
+    }
+    connect(process, &QProcess::finished, process, &QObject::deleteLater);
+    if (wasUp) { // asked politely first (8.8); a server that does not know the operation is ended below
+        QNetworkRequest shutdown(QUrl(where + QStringLiteral("/fugue/v1/shutdown")));
+        if (!m_instance.key.isEmpty())
+            shutdown.setRawHeader("Authorization", "Bearer " + m_instance.key.toUtf8());
+        shutdown.setHeader(QNetworkRequest::ContentTypeHeader, QByteArrayLiteral("application/json"));
+        QNetworkReply *sent = m_network.post(shutdown, QByteArrayLiteral("{}"));
+        connect(sent, &QNetworkReply::finished, sent, &QObject::deleteLater);
+    }
+    QTimer::singleShot(1000, process, [process] { process->terminate(); });
+    QTimer::singleShot(5000, process, [process] { process->kill(); });
+    return process;
+}
+
+void RemoteHelperProvider::shutdown(Reply<Nothing> reply) {
+    // Returns once the process is gone, so its memory is back when the caller measures again (9.3).
+    // The shutdown request goes out and the process is ended after a second (stopServer), both
+    // from the event loop, so it is spun here until the process is over.
+    if (QProcess *process = stopServer(); process && process->state() != QProcess::NotRunning) {
+        QEventLoop wait;
+        connect(process, &QProcess::finished, &wait, &QEventLoop::quit);
+        QTimer::singleShot(7000, &wait, &QEventLoop::quit);
+        wait.exec();
+    }
+    later(std::move(reply), Result<Nothing>(Nothing{}));
 }
 
 } // namespace fugue

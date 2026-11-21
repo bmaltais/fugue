@@ -98,7 +98,10 @@ bool CudaHelperNotice::due() {
 void CudaHelperNotice::dismiss() { dismiss(stateDir()); }
 
 HelperProvider::HelperProvider(const ProviderInstance &instance, QString program, int graceMs, QObject *parent)
-    : Provider(parent), m_instance(instance), m_program(std::move(program)), m_graceMs(graceMs) {
+    : HelperProvider(instance, StdioLaunch{std::move(program), {QStringLiteral("--serve")}, {}}, graceMs, parent) {}
+
+HelperProvider::HelperProvider(const ProviderInstance &instance, StdioLaunch launch, int graceMs, QObject *parent)
+    : Provider(parent), m_instance(instance), m_launch(std::move(launch)), m_program(m_launch.program), m_graceMs(graceMs) {
     // A number, or text as the settings page stores it.
     const QJsonValue setting = instance.settings.value("idle_timeout_s");
     bool ok = setting.isDouble();
@@ -127,7 +130,7 @@ qint64 HelperProvider::pid() const {
 Error HelperProvider::unreachable(const QString &why) const {
     return makeError(QStringLiteral("provider_unreachable"),
                      why.isEmpty() ? QStringLiteral("%1 has no Fugue helper to run.").arg(m_instance.name) : why,
-                     QStringLiteral("Install fugue (it has fugue-helper-vulkan), or fugue-helper-cuda on an NVIDIA card."));
+                     m_launch.hint);
 }
 
 QString HelperProvider::lastLog() const { return m_log.join(QLatin1Char('\n')); }
@@ -135,6 +138,22 @@ QString HelperProvider::lastLog() const { return m_log.join(QLatin1Char('\n')); 
 void HelperProvider::describe(Reply<Description> reply) {
     if (m_program.isEmpty())
         return later(std::move(reply), Result<Description>(unreachable()));
+    if (m_launch.describeOverProtocol) {
+        if (!m_process) {
+            const QString why = start();
+            if (!why.isEmpty())
+                return later(std::move(reply), Result<Description>(unreachable(why)));
+        }
+        return send(QJsonObject{{"op", "describe"}}, [this, reply](const Result<QJsonObject> &answer) {
+            if (!answer)
+                return reply(Result<Description>(answer.errors()));
+            // A stdio provider is a process on this machine: it shares the filesystem unless it says not.
+            QJsonObject described = answer.value();
+            if (!described.contains("shares_filesystem"))
+                described.insert("shares_filesystem", true);
+            reply(Result<Description>(parseDescription(described, m_launch.engine, {})));
+        });
+    }
     // Answered here, not by the helper: a model picker describes every provider each time it
     // opens, and that must not start a GPU process.
     Description description;
@@ -259,7 +278,9 @@ QString HelperProvider::start() {
         if (process == m_process && error == QProcess::FailedToStart)
             finished();
     });
-    process->start(m_program, {QStringLiteral("--serve")});
+    if (!m_launch.workingDirectory.isEmpty())
+        process->setWorkingDirectory(m_launch.workingDirectory);
+    process->start(m_program, m_launch.arguments);
     if (!m_process) // finished() ran inside start()
         return m_startError;
     return {};
@@ -277,7 +298,7 @@ QList<QByteArray> HelperProvider::takeLines(QByteArray &buffer) {
 
 void HelperProvider::send(QJsonObject message, Answer answer) {
     if (!m_process) // it stopped while a reply was being read
-        return answer(Result<QJsonObject>(stopped(QStringLiteral("The Fugue helper stopped."))));
+        return answer(Result<QJsonObject>(stopped(m_launch.label + QStringLiteral(" stopped."))));
     const QString id = QString::number(++m_nextId);
     message.insert("id", id);
     m_waiting.insert(id, std::move(answer));
@@ -349,10 +370,10 @@ void HelperProvider::finished() {
     if (!startFailed)
         readOutput(process);
     process->deleteLater();
-    m_startError = startFailed ? QStringLiteral("The Fugue helper could not be started: %1.").arg(process->errorString())
+    m_startError = startFailed ? QStringLiteral("%1 could not be started: %2.").arg(m_launch.label, process->errorString())
                                : QString();
     QString why = startFailed ? m_startError
-                              : QStringLiteral("The Fugue helper stopped while running this node; it starts again on the next run.");
+                              : m_launch.label + QStringLiteral(" stopped while running this node; it starts again on the next run.");
     if (!m_log.isEmpty())
         why += QStringLiteral(" Its log ends:\n") + lastLog();
     abandon(startFailed ? unreachable(why) : stopped(why));
@@ -398,7 +419,7 @@ QProcess *HelperProvider::stop() {
         process->closeWriteChannel();
         QTimer::singleShot(m_graceMs, process, [process] { process->kill(); });
     }
-    abandon(stopped(QStringLiteral("The Fugue helper was stopped while running this node.")));
+    abandon(stopped(m_launch.label + QStringLiteral(" was stopped while running this node.")));
     return process;
 }
 

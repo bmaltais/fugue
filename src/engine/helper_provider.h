@@ -58,6 +58,20 @@ struct CudaHelperNotice {
     static void dismiss();
 };
 
+// How a stdio provider is started, and what it is called in messages. The helper's own is
+// {program, {"--serve"}}, found by helperProgram(); a stdio module's comes from its provider.json (8.8).
+struct StdioLaunch {
+    QString program;       // empty: none installed, every operation fails with provider_unreachable
+    QStringList arguments;
+    QString workingDirectory;
+    QString label = QStringLiteral("The Fugue helper"); // "<label> stopped while running this node."
+    QString hint = QStringLiteral("Install fugue (it has fugue-helper-vulkan), or fugue-helper-cuda on an NVIDIA card.");
+    // A module describes itself: describe is sent to the process (starting it) and its reply read
+    // with parseDescription. The helper answers describe here, so a model picker never starts it.
+    bool describeOverProtocol = false;
+    QString engine = QStringLiteral("sdcpp");
+};
+
 class HelperProvider : public Provider {
     Q_OBJECT
 
@@ -67,6 +81,7 @@ public:
     // a number or its text; default 600; 0 never stops it for idling) is how long it stays warm.
     HelperProvider(const ProviderInstance &instance, QString program, int graceMs = 5000,
                    QObject *parent = nullptr);
+    HelperProvider(const ProviderInstance &instance, StdioLaunch launch, int graceMs = 5000, QObject *parent = nullptr);
     ~HelperProvider() override;
 
     void describe(Reply<Description> reply) override;
@@ -116,6 +131,7 @@ private:
     QString lastLog() const;
 
     ProviderInstance m_instance;
+    StdioLaunch m_launch;
     QString m_program;
     int m_graceMs;
     int m_idleMs;

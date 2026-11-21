@@ -23,6 +23,7 @@ vocabulary in [docs/GLOSSARY.md](docs/GLOSSARY.md).
 - **Groups.** Select nodes and make a group (Ctrl+Shift+E): it collapses into one reusable
   node with the inputs and outputs you choose, and can be entered, nested and ungrouped. Frames
   (Ctrl+G) are colored boxes that only organize the canvas.
+- **Providers as modules.** A provider is a folder with a `provider.json` in `~/.local/share/fugue/providers/<id>/`, speaking a small JSON protocol over HTTP or stdio (spec 8.8); no change to Fugue is needed to add one.
 - **Local and paired-host runs.** The `omarchy` provider serves models from this machine and
   from every host paired through omarchy-local-ai, so one graph can use a model on another
   machine. Heavy generation runs in a separate helper process (stable-diffusion.cpp).

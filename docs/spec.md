@@ -1206,7 +1206,12 @@ Servers drop finished jobs (the Omarchy image server after 600 seconds).
 | `comfyui` | Optional, off by default. Talks HTTP and websocket to a ComfyUI server the user installs and runs. Fugue bundles none of its code or node schemas and never starts it. | after v0.1 |
 
 The shipped providers are not special: they sit behind the same interface and registry as a
-third-party module ([8.11](#811-the-provider-interface)).
+third-party module ([8.11](#811-the-provider-interface)). `omarchy` and `fugue-helper` are listed
+as modules with transport `builtin` ([8.8](#88-provider-modules)): they are code compiled into
+Fugue, because `omarchy` speaks its servers' own APIs, not the protocol of 8.8, and the helper's
+program is found by Fugue ([8.10](#810-gpu-memory-and-the-helper)). `http` and `comfyui` are
+not built yet: each is a module folder (`http` for OpenAI-compatible and sd.cpp native endpoints,
+`comfyui` for ComfyUI's own API), written against 8.8 when its milestone comes, with no change to Fugue.
 
 **The `fugue-helper` provider** runs `fugue-helper --serve` ([8.10](#810-gpu-memory-and-the-helper))
 and speaks the protocol of 8.8 to it over `stdio`:
@@ -1317,7 +1322,8 @@ omarchy-local-ai at commit 703ae0c when the provider was built):
 ### 8.8 Provider modules
 
 A third party adds a provider as a folder in `~/.local/share/fugue/providers/<id>/` with a
-`provider.json`. No change to Fugue is needed.
+`provider.json`. No change to Fugue is needed: the folder is found when a providers.json entry has
+`"type": "<id>"` ([8.2](#82-provider-instances)), and read again each time providers are made.
 
 ```json
 {
@@ -1327,7 +1333,7 @@ A third party adds a provider as a folder in `~/.local/share/fugue/providers/<id
   "name": "Example engine",
   "transport": "http",
   "start": {"command": ["./server", "--port", "{port}"], "when": "on_demand",
-            "idle_timeout_s": 600},
+            "idle_timeout_s": 600, "start_timeout_s": 30},
   "address": "http://127.0.0.1:{port}",
   "capabilities": ["image.generate"],
   "settings": [{"name": "address", "type": "text"}, {"name": "key", "type": "text", "secret": true}],
@@ -1337,37 +1343,81 @@ A third party adds a provider as a folder in `~/.local/share/fugue/providers/<id
 
 | Field | Meaning |
 | --- | --- |
-| `transport` | `http` or `stdio`. |
-| `start` | Optional. How Fugue starts it: `command`, `when` (`on_demand` or `never`), `idle_timeout_s`. Without `start` the user runs it. |
-| `address` | Default address for `http`. `{port}` is a free loopback port Fugue picks. |
+| `manifest` | 1. |
+| `id` | Letters, digits and `. - _`. The folder is named after it. A module cannot use the id of a provider that comes with Fugue (`omarchy`, `fugue-helper`). |
+| `version`, `name` | Required, and for people (`name` defaults to the id). |
+| `transport` | `http` or `stdio`. (`builtin`, in the registry only, marks a provider compiled into Fugue.) |
+| `start` | Optional for `http`, required for `stdio`. How Fugue starts it: `command` (a list; a first item with a slash is a file of the module's folder, a bare name is looked up on PATH; the folder is the working directory), `when` (`on_demand` or `never`), `idle_timeout_s` (default 600, 0 never stops it), `start_timeout_s` (`http`: how long it has to answer `describe`, default 30). Without `start` the user runs it. |
+| `address` | Default address for `http`. `{port}` here and in `command` is a free loopback port Fugue picks at each start. An instance's own `address` replaces it, and then Fugue does not start anything. |
 | `capabilities` | What it may offer; the live list comes from `describe`. |
 | `settings` | Fields an instance can set. `secret` fields are stored like keys. |
 | `needs` | As in [6.3](#63-the-needs-block), for scheduling. |
 
+A folder whose `provider.json` does not read is skipped with a warning; the other modules still
+load. A providers.json entry whose type is no module is `unknown_provider`, with every module id
+as the valid ones (and the reason, when that module's file is the one that does not read).
+
 **Protocol.** The same operations on both transports. Over `http` each is
-`POST <address>/fugue/v1/<op>` with a JSON body and a JSON reply; the instance key is sent as a
-bearer token. Over `stdio` each is one JSON line with `"op"` and an `"id"` echoed in the reply.
+`POST <address>/fugue/v1/<op>` with a JSON body and a JSON reply; the instance key, when there is
+one, is sent as a bearer token. Over `stdio` each is one JSON line with `"op"` and an `"id"`
+echoed in the reply; the provider writes to stdout only protocol lines (its log goes to stderr, whose
+last lines come with a failure).
 
 | Operation | Request | Reply |
 | --- | --- | --- |
-| `describe` | none | `protocol` (1), `engine` (a stable id of the inference engine, such as `sdcpp`), per capability: `models`, `properties`, `limits`, `defaults`, `status` (`ready`, `loading`, `unavailable`) and a `reason` |
-| `submit` | `capability`, `model`, `params`, `inputs` | `job` |
+| `describe` | none | `protocol` (1), `engine` (a stable id of the inference engine, such as `sdcpp`; the module's id when absent), `shares_filesystem`, `free_memory_bytes`, `host`, and `capabilities` (below) |
+| `submit` | `capability`, `model`, `params`, `inputs`; over `stdio` also `output_dir` | `job` |
 | `status` | `job` | `state` (`queued`, `running`, `done`, `error`, `cancelled`), `progress` (0 to 1), `stage`, optional `preview`, `error` |
 | `cancel` | `job` | `state` |
 | `result` | `job` | `outputs` (values and file references), `used` (the values actually used) |
 | `shutdown` | none | none. Only for providers Fugue started. |
 
+`capabilities` in the `describe` reply is either a list of ids (each is served with the model
+files given in the job: one anonymous ready model, as the helper's stage capabilities), or an
+object by id:
+
+```json
+{"image.generate": {
+   "status": "ready", "reason": "", "hint": "",
+   "properties": {"edit": false}, "limits": {"max_width": 2048}, "defaults": {"steps": 20},
+   "models": [{"name": "toy", "hash": "…", "resource": "diffusion", "title": "Toy",
+               "status": "ready", "properties": {}, "limits": {}, "defaults": {}}]}}
+```
+
+A model is its name (a string) or an object with `name`, `hash`, `resource` (its resource handle,
+[2.5](#25-resource-handles)) and its own `title`, `status` (`ready`, `loading`; anything else is
+unavailable), `reason`, `hint`, `properties`, `limits`, `defaults`. What the capability gives for
+`status`, `reason`, `hint`, `properties`, `limits` and `defaults` holds for each model that does
+not say its own. A capability without `models` is one model that is not named, with the
+capability's status (a module that takes model files in the job).
+
+- **Starting.** A started module is started by the first `describe` or `submit`, whichever comes
+  first (so a model picker starts a module, unlike the helper, which answers `describe` itself,
+  8.10), and stopped after `idle_timeout_s` without a job: `shutdown` is sent, then it is ended
+  (terminate after one second, kill after five). A module Fugue did not start is never sent
+  `shutdown`. A module that does not answer `describe` in `start_timeout_s`, or exits first, fails
+  with `provider_unreachable` and the last lines of its log.
+- **Jobs.** Over `stdio` the provider pushes `status` lines (`{"op": "status", "job", "state", …}`)
+  as the job changes, and the `result` is fetched by Fugue the moment the job is `done`; Fugue does
+  not poll. Over `http` Fugue polls `status` (every 500 ms) and fetches `result` at `done`. One
+  job runs at a time per instance ([9.2](#92-scheduling)); a provider may queue.
 - Media in `submit` and `result`: over `stdio`, and over `http` to a loopback address when
-  `describe` reports `"shares_filesystem": true`, media are `{"path": …}`. Otherwise media are
-  sent as `{"data": "<base64>", "format": "png"}` and results are fetched with
-  `GET <address>/fugue/v1/result/<job>/<index>`.
+  `describe` reports `"shares_filesystem": true`, media are `{"path": …}`. Otherwise (the `http`
+  default: `shares_filesystem` is absent) media are sent as `{"data": "<base64>", "format": "png"}`
+  and a result lists each file as `{"file": i, "format", "size"}`, fetched with
+  `GET <address>/fugue/v1/result/<job>/<i>` into the job's folder.
 - A provider may stream status instead of being polled: `GET …/events/<job>` as server-sent
-  events over `http`, or unsolicited `status` lines over `stdio`.
-- Errors are `{"error": {"code": …, "message": …}}`. `out_of_memory` is a reserved code.
+  events over `http` (not used by Fugue yet; it polls), or unsolicited `status` lines over `stdio`.
+- Errors are `{"error": {"code": …, "message": …}}`. `out_of_memory`, `cancelled` and (`http`)
+  `model_missing` keep their codes; any other code is `node_failed` with the provider's message.
+  An unreachable address, a refused key (401, 403) or three failed polls in a row is
+  `provider_unreachable`.
 - A provider process that dies fails the jobs it held and is restarted on the next request.
 
 A new model family that an existing engine already runs needs only a node pack and a model
-reference. A new inference runtime is a new provider module.
+reference. A new inference runtime is a new provider module. `tests/provider_module_support`
+holds a tiny example provider, `fake_module_provider`, over both transports; the tests install
+it as a module folder and run it with no code of its own in Fugue.
 
 ### 8.9 Models on disk
 
@@ -1529,9 +1579,14 @@ interface.
 - M0 builds the interface, a fake provider for tests, and the `omarchy` provider as an adapter
   compiled into Fugue: it implements the interface by calling the Omarchy servers' own HTTP
   APIs. No inference code is linked into Fugue; the engine it talks to is still another process.
-- M4 adds the module adapter, which implements the same interface by speaking the protocol of
-  8.8 to a third-party program. From then on each shipped provider also has a `provider.json`,
-  so the registry lists shipped and third-party providers the same way.
+- The module adapter (#31) implements the same interface by speaking the protocol of 8.8 to a
+  third-party program: `HelperProvider` (`stdio`) and `RemoteHelperProvider` (`http`) are the two
+  adapters, each used by the shipped helper and by modules, with a `StdioLaunch` or
+  `RemoteProviderOptions` that says what differs (the program and its arguments, the wording of
+  messages, whether describe is asked of the process). The registry lists `omarchy` and
+  `fugue-helper` as modules with transport `builtin`, ahead of the installed ones, so shipped and
+  third-party providers are listed the same way; `omarchy` itself stays an adapter to its servers'
+  own APIs, because those servers do not speak 8.8.
 - `engine` from `describe` is the engine id used in cache keys and recorded in results. For
   `omarchy` it is the server kind (`sdcpp` for images and video).
 

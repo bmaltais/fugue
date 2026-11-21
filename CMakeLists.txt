@@ -159,6 +159,12 @@ add_executable(fake_fugue_helper tests/helper_support/fake_fugue_helper.cpp)
 target_link_libraries(fake_fugue_helper PRIVATE Qt6::Core)
 target_compile_options(fake_fugue_helper PRIVATE -Wall -Wextra)
 
+# A tiny third-party provider speaking the provider protocol over stdio or http, for the tests of
+# provider modules (test_provider_module).
+add_executable(fake_module_provider tests/provider_module_support/fake_module_provider.cpp)
+target_link_libraries(fake_module_provider PRIVATE Qt6::Core Qt6::Network)
+target_compile_options(fake_module_provider PRIVATE -Wall -Wextra)
+
 # Engine tests: each tests/engine/<name>.cpp is its own QtTest executable, so
 # parts can be tested (and fail) independently. They link only the engine.
 file(GLOB fugue_engine_tests CONFIGURE_DEPENDS tests/engine/*.cpp)
@@ -167,8 +173,9 @@ foreach(test_source ${fugue_engine_tests})
   add_executable(${test_name} ${test_source} tests/test_environment.cpp)
   target_link_libraries(${test_name} PRIVATE fugue_engine Qt6::Test)
   target_compile_definitions(${test_name} PRIVATE FUGUE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
-                             FUGUE_FAKE_HELPER="$<TARGET_FILE:fake_fugue_helper>")
-  add_dependencies(${test_name} fake_fugue_helper)
+                             FUGUE_FAKE_HELPER="$<TARGET_FILE:fake_fugue_helper>"
+                             FUGUE_FAKE_MODULE_PROVIDER="$<TARGET_FILE:fake_module_provider>")
+  add_dependencies(${test_name} fake_fugue_helper fake_module_provider)
   add_test(NAME ${test_name} COMMAND ${test_name})
 endforeach()
 
