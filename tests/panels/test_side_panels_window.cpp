@@ -74,6 +74,14 @@ class TestSidePanelsWindow : public QObject {
 
 private slots:
     void initTestCase() { QQuickStyle::setStyle("Material"); }
+    // The test's home lasts between runs (build/test-home/), so groups an earlier run saved to the
+    // library would still be there: a group's key would be local/group-10, and the tests that count
+    // library rows would see more than their own. Each test starts with an empty library.
+    void init() {
+        QDir library(fugue::libraryDir());
+        for (const QString &group : library.entryList(QDir::Dirs | QDir::NoDotAndDotDot))
+            QDir(library.filePath(group)).removeRecursively();
+    }
 
     void nothingIsMadeWhileClosed() {
         App app(load(small));
@@ -507,9 +515,12 @@ private slots:
         QCOMPARE(app.model.groupProblem(), QString());
         app.model.search()->openAt(0, 0);
         app.model.search()->setQuery("group");
-        for (int i = 0; i < app.model.search()->results()->rowCount(); ++i)
-            QVERIFY(app.model.search()->results()->data(app.model.search()->results()->index(i), fugue::SearchResults::TypeId).toString()
-                    != "local/group");
+        // Node search offers the open workflow's own definition of the group (4.4: it stands for its id), so a
+        // row of local/group is there only because the workflow embeds it; the library's copy is gone.
+        for (int i = 0; i < app.model.search()->results()->rowCount(); ++i) {
+            const QString id = app.model.search()->results()->data(app.model.search()->results()->index(i), fugue::SearchResults::TypeId).toString();
+            QVERIFY(id != "local/group" || app.model.document().group(id));
+        }
         app.model.search()->close();
         // The open workflow keeps the definition it embeds, and still compiles to the same thing.
         QVERIFY(app.model.document().group(embedded));
