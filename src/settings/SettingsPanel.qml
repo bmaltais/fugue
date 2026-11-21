@@ -50,7 +50,9 @@ Popup {
     property var pickDone: null
     function pickFolder(callback) {
         pickDone = callback
-        (folderDialog.createObject(panel) as FolderDialog).open()
+        // A line starting with "(" would continue the line above as a call of `callback`.
+        const dialog = folderDialog.createObject(panel) as FolderDialog
+        dialog.open()
     }
     Component {
         id: folderDialog
