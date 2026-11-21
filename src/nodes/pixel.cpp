@@ -1,6 +1,7 @@
 #include "nodes/kernels.h"
 
 // Ticket #15: resize, crop, brightness-contrast, blend, text-concat (spec 14.1).
+// Ticket #29: pad, rotate, flip, blur, sharpen, invert, mask tools, number math (spec 14.2).
 //
 // The pixel kernels work on float RGB(A) buffers in 0..1, as ComfyUI holds images. libvips
 // decodes the input and holds the result (MediaHandle); the arithmetic is plain loops,
@@ -469,6 +470,400 @@ public:
     }
 };
 
+
+// ---- more pixel nodes (ticket #29, spec 14.2) ---------------------------------------
+
+// A mask input as one channel: an image's first channel (a gray mask is its own).
+Result<Pixels> maskOf(const Value &value, const QString &input) {
+    Result<Pixels> loaded = pixelsOf(value, input);
+    if (!loaded.ok())
+        return loaded;
+    const Pixels &in = loaded.value();
+    Pixels mask(in.width, in.height, 1);
+    for (int y = 0; y < in.height; ++y)
+        for (int x = 0; x < in.width; ++x)
+            mask.at(x, y, 0) = in.at(x, y, 0);
+    return mask;
+}
+
+// A result image under the output name `name` ("image", or "mask" for a one-channel mask).
+Result<Values> namedOutput(Pixels pixels, const char *name) {
+    Result<Values> made = imageOutput(std::move(pixels));
+    if (!made.ok() || QLatin1String(name) == QLatin1String("image"))
+        return made;
+    Values out;
+    out.insert(QString::fromLatin1(name), made.value().value("image"));
+    return out;
+}
+
+// ComfyUI's ImagePadForOutpaint: new area 0.5 gray (alpha 1), mask 1 over it and 0 over the
+// original; feathering fades the mask inward from the padded edges as ((f - d) / f)^2.
+class PadKernel : public NodeKernel {
+public:
+    Result<Values> run(const NodeContext &context) override {
+        const Result<Pixels> loaded = pixelsOf(context.input("image"), "image");
+        if (!loaded.ok())
+            return Result<Values>(loaded.errors());
+        const Pixels &in = loaded.value();
+        int sides[4];
+        const char *names[4] = {"left", "top", "right", "bottom"};
+        for (int i = 0; i < 4; ++i) {
+            sides[i] = toInt(context.input(QString::fromLatin1(names[i])));
+            if (sides[i] < 0 || sides[i] > kMaxSide)
+                return makeInputError(QStringLiteral("value_out_of_range"), QString::fromLatin1(names[i]),
+                                      QStringLiteral("A %1 of %2 is outside 0 to %3.")
+                                          .arg(QString::fromLatin1(names[i])).arg(sides[i]).arg(kMaxSide));
+        }
+        const int left = sides[0], top = sides[1], right = sides[2], bottom = sides[3];
+        const int feathering = std::max(0, toInt(context.input("feathering")));
+        const int width = in.width + left + right;
+        const int height = in.height + top + bottom;
+        if (width > kMaxSide || height > kMaxSide)
+            return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("left"),
+                                  QStringLiteral("The padded image would be %1 x %2, past %3 on a side.")
+                                      .arg(width).arg(height).arg(kMaxSide));
+        Pixels image(width, height, in.channels, 0.5f);
+        Pixels mask(width, height, 1, 1.0f);
+        if (in.channels == 4)
+            for (int y = 0; y < height; ++y)
+                for (int x = 0; x < width; ++x)
+                    image.at(x, y, 3) = 1.0f;
+        const bool feather = feathering > 0 && feathering * 2 < in.height && feathering * 2 < in.width;
+        for (int y = 0; y < in.height; ++y)
+            for (int x = 0; x < in.width; ++x) {
+                for (int ch = 0; ch < in.channels; ++ch)
+                    image.at(x + left, y + top, ch) = in.at(x, y, ch);
+                float value = 0.0f;
+                if (feather) {
+                    const int dt = top != 0 ? y : in.height;
+                    const int db = bottom != 0 ? in.height - y : in.height;
+                    const int dl = left != 0 ? x : in.width;
+                    const int dr = right != 0 ? in.width - x : in.width;
+                    const int d = std::min({dt, db, dl, dr});
+                    if (d < feathering) {
+                        const float v = float(feathering - d) / float(feathering);
+                        value = v * v;
+                    }
+                }
+                mask.at(x + left, y + top, 0) = value;
+            }
+        Result<Values> imageResult = imageOutput(std::move(image));
+        if (!imageResult.ok())
+            return imageResult;
+        const Result<Values> maskResult = namedOutput(std::move(mask), "mask");
+        if (!maskResult.ok())
+            return maskResult;
+        Values out = imageResult.value();
+        out.insert("mask", maskResult.value().value("mask"));
+        return out;
+    }
+};
+
+// ComfyUI's ImageRotate: torch.rot90(k, dims=[2, 1]) turns clockwise.
+class RotateKernel : public NodeKernel {
+public:
+    Result<Values> run(const NodeContext &context) override {
+        const Result<Pixels> loaded = pixelsOf(context.input("image"), "image");
+        if (!loaded.ok())
+            return Result<Values>(loaded.errors());
+        const Pixels &in = loaded.value();
+        const QString rotation = context.input("rotation").text();
+        const int turns = rotation.startsWith(QLatin1String("90")) ? 1
+                          : rotation.startsWith(QLatin1String("180")) ? 2
+                          : rotation.startsWith(QLatin1String("270")) ? 3 : 0;
+        if (turns == 0)
+            return Values{{"image", context.input("image")}};
+        const bool swap = turns != 2;
+        Pixels out(swap ? in.height : in.width, swap ? in.width : in.height, in.channels);
+        for (int y = 0; y < in.height; ++y)
+            for (int x = 0; x < in.width; ++x) {
+                int ox = 0, oy = 0;
+                if (turns == 1) {
+                    ox = in.height - 1 - y;
+                    oy = x;
+                } else if (turns == 2) {
+                    ox = in.width - 1 - x;
+                    oy = in.height - 1 - y;
+                } else {
+                    ox = y;
+                    oy = in.width - 1 - x;
+                }
+                for (int ch = 0; ch < in.channels; ++ch)
+                    out.at(ox, oy, ch) = in.at(x, y, ch);
+            }
+        return imageOutput(std::move(out));
+    }
+};
+
+class FlipKernel : public NodeKernel {
+public:
+    Result<Values> run(const NodeContext &context) override {
+        const Result<Pixels> loaded = pixelsOf(context.input("image"), "image");
+        if (!loaded.ok())
+            return Result<Values>(loaded.errors());
+        const Pixels &in = loaded.value();
+        const bool vertical = context.input("direction").text() == QLatin1String("vertically");
+        Pixels out(in.width, in.height, in.channels);
+        for (int y = 0; y < in.height; ++y)
+            for (int x = 0; x < in.width; ++x)
+                for (int ch = 0; ch < in.channels; ++ch)
+                    out.at(vertical ? x : in.width - 1 - x, vertical ? in.height - 1 - y : y, ch) = in.at(x, y, ch);
+        return imageOutput(std::move(out));
+    }
+};
+
+class InvertKernel : public NodeKernel {
+public:
+    Result<Values> run(const NodeContext &context) override {
+        Result<Pixels> loaded = pixelsOf(context.input("image"), "image");
+        if (!loaded.ok())
+            return Result<Values>(loaded.errors());
+        Pixels pixels = std::move(loaded.value());
+        for (size_t i = 0; i < pixels.data.size(); ++i)
+            if (pixels.channels != 4 || i % 4 != 3) // alpha stores transparency, not color
+                pixels.data[i] = 1.0f - pixels.data[i];
+        return imageOutput(std::move(pixels));
+    }
+};
+
+// ComfyUI's gaussian_kernel: a size x size grid over -1..1, weight exp(-d^2 / (2 sigma^2)),
+// summing to 1. Sigma is over the kernel's half width, not in pixels.
+std::vector<float> gaussianKernel(int size, double sigma) {
+    std::vector<double> g(size_t(size) * size);
+    double sum = 0;
+    for (int i = 0; i < size; ++i)
+        for (int j = 0; j < size; ++j) {
+            const double x = size == 1 ? -1.0 : -1.0 + 2.0 * i / (size - 1);
+            const double y = size == 1 ? -1.0 : -1.0 + 2.0 * j / (size - 1);
+            g[size_t(i) * size + j] = std::exp(-(x * x + y * y) / (2.0 * sigma * sigma));
+            sum += g[size_t(i) * size + j];
+        }
+    std::vector<float> kernel(g.size());
+    for (size_t i = 0; i < kernel.size(); ++i)
+        kernel[i] = float(g[i] / sum);
+    return kernel;
+}
+
+// torch's 'reflect' padding index (the edge pixel is not repeated), folded for any distance.
+int reflectIndex(int i, int n) {
+    if (n == 1)
+        return 0;
+    const int period = 2 * (n - 1);
+    i %= period;
+    if (i < 0)
+        i += period;
+    return i < n ? i : period - i;
+}
+
+// Reflect-padded convolution of the first `channels` channels with a size x size kernel;
+// the others pass through.
+Pixels convolve(const Pixels &in, const std::vector<float> &kernel, int size, int channels) {
+    const int radius = size / 2;
+    Pixels out = in;
+    std::vector<int> xs(size_t(in.width) * size), ys(size_t(in.height) * size);
+    for (int x = 0; x < in.width; ++x)
+        for (int k = 0; k < size; ++k)
+            xs[size_t(x) * size + k] = reflectIndex(x + k - radius, in.width);
+    for (int y = 0; y < in.height; ++y)
+        for (int k = 0; k < size; ++k)
+            ys[size_t(y) * size + k] = reflectIndex(y + k - radius, in.height);
+    for (int y = 0; y < in.height; ++y)
+        for (int x = 0; x < in.width; ++x)
+            for (int ch = 0; ch < channels; ++ch) {
+                float acc = 0;
+                for (int j = 0; j < size; ++j)
+                    for (int i = 0; i < size; ++i)
+                        acc += kernel[size_t(j) * size + i] *
+                               in.at(xs[size_t(x) * size + i], ys[size_t(y) * size + j], ch);
+                out.at(x, y, ch) = acc;
+            }
+    return out;
+}
+
+Result<int> radiusOf(const NodeContext &context) {
+    const int radius = toInt(context.input("radius"));
+    if (radius < 1 || radius > 31)
+        return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("radius"),
+                              QStringLiteral("A radius of %1 is outside 1 to 31.").arg(radius));
+    return radius;
+}
+
+// ComfyUI's Blur (ImageBlur): every channel, alpha too.
+class BlurKernel : public NodeKernel {
+public:
+    Result<Values> run(const NodeContext &context) override {
+        const Result<Pixels> loaded = pixelsOf(context.input("image"), "image");
+        if (!loaded.ok())
+            return Result<Values>(loaded.errors());
+        const Result<int> radius = radiusOf(context);
+        if (!radius)
+            return radius.errors();
+        const int size = *radius * 2 + 1;
+        const double sigma = std::max(context.input("sigma").number(), 1e-3);
+        const Pixels &in = loaded.value();
+        return imageOutput(convolve(in, gaussianKernel(size, sigma), size, in.channels));
+    }
+};
+
+// ComfyUI's Sharpen (ImageSharpen), `amount` being its `alpha`; Fugue leaves an alpha channel alone.
+class SharpenKernel : public NodeKernel {
+public:
+    Result<Values> run(const NodeContext &context) override {
+        const Result<Pixels> loaded = pixelsOf(context.input("image"), "image");
+        if (!loaded.ok())
+            return Result<Values>(loaded.errors());
+        const Result<int> radius = radiusOf(context);
+        if (!radius)
+            return radius.errors();
+        const int size = *radius * 2 + 1;
+        const double sigma = std::max(context.input("sigma").number(), 1e-3);
+        const float amount = float(context.input("amount").number());
+        std::vector<float> kernel = gaussianKernel(size, sigma);
+        float sum = 0;
+        for (float &k : kernel) {
+            k *= -(amount * 10);
+            sum += k;
+        }
+        const size_t center = size_t(size / 2) * size + size / 2;
+        kernel[center] = kernel[center] - sum + 1.0f;
+        const Pixels &in = loaded.value();
+        return imageOutput(convolve(in, kernel, size, in.channels == 4 ? 3 : in.channels));
+    }
+};
+
+// ---- masks ---------------------------------------------------------------------------
+
+// ComfyUI's GrowMask: |expand| passes of a 3x3 grey dilation (positive) or erosion (negative),
+// the footprint's corners left out when tapered. Neighbors outside the image are ignored,
+// which is what scipy's reflect mode comes to for a max or a min.
+class GrowMaskKernel : public NodeKernel {
+public:
+    Result<Values> run(const NodeContext &context) override {
+        Result<Pixels> loaded = maskOf(context.input("mask"), "mask");
+        if (!loaded.ok())
+            return Result<Values>(loaded.errors());
+        Pixels mask = std::move(loaded.value());
+        const int expand = toInt(context.input("expand"));
+        const bool tapered = context.input("tapered_corners").json().toBool(true);
+        const bool grow = expand > 0;
+        const int w = mask.width, h = mask.height;
+        Pixels next = mask;
+        for (int pass = 0; pass < std::abs(expand); ++pass) {
+            for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w; ++x) {
+                    float best = mask.at(x, y, 0);
+                    for (int dy = -1; dy <= 1; ++dy)
+                        for (int dx = -1; dx <= 1; ++dx) {
+                            if (tapered && dx != 0 && dy != 0)
+                                continue;
+                            const int nx = x + dx, ny = y + dy;
+                            if (nx < 0 || ny < 0 || nx >= w || ny >= h)
+                                continue;
+                            const float v = mask.at(nx, ny, 0);
+                            best = grow ? std::max(best, v) : std::min(best, v);
+                        }
+                    next.at(x, y, 0) = best;
+                }
+            std::swap(mask, next);
+        }
+        return namedOutput(std::move(mask), "mask");
+    }
+};
+
+class InvertMaskKernel : public NodeKernel {
+public:
+    Result<Values> run(const NodeContext &context) override {
+        Result<Pixels> loaded = maskOf(context.input("mask"), "mask");
+        if (!loaded.ok())
+            return Result<Values>(loaded.errors());
+        Pixels mask = std::move(loaded.value());
+        for (float &v : mask.data)
+            v = 1.0f - v;
+        return namedOutput(std::move(mask), "mask");
+    }
+};
+
+// ComfyUI's ImageToMask. An image without alpha has no transparency, so its alpha is 1
+// everywhere (ComfyUI fails on the missing channel).
+class ImageToMaskKernel : public NodeKernel {
+public:
+    Result<Values> run(const NodeContext &context) override {
+        const Result<Pixels> loaded = pixelsOf(context.input("image"), "image");
+        if (!loaded.ok())
+            return Result<Values>(loaded.errors());
+        const Pixels &in = loaded.value();
+        const QString channel = context.input("channel").text();
+        const int index = channel == QLatin1String("red") ? 0 : channel == QLatin1String("green") ? 1
+                          : channel == QLatin1String("blue") ? 2 : 3;
+        Pixels mask(in.width, in.height, 1, 1.0f);
+        if (index < in.channels)
+            for (int y = 0; y < in.height; ++y)
+                for (int x = 0; x < in.width; ++x)
+                    mask.at(x, y, 0) = in.at(x, y, index);
+        return namedOutput(std::move(mask), "mask");
+    }
+};
+
+class SolidMaskKernel : public NodeKernel {
+public:
+    Result<Values> run(const NodeContext &context) override {
+        const int width = toInt(context.input("width"));
+        const int height = toInt(context.input("height"));
+        for (const auto &[side, value] : {std::pair{"width", width}, std::pair{"height", height}})
+            if (value < 1 || value > kMaxSide)
+                return makeInputError(QStringLiteral("value_out_of_range"), QString::fromLatin1(side),
+                                      QStringLiteral("A %1 of %2 is outside 1 to %3.")
+                                          .arg(QString::fromLatin1(side)).arg(value).arg(kMaxSide));
+        return namedOutput(Pixels(width, height, 1, float(context.input("value").number())), "mask");
+    }
+};
+
+// ---- numbers --------------------------------------------------------------------------
+
+// Python's operators: `%` takes the sign of b; dividing by zero is an error, as it is in Python.
+class NumberMathKernel : public NodeKernel {
+public:
+    Result<Values> run(const NodeContext &context) override {
+        const double a = context.input("a").number();
+        const double b = context.input("b").number();
+        const QString op = context.input("operation").text();
+        double result = 0;
+        if (op == QLatin1String("add")) {
+            result = a + b;
+        } else if (op == QLatin1String("subtract")) {
+            result = a - b;
+        } else if (op == QLatin1String("multiply")) {
+            result = a * b;
+        } else if (op == QLatin1String("min")) {
+            result = std::min(a, b);
+        } else if (op == QLatin1String("max")) {
+            result = std::max(a, b);
+        } else if (op == QLatin1String("power")) {
+            result = std::pow(a, b);
+        } else if (op == QLatin1String("divide") || op == QLatin1String("modulo")) {
+            if (b == 0)
+                return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("b"),
+                                      QStringLiteral("Cannot %1 by zero.")
+                                          .arg(op == QLatin1String("divide") ? QStringLiteral("divide")
+                                                                             : QStringLiteral("take a modulo")));
+            if (op == QLatin1String("divide")) {
+                result = a / b;
+            } else {
+                result = std::fmod(a, b);
+                if (result != 0 && (result < 0) != (b < 0))
+                    result += b;
+            }
+        } else {
+            return makeInputError(QStringLiteral("value_not_in_choices"), QStringLiteral("operation"),
+                                  QStringLiteral("\"%1\" is not an operation this node knows.").arg(op));
+        }
+        if (!std::isfinite(result))
+            return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("a"),
+                                  QStringLiteral("The result is not a finite number."));
+        return Values{{"value", Value(result)}};
+    }
+};
+
 } // namespace
 
 void addPixelKernels(Kernels &kernels) {
@@ -478,6 +873,17 @@ void addPixelKernels(Kernels &kernels) {
     kernels.add("fugue/brightness-contrast", std::make_shared<BrightnessContrastKernel>());
     kernels.add("fugue/blend", std::make_shared<BlendKernel>());
     kernels.add("fugue/text-concat", std::make_shared<TextConcatKernel>());
+    kernels.add("fugue/pad", std::make_shared<PadKernel>());
+    kernels.add("fugue/rotate", std::make_shared<RotateKernel>());
+    kernels.add("fugue/flip", std::make_shared<FlipKernel>());
+    kernels.add("fugue/blur", std::make_shared<BlurKernel>());
+    kernels.add("fugue/sharpen", std::make_shared<SharpenKernel>());
+    kernels.add("fugue/invert", std::make_shared<InvertKernel>());
+    kernels.add("fugue/grow-mask", std::make_shared<GrowMaskKernel>());
+    kernels.add("fugue/invert-mask", std::make_shared<InvertMaskKernel>());
+    kernels.add("fugue/image-to-mask", std::make_shared<ImageToMaskKernel>());
+    kernels.add("fugue/solid-mask", std::make_shared<SolidMaskKernel>());
+    kernels.add("fugue/number-math", std::make_shared<NumberMathKernel>());
 }
 
 } // namespace fugue::nodes

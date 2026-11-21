@@ -1,0 +1,39 @@
+{
+  "manifest": 1,
+  "id": "fugue/flip",
+  "version": "1.0.0",
+  "name": "Flip",
+  "description": "Mirror an image top to bottom or left to right.",
+  "category": "Image/Transform",
+  "keywords": [
+    "mirror",
+    "reflect"
+  ],
+  "runtime": {
+    "kind": "builtin"
+  },
+  "inputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    },
+    {
+      "name": "direction",
+      "type": "text",
+      "label": "Direction",
+      "default": "horizontally",
+      "choices": [
+        "horizontally",
+        "vertically"
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    }
+  ]
+}

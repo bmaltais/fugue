@@ -68,7 +68,7 @@ private slots:
         put(root.path() + "/io.github.alice.tools/pack.json", R"({"manifest": 1, "id": "io.github.alice.tools", "version": "1.2.0",
             "name": "Alice tools", "nodes": ["sharpen"]})");
         put(root.path() + "/io.github.alice.tools/sharpen/node.json", R"({"manifest": 1, "id": "io.github.alice.tools/sharpen",
-            "version": "1.2.0", "name": "Sharpen Plus", "category": "Image/Filter", "keywords": ["unsharp"],
+            "version": "1.2.0", "name": "Sharpen Plus", "category": "Image/Filter", "keywords": ["unsharp-mask-plus"],
             "runtime": {"kind": "command", "entry": "./sharpen.sh"},
             "inputs": [{"name": "image", "type": "image"}], "outputs": [{"name": "image", "type": "image"}]})");
         Registry withPack;
@@ -77,7 +77,7 @@ private slots:
         CanvasModel model(&withPack);
         model.setDocument(load(small));
         model.search()->openAt(10, 20);
-        model.search()->setQuery("unsharp");
+        model.search()->setQuery("unsharp-mask-plus");
         QCOMPARE(names(model.search()->results()), QStringList{"Sharpen Plus"});
     }
 
@@ -116,7 +116,7 @@ private slots:
         search->openAt(0, 0);
         search->setQuery("transform");
         const QStringList found = names(search->results());
-        QCOMPARE(QSet<QString>(found.begin(), found.end()), (QSet<QString>{"Crop", "Resize", "Resize to Megapixels"}));
+        QCOMPARE(QSet<QString>(found.begin(), found.end()), (QSet<QString>{"Crop", "Flip", "Pad", "Resize", "Resize to Megapixels", "Rotate"}));
     }
 
     void noMatchGivesNoResults() {

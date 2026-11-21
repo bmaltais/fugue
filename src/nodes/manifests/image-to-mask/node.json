@@ -1,0 +1,42 @@
+{
+  "manifest": 1,
+  "id": "fugue/image-to-mask",
+  "version": "1.0.0",
+  "name": "Image to Mask",
+  "description": "One channel of an image as a mask. Alpha is 1 where the image is opaque; an image with no alpha channel gives 1 everywhere.",
+  "category": "Image/Mask",
+  "keywords": [
+    "alpha",
+    "channel",
+    "extract"
+  ],
+  "runtime": {
+    "kind": "builtin"
+  },
+  "inputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    },
+    {
+      "name": "channel",
+      "type": "text",
+      "label": "Channel",
+      "default": "alpha",
+      "choices": [
+        "red",
+        "green",
+        "blue",
+        "alpha"
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "name": "mask",
+      "type": "image",
+      "label": "Mask"
+    }
+  ]
+}

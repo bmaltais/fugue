@@ -1,0 +1,49 @@
+{
+  "manifest": 1,
+  "id": "fugue/blur",
+  "version": "1.0.0",
+  "name": "Blur",
+  "description": "Gaussian blur, ComfyUI's Blur Image: the kernel is (2 * radius + 1) wide and sigma is measured over the kernel's half width, so a larger radius softens more at the same sigma. Edges reflect.",
+  "category": "Image/Adjust",
+  "keywords": [
+    "gaussian",
+    "soften",
+    "smooth"
+  ],
+  "runtime": {
+    "kind": "builtin"
+  },
+  "inputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    },
+    {
+      "name": "radius",
+      "type": "number",
+      "label": "Radius",
+      "default": 1,
+      "min": 1,
+      "max": 31,
+      "step": 1,
+      "integer": true
+    },
+    {
+      "name": "sigma",
+      "type": "number",
+      "label": "Sigma",
+      "default": 1.0,
+      "min": 0.1,
+      "max": 10,
+      "step": 0.1
+    }
+  ],
+  "outputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    }
+  ]
+}

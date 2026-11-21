@@ -1,0 +1,87 @@
+{
+  "manifest": 1,
+  "id": "fugue/pad",
+  "version": "1.0.0",
+  "name": "Pad",
+  "description": "Add room around an image for outpainting. The new area is gray; the mask is 1 over the new area and 0 over the original. Feathering fades the mask inward from the padded edges (ComfyUI's Pad Image for Outpainting).",
+  "category": "Image/Transform",
+  "keywords": [
+    "outpaint",
+    "extend",
+    "canvas",
+    "expand"
+  ],
+  "runtime": {
+    "kind": "builtin"
+  },
+  "inputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    },
+    {
+      "name": "left",
+      "type": "number",
+      "label": "Left",
+      "default": 0,
+      "min": 0,
+      "max": 16384,
+      "step": 8,
+      "integer": true
+    },
+    {
+      "name": "top",
+      "type": "number",
+      "label": "Top",
+      "default": 0,
+      "min": 0,
+      "max": 16384,
+      "step": 8,
+      "integer": true
+    },
+    {
+      "name": "right",
+      "type": "number",
+      "label": "Right",
+      "default": 0,
+      "min": 0,
+      "max": 16384,
+      "step": 8,
+      "integer": true
+    },
+    {
+      "name": "bottom",
+      "type": "number",
+      "label": "Bottom",
+      "default": 0,
+      "min": 0,
+      "max": 16384,
+      "step": 8,
+      "integer": true
+    },
+    {
+      "name": "feathering",
+      "type": "number",
+      "label": "Feathering",
+      "default": 40,
+      "min": 0,
+      "max": 16384,
+      "step": 1,
+      "integer": true,
+      "advanced": true
+    }
+  ],
+  "outputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    },
+    {
+      "name": "mask",
+      "type": "image",
+      "label": "Mask"
+    }
+  ]
+}

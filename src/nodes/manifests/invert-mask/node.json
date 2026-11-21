@@ -1,0 +1,29 @@
+{
+  "manifest": 1,
+  "id": "fugue/invert-mask",
+  "version": "1.0.0",
+  "name": "Invert Mask",
+  "description": "1 minus the mask.",
+  "category": "Image/Mask",
+  "keywords": [
+    "reverse",
+    "negative"
+  ],
+  "runtime": {
+    "kind": "builtin"
+  },
+  "inputs": [
+    {
+      "name": "mask",
+      "type": "image",
+      "label": "Mask"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "mask",
+      "type": "image",
+      "label": "Mask"
+    }
+  ]
+}

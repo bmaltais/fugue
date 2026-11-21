@@ -1,0 +1,29 @@
+{
+  "manifest": 1,
+  "id": "fugue/invert",
+  "version": "1.0.0",
+  "name": "Invert",
+  "description": "Flip every color to its opposite. Alpha is left alone.",
+  "category": "Image/Adjust",
+  "keywords": [
+    "negative",
+    "reverse"
+  ],
+  "runtime": {
+    "kind": "builtin"
+  },
+  "inputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    }
+  ]
+}

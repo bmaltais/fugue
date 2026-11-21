@@ -1,0 +1,48 @@
+{
+  "manifest": 1,
+  "id": "fugue/grow-mask",
+  "version": "1.0.0",
+  "name": "Grow Mask",
+  "description": "Grow a mask by a number of pixels, or shrink it with a negative number (ComfyUI's Grow Mask: a 3x3 dilation or erosion repeated). Tapered corners round the growth into a diamond; off it grows as a square.",
+  "category": "Image/Mask",
+  "keywords": [
+    "expand",
+    "shrink",
+    "erode",
+    "dilate"
+  ],
+  "runtime": {
+    "kind": "builtin"
+  },
+  "inputs": [
+    {
+      "name": "mask",
+      "type": "image",
+      "label": "Mask"
+    },
+    {
+      "name": "expand",
+      "type": "number",
+      "label": "Expand",
+      "default": 0,
+      "min": -256,
+      "max": 256,
+      "step": 1,
+      "integer": true
+    },
+    {
+      "name": "tapered_corners",
+      "type": "boolean",
+      "label": "Tapered corners",
+      "default": true,
+      "advanced": true
+    }
+  ],
+  "outputs": [
+    {
+      "name": "mask",
+      "type": "image",
+      "label": "Mask"
+    }
+  ]
+}

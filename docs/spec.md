@@ -2067,9 +2067,21 @@ choice; a limit the provider reports for the model replaces it, higher or lower.
   model, seed; outputs the prompt as `text`, with `seed` and `model`), both on `text.generate`
   (8.1, 8.7). The templates `enhance-prompt` (Generate Image, any model) and
   `z-image-turbo-enhance` (the component nodes) are ready to open (11.10).
-- Pad (for outpainting), Rotate, Flip, Blur, Sharpen, Invert.
-- Mask tools: grow, shrink, invert, from alpha, solid.
-- Number Math.
+- Shipped (#29), each with a parity test against ComfyUI's own outputs (`tests/nodes/golden/`):
+
+| Type id | Inputs | Outputs | Notes |
+| --- | --- | --- | --- |
+| `fugue/pad` | `image`, `left`, `top`, `right`, `bottom`, `feathering` (advanced, default 40) | `image`, `mask` | ComfyUI's Pad Image for Outpainting: the new area is 0.5 gray (alpha 1), the mask is 1 there and 0 over the original; feathering fades the mask inward as ((f - d) / f)^2 and is ignored when twice it is not smaller than the image's sides. |
+| `fugue/rotate` | `image`, `rotation` (none, 90 degrees, 180 degrees, 270 degrees) | `image` | Clockwise. |
+| `fugue/flip` | `image`, `direction` (horizontally, vertically) | `image` | |
+| `fugue/blur` | `image`, `radius` (1 to 31), `sigma` | `image` | ComfyUI's Blur Image, alpha included. |
+| `fugue/sharpen` | `image`, `radius`, `sigma`, `amount` (advanced) | `image` | ComfyUI's Sharpen Image (`amount` is its `alpha`); alpha is left alone. |
+| `fugue/invert` | `image` | `image` | Alpha is left alone. |
+| `fugue/grow-mask` | `mask`, `expand` (negative shrinks), `tapered_corners` (advanced) | `mask` | ComfyUI's Grow Mask. |
+| `fugue/invert-mask` | `mask` | `mask` | |
+| `fugue/image-to-mask` | `image`, `channel` (red, green, blue, alpha) | `mask` | ComfyUI's Convert Image to Mask. |
+| `fugue/solid-mask` | `value`, `width`, `height` | `mask` | |
+| `fugue/number-math` | `a`, `operation` (add, subtract, multiply, divide, modulo, power, min, max), `b` | `value` | Python's arithmetic. |
 
 ### 14.3 M5: component level
 
@@ -2230,6 +2242,7 @@ Building M1 made these further choices.
 | Resize is ComfyUI's: torch nearest-exact, bilinear, bicubic (A = -0.75), area, and PIL lanczos (a = 3, premultiplied RGBA), without PIL's uint8 rounding in lanczos (up to about 2/255) | 14.1 | high |
 | Resize `fit`: stretch is ComfyUI's crop "disabled", cover its crop "center"; a width or height of 0 follows the other side, both 0 pass the image through | 14.1 | high |
 | Resize `contain` fits inside the box keeping the aspect and never pads, so one side can be smaller than the box (padding is the M4 Pad node) | 14.1 | medium |
+| More pixel and mask nodes (#29): ComfyUI has no node of its own for Number Math (its Math Expression takes a formula), so Number Math is eight operations on two numbers with Python's rules (`%` takes the sign of b; a zero divisor and a result that is not finite are errors). Shrink is Grow Mask with a negative `expand` (ComfyUI's one node), not a node of its own; `expand` is held to ±256 because each step is a pass over the image. Rotate turns clockwise as ComfyUI's `rot90(dims=[2, 1])` does; Flip says horizontally and vertically in place of ComfyUI's "y-axis: horizontally" and "x-axis: vertically". Sharpen's `alpha` is called `amount`, since alpha is a channel here, and Sharpen and Invert leave an alpha channel alone (ComfyUI's Invert does too; its Sharpen sharpens whatever channels it gets). A mask input takes the first channel of whatever image arrives. Image to Mask of an image with no alpha gives 1 everywhere (ComfyUI raises an index error). Pad's mask is 1 over the new area, the polarity ComfyUI's inpaint nodes take, unlike Load Image's mask, which is 1 - alpha | 14.2 | medium-high |
 | Image nodes clamp their output to 0..1 and return float32 RGB or RGBA; gray input becomes RGB | 14.1 | high |
 | Crop is ComfyUI's ImageCrop: x and y are held inside the image, the far edge is cut at the image's edge | 14.1 | high |
 | Brightness/Contrast (no ComfyUI core node) is clamp((v - 0.5) * contrast + 0.5 + brightness) with alpha untouched: a mid-gray pivot, so contrast does not brighten (spike 03's form did) | 14.1 | medium |

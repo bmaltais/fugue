@@ -1,0 +1,64 @@
+{
+  "manifest": 1,
+  "id": "fugue/number-math",
+  "version": "1.0.0",
+  "name": "Number Math",
+  "description": "Do arithmetic on two numbers. Modulo has the sign of b, as in Python; dividing by zero is an error.",
+  "category": "Basic",
+  "keywords": [
+    "add",
+    "subtract",
+    "multiply",
+    "divide",
+    "calculate",
+    "math"
+  ],
+  "runtime": {
+    "kind": "builtin"
+  },
+  "inputs": [
+    {
+      "name": "a",
+      "type": "number",
+      "label": "A",
+      "default": 0,
+      "min": -1000000000000000.0,
+      "max": 1000000000000000.0,
+      "step": 1,
+      "widget": "spin"
+    },
+    {
+      "name": "operation",
+      "type": "text",
+      "label": "Operation",
+      "default": "add",
+      "choices": [
+        "add",
+        "subtract",
+        "multiply",
+        "divide",
+        "modulo",
+        "power",
+        "min",
+        "max"
+      ]
+    },
+    {
+      "name": "b",
+      "type": "number",
+      "label": "B",
+      "default": 0,
+      "min": -1000000000000000.0,
+      "max": 1000000000000000.0,
+      "step": 1,
+      "widget": "spin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "value",
+      "type": "number",
+      "label": "Value"
+    }
+  ]
+}

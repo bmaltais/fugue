@@ -1,0 +1,41 @@
+{
+  "manifest": 1,
+  "id": "fugue/rotate",
+  "version": "1.0.0",
+  "name": "Rotate",
+  "description": "Turn an image clockwise by a quarter turn, 180 degrees or three quarters.",
+  "category": "Image/Transform",
+  "keywords": [
+    "turn",
+    "orientation"
+  ],
+  "runtime": {
+    "kind": "builtin"
+  },
+  "inputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    },
+    {
+      "name": "rotation",
+      "type": "text",
+      "label": "Rotation",
+      "default": "90 degrees",
+      "choices": [
+        "none",
+        "90 degrees",
+        "180 degrees",
+        "270 degrees"
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    }
+  ]
+}
