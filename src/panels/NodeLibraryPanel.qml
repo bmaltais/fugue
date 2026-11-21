@@ -145,9 +145,7 @@ Item {
         boundsBehavior: Flickable.StopAtBounds
         activeFocusOnTab: true
         keyNavigationEnabled: false
-        ScrollBar.vertical: ScrollBar {
-            policy: list.contentHeight > list.height ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
-        }
+        ScrollBar.vertical: FugueScrollBar { look: root.look }
         WheelHandler {
             onWheel: event => {
                 list.contentY = Math.max(0, Math.min(list.contentHeight - list.height, list.contentY - event.angleDelta.y / 2))

@@ -180,7 +180,7 @@ Popup {
                 Layout.fillHeight: true
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
-                ScrollBar.vertical: ScrollBar {}
+                ScrollBar.vertical: FugueScrollBar { look: dialog.look }
                 model: dialog.shown
                 keyNavigationEnabled: true
                 // As many 56u cards as fit, sharing the spare width.

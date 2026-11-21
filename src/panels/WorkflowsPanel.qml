@@ -147,9 +147,7 @@ Item {
         currentIndex: -1
         boundsBehavior: Flickable.StopAtBounds
         activeFocusOnTab: true
-        ScrollBar.vertical: ScrollBar {
-            policy: list.contentHeight > list.height ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
-        }
+        ScrollBar.vertical: FugueScrollBar { look: root.look }
         Accessible.role: Accessible.List
         Accessible.name: qsTr("Workflows")
         onActiveFocusChanged: if (activeFocus && currentIndex < 0) root.step(1)

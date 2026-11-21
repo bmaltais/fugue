@@ -243,7 +243,7 @@ Popup {
                 highlightMoveDuration: 0
                 highlightFollowsCurrentItem: true
                 boundsBehavior: Flickable.StopAtBounds
-                ScrollBar.vertical: ScrollBar {}
+                ScrollBar.vertical: FugueScrollBar { look: root.look }
                 // With no query the results are by category: each gets a heading.
                 section.property: root.words.length === 0 ? "category" : ""
                 section.delegate: Text {

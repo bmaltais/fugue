@@ -278,7 +278,7 @@ Item {
                 contentHeight: columnsRow.implicitHeight
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
-                ScrollBar.vertical: ScrollBar {}
+                ScrollBar.vertical: FugueScrollBar { look: root.look }
                 Row {
                     id: columnsRow
                     width: commandList.width

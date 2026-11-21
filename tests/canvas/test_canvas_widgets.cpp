@@ -16,6 +16,7 @@
 #include "widget_fixture.h"
 #include "../engine/fake_http.h"
 #include "../engine/omarchy_fixture.h"
+#include "../window_grab.h"
 
 using namespace fugue;
 using canvas_test::App;
@@ -573,6 +574,54 @@ private slots:
         app.key(Qt::Key_Escape);
         app.key(Qt::Key_Escape); // then closes
         QTRY_VERIFY(!app.menuOpen());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // A long model list shows a scroll bar with a thumb of a grabbable length, a press on the track
+    // pages, and a short list shows none.
+    void aLongModelListShowsAScrollBarAndAShortOneDoesNot() {
+        QTemporaryDir models;
+        for (int i = 0; i < 400; ++i)
+            QVERIFY(test::writeFixtureFile(models.filePath(QStringLiteral("image-model/model-%1.gguf").arg(i, 3, 10, QLatin1Char('0'))), "w"));
+        WidgetApp app;
+        app.model.widgets()->setModelRoots({models.path()});
+        app.model.widgets()->setModelSource([](const QString &, const QStringList &,
+                                               std::function<void(QList<WidgetEdit::Model>)> done) { done({}); });
+        QVERIFY(app.open());
+        app.click(app.in("all", "model"));
+        QTRY_VERIFY2(app.menuOpen(), qPrintable(app.warnings.join('\n')));
+        QQuickItem *list = canvas_test::item(app.window->contentItem(), "widgetMenuList");
+        QVERIFY(list);
+        QQuickItem *bar = canvas_test::item(list, "fugueScrollBar");
+        QVERIFY(bar);
+        QTRY_VERIFY(bar->isVisible());
+        QVERIFY(bar->property("size").toDouble() < 0.2);
+        // 400 rows: the thumb is still 32px long.
+        QQuickItem *thumb = bar->property("contentItem").value<QQuickItem *>();
+        QVERIFY(thumb);
+        QVERIFY2(thumb->height() >= 31.5, qPrintable(QString::number(thumb->height())));
+        // Not a check: with FUGUE_SHOT_DIR set, saves the window with the long list open.
+        if (const QByteArray dir = qgetenv("FUGUE_SHOT_DIR"); !dir.isEmpty()) {
+            QTest::qWait(150);
+            QVERIFY(test_support::grab(app.window).save(QString::fromUtf8(dir) + "/model-picker-scrollbar.png"));
+        }
+        // A press on the track under the thumb scrolls the list down a page.
+        QCOMPARE(list->property("contentY").toDouble(), 0.0);
+        const QPointF below = bar->mapToScene(QPointF(bar->width() / 2, bar->height() - 4));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, below.toPoint());
+        QTRY_VERIFY(list->property("contentY").toDouble() > 0);
+        app.key(Qt::Key_Escape);
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!app.menuOpen());
+
+        // A menu of a few choices fits: no bar.
+        app.click(app.in("all", "mode"));
+        QTRY_VERIFY(app.menuOpen());
+        QQuickItem *shortList = canvas_test::item(app.window->contentItem(), "widgetMenuList");
+        QVERIFY(shortList);
+        QQuickItem *none = canvas_test::item(shortList, "fugueScrollBar");
+        QVERIFY(none);
+        QVERIFY(!none->isVisible());
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
