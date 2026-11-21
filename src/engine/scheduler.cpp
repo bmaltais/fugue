@@ -557,6 +557,7 @@ private:
                                              .arg(n.selection->instance)));
             parts.engine = n.selection->engine;
             parts.model = resourceIdentity(n.selection->model.handle);
+            parts.extra = n.providerKernel->keyExtra(n.inputs);
             n.models = {n.selection->instance + QLatin1Char('\n') + parts.model};
         } else if (n.kernel) {
             for (const Value &value : std::as_const(n.inputs))

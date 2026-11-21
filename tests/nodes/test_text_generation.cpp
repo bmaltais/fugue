@@ -19,6 +19,7 @@
 
 #include "engine/file_hashes.h"
 #include "engine/media.h"
+#include "engine/paths.h"
 #include "engine/registry.h"
 #include "engine/vips.h"
 #include "nodes/builtin.h"
@@ -287,6 +288,99 @@ private slots:
         QVERIFY(tags->params.value("system").toString().contains("comma-separated"));
         const Result<JobRequest> photo = bench.request(kEnhance, {{"prompt", "a fox in snow"}, {"style", "photograph"}});
         QVERIFY(photo->params.value("system").toString().contains("lens"));
+    }
+
+    // The three styles Enhance Prompt had before its prompts became data (#140), word for word.
+    void theOriginalStylesAreUnchanged() {
+        Bench bench;
+        const QString rules =
+            "You turn a short idea for a picture into a prompt for a text-to-image model. Keep every subject, detail "
+            "and constraint the idea gives, and do not change what it asks for; add only what makes the picture "
+            "concrete. Do not put words, letters or logos in the picture unless the idea asks for them. ";
+        const QString answer = "Answer with the prompt alone: no title, no quotes, no notes.";
+        const auto system = [&](const QString &style) {
+            return bench.request(kEnhance, {{"prompt", "a fox"}, {"style", style}})->params.value("system").toString();
+        };
+        QCOMPARE(system("detailed"),
+                 rules + "Write one paragraph of plain sentences, 60 to 120 words: the main subject first, then the "
+                         "setting, the composition and point of view, the lighting, the colours, and the medium or "
+                         "style. " + answer);
+        QCOMPARE(system("photograph"),
+                 rules + "Write one paragraph of plain sentences, 60 to 120 words, describing it as a photograph: "
+                         "the subject first, then the setting, the framing and camera angle, the lens and depth "
+                         "of field, the light and time of day, and the colour and film look. " + answer);
+        QCOMPARE(system("tags"),
+                 rules + "Write a comma-separated list of 20 to 40 short tags, the most important first: subject, "
+                         "details, setting, composition, lighting, style. No sentences. " + answer);
+    }
+
+    void theStyleChoicesAreThePromptTemplates() {
+        Bench bench;
+        const InputSpec *style = nullptr;
+        for (const InputSpec &input : bench.type(kEnhance).inputs)
+            if (input.name == "style")
+                style = &input;
+        QVERIFY(style && style->choices);
+        QVERIFY(style->choices->contains("minimax-video"));
+        QCOMPARE(style->choices->mid(0, 3), (QStringList{"detailed", "photograph", "tags"}));
+        QVERIFY(style->description.contains("minimax-video: MiniMax H3 video"));
+    }
+
+    void aVideoStyleAsksForMotionAndTheNodesLengthAndLanguage() {
+        Bench bench;
+        const QString plain =
+            bench.request(kEnhance, {{"prompt", "a fox"}, {"style", "minimax-video"}})->params.value("system").toString();
+        QVERIFY2(plain.contains("integrated_multimodal_description"), qPrintable(plain));
+        QVERIFY(plain.contains("Do not use bracketed commands"));
+        QVERIFY(!plain.contains("seconds"));
+        const QString full = bench.request(kEnhance, {{"prompt", "a fox"}, {"style", "minimax-video"}, {"duration", 8},
+                                                      {"language", "French"}, {"instructions", "Night."}})
+                                 ->params.value("system").toString();
+        QVERIFY(full.contains("The clip lasts 8 seconds"));
+        QVERIFY(full.contains("Write the prompt in French"));
+        QVERIFY(full.endsWith("Also: Night."));
+        // An image style does not use a length.
+        QVERIFY(!bench.request(kEnhance, {{"prompt", "a fox"}, {"duration", 8}})->params.value("system").toString().contains("8 seconds"));
+        const QString fromImage = bench.request(kEnhance, {{"prompt", "she smiles"}, {"style", "video-from-image"}})
+                                      ->params.value("system").toString();
+        QVERIFY(fromImage.contains("first frame"));
+        QVERIFY(bench.request(kEnhance, {{"prompt", "jazz"}, {"style", "music"}})->params.value("system").toString().contains("caption"));
+    }
+
+    // A file a person drops in the data folder's prompts folder is a style (#140).
+    void aTemplateInTheDataFolderIsAStyle() {
+        writeFile(fugue::dataDir() + "/prompts/mine.json",
+                  R"({"prompt_templates": 1, "templates": [{"id": "my-style", "label": "Mine", "family": "image",
+                      "system": "Write it my way. Answer with the prompt alone."}]})");
+        Bench bench;
+        const InputSpec *style = nullptr;
+        for (const InputSpec &input : bench.type(kEnhance).inputs)
+            if (input.name == "style")
+                style = &input;
+        QVERIFY(style && style->choices && style->choices->contains("my-style"));
+        QCOMPARE(bench.request(kEnhance, {{"prompt", "a fox"}, {"style", "my-style"}})->params.value("system").toString(),
+                 QStringLiteral("Write it my way. Answer with the prompt alone."));
+        QFile::remove(fugue::dataDir() + "/prompts/mine.json");
+    }
+
+    // The template is read from files, so it is part of the result's cache key (10.1).
+    void theTemplateIsPartOfTheCacheKey() {
+        Bench bench;
+        const auto key = [&](const QString &style) {
+            return bench.kernel(kEnhance)->keyExtra({{"style", Value(style)}});
+        };
+        QVERIFY(!key("video").isEmpty());
+        QVERIFY(key("video") != key("minimax-video"));
+        QCOMPARE(key("video"), key("video"));
+        QVERIFY(key("nonesuch").isEmpty());
+        QVERIFY(bench.kernel(kTextGenerate)->keyExtra({{"style", Value(QStringLiteral("video"))}}).isEmpty());
+    }
+
+    void aStyleThatIsNotATemplateIsRefused() {
+        Bench bench;
+        const Result<JobRequest> job = bench.request(kEnhance, {{"prompt", "a fox"}, {"style", "nonesuch"}});
+        QVERIFY(!job.ok());
+        QCOMPARE(job.errors().first().code, QStringLiteral("value_not_in_choices"));
     }
 
     void enhancePromptAddsTheUsersInstructions() {

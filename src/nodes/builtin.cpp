@@ -4,6 +4,7 @@
 
 #include "engine/command_node.h"
 #include "engine/pack_loader.h"
+#include "engine/prompt_templates.h"
 #include "nodes/kernels.h"
 
 namespace fugue::nodes {
@@ -14,6 +15,12 @@ void addBuiltinNodeTypes(Registry &registry) {
         std::fprintf(stderr, "fugue pack: %s: %s\n", qPrintable(error.code), qPrintable(error.message));
     for (const PackProblem &node : pack.disabled)
         std::fprintf(stderr, "fugue pack: %s: %s\n", qPrintable(node.node), qPrintable(node.reason));
+    // Enhance Prompt's Style is the prompt templates: Fugue's and the person's (#140).
+    const PromptTemplates templates = PromptTemplates::load();
+    for (const QString &problem : templates.problems())
+        std::fprintf(stderr, "fugue prompts: %s\n", qPrintable(problem));
+    registry.setInputChoices(QStringLiteral("fugue/enhance-prompt"), QStringLiteral("style"), templates.ids(),
+                             QStringLiteral("What the prompt is for:\n") + styleSummary(templates));
 }
 
 void addBuiltinKernels(Kernels &kernels) {

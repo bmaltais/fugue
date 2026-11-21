@@ -97,6 +97,26 @@ private slots:
             QVERIFY2(!Version::parse(QString::fromLatin1(bad)), bad);
     }
 
+    void aChoiceInputsListCanBeReplacedAfterTheTypeIsRegistered() {
+        Registry registry;
+        QVERIFY(registry.addManifest(object("{\"manifest\": 1, \"id\": \"io.github.alice.tools/pick\", \"version\": \"1.0.0\", \"name\": \"Pick\","
+                                            "\"description\": \"Pick.\", \"category\": \"Text\", \"runtime\": {\"kind\": \"command\", \"entry\": \"./pick.sh\"},"
+                                            "\"inputs\": [{\"name\": \"style\", \"type\": \"text\", \"default\": \"a\","
+                                            "\"choices\": [\"a\"], \"description\": \"old\"},"
+                                            "{\"name\": \"free\", \"type\": \"text\", \"default\": \"\"}],"
+                                            "\"outputs\": [{\"name\": \"out\", \"type\": \"text\"}]}")).isEmpty());
+        registry.setInputChoices("io.github.alice.tools/pick", "style", {"a", "b"}, "new");
+        registry.setInputChoices("io.github.alice.tools/pick", "style", {}, "ignored");            // empty list: no change
+        registry.setInputChoices("io.github.alice.tools/pick", "free", {"x"}, "not a choice");     // not a choice input
+        registry.setInputChoices("io.github.alice.tools/none", "style", {"x"});                    // not a type
+        const NodeType *type = registry.nodeType("io.github.alice.tools/pick");
+        QCOMPARE(*type->inputs.at(0).choices, (QStringList{"a", "b"}));
+        QCOMPARE(type->inputs.at(0).description, QString("new"));
+        QVERIFY(!type->inputs.at(1).choices);
+        registry.setInputChoices("io.github.alice.tools/pick", "style", {"c"}); // no description given: it stays
+        QCOMPARE(type->inputs.at(0).description, QString("new"));
+    }
+
     void manifestParses() {
         const Result<NodeType> type = NodeType::fromJson(object(sharpen));
         QVERIFY2(type.ok(), qPrintable(dump(type.errors())));

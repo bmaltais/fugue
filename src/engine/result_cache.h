@@ -48,6 +48,8 @@ struct KeyParts {
     // Provider nodes only: the engine id and the identity of the model resolved.
     QString engine;
     QString model;
+    // Provider nodes only: what else the kernel says decides the answer (ProviderKernel::keyExtra).
+    QString extra;
     // Only for a node type with `deterministic: false`: the run id.
     QString run;
 };

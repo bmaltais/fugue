@@ -32,6 +32,14 @@ foreach(catalog ${fugue_catalogs})
   list(APPEND fugue_catalog_files src/catalog/${catalog})
 endforeach()
 qt_add_resources(fugue_engine fugue_catalogs PREFIX /fugue/catalog FILES ${fugue_catalog_files})
+# The prompt templates (spec 14.2, #140) are compiled in the same way: src/prompts/*.json under :/fugue/prompts.
+file(GLOB fugue_prompt_files CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/src/prompts src/prompts/*.json)
+set(fugue_prompt_sources)
+foreach(prompts ${fugue_prompt_files})
+  set_source_files_properties(src/prompts/${prompts} PROPERTIES QT_RESOURCE_ALIAS ${prompts})
+  list(APPEND fugue_prompt_sources src/prompts/${prompts})
+endforeach()
+qt_add_resources(fugue_engine fugue_prompts PREFIX /fugue/prompts FILES ${fugue_prompt_sources})
 
 # Everything else but main.cpp, shared by the app and the tests, so each source
 # compiles once and a new file in src/ needs no line here.

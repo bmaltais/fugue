@@ -4,6 +4,7 @@
 
 #include "nodes/kernels.h"
 
+#include <QCryptographicHash>
 #include <QDir>
 #include <QJsonArray>
 #include <QRegularExpression>
@@ -11,6 +12,7 @@
 #include <vips/vips8>
 
 #include "engine/media.h"
+#include "engine/prompt_templates.h"
 #include "engine/vips.h"
 
 namespace fugue::nodes {
@@ -22,28 +24,6 @@ const QString kTextGenerate = QStringLiteral("text.generate");
 // A picture goes to the model at most this many pixels on a side: vision models read far
 // fewer (Qwen-VL resizes to about a megapixel), and the whole file travels as base64.
 constexpr int kLongestSide = 1024;
-
-// Enhance Prompt's styles. What every style asks, then what each adds. ComfyUI's enhancer
-// nodes report the same failure: a chatty answer ("Here is your prompt: ..."), so the rules
-// ask for the prompt alone, and outputs() strips what slips through.
-const QString kRules = QStringLiteral(
-    "You turn a short idea for a picture into a prompt for a text-to-image model. Keep every subject, detail "
-    "and constraint the idea gives, and do not change what it asks for; add only what makes the picture "
-    "concrete. Do not put words, letters or logos in the picture unless the idea asks for them. ");
-const QString kAnswer = QStringLiteral("Answer with the prompt alone: no title, no quotes, no notes.");
-
-QString styleRules(const QString &style) {
-    if (style == QLatin1String("photograph"))
-        return QStringLiteral("Write one paragraph of plain sentences, 60 to 120 words, describing it as a photograph: "
-                              "the subject first, then the setting, the framing and camera angle, the lens and depth "
-                              "of field, the light and time of day, and the colour and film look. ");
-    if (style == QLatin1String("tags"))
-        return QStringLiteral("Write a comma-separated list of 20 to 40 short tags, the most important first: subject, "
-                              "details, setting, composition, lighting, style. No sentences. ");
-    return QStringLiteral("Write one paragraph of plain sentences, 60 to 120 words: the main subject first, then the "
-                          "setting, the composition and point of view, the lighting, the colours, and the medium or "
-                          "style. ");
-}
 
 // The answer without the model's reasoning ahead of it: a leading <think> block, or everything
 // up to a first closing tag with no opening before it (the chat template wrote the opening,
@@ -96,13 +76,34 @@ public:
         return requirement;
     }
 
+    // The template's instructions decide Enhance Prompt's answer and are read from files, so they are
+    // part of the key: editing a template (or the person's file replacing one) is a new result.
+    QString keyExtra(const Values &inputs) const override {
+        if (!m_enhance)
+            return {};
+        const QString style = inputs.value(QStringLiteral("style")).text();
+        const PromptTemplates templates = PromptTemplates::load();
+        const PromptTemplate *chosen = templates.find(style);
+        if (!chosen)
+            return {};
+        return QString::fromLatin1(QCryptographicHash::hash(systemPrompt(*chosen, {}).toUtf8(), QCryptographicHash::Sha256).toHex());
+    }
+
     Result<JobRequest> request(const NodeContext &context, const Selection &selection) override {
         JobRequest request;
         request.capability = kTextGenerate;
         request.model = selection.model.handle;
         QJsonObject &params = request.params;
         params.insert(QStringLiteral("prompt"), context.input(QStringLiteral("prompt")).text());
-        const QString system = m_enhance ? enhanceSystem(context) : context.input(QStringLiteral("system")).text();
+        QString system;
+        if (m_enhance) {
+            const Result<QString> made = enhanceSystem(context);
+            if (!made)
+                return made.errors();
+            system = made.value();
+        } else {
+            system = context.input(QStringLiteral("system")).text();
+        }
         if (!system.isEmpty())
             params.insert(QStringLiteral("system"), system);
         for (const QString &key : {QStringLiteral("seed"), QStringLiteral("max_tokens"), QStringLiteral("temperature")}) {
@@ -161,12 +162,22 @@ public:
     }
 
 private:
-    static QString enhanceSystem(const NodeContext &context) {
-        QString system = kRules + styleRules(context.input(QStringLiteral("style")).text()) + kAnswer;
-        const QString extra = context.input(QStringLiteral("instructions")).text().trimmed();
-        if (!extra.isEmpty())
-            system += QStringLiteral("\n\nAlso: ") + extra;
-        return system;
+    // The instructions of the chosen template (data: engine/prompt_templates.h, src/prompts) and
+    // the options. ComfyUI's enhancer nodes report a chatty answer ("Here is your prompt: ..."), so
+    // every template asks for the prompt alone, and outputs() strips what slips through.
+    static Result<QString> enhanceSystem(const NodeContext &context) {
+        const QString style = context.input(QStringLiteral("style")).text();
+        const PromptTemplates templates = PromptTemplates::load();
+        const PromptTemplate *chosen = templates.find(style);
+        if (!chosen)
+            return makeInputError(QStringLiteral("value_not_in_choices"), QStringLiteral("style"),
+                                  QStringLiteral("There is no prompt style \"%1\".").arg(style),
+                                  QStringLiteral("Choose among: %1.").arg(templates.ids().join(QStringLiteral(", "))));
+        PromptOptions options;
+        options.language = context.input(QStringLiteral("language")).text();
+        options.durationSeconds = context.input(QStringLiteral("duration")).json().toInt();
+        options.instructions = context.input(QStringLiteral("instructions")).text();
+        return systemPrompt(*chosen, options);
     }
 
     // The picture to send, {path, format}: as it is when it is a PNG or JPEG standing upright

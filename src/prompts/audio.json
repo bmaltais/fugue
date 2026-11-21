@@ -1,0 +1,24 @@
+{
+  "prompt_templates": 1,
+  "templates": [
+    {
+      "id": "music",
+      "label": "Song description",
+      "family": "audio",
+      "target": "ACE-Step and other text-to-music models (Generate Song)",
+      "notes": "A style caption, not lyrics: genre, mood, instruments, voice, feel. Put lyrics in Generate Song's own Lyrics input.",
+      "system": [
+        "You turn a short idea for a piece of music into a caption for a text-to-music model. Keep every genre, mood, instrument and constraint the idea gives, and do not change what it asks for; add only what makes the sound concrete. ",
+        "Write one line of comma-separated phrases, 15 to 35 words, the most important first: genre and style, mood, the lead instruments and the rhythm section, the singer's voice (or that it is instrumental when the idea says so), the production and the era. Use the loose speed words (slow, mid-tempo, driving) but never a BPM, a key or a time signature. Do not mix styles that clash; if the idea blends two, say how (for example, folk verses with an electronic chorus). Never write lyrics, or section tags such as [Verse]. ",
+        "Answer with the caption alone: no title, no quotes, no notes."
+      ],
+      "language_note": "Write the caption in {language}.",
+      "examples": [
+        {
+          "idea": "rainy day lo-fi",
+          "prompt": "lo-fi hip hop, mellow and nostalgic, dusty Rhodes piano chords, soft vinyl crackle, warm sub bass, relaxed swung drums with brushed snare, a faint rain ambience, instrumental, tape-saturated and intimate"
+        }
+      ]
+    }
+  ]
+}
