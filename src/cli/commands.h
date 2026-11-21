@@ -52,6 +52,9 @@ Reply execute(const Command &command, Context &context);
 // the worker are in runs.h.
 Reply nodeList(const Command &command, Context &context);
 Reply nodeDescribe(const Command &command, Context &context);
+// authoring.cpp: `node new` and `node test` (6.11).
+Reply nodeNew(const Command &command, Context &context);
+Reply nodeTest(const Command &command, Context &context);
 Reply validateWorkflow(const Command &command, Context &context);
 Reply compileWorkflow(const Command &command, Context &context);
 Reply workflowNew(const Command &command, Context &context);

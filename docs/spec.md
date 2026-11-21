@@ -909,7 +909,12 @@ it later needs no format change. Command nodes cover light logic.
 
 - `fugue node new <name>` scaffolds a node folder with a manifest and a small program.
 - `fugue node test <path>` runs a node against sample inputs and checks its outputs against the
-  manifest.
+  manifest. `<path>` is a node folder or a pack folder (every command node in it). The cases are
+  in `test.json` next to `node.json` (`inputs`, and `expect` for exact output values); with none,
+  the node runs once on its defaults. Cases of one node share a program, so a persistent node
+  keeps its state. The pack is read where it is: no install, no trust. `fugue node new <name>`
+  inside a pack folder adds a node; elsewhere it makes the pack `io.example.<name>` (`--id` picks
+  another) in a folder named after its id, with a one-shot shell node and a `test.json`.
 
 ### 6.12 The registry
 
@@ -1955,7 +1960,7 @@ Codes in v0.1:
 | Packs | `pack_invalid`, `pack_exists`, `unknown_pack`, `fetch_failed`, `setup_failed` |
 | Groups | `group_invalid` (an edit a group cannot take: a list input fed from both sides of the selection, a name taken or not valid, a port exposed already) |
 | Providers | `capability_unavailable`, `model_not_running`, `provider_unreachable` |
-| Running | `node_failed`, `node_bad_output`, `node_timeout`, `out_of_memory`, `cancelled` |
+| Running | `node_failed`, `node_bad_output`, `node_timeout`, `out_of_memory`, `cancelled`, `node_test_failed` (`fugue node test`: an output is not what the test expects) |
 | Other | `unknown_run`, `usage`, `internal` |
 
 New codes may be added; existing ones do not change meaning.
@@ -2096,7 +2101,7 @@ For people who add nodes. Written in M3.
 9. Publishing a pack.
 10. The native plugin guide, once the interface is frozen.
 
-An example pack lives in the repository and is used by the quickstart and the tests.
+The pages are in [docs/nodes](nodes/README.md). An example pack lives in the repository (`examples/packs/io.github.bmaltais.fugue-example`) and is used by the docs and the tests.
 
 ---
 

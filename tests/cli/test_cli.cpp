@@ -756,7 +756,7 @@ private slots:
     void laterMilestoneCommandsAreParsedAndSayNotAvailable() {
         for (const QStringList &args : QList<QStringList>{
                  {"provider", "list"}, {"providers", "list"}, {"cache", "status"}, {"cache", "clear", "--workflow", "f", "--node", "n"},
-                 {"command", "list"}, {"skill", "install"}, {"node", "new", "x"}, {"node", "test", "x"},
+                 {"command", "list"}, {"skill", "install"},
              }) {
             const Outcome o = fugue(args + QStringList{"--json"});
             QVERIFY2(o.exitCode == 1, qPrintable(args.join(' ')));

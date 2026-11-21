@@ -1,0 +1,9 @@
+{
+  "manifest": 1,
+  "id": "io.github.bmaltais.fugue-example",
+  "version": "1.0.0",
+  "name": "Fugue example nodes",
+  "description": "Two small command nodes to read and copy: a one-shot one and a persistent one.",
+  "license": "MIT",
+  "nodes": ["shout", "counter"]
+}

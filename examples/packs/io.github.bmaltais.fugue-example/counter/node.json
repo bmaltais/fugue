@@ -1,0 +1,12 @@
+{
+  "manifest": 1,
+  "id": "io.github.bmaltais.fugue-example/counter",
+  "version": "1.0.0",
+  "name": "Counter",
+  "description": "Counts how many runs its program has served. Shows a persistent node that keeps state.",
+  "category": "Example",
+  "deterministic": false,
+  "runtime": {"kind": "command", "entry": "./run.sh", "mode": "persistent", "idle_timeout_s": 60},
+  "inputs": [{"name": "step", "type": "number", "default": 1, "integer": true, "min": 1, "max": 100}],
+  "outputs": [{"name": "count", "type": "number"}]
+}

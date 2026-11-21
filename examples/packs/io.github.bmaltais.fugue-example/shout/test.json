@@ -1,0 +1,4 @@
+{"cases": [
+  {"name": "defaults", "inputs": {}, "expect": {"text": "HELLO!"}},
+  {"name": "three question marks", "inputs": {"text": "is it", "mark": "?", "times": 3}, "expect": {"text": "IS IT???"}}
+]}

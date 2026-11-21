@@ -1,0 +1,4 @@
+{"cases": [
+  {"name": "first run", "inputs": {}, "expect": {"count": 1}},
+  {"name": "same program, second run", "inputs": {"step": 5}, "expect": {"count": 6}}
+]}

@@ -1,0 +1,16 @@
+{
+  "manifest": 1,
+  "id": "io.github.bmaltais.fugue-example/shout",
+  "version": "1.0.0",
+  "name": "Shout",
+  "description": "Turns text to upper case and adds a mark.",
+  "category": "Example",
+  "keywords": ["upper", "case"],
+  "runtime": {"kind": "command", "entry": "./run.sh"},
+  "inputs": [
+    {"name": "text", "type": "text", "default": "hello", "widget": "multiline"},
+    {"name": "mark", "type": "text", "default": "!", "choices": ["!", "?", "..."]},
+    {"name": "times", "type": "number", "default": 1, "min": 1, "max": 5, "step": 1, "integer": true}
+  ],
+  "outputs": [{"name": "text", "type": "text"}]
+}
