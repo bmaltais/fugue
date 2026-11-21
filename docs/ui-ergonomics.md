@@ -96,7 +96,7 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 
 ### 2026-11-20 export for sharing (#91)
 
-- Control: File > Export for sharing… (`file.export-share`, `src/menu/menus.cpp`), the item that was Export share copy…, in the same place after Save as; it opens `exportDialog`, a save dialog for a `.zip` (`src/workflow/WorkflowDialogs.qml`). The open dialog's filter names packages too.
+- Control: File > Export for sharing… (`file.export-share`, `src/menu/menus.cpp`), the item that was Export share copy…, in the same place after Save as; it opens `exportDialog`, a save dialog for a `.fuguepack` (`src/workflow/WorkflowDialogs.qml`). The open dialog's filter names packages too.
 - Control: File > Export the compiled graph (`file.export-compiled`), unchanged in place and label; it now opens `compiledDialog`, a save dialog for a `.json`.
 - Control: the banner's `installPack` ("Install <pack>…", plain, before Download), while the line names nodes of a pack the workflow says where to get; it opens Settings > Packs and starts the install there, which asks.
 - Old: both items were listed and enabled but did nothing; a missing pack was named with nowhere to go.

@@ -6,4 +6,5 @@ Exec=fugue %f
 Icon=fugue
 Terminal=false
 Categories=Utility;
+MimeType=application/x-fugue-workflow;application/x-fugue-package;
 StartupWMClass=fugue

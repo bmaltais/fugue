@@ -136,8 +136,8 @@ public:
     // A package another Fugue exported (engine/share_package.h, #91), unpacked and opened as
     // its template is (openTemplate). openPath() takes one by its contents.
     bool openPackage(const QString &path);
-    // Writes the shown workflow as a package at a path or file URL (".zip" added when the name
-    // has none), never over a file; `preview` is a picture it made, or empty. The banner says
+    // Writes the shown workflow as a package at a path or file URL (".fuguepack" added when the
+    // name does not end so), never over a file; `preview` is a picture it made, or empty. The banner says
     // where it went, and what it left out. False when nothing was written.
     Q_INVOKABLE bool exportShare(const QString &pathOrUrl, const QString &preview);
     // Writes the shown workflow's compiled graph (4.8), as `fugue compile` prints it, at a path

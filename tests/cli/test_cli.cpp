@@ -636,7 +636,7 @@ private slots:
 
     // #91: the workflow packed to share, as File > Export for sharing writes it.
     void workflowExportWritesAPackageToShare() {
-        const QString out = m_dir.filePath("shared.zip");
+        const QString out = m_dir.filePath("shared.fuguepack");
         Outcome o = fugue({"workflow", "export", workflow(), "--share", "--no-prompts", "--no-layout", "--out", out, "--json"});
         QVERIFY2(o.exitCode == 0, o.out.constData());
         QCOMPARE(o.json().value("data").toObject().value("file").toString(), out);

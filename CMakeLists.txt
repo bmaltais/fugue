@@ -251,6 +251,7 @@ endforeach()
 include(GNUInstallDirs)
 install(TARGETS fugue RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES share/fugue.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+install(FILES share/fugue-mime.xml DESTINATION ${CMAKE_INSTALL_DATADIR}/mime/packages RENAME fugue.xml)
 install(FILES share/fugue.svg DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
 install(FILES examples/demo.fugue DESTINATION ${CMAKE_INSTALL_DATADIR}/fugue/examples)
 # The bundled templates (spec 11.10): the `templates` submodule, bmaltais/fugue-workflows at the

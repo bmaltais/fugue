@@ -1,4 +1,4 @@
-// A workflow packed to share (spec 11.5, #91): one .zip, a template inside, opened by another
+// A workflow packed to share (spec 11.5, #91): one .fuguepack (a zip), a template inside, opened by another
 // Fugue as a template opens.
 //
 // Seams: writeSharePackage / unpackSharePackage (engine/share_package.h) over real files with
@@ -267,7 +267,7 @@ private slots:
                                                                     {"ref", "0123abcd"}}}}));
     }
 
-    // File > Export for sharing writes the shown workflow; opening the .zip (File > Open, a drop)
+    // File > Export for sharing writes the shown workflow; opening the .fuguepack (File > Open, a drop)
     // opens it as a new workflow with its images.
     void theWindowExportsAndOpensAPackage() {
         QTemporaryDir dir, state;
@@ -304,12 +304,12 @@ private slots:
         workflows.setCurrent(shared);
 
         QVERIFY(workflows.exportShare(QUrl::fromLocalFile(dir.filePath("shared")).toString(), {}));
-        QVERIFY(QFileInfo::exists(dir.filePath("shared.zip"))); // ".zip" added
-        QVERIFY(workflows.notice().contains(dir.filePath("shared.zip")));
+        QVERIFY(QFileInfo::exists(dir.filePath("shared.fuguepack"))); // its extension added
+        QVERIFY(workflows.notice().contains(dir.filePath("shared.fuguepack")));
         QVERIFY(workflows.notice().contains("lost.png")); // what it left out
 
         const int before = workflows.count();
-        QVERIFY(workflows.openPath(dir.filePath("shared.zip")));
+        QVERIFY(workflows.openPath(dir.filePath("shared.fuguepack")));
         QCOMPARE(workflows.count(), before + 1);
         QVERIFY(workflows.pathOf(workflows.current()).isEmpty()); // a new workflow, saved where asked
         const QString file = canvas.document().graph.nodes.value("load").inputs.value("file").literal().toString();
@@ -327,6 +327,22 @@ private slots:
             {"requires", QJsonObject{{"packs", QJsonObject{{"io.github.alice.tools",
                 QJsonObject{{"version", "1.2.0"}, {"source", "https://github.com/alice/fugue-tools"}, {"ref", "0123abcd"}}}}}}}};
         QVERIFY(workflows.openText(QString::fromUtf8(QJsonDocument(withPack).toJson())));
+        // Its node's image comes with a package too, though the pack is not here to say it is a file.
+        {
+            const QString zip = dir.filePath("with-pack.zip");
+            QJsonObject flow = withPack;
+            QJsonObject nodes = flow.value("graph").toObject().value("nodes").toObject();
+            QJsonObject sharpen = nodes.value("s").toObject();
+            sharpen.insert("inputs", QJsonObject{{"picture", "inputs/cat.png"}});
+            nodes.insert("s", sharpen);
+            flow.insert("graph", QJsonObject{{"nodes", nodes}});
+            makeZip(zip, {{"sharp/workflow.fugue", QJsonDocument(flow).toJson()},
+                          {"sharp/template.json", R"({"title": "Sharp"})"}, {"sharp/inputs/cat.png", png()}});
+            QVERIFY(workflows.openPath(zip));
+            const QString picture = canvas.document().graph.nodes.value("s").inputs.value("picture").literal().toString();
+            QVERIFY2(picture.startsWith(inputsDir() + "/"), qPrintable(picture));
+            QCOMPARE(readFile(picture), png());
+        }
         QCOMPARE(workflows.packOffer().value("id").toString(), QString("io.github.alice.tools"));
         QSignalSpy install(&workflows, &Workflows::packInstallRequested);
         workflows.installPack();

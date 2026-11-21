@@ -1,6 +1,8 @@
 #pragma once
 
-// A workflow packed to share (spec 11.5, #91): one .zip another Fugue opens and runs.
+// A workflow packed to share (spec 11.5, #91): one .fuguepack file (a zip, with its own extension
+// and MIME type, application/x-fugue-package, so the desktop opens it with Fugue) that another
+// Fugue opens and runs. Opening tells one by its bytes, so a package renamed .zip opens too.
 //
 // The package is a template (11.10), zipped: `<id>/template.json` (the title), `<id>/workflow.fugue`
 // (the share copy, engine/share_copy.h, with `requires` refreshed so it names the packs it uses

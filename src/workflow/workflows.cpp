@@ -426,8 +426,8 @@ bool Workflows::exportShare(const QString &pathOrUrl, const QString &preview) {
     if (m_current < 0)
         return false;
     QString path = toPath(pathOrUrl);
-    if (QFileInfo(path).suffix().compare(QLatin1String("zip"), Qt::CaseInsensitive) != 0)
-        path += QStringLiteral(".zip");
+    if (QFileInfo(path).suffix().compare(QLatin1String("fuguepack"), Qt::CaseInsensitive) != 0)
+        path += QStringLiteral(".fuguepack");
     const Tab &tab = m_tabs[size_t(m_current)];
     ShareRequest request;
     request.title = tab.title.endsWith(QStringLiteral(".fugue")) ? tab.title.chopped(6) : tab.title;
@@ -537,13 +537,35 @@ bool Workflows::openTemplate(const Template &chosen, bool fromPackage) {
         makeInputsAbsolute(document.value(), *m_registry, chosen.workflow);
         errors = takeInputsFrom(document.value(), *m_registry, chosen.folder);
     }
-    if (document && fromPackage) {
+    if (document && fromPackage && errors.isEmpty()) {
         const QString folder = canonicalPath(chosen.folder);
         forEachFileLiteral(document.value(), *m_registry, [&](const QString &, const QString &, InputValue &value) {
             const QString path = canonicalPath(value.literal().toString());
             if (!path.isEmpty() && isInside(path, folder))
                 value = InputValue::literal(QFileInfo(path).fileName());
         });
+        // A node of a pack not installed here: which inputs are files is not known, so any text
+        // naming one of the package's images is taken in too, to be there once the pack is.
+        const FileRoots roots = FileRoots::forInputs();
+        const auto takeUnknown = [&](Nodes &nodes) {
+            for (Node &node : nodes) {
+                if (m_registry->nodeType(node.type))
+                    continue;
+                for (InputValue &value : node.inputs) {
+                    if (value.kind() != InputValue::Kind::Literal || !value.literal().isString()
+                        || !value.literal().toString().startsWith(QStringLiteral("inputs/")))
+                        continue;
+                    const QString path = canonicalPath(folder + QLatin1Char('/') + value.literal().toString());
+                    if (path.isEmpty() || !isInside(path, folder) || !QFileInfo(path).isFile())
+                        continue;
+                    if (const Result<QString> stored = storeImageFile(path, inputsDir(), roots))
+                        value = InputValue::literal(stored.value());
+                }
+            }
+        };
+        takeUnknown(document->graph.nodes);
+        for (GroupDefinition &group : document->groups)
+            takeUnknown(group.nodes);
     }
     if (!errors.isEmpty()) {
         setNotice(tr("Could not open the template %1: %2").arg(chosen.title, firstMessage(errors)));
