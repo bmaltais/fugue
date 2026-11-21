@@ -1,6 +1,7 @@
 #include "engine/pack_loader.h"
 #include "engine/command_node.h"
 
+#include "engine/group_library.h"
 #include "engine/json.h"
 #include "engine/pack_manager.h"
 #include "engine/paths.h"
@@ -436,6 +437,8 @@ PackReport loadPacks(Registry &registry, const QStringList &searchPaths) {
             if (entry.fileName().startsWith(QLatin1Char('.')))
                 continue;
             const bool library = i == 0 && entry.fileName() == QLatin1String("local") && !entry.isSymLink();
+            if (library)
+                healLibrary(entry.filePath());
             report.packs << loadPack(registry, entry.filePath(), library ? PackOrigin::Library : PackOrigin::Disk);
         }
     }

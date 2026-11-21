@@ -7,6 +7,7 @@
 #include <QSignalSpy>
 #include <QtTest>
 
+#include "../test_home_guard.h"
 #include "canvas_app.h"
 #include "../disk_pack.h"
 #include "engine/group_library.h"
@@ -57,8 +58,14 @@ class TestCanvasReload : public QObject {
     Q_OBJECT
 
 private slots:
-    void init() { QDir(fugue::packsDir()).removeRecursively(); }
-    void cleanup() { QDir(fugue::packsDir()).removeRecursively(); }
+    void init() {
+        FUGUE_REQUIRE_TEST_HOME(fugue::packsDir());
+        QDir(fugue::packsDir()).removeRecursively();
+    }
+    void cleanup() {
+        FUGUE_REQUIRE_TEST_HOME(fugue::packsDir());
+        QDir(fugue::packsDir()).removeRecursively();
+    }
 
     void aPlaceholderTurnsRealWhenItsPackComesAndBackWhenItGoes() {
         App app(load(kUsesSay));
@@ -88,6 +95,7 @@ private slots:
         app.workflows.dismissPendingTrust();
 
         // Removed: a placeholder again, which keeps its inputs and links.
+        FUGUE_REQUIRE_TEST_HOME(fugue::packsDir());
         QVERIFY(QDir(fugue::packsDir() + "/io.example.tools").removeRecursively());
         QTRY_VERIFY_WITH_TIMEOUT(role(app.model, "say", NodeList::Missing).toBool(), 5000);
         QCOMPARE(app.model.links()->rowCount(), links);

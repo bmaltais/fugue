@@ -56,6 +56,11 @@ struct LibraryGroup {
 };
 QList<LibraryGroup> libraryGroups(const QString &dir = libraryDir());
 
+// Drops the entries of the library's pack.json whose folder is gone or has no node.json, and
+// rewrites it (atomically) when any went; returns how many. Never touches a folder or file but
+// pack.json. Groups on disk that pack.json does not list are not adopted (spec 5.3).
+int healLibrary(const QString &dir = libraryDir());
+
 // Removes a library group: its folder, and its line in pack.json. Workflows that use it keep their
 // own copy of its definition (5.3). group_invalid for a group the library does not have.
 Errors removeFromLibrary(const QString &id, const QString &dir = libraryDir());

@@ -9,6 +9,7 @@
 #include <QQuickStyle>
 #include <QtTest>
 
+#include "../test_home_guard.h"
 #include "../canvas/canvas_app.h"
 #include "engine/group_library.h"
 
@@ -78,6 +79,7 @@ private slots:
     // library would still be there: a group's key would be local/group-10, and the tests that count
     // library rows would see more than their own. Each test starts with an empty library.
     void init() {
+        FUGUE_REQUIRE_TEST_HOME(fugue::libraryDir());
         QDir library(fugue::libraryDir());
         for (const QString &group : library.entryList(QDir::Dirs | QDir::NoDotAndDotDot))
             QDir(library.filePath(group)).removeRecursively();

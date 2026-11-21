@@ -673,6 +673,15 @@ with an id and a version, and it appears in node search.
   separate question, then Delete, [12.14](#1214-side-panels)). Only the library's folder and its
   line in `local/pack.json` go; a workflow that used the group keeps the definition it embeds, and
   opens and runs as before.
+- **The list follows the disk.** `local/pack.json` lists only folders that hold a `node.json`:
+  every write of it drops the others, and so does loading the library, which rewrites it once
+  (atomically) when a listed folder is gone or has no `node.json` (removed by hand, or a removal
+  that stopped half way), with no warning (one `qInfo` line at most). Only the list is fixed:
+  no folder or file is ever deleted by it. A removal rewrites the list whatever became of the
+  folder; a folder that could not be removed stays listed, with an error, so it can be tried
+  again. Only the `local` pack heals; another pack keeps its "node is disabled" warning. A
+  folder on disk that the list does not name is not adopted (it keeps the warning of 6.5): the
+  list is what the library holds, and adopting would bring back what a removal took out.
 - The groups of the workflow appear in node search too, except one the level shown is inside of.
 
 ### 5.4 Exposed inputs and outputs
