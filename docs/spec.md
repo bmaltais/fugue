@@ -63,6 +63,10 @@ matches what its users expect and is deliberately better where ComfyUI is weak (
    failed node is reported on the node with how to fix it.
 6. **Nothing changes silently.** Pack updates, group updates, model starts and installs are
    explicit and confirmed by a human.
+7. **Small, reusable parts.** Components and nodes do one thing and stand alone: a UI component
+   takes a value and reports a change without knowing its caller; a node that does too much is
+   split into simple nodes, assembled as a group ([5](#5-groups)) plus a new node only for the
+   missing part ([3.7](#37-designing-node-types)).
 
 ### 1.3 Processes
 
@@ -324,6 +328,22 @@ workflows. An alias applies only when no installed type has that id.
 The version is part of the cache key ([10.1](#101-keys)), so a new version never reuses old results.
 
 ---
+
+### 3.7 Designing node types
+
+Prefer several simple nodes composed as a group over one complex node, and add a new node only
+for the part no existing node does. Split where:
+
+- the value passed between the parts is meaningful and cheap to carry: an image, mask, latent,
+  number or text. Not half-finished state such as a sampler mid-run or a loaded model, which costs
+  memory or reloads and is useless alone;
+- each part is useful by itself or in another workflow.
+
+Keep one node where the split would run a hot path through many tiny steps (per-pixel work
+wants one kernel), or where the intermediate value has no meaning outside the node. A group
+must behave like a node ([5.4](#54-exposed-inputs-and-outputs)): exposed inputs and outputs,
+collapsed to one box, reused from the library. Groups pin their nodes' versions ([3.6](#36-versions)),
+so a split does not break older workflows.
 
 ## 4. The workflow document
 
