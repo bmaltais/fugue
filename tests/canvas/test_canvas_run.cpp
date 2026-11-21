@@ -28,6 +28,7 @@
 #include "engine/run_folder.h"
 #include "run/canvas_runs.h"
 #include "run/run_bar.h"
+#include "../window_grab.h"
 #include "run/run_queue.h"
 #include "run/run_service.h"
 
@@ -130,8 +131,9 @@ struct RunApp {
     std::unique_ptr<fugue::RunBar> bar;
     std::unique_ptr<fugue::RunQueue> queue;
 
-    explicit RunApp(const QByteArray &graph, bool slow = false, const fugue::Description &offers = imageDescription())
-        : app(load(graph)) {
+    explicit RunApp(const QByteArray &graph, bool slow = false, const fugue::Description &offers = imageDescription(),
+                    const Look &look = {})
+        : app(load(graph), {}, look) {
         RunSetup setup;
         // As main() fills it: the built-ins, then the test's own (XDG) packs folder.
         setup.addNodeTypes = [](fugue::Registry &registry) {
@@ -1245,35 +1247,119 @@ echo '{"outputs": {"text": "painted"}}'
         QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
     }
 
-    // Dragged to the lower half, the toolbar docks at the bottom edge, and the choice is kept in the
-    // state file for the next window; the View menu's command hides it and shows it again.
-    void theToolbarDocksAtTheOtherEdgeAndCanBeHidden() {
+    // The toolbar moves anywhere in the window, across as well as up and down, and the place is kept
+    // in the state file as fractions of its room; the keys move it from the grip, Shift in bigger
+    // steps; the View menu's command hides it and shows it again (#120).
+    void theToolbarMovesFreelyAndRemembersItsPlace() {
         RunApp r(kGraph);
         QVERIFY(r.app.open());
         QQuickItem *grip = named(r, "runToolbarGrip");
         QVERIFY(grip);
         QQuickItem *toolbar = qvariant_cast<QQuickItem *>(named(r, "runToolbar")->property("surface"));
         QVERIFY(toolbar);
+        QQuickItem *area = toolbar->parentItem();
+        const qreal unit = r.app.theme.look()->property("unit").toReal();
+        QCOMPARE(r.bar->place(), QPointF(0.5, 0));
         const QPoint from = grip->mapToScene(QPointF(grip->width() / 2, grip->height() / 2)).toPoint();
         QTest::mousePress(r.app.window, Qt::LeftButton, {}, from);
         for (int i = 1; i <= 10; ++i)
-            QTest::mouseMove(r.app.window, from + QPoint(0, 40 * i));
-        QTest::mouseRelease(r.app.window, Qt::LeftButton, {}, from + QPoint(0, 400));
-        QTRY_COMPARE(r.bar->dock(), QStringLiteral("bottom"));
-        QTRY_VERIFY2(toolbar->y() > toolbar->parentItem()->height() / 2,
-                     qPrintable(QStringLiteral("%1 of %2").arg(toolbar->y()).arg(toolbar->parentItem()->height())));
+            QTest::mouseMove(r.app.window, from + QPoint(-30 * i, 20 * i));
+        QTest::mouseRelease(r.app.window, Qt::LeftButton, {}, from + QPoint(-300, 200));
+        // Left and down of where it was, both axes remembered (the drag may be pulled to an edge).
+        QTRY_VERIFY2(r.bar->place().x() < 0.5 && r.bar->place().y() > 0, qPrintable(QStringLiteral("%1,%2").arg(r.bar->place().x()).arg(r.bar->place().y())));
+        QVERIFY(toolbar->x() < (area->width() - toolbar->width()) / 2);
+        QVERIFY(toolbar->y() > 4 * unit);
         QFile saved(r.app.dir.path() + "/run-bar.json");
         QVERIFY(saved.open(QIODevice::ReadOnly));
-        QCOMPARE(QJsonDocument::fromJson(saved.readAll()).object().value("dock").toString(), QStringLiteral("bottom"));
-        // The keys do the same from the grip.
+        const QJsonObject kept = QJsonDocument::fromJson(saved.readAll()).object();
+        QVERIFY(!kept.contains("dock"));
+        QCOMPARE(kept.value("place").toObject().value("x").toDouble(), r.bar->place().x());
+
+        // Dragged far outside, it stays inside the window, 4u from the edge.
+        const QPoint grip2 = grip->mapToScene(QPointF(grip->width() / 2, grip->height() / 2)).toPoint();
+        QTest::mousePress(r.app.window, Qt::LeftButton, {}, grip2);
+        for (int i = 1; i <= 10; ++i)
+            QTest::mouseMove(r.app.window, grip2 + QPoint(-200 * i, 0));
+        QTest::mouseRelease(r.app.window, Qt::LeftButton, {}, grip2 + QPoint(-2000, 0));
+        QTRY_COMPARE(r.bar->place().x(), 0.0);
+        QCOMPARE(toolbar->x(), 4 * unit);
+
+        // The keys from the grip: Right moves it by 2u, Shift by 10u; Down likewise.
         grip->forceActiveFocus();
-        r.app.key(Qt::Key_Up);
-        QTRY_COMPARE(r.bar->dock(), QStringLiteral("top"));
+        const qreal x0 = toolbar->x(), y0 = toolbar->y();
+        r.app.key(Qt::Key_Right);
+        QTRY_COMPARE(toolbar->x(), x0 + 2 * unit);
+        r.app.key(Qt::Key_Right, Qt::ShiftModifier);
+        QTRY_COMPARE(toolbar->x(), x0 + 12 * unit);
+        r.app.key(Qt::Key_Down);
+        QTRY_COMPARE(toolbar->y(), y0 + 2 * unit);
+        r.app.key(Qt::Key_Up, Qt::ShiftModifier);
+        QTRY_COMPARE(toolbar->y(), qMax(4 * unit, y0 - 8 * unit));
+        // Far enough to the right and it stops at the edge.
+        for (int i = 0; i < 200 && toolbar->x() + toolbar->width() + 4 * unit < area->width(); ++i)
+            r.app.key(Qt::Key_Right, Qt::ShiftModifier);
+        QTRY_COMPARE(r.bar->place().x(), 1.0);
+        QCOMPARE(toolbar->x() + toolbar->width(), area->width() - 4 * unit);
+
+        // A smaller window keeps the bar inside, at the same relative place.
+        const QSize before = r.app.window->size();
+        r.app.window->resize(before.width() * 3 / 4, before.height() * 3 / 4);
+        QTRY_COMPARE(area->width(), qreal(before.width() * 3 / 4));
+        QTRY_COMPARE(toolbar->x() + toolbar->width(), area->width() - 4 * unit);
+        QVERIFY(toolbar->y() + toolbar->height() <= area->height());
+        r.app.window->resize(before);
 
         QVERIFY(r.app.commands.trigger("view.toggle-run-toolbar"));
         QTRY_VERIFY(!named(r, "runToolbar"));
         QVERIFY(r.app.commands.trigger("view.toggle-run-toolbar"));
         QTRY_VERIFY(named(r, "runToolbar"));
+        QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
+    }
+
+    // Not a check: with FUGUE_SHOT_DIR set, saves the run toolbar with Cancel enabled and disabled
+    // on a dark and a light theme, as <dir>/runbar-<theme>.png (#120).
+    void savesTheToolbarWhenAsked() {
+        const QByteArray dir = qgetenv("FUGUE_SHOT_DIR");
+        if (dir.isEmpty())
+            QSKIP("set FUGUE_SHOT_DIR to save the toolbar's picture");
+        for (const QString &theme : {QStringLiteral("tokyo-night"), QStringLiteral("catppuccin-latte"), QStringLiteral("rose-pine")}) {
+            RunApp r(kGraph, false, imageDescription(), Look{theme, -1});
+            QVERIFY(r.app.open());
+            QQuickItem *bar = qvariant_cast<QQuickItem *>(named(r, "runToolbar")->property("surface"));
+            QTest::qWait(300);
+            const QRect box(bar->mapToScene(QPointF(0, 0)).toPoint(), QSize(bar->width() + 8, bar->height() + 8));
+            const QString base = QString::fromLocal8Bit(dir) + "/runbar-" + theme;
+            QVERIFY(test_support::grab(r.app.window).copy(box.adjusted(-4, -4, 4, 4)).save(base + "-idle.png"));
+            named(r, "runToolbar")->setProperty("canCancel", true);
+            named(r, "runToolbar")->setProperty("pending", 2);
+            QTest::qWait(200);
+            QVERIFY(test_support::grab(r.app.window).copy(box.adjusted(-4, -4, 4, 4)).save(base + "-running.png"));
+            QTest::mouseMove(r.app.window, named(r, "runCancelButton")->mapToScene(QPointF(10, 10)).toPoint());
+            QTest::qWait(200);
+            QVERIFY(test_support::grab(r.app.window).copy(box.adjusted(-4, -4, 4, 4)).save(base + "-hover.png"));
+        }
+    }
+
+    // The queue panel stays attached to the bar wherever it is: over it when the bar is low, under
+    // it when the bar is high, and inside the window when the bar is at a side (#120).
+    void theQueuePanelFollowsTheBar() {
+        RunApp r(kGraph);
+        QVERIFY(r.app.open());
+        r.bar->setPlace({0.5, 1});
+        QQuickItem *bar = qvariant_cast<QQuickItem *>(named(r, "runToolbar")->property("surface"));
+        QTRY_VERIFY(bar->y() > bar->parentItem()->height() / 2);
+        click(r, named(r, "runQueueButton"));
+        QQuickItem *panel = nullptr;
+        QTRY_VERIFY((panel = named(r, "runQueuePanel")) && panel->isVisible());
+        QTRY_VERIFY(panel->y() + panel->height() <= bar->y());
+        QVERIFY(panel->y() >= 0);
+
+        r.bar->setPlace({0, 0.5});
+        QTRY_COMPARE(bar->x(), 4 * r.app.theme.look()->property("unit").toReal());
+        QTRY_VERIFY(panel->x() >= 0);
+        QVERIFY(panel->x() + panel->width() <= panel->parentItem()->width());
+        QVERIFY(panel->y() >= 0 && panel->y() + panel->height() <= panel->parentItem()->height());
+        QVERIFY(panel->y() + panel->height() <= bar->y() || panel->y() >= bar->y() + bar->height());
         QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
     }
 
@@ -1311,6 +1397,12 @@ echo '{"outputs": {"text": "painted"}}'
         QVERIFY(named(r, "queueEntry-cli-waiting"));
         QVERIFY(named(r, "queueEntry-" + first));
         QVERIFY(named(r, "queueEntry-" + second));
+        // The panel hangs from the bar, under it at the top of the window.
+        {
+            QQuickItem *bar = qvariant_cast<QQuickItem *>(named(r, "runToolbar")->property("surface"));
+            QVERIFY(qAbs(panel->x() + panel->width() / 2 - (bar->x() + bar->width() / 2)) <= 1);
+            QVERIFY(panel->y() >= bar->y() + bar->height());
+        }
         QCOMPARE(named(r, "queueEntry-cli-going")->findChild<QQuickItem *>("queueDetail")->property("text").toString(),
                  QStringLiteral("Starting · from the command line"));
         QVERIFY(named(r, "queueFront-" + first)->isVisible() && !named(r, "queueFront-cli-going")->isVisible());

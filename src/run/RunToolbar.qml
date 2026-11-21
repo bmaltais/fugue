@@ -3,13 +3,14 @@ import QtQuick
 import Fugue
 import "../canvas"
 
-// The run toolbar (#60, as ComfyUI's action bar): a bar floating over its parent, centered at its top
-// or bottom edge, with the batch count, Run (the one highlighted control) and the menu behind it,
+// The run toolbar (#60, as ComfyUI's action bar): a bar floating over its parent, anywhere in it
+// (#120: dragged by its grip, or moved by the arrow keys), with the batch count, Run (the one highlighted control) and the menu behind it,
 // Cancel, and the queue button. It knows nothing of the canvas or of the run queue: the caller
 // gives the state (`running`, `pending`, `progress`, `batch`, `queueOpen`) and the rows of the split
 // menu (`menuItems`, a CommandMenu's rows), and listens to what a person asked for.
 //
-//   chunk 1: grip (drag, or Up and Down, to move it to the other edge)
+//   chunk 1: grip (a MoveGrip: drag, or the arrow keys, Shift for bigger steps; the bar stays inside
+//            its parent and is pulled lightly to the edges and the middle)
 //   chunk 2: batch count, Run and its menu: `batch` runs are made by each Run, so a seed set to
 //            increment gives each its own number
 //   chunk 3: Cancel (destructive: its own chunk, 3u before it as between the others)
@@ -28,7 +29,9 @@ Item {
     property int batch: 1
     property int maxBatch: 99
     property bool queueOpen: false
-    property string dock: "top"     // "top" or "bottom"
+    // Where it floats: fractions (0 to 1) of the room it has in its parent, as MoveGrip keeps them.
+    // The default, centered at the top, is {0.5, 0}.
+    property point place: Qt.point(0.5, 0)
     property var menuItems: []      // the split menu's rows (CommandMenu `items`)
     readonly property real u: look.unit
 
@@ -37,13 +40,11 @@ Item {
     signal cancelRequested
     signal batchRequested(int value)
     signal queueToggled
-    signal dockRequested(string dock)
+    signal placeRequested(point place)
 
     // It fills what it floats over (a Loader does that anyway); only `box` is drawn and takes presses.
     anchors.fill: parent
-    // The bar sits centered, 4u from its edge at rest; while it is dragged it follows the pointer,
-    // then lets go at the nearer edge.
-    readonly property real restY: dock === "bottom" ? height - box.height - 4 * u : 4 * u
+    // It keeps 4u from the edges of its parent, as it did at rest before it moved freely.
     // The bar itself, for a caller that places something by it.
     readonly property Item surface: box
 
@@ -58,7 +59,7 @@ Item {
             }
     }
 
-    // Opens the split menu under (over, when docked at the bottom) the arrow.
+    // Opens the split menu under the arrow, or over it where there is no room under.
     property var splitMenu: null
     function openMenu() {
         bar.menuAboutToOpen() // the caller gives the rows as they are now
@@ -77,8 +78,8 @@ Item {
     }
     Rectangle {
         id: box
-        x: (bar.width - width) / 2
-        y: grab.active ? Math.max(0, Math.min(bar.height - height, bar.restY + grab.activeTranslation.y)) : bar.restY
+        x: grab.position.x
+        y: grab.position.y
         width: row.implicitWidth + 2 * bar.u
         height: 9 * bar.u
         radius: Math.min(bar.look.popupCorner, 14)
@@ -95,34 +96,29 @@ Item {
             Keys.onRightPressed: bar.step(true)
 
             // Chunk 1: the grip.
-            Item {
-                id: gripArea
+            MoveGrip {
+                id: grab
                 objectName: "runToolbarGrip"
-                width: 4 * bar.u
+                width: 6 * bar.u
                 height: 7 * bar.u
-                activeFocusOnTab: true
+                areaWidth: bar.width
+                areaHeight: bar.height
+                boxWidth: box.width
+                boxHeight: box.height
+                margin: 4 * bar.u
+                place: bar.place
+                step: 2 * bar.u
+                snapDistance: 3 * bar.u
+                onPlaceRequested: place => bar.placeRequested(place)
                 Accessible.role: Accessible.Button
                 Accessible.name: qsTr("Move the run toolbar")
-                Accessible.description: qsTr("Up and Down move it to the top or bottom edge")
+                Accessible.description: qsTr("The arrow keys move it, Shift for bigger steps")
                 Text {
                     anchors.centerIn: parent
                     text: "⋮⋮"
-                    color: gripArea.activeFocus ? bar.look.accent : bar.look.label
+                    color: grab.activeFocus ? bar.look.accent : bar.look.label
                     font.pixelSize: 14
                 }
-                DragHandler {
-                    id: grab
-                    target: null
-                    yAxis.enabled: true
-                    xAxis.enabled: false
-                    cursorShape: active ? Qt.ClosedHandCursor : Qt.OpenHandCursor
-                    property real last: 0
-                    onActiveTranslationChanged: last = activeTranslation.y
-                    onActiveChanged: if (!active)
-                        bar.dockRequested(bar.restY + last + box.height / 2 > bar.height / 2 ? "bottom" : "top")
-                }
-                Keys.onUpPressed: bar.dockRequested("top")
-                Keys.onDownPressed: bar.dockRequested("bottom")
             }
 
             // Chunk 2: batch count, Run and its menu.
@@ -187,6 +183,7 @@ Item {
             ViewButton {
                 objectName: "runCancelButton"
                 look: bar.look
+                danger: true
                 glyph: "x"
                 text: qsTr("Cancel")
                 tip: qsTr("Cancel the run")

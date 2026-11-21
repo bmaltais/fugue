@@ -267,6 +267,7 @@ light design tools lay cards on a gray table.
 | `menu-row` | `mix(popup, accent, k)`, k from .32 stepping down until the text reads at 4.5:1 | the same | the current row of a menu: hovered or on by key, one at a time, a submenu parent while open; menus stay inside the window (flip, shift, scroll when taller) |
 | `error-header` | `mix(header, red, .20)` | `mix(header, red, .14)` | a node in error |
 | `error-chip` | `mix(body, red, .14)` | `mix(body, red, .10)` | the error chip |
+| `danger-fill`, `danger-hover` | `mix(popup, red, k)`, k = .30 (hover .46), stepping down until `text` reads at 4.5:1 | the same | a cancel button that can act (the toolbar's Cancel, the queue rows' x): rest and hover/press; the focus ring is `error`; disabled it is the plain well at 40% |
 | `selected-row` | `mix(body, accent, .16)` | `mix(body, accent, .12)` | search highlight |
 | `frame-<role>` | `mix(canvas, role, .10)` | `mix(canvas, role, .12)` | frame fill (opaque) |
 | `frame-<role>-edge` | `mix(canvas, role, .35)` | same | frame edge |
@@ -533,15 +534,15 @@ A dashed edge in QML is a `Shape` with `strokeStyle: ShapePath.DashLine` around 
 - **Marquee**: 1 px `accent` edge, `accent` at 10% fill.
 - **Zoom and run pills**: like the breadcrumb, bottom left (zoom percent) and top right (run
   state: spinner, "Running", node and percent, "1 of 3").
-- **Run toolbar** (#60, ComfyUI's action bar): floating, centered, 4u from the top edge of the canvas (or
-  the bottom: dragged by its grip), 9u tall, `popup` fill, `hairline` edge, corner `min(R, 14)`, level 2
+- **Run toolbar** (#60, ComfyUI's action bar): floating, 4u at least from every edge of the canvas
+  (it starts centered at the top; a drag by its grip or the arrow keys moves it anywhere, #120), 9u tall, `popup` fill, `hairline` edge, corner `min(R, 14)`, level 2
   shadow like the pills. Buttons are 7u (`ViewButton`: the well fill, 14 px glyphs and `label` size text);
-  Run and its arrow are the accent (the one primary), the queue button takes `selected-row` while its panel is
+  Run and its arrow are the accent (the one primary), Cancel is `danger-fill` while it can cancel (a run going) and the plain well, dimmed, otherwise, the queue button takes `selected-row` while its panel is
   open. Chunks are 3u apart, 1u inside one; the grip is two columns of dots in `label` (the accent
   with the focus), then the batch count (−, ×N in `tnum`, +), Run and its arrow, Cancel, the queue button
   with the number of runs. A 2px accent bar along the lower edge shows the progress of the node going.
 - **Run queue panel** (#60): `popup` fill, `hairline` edge, corner `min(R, 14)`, level 3 shadow, 96u wide,
-  at most 80u tall (it scrolls), hung 2u under the toolbar (over it when docked at the bottom).
+  at most 80u tall (it scrolls), hung 2u under the toolbar, or over it where there is more room there, centered on the bar and kept inside the canvas.
   Section headings in `label`, caption size, DemiBold, with a hairline between the two sections. A row is
   9u: a 5u mark (a spinning `loader-circle` in the accent for the run going, the queue position in
   `label` for a waiting one; for a finished one `check`, `circle-x` in `error`, or `ban`), the name at label size

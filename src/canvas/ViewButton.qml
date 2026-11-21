@@ -18,18 +18,23 @@ Rectangle {
     property bool current: false
     property bool accented: true  // `current` shows in the accent; false in the quiet selection color
     property bool primary: false
+    // A cancel or a delete: a red tint while it can act (docs/canvas-look.md 11); disabled it is as calm as any button.
+    property bool danger: false
     signal tapped
 
     readonly property bool marked: primary || (current && accented)
+    readonly property bool alarmed: danger && enabled && !marked
     readonly property color ink: marked ? look.accentForeground : look.text
     implicitWidth: Math.max(content.implicitWidth + 4 * look.unit, implicitHeight)
     implicitHeight: 7 * look.unit
     width: implicitWidth
     height: implicitHeight
     radius: look.smallCorner
-    color: marked ? look.accent : current ? look.selectedRow : look.well
+    color: marked ? look.accent
+         : alarmed ? (hover.hovered || tap.pressed ? look.dangerHover : look.dangerFill)
+         : current ? look.selectedRow : look.well
     border.width: activeFocus ? 2 : 0
-    border.color: look.accent
+    border.color: alarmed ? look.error : look.accent
     activeFocusOnTab: enabled
     opacity: enabled ? 1 : 0.4
     Accessible.role: Accessible.Button
@@ -55,7 +60,10 @@ Rectangle {
             font.pixelSize: button.look.labelSize
         }
     }
-    TapHandler { onTapped: button.tapped() }
+    TapHandler {
+        id: tap
+        onTapped: button.tapped()
+    }
     HoverHandler {
         id: hover
         cursorShape: button.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
