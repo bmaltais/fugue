@@ -39,7 +39,7 @@ bool executable(const QString &path) {
 
 QStringList helperCapabilities() {
     return {QStringLiteral("text.encode"), QStringLiteral("latent.sample"), QStringLiteral("latent.decode"),
-            QStringLiteral("latent.encode")};
+            QStringLiteral("latent.encode"), QStringLiteral("image.upscale")};
 }
 
 bool hasNvidiaGpu() { return QFileInfo::exists(QStringLiteral("/proc/driver/nvidia/version")); }

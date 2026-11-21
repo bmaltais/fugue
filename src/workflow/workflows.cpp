@@ -1,4 +1,5 @@
 #include "workflow/workflows.h"
+#include "canvas/widget_edit.h"
 
 #include "engine/atomic_file.h"
 #include "engine/compiler.h"
@@ -150,6 +151,7 @@ Workflows::Workflows(CanvasModel *canvas, const Registry *registry, CommandRegis
     });
     m_images = new ImageInputs(m_canvas, m_registry, this);
     m_downloads = new ModelDownloads(this);
+    m_canvas->widgets()->setDownloads(m_downloads); // the model picker's catalog downloads share the line (#134)
     // The banner says what arrived, or what went wrong; what is still missing comes back.
     connect(m_downloads, &ModelDownloads::finished, this, [this](int arrived, const Errors &all) {
         refreshMissing(false);

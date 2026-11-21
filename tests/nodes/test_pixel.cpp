@@ -165,7 +165,7 @@ Taps tapsFor(const QString &method, int in, int out, int o) {
 
 Img resample(const Img &in, int W, int H, const QString &method, bool clamp = true) {
     Img src = in;
-    const bool premultiply = method == "lanczos" && in.c == 4; // PIL resizes RGBA premultiplied
+    const bool premultiply = method != "nearest" && in.c == 4; // premultiplied RGBA (ComfyUI resamples RGB only)
     if (premultiply)
         for (int y = 0; y < in.h; ++y)
             for (int x = 0; x < in.w; ++x)
@@ -302,6 +302,16 @@ class TestPixel : public QObject {
         return m_kernels.node("fugue/resize-megapixels")->run(context);
     }
 
+    // Runs Upscale Image; the whole result, so the width and height outputs can be read.
+    Result<Values> upscaled(const Img &in, double scale, const QString &method) {
+        NodeContext context;
+        context.node = "n";
+        context.inputs = {{"image", handleOf(in)}, {"scale", scale}, {"method", method}};
+        context.progress = [](double, const QString &, const QString &) {};
+        context.cancelled = [] { return false; };
+        return m_kernels.node("fugue/upscale-image")->run(context);
+    }
+
 private slots:
     void initTestCase() {
         initVips();
@@ -367,6 +377,52 @@ private slots:
         const Img out = resized(in, w, h, "stretch", method);
         const Img expected = resample(in, w, h, method);
         QVERIFY2(maxDiff(out, expected) <= float(tolerance), qPrintable(QString::number(maxDiff(out, expected))));
+    }
+
+    // ---- upscale image: Resize's resampling by a factor ----
+
+    void upscaleImageGivesResizesPixelsAtTheScaledSize_data() {
+        QTest::addColumn<QString>("method");
+        for (const char *m : {"nearest", "bilinear", "bicubic", "area", "lanczos"})
+            QTest::addRow("%s", m) << m;
+    }
+    void upscaleImageGivesResizesPixelsAtTheScaledSize() {
+        QFETCH(QString, method);
+        const Img in = synthetic(7, 5, 3, 9);
+        const Result<Values> r = upscaled(in, 2, method);
+        QVERIFY(r.ok());
+        const Img out = imgOf(r.value().value("image").media());
+        QCOMPARE(out.w, 14);
+        QCOMPARE(out.h, 10);
+        QCOMPARE(r.value().value("width").number(), 14.0);
+        QCOMPARE(r.value().value("height").number(), 10.0);
+        QVERIFY(maxDiff(out, resized(in, 14, 10, "stretch", method)) == 0.0f);
+    }
+    void upscaleImageRoundsEachSideHalfToEven() {
+        const Result<Values> r = upscaled(synthetic(7, 5, 3, 1), 1.5, "bilinear"); // 10.5 -> 10, 7.5 -> 8
+        QVERIFY(r.ok());
+        QCOMPARE(r.value().value("width").number(), 10.0);
+        QCOMPARE(r.value().value("height").number(), 8.0);
+    }
+    void upscaleImageRefusesASideAboveTheLimit() {
+        const Result<Values> r = upscaled(synthetic(4, 4, 3, 1), 16, "nearest"); // 64: fine
+        QVERIFY(r.ok());
+        Img wide{9000, 1, 3, std::vector<float>(size_t(9000) * 3, 0.5f)};
+        const Result<Values> big = upscaled(wide, 2, "nearest"); // 18000
+        QVERIFY(!big.ok());
+        QCOMPARE(big.errors().value(0).code, QString("value_out_of_range"));
+    }
+    void upscaleImageKeepsTransparentColorOutOfItsNeighbours() {
+        // A transparent red pixel beside an opaque green one: no red may reach the green side.
+        Img in{2, 1, 4, {1, 0, 0, 0, 0, 1, 0, 1}};
+        for (const char *method : {"bilinear", "bicubic", "lanczos", "area"}) {
+            const Img out = imgOf(upscaled(in, 4, method).value().value("image").media());
+            QVERIFY(out.w == 8);
+            for (int x = 0; x < out.w; ++x) {
+                if (out.at(x, 0, 3) > 0.01f)
+                    QVERIFY2(out.at(x, 0, 0) < 0.01f, method);
+            }
+        }
     }
 
     // ---- resize to megapixels: sizes from ComfyUI's formula, evaluated in Python

@@ -15,6 +15,9 @@
 //                        "video": OUT}                         "video" is written instead (below)
 //   {"op": "vae_encode", "image": IN, "latent": OUT}           PNG -> latent
 //   {"op": "generate",   "image": OUT, "video": OUT}           all stages in one call
+//   {"op": "upscale",    "image": IN, "output": OUT}           PNG -> PNG through an upscale model;
+//                        "context": {"model_path"}, "params": {"tile_size"} (no sd context: the
+//                        model is loaded for the call)
 //
 // A context of a video model (Wan) makes the same operations on video: the library's video
 // options (video_frames, fps, high_noise_*) and sd_generate_video; the latent is the clip's, and
@@ -39,7 +42,7 @@
 //   {"op": "shutdown"}         -> {}, then it exits; so does it when stdin closes
 //
 // The capability is the operation: text.encode (encode), latent.sample (sample),
-// latent.decode (decode), latent.encode (vae_encode). params.context is the request's
+// latent.decode (decode), latent.encode (vae_encode), image.upscale (upscale). params.context is the request's
 // "context" and the other params its "params"; inputs.conditioning, .latent, .init_latent and
 // .image ({"path"}) are its input files, and its outputs are written into output_dir as
 // conditioning.bin, latent.bin, image.png. Jobs run one at a time, in order. Unasked, it writes
@@ -353,12 +356,64 @@ private:
     std::list<Entry> m_entries;
 };
 
+// image.upscale (spec 8.1): one image through an upscale model (ESRGAN, MoSR), tiled by the
+// library's own tiling (params.tile_size, overlap a quarter) so a large image fits in memory. The
+// model is loaded for the job and freed after it: a file of tens of megabytes is read in well under
+// a second, and nothing stays resident between jobs. The library reports each tile through its
+// progress callback; it has no cancel of its own for an upscale, so a cancel is the provider's
+// (the helper is ended after the grace period, spec 9.6).
+json upscaleOnce(const json &request) {
+    const json context = request.value("context", json::object());
+    const json params = request.value("params", json::object());
+    const std::string model = context.value("model_path", "");
+    if (model.empty())
+        fail("input_invalid", "\"model_path\" is required for upscale");
+    Opt load(sd_upscaler_opt_create());
+    if (!load)
+        fail("out_of_memory", "cannot create the options");
+    check(sd_opt_set_string(load.get(), "model_path", model.c_str()), "model_path");
+    if (params.contains("tile_size"))
+        setOption(load.get(), "tile_size", params["tile_size"]);
+    sd_upscaler_t *upscaler = nullptr;
+    const sd_status_t created = sd_upscaler_create(load.get(), &upscaler);
+    if (created == SD_STATUS_LOAD_FAILED)
+        fail("model_unsupported", "cannot load the upscale model " + std::filesystem::path(model).filename().string() +
+                                      ": the engine runs ESRGAN (RRDBNet) 4x models and MoSR; a 2x model that unshuffles pixels (Real-ESRGAN x2plus) is not supported");
+    check(created, "loading the upscale model " + std::filesystem::path(model).filename().string());
+    std::unique_ptr<sd_upscaler_t, void (*)(sd_upscaler_t *)> owner(upscaler, sd_upscaler_free);
+    Opt options(sd_upscale_opt_create());
+    if (!options)
+        fail("out_of_memory", "cannot create the options");
+    check(sd_opt_set_tensor(options.get(), "image", loadImage(required(request, "image")).get()), "image");
+    sd_result_t *result = nullptr;
+    check(sd_upscale(upscaler, options.get(), &result), "upscale");
+    std::unique_ptr<sd_result_t, void (*)(sd_result_t *)> resultOwner(result, sd_result_free);
+    if (sd_result_get_image_count(result) == 0)
+        fail("helper_failed", "no image was made");
+    const std::string out = required(request, "output");
+    saveImage(sd_result_get_image(result, 0), out);
+    return {{"outputs", json::array({json{{"image", out}}})}, {"scale", sd_upscaler_get_scale(upscaler)}};
+}
+
+json runUpscale(const json &request, Contexts &contexts) {
+    try {
+        return upscaleOnce(request);
+    } catch (const Failure &failure) {
+        // The loaded models may hold the memory it needs: free them, and try once more.
+        if (failure.code != "out_of_memory" || !contexts.dropOthers(nullptr))
+            throw;
+        return upscaleOnce(request);
+    }
+}
+
 // `running` is told the context just before the generation (false from it: cancelled, do not
 // start) and null after it.
 json run(const json &request, Contexts &contexts, const std::function<bool(sd_ctx_t *)> &running = {}) {
     const std::string op = request.value("op", "");
+    if (op == "upscale")
+        return runUpscale(request, contexts);
     if (op != "encode" && op != "sample" && op != "decode" && op != "vae_encode" && op != "generate")
-        fail("input_invalid", "unknown op \"" + op + "\"; use encode, sample, decode, vae_encode or generate");
+        fail("input_invalid", "unknown op \"" + op + "\"; use encode, sample, decode, vae_encode, generate or upscale");
 
     // The context first: whether it makes video (Wan, ...) says which options and which call.
     sd_ctx_t *ctx = contexts.get(request.value("context", json::object()));
@@ -968,7 +1023,7 @@ public:
                         {"engine", "sdcpp"},
                         {"shares_filesystem", false},
                         {"backend", FUGUE_BACKEND},
-                        {"capabilities", {"text.encode", "latent.sample", "latent.decode", "latent.encode"}},
+                        {"capabilities", {"text.encode", "latent.sample", "latent.decode", "latent.encode", "image.upscale"}},
                         {"free_memory_bytes", availableMemory()},
                         {"host", hostName()}};
         });
@@ -1266,7 +1321,8 @@ private:
         static const std::map<std::string, std::string> ops{{"text.encode", "encode"},
                                                             {"latent.sample", "sample"},
                                                             {"latent.decode", "decode"},
-                                                            {"latent.encode", "vae_encode"}};
+                                                            {"latent.encode", "vae_encode"},
+                                                            {"image.upscale", "upscale"}};
         const std::string capability = message.value("capability", "");
         const auto op = ops.find(capability);
         if (op == ops.end())
@@ -1286,6 +1342,8 @@ private:
             request["conditioning"] = (dir / "conditioning.bin").string();
         else if (op->second == "sample" || op->second == "vae_encode")
             request["latent"] = (dir / "latent.bin").string();
+        else if (op->second == "upscale")
+            request["output"] = (dir / "image.png").string(); // "image" stays the input
         else {
             request["image"] = (dir / "image.png").string(); // a video model writes the video instead
             request["video"] = (dir / "video.y4m").string();

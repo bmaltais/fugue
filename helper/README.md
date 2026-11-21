@@ -116,6 +116,26 @@ with `"context": {"diffusion_model_path": "…LowNoise….gguf", "high_noise_dif
 "sample.guidance.txt_cfg", "sample.flow_shift"}`, the same in all three. A video has no `vae_encode`
 and cannot start from a latent; the helper answers `input_invalid`.
 
+## Upscaling (`image.upscale`)
+
+An image through an upscale model, with the library's own ESRGAN and MoSR upscaler (spec 8.1). No
+context is loaded: the model file is read for the job and freed after it, and the tiling is the
+library's (`tile_size`, a quarter of overlap), which reports each tile as progress. A request, one
+operation per process:
+
+```sh
+fugue-helper-cuda up.json   # {"op": "upscale", "image": "in.png", "output": "out.png",
+                            #  "context": {"model_path": "RealESRGAN_x4plus.safetensors"}, "params": {"tile_size": 512}}
+```
+
+The reply is `{"outputs": [{"image": "out.png"}], "scale": 4}`. Through `--serve` the capability is
+`image.upscale`, the input is `inputs.image` and the model is `params.context.model_path` (a handle
+over HTTP, like any `_path`). The input is 8-bit RGB; Fugue keeps an alpha channel itself. The
+supported models are ESRGAN RRDBNet (4x) and MoSR, as `.safetensors`, `.pth` or GGUF; a 2x model
+(Real-ESRGAN x2plus, whose first convolution takes 12 channels) is refused with `model_unsupported`.
+A cancel has no hook in the library for an upscale: Fugue ends the helper after its grace period.
+No change to the stage patch: the upscaler API is the library's own.
+
 ## Moving the pin
 
 The pin moves only on purpose (spec 8.10).

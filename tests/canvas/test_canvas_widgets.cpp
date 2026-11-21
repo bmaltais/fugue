@@ -11,8 +11,10 @@
 
 #include "canvas/widget_edit.h"
 #include "engine/hash.h"
+#include "engine/model_catalog.h"
 #include "canvas_app.h"
 #include "widget_fixture.h"
+#include "../engine/fake_http.h"
 #include "../engine/omarchy_fixture.h"
 
 using namespace fugue;
@@ -571,6 +573,89 @@ private slots:
         app.key(Qt::Key_Escape);
         app.key(Qt::Key_Escape); // then closes
         QTRY_VERIFY(!app.menuOpen());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // #134: the Load Upscale Model node's picker lists the catalog under "Download", a filter finds
+    // a model by its license or architecture, and picking one asks first: its license, its size and
+    // where it comes from. Cancel fetches nothing; Download fetches it, checks it, and fills the input.
+    void theUpscaleModelPickerOffersCatalogModelsAndAsksBeforeDownloading() {
+        QTemporaryDir models;
+        const QByteArray bytes(50000, 'u');
+        fugue::test::FakeHttpServer server;
+        QVERIFY(server.listen());
+        int requests = 0;
+        server.on("GET", "/m.safetensors", [&](const fugue::test::HttpRequest &) {
+            ++requests;
+            fugue::test::HttpResponse response;
+            response.body = bytes;
+            return response;
+        });
+        const auto entry = [&](const QString &id, const QString &license, bool commercial) {
+            return QJsonObject{{"id", id}, {"resource", "fugue/upscale-model"}, {"title", "Model " + id},
+                               {"description", "For " + id}, {"file", id + ".safetensors"},
+                               {"url", QString::fromLatin1(server.origin()) + "/m.safetensors"}, {"size", bytes.size()},
+                               {"sha256", sha256(bytes).mid(7)}, {"scale", 4}, {"architecture", "ESRGAN"},
+                               {"license", license}, {"commercial", commercial}};
+        };
+        WidgetApp app(R"({"fugue": 1,
+          "graph": {"nodes": {"load": {"type": "fugue/load-upscale-model", "version": "1.0.0"}}},
+          "layout": {"nodes": {"load": {"pos": [20, 20]}}, "view": {"center": [480, 340], "zoom": 1}}})");
+        app.model.widgets()->setModelRoots({models.path()});
+        app.model.widgets()->setModelSource([](const QString &, const QStringList &,
+                                               std::function<void(QList<WidgetEdit::Model>)> done) { done({}); });
+        app.model.widgets()->setCatalog(ModelCatalog::parse(
+            QJsonDocument(QJsonObject{{"catalog", 1}, {"models", QJsonArray{entry("alpha", "MIT", true), entry("beta", "CC-BY-NC-SA-4.0", false)}}})
+                .toJson(),
+            "test"));
+        QVERIFY(app.open());
+        app.click(app.in("load", "model"));
+        QTRY_VERIFY2(app.menuOpen(), qPrintable(app.warnings.join('\n')));
+        QObject *menu = app.popup("widgetMenu");
+        const auto rows = [&] {
+            QStringList out;
+            for (const QVariant &entry : menu->property("shown").toList()) {
+                const QVariantMap e = entry.toMap();
+                out << (e.value("heading").toBool() ? "# " : "") + e.value("text").toString();
+            }
+            return out;
+        };
+        QTRY_COMPARE(rows(), (QStringList{"# Download", "Model alpha", "Model beta", "Type a name…"}));
+        const QString shots = qEnvironmentVariable("FUGUE_REAL_SHOTS"); // as the real-folder test: a picture of each
+        if (!shots.isEmpty())
+            app.window->grabWindow().save(shots + "/upscale-picker.png");
+        app.type("nc"); // matches the license "CC-BY-NC-SA-4.0" in the keywords, not in the row's text
+        QTRY_COMPARE(rows(), (QStringList{"# Download", "Model beta", "Type a name…"}));
+        app.key(Qt::Key_Return);
+        QTRY_VERIFY(!app.menuOpen());
+        // The question names the license, says it is not for commercial use, and has fetched nothing.
+        QObject *ask = nullptr;
+        QTRY_VERIFY((ask = app.popup("downloadAsk")) != nullptr);
+        QCOMPARE(canvas_test::item(app.window->contentItem(), "downloadAskLicense")->property("text").toString(),
+                 QString("CC-BY-NC-SA-4.0, not for commercial use"));
+        QCOMPARE(canvas_test::item(app.window->contentItem(), "downloadAskHost")->property("text").toString(), QString("127.0.0.1"));
+        QCOMPARE(requests, 0);
+        if (!shots.isEmpty()) {
+            QTest::qWait(200);
+            app.window->grabWindow().save(shots + "/upscale-ask.png");
+        }
+        QMetaObject::invokeMethod(canvas_test::item(app.window->contentItem(), "downloadAskCancel"), "clicked");
+        QTRY_VERIFY(!app.popup("downloadAsk"));
+        QTest::qWait(100);
+        QCOMPARE(requests, 0);
+        QCOMPARE(app.stored("load", "model"), QJsonValue(QJsonValue::Undefined));
+
+        // Download: after the question's yes the file comes, and its handle is in the input.
+        app.click(app.in("load", "model"));
+        QTRY_VERIFY(app.menuOpen());
+        app.type("alpha");
+        app.key(Qt::Key_Return);
+        QTRY_VERIFY(app.popup("downloadAsk"));
+        QMetaObject::invokeMethod(canvas_test::item(app.window->contentItem(), "downloadAskOk"), "clicked");
+        QTRY_COMPARE_WITH_TIMEOUT(app.stored("load", "model").toObject().value("hash").toString(), sha256(bytes), 10000);
+        QCOMPARE(app.stored("load", "model").toObject().value("name").toString(), QString("alpha.safetensors"));
+        QCOMPARE(requests, 1);
+        QVERIFY(QFileInfo::exists(models.filePath("upscale_models/alpha.safetensors")));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 

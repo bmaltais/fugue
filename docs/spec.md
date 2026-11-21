@@ -1087,7 +1087,7 @@ A node asks for a capability, never a server.
 | `video.generate` | Text or first frame to video | M4 (#28) |
 | `audio.generate` | Music from a prompt and optional lyrics | M4 (#28) |
 | `text.generate` | LLM text, optionally with image input | M4 |
-| `image.upscale` | Model upscaling | M5 |
+| `image.upscale` | Model upscaling (#134): one image through an upscale model, tiled | M5 |
 | `text.encode`, `latent.sample`, `latent.decode`, `latent.encode` | Component-level generation; for a video model (Wan) the same capabilities make and decode a video latent (#105, [8.10](#810-gpu-memory-and-the-helper)) | M5 |
 
 Capability ids are open: a provider module can advertise a new one and a node pack can ask for it.
@@ -1105,8 +1105,11 @@ does not support and must report the values it actually used.
 | `image.edit` | `prompt` (the instruction), `images` (references), `width`, `height`, `steps`, `guidance`, `seed`, `model` | same |
 | `text.generate` | `prompt`, `system` (optional), `image` (optional, an input), `seed`, `max_tokens`, `temperature`, `thinking` (optional boolean), `model` | `text` (the answer, reasoning left out); used: `seed`, `model`, `engine` |
 
+| `image.upscale` | `model_path` (in `context`: the upscale model's file, or for a paired host a handle `{name, sha256, size}`), `tile_size` (pixels per tile side, tiles overlap by a quarter; an image no bigger than one is done whole), `image` (an input: an 8-bit RGB PNG) | `image` (the size times the model's scale); `scale` |
 | `video.generate` | `prompt`, `negative_prompt`, `width`, `height`, `video_frames`, `fps`, `steps`, `guidance`, `seed`, `image` (first frame, an input), `model` | `video` (a file); used: `seed`, `fps`, `frames`, `model`, `engine` |
 | `audio.generate` | `prompt` (what the song is like), `lyrics` (`[Instrumental]` for none, empty for the model's own), `duration` (seconds), `language`, `seed`, `model` | `audio` (a file) and `lyrics` (what was sung); used: `seed`, `model`, `engine` |
+
+`image.upscale` is the one helper capability with no sd context: the model is loaded for the job and freed after it (a file of tens of megabytes), so nothing stays resident. The library reports each tile as progress and has no cancel of its own for an upscale: a cancel ends the helper after the grace period ([9.6](#96-cancel)). The helper runs ESRGAN (RRDBNet, the 4x models) and MoSR; a model that unshuffles pixels to its input (Real-ESRGAN x2plus and the other 2x models) fails to load and is `node_failed` naming it.
 
 A video's size, rate and length are read from the file the provider wrote, not from the used values:
 a model rounds the frame count to what it can make. A model of a capability may report `min_duration`
@@ -1401,6 +1404,22 @@ reference. A new inference runtime is a new provider module.
   doubling from 2 s; 60 s of silence is a break); a part an earlier Fugue left is hashed and
   resumed; Cancel deletes the part. Free space is checked once the size is known. Files come one
   after another. Any https source is safe to take, since a wrong file is never kept.
+- Catalog (#134): Fugue ships lists of models a person can fetch, for any resource type
+  (`src/catalog/*.json`, compiled in; the person's own, and updates, are files in
+  `~/.local/share/fugue/catalog/*.json`, read after Fugue's, an entry of the same `id` replacing it).
+  An entry has the file `name`, an https `url` (http only to this machine), `size`, `sha256`,
+  and what a person reads before deciding: `title`, `description`, `scale`, `architecture`,
+  `license` (an SPDX id), `license_url`, `commercial` (false when the license forbids it),
+  `attribution`, `author` and the `source` page. An entry with no https URL, no 64-digit sha256,
+  no size, a file name that is not a plain relative path, or a repeated id is left out and
+  reported: a model whose hash was not checked has no place in a catalog. A resource input's
+  picker lists the entries of its type that are not on disk (none by that name, none with that
+  hash remembered) under "Download", after the files; a typed filter also reads their architecture,
+  license, author and tags. Picking one fetches nothing: a question names the license (in the error
+  color when it is not for commercial use), the size, the host, and the folder it goes in, and only
+  Download queues it, on the same line as every other download (the banner shows it), with the
+  checks above. When the file is in place its handle is the input's value, as for a file picked
+  from disk. Nothing downloads without that answer (6.7: nothing silent).
 - Fugue never modifies or deletes a model file.
 
 ### 8.10 GPU memory and the helper
@@ -2302,6 +2321,10 @@ merged, its `node.json` is the source of truth.
 | `fugue/edit-image` | `instruction`, `images` (list, 1 to the model's limit, else 4), `model` (optional), `steps` (optional), `seed` | `image`, `seed`, `width`, `height`, `model` | Capability `image.edit`; `instruction` is sent as its `prompt`. |
 | `fugue/resize` | `image`, `width`, `height`, `fit` (stretch, contain, cover), `method` (nearest, bilinear, bicubic, lanczos, area) | `image` | ComfyUI's resampling. `contain` fits inside the box without padding, so the result can be smaller than the box on one side. |
 | `fugue/resize-megapixels` | `image`, `megapixels` (default 1), `multiple` (advanced, default 16), `method` (as Resize, default lanczos) | `image`, `width`, `height` | ComfyUI's ImageScaleToTotalPixels: each side is `round(side * sqrt(megapixels * 1024 * 1024 / (W * H)) / multiple) * multiple`, rounded half to even, then stretched with Resize's resampling. No crop, so the shape can drift by the rounding. A side that rounds to 0 becomes `multiple`. `width` and `height` can feed an Empty Latent. |
+| `fugue/upscale-image` | `image`, `scale` (default 2, 0.1 to 16), `method` (as Resize, default lanczos) | `image`, `width`, `height` | #134. No model: Resize's resampling by a factor (ComfyUI's ImageScaleBy), each side `round(side * scale)` half to even. The same kernel as Resize, so the same pixels for the same size. To fit a size use Resize; for added detail, Upscale with Model. |
+| `fugue/upscale-with-model` | `image`, `model` (`fugue/upscale-model`), `tile` (advanced, default 512) | `image`, `width`, `height` | #134. Provider capability `image.upscale` ([8.1](#81-capabilities)). The size grows by the model's own scale. An alpha channel is resized with lanczos and put back (the helper takes RGB); a gray or 16-bit image is sent as 8-bit sRGB. A missing model file is `model_missing` on `model`. |
+| `fugue/load-upscale-model` | `model` (`fugue/upscale-model`, the picker) | `model` | #134. The handle its picker holds, passed on, so one choice feeds several upscalers. Upscale with Model has the same picker on its own input. |
+| `fugue/upscale-video` | `video`, `scale` (default 2, 0.1 to 8), `method` (as Resize, default lanczos) | `video` | #134. The video twin of Upscale Image: ffmpeg's `scale` filter on the streamed frames (never decoded here), each side rounded down to even; the frame rate, length and audio track (copied) are the input's; H.264 CRF 12 in Matroska (close to lossless, far smaller than FFV1 at the new size, so Save Video's encode is the only visible one). Progress is the output time over the length, and cancel kills ffmpeg. A pending trim or crop on the input is applied first. |
 | `fugue/crop` | `image`, `x`, `y`, `width`, `height` | `image` | Visual (#73): its face shows the picture arriving at `image` (the last run's, or a Load Image's file feeding it directly; "No picture yet" before) with the frame over it and the outside dimmed. Dragging inside the frame moves it, a corner or edge handle resizes it (Shift keeps the ratio, Alt resizes from the center); each drag writes `x`, `y`, `width` and `height` as one undo step, and typing the numbers moves the frame. A double click opens the crop window: the same frame at full size, the four numbers, an aspect lock (Free, Original, 1:1, 4:3, 3:2, 16:9, Turn), a rule-of-thirds grid while dragging; OK or Enter writes, Cancel or Escape leaves the node as it was. With one of the four linked the frame is not drawn. The frame is what the kernel cuts (the origin held inside, the size stopping at the edge). |
 | `fugue/brightness-contrast` | `image`, `brightness`, `contrast` | `image` | |
 | `fugue/blend` | `base`, `top`, `mode`, `opacity` | `image` | Modes at least: normal, multiply, screen, overlay, soft light, difference. Difference is \|base - top\| as in Photoshop, GIMP and CSS; subtract is base - top clamped, which ComfyUI calls difference. |
@@ -2383,7 +2406,8 @@ Decode; the templates `flux2-klein-9b-edit` (distilled: 4 steps, guidance 1),
 `flux2-klein-9b-edit-2-refs`, each with sample pictures. Checked on an RTX 3090: staged equals one `generate`
 run with the same reference, byte for byte. Not built: ComfyUI's KV-cache edit (FluxKVCache) and
 its outpaint template (pad, mask, color match). Then text
-encoders other than one LLM (FLUX.1's CLIP-L and T5, SD3), ControlNet, upscale with a model,
+encoders other than one LLM (FLUX.1's CLIP-L and T5, SD3), ControlNet, upscale of a video with a model
+(#138),
 hires fix as a group, inpaint models. A coarse Generate Image can later be rebuilt as a group of
 these.
 
@@ -2742,6 +2766,17 @@ Building M4 made these further choices.
 | `requires.packs` records one entry per pack id: the version of the pack holding the newest major of its nodes in use. A workflow that mixes two majors of one pack records the newer | 4.3 | medium |
 | The offer to move to the newer major is the compiler warning and the CLI; a canvas affordance (a badge and a "Move to 2.0" action) and templates that carry their own pack are follow-ups | 3.6, 11.10 | medium |
 | Research (#90): ComfyUI's V3 schema has no per-node version. Its `comfy_api` is versioned as a whole (`comfy_api.latest`, a pinned `comfy_api.v0_0_2`), so an extension chooses the API it was written to, which a node cannot do per node. It renames with `search_aliases` and `NodeReplace` (old node id to new) and marks `is_deprecated`; a custom node is pinned by the Manager and comfy-cli by snapshot of the whole environment (`save-snapshot`, `restore-snapshot`), not per node. Fugue records each node's version in the workflow and keeps older majors installed, which is the part ComfyUI leaves to snapshots. Read as documentation only (docs.comfy.org); ComfyUI, ComfyUI-Manager and comfy-cli are GPL-3.0, so no code was read or taken | 3.6, 6.6 | high |
+| Upscaling (#134), the engine: stable-diffusion.cpp's own ESRGAN upscaler in the helper (the `sd_upscaler` API at the pin: ESRGAN RRDBNet and MoSR, `.safetensors`, `.pth` and GGUF, `tile_size` with a quarter overlap, a progress call per tile, CUDA/Vulkan like the rest of the helper). Chosen over realesrgan-ncnn-vulkan (MIT, image-only, needs its own NCNN model conversion, a second runtime) and spandrel/ONNX Runtime (Python, or a second native runtime): the helper already ships, is out of process, on the card's backends, and is where memory is arbitrated (8.10). Verified here on an RTX 3090 (CUDA helper): Real-ESRGAN x4plus (both .safetensors and the original .pth), x4plus anime 6B, 4x-UltraSharp, 4xNomos8kSC, 4xNomosWebPhoto and 4xNomos2 HQ MoSR run; Real-ESRGAN x2plus, 2xHFA2kShallowESRGAN and 2xLexicaRRDBNet do not (their first convolution takes 12 channels, a pixel unshuffle the loader lacks: "tensor conv_first.weight has wrong shape [3,3,12,64]"), so no 2x model is in the catalog and the helper says why | 8.1, 8.10, 14.1 | high |
+| Upscaling, what ComfyUI does (docs.comfy.org UpscaleModelLoader and ImageUpscaleWithModel; the node source was read for the numbers): models from `models/upscale_models` (and `extra_model_paths.yaml`), a loader node apart from the upscale node, the image upscaled in tiles to avoid out-of-memory (tile 512, overlap 32, halved and retried on out-of-memory until 128; the docs give no numbers), `ImageScaleBy` with nearest-exact, bilinear, area, bicubic and lanczos. Matched: the folder name, the loader node, the five methods, tiles with overlap, a default tile of 512. Improved: the picker lists the catalog beside the files with the license before any download; progress per tile; Upscale Image is Resize's kernel, so one place does resampling. Not done: halve-and-retry (the helper frees its other models and retries once on out-of-memory; a smaller `tile` is the person's), the Ultimate SD Upscale and SUPIR families (diffusion refinement: later, as groups) | 14.1, 8.9 | medium-high |
+| Upscaling, apps read (docs and READMEs, no GPL source: Fooocus' code was not read): Upscayl ships a built-in list of Real-ESRGAN-style models and takes more from a custom-models repo (its docs pages for models returned 404, so its wiki was not read); chaiNNer loads a model file the person has, with OpenModelDB as the place to get them and no built-in download; InvokeAI's Upscale panel has a Spandrel model picker that, when none is installed, offers to open the Model Manager; Fooocus shows only 1.5x and 2x. Chosen: the model list in place (a filterable menu on the input, #84's), downloads from that same menu through the one download line, a license question first (none of them asks) | 8.9, 14.1 | medium |
+| Upscale models, formats and licenses (OpenModelDB data and each host's card): `.pth` is a pickle, `.safetensors` is not; the helper's loader reads a `.pth` without running its code, and the catalog prefers `.safetensors` where one exists (Real-ESRGAN x4plus from Comfy-Org's repackaging, the others from their authors' repos), the anime 6B being `.pth` only. Licenses: Real-ESRGAN models BSD-3-Clause (xinntao); the Phhofm Nomos models CC-BY-4.0 (credit the author; two cards say "CC-BY-0.4", a typo, their metadata says CC-BY-4.0); 4x-UltraSharp CC-BY-NC-SA-4.0, listed but marked not for commercial use. Left out (cannot be verified or are not wanted): Remacri (HF license `unknown`, OpenModelDB says CC-BY-NC-SA-4.0, not downloaded), 4x_NMKD-Siax (no stable URL), 4xLSDIR (only a branch-tip raw URL), IllustrationJaNai (Google Drive), AniScale-2 (CC-BY-NC-4.0), and every 2x model for the loader reason above. Every catalog hash and size was taken from the host (Hugging Face's LFS oid, OpenModelDB's sha256) and checked by downloading the file | 8.9 | high |
+| Catalog entries carry `commercial` and `attribution` flags beside the SPDX id, so the question can say "not for commercial use" in words (and in the error color) without a person decoding an id; Fugue does not enforce a license, it shows it | 8.9 | medium-high |
+| The catalog is a JSON file per resource type, compiled in, with the person's own and updates dropped in `~/.local/share/fugue/catalog/`; a remote update feed is a follow-up. The picker component is the existing model picker (InputWidget, WidgetMenu, WidgetPicker): any resource type with catalog entries gets "Download" and the question, with no change to the type | 8.9 | medium-high |
+| Upscale with Model sends RGB and puts the alpha back resized with lanczos (the helper takes three channels); it outputs the model's scale and no "scale to" input: Resize or Upscale Image after it sets the final size (3.7: simple nodes composed) | 14.1 | high |
+| Video upscaling research: per-frame image upscalers (Real-ESRGAN and the RRDB models) flicker, because each frame invents its own detail; video models use a temporal window (RealBasicVSR and BasicVSR++: Apache-2.0 code, checkpoints on Dropbox/Drive/OpenMMLab with no stated license; RelayVSR and SeedVR2: Apache-2.0, in stable-diffusion.cpp's `vid_upscale`, heavy, each with its own VAE and diffusion model, SeedVR2 marked experimental there). Video2X (AGPL-3.0) and realesrgan-ncnn-vulkan (MIT) are per-frame ffmpeg pipelines. ComfyUI's video upscaling is a frames node pair (VideoHelperSuite) plus Upscale Image per frame. Chosen: a separate Upscale Video node (an output port has one type) sharing the picker and kernel family; the no-model one is ffmpeg's `scale` on the stream, with no frame round trip; the model one (#138) streams frames through the helper in chunks with the model kept loaded | 14.1 | medium-high |
+| Video with a model is not built in #134: the helper loads the model per job, a frame per job would reload it, so it needs the helper to keep its upscaler loaded between jobs and take a folder of frames (or a chunk) per job, with ffmpeg decoding in chunks and encoding the results, one pass for audio. Designed in #138 rather than shipped half-working; for flicker, RelayVSR and SeedVR2 are the engine's video models, a separate decision | 14.1 | high |
+| Resize's resampling premultiplies RGBA for every method but nearest (it did for lanczos only, as PIL does): a transparent pixel's color no longer leaks into its neighbours when scaling up or down. ComfyUI resamples RGB only, so there is no reference to differ from | 14.1 | high |
+| The video twin encodes H.264 CRF 12 in Matroska, not the engine's FFV1: FFV1 at 4 times the pixels is gigabytes for a short clip, and CRF 12 is visually lossless; Save Video's own encode (CRF 18) follows | 14.1 | medium |
 
 ## Appendix B: issue to section map
 
@@ -2788,3 +2823,4 @@ Building M4 made these further choices.
 | #33 component nodes | 14.3, 2.5, 2.6, 8.9 |
 | #34 CI recipe | 17 |
 | #105 video stages in the helper and nodes | 8.10, 8.1, 2.6, 14.3 |
+| #134 upscaling: Upscale Image and Video, Upscale with Model, the model catalog and picker downloads | 8.1, 8.9, 14.1, Appendix A |

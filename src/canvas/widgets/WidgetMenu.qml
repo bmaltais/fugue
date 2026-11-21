@@ -6,13 +6,13 @@ import ".."
 import "../../menu/placement.js" as Placement
 
 // The list a choice, seed or model widget opens: entries of {text, value, detail, note,
-// checked, enabled, heading, keep, dim}. A `heading` names the group of entries below it; a
+// checked, enabled, heading, keep, dim, keywords}. A `heading` names the group of entries below it; a
 // `note` is a second, smaller line; a `dim` entry can be chosen but reads as one the list
 // advises against. Modal, so the window's keys sleep while it is open; Up and Down move
 // between the entries that can be chosen, Enter chooses, Escape or a press outside closes it.
 //
 // `searchable` puts a search field on top, holding the keys (#84): what is typed filters the
-// entries to those with every word in their text, detail or heading, case aside; a heading
+// entries to those with every word in their text, detail, keywords or heading, case aside; a heading
 // stays while an entry under it does, an entry with `keep` (an action such as "Type a name…")
 // always does. Escape empties the field before it closes the menu.
 Popup {
@@ -244,7 +244,7 @@ Popup {
                 headingShown = false
                 continue
             }
-            const said = [e.text, e.detail, heading ? heading.text : ""].join(" ").toLowerCase()
+            const said = [e.text, e.detail, heading ? heading.text : "", e.keywords].join(" ").toLowerCase()
             const fits = e.keep !== true && e.value !== undefined && words.every(w => said.includes(w))
             if (!fits && e.keep !== true)
                 continue

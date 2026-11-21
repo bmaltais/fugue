@@ -1,9 +1,11 @@
 #include "canvas/widget_edit.h"
 #include "workflow/image_inputs.h"
+#include "workflow/model_downloads.h"
 
 #include "canvas/canvas_model.h"
 #include "canvas/input_links.h"
 #include "engine/file_hashes.h"
+#include "engine/model_download.h"
 #include "engine/model_library.h"
 #include "engine/registry.h"
 #include "engine/settings.h"
@@ -518,6 +520,9 @@ void WidgetEdit::requestModels(const QString &node, const QString &input) {
     const PortType &portType = target(node, input).spec->type.type;
     const QString type = portType.toString();
     m_diskModels.insert(key, listDiskModels(library(), portType, hashes()));
+    if (!m_catalogSet)
+        m_catalog = ModelCatalog::load(); // read each time: a file dropped in the catalog folder shows
+    m_catalogMissing.insert(key, m_catalog.missing(type, library(), portType, hashes()));
     requestFits(node, input);
     if (!m_source)
         m_source = listOfferedModels;
@@ -683,6 +688,14 @@ QVariantList WidgetEdit::models(const QString &node, const QString &input) const
         }
         list.append(entry);
     }
+    for (const CatalogModel &model : m_catalogMissing.value(key))
+        list.append(QVariantMap{{"catalog", true},
+                                {"id", model.id},
+                                {"title", model.title},
+                                {"detail", model.summary()},
+                                {"size", model.size},
+                                {"keywords", model.keywords()},
+                                {"note", model.description}});
     return list;
 }
 
@@ -768,6 +781,84 @@ QString WidgetEdit::setDiskModel(const QString &node, const QString &input, cons
     ++m_hashRevision;
     emit hashingChanged();
     return {};
+}
+
+void WidgetEdit::setDownloads(ModelDownloads *downloads) {
+    m_downloads = downloads;
+    if (downloads)
+        connect(downloads, &ModelDownloads::finished, this, [this] { downloadsFinished(); });
+}
+
+QVariantMap WidgetEdit::catalogInfo(const QString &node, const QString &input, const QString &id) const {
+    const Target t = target(node, input);
+    const CatalogModel *model = t.widget == QLatin1String("model") ? m_catalog.find(id) : nullptr;
+    if (!model || model->resource != t.spec->type.type.toString())
+        return {};
+    return QVariantMap{{"id", model->id},
+                       {"title", model->title},
+                       {"description", model->description},
+                       {"scale", model->scale},
+                       {"architecture", model->architecture},
+                       {"license", model->license},
+                       {"licenseLine", licenseLine(*model)},
+                       {"licenseUrl", model->licenseUrl},
+                       {"commercial", model->commercial},
+                       {"attribution", model->attribution},
+                       {"author", model->author},
+                       {"source", model->source},
+                       {"url", model->url},
+                       {"host", QUrl(model->url).host()},
+                       {"size", model->size},
+                       {"sizeText", ModelDownloads::sizeText(model->size)},
+                       {"folder", library().downloadFolder(t.spec->type.type)},
+                       {"file", model->file}};
+}
+
+QString WidgetEdit::downloadCatalogModel(const QString &node, const QString &input, const QString &id) {
+    const Target t = target(node, input);
+    if (t.widget != QLatin1String("model"))
+        return tr("%1 cannot be edited here.").arg(input);
+    if (m_canvas->scopeDocument().graph.nodes.value(node).inputs.value(input).kind() == InputValue::Kind::Link)
+        return tr("%1 is linked; take the link out to pick a model.").arg(label(*t.spec));
+    const CatalogModel *model = m_catalog.find(id);
+    if (!model || model->resource != t.spec->type.type.toString())
+        return tr("This model is not in the catalog for this input.");
+    if (!m_downloads)
+        return tr("Downloads are not available here.");
+    ModelLibrary lib = library();
+    lib.fitDownloadRoot({t.spec->type.type});
+    MissingModel wanted;
+    wanted.handle = model->handle();
+    wanted.source = model->url;
+    wanted.size = model->size;
+    wanted.folder = lib.downloadFolder(t.spec->type.type);
+    const Result<DownloadTarget> planned = planDownload(lib, wanted);
+    if (!planned)
+        return planned.error().message;
+    m_downloading.append(Download{m_canvas->scopePath(), node, input, planned->path, model->resource, model->file,
+                                  QStringLiteral("sha256:") + model->sha256});
+    m_downloads->add({planned.value()}, QStringLiteral("pick"));
+    return {};
+}
+
+void WidgetEdit::downloadsFinished() {
+    // What came: the file is in place with its hash remembered (a download keeps nothing else).
+    // The input gets it as a picked file does, at once when its level is shown, else when it is.
+    for (const Download &download : std::as_const(m_downloading)) {
+        if (!QFileInfo::exists(download.path) || hashes().known(download.path) != download.hash)
+            continue;
+        Pick pick;
+        pick.scope = download.scope;
+        pick.node = download.node;
+        pick.input = download.input;
+        pick.path = download.path;
+        pick.resource = download.resource;
+        pick.name = download.name;
+        pick.hash = download.hash;
+        m_picks.append(pick);
+    }
+    m_downloading.clear();
+    storePicks();
 }
 
 void WidgetEdit::startHashing(const QString &path) {
