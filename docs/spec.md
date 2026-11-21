@@ -2701,7 +2701,7 @@ FLUX.1 Fill staged picture differs from the single run's.
 
 ### 14.4 Masking and inpainting (#167)
 
-Designed; the staged path in the helper and the nodes is built (#173) and the nodes of #171 are built; the parts are the issues at the end of this section, and each part says here what has
+Designed; the staged path in the helper and the nodes is built (#173) and the nodes of #171 and the mask editor (#172) are built; the parts are the issues at the end of this section, and each part says here what has
 shipped. The research and each choice with its confidence are in Appendix A (the rows marked
 #167); the person's guide is [masking.md](masking.md).
 

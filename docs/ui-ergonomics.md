@@ -34,12 +34,12 @@ Done when every added or moved control has a **Decisions** row that names the ru
 - Rule: canvas-look §4 and spec Appendix A. A port inside the corner square starts a wire.
 - Acceptance: at zoom 1, a left press at a port center that lies inside the corner square starts a link and does not call `beginResize`. A press in that square with no port still resizes.
 
-### Mask editor and the Paint mask button (#167, designed in spec 14.4)
+### Paint mask button on a node's face (#167, #174; the editor itself is built, see Decisions)
 
-- Files to come: `src/canvas/MaskEditor.qml` (in `LargeViewDialog`), `src/canvas/MaskNodeView.qml` (the face), `src/canvas/PortDot.qml` (the hollow mask port).
-- Planned: the bar holds the tools (Brush, Eraser, Lasso, Rectangle), then size and hardness, then the overlay toggle; one chunk each, 2u between chunks; then Fit and 100%, then close, as the crop window's bar. Clear is destructive. It sits in its own chunk at the end of the tools, it is undoable in the editor, and Cancel drops the whole session. Footer: Cancel, then OK (the primary, highlighted). On the face: a Paint mask `ViewButton` (28px) under the picture.
-- Rules to meet: Floor (every bar button 28px; the brush is the pointer, so it has no target size), Primary (OK), Destructive (Clear), Learned place (Load Image's double click keeps the large view; ComfyUI's Alt+drag for size and hardness), Posture (a transient dialog; the face keeps the canvas's density).
-- Acceptance: the change that builds the editor moves this row to **Decisions** with the measured sizes and offscreen screenshots.
+- Files to come: `src/canvas/MaskNodeView.qml` (the face), `src/canvas/PortDot.qml` (the hollow mask port).
+- Planned: a Paint mask `ViewButton` (28px) under the picture; a double click on Paint Mask's picture opens the editor (`MaskEditor`, Components), Load Image's double click keeps the large view.
+- Rules to meet: Floor (28px), Learned place (Load Image's double click), Posture (the face keeps the canvas's density).
+- Acceptance: the change that builds the face moves this row to **Decisions**.
 
 ## Not scheduled
 
@@ -64,6 +64,17 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 - New: hiding leaves the edge and the handle. In after 120 ms of pointer on them (a press at once), out after 400 ms off them, on Escape, after a command or when its menu closes; 170 ms, ease out, on `y` not on the layout, over the canvas: the canvas keeps its size and place while it slides.
 - Why: a way back that needs no hidden knowledge (the handle is the cue); the edge is the infinitely deep Fitts target (the pointer pushed to the window's top lands on it), the dwell keeps a passing pointer from opening it, the longer out delay keeps it from flickering while the pointer travels to a menu.
 - Rule: Floor (the handle is 28px tall, 36px wide; the edge is a 4px strip but a long edge target: its exception is that the window edge stops the pointer, and the handle, the press target, meets the floor). Posture: the canvas is sovereign, so the bar overlays it and never resizes it; the handle hangs only 24px into the canvas's corner and the breadcrumb steps aside. Gaps: 1.5u from the strip or window side. Learned place: the menu titles and their order did not change.
+
+### 2026-11-21 mask editor (#172)
+
+- Control: `src/canvas/MaskEditor.qml` (a `LargeViewDialog`, `name: "mask"`; viewer `CompareView` single mode; `MaskLayer` over it; the pointer is one `MouseArea` over both).
+- Old: none (the Open row "Mask editor and the Paint mask button", spec 14.4).
+- New: the bar, left to right, in chunks (1u inside, 2u between, the dialog's own spacer): tools Brush, Eraser, Lasso, Rectangle (28px glyph buttons, the current one in the accent); Size and Hardness sliders (26u = 104px wide, 28px tall, a fill from the left, label left and value right; a press or drag sets, Left and Right step, Shift for ten, the wheel); Undo and Redo (dimmed when none); Invert, Fill, Mask alone (the eye); then Clear alone at the end (danger tint, 4u gap before it where the others are 1u); then the dialog's Fit, 100% and close. Footer: a one-line key reminder (the error in the error color), Cancel then OK (the primary, highlighted). Measured at text size 12: every bar control 28px tall; glyph buttons 28 x 28.
+- Pointer: left paints, erases, draws a shape or (Space held) pans; a middle drag pans; the wheel zooms at the pointer; the brush has no target size, its circle (the size, an inner ring for the hardness, a dot) is the cursor, drawn white over a dark ring so it reads on any picture, and the system cursor is hidden over the picture for the brush and a cross for the shapes. Alt+drag with the brush sizes (left and right, the ring's diameter follows the pointer 1:1) and sets hardness (up is harder, 200px for the whole range); Alt on a Lasso or Rectangle release erases. A tablet's pressure scales the size.
+- Keys: B, E, X (swap), L, R, I, H, Shift+Delete, `[` `]` (size, x1.25), Shift with them (hardness, 0.1), Ctrl+Z, Ctrl+Shift+Z or Ctrl+Y; the dialog's 0, 1, + and -, Enter (OK), Escape (Cancel). `LargeViewDialog` gained `keyPressed` and `keyReleased` for a key it did not take. Every bar control takes Tab focus (ring in the accent), Enter and Space press a button.
+- Look: the mask is the accent at 50% over the picture; H draws it white on black, the picture hidden; both follow light and dark themes (tokens only). Sizes are in picture pixels, so zoom never changes what a stroke covers. Screenshots: `FUGUE_SHOT_DIR=... test_canvas_mask_editor savesTheEditorOnLightAndDarkThemes`.
+- Rules met: Floor (28px; the sliders too), Primary (OK, the only highlighted button), Destructive (Clear in its own chunk at the end of the tools, twice the gap, undoable; Cancel drops the whole session), Gaps, Learned place (ComfyUI's Alt+drag; Load Image's double click untouched), Posture (a transient dialog).
+- Open choices (owner): the Fill button fills the whole picture (the complement of Clear; no flood fill); the one eye toggle is "mask alone", there is no separate overlay-off.
 
 ### 2026-11-20 main window, Run menu, node search
 
@@ -198,10 +209,17 @@ Reusable controls other surfaces may call. A component names its input and outpu
 ### Large view and crop frame (#73)
 
 - Files: `src/canvas/LargeViewDialog.qml` (a modal frame with a bar: its `tools`, Fit, 100%, close; the `body` and an optional `footer`; keys 0, 1, + and -, Enter as `confirm`), `ViewButton.qml` (its 28px button), `CropFrame.qml` (the frame over any picture), `CropView.qml` (CompareView in its `single` mode with a CropFrame), `CropGeometry` (`src/canvas/crop_qml.h`, the geometry for QML over `src/engine/crop_geometry.h`). Glue: `ImageDialog.qml`, `CropDialog.qml`, `CropNodeView.qml`; C++ `CanvasModel::cropRect`, `setCropRect`, `pictureAt`, `CanvasRuns::imageUrl`.
-- LargeViewDialog input: `look`, `name` (the prefix of the objectNames of its bar), `zoomable` (anything with `fit()`, `actualSize()`, `zoomAt()`, `actual`, `zoom`), `tools`, `footer`, the viewer as its child. Output: `confirm`; it closes itself.
+- LargeViewDialog input: `look`, `name` (the prefix of the objectNames of its bar), `zoomable` (anything with `fit()`, `actualSize()`, `zoomAt()`, `actual`, `zoom`), `tools`, `footer`, the viewer as its child. Output: `confirm`; `keyPressed(event)` and `keyReleased(event)` for a key it did not take (the mask editor's); it closes itself.
 - CropFrame input: `imageSize`, `originX`, `originY`, `zoom` (where the picture's corner is in the frame's coordinates, and view units per pixel), `rect` ({x, y, width, height}), `ratio` (0 = free), `editable`. Output: `committed(rect)` at the end of a drag, `changing(rect)`, `pressed`, `activated`. It takes only presses on its handles and inside the frame.
 - CompareView `mode: "single"` is one picture with the wheel, drag, Fit and 100%; `showZoom` adds the zoom to the size notice; `imageX`, `imageY` and `imageScale` give a picture's place for what is drawn over it.
 - A new caller: a `LargeViewDialog` with a viewer inside, or a `CropView` with the picture, its pixel size, a `rect` and `onCommitted`; the geometry is `CropGeometry` or `crop::` (tests: `tests/engine/test_crop_geometry.cpp`).
+
+### Mask editor (#172)
+
+- Files: `src/canvas/MaskEditor.qml` (the dialog), `src/canvas/mask_layer.{h,cpp}` (`MaskLayer`, a QQuickItem: 256px texture cells, only the cells a stroke touched are uploaded), `src/engine/mask_paint.{h,cpp}` (the pure core: dabs, shapes, invert, clear, fill, undo by 64px tiles, PNG and scaling; tests `tests/engine/test_mask_paint.cpp`, `tests/canvas/test_canvas_mask_editor.cpp`).
+- Input: `imageSource` (url), `imageSize` (the picture's pixels), `maskPath` (a stored 8-bit gray PNG, or empty; another size is scaled to the picture), `look`; `stem` (the saved file's name start; the picture's plus `-mask`), `folder` (default: the inputs folder). Then `open()`; each open starts from `maskPath`.
+- Output: `saved(path)` on OK or Enter: the mask stored by `storeImage` as `<stem>-<10 hex>.png` (the same mask is one file), or an empty path when nothing is painted (no mask); `canceled()` on Cancel, the close button or Escape. It knows nothing of nodes.
+- A new caller: a `MaskEditor` with `look: App.theme.look`, set the picture and the mask, `open()`, `onSaved: path => ...` to write the path where it keeps the mask (one canvas undo step for the session), `onCanceled` for nothing.
 
 ### Compare view (#62)
 
