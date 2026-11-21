@@ -143,6 +143,7 @@ QtObject {
                 onCommitted: text => folder.host.apply(folder.host.model.set(folder.key, text))
             }
             SmallButton {
+                objectName: folder.key + "-choose"
                 text: qsTr("Choose…")
                 onClicked: folder.host.pickFolder(url => folder.host.apply(folder.host.model.set(folder.key, url)))
             }

@@ -161,6 +161,19 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // Choose… opens the folder dialog. It once called the callback instead of the dialog (a line starting
+    // with "(" continued the one above), which warned "Property 'open' of object false is not a function".
+    void chooseOpensTheFolderDialog() {
+        App app(load(emptyDoc));
+        QVERIFY(app.open());
+        app.commands.trigger("app.settings");
+        QTRY_VERIFY(panelOpen(app.window));
+        click(app, NEED("settingsPage-1"));
+        click(app, NEED("output_folder-choose"));
+        QTRY_VERIFY(app.window->findChild<QObject *>("settingsFolderDialog"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     // #86: an extra model folder says what it holds: what its files say, or a kind set here.
     void aModelFolderShowsWhatItHoldsAndTakesAKind() {
         QTemporaryDir loras;
