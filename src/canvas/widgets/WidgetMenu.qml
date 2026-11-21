@@ -130,7 +130,7 @@ Popup {
         focus: !menu.searchable
         clip: true
         // The width the scroll bar covers, kept clear by the rows' right-hand text.
-        readonly property real edge: ScrollBar.vertical.visible ? ScrollBar.vertical.width : 0
+        readonly property real edge: (ScrollBar.vertical as FugueScrollBar).inset
         keyNavigationEnabled: true
         boundsBehavior: Flickable.StopAtBounds
         ScrollBar.vertical: FugueScrollBar { look: menu.look }

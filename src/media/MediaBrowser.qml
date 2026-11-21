@@ -38,7 +38,7 @@ FocusScope {
     readonly property real u: look.unit
     readonly property real cell: 24 * u // 96px
     readonly property real strip: 18 * u
-    readonly property int columns: Math.max(1, Math.floor((width - u) / (cell + u)))
+    readonly property int columns: Math.max(1, Math.floor((width - u - 10) / (cell + u)))
     // The grid's rows: a heading for each group, then the item indexes, `columns` to a row.
     readonly property var gridRows: {
         const out = []
@@ -329,7 +329,7 @@ FocusScope {
                     required property int index
                     objectName: "mediaStripCell-" + index
                     width: root.strip - 2 * root.u
-                    height: root.strip - 2 * root.u
+                    height: root.strip - 2 * root.u - (ListView.view.ScrollBar.horizontal as FugueScrollBar).inset
                     look: root.look
                     item: modelData
                     current: index === root.currentIndex
@@ -356,7 +356,7 @@ FocusScope {
             ScrollBar.vertical: FugueScrollBar { look: root.look }
             Column {
                 id: infoColumn
-                width: infoBox.width
+                width: infoBox.width - (infoBox.ScrollBar.vertical as FugueScrollBar).inset
                 spacing: root.u / 2
                 Repeater {
                     model: root.details

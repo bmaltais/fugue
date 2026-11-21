@@ -16,6 +16,7 @@
 #include "widget_fixture.h"
 #include "../engine/fake_http.h"
 #include "../engine/omarchy_fixture.h"
+#include "../scroll_checks.h"
 #include "../window_grab.h"
 
 using namespace fugue;
@@ -610,6 +611,11 @@ private slots:
         const QPointF below = bar->mapToScene(QPointF(bar->width() / 2, bar->height() - 4));
         QTest::mouseClick(app.window, Qt::LeftButton, {}, below.toPoint());
         QTRY_VERIFY(list->property("contentY").toDouble() > 0);
+        // No row's text runs under the bar, and the wheel and the thumb scroll the list.
+        const QString under = scroll_checks::contentUnderBar(list, bar);
+        QVERIFY2(under.isEmpty(), qPrintable(under));
+        const QString failed = scroll_checks::scrollsByWheelAndThumb(app.window, list);
+        QVERIFY2(failed.isEmpty(), qPrintable(failed));
         app.key(Qt::Key_Escape);
         app.key(Qt::Key_Escape);
         QTRY_VERIFY(!app.menuOpen());

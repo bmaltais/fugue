@@ -321,12 +321,13 @@ Item {
             }
 
             ScrollView {
+                id: faceScroll
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
                 ScrollBar.vertical: FugueScrollBar { look: root.look }
                 ColumnLayout {
-                    width: editor.availableWidth
+                    width: faceScroll.availableWidth - (faceScroll.ScrollBar.vertical as FugueScrollBar).inset
                     spacing: 2 * root.look.unit
 
                     Label {

@@ -165,7 +165,7 @@ Item {
         ScrollBar.vertical: FugueScrollBar { look: root.look }
         WheelHandler {
             onWheel: event => {
-                list.contentY = Math.max(0, Math.min(list.contentHeight - list.height, list.contentY - event.angleDelta.y / 2))
+                list.contentY = Math.max(0, Math.min(list.contentHeight - list.height, list.contentY - (event.pixelDelta.y !== 0 ? event.pixelDelta.y : event.angleDelta.y / 2)))
             }
         }
         Accessible.role: Accessible.List
@@ -215,7 +215,7 @@ Item {
             height: 7 * root.u
             Rectangle {
                 x: root.u
-                width: parent.width - 2 * root.u - (list.ScrollBar.vertical.visible ? list.ScrollBar.vertical.width : 0)
+                width: parent.width - 2 * root.u - (list.ScrollBar.vertical as FugueScrollBar).inset
                 height: parent.height
                 radius: root.look.smallCorner
                 color: list.activeFocus && list.currentIndex === row.index ? root.look.selectedRow
@@ -243,7 +243,7 @@ Item {
             Text {
                 id: countText
                 visible: row.category
-                x: parent.width - width - 3 * root.u - (list.ScrollBar.vertical.visible ? list.ScrollBar.vertical.width : 0)
+                x: parent.width - width - 3 * root.u - (list.ScrollBar.vertical as FugueScrollBar).inset
                 anchors.verticalCenter: parent.verticalCenter
                 text: row.category ? row.modelData.count : ""
                 color: root.look.label
@@ -254,7 +254,7 @@ Item {
             Loader {
                 id: trash
                 active: row.modelData.library === true
-                x: parent.width - root.u - width - (list.ScrollBar.vertical.visible ? list.ScrollBar.vertical.width : 0)
+                x: parent.width - root.u - width - (list.ScrollBar.vertical as FugueScrollBar).inset
                 anchors.verticalCenter: parent.verticalCenter
                 width: 7 * root.u
                 height: width

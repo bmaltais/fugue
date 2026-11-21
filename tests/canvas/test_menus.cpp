@@ -16,6 +16,7 @@
 #include "canvas_app.h"
 #include "menu/menu_commands.h"
 #include "menu/menus.h"
+#include "../scroll_checks.h"
 #include "../window_grab.h"
 
 using namespace fugue;
@@ -558,6 +559,29 @@ private slots:
         app.key(Qt::Key_Escape);
         QTRY_VERIFY(allClosed(app.window));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // The Shortcuts overlay: its scroll bar overlays the view's edge, and the key chips of the right
+    // column (the last key of Ctrl+N, Delete) must not run under it; the wheel and the thumb scroll it.
+    void theShortcutsOverlayKeepsItsKeyChipsClearOfTheScrollBar() {
+        App app(load(framed));
+        QVERIFY(app.open());
+        QVERIFY(app.commands.trigger("app.shortcuts"));
+        QQuickItem *list = nullptr;
+        QTRY_VERIFY((list = find(app.window, "commandList")));
+        QQuickItem *bar = scroll_checks::barOf(list);
+        QVERIFY(bar);
+        QTRY_VERIFY2(bar->isVisible() && list->height() > 100, qPrintable(QString::number(list->height())));
+        QTest::qWait(150); // the dialog settles its width
+        // Not a check: with FUGUE_SHOT_DIR set, saves the window with the overlay open.
+        if (const QByteArray dir = qgetenv("FUGUE_SHOT_DIR"); !dir.isEmpty()) {
+            QTest::qWait(150);
+            QVERIFY(test_support::grab(app.window).save(QString::fromUtf8(dir) + "/shortcuts-overlay.png"));
+        }
+        const QString under = scroll_checks::contentUnderBar(list, bar);
+        QVERIFY2(under.isEmpty(), qPrintable(under));
+        const QString failed = scroll_checks::scrollsByWheelAndThumb(app.window, list);
+        QVERIFY2(failed.isEmpty(), qPrintable(failed));
     }
 
     void alignAndDistributeComeFromTheNodeMenuAsOneStepEach() {

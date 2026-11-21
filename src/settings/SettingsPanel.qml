@@ -138,7 +138,7 @@ Popup {
                     id: pageColumn
                     x: 6 * panel.u
                     y: 6 * panel.u
-                    width: scroller.width - 12 * panel.u
+                    width: scroller.width - 12 * panel.u - (scroller.ScrollBar.vertical as FugueScrollBar).inset
                     spacing: 6 * panel.u
 
                     // settings.json cannot be used as it is.

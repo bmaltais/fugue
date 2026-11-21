@@ -281,7 +281,7 @@ Item {
                 ScrollBar.vertical: FugueScrollBar { look: root.look }
                 Row {
                     id: columnsRow
-                    width: commandList.width
+                    width: commandList.width - (commandList.ScrollBar.vertical as FugueScrollBar).inset
                     spacing: 9 * root.u
                     Repeater {
                         model: help.columns

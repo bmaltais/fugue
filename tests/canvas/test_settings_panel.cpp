@@ -7,6 +7,7 @@
 #include <QtTest>
 
 #include "canvas_app.h"
+#include "../scroll_checks.h"
 #include "engine/json.h"
 #include "engine/paths.h"
 #include "engine/providers.h"
@@ -355,6 +356,35 @@ private slots:
             QTest::qWait(20);
         }
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // A page taller than the window shows the bar over its right edge: no text runs under it, and the
+    // wheel and the thumb scroll the page. At least one page overflows in a short window.
+    void aTallPageKeepsItsContentClearOfTheScrollBar() {
+        App app(load(emptyDoc));
+        QVERIFY(app.open());
+        app.window->resize(app.window->width(), 420);
+        app.commands.trigger("app.settings");
+        QTRY_VERIFY(panelOpen(app.window));
+        int overflowing = 0;
+        for (int index = 0; index < 6; ++index) {
+            click(app, NEED(QStringLiteral("settingsPage-%1").arg(index)));
+            QTest::qWait(60);
+            QQuickItem *page = nullptr;
+            for (QQuickItem *flick : app.window->contentItem()->findChildren<QQuickItem *>())
+                if (flick->property("contentHeight").isValid() && scroll_checks::barOf(flick) && flick->isVisible())
+                    page = flick;
+            QVERIFY(page);
+            QQuickItem *bar = scroll_checks::barOf(page);
+            if (!bar->isVisible())
+                continue;
+            ++overflowing;
+            const QString under = scroll_checks::contentUnderBar(page, bar);
+            QVERIFY2(under.isEmpty(), qPrintable(QStringLiteral("page %1: %2").arg(index).arg(under)));
+            const QString failed = scroll_checks::scrollsByWheelAndThumb(app.window, page);
+            QVERIFY2(failed.isEmpty(), qPrintable(QStringLiteral("page %1: %2").arg(index).arg(failed)));
+        }
+        QVERIFY(overflowing > 0);
     }
 
     // FUGUE_SETTINGS_SHOTS=<dir> QT_QUICK_BACKEND=rhi: each page as a PNG, to look at.

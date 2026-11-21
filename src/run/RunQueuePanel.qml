@@ -122,7 +122,7 @@ Item {
         ScrollBar.vertical: FugueScrollBar { look: panel.look }
         Column {
             id: column
-            width: flick.width
+            width: flick.width - (flick.ScrollBar.vertical as FugueScrollBar).inset
             spacing: 0
 
             // Going and waiting.
