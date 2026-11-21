@@ -84,6 +84,11 @@ struct JobRequest {
     // Kernel-only: the directory the provider writes results to the moment the job finishes
     // (8.6). The caller creates it; result() returns paths inside it.
     QString outputDir;
+    // Kernel-only, for a node that runs several jobs in turn (ProviderKernel::next): the share of
+    // the node's progress this job covers, from `progressFrom` for `progressSpan`, so the node's
+    // bar moves once over all of them. The default is the whole bar.
+    double progressFrom = 0;
+    double progressSpan = 1;
 };
 
 // The reply of status (8.8).

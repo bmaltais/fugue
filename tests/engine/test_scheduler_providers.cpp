@@ -8,6 +8,8 @@
 #include <QSemaphore>
 #include <QtTest>
 
+#include <atomic>
+
 #include "engine/hash.h"
 #include "engine/paths.h"
 #include "scheduler_support.h"
@@ -34,6 +36,35 @@ QJsonObject generateGraph(const QString &prompt, const QJsonObject &modelHandle 
 }
 
 const QMap<QString, QByteArray> picture{{"result.txt", "a picture"}};
+
+// A node of several jobs in turn (ProviderKernel::next): `parts` jobs, each placed in a part of the
+// node's bar, the last one's result the node's. abandon() is counted.
+class ChunkedKernel : public FakeGenerateKernel {
+public:
+    explicit ChunkedKernel(int parts) : m_parts(parts) {}
+    Result<JobRequest> request(const NodeContext &context, const Selection &selection) override {
+        Result<JobRequest> first = FakeGenerateKernel::request(context, selection);
+        first.value().progressSpan = 1.0 / m_parts;
+        return first;
+    }
+    Result<std::optional<JobRequest>> next(const NodeContext &, const Selection &selection, const JobResult &) override {
+        if (++m_finished >= m_parts)
+            return std::optional<JobRequest>();
+        JobRequest request;
+        request.capability = QStringLiteral("image.generate");
+        request.model = selection.model.handle;
+        request.params = QJsonObject{{"prompt", QStringLiteral("part %1").arg(m_finished.load())}};
+        request.progressFrom = double(m_finished) / m_parts;
+        request.progressSpan = 1.0 / m_parts;
+        return std::optional<JobRequest>(request);
+    }
+    void abandon(const NodeContext &) override { ++m_abandoned; }
+    std::atomic<int> m_finished{0};
+    std::atomic<int> m_abandoned{0};
+
+private:
+    int m_parts;
+};
 
 // A provider whose one job reports a preview frame and then finishes.
 class PreviewingProvider : public Provider {
@@ -348,6 +379,82 @@ private slots:
         QCOMPARE(trace(folder.events()),
                  (QStringList{"run.started", "node.running g", "node.skipped g cancelled", "node.skipped s cancelled",
                               "run.done cancelled"}));
+    }
+
+    // --- a node of several jobs (#138) ---
+
+    void aNodeCanRunSeveralJobsInTurnAndItsBarSpansThemAll() {
+        World world;
+        const auto provider = world.provider("This machine", {"flux"});
+        world.type("fugue/generate-chunks",
+                   "'inputs': [{'name': 'prompt', 'type': 'text'}],"
+                   "'outputs': [{'name': 'text', 'type': 'text'}, {'name': 'model', 'type': 'text'}]",
+                   nullptr);
+        const auto kernel = std::make_shared<ChunkedKernel>(2);
+        world.kernels.add("fugue/generate-chunks", kernel);
+        const QJsonObject nodes{{"g", node("fugue/generate-chunks", {{"prompt", "a cat"}})},
+                                {"s", node("fugue/save", {{"value", from("g.text")}})}};
+        const RunFolder folder = world.folder();
+        Run run(world.graph(nodes), folder, world.environment());
+        run.start();
+        QTRY_COMPARE(provider->jobs().size(), 1);
+        provider->progress(provider->jobs().at(0), 0.5, "chunk");
+        provider->finish(provider->jobs().at(0), picture);
+        QTRY_COMPARE(provider->jobs().size(), 2); // the next job, on the same provider
+        QCOMPARE(provider->submitted(provider->jobs().at(1)).params.value("prompt").toString(), QStringLiteral("part 1"));
+        QCOMPARE(provider->submitted(provider->jobs().at(1)).outputDir, provider->submitted(provider->jobs().at(0)).outputDir);
+        provider->progress(provider->jobs().at(1), 0.5, "chunk");
+        provider->finish(provider->jobs().at(1), picture);
+        QTRY_VERIFY(run.isFinished());
+        QCOMPARE(run.outcome().status, RunStatus::Ok);
+        QCOMPARE(kernel->m_abandoned.load(), 0);
+        QList<double> values;
+        for (const QJsonObject &event : folder.events())
+            if (event.value("event").toString() == QLatin1String("node.progress"))
+                values.append(event.value("value").toDouble());
+        QCOMPARE(values, (QList<double>{0.25, 0.75}));
+    }
+
+    void cancellingANodeOfSeveralJobsLetsItCleanUp() {
+        World world;
+        const auto provider = world.provider("This machine", {"flux"});
+        world.type("fugue/generate-chunks",
+                   "'inputs': [{'name': 'prompt', 'type': 'text'}],"
+                   "'outputs': [{'name': 'text', 'type': 'text'}, {'name': 'model', 'type': 'text'}]",
+                   nullptr);
+        const auto kernel = std::make_shared<ChunkedKernel>(3);
+        world.kernels.add("fugue/generate-chunks", kernel);
+        const QJsonObject nodes{{"g", node("fugue/generate-chunks", {{"prompt", "a cat"}})},
+                                {"s", node("fugue/save", {{"value", from("g.text")}})}};
+        Run run(world.graph(nodes), world.folder(), world.environment());
+        run.start();
+        QTRY_COMPARE(provider->jobs().size(), 1);
+        provider->finish(provider->jobs().at(0), picture);
+        QTRY_COMPARE(provider->jobs().size(), 2);
+        run.cancel();
+        QTRY_VERIFY(run.isFinished());
+        QCOMPARE(run.outcome().status, RunStatus::Cancelled);
+        QCOMPARE(kernel->m_abandoned.load(), 1);
+    }
+
+    void aFailedNodeIsAbandonedToo() {
+        World world;
+        const auto provider = world.provider("This machine", {"flux"});
+        world.type("fugue/generate-chunks",
+                   "'inputs': [{'name': 'prompt', 'type': 'text'}],"
+                   "'outputs': [{'name': 'text', 'type': 'text'}, {'name': 'model', 'type': 'text'}]",
+                   nullptr);
+        const auto kernel = std::make_shared<ChunkedKernel>(3);
+        world.kernels.add("fugue/generate-chunks", kernel);
+        const QJsonObject nodes{{"g", node("fugue/generate-chunks", {{"prompt", "a cat"}})},
+                                {"s", node("fugue/save", {{"value", from("g.text")}})}};
+        Run run(world.graph(nodes), world.folder(), world.environment());
+        run.start();
+        QTRY_COMPARE(provider->jobs().size(), 1);
+        provider->fail(provider->jobs().at(0), makeError("helper_failed", "no"));
+        QTRY_VERIFY(run.isFinished());
+        QCOMPARE(run.outcome().status, RunStatus::Failed);
+        QCOMPARE(kernel->m_abandoned.load(), 1);
     }
 
     // --- residency (9.3) ---

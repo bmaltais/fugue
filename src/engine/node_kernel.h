@@ -50,6 +50,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 
 #include "engine/file_roots.h"
 #include "engine/node_type.h"
@@ -153,6 +154,21 @@ public:
     // become ordinary outputs (3.3). Called on a worker thread.
     virtual Result<Values> outputs(const NodeContext &context, const Selection &selection,
                                    const JobResult &result) = 0;
+
+    // A node that runs several jobs in turn on the same provider, such as a video through an
+    // upscaler a chunk of frames at a time (#138) so the whole is never in memory or on disk.
+    // After every finished job the scheduler calls next() with its result: a request is the job to
+    // run now (its progressFrom and progressSpan place it in the node's bar), nothing means that
+    // was the last and outputs() follows with that last result. The kernel keeps no state of its
+    // own (one object serves many nodes): what comes between the jobs is in context.workDir. The
+    // default is one job. Called on a worker thread.
+    virtual Result<std::optional<JobRequest>> next(const NodeContext &context, const Selection &selection,
+                                                   const JobResult &result);
+
+    // The node ended with an error or a cancel, after request() was called: remove what the jobs
+    // left in context.workDir besides results (the scheduler never removes files). Quick; called on
+    // the scheduler's thread.
+    virtual void abandon(const NodeContext &context);
 };
 
 // The kernels of a process, by node type id (and major, for an older major kept beside the newest).

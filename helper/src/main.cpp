@@ -17,7 +17,8 @@
 //   {"op": "generate",   "image": OUT, "video": OUT}           all stages in one call
 //   {"op": "upscale",    "image": IN, "output": OUT}           PNG -> PNG through an upscale model;
 //                        "context": {"model_path"}, "params": {"tile_size"} (no sd context: the
-//                        model is loaded for the call)
+//                        upscaler stays loaded between calls); "frames": DIR, "frames_output":
+//                        DIR instead of image and output: every PNG of a folder, in name order
 //
 // A context of a video model (Wan) makes the same operations on video: the library's video
 // options (video_frames, fps, high_noise_*) and sd_generate_video; the latent is the clip's, and
@@ -44,8 +45,9 @@
 // The capability is the operation: text.encode (encode), latent.sample (sample),
 // latent.decode (decode), latent.encode (vae_encode), image.upscale (upscale). params.context is the request's
 // "context" and the other params its "params"; inputs.conditioning, .latent, .init_latent and
-// .image ({"path"}) are its input files, and its outputs are written into output_dir as
-// conditioning.bin, latent.bin, image.png. Jobs run one at a time, in order. Unasked, it writes
+// .image and .frames ({"path"}) are its input files, and its outputs are written into output_dir
+// as conditioning.bin, latent.bin, image.png (an upscale of frames: the folder frames-out/). Jobs
+// run one at a time, in order. Unasked, it writes
 // {"op": "status", "job", "state", "progress", "stage", "error"?} lines as a job moves.
 // An error is {"error": {"code", "message"}}; out of memory is "out_of_memory".
 //
@@ -297,6 +299,30 @@ public:
     Contexts &operator=(const Contexts &) = delete;
     ~Contexts() { clear(); }
 
+    // The one upscaler kept loaded between upscale jobs, by model file and tile size: a video comes
+    // as a job per chunk of frames and must not read the model again for each. It is freed before a
+    // diffusion context loads, by dropOthers and by clear, like any other model here.
+    sd_upscaler_t *upscaler(const std::string &model, const json &tile) {
+        const std::string key = model + "|" + tile.dump();
+        if (m_upscaler && m_upscalerKey == key)
+            return m_upscaler;
+        dropUpscaler();
+        Opt load(sd_upscaler_opt_create());
+        if (!load)
+            fail("out_of_memory", "cannot create the options");
+        check(sd_opt_set_string(load.get(), "model_path", model.c_str()), "model_path");
+        if (!tile.is_null())
+            setOption(load.get(), "tile_size", tile);
+        const std::string name = std::filesystem::path(model).filename().string();
+        const sd_status_t created = sd_upscaler_create(load.get(), &m_upscaler);
+        if (created == SD_STATUS_LOAD_FAILED)
+            fail("model_unsupported", "cannot load the upscale model " + name +
+                                          ": the engine runs ESRGAN (RRDBNet) 4x models and MoSR; a 2x model that unshuffles pixels (Real-ESRGAN x2plus) is not supported");
+        check(created, "loading the upscale model " + name);
+        m_upscalerKey = key;
+        return m_upscaler;
+    }
+
     sd_ctx_t *get(const json &options) {
         const std::string key = options.dump();
         for (auto it = m_entries.begin(); it != m_entries.end(); ++it)
@@ -304,6 +330,7 @@ public:
                 m_entries.splice(m_entries.end(), m_entries, it);
                 return m_entries.back().ctx;
             }
+        dropUpscaler();
         const size_t needed = memoryFor(options);
         while (!m_entries.empty() && freeDeviceMemory() < needed)
             dropFirst();
@@ -325,7 +352,7 @@ public:
 
     // Frees every context but `keep`; false when there was none to free.
     bool dropOthers(sd_ctx_t *keep) {
-        bool dropped = false;
+        bool dropped = dropUpscaler();
         for (auto it = m_entries.begin(); it != m_entries.end();) {
             if (it->ctx == keep) {
                 ++it;
@@ -341,9 +368,18 @@ public:
     void clear() {
         while (!m_entries.empty())
             dropFirst();
+        dropUpscaler();
     }
 
 private:
+    bool dropUpscaler() {
+        if (!m_upscaler)
+            return false;
+        sd_upscaler_free(m_upscaler);
+        m_upscaler = nullptr;
+        return true;
+    }
+
     void dropFirst() {
         sd_ctx_free(m_entries.front().ctx);
         m_entries.pop_front();
@@ -354,64 +390,107 @@ private:
         sd_ctx_t *ctx;
     };
     std::list<Entry> m_entries;
+    sd_upscaler_t *m_upscaler = nullptr;
+    std::string m_upscalerKey;
 };
 
-// image.upscale (spec 8.1): one image through an upscale model (ESRGAN, MoSR), tiled by the
-// library's own tiling (params.tile_size, overlap a quarter) so a large image fits in memory. The
-// model is loaded for the job and freed after it: a file of tens of megabytes is read in well under
-// a second, and nothing stays resident between jobs. The library reports each tile through its
-// progress callback; it has no cancel of its own for an upscale, so a cancel is the provider's
-// (the helper is ended after the grace period, spec 9.6).
-json upscaleOnce(const json &request) {
-    const json context = request.value("context", json::object());
-    const json params = request.value("params", json::object());
-    const std::string model = context.value("model_path", "");
-    if (model.empty())
-        fail("input_invalid", "\"model_path\" is required for upscale");
-    Opt load(sd_upscaler_opt_create());
-    if (!load)
-        fail("out_of_memory", "cannot create the options");
-    check(sd_opt_set_string(load.get(), "model_path", model.c_str()), "model_path");
-    if (params.contains("tile_size"))
-        setOption(load.get(), "tile_size", params["tile_size"]);
-    sd_upscaler_t *upscaler = nullptr;
-    const sd_status_t created = sd_upscaler_create(load.get(), &upscaler);
-    if (created == SD_STATUS_LOAD_FAILED)
-        fail("model_unsupported", "cannot load the upscale model " + std::filesystem::path(model).filename().string() +
-                                      ": the engine runs ESRGAN (RRDBNet) 4x models and MoSR; a 2x model that unshuffles pixels (Real-ESRGAN x2plus) is not supported");
-    check(created, "loading the upscale model " + std::filesystem::path(model).filename().string());
-    std::unique_ptr<sd_upscaler_t, void (*)(sd_upscaler_t *)> owner(upscaler, sd_upscaler_free);
+// What a job tells the server it is running, and asks of it.
+struct Hooks {
+    // Told the context just before the generation (false from it: cancelled, do not start) and
+    // null after it.
+    std::function<bool(sd_ctx_t *)> running;
+    // True once the job is cancelled: polled between the frames of an upscale, which has no
+    // cancel inside a frame.
+    std::function<bool()> cancelled;
+    // The share of an upscale's frames done, 0 to 1 (a job of one image reports its tiles through
+    // the library's own callback).
+    std::function<void(double)> progress;
+};
+
+// One image through the upscaler (the library's tiling reports each tile as progress).
+void upscaleImage(sd_upscaler_t *upscaler, const std::string &in, const std::string &out) {
     Opt options(sd_upscale_opt_create());
     if (!options)
         fail("out_of_memory", "cannot create the options");
-    check(sd_opt_set_tensor(options.get(), "image", loadImage(required(request, "image")).get()), "image");
+    check(sd_opt_set_tensor(options.get(), "image", loadImage(in).get()), "image");
     sd_result_t *result = nullptr;
     check(sd_upscale(upscaler, options.get(), &result), "upscale");
     std::unique_ptr<sd_result_t, void (*)(sd_result_t *)> resultOwner(result, sd_result_free);
     if (sd_result_get_image_count(result) == 0)
         fail("helper_failed", "no image was made");
-    const std::string out = required(request, "output");
     saveImage(sd_result_get_image(result, 0), out);
-    return {{"outputs", json::array({json{{"image", out}}})}, {"scale", sd_upscaler_get_scale(upscaler)}};
 }
 
-json runUpscale(const json &request, Contexts &contexts) {
+// image.upscale (spec 8.1): an image, or a folder of frames, through an upscale model (ESRGAN,
+// MoSR), tiled by the library's own tiling (params.tile_size, overlap a quarter) so a large image
+// fits in memory. The upscaler stays loaded between jobs (Contexts::upscaler), so a video's chunks
+// do not read the model again. "frames" is a folder of PNGs: each one is upscaled in file-name
+// order into "frames_output" under the same name, one at a time (a frame is never held with its
+// neighbours), the progress is the frames done, and a cancel is heard between frames, as the
+// library has no hook inside one. A single image's cancel is the provider's: the helper is ended
+// after the grace period (spec 9.6).
+json upscaleOnce(const json &request, Contexts &contexts, const Hooks &hooks) {
+    const json context = request.value("context", json::object());
+    const json params = request.value("params", json::object());
+    const std::string model = context.value("model_path", "");
+    if (model.empty())
+        fail("input_invalid", "\"model_path\" is required for upscale");
+    const json tile = params.contains("tile_size") ? params["tile_size"] : json();
+    if (!request.contains("frames")) {
+        sd_upscaler_t *upscaler = contexts.upscaler(model, tile);
+        upscaleImage(upscaler, required(request, "image"), required(request, "output"));
+        return {{"outputs", json::array({json{{"image", request["output"]}}})}, {"scale", sd_upscaler_get_scale(upscaler)}};
+    }
+    namespace fs = std::filesystem;
+    const fs::path in = required(request, "frames"), out = required(request, "frames_output");
+    std::vector<fs::path> names;
+    std::error_code ignored;
+    for (const auto &entry : fs::directory_iterator(in, ignored))
+        if (entry.is_regular_file() && entry.path().extension() == ".png")
+            names.push_back(entry.path().filename());
+    std::sort(names.begin(), names.end());
+    if (names.empty())
+        fail("input_invalid", "no PNG frames in " + in.string());
+    fs::create_directories(out, ignored);
+    int scale = 0;
+    for (size_t i = 0; i < names.size(); ++i) {
+        if (hooks.cancelled && hooks.cancelled())
+            fail("cancelled", "upscale was cancelled");
+        // Written beside, then renamed: a frame is either whole or not there.
+        const fs::path part = out / (names[i].string() + ".part"), done = out / names[i];
+        try {
+            sd_upscaler_t *upscaler = contexts.upscaler(model, tile);
+            scale = sd_upscaler_get_scale(upscaler);
+            upscaleImage(upscaler, (in / names[i]).string(), part.string());
+        } catch (const Failure &failure) {
+            // The loaded models may hold the memory it needs: free them, and try this frame once more.
+            if (failure.code != "out_of_memory" || !contexts.dropOthers(nullptr))
+                throw;
+            upscaleImage(contexts.upscaler(model, tile), (in / names[i]).string(), part.string());
+        }
+        fs::rename(part, done);
+        if (hooks.progress)
+            hooks.progress(double(i + 1) / names.size());
+    }
+    return {{"outputs", json::array({json{{"frames", out.string()}}})}, {"scale", scale}, {"frames", names.size()}};
+}
+
+json runUpscale(const json &request, Contexts &contexts, const Hooks &hooks) {
     try {
-        return upscaleOnce(request);
+        return upscaleOnce(request, contexts, hooks);
     } catch (const Failure &failure) {
         // The loaded models may hold the memory it needs: free them, and try once more.
         if (failure.code != "out_of_memory" || !contexts.dropOthers(nullptr))
             throw;
-        return upscaleOnce(request);
+        return upscaleOnce(request, contexts, hooks);
     }
 }
 
-// `running` is told the context just before the generation (false from it: cancelled, do not
-// start) and null after it.
-json run(const json &request, Contexts &contexts, const std::function<bool(sd_ctx_t *)> &running = {}) {
+json run(const json &request, Contexts &contexts, const Hooks &hooks = {}) {
     const std::string op = request.value("op", "");
+    const auto &running = hooks.running;
     if (op == "upscale")
-        return runUpscale(request, contexts);
+        return runUpscale(request, contexts, hooks);
     if (op != "encode" && op != "sample" && op != "decode" && op != "vae_encode" && op != "generate")
         fail("input_invalid", "unknown op \"" + op + "\"; use encode, sample, decode, vae_encode, generate or upscale");
 
@@ -1332,7 +1411,7 @@ private:
         params.erase("context");
         request["params"] = params;
         const json inputs = message.value("inputs", json::object());
-        for (const char *name : {"conditioning", "latent", "init_latent", "image"})
+        for (const char *name : {"conditioning", "latent", "init_latent", "image", "frames"})
             if (inputs.contains(name) && inputs[name].is_object() && inputs[name].contains("path"))
                 request[name] = inputs[name]["path"];
         const std::filesystem::path dir = message.value("output_dir", "");
@@ -1342,8 +1421,10 @@ private:
             request["conditioning"] = (dir / "conditioning.bin").string();
         else if (op->second == "sample" || op->second == "vae_encode")
             request["latent"] = (dir / "latent.bin").string();
-        else if (op->second == "upscale")
+        else if (op->second == "upscale") {
             request["output"] = (dir / "image.png").string(); // "image" stays the input
+            request["frames_output"] = (dir / "frames-out").string();
+        }
         else {
             request["image"] = (dir / "image.png").string(); // a video model writes the video instead
             request["video"] = (dir / "video.y4m").string();
@@ -1405,13 +1486,24 @@ private:
                     std::lock_guard<std::mutex> lock(m_mutex);
                     m_jobs[id].stage = request.value("op", "");
                 }
-                return run(request, contexts, [this](sd_ctx_t *ctx) {
+                Hooks hooks;
+                hooks.running = [this](sd_ctx_t *ctx) {
                     std::lock_guard<std::mutex> lock(m_mutex);
                     if (ctx && m_jobs[m_current].cancel) // asked while the models loaded
                         return false;
                     m_running = ctx;
                     return true;
-                });
+                };
+                hooks.cancelled = [this] {
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    return m_jobs[m_current].cancel;
+                };
+                hooks.progress = [this](double done) {
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    m_progress[m_current] = done;
+                    say(statusOf(m_current, m_jobs[m_current]));
+                };
+                return run(request, contexts, hooks);
             });
             std::lock_guard<std::mutex> lock(m_mutex);
             Job &job = m_jobs[id];
@@ -1460,6 +1552,8 @@ private:
         auto *self = static_cast<Server *>(data);
         std::lock_guard<std::mutex> lock(self->m_mutex);
         if (self->m_current.empty() || steps <= 0)
+            return;
+        if (self->m_jobs[self->m_current].request.contains("frames")) // the frames are the progress
             return;
         self->m_progress[self->m_current] = double(step) / steps;
         self->say(self->statusOf(self->m_current, self->m_jobs[self->m_current]));

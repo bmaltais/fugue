@@ -5,6 +5,10 @@ namespace fugue {
 NodeKernel::~NodeKernel() = default;
 Errors NodeKernel::check(const NodeContext &) const { return {}; }
 ProviderKernel::~ProviderKernel() = default;
+Result<std::optional<JobRequest>> ProviderKernel::next(const NodeContext &, const Selection &, const JobResult &) {
+    return std::optional<JobRequest>();
+}
+void ProviderKernel::abandon(const NodeContext &) {}
 
 void Kernels::add(const QString &typeId, std::shared_ptr<NodeKernel> kernel) {
     m_providers.erase(typeId);

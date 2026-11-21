@@ -50,6 +50,7 @@
     "text-generate",
     "upscale-image",
     "upscale-video",
+    "upscale-video-with-model",
     "upscale-with-model",
     "vae-decode",
     "vae-decode-video",

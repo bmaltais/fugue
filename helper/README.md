@@ -119,9 +119,10 @@ and cannot start from a latent; the helper answers `input_invalid`.
 ## Upscaling (`image.upscale`)
 
 An image through an upscale model, with the library's own ESRGAN and MoSR upscaler (spec 8.1). No
-context is loaded: the model file is read for the job and freed after it, and the tiling is the
-library's (`tile_size`, a quarter of overlap), which reports each tile as progress. A request, one
-operation per process:
+sd context is loaded. The upscaler stays loaded between jobs, keyed by the model file and the tile
+size, and is freed before a diffusion context loads or when memory runs out, like the contexts. The
+tiling is the library's (`tile_size`, a quarter of overlap), which reports each tile as progress. A
+request, one operation per process:
 
 ```sh
 fugue-helper-cuda up.json   # {"op": "upscale", "image": "in.png", "output": "out.png",
@@ -133,8 +134,15 @@ The reply is `{"outputs": [{"image": "out.png"}], "scale": 4}`. Through `--serve
 over HTTP, like any `_path`). The input is 8-bit RGB; Fugue keeps an alpha channel itself. The
 supported models are ESRGAN RRDBNet (4x) and MoSR, as `.safetensors`, `.pth` or GGUF; a 2x model
 (Real-ESRGAN x2plus, whose first convolution takes 12 channels) is refused with `model_unsupported`.
-A cancel has no hook in the library for an upscale: Fugue ends the helper after its grace period.
-No change to the stage patch: the upscaler API is the library's own.
+
+A video comes as a folder of frames, a chunk at a time (Upscale Video with Model, #138): `"frames":
+"in/"` and `"frames_output": "out/"` instead of `image` and `output` (through `--serve`,
+`inputs.frames` and the job's `frames-out/` folder). Every PNG of the folder goes through in file-name
+order, one at a time, into the other folder under the same name (written as `.part`, then renamed);
+progress is the frames done; the reply is `{"outputs": [{"frames": "out/"}], "scale": 4, "frames": N}`.
+The folder is on the helper's disk, so a paired host (`--serve-http`) does not take it. A cancel is
+heard between frames (`cancelled`); inside one image the library has no hook, and Fugue ends the
+helper after its grace period. No change to the stage patch: the upscaler API is the library's own.
 
 ## Moving the pin
 

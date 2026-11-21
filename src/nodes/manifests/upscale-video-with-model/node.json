@@ -1,0 +1,21 @@
+{
+  "manifest": 1,
+  "id": "fugue/upscale-video-with-model",
+  "version": "1.0.0",
+  "name": "Upscale Video with Model",
+  "description": "Makes a video bigger with an upscale model (Real-ESRGAN and the like), which draws in detail a plain resize cannot. The size grows by the model's own factor, 4 times for most. The frames go through the model a chunk at a time, so a long video is never held in memory and uses little disk; the frame rate, the length and the sound are kept. It is slow (about a frame a second for a 480p video on an RTX 3090) and each frame is made on its own, so fine detail can shimmer a little from frame to frame. For a plain resize use Upscale Video; to change the final size, follow it with Upscale Video at a smaller scale.",
+  "category": "Video",
+  "keywords": ["upscale", "enlarge", "esrgan", "real-esrgan", "super resolution", "4x", "detail", "bigger", "resolution", "clip", "movie"],
+  "runtime": {"kind": "builtin"},
+  "capabilities": ["image.upscale"],
+  "needs": {"files": true},
+  "inputs": [
+    {"name": "video", "type": "video", "label": "Video"},
+    {"name": "model", "type": "fugue/upscale-model", "label": "Upscale model"},
+    {"name": "tile", "type": "number", "label": "Tile size", "default": 512, "min": 64, "max": 2048, "step": 32, "integer": true,
+     "advanced": true, "description": "Pixels per side of the pieces each frame is cut in (they overlap and are blended). Smaller uses less memory and is slower; a frame no bigger than a tile is done whole. Lower it if memory runs out."}
+  ],
+  "outputs": [
+    {"name": "video", "type": "video", "label": "Video"}
+  ]
+}
