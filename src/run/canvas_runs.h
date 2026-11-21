@@ -97,6 +97,8 @@ public:
     // names), for Open, Copy and Save Image; empty when it shows none or the file is gone.
     // Never the thumbnail, which is a 512 px copy.
     Q_INVOKABLE QString imageFile(const QString &node) const;
+    // The same as a file URL, for QML (empty without one).
+    Q_INVOKABLE QUrl imageUrl(const QString &node) const;
     // The full file of one picture of a Compare Images node ("a", "b", "difference" or
     // "composite"), empty when there is none or the file is gone.
     Q_INVOKABLE QString compareFile(const QString &node, const QString &which) const;
@@ -160,6 +162,13 @@ private:
     void scheduleCheck(bool edit);
     void showTab();
     void show(const QString &tab, const QString &node);
+    // The picture the node shows when it crops: what its image input receives, from the node linked
+    // to it (its last result, else its input file's image). Empty `thumbnail` without one.
+    struct Picture {
+        QString thumbnail, path;
+        int width = 0, height = 0;
+    };
+    Picture cropSource(const QString &tab, const QString &node) const;
     void flushProgress();
     void setContext();
     void readNodes();
@@ -180,6 +189,8 @@ private:
         bool compares = false;    // Compare Images: its slot is a viewer of A and B (#62)
         QString labelA, labelB;   // what produced A and B: the linked node's title
         QString imageFile;        // the image file its file input names
+        bool crops = false;       // Crop: its slot shows the picture arriving at its input, under the frame (#73)
+        QString cropFrom;         // the path id of the node that feeds that input, if one does
     };
     QHash<QString, NodeInfo> m_nodeInfo; // of the shown workflow
     QSet<QString> m_rowsMade;            // its nodes whose cards made their rows

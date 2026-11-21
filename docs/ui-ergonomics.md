@@ -128,6 +128,14 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 - Why: comparing is done by the eye on one place, so the pointer moves the divider with no press (rgthree's Slide); keys do the rest without the pointer leaving the picture (Fitts: the target is the whole picture); the large view's bar is the five views and two zooms, in two chunks with a gap of 2u between (twice the 1u inside a chunk).
 - Rule: Floor (the bar's buttons are 7u = 28px tall; the face's whole picture is the target, the divider is read, never aimed at). Primary (the divider on the face; no highlighted button in the large view, the current view is marked by the accent). Gaps (1u inside the bar's chunks, 2u between; the close button apart at the end, last). Destructive: none. Learned place: the context menu's image items keep their order, the three copies follow Save Image. Posture: the face is the canvas, so its density is kept and the picture is the target; the large view is a transient dialog. The bar's buttons take Tab focus; the face's picture too, for the arrow keys.
 
+### 2026-11-21 large image view and visual crop (#73)
+
+- Control: `ImageDialog.qml` (`imageDialog`), opened by a double click on any node's picture (`FugueCanvas.qml` `openImage`), made on first use; `CropDialog.qml` (`cropDialog`), opened by a double click on a Crop node's picture; both in `LargeViewDialog.qml`, the frame and bar `CompareDialog.qml` now uses too (`ViewButton.qml` is its button). The bar: the dialog's own tools, then Fit and 100%, then the close button; keys 0, 1, + and -. The crop window's tools are the ratio lock (Free, Original, 1:1, 4:3, 3:2, 16:9, Turn); under the picture the fields X, Y, Width, Height, then Cancel and OK (`cropOk`, the one highlighted button). On the node's face (`CanvasNode.qml`, the slot's `cropViewer`, made only at full detail): the frame over the picture with eight handles (`CropFrame.qml`).
+- Old: a double click on a picture did nothing except Compare Images'; a Crop showed its result and took numbers only.
+- New: as above. A press on a handle or inside the frame drags it; a press outside it pans the viewer (nothing at Fit on the face); Shift keeps the ratio, Alt resizes from the center; Enter applies, Escape cancels.
+- Why: the picture is the target (Fitts), the frame is moved by direct manipulation and the numbers follow it, so there is no round trip between a field and a guess.
+- Rule: Floor (handles are drawn 8 px, with a 24 px press target: 12 px reach, held to a third of a small frame's side so its inside stays to move it; the bar and footer buttons are 7u = 28px, the fields Material's 40px). Primary (OK in the crop window; the large image view has none). Gaps (1u inside the bar's and the footer's chunks, 2u between; the close button apart, last; Cancel before OK with 2u after the fields). Destructive: none, Cancel discards a draft and a drag is one undo step. Learned place: Photoshop's (Shift, Alt, Enter, Escape, the thirds); no menu changed. Posture: the face keeps the canvas's density; the windows are transient dialogs.
+
 ## Components
 
 Reusable controls other surfaces may call. A component names its input and output here, knows nothing of its caller, and a caller's glue lives in its own file.
@@ -140,6 +148,14 @@ Reusable controls other surfaces may call. A component names its input and outpu
 - Popup: `ColorPickerPopup.openWith(color)`, `picked(color)`; Escape or a press outside closes it with no `picked`; it has no open or close fade.
 - Keys: the wheel, the brightness bar, the hex field, Apply and the recent colors take Tab focus. On the wheel, Left and Right turn the hue and Up and Down set saturation, 5 steps (Shift: 1); on the bar, Up and Down.
 - A new caller: a `ColorPickerPane` or `ColorPickerPopup`, `setColor`/`openWith` with its current color, `onPicked`. Needs `App.colorHistory` (null in a window made without it: the picker then picks nothing).
+
+### Large view and crop frame (#73)
+
+- Files: `src/canvas/LargeViewDialog.qml` (a modal frame with a bar: its `tools`, Fit, 100%, close; the `body` and an optional `footer`; keys 0, 1, + and -, Enter as `confirm`), `ViewButton.qml` (its 28px button), `CropFrame.qml` (the frame over any picture), `CropView.qml` (CompareView in its `single` mode with a CropFrame), `CropGeometry` (`src/canvas/crop_qml.h`, the geometry for QML over `src/engine/crop_geometry.h`). Glue: `ImageDialog.qml`, `CropDialog.qml`, `CropNodeView.qml`; C++ `CanvasModel::cropRect`, `setCropRect`, `pictureAt`, `CanvasRuns::imageUrl`.
+- LargeViewDialog input: `look`, `name` (the prefix of the objectNames of its bar), `zoomable` (anything with `fit()`, `actualSize()`, `zoomAt()`, `actual`, `zoom`), `tools`, `footer`, the viewer as its child. Output: `confirm`; it closes itself.
+- CropFrame input: `imageSize`, `originX`, `originY`, `zoom` (where the picture's corner is in the frame's coordinates, and view units per pixel), `rect` ({x, y, width, height}), `ratio` (0 = free), `editable`. Output: `committed(rect)` at the end of a drag, `changing(rect)`, `pressed`, `activated`. It takes only presses on its handles and inside the frame.
+- CompareView `mode: "single"` is one picture with the wheel, drag, Fit and 100%; `showZoom` adds the zoom to the size notice; `imageX`, `imageY` and `imageScale` give a picture's place for what is drawn over it.
+- A new caller: a `LargeViewDialog` with a viewer inside, or a `CropView` with the picture, its pixel size, a `rect` and `onCommitted`; the geometry is `CropGeometry` or `crop::` (tests: `tests/engine/test_crop_geometry.cpp`).
 
 ### Compare view (#62)
 

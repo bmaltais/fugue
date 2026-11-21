@@ -242,9 +242,27 @@ QString CanvasRuns::nodeTitle(const QString &tab, const QString &path) const {
     return path;
 }
 
+// The picture arriving at a Crop's image input (#73).
+CanvasRuns::Picture CanvasRuns::cropSource(const QString &tab, const QString &node) const {
+    const QString from = m_nodeInfo.value(node).cropFrom;
+    const auto nodes = m_tabs.value(tab).nodes;
+    const auto found = nodes.constFind(from);
+    if (from.isEmpty() || found == nodes.constEnd())
+        return {};
+    if (!found->thumbnail.isEmpty() && found->text.isEmpty() && found->thumbnailWidth > 0 && found->thumbnailHeight > 0)
+        return {found->thumbnail, found->imagePath, found->thumbnailWidth, found->thumbnailHeight};
+    if (!found->inputThumbnail.isEmpty() && !found->inputMissing)
+        return {found->inputThumbnail, expandHome(m_nodeInfo.value(from).imageFile), found->inputWidth, found->inputHeight};
+    return {};
+}
+
 void CanvasRuns::show(const QString &tab, const QString &node) {
     if (tab != m_shownTab)
         return;
+    // A Crop shows its input's picture: it follows the node that feeds it (a DAG, so this ends).
+    for (auto it = m_nodeInfo.cbegin(); it != m_nodeInfo.cend(); ++it)
+        if (it->crops && it->cropFrom == node)
+            show(tab, it.key());
     // `node` is a path id; only the nodes of the level shown have a card.
     const QString row = rowFor(node);
     if (row.isEmpty())
@@ -270,7 +288,14 @@ void CanvasRuns::show(const QString &tab, const QString &node) {
     // One slot (docs/canvas-look.md 4.5, 4.6): the last result, else the input file's image
     // (Load Image before it runs), else a dimmed placeholder on a node made to show one.
     const NodeInfo info = m_nodeInfo.value(node);
-    if (!view.thumbnail.isEmpty() && view.thumbnailWidth > 0 && view.thumbnailHeight > 0)
+    const Picture cropped = info.crops ? cropSource(tab, node) : Picture{};
+    if (info.crops) {
+        // A Crop shows what arrives at its input, never its own result: the frame is drawn over it.
+        if (cropped.width > 0 && cropped.height > 0)
+            image(cropped.thumbnail, cropped.width, cropped.height, {});
+        else
+            text(tr("No picture yet"), 0.5, true);
+    } else if (!view.thumbnail.isEmpty() && view.thumbnailWidth > 0 && view.thumbnailHeight > 0)
         image(view.thumbnail, view.thumbnailWidth, view.thumbnailHeight, view.thumbnailFile);
     else if (!view.text.isEmpty())
         text(view.text, view.textAspect, false);
@@ -718,6 +743,12 @@ void CanvasRuns::readNodes() {
         NodeInfo info;
         info.savesFile = it->type == QLatin1String("fugue/save-image");
         info.compares = it->type == QLatin1String("fugue/compare-images");
+        info.crops = it->type == QLatin1String("fugue/crop");
+        if (info.crops) {
+            const InputValue image = it->inputs.value(QStringLiteral("image"));
+            if (image.kind() == InputValue::Kind::Link)
+                info.cropFrom = keyFor(image.from().node);
+        }
         info.showsResult = it->type == QLatin1String("fugue/preview") || it->type == QLatin1String("fugue/save-image") || info.compares;
         if (info.compares) {
             // What made A and B names them: the linked node's title, else the plain letter.
@@ -744,12 +775,12 @@ void CanvasRuns::readNodes() {
                 }
             }
         }
-        if (info.showsResult || !info.imageFile.isEmpty())
+        if (info.showsResult || info.crops || !info.imageFile.isEmpty())
             m_nodeInfo.insert(keyFor(it.key()), info);
     }
     TabRuns &runs = m_tabs[m_shownTab];
     for (auto it = m_nodeInfo.cbegin(); it != m_nodeInfo.cend(); ++it)
-        if (it->showsResult && !runs.nodes.contains(it.key()))
+        if ((it->showsResult || it->crops) && !runs.nodes.contains(it.key()))
             runs.nodes.insert(it.key(), NodeView{});
 }
 
@@ -767,7 +798,8 @@ void CanvasRuns::refreshInputs() {
     for (const QString &node : std::as_const(nodes)) {
         const QString was = before.value(node).imageFile, now = m_nodeInfo.value(node).imageFile;
         if (was == now) {
-            if (!before.contains(node)) // a new Preview or Save Image: its placeholder
+            // A new Preview or Save Image: its placeholder. A Crop wired to another node: that picture.
+            if (!before.contains(node) || before.value(node).cropFrom != m_nodeInfo.value(node).cropFrom)
                 show(m_shownTab, node);
             continue;
         }
@@ -808,11 +840,18 @@ QString CanvasRuns::imageFile(const QString &row) const {
     const QString node = keyFor(row);
     const NodeView view = m_tabs.value(m_shownTab).nodes.value(node);
     QString path;
-    if (!view.thumbnail.isEmpty() && !view.imagePath.isEmpty())
+    if (m_nodeInfo.value(node).crops)
+        path = cropSource(m_shownTab, node).path;
+    else if (!view.thumbnail.isEmpty() && !view.imagePath.isEmpty())
         path = view.imagePath;
     else if (view.text.isEmpty())
         path = expandHome(m_nodeInfo.value(node).imageFile);
     return QDir::isAbsolutePath(path) && QFileInfo(path).isFile() ? path : QString();
+}
+
+QUrl CanvasRuns::imageUrl(const QString &row) const {
+    const QString path = imageFile(row);
+    return path.isEmpty() ? QUrl() : QUrl::fromLocalFile(path);
 }
 
 QString CanvasRuns::compareFile(const QString &row, const QString &which) const {

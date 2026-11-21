@@ -405,6 +405,8 @@ Item {
             // Compare Images (#62): its viewer takes the slot while the node is read at full detail
             // (made only then, as the thumbnails are); zoomed out, A's thumbnail stands in.
             readonly property bool comparing: node.compare.a !== undefined
+            // Crop (#73): the picture arriving at its input, with the frame over it, at full detail.
+            readonly property bool cropping: node.canvasModel.isCrop(node.nodeId) && node.thumbnailText === ""
             // One Loader, so a node costs the one item it always did (#5).
             Loader {
                 id: pictureLoader
@@ -414,7 +416,8 @@ Item {
                 width: node.thumbnailRect.width
                 height: node.thumbnailRect.height
                 objectName: "thumbnail"
-                sourceComponent: face.comparing && face.full ? compareComponent : thumbnailComponent
+                sourceComponent: !face.full ? thumbnailComponent : face.comparing ? compareComponent
+                                 : face.cropping ? cropComponent : thumbnailComponent
                 onItemChanged: node.compareItem = face.comparing && face.full ? item : null
                 Component {
                     id: thumbnailComponent
@@ -427,6 +430,20 @@ Item {
                         full: face.full
                         // A placeholder, and the last run's picture while the node runs again (not
                         // this run's preview), are at half strength.
+                        opacity: node.thumbnailDim ? 0.5 : 1
+                    }
+                }
+                Component {
+                    id: cropComponent
+                    CropNodeView {
+                        objectName: "cropViewer"
+                        canvasModel: node.canvasModel
+                        nodeId: node.nodeId
+                        look: node.look
+                        source: node.thumbnail
+                        wheelModifiers: Qt.AltModifier // a plain wheel moves the canvas
+                        onPressed: node.canvasModel.select([node.nodeId])
+                        onActivated: node.canvasView.openCrop(node.nodeId)
                         opacity: node.thumbnailDim ? 0.5 : 1
                     }
                 }

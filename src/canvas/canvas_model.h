@@ -506,10 +506,23 @@ public:
 signals:
     void compareViewChanged(const QString &node);
 public:
+    // The Crop node's frame (#73): its x, y, width and height as the node cuts them (the values the
+    // node holds, the defaults for one never set), {x, y, width, height, editable}; `editable` is false
+    // when any of the four is linked, whose value is not known before a run. Empty for another node.
+    Q_INVOKABLE bool isCrop(const QString &node) const;
+    Q_INVOKABLE QVariantMap cropRect(const QString &node) const;
+    // Writes the four numbers as one undo step (named "Crop"), only those that changed; false when
+    // nothing changed, the node is no Crop or one of the four is linked.
+    Q_INVOKABLE bool setCropRect(const QString &node, const QVariantMap &rect);
+    // The world point (x, y) lies on the node's picture (a result or a file's image), not on a text
+    // standing in its place: where a double click opens the large view.
+    Q_INVOKABLE bool pictureAt(const QString &node, qreal x, qreal y) const;
+    // The node whose output feeds the node's input, or empty (a literal, nothing, or a missing node).
+    Q_INVOKABLE QString linkedFrom(const QString &node, const QString &input) const;
     // The seam for #49 (node size): the pixel size of the node's last image (setRunState's
     // `thumbnailSize`), empty without one. previewSizeChanged(node) fires when a thumbnail
     // comes, goes or changes size, after the node's rows were laid out again with it.
-    QSizeF previewSize(const QString &node) const;
+    Q_INVOKABLE QSizeF previewSize(const QString &node) const;
     // The node card made its rows (it came into view at a readable zoom): rowsMade(node) tells
     // whoever makes previews only for those (CanvasRuns, the image of a Load Image's file).
     Q_INVOKABLE void noteRowsMade(const QString &node) { emit rowsMade(node); }

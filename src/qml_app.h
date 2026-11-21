@@ -9,6 +9,7 @@
 #include <QtQmlIntegration/qqmlintegration.h>
 
 #include "canvas/canvas_model.h"
+#include "canvas/crop_qml.h" // a QML singleton (CropGeometry): the module registers it from here
 #include "commands/command_registry.h"
 #include "menu/color_history.h"
 #include "menu/image_actions.h"
