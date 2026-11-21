@@ -12,6 +12,7 @@
 #include "canvas_app.h"
 #include "engine/group_library.h"
 #include "look.h"
+#include "../test_home_guard.h"
 #include "../window_grab.h"
 
 using namespace canvas_test;
@@ -319,6 +320,7 @@ private slots:
         QTest::mouseClick(app.window, Qt::LeftButton, {}, yes->mapToScene(QPointF(yes->width() / 2, yes->height() / 2)).toPoint());
         QTRY_VERIFY(QFileInfo(library + "/fox-pass/node.json").isFile());
         QVERIFY(!QFileInfo(library + "/group").exists());
+        FUGUE_REQUIRE_TEST_HOME(library);
         QDir(library).removeRecursively();
     }
 

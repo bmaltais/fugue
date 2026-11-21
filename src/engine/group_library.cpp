@@ -42,8 +42,23 @@ QStringList libraryFolders(const QString &dir) {
     return nodes;
 }
 
-// Writes the library's pack.json, listing `folders`.
+// A folder name as the library writes them (local/<name>, a type id's name): never "..", a slash
+// or anything else that would reach outside the library from a hand-edited pack.json.
+bool isLibraryFolderName(const QString &name) {
+    static const QRegularExpression folderName(QStringLiteral("^[a-z][a-z0-9_-]*$"));
+    return folderName.match(name).hasMatch();
+}
+
+// Whether a library folder still holds a definition: the one thing a pack.json entry needs.
+bool hasDefinition(const QString &dir, const QString &name) {
+    return isLibraryFolderName(name) && QFileInfo(dir + QLatin1Char('/') + name + QStringLiteral("/node.json")).isFile();
+}
+
+// Writes the library's pack.json, listing `folders` that still hold a definition (the list is
+// always what is on disk, so a folder that went by hand or by an interrupted removal never stays listed).
 Errors writeLibraryPack(const QString &dir, QStringList folders) {
+    folders.erase(std::remove_if(folders.begin(), folders.end(), [&](const QString &name) { return !hasDefinition(dir, name); }),
+                  folders.end());
     QJsonObject pack{{"manifest", 1},
                      {"id", "local"},
                      {"version", "1.0.0"},
@@ -53,13 +68,6 @@ Errors writeLibraryPack(const QString &dir, QStringList folders) {
     folders.sort();
     pack.insert("nodes", QJsonArray::fromStringList(folders));
     return writeJsonFile(dir + QStringLiteral("/pack.json"), pack);
-}
-
-// A folder name as the library writes them (local/<name>, a type id's name): never "..", a slash
-// or anything else that would reach outside the library from a hand-edited pack.json.
-bool isLibraryFolderName(const QString &name) {
-    static const QRegularExpression folderName(QStringLiteral("^[a-z][a-z0-9_-]*$"));
-    return folderName.match(name).hasMatch();
 }
 
 // The folder of a library group's id, local/<name>; empty when it is not one of the library's.
@@ -122,6 +130,27 @@ void compare(const QHash<QString, QString> &before, const QHash<QString, QString
 } // namespace
 
 QString libraryDir() { return packsDir() + QStringLiteral("/local"); }
+
+int healLibrary(const QString &dir) {
+    const Result<QJsonObject> pack = readJsonObject(dir + QStringLiteral("/pack.json"));
+    if (!pack.ok() || pack->value("id").toString() != QLatin1String("local"))
+        return 0; // not a library pack.json we wrote: leave it to the loader's own report
+    QStringList kept;
+    int dropped = 0;
+    for (const QJsonValue &node : pack->value("nodes").toArray()) {
+        // Only a plain missing folder or definition counts; an odd name is the loader's to report.
+        if (isLibraryFolderName(node.toString()) && !hasDefinition(dir, node.toString()))
+            ++dropped;
+        else
+            kept << node.toString();
+    }
+    if (dropped == 0)
+        return 0;
+    if (hasErrors(writeLibraryPack(dir, kept)))
+        return 0;
+    qInfo("library: dropped %d entr%s with no folder from pack.json", dropped, dropped == 1 ? "y" : "ies");
+    return dropped;
+}
 
 Result<SavedGroup> saveToLibrary(const Document &document, const QString &group, const Registry &registry,
                                  const QString &dir) {
@@ -232,11 +261,16 @@ Errors removeFromLibrary(const QString &id, const QString &dir) {
     const QString folder = libraryFolder(id, dir);
     if (folder.isEmpty())
         return {libraryError(QStringLiteral("The library has no group %1.").arg(id))};
-    if (!QDir(folder).removeRecursively())
-        return {libraryError(QStringLiteral("%1 could not be removed from the library.").arg(id))};
+    // The list is rewritten whatever became of the folder, from what is on disk: a removal that
+    // stopped half way (or a folder gone already) never leaves an entry without its folder.
+    const bool removed = QDir(folder).removeRecursively();
     QStringList folders = libraryFolders(dir);
-    folders.removeAll(id.section(QLatin1Char('/'), 1));
-    return writeLibraryPack(dir, folders);
+    if (removed)
+        folders.removeAll(id.section(QLatin1Char('/'), 1));
+    Errors written = writeLibraryPack(dir, folders); // an entry whose definition survived stays, to try again
+    if (!removed)
+        written.prepend(libraryError(QStringLiteral("%1 could not be removed from the library.").arg(id)));
+    return written;
 }
 
 Result<QString> renameInLibrary(const QString &id, const QString &name, const Registry &registry, const QString &dir) {

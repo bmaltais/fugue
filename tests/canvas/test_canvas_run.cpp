@@ -21,6 +21,7 @@
 
 #include "canvas_app.h"
 #include "../disk_pack.h"
+#include "../test_home_guard.h"
 #include "engine/fake_provider.h"
 #include "engine/pack_loader.h"
 #include "engine/trust_store.h"
@@ -1011,6 +1012,7 @@ private slots:
     // is its update (a new version, trusted again): the run thread reloads between runs.
     void aReloadBetweenTwoRunsRunsTheNewTypes() {
         const QString packs = fugue::packsDir();
+        FUGUE_REQUIRE_TEST_HOME(packs);
         QDir(packs).removeRecursively();
         RunApp r(R"({
   "fugue": 1,
@@ -1074,6 +1076,7 @@ private slots:
     // last run's and is drawn at half strength until the new run's preview comes.
     void aCommandNodesPreviewShowsOnTheNodeWhileItRuns() {
         const QString packs = fugue::packsDir();
+        FUGUE_REQUIRE_TEST_HOME(packs);
         QDir(packs).removeRecursively();
         // Run n waits for the file preview<n> in the node's folder, shows step.png, then waits
         // for result<n>: the test decides when each step happens.

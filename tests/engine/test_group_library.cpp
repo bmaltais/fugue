@@ -74,6 +74,20 @@ class TestGroupLibrary : public QObject {
 
     Registry m_registry;
 
+    // Copies the folder of a saved group under other names and lists them all in pack.json.
+    static void copyAndList(const QString &dir, const QStringList &copies) {
+        QJsonArray nodes{"pass"};
+        for (const QString &name : copies) {
+            QDir().mkpath(dir + "/" + name);
+            QVERIFY(QFile::copy(dir + "/pass/node.json", dir + "/" + name + "/node.json"));
+            QVERIFY(QFile::copy(dir + "/pass/group.fugue", dir + "/" + name + "/group.fugue"));
+            nodes << name;
+        }
+        QJsonObject pack = readJsonObject(dir + "/pack.json").value();
+        pack.insert("nodes", nodes);
+        QVERIFY(!hasErrors(writeJsonFile(dir + "/pack.json", pack)));
+    }
+
 private slots:
     void initTestCase() { addTypes(m_registry); }
 
@@ -244,6 +258,73 @@ private slots:
         const QString type = updated.group("local/pass")->nodes.value("i").type;
         QCOMPARE(type, QStringLiteral("local/inner-2"));
         QCOMPARE(updated.group(type)->name, QStringLiteral("Inner"));
+    }
+
+    // A folder that went without pack.json being rewritten (by hand, an interrupted removal)
+    // is dropped from the list when the library loads: quietly, once, and nothing else is touched.
+    void theLibraryDropsEntriesWhoseFolderIsGone() {
+        QTemporaryDir packs;
+        const QString dir = packs.filePath("local");
+        QString instance;
+        Document doc = workflow(m_registry, &instance);
+        QVERIFY(saveToLibrary(doc, "local/pass", m_registry, dir).ok());
+        copyAndList(dir, {"other", "bare"});
+        QVERIFY(QDir(dir + "/other").removeRecursively());  // gone
+        QVERIFY(QFile::remove(dir + "/bare/node.json"));    // no definition left
+        QDir().mkpath(dir + "/stray");                      // on disk, never listed
+        QFile marker(dir + "/stray/keep.txt");
+        QVERIFY(marker.open(QIODevice::WriteOnly));
+        marker.close();
+
+        Registry library;
+        addTypes(library);
+        const PackReport report = loadPacks(library, {packs.path()});
+        QCOMPARE(report.packs.size(), 1);
+        QVERIFY(report.packs[0].enabled);
+        QVERIFY(report.packs[0].disabled.isEmpty());
+        QVERIFY(library.nodeType("local/pass"));
+        const Result<QJsonObject> pack = readJsonObject(dir + "/pack.json");
+        QVERIFY(pack.ok());
+        QCOMPARE(pack->value("nodes").toArray(), QJsonArray{"pass"});
+        // Nothing but pack.json changed: the folder with no definition and the stray one stay.
+        QVERIFY(QFileInfo::exists(dir + "/bare/group.fugue"));
+        QVERIFY(QFileInfo::exists(dir + "/stray/keep.txt"));
+        QCOMPARE(healLibrary(dir), 0); // once: nothing more to drop
+
+        // Another pack keeps its warning for the same fault.
+        QTemporaryDir other;
+        QDir().mkpath(other.filePath("io.example.tools"));
+        QFile tools(other.filePath("io.example.tools/pack.json"));
+        QVERIFY(tools.open(QIODevice::WriteOnly));
+        tools.write(R"({"manifest": 1, "id": "io.example.tools", "version": "1.0.0", "name": "T", "nodes": ["gone"]})");
+        tools.close();
+        Registry r2;
+        const PackReport second = loadPacks(r2, {other.path()});
+        QCOMPARE(second.packs.value(0).disabled.size(), 1);
+    }
+
+    // Removing a group rewrites pack.json from what is on disk, even when the folder only
+    // partly goes or an entry was dangling already.
+    void removingRewritesTheListFromWhatIsOnDisk() {
+        QTemporaryDir packs;
+        const QString dir = packs.filePath("local");
+        QString instance;
+        Document doc = workflow(m_registry, &instance);
+        QVERIFY(saveToLibrary(doc, "local/pass", m_registry, dir).ok());
+        copyAndList(dir, {"dangling"});
+        QVERIFY(QDir(dir + "/dangling").removeRecursively()); // pack.json still lists it
+        QVERIFY(!hasErrors(removeFromLibrary("local/pass", dir)));
+        const Result<QJsonObject> pack = readJsonObject(dir + "/pack.json");
+        QVERIFY(pack.ok());
+        QVERIFY(pack->value("nodes").toArray().isEmpty());
+
+        // A folder that cannot be removed (read-only) stays listed, with an error, to try again.
+        QVERIFY(saveToLibrary(doc, "local/pass", m_registry, dir).ok());
+        QVERIFY(QFile::setPermissions(dir + "/pass", QFileDevice::ReadOwner | QFileDevice::ExeOwner));
+        const Errors failed = removeFromLibrary("local/pass", dir);
+        QFile::setPermissions(dir + "/pass", QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+        if (hasErrors(failed)) // (running as root removes it anyway)
+            QCOMPARE(readJsonObject(dir + "/pack.json")->value("nodes").toArray(), QJsonArray{"pass"});
     }
 
     void theLibraryHoldsGroupsOnlyAndNoOtherFolderIsLocal() {
