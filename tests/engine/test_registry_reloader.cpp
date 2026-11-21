@@ -86,14 +86,16 @@ private slots:
     void manyEventsInARowAreOneReload() {
         Registry registry;
         auto reloader = reloaderFor(registry);
-        reloader->setSettleMs(300);
+        // The settle time is far longer than the gap between writes (30 ms plus the write itself), so a
+        // slow runner that stretches a write several times over still lands inside one settle window.
+        reloader->setSettleMs(1000);
         QSignalSpy reloaded(reloader.get(), &RegistryReloader::reloaded);
         for (int i = 0; i < 5; ++i) {
             QVERIFY(writeSayPack(packs(), "again", QStringLiteral("1.0.%1").arg(i)));
             QTest::qWait(30);
         }
-        QTRY_COMPARE_WITH_TIMEOUT(reloaded.count(), 1, 5000);
-        QTest::qWait(500);
+        QTRY_COMPARE_WITH_TIMEOUT(reloaded.count(), 1, 10000);
+        QTest::qWait(1200);
         QCOMPARE(reloaded.count(), 1);
         QCOMPARE(registry.nodeType(kSay)->version.toString(), QStringLiteral("1.0.4"));
     }
