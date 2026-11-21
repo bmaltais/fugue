@@ -76,6 +76,10 @@ Reply packRemove(const Command &command, Context &context);
 Reply packUpdate(const Command &command, Context &context);
 Reply packTrust(const Command &command, Context &context);
 
+// cache.cpp: `cache status` and `cache clear` (10.6).
+Reply cacheStatus(const Command &command, Context &context);
+Reply cacheClear(const Command &command, Context &context);
+
 // skill.cpp: `skill install` and `skill uninstall` (13.5).
 Reply skillInstall(const Command &command, Context &context);
 Reply skillUninstall(const Command &command, Context &context);

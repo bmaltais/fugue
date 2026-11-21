@@ -77,7 +77,7 @@ struct CacheEntry {
 
 class ResultCache {
 public:
-    static constexpr qint64 defaultLimit = 20LL * 1024 * 1024 * 1024; // 20 GiB (10.5)
+    static constexpr qint64 defaultLimit = 10LL * 1000 * 1000 * 1000; // 10 GB (10.5)
     static constexpr qint64 gracePeriodSeconds = 7 * 24 * 3600;       // 7 days (10.5)
 
     struct Options {
@@ -94,6 +94,10 @@ public:
     ResultCache(QString root, Options options);
 
     QString root() const { return m_root; }
+    // The size limit evict() keeps to; 0 or less is no limit. The settings can change it between
+    // runs (spec 10.5, cache_results_gb).
+    void setLimit(qint64 bytes) { m_options.limitBytes = bytes; }
+    qint64 limit() const { return m_options.limitBytes; }
 
     // Records a finished node's outputs under `key` and returns them as they
     // are to be passed on. Each media or data file that lies inside `nodeDir`
@@ -121,8 +125,9 @@ public:
 
     // Every record, least recently used first.
     QList<CacheEntry> entries() const;
-    // Bytes of all blobs.
+    // Bytes of all blobs, and how many files they are.
     qint64 size() const;
+    int blobCount() const;
 
     // Over the size limit, removes the least recently used records that are
     // not frozen, and the blobs nothing refers to any more, until the store
@@ -133,6 +138,19 @@ public:
     // another workflow or node also uses only loses its `used_by` line.
     // Frozen results are kept. Returns the keys removed.
     QStringList clear(const QString &workflow = {}, const QString &node = {});
+
+    // The same with one more filter, and a dry run: what `fugue cache clear` and the Cache page
+    // ask. A record is a candidate when `usedBefore` is unset or it was last used before it.
+    struct ClearFilter {
+        QString workflow;
+        QString node;
+        QDateTime usedBefore;
+    };
+    struct Cleared {
+        QStringList keys;  // the records removed (or, in a dry run, that would be), sorted
+        qint64 bytes = 0;  // the blobs that go with them: those no other record refers to
+    };
+    Cleared clearMatching(const ClearFilter &filter, bool dryRun);
 
     // Garbage collection (10.5): removes key records whose files are gone,
     // and blobs no record refers to that are older than the grace period.
@@ -154,11 +172,5 @@ private:
     QString m_root;
     Options m_options;
 };
-
-// The other half of 10.5's garbage collection: removes the run folders under
-// `runsRoot` whose run ended more than the grace period before `now`. A run
-// that has not ended (no `ended` in run.json) is kept. Returns the ids removed.
-QStringList removeEndedRunFolders(const QString &runsRoot, const QDateTime &now,
-                                  qint64 graceSeconds = ResultCache::gracePeriodSeconds);
 
 } // namespace fugue

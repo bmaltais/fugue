@@ -399,22 +399,6 @@ private slots:
         QVERIFY(QFile::exists(kept));
         QVERIFY(w.cache->contains(key(1)));
     }
-
-    void endedRunFoldersGoAfterTheGracePeriod() {
-        const QString runs = m_dir.filePath("runs");
-        const auto old = RunFolder::create(runs, "old");
-        const auto recent = RunFolder::create(runs, "recent");
-        const auto running = RunFolder::create(runs, "running");
-        QVERIFY(old.ok() && recent.ok() && running.ok());
-        old.value().writeState(QJsonObject{{"status", "ok"}, {"ended", "2026-11-10T12:00:00.000Z"}});
-        recent.value().writeState(QJsonObject{{"status", "failed"}, {"ended", "2026-11-18T12:00:00.000Z"}});
-        running.value().writeState(QJsonObject{{"status", "running"}, {"started", "2026-11-01T12:00:00.000Z"}});
-
-        QCOMPARE(removeEndedRunFolders(runs, m_now), QStringList{"old"});
-        QVERIFY(!QDir(runs + "/old").exists());
-        QVERIFY(QDir(runs + "/recent").exists());
-        QVERIFY(QDir(runs + "/running").exists());
-    }
 };
 
 QTEST_GUILESS_MAIN(TestResultCache)

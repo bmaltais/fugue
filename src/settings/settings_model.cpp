@@ -104,6 +104,8 @@ void SettingsModel::registerCommands(CommandRegistry &registry, std::function<vo
     m_openUrl = std::move(openUrl);
     registry.setHandler(QStringLiteral("app.settings"),
                         [&registry] { emit registry.windowRequested(QStringLiteral("app.settings")); });
+    registry.setHandler(QStringLiteral("cache.clear-previews"),
+                        [&registry] { emit registry.windowRequested(QStringLiteral("cache.clear-previews")); });
 }
 
 void SettingsModel::loadSettings() { m_file = readSettings(m_path); }

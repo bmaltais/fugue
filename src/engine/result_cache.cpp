@@ -401,9 +401,13 @@ qint64 ResultCache::size() const {
     return total;
 }
 
+int ResultCache::blobCount() const {
+    return int(QDir(blobsDir()).entryList(QDir::Files).size());
+}
+
 QStringList ResultCache::evict() {
     qint64 total = size();
-    if (total <= m_options.limitBytes)
+    if (m_options.limitBytes <= 0 || total <= m_options.limitBytes)
         return {};
     const QList<Record> all = records();
     QHash<QString, int> references;
@@ -432,29 +436,64 @@ QStringList ResultCache::evict() {
 }
 
 QStringList ResultCache::clear(const QString &workflow, const QString &node) {
-    QStringList removed;
-    for (Record &record : records()) {
+    return clearMatching(ClearFilter{workflow, node, {}}, false).keys;
+}
+
+ResultCache::Cleared ResultCache::clearMatching(const ClearFilter &filter, bool dryRun) {
+    const QList<Record> all = records();
+    QList<Record> trimmed; // records that only lose some of their `used_by`
+    QList<Record> removed;
+    for (const Record &record : all) {
         if (isFrozen(record.key))
+            continue;
+        if (filter.usedBefore.isValid() && !(record.lastUsed < filter.usedBefore))
             continue;
         QList<UsedBy> kept;
         for (const UsedBy &by : record.usedBy) {
-            const bool matches = (workflow.isEmpty() || by.workflow == workflow) && (node.isEmpty() || by.node == node);
+            const bool matches = (filter.workflow.isEmpty() || by.workflow == filter.workflow)
+                                 && (filter.node.isEmpty() || by.node == filter.node);
             if (!matches)
                 kept.append(by);
         }
         if (kept.isEmpty()) {
-            removeRecord(record.key);
-            removed.append(record.key);
+            removed.append(record);
         } else if (kept.size() != record.usedBy.size()) {
-            record.usedBy = kept;
-            write(record);
+            Record changed = record;
+            changed.usedBy = kept;
+            trimmed.append(changed);
         }
     }
+
+    Cleared cleared;
+    // The bytes freed are the blobs no remaining record refers to.
+    QHash<QString, int> references;
+    for (const Record &record : all)
+        for (auto it = record.blobs.begin(); it != record.blobs.end(); ++it)
+            ++references[it.key()];
+    for (const Record &record : removed)
+        for (auto it = record.blobs.begin(); it != record.blobs.end(); ++it)
+            --references[it.key()];
+    QSet<QString> counted;
+    for (const Record &record : removed) {
+        cleared.keys.append(record.key);
+        for (auto it = record.blobs.begin(); it != record.blobs.end(); ++it)
+            if (references.value(it.key()) <= 0 && !counted.contains(it.key())) {
+                counted.insert(it.key());
+                cleared.bytes += it.value();
+            }
+    }
+    cleared.keys.sort();
+    if (dryRun)
+        return cleared;
+
+    for (const Record &record : trimmed)
+        write(record);
+    for (const Record &record : removed)
+        removeRecord(record.key);
     // What was cleared goes at once; clearing is how a person frees space.
     if (!removed.isEmpty())
         removeUnreferencedBlobs(QDateTime());
-    removed.sort();
-    return removed;
+    return cleared;
 }
 
 void ResultCache::removeUnreferencedBlobs(const QDateTime &olderThan) const {
@@ -488,22 +527,6 @@ void ResultCache::collectGarbage() {
             removeRecord(record.key);
     }
     removeUnreferencedBlobs(now().addSecs(-gracePeriodSeconds));
-}
-
-QStringList removeEndedRunFolders(const QString &runsRoot, const QDateTime &now, qint64 graceSeconds) {
-    QStringList removed;
-    const QDir root(runsRoot);
-    for (const QString &id : root.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
-        const Result<QJsonObject> state = readJsonObject(root.filePath(id) + QStringLiteral("/run.json"));
-        if (!state)
-            continue;
-        const QDateTime ended = parseTime(state->value("ended").toString());
-        if (!ended.isValid() || ended.addSecs(graceSeconds) >= now)
-            continue;
-        if (QDir(root.filePath(id)).removeRecursively())
-            removed.append(id);
-    }
-    return removed;
 }
 
 } // namespace fugue

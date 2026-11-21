@@ -11,6 +11,8 @@ QString configDir(); // $XDG_CONFIG_HOME/fugue  (~/.config/fugue)
 QString stateDir();  // $XDG_STATE_HOME/fugue   (~/.local/state/fugue)
 QString dataDir();   // $XDG_DATA_HOME/fugue    (~/.local/share/fugue)
 QString cacheDir();  // $XDG_CACHE_HOME/fugue   (~/.cache/fugue)
+// The 512 px copies of the pictures the canvas shows (spec 12.7): <cacheDir>/thumbnails.
+QString thumbnailsDir();
 // The default output folder of Save nodes: Fugue under the user's pictures folder
 // ($XDG_PICTURES_DIR, else the desktop's setting, else ~/Pictures): ~/Pictures/Fugue, unless
 // settings.json's output_folder names another (engine/settings.h).

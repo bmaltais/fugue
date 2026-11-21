@@ -6,7 +6,7 @@ import QtQuick.Layouts
 import Fugue
 import "../canvas"
 
-// The settings panel (#51), opened by app.settings (Ctrl+,): seven pages on the left, the
+// The settings panel (#51), opened by app.settings (Ctrl+,): eight pages on the left, the
 // page on the right. Each change goes to the model (settings_model.h), which checks it and
 // writes the file at once; a refused change shows why under the page and writes nothing.
 // Styled as the `?` overlay (docs/canvas-look.md 13): scrim, popup card, level 3 shadow.
@@ -44,7 +44,7 @@ Popup {
     function apply(result) { error = result; return result === "" }
 
     readonly property var pages: [qsTr("General"), qsTr("Folders"), qsTr("Run"), qsTr("Providers"),
-                                  qsTr("Keymap"), qsTr("Theme"), qsTr("Packs")]
+                                  qsTr("Keymap"), qsTr("Theme"), qsTr("Packs"), qsTr("Cache")]
 
     // The desktop portal's folder picker (Qt's own where there is none).
     property var pickDone: null
@@ -319,6 +319,14 @@ Popup {
                         visible: panel.page === 6
                         Layout.fillWidth: true
                         host: panel
+                    }
+
+                    // Cache (#141): made when first shown, so the page costs nothing until then.
+                    Loader {
+                        active: panel.page === 7 || item !== null
+                        visible: panel.page === 7
+                        Layout.fillWidth: true
+                        sourceComponent: CachePage { host: panel }
                     }
 
                     // Keymap

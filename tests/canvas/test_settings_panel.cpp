@@ -8,6 +8,7 @@
 
 #include "canvas_app.h"
 #include "engine/json.h"
+#include "engine/paths.h"
 #include "engine/providers.h"
 
 #include <QJsonDocument>
@@ -93,6 +94,53 @@ private slots:
         QTRY_VERIFY(panelOpen(app.window));
         QTest::keyClick(app.window, Qt::Key_Escape);
         QTRY_VERIFY(!panelOpen(app.window));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // Settings > Cache (#141): the command "Clear image preview cache" opens the page with the
+    // question for the previews; nothing goes before the yes, and a no keeps everything.
+    void clearingTheImagePreviewsAsksFirst() {
+        const QString file = fugue::thumbnailsDir() + "/probe-512.png";
+        QDir().mkpath(fugue::thumbnailsDir());
+        QFile probe(file);
+        QVERIFY(probe.open(QIODevice::WriteOnly));
+        probe.write(QByteArray(1000, 'x'));
+        probe.close();
+        App app(load(emptyDoc));
+        QVERIFY(app.open());
+        app.commands.trigger("cache.clear-previews");
+        QTRY_VERIFY(panelOpen(app.window));
+        NEED("cacheQuestion");
+        QTRY_VERIFY(NEED("cacheQuestionDetail")->property("text").toString().contains("Nothing is lost for good"));
+        click(app, NEED("cacheNo"));
+        QTRY_VERIFY(!find(app.window, "cacheQuestion"));
+        QVERIFY(QFile::exists(file));
+        // Asked again, the yes clears it, and the page says how much.
+        app.commands.trigger("cache.clear-previews");
+        click(app, NEED("cacheYes"));
+        QTRY_VERIFY(!QFile::exists(file));
+        QTRY_VERIFY(NEED("cacheMessage")->property("text").toString().contains("Cleared"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    void theCacheLimitsAreChoicesThatPersist() {
+        App app(load(emptyDoc));
+        QVERIFY(app.open());
+        app.commands.trigger("cache.clear-previews");
+        QTRY_VERIFY(panelOpen(app.window));
+        click(app, NEED("cacheResults-5"));
+        QTRY_COMPARE(fugue::SettingsModel(app.settings.path()).cacheResultsGb(), 5.0);
+        click(app, NEED("cacheThumbnails-0"));
+        QTRY_COMPARE(fugue::SettingsModel(app.settings.path()).cacheThumbnailsGb(), 0.0);
+        // The last limit is below the fold of the page: scroll to it, as a person would.
+        QQuickItem *runs = NEED("runsKept-50");
+        for (QQuickItem *up = runs->parentItem(); up; up = up->parentItem())
+            if (up->inherits("QQuickFlickable")) {
+                up->setProperty("contentY", up->property("contentHeight").toReal() - up->height());
+                break;
+            }
+        click(app, runs);
+        QTRY_COMPARE(fugue::SettingsModel(app.settings.path()).runsKept(), 50);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 

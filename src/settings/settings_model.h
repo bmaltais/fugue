@@ -21,6 +21,7 @@
 #include <functional>
 
 #include "engine/providers.h"
+#include "settings/cache_model.h"
 #include "settings/packs_model.h"
 #include "engine/settings.h"
 
@@ -58,6 +59,10 @@ class SettingsModel : public QObject {
     Q_PROPERTY(int maxCornerRadius READ maxCornerRadius CONSTANT)
     // The hover magnifier (#74, #123): off unless turned on; the canvas binds it.
     Q_PROPERTY(bool hoverMagnifier READ hoverMagnifier NOTIFY changed)
+    // The cache limits (#141): GB of results and of previews (0: no limit), runs kept past a week.
+    Q_PROPERTY(double cacheResultsGb READ cacheResultsGb NOTIFY changed)
+    Q_PROPERTY(double cacheThumbnailsGb READ cacheThumbnailsGb NOTIFY changed)
+    Q_PROPERTY(int runsKept READ runsKept NOTIFY changed)
     // What is wrong with settings.json, one line each, and whether the panel may write it.
     Q_PROPERTY(QStringList problems READ problems NOTIFY changed)
     Q_PROPERTY(bool writable READ writable NOTIFY changed)
@@ -73,6 +78,8 @@ class SettingsModel : public QObject {
     Q_PROPERTY(QStringList providerTypes READ providerTypes CONSTANT)
     // The Packs page: install, trust and remove (#25).
     Q_PROPERTY(fugue::PacksModel *packs READ packs CONSTANT)
+    // The Cache page: sizes, Clear and the automatic cleaning (#141).
+    Q_PROPERTY(fugue::CacheModel *cache READ cache CONSTANT)
 
 public:
     // `settingsFile` and `providersFile` are settings.json and providers.json (the standard
@@ -84,7 +91,8 @@ public:
     // at once.
     void attach(Translator *translator, CanvasModel *canvas, const Registry *registry = nullptr,
                 Theme *theme = nullptr);
-    // app.settings opens the panel; the keymap page opens files with `openUrl`.
+    // app.settings opens the panel; cache.clear-previews opens it on the Cache page with the
+    // question for the previews; the keymap page opens files with `openUrl`.
     void registerCommands(CommandRegistry &registry, std::function<void(const QUrl &)> openUrl);
 
     QString path() const { return m_path; }
@@ -101,6 +109,9 @@ public:
     QString embedWorkflow() const { return m_file.settings.embedWorkflow; }
     int cornerRadius() const { return m_file.settings.cornerRadius; }
     bool hoverMagnifier() const { return m_file.settings.hoverMagnifier; }
+    double cacheResultsGb() const { return m_file.settings.cacheResultsGb; }
+    double cacheThumbnailsGb() const { return m_file.settings.cacheThumbnailsGb; }
+    int runsKept() const { return m_file.settings.runsKept; }
     static int maxCornerRadius() { return Settings::maxCornerRadius; }
     QStringList problems() const { return m_file.problems; }
     bool writable() const { return m_file.writable; }
@@ -110,6 +121,7 @@ public:
     QString providersProblem() const { return m_providersProblem; }
     QStringList providerTypes() const;
     PacksModel *packs() { return &m_packs; }
+    CacheModel *cache() { return &m_cache; }
 
     // Sets one setting (a settings.json key) and writes the file. For a folder, empty text
     // goes back to the default; a folder may be text or the folder picker's URL. Empty when done,
@@ -155,6 +167,7 @@ private:
     QByteArray providersSnapshot() const;
 
     PacksModel m_packs;
+    CacheModel m_cache;
     QString m_path;
     QString m_providersPath;
     SettingsFile m_file;

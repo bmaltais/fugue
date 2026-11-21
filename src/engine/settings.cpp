@@ -19,7 +19,8 @@ namespace {
 const QStringList kKeys{"navigation",     "language",       "output_folder",
                         "inputs_folder",  "model_paths",    "model_folder_kinds",
                         "download_folder", "pack_paths",    "new_seed",
-                        "embed_workflow", "corner_radius",  "hover_magnifier"};
+                        "embed_workflow", "corner_radius",  "hover_magnifier",
+                        "cache_results_gb", "cache_thumbnails_gb", "runs_kept"};
 
 QString oneOf(const QJsonValue &value, const QStringList &choices, const QString &key) {
     if (value.isString() && choices.contains(value.toString()))
@@ -90,6 +91,12 @@ void apply(Settings &settings, const QString &key, const QJsonValue &value) {
         settings.cornerRadius = value.isString() ? Settings::followOmarchy : value.toInt();
     else if (key == QLatin1String("hover_magnifier"))
         settings.hoverMagnifier = value.toBool();
+    else if (key == QLatin1String("cache_results_gb"))
+        settings.cacheResultsGb = value.toDouble();
+    else if (key == QLatin1String("cache_thumbnails_gb"))
+        settings.cacheThumbnailsGb = value.toDouble();
+    else if (key == QLatin1String("runs_kept"))
+        settings.runsKept = value.toInt();
 }
 
 } // namespace
@@ -109,6 +116,12 @@ QJsonValue settingDefault(const QString &key) {
         return 8;
     if (key == QLatin1String("hover_magnifier"))
         return false;
+    if (key == QLatin1String("cache_results_gb"))
+        return 10;
+    if (key == QLatin1String("cache_thumbnails_gb"))
+        return 1;
+    if (key == QLatin1String("runs_kept"))
+        return 20;
     if (key == QLatin1String("model_paths") || key == QLatin1String("pack_paths"))
         return QJsonArray();
     if (key == QLatin1String("model_folder_kinds"))
@@ -133,6 +146,17 @@ QString checkSetting(const QString &key, const QJsonValue &value) {
     }
     if (key == QLatin1String("hover_magnifier"))
         return value.isBool() ? QString() : QStringLiteral("hover_magnifier must be true or false.");
+    if (key == QLatin1String("cache_results_gb") || key == QLatin1String("cache_thumbnails_gb")) {
+        if (value.isDouble() && value.toDouble() >= 0 && value.toDouble() <= Settings::maxCacheGb)
+            return {};
+        return QStringLiteral("%1 must be a number of GB from 0 (no limit) to %2.").arg(key).arg(Settings::maxCacheGb);
+    }
+    if (key == QLatin1String("runs_kept")) {
+        const double count = value.toDouble(-1);
+        if (value.isDouble() && count == std::floor(count) && count >= 0 && count <= Settings::maxRunsKept)
+            return {};
+        return QStringLiteral("runs_kept must be a whole number from 0 to %1.").arg(Settings::maxRunsKept);
+    }
     if (key == QLatin1String("language")) {
         static const QRegularExpression code(QStringLiteral("^[a-z]{2,3}(-[A-Za-z]{2})?$"));
         if (value.isString() && code.match(value.toString()).hasMatch())
