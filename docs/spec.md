@@ -253,7 +253,8 @@ latent the model, which VAE Decode decodes with; an Empty Latent's is only the s
 (`"empty": true`), the Sampler starting from noise. A video latent (#105) is the same file kind
 with `frames` and `fps` in its `meta` too; the tensor has the time axis, tens of MB for a few
 seconds, and travels to a paired host like any latent. Wan's 4 n + 1 frames: the model rounds
-another count to one. `fugue/controlnet` and
+another count to one. `fugue/stitch` (#176, 14.4) is a data type too: a descriptor alone, where a crop came from.
+`fugue/controlnet` and
 `fugue/upscale-model` come with their nodes.
 
 ---
@@ -2711,7 +2712,7 @@ FLUX.1 Fill staged picture differs from the single run's.
 
 ### 14.4 Masking and inpainting (#167)
 
-Designed; the staged path in the helper and the nodes is built (#173) and the nodes of #171 and the mask editor (#172) are built; the parts are the issues at the end of this section, and each part says here what has
+Designed; the staged path in the helper and the nodes is built (#173) and the nodes of #171, the mask editor (#172) and Crop to Mask, Stitch and the group (#176) are built; the parts are the issues at the end of this section, and each part says here what has
 shipped. The research and each choice with its confidence are in Appendix A (the rows marked
 #167); the person's guide is [masking.md](masking.md).
 
@@ -2720,9 +2721,19 @@ Masked, Feather Mask, Threshold Mask, Combine Masks, Fill Masked and Overlay Mas
 for the kernels, `src/nodes/mask_ops.*` for the arithmetic, plain functions on float buffers that
 Stitch and Generate Image call as well; `pixel_io.*` is the reading and writing of buffers that
 `pixel.cpp` and `mask.cpp` share). The rows of the table below that are not marked as shipped are
-still to come. Parity tests against ComfyUI's own outputs cover Composite Masked, Threshold Mask and
+still to come, except those marked shipped below. Parity tests against ComfyUI's own outputs cover Composite Masked, Threshold Mask and
 Combine Masks (`tests/nodes/golden/make_mask.py`, `mask.json`); Feather Mask and Fill Masked have
 property tests (`tests/nodes/test_mask_nodes.cpp`).
+
+**Shipped (#176):** Crop to Mask and Stitch (`src/nodes/crop_stitch.cpp` for the nodes,
+`src/nodes/crop_stitch_ops.*` for the arithmetic: plain functions on float buffers), the declared
+type `fugue/stitch`, and the group `fugue/inpaint-crop-stitch`. Tests: `tests/nodes/test_crop_stitch.cpp`
+(the box rule, the sizes, crop then stitch, the handle's hash, the errors, the group on the fake
+helper). No ComfyUI golden: the size rule is Resize to Megapixels' (checked in #72's tests), the
+resampling and the feathering are the shared kernels, and the community Inpaint Crop and Stitch node
+is GPL, so its behaviour was taken from its README only; what is new is the box and the stitch,
+which the tests state as properties (an untouched crop gives the original back, outside the box is
+byte for byte the original's).
 
 **The mask.** A mask stays an `image` with one channel (2.1), values 0 to 1, where 1 is the part
 to change and 0 the part to keep: the polarity of Pad, of ComfyUI's inpaint nodes, of
@@ -2790,19 +2801,23 @@ or copied). Mask outputs carry the role.
 | `fugue/combine-masks` 1.0.0 (shipped) | `destination`, `source`, `operation` (multiply, add, subtract, and, or, xor), `x`, `y` | `mask` | ComfyUI's MaskComposite. Shipped: `x` and `y` run 0 to 16384; the result is held to 0 to 1; and, or and xor round half to even first, so 0.5 counts as off. |
 | `fugue/fill-masked` 1.0.0 (shipped) | `image`, `mask`, `mode` (gray, blur; default blur) | `image` | What lies under the mask before a redraw below denoise 1 (A1111's masked content "fill", Krita's pre-fill): gray is 0.5; blur spreads the colors around the mask into it (push-pull: averages of the kept pixels, coarse to fine). Where m = 0 nothing changes. Property tests, no parity (no permissive reference). Shipped: a mask of another size is stretched to the picture (bilinear). The blur weights each pixel by 1 - m, so a half-masked pixel counts half, and a fill is a convex mix of kept colors; with nothing kept it is gray. Where 0 < m < 1 the result is image x (1 - m) + fill x m. Gray gives alpha 1 on a picture with alpha; 4 MP takes about 130 ms. |
 | `fugue/overlay-mask` 1.0.0 (shipped) | `image`, `mask`, `color` (default `#ff3b30`), `opacity` (default 0.5) | `image` | The mask drawn over the picture, to check or save what is masked. A mask alone already shows as a gray picture in Preview. Shipped: out = image x (1 - a) + color x a with a = m x opacity; `color` is `#rrggbb`, `#rgb` or `#rrggbbaa` (the alpha multiplies the opacity); the picture's alpha channel is left alone. |
-| `fugue/crop-to-mask` | `image`, `mask`, `padding` (px, default 64), `megapixels` (default 1; 0 keeps the size), `multiple` (advanced, default 16) | `image`, `mask`, `stitch`, `width`, `height` | The box around every pixel with m > 0, grown by `padding` on each side, moved inside the picture where it sticks out and cut where the picture is smaller; then resized to Resize to Megapixels' size for the box (lanczos for the picture, bilinear for the mask), so a small region is redrawn at the model's resolution and a large one is not drawn above it. |
-| `fugue/stitch` | `stitch`, `image`, `blend` (px, default 16), `mask` (optional) | `image` | The redrawn crop put back: resized to the box (lanczos) and blended through the handle's mask (or `mask`, at the picture's size) feathered outward by `blend` (Feather Mask's kernel), cut at the box. Outside the box the original's pixels are kept byte for byte. |
+| `fugue/crop-to-mask` | `image`, `mask`, `padding` (px, default 64), `megapixels` (default 1; 0 keeps the size), `multiple` (advanced, default 16) | `image`, `mask`, `stitch`, `width`, `height` | The box around every pixel with m > 0, grown by `padding` on each side, moved inside the picture where it sticks out and cut where the picture is smaller; then resized to Resize to Megapixels' size for the box (lanczos for the picture, bilinear for the mask), so a small region is redrawn at the model's resolution and a large one is not drawn above it. Shipped (`fugue/crop-to-mask` 1.0.0): padding 0 to 4096, megapixels 0 to 16, `multiple` 1 to 256. The box is the bounds of the pixels above 0 (a faint stroke counts); grown by the padding it is moved inside the picture, and cut when the grown box is wider or taller than the picture, so a mask over half the picture, or a 1 px mask in a corner, still gives a box inside it. Its size is `sizeForMegapixels` of the box's aspect, no side above 4096 (a 1 x 4000 box at 1 MP would be 16 x 65536); with megapixels 0 it is the box's own size and nothing is resampled. A mask of another size than the picture is stretched to it (bilinear) with the warning `mask_resized`; an empty one is `mask_empty`. The crop keeps the picture's channels; the mask output is one channel in 0 to 1. |
+| `fugue/stitch` | `stitch`, `image`, `blend` (px, default 16), `mask` (optional) | `image` | The redrawn crop put back: resized to the box (lanczos) and blended through the handle's mask (or `mask`, at the picture's size) feathered outward by `blend` (Feather Mask's kernel), cut at the box. Outside the box the original's pixels are kept byte for byte. Shipped (`fugue/stitch` 1.0.0): blend 0 to 512. The mask is feathered over the whole picture and then cut at the box, so a mask that reaches the box's edge fades as it does anywhere; where the feathered mask is 0 the original is returned exactly (out = d x (1 - m) + s x m with m = 0), and a crop that was not resized and not changed gives the original back within float rounding. A mask of another size than the original is stretched to it. The redrawn picture must have the crop's shape to within 2% of its aspect ratio, any size: another size is resized to the box (an edit model may return a larger picture). A handle whose original or mask file has changed since Crop to Mask read it is `file_not_found` on `stitch`; a value that is not a stitch handle is `input_invalid`. |
 
 **The stitch handle.** A declared data type `fugue/stitch` (a diamond port, 2.2), a descriptor
-alone as an Empty Latent is (2.6): `{"data": "fugue/stitch", "hash", "meta": {"image": <the
+alone as an Empty Latent is (2.6; shipped: the file is `stitch.json` in Crop to Mask's folder and holds the `meta` as compact canonical JSON and nothing else, so what the scheduler hashes is the meta; the media handles it names are the inputs' own files, a mask of another size included, and Stitch checks their hashes): `{"data": "fugue/stitch", "hash", "meta": {"image": <the
 original's media handle>, "mask": <the mask's, at the original's size>, "box": {"x", "y",
 "width", "height"}, "size": {"width", "height"}}}`, the hash that of the canonical `meta`. So a
 Stitch cannot be fed a picture by mistake, and it needs no second wire from the original.
 
 **The group.** `fugue/inpaint-crop-stitch`, "Inpaint (crop and stitch)", shipped by the `fugue`
-pack as a group (6.1 `runtime.kind: "group"`; in the template's own definition until the
-built-in pack can carry one): Crop to Mask, Text Encode (the crop as its reference), VAE Encode
-(the crop and its mask), Sampler, VAE Decode, Stitch. Exposed: `model`, `image`, `mask`,
+pack as a group (6.1 `runtime.kind: "group"`). The built-in pack can carry one: `pack.json` lists
+the folder, whose `node.json` has `runtime: {"kind": "group", "definition": "group.fugue"}` and whose
+`group.fugue` (a document with an empty graph and the definition in `groups`, as the library writes
+it, 5.3) is compiled in as a resource beside it (CMakeLists.txt globs `group.fugue`);
+`loadLibraryGroup` and `embedGroupTypes` read it through the resource path as they read a file, so
+the template (#177) adds the group like any other and the workflow embeds the definition. Its nodes: Crop to Mask, Text Encode (the crop as its reference), VAE Encode
+(the crop and its mask), Sampler, VAE Decode, Stitch (inner ids `crop`, `encode`, `vae_encode`, `sample`, `decode`, `stitch`). Exposed: `model`, `image`, `mask`,
 `prompt`, `seed`, `steps`, `guidance`, `denoise` (default 1), `padding`, `megapixels`, `blend`;
 out: `image`.
 
@@ -3307,6 +3322,7 @@ Building M4 made these further choices.
 | The helper, not Fugue, decides how an image model uses a mask, by the library's version name (inpaint models: the picture; others: the start latent): it owns stable-diffusion.cpp's behaviour, and the names are checked when the pin moves. Fugue's `model_shape` only learns the inpaint models' wider input so it stops calling them mismatched | 8.10, 14.4 | medium |
 | Staged masks as built (#173, 2026-11-21): the Sampler sends the picture as VAE Encode did (the library scales both the same way) rather than pre-scaling it, and the mask pre-scaled by the nearest pixel, which the helper checks against the request's size; a mask of another size than the picture is `node_failed` on `mask`, not scaled; `mask_empty` is an error at VAE Encode and `mask_full` a warning there, not flags on the latent; an inpaint model ignores the start latent it is sent (its sample re-encodes the picture, so the VAE's noise draw is the one a single run makes); the hook sets `c_concat` only where a single run would (the unconditional and image-unconditional when the conditioning has them). Staged equals one `generate`, byte for byte, on an RTX 3090 for FLUX.2 Klein 4B, FLUX.1 Fill (fp8) and SDXL Inpaint; the FLUX.1 Fill staged picture without the hook differs, which is what the hook is for. The diffusers SDXL Inpaint UNet is read for its 9 channels from `conv_in.weight` only when it has 9 and `down_blocks.` (a VAE and a 4-channel UNet are not) | 8.10, 14.3, 14.4 | high |
 | Composite back is a node in staged graphs (Composite Masked, Stitch), and built into Generate Image, the coarse node whose promise is that the outside is unchanged. Soft edges come from Feather Mask and Stitch's blend, in pixels, because the library rounds the mask in the latent | 14.4 | medium |
+| Crop and stitch as built (#176): the group ships from the built-in pack (a `group.fugue` resource beside its `node.json`; the loader, `loadLibraryGroup` and `embedGroupTypes` took it with no change), so #177's template only adds it. Choices made while building: the handle's `meta` names the picture and mask as the inputs' own media handles, so the cache and the hash follow them, and a mask of another size is kept as given and stretched in Stitch (a resized mask written to the node's folder would move into the cache's store and leave a stale path); the shape check compares the picture with the handle's own `size`, not with the box, so the rounding to a multiple of 16 never causes `stitch_mismatch`; no side of a crop passes 4096 (a sliver box would otherwise be 16 x 65536 at 1 MP); a crop that is not resized takes no resampling, so megapixels 0 with blend 0 returns the original byte for byte; the mask is feathered over the whole picture and cut at the box, not feathered inside the box, so the edge fades alike at the box's border; the box is the bounds of the pixels above 0, so a faint stroke counts and an 8-bit mask's 1/255 is not ignored; no ComfyUI golden (the formulas are the shared resize and feather kernels; the GPL Inpaint Crop and Stitch node was not read beyond its README); `mask_full` is not a warning of Crop to Mask (the box is the picture) | 14.4 | medium-high |
 | Names and defaults the owner may change: Feather Mask (`fugue/feather-mask`, a blur of the mask outward by default; ComfyUI's FeatherMask, which fades from the picture's borders, would convert to another node), Combine Masks for MaskComposite, Crop to Mask's padding 64 px and 1 megapixel, Stitch's blend 16 px, the overlay in the accent at 50% | 14.4 | medium |
 | Both templates run FLUX.2 Klein 9B, the files the edit templates already use, by masked sampling with the picture as a reference: the owner has the files and they are checked staged; Klein 4B (Apache-2.0) is the alternative with a licence for commercial use, FLUX.1 Fill the dedicated model once its file is at hand. Whether the reference helps or makes Klein keep the old content is checked on the 3090 when the template is built | 11.10, 14.4 | medium |
 | No differential diffusion now: the library rounds the mask, and thresholding it per step is a change to sampling code, which the patch's rule excludes (8.10). It waits for the owner: carry it in the patch, or propose it upstream (17) | 8.10, 14.4, 17 | high |

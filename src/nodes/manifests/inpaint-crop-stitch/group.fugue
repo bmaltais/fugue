@@ -1,0 +1,212 @@
+{
+  "fugue": 1,
+  "graph": {
+    "nodes": {}
+  },
+  "groups": {
+    "fugue/inpaint-crop-stitch": {
+      "category": "Image/Mask",
+      "description": "Redraw the painted part of a picture at the model's full detail: cut a box around the mask, redraw it at about a megapixel, and put it back through a soft edge, so only the masked part changes.",
+      "inputs": [
+        {
+          "label": "Model",
+          "name": "model",
+          "targets": [
+            "encode.model",
+            "vae_encode.model",
+            "sample.model"
+          ]
+        },
+        {
+          "label": "Image",
+          "name": "image",
+          "targets": [
+            "crop.image"
+          ]
+        },
+        {
+          "label": "Mask",
+          "name": "mask",
+          "targets": [
+            "crop.mask"
+          ]
+        },
+        {
+          "label": "Prompt",
+          "name": "prompt",
+          "targets": [
+            "encode.prompt"
+          ]
+        },
+        {
+          "label": "Seed",
+          "name": "seed",
+          "targets": [
+            "sample.seed"
+          ]
+        },
+        {
+          "label": "Steps",
+          "name": "steps",
+          "targets": [
+            "sample.steps"
+          ]
+        },
+        {
+          "label": "Guidance",
+          "name": "guidance",
+          "targets": [
+            "sample.guidance"
+          ]
+        },
+        {
+          "label": "Denoise",
+          "name": "denoise",
+          "targets": [
+            "sample.denoise"
+          ]
+        },
+        {
+          "label": "Padding",
+          "name": "padding",
+          "section": "Crop",
+          "targets": [
+            "crop.padding"
+          ]
+        },
+        {
+          "label": "Megapixels",
+          "name": "megapixels",
+          "section": "Crop",
+          "targets": [
+            "crop.megapixels"
+          ]
+        },
+        {
+          "label": "Blend",
+          "name": "blend",
+          "section": "Crop",
+          "targets": [
+            "stitch.blend"
+          ]
+        }
+      ],
+      "name": "Inpaint (crop and stitch)",
+      "nodes": {
+        "crop": {
+          "inputs": {},
+          "type": "fugue/crop-to-mask",
+          "version": "1.0.0"
+        },
+        "decode": {
+          "inputs": {
+            "latent": {
+              "from": "sample.latent"
+            }
+          },
+          "type": "fugue/vae-decode",
+          "version": "1.0.0"
+        },
+        "encode": {
+          "inputs": {
+            "references": [
+              {
+                "from": "crop.image"
+              }
+            ]
+          },
+          "type": "fugue/text-encode",
+          "version": "1.0.0"
+        },
+        "sample": {
+          "inputs": {
+            "conditioning": {
+              "from": "encode.conditioning"
+            },
+            "latent": {
+              "from": "vae_encode.latent"
+            }
+          },
+          "type": "fugue/sampler",
+          "version": "1.0.0"
+        },
+        "stitch": {
+          "inputs": {
+            "image": {
+              "from": "decode.image"
+            },
+            "stitch": {
+              "from": "crop.stitch"
+            }
+          },
+          "type": "fugue/stitch",
+          "version": "1.0.0"
+        },
+        "vae_encode": {
+          "inputs": {
+            "image": {
+              "from": "crop.image"
+            },
+            "mask": {
+              "from": "crop.mask"
+            }
+          },
+          "type": "fugue/vae-encode",
+          "version": "1.1.0"
+        }
+      },
+      "outputs": [
+        {
+          "from": "stitch.image",
+          "label": "Image",
+          "name": "image"
+        }
+      ],
+      "version": "1.0.0"
+    }
+  },
+  "layout": {
+    "groups": {
+      "fugue/inpaint-crop-stitch": {
+        "nodes": {
+          "crop": {
+            "pos": [
+              0,
+              0
+            ]
+          },
+          "decode": {
+            "pos": [
+              1020,
+              0
+            ]
+          },
+          "encode": {
+            "pos": [
+              340,
+              0
+            ]
+          },
+          "sample": {
+            "pos": [
+              680,
+              0
+            ]
+          },
+          "stitch": {
+            "pos": [
+              1360,
+              0
+            ]
+          },
+          "vae_encode": {
+            "pos": [
+              340,
+              300
+            ]
+          }
+        }
+      }
+    }
+  }
+}

@@ -55,7 +55,10 @@ picture back over the result. Set how much to add on each side in Pad.
   Composite Masked. The model works on blocks of 8 or 16 pixels, so the exact edge always comes
   from the blend.
 - **Small regions.** Use the crop-and-stitch group (or Crop to Mask and Stitch), not the whole
-  picture, so the region is redrawn at the model's resolution.
+  picture, so the region is redrawn at the model's resolution. Crop to Mask gives the crop, its mask
+  and a stitch handle (the diamond port) that remembers where the crop came from; wire the redrawn
+  crop and that handle into Stitch. The crop must keep its shape (to within 2%) or Stitch says so.
+  Padding 64 px, 1 megapixel and Blend 16 px are the defaults; Megapixels 0 keeps the crop's size.
 - **Denoise.** 1 replaces what is under the mask. Lower keeps its shapes and colors. Below 1, put
   a Fill Masked (blur) before VAE Encode when the old content should not show through.
 - **Wrong way round.** If the rest of the picture changed and the painted part did not, the mask

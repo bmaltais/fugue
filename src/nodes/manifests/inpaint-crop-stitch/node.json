@@ -1,0 +1,126 @@
+{
+  "manifest": 1,
+  "id": "fugue/inpaint-crop-stitch",
+  "version": "1.0.0",
+  "name": "Inpaint (crop and stitch)",
+  "description": "Redraw the painted part of a picture at the model's full detail: cut a box around the mask, redraw it at about a megapixel, and put it back through a soft edge, so only the masked part changes.",
+  "category": "Image/Mask",
+  "keywords": [
+    "inpaint",
+    "region",
+    "redraw",
+    "crop",
+    "stitch",
+    "mask"
+  ],
+  "runtime": {
+    "kind": "group",
+    "definition": "group.fugue"
+  },
+  "inputs": [
+    {
+      "name": "model",
+      "type": "fugue/model",
+      "label": "Model"
+    },
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    },
+    {
+      "name": "mask",
+      "type": "image",
+      "label": "Mask",
+      "role": "mask"
+    },
+    {
+      "name": "prompt",
+      "type": "text",
+      "label": "Prompt",
+      "widget": "multiline"
+    },
+    {
+      "name": "seed",
+      "type": "number",
+      "label": "Seed",
+      "default": 0,
+      "integer": true,
+      "min": 0,
+      "max": 9007199254740991,
+      "widget": "seed"
+    },
+    {
+      "name": "steps",
+      "type": "number",
+      "label": "Steps",
+      "default": 20,
+      "integer": true,
+      "min": 1,
+      "max": 200
+    },
+    {
+      "name": "guidance",
+      "type": "number",
+      "label": "Guidance",
+      "default": 1,
+      "min": 0,
+      "max": 30,
+      "step": 0.1,
+      "description": "How closely to follow the prompt (CFG). 1 for distilled models such as Z-Image Turbo and FLUX.2 Klein, which also skips the negative prompt; about 5 to 8 for SDXL and SD 1.5."
+    },
+    {
+      "name": "denoise",
+      "type": "number",
+      "label": "Denoise",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "widget": "slider",
+      "description": "For a latent from VAE Encode or another Sampler: how far to move from it, 0 keeps it, 1 ignores it. An Empty Latent always starts from noise."
+    },
+    {
+      "name": "padding",
+      "type": "number",
+      "label": "Padding",
+      "description": "Pixels of the picture kept around the mask on each side, so the model sees what surrounds it.",
+      "default": 64,
+      "min": 0,
+      "max": 4096,
+      "step": 1,
+      "integer": true,
+      "section": "Crop"
+    },
+    {
+      "name": "megapixels",
+      "type": "number",
+      "label": "Megapixels",
+      "description": "The crop is resized to about this many megapixels. 0 keeps its size.",
+      "default": 1,
+      "min": 0,
+      "max": 16,
+      "step": 0.05,
+      "section": "Crop"
+    },
+    {
+      "name": "blend",
+      "type": "number",
+      "label": "Blend",
+      "description": "How far the edge of the mask fades outward, in pixels of the picture.",
+      "default": 16,
+      "min": 0,
+      "max": 512,
+      "step": 1,
+      "integer": true,
+      "section": "Crop"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    }
+  ]
+}

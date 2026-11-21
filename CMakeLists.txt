@@ -133,6 +133,13 @@ foreach(manifest ${fugue_node_manifests})
   set_source_files_properties(src/nodes/manifests/${manifest} PROPERTIES QT_RESOURCE_ALIAS ${manifest})
   list(APPEND fugue_node_manifest_files src/nodes/manifests/${manifest})
 endforeach()
+# A group the pack ships (runtime.kind "group") keeps its definition beside its node.json.
+file(GLOB fugue_group_definitions CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/src/nodes/manifests
+     src/nodes/manifests/*/group.fugue)
+foreach(definition ${fugue_group_definitions})
+  set_source_files_properties(src/nodes/manifests/${definition} PROPERTIES QT_RESOURCE_ALIAS ${definition})
+  list(APPEND fugue_node_manifest_files src/nodes/manifests/${definition})
+endforeach()
 qt_add_resources(fugue_nodes fugue_node_manifests PREFIX /fugue/nodes FILES ${fugue_node_manifest_files})
 
 add_executable(fugue src/main.cpp src/resources.qrc)
