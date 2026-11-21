@@ -74,10 +74,10 @@ jobs:
     name: Build and test (aarch64)
     # The same build and tests on an arm64 runner, so a pull request covers both architectures (#61).
     # Arch has no official arm64 container (Arch Linux ARM is a separate, third-party distribution), so
-    # this uses Debian 13 (trixie): Qt 6.8 and libvips 8.16, near what the app is built against, where
-    # Ubuntu 24.04 has Qt 6.4. See docs/aarch64-ci.md.
+    # this uses Ubuntu 26.04: it has Qt 6.10, which the app needs (QQmlEngine::setExternalSingletonInstance),
+    # where Ubuntu 24.04 has 6.4 and Debian 13 has 6.8. See docs/aarch64-ci.md.
     runs-on: ubuntu-24.04-arm
-    container: debian:trixie
+    container: ubuntu:26.04
     defaults:
       run:
         shell: bash
