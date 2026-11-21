@@ -42,6 +42,7 @@ makedepends=(
   'vulkan-headers'
 )
 checkdepends=(
+  'jq'
   'noto-fonts'
 )
 _sdcpp=532d2c15c430a785a712b2d94281f04e733008a4
