@@ -17,6 +17,10 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      # bin/build uses ccache when it is installed; its folder is kept between runs below.
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 800M
     steps:
       - name: Install git for the checkout
         run: pacman -Syu --noconfirm --needed git
@@ -45,7 +49,16 @@ jobs:
           deps=("${depends[@]}" "${makedepends[@]}" "${checkdepends[@]}")
           wanted=()
           for dep in "${deps[@]%%[<>=]*}"; do [[ $dep == cuda ]] || wanted+=("$dep"); done
-          pacman -S --noconfirm --needed base-devel cmake dbus "${wanted[@]}"
+          pacman -S --noconfirm --needed base-devel ccache cmake dbus "${wanted[@]}"
+
+      - name: Restore the compiler cache
+        # A new entry is saved on every run (the key has the commit); the newest older one is the start.
+        # It is restored before the chown below, so the build user owns it.
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: test-ccache-${{ github.sha }}
+          restore-keys: test-ccache-
 
       - name: Set up a user and a locale like a desktop's
         # Root can read any file, so tests about unreadable ones need an ordinary user, with a second group for tests that change a file's group; and the container generates no locale.
@@ -63,3 +76,6 @@ jobs:
       - name: Test
         run: su tester -c 'LANG=en_US.UTF-8 dbus-run-session -- bin/test'
 
+      - name: Compiler cache use
+        if: always()
+        run: su tester -c 'ccache -s'
