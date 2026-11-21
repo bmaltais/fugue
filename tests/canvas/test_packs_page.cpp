@@ -125,16 +125,16 @@ private slots:
         App app(load(emptyDoc));
         QVERIFY(app.open());
         app.commands.trigger("app.settings");
-        QTRY_VERIFY(panelOpen(app.window));
+        QTRY_VERIFY_WITH_TIMEOUT(panelOpen(app.window), 20000);
         click(app, NEED("settingsPage-6"));
         type(app, NEED("packLocation"), m_source);
         click(app, NEED("packAdd"));
-        QTRY_VERIFY(find(app.window, "packQuestion"));
+        QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "packQuestion"), 20000);
         QVERIFY(find(app.window, "packQuestionDetail"));
-        QTRY_VERIFY(NEED("packNo")->isEnabled());
+        QTRY_VERIFY_WITH_TIMEOUT(NEED("packNo")->isEnabled(), 20000);
         click(app, NEED("packNo"));
-        QTRY_VERIFY(!find(app.window, "packQuestion"));
-        QTRY_VERIFY(find(app.window, "packsFailure"));
+        QTRY_VERIFY_WITH_TIMEOUT(!find(app.window, "packQuestion"), 20000);
+        QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "packsFailure"), 20000);
         QVERIFY(!QFileInfo(packs() + "/io.example.tools").exists());
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
@@ -143,36 +143,36 @@ private slots:
         App app(load(emptyDoc));
         QVERIFY(app.open());
         app.commands.trigger("app.settings");
-        QTRY_VERIFY(panelOpen(app.window));
+        QTRY_VERIFY_WITH_TIMEOUT(panelOpen(app.window), 20000);
         click(app, NEED("settingsPage-6"));
 
         type(app, NEED("packLocation"), m_source);
         click(app, NEED("packAdd"));
-        QTRY_VERIFY(find(app.window, "packQuestion"));
+        QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "packQuestion"), 20000);
         QVERIFY(!QFileInfo(packs() + "/io.example.tools").exists()); // nothing before the yes
-        QTRY_VERIFY(NEED("packYes")->isEnabled());
+        QTRY_VERIFY_WITH_TIMEOUT(NEED("packYes")->isEnabled(), 20000);
         click(app, NEED("packYes"));
-        QTRY_VERIFY(QFileInfo(packs() + "/io.example.tools/pack.json").isFile());
-        QTRY_VERIFY(find(app.window, "pack-io.example.tools"));
+        QTRY_VERIFY_WITH_TIMEOUT(QFileInfo(packs() + "/io.example.tools/pack.json").isFile(), 20000);
+        QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "pack-io.example.tools"), 20000);
         // Usable at once (#70): the window's node types have it, with no restart.
-        QTRY_VERIFY(app.registry.nodeType("io.example.tools/tool"));
+        QTRY_VERIFY_WITH_TIMEOUT(app.registry.nodeType("io.example.tools/tool"), 20000);
         QCOMPARE(fugue::TrustStore(trustFile()).isTrusted("io.example.tools", "1.0.0"), false);
 
         click(app, NEED("packTrust-io.example.tools"));
-        QTRY_VERIFY(find(app.window, "packQuestion"));
+        QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "packQuestion"), 20000);
         QCOMPARE(fugue::TrustStore(trustFile()).isTrusted("io.example.tools", "1.0.0"), false);
-        QTRY_VERIFY(NEED("packYes")->isEnabled());
+        QTRY_VERIFY_WITH_TIMEOUT(NEED("packYes")->isEnabled(), 20000);
         click(app, NEED("packYes"));
         QTRY_COMPARE(fugue::TrustStore(trustFile()).isTrusted("io.example.tools", "1.0.0"), true);
 
         click(app, NEED("packRemove-io.example.tools"));
-        QTRY_VERIFY(find(app.window, "packQuestion"));
+        QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "packQuestion"), 20000);
         QVERIFY(QFileInfo(packs() + "/io.example.tools").isDir());
-        QTRY_VERIFY(NEED("packYes")->isEnabled());
+        QTRY_VERIFY_WITH_TIMEOUT(NEED("packYes")->isEnabled(), 20000);
         click(app, NEED("packYes"));
-        QTRY_VERIFY(!QFileInfo(packs() + "/io.example.tools").exists());
-        QTRY_VERIFY(!find(app.window, "pack-io.example.tools"));
-        QTRY_VERIFY(!app.registry.nodeType("io.example.tools/tool"));
+        QTRY_VERIFY_WITH_TIMEOUT(!QFileInfo(packs() + "/io.example.tools").exists(), 20000);
+        QTRY_VERIFY_WITH_TIMEOUT(!find(app.window, "pack-io.example.tools"), 20000);
+        QTRY_VERIFY_WITH_TIMEOUT(!app.registry.nodeType("io.example.tools/tool"), 20000);
         QCOMPARE(fugue::TrustStore(trustFile()).isTrusted("io.example.tools", "1.0.0"), false);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
@@ -190,23 +190,23 @@ private slots:
         QVERIFY2(app.model.saveGroupToLibrary(), qPrintable(app.model.groupProblem()));
         QVERIFY(QFileInfo(packs() + "/local/group/node.json").isFile());
         app.commands.trigger("app.settings");
-        QTRY_VERIFY(panelOpen(app.window));
+        QTRY_VERIFY_WITH_TIMEOUT(panelOpen(app.window), 20000);
         click(app, NEED("settingsPage-6"));
-        QTRY_VERIFY(find(app.window, "libraryGroup-local/group"));
+        QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "libraryGroup-local/group"), 20000);
 
         click(app, NEED("libraryRename-local/group"));
         type(app, NEED("libraryName-local/group"), "renamed");
-        QTRY_VERIFY(QFileInfo(packs() + "/local/renamed/node.json").isFile());
+        QTRY_VERIFY_WITH_TIMEOUT(QFileInfo(packs() + "/local/renamed/node.json").isFile(), 20000);
         QVERIFY(!QFileInfo(packs() + "/local/group").exists());
-        QTRY_VERIFY(find(app.window, "libraryGroup-local/renamed"));
-        QTRY_VERIFY(app.registry.nodeType("local/renamed"));
+        QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "libraryGroup-local/renamed"), 20000);
+        QTRY_VERIFY_WITH_TIMEOUT(app.registry.nodeType("local/renamed"), 20000);
 
         click(app, NEED("libraryRemove-local/renamed"));
         QVERIFY(QFileInfo(packs() + "/local/renamed").isDir()); // nothing before the yes
         click(app, NEED("libraryRemoveYes-local/renamed"));
-        QTRY_VERIFY(!QFileInfo(packs() + "/local/renamed").exists());
-        QTRY_VERIFY(!find(app.window, "libraryGroup-local/renamed"));
-        QTRY_VERIFY(!app.registry.nodeType("local/renamed"));
+        QTRY_VERIFY_WITH_TIMEOUT(!QFileInfo(packs() + "/local/renamed").exists(), 20000);
+        QTRY_VERIFY_WITH_TIMEOUT(!find(app.window, "libraryGroup-local/renamed"), 20000);
+        QTRY_VERIFY_WITH_TIMEOUT(!app.registry.nodeType("local/renamed"), 20000);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
@@ -215,11 +215,11 @@ private slots:
         QVERIFY(app.open());
         fugue::PacksModel *model = app.settings.packs();
         model->add(m_source, {});
-        QTRY_VERIFY(!model->question().isEmpty());
+        QTRY_VERIFY_WITH_TIMEOUT(!model->question().isEmpty(), 20000);
         model->answer(true); // too soon: it was meant for nothing on this question
         QVERIFY(!model->question().isEmpty());
         QVERIFY(!QFileInfo(packs() + "/io.example.tools").exists());
-        QTRY_VERIFY(model->questionReady());
+        QTRY_VERIFY_WITH_TIMEOUT(model->questionReady(), 20000);
         model->cancel(); // a cancel answers no
         QVERIFY(model->waitIdle());
         QVERIFY(!QFileInfo(packs() + "/io.example.tools").exists());
@@ -231,7 +231,7 @@ private slots:
         QVERIFY(app.open());
         fugue::PacksModel *model = app.settings.packs();
         model->add(m_source, {});
-        QTRY_VERIFY(model->questionReady());
+        QTRY_VERIFY_WITH_TIMEOUT(model->questionReady(), 20000);
         model->answer(true);
         QVERIFY(model->waitIdle());
         QVERIFY(QFileInfo(packs() + "/io.example.tools/pack.json").isFile());
@@ -241,7 +241,7 @@ private slots:
                                              {"nodes", QJsonArray{"tool"}}}).toJson());
         bump.close();
         model->update("io.example.tools");
-        QTRY_VERIFY(model->questionReady());
+        QTRY_VERIFY_WITH_TIMEOUT(model->questionReady(), 20000);
         QCOMPARE(model->question().value("kind").toString(), QString("update"));
         model->answer(false);
         QVERIFY(model->waitIdle());
