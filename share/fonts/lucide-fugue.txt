@@ -42,3 +42,12 @@ volume-x e1ac
 maximize-2 e117
 boxes e2d0
 workflow e42a
+brush e1d3
+eraser e28f
+lasso-select e1cf
+square-dashed e1cb
+contrast e0a1
+paint-bucket e2e6
+undo-2 e2a1
+redo-2 e2a0
+eye e0be

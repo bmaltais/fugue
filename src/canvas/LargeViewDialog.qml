@@ -23,6 +23,10 @@ Popup {
     property alias footer: footerHolder.data
     readonly property alias bar: bar
     signal confirm // Enter, when nothing in the dialog took it (a text field does)
+    // A key the dialog did not take, for a viewer with keys of its own (the mask editor's B and E):
+    // the handler sets `event.accepted`. The release of any key too.
+    signal keyPressed(var event)
+    signal keyReleased(var event)
 
     parent: Overlay.overlay
     x: Math.round((parent.width - width) / 2)
@@ -41,16 +45,22 @@ Popup {
         id: column
         spacing: 2 * root.look.unit
         focus: true
+        Keys.onReleased: event => root.keyReleased(event)
         Keys.onPressed: event => {
-            if (!root.zoomable || (event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)))
+            if (!root.zoomable || (event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) {
+                root.keyPressed(event)
                 return
+            }
             const middle = Qt.point(root.zoomable.width / 2, root.zoomable.height / 2)
             if (event.key === Qt.Key_0) root.zoomable.fit()
             else if (event.key === Qt.Key_1) root.zoomable.actualSize()
             else if (event.key === Qt.Key_Plus || event.key === Qt.Key_Equal) root.zoomable.zoomAt(middle.x, middle.y, 1.25)
             else if (event.key === Qt.Key_Minus) root.zoomable.zoomAt(middle.x, middle.y, 0.8)
             else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) root.confirm()
-            else return
+            else {
+                root.keyPressed(event)
+                return
+            }
             event.accepted = true
         }
         Row {
