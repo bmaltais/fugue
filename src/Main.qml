@@ -35,6 +35,61 @@ ApplicationWindow {
 
     HelperNotice { id: helperNotice }
 
+    // Which bars and panels are shown (#129, panels/chrome_visibility.h). A window without the
+    // registry (a test window) shows them all.
+    function chromeIsShown(id) {
+        return App.chrome === null || App.chrome.shown[id] !== false
+    }
+
+    // One line that says how to get chrome back, for a few seconds: made when needed, dropped after.
+    property Item chromeHintItem: null
+    function showChromeHint(text) {
+        if (chromeHintItem)
+            chromeHintItem.destroy()
+        chromeHintItem = chromeHintComponent.createObject(windowRoot, {text: text}) as Item
+    }
+    Connections {
+        target: App.chrome
+        function onHiddenByRequest(id) {
+            if (id === "menu-bar")
+                win.showChromeHint(qsTr("Menu bar hidden. F10 brings it back."))
+        }
+        function onFocusModeChanged() {
+            if (App.chrome.focusMode)
+                win.showChromeHint(qsTr("Focus mode. H brings everything back."))
+        }
+    }
+    Component {
+        id: chromeHintComponent
+        Rectangle {
+            id: hint
+            objectName: "chromeHint"
+            property string text
+            z: 20
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 4 * App.theme.look.unit
+            width: hintLabel.implicitWidth + 6 * App.theme.look.unit
+            height: 7 * App.theme.look.unit
+            radius: Math.min(App.theme.look.popupCorner, 14)
+            color: App.theme.look.popup
+            border.color: App.theme.look.hairline
+            Accessible.role: Accessible.AlertMessage
+            Accessible.name: text
+            Label {
+                id: hintLabel
+                anchors.centerIn: parent
+                color: App.theme.look.text
+                text: hint.text
+            }
+            Timer {
+                running: true
+                interval: 4000
+                onTriggered: hint.destroy()
+            }
+        }
+    }
+
     // Right-to-left languages mirror the window; the Translator sets the
     // application's layout direction.
     Item {
@@ -47,11 +102,16 @@ ApplicationWindow {
             anchors.fill: parent
             spacing: 0
 
+            // The menu bar and the tabs hide from View > Bars and panels (#129; items are kept, not dropped:
+            // the window's item count is a budget and a Loader each would add to it). F10
+            // (app.menu-bar) brings the menu bar back.
             MenuBar {
+                visible: win.chromeIsShown("menu-bar")
                 Layout.fillWidth: true
                 Layout.preferredHeight: implicitHeight
             }
             WorkflowTabs {
+                allowed: win.chromeIsShown("workflow-tabs")
                 Layout.fillWidth: true
                 Layout.preferredHeight: implicitHeight
             }
@@ -103,6 +163,10 @@ ApplicationWindow {
                 model: App.canvasModel
                 navigation: win.appSettingsModel ? win.appSettingsModel.navigation : "legacy"
                 hoverMagnifier: win.appSettingsModel ? win.appSettingsModel.hoverMagnifier : false
+                selectionToolbarShown: win.chromeIsShown("selection-toolbar")
+                breadcrumbShown: win.chromeIsShown("breadcrumb")
+                runPillShown: win.chromeIsShown("run-status")
+                zoomPillShown: win.chromeIsShown("zoom-readout")
                 onSearchRequested: (x, y) => App.canvasModel.search.openAt(x, y)
                 onLinkReleased: (from, x, y) => App.canvasModel.search.openFromLink(from, x, y)
                 onContextMenuRequested: (x, y) => contextMenu.openAt(x, y, false)

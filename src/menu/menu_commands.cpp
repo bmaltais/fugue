@@ -14,6 +14,7 @@
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
 #include "menu/menus.h"
+#include "panels/chrome_commands.h"
 #include "workflow/image_inputs.h"
 
 namespace fugue {
@@ -108,8 +109,6 @@ QList<Row> menuRows() {
         {"frame.rename", QT_TRANSLATE_NOOP("Command", "Rename the Frame"), QT_TRANSLATE_NOOP("Command", "Rename Frame…"), {}, "canvas", "same"},
         {"frame.delete", QT_TRANSLATE_NOOP("Command", "Delete the Frame (its nodes stay)"),
          QT_TRANSLATE_NOOP("Command", "Delete Frame"), {}, "canvas", "same"},
-        {"view.toggle-run-toolbar", QT_TRANSLATE_NOOP("Command", "Show or hide the run toolbar"),
-         QT_TRANSLATE_NOOP("Command", "Show run toolbar"), {}, "app", "added"},
         {"app.menu-bar", QT_TRANSLATE_NOOP("Command", "Open the menu bar"), nullptr, {"F10"}, "app", "added"},
         {"app.context-menu", QT_TRANSLATE_NOOP("Command", "Open the context menu"), nullptr, {"Shift+F10", "Menu"}, "canvas", "added"},
     };
@@ -140,6 +139,7 @@ QList<QPair<const char *, const char *>> menuLabels() {
 } // namespace
 
 void registerMenuCommands(CommandRegistry &registry) {
+    addChromeCommands(registry); // the Bars and panels menu's rows
     for (const Row &row : menuRows()) {
         if (registry.contains(QString::fromLatin1(row.id)))
             continue;

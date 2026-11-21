@@ -5,7 +5,11 @@
 // The toolbar and the panel are QML (src/run/RunToolbar.qml, RunQueuePanel.qml) that know
 // nothing of this; Main.qml binds them to App.runBar, App.runs and App.runQueue.
 //
-// Kept in a small file of the state folder: {"visible", "place": {"x", "y"}, "batch"}. The place is
+// Whether the toolbar is shown is the visibility registry's (id "run-toolbar", panels/chrome_visibility.h):
+// the Bars and panels menu, focus mode and the file that remembers it are its. A "visible" in this
+// file from before is read once, when the registry has nothing for the toolbar.
+//
+// Kept in a small file of the state folder: {"place": {"x", "y"}, "batch"}. The place is
 // the bar's, as fractions (0 to 1) of the room it has in the window (src/engine/float_place.h), so a
 // resized window keeps it sensible: {0.5, 0} is centered at the top, {0.5, 1} at the bottom. An
 // older file has "dock": "top"|"bottom" instead, read as those two places and dropped at the next
@@ -22,6 +26,7 @@
 namespace fugue {
 
 class CanvasRuns;
+class ChromeVisibility;
 class CommandRegistry;
 
 class RunBar : public QObject {
@@ -35,10 +40,13 @@ class RunBar : public QObject {
 
 public:
     // `path` is the file it is kept in; the batch count is `runs`' (set from the file, saved when
-    // it changes).
-    RunBar(CanvasRuns *runs, QString path, QObject *parent = nullptr);
+    // it changes). `chrome` is the registry the toolbar registers with; none: a registry of its own,
+    // which keeps nothing.
+    RunBar(CanvasRuns *runs, QString path, ChromeVisibility *chrome = nullptr);
 
-    bool visible() const { return m_visible; }
+    static constexpr const char *kChromeId = "run-toolbar";
+
+    bool visible() const;
     QPointF place() const { return m_place; }
     bool queueOpen() const { return m_queueOpen; }
     void setVisible(bool visible);
@@ -59,7 +67,7 @@ private:
 
     CanvasRuns *m_runs;
     QString m_path;
-    bool m_visible = true;
+    ChromeVisibility *m_chrome;
     QPointF m_place{0.5, 0};
     bool m_queueOpen = false;
 };

@@ -164,7 +164,7 @@ struct RunApp {
         runs->registerCommands(app.commands);
         app.runs = runs.get();
         // The run toolbar and the queue panel, as main() makes them, with the test's own folders.
-        bar = std::make_unique<fugue::RunBar>(runs.get(), root + "/run-bar.json");
+        bar = std::make_unique<fugue::RunBar>(runs.get(), root + "/run-bar.json", &app.chrome);
         bar->registerCommands(app.commands);
         queue = std::make_unique<fugue::RunQueue>(fugue::RunQueuePaths{root + "/runs", root + "/queue", root + "/engine.lock"},
                                                   service.get());

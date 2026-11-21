@@ -5,6 +5,7 @@
 
 #include <QtTest>
 
+#include "panels/chrome_visibility.h"
 #include "run/run_bar.h"
 
 class TestRunBar : public QObject {
@@ -41,6 +42,26 @@ private slots:
         fugue::RunBar again(nullptr, path);
         QCOMPARE(again.place(), QPointF(0.25, 0.75));
         QVERIFY(!read(path).contains("dock"));
+    }
+
+    void whetherItIsShownIsTheRegistrysAndAnOlderFileIsReadOnce() {
+        QTemporaryDir dir;
+        const QString path = dir.path() + "/run-bar.json";
+        write(path, R"({"visible": false, "batch": 3})");
+        {
+            fugue::ChromeVisibility chrome(dir.path() + "/chrome.json");
+            fugue::RunBar bar(nullptr, path, &chrome);
+            QVERIFY(!bar.visible());
+            QSignalSpy changed(&bar, &fugue::RunBar::visibleChanged);
+            chrome.setVisible("run-toolbar", true);
+            QCOMPARE(changed.count(), 1);
+            QVERIFY(bar.visible());
+            chrome.setFocusMode(true);
+            QVERIFY(!bar.visible());
+        }
+        fugue::ChromeVisibility chrome(dir.path() + "/chrome.json");
+        fugue::RunBar again(nullptr, path, &chrome);
+        QVERIFY(again.visible()); // the registry's choice wins over the older file
     }
 
     void anOlderDockEdgeIsReadAsAPlace() {

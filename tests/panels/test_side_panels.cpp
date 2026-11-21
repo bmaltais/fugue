@@ -6,6 +6,7 @@
 
 #include "commands/command_registry.h"
 #include "menu/menu_commands.h"
+#include "panels/chrome_visibility.h"
 #include "panels/side_panels.h"
 
 using namespace fugue;
@@ -51,15 +52,48 @@ private slots:
     void itIsKeptBetweenRuns() {
         QTemporaryDir dir;
         {
-            SidePanels panels(dir.filePath("side-panels.json"));
+            ChromeVisibility chrome(dir.filePath("chrome.json"));
+            SidePanels panels(dir.filePath("side-panels.json"), &chrome);
             panels.setTab("workflows");
             panels.setDock("right");
             panels.setWidth(333);
         }
-        SidePanels again(dir.filePath("side-panels.json"));
+        ChromeVisibility chrome(dir.filePath("chrome.json"));
+        SidePanels again(dir.filePath("side-panels.json"), &chrome);
         QCOMPARE(again.tab(), QString("workflows"));
         QCOMPARE(again.dock(), QString("right"));
         QCOMPARE(again.width(), 333);
+    }
+    void aTabKeptByAnOlderFileIsReadOnceAndThenTheRegistryDecides() {
+        QTemporaryDir dir;
+        const QString path = dir.filePath("side-panels.json");
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("{\"tab\": \"nodes\", \"dock\": \"right\", \"width\": 300}");
+        file.close();
+        {
+            ChromeVisibility chrome(dir.filePath("chrome.json"));
+            SidePanels panels(path, &chrome);
+            QCOMPARE(panels.tab(), QString("nodes"));
+            QCOMPARE(panels.dock(), QString("right"));
+            panels.setTab(""); // closed: the registry now has its own answer
+        }
+        ChromeVisibility chrome(dir.filePath("chrome.json"));
+        SidePanels again(path, &chrome);
+        QCOMPARE(again.tab(), QString());
+    }
+    void focusModeHidesThePanelAndBringsItBack() {
+        ChromeVisibility chrome({});
+        SidePanels panels({}, &chrome);
+        QSignalSpy changed(&panels, &SidePanels::tabChanged);
+        panels.setTab("nodes");
+        chrome.setFocusMode(true);
+        QCOMPARE(panels.tab(), QString());
+        chrome.setFocusMode(false);
+        QCOMPARE(panels.tab(), QString("nodes"));
+        QCOMPARE(changed.count(), 3);
+        panels.toggle("workflows"); // switching sends one change
+        QCOMPARE(changed.count(), 4);
     }
     void aDamagedFileGivesTheDefaults() {
         QTemporaryDir dir;

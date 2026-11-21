@@ -1941,12 +1941,14 @@ and the `?` overlay marks each one.
 | `view.toggle-links` | Hide or show links | L | same |
 | `panel.nodes`, `panel.workflows` | Toggle the node library, the workflows panel | N, W | same |
 | `panel.queue` | Toggle the run queue panel | Alt+Q | added (ComfyUI's `q` is Quit here) |
-| `view.toggle-run-toolbar` | Show or hide the run toolbar | none (View menu) | added |
+| `view.toggle-menu-bar`, `view.toggle-tabs`, `view.toggle-run-toolbar`, `view.toggle-selection-toolbar`, `view.toggle-breadcrumb`, `view.toggle-run-status`, `view.toggle-zoom-readout` | Show or hide each bar | none (View > Bars and panels) | added |
+| `view.focus-mode` | Hide all bars and panels; the same key brings them back as they were | H | added |
+| `view.reset-bars` | Every bar back, the panels closed | none (View > Bars and panels) | added |
 | `app.menu-bar` | Open the menu bar | F10 | added |
 | `app.context-menu` | Open the context menu | Shift+F10, Menu | added |
 
 Commands with no default key (the colors `node.color.<role>`, `edit.clear`, the exports, the help
-links, `view.toggle-run-toolbar`) are in the menus, and the keymap file can bind any of them.
+links, the `view.toggle-...` bars, `view.reset-bars`) are in the menus, and the keymap file can bind any of them.
 
 Align and distribute (#58): `node.align-left`, `-right`, `-top`, `-bottom` put the selected nodes
 on the selection's outermost edge; `node.distribute-horizontal` and `-vertical` even out the gaps
@@ -2045,7 +2047,7 @@ they add no queue of their own.
   remembered with the batch count in `~/.local/state/fugue/run-bar.json` as fractions of the room
   the bar has (`place`: x and y, 0 to 1), so a resized window keeps it where it was relative to the
   edges; an older file's `dock` ("top" or "bottom") is read as the centered top or bottom place. `view.toggle-run-toolbar`
-  (View menu) hides and shows it. A thin bar under it shows the progress of the node going.
+  (View > Bars and panels) hides and shows it. A thin bar under it shows the progress of the node going.
 - **Batch count** (1 to 99): one Run makes that many runs, queued together in order, each taking the
   document as it is then, so a seed set to increment gives each its own number (ComfyUI's batch
   count). It applies to Run, Run first and Run to here.
@@ -2070,7 +2072,7 @@ they add no queue of their own.
 
 A dockable panel beside the canvas (#56), as ComfyUI's sidebar, with two tabs: the **node library**
 (`panel.nodes`, N) and the **workflows panel** (`panel.workflows`, W). One is open at a time: its key
-opens it, the same key closes it, the other key replaces it. Each is a checked item in the View menu
+opens it, the same key closes it, the other key replaces it. Each is a checked item in the View menu's Bars and panels submenu
 while it is the open one. The canvas gives up the panel's width; the panel is made only while open,
 and the window keeps its item budget.
 
@@ -2095,6 +2097,51 @@ and the window keeps its item budget.
   dropped). The library of groups ([5.3](#53-definitions-copies-and-the-library), #26) is a third list here later.
 - **Not built** (follow-ups): a model library tab (M), assets, a log or terminal panel at the bottom,
   bookmarks and a preview of a node in the library.
+
+### 12.15 Bars and panels: the menu and focus mode
+
+Every bar and panel can be shown and hidden (#129), as Photoshop's Window menu does. One small registry
+keeps which are shown (`panels/chrome_visibility.h`: plain C++, no QML, tested alone); each bar
+registers an id with it and the window shows the bar while the id is shown. The commands, the menus,
+focus mode and the file all read that one place.
+
+| Id | Command | What it is |
+| --- | --- | --- |
+| `menu-bar` | `view.toggle-menu-bar` | the menu bar |
+| `workflow-tabs` | `view.toggle-tabs` | the workflow tabs (12.10); still only from the second workflow on |
+| `run-toolbar` | `view.toggle-run-toolbar` | the run toolbar (12.13); the queue panel hangs from it and goes with it |
+| `selection-toolbar` | `view.toggle-selection-toolbar` | the toolbar above a selection |
+| `breadcrumb` | `view.toggle-breadcrumb` | the group breadcrumb |
+| `run-status` | `view.toggle-run-status` | the run pill at the top right |
+| `zoom-readout` | `view.toggle-zoom-readout` | the zoom pill at the bottom left |
+| `node-library`, `workflows-panel` | `panel.nodes`, `panel.workflows` | the side panels (12.14), one at a time (an exclusive group of the registry) |
+
+- **Bars and panels** (a submenu at the end of the View menu, after fit, zoom and links, with **Focus mode** under it): one row per bar with a check while it is shown, then the
+  panels (`panel.nodes`, `panel.workflows`, `panel.queue`), then **Focus mode** and **Reset bars and
+  panels**. The same menu is a submenu of the canvas's context menu, so a right click finds it even
+  with the menu bar hidden.
+- **Focus mode** (`view.focus-mode`, **H** on the canvas): hides every bar and panel; H again brings
+  back exactly what was shown, no more and no less. Tab is not used: it already enters a group and opens
+  node search (12.4). While it is on, what is asked for shows alone: a panel opened with N or W, the
+  menu bar brought back with F10; leaving focus mode keeps it, with the rest. Focus mode is not
+  remembered: a window always opens with its bars, so a window closed in focus mode loses nothing. A line
+  at the bottom says how to leave it for four seconds.
+- **Nothing is lost.** The menu bar is the only bar that holds the commands to bring the others
+  back, so it has three ways back: F10 (`app.menu-bar`) shows it first when it is hidden, then opens it;
+  the canvas's context menu has the same submenu; **Reset bars and panels** (a key if the keymap file
+  binds `view.reset-bars`) shows every bar and closes the panels. Hiding the menu bar says so for four
+  seconds: "Menu bar hidden. F10 brings it back." A newly hidden bar keeps its command in the keymap:
+  any `view.toggle-...` can be bound in the keymap file (12.5).
+- **Remembered** in `~/.local/state/fugue/chrome.json`: `{"visible": {"<id>": true|false}}`, an entry per
+  choice made. An id this version does not know is kept as it is; a file that cannot be read gives the
+  defaults. The run toolbar's older `visible` in `run-bar.json` and the side panels' older `tab` in
+  `side-panels.json` are read once, when `chrome.json` has nothing for them; those files keep the toolbar's
+  place and batch count and the panel's side and width.
+- The queue panel (`panel.queue`) is open or not for the window's life, and is not an id of its own:
+  it hangs from the run toolbar, so hiding the toolbar or entering focus mode hides it, and it comes
+  back with the toolbar.
+- Not built: workspaces (a named set of shown bars, Photoshop's Essentials), a minimap (12.9, later), a
+  status bar and a bottom panel (none exist).
 
 ---
 
@@ -2593,6 +2640,7 @@ Building M2 made these further choices.
 | Live node types (#70): one registry per window stays in place and takes the types read again (`Registry::replaceTypes`); a reload asked for by the window (Packs page, library save) happens at once, one seen on disk (QFileSystemWatcher on the pack paths, pack and node folders, manifests and command entries) after 500 ms of quiet and only when the types differ. The run thread fills its compile registry before its next compile and its run registry before its next run starts. ComfyUI loads custom nodes only at server start (its Manager says "restart required"); Fugue has no server to restart | 6.5, 6.6 | medium-high |
 | Run toolbar and queue panel (#60). Researched from ComfyUI's documentation (docs.comfy.org interface overview, shortcuts, job history and settings pages; the frontend source was not read, and it is GPL-3.0-only, so no code was looked at or copied): a floating run bar at the top of the canvas, dragged by a handle and docked back to the top; Run with Run (On Change) and Run (Instant); a batch count (default 1, capped at 100 by a setting); Interrupt, disabled when idle; Ctrl+Enter, Ctrl+Shift+Enter (front), Ctrl+Alt+Enter (interrupt), Q (queue sidebar); a job history panel with status, progress and previews, per-job cancel, Clear queue and Clear history, 64 entries by default. Not found in the docs: whether the bar's place is remembered, reordering or moving a queued job to the front, and clicking a job to show its outputs on the canvas. Matched: the batch count (1 to 99) beside Run, Cancel next to it, the bar floating at the canvas edge and movable, the keys, a queue panel with running, waiting and finished runs. Improved: the panel lists runs started from a terminal as well (one shared queue, 9.8) and cancels them the way `fugue runs cancel` does; move to front for any waiting run; a click on a finished run puts its results back on the nodes; the bar's place and the batch count are remembered; the same Run menu rows behind the arrow. Chosen: the bar moves freely in the window (#120; first it docked at the top or the bottom edge) and the panel follows it; the history is the last 8 runs (ComfyUI keeps 64: ours is a glance, the run folders hold the rest for 7 days); Alt+Q opens the panel because `Q` is Quit here; Run (On Change), Run (Instant), a GPU memory readout and a results strip are not built | 12.13 | medium |
 | Side panels (#56). Researched from ComfyUI's documentation (docs.comfy.org interface overview, node library and shortcuts pages; the frontend source is GPL-3.0-only and was not read, so no code was looked at or copied; the documentation is public and only facts about behavior were taken): the left sidebar has tabs for Node Library, Model Library, Workflows, Assets, Apps and (optionally) Job History, each opened and closed by a key (N, M, W, Q; A is Select all); the node library is searchable, has bookmarks and an Essentials tab, and nodes are dragged onto the canvas; Workflows lists saved workflows and recent files. Not found in the docs: whether the sidebar's width or side is remembered. Matched: N and W toggling a left sidebar with one tab open at a time, the searchable node library, a drag onto the canvas, the workflows tab with recent files. Improved: the same search ranking as Add node (a word finds the same nodes in both), a click adds at the middle of the view and a drop where it lands, the open tabs are listed with their color and unsaved mark and can be closed there, the panel can dock on either side, be resized, and its tab, side and width are remembered, the View menu checks the open one. Chosen: one tab at a time (as ComfyUI's); the library is a category tree (closed at first), not a grid with an Essentials tab; the library's list scrolls by the wheel and its scroll bar, not by dragging, so a drag can take a node out; bookmarks, hover previews, a model library (M), assets (A) and a log panel are follow-ups; recent files keep 12 | 12.14 | medium |
+| Bars and panels and focus mode (#129). Researched from the products' documentation only (Adobe's Photoshop user guide on the Window menu, panels and workspaces; the Blender manual's interface pages on areas, View menu and Toggle Maximize Area; ComfyUI's documentation on the interface and shortcuts); no source was read, ComfyUI's and Blender's being GPL; Adobe's page answered 403 and Blender's manual page did not load in the session that built it, so the facts below are from the documentation as known, not re-read, and should be rechecked before they are quoted. Photoshop: a Window menu lists every panel and the options bar and tools bar with a check mark while shown; Tab hides all panels, the toolbar and the options bar, Shift+Tab hides the panels but not them, and moving the pointer to the screen edge shows them for a moment; the layout is remembered and a Workspace (Essentials, Reset Essentials) saves and restores a set. Blender: the View menu toggles the toolbar, the sidebar and the header of an area; Ctrl+Space maximizes the area under the pointer and again restores the layout, Ctrl+Alt+Space makes it full screen; a hidden header comes back from a small arrow on the area. ComfyUI: sidebar tabs open and close with keys (N, W, M, Q; 12.14); the documentation read describes no menu of bars and no hide-all key (not verified beyond that). Matched: a menu of every bar with a check (Photoshop's Window menu); one command per bar that the keymap can bind; one key hides all the chrome and the same key restores it (Photoshop's Tab, Blender's Ctrl+Space); the state is remembered. Improved: the restore is exact (what was shown, nothing else; a panel opened during focus mode stays), a hidden menu bar says how it comes back and has three ways (F10, the canvas's menu, Reset), focus mode is never saved so a window cannot open bare, and every bar is a registry entry so a later bar costs one id. Chosen: H, not Tab (Tab enters a group and opens search here, 12.4) and not Ctrl+Space (some input methods take it); the list is a submenu of View (a top Window menu, as Photoshop's, adds four items to the window, which keeps an item budget) with the panels in it; one panel and one bar are one id each; no hover-at-the-edge reveal, no workspaces and no per-panel arrows (follow-ups); the toolbar `view.toggle-run-toolbar` keeps its id | 12.15 | medium |
 | Corners (#63): 8 px by default for every canvas surface, the node corner `r` and the popup corner `R` alike, from the `corner_radius` setting (General page: Fixed, 0 to 16 px a step at a time, or Follow Omarchy, which keeps the earlier rule: `R` is Hyprland's rounding and `r` is held to 8). ComfyUI's `ROUND_RADIUS` is 8 and its Vue nodes use 0.75 rem; Omarchy's default rounding is 0, which drew square nodes. The setting sits on the General page as the issue asks; the Theme page shows Hyprland's rounding as "Window rounding" | 12.11 | high |
 | Shadows (#63, docs/canvas-look.md 7): a contact and an ambient layer per level, cast downward and growing with the zoom; much stronger on dark themes (black only reads over a near-black canvas when it is deep) plus a 1 px top highlight on the card at 10% of the text color; selected nodes higher (level 2) and the selection being dragged higher still (a new level 4). ComfyUI draws one black 50% shadow at (2, 2) blur 3 for every node, selected or not. The canvas color itself is unchanged (the theme's background); a slightly lighter canvas on dark themes would make the elevation read more and is left for the owner's look review | 12.1 | medium |
 | Resize from any of the four corners (#63), as ComfyUI's canvas and Vue nodes (a 15 px square inside each corner; no edges: its `resizeEdgeSize` is declared and unused); a top or left corner moves the node so the opposite corner stays, after the size limits. Each corner sets its diagonal resize cursor before the press. ComfyUI's canvas draws no mark (its Vue nodes show two short diagonals at each corner on hover); ours is one stroke concentric with the node's corner, in all four corners while hovered or selected (the one under the pointer brighter), so the affordance follows round and square corners alike; a port inside a corner's square wins over it | 12, 4.5 | high |

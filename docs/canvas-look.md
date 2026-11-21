@@ -533,7 +533,10 @@ A dashed edge in QML is a `Shape` with `strokeStyle: ShapePath.DashLine` around 
   the major dots remain. Needs `Qt6::ShaderTools` and `qt_add_shaders` (installed here).
 - **Marquee**: 1 px `accent` edge, `accent` at 10% fill.
 - **Zoom and run pills**: like the breadcrumb, bottom left (zoom percent) and top right (run
-  state: spinner, "Running", node and percent, "1 of 3").
+  state: spinner, "Running", node and percent, "1 of 3"). Each of these bars, and the selection
+  toolbar, can be hidden from the View menu's Bars and panels, and focus mode (H) hides them all (spec 12.15). The
+  line that says how to get a hidden menu bar or focus mode back is a pill like these, `popup` fill,
+  7u tall, centered 4u above the window's bottom edge, for 4 s.
 - **Run toolbar** (#60, ComfyUI's action bar): floating, 4u at least from every edge of the canvas
   (it starts centered at the top; a drag by its grip or the arrow keys moves it anywhere, #120), 9u tall, `popup` fill, `hairline` edge, corner `min(R, 14)`, level 2
   shadow like the pills. Buttons are 7u (`ViewButton`: the well fill, 14 px glyphs and `label` size text);

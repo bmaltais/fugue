@@ -37,6 +37,12 @@ FocusScope {
     required property CanvasModel model
     // "legacy" or "standard" (12.3): settings.json's navigation, bound in Main.qml.
     property string navigation: "legacy"
+    // The bars the window may hide (#129): the toolbar above a selection, the group breadcrumb and the
+    // run and zoom pills.
+    property bool selectionToolbarShown: true
+    property bool breadcrumbShown: true
+    property bool runPillShown: true
+    property bool zoomPillShown: true
     readonly property real minZoom: 0.1
     readonly property real maxZoom: 4
     readonly property alias zoom: world.scale
@@ -1412,7 +1418,7 @@ FocusScope {
         function onSelectionChanged() { Qt.callLater(() => canvas.nodesTick++) }
     }
     Loader {
-        active: canvas.model.selection.length > 0 && canvas.gesture === "" && canvas.renamingNode === ""
+        active: canvas.selectionToolbarShown && canvas.model.selection.length > 0 && canvas.gesture === "" && canvas.renamingNode === ""
                 && canvas.renamingFrame === ""
                 && canvas.dropChoice.node === undefined && !canvas.lensOpen
         z: 8
@@ -1611,7 +1617,7 @@ FocusScope {
     // zoom and run ones are; a click on a level goes back to it.
     Item {
         objectName: "breadcrumb"
-        visible: canvas.model.inGroup
+        visible: canvas.breadcrumbShown && canvas.model.inGroup
         x: 4 * canvas.look.unit
         y: 4 * canvas.look.unit
         width: crumbBox.width
@@ -1685,7 +1691,7 @@ FocusScope {
     Loader {
         id: runPill
         objectName: "runPill"
-        active: canvas.windowRuns !== null
+        active: canvas.runPillShown && canvas.windowRuns !== null
         x: canvas.width - width - 4 * canvas.look.unit
         y: 4 * canvas.look.unit
         sourceComponent: RunPill {
@@ -1697,6 +1703,7 @@ FocusScope {
     // The zoom, bottom left (11).
     Item {
         objectName: "zoomPill"
+        visible: canvas.zoomPillShown
         x: 4 * canvas.look.unit
         y: canvas.height - height - 4 * canvas.look.unit
         width: zoomText.implicitWidth + 6 * canvas.look.unit
