@@ -606,6 +606,17 @@ FocusScope {
                 canvas.openCompare(hit)
                 return
             }
+            // A double click on any other node's picture opens it large (#73); a Crop's opens the
+            // crop window, a Compare Images', as above, its own.
+            if (hit !== "" && port.node === undefined && canvas.model.pictureAt(hit, w.x, w.y)
+                    && App.runs && App.runs.imageFile(hit) !== "") {
+                canvas.model.endMove()
+                if (canvas.model.isCrop(hit))
+                    canvas.openCrop(hit)
+                else
+                    canvas.openImage(hit)
+                return
+            }
             if (hit === "" && port.node === undefined)
                 canvas.searchRequested(w.x, w.y)
         }
@@ -647,6 +658,27 @@ FocusScope {
         if (!compareDialog)
             compareDialog = compareDialogComponent.createObject(canvas, {canvasModel: canvas.model})
         compareDialog.openFor(node)
+    }
+    // The large views of any node's picture and of a Crop's frame (#73), made on first use.
+    function openImage(node) {
+        if (!imageDialog)
+            imageDialog = imageDialogComponent.createObject(canvas, {canvasModel: canvas.model})
+        imageDialog.openFor(node)
+    }
+    function openCrop(node) {
+        if (!cropDialog)
+            cropDialog = cropDialogComponent.createObject(canvas, {canvasModel: canvas.model})
+        cropDialog.openFor(node)
+    }
+    property var imageDialog: null
+    Component {
+        id: imageDialogComponent
+        ImageDialog {}
+    }
+    property var cropDialog: null
+    Component {
+        id: cropDialogComponent
+        CropDialog {}
     }
     function copyCompareView(node) {
         let viewer = compareDialog && compareDialog.visible && compareDialog.nodeId === node ? compareDialog.viewer : null

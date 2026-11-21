@@ -16,6 +16,9 @@ import Fugue
 //         image pixel to one screen pixel, which beats zoom), centerX and centerY (the point of the
 //         image at the middle, 0..1). Zoom and pan are one transform for both images (linked).
 //         Pixels are shown as they are (nearest-neighbour) once enlarged past the file's own.
+// "single" is one picture, A alone, for the large view of any node's image (#73): a drag pans (once
+// zoomed), no divider, no B, and `showZoom` adds the zoom to the size notice. It is not one of `modes`
+// the keys cycle through.
 // B is drawn in A's frame, cropped to A's shape and centered (the same fit as the Compare Images
 // node's difference), and a notice says so when the sizes differ.
 Item {
@@ -41,16 +44,21 @@ Item {
     property bool interactive: true
     property bool hoverWipe: true  // the divider follows the pointer, as well as being dragged
     property bool chrome: true     // the labels and the size notice
+    property bool showZoom: false  // the zoom in percent after the size notice
     property int wheelModifiers: Qt.NoModifier // held to zoom with the wheel (the node's face asks for Alt)
     property color background: look.well
 
     readonly property var modes: ["slider", "slider_horizontal", "side_by_side", "flip", "difference"]
+    readonly property bool single: mode === "single"
     readonly property bool sliding: mode === "slider" || mode === "slider_horizontal"
     readonly property bool differs: sizeA.width > 0 && sizeB.width > 0
                                     && (sizeA.width !== sizeB.width || sizeA.height !== sizeB.height)
+    // One image pixel is `imageScale` screen pixels, so the zoom in percent is that.
+    readonly property string zoomText: qsTr("%1%").arg(Math.round(imageScale * 100))
     readonly property string sizeNotice: differs
         ? qsTr("A %1 × %2, B %3 × %4: B fitted to A").arg(sizeA.width).arg(sizeA.height).arg(sizeB.width).arg(sizeB.height)
-        : sizeA.width > 0 ? qsTr("%1 × %2").arg(sizeA.width).arg(sizeA.height) : ""
+        : sizeA.width > 0 ? (showZoom ? qsTr("%1 × %2 · %3").arg(sizeA.width).arg(sizeA.height).arg(zoomText)
+                                      : qsTr("%1 × %2").arg(sizeA.width).arg(sizeA.height)) : ""
 
     // The whole state a person changes.
     readonly property var current: ({mode: mode, position: position, showB: showB, zoom: zoom,
@@ -79,9 +87,9 @@ Item {
         if (v.centerX !== undefined) centerX = v.centerX
         if (v.centerY !== undefined) centerY = v.centerY
     }
-    function nextMode() { setView({mode: modes[(modes.indexOf(mode) + 1) % modes.length]}) }
+    function nextMode() { if (!single) setView({mode: modes[(modes.indexOf(mode) + 1) % modes.length]}) }
     // Flip: A over B. From another mode it enters the flip mode at A; in it, it shows the other.
-    function flip() { setView(mode === "flip" ? {showB: !showB} : {mode: "flip", showB: false}) }
+    function flip() { if (!single) setView(mode === "flip" ? {showB: !showB} : {mode: "flip", showB: false}) }
     function fit() { setView({zoom: 1, actual: false, centerX: 0.5, centerY: 0.5}) }
     function actualSize() { setView({actual: true}) }
     // Zooms by `factor` keeping the image point under (x, y) of the view where it is.
@@ -115,6 +123,10 @@ Item {
     // Screen x of the image's left edge in the panel centered at cx, and y of the top.
     function edgeX(cx) { return cx - centerX * aw * imageScale }
     function edgeY() { return height / 2 - centerY * ah * imageScale }
+    // Where the image's top left corner is, in the view's coordinates (single and the slider modes:
+    // one panel), for whatever draws over the picture (the crop frame).
+    readonly property real imageX: edgeX(panelW / 2)
+    readonly property real imageY: edgeY()
     // The image point (0..1) at the screen point.
     function pointAt(x, y) {
         const o = panelFor(x)
@@ -161,7 +173,7 @@ Item {
         }
         Layer {
             objectName: "layerA"
-            visible: view.sliding || (view.mode === "flip" && !view.showB)
+            visible: view.sliding || view.single || (view.mode === "flip" && !view.showB)
             source: view.sourceA
             width: view.mode === "slider" ? view.position * view.width : view.width
             height: view.mode === "slider_horizontal" ? view.position * view.height : view.height
@@ -316,6 +328,8 @@ Item {
                 if (Math.abs(mouse.x - last.x) + Math.abs(mouse.y - last.y) > 3)
                     moved = true
                 if (panning) {
+                    if (view.single && !view.actual && view.zoom <= 1)
+                        return // a single picture at Fit stays put
                     const dx = mouse.x - last.x, dy = mouse.y - last.y
                     last = Qt.point(mouse.x, mouse.y)
                     view.setView({centerX: view.centerX - dx / (view.aw * view.imageScale),

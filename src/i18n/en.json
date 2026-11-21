@@ -594,5 +594,17 @@
   "Recent color %1": "Recent color %1",
   "Color: pick any color": "Color: pick any color",
   "Custom…": "Custom…",
-  "|A − B|": "|A − B|"
+  "|A − B|": "|A − B|",
+  "%1 × %2 · %3": "%1 × %2 · %3",
+  "%1%": "%1%",
+  "Crop": "Crop",
+  "Free": "Free",
+  "Height": "Height",
+  "No picture yet": "No picture yet",
+  "OK": "OK",
+  "Original": "Original",
+  "Turn": "Turn",
+  "Width": "Width",
+  "X": "X",
+  "Y": "Y"
 }

@@ -193,6 +193,11 @@ A Compare Images node (#62) puts its viewer (`CompareView.qml`) in this slot, sa
 with a 60% black grip; the A and B labels and the size notice are chips like the info chip, the notice
 amber when the sizes differ.
 
+A Crop node (#73) puts its viewer (`CropNodeView.qml`) in the same slot at full detail: the picture arriving
+at its input, the area outside the frame dimmed (black at 55%), the frame a white line on a 60% black one,
+eight 8 px square handles (white, dark edge; an edge handle only when its side is at least 24 px), a
+rule-of-thirds grid while a drag is going on and the pixel size in a chip.
+
 Rounding an `Image` needs a mask: use one small `ShaderEffect` (a rounded-rect alpha in the fragment
 shader, compiled with `qt_add_shaders`) only when the thumbnail corner is above 0. Never
 `layer.enabled` or `MultiEffect` masking per thumbnail.
