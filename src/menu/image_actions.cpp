@@ -125,6 +125,14 @@ ImageActions::ImageActions(CommandRegistry &commands, CanvasModel &canvas, Canva
     // The commands are registered with the menus' (menu_commands.cpp), not available until here.
     for (const char *id : {"node.open-image", "node.copy-image", "node.save-image"})
         commands.setEnabledWhen(QString::fromLatin1(id), [this] { return !m_runs.imageFile(node()).isEmpty(); });
+    // Compare Images (#62): A, B and the view as drawn. The files are the full ones, as Copy Image's.
+    for (const char *which : {"a", "b"}) {
+        const QString id = QStringLiteral("compare.copy-") + QLatin1String(which);
+        commands.setEnabledWhen(id, [this, which] { return !m_runs.compareFile(node(), QLatin1String(which)).isEmpty(); });
+        commands.setHandler(id, [this, which] { copyFile(m_runs.compareFile(node(), QLatin1String(which))); });
+    }
+    commands.setEnabledWhen(QStringLiteral("compare.copy-view"), [this] { return m_canvas.isCompare(node()) && !m_runs.compareFile(node(), QStringLiteral("a")).isEmpty(); });
+    commands.setHandler(QStringLiteral("compare.copy-view"), [this] { emit viewCopyRequested(node()); });
     commands.setHandler("node.open-image", [this] { open(); });
     commands.setHandler("node.copy-image", [this] { copy(); });
     commands.setHandler("node.save-image", [this] { save(); });
@@ -175,8 +183,22 @@ void ImageActions::open() {
     });
 }
 
-void ImageActions::copy() {
-    const QString path = m_runs.imageFile(node());
+void ImageActions::copy() { copyFile(m_runs.imageFile(node())); }
+
+// The view a Compare Images node draws, grabbed by the window: drawn pixels, so a decoded image
+// is all there is to put on the clipboard.
+void ImageActions::copyImage(const QImage &image) {
+    if (image.isNull()) {
+        emit message(say("The view could not be copied."));
+        return;
+    }
+    auto *data = new QMimeData;
+    data->setImageData(image);
+    QGuiApplication::clipboard()->setMimeData(data);
+    emit copied();
+}
+
+void ImageActions::copyFile(const QString &path) {
     if (path.isEmpty())
         return;
     QPointer<ImageActions> self(this);

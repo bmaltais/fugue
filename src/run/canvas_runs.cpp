@@ -4,6 +4,7 @@
 #include <QJsonArray>
 #include <QFileInfo>
 #include <QSizeF>
+#include <QUrl>
 
 #include <algorithm>
 #include <cmath>
@@ -279,6 +280,12 @@ void CanvasRuns::show(const QString &tab, const QString &node) {
         text(tr("File not found"), 0.5, true);
     else if (info.showsResult && aggregate(view) != QLatin1String("running"))
         text(tr("No result yet"), 0.5, true);
+    if (info.compares && !view.compare.isEmpty()) {
+        QVariantMap compare = view.compare;
+        compare.insert("labelA", info.labelA);
+        compare.insert("labelB", info.labelB);
+        state.insert("compare", compare);
+    }
     // While a node runs, what its slot shows is the last run's, at half strength, until this
     // run's preview comes.
     if (state.contains("thumbnail") && aggregate(view) == QLatin1String("running") && !view.live)
@@ -483,7 +490,33 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
                         view.values.insert(it.key(), text);
             }
             const QJsonObject thumbnails = event.value("thumbnails").toObject();
-            if (!thumbnails.isEmpty() && !inner) {
+            if (!inner && m_nodeInfo.value(top).compares) {
+                // Compare Images: the viewer takes A and B (the inputs' thumbnails) and the two
+                // outputs; the slot's size is A's, its file the composite.
+                const QJsonObject inputs = event.value("inputThumbnails").toObject();
+                view.compare.clear();
+                const auto take = [&](const char *key, const QJsonObject &from, const char *name) {
+                    const QJsonObject t = from.value(QLatin1String(name)).toObject();
+                    if (!t.value("url").toString().isEmpty())
+                        view.compare.insert(QLatin1String(key), QVariantMap{{"url", t.value("url").toString()},
+                            {"source", t.value("source").toString()},
+                            {"fileUrl", QUrl::fromLocalFile(t.value("source").toString()).toString()}, {"width", t.value("width").toInt()},
+                            {"height", t.value("height").toInt()}});
+                };
+                take("a", inputs, "a");
+                take("b", inputs, "b");
+                take("difference", thumbnails, "difference");
+                take("composite", thumbnails, "composite");
+                const QVariantMap a = view.compare.value("a").toMap();
+                if (!a.isEmpty()) {
+                    view.thumbnail = a.value("url").toString();
+                    view.thumbnailWidth = a.value("width").toInt();
+                    view.thumbnailHeight = a.value("height").toInt();
+                    view.imagePath = view.compare.value("composite").toMap().value("source").toString();
+                    view.thumbnailFile.clear();
+                    view.text.clear();
+                }
+            } else if (!thumbnails.isEmpty() && !inner) {
                 const QJsonObject thumbnail = thumbnails.contains("image")  ? thumbnails.value("image").toObject()
                                               : thumbnails.contains("file") ? thumbnails.value("file").toObject()
                                                                             : thumbnails.begin().value().toObject();
@@ -684,7 +717,20 @@ void CanvasRuns::readNodes() {
     for (auto it = document.graph.nodes.cbegin(); it != document.graph.nodes.cend(); ++it) {
         NodeInfo info;
         info.savesFile = it->type == QLatin1String("fugue/save-image");
-        info.showsResult = it->type == QLatin1String("fugue/preview") || it->type == QLatin1String("fugue/save-image");
+        info.compares = it->type == QLatin1String("fugue/compare-images");
+        info.showsResult = it->type == QLatin1String("fugue/preview") || it->type == QLatin1String("fugue/save-image") || info.compares;
+        if (info.compares) {
+            // What made A and B names them: the linked node's title, else the plain letter.
+            const auto labelOf = [&](const char *name, const QString &fallback) {
+                const InputValue value = it->inputs.value(QLatin1String(name));
+                if (value.kind() != InputValue::Kind::Link)
+                    return fallback;
+                const QString title = m_canvas->nodeTitle(value.from().node);
+                return title.isEmpty() ? fallback : title;
+            };
+            info.labelA = labelOf("a", QStringLiteral("A"));
+            info.labelB = labelOf("b", QStringLiteral("B"));
+        }
         if (const NodeType *type = m_registry->nodeType(it->type)) {
             for (const InputSpec &input : type->inputs) {
                 const InputValue value = it->inputs.value(input.name);
@@ -766,6 +812,11 @@ QString CanvasRuns::imageFile(const QString &row) const {
         path = view.imagePath;
     else if (view.text.isEmpty())
         path = expandHome(m_nodeInfo.value(node).imageFile);
+    return QDir::isAbsolutePath(path) && QFileInfo(path).isFile() ? path : QString();
+}
+
+QString CanvasRuns::compareFile(const QString &row, const QString &which) const {
+    const QString path = m_tabs.value(m_shownTab).nodes.value(keyFor(row)).compare.value(which).toMap().value("source").toString();
     return QDir::isAbsolutePath(path) && QFileInfo(path).isFile() ? path : QString();
 }
 

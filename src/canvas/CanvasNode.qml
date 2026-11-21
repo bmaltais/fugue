@@ -41,6 +41,8 @@ Item {
     required property rect thumbnailRect
     required property string thumbnailText // in the image's place (a shown text, a label)
     required property bool thumbnailDim    // half strength: a placeholder, or the last run's while running
+    required property var compare          // Compare Images: its result's pictures (#62), else empty
+    required property var compareView      // its viewer's state
     required property string updateAvailable // a group the library has a newer version of (5.3)
     required property int groupSize // a group instance: the nodes it holds (docs/canvas-look.md 9), else 0
 
@@ -67,6 +69,7 @@ Item {
     property bool rowsMade: false
     onWantedChanged: if (wanted) rowsMade = true
     onRowsMadeChanged: if (rowsMade) canvasModel.noteRowsMade(nodeId) // previews are made from here (#19)
+    property var compareItem: null // the viewer on the face while it is made (Loader below)
     property bool seen: false
     onInViewChanged: if (inView) seen = true
     Component.onCompleted: {
@@ -399,23 +402,48 @@ Item {
             }
 
             // The last image: thumbnail (docs/canvas-look.md 4.6), in every tier.
+            // Compare Images (#62): its viewer takes the slot while the node is read at full detail
+            // (made only then, as the thumbnails are); zoomed out, A's thumbnail stands in.
+            readonly property bool comparing: node.compare.a !== undefined
+            // One Loader, so a node costs the one item it always did (#5).
             Loader {
+                id: pictureLoader
                 active: node.thumbnail !== "" && !node.collapsed
                 x: node.thumbnailRect.x
                 y: node.thumbnailRect.y
                 width: node.thumbnailRect.width
                 height: node.thumbnailRect.height
                 objectName: "thumbnail"
-                sourceComponent: Thumbnail {
-                    source: node.thumbnail
-                    info: node.thumbnailInfo
-                    file: node.thumbnailFile
-                    text: node.thumbnailText
-                    look: node.look
-                    full: face.full
-                    // A placeholder, and the last run's picture while the node runs again (not
-                    // this run's preview), are at half strength.
-                    opacity: node.thumbnailDim ? 0.5 : 1
+                sourceComponent: face.comparing && face.full ? compareComponent : thumbnailComponent
+                onItemChanged: node.compareItem = face.comparing && face.full ? item : null
+                Component {
+                    id: thumbnailComponent
+                    Thumbnail {
+                        source: node.thumbnail
+                        info: node.thumbnailInfo
+                        file: node.thumbnailFile
+                        text: node.thumbnailText
+                        look: node.look
+                        full: face.full
+                        // A placeholder, and the last run's picture while the node runs again (not
+                        // this run's preview), are at half strength.
+                        opacity: node.thumbnailDim ? 0.5 : 1
+                    }
+                }
+                Component {
+                    id: compareComponent
+                    CompareNodeView {
+                        objectName: "compareViewer"
+                        canvasModel: node.canvasModel
+                        nodeId: node.nodeId
+                        compare: node.compare
+                        viewState: node.compareView
+                        look: node.look
+                        wheelModifiers: Qt.AltModifier // a plain wheel moves the canvas
+                        onPressed: node.canvasModel.select([node.nodeId])
+                        onActivated: node.canvasView.openCompare(node.nodeId)
+                        opacity: node.thumbnailDim ? 0.5 : 1
+                    }
                 }
             }
             // The resize marks (#49, #63): every corner resizes, and all four show their mark while

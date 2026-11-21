@@ -119,6 +119,15 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 - Why: the command is on the button, so the click costs nothing unknown; one action, then the ×.
 - Rule: Floor (the button and the × are Material's 48px). Primary (Copy is the row's one highlighted control). Gaps (8px inside the row, as the workflow banner). Posture: transient; it asks nothing.
 
+### 2026-11-21 Compare Images viewer (#62)
+
+- Control: on the node's face (`CanvasNode.qml`, `compareViewer`, in the thumbnail's place and size, made only at full detail like the thumbnail; zoomed out, A's thumbnail stands in), the viewer above; the divider (2px, with a 2u-wide grip), the labels A and B (chips on the pictures, as the info chip), the size notice (an amber chip when the sizes differ). Large view: `CompareDialog.qml`, opened by a double click on the picture (`FugueCanvas.qml` `openCompare`), a modal popup at 90% of the window with a bar of seven buttons: Slider, Slider horizontal, Side by side, Flip, Difference, then Fit and 100%, then the close button; Escape closes.
+- Commands: `compare.flip` (`\`), `compare.next-mode` (`M`), `compare.fit` (`0`), `compare.actual` (`1`), in the new `compare` context, active only while one Compare Images node is selected; `compare.copy-a`, `compare.copy-b` and `compare.copy-view` (no keys) in the node's context menu, shown when the node has a result.
+- Old: none; a Preview showed one image.
+- New: as above. The divider is the primary control of the face and the only one with a grip.
+- Why: comparing is done by the eye on one place, so the pointer moves the divider with no press (rgthree's Slide); keys do the rest without the pointer leaving the picture (Fitts: the target is the whole picture); the large view's bar is the five views and two zooms, in two chunks with a gap of 2u between (twice the 1u inside a chunk).
+- Rule: Floor (the bar's buttons are 7u = 28px tall; the face's whole picture is the target, the divider is read, never aimed at). Primary (the divider on the face; no highlighted button in the large view, the current view is marked by the accent). Gaps (1u inside the bar's chunks, 2u between; the close button apart at the end, last). Destructive: none. Learned place: the context menu's image items keep their order, the three copies follow Save Image. Posture: the face is the canvas, so its density is kept and the picture is the target; the large view is a transient dialog. The bar's buttons take Tab focus; the face's picture too, for the arrow keys.
+
 ## Components
 
 Reusable controls other surfaces may call. A component names its input and output here, knows nothing of its caller, and a caller's glue lives in its own file.
@@ -131,6 +140,14 @@ Reusable controls other surfaces may call. A component names its input and outpu
 - Popup: `ColorPickerPopup.openWith(color)`, `picked(color)`; Escape or a press outside closes it with no `picked`; it has no open or close fade.
 - Keys: the wheel, the brightness bar, the hex field, Apply and the recent colors take Tab focus. On the wheel, Left and Right turn the hue and Up and Down set saturation, 5 steps (Shift: 1); on the bar, Up and Down.
 - A new caller: a `ColorPickerPane` or `ColorPickerPopup`, `setColor`/`openWith` with its current color, `onPicked`. Needs `App.colorHistory` (null in a window made without it: the picker then picks nothing).
+
+### Compare view (#62)
+
+- Files: `src/canvas/CompareView.qml` (the viewer), `src/canvas/CompareNodeView.qml` (glue to a Compare Images node and the model's `compareView` state), `src/canvas/CompareDialog.qml` (the large view). C++: `CanvasModel::compareView`, `setCompareView`, `compareStep`.
+- Input: `sourceA`, `sourceB`, `sourceDifference`, `sizeA`, `sizeB`, `labelA`, `labelB`, `look`, and the view: `mode` ("slider" the primary and default, "slider_horizontal", "side_by_side", "flip", "difference"), `position`, `showB`, `zoom` (1 = fit), `actual` (1:1), `centerX`, `centerY`. `interactive`, `hoverWipe`, `chrome` and `wheelModifiers` are the caller's choices.
+- Output: `viewChanged(current)` on every change a person makes, `pressed` and `activated` (a double click). Functions: `setView`, `apply` (takes a state without announcing it), `flip`, `nextMode`, `fit`, `actualSize`, `zoomAt`, `grab(callback)`.
+- Pointer: in a slider mode the divider follows the pointer and a drag; a middle drag or Shift+drag pans. In the other modes a drag pans and, in flip, a click flips. The wheel zooms at the pointer (the node's face asks for Alt, so a plain wheel keeps moving the canvas). The arrow keys move the divider (Shift: 10%), Home and End put it at the ends.
+- A new caller: a `CompareView` with its sources and sizes, `onViewChanged` to keep the state, `apply(state)` to give it back.
 
 ## Unread
 

@@ -7,6 +7,7 @@
 #include <QClipboard>
 #include <QGuiApplication>
 #include <QMimeData>
+#include <utility>
 
 namespace {
 
@@ -99,12 +100,20 @@ void registerCanvasCommands(fugue::CommandRegistry &commands, CanvasModel &canva
     });
     commands.setHandler("group.save-to-library", [model] { model->saveGroupToLibrary(); });
     commands.setHandler("group.update", [model] { model->requestGroupUpdate(); });
+    // Compare Images (#62): the node the menu was opened on, else the one selected.
+    for (const auto &[id, step] : {std::pair{"compare.flip", "flip"}, {"compare.next-mode", "next-mode"},
+                                   {"compare.fit", "fit"}, {"compare.actual", "actual"}})
+        commands.setHandler(QString::fromLatin1(id), [model, &commands, step = QString::fromLatin1(step)] {
+            const QString target = commands.target().value("node").toString();
+            model->compareStep(model->isCompare(target) ? target : model->selectedCompare(), step);
+        });
     commands.setContextActive(QStringLiteral("canvas"), true);
     // group-selected: one group instance is selected (Tab enters it); group: one is entered.
     auto contexts = [model, &commands] {
         const QStringList selected = model->selectedIds();
         commands.setContextActive(QStringLiteral("group-selected"), selected.size() == 1 && model->isGroup(selected.first()));
         commands.setContextActive(QStringLiteral("group"), model->inGroup());
+        commands.setContextActive(QStringLiteral("compare"), !model->selectedCompare().isEmpty());
     };
     QObject::connect(model, &CanvasModel::selectionChanged, &commands, contexts);
     QObject::connect(model, &CanvasModel::scopeChanged, &commands, contexts);
