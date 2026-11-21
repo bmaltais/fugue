@@ -149,6 +149,19 @@ private slots:
         QCOMPARE(canvas.document().graph.nodes.value(id).inputs.value("embed").literal(), QJsonValue("no-prompts"));
     }
 
+    // The hover magnifier (#123): off by default, on when set, and back to off takes the key out.
+    void theHoverMagnifierIsOffByDefaultAndPersists() {
+        SettingsModel model;
+        QVERIFY(!model.hoverMagnifier());
+        QCOMPARE(model.set("hover_magnifier", true), QString());
+        QVERIFY(model.hoverMagnifier());
+        QVERIFY(SettingsModel().hoverMagnifier());
+        QVERIFY(!model.set("hover_magnifier", "yes").isEmpty());
+        QVERIFY(model.hoverMagnifier());
+        QCOMPARE(model.set("hover_magnifier", false), QString());
+        QVERIFY(!readJsonObject(settingsFile()).value().contains("hover_magnifier"));
+    }
+
     // The corner radius (#63) reaches the Theme at once: 8 px by default, a fixed radius, or
     // Omarchy's rounding again.
     void theCornerRadiusAppliesLive() {

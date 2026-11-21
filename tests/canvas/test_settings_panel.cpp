@@ -112,6 +112,25 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // General > Magnify small nodes on hover (#123): off by default, the switch turns it on and
+    // off live and the file keeps it.
+    void theHoverMagnifierSwitchChangesLiveAndPersists() {
+        App app(load(emptyDoc));
+        QVERIFY(app.open());
+        QVERIFY(!app.canvas->property("hoverMagnifier").toBool());
+        app.commands.trigger("app.settings");
+        QTRY_VERIFY(panelOpen(app.window));
+        QQuickItem *toggle = NEED("hoverMagnifier");
+        QVERIFY(!toggle->property("on").toBool());
+        click(app, toggle);
+        QTRY_VERIFY(app.canvas->property("hoverMagnifier").toBool());
+        QVERIFY(fugue::SettingsModel(app.settings.path()).hoverMagnifier());
+        click(app, toggle);
+        QTRY_VERIFY(!app.canvas->property("hoverMagnifier").toBool());
+        QVERIFY(!fugue::SettingsModel(app.settings.path()).hoverMagnifier());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     // General > Corner radius (#63): fixed at 8 px by default, a step at a time from 0 to 16, or
     // Omarchy's rounding (none here: square); the canvas redraws at once and the file keeps it.
     void theCornerRadiusChangesLiveAndPersists() {

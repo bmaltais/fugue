@@ -252,3 +252,11 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - New: one bar, 7u = 28px tall, over the picture: play and pause first, the time, the seek rail (the rest of the width), then mute and expand. The large view has the same bar and the close button of `LargeViewDialog`, with no Fit and 100% (a player has no zoom).
 - Why: play is the one thing wanted of a player, so it is first and in the same place on the face and the large view, as the dialog's primary; the rail is the widest target, since a seek is by pointing (Fitts); a press on the picture is not play, so it can select the node and a double click can open the large view, as for a picture. Space, Left, Right and M work once it has the focus.
 - Rule: Floor (every button is 28px square; the rail's press area is the bar's whole 28px height, its rail 4px). Primary (play is the first control; the others are quiet). Gaps (one `u` between the time, rail and buttons). Learned place: no menu changed. Posture: on the canvas, a control that is frequent is raised to 28px, over the node's 24px floor; the dialog is transient and starts playing at once, so it asks no decision.
+
+### 2026-11-21 hover magnifier setting (#123)
+
+- Control: Settings > General, `src/settings/SettingsPanel.qml` "Magnify small nodes on hover" (`hoverMagnifier`), a `SettingsParts.Toggle` (`src/settings/SettingsParts.qml`), after Corner radius, before Language. Writes `hover_magnifier` in settings.json.
+- Old: the magnifier (#74) always came up on a short hover far out.
+- New: off by default, so a node never grows under the pointer unasked; on, it behaves as #74. The toggle's label reads On or Off beside the switch. Applies at once; turning it off closes an open magnifier.
+- Why: the owner found a node growing on hover a surprise, not a help; a surprise costs more than the wire it saves, and the choice is one the user makes once.
+- Rule: Floor (the whole row, switch and label, is the press target, 7u = 28px tall; the 22x12 switch is the same drawing as Providers' "Use" switch). Primary: none, a settings page has none. Posture: a setting, no frequent action. The toggle takes Tab focus; Space or Enter flips it.

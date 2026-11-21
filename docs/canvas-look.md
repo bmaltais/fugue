@@ -570,7 +570,7 @@ A dashed edge in QML is a `Shape` with `strokeStyle: ShapePath.DashLine` around 
   `label`, `menu-row` and `text` under the pointer, 40% when off: Run to here (one node), Bypass,
   Color (the color menu), Frame, Enter (a group), Open Image (a node with an image), Delete, and
   "…" (the node's menu). Hidden during a gesture, a title edit, the drop list or the magnifier.
-- **Magnifier** (#74): far out, the node a short hover rests on at zoom 1 over itself, on a
+- **Magnifier** (#74, off unless Settings > General turns it on, #123): far out, the node a short hover rests on at zoom 1 over itself, on a
   `canvas` card with a `hairline-strong` edge and a level 3 shadow, its ports live.
 - **Drop list** (#74): a wire let go on a body where several free ports fit: a small `popup`
   list, a row per port (`menu-row` under the pointer), a linked input marked "replaces its link".

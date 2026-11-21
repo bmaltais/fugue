@@ -661,5 +661,9 @@
   "Open large": "Open large",
   "Pause": "Pause",
   "Play": "Play",
-  "Position": "Position"
+  "Position": "Position",
+  "Magnify small nodes on hover": "Magnify small nodes on hover",
+  "Zoomed far out, a short hover over a node shows it at full size over itself, so a wire can start there. Off by default.": "Zoomed far out, a short hover over a node shows it at full size over itself, so a wire can start there. Off by default.",
+  "On": "On",
+  "Off": "Off"
 }

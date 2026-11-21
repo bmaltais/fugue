@@ -764,7 +764,15 @@ private slots:
         QQuickItem *lensWorld = item(app.window->contentItem(), "lensWorld");
         QVERIFY(lens && lensWorld);
         QVERIFY(!lens->isVisible());
+        // Off by default (#123): a long hover far out shows nothing; the setting turns it on.
+        QVERIFY(!app.canvas->property("hoverMagnifier").toBool());
         const QPointF genMiddle = app.model.position("gen") + QPointF(60, 60);
+        QTest::mouseMove(app.window, app.screen(genMiddle.x(), genMiddle.y()));
+        QTest::qWait(700);
+        QVERIFY(!lens->isVisible());
+        QVERIFY(app.canvas->property("lensNode").toString().isEmpty());
+        app.canvas->setProperty("hoverMagnifier", true);
+        QTest::mouseMove(app.window, app.screen(genMiddle.x() + 5, genMiddle.y() + 5));
         QTest::mouseMove(app.window, app.screen(genMiddle.x(), genMiddle.y()));
         QTRY_VERIFY(lens->isVisible());
         QCOMPARE(app.canvas->property("lensNode").toString(), QStringLiteral("gen"));
@@ -790,6 +798,11 @@ private slots:
         QCOMPARE(app.model.document().graph.nodes.value("save").inputs.value("image").from().toString(),
                  QString("gen.image"));
         QCOMPARE(QPointF(app.world->x(), app.world->y()), view); // the view never moved
+        // Turning it off takes an open magnifier away.
+        QTest::mouseMove(app.window, app.screen(genMiddle.x(), genMiddle.y()));
+        QTRY_VERIFY(!app.canvas->property("lensNode").toString().isEmpty());
+        app.canvas->setProperty("hoverMagnifier", false);
+        QTRY_VERIFY(app.canvas->property("lensNode").toString().isEmpty());
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
