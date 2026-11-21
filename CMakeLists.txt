@@ -260,3 +260,12 @@ install(FILES examples/demo.fugue DESTINATION ${CMAKE_INSTALL_DATADIR}/fugue/exa
 install(DIRECTORY templates/ DESTINATION ${CMAKE_INSTALL_DATADIR}/fugue/templates
         PATTERN ".*" EXCLUDE PATTERN "bin" EXCLUDE PATTERN "README.md" EXCLUDE)
 install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/fugue)
+
+# Tests that count timer, socket or file-watch events with margins of tens of milliseconds. `bin/test` runs the
+# suite in parallel, one test per core, and on a busy 4-core runner those margins vanish (a download's requests,
+# Hyprland calls, a reload burst). They run alone; the rest stay parallel.
+foreach(serial_test fugue_tests test_model_download test_registry_reloader)
+  if(TEST ${serial_test})
+    set_tests_properties(${serial_test} PROPERTIES RUN_SERIAL TRUE)
+  endif()
+endforeach()
