@@ -133,6 +133,36 @@ private slots:
         QVERIFY(second.outcome.ran.isEmpty()); // everything came from the cache
     }
 
+    // 3.6, #90: a node recorded at an older major that is still installed runs that major's
+    // kernel and a result of one major is never taken for the other (10.1).
+    void aNodeRunsOnItsOwnMajorAndTheCacheKeepsTheMajorsApart() {
+        World world;
+        world.registry.addManifest(json("{'manifest': 1, 'id': 'fugue/text', 'version': '2.0.0', 'name': 'Text',"
+                                        " 'runtime': {'kind': 'builtin'},"
+                                        " 'inputs': [{'name': 'text', 'type': 'text'}],"
+                                        " 'outputs': [{'name': 'text', 'type': 'text'}]}"));
+        // The fake kernel of the id serves the newest major; the older one has its own.
+        world.kernel("fugue/text", [](const NodeContext &context) -> Result<Values> {
+            return Values{{"text", "v2 " + context.input("text").text()}};
+        });
+        class Old : public NodeKernel {
+        public:
+            Result<Values> run(const NodeContext &context) override { return Values{{"text", "v1 " + context.input("text").text()}}; }
+        };
+        world.kernels.addAt("fugue/text", 1, std::make_shared<Old>());
+
+        const QByteArray nodes = "{'old': {'type': 'fugue/text', 'version': '1.0.0', 'inputs': {'text': 'fox'}},"
+                                 " 'new': {'type': 'fugue/text', 'version': '2.0.0', 'inputs': {'text': 'fox'}},"
+                                 " 's': {'type': 'fugue/save', 'inputs': {'value': {'from': 'old.text'}}},"
+                                 " 't': {'type': 'fugue/save', 'inputs': {'value': {'from': 'new.text'}}}}";
+        const Ran first = world.run(world.graph(nodes));
+        QCOMPARE(first.outcome.status, RunStatus::Ok);
+        QCOMPARE(first.outcome.outputs.value("old").value("text").text(), QStringLiteral("v1 fox"));
+        QCOMPARE(first.outcome.outputs.value("new").value("text").text(), QStringLiteral("v2 fox"));
+        // Same inputs, so only the major tells the two results apart; a second run reuses both.
+        QCOMPARE(world.run(world.graph(nodes)).outcome.ran.size(), 0);
+    }
+
     void aChainRunsInDependencyOrder() {
         World world;
         world.cpuSlots = 1;

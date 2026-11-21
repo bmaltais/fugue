@@ -168,6 +168,8 @@ private slots:
     void groupFaceProblemsAreReportedOnTheInstance();
     void missingInputsNameTheExposedInputToSet();
     void majorVersionMismatchNeedsReview();
+    void anOlderMajorStillInstalledRunsAndIsOfferedTheNewer();
+    void trustIsAskedAtThePackVersionOfTheNodesMajor();
     void olderMinorVersionWarnsAndDropsUnknownInputs();
     void aliasesCompileToTheInstalledType();
     void groupRecursionIsReportedAndDoesNotHang();
@@ -404,6 +406,90 @@ void TestCompiler::majorVersionMismatchNeedsReview() {
     QCOMPARE(error.node, QString("old"));
     QCOMPARE(error.valid, QJsonArray{"1.2.0"});
     QVERIFY2(error.hint.contains("1.2.0"), qPrintable(error.hint));
+}
+
+// shrink at major 2 beside the 1.2.0 of registry(): the input `image` became `source`.
+Registry registryWithShrink2() {
+    Registry r = registry();
+    const Errors errors = r.addManifest(json(
+        "{'manifest': 1, 'id': 'io.example.tools/shrink', 'version': '2.0.0', 'name': 'Shrink',"
+        " 'runtime': {'kind': 'command', 'entry': './shrink'},"
+        " 'inputs': [{'name': 'source', 'type': 'image'}],"
+        " 'outputs': [{'name': 'image', 'type': 'image'}]}"));
+    if (hasErrors(errors))
+        qFatal("bad fake manifest: %s", qPrintable(dump(errors)));
+    return r;
+}
+
+// 3.6, #90: a node runs on the major it was made with while that major is installed, and is
+// offered the newer one; a major that is not installed still needs review.
+void TestCompiler::anOlderMajorStillInstalledRunsAndIsOfferedTheNewer() {
+    const Registry r = registryWithShrink2();
+    const auto doc = [](const char *version, const char *input) {
+        return document(QByteArray("{'fugue': 1, 'graph': {'nodes': {"
+                                   " 'gen': {'type': 'fugue/generate-image', 'version': '1.0.0', 'inputs': {'prompt': 'a fox'}},"
+                                   " 'shrink': {'type': 'io.example.tools/shrink', 'version': '")
+                        + version + "', 'inputs': {'" + input
+                        + "': {'from': 'gen.image'}}},"
+                          " 'save': {'type': 'fugue/save-image', 'version': '1.0.0', 'inputs': {'image': {'from': 'shrink.image'}}}"
+                          "}}}");
+    };
+
+    const Compilation older = compile(doc("1.0.0", "image"), r);
+    QVERIFY2(older.ok(), qPrintable(dump(older.problems())));
+    QCOMPARE(nodesOf(older).value("shrink").toObject().value("version").toString(), QString("1.2.0"));
+    QCOMPARE(older.problems().size(), 1);
+    const Error &offer = older.problems().first();
+    QCOMPARE(offer.severity, Error::Severity::Warning);
+    QCOMPARE(offer.code, QString("node_newer_major"));
+    QCOMPARE(offer.node, QString("shrink"));
+    QCOMPARE(offer.valid, QJsonArray{"2.0.0"});
+
+    const Compilation newer = compile(doc("2.0.0", "source"), r);
+    QVERIFY2(newer.ok(), qPrintable(dump(newer.problems())));
+    QVERIFY2(newer.problems().isEmpty(), qPrintable(dump(newer.problems())));
+    QCOMPARE(nodesOf(newer).value("shrink").toObject().value("version").toString(), QString("2.0.0"));
+
+    // The inputs of the node's own major are the ones checked.
+    const Compilation wrong = compile(doc("2.0.0", "image"), r);
+    QVERIFY(!wrong.ok());
+    QCOMPARE(wrong.problems().first().code, QString("unknown_input"));
+
+    const Compilation notInstalled = compile(doc("3.0.0", "source"), r);
+    QCOMPARE(notInstalled.problems().first().code, QString("node_version_mismatch"));
+    QCOMPARE(notInstalled.problems().first().valid, QJsonArray{"2.0.0"});
+}
+
+// 6.7, 6.6: trust is asked at the version of the pack that holds the node's major.
+void TestCompiler::trustIsAskedAtThePackVersionOfTheNodesMajor() {
+    Registry r;
+    const auto add = [&](const char *version, const char *packVersion, const char *input) {
+        Result<NodeType> type = NodeType::fromJson(json((QByteArray("{'manifest': 1, 'id': 'io.example.tools/shrink', 'version': '")
+                                                         + version + "', 'name': 'Shrink', 'runtime': {'kind': 'command', 'entry': './shrink'},"
+                                                         " 'inputs': [{'name': '" + input + "', 'type': 'image'}],"
+                                                         " 'outputs': [{'name': 'image', 'type': 'image'}]}").constData()));
+        if (!type)
+            qFatal("bad fake manifest");
+        type->packVersion = QString::fromLatin1(packVersion);
+        if (hasErrors(r.add(*type)))
+            qFatal("cannot add");
+        r.setPackVersion("io.example.tools", QString::fromLatin1(packVersion));
+    };
+    add("1.0.0", "1.0.0", "image");
+    add("2.0.0", "2.0.0", "source");
+    const Document doc = document(
+        "{'fugue': 1, 'graph': {'nodes': {"
+        " 'a': {'type': 'io.example.tools/shrink', 'version': '1.0.0', 'inputs': {'image': {'from': 'x.y'}}}}}}");
+    QStringList asked;
+    CompileOptions options;
+    options.trusted = [&](const QString &pack, const QString &version) {
+        asked << pack + " " + version;
+        return version == "1.0.0";
+    };
+    const Compilation result = compile(doc, r, options);
+    QCOMPARE(asked, QStringList{"io.example.tools 1.0.0"}); // not the newest pack's version
+    for (const Error &error : result.problems())
+        QVERIFY2(error.code != "pack_untrusted", qPrintable(dump(result.problems())));
 }
 
 // 3.6: a workflow made with a newer minor version loads; inputs the installed

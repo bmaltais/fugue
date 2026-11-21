@@ -19,3 +19,10 @@ install it by address and a pin.
 
 Updates are explicit and pinned: a user runs `fugue pack update <id> --ref v1.3.0`, sees the new
 version, and is asked again about trust.
+
+## Breaking changes: a new major
+
+A change that renames or removes an input or output, changes a type or changes the results for the
+same inputs is a new major version of the node (spec 3.6). Bump the pack's major too. Users install
+it beside the old one (`packs/<id>@<major>`), and workflows made with the old major keep running on
+it; they are offered the newer major, never forced onto it.

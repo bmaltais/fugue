@@ -289,10 +289,11 @@ public:
             n.path = path;
             n.node = &*m_graph.nodes.constFind(path);
             n.dependencies = m_graph.dependencies(path);
-            n.type = m_env.registry ? m_env.registry->nodeType(n.node->type) : nullptr;
+            // The compiled node holds the version it runs at (3.6): its major picks the type.
+            n.type = m_env.registry ? m_env.registry->nodeTypeFor(n.node->type, n.node->version.major) : nullptr;
             if (n.type && m_env.kernels) {
                 n.kernel = m_env.kernels->node(*n.type);
-                n.providerKernel = m_env.kernels->provider(n.type->id);
+                n.providerKernel = m_env.kernels->provider(*n.type);
             }
             needsProviders = needsProviders || n.providerKernel;
             m_nodes.insert(path, n);
@@ -580,6 +581,7 @@ private:
         parts.type = n.type->id;
         parts.version = n.type->version;
         parts.pack = typeNamespace(n.type->id);
+        parts.packVersion = n.type->packVersion;
         if (!n.type->deterministic) {
             if (m_dry)
                 return stale(n);

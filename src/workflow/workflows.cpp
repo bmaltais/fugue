@@ -1120,7 +1120,7 @@ void Workflows::refreshNodeTypes() {
     for (const QVariant &entry : std::as_const(m_pendingTrust)) {
         const QString id = entry.toMap().value("id").toString(), version = entry.toMap().value("version").toString();
         const QString installed = m_registry->packVersion(id);
-        if (!m_trust.isTrusted(id, version) && (installed.isEmpty() || installed == version))
+        if (!m_trust.isTrusted(id, version) && (installed.isEmpty() || m_registry->hasPackVersion(id, version)))
             still << entry;
     }
     bool changed = still.size() != m_pendingTrust.size();

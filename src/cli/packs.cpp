@@ -1,6 +1,7 @@
 #include "cli/commands.h"
 
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QTextStream>
@@ -148,7 +149,8 @@ Reply packAdd(const Command &command, Context &context) {
     QString text = QStringLiteral("Installed %1 %2.").arg(added->pack.id, added->pack.version);
     if (added->setupSkipped)
         text += QStringLiteral(" Its setup was not run; run it yourself in %1.").arg(added->pack.folder);
-    text += QStringLiteral(" Trust it with `fugue pack trust %1` before it runs.").arg(added->pack.id);
+    // Beside another major of the pack its folder is <id>@<major>, which the pack commands take.
+    text += QStringLiteral(" Trust it with `fugue pack trust %1` before it runs.").arg(QFileInfo(added->pack.folder).fileName());
     Reply reply = Reply::success(addedJson(*added), text);
     reply.errors = added.warnings();
     return reply;

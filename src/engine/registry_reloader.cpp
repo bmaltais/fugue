@@ -104,7 +104,7 @@ void RegistryReloader::watch() {
                 paths << node.filePath() << node.filePath() + QStringLiteral("/node.json");
         }
     }
-    for (const NodeType *type : m_registry->nodeTypes()) {
+    for (const NodeType *type : m_registry->allNodeTypes()) {
         const QString entry = type->runtime.value("entry").toString();
         if (!type->dir.isEmpty() && !entry.isEmpty())
             paths << QDir(type->dir).absoluteFilePath(entry);

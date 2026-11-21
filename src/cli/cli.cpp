@@ -61,7 +61,7 @@ const char *helpText =
     "  validate <file> | compile <file>\n"
     "  workflow new <file> [--template <id>] | workflow describe|export|run|validate|compile <file>\n"
     "  runs list | runs status|events|result|cancel <run-id>\n"
-    "  node list [--type <port type>] | node describe <type id>...\n"
+    "  node list [--type <port type>] | node describe <type id>[@<major>]...\n"
     "  pack list | pack add <folder|git-url> [--ref <tag|commit>] | pack update [id] [--ref ...] | pack remove|trust <id>\n"
     "  model list [--type <resource type>] [--hash]\n"
     "  template list\n"

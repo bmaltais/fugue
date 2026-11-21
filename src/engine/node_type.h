@@ -73,6 +73,9 @@ struct NodeType {
     // The folder holding node.json: set by the pack loader, empty for a type that has none
     // (the built-ins' resources). Not part of the manifest, so toJson() leaves it out.
     QString dir;
+    // The version of the pack this type was loaded from (pack.json), set by the pack loader;
+    // empty for a type with no pack folder. Trust and the cache key use it (6.7, 10.1).
+    QString packVersion;
     // What the pack loader saw of a command node's files (nodeSeal in command_node.h); the
     // runner refuses to run when they no longer match. Empty: not checked.
     QString seal;

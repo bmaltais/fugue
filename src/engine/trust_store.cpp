@@ -69,6 +69,26 @@ Errors TrustStore::trust(const QString &packId, const QString &version) {
     return replaceFile(m_path, writeJson(QJsonObject{{"packs", packs}}), QFileInfo(m_path).fileName(), FileMode::OwnerOnly);
 }
 
+Errors TrustStore::forget(const QString &packId, const QString &version) {
+    QMutexLocker lock(&fileLock());
+    QJsonObject packs = readPacks(m_path);
+    QJsonArray kept;
+    bool found = false;
+    for (const QJsonValue &value : packs.value(packId).toArray()) {
+        if (value.toString() == version)
+            found = true;
+        else
+            kept.append(value);
+    }
+    if (!found)
+        return {};
+    if (kept.isEmpty())
+        packs.remove(packId);
+    else
+        packs.insert(packId, kept);
+    return replaceFile(m_path, writeJson(QJsonObject{{"packs", packs}}), QFileInfo(m_path).fileName(), FileMode::OwnerOnly);
+}
+
 Errors TrustStore::forget(const QString &packId) {
     QMutexLocker lock(&fileLock());
     QJsonObject packs = readPacks(m_path);
@@ -88,12 +108,17 @@ QList<PackUse> TrustStore::packsUsed(const Document &document, const Registry &r
             const QString pack = packOf(node.type);
             if (pack.isEmpty() || isBuiltIn(pack))
                 continue;
-            PackUse &use = used[pack];
+            // The version asked about is the one of the pack that holds the node's major (6.6).
+            const NodeType *type = registry.nodeTypeFor(node.type, node.version.major);
+            const QJsonObject entry = recorded.value(pack).toObject();
+            QString installed = type ? type->packVersion : QString();
+            if (installed.isEmpty())
+                installed = registry.packVersion(pack);
+            const QString version = installed.isEmpty() ? entry.value("version").toString() : installed;
+            PackUse &use = used[pack + QLatin1Char('@') + version];
             if (use.id.isEmpty()) {
-                const QJsonObject entry = recorded.value(pack).toObject();
                 use.id = pack;
-                const QString installed = registry.packVersion(pack);
-                use.version = installed.isEmpty() ? entry.value("version").toString() : installed;
+                use.version = version;
                 use.source = entry.value("source").toString();
             }
             if (!use.types.contains(node.type))

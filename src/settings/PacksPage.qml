@@ -138,21 +138,21 @@ ColumnLayout {
                         visible: card.modelData.enabled && !card.modelData.trusted
                         enabled: !page.model.busy
                         text: qsTr("Trust…")
-                        onClicked: page.model.trust(card.modelData.id)
+                        onClicked: page.model.trust(card.modelData.folder)
                     }
                     SettingsParts.SmallButton {
                         objectName: "packUpdate-" + card.modelData.id
                         visible: card.modelData.removable && card.modelData.source !== ""
                         enabled: !page.model.busy
                         text: qsTr("Update")
-                        onClicked: page.model.update(card.modelData.id)
+                        onClicked: page.model.update(card.modelData.folder)
                     }
                     SettingsParts.SmallButton {
                         objectName: "packRemove-" + card.modelData.id
                         visible: card.modelData.removable
                         enabled: !page.model.busy
                         text: qsTr("Remove…")
-                        onClicked: page.model.remove(card.modelData.id)
+                        onClicked: page.model.remove(card.modelData.folder)
                     }
                 }
                 Text {

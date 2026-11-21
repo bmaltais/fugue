@@ -9,7 +9,7 @@ void forEachFileLiteral(Document &document, const Registry &registry,
                         const std::function<void(const QString &node, const QString &input, InputValue &value)> &visit) {
     const auto scan = [&](Nodes &nodes) {
         for (auto it = nodes.begin(); it != nodes.end(); ++it) {
-            const NodeType *type = registry.nodeType(it->type);
+            const NodeType *type = registry.nodeTypeFor(it->type, it->version.major);
             if (!type)
                 continue;
             for (auto in = it->inputs.begin(); in != it->inputs.end(); ++in) {

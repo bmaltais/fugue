@@ -319,13 +319,29 @@ A workflow records each node's type id and the version it was made with. On open
 | --- | --- |
 | same major, same or newer minor | Loads normally. |
 | same major, older minor | Loads; inputs the installed version lacks are kept and flagged. |
-| different major | The node opens in a "needs review" state that shows what changed. It does not run until the user accepts; compiling reports `node_version_mismatch`. Accepting rewrites the node's `version` to the installed one, which is also how an agent accepts: by editing the file. |
+| different major, that major installed | The node runs on that major (its newest installed minor) and is offered the newer major: compiling gives the warning `node_newer_major`, never a block. Moving to the newer major rewrites the node's `version`; the person reviews what changed first, and an agent moves by editing the file. |
+| different major, that major not installed | The node opens in a "needs review" state that shows what changed. It does not run until the user accepts; compiling reports `node_version_mismatch`. Accepting rewrites the node's `version` to the installed one, which is also how an agent accepts: by editing the file. |
 | type missing | A placeholder that keeps its inputs and links, so saving loses nothing. |
+
+Several majors of a node type can be installed at once (#90). The registry holds each type per
+major; a workflow node runs on the major it recorded, so an older workflow does not change when a
+newer major arrives. Node search, the node library and a new node use the newest major. A major
+comes from:
+
+- the built-in pack: `pack.json` lists a node folder named `<name>@<major>` beside `<name>` for
+  each earlier major it keeps, with its own `node.json` (the version's major must match the
+  name) and its own kernel in code (`Kernels::addAt`);
+- another pack folder: packs install side by side by major ([6.6](#66-installing)).
+
+Where an id is installed at two majors the same minor-and-patch rules hold within each. An alias
+applies to every major of the type it names. `fugue node describe <id>@<major>` shows an older
+major's manifest.
 
 A node type can declare `aliases`: old ids it answers to, so a rename does not break saved
 workflows. An alias applies only when no installed type has that id.
 
-The version is part of the cache key ([10.1](#101-keys)), so a new version never reuses old results.
+The version is part of the cache key ([10.1](#101-keys)), so a new version never reuses old results, and
+neither does one major another's.
 
 ---
 
@@ -442,7 +458,7 @@ An object is a link if and only if it has the key `from`. `null` is not a value;
 - `nodes`: every node type used, including inside groups, with its version.
 - `packs`: the packs those types come from, with an optional `source` Fugue can offer to install
   from (a prompt; nothing installs silently). A save writes each pack installed here at its
-  version, with the git URL it was added from (`.fugue-source.json`, 6.6) and the commit it is
+  version (of the pack that holds the newest major of its nodes in use), with the git URL it was added from (`.fugue-source.json`, 6.6) and the commit it is
   at (`ref`), when it was added from git (#91). The URL never carries a credential (https
   user and password, ssh password are dropped) and a `file://` one is not written.
 - `models`: every resource handle with a hash that appears as a literal, with an optional
@@ -841,7 +857,11 @@ holding that node's `node.json`.
 
 ### 6.5 Where packs live and how they load
 
-- Packs live in `~/.local/share/fugue/packs/<pack-id>/`, plus extra paths set in settings.
+- Packs live in `~/.local/share/fugue/packs/<pack-id>/`, plus extra paths set in settings. A pack
+  folder is named `<pack-id>`, or `<pack-id>@<major>` (the major of its version) when another major of
+  the pack is installed beside it ([6.6](#66-installing)). Several majors of a pack load together;
+  the same major twice loads once, from the earlier path. Each node type remembers the pack version
+  it came from, which trust and the cache key use.
 - The built-in nodes are the pack `fugue`, shipped with the app and loaded the same way.
 - At startup Fugue reads only manifests and builds the registry. A manifest that fails
   validation disables that node (or pack) with a visible reason; it never stops Fugue.
@@ -864,7 +884,10 @@ holding that node's `node.json`.
 - Copy a folder into the packs folder, or `fugue pack add <folder|git-url>`. A folder is copied;
   a git address (`https://`, `ssh://`, `git://`, `file://` or `user@host:path`) is cloned and
   must be pinned with `--ref <tag|commit>`. Also `fugue pack list`, `remove`, `update`, `trust`.
-- The pack goes to `packs/<id>` with a `.fugue-source.json` beside `pack.json` saying where it
+- The pack goes to `packs/<id>`, or to `packs/<id>@<major>` when `packs/<id>` holds another major
+  (#90): `pack add` of another major neither replaces nor untrusts the one installed, and `pack add`
+  of a major already installed is `pack_exists`. `remove`, `update` and `trust` take the folder
+  name, `<id>` or `<id>@<major>`; an update stays in its major (a new major is an `add`). The pack goes with a `.fugue-source.json` beside `pack.json` saying where it
   came from (and the commit a ref resolved to), so `update` can fetch it again. The `.git`
   folder is not kept. A pack is checked in a staging folder first and put in place only when
   it loads and the person agreed; a refusal or a failure leaves no half-installed pack.
@@ -1614,7 +1637,8 @@ the resident models in memory ([9.3](#93-residency)).
 A node's key is the SHA-256 of the canonical JSON of:
 
 - the node type id and version;
-- the pack id and version it came from;
+- the pack id and the version of the pack it came from, for a node from a pack on disk (the
+  built-in pack's versions are the nodes' own);
 - every input: a literal's value, or for a link the content hash of the upstream output;
 - the identity hash of every resource handle ([2.5](#25-resource-handles));
 - for provider nodes, the engine id ([8.11](#811-the-provider-interface)) and the identity of
@@ -2071,9 +2095,9 @@ Each command works with no display, never opens a dialog, and takes `--json`. Fo
 | `fugue runs result <run-id>` | Sink outputs: values and file paths. |
 | `fugue runs cancel <run-id>` | Cancel. |
 | `fugue node list [--type <port type>]` | Installed node types. |
-| `fugue node describe <type id>…` | Full manifests as data. |
+| `fugue node describe <type id>[@<major>]…` | Full manifests as data. |
 | `fugue node new <name>`, `fugue node test <path>` | Authoring ([6.11](#611-authoring-tools)). |
-| `fugue pack list`, `add <folder\|git-url> [--ref <tag\|commit>]`, `remove <id>`, `update [id] [--ref <tag\|commit>]`, `trust <id>` | Packs ([6.6](#66-installing)). All but `list` need a human ([13.6](#136-safety)). |
+| `fugue pack list`, `add <folder\|git-url> [--ref <tag\|commit>]`, `remove <id>`, `update [id] [--ref <tag\|commit>]`, `trust <id>` (an `<id>@<major>` where majors of a pack sit side by side) | Packs ([6.6](#66-installing)). All but `list` need a human ([13.6](#136-safety)). |
 | `fugue provider list` | Instances, their capabilities and status. |
 | `fugue template list` | The templates, each with the models it names (`here` or not, and the folder a missing one goes in) and the packs it lacks; what is wrong with one is a warning. |
 | `fugue model get <file\|template id> [--into <model folder>]` | Download the models a workflow or template names that are not here and have a `source` (8.9, #89), into the model folder downloads go in (`--into` names another, for this call); progress on stderr. Each failure is an error; what arrived stays. |
@@ -2137,7 +2161,7 @@ Codes in v0.1:
 | Area | Codes |
 | --- | --- |
 | Files | `file_not_found`, `invalid_json`, `invalid_document`, `unsupported_format_version`, `permission_denied`, `media_unreadable`, `download_failed` (no source, a source or name Fugue does not take, an error status, a break it gave up on, no room, a file at the name), `download_mismatch` (the file is not the handle's, by hash or size; deleted) |
-| Graph | `unknown_node_type`, `node_version_mismatch`, `unknown_input`, `missing_input`, `unknown_link_source`, `unknown_output`, `type_mismatch`, `value_out_of_range`, `value_not_in_choices`, `cycle`, `group_recursion`, `unknown_provider` |
+| Graph | `unknown_node_type`, `node_version_mismatch`, `node_newer_major` (a warning), `unknown_input`, `missing_input`, `unknown_link_source`, `unknown_output`, `type_mismatch`, `value_out_of_range`, `value_not_in_choices`, `cycle`, `group_recursion`, `unknown_provider` |
 | Warnings | `not_part_of_output`, `model_missing` (an error when a run reaches the node, 8.5), `model_mismatch` (a text encoder, VAE or LoRA that does not fit its diffusion model, by the files' headers, #85, #86; an error when a run reaches a stage), `model_unsupported` (a model file in a format the helper cannot load, such as ComfyUI's mixed quantization; likewise), `frozen_result_missing`, `pack_update_available`, `workflow_not_embedded`, `node_bad_preview` |
 | Trust | `pack_untrusted`, `needs_confirmation` |
 | Packs | `pack_invalid`, `pack_exists`, `unknown_pack`, `fetch_failed`, `setup_failed` |
@@ -2625,6 +2649,14 @@ Building M4 made these further choices.
 | A package takes only images Fugue takes in (14.1), not every file a `file` input names: a workflow received or pasted may point an input at any file (`~/.ssh/id_rsa`), and the person exporting would not see it go. The notice names what went in and what did not | 11.5, 13.6 | high |
 | A pack's source is written only as an https, ssh or git URL without credentials, with the exact commit: what is shared goes to others, and an install must get the version the workflow was made with | 4.3, 6.6 | high |
 | A package has its own extension, `.fuguepack`, not `.zip` (the owner, 2026-11-20): the desktop opens it with Fugue (`share/fugue-mime.xml`: `application/x-fugue-package`, a kind of `application/zip`; `application/x-fugue-workflow` for `.fugue`, a kind of JSON), and a person sees it is a Fugue file. It stays a zip inside, so any unzip tool reads it | 11.5, 1.4 | high |
+| Node versions side by side (#90). The registry keys a type by id and major; lookups without a major give the newest, a workflow node asks for its recorded major and falls back to the newest (then it needs review). Search and the library list the newest major only | 3.6, 6.12 | high |
+| An older major of a node still installed runs on it and gets the warning `node_newer_major`, not an error; only a major that is not installed is `node_version_mismatch` | 3.6 | high |
+| Older majors of built-in nodes live in the built-in pack as `<name>@<major>` node folders with their own kernels (`Kernels::addAt`); no built-in has an older major yet, so the mechanism is tested with fakes | 3.6, 6.4 | medium-high |
+| Pack folders `<id>` (first or any) and `<id>@<major>` (pack.json's version major); trust is per pack id and version, so installing, updating or removing one major never forgets another's trust | 6.5, 6.6, 6.7 | medium-high |
+| Cache keys carry the pack version of the node's own pack; built-in nodes keep the empty one, so existing keys of built-ins stay valid | 10.1 | high |
+| `requires.packs` records one entry per pack id: the version of the pack holding the newest major of its nodes in use. A workflow that mixes two majors of one pack records the newer | 4.3 | medium |
+| The offer to move to the newer major is the compiler warning and the CLI; a canvas affordance (a badge and a "Move to 2.0" action) and templates that carry their own pack are follow-ups | 3.6, 11.10 | medium |
+| Research (#90): ComfyUI's V3 schema has no per-node version. Its `comfy_api` is versioned as a whole (`comfy_api.latest`, a pinned `comfy_api.v0_0_2`), so an extension chooses the API it was written to, which a node cannot do per node. It renames with `search_aliases` and `NodeReplace` (old node id to new) and marks `is_deprecated`; a custom node is pinned by the Manager and comfy-cli by snapshot of the whole environment (`save-snapshot`, `restore-snapshot`), not per node. Fugue records each node's version in the workflow and keeps older majors installed, which is the part ComfyUI leaves to snapshots. Read as documentation only (docs.comfy.org); ComfyUI, ComfyUI-Manager and comfy-cli are GPL-3.0, so no code was read or taken | 3.6, 6.6 | high |
 
 ## Appendix B: issue to section map
 
@@ -2663,7 +2695,7 @@ Building M4 made these further choices.
 | #83 workflow templates, missing models on open | 11.10, 4.3, 13.1 |
 | #89 model downloads | 8.9, 4.3, 13.1, 13.3 |
 | #91 export for sharing | 11.5, 4.3, 13.1 |
-| #90 node versions side by side | 3.6, 6.6 |
+| #90 node versions side by side | 3.6, 6.5, 6.6, 10.1 |
 | #29 more pixel and mask nodes | 14.2, 2.1 |
 | #30 agent skill | 13.4, 13.5 |
 | #31 providers as modules | 8.8 |

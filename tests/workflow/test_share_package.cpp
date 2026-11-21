@@ -255,7 +255,7 @@ private slots:
             {"outputs", QJsonArray{QJsonObject{{"name", "text"}, {"type", "text"}}}}});
         QVERIFY2(added.isEmpty(), qPrintable(added.isEmpty() ? QString() : added.first().message));
         registry.setPackVersion("io.github.alice.tools", "1.2.0");
-        registry.setPackSource("io.github.alice.tools", "https://github.com/alice/fugue-tools", "0123abcd");
+        registry.setPackSource("io.github.alice.tools", "1.2.0", "https://github.com/alice/fugue-tools", "0123abcd");
         Document document = Document::fromJson(QJsonObject{
             {"fugue", 1},
             {"graph", QJsonObject{{"nodes", QJsonObject{{"s", QJsonObject{{"type", "io.github.alice.tools/sharpen"},

@@ -90,8 +90,8 @@ bool opensHere(const Document &document, const Registry &registry, QStringList *
         for (const Node &node : nodes) {
             if (document.groups.contains(node.type))
                 continue;
-            const NodeType *type = registry.nodeType(node.type);
-            const bool same = type && type->version.major == node.version.major && type->version.minor >= node.version.minor;
+            const NodeType *type = registry.nodeTypeAt(node.type, node.version.major);
+            const bool same = type && type->version.minor >= node.version.minor;
             if (same)
                 continue;
             const QString pack = typeNamespace(node.type);
