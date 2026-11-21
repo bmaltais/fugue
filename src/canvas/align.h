@@ -25,7 +25,9 @@ enum class Axis { Horizontal, Vertical };
 QHash<QString, QPointF> alignTo(const QList<Box> &boxes, Edge edge);
 
 // The new top left of each node that has to move, so the gaps between neighbours along `axis`
-// are equal. The span from the first start to the furthest end stays; the nodes keep their order. A pinned node stays
+// are equal. The span from the first start to the furthest end stays; the nodes keep their order. When
+// the nodes do not fit the span with a gap of 24 units (or already overlap), the gap is 24 and the
+// run grows past the span. A pinned node stays
 // where it is, so the gaps around it are not equal. Fewer than three boxes: nothing moves.
 QHash<QString, QPointF> distribute(const QList<Box> &boxes, Axis axis);
 

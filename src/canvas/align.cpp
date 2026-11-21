@@ -9,6 +9,8 @@ namespace fugue::align {
 
 namespace {
 
+constexpr qreal kMinGap = 24; // world units, the room distribute always leaves between two nodes
+
 // Positions are saved as whole numbers; a move smaller than that is no move.
 QPointF whole(QPointF p) { return QPointF(std::round(p.x()), std::round(p.y())); }
 
@@ -68,7 +70,9 @@ QHash<QString, QPointF> distribute(const QList<Box> &boxes, Axis axis) {
         last = std::max(last, start(*box) + length(*box));
         total += length(*box);
     }
-    const qreal gap = (last - first - total) / qreal(order.size() - 1);
+    // Nodes that already overlap, or fill the span, would get a negative gap and stay on top of one
+    // another: keep a minimum gap and let the run grow past the last node's end instead.
+    const qreal gap = std::max(kMinGap, (last - first - total) / qreal(order.size() - 1));
     qreal at = first;
     for (const Box *box : order) {
         put(moves, *box, across ? QPointF(at, box->rect.top()) : QPointF(box->rect.left(), at));

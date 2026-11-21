@@ -1904,7 +1904,8 @@ links, `view.toggle-run-toolbar`) are in the menus, and the keymap file can bind
 
 Align and distribute (#58): `node.align-left`, `-right`, `-top`, `-bottom` put the selected nodes
 on the selection's outermost edge; `node.distribute-horizontal` and `-vertical` even out the gaps
-between three or more, in the order they start (ComfyUI's Align Selected To and Distribute Nodes).
+between three or more, in the order they start, never closer than 24 units: nodes that do not fit
+the span get that gap and the run grows past it (ComfyUI's Align Selected To and Distribute Nodes).
 They have no default keys; they are in the Node menu, and in the node's menu when enough nodes are
 selected (two to align, three to distribute). A pinned node stays where it is. One undo step each.
 
