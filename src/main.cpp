@@ -29,7 +29,10 @@
 #include "nodes/builtin.h"
 #include "qml_app.h"
 #include "run/canvas_runs.h"
+#include "panels/side_panels.h"
 #include "run/run_bar.h"
+#include "search/node_library.h"
+#include "workflow/recent_files.h"
 #include "run/run_queue.h"
 #include "run/run_service.h"
 #include "settings/settings_model.h"
@@ -122,9 +125,16 @@ int main(int argc, char *argv[]) {
     fugue::ColorHistory colorHistory(fugue::TrustStore::defaultPath().section('/', 0, -2) + "/recent-colors.json");
     fugue::LayoutColors layoutColors(canvasModel);
 
+    // The side panels (#56): which is open and how wide, the node library's rows, the files lately open.
+    fugue::SidePanels sidePanels(fugue::stateDir() + "/side-panels.json");
+    sidePanels.registerCommands(commands);
+    fugue::NodeLibrary nodeLibrary(&registry);
+    fugue::RecentFiles recentFiles(fugue::stateDir() + "/recent-files.json");
+    recentFiles.follow(&workflows);
+
     const fugue::AppObjects objects{&translator, &theme,   &commands, &canvasModel,  &workflows,
                                     &appSettings, &runs, &imageActions, &colorHistory, &layoutColors,
-                                    &runBar,      &runQueue};
+                                    &runBar,      &runQueue,    &sidePanels,   &nodeLibrary,  &recentFiles};
     // The registry is filled again when the packs or the trust change, so what is installed is
     // usable with no restart (#70). Made after what it refreshes, so it goes first.
     fugue::RegistryReloader reloader(&registry, addNodeTypes);

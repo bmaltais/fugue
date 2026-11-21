@@ -6,6 +6,7 @@ import QtQuick.Layouts
 import Fugue
 import "canvas"
 import "menu"
+import "panels"
 import "run"
 import "search"
 import "settings"
@@ -37,6 +38,7 @@ ApplicationWindow {
     // Right-to-left languages mirror the window; the Translator sets the
     // application's layout direction.
     Item {
+        id: windowRoot
         anchors.fill: parent
         LayoutMirroring.enabled: win.rightToLeft
         LayoutMirroring.childrenInherit: true
@@ -95,6 +97,9 @@ ApplicationWindow {
                 objectName: "canvas"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                // The side panel (#56) takes its width from the canvas, on the side it docks.
+                Layout.leftMargin: win.sidePanelMargin("left")
+                Layout.rightMargin: win.sidePanelMargin("right")
                 model: App.canvasModel
                 navigation: win.appSettingsModel ? win.appSettingsModel.navigation : "legacy"
                 onSearchRequested: (x, y) => App.canvasModel.search.openAt(x, y)
@@ -198,7 +203,10 @@ ApplicationWindow {
             App.runQueue.watching = false
         }
     }
-    Component.onCompleted: syncRunBar()
+    Component.onCompleted: {
+        syncRunBar()
+        syncSidePanel()
+    }
     Connections {
         target: App.runBar
         function onVisibleChanged() { win.syncRunBar() }
@@ -250,6 +258,112 @@ ApplicationWindow {
                 property: "yieldKeys"
                 value: runQueuePanel.activeFocus
             }
+        }
+    }
+
+    // The side panels (#56): the node library (N) and the workflows panel (W), one open at a time
+    // on the left or the right of the canvas, which gives up their width. Made when one is
+    // open and dropped when none is, and not at all in a window without them: the window keeps
+    // few items (#5). The panels know nothing of the canvas or of App; what they ask is done here.
+    property Item sidePanelItem: null
+    property Item sidePanelContent: null
+    property string sidePanelShown: ""
+    readonly property bool sidePanelsWanted: App.sidePanels !== null && App.nodeLibrary !== null && App.recentFiles !== null
+    // The width the canvas gives up on `side` ("left" or "right"). The layout mirrors with the
+    // window, and so does its margin, so a margin is asked for on the side it will be drawn on.
+    function sidePanelMargin(side) {
+        if (!sidePanelItem || App.sidePanels.dock !== side)
+            return 0
+        return App.sidePanels.width
+    }
+    function syncSidePanel() {
+        const tab = sidePanelsWanted ? App.sidePanels.tab : ""
+        if (tab === "") {
+            if (sidePanelItem)
+                sidePanelItem.destroy()
+            sidePanelItem = null
+            sidePanelContent = null
+            sidePanelShown = ""
+            return
+        }
+        if (!sidePanelItem)
+            sidePanelItem = sidePanelComponent.createObject(windowRoot) as Item
+        if (sidePanelContent && sidePanelShown !== tab) {
+            sidePanelContent.destroy()
+            sidePanelContent = null
+        }
+        if (!sidePanelContent) {
+            const area = (sidePanelItem as SidePanel).contentArea
+            sidePanelContent = (tab === "nodes" ? nodeLibraryComponent : workflowsPanelComponent).createObject(area) as Item
+            ;(sidePanelItem as SidePanel).focusTarget = tab === "nodes" ? (sidePanelContent as NodeLibraryPanel).focusTarget
+                                                                         : (sidePanelContent as WorkflowsPanel).focusTarget
+        }
+        sidePanelShown = tab
+    }
+    Connections {
+        target: App.sidePanels
+        function onTabChanged() { win.syncSidePanel() }
+        function onFocusRequested() {
+            win.syncSidePanel()
+            ;(win.sidePanelItem as SidePanel)?.focusFirst()
+        }
+    }
+    Component {
+        id: sidePanelComponent
+        SidePanel {
+            look: App.theme.look
+            title: App.sidePanels.tab === "nodes" ? qsTr("Node library") : qsTr("Workflows")
+            dock: App.sidePanels.dock
+            width: App.sidePanels.width
+            minWidth: App.sidePanels.minWidth
+            maxWidth: App.sidePanels.maxWidth
+            x: dock === "right" ? windowRoot.width - width : 0
+            y: fugueCanvas.y
+            height: fugueCanvas.height
+            onCloseRequested: App.sidePanels.tab = ""
+            onDockRequested: dock => App.sidePanels.dock = dock
+            onWidthRequested: width => App.sidePanels.width = width
+        }
+    }
+    Component {
+        id: nodeLibraryComponent
+        NodeLibraryPanel {
+            anchors.fill: parent
+            look: App.theme.look
+            rows: App.nodeLibrary.rows
+            query: App.nodeLibrary.query
+            nodeCount: App.nodeLibrary.nodeCount
+            onQueryEdited: query => App.nodeLibrary.query = query
+            onCategoryToggled: key => App.nodeLibrary.toggle(key)
+            onCloseRequested: App.sidePanels.tab = ""
+            // A click adds the node in the middle of the view; a drop, where it was let go.
+            onNodeActivated: typeId => {
+                const p = fugueCanvas.toWorld(fugueCanvas.width / 2, fugueCanvas.height / 2)
+                App.canvasModel.addNode(typeId, p.x, p.y)
+            }
+            onNodeDropped: (typeId, sceneX, sceneY) => {
+                const at = fugueCanvas.mapFromItem(null, sceneX, sceneY)
+                if (at.x < 0 || at.y < 0 || at.x > fugueCanvas.width || at.y > fugueCanvas.height)
+                    return
+                const p = fugueCanvas.toWorld(at.x, at.y)
+                App.canvasModel.addNode(typeId, p.x, p.y)
+            }
+        }
+    }
+    Component {
+        id: workflowsPanelComponent
+        WorkflowsPanel {
+            anchors.fill: parent
+            look: App.theme.look
+            tabs: App.workflows.tabs
+            recent: App.recentFiles.entries
+            onTabRequested: index => App.workflows.current = index
+            onTabCloseRequested: index => App.workflows.closeTab(index)
+            onFileRequested: path => {
+                if (!App.workflows.openPath(path))
+                    App.recentFiles.forget(path)
+            }
+            onCloseRequested: App.sidePanels.tab = ""
         }
     }
 

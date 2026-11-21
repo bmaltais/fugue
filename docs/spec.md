@@ -1994,6 +1994,36 @@ they add no queue of their own.
   The panel reads the queue folder (a file watch, nothing at idle); only while it is open does it
   read the going run's events once a second and list the history.
 
+### 12.14 Side panels
+
+A dockable panel beside the canvas (#56), as ComfyUI's sidebar, with two tabs: the **node library**
+(`panel.nodes`, N) and the **workflows panel** (`panel.workflows`, W). One is open at a time: its key
+opens it, the same key closes it, the other key replaces it. Each is a checked item in the View menu
+while it is the open one. The canvas gives up the panel's width; the panel is made only while open,
+and the window keeps its item budget.
+
+- **Container** (`SidePanel.qml`): a title bar with a button that moves the panel to the other side
+  and one that closes it, the content below, and a grip on the canvas-facing edge (drag, or Left and
+  Right on it with the focus) that sets the width, 200 to 640 px. It knows nothing of the canvas or
+  of what it holds. Which panel is open, its side and its width are remembered in
+  `~/.local/state/fugue/side-panels.json`; a window starts with what it closed with.
+  The sides are the window's, left and right: the canvas never mirrors, and neither does the side.
+- **Node library** (`NodeLibraryPanel.qml`, `search/node_library.h`): a search field over every node
+  type in a tree by category (the `/` parts of `category`; closed at first, a click, Enter, Left and
+  Right open and close one, with the count of nodes under it). The filter is node search's own
+  ranking ([12.8](#128-node-search)), so a word finds the same nodes in both, and a query opens every
+  category on the way to a match. A **click or Enter adds the node** in the middle of the view; **dragging
+  a row onto the canvas** adds it where it is let go (a drop over the panel adds nothing); one undo step
+  either way, as with search. A node's tooltip is its description. Groups of the library are not
+  listed yet (they are in search).
+- **Workflows panel** (`WorkflowsPanel.qml`, `workflow/recent_files.h`): *Open* lists the tabs, with
+  their color, an unsaved dot and a close button (a click shows one; Delete closes it);
+  *Recent* lists the last 12 files opened or saved that are not open now and still exist, newest first,
+  kept in `~/.local/state/fugue/recent-files.json` (a click opens one; one that fails to open is
+  dropped). The library of groups ([5.3](#53-definitions-copies-and-the-library), #26) is a third list here later.
+- **Not built** (follow-ups): a model library tab (M), assets, a log or terminal panel at the bottom,
+  bookmarks and a preview of a node in the library.
+
 ---
 
 ## 13. CLI and agent interface
@@ -2465,6 +2495,7 @@ Building M2 made these further choices.
 | The library is the `local` folder of the first pack path, loaded as a pack of groups only; saving bumps the version by 3.6 from the face; every open window sees a newly saved group at once (#70: the registry is read again, 6.5) | 5.3, 6.5 | medium |
 | Live node types (#70): one registry per window stays in place and takes the types read again (`Registry::replaceTypes`); a reload asked for by the window (Packs page, library save) happens at once, one seen on disk (QFileSystemWatcher on the pack paths, pack and node folders, manifests and command entries) after 500 ms of quiet and only when the types differ. The run thread fills its compile registry before its next compile and its run registry before its next run starts. ComfyUI loads custom nodes only at server start (its Manager says "restart required"); Fugue has no server to restart | 6.5, 6.6 | medium-high |
 | Run toolbar and queue panel (#60). Researched from ComfyUI's documentation (docs.comfy.org interface overview, shortcuts, job history and settings pages; the frontend source was not read, and it is GPL-3.0-only, so no code was looked at or copied): a floating run bar at the top of the canvas, dragged by a handle and docked back to the top; Run with Run (On Change) and Run (Instant); a batch count (default 1, capped at 100 by a setting); Interrupt, disabled when idle; Ctrl+Enter, Ctrl+Shift+Enter (front), Ctrl+Alt+Enter (interrupt), Q (queue sidebar); a job history panel with status, progress and previews, per-job cancel, Clear queue and Clear history, 64 entries by default. Not found in the docs: whether the bar's place is remembered, reordering or moving a queued job to the front, and clicking a job to show its outputs on the canvas. Matched: the batch count (1 to 99) beside Run, Cancel next to it, the bar floating at the canvas edge and movable, the keys, a queue panel with running, waiting and finished runs. Improved: the panel lists runs started from a terminal as well (one shared queue, 9.8) and cancels them the way `fugue runs cancel` does; move to front for any waiting run; a click on a finished run puts its results back on the nodes; the bar's edge and the batch count are remembered; the same Run menu rows behind the arrow. Chosen: the bar docks at the top or the bottom edge (not freely placed: free palettes are #56); the history is the last 8 runs (ComfyUI keeps 64: ours is a glance, the run folders hold the rest for 7 days); Alt+Q opens the panel because `Q` is Quit here; Run (On Change), Run (Instant), a GPU memory readout and a results strip are not built | 12.13 | medium |
+| Side panels (#56). Researched from ComfyUI's documentation (docs.comfy.org interface overview, node library and shortcuts pages; the frontend source is GPL-3.0-only and was not read, so no code was looked at or copied; the documentation is public and only facts about behavior were taken): the left sidebar has tabs for Node Library, Model Library, Workflows, Assets, Apps and (optionally) Job History, each opened and closed by a key (N, M, W, Q; A is Select all); the node library is searchable, has bookmarks and an Essentials tab, and nodes are dragged onto the canvas; Workflows lists saved workflows and recent files. Not found in the docs: whether the sidebar's width or side is remembered. Matched: N and W toggling a left sidebar with one tab open at a time, the searchable node library, a drag onto the canvas, the workflows tab with recent files. Improved: the same search ranking as Add node (a word finds the same nodes in both), a click adds at the middle of the view and a drop where it lands, the open tabs are listed with their color and unsaved mark and can be closed there, the panel can dock on either side, be resized, and its tab, side and width are remembered, the View menu checks the open one. Chosen: one tab at a time (as ComfyUI's); the library is a category tree (closed at first), not a grid with an Essentials tab; the library's list scrolls by the wheel and its scroll bar, not by dragging, so a drag can take a node out; bookmarks, hover previews, a model library (M), assets (A) and a log panel are follow-ups; recent files keep 12 | 12.14 | medium |
 | Corners (#63): 8 px by default for every canvas surface, the node corner `r` and the popup corner `R` alike, from the `corner_radius` setting (General page: Fixed, 0 to 16 px a step at a time, or Follow Omarchy, which keeps the earlier rule: `R` is Hyprland's rounding and `r` is held to 8). ComfyUI's `ROUND_RADIUS` is 8 and its Vue nodes use 0.75 rem; Omarchy's default rounding is 0, which drew square nodes. The setting sits on the General page as the issue asks; the Theme page shows Hyprland's rounding as "Window rounding" | 12.11 | high |
 | Shadows (#63, docs/canvas-look.md 7): a contact and an ambient layer per level, cast downward and growing with the zoom; much stronger on dark themes (black only reads over a near-black canvas when it is deep) plus a 1 px top highlight on the card at 10% of the text color; selected nodes higher (level 2) and the selection being dragged higher still (a new level 4). ComfyUI draws one black 50% shadow at (2, 2) blur 3 for every node, selected or not. The canvas color itself is unchanged (the theme's background); a slightly lighter canvas on dark themes would make the elevation read more and is left for the owner's look review | 12.1 | medium |
 | Resize from any of the four corners (#63), as ComfyUI's canvas and Vue nodes (a 15 px square inside each corner; no edges: its `resizeEdgeSize` is declared and unused); a top or left corner moves the node so the opposite corner stays, after the size limits. Each corner sets its diagonal resize cursor before the press. ComfyUI's canvas draws no mark (its Vue nodes show two short diagonals at each corner on hover); ours is one stroke concentric with the node's corner, in all four corners while hovered or selected (the one under the pointer brighter), so the affordance follows round and square corners alike; a port inside a corner's square wins over it | 12, 4.5 | high |

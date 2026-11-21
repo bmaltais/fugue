@@ -542,6 +542,21 @@ A dashed edge in QML is a `Shape` with `strokeStyle: ShapePath.DashLine` around 
   DemiBold, under it caption `label` text (node and percent, or "Waiting", and where it came from; or how it
   ended, how long, how long ago), the time in `tnum` at the right, then 7u buttons (`arrow-up`, `x`;
   `image`, `folder`). `menu-row` under the pointer; a 2px accent bar along the lower edge of the row going.
+- **Side panel** (#56, ComfyUI's sidebar): docked at the left or right edge of the canvas, which gives up its
+  width (288 px at first, 200 to 640), full height of the canvas, `popup` fill, one `hairline` on the canvas-facing
+  edge, no shadow and no corner (it is part of the window, not a floating surface). A 9u title bar: the title at
+  label size, DemiBold, then two 7u `ViewButton`s 1u apart (`chevron-right` or `chevron-left` to move it to the
+  other side, `x` to close), and a hairline under it. The width grip is 8 px along the canvas-facing edge, a 3 px
+  `accent` line while hovered, dragged or focused. The node library: an 8u search field in `well` (a 14 px `search`
+  glyph in `label`, the query at search-field size, a clear `x` while there is one; the 1 px `accent` edge with
+  the focus) 2u from the sides, under it the rows, each 7u tall with a `menu-row` hover and `selected-row` for the
+  current one while the list has the focus: a category is a `chevron-right` or `chevron-down` (14 px, `label`),
+  its name in `label` DemiBold and its count in caption `label` at the right; a node is its name at label size in
+  `text`, indented 3u a level and 4.5u past its category's chevron. Dragging a node shows a chip with its name
+  (`popup`, 1 px `accent` edge, 92% opaque) at the pointer. The workflows panel: caption DemiBold headings "Open"
+  and "Recent" in `label`; an open workflow's row is 8u: a 2 px bar in its tab color, the name (bold while it is the
+  shown tab, on `well`), a 1.5u `accent` dot when unsaved, and a 7u wide `x` button; a recent file's row is 8u: the
+  name, and under it the folder in caption `label`.
 - **Selection toolbar** (#74, as ComfyUI's selection toolbox): over the selection's box, centred
   (under it when there is no room above), 9u tall, `popup` fill, `hairline` edge, corner
   `min(R, 10)`, no shadow (it would fall on the selection). Buttons 7u square, 14 px glyphs in
