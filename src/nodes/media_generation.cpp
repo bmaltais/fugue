@@ -1,0 +1,245 @@
+// Generate Video and Generate Song (spec 14.2): the coarse media nodes, served by a provider's
+// video.generate and audio.generate (8.1). Like Generate Image they only translate (node_kernel.h):
+// inputs to a JobRequest, and the JobResult to outputs with the values actually used (3.3). The
+// clip and the song come back as file-backed media handles (2.4), so what reads them later
+// (Load-style nodes, Save, the video stages of #105) streams the file and never holds it whole.
+
+#include "nodes/image_cover.h"
+#include "nodes/image_size.h"
+#include "nodes/kernels.h"
+
+#include <QDir>
+#include <QJsonArray>
+#include <QSize>
+
+#include <algorithm>
+#include <cmath>
+
+#include <vips/vips8>
+
+#include "engine/media.h"
+#include "engine/vips.h"
+
+namespace fugue::nodes {
+
+namespace {
+
+const QString kVideo = QStringLiteral("video.generate");
+const QString kAudio = QStringLiteral("audio.generate");
+
+// Fantasi's choices (generator.cpp fitVideo, videoFps at 6aa8dc2): a clip is about 0.4 megapixel
+// (864 x 480) in steps of 32, at 24 frames a second, unless the model or the node says otherwise.
+constexpr double kVideoMegapixels = 0.4;
+constexpr int kVideoMultiple = 32;
+constexpr QSize kVideoSize{864, 480};
+constexpr int kVideoFps = 24;
+
+QString modelName(const Selection &selection) { return selection.model.handle.value("name").toString(); }
+
+// What a node reports of a value the provider may not have said: the provider's own, else the
+// fallback.
+Value usedNumber(const QJsonObject &used, const QString &key, const Value &otherwise) {
+    const QJsonValue value = used.value(key);
+    return value.isDouble() ? Value(value) : otherwise;
+}
+
+Value usedModel(const QJsonObject &used, const Selection &selection) {
+    const QJsonObject model = used.value(QStringLiteral("model")).toObject();
+    return Value(model.isEmpty() ? selection.model.handle : model);
+}
+
+// The path a provider gave for output `name`, probed as media of `type`.
+Result<MediaHandle> outputMedia(MediaType type, const NodeContext &context, const Selection &selection,
+                                const JobResult &result) {
+    const QString name = mediaTypeName(type);
+    const QString path = result.outputs.value(name).toObject().value(QStringLiteral("path")).toString();
+    if (path.isEmpty())
+        return makeError(QStringLiteral("node_failed"),
+                         QStringLiteral("%1 finished without %2.").arg(modelName(selection), type == MediaType::Video ? QStringLiteral("a video") : QStringLiteral("audio")));
+    return MediaHandle::probe(type, path, *context.hashes);
+}
+
+class VideoKernel : public ProviderKernel {
+public:
+    Requirement requirement(const NodeType &, const Values &inputs) const override {
+        Requirement requirement;
+        requirement.capability = kVideo;
+        requirement.model = inputs.value(QStringLiteral("model")).json().toObject();
+        return requirement;
+    }
+
+    Result<JobRequest> request(const NodeContext &context, const Selection &selection) override {
+        JobRequest request;
+        request.capability = kVideo;
+        request.model = selection.model.handle;
+        QJsonObject &params = request.params;
+        params.insert(QStringLiteral("prompt"), context.input(QStringLiteral("prompt")).text());
+        const QString negative = context.input(QStringLiteral("negative_prompt")).text();
+        if (!negative.isEmpty())
+            params.insert(QStringLiteral("negative_prompt"), negative);
+        const Value seed = context.input(QStringLiteral("seed"));
+        if (!seed.isEmpty())
+            params.insert(QStringLiteral("seed"), seed.json().toInteger());
+
+        const QJsonObject &defaults = selection.model.defaults;
+        const bool framed = context.inputs.contains(QStringLiteral("image"));
+        MediaHandle frame;
+        if (framed) {
+            frame = context.input(QStringLiteral("image")).media();
+            if (frame.width() <= 0 || frame.height() <= 0)
+                return makeInputError(QStringLiteral("media_unreadable"), QStringLiteral("image"),
+                                      QStringLiteral("The first frame has no size."));
+        }
+
+        // The size: what the node sets; else, for a first frame, its shape at about 0.4 megapixel
+        // (a side set alone keeps the shape); else the model's default, else 864 x 480.
+        const auto set = [&](const QString &side) -> int {
+            return context.inputs.contains(side) ? int(context.input(side).number()) : 0;
+        };
+        const auto fallback = [&](const QString &side) {
+            const int own = defaults.value(side).toInt(0);
+            return own > 0 ? own : (side == QLatin1String("width") ? kVideoSize.width() : kVideoSize.height());
+        };
+        QSize size(set(QStringLiteral("width")), set(QStringLiteral("height")));
+        if (framed) {
+            const double aspect = double(frame.width()) / frame.height();
+            const auto along = [](double length, double ratio) {
+                return std::max(1, int(std::lround(length * ratio / kVideoMultiple))) * kVideoMultiple;
+            };
+            if (size.width() > 0 && size.height() <= 0)
+                size.setHeight(along(size.width(), 1 / aspect));
+            else if (size.height() > 0 && size.width() <= 0)
+                size.setWidth(along(size.height(), aspect));
+            else if (size.width() <= 0)
+                size = sizeForMegapixels(aspect, kVideoMegapixels, kVideoMultiple);
+        } else {
+            if (size.width() <= 0)
+                size.setWidth(fallback(QStringLiteral("width")));
+            if (size.height() <= 0)
+                size.setHeight(fallback(QStringLiteral("height")));
+        }
+        params.insert(QStringLiteral("width"), size.width());
+        params.insert(QStringLiteral("height"), size.height());
+        const QString blamed = context.inputs.contains(QStringLiteral("width"))    ? QStringLiteral("width")
+                               : context.inputs.contains(QStringLiteral("height")) ? QStringLiteral("height")
+                               : framed                                            ? QStringLiteral("image")
+                                                                                   : QString();
+        if (const Errors outside = outsideSizeLimits(modelName(selection), selection.model.limits, params,
+                                                     [&](const QString &side) {
+                                                         return context.inputs.contains(side) ? side : blamed;
+                                                     });
+            hasErrors(outside))
+            return outside;
+
+        // The length: seconds at the rate. The model rounds the count to one it can make.
+        const Value rate = context.input(QStringLiteral("fps"));
+        const int fps = !rate.isEmpty() ? int(rate.number()) : defaults.value(QStringLiteral("fps")).toInt(kVideoFps);
+        params.insert(QStringLiteral("fps"), fps);
+        params.insert(QStringLiteral("video_frames"),
+                      std::max(1, int(std::lround(context.input(QStringLiteral("duration")).number() * fps))));
+
+        for (const QString &key : {QStringLiteral("steps"), QStringLiteral("guidance")}) {
+            const Value value = context.input(key);
+            if (!value.isEmpty())
+                params.insert(key, value.json());
+            else if (defaults.contains(key))
+                params.insert(key, defaults.value(key));
+        }
+
+        if (framed) {
+            if (!initVips())
+                return vipsUnavailable();
+            Result<QString> path = QString();
+            try {
+                path = coverToFile(frame, size, QDir(context.workDir).filePath(QStringLiteral("first-frame.png")));
+            } catch (const vips::VError &error) {
+                Error unreadable = vipsError(error, QStringLiteral("media_unreadable"));
+                unreadable.message = QStringLiteral("Cannot prepare the first frame: %1").arg(unreadable.message);
+                return unreadable;
+            }
+            if (!path)
+                return path.errors();
+            request.inputs.insert(QStringLiteral("image"), QJsonObject{{"path", path.value()}});
+        }
+        return request;
+    }
+
+    // The values used are the provider's report (8.1); what it leaves out is read from the file
+    // (size, rate, length) or is what was asked for (the seed, the model).
+    Result<Values> outputs(const NodeContext &context, const Selection &selection, const JobResult &result) override {
+        const Result<MediaHandle> video = outputMedia(MediaType::Video, context, selection, result);
+        if (!video)
+            return video.errors();
+        const QJsonObject &used = result.used;
+        return Values{{QStringLiteral("video"), Value(video.value())},
+                      {QStringLiteral("seed"), usedNumber(used, QStringLiteral("seed"), context.input(QStringLiteral("seed")))},
+                      {QStringLiteral("width"), Value(video->width())},
+                      {QStringLiteral("height"), Value(video->height())},
+                      {QStringLiteral("fps"), Value(video->fps())},
+                      {QStringLiteral("duration"), Value(video->duration())},
+                      {QStringLiteral("model"), usedModel(used, selection)}};
+    }
+};
+
+class SongKernel : public ProviderKernel {
+public:
+    Requirement requirement(const NodeType &, const Values &inputs) const override {
+        Requirement requirement;
+        requirement.capability = kAudio;
+        requirement.model = inputs.value(QStringLiteral("model")).json().toObject();
+        return requirement;
+    }
+
+    Result<JobRequest> request(const NodeContext &context, const Selection &selection) override {
+        JobRequest request;
+        request.capability = kAudio;
+        request.model = selection.model.handle;
+        QJsonObject &params = request.params;
+        params.insert(QStringLiteral("prompt"), context.input(QStringLiteral("prompt")).text().trimmed());
+        // ACE-Step's own convention (Fantasi, ace-server docs): "[Instrumental]" sings nothing, an
+        // empty text leaves the words to the model.
+        const bool instrumental = context.input(QStringLiteral("instrumental")).json().toBool();
+        params.insert(QStringLiteral("lyrics"),
+                      instrumental ? QStringLiteral("[Instrumental]") : context.input(QStringLiteral("lyrics")).text().trimmed());
+        const int seconds = int(context.input(QStringLiteral("duration")).number());
+        const int least = selection.model.limits.value(QStringLiteral("min_duration")).toInt(0);
+        const int most = selection.model.limits.value(QStringLiteral("max_duration")).toInt(0);
+        if ((least > 0 && seconds < least) || (most > 0 && seconds > most))
+            return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("duration"),
+                                  QStringLiteral("%1 makes songs of %2 to %3 seconds, not %4.")
+                                      .arg(modelName(selection))
+                                      .arg(least)
+                                      .arg(most > 0 ? QString::number(most) : QStringLiteral("any"))
+                                      .arg(seconds));
+        params.insert(QStringLiteral("duration"), seconds);
+        // The model takes a language by its plain code: pt, not pt-BR.
+        const QString language = context.input(QStringLiteral("language")).text().trimmed().section(QLatin1Char('-'), 0, 0);
+        if (!language.isEmpty())
+            params.insert(QStringLiteral("language"), language);
+        const Value seed = context.input(QStringLiteral("seed"));
+        if (!seed.isEmpty())
+            params.insert(QStringLiteral("seed"), seed.json().toInteger());
+        return request;
+    }
+
+    Result<Values> outputs(const NodeContext &context, const Selection &selection, const JobResult &result) override {
+        const Result<MediaHandle> audio = outputMedia(MediaType::Audio, context, selection, result);
+        if (!audio)
+            return audio.errors();
+        const QJsonObject &used = result.used;
+        return Values{{QStringLiteral("audio"), Value(audio.value())},
+                      {QStringLiteral("lyrics"), Value(result.outputs.value(QStringLiteral("lyrics")).toString())},
+                      {QStringLiteral("seed"), usedNumber(used, QStringLiteral("seed"), context.input(QStringLiteral("seed")))},
+                      {QStringLiteral("duration"), Value(audio->duration())},
+                      {QStringLiteral("model"), usedModel(used, selection)}};
+    }
+};
+
+} // namespace
+
+void addMediaGenerationKernels(Kernels &kernels) {
+    kernels.add(QStringLiteral("fugue/generate-video"), std::make_shared<VideoKernel>());
+    kernels.add(QStringLiteral("fugue/generate-song"), std::make_shared<SongKernel>());
+}
+
+} // namespace fugue::nodes

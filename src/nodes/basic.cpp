@@ -1,4 +1,5 @@
-// The basic nodes (spec 14.1, ticket #13): Text, Number, Load Image, Save Image, Preview.
+// The basic nodes (spec 14.1, ticket #13): Text, Number, Load Image, Save Image, Preview; and
+// Load Video and Load Audio (14.2, #28).
 
 #include <QDir>
 #include <QFile>
@@ -27,8 +28,13 @@ private:
     const QString m_port;
 };
 
-class LoadImageKernel : public NodeKernel {
+// Load Image, Load Video and Load Audio: one file, probed into a handle of the node's media type
+// (2.4) and described by the numbers the type carries. A video or audio file is only probed, never
+// decoded (media_video.cpp).
+class LoadMediaKernel : public NodeKernel {
 public:
+    explicit LoadMediaKernel(MediaType type) : m_type(type) {}
+
     Result<Values> run(const NodeContext &context) override {
         // The scheduler has expanded "~" (paths.h), so the file is the one the key was made from.
         QString file = context.input("file").text();
@@ -39,16 +45,35 @@ public:
                 return readable.errors();
             file = readable.value();
         }
+        const QString kind = mediaTypeName(m_type);
         if (!QFileInfo(file).isFile())
-            return makeError(QStringLiteral("file_not_found"), QStringLiteral("No image file at %1.").arg(file),
+            return makeError(QStringLiteral("file_not_found"), QStringLiteral("No %1 file at %2.").arg(kind, file),
                              QStringLiteral("Pick the file again in the node."));
-        const Result<MediaHandle> image = MediaHandle::probe(MediaType::Image, file, *context.hashes);
-        if (!image)
-            return image.errors();
-        return Values{{"image", Value(image.value())},
-                      {"width", Value(image->width())},
-                      {"height", Value(image->height())}};
+        const Result<MediaHandle> media = MediaHandle::probe(m_type, file, *context.hashes);
+        if (!media)
+            return media.errors();
+        Values values{{kind, Value(media.value())}};
+        switch (m_type) {
+        case MediaType::Image:
+            values.insert("width", Value(media->width()));
+            values.insert("height", Value(media->height()));
+            break;
+        case MediaType::Video:
+            values.insert("width", Value(media->width()));
+            values.insert("height", Value(media->height()));
+            values.insert("fps", Value(media->fps()));
+            values.insert("duration", Value(media->duration()));
+            break;
+        case MediaType::Audio:
+            values.insert("duration", Value(media->duration()));
+            values.insert("sample_rate", Value(media->sampleRate()));
+            break;
+        }
+        return values;
     }
+
+private:
+    const MediaType m_type;
 };
 
 // The workflow text Save Image embeds: the share copy (11.5) with a `run` section holding
@@ -213,7 +238,9 @@ public:
 void addBasicKernels(Kernels &kernels) {
     kernels.add("fugue/text", std::make_shared<PassKernel>("text"));
     kernels.add("fugue/number", std::make_shared<PassKernel>("value"));
-    kernels.add("fugue/load-image", std::make_shared<LoadImageKernel>());
+    kernels.add("fugue/load-image", std::make_shared<LoadMediaKernel>(MediaType::Image));
+    kernels.add("fugue/load-video", std::make_shared<LoadMediaKernel>(MediaType::Video));
+    kernels.add("fugue/load-audio", std::make_shared<LoadMediaKernel>(MediaType::Audio));
     kernels.add("fugue/save-image", std::make_shared<SaveImageKernel>());
     kernels.add("fugue/preview", std::make_shared<PreviewKernel>());
 }

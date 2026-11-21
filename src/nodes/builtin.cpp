@@ -21,6 +21,7 @@ void addBuiltinKernels(Kernels &kernels) {
     addComponentKernels(kernels);
     addImageGenerationKernels(kernels);
     addImageSizeKernels(kernels);
+    addMediaGenerationKernels(kernels);
     addPixelKernels(kernels);
     addTextGenerationKernels(kernels);
     // The programs of the packs on disk (7).

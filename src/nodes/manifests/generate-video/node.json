@@ -1,0 +1,43 @@
+{
+  "manifest": 1,
+  "id": "fugue/generate-video",
+  "version": "1.0.0",
+  "name": "Generate Video",
+  "description": "Makes a video clip from a prompt on a video model, optionally starting from a first frame.",
+  "category": "Generate",
+  "keywords": ["text to video", "txt2vid", "image to video", "img2vid", "animate", "clip", "movie", "diffusion", "prompt"],
+  "runtime": {"kind": "builtin"},
+  "capabilities": ["video.generate"],
+  "inputs": [
+    {"name": "prompt", "type": "text", "label": "Prompt", "widget": "multiline"},
+    {"name": "negative_prompt", "type": "text", "label": "Negative prompt", "default": "", "widget": "multiline",
+     "description": "What the clip should not show. Models that take none ignore it."},
+    {"name": "model", "type": "fugue/video-model", "label": "Model", "optional": true,
+     "description": "Unset: any ready video model."},
+    {"name": "image", "type": "image", "label": "First frame", "optional": true,
+     "description": "The clip starts from this picture. Fitted to the size by covering it and cutting the middle."},
+    {"name": "duration", "type": "number", "label": "Length (seconds)", "default": 2, "min": 0.5, "max": 60, "step": 0.5,
+     "description": "The model rounds it to a length it can make; the clip's real length is an output."},
+    {"name": "width", "type": "number", "label": "Width", "optional": true, "integer": true, "min": 64, "max": 4096,
+     "step": 32, "description": "Unset: the first frame's shape at about 0.4 megapixel, else the model's default."},
+    {"name": "height", "type": "number", "label": "Height", "optional": true, "integer": true, "min": 64, "max": 4096,
+     "step": 32, "description": "Unset: the first frame's shape at about 0.4 megapixel, else the model's default."},
+    {"name": "fps", "type": "number", "label": "Frames per second", "optional": true, "integer": true, "min": 1, "max": 120,
+     "advanced": true, "description": "Unset: the model's default, else 24. Some models make one rate only."},
+    {"name": "steps", "type": "number", "label": "Steps", "optional": true, "integer": true, "min": 1, "max": 200,
+     "advanced": true, "description": "Unset: the model's default."},
+    {"name": "guidance", "type": "number", "label": "Guidance", "optional": true, "min": 0, "max": 30, "step": 0.1,
+     "advanced": true, "description": "Unset: the model's default."},
+    {"name": "seed", "type": "number", "label": "Seed", "default": 0, "integer": true, "min": 0,
+     "max": 9007199254740991, "widget": "seed"}
+  ],
+  "outputs": [
+    {"name": "video", "type": "video", "label": "Video"},
+    {"name": "seed", "type": "number", "label": "Seed used"},
+    {"name": "width", "type": "number", "label": "Width used"},
+    {"name": "height", "type": "number", "label": "Height used"},
+    {"name": "fps", "type": "number", "label": "Frames per second used"},
+    {"name": "duration", "type": "number", "label": "Length (seconds) made"},
+    {"name": "model", "type": "fugue/video-model", "label": "Model used"}
+  ]
+}

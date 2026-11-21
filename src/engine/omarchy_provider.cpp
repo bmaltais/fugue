@@ -26,7 +26,13 @@ constexpr int kDefaultPollMs = 500;
 const QString kEngine = QStringLiteral("sdcpp");
 const QString kModelResource = QStringLiteral("fugue/image-model");
 const QString kTextResource = QStringLiteral("fugue/text-model");
+const QString kVideoResource = QStringLiteral("fugue/video-model");
+const QString kMusicResource = QStringLiteral("fugue/music-model");
 const QString kTextGenerate = QStringLiteral("text.generate");
+const QString kVideoGenerate = QStringLiteral("video.generate");
+const QString kAudioGenerate = QStringLiteral("audio.generate");
+// Engine ids of a row that names no runtime.
+const QString kMusicEngine = QStringLiteral("acestep");
 
 // A chat answer streams a chunk per token, but the first can be long in coming: the prompt
 // (and an image) is read first, and a thinking model reasons before it answers. Silence this
@@ -56,10 +62,10 @@ int httpStatus(QNetworkReply *reply) {
     return reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
 }
 
-// Defaults (8.1 names) from sd-server's capabilities: defaults_by_mode.img_gen, or the
-// deprecated `defaults` mirror (api.md "GET /sdcpp/v1/capabilities").
-QJsonObject defaultsOf(const QJsonObject &capabilities) {
-    QJsonObject mode = capabilities.value("defaults_by_mode").toObject().value("img_gen").toObject();
+// Defaults (8.1 names) from sd-server's capabilities: defaults_by_mode.<mode> (img_gen or
+// vid_gen), or the deprecated `defaults` mirror (api.md "GET /sdcpp/v1/capabilities").
+QJsonObject defaultsOf(const QJsonObject &capabilities, const char *modeName = "img_gen") {
+    QJsonObject mode = capabilities.value("defaults_by_mode").toObject().value(QLatin1String(modeName)).toObject();
     if (mode.isEmpty())
         mode = capabilities.value("defaults").toObject();
     const QJsonObject sample = mode.value("sample_params").toObject();
@@ -73,6 +79,8 @@ QJsonObject defaultsOf(const QJsonObject &capabilities) {
     const QJsonObject guidance = sample.value("guidance").toObject();
     if (guidance.contains("txt_cfg"))
         defaults.insert("guidance", guidance.value("txt_cfg"));
+    if (mode.value("fps").toDouble() > 0)
+        defaults.insert("fps", mode.value("fps"));
     return defaults;
 }
 
@@ -104,6 +112,11 @@ struct OmarchyProvider::Job {
     QString text;          // the answer so far
     int chunks = 0;        // pieces of the answer so far, for progress
     bool finished = false; // the stream said it is over ([DONE] or a finish_reason)
+    // A music job (audio.generate) is two ace-server jobs in turn: the song written (/lm), then
+    // rendered (/synth). `serverId` is the one in flight.
+    bool music = false;
+    bool rendering = false; // the second job is the one in flight
+    QJsonObject song;       // the written song (an AceRequest), sent to /synth as it is
 };
 
 namespace {
@@ -128,7 +141,7 @@ Error jobError(const QString &message, bool text = false) {
                          message.isEmpty() ? QStringLiteral("The model server failed the job.") : message,
                          !memory ? QString()
                          : text  ? QStringLiteral("Stop other models to free memory, or ask for a shorter answer.")
-                                 : QStringLiteral("Stop other models to free memory, or ask for a smaller image."));
+                                 : QStringLiteral("Stop other models to free memory, or ask for a smaller size."));
 }
 
 // A server's answer to a job it did not take: not there, the key refused, still loading, or
@@ -231,15 +244,73 @@ QJsonObject imgGenBody(const JobRequest &request, Errors *errors) {
     return body;
 }
 
+// The vid_gen body for the parameters of video.generate (8.1; api.md "vid_gen"). Always WebM, and
+// the VAE tiled as Fantasi does for video. Every LoRA the server lists goes with the job: it
+// applies none by itself, and a model such as MiniMax H3 ships its few-step LoRA that way (8.7).
+QJsonObject vidGenBody(const JobRequest &request, const QJsonArray &loras, Errors *errors) {
+    const QJsonObject &params = request.params;
+    QJsonObject body{{"prompt", params.value("prompt").toString()},
+                     {"seed", params.contains("seed") ? params.value("seed") : QJsonValue(-1)},
+                     {"output_format", "webm"},
+                     {"vae_tiling_params", QJsonObject{{"enabled", true}}}};
+    for (const char *key : {"negative_prompt", "width", "height", "video_frames", "fps"})
+        if (params.contains(QLatin1String(key)))
+            body.insert(QLatin1String(key), params.value(QLatin1String(key)));
+    QJsonObject sample;
+    if (params.contains("steps"))
+        sample.insert("sample_steps", params.value("steps"));
+    if (params.contains("guidance"))
+        sample.insert("guidance", QJsonObject{{"txt_cfg", params.value("guidance")}});
+    if (!sample.isEmpty())
+        body.insert("sample_params", sample);
+    QJsonArray lora;
+    for (const QJsonValue &each : loras)
+        lora.append(QJsonObject{{"path", each.toObject().value("path").toString()}, {"multiplier", 1.0}});
+    if (!lora.isEmpty())
+        body.insert("lora", lora);
+    QString encoded;
+    if (request.inputs.contains("image") && encodeInput(request.inputs.value("image"), &encoded, errors))
+        body.insert("init_image", encoded);
+    return body;
+}
+
+// The /lm body for audio.generate (8.1): ace-server's AceRequest fields caption, lyrics, duration,
+// vocal_language and seed (docs/ARCHITECTURE.md, "Request JSON reference"). A seed of -1 is random.
+QJsonObject aceBody(const JobRequest &request) {
+    const QJsonObject &params = request.params;
+    QJsonObject body{{"caption", params.value("prompt").toString()},
+                     {"lyrics", params.value("lyrics").toString()},
+                     {"duration", params.value("duration")}};
+    if (params.contains("language"))
+        body.insert("vocal_language", params.value("language"));
+    if (params.contains("seed"))
+        body.insert("seed", params.value("seed"));
+    return body;
+}
+
+// The audio of a /synth result: multipart/mixed, whose first part is the song (the others are
+// latents). The boundary is the first line; parts are bodies between its lines.
+QByteArray firstPart(const QByteArray &body) {
+    const qsizetype lineEnd = body.indexOf("\r\n");
+    if (lineEnd <= 0)
+        return {};
+    const QByteArray boundary = "\r\n" + body.left(lineEnd);
+    const qsizetype start = body.indexOf("\r\n\r\n");
+    if (start < 0)
+        return {};
+    const qsizetype end = body.indexOf(boundary, start + 4);
+    return end < 0 ? QByteArray() : body.mid(start + 4, end - start - 4);
+}
+
 // A seed in generation_info is a decimal string (generation_metadata.md "Reproduction
 // parameters"); accept a number too.
 QJsonValue seedOf(const QJsonValue &seed) {
     if (seed.isString()) {
         bool ok = false;
         const qint64 value = seed.toString().toLongLong(&ok);
-        return ok ? QJsonValue(value) : QJsonValue();
+        return ok ? QJsonValue(value) : QJsonValue(QJsonValue::Undefined);
     }
-    return seed.isDouble() ? seed : QJsonValue();
+    return seed.isDouble() ? seed : QJsonValue(QJsonValue::Undefined);
 }
 
 // The chat request for text.generate (8.1): the system prompt, then the user's prompt with
@@ -301,7 +372,7 @@ QNetworkReply *OmarchyProvider::send(const Server &server, const QByteArray &met
     if (timeoutMs > 0)
         request.setTransferTimeout(timeoutMs);
     request.setRawHeader("Authorization", "Bearer " + server.key);
-    if (!body.isEmpty())
+    if (!body.isEmpty() || method == "POST")
         request.setHeader(QNetworkRequest::ContentTypeHeader, QByteArrayLiteral("application/json"));
     return m_network.sendCustomRequest(request, method, body);
 }
@@ -378,7 +449,7 @@ void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> do
         Discovery discovery;
         QList<OfferedModel> models;
         QList<bool> edits;
-        QList<bool> texts; // a text row's model (text.generate), else an image row's
+        QStringList kinds; // each row's kind: image, video, music or text
         int waiting = 0;
         std::function<void(const Result<Discovery> &)> done;
     };
@@ -390,16 +461,23 @@ void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> do
         CapabilityOffer generate{QStringLiteral("image.generate"), {}};
         CapabilityOffer edit{QStringLiteral("image.edit"), {}};
         CapabilityOffer text{kTextGenerate, {}};
+        CapabilityOffer video{kVideoGenerate, {}};
+        CapabilityOffer music{kAudioGenerate, {}};
         for (qsizetype i = 0; i < pending->models.size(); ++i) {
-            if (pending->texts.at(i)) {
+            const QString &kind = pending->kinds.at(i);
+            if (kind == QLatin1String("text")) {
                 text.models.append(pending->models.at(i));
-                continue;
+            } else if (kind == QLatin1String("video")) {
+                video.models.append(pending->models.at(i));
+            } else if (kind == QLatin1String("music")) {
+                music.models.append(pending->models.at(i));
+            } else {
+                generate.models.append(pending->models.at(i));
+                if (pending->edits.at(i))
+                    edit.models.append(pending->models.at(i));
             }
-            generate.models.append(pending->models.at(i));
-            if (pending->edits.at(i))
-                edit.models.append(pending->models.at(i));
         }
-        for (const CapabilityOffer &offer : {generate, edit, text})
+        for (const CapabilityOffer &offer : {generate, edit, text, video, music})
             if (!offer.models.isEmpty())
                 description.capabilities.append(offer);
         pending->done(Result<Discovery>(pending->discovery));
@@ -409,16 +487,21 @@ void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> do
     for (const QJsonObject &row : rows) {
         const QString kind = row.value("kind").toString();
         const bool text = kind == QLatin1String("text");
-        if (kind != QLatin1String("image") && !text)
+        const bool music = kind == QLatin1String("music");
+        if (kind != QLatin1String("image") && kind != QLatin1String("video") && !text && !music)
             continue;
         const QString recipe = row.value("recipe").toString();
         const QString unit = row.value("unit").toString();
         const Server server{recipe, baseOf(row.value("endpoint").toString()), key,
-                            row.value("runtime").toString()};
+                            row.value("runtime").toString(), {}};
         pending->discovery.servers.insert(recipe, server);
 
         OfferedModel model;
-        model.handle = QJsonObject{{"resource", text ? kTextResource : kModelResource}, {"name", recipe}};
+        model.handle = QJsonObject{{"resource", text    ? kTextResource
+                                                : music ? kMusicResource
+                                                : kind == QLatin1String("video") ? kVideoResource
+                                                                                 : kModelResource},
+                                   {"name", recipe}};
         model.title = row.value("name").toString();
         if (text) {
             // What it takes is known for a paired host's row only (network.json); a local row
@@ -427,6 +510,11 @@ void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> do
                 model.properties.insert("input", row.value("input"));
             if (row.value("max_tokens").toInt() > 0)
                 model.limits.insert("max_tokens", row.value("max_tokens"));
+        } else if (music) {
+            // ace-server makes 10 to 600 seconds (docs/ARCHITECTURE.md, "Request JSON reference").
+            model.limits = QJsonObject{{"min_duration", 10}, {"max_duration", 600}};
+        } else if (kind == QLatin1String("video")) {
+            model.properties = QJsonObject{{"input", row.value("input").isArray() ? row.value("input") : QJsonArray{"text"}}};
         } else {
             model.properties = QJsonObject{{"edit", row.value("edit").toBool()},
                                            {"input", row.value("input").isArray() ? row.value("input")
@@ -463,25 +551,31 @@ void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> do
         const qsizetype index = pending->models.size();
         pending->models.append(model);
         pending->edits.append(row.value("edit").toBool());
-        pending->texts.append(text);
+        pending->kinds.append(kind);
         if (model.status != ModelStatus::Ready)
             continue;
 
         // An sd-server's capabilities, or a text server's model list (the OpenAI-compatible API
         // omarchy-local-ai checks after a start, docs/engine.md).
         ++pending->waiting;
-        QNetworkReply *reply = send(server, "GET", text ? QStringLiteral("/v1/models") : QStringLiteral("/sdcpp/v1/capabilities"));
-        connect(reply, &QNetworkReply::finished, this, [pending, reply, index, recipe, server, assemble, where, command, text, this] {
+        const bool video = kind == QLatin1String("video");
+        QNetworkReply *reply = send(server, "GET",
+                                    text    ? QStringLiteral("/v1/models")
+                                    : music ? QStringLiteral("/health")
+                                            : QStringLiteral("/sdcpp/v1/capabilities"));
+        connect(reply, &QNetworkReply::finished, this, [pending, reply, index, recipe, server, assemble, where, command, text, music, video, this] {
             reply->deleteLater();
             OfferedModel &model = pending->models[index];
             const int code = httpStatus(reply);
             const QJsonObject body = jsonBody(reply);
             if (code == 200) {
-                if (!text) {
-                    model.defaults = defaultsOf(body);
+                if (!text && !music) {
+                    model.defaults = defaultsOf(body, video ? "vid_gen" : "img_gen");
                     model.limits = limitsOf(body);
                 }
-            } else if (code == 503 && (text || body.value("code").toString() == QLatin1String("model_loading"))) {
+                if (video)
+                    pending->discovery.servers[recipe].loras = body.value("loras").toArray();
+            } else if (code == 503 && (text || music || body.value("code").toString() == QLatin1String("model_loading"))) {
                 // llama.cpp-style servers answer 503 while the weights load.
                 model.status = ModelStatus::Loading;
                 model.reason = QStringLiteral("%1 is loading its model.").arg(recipe);
@@ -543,7 +637,8 @@ void OmarchyProvider::submit(const JobRequest &request, Reply<QString> reply) {
         if (!found.ok())
             return reply(Result<QString>(found.errors()));
         if (request.capability != QLatin1String("image.generate") &&
-            request.capability != QLatin1String("image.edit") && request.capability != kTextGenerate)
+            request.capability != QLatin1String("image.edit") && request.capability != kTextGenerate &&
+            request.capability != kVideoGenerate && request.capability != kAudioGenerate)
             return reply(Result<QString>(makeError(QStringLiteral("capability_unavailable"),
                                                    QStringLiteral("The omarchy provider does not offer %1.").arg(request.capability))));
         // The same rules as choosing among instances (8.3, 8.4), within this one.
@@ -558,14 +653,19 @@ void OmarchyProvider::submit(const JobRequest &request, Reply<QString> reply) {
             const QJsonObject model = chosen->model.handle;
             return self->submitChat(found->servers.value(model.value("name").toString()), request, model, reply);
         }
+        if (request.capability == kAudioGenerate) {
+            const QJsonObject model = chosen->model.handle;
+            return self->submitSong(found->servers.value(model.value("name").toString()), request, model, reply);
+        }
+        const bool video = request.capability == kVideoGenerate;
+        const QJsonObject model = chosen->model.handle;
+        const Server server = found->servers.value(model.value("name").toString());
         Errors errors;
-        const QJsonObject body = imgGenBody(request, &errors);
+        const QJsonObject body = video ? vidGenBody(request, server.loras, &errors) : imgGenBody(request, &errors);
         if (hasErrors(errors))
             return reply(Result<QString>(errors));
 
-        const QJsonObject model = chosen->model.handle;
-        const Server server = found->servers.value(model.value("name").toString());
-        QNetworkReply *posted = self->send(server, "POST", QStringLiteral("/sdcpp/v1/img_gen"),
+        QNetworkReply *posted = self->send(server, "POST", video ? QStringLiteral("/sdcpp/v1/vid_gen") : QStringLiteral("/sdcpp/v1/img_gen"),
                                            QJsonDocument(body).toJson(QJsonDocument::Compact));
         connect(posted, &QNetworkReply::finished, self, [self, posted, server, request, model, reply] {
             posted->deleteLater();
@@ -738,6 +838,25 @@ void OmarchyProvider::cancel(const QString &job, Reply<QString> reply) {
             found->stream->abort();
         return later(std::move(reply), Result<QString>(found->status.state));
     }
+    if (found->music) {
+        // ace-server: POST /job?id=N&cancel=1. A job it has finished stays finished, so the poller
+        // follows the answer to the end (9.6).
+        QNetworkReply *posted = send(found->server, "POST", QStringLiteral("/job?id=%1&cancel=1").arg(found->serverId));
+        connect(posted, &QNetworkReply::finished, this, [this, posted, job, found, reply] {
+            posted->deleteLater();
+            const int code = httpStatus(posted);
+            if (code == 0)
+                return reply(Result<QString>(makeError(QStringLiteral("provider_unreachable"),
+                                                       QStringLiteral("%1 is not answering at %2.").arg(found->server.recipe, found->server.base))));
+            if (code == 200 && jsonBody(posted).value("status").toString() == QLatin1String("cancelled") && !found->status.isTerminal()) {
+                JobStatus cancelled;
+                cancelled.state = QStringLiteral("cancelled");
+                change(job, cancelled);
+            }
+            reply(Result<QString>(found->status.state));
+        });
+        return;
+    }
     // Cooperative (api.md "POST /sdcpp/v1/jobs/{id}/cancel"): a generating job stays generating
     // until a checkpoint, so the poller keeps following it to its terminal state (9.6).
     QNetworkReply *posted = send(found->server, "POST", QStringLiteral("/sdcpp/v1/jobs/%1/cancel").arg(found->serverId));
@@ -775,7 +894,7 @@ void OmarchyProvider::poll() {
             continue; // a chat job is followed by its stream, not polled
         active = true;
         if (!it.value()->asking)
-            pollJob(it.key());
+            it.value()->music ? pollSong(it.key()) : pollJob(it.key());
     }
     if (!active)
         m_poll.stop();
@@ -823,6 +942,8 @@ void OmarchyProvider::finishJob(const QString &id, const QJsonObject &answer) {
     // (--completed-ttl-seconds, 600 by default), so it is written out now (8.6).
     const auto job = m_jobs.value(id);
     const QJsonObject result = answer.value("result").toObject();
+    if (job->request.capability == kVideoGenerate)
+        return finishVideo(id, result);
     const QString format = result.value("output_format").toString(QStringLiteral("png"));
     const QJsonArray images = result.value("images").toArray();
     const QDir dir(job->request.outputDir);
@@ -868,6 +989,210 @@ void OmarchyProvider::finishJob(const QString &id, const QJsonObject &answer) {
     status.state = QStringLiteral("done");
     status.progress = 1;
     change(id, status);
+}
+
+// A finished vid_gen job's result is the whole container as base64 (api.md "Completion Result":
+// output_format, mime_type, fps, frame_count, b64_json), written to video.<format> now (8.6).
+void OmarchyProvider::finishVideo(const QString &id, const QJsonObject &result) {
+    const auto job = m_jobs.value(id);
+    const QString format = result.value("output_format").toString(QStringLiteral("webm"));
+    const QByteArray bytes = QByteArray::fromBase64(result.value("b64_json").toString().toLatin1());
+    JobStatus status;
+    if (bytes.isEmpty()) {
+        status.state = QStringLiteral("error");
+        status.error = jobError(QStringLiteral("%1 finished without a video.").arg(job->server.recipe));
+        return change(id, status);
+    }
+    const QString path = QDir(job->request.outputDir).absoluteFilePath(QStringLiteral("video.") + format);
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size()) {
+        status.state = QStringLiteral("error");
+        status.error = makeError(QStringLiteral("internal"), QStringLiteral("Cannot write %1.").arg(path));
+        return change(id, status);
+    }
+    file.close();
+
+    // The model may have changed the length (MiniMax H3: 17n+5 frames), so the file's own are the
+    // truth: the node reads size, rate and length from it. The seed is the server's record, else
+    // the one asked for.
+    const QJsonObject &params = job->request.params;
+    QJsonObject used{{"model", job->model}, {"engine", kEngine}};
+    const QJsonValue seed = seedOf(result.value("generation_info").toObject().value("seed"));
+    if (!seed.isUndefined())
+        used.insert("seed", seed);
+    else if (params.contains("seed"))
+        used.insert("seed", params.value("seed"));
+    if (result.value("fps").toDouble() > 0)
+        used.insert("fps", result.value("fps"));
+    if (result.value("frame_count").toInt() > 0)
+        used.insert("frames", result.value("frame_count"));
+    job->result = JobResult{QJsonObject{{"video", QJsonObject{{"path", path}, {"format", format}}}}, used};
+    status.state = QStringLiteral("done");
+    status.progress = 1;
+    change(id, status);
+}
+
+// A song is two ace-server jobs in turn (Fantasi's makeSong; docs/ARCHITECTURE.md): /lm writes it
+// out (lyrics, tempo, key, audio codes) and /synth renders that. The server has no queue state,
+// progress counter or preview, so progress is the half each job is.
+void OmarchyProvider::submitSong(const Server &server, const JobRequest &request, const QJsonObject &model,
+                                 Reply<QString> reply) {
+    QNetworkReply *posted = send(server, "POST", QStringLiteral("/lm"),
+                                 QJsonDocument(aceBody(request)).toJson(QJsonDocument::Compact));
+    connect(posted, &QNetworkReply::finished, this, [this, posted, server, request, model, reply] {
+        posted->deleteLater();
+        const int code = httpStatus(posted);
+        const QJsonObject answer = jsonBody(posted);
+        const QString serverId = answer.value("id").toString();
+        if (code != 200 && code != 202)
+            return reply(Result<QString>(refusal(server.recipe, server.base, code, answer, false)));
+        if (serverId.isEmpty())
+            return reply(Result<QString>(jobError(QStringLiteral("%1 took the job but gave no id.").arg(server.recipe))));
+        auto job = std::make_shared<Job>();
+        job->music = true;
+        job->server = server;
+        job->serverId = serverId;
+        job->request = request;
+        job->model = model;
+        job->status.state = QStringLiteral("running");
+        job->status.stage = QStringLiteral("writing");
+        const QString id = QStringLiteral("%1/song-%2").arg(server.recipe).arg(++m_chats);
+        m_jobs.insert(id, job);
+        if (!m_poll.isActive())
+            m_poll.start();
+        reply(Result<QString>(id));
+    });
+}
+
+// ace-server's job states: running, done, failed, cancelled (GET /job?id=N).
+void OmarchyProvider::pollSong(const QString &id) {
+    const auto job = m_jobs.value(id);
+    job->asking = true;
+    QNetworkReply *reply = send(job->server, "GET", QStringLiteral("/job?id=%1").arg(job->serverId));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, id, job] {
+        reply->deleteLater();
+        const auto over = [&] { job->asking = false; };
+        if (job->status.isTerminal())
+            return over();
+        const int code = httpStatus(reply);
+        if (code == 0) {
+            over();
+            if (++job->failures >= kMaxPollFailures) {
+                JobStatus lost;
+                lost.state = QStringLiteral("error");
+                lost.error = makeError(QStringLiteral("provider_unreachable"),
+                                       QStringLiteral("%1 stopped answering during the job.").arg(job->server.recipe));
+                change(id, lost);
+            }
+            return;
+        }
+        job->failures = 0;
+        if (code != 200) {
+            over();
+            JobStatus gone;
+            gone.state = QStringLiteral("error");
+            gone.error = makeError(QStringLiteral("node_failed"),
+                                   QStringLiteral("%1 no longer has the job (HTTP %2).").arg(job->server.recipe).arg(code),
+                                   QStringLiteral("Run the node again."));
+            return change(id, gone);
+        }
+        const QString state = jsonBody(reply).value("status").toString();
+        JobStatus status;
+        if (state == QLatin1String("done"))
+            return fetchSong(id); // keeps `asking` until the result is in hand
+        over();
+        if (state == QLatin1String("failed")) {
+            status.state = QStringLiteral("error");
+            status.error = jobError(QStringLiteral("%1 could not make the song.").arg(job->server.recipe));
+        } else if (state == QLatin1String("cancelled")) {
+            status.state = QStringLiteral("cancelled");
+        } else {
+            status.state = QStringLiteral("running");
+            status.stage = job->rendering ? QStringLiteral("rendering") : QStringLiteral("writing");
+            status.progress = job->rendering ? 0.5 : 0.0;
+        }
+        change(id, status);
+    });
+}
+
+void OmarchyProvider::fetchSong(const QString &id) {
+    const auto job = m_jobs.value(id);
+    QNetworkReply *reply = send(job->server, "GET", QStringLiteral("/job?id=%1&result=1").arg(job->serverId));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, id, job] {
+        reply->deleteLater();
+        job->asking = false;
+        if (job->status.isTerminal())
+            return;
+        const auto fail = [&](const QString &message) {
+            JobStatus failed;
+            failed.state = QStringLiteral("error");
+            failed.error = jobError(message);
+            change(id, failed);
+        };
+        const int code = httpStatus(reply);
+        if (code != 200)
+            return fail(QStringLiteral("%1 gave no result (HTTP %2).").arg(job->server.recipe).arg(code));
+        const QByteArray body = reply->readAll();
+        if (!job->rendering) {
+            // The song written out: it goes back to be rendered as it is, as an mp3.
+            QJsonObject song = QJsonDocument::fromJson(body).array().first().toObject();
+            if (song.isEmpty())
+                return fail(QStringLiteral("%1 wrote no song.").arg(job->server.recipe));
+            job->song = song;
+            song.insert("output_format", "mp3");
+            QNetworkReply *posted = send(job->server, "POST", QStringLiteral("/synth"),
+                                         QJsonDocument(song).toJson(QJsonDocument::Compact));
+            job->asking = true;
+            connect(posted, &QNetworkReply::finished, this, [this, posted, id, job] {
+                posted->deleteLater();
+                job->asking = false;
+                if (job->status.isTerminal())
+                    return;
+                const int status = httpStatus(posted);
+                const QString serverId = jsonBody(posted).value("id").toString();
+                if ((status != 200 && status != 202) || serverId.isEmpty()) {
+                    JobStatus failed;
+                    failed.state = QStringLiteral("error");
+                    failed.error = refusal(job->server.recipe, job->server.base, status, jsonBody(posted), false);
+                    return change(id, failed);
+                }
+                job->serverId = serverId;
+                job->rendering = true;
+                JobStatus running;
+                running.state = QStringLiteral("running");
+                running.stage = QStringLiteral("rendering");
+                running.progress = 0.5;
+                change(id, running);
+            });
+            return;
+        }
+        const QByteArray mp3 = firstPart(body);
+        if (mp3.isEmpty())
+            return fail(QStringLiteral("%1 finished without a song.").arg(job->server.recipe));
+        const QString path = QDir(job->request.outputDir).absoluteFilePath(QStringLiteral("audio.mp3"));
+        QFile file(path);
+        if (!file.open(QIODevice::WriteOnly) || file.write(mp3) != mp3.size()) {
+            JobStatus failed;
+            failed.state = QStringLiteral("error");
+            failed.error = makeError(QStringLiteral("internal"), QStringLiteral("Cannot write %1.").arg(path));
+            return change(id, failed);
+        }
+        file.close();
+        QJsonObject used{{"model", job->model},
+                         {"engine", job->server.runtime.isEmpty() ? kMusicEngine : job->server.runtime}};
+        const QJsonValue seed = job->song.contains("seed") ? seedOf(job->song.value("seed")) : QJsonValue(QJsonValue::Undefined);
+        if (!seed.isUndefined() && seed.toDouble(-1) >= 0)
+            used.insert("seed", seed);
+        else if (job->request.params.contains("seed"))
+            used.insert("seed", job->request.params.value("seed"));
+        job->result = JobResult{QJsonObject{{"audio", QJsonObject{{"path", path}, {"format", "mp3"}}},
+                                            {"lyrics", job->song.value("lyrics").toString()}},
+                                used};
+        JobStatus done;
+        done.state = QStringLiteral("done");
+        done.progress = 1;
+        change(id, done);
+    });
 }
 
 void OmarchyProvider::change(const QString &id, const JobStatus &status) {

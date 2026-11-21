@@ -1,0 +1,21 @@
+{
+  "manifest": 1,
+  "id": "fugue/load-video",
+  "version": "1.0.0",
+  "name": "Load Video",
+  "description": "Reads a video file from disk. The file is not decoded: later nodes stream its frames.",
+  "category": "Basic",
+  "keywords": ["open", "file", "input", "clip", "movie", "mp4", "webm", "mkv", "mov"],
+  "runtime": {"kind": "builtin"},
+  "needs": {"files": true},
+  "inputs": [
+    {"name": "file", "type": "text", "label": "File", "widget": "file"}
+  ],
+  "outputs": [
+    {"name": "video", "type": "video", "label": "Video"},
+    {"name": "width", "type": "number", "label": "Width"},
+    {"name": "height", "type": "number", "label": "Height"},
+    {"name": "fps", "type": "number", "label": "Frames per second"},
+    {"name": "duration", "type": "number", "label": "Length (seconds)"}
+  ]
+}

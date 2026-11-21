@@ -1058,8 +1058,8 @@ A node asks for a capability, never a server.
 | --- | --- | --- |
 | `image.generate` | Text (and optional start image) to image | M1 |
 | `image.edit` | Instruction plus reference images to image | M1 |
-| `video.generate` | Text or first frame to video | M4 |
-| `audio.generate` | Music from a prompt and optional lyrics | M4 |
+| `video.generate` | Text or first frame to video | M4 (#28) |
+| `audio.generate` | Music from a prompt and optional lyrics | M4 (#28) |
 | `text.generate` | LLM text, optionally with image input | M4 |
 | `image.upscale` | Model upscaling | M5 |
 | `text.encode`, `latent.sample`, `latent.decode`, `latent.encode` | Component-level generation | M5 |
@@ -1078,6 +1078,13 @@ does not support and must report the values it actually used.
 | `image.generate` | `prompt`, `negative_prompt`, `width`, `height`, `steps`, `guidance`, `seed`, `image` (start image), `strength`, `model` | `image`; used: `seed`, `width`, `height`, `steps`, `model`, `engine` |
 | `image.edit` | `prompt` (the instruction), `images` (references), `width`, `height`, `steps`, `guidance`, `seed`, `model` | same |
 | `text.generate` | `prompt`, `system` (optional), `image` (optional, an input), `seed`, `max_tokens`, `temperature`, `thinking` (optional boolean), `model` | `text` (the answer, reasoning left out); used: `seed`, `model`, `engine` |
+
+| `video.generate` | `prompt`, `negative_prompt`, `width`, `height`, `video_frames`, `fps`, `steps`, `guidance`, `seed`, `image` (first frame, an input), `model` | `video` (a file); used: `seed`, `fps`, `frames`, `model`, `engine` |
+| `audio.generate` | `prompt` (what the song is like), `lyrics` (`[Instrumental]` for none, empty for the model's own), `duration` (seconds), `language`, `seed`, `model` | `audio` (a file) and `lyrics` (what was sung); used: `seed`, `model`, `engine` |
+
+A video's size, rate and length are read from the file the provider wrote, not from the used values:
+a model rounds the frame count to what it can make. A model of a capability may report `min_duration`
+and `max_duration` (audio) or `min_`/`max_` `width` and `height` (video) as limits.
 
 Parameters of later capabilities are fixed when their nodes are built, following this pattern.
 A text model may report `max_tokens` (its longest answer) as a limit and `input` (`["text",
@@ -1246,6 +1253,18 @@ omarchy-local-ai at commit 703ae0c when the provider was built):
   previews are requested for images.
 - Video jobs must send every LoRA the server lists in its capabilities; the server does not
   apply them on its own.
+- Video (#28): each `kind: video` row is a `fugue/video-model` of `video.generate`, probed with
+  `GET /sdcpp/v1/capabilities` (defaults from `defaults_by_mode.vid_gen`: size, steps, guidance, `fps`).
+  A job is `POST /sdcpp/v1/vid_gen` and the same job API as images; it asks for WebM with the VAE
+  tiled, sends `init_image` for a first frame and every listed LoRA, and the finished job's whole
+  container (base64) is written to `video.webm` at once (8.6). No previews are asked for.
+- Music (#28): each `kind: music` row is a `fugue/music-model` of `audio.generate`, probed with
+  `GET /health` (ace-server has no capabilities call; 10 to 600 seconds is its documented range). A song is
+  two ace-server jobs in turn: `POST /lm` writes it out (lyrics, tempo, key, audio codes), `POST /synth`
+  renders what `/lm` wrote, as an mp3; `GET /job?id=N` is `running`, `done`, `failed` or `cancelled`,
+  `GET /job?id=N&result=1` the result (a JSON array, then `multipart/mixed` whose first part is the audio),
+  `POST /job?id=N&cancel=1` cancels. There is no queue state, step counter or preview, so progress is
+  the half each job is. The lyrics the model wrote are an output of the node.
 - Text: each `kind: text` row is a `fugue/text-model` of `text.generate`, served by its
   OpenAI-compatible API (omarchy-local-ai runtimes' `api = "openai"`; the served model name is
   the recipe). Ready is asked with `GET /v1/models` (503 while the weights load). A job is one
@@ -2197,8 +2216,20 @@ choice; a limit the provider reports for the model replaces it, higher or lower.
 
 ### 14.2 M4: the rest of v0.1
 
-- Generate Video (first frame optional, file-backed output), Generate Song (prompt, optional
-  lyrics), Load Video, Load Audio.
+- Shipped (#28): Load Video, Load Audio, Generate Video and Generate Song.
+
+| Type id | Inputs | Outputs | Notes |
+| --- | --- | --- | --- |
+| `fugue/load-video` | `file` | `video`, `width`, `height`, `fps`, `duration` | Probed with ffprobe, never decoded; keyed by the file's content hash. |
+| `fugue/load-audio` | `file` | `audio`, `duration`, `sample_rate` | As Load Video. |
+| `fugue/generate-video` | `prompt`, `negative_prompt`, `model` (optional), `image` (first frame, optional), `duration` (seconds, default 2), `width`, `height` (optional, steps of 32), `fps`, `steps`, `guidance` (advanced, optional), `seed` | `video`, `seed`, `width`, `height`, `fps`, `duration`, `model` | Capability `video.generate`. Unset size: a first frame's shape at about 0.4 megapixel in steps of 32, else the model's default, else 864 x 480; the frame goes to the model as a PNG of exactly that size (scaled to cover, cut from the middle, as Generate Image's start image). Unset rate: the model's, else 24. The size, rate and length out are the file's. |
+| `fugue/generate-song` | `prompt`, `lyrics` (empty: the model writes them), `instrumental`, `model` (optional), `duration` (seconds, 10 to 600, default 30), `language` (advanced, default `en`; `pt-BR` is sent as `pt`), `seed` | `audio`, `lyrics`, `seed`, `duration`, `model` | Capability `audio.generate`. `lyrics` out is what was sung (or the model's own words), so it can feed Text nodes. |
+
+Both generate nodes return a file-backed handle ([2.4](#24-media-handles)): the clip and the song are
+never held whole, so what reads them next (the video stages of #105, a Save node) streams the file. The
+video and audio types, Load Video and Load Audio are the base those stages build on. A video's audio
+track stays inside the clip: there is no separate audio output until a node needs one. The node faces
+show a video or song by its description only (no player yet), as Preview does.
 - Shipped (#87): Text Generate (`fugue/text-generate`: prompt, system prompt, optional image,
   model, seed, and in Advanced the longest answer, temperature and thinking (off); outputs `text`, `seed`,
   `model`) and Enhance Prompt (`fugue/enhance-prompt`: an idea, a style, more instructions,
@@ -2553,6 +2584,12 @@ Building M4 made these further choices.
 | Enhance Prompt (#87) is a node of its own with three styles, not a Text Generate preset: `detailed` (a paragraph, for models that read sentences: Z-Image, FLUX, Qwen-Image), `photograph`, and `tags` (SDXL, SD 1.5), plus free instructions. ComfyUI's enhancer nodes (custom nodes on Ollama or LM Studio) work this way; its built-in TextGenerate instead runs the Qwen3 encoder file as an LLM, which stable-diffusion.cpp cannot do (llama.cpp in the helper: not now) | 14.2 | medium-high |
 | Text answers lose the model's reasoning ahead of the answer (a leading `<think>` block, or text up to a first `</think>` the chat template opened; `reasoning_content`) on every text node; Enhance Prompt also drops a leading label ("Enhanced prompt:", "Here is …:"), a code fence and quotes around the whole, the chatty filler ComfyUI's enhancers report. An empty answer fails the node (a thinking model can spend all its tokens thinking) | 14.2 | medium-high |
 | An image to a text model is sent at most 1024 pixels on a side (as it is when a PNG or JPEG within that), since it travels as base64. It is refused before the job only when the model says it takes no image; a local model says nothing (status.json has no `input`) and is asked | 8.1, 8.7 | medium |
+| Generate Video is one node with a first frame as an optional input, not a text node and an image node: the model decides whether it takes one, and the server answers 400 with its own words when it cannot. An end frame, reference images and control frames (`end_image`, `ref_images`, `control_frames` of `vid_gen`) are left out: no model Omarchy ships has them tested (8.7). Split into stages later is #105's | 14.2 | medium-high |
+| Generate Song is one node over ace-server's two jobs (`/lm`, `/synth`), as Fantasi does, with `lyrics` out; the two are one step to the user, since the written song goes back to render unchanged and holds nothing useful alone (3.7). `cover`, `repaint` and the base-DiT tasks are not offered: Omarchy ships the turbo DiT only | 14.2, 8.7, 3.7 | medium-high |
+| Video defaults are Fantasi's (864 x 480 at about 0.4 megapixel, steps of 32, 24 frames a second, 2 seconds here where Fantasi allows 1 to 10), overridden by what the model reports; the length is `duration` in seconds, from which the frames are made, since a person thinks in seconds and the model rounds the count (MiniMax H3: 17n+5) | 14.2 | medium-high |
+| Every LoRA a video server lists is sent with every job (Fantasi's rule; the server applies none, and MiniMax H3's few-step LoRA is how it is meant to run). A user-chosen LoRA for video is not offered: Omarchy's runtime maps none | 8.7 | high |
+| Load Video and Load Audio are separate from Load Image, one kernel for the three: an `any` file loader would need a type chosen by content, and compatibility is by type (2.3). ComfyUI also has separate LoadVideo and LoadAudio (core, GPL-3.0: read as documentation only, no code taken; its audio loader also takes video files and decodes whole into memory, its video type is an opaque object; Fugue keeps files and probes). Dropping or pasting a video or sound onto the canvas is not built | 14.2 | medium-high |
+| Research for #28: ComfyUI's video nodes (LoadVideo, SaveVideo, CreateVideo, GetVideoComponents, trim) and audio nodes (LoadAudio, PreviewAudio, VAE audio) were read as documentation and in the workbench note `map/research/14-comfyui-media-handling.md`; Fantasi (the Omarchy image app) and omarchy-local-ai, stable-diffusion.cpp `api.md` and acestep.cpp `docs/ARCHITECTURE.md` (MIT) for the servers. Fantasi's code was read for the protocol only; Fugue's provider is written for Fugue | 14.2, 8.7 | high |
 | Thinking is off unless asked for: Enhance Prompt never thinks, Text Generate has a Thinking switch (Advanced, off). It is sent as the chat template's switch (`chat_template_kwargs.enable_thinking`), not OpenAI's `reasoning_effort`, whose `"none"` a strict server refuses. Checked on the DGX (Qwen3.5 2B, tensorfold, 2026-11-20): thinking spent the whole default answer (4096 tokens, "low" effort too) and wrote nothing; off, a good prompt in 41 tokens. ComfyUI's Qwen3 prompt node has the same switch | 8.1, 14.2 | high |
 | A text job waits up to 300 seconds of silence (image jobs: 15 s per request): reading a long prompt or an image, or reasoning, can stream nothing for a while | 8.7 | medium |
 | Resize to Megapixels defaults its multiple to 16 (ComfyUI's resolution_steps defaults to 1): sizes then match a latent of the same picture | 14.1 | medium-high |
@@ -2608,6 +2645,7 @@ Building M4 made these further choices.
 | #27 user docs | 16, 6.11 |
 | #28 video, song and text nodes | 14.2, 8.1, 8.7 |
 | #87 Text Generate, Enhance Prompt | 14.2, 8.1, 8.7 |
+| #28 Load Video, Load Audio, Generate Video, Generate Song | 14.2, 8.1, 8.7 |
 | #88 Klein 9B edit: references, Resize to Megapixels | 14.1, 14.3 |
 | #83 workflow templates, missing models on open | 11.10, 4.3, 13.1 |
 | #89 model downloads | 8.9, 4.3, 13.1, 13.3 |

@@ -1,0 +1,34 @@
+{
+  "manifest": 1,
+  "id": "fugue/generate-song",
+  "version": "1.0.0",
+  "name": "Generate Song",
+  "description": "Makes a song from a description and, optionally, lyrics on a music model.",
+  "category": "Generate",
+  "keywords": ["music", "text to music", "audio", "lyrics", "sing", "instrumental", "ace-step"],
+  "runtime": {"kind": "builtin"},
+  "capabilities": ["audio.generate"],
+  "inputs": [
+    {"name": "prompt", "type": "text", "label": "Description", "widget": "multiline",
+     "description": "The style, mood, instruments and tempo of the song."},
+    {"name": "lyrics", "type": "text", "label": "Lyrics", "default": "", "widget": "multiline",
+     "description": "Sung as written, with [verse] and [chorus] lines to part it. Empty: the model writes them."},
+    {"name": "instrumental", "type": "boolean", "label": "Instrumental", "default": false,
+     "description": "No singing. The lyrics are ignored."},
+    {"name": "model", "type": "fugue/music-model", "label": "Model", "optional": true,
+     "description": "Unset: any ready music model."},
+    {"name": "duration", "type": "number", "label": "Length (seconds)", "default": 30, "integer": true, "min": 10,
+     "max": 600, "step": 5},
+    {"name": "language", "type": "text", "label": "Language", "default": "en", "advanced": true,
+     "description": "The language sung, by its code (en, fr, pt, ja)."},
+    {"name": "seed", "type": "number", "label": "Seed", "default": 0, "integer": true, "min": 0,
+     "max": 9007199254740991, "widget": "seed"}
+  ],
+  "outputs": [
+    {"name": "audio", "type": "audio", "label": "Audio"},
+    {"name": "lyrics", "type": "text", "label": "Lyrics used"},
+    {"name": "seed", "type": "number", "label": "Seed used"},
+    {"name": "duration", "type": "number", "label": "Length (seconds) made"},
+    {"name": "model", "type": "fugue/music-model", "label": "Model used"}
+  ]
+}

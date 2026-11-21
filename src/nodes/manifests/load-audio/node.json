@@ -1,0 +1,19 @@
+{
+  "manifest": 1,
+  "id": "fugue/load-audio",
+  "version": "1.0.0",
+  "name": "Load Audio",
+  "description": "Reads an audio file from disk.",
+  "category": "Basic",
+  "keywords": ["open", "file", "input", "sound", "music", "song", "mp3", "wav", "flac", "ogg"],
+  "runtime": {"kind": "builtin"},
+  "needs": {"files": true},
+  "inputs": [
+    {"name": "file", "type": "text", "label": "File", "widget": "file"}
+  ],
+  "outputs": [
+    {"name": "audio", "type": "audio", "label": "Audio"},
+    {"name": "duration", "type": "number", "label": "Length (seconds)"},
+    {"name": "sample_rate", "type": "number", "label": "Sample rate"}
+  ]
+}
