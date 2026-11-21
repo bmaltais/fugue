@@ -74,6 +74,41 @@ private slots:
         QVERIFY(again.isVisible("b"));
     }
 
+    void anAutoHideBarKeepsAModeWordAndReadsTheOlderBool() {
+        QTemporaryDir dir;
+        const QString path = dir.filePath("bars.json");
+        // The older file: hidden is auto-hide, shown is shown.
+        write(path, R"({"visible": {"menu-bar": false, "other": false}})");
+        {
+            ChromeVisibility chrome(path);
+            chrome.add("menu-bar");
+            chrome.setAutoHide("menu-bar");
+            chrome.add("other");
+            QVERIFY(!chrome.isVisible("menu-bar"));
+            QCOMPARE(chrome.mode("menu-bar"), QString("auto-hide"));
+            chrome.setVisible("menu-bar", true);
+            QCOMPARE(chrome.mode("menu-bar"), QString("shown"));
+            chrome.setVisible("menu-bar", false);
+        }
+        // Written as words for the auto-hide bar, bools for the rest.
+        const QJsonObject saved = read(path).value("visible").toObject();
+        QCOMPARE(saved.value("menu-bar").toString(), QString("auto-hide"));
+        QVERIFY(saved.value("other").isBool());
+        ChromeVisibility again(path);
+        again.add("menu-bar");
+        again.setAutoHide("menu-bar");
+        QVERIFY(!again.isVisible("menu-bar"));
+        // A word an older build wrote as true, and "shown", both read as shown; reset writes "shown".
+        write(path, R"({"visible": {"menu-bar": "shown"}})");
+        ChromeVisibility shown(path);
+        shown.add("menu-bar");
+        shown.setAutoHide("menu-bar");
+        QVERIFY(shown.isVisible("menu-bar"));
+        shown.setVisible("menu-bar", false);
+        shown.reset();
+        QCOMPARE(read(path).value("visible").toObject().value("menu-bar").toString(), QString("shown"));
+    }
+
     void anElementNotRegisteredThisTimeKeepsItsChoice() {
         QTemporaryDir dir;
         const QString path = dir.filePath("bars.json");

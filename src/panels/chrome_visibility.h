@@ -7,7 +7,10 @@
 // rules are tested without a window (tests/panels/test_chrome_visibility.cpp).
 //
 // An element has a *wanted* state, the user's choice, which is kept in a small file of the state
-// folder: {"visible": {"<id>": true|false}}. What is shown is the wanted state seen through focus
+// folder: {"visible": {"<id>": true|false}}. An auto-hide bar (setAutoHide, the menu bar: #160) is
+// not removed when it is not shown: it collapses to a slim edge and slides in when wanted
+// (panels/AutoHide.qml). Its entry is a mode word, "shown" or "auto-hide"; the older false reads as
+// auto-hide and true as shown, and the same ids are written back as words. What is shown is the wanted state seen through focus
 // mode: while it is on, nothing is shown except what was asked for since it began (a panel opened
 // on purpose, the menu bar brought back with F10). Leaving it restores the wanted states exactly,
 // plus what was asked for meanwhile. Focus mode is not kept: a window always opens with its bars.
@@ -42,6 +45,12 @@ public:
     // For an element that used to keep its own state elsewhere: `shown` is that old state, used
     // only when this registry's file has nothing for the id.
     void seed(const QString &id, bool shown);
+    // The bar `id` auto-hides instead of disappearing when it is not shown: only its saved form
+    // and `mode` differ; the window draws the slim edge (`isVisible` is false then, as ever).
+    void setAutoHide(const QString &id);
+    bool autoHides(const QString &id) const { return m_autoHide.contains(id); }
+    // "shown" or "auto-hide" for the wanted state of an id; empty for an unknown id.
+    Q_INVOKABLE QString mode(const QString &id) const;
     // At most one of these is shown: showing one hides the others. When the file shows several,
     // the first stays.
     void setExclusive(const QStringList &ids);
@@ -86,6 +95,7 @@ private:
     QHash<QString, bool> m_default;
     QHash<QString, bool> m_stored; // every choice made, also of ids not registered now
     QList<QStringList> m_groups;
+    QSet<QString> m_autoHide;
     QSet<QString> m_asked; // in focus mode: what was asked for since it began
     bool m_focus = false;
 };

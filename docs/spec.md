@@ -2313,7 +2313,7 @@ focus mode and the file all read that one place.
 
 | Id | Command | What it is |
 | --- | --- | --- |
-| `menu-bar` | `view.toggle-menu-bar` | the menu bar |
+| `menu-bar` | `view.toggle-menu-bar` | the menu bar; not shown, it **auto-hides** (below), never disappears |
 | `workflow-tabs` | `view.toggle-tabs` | the workflow tabs (12.10); still only from the second workflow on |
 | `run-toolbar` | `view.toggle-run-toolbar` | the run toolbar (12.13); the queue panel hangs from it and goes with it |
 | `selection-toolbar` | `view.toggle-selection-toolbar` | the toolbar above a selection |
@@ -2330,17 +2330,41 @@ focus mode and the file all read that one place.
 - **Focus mode** (`view.focus-mode`, **H** on the canvas): hides every bar and panel; H again brings
   back exactly what was shown, no more and no less. Tab is not used: it already enters a group and opens
   node search (12.4). While it is on, what is asked for shows alone: a panel opened with N or W, the
-  menu bar brought back with F10; leaving focus mode keeps it, with the rest. Focus mode is not
+  menu bar slid in with F10, which goes out again by itself (below). Focus mode is not
   remembered: a window always opens with its bars, so a window closed in focus mode loses nothing. A line
   at the bottom says how to leave it for four seconds.
-- **Nothing is lost.** The menu bar is the only bar that holds the commands to bring the others
-  back, so it has three ways back: F10 (`app.menu-bar`) shows it first when it is hidden, then opens it;
-  the canvas's context menu has the same submenu; **Reset bars and panels** (a key if the keymap file
-  binds `view.reset-bars`) shows every bar and closes the panels. Hiding the menu bar says so for four
-  seconds: "Menu bar hidden. F10 brings it back." A newly hidden bar keeps its command in the keymap:
-  any `view.toggle-...` can be bound in the keymap file (12.5).
+- **Auto-hide menu bar** (#160, `panels/AutoHide.qml`). Hiding the menu bar (View > Bars and panels > Menu bar,
+  unchecked) does not remove it: it collapses to a slim hot edge, 4 px tall across the window's top edge, and a
+  **handle** (a menu glyph, 36 x 28 px, hanging under the edge at the left after the side strip and panel; at the
+  right in a right-to-left language) that stay drawn, so the way back needs no hidden knowledge. The bar waits just
+  above the window and slides down **over** the canvas (the bar overlays: nothing under it moves or resizes while it
+  slides, and the canvas is pushed only while the bar is *shown*, pinned). The slide moves the bar's `y`, not the layout:
+  170 ms, ease out (`Easing.OutCubic`).
+  - **In**: the pointer on the edge or the handle for 120 ms (a pointer passing is not a request), a press on the handle
+    at once, **F10** (it slides in and opens the first menu, as ever) and an **Alt mnemonic** (Alt+F and the rest keep
+    working while it is out: they slide it in and open the menu).
+  - **Out**: the pointer off the bar, edge and handle for 400 ms; a command chosen; the menu closed (with the pointer
+    not on the bar); **Escape** when no menu is open (the canvas's and a field's own Escape come first). While a menu of
+    the bar is open the bar stays. After a key or a command the pointer may still rest on the edge: it must leave and
+    come back before the bar slides in again, so Escape is never undone at once. A touch screen has no hover: a tap on
+    the edge or handle brings it in and it stays 4 s (or until a command or a menu closes).
+  - The group breadcrumb moves right to clear the handle while it is drawn.
+  - The container is one component: **`AutoHide.qml`** takes any top bar as its child (`pinned`, `edgeShown`,
+    `holdOpen`, `reveal()`, `conceal()`); it is used for the menu bar only; see the follow-ups below.
+  - Focus mode (H) still hides everything, **the edge and handle too**; a bar asked for in focus mode (F10, an Alt
+    key) slides in alone over the canvas and out again, and leaving focus mode restores what it was (shown, or
+    auto-hide). F10 does not change the remembered mode.
+  - Screen readers: the handle is a button named "Show the menu bar" with a press action; the bar's own items are
+    not exposed while it is out (F10 and the Alt keys are the keyboard way, as in every desktop menu bar).
+- **Nothing is lost.** The menu bar holds the commands that bring the others back, and it is never gone: the handle
+  and the edge stay (except in focus mode, where H and the line at the bottom are the way out), F10 and the Alt keys
+  slide it in, the canvas's context menu has the same Bars and panels submenu, and **Reset bars and panels** (a key
+  if the keymap file binds `view.reset-bars`) shows every bar, the menu bar pinned, and closes the panels. No notice
+  is needed when hiding it. A newly hidden bar keeps its command in the keymap: any `view.toggle-...` can be bound in
+  the keymap file (12.5).
 - **Remembered** in `~/.local/state/fugue/chrome.json`: `{"visible": {"<id>": true|false}}`, an entry per
-  choice made. An id this version does not know is kept as it is; a file that cannot be read gives the
+  choice made; the menu bar's entry is a mode, `"shown"` or `"auto-hide"` (written as that word since #160; a file
+  that says `false` for it, as before, reads as auto-hide and `true` as shown; Reset writes `"shown"`). An id this version does not know is kept as it is; a file that cannot be read gives the
   defaults. The run toolbar's older `visible` in `run-bar.json` and the side panels' older `tab` in
   `side-panels.json` are read once, when `chrome.json` has nothing for them; those files keep the toolbar's
   place and batch count and the panel's side and width.
@@ -2348,7 +2372,10 @@ focus mode and the file all read that one place.
   it hangs from the run toolbar, so hiding the toolbar or entering focus mode hides it, and it comes
   back with the toolbar.
 - Not built: workspaces (a named set of shown bars, Photoshop's Essentials), a minimap (12.9, later), a
-  status bar and a bottom panel (none exist).
+  status bar and a bottom panel (none exist). Follow-ups of #160: auto-hide for the workflow tabs (it needs the same
+  container, stacked under the menu bar's edge so one reveal brings both, as Firefox and Chrome do in full screen)
+  and for a collapsed run toolbar (a floating toolbar has its own grip and place; an edge reveal does not fit it);
+  a setting for the delays; an animation-off setting (the slide then jumps).
 
 ---
 
@@ -3116,6 +3143,7 @@ Building M2 made these further choices.
 | Context menus offer what applies (#72): a command for a group, a port or an image is left out of a node's menu when it does not apply, and commands not built yet are left out of context menus; the menu bar keeps every command, dimmed when off (40%), so it can be found. As ComfyUI, whose node menu shows a subgraph's entries only on a subgraph and image entries only on a node with an image. Rules: Run to here needs exactly one node, Make unique a definition other instances share, Paste Fugue's nodes, a JSON object or an image, Run and the exports a node | 12.3 | high |
 | Renaming a group's port (#72) sets its label, the name on the face, and keeps its `name`, which links and `--set` use, as ComfyUI's Rename Slot sets a slot's label; so outputs gained an optional `label` (an older Fugue keeps it as an unknown key). Reached from the port itself: a double-click on a group card's port or on an inner port's exposed mark, or Rename on its context menu. Node titles (#55) and Frame titles are edited in place, on the header or the Frame (#74, as the owner asked): the title selected, Enter keeps, Esc drops, a click elsewhere keeps; a port keeps the small question, its label not being drawn as one line to edit | 5.4, 12.4 | medium-high |
 | Side tab strip (#159). Researched from public documentation (VS Code's user interface page, JetBrains' tool windows page, ComfyUI's interface overview, read 2026-11-21) and, for what those pages do not say, from general knowledge of the products, to recheck before quoting (Obsidian's ribbon, Blender's editor-type and area edge controls, Krita and GIMP docker tabs, Figma and Photoshop panel tabs); no source was read, ComfyUI's, Blender's, Krita's and GIMP's being GPL. Found in the docs: ComfyUI's left sidebar is a vertical icon rail (Job History, Assets, Node Library, Model Library, Workflows, Apps) and its page says nothing of tooltips, keys or one-at-a-time; VS Code's Activity Bar sits on the far left, switches views, carries badges, offers a right-click menu to move it and to show or hide views, views reorder by drag, and the Primary Side Bar moves right while the bar's own place is set separately; JetBrains' stripes sit on the window edges, a click shows or hides the tool window, icons drag to reorder, each tool window has a shortcut (Alt+1 and so on), and Shift+Escape hides the active one. From general knowledge: the icon of the open view is marked (VS Code and JetBrains), a second click collapses it, hover labels carry the key, VS Code's Activity Bar is 48 px wide with 24 px icons, and a narrow window loses the side bar before the bar. Matched: a left vertical rail of icons, one per panel (ComfyUI, VS Code), a click shows and a second click hides (JetBrains, VS Code), the open one marked, a tooltip with the name and the key, the same key as the strip does the same thing. Improved: the strip is built from the panel registry (a new panel adds a tab with no strip change), it is keyboard reachable (Tab, Enter, Space) with a focus ring and screen-reader names with a checked state, and it stays in step with N, W and the View menu through the one toggle (ComfyUI's page does not say); the canvas keeps 160 px when a narrow window cannot hold the panel; the strip hides in focus mode with the rest. Chosen: the left edge, because the panels are navigation (library, workflows) and ComfyUI, VS Code and Obsidian put navigation left; inspectors belong right, and the strip stays left even when a panel is docked right (VS Code does the same); 44 px wide, a 24 px glyph and a 44 px hit area (VS Code's 48/24, above the 36 px floor of the issue); no badges, reordering, right-click menu or right strip (follow-ups); the Lucide glyphs `boxes` (nodes) and `workflow` (workflows), ISC, added to the bundled font by the recipe in `share/fonts/lucide-fugue.txt`; the run queue (a floating panel of the run toolbar) and the media results (a view in the workflows panel) are not docked panels, so they have no tab yet | 12.14, 12.15, 16 | medium |
+| Auto-hide menu bar (#160). **Researched from the products' public documentation and general knowledge of them, not re-read this session (no web fetch was made; recheck the numbers before quoting them)**; no source was read (Blender, GNOME Shell and KDE Plasma are GPL). Firefox and Chrome in full screen: the toolbar (and tabs) are hidden and slide down when the pointer touches the top edge of the screen, and slide up when it leaves, with a short delay; F6 or Ctrl+L also bring the toolbar in; the page does not move while it is shown (it overlays). Windows taskbar auto-hide: the bar hides to a 1-2 px sliver at the screen edge and slides in on hover, and stays while a menu or flyout of it is open; macOS auto-hidden menu bar: it appears when the pointer reaches the top edge after a short dwell, over the windows, and a full-screen app can show it always or on hover. GNOME Shell and KDE Plasma panels: the KDE panel's "auto-hide" and "windows go below" modes reveal on the screen edge and offer a visible sliver or handle; the delay is configurable. VS Code: the menu bar can be hidden (`window.menuBarVisibility`: classic, visible, toggle, hidden); in "toggle" a tap of Alt shows it, a mnemonic opens its menu, and Alt+F in "hidden" opens a menu without a visible bar. Blender: a hidden area header leaves a small arrow tab on the area that restores it by a click. Figma and Photoshop: Tab hides every panel; Photoshop shows them again for a moment when the pointer goes to the edge. Common to all: a hot edge at the window or screen edge (Fitts: the edge is infinitely deep, so the target is as long as the edge and as deep as the pointer can push), a dwell before revealing so a pass does not trigger, a longer delay before hiding so the bar does not flicker, the bar over the content and not pushing it, the bar kept while a menu of it is open, a visible cue for touch and for discovery (the arrow tab, the sliver), and a key (Alt, F10, Tab) for keyboards. Screen readers: the hidden bar is normally out of the accessibility tree and the key reveals it; native bars keep F10. Hover delays used in practice are roughly 100-300 ms in and 300-1000 ms out; touch has no hover, so a tap reveals and a tap elsewhere hides. Matched: an edge that reveals on hover, the bar overlaying the content, staying while a menu is open, Escape and a command hiding it, F10 and mnemonics working while hidden, a visible handle (Blender's arrow, KDE's sliver). Improved: the edge is a real 4 px layout strip, not a 1 px pixel, so it is a long target that is never under the content, the handle has a name for screen readers, a 28 px floor, and moves clear of the side strip and the breadcrumb; the remembered mode is in a word so a later "pinned elsewhere" mode needs no new format; one container, tested, for any top bar. Chosen: 4 px edge, 36 x 28 px handle at the left (menu glyph), in after 120 ms, out after 400 ms, 170 ms OutCubic slide of `y` (not the layout), Escape slides out only when nothing else wants the key, a tap holds 4 s; the tab bar and the run toolbar are not converted: Firefox and Chrome reveal tabs with the toolbar, which needs two bars stacked under one reveal, and the run toolbar floats and moves, so an edge reveal does not fit it (follow-ups); the `AutoHide` component is generic so the tab bar costs one wrapper | 12.15 | medium |
 | Library groups (#74): ComfyUI (ComfyUI_frontend `TitleEditor.vue`, `subgraphStore.ts`, read at main on 2026-11-20) renames a subgraph's definition when its node's title is edited inline, lists saved blueprints in the node library and deletes one after a confirmation; workflows keep their own copy; it cannot rename a blueprint. We match: a group card's title edited in place renames the group; Settings > Packs lists the library's groups and removes one after a yes, workflows keeping their copy. We improve: a group of the library renamed in a workflow offers to rename it in the library too, and the page renames a library group (its folder and id follow, local/<name>); removing from node search is left out, the page being the one place that manages the library. #156 adds the node library panel as the second place (a trash can on a library group's row, a separate Cancel-first question, one shared call); node search stays without it: its row is full and a click on it adds the node, so the panel and the page are the places that manage the library | 5.3, 12.14 | medium-high |
 | Wiring far out (#74). ComfyUI keeps its slots usable when zoomed out and connects a wire dropped on a node's body to the first input that fits. We match: ports work wherever they are drawn (the map tier), with the same 10 px reach on screen, and a drop on a body connects to the one port that fits (the one free one when an input is linked). We improve: when several free ports fit, a short list asks which; and a magnifier: far out, a short hover (400 ms; 300 during a drag) shows the node at zoom 1 over itself, its ports live, without moving the view (a setting, Settings > General, `hover_magnifier`, off by default: a node that grows under the pointer surprises, #123); a wire started there leaves it as it travels, and the node it reaches shows its own to drop on | 12.6 | medium-high |
 | Selection toolbar (#74): as ComfyUI's selection toolbox (the owner's screenshot: delete, info, color, frame, widgets, help, bypass, "…"), a bar over the selection made of commands, so it is enabled and labelled as the menus are. Fugue's set: Run to here, Bypass, Color, Frame, Enter (a group), Open Image (a node with an image), Delete, "…" (the node's menu); no Info or Help yet, Fugue has neither panel. Node types adding their own buttons (ComfyUI's extensions do, through a hook in its frontend whose exact name and set were not read for this) waits for a manifest field and a protocol message (7.2) | 12.3 | medium |
@@ -3287,6 +3315,7 @@ Building M4 made these further choices.
 | #105 video stages in the helper and nodes | 8.10, 8.1, 2.6, 14.3 |
 | #133 media viewer: the media browser and the workflows panel's Results view | 12.14, 9.7, 11.7, Appendix A |
 | #159 side tab strip | 12.14, 12.15, Appendix A |
+| #160 auto-hide menu bar | 12.15, Appendix A |
 | #141 cache management | 10.5, 10.6, 13.1, 12.7, Appendix A |
 | #134 upscaling: Upscale Image and Video, Upscale with Model, the model catalog and picker downloads | 8.1, 8.9, 14.1, Appendix A |
 | #138 Upscale Video with Model: frames streamed through the helper's upscaler | 8.1, 9.2, 14.1, Appendix A |

@@ -37,6 +37,7 @@ ApplicationWindow {
 
     // Which bars and panels are shown (#129, panels/chrome_visibility.h). A window without the
     // registry (a test window) shows them all.
+    readonly property bool focusMode: App.chrome !== null && App.chrome.focusMode
     function chromeIsShown(id) {
         return App.chrome === null || App.chrome.shown[id] !== false
     }
@@ -50,10 +51,6 @@ ApplicationWindow {
     }
     Connections {
         target: App.chrome
-        function onHiddenByRequest(id) {
-            if (id === "menu-bar")
-                win.showChromeHint(qsTr("Menu bar hidden. F10 brings it back."))
-        }
         function onFocusModeChanged() {
             if (App.chrome.focusMode)
                 win.showChromeHint(qsTr("Focus mode. H brings everything back."))
@@ -98,18 +95,41 @@ ApplicationWindow {
         LayoutMirroring.enabled: win.rightToLeft
         LayoutMirroring.childrenInherit: true
 
+        // Escape slides an auto-hidden menu bar out when nothing else wants the key (the canvas
+        // and the fields take it first).
+        Keys.onShortcutOverride: event => event.accepted = event.key === Qt.Key_Escape && menuBarHost.escapeWanted
+        Keys.onEscapePressed: event => {
+            if (menuBarHost.escapeWanted) {
+                menuBarHost.conceal()
+                event.accepted = true
+            }
+        }
+
+        // The menu bar and the tabs hide from View > Bars and panels (#129; items are kept, not dropped:
+        // the window's item count is a budget and a Loader each would add to it). Not shown, the
+        // menu bar auto-hides (#160): a slim edge and a handle stay, and it slides in over the canvas
+        // for the pointer at the edge, F10 and the Alt keys (panels/AutoHide.qml). It sits above the
+        // layout, which starts under it, so it also slides over the side strip.
+        AutoHide {
+            id: menuBarHost
+            anchors { top: parent.top; left: parent.left; right: parent.right }
+            z: 5 // over the side strip and panel, which the bar slides across
+            pinned: win.chromeIsShown("menu-bar")
+            edgeShown: !win.focusMode
+            handleInset: win.rightToLeft ? 0 : fugueCanvas.x
+            holdOpen: menuBar.anyShown
+            handleName: qsTr("Show the menu bar")
+            MenuBar {
+                id: menuBar
+                width: parent.width
+                onNeeded: menuBarHost.reveal()
+            }
+        }
         ColumnLayout {
-            anchors.fill: parent
+            id: mainLayout
+            anchors { fill: parent; topMargin: menuBarHost.implicitHeight }
             spacing: 0
 
-            // The menu bar and the tabs hide from View > Bars and panels (#129; items are kept, not dropped:
-            // the window's item count is a budget and a Loader each would add to it). F10
-            // (app.menu-bar) brings the menu bar back.
-            MenuBar {
-                visible: win.chromeIsShown("menu-bar")
-                Layout.fillWidth: true
-                Layout.preferredHeight: implicitHeight
-            }
             WorkflowTabs {
                 allowed: win.chromeIsShown("workflow-tabs")
                 Layout.fillWidth: true
@@ -164,6 +184,8 @@ ApplicationWindow {
                 floatingBar: (win.runToolbarItem as RunToolbar)?.surface ?? null
                 navigation: win.appSettingsModel ? win.appSettingsModel.navigation : "legacy"
                 hoverMagnifier: win.appSettingsModel ? win.appSettingsModel.hoverMagnifier : false
+                // The auto-hide menu bar's handle hangs over the canvas's top left (#160).
+                leadingClear: Math.max(0, menuBarHost.handleEnd - x)
                 selectionToolbarShown: win.chromeIsShown("selection-toolbar")
                 breadcrumbShown: win.chromeIsShown("breadcrumb")
                 runPillShown: win.chromeIsShown("run-status")
@@ -385,7 +407,7 @@ ApplicationWindow {
         id: stripLoader
         parent: windowRoot
         active: win.stripWanted
-        y: fugueCanvas.y
+        y: mainLayout.y + fugueCanvas.y
         height: fugueCanvas.height
         sourceComponent: SideTabStrip {
             look: App.theme.look
@@ -405,14 +427,14 @@ ApplicationWindow {
     Component {
         id: sidePanelComponent
         SidePanel {
-            look: App.theme.look
+                look: App.theme.look
             title: App.sidePanels.tab === "nodes" ? qsTr("Node library") : qsTr("Workflows")
             dock: App.sidePanels.dock
             width: win.sidePanelWidth
             minWidth: App.sidePanels.minWidth
             maxWidth: App.sidePanels.maxWidth
             x: dock === "right" ? windowRoot.width - width : win.stripWidth
-            y: fugueCanvas.y
+            y: mainLayout.y + fugueCanvas.y
             height: fugueCanvas.height
             onCloseRequested: App.sidePanels.tab = ""
             onDockRequested: dock => App.sidePanels.dock = dock

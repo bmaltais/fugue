@@ -11,9 +11,15 @@ ChromeVisibility::ChromeVisibility(QString path, QObject *parent) : QObject(pare
         return;
     if (const Result<QJsonObject> read = readJsonObject(m_path)) {
         const QJsonObject visible = read->value("visible").toObject();
-        for (auto it = visible.begin(); it != visible.end(); ++it)
+        for (auto it = visible.begin(); it != visible.end(); ++it) {
+            // A bool is the older form; an auto-hide bar writes its mode as a word (#160).
             if (it.value().isBool())
                 m_stored.insert(it.key(), it.value().toBool());
+            else if (it.value().toString() == QLatin1String("shown"))
+                m_stored.insert(it.key(), true);
+            else if (it.value().toString() == QLatin1String("auto-hide"))
+                m_stored.insert(it.key(), false);
+        }
     }
 }
 
@@ -23,6 +29,16 @@ void ChromeVisibility::add(const QString &id, bool shownByDefault) {
     m_order.append(id);
     m_default.insert(id, shownByDefault);
     m_wanted.insert(id, m_stored.value(id, shownByDefault));
+}
+
+void ChromeVisibility::setAutoHide(const QString &id) {
+    m_autoHide.insert(id);
+}
+
+QString ChromeVisibility::mode(const QString &id) const {
+    if (!m_wanted.contains(id))
+        return {};
+    return m_wanted.value(id) ? QStringLiteral("shown") : QStringLiteral("auto-hide");
 }
 
 void ChromeVisibility::seed(const QString &id, bool shown) {
@@ -144,8 +160,12 @@ void ChromeVisibility::save() const {
     if (m_path.isEmpty())
         return;
     QJsonObject visible;
-    for (auto it = m_stored.begin(); it != m_stored.end(); ++it)
-        visible.insert(it.key(), it.value());
+    for (auto it = m_stored.begin(); it != m_stored.end(); ++it) {
+        if (m_autoHide.contains(it.key()))
+            visible.insert(it.key(), it.value() ? QStringLiteral("shown") : QStringLiteral("auto-hide"));
+        else
+            visible.insert(it.key(), it.value());
+    }
     writeJsonFile(m_path, QJsonObject{{"visible", visible}});
 }
 
