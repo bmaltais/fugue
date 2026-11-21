@@ -476,7 +476,7 @@ public:
                 field(n, at, "size", isPair, "a pair of numbers [width, height]");
                 field(n, at, "collapsed", isBool, "true or false");
                 field(n, at, "pinned", isBool, "true or false");
-                field(n, at, "color", isString, "a theme role name");
+                field(n, at, "color", isString, "a theme role name or a hex color #rrggbb");
                 field(n, at, "title", isString, "a string");
                 field(n, at, "increment", isStrings, "a list of input names");
             }
@@ -490,7 +490,7 @@ public:
                 const QJsonObject f = frames.at(i).toObject();
                 field(f, at, "id", isString, "a string");
                 field(f, at, "title", isString, "a string");
-                field(f, at, "color", isString, "a theme role name");
+                field(f, at, "color", isString, "a theme role name or a hex color #rrggbb");
                 field(f, at, "rect", [](const QJsonValue &v) { return isNumbers(v, 4); },
                       "four numbers [x, y, width, height]");
                 field(f, at, "nodes", isStrings, "a list of node ids");

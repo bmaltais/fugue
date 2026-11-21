@@ -10,7 +10,9 @@
 
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
+#include "menu/color_history.h"
 #include "menu/image_actions.h"
+#include "menu/layout_colors.h"
 #include "run/canvas_runs.h"
 #include "settings/settings_model.h"
 #include "theme.h"
@@ -30,6 +32,8 @@ struct AppObjects {
     SettingsModel *settings = nullptr; // optional
     CanvasRuns *runs = nullptr;        // optional
     ImageActions *imageActions = nullptr; // optional
+    ColorHistory *colorHistory = nullptr; // optional
+    LayoutColors *layoutColors = nullptr; // optional
 };
 
 class QmlApp : public QObject {
@@ -45,6 +49,8 @@ class QmlApp : public QObject {
     Q_PROPERTY(fugue::SettingsModel *settings READ settings CONSTANT)
     Q_PROPERTY(fugue::CanvasRuns *runs READ runs CONSTANT)
     Q_PROPERTY(fugue::ImageActions *imageActions READ imageActions CONSTANT)
+    Q_PROPERTY(fugue::ColorHistory *colorHistory READ colorHistory CONSTANT)
+    Q_PROPERTY(fugue::LayoutColors *layoutColors READ layoutColors CONSTANT)
 
 public:
     explicit QmlApp(const AppObjects &objects, QObject *parent = nullptr) : QObject(parent), m_objects(objects) {}
@@ -57,6 +63,8 @@ public:
     SettingsModel *settings() const { return m_objects.settings; }
     CanvasRuns *runs() const { return m_objects.runs; }
     ImageActions *imageActions() const { return m_objects.imageActions; }
+    ColorHistory *colorHistory() const { return m_objects.colorHistory; }
+    LayoutColors *layoutColors() const { return m_objects.layoutColors; }
 
 private:
     AppObjects m_objects;

@@ -564,5 +564,13 @@
   "Space the selected nodes evenly, left to right": "Space the selected nodes evenly, left to right",
   "Space the selected nodes evenly, top to bottom": "Space the selected nodes evenly, top to bottom",
   "Top": "Top",
-  "Vertically": "Vertically"
+  "Vertically": "Vertically",
+  "Hue and saturation": "Hue and saturation",
+  "Brightness": "Brightness",
+  "Hex color": "Hex color",
+  "Apply": "Apply",
+  "Recent colors": "Recent colors",
+  "Recent color %1": "Recent color %1",
+  "Color: pick any color": "Color: pick any color",
+  "Custom…": "Custom…"
 }

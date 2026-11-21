@@ -62,6 +62,7 @@ QList<Row> menuRows() {
         {"node.color.cyan", QT_TRANSLATE_NOOP("Command", "Color: cyan"), QT_TRANSLATE_NOOP("Command", "Cyan"), {}, "canvas", "same"},
         {"node.color.blue", QT_TRANSLATE_NOOP("Command", "Color: blue"), QT_TRANSLATE_NOOP("Command", "Blue"), {}, "canvas", "same"},
         {"node.color.magenta", QT_TRANSLATE_NOOP("Command", "Color: magenta"), QT_TRANSLATE_NOOP("Command", "Magenta"), {}, "canvas", "same"},
+        {"node.color.custom", QT_TRANSLATE_NOOP("Command", "Color: pick any color"), QT_TRANSLATE_NOOP("Command", "Custom…"), {}, "canvas", "added"},
         // Align and distribute (#58): no default keys; the handlers are in canvas_commands.cpp.
         {"node.align-left", QT_TRANSLATE_NOOP("Command", "Align the selected nodes to the left edge"), QT_TRANSLATE_NOOP("Command", "Left"), {}, "canvas", "same"},
         {"node.align-right", QT_TRANSLATE_NOOP("Command", "Align the selected nodes to the right edge"), QT_TRANSLATE_NOOP("Command", "Right"), {}, "canvas", "same"},
@@ -161,6 +162,10 @@ void bindMenuCommands(CommandRegistry &registry, CanvasModel &canvas, std::funct
             applyLayoutColor(*model, role, registry.target().value("frame").toString());
         });
 
+    registry.setHandler("node.color.custom", [model, &registry] {
+        emit model->colorPickRequested(registry.target().value("frame").toString());
+    });
+
     const auto selected = [model] { return !model->selectedIds().isEmpty(); };
     const auto hasNodes = [model] { return model->nodes()->rowCount() > 0; };
     registry.setEnabledWhen("edit.undo", [model] { return model->canUndo(); });
@@ -249,7 +254,7 @@ void bindMenuCommands(CommandRegistry &registry, CanvasModel &canvas, std::funct
         const QStringList ids = model->selectedIds();
         return std::any_of(ids.begin(), ids.end(), [model](const QString &id) { return model->isGroup(id); });
     });
-    for (const QString &role : menus::colorRoles())
+    for (const QString &role : menus::colorRoles() + QStringList{QStringLiteral("custom")})
         registry.setEnabledWhen(QStringLiteral("node.color.") + role, [model, &registry] {
             return !model->selectedIds().isEmpty() || !registry.target().value("frame").toString().isEmpty();
         });

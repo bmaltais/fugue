@@ -1,5 +1,7 @@
 #include "look.h"
 
+#include "engine/layout_color.h"
+
 #include <QBuffer>
 #include <QFile>
 #include <QFontDatabase>
@@ -565,7 +567,10 @@ QVariantMap CanvasLook::role(const QString &name) const {
     if (const auto it = m_roles.constFind(name); it != m_roles.constEnd())
         return *it;
     QColor color;
-    if (name == QLatin1String("accent"))
+    // A hex layout color (#52): a hue, derived below as any role is, so it follows the theme.
+    if (const QString hex = fugue::normalizeHex(name); name.startsWith(QLatin1Char('#')) && !hex.isEmpty())
+        color = QColor(hex);
+    else if (name == QLatin1String("accent"))
         color = m_accent;
     else if (name == QLatin1String("text"))
         color = m_text;

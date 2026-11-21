@@ -119,6 +119,19 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 - Why: the command is on the button, so the click costs nothing unknown; one action, then the ×.
 - Rule: Floor (the button and the × are Material's 48px). Primary (Copy is the row's one highlighted control). Gaps (8px inside the row, as the workflow banner). Posture: transient; it asks nothing.
 
+## Components
+
+Reusable controls other surfaces may call. A component names its input and output here, knows nothing of its caller, and a caller's glue lives in its own file.
+
+### Color picker (#52)
+
+- Files: `src/canvas/ColorPickerPane.qml` (the picker), `src/canvas/ColorPickerPopup.qml` (the pane on a popup), `src/menu/color_history.h` (`App.colorHistory`: the recent list and the color math), `src/engine/layout_color.h` (the same in plain C++: `normalizeHex`, `hsvFromHex`, `hexFromHsv`, `RecentColors`). Canvas glue: `src/canvas/LayoutColorPicker.qml` and `src/menu/layout_colors.h` (node and Frame coloring, the first caller).
+- Input: `setColor(c)` starts it on a color ("#rrggbb", "#rgb", or without the "#"; a bad value is ignored). `remember` (true) and `showRecent` (true).
+- Output: `color` (read, the color being chosen now, follows every drag and key), and `picked(color)` on a confirm: Apply, Enter in the hex field, or a click on a recent color. A confirm puts the color first in `App.colorHistory.recent` when `remember` is true. The caller decides what picking does.
+- Popup: `ColorPickerPopup.openWith(color)`, `picked(color)`; Escape or a press outside closes it with no `picked`; it has no open or close fade.
+- Keys: the wheel, the brightness bar, the hex field, Apply and the recent colors take Tab focus. On the wheel, Left and Right turn the hue and Up and Down set saturation, 5 steps (Shift: 1); on the bar, Up and Down.
+- A new caller: a `ColorPickerPane` or `ColorPickerPopup`, `setColor`/`openWith` with its current color, `onPicked`. Needs `App.colorHistory` (null in a window made without it: the picker then picks nothing).
+
 ## Unread
 
 Settings, the shortcuts overlay, the quit question, About, every menu except Run, the context menus, the workflow dialogs and their questions (those questions are a row of buttons), the group dialogs, image save, the widget pickers (but their search field), the magnifier.
@@ -130,3 +143,11 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - New: two submenus, no default keys. In the node's menu a command shows only when it applies (Align from two selected nodes, Distribute from three), and a submenu with nothing left is left out; in the bar they stay and dim, as the other Node items do.
 - Why: ComfyUI offers both as menu items, so recognition not recall; six leaf commands under two headings keep the Node menu from growing by six rows (Hick).
 - Rule: Learned place (the existing Node and node-menu items keep their order; the new rows sit after the toggles, before the image items). Gaps (the two rows join the toggles' chunk; no gap added). Floor (menu rows are the menus' existing height). Destructive: not applicable, and undo reverses each.
+
+### 2026-11-21 color picker for nodes and Frames (#52)
+
+- Control: the last row of the Colors menu (Edit > Colors, the node and Frame context menus and the selection toolbar's color button), `node.color.custom`, "Custom…", after a separator (`src/menu/menus.cpp`); and the popup it opens, `ColorPickerPopup` through `LayoutColorPicker.qml`: the disk 40u (160px), the brightness bar 7u (28px) wide beside it, a row of the color's preview (7u), the hex field (7u tall) and Apply (7u tall, highlighted), and under it the recent colors, 7u swatches 1u apart, six to a row, up to 12.
+- Old: nine theme roles and "No color"; no other color could be given.
+- New: the row above, enabled with a selection or on a Frame. The popup opens centered with the hex field focused, started on the target's hex color, else the last one used, else the accent. Nothing changes until Apply, Enter, or a click on a recent color; that is one undo step. Escape or a press outside leaves it as it was.
+- Why: a person who wants a color the roles lack picks it by sight (the disk, as Blender's picker) or by value (the hex field); the colors used lately are recognized, not recalled (Hick), and one click re-applies one. The roles stay the quick path in the same menu, the order of the menu above is unchanged.
+- Rule: Learned place (the nine roles keep their order; the new row is last, after a separator, the chunk gap). Floor (every target is at least 24px: swatches, field, button and bar 28px; the disk 160px; the wheel's handle is a mark, not a target). Primary (Apply is the popup's one highlighted control). Gaps (1u inside a row, 2u between the disk and the bar, 3u between the three chunks, more than twice 1u). Posture: a transient popup, two decisions at most (pick a color, apply it). Destructive: not applicable, undo reverses it.
