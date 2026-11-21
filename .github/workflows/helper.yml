@@ -28,7 +28,7 @@ jobs:
       - name: Install git for the checkout
         run: pacman -Syu --noconfirm --needed git
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check the PKGBUILD pins the helper's sources at the same commits
         run: |
@@ -41,7 +41,7 @@ jobs:
         run: pacman -S --noconfirm --needed base-devel ccache cmake shaderc spirv-headers vulkan-headers vulkan-icd-loader
 
       - name: Restore the compiler cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .ccache
           key: helper-vulkan-${{ hashFiles('helper/**') }}

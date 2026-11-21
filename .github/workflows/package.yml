@@ -35,7 +35,7 @@ jobs:
       - name: Install git for the checkout
         run: pacman -Syu --noconfirm --needed git
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # tags, for the package version
 
@@ -47,7 +47,7 @@ jobs:
           pacman -S --noconfirm --needed base-devel ccache sudo "${deps[@]%%[<>=]*}"
 
       - name: Restore the compiler cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .ccache
           key: package-ccache-${{ github.sha }}
@@ -78,7 +78,7 @@ jobs:
         if: always()
         run: su builder -c "CCACHE_DIR='$CCACHE_DIR' ccache -s" || true
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: package
           path: dist/*
@@ -93,7 +93,7 @@ jobs:
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 1500M
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install the build tools and the CUDA 13 toolkit (compiler and libraries only)
         run: |
@@ -105,7 +105,7 @@ jobs:
           sudo ln -sfn /usr/local/cuda-13.0 /usr/local/cuda
 
       - name: Restore the compiler cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .ccache
           key: helper-aarch64-ccache-${{ github.sha }}
@@ -118,7 +118,7 @@ jobs:
         if: always()
         run: ccache -s || true
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: helper-aarch64
           path: dist/*
@@ -131,7 +131,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: '*'
           path: parts

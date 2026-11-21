@@ -25,7 +25,7 @@ jobs:
       - name: Install git for the checkout
         run: pacman -Syu --noconfirm --needed git
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true # the bundled templates: bmaltais/fugue-workflows, a public repo
 
@@ -43,7 +43,7 @@ jobs:
       - name: Restore the compiler cache
         # A new entry is saved on every run (the key has the commit); the newest older one is the start.
         # It is restored before the chown below, so the build user owns it.
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .ccache
           key: test-ccache-${{ github.sha }}
