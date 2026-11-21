@@ -12,6 +12,8 @@ void followNodeTypeReloads(RegistryReloader &reloader, const AppObjects &objects
             objects.runs->refreshNodeTypes();
         if (objects.settings)
             objects.settings->packs()->refresh();
+        if (objects.nodeLibrary)
+            objects.nodeLibrary->refresh();
     });
     // Queued: the save's own call (a menu, a button) is over before every row is made again.
     if (objects.canvasModel)

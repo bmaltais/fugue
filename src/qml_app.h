@@ -14,12 +14,15 @@
 #include "menu/color_history.h"
 #include "menu/image_actions.h"
 #include "menu/layout_colors.h"
+#include "panels/side_panels.h"
 #include "run/canvas_runs.h"
 #include "run/run_bar.h"
 #include "run/run_queue.h"
+#include "search/node_library.h"
 #include "settings/settings_model.h"
 #include "theme.h"
 #include "translator.h"
+#include "workflow/recent_files.h"
 #include "workflow/workflows.h"
 
 class QQmlEngine;
@@ -39,6 +42,9 @@ struct AppObjects {
     LayoutColors *layoutColors = nullptr; // optional
     RunBar *runBar = nullptr;             // optional: the run toolbar and queue panel (#60)
     RunQueue *runQueue = nullptr;         // optional, with runBar
+    SidePanels *sidePanels = nullptr;     // optional: the side panels (#56)
+    NodeLibrary *nodeLibrary = nullptr;   // optional, with sidePanels
+    RecentFiles *recentFiles = nullptr;   // optional, with sidePanels
 };
 
 class QmlApp : public QObject {
@@ -58,6 +64,9 @@ class QmlApp : public QObject {
     Q_PROPERTY(fugue::LayoutColors *layoutColors READ layoutColors CONSTANT)
     Q_PROPERTY(fugue::RunBar *runBar READ runBar CONSTANT)
     Q_PROPERTY(fugue::RunQueue *runQueue READ runQueue CONSTANT)
+    Q_PROPERTY(fugue::SidePanels *sidePanels READ sidePanels CONSTANT)
+    Q_PROPERTY(fugue::NodeLibrary *nodeLibrary READ nodeLibrary CONSTANT)
+    Q_PROPERTY(fugue::RecentFiles *recentFiles READ recentFiles CONSTANT)
 
 public:
     explicit QmlApp(const AppObjects &objects, QObject *parent = nullptr) : QObject(parent), m_objects(objects) {}
@@ -74,6 +83,9 @@ public:
     LayoutColors *layoutColors() const { return m_objects.layoutColors; }
     RunBar *runBar() const { return m_objects.runBar; }
     RunQueue *runQueue() const { return m_objects.runQueue; }
+    SidePanels *sidePanels() const { return m_objects.sidePanels; }
+    NodeLibrary *nodeLibrary() const { return m_objects.nodeLibrary; }
+    RecentFiles *recentFiles() const { return m_objects.recentFiles; }
 
 private:
     AppObjects m_objects;

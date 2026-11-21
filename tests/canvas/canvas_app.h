@@ -23,6 +23,9 @@
 #include "engine/registry.h"
 #include "menu/menu_commands.h"
 #include "node_type_reloads.h"
+#include "panels/side_panels.h"
+#include "search/node_library.h"
+#include "workflow/recent_files.h"
 #include "nodes/builtin.h"
 #include "qml_app.h"
 #include "search/node_search.h"
@@ -101,6 +104,10 @@ struct App {
     fugue::RunBar *runBar = nullptr;     // the run toolbar's (test_canvas_run), likewise
     fugue::RunQueue *runQueue = nullptr;
     fugue::ImageActions *imageActions = nullptr; // likewise (test_canvas_image_actions)
+    // The side panels (#56), with their state in the test's own folder.
+    fugue::SidePanels sidePanels{dir.path() + "/side-panels.json"};
+    fugue::NodeLibrary nodeLibrary{&registry};
+    fugue::RecentFiles recentFiles{dir.path() + "/recent-files.json"};
     // The color picker's recent colors (#52), in the test's own folder, and layout coloring.
     fugue::ColorHistory colorHistory{dir.path() + "/recent-colors.json"};
     fugue::LayoutColors layoutColors{model};
@@ -133,6 +140,9 @@ struct App {
         model.search()->registerCommands(commands);
         registerCanvasCommands(commands, model);
         fugue::bindMenuCommands(commands, model, [this](const QUrl &url) { openedUrls << url; });
+        nodeLibrary.refresh(); // the registry is filled now
+        sidePanels.registerCommands(commands);
+        recentFiles.follow(&workflows);
         settings.attach(&translator, &model, &registry, &theme); // as main.cpp does
         settings.registerCommands(commands, [this](const QUrl &url) { openedUrls << url; });
         // Opened as a file is: one tab, nothing unsaved.
@@ -148,7 +158,7 @@ struct App {
     bool open() {
         // As main() does: the English catalog gives counted strings their plural forms.
         QCoreApplication::installTranslator(&translator);
-        const fugue::AppObjects objects{&translator, &theme, &commands, &model, &workflows, &settings, runs, imageActions, &colorHistory, &layoutColors, runBar, runQueue};
+        const fugue::AppObjects objects{&translator, &theme, &commands, &model, &workflows, &settings, runs, imageActions, &colorHistory, &layoutColors, runBar, runQueue, &sidePanels, &nodeLibrary, &recentFiles};
         fugue::followNodeTypeReloads(*reloader, objects);
         fugue::exposeToQml(engine, objects);
         engine.load(QUrl("qrc:/Main.qml"));
