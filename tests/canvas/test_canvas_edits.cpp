@@ -8,6 +8,7 @@
 #include <QtTest>
 #include <QUndoStack>
 
+#include "canvas/align.h"
 #include "canvas/canvas_model.h"
 #include "canvas/widget_edit.h"
 #include "engine/document.h"
@@ -160,6 +161,18 @@ private slots:
         QVERIFY(canvas.alignSelection("bottom"));
         QCOMPARE(canvas.position("gen"), QPointF(300, 80));
         QVERIFY(!canvas.alignSelection("sideways"));
+    }
+
+    // Distribute never leaves nodes overlapping: tall nodes in a short span get a minimum gap and the run
+    // grows past the span (found in the real window, #58).
+    void distributeKeepsAMinimumGapWhenTheNodesDoNotFitTheSpan() {
+        const QList<fugue::align::Box> boxes{{"a", QRectF(0, 0, 100, 200), false},
+                                             {"b", QRectF(0, 50, 100, 200), false},
+                                             {"c", QRectF(0, 100, 100, 200), false}};
+        const QHash<QString, QPointF> moves = fugue::align::distribute(boxes, fugue::align::Axis::Vertical);
+        QCOMPARE(moves.value("b").y(), 224.0); // a ends at 200, plus the gap
+        QCOMPARE(moves.value("c").y(), 448.0);
+        QVERIFY(!moves.contains("a"));
     }
 
     // #55: a rename sets the title the canvas shows (layout.nodes.<id>.title), one undo step;
