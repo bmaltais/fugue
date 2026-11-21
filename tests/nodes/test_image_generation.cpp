@@ -63,6 +63,56 @@ QSize sizeOf(const QString &path) {
     return {image.width(), image.height()};
 }
 
+// A picture whose every pixel differs (a gradient with a checker), so a pixel taken from the wrong
+// place shows. 8-bit RGB.
+QString writeGradient(const QString &path, int width, int height) {
+    initVips();
+    const vips::VImage x = vips::VImage::xyz(width, height).extract_band(0);
+    const vips::VImage y = vips::VImage::xyz(width, height).extract_band(1);
+    const vips::VImage red = (x * 255.0 / width).cast(VIPS_FORMAT_UCHAR);
+    const vips::VImage green = (y * 255.0 / height).cast(VIPS_FORMAT_UCHAR);
+    const vips::VImage blue = (((x + y) % 2.0) * 90.0 + 20.0).cast(VIPS_FORMAT_UCHAR);
+    vips::VImage::bandjoin(std::vector<vips::VImage>{red, green, blue}).write_to_file(path.toUtf8().constData());
+    return path;
+}
+
+// An 8-bit gray mask of the given size: white in the rectangle, black elsewhere.
+QString writeMask(const QString &path, int width, int height, const QRect &white) {
+    initVips();
+    if (white.isEmpty()) {
+        vips::VImage::black(width, height).cast(VIPS_FORMAT_UCHAR).write_to_file(path.toUtf8().constData());
+        return path;
+    }
+    const vips::VImage x = vips::VImage::xyz(width, height).extract_band(0);
+    const vips::VImage y = vips::VImage::xyz(width, height).extract_band(1);
+    const vips::VImage inside = (x >= white.left()) & (x <= white.right()) & (y >= white.top()) & (y <= white.bottom());
+    inside.copy(vips::VImage::option()->set("interpretation", VIPS_INTERPRETATION_B_W))
+        .write_to_file(path.toUtf8().constData());
+    return path;
+}
+
+// What a provider that takes a mask offers for a model (8.1: the `inputs` property).
+Selection maskSelection() {
+    Selection chosen = selection();
+    chosen.model.properties = QJsonObject{{"inputs", QJsonArray{"mask"}}};
+    return chosen;
+}
+
+// The 8-bit values of an image file or handle, band-interleaved.
+QByteArray eightBit(const vips::VImage &image) {
+    vips::VImage values = image;
+    if (values.format() == VIPS_FORMAT_USHORT)
+        values = (values.cast(VIPS_FORMAT_FLOAT) / 257.0).cast(VIPS_FORMAT_FLOAT);
+    else if (values.format() == VIPS_FORMAT_FLOAT)
+        values = values * 255.0;
+    values = (values + 0.5).floor().cast(VIPS_FORMAT_UCHAR);
+    size_t size = 0;
+    void *memory = values.write_to_memory(&size);
+    const QByteArray bytes(static_cast<const char *>(memory), qsizetype(size));
+    g_free(memory);
+    return bytes;
+}
+
 class Bench {
 public:
     Bench() : hashes(dir.filePath("hashes.json")) {
@@ -532,6 +582,235 @@ private slots:
         const Result<Values> out = bench.kernel(kGenerate)->outputs(bench.context(kGenerate, {}), selection(), JobResult{});
         QVERIFY(!out.ok());
         QCOMPARE(out.error().code, QStringLiteral("node_failed"));
+    }
+
+    // --- Generate Image: a mask (14.4) ---
+
+    // Asked with a mask, "any ready model" prefers one that takes it; without, nothing changes.
+    void aMaskMakesTheRequirementPreferAModelThatTakesOne() {
+        Bench bench;
+        const Value start = bench.image(writePng(bench.file("start.png"), 1024, 768));
+        const Value mask = bench.image(writeMask(bench.file("mask.png"), 1024, 768, QRect(100, 100, 50, 50)));
+        const Requirement with = bench.kernel(kGenerate)->requirement(
+            bench.type(kGenerate), {{"prompt", "a cat"}, {"image", start}, {"mask", mask}});
+        QCOMPARE(with.preferred, (QJsonObject{{"inputs", QJsonArray{"mask"}}}));
+        QVERIFY(with.properties.isEmpty()); // a preference: the node says mask_unsupported itself
+        const Requirement without =
+            bench.kernel(kGenerate)->requirement(bench.type(kGenerate), {{"prompt", "a cat"}, {"image", start}});
+        QVERIFY(without.preferred.isEmpty());
+        QVERIFY(bench.kernel(kEdit)->requirement(bench.type(kEdit), {}).preferred.isEmpty());
+    }
+
+    // The mask goes as an 8-bit gray PNG of the size the start image goes at, cut as the image is:
+    // 1000x600 goes at 1344x768, so the mask does too.
+    void theMaskIsSentAtTheStartImagesSize() {
+        Bench bench;
+        const Value start = bench.image(writeGradient(bench.file("odd.png"), 1000, 600));
+        const Value mask = bench.image(writeMask(bench.file("mask.png"), 1000, 600, QRect(200, 100, 300, 200)));
+        const Result<JobRequest> sent = bench.request(
+            kGenerate, {{"prompt", "a cat"}, {"image", start}, {"mask", mask}}, maskSelection());
+        QVERIFY2(sent.ok(), qPrintable(sent.ok() ? QString() : sent.error().message));
+        const QString image = sent->inputs.value("image").toObject().value("path").toString();
+        const QString path = sent->inputs.value("mask").toObject().value("path").toString();
+        QVERIFY(!path.isEmpty());
+        QCOMPARE(sizeOf(path), QSize(1344, 768));
+        QCOMPARE(sizeOf(path), sizeOf(image));
+        const vips::VImage sentMask = vips::VImage::new_from_file(path.toUtf8().constData());
+        QCOMPARE(sentMask.bands(), 1);
+        QCOMPARE(int(sentMask.format()), int(VIPS_FORMAT_UCHAR));
+        // The painted box lands where the picture's pixels under it do: 1344/1000 scale, the middle kept.
+        const auto at = [&sentMask](int x, int y) { return int(sentMask.getpoint(x, y).at(0)); };
+        QVERIFY(at(int(350 * 1.344), int(200 * 1.28)) > 250);
+        QVERIFY(at(int(50 * 1.344), int(50 * 1.28)) < 5);
+        // Nothing else of the request changed for the mask.
+        QCOMPARE(sent->params.value("width").toInt(), 1344);
+        QCOMPARE(sent->params.value("height").toInt(), 768);
+    }
+
+    // A mask the size of an image the model works in as it is goes as it is.
+    void aMaskOfTheImagesOwnSizeIsWrittenAsItIs() {
+        Bench bench;
+        const Value start = bench.image(writeGradient(bench.file("start.png"), 1024, 768));
+        const QString painted = writeMask(bench.file("mask.png"), 1024, 768, QRect(10, 20, 30, 40));
+        const Result<JobRequest> sent = bench.request(
+            kGenerate, {{"prompt", "a cat"}, {"image", start}, {"mask", bench.image(painted)}}, maskSelection());
+        QVERIFY2(sent.ok(), qPrintable(sent.ok() ? QString() : sent.error().message));
+        const QString path = sent->inputs.value("mask").toObject().value("path").toString();
+        QCOMPARE(eightBit(vips::VImage::new_from_file(path.toUtf8().constData())),
+                 eightBit(vips::VImage::new_from_file(painted.toUtf8().constData())));
+    }
+
+    // Without a mask the request is what it was: no mask file, no new parameter.
+    void noMaskLeavesTheRequestAsItWas() {
+        Bench bench;
+        const Value start = bench.image(writeGradient(bench.file("start.png"), 1024, 768));
+        const Result<JobRequest> sent = bench.request(kGenerate, {{"prompt", "a cat"}, {"image", start}}, maskSelection());
+        QVERIFY(sent.ok());
+        QCOMPARE(QStringList(sent->inputs.keys()), (QStringList{"image"}));
+        QCOMPARE(QStringList(sent->params.keys()), (QStringList{"height", "prompt", "seed", "strength", "width"}));
+        QVERIFY(!QFileInfo::exists(QDir(bench.workDir()).filePath("mask.png")));
+        const Result<JobRequest> plain = bench.request(kGenerate, {{"prompt", "a cat"}, {"image", start}});
+        QCOMPARE(compact(sent->params), compact(plain->params));
+        QCOMPARE(compact(sent->inputs), compact(plain->inputs));
+    }
+
+    // A provider that does not say it takes a mask is refused before the job, naming the ones that do.
+    void aModelThatCannotTakeAMaskIsMaskUnsupported() {
+        Bench bench;
+        const Value start = bench.image(writeGradient(bench.file("start.png"), 1024, 768));
+        const Value mask = bench.image(writeMask(bench.file("mask.png"), 1024, 768, QRect(0, 0, 100, 100)));
+        Selection chosen = selection();
+        chosen.preferredOffers = {QStringLiteral("gx: FLUX.2 Klein 4B"), QStringLiteral("This machine: SDXL")};
+        const Result<JobRequest> sent =
+            bench.request(kGenerate, {{"prompt", "a cat"}, {"image", start}, {"mask", mask}}, chosen);
+        QVERIFY(!sent.ok());
+        QCOMPARE(sent.error().code, QStringLiteral("mask_unsupported"));
+        QCOMPARE(sent.error().input, QStringLiteral("mask"));
+        QCOMPARE(sent.error().valid, (QJsonArray{"gx: FLUX.2 Klein 4B", "This machine: SDXL"}));
+        QVERIFY(sent.error().hint.contains(QStringLiteral("gx: FLUX.2 Klein 4B")));
+
+        // Nobody can: the hint says what to do instead.
+        const Result<JobRequest> nobody =
+            bench.request(kGenerate, {{"prompt", "a cat"}, {"image", start}, {"mask", mask}}, selection());
+        QCOMPARE(nobody.error().code, QStringLiteral("mask_unsupported"));
+        QVERIFY(nobody.error().hint.contains(QStringLiteral("mask_image")));
+        QVERIFY(nobody.error().valid.isEmpty());
+    }
+
+    void aMaskWithNothingPaintedIsMaskEmpty() {
+        Bench bench;
+        const Value start = bench.image(writeGradient(bench.file("start.png"), 1024, 768));
+        const Value mask = bench.image(writeMask(bench.file("mask.png"), 1024, 768, QRect()));
+        const Result<JobRequest> sent =
+            bench.request(kGenerate, {{"prompt", "a cat"}, {"image", start}, {"mask", mask}}, maskSelection());
+        QVERIFY(!sent.ok());
+        QCOMPARE(sent.error().code, QStringLiteral("mask_empty"));
+        QCOMPARE(sent.error().input, QStringLiteral("mask"));
+    }
+
+    void aMaskWithoutAStartImageIsAnInputError() {
+        Bench bench;
+        const Value mask = bench.image(writeMask(bench.file("mask.png"), 512, 512, QRect(0, 0, 10, 10)));
+        const Result<JobRequest> sent = bench.request(kGenerate, {{"prompt", "a cat"}, {"mask", mask}}, maskSelection());
+        QVERIFY(!sent.ok());
+        QCOMPARE(sent.error().code, QStringLiteral("missing_input"));
+        QCOMPARE(sent.error().input, QStringLiteral("image"));
+    }
+
+    void aMaskOfAnotherSizeThanTheStartImageFails() {
+        Bench bench;
+        const Value start = bench.image(writeGradient(bench.file("start.png"), 1024, 768));
+        const Value mask = bench.image(writeMask(bench.file("mask.png"), 512, 384, QRect(0, 0, 100, 100)));
+        const Result<JobRequest> sent =
+            bench.request(kGenerate, {{"prompt", "a cat"}, {"image", start}, {"mask", mask}}, maskSelection());
+        QVERIFY(!sent.ok());
+        QCOMPARE(sent.error().code, QStringLiteral("node_failed"));
+        QCOMPARE(sent.error().input, QStringLiteral("mask"));
+    }
+
+    // What the model drew is put back through the mask: outside it the result is the start image,
+    // pixel for pixel, whatever the model did there; inside it is the model's.
+    void outsideTheMaskTheResultIsTheStartImage() {
+        Bench bench;
+        const QString startFile = writeGradient(bench.file("start.png"), 1024, 768);
+        const QRect white(300, 200, 400, 300);
+        const Value start = bench.image(startFile);
+        const Value mask = bench.image(writeMask(bench.file("mask.png"), 1024, 768, white));
+        const Values inputs{{"prompt", "a cat"}, {"image", start}, {"mask", mask}};
+        const Result<JobRequest> sent = bench.request(kGenerate, inputs, maskSelection());
+        QVERIFY2(sent.ok(), qPrintable(sent.ok() ? QString() : sent.error().message));
+
+        // The "model": a flat orange picture of the size asked for.
+        const QString made = QDir(bench.workDir()).filePath("image.png");
+        initVips();
+        vips::VImage::black(1024, 768, vips::VImage::option()->set("bands", 3))
+            .new_from_image(std::vector<double>{240, 120, 10})
+            .cast(VIPS_FORMAT_UCHAR)
+            .write_to_file(made.toUtf8().constData());
+        const JobResult job{QJsonObject{{"image", QJsonObject{{"path", made}, {"format", "png"}}}}, QJsonObject{}};
+        const Result<Values> out = bench.kernel(kGenerate)->outputs(bench.context(kGenerate, inputs), maskSelection(), job);
+        QVERIFY2(out.ok(), qPrintable(out.ok() ? QString() : out.error().message));
+        QVERIFY(out.warnings().isEmpty());
+
+        // As the store saves it (16 bits for a working image), read back at 8.
+        const Result<MediaHandle> saved =
+            out->value("image").media().saved(bench.file("store"), QStringLiteral("out"), bench.hashes);
+        QVERIFY2(saved.ok(), qPrintable(saved.ok() ? QString() : saved.error().message));
+        QCOMPARE(saved->width(), 1024);
+        QCOMPARE(saved->height(), 768);
+        const vips::VImage result = vips::VImage::new_from_file(saved->path().toUtf8().constData());
+        const vips::VImage original = vips::VImage::new_from_file(startFile.toUtf8().constData());
+        const QByteArray got = eightBit(result);
+        const QByteArray want = eightBit(original);
+        QCOMPARE(got.size(), want.size());
+        const QByteArray flat = eightBit(vips::VImage::new_from_file(made.toUtf8().constData()));
+        int outside = 0;
+        int inside = 0;
+        for (int y = 0; y < 768; ++y)
+            for (int x = 0; x < 1024; ++x) {
+                const qsizetype at = (qsizetype(y) * 1024 + x) * 3;
+                const bool masked = white.contains(x, y);
+                const QByteArray pixel = got.mid(at, 3);
+                if (masked ? pixel != flat.mid(at, 3) : pixel != want.mid(at, 3))
+                    QFAIL(qPrintable(QStringLiteral("pixel %1,%2 is wrong").arg(x).arg(y)));
+                (masked ? inside : outside)++;
+            }
+        QVERIFY(outside > 0 && inside > 0);
+    }
+
+    // The start image the provider's result goes back over is the one that went to the model (cut
+    // from the middle, in steps of 64), not the file as it was.
+    void theStartImageIsPutBackAsItWentToTheModel() {
+        Bench bench;
+        const QString startFile = writeGradient(bench.file("odd.png"), 1000, 600);
+        const Value start = bench.image(startFile);
+        const Value mask = bench.image(writeMask(bench.file("mask.png"), 1000, 600, QRect(0, 0, 40, 40)));
+        const Values inputs{{"prompt", "a cat"}, {"image", start}, {"mask", mask}};
+        const Result<JobRequest> sent = bench.request(kGenerate, inputs, maskSelection());
+        QVERIFY(sent.ok());
+        const QString went = sent->inputs.value("image").toObject().value("path").toString();
+        const QString made = QDir(bench.workDir()).filePath("image.png");
+        writePng(made, 1344, 768);
+        const JobResult job{QJsonObject{{"image", QJsonObject{{"path", made}, {"format", "png"}}}}, QJsonObject{}};
+        const Result<Values> out = bench.kernel(kGenerate)->outputs(bench.context(kGenerate, inputs), maskSelection(), job);
+        QVERIFY(out.ok());
+        const Result<MediaHandle> saved =
+            out->value("image").media().saved(bench.file("store"), QStringLiteral("out"), bench.hashes);
+        QVERIFY(saved.ok());
+        // The bottom right corner is far from the mask: it is the picture as sent.
+        const vips::VImage result = vips::VImage::new_from_file(saved->path().toUtf8().constData());
+        const vips::VImage sentImage = vips::VImage::new_from_file(went.toUtf8().constData());
+        const QByteArray got = eightBit(result.extract_area(600, 300, 700, 400));
+        const QByteArray want = eightBit(sentImage.extract_area(600, 300, 700, 400));
+        QCOMPARE(got, want);
+    }
+
+    // A mask over everything is plain image to image, said as a warning; the result is the model's.
+    void aFullMaskWarns() {
+        Bench bench;
+        const Value start = bench.image(writeGradient(bench.file("start.png"), 1024, 768));
+        const Value mask = bench.image(writeMask(bench.file("mask.png"), 1024, 768, QRect(0, 0, 1024, 768)));
+        const Values inputs{{"prompt", "a cat"}, {"image", start}, {"mask", mask}};
+        QVERIFY(bench.request(kGenerate, inputs, maskSelection()).ok());
+        const QString made = writePng(QDir(bench.workDir()).filePath("image.png"), 1024, 768);
+        const JobResult job{QJsonObject{{"image", QJsonObject{{"path", made}, {"format", "png"}}}}, QJsonObject{}};
+        const Result<Values> out = bench.kernel(kGenerate)->outputs(bench.context(kGenerate, inputs), maskSelection(), job);
+        QVERIFY(out.ok());
+        QCOMPARE(out.warnings().size(), qsizetype(1));
+        QCOMPARE(out.warnings().first().code, QStringLiteral("mask_full"));
+        QCOMPARE(out.warnings().first().severity, Error::Severity::Warning);
+    }
+
+    // Without a mask the result is the provider's file itself (no composite, no copy).
+    void withoutAMaskTheResultIsTheProvidersFile() {
+        Bench bench;
+        const Value start = bench.image(writeGradient(bench.file("start.png"), 1024, 768));
+        const Values inputs{{"prompt", "a cat"}, {"image", start}};
+        const QString made = writePng(QDir(bench.workDir()).filePath("image.png"), 1024, 768);
+        const JobResult job{QJsonObject{{"image", QJsonObject{{"path", made}, {"format", "png"}}}}, QJsonObject{}};
+        const Result<Values> out = bench.kernel(kGenerate)->outputs(bench.context(kGenerate, inputs), selection(), job);
+        QVERIFY(out.ok());
+        QCOMPARE(out->value("image").media().path(), made);
     }
 
     // --- end to end: the shipped binary, a fake omarchy server (no live model here) ---

@@ -631,6 +631,87 @@ private slots:
         QVERIFY(!body.contains("init_image"));
     }
 
+    // --- a mask (14.4) ---
+
+    // The server says it takes one in its features (api.md "features_by_mode"): the model has the
+    // `inputs` property with "mask", and a mask goes out as mask_image, one channel, as the file is.
+    void aServerThatListsMaskImageTakesAMask() {
+        Fixture fixture;
+        fixture.server.on("GET", "/sdcpp/v1/capabilities", [](const HttpRequest &) {
+            QJsonObject caps = capabilities();
+            caps.insert("features_by_mode", QJsonObject{{"img_gen", QJsonObject{{"init_image", true}, {"mask_image", true}}}});
+            return HttpResponse{200, json(caps)};
+        });
+        fixture.runKlein();
+        fixture.acceptJobs("job_1");
+        fixture.scriptJob("job_1", {});
+        auto provider = fixture.provider();
+        const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
+        QVERIFY(described.ok());
+        const OfferedModel *klein = findModel(described.value(), "image.generate", kKlein);
+        QVERIFY(klein);
+        QCOMPARE(klein->properties.value("inputs").toArray(), (QJsonArray{"mask"}));
+
+        const QString start = fixture.writeInput("start.png", "START");
+        const QString mask = fixture.writeInput("mask.png", "MASK");
+        auto generate = fixture.request("image.generate", {{"prompt", "redraw"}, {"strength", 0.6}},
+                                        {{"image", QJsonObject{{"path", start}}}, {"mask", QJsonObject{{"path", mask}}}});
+        QVERIFY(await<QString>([&](auto reply) { provider->submit(generate, reply); }).ok());
+        const QJsonObject body = requestBody(fixture.server);
+        QCOMPARE(QByteArray::fromBase64(body.value("init_image").toString().toLatin1()), QByteArray("START"));
+        QCOMPARE(QByteArray::fromBase64(body.value("mask_image").toString().toLatin1()), QByteArray("MASK"));
+    }
+
+    // Without the feature (or with it off) the model offers no mask and a job with one is refused
+    // before anything is posted: never a request the server would answer with a full redraw.
+    void aServerWithoutMaskImageRefusesAMask() {
+        for (const bool listed : {false, true}) {
+            Fixture fixture;
+            if (listed) { // present and false, and the deprecated mirror alone
+                fixture.server.on("GET", "/sdcpp/v1/capabilities", [](const HttpRequest &) {
+                    QJsonObject caps = capabilities();
+                    caps.insert("features_by_mode", QJsonObject{{"img_gen", QJsonObject{{"init_image", true}, {"mask_image", false}}}});
+                    caps.insert("features", QJsonObject{{"mask_image", true}}); // the mirror of another mode
+                    return HttpResponse{200, json(caps)};
+                });
+            }
+            fixture.runKlein();
+            fixture.acceptJobs("job_1");
+            auto provider = fixture.provider();
+            const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
+            QVERIFY(described.ok());
+            QVERIFY(!findModel(described.value(), "image.generate", kKlein)->properties.contains("inputs"));
+            const QString start = fixture.writeInput("start.png", "START");
+            const QString mask = fixture.writeInput("mask.png", "MASK");
+            auto generate = fixture.request("image.generate", {{"prompt", "redraw"}},
+                                            {{"image", QJsonObject{{"path", start}}}, {"mask", QJsonObject{{"path", mask}}}});
+            const auto submitted = await<QString>([&](auto reply) { provider->submit(generate, reply); });
+            QVERIFY(!submitted.ok());
+            QCOMPARE(submitted.errors().first().code, QStringLiteral("mask_unsupported"));
+            QVERIFY(fixture.server.requestsTo("POST", "/sdcpp/v1/img_gen").isEmpty());
+
+            // The same job without a mask goes, and says nothing of one.
+            auto plain = fixture.request("image.generate", {{"prompt", "redraw"}}, {{"image", QJsonObject{{"path", start}}}});
+            QVERIFY(await<QString>([&](auto reply) { provider->submit(plain, reply); }).ok());
+            QVERIFY(!requestBody(fixture.server).contains("mask_image"));
+        }
+    }
+
+    // The deprecated top-level `features` is read when the mode-aware one is not there.
+    void theDeprecatedFeaturesMirrorIsReadWhenThereIsNoModeAwareOne() {
+        Fixture fixture;
+        fixture.server.on("GET", "/sdcpp/v1/capabilities", [](const HttpRequest &) {
+            QJsonObject caps = capabilities();
+            caps.insert("features", QJsonObject{{"init_image", true}, {"mask_image", true}});
+            return HttpResponse{200, json(caps)};
+        });
+        fixture.runKlein();
+        auto provider = fixture.provider();
+        const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
+        QCOMPARE(findModel(described.value(), "image.generate", kKlein)->properties.value("inputs").toArray(),
+                 (QJsonArray{"mask"}));
+    }
+
     void aMissingInputFileIsFileNotFound() {
         Fixture fixture;
         fixture.runKlein();

@@ -18,6 +18,12 @@ namespace fugue::nodes {
 // the path. The caller has run initVips() and catches vips::VError.
 Result<QString> coverToFile(const MediaHandle &image, QSize size, const QString &path);
 
+// `mask`'s first channel scaled to cover `size` the way coverToFile scales a picture (the same
+// geometry, so a mask of the picture's own size lines up with the fitted picture), cut from the
+// middle and written as an 8-bit gray PNG to `path`; the path. A mask already of `size` is written
+// as it is. The caller has run initVips() and catches vips::VError.
+Result<QString> coverMaskToFile(const MediaHandle &mask, QSize size, const QString &path);
+
 // The `width` and `height` in `params` against the model's `min_`/`max_` limits (8.1): one error
 // per side outside them, blamed on the input `blame(side)` names (empty: none). `model` is the name
 // the message gives.

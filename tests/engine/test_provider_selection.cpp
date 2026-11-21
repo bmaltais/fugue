@@ -119,6 +119,41 @@ private slots:
         QVERIFY(!only->sharesFilesystem);
     }
 
+    // A node's preference (a mask, 14.4): any ready model that has it wins over an earlier one that
+    // has not, nothing having it fails nothing, and a named model is still the named model; the
+    // models that have it are in the selection for the node's message.
+    void aPreferredPropertyChoosesAmongReadyModelsAndNeverFails() {
+        const QJsonObject masks{{"inputs", QJsonArray{"mask"}}};
+        const QList<Candidate> candidates{
+            candidate("This machine", {generate({model("plain")})}),
+            candidate("Studio", {generate({model("stopped", ModelStatus::Unavailable, masks), model("fills", ModelStatus::Ready, masks)})}),
+        };
+        Requirement requirement = wants("image.generate");
+        QCOMPARE(selectProvider(candidates, requirement)->model.handle, handle("plain"));
+        QVERIFY(selectProvider(candidates, requirement)->preferredOffers.isEmpty());
+
+        requirement.preferred = masks;
+        const auto chosen = selectProvider(candidates, requirement);
+        QVERIFY(chosen.ok());
+        QCOMPARE(chosen->instance, QStringLiteral("Studio"));
+        QCOMPARE(chosen->model.handle, handle("fills"));
+        QCOMPARE(chosen->preferredOffers, (QStringList{"Studio: fills"}));
+
+        // A model asked for by name is that one, with the others that could take the mask named.
+        requirement.model = handle("plain");
+        const auto named = selectProvider(candidates, requirement);
+        QVERIFY(named.ok());
+        QCOMPARE(named->model.handle, handle("plain"));
+        QCOMPARE(named->preferredOffers, (QStringList{"Studio: fills"}));
+
+        // Nothing has it: the first ready model, as without the preference.
+        requirement.model = {};
+        const auto none = selectProvider({candidates.first()}, requirement);
+        QVERIFY(none.ok());
+        QCOMPARE(none->model.handle, handle("plain"));
+        QVERIFY(none->preferredOffers.isEmpty());
+    }
+
     void instancesNeedAUniqueNameAndAType() {
         const QJsonArray providers{
             QJsonObject{{"name", "A"}, {"type", "omarchy"}},

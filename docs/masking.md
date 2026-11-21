@@ -75,7 +75,11 @@ These work with Fugue's helper:
   dev, Z-Image, SDXL and SD 1.5.
 
 Video models take no mask. Generate Image takes a mask only from a provider that supports one,
-and otherwise says so.
+and otherwise says so (`mask_unsupported`, naming the models that can). Today that is an Omarchy
+model whose sd-server lists `mask_image`; the Fugue helper redraws through the staged nodes (VAE
+Encode with a mask, then a Sampler) instead. The mask must be the size of the start image, and the
+result is put back over the start image through it, so everything outside the mask is the start
+image's, to the pixel; put a Feather Mask in front for a soft edge.
 
 ## Not yet
 

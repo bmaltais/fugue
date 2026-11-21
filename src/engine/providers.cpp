@@ -64,9 +64,12 @@ void appendUnique(QStringList &list, const QString &item) {
 }
 
 Result<Selection> chosen(const Match &match) {
-    return Result<Selection>(Selection{match.candidate->instance.name,
-                                       match.candidate->description->engine, *match.model,
-                                       match.candidate->description->sharesFilesystem});
+    Selection selection;
+    selection.instance = match.candidate->instance.name;
+    selection.engine = match.candidate->description->engine;
+    selection.model = *match.model;
+    selection.sharesFilesystem = match.candidate->description->sharesFilesystem;
+    return Result<Selection>(selection);
 }
 
 Result<Selection> failed(const Error &error) { return Result<Selection>(error); }
@@ -88,6 +91,19 @@ Result<Selection> choose(const QList<const Candidate *> &usable, const Requireme
     const auto isReady = [](const Match &match) {
         return match.model->status == ModelStatus::Ready;
     };
+    // The ready models that have what the node would like (Requirement::preferred), by "instance:
+    // model", which the node names when the one chosen lacks it.
+    QStringList preferredOffers;
+    for (const Match &match : fitting)
+        if (isReady(match) && !requirement.preferred.isEmpty() && hasProperties(*match.model, requirement.preferred))
+            appendUnique(preferredOffers, QStringLiteral("%1: %2").arg(match.candidate->instance.name,
+                                                                     match.model->title.isEmpty() ? modelName(match.model->handle)
+                                                                                                  : match.model->title));
+    const auto pick = [&preferredOffers](const Match &match) {
+        Result<Selection> selection = chosen(match);
+        selection->preferredOffers = preferredOffers;
+        return selection;
+    };
     QJsonArray readyNames;
     for (const Match &match : fitting)
         if (isReady(match) && !readyNames.contains(modelName(match.model->handle)))
@@ -101,7 +117,7 @@ Result<Selection> choose(const QList<const Candidate *> &usable, const Requireme
                 same.append(match);
         for (const Match &match : same)
             if (isReady(match))
-                return chosen(match);
+                return pick(match);
         if (!same.isEmpty()) {
             const Match &first = same.first();
             QString message = QStringLiteral("%1 is not running on %2.")
@@ -127,9 +143,13 @@ Result<Selection> choose(const QList<const Candidate *> &usable, const Requireme
         return failed(error);
     }
 
+    // Any ready model: one that has what the node prefers, else the first.
+    for (const Match &match : fitting)
+        if (isReady(match) && hasProperties(*match.model, requirement.preferred))
+            return pick(match);
     for (const Match &match : fitting)
         if (isReady(match))
-            return chosen(match);
+            return pick(match);
 
     // Nothing ready: say what would fix it, the most specific fix first.
     QStringList fixes;
