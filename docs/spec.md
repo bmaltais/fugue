@@ -1860,6 +1860,12 @@ and the `?` overlay marks each one.
 Commands with no default key (the colors `node.color.<role>`, `edit.clear`, the exports, the help
 links) are in the menus, and the keymap file can bind any of them.
 
+Align and distribute (#58): `node.align-left`, `-right`, `-top`, `-bottom` put the selected nodes
+on the selection's outermost edge; `node.distribute-horizontal` and `-vertical` even out the gaps
+between three or more, in the order they start (ComfyUI's Align Selected To and Distribute Nodes).
+They have no default keys; they are in the Node menu, and in the node's menu when enough nodes are
+selected (two to align, three to distribute). A pinned node stays where it is. One undo step each.
+
 Tab enters a group when exactly one group is selected and opens node search otherwise, inside a
 group too. A command states the context it applies in, and the more specific context owns the key.
 

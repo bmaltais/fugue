@@ -108,6 +108,60 @@ private slots:
         QVERIFY(canvas.selectionAll("pinned"));
     }
 
+    // #58: align puts the selection on its outermost edge, distribute evens the gaps; each is one
+    // undo step, a pinned node stays, and what would not move makes no step.
+    void alignAndDistributeAreOneUndoStepEach() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(chain));
+        canvas.select({"prompt", "gen", "save"});
+        const int steps = canvas.undoStack()->count();
+        const QRectF gen = canvas.nodeRect("gen");
+        const QRectF save = canvas.nodeRect("save");
+        QVERIFY(canvas.alignSelection("top"));
+        QCOMPARE(canvas.position("prompt").y(), 80.0);
+        QCOMPARE(canvas.position("gen").y(), 80.0);
+        QCOMPARE(canvas.position("save").y(), 80.0);
+        QCOMPARE(canvas.position("save").x(), 640.0); // the other axis is left alone
+        QCOMPARE(canvas.undoStack()->count(), steps + 1);
+        canvas.undo();
+        QCOMPARE(canvas.position("save"), QPointF(640, 120));
+        QCOMPARE(canvas.position("prompt"), QPointF(0, 100));
+
+        QVERIFY(canvas.alignSelection("right"));
+        QCOMPARE(canvas.nodeRect("prompt").right(), save.right());
+        QCOMPARE(canvas.nodeRect("gen").right(), save.right());
+        canvas.undo();
+        QVERIFY(canvas.alignSelection("bottom"));
+        QCOMPARE(canvas.nodeRect("prompt").bottom(), std::max(gen.bottom(), save.bottom()));
+        canvas.undo();
+        QVERIFY(canvas.alignSelection("left"));
+        QCOMPARE(canvas.position("gen").x(), 0.0);
+        QVERIFY(!canvas.alignSelection("left")); // already there: no step
+        QCOMPARE(canvas.undoStack()->count(), steps + 1);
+        canvas.undo();
+
+        // Distribute: equal gaps along x between the first node's left and the last one's right.
+        canvas.select({"prompt", "gen", "save"});
+        QVERIFY(canvas.alignSelection("horizontal"));
+        const QRectF a = canvas.nodeRect("prompt"), b = canvas.nodeRect("gen"), c = canvas.nodeRect("save");
+        QCOMPARE(a.left(), 0.0);
+        QCOMPARE(c.right(), save.right());
+        QVERIFY(std::abs((b.left() - a.right()) - (c.left() - b.right())) <= 1);
+        canvas.undo();
+        QCOMPARE(canvas.position("gen"), QPointF(300, 80));
+
+        // Two nodes have no gap to even out; a pinned node stays.
+        canvas.select({"prompt", "gen"});
+        QVERIFY(!canvas.alignSelection("vertical"));
+        canvas.select({"prompt", "gen", "save"});
+        canvas.select({"gen"});
+        canvas.togglePinned();
+        canvas.select({"prompt", "gen", "save"});
+        QVERIFY(canvas.alignSelection("bottom"));
+        QCOMPARE(canvas.position("gen"), QPointF(300, 80));
+        QVERIFY(!canvas.alignSelection("sideways"));
+    }
+
     // #55: a rename sets the title the canvas shows (layout.nodes.<id>.title), one undo step;
     // an empty one goes back to the type's name.
     void aRenameSetsTheTitle() {

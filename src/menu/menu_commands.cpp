@@ -62,6 +62,13 @@ QList<Row> menuRows() {
         {"node.color.cyan", QT_TRANSLATE_NOOP("Command", "Color: cyan"), QT_TRANSLATE_NOOP("Command", "Cyan"), {}, "canvas", "same"},
         {"node.color.blue", QT_TRANSLATE_NOOP("Command", "Color: blue"), QT_TRANSLATE_NOOP("Command", "Blue"), {}, "canvas", "same"},
         {"node.color.magenta", QT_TRANSLATE_NOOP("Command", "Color: magenta"), QT_TRANSLATE_NOOP("Command", "Magenta"), {}, "canvas", "same"},
+        // Align and distribute (#58): no default keys; the handlers are in canvas_commands.cpp.
+        {"node.align-left", QT_TRANSLATE_NOOP("Command", "Align the selected nodes to the left edge"), QT_TRANSLATE_NOOP("Command", "Left"), {}, "canvas", "same"},
+        {"node.align-right", QT_TRANSLATE_NOOP("Command", "Align the selected nodes to the right edge"), QT_TRANSLATE_NOOP("Command", "Right"), {}, "canvas", "same"},
+        {"node.align-top", QT_TRANSLATE_NOOP("Command", "Align the selected nodes to the top edge"), QT_TRANSLATE_NOOP("Command", "Top"), {}, "canvas", "same"},
+        {"node.align-bottom", QT_TRANSLATE_NOOP("Command", "Align the selected nodes to the bottom edge"), QT_TRANSLATE_NOOP("Command", "Bottom"), {}, "canvas", "same"},
+        {"node.distribute-horizontal", QT_TRANSLATE_NOOP("Command", "Space the selected nodes evenly, left to right"), QT_TRANSLATE_NOOP("Command", "Horizontally"), {}, "canvas", "same"},
+        {"node.distribute-vertical", QT_TRANSLATE_NOOP("Command", "Space the selected nodes evenly, top to bottom"), QT_TRANSLATE_NOOP("Command", "Vertically"), {}, "canvas", "same"},
         // Handlers come from ImageActions (image_actions.h).
         {"node.open-image", QT_TRANSLATE_NOOP("Command", "Open the node's image in the default viewer"),
          QT_TRANSLATE_NOOP("Command", "Open Image"), {}, "canvas", "same"},
@@ -161,6 +168,11 @@ void bindMenuCommands(CommandRegistry &registry, CanvasModel &canvas, std::funct
     for (const char *id : {"edit.copy", "edit.clone", "edit.delete", "node.bypass", "node.mute",
                            "node.collapse", "node.pin", "frame.make", "group.make"})
         registry.setEnabledWhen(QString::fromLatin1(id), selected);
+    // Align needs two nodes to line up; distribute needs three, or there is no gap to even out (#58).
+    for (const char *id : {"node.align-left", "node.align-right", "node.align-top", "node.align-bottom"})
+        registry.setEnabledWhen(QString::fromLatin1(id), [model] { return model->selectedIds().size() >= 2; });
+    for (const char *id : {"node.distribute-horizontal", "node.distribute-vertical"})
+        registry.setEnabledWhen(QString::fromLatin1(id), [model] { return model->selectedIds().size() >= 3; });
     // Rename: one node (#55), or a group's port the menu was opened on (#72).
     registry.setEnabledWhen("edit.rename", [model, &registry] {
         const QVariantMap target = registry.target();

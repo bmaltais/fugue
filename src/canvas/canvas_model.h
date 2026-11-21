@@ -455,6 +455,10 @@ public:
     // The node.pin command (#55): pins the selection in place, or unpins it when all are pinned;
     // a pinned node does not move with a drag or its Frame. One undo step.
     Q_INVOKABLE void togglePinned();
+    // The node.align-* and node.distribute-* commands (#58): `mode` is "left", "right", "top" or
+    // "bottom" (the selection shares that edge) or "horizontal" or "vertical" (equal gaps between
+    // the nodes; three or more). A pinned node stays. One undo step; false when nothing moved.
+    Q_INVOKABLE bool alignSelection(const QString &mode);
     // The edit.rename command (#55): the title the canvas shows, layout.nodes.<id>.title; empty
     // goes back to the type's name. One undo step.
     // On a group card it renames the group (#74, as ComfyUI renames a subgraph from its node's
