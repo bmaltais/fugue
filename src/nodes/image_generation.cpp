@@ -2,6 +2,7 @@
 // image.generate and image.edit (8.1). The kernels only translate (node_kernel.h): inputs to a
 // JobRequest, and the JobResult to outputs with the values actually used (3.3).
 
+#include "nodes/image_cover.h"
 #include "nodes/image_size.h"
 #include "nodes/kernels.h"
 
@@ -63,25 +64,7 @@ QSize ownSize(const MediaHandle &image) {
 Result<QString> prepared(const MediaHandle &image, QSize size, const QString &path) {
     if (image.width() == size.width() && image.height() == size.height() && worksAsItIs(image))
         return image.path();
-    const auto options = [&] {
-        return vips::VImage::option()
-            ->set("height", size.height())
-            ->set("crop", VIPS_INTERESTING_CENTRE);
-    };
-    vips::VImage fitted;
-    if (image.hasFile()) {
-        fitted = vips::VImage::thumbnail(QFile::encodeName(image.path()).constData(), size.width(), options());
-    } else {
-        const Result<vips::VImage> decoded = image.image();
-        if (!decoded)
-            return decoded.errors();
-        fitted = decoded->thumbnail_image(size.width(), options());
-    }
-    fitted = fitted.colourspace(VIPS_INTERPRETATION_sRGB);
-    if (fitted.bands() > 3)
-        fitted = fitted.extract_band(0, vips::VImage::option()->set("n", 3));
-    fitted.write_to_file(QFile::encodeName(path).constData());
-    return path;
+    return coverToFile(image, size, path);
 }
 
 class ImageKernel : public ProviderKernel {
@@ -230,28 +213,12 @@ private:
 
     // The size against the model's limits (8.1), blamed on the input that set it.
     Errors outsideLimits(const NodeContext &context, const Selection &selection, const QJsonObject &params) const {
-        Errors errors;
-        const QJsonObject &limits = selection.model.limits;
-        for (const QString &side : {QStringLiteral("width"), QStringLiteral("height")}) {
-            if (!params.contains(side))
-                continue;
-            const int value = params.value(side).toInt();
-            const int least = limits.value(QStringLiteral("min_") + side).toInt(0);
-            const int most = limits.value(QStringLiteral("max_") + side).toInt(0);
-            if ((least > 0 && value < least) || (most > 0 && value > most)) {
-                const QString blamed = context.inputs.contains(side)                   ? side
-                                       : editing()                                     ? QStringLiteral("images")
-                                       : context.inputs.contains(QStringLiteral("image")) ? QStringLiteral("image")
-                                                                                       : QString();
-                errors.append(makeInputError(QStringLiteral("value_out_of_range"), blamed,
-                                             QStringLiteral("%1 makes a %2 of %3 to %4 pixels, not %5.")
-                                                 .arg(modelName(selection), side)
-                                                 .arg(least)
-                                                 .arg(most > 0 ? QString::number(most) : QStringLiteral("any"))
-                                                 .arg(value)));
-            }
-        }
-        return errors;
+        return outsideSizeLimits(modelName(selection), selection.model.limits, params, [&](const QString &side) {
+            return context.inputs.contains(side)                      ? side
+                   : editing()                                        ? QStringLiteral("images")
+                   : context.inputs.contains(QStringLiteral("image")) ? QStringLiteral("image")
+                                                                      : QString();
+        });
     }
 
     static QString modelName(const Selection &selection) { return selection.model.handle.value("name").toString(); }

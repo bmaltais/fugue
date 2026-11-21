@@ -30,6 +30,8 @@ namespace {
 const QByteArray kKey = "local-key-0123456789";
 const QString kKlein = QStringLiteral("flux2-klein-4b-sdcpp");
 const QString kZImage = QStringLiteral("z-image-turbo-sdcpp");
+const QString kVideoModel = QStringLiteral("minimax-h3-sdcpp");
+const QString kMusicModel = QStringLiteral("ace-step-1.5-turbo-acestep");
 
 QByteArray json(const QJsonObject &object) { return QJsonDocument(object).toJson(QJsonDocument::Compact); }
 
@@ -1058,6 +1060,190 @@ private slots:
         QTRY_VERIFY((status = await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value()).isTerminal());
         QCOMPARE(status.error.code, QStringLiteral("out_of_memory"));
         QVERIFY2(!status.error.hint.contains("image"), qPrintable(status.error.hint));
+    }
+
+    // --- video (video.generate, sd-server vid_gen) and music (audio.generate, ace-server) ---
+
+    void videoAndMusicRowsAreOfferedAsTheirOwnCapabilities() {
+        Fixture fixture;
+        fixture.server.on("GET", "/sdcpp/v1/capabilities", [](const HttpRequest &) {
+            QJsonObject caps = capabilities();
+            caps.insert("defaults_by_mode",
+                        QJsonObject{{"vid_gen", QJsonObject{{"width", 832}, {"height", 480}, {"fps", 16},
+                                                            {"sample_params", QJsonObject{{"sample_steps", 4}}}}}});
+            return HttpResponse{200, json(caps)};
+        });
+        fixture.server.on("GET", "/health", [](const HttpRequest &) { return HttpResponse{200, "{\"status\":\"ok\"}"}; });
+        fixture.writeStatus(QJsonObject{{kVideoModel, row(kVideoModel, "video", "active", fixture.endpoint())},
+                                        {kMusicModel, row(kMusicModel, "music", "active", fixture.endpoint())},
+                                        {kKlein, row(kKlein, "image", "active", fixture.endpoint())}});
+        auto provider = fixture.provider();
+        const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
+        QVERIFY(described.ok());
+
+        const OfferedModel *video = findModel(described.value(), "video.generate", kVideoModel);
+        QVERIFY(video);
+        QCOMPARE(video->handle.value("resource").toString(), QStringLiteral("fugue/video-model"));
+        QCOMPARE(video->status, ModelStatus::Ready);
+        QCOMPARE(video->defaults.value("width").toInt(), 832);
+        QCOMPARE(video->defaults.value("fps").toInt(), 16);
+        QCOMPARE(video->defaults.value("steps").toInt(), 4);
+
+        const OfferedModel *music = findModel(described.value(), "audio.generate", kMusicModel);
+        QVERIFY(music);
+        QCOMPARE(music->handle.value("resource").toString(), QStringLiteral("fugue/music-model"));
+        QCOMPARE(music->status, ModelStatus::Ready);
+        QCOMPARE(music->limits.value("max_duration").toInt(), 600);
+
+        // Neither is an image model, and the image model is neither.
+        QVERIFY(!findModel(described.value(), "image.generate", kVideoModel));
+        QVERIFY(!findModel(described.value(), "video.generate", kKlein));
+        QVERIFY(!findModel(described.value(), "audio.generate", kVideoModel));
+    }
+
+    void aVideoJobSendsEveryLoraAndTheFirstFrameAndKeepsTheClipAsAFile() {
+        Fixture fixture;
+        fixture.server.on("GET", "/sdcpp/v1/capabilities", [](const HttpRequest &) {
+            QJsonObject caps = capabilities();
+            caps.insert("loras", QJsonArray{QJsonObject{{"name", "turbo"}, {"path", "/models/loras/turbo.safetensors"}}});
+            return HttpResponse{200, json(caps)};
+        });
+        const QByteArray webm = "\x1a\x45\xdf\xa3 pretend webm";
+        fixture.server.on("POST", "/sdcpp/v1/vid_gen", [](const HttpRequest &) {
+            return HttpResponse{202, json(QJsonObject{{"id", "vid_1"}, {"kind", "vid_gen"}, {"status", "queued"}})};
+        });
+        fixture.server.on("GET", "/sdcpp/v1/jobs/vid_1", [webm](const HttpRequest &) {
+            return HttpResponse{200, json(job("completed",
+                                              {{"result", QJsonObject{{"output_format", "webm"}, {"mime_type", "video/webm"},
+                                                                      {"fps", 24}, {"frame_count", 53},
+                                                                      {"b64_json", QString::fromLatin1(webm.toBase64())}}}}))};
+        });
+        fixture.writeStatus(QJsonObject{{kVideoModel, row(kVideoModel, "video", "active", fixture.endpoint())}});
+        auto provider = fixture.provider();
+        const QString frame = fixture.writeInput("frame.png", "first frame bytes");
+        auto request = fixture.request("video.generate",
+                                       {{"prompt", "a fox runs"}, {"negative_prompt", "blur"}, {"width", 864}, {"height", 480},
+                                        {"video_frames", 48}, {"fps", 24}, {"steps", 4}, {"guidance", 1.5}, {"seed", 9}},
+                                       {{"image", QJsonObject{{"path", frame}}}});
+        const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value();
+        JobStatus status;
+        QTRY_VERIFY((status = await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value()).isTerminal());
+        QCOMPARE(status.state, QStringLiteral("done"));
+
+        const QJsonObject body = QJsonDocument::fromJson(fixture.server.requestsTo("POST", "/sdcpp/v1/vid_gen").first().body).object();
+        QCOMPARE(body.value("prompt").toString(), QStringLiteral("a fox runs"));
+        QCOMPARE(body.value("negative_prompt").toString(), QStringLiteral("blur"));
+        QCOMPARE(body.value("width").toInt(), 864);
+        QCOMPARE(body.value("video_frames").toInt(), 48);
+        QCOMPARE(body.value("fps").toInt(), 24);
+        QCOMPARE(body.value("seed").toInt(), 9);
+        QCOMPARE(body.value("output_format").toString(), QStringLiteral("webm"));
+        QCOMPARE(body.value("vae_tiling_params").toObject().value("enabled").toBool(), true);
+        QCOMPARE(body.value("sample_params").toObject().value("sample_steps").toInt(), 4);
+        QCOMPARE(body.value("sample_params").toObject().value("guidance").toObject().value("txt_cfg").toDouble(), 1.5);
+        QCOMPARE(body.value("init_image").toString(), QString::fromLatin1(QByteArray("first frame bytes").toBase64()));
+        // The server applies no LoRA by itself, so each one it lists goes with the job (8.7).
+        QCOMPARE(body.value("lora").toArray(),
+                 (QJsonArray{QJsonObject{{"path", "/models/loras/turbo.safetensors"}, {"multiplier", 1.0}}}));
+
+        const auto result = await<JobResult>([&](auto reply) { provider->result(id, reply); });
+        QVERIFY(result.ok());
+        const QJsonObject video = result->outputs.value("video").toObject();
+        QCOMPARE(video.value("format").toString(), QStringLiteral("webm"));
+        QCOMPARE(readAll(video.value("path").toString()), webm);
+        QCOMPARE(result->used.value("seed").toInt(), 9);
+        QCOMPARE(result->used.value("frames").toInt(), 53);
+        QCOMPARE(result->used.value("engine").toString(), QStringLiteral("sdcpp"));
+    }
+
+    void aVideoJobWithoutFirstFrameOrLorasSendsNeither() {
+        Fixture fixture;
+        fixture.server.on("POST", "/sdcpp/v1/vid_gen", [](const HttpRequest &) {
+            return HttpResponse{400, json(QJsonObject{{"error", "this model needs a first frame"}})};
+        });
+        fixture.writeStatus(QJsonObject{{kVideoModel, row(kVideoModel, "video", "active", fixture.endpoint())}});
+        auto provider = fixture.provider();
+        auto request = fixture.request("video.generate", {{"prompt", "a fox runs"}});
+        const auto refused = await<QString>([&](auto reply) { provider->submit(request, reply); });
+        QVERIFY(!refused.ok());
+        QVERIFY2(refused.error().message.contains("needs a first frame"), qPrintable(refused.error().message));
+        const QJsonObject body = QJsonDocument::fromJson(fixture.server.requestsTo("POST", "/sdcpp/v1/vid_gen").first().body).object();
+        QVERIFY(!body.contains("init_image"));
+        QVERIFY(!body.contains("lora"));
+    }
+
+    // ace-server's two jobs in turn (Fantasi's makeSong): /lm writes the song, /synth renders it
+    // as it was written, and the first part of the multipart answer is the song.
+    void aSongIsWrittenThenRenderedAndItsFirstPartIsTheAudio() {
+        Fixture fixture;
+        fixture.server.on("GET", "/health", [](const HttpRequest &) { return HttpResponse{200, "{\"status\":\"ok\"}"}; });
+        fixture.server.on("POST", "/lm", [](const HttpRequest &) { return HttpResponse{200, "{\"id\":\"1\"}"}; });
+        fixture.server.on("GET", "/job?id=1", [](const HttpRequest &) { return HttpResponse{200, "{\"status\":\"done\"}"}; });
+        const QJsonObject written{{"caption", "a calm piano piece"}, {"lyrics", "[Verse]\nla la"}, {"bpm", 80}, {"seed", 4242},
+                                  {"audio_codes", "1,2,3"}};
+        fixture.server.on("GET", "/job?id=1&result=1", [written](const HttpRequest &) {
+            return HttpResponse{200, QJsonDocument(QJsonArray{written}).toJson(QJsonDocument::Compact)};
+        });
+        fixture.server.on("POST", "/synth", [](const HttpRequest &) { return HttpResponse{200, "{\"id\":\"2\"}"}; });
+        fixture.server.on("GET", "/job?id=2", [](const HttpRequest &) { return HttpResponse{200, "{\"status\":\"done\"}"}; });
+        const QByteArray mp3 = "ID3 pretend mp3 \r\n bytes";
+        fixture.server.on("GET", "/job?id=2&result=1", [mp3](const HttpRequest &) {
+            return HttpResponse{200,
+                                "--B7\r\nContent-Type: audio/mpeg\r\n\r\n" + mp3 + "\r\n--B7\r\nContent-Type: application/octet-stream\r\n\r\nLATENT\r\n--B7--\r\n",
+                                "multipart/mixed; boundary=B7"};
+        });
+        fixture.writeStatus(QJsonObject{{kMusicModel, row(kMusicModel, "music", "active", fixture.endpoint())}});
+        auto provider = fixture.provider();
+        auto request = fixture.request("audio.generate", {{"prompt", "a calm piano piece"}, {"lyrics", ""}, {"duration", 40},
+                                                          {"language", "en"}, {"seed", 4242}});
+        const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value();
+        JobStatus status;
+        QTRY_VERIFY((status = await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value()).isTerminal());
+        QCOMPARE(status.state, QStringLiteral("done"));
+
+        const QJsonObject lm = QJsonDocument::fromJson(fixture.server.requestsTo("POST", "/lm").first().body).object();
+        QCOMPARE(lm.value("caption").toString(), QStringLiteral("a calm piano piece"));
+        QCOMPARE(lm.value("lyrics").toString(), QString());
+        QCOMPARE(lm.value("duration").toInt(), 40);
+        QCOMPARE(lm.value("vocal_language").toString(), QStringLiteral("en"));
+        QCOMPARE(lm.value("seed").toInt(), 4242);
+        QJsonObject sent = QJsonDocument::fromJson(fixture.server.requestsTo("POST", "/synth").first().body).object();
+        QCOMPARE(sent.take("output_format").toString(), QStringLiteral("mp3"));
+        QCOMPARE(sent, written);
+
+        const auto result = await<JobResult>([&](auto reply) { provider->result(id, reply); });
+        QVERIFY(result.ok());
+        QCOMPARE(readAll(result->outputs.value("audio").toObject().value("path").toString()), mp3);
+        QCOMPARE(result->outputs.value("lyrics").toString(), QStringLiteral("[Verse]\nla la"));
+        QCOMPARE(result->used.value("seed").toInt(), 4242);
+    }
+
+    void aSongThatFailsAndACancelledSongSayWhere() {
+        Fixture fixture;
+        fixture.server.on("GET", "/health", [](const HttpRequest &) { return HttpResponse{200, "{}"}; });
+        fixture.server.on("POST", "/lm", [](const HttpRequest &) { return HttpResponse{200, "{\"id\":\"1\"}"}; });
+        auto state = std::make_shared<QString>("running");
+        fixture.server.on("GET", "/job?id=1", [state](const HttpRequest &) {
+            return HttpResponse{200, json(QJsonObject{{"status", *state}})};
+        });
+        fixture.server.on("POST", "/job?id=1&cancel=1", [state](const HttpRequest &) {
+            *state = "cancelled";
+            return HttpResponse{200, "{\"status\":\"cancelled\"}"};
+        });
+        fixture.writeStatus(QJsonObject{{kMusicModel, row(kMusicModel, "music", "active", fixture.endpoint())}});
+        auto provider = fixture.provider();
+        auto request = fixture.request("audio.generate", {{"prompt", "x"}, {"lyrics", ""}, {"duration", 30}});
+        QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value();
+        QTRY_COMPARE(await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value().stage, QStringLiteral("writing"));
+        QCOMPARE(await<QString>([&](auto reply) { provider->cancel(id, reply); }).value(), QStringLiteral("cancelled"));
+        QCOMPARE(fixture.server.requestsTo("POST", "/job?id=1&cancel=1").size(), 1);
+
+        *state = "failed";
+        id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value();
+        JobStatus status;
+        QTRY_VERIFY((status = await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value()).isTerminal());
+        QCOMPARE(status.state, QStringLiteral("error"));
+        QCOMPARE(status.error.code, QStringLiteral("node_failed"));
     }
 };
 

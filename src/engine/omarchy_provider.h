@@ -26,13 +26,18 @@
 //
 // Each row of kind image becomes a model of image.generate, and also of image.edit when its
 // `edit` is true. Each row of kind text becomes a model of text.generate (a fugue/text-model),
-// served over its OpenAI-compatible API (POST /v1/chat/completions, streamed). Video and
-// music rows are not offered until their nodes are built (M4). A served model is named by
+// served over its OpenAI-compatible API (POST /v1/chat/completions, streamed). Each row of kind
+// video becomes a model of video.generate (a fugue/video-model), served by sd-server's
+// POST /sdcpp/v1/vid_gen through the same job API as images; each row of kind music a model of
+// audio.generate (a fugue/music-model), served by ace-server in two jobs (POST /lm, then
+// POST /synth; GET /job?id=N). ace-server: acestep.cpp 973517be, docs/ARCHITECTURE.md and
+// tools/ace-server.cpp. A served model is named by
 // its recipe, with no content hash; its row's
 // `name` ("FLUX.2 Klein 4B") is its title, for display only. Without providers.json each
 // paired host is an instance of its own (providers.h defaultProviderInstances).
 
 #include <QHash>
+#include <QJsonArray>
 
 #include <functional>
 #include <QNetworkAccessManager>
@@ -79,6 +84,7 @@ private:
         QString base; // the endpoint without its /v1: the native API's root
         QByteArray key;
         QString runtime; // the row's runtime (gufo, tensorfold-x86): a text job's engine
+        QJsonArray loras; // a video server's capabilities.loras: sent with every job (8.7)
     };
     struct Discovery {
         Description description;
@@ -96,6 +102,10 @@ private:
     void poll();
     void pollJob(const QString &id);
     void finishJob(const QString &id, const QJsonObject &job);
+    void finishVideo(const QString &id, const QJsonObject &result);
+    void submitSong(const Server &server, const JobRequest &request, const QJsonObject &model, Reply<QString> reply);
+    void pollSong(const QString &id);
+    void fetchSong(const QString &id);
     void change(const QString &id, const JobStatus &status);
     qint64 now() const;
     void forgetOldJobs();
