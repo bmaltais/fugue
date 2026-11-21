@@ -2827,17 +2827,17 @@ seam), and a paint canvas with layers and colors. Each is its own issue.
 
 | Issue | Part | After | Beside |
 | --- | --- | --- | --- |
-| {A} | Mask and composite nodes, `role: mask` in manifests | | {B1}, {C1} |
-| {B1} | `mask_paint` core and the mask editor component | | {A}, {C1} |
-| {C1} | Helper mask support, the `c_concat` hook, VAE Encode and Sampler, inpaint models in `model_shape`, the staged guard | | {A}, {B1} |
-| {B2} | The `mask` widget, Load Image 1.1, Paint Mask, the hollow port, masks in saves, packages and templates | {B1} | {C2} |
-| {C2} | Generate Image's mask and the `omarchy` provider's `mask_image` | {A}, {C1} | {B2} |
-| {D} | Crop to Mask, Stitch, `fugue/stitch`, the group | {A}, {C1} | |
-| {E} | The two templates, masking.md, the screenshots | {B2}, {C2}, {D} | |
-| {F} | Later: automatic masks as packs | {B2} | |
-| {G} | Later: soft masks (differential diffusion) | {C1} | |
-| {H} | Later: Color Match | {A} | |
-| {I} | Later: a paint canvas | {B2} | |
+| #171 | Mask and composite nodes, `role: mask` in manifests | | #172, #173 |
+| #172 | `mask_paint` core and the mask editor component | | #171, #173 |
+| #173 | Helper mask support, the `c_concat` hook, VAE Encode and Sampler, inpaint models in `model_shape`, the staged guard | | #171, #172 |
+| #174 | The `mask` widget, Load Image 1.1, Paint Mask, the hollow port, masks in saves, packages and templates | #172 | #175 |
+| #175 | Generate Image's mask and the `omarchy` provider's `mask_image` | #171, #173 | #174 |
+| #176 | Crop to Mask, Stitch, `fugue/stitch`, the group | #171, #173 | |
+| #177 | The two templates, masking.md, the screenshots | #174, #175, #176 | |
+| #178 | Later: automatic masks as packs | #174 | |
+| #179 | Later: soft masks (differential diffusion) | #173 | |
+| #180 | Later: Color Match | #171 | |
+| #181 | Later: a paint canvas | #174 | |
 
 ---
 
@@ -2893,7 +2893,7 @@ To measure or confirm before the part that depends on each is built. None blocks
 | ~~Whether Omarchy's engine runs on a discrete NVIDIA card~~ Answered: no. At omarchy-local-ai 703ae0c the engine detects no discrete NVIDIA card and has no sd-server runtime for one; the `omarchy` provider reports `capability_unavailable` with how to fix it. Local use on such machines waits for the helper | local use on such machines | #11, #32 |
 | The exact WebP container field for the embedded workflow | [11.7](#117-embedding-in-outputs) | with #13 |
 | Whether Alt shortcuts clash with the window manager's bindings | [12.4](#124-default-keymap) | with #17 |
-| Soft masks in the sampler (differential diffusion): a change to sampling code, which the patch's rule excludes (8.10); carry it in the patch anyway, or propose it to stable-diffusion.cpp upstream | soft inpainting, [14.4](#144-masking-and-inpainting-167) | owner decision, {G} |
+| Soft masks in the sampler (differential diffusion): a change to sampling code, which the patch's rule excludes (8.10); carry it in the patch anyway, or propose it to stable-diffusion.cpp upstream | soft inpainting, [14.4](#144-masking-and-inpainting-167) | owner decision, #179 |
 | ~~An existing package named `fugue`~~ None: the AUR has no package named `fugue` (checked 2026-11-19) | packaging | #34 |
 
 ---
