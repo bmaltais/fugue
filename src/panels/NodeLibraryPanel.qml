@@ -12,6 +12,9 @@ import "../canvas"
 // of the canvas.
 //
 //   click or Enter on a category: opens it, Left and Right close and open it; on a node: adds it
+//   a group of the user's library (`library` in its row) also has a trash can at its far end, and
+//   Delete on its row does the same: both ask first (DeleteGroupQuestion) and say `groupDeleted`
+//   only after a yes; the caller deletes it, and the new rows follow
 //   Down from the field goes to the list, Up from its first row back; Escape empties the field,
 //   then closes the panel
 Item {
@@ -28,11 +31,13 @@ Item {
     signal categoryToggled(string key)
     signal nodeActivated(string typeId)
     signal nodeDropped(string typeId, real sceneX, real sceneY)
+    signal groupDeleted(string typeId, string name)
     signal closeRequested
 
     readonly property real u: look.unit
     property alias rowList: list
     property alias searchField: field
+    property alias deleteQuestion: deleteAsk
 
     // The row that takes Enter and the arrows, -1 for none.
     function addCurrent() {
@@ -43,6 +48,18 @@ Item {
             categoryToggled(row.key)
         else
             nodeActivated(row.key)
+    }
+
+    // What a trash can, or Delete on a library row, asks (#156).
+    function askDelete(row) {
+        if (row && row.library)
+            deleteAsk.ask(row.key, row.label)
+    }
+
+    DeleteGroupQuestion {
+        id: deleteAsk
+        onConfirmed: (groupId, groupName) => root.groupDeleted(groupId, groupName)
+        onClosed: list.forceActiveFocus()
     }
 
     // Search field: a glyph, the query, a clear button while there is one.
@@ -169,6 +186,13 @@ Item {
         Keys.onReturnPressed: root.addCurrent()
         Keys.onEnterPressed: root.addCurrent()
         Keys.onEscapePressed: root.closeRequested()
+        // Delete on a library group's row asks to delete it; the window's own Delete (the selected
+        // nodes) is not taken while the row is not a library group.
+        Keys.onDeletePressed: root.askDelete(root.rows[currentIndex])
+        Keys.onShortcutOverride: event => {
+            if (event.key === Qt.Key_Delete && root.rows[currentIndex]?.library)
+                event.accepted = true
+        }
         Keys.onRightPressed: {
             const row = root.rows[currentIndex]
             if (row && row.category && !row.open)
@@ -208,7 +232,7 @@ Item {
             }
             Text {
                 x: chevron.x + 4.5 * root.u
-                width: countText.x - x - root.u
+                width: (trash.item ? trash.x : countText.x) - x - root.u
                 anchors.verticalCenter: parent.verticalCenter
                 text: row.modelData.label
                 elide: Text.ElideRight
@@ -225,12 +249,40 @@ Item {
                 color: root.look.label
                 font.pixelSize: root.look.captionSize
             }
+            // The trash can of a library group, at the row's far end and clear of the scroll bar; made
+            // only on those rows.
+            Loader {
+                id: trash
+                active: row.modelData.library === true
+                x: parent.width - root.u - width - (list.ScrollBar.vertical.visible ? list.ScrollBar.vertical.width : 0)
+                anchors.verticalCenter: parent.verticalCenter
+                width: 7 * root.u
+                height: width
+                sourceComponent: RowTrashButton {
+                    objectName: "nodeLibraryTrash"
+                    look: root.look
+                    label: qsTr("Delete %1 from the library").arg(row.modelData.label)
+                    ToolTip.visible: hovered
+                    ToolTip.text: label
+                    ToolTip.delay: 600
+                    onClicked: {
+                        list.currentIndex = row.index
+                        root.askDelete(row.modelData)
+                    }
+                }
+            }
             HoverHandler {
                 id: hover
                 cursorShape: Qt.PointingHandCursor
             }
+            // A press on the trash can's square is its own: the row neither adds nor drags from it.
+            function inTrash(point) {
+                return trash.active && point.x >= trash.x && point.x <= trash.x + trash.width
+            }
             TapHandler {
-                onTapped: {
+                onTapped: eventPoint => {
+                    if (row.inTrash(eventPoint.position))
+                        return
                     list.currentIndex = row.index
                     list.forceActiveFocus()
                     root.addCurrent()
@@ -241,14 +293,22 @@ Item {
                 id: drag
                 target: null
                 enabled: !row.category
+                // The press was on the trash can: a drag from there takes nothing out.
+                property bool fromTrash: false
                 onActiveChanged: {
+                    if (active)
+                        fromTrash = row.inTrash(centroid.pressPosition)
+                    if (fromTrash) {
+                        ghost.visible = false
+                        return
+                    }
                     ghost.visible = active
                     if (active)
                         ghost.text = row.modelData.label
                     else
                         root.nodeDropped(row.modelData.key, centroid.scenePosition.x, centroid.scenePosition.y)
                 }
-                onCentroidChanged: if (active) ghost.follow(centroid.scenePosition)
+                onCentroidChanged: if (active && !fromTrash) ghost.follow(centroid.scenePosition)
             }
             ToolTip.visible: hover.hovered && !row.category && row.modelData.description !== ""
             ToolTip.text: row.modelData.description

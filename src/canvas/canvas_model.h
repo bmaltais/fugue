@@ -366,6 +366,9 @@ public:
     void setLibraryDir(const QString &dir) { m_libraryDir = dir; }
     QString groupNotice() const { return m_groupNotice; }
     Q_INVOKABLE void dismissGroupNotice() { setGroupNotice({}); }
+    // Says the outcome of a library action made elsewhere (a group deleted from the node
+    // library, #156) on the window's notice line: `problem` when it failed, else `notice`.
+    Q_INVOKABLE void announceLibraryResult(const QString &notice, const QString &problem);
 
     // Why the last group edit was refused, one sentence; empty after one that worked.
     QString groupProblem() const { return m_groupProblem; }

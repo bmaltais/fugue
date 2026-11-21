@@ -485,6 +485,11 @@ void CanvasModel::setGroupNotice(const QString &notice) {
     emit groupNoticeChanged();
 }
 
+void CanvasModel::announceLibraryResult(const QString &notice, const QString &problem) {
+    setGroupProblem(problem);
+    setGroupNotice(problem.isEmpty() ? notice : QString());
+}
+
 void CanvasModel::renameGroupCard(const QString &node, const QString &name) {
     const QString shown = name.trimmed();
     const QString group = m_document.graph.nodes.value(node).type;

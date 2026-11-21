@@ -1,6 +1,7 @@
 // The node library's tree and filter without a window (#56): categories from the `/` parts of a
 // type's category, which levels are open, and the filter that is node search's ranking.
 
+#include <QJsonObject>
 #include <QtTest>
 
 #include "engine/registry.h"
@@ -70,6 +71,21 @@ private slots:
         QCOMPARE(shown(libraryRows({&x10, &x2}, {}, {})), (QStringList{"Step 2", "Step 10"}));
     }
 
+    // #156: only a group of the user's library (`local/<name>`, kind group) can be deleted there.
+    void onlyLibraryGroupsAreMarkedForDeletion() {
+        NodeType mine = type("local/fox", "Fox", "Groups");
+        mine.runtime = QJsonObject{{"kind", "group"}};
+        NodeType packs = type("io.example.tools/fox", "Pack fox", "Groups");
+        packs.runtime = QJsonObject{{"kind", "group"}};
+        NodeType notGroup = type("local/odd", "Odd", "Groups"); // the local pack holds groups only; a command is not one
+        notGroup.runtime = QJsonObject{{"kind", "command"}};
+        const auto rows = libraryRows({&mine, &packs, &notGroup, &a}, {}, {"Groups", "Image", "Image/Filter"});
+        QStringList marked;
+        for (const LibraryRow &row : rows)
+            if (!row.category && row.library)
+                marked << row.key;
+        QCOMPARE(marked, QStringList{"local/fox"});
+    }
     void theModelFollowsTheRegistryAndTheOpenSet() {
         Registry registry;
         nodes::addBuiltinNodeTypes(registry);

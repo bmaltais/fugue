@@ -5,10 +5,12 @@
 // while closed.
 
 #include <QFile>
+#include <QJsonDocument>
 #include <QQuickStyle>
 #include <QtTest>
 
 #include "../canvas/canvas_app.h"
+#include "engine/group_library.h"
 
 using namespace canvas_test;
 
@@ -47,6 +49,17 @@ int firstRow(App &app, bool category) {
 }
 
 bool checked(App &app, const QString &id) { return app.commands.entry(id).value("checked").toBool(); }
+
+// The row of the library list showing `key`, or null; the trash can in a row, or null.
+QQuickItem *rowOfKey(App &app, QQuickItem *list, const QString &key) {
+    const QVariantList rows = rowsOf(app);
+    for (int i = 0; i < rows.size(); ++i)
+        if (rows[i].toMap().value("key").toString() == key) {
+            QMetaObject::invokeMethod(list, "positionViewAtIndex", Q_ARG(int, i), Q_ARG(int, 0)); // ListView.Beginning
+            return rowItem(list, i);
+        }
+    return nullptr;
+}
 
 } // namespace
 
@@ -280,6 +293,200 @@ private slots:
         click(app, named(app, "sidePanelClose"));
         QTRY_VERIFY(!named(app, "sidePanel"));
         QTRY_COMPARE(app.canvas->width(), qreal(app.window->width()));
+    }
+
+    // A workflow with one group saved to the library as local/group (the library is the test's own).
+    static bool saveGroup(App &app) {
+        app.model.select({"prompt"});
+        const QString instance = app.model.makeGroup();
+        app.model.select({instance});
+        return app.model.saveGroupToLibrary();
+    }
+
+    QQuickItem *libraryRow(App &app) {
+        QQuickItem *list = named(app, "nodeLibraryList");
+        QQuickItem *row = nullptr;
+        [&] { QTRY_VERIFY((row = rowOfKey(app, list, "local/group"))); }();
+        return row;
+    }
+
+    // #156: a trash can ends the row of a group of the library and no other row; it asks first.
+    void onlyALibraryGroupsRowHasATrashCan() {
+        App app(load(small));
+        QVERIFY(app.open());
+        QVERIFY2(saveGroup(app), qPrintable(app.model.groupProblem()));
+        QTRY_VERIFY(app.registry.nodeType("local/group"));
+        app.commands.run("panel.nodes");
+        QTRY_VERIFY(named(app, "nodeLibraryList"));
+        app.nodeLibrary.setQuery("o"); // every category on the way to a match is open; many rows
+        QQuickItem *list = named(app, "nodeLibraryList");
+        QQuickItem *mine = libraryRow(app);
+        QVERIFY(item(mine, "nodeLibraryTrash"));
+        int nodes = 0;
+        for (int i = 0; i < rowsOf(app).size(); ++i) {
+            const QVariantMap row = rowsOf(app)[i].toMap();
+            if (row.value("category").toBool())
+                continue;
+            ++nodes;
+            QMetaObject::invokeMethod(list, "positionViewAtIndex", Q_ARG(int, i), Q_ARG(int, 0));
+            QQuickItem *shown = rowItem(list, i);
+            QVERIFY(shown);
+            QCOMPARE(item(shown, "nodeLibraryTrash") != nullptr, row.value("key").toString() == "local/group");
+        }
+        QVERIFY(nodes > 1); // the built-in group nodes show none
+        // The can is a 28px square at the row's far end, clear of the scroll bar.
+        QQuickItem *trash = item(mine, "nodeLibraryTrash");
+        QVERIFY(trash->width() >= 28 && trash->height() >= 28);
+        QQuickItem *bar = item(list, "fugueScrollBar");
+        QVERIFY(bar && bar->isVisible()); // so many rows match "o" that the list scrolls
+        QVERIFY(trash->mapToItem(list, QPointF(trash->width(), 0)).x() <= list->width() - bar->width());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    void theTrashCanAsksAndCancelKeepsTheGroup() {
+        App app(load(small));
+        QVERIFY(app.open());
+        QVERIFY2(saveGroup(app), qPrintable(app.model.groupProblem()));
+        QTRY_VERIFY(app.registry.nodeType("local/group"));
+        app.commands.run("panel.nodes");
+        QTRY_VERIFY(named(app, "nodeLibraryList"));
+        app.nodeLibrary.setQuery("group");
+        const int nodes = app.model.document().graph.nodes.size();
+        QQuickItem *trash = item(libraryRow(app), "nodeLibraryTrash");
+        QVERIFY(trash);
+        click(app, trash);
+        QObject *ask = nullptr;
+        QTRY_VERIFY((ask = app.window->findChild<QObject *>("deleteGroupQuestion")));
+        QTRY_VERIFY(ask->property("visible").toBool());
+        // It names the group and says what happens.
+        QQuickItem *title = item(app.window->contentItem(), "deleteGroupTitle");
+        QVERIFY(title);
+        QVERIFY2(title->property("text").toString().contains("Group"), qPrintable(title->property("text").toString()));
+        QVERIFY(item(app.window->contentItem(), "deleteGroupDetail")->property("text").toString().contains("cannot be undone", Qt::CaseInsensitive));
+        // The click did not add a node, and nothing is deleted yet; Cancel has the focus, Cancel
+        // is before Delete.
+        QCOMPARE(app.model.document().graph.nodes.size(), nodes);
+        QQuickItem *cancel = item(app.window->contentItem(), "deleteGroupCancel");
+        QQuickItem *confirm = item(app.window->contentItem(), "deleteGroupConfirm");
+        QVERIFY(cancel && confirm);
+        QTRY_VERIFY(cancel->hasActiveFocus());
+        QVERIFY(cancel->mapToScene(QPointF(0, 0)).x() < confirm->mapToScene(QPointF(0, 0)).x());
+        app.key(Qt::Key_Return); // Enter is Cancel
+        QTRY_VERIFY(!ask->property("visible").toBool());
+        QVERIFY(QFileInfo(fugue::libraryDir() + "/group/node.json").isFile());
+        QVERIFY(app.registry.nodeType("local/group"));
+        // Escape cancels too.
+        click(app, item(libraryRow(app), "nodeLibraryTrash"));
+        QTRY_VERIFY(ask->property("visible").toBool());
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!ask->property("visible").toBool());
+        QVERIFY(QFileInfo(fugue::libraryDir() + "/group/node.json").isFile());
+        QCOMPARE(app.model.document().graph.nodes.size(), nodes);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    void deleteRemovesTheGroupAtOnceAndTheOpenWorkflowKeepsItsCopy() {
+        App app(load(small));
+        QVERIFY(app.open());
+        QVERIFY2(saveGroup(app), qPrintable(app.model.groupProblem()));
+        QTRY_VERIFY(app.registry.nodeType("local/group"));
+        app.commands.run("panel.nodes");
+        QTRY_VERIFY(named(app, "nodeLibraryList"));
+        app.nodeLibrary.setQuery("group");
+        const fugue::Document before = app.model.document();
+        QVERIFY2(before.groups.size() == 1, qPrintable(QString::number(before.groups.size())));
+        const QString embedded = before.groups.firstKey();
+        click(app, item(libraryRow(app), "nodeLibraryTrash"));
+        QObject *ask = nullptr;
+        QTRY_VERIFY((ask = app.window->findChild<QObject *>("deleteGroupQuestion")) && ask->property("visible").toBool());
+        QQuickItem *confirm = item(app.window->contentItem(), "deleteGroupConfirm");
+        QTest::qWait(100);
+        click(app, confirm);
+        QTRY_VERIFY(!ask->property("visible").toBool());
+        // Gone from disk, the registry, the panel and node search, with a notice.
+        QVERIFY(!QFileInfo(fugue::libraryDir() + "/group").exists());
+        QTRY_VERIFY(!app.registry.nodeType("local/group"));
+        QTRY_VERIFY(!rowOfKey(app, named(app, "nodeLibraryList"), "local/group"));
+        for (const QVariant &row : rowsOf(app))
+            QVERIFY(row.toMap().value("key").toString() != "local/group");
+        QVERIFY2(app.model.groupNotice().contains("Deleted"), qPrintable(app.model.groupNotice()));
+        QCOMPARE(app.model.groupProblem(), QString());
+        app.model.search()->openAt(0, 0);
+        app.model.search()->setQuery("group");
+        for (int i = 0; i < app.model.search()->results()->rowCount(); ++i)
+            QVERIFY(app.model.search()->results()->data(app.model.search()->results()->index(i), fugue::SearchResults::TypeId).toString()
+                    != "local/group");
+        app.model.search()->close();
+        // The open workflow keeps the definition it embeds, and still compiles to the same thing.
+        QVERIFY(app.model.document().group(embedded));
+        const fugue::Result<fugue::Document> again = fugue::Document::load(QJsonDocument(app.model.document().toJson()).toJson());
+        QVERIFY(again.ok());
+        QVERIFY(again->group(embedded));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // The can is reached by Tab-focus and Enter, and a drag that starts on it takes nothing out.
+    void theTrashCanIsKeyboardReachableAndNotADragHandle() {
+        App app(load(small));
+        QVERIFY(app.open());
+        QVERIFY2(saveGroup(app), qPrintable(app.model.groupProblem()));
+        QTRY_VERIFY(app.registry.nodeType("local/group"));
+        app.commands.run("panel.nodes");
+        QTRY_VERIFY(named(app, "nodeLibraryList"));
+        app.nodeLibrary.setQuery("group");
+        QQuickItem *trash = item(libraryRow(app), "nodeLibraryTrash");
+        QVERIFY(trash->activeFocusOnTab());
+        const int nodes = app.model.document().graph.nodes.size();
+        // A drag from the can onto the canvas adds nothing, and asks nothing.
+        const QPoint from = center(trash);
+        QTest::mousePress(app.window, Qt::LeftButton, {}, from);
+        for (int i = 1; i <= 8; ++i)
+            QTest::mouseMove(app.window, from + QPoint(i * 60, 0));
+        QTest::mouseRelease(app.window, Qt::LeftButton, {}, from + QPoint(480, 0));
+        settle();
+        QCOMPARE(app.model.document().graph.nodes.size(), nodes);
+        QObject *ask = app.window->findChild<QObject *>("deleteGroupQuestion");
+        QVERIFY(!ask || !ask->property("visible").toBool());
+        // Focus and Enter ask; Delete on the row does too.
+        trash = item(libraryRow(app), "nodeLibraryTrash");
+        trash->forceActiveFocus();
+        app.key(Qt::Key_Return);
+        QTRY_VERIFY((ask = app.window->findChild<QObject *>("deleteGroupQuestion")) && ask->property("visible").toBool());
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!ask->property("visible").toBool());
+        QQuickItem *list = named(app, "nodeLibraryList");
+        const QVariantList rows = rowsOf(app);
+        for (int i = 0; i < rows.size(); ++i)
+            if (rows[i].toMap().value("key").toString() == "local/group")
+                list->setProperty("currentIndex", i);
+        list->forceActiveFocus();
+        app.key(Qt::Key_Delete);
+        QTRY_VERIFY(ask->property("visible").toBool());
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!ask->property("visible").toBool());
+        QVERIFY(QFileInfo(fugue::libraryDir() + "/group/node.json").isFile());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // Not a check: with FUGUE_SHOT_DIR set, saves the panel with a library group and the question.
+    void savesTheLibraryDeleteShots() {
+        const QByteArray dir = qgetenv("FUGUE_SHOT_DIR");
+        if (dir.isEmpty())
+            QSKIP("set FUGUE_SHOT_DIR to save the pictures");
+        App app(load(small));
+        QVERIFY(app.open());
+        QVERIFY2(saveGroup(app), qPrintable(app.model.groupProblem()));
+        QTRY_VERIFY(app.registry.nodeType("local/group"));
+        app.commands.run("panel.nodes");
+        QTRY_VERIFY(named(app, "nodeLibraryList"));
+        app.nodeLibrary.setQuery("group");
+        QTest::qWait(300);
+        test_support::grab(app.window).save(QString::fromLocal8Bit(dir) + "/library-delete-panel.png");
+        click(app, item(libraryRow(app), "nodeLibraryTrash"));
+        QObject *ask = nullptr;
+        QTRY_VERIFY((ask = app.window->findChild<QObject *>("deleteGroupQuestion")) && ask->property("visible").toBool());
+        QTest::qWait(400);
+        test_support::grab(app.window).save(QString::fromLocal8Bit(dir) + "/library-delete-question.png");
     }
 
     static int SidePanelsMin() { return fugue::SidePanels::kMinWidth; }
