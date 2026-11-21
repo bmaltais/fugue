@@ -44,6 +44,18 @@ _Avoid_: tensor type, blob type
 The value an Image, Video or Audio port carries. It can stand for a file, a decoded form, or both; video is always file-backed.
 _Avoid_: buffer, blob
 
+**Mask**:
+A one-channel Image where 1 is the part to change and 0 the part to keep. Not its own port type; a mask port is marked with the role `mask` and drawn hollow.
+_Avoid_: selection, alpha (a picture's transparency only becomes a mask through Load Image), matte
+
+**Inpaint**:
+Redraw the masked part of a picture and keep the rest. Outpaint is inpainting a border Pad added. An inpaint model takes the mask itself; any other model is held to the rest of the picture at every step (masked sampling).
+_Avoid_: fill (Fill Masked is the pre-fill under a mask), repaint
+
+**Stitch handle**:
+The value Crop to Mask gives Stitch: the original picture, its mask, the box that was cut out and the size it was redrawn at. A data type, `fugue/stitch`.
+_Avoid_: stitcher, crop info
+
 **Graph**:
 The nodes of a workflow with their inputs and links, containing no layout.
 _Avoid_: pipeline, flow
