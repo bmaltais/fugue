@@ -136,6 +136,7 @@ public:
         Notice,        // why the node cannot run now and how to fix it (8.5), from a check
         UpdateAvailable, // a group whose library version is newer: that version (5.3), else empty
         GroupSize,       // a group instance: how many nodes its definition holds (its caption row), else 0
+        NewerMajor,      // a node running on an older installed major: the newest version it can move to (3.6, #118), else empty
     };
 
     explicit NodeList(CanvasModel *canvas);
@@ -350,6 +351,17 @@ public:
     Q_INVOKABLE bool updateGroupInstance(const QString &node);
     // The group.update command: groupUpdateAsked(groupUpdate(selected)) for the window to show.
     Q_INVOKABLE void requestGroupUpdate();
+    // A node that runs on an older major of its type while a newer one is installed (3.6, #90):
+    // the newest version it can move to, else empty. Never a group instance (it has its update).
+    Q_INVOKABLE QString newerMajor(const QString &node) const;
+    // What moving the node would change: {name, from, to, addedInputs, removedInputs,
+    // addedOutputs, removedOutputs}; empty when there is no newer major.
+    Q_INVOKABLE QVariantMap majorMove(const QString &node) const;
+    // Rewrites the node's version to the newest one (values and links stay, the compiler flags
+    // what the new version lacks). One undo step.
+    Q_INVOKABLE bool moveToNewerMajor(const QString &node);
+    // The node.move-version command: nodeMoveAsked(majorMove(selected)) for the window to show.
+    Q_INVOKABLE void requestMajorMove();
     // Where the library is (tests point it elsewhere).
     void setLibraryDir(const QString &dir) { m_libraryDir = dir; }
     QString groupNotice() const { return m_groupNotice; }
@@ -661,6 +673,7 @@ signals:
     void makeGroupAsked(const QStringList &sinks);
     void groupNoticeChanged();
     void groupUpdateAsked(const QString &node, const QVariantMap &changes);
+    void nodeMoveAsked(const QString &node, const QVariantMap &changes);
     // The group.interface command: the window opens the interface editor of the group shown.
     void interfaceEditorRequested();
     // The frame.rename command: the window asks for the title.

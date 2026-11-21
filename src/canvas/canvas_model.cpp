@@ -87,6 +87,7 @@ QVariant NodeList::data(const QModelIndex &index, int role) const {
     case ThumbnailRect: return row.thumbnail;
     case UpdateAvailable: return m_canvas->updateAvailable(row.id);
     case GroupSize: return row.groupSize;
+    case NewerMajor: return m_canvas->newerMajor(row.id);
     default: break;
     }
     const CanvasModel::RunInfo run = m_canvas->m_run.value(row.id);
@@ -117,7 +118,7 @@ QHash<int, QByteArray> NodeList::roleNames() const {
             {Seconds, "seconds"}, {Error, "error"}, {Warnings, "warnings"}, {Thumbnail, "thumbnail"},
             {ThumbnailInfo, "thumbnailInfo"}, {ThumbnailFile, "thumbnailFile"}, {ThumbnailRect, "thumbnailRect"}, {ThumbnailText, "thumbnailText"}, {ThumbnailDim, "thumbnailDim"},
             {Compare, "compare"}, {CompareView, "compareView"}, {Media, "media"},
-            {Notice, "notice"}, {UpdateAvailable, "updateAvailable"}, {GroupSize, "groupSize"}};
+            {Notice, "notice"}, {UpdateAvailable, "updateAvailable"}, {GroupSize, "groupSize"}, {NewerMajor, "newerMajor"}};
 }
 
 LinkList::LinkList(CanvasModel *canvas) : QAbstractListModel(canvas), m_canvas(canvas) {}

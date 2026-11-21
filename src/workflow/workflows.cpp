@@ -627,6 +627,10 @@ bool Workflows::openTemplate(const Template &chosen, bool fromPackage) {
         return false;
     }
     addTab(document.value(), {}, chosen.title, true, true);
+    // Its carried packs stay in the template's folder, so a package (unpacked only while it
+    // opens) offers none; the workflow's requires.packs source is its offer then (#91).
+    if (!fromPackage)
+        m_tabs[size_t(m_current)].carried = chosen.carriedPacks;
     analyze(document.value(), chosen.title);
     return true;
 }
@@ -647,8 +651,17 @@ QVariantList Workflows::templates() const {
         QStringList status;
         if (!missing.isEmpty())
             status << tr("Models missing: %1 of %2").arg(missing.size()).arg(t.models.size());
-        if (!t.neededPacks.isEmpty())
-            status << tr("Packs needed: %1").arg(t.neededPacks.join(QStringLiteral(", ")));
+        // A pack the template carries is installed from it, after a question (#118).
+        QStringList carried, elsewhere;
+        for (const QString &pack : t.neededPacks) {
+            const bool here = std::any_of(t.carriedPacks.cbegin(), t.carriedPacks.cend(),
+                                          [&](const CarriedPack &c) { return c.id == pack; });
+            (here ? carried : elsewhere) << pack;
+        }
+        if (!elsewhere.isEmpty())
+            status << tr("Packs needed: %1").arg(elsewhere.join(QStringLiteral(", ")));
+        if (!carried.isEmpty())
+            status << tr("Carries the pack to install: %1").arg(carried.join(QStringLiteral(", ")));
         out.append(QVariantMap{{"id", t.id},
                                {"title", t.title},
                                {"description", t.description},
@@ -684,8 +697,26 @@ void Workflows::openStartup(const QStringList &paths) {
         openPath(path);
 }
 
+QVariantMap Workflows::carriedPackOffer(const Document &document) const {
+    if (m_current < 0)
+        return {};
+    const QStringList needed = packsNeeded(document, *m_registry);
+    for (const CarriedPack &pack : m_tabs[size_t(m_current)].carried)
+        if (needed.contains(pack.id))
+            return QVariantMap{{"id", pack.id},
+                               {"source", pack.folder},
+                               {"ref", QString()},
+                               {"version", pack.version},
+                               {"text", tr("Install %1 %2…").arg(pack.id, pack.version)}};
+    return {};
+}
+
 QString Workflows::missingNotice(const Document &document, const QString &title, DownloadOffer *offer) const {
     QStringList lines;
+    const QVariantMap carried = carriedPackOffer(document);
+    if (!carried.isEmpty())
+        lines << tr("%1 carries the pack %2 %3, which its nodes need. Installing it asks first, and the pack is not trusted until you allow it.")
+                     .arg(title, carried.value("id").toString(), carried.value("version").toString());
     const QStringList missing = missingTypes(document, *m_registry);
     if (!missing.isEmpty())
         lines << tr("%1 uses nodes that are not installed (%2). They open as placeholders and keep their inputs.")
@@ -708,9 +739,9 @@ QString Workflows::missingNotice(const Document &document, const QString &title,
         lines << tr("%1 needs models that are not in the model folders: %2.").arg(title, models.join(QStringLiteral("; ")));
     if (offer) {
         // The first missing pack the workflow says where to get (4.3).
-        offer->pack.clear();
+        offer->pack = carried;
         const QJsonObject packs = document.requirements.value(QStringLiteral("packs")).toObject();
-        for (const QString &type : missing) {
+        for (const QString &type : carried.isEmpty() ? missing : QStringList()) {
             const QString pack = type.section(QLatin1Char('/'), 0, 0);
             const QJsonObject entry = packs.value(pack).toObject();
             if (entry.value(QStringLiteral("source")).toString().isEmpty() || !m_registry->packVersion(pack).isEmpty())

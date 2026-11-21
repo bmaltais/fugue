@@ -322,7 +322,7 @@ A workflow records each node's type id and the version it was made with. On open
 | --- | --- |
 | same major, same or newer minor | Loads normally. |
 | same major, older minor | Loads; inputs the installed version lacks are kept and flagged. |
-| different major, that major installed | The node runs on that major (its newest installed minor) and is offered the newer major: compiling gives the warning `node_newer_major`, never a block. Moving to the newer major rewrites the node's `version`; the person reviews what changed first, and an agent moves by editing the file. |
+| different major, that major installed | The node runs on that major (its newest installed minor) and is offered the newer major: compiling gives the warning `node_newer_major`, never a block. Moving to the newer major rewrites the node's `version`; the person reviews what changed first, and an agent moves by editing the file. On the canvas the node shows a chip "Move to <version>" (and the Node menu has "Move to newer version…"); either asks first, listing the inputs and outputs that come and go, and moving is one undo step (#118). |
 | different major, that major not installed | The node opens in a "needs review" state that shows what changed. It does not run until the user accepts; compiling reports `node_version_mismatch`. Accepting rewrites the node's `version` to the installed one, which is also how an agent accepts: by editing the file. |
 | type missing | A placeholder that keeps its inputs and links, so saving loses nothing. |
 
@@ -894,6 +894,10 @@ holding that node's `node.json`.
   came from (and the commit a ref resolved to), so `update` can fetch it again. The `.git`
   folder is not kept. A pack is checked in a staging folder first and put in place only when
   it loads and the person agreed; a refusal or a failure leaves no half-installed pack.
+- A template may carry the exact pack it needs as `packs/<id>/` in its folder ([11.10](#1110-templates)). The window
+  offers it from the banner and the CLI names `fugue pack add <that folder>`; it is installed by
+  this same question and trusted by the same one ([6.7](#67-trust)), never silently, and what
+  ships with Fugue does not matter. Installing beside another major needs no replace (above).
 - The prompt shows the pack, its version and source, the runtime kinds of its nodes and what
   they declare ([6.3](#63-the-needs-block)). Installing does not trust: `fugue pack trust <id>`
   or the first run does ([6.7](#67-trust)).
@@ -1855,6 +1859,14 @@ list`, and copied out by opening one or by `fugue workflow new <file> --template
   a preview (`preview.webp`, `.png` or `.jpg`) and `inputs/`, the sample pictures its Load Image
   nodes name as `inputs/<name>`. A root of templates may hold `categories.json`, the order and
   titles of its categories. Nothing indexes the templates: a root's folders are its templates.
+- A template folder may also hold `packs/<id>/`, the exact pack its nodes need (a pack folder,
+  [6.4](#64-packjson)), so it runs whatever Fugue ships. It is offered, never
+  installed on its own: the banner of the opened template says it carries the pack and its button
+  goes through the install-and-trust questions of [6.6](#66-installing) and [6.7](#67-trust); a card
+  says "Carries the pack to install"; `fugue template list` gives `carried_packs` and `fugue
+  workflow new --template` names the `fugue pack add` to run. The workflow's `requires.packs`
+  stays the record of the pack's version and where else to get it (4.3); a carried pack of another
+  version than that record is a problem of the bundled templates. A shared package carries none.
 - What a template needs is read from its workflow, not written again: its models (handles, with
   each `source` in `requires.models`) and the node versions it was made with. A template whose
   built-in nodes this Fugue lacks, or has at another major or an older minor ([3.6](#36-versions)),

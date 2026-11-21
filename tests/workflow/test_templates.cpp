@@ -97,6 +97,18 @@ QQuickItem *item(QQuickItem *from, const QString &name) {
     return nullptr;
 }
 
+// Why the bundled templates (the `templates` submodule) cannot be tested, or empty when they
+// are there: the folder is missing or empty (the submodule was never initialised) or has no
+// categories.json (an old checkout). The same advice both times.
+QString bundledProblem(const QString &root) {
+    const QString fix = QStringLiteral("run: git submodule update --init templates");
+    if (!QFileInfo(root).isDir() || QDir(root).isEmpty(QDir::AllEntries | QDir::NoDotAndDotDot))
+        return QStringLiteral("the templates submodule is empty (%1); %2").arg(root, fix);
+    if (!QFileInfo(root + "/categories.json").isFile())
+        return QStringLiteral("the templates submodule is stale, it has no categories.json (%1); %2").arg(root, fix);
+    return {};
+}
+
 struct Fixture {
     QTemporaryDir bundled, own;
     Registry registry;
@@ -191,6 +203,120 @@ private slots:
         QCOMPARE(ids(listed), (QStringList{"packed", "older"}));
         QCOMPARE(listed.at(0).neededPacks, QStringList{"io.example.tools"});
         QVERIFY(f.library().problems().isEmpty());
+    }
+
+    // 11.10, #118: a template folder may carry the exact pack it needs as packs/<id>/. It is
+    // listed as carried (the offer comes from it), and a carried pack that is not what the
+    // workflow records, or is not named for its id, is a problem of the bundled templates.
+    void aTemplateListsThePacksItCarries() {
+        Fixture f;
+        const QJsonObject recorded{{"packs", QJsonObject{{"io.example.tools", QJsonObject{{"version", "1.2.0"}, {"source", "https://example.com/tools"}}}}}};
+        makeTemplate(f.bundled.filePath("carrier"), {{"title", "Carrier"}},
+                     workflow({{"p", node("io.example.tools/sharpen", {}, "1.0.0")}}, recorded));
+        writeJson(f.bundled.filePath("carrier/packs/io.example.tools/pack.json"),
+                  {{"manifest", 1}, {"id", "io.example.tools"}, {"version", "1.2.0"}});
+        makeTemplate(f.bundled.filePath("plain"), {{"title", "Plain"}});
+        QVERIFY(f.library().problems().isEmpty());
+
+        QVERIFY(f.library().find("carrier"));
+        const Template carrier = *f.library().find("carrier");
+        QCOMPARE(carrier.neededPacks, QStringList{"io.example.tools"}); // not installed here
+        QCOMPARE(carrier.carriedPacks.size(), 1);
+        QCOMPARE(carrier.carriedPacks.first().id, QStringLiteral("io.example.tools"));
+        QCOMPARE(carrier.carriedPacks.first().version, QStringLiteral("1.2.0"));
+        QCOMPARE(carrier.carriedPacks.first().folder, f.bundled.filePath("carrier/packs/io.example.tools"));
+        QVERIFY(f.library().find("plain")->carriedPacks.isEmpty());
+
+        // A version other than the record, a folder not named for its id, a pack.json that is not one.
+        writeJson(f.bundled.filePath("carrier/packs/io.example.tools/pack.json"),
+                  {{"manifest", 1}, {"id", "io.example.tools"}, {"version", "1.3.0"}});
+        writeJson(f.bundled.filePath("carrier/packs/other/pack.json"), {{"manifest", 1}, {"id", "io.example.else"}, {"version", "1.0.0"}});
+        writeFile(f.bundled.filePath("carrier/packs/broken/pack.json"), "{ not json");
+        QStringList messages;
+        for (const Error &error : f.library().problems())
+            messages << error.message;
+        const QString all = messages.join('\n');
+        QVERIFY2(all.contains("records 1.2.0"), qPrintable(all));
+        QVERIFY2(all.contains("packs/other must hold the pack other"), qPrintable(all));
+        QVERIFY2(all.contains("broken"), qPrintable(all));
+        QCOMPARE(messages.size(), 3);
+    }
+
+    // The window offers the carried pack from the template's own folder through the banner (never
+    // installs it: the Packs page asks), also when another major of the pack is installed beside
+    // it; the offer goes once the pack is there. A pack the template does not carry has no offer.
+    void theBannerOffersThePackTheTemplateCarries() {
+        const auto sharpen = [](const QString &version) {
+            return QJsonObject{{"manifest", 1}, {"id", "io.example.tools/sharpen"}, {"version", version}, {"name", "Sharpen"},
+                               {"runtime", QJsonObject{{"kind", "command"}, {"entry", "./run.sh"}}},
+                               {"inputs", QJsonArray()}, {"outputs", QJsonArray()}};
+        };
+        Fixture f;
+        const QJsonObject recorded{{"packs", QJsonObject{{"io.example.tools", QJsonObject{{"version", "1.2.0"},
+                                                                                        {"source", "https://example.com/tools"}}}}}};
+        makeTemplate(f.bundled.filePath("carrier"), {{"title", "Carrier"}},
+                     workflow({{"p", node("io.example.tools/sharpen", {}, "1.0.0")}}, recorded));
+        writeJson(f.bundled.filePath("carrier/packs/io.example.tools/pack.json"),
+                  {{"manifest", 1}, {"id", "io.example.tools"}, {"version", "1.2.0"}});
+        makeTemplate(f.bundled.filePath("bare"), {{"title", "Bare"}},
+                     workflow({{"p", node("io.example.tools/sharpen", {}, "1.0.0")}}, recorded));
+        CanvasModel canvas(&f.registry);
+        CommandRegistry commands;
+        QTemporaryDir state;
+        WorkflowLocations locations;
+        locations.recoveryDir = state.filePath("recovery");
+        locations.trustPath = state.filePath("trust.json");
+        locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        Workflows workflows(&canvas, &f.registry, &commands, locations);
+
+        // Not installed: the offer names the folder the template holds, with no ref.
+        QVERIFY(workflows.openTemplateById("carrier"));
+        QVariantMap offer = workflows.packOffer();
+        QCOMPARE(offer.value("id").toString(), QStringLiteral("io.example.tools"));
+        QCOMPARE(offer.value("source").toString(), f.bundled.filePath("carrier/packs/io.example.tools"));
+        QCOMPARE(offer.value("ref").toString(), QString());
+        QVERIFY2(workflows.notice().contains("carries the pack io.example.tools 1.2.0"), qPrintable(workflows.notice()));
+        QSignalSpy install(&workflows, &Workflows::packInstallRequested);
+        workflows.installPack();
+        QCOMPARE(install.size(), 1);
+        QCOMPARE(install.first().at(0).toString(), f.bundled.filePath("carrier/packs/io.example.tools"));
+        QCOMPARE(install.first().at(1).toString(), QString());
+
+        // Another major installed beside it does not satisfy the node's recorded major.
+        QVERIFY(f.registry.addManifest(sharpen("2.0.0")).isEmpty());
+        f.registry.setPackVersion("io.example.tools", "2.0.0");
+        workflows.refreshNodeTypes();
+        QCOMPARE(workflows.packOffer().value("id").toString(), QStringLiteral("io.example.tools"));
+
+        // A template that carries nothing offers the recorded source, as before (#91).
+        QVERIFY(workflows.openTemplateById("bare"));
+        QVERIFY(workflows.packOffer().isEmpty()); // installed at another major: needs review, not missing
+    }
+
+    void theBannerOffersNothingOnceTheCarriedPackIsInstalled() {
+        Fixture f;
+        makeTemplate(f.bundled.filePath("carrier"), {{"title", "Carrier"}},
+                     workflow({{"p", node("io.example.tools/sharpen", {}, "1.0.0")}}));
+        writeJson(f.bundled.filePath("carrier/packs/io.example.tools/pack.json"),
+                  {{"manifest", 1}, {"id", "io.example.tools"}, {"version", "1.0.0"}});
+        CanvasModel canvas(&f.registry);
+        CommandRegistry commands;
+        QTemporaryDir state;
+        WorkflowLocations locations;
+        locations.recoveryDir = state.filePath("recovery");
+        locations.trustPath = state.filePath("trust.json");
+        locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        Workflows workflows(&canvas, &f.registry, &commands, locations);
+        QVERIFY(workflows.openTemplateById("carrier"));
+        QVERIFY(!workflows.packOffer().isEmpty());
+        QVERIFY(f.registry.addManifest(QJsonObject{{"manifest", 1}, {"id", "io.example.tools/sharpen"}, {"version", "1.0.0"},
+                                                   {"name", "Sharpen"},
+                                                   {"runtime", QJsonObject{{"kind", "command"}, {"entry", "./run.sh"}}},
+                                                   {"inputs", QJsonArray()}, {"outputs", QJsonArray()}}).isEmpty());
+        f.registry.setPackVersion("io.example.tools", "1.0.0");
+        workflows.refreshNodeTypes();
+        QVERIFY(workflows.packOffer().isEmpty());
+        QVERIFY2(!workflows.notice().contains("carries"), qPrintable(workflows.notice()));
     }
 
     void theModelsItNeedsComeFromItsWorkflow() {
@@ -582,8 +708,7 @@ private slots:
     // and each model it names has a source and a size.
     void theBundledTemplatesAreWholeAndCompile() {
         const QString root = QStringLiteral(FUGUE_SOURCE_DIR "/templates");
-        QVERIFY2(QFileInfo(root + "/categories.json").isFile(),
-                 "the templates submodule is not checked out: git submodule update --init templates");
+        QVERIFY2(bundledProblem(root).isEmpty(), qPrintable(bundledProblem(root)));
         Fixture f;
         const TemplateLibrary library({{root, false}}, &f.registry);
         const Errors problems = library.problems();
@@ -613,6 +738,46 @@ private slots:
             if (document.graph.nodes.contains("generate"))
                 QCOMPARE(document.graph.nodes.value("generate").inputs.value("width").kind(), InputValue::Kind::Link);
         }
+    }
+
+    // The guard for the submodule pointer: the templates Fugue ships with are the ones it expects
+    // (the video and upscale ones came with a later pointer; a checkout left on an older one, or
+    // an empty folder, must fail here with the fix, not later with a puzzling count).
+    void theBundledTemplatesAreTheOnesFugueExpects() {
+        const QString root = QStringLiteral(FUGUE_SOURCE_DIR "/templates");
+        QVERIFY2(bundledProblem(root).isEmpty(), qPrintable(bundledProblem(root)));
+        const QString fix = QStringLiteral("; the templates submodule is stale, run: git submodule update --init templates");
+
+        const QJsonArray listedCategories = QJsonDocument::fromJson(readFile(root + "/categories.json"))
+                                                .object().value("categories").toArray();
+        QStringList categories;
+        for (const QJsonValue category : listedCategories)
+            categories << category.toObject().value("id").toString();
+        for (const char *wanted : {"video", "upscale"})
+            QVERIFY2(categories.contains(QLatin1String(wanted)),
+                     qPrintable(QStringLiteral("categories.json lacks the category %1").arg(wanted) + fix));
+        for (const QJsonValue category : listedCategories)
+            QVERIFY2(!category.toObject().value("title").toString().isEmpty(),
+                     qPrintable(category.toObject().value("id").toString() + " has no title"));
+
+        Fixture f;
+        const TemplateLibrary library({{root, false}}, &f.registry);
+        QStringList found;
+        for (const Template &t : library.list()) {
+            found << t.id;
+            // Every category a template uses is one categories.json names.
+            QVERIFY2(categories.contains(t.category),
+                     qPrintable(QStringLiteral("%1 is in the category \"%2\", which categories.json lacks").arg(t.id, t.category)));
+        }
+        for (const char *wanted : {"text-to-video", "image-to-video", "image-chain-to-video", "image-upscale", "video-upscale"})
+            QVERIFY2(found.contains(QLatin1String(wanted)),
+                     qPrintable(QStringLiteral("the template %1 is not here").arg(wanted) + fix));
+        // The two categories hold what they are for.
+        QCOMPARE(library.find("text-to-video")->category, QStringLiteral("video"));
+        QCOMPARE(library.find("image-upscale")->category, QStringLiteral("upscale"));
+        QCOMPARE(library.find("video-upscale")->category, QStringLiteral("upscale"));
+        QCOMPARE(library.find("image-upscale")->categoryTitle, QStringLiteral("Upscaling"));
+        QCOMPARE(library.find("text-to-video")->categoryTitle, QStringLiteral("Video"));
     }
 };
 

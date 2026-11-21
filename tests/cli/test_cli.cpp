@@ -17,6 +17,7 @@
 #include <QSemaphore>
 #include <QTemporaryDir>
 #include <QThread>
+#include <QScopeGuard>
 #include <QtTest>
 
 #include "../engine/fake_http.h"
@@ -567,6 +568,31 @@ private slots:
         QCOMPARE(o.exitCode, 1);
         QCOMPARE(o.firstCode(), QString("usage"));
         QVERIFY(!QFile::exists(m_dir.filePath("other.fugue")));
+    }
+
+    // #118: a template that carries the pack its nodes need says so; the CLI names the commands
+    // that install it (with the usual question) and never installs it itself.
+    void aTemplateThatCarriesAPackSaysHowToInstallIt() {
+        const QScopeGuard tidy([this] { QDir(m_dir.filePath("templates/carrier")).removeRecursively(); }); // others count templates
+        write(m_dir.filePath("templates/carrier/template.json"), R"({"title": "Carrier"})");
+        write(m_dir.filePath("templates/carrier/workflow.fugue"),
+              R"({"fugue": 1, "graph": {"nodes": {"c": {"type": "io.example.tools/sharpen", "version": "1.0.0"}}}})");
+        write(m_dir.filePath("templates/carrier/packs/io.example.tools/pack.json"),
+              R"({"manifest": 1, "id": "io.example.tools", "version": "1.0.0"})");
+        Outcome o = fugue({"template", "list", "--json"});
+        QCOMPARE(o.exitCode, 0);
+        const QJsonObject listed = o.json().value("data").toObject().value("templates").toArray().at(0).toObject();
+        QCOMPARE(listed.value("needed_packs").toArray().at(0).toString(), QString("io.example.tools"));
+        const QJsonObject carried = listed.value("carried_packs").toArray().at(0).toObject();
+        QCOMPARE(carried.value("id").toString(), QString("io.example.tools"));
+        QCOMPARE(carried.value("version").toString(), QString("1.0.0"));
+        QVERIFY(QFileInfo(carried.value("folder").toString() + "/pack.json").isFile());
+
+        o = fugue({"workflow", "new", m_dir.filePath("carried.fugue"), "--template", "carrier", "--json"});
+        QCOMPARE(o.exitCode, 0);
+        QCOMPARE(o.json().value("data").toObject().value("carried_packs").toArray().size(), 1);
+        o = fugue({"workflow", "new", m_dir.filePath("carried2.fugue"), "--template", "carrier"});
+        QVERIFY2(o.out.contains("fugue pack add"), qPrintable(o.out));
     }
 
     // #89: the models a workflow or template names and lacks, downloaded into the model folder,

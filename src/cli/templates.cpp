@@ -12,6 +12,18 @@
 
 namespace fugue::cli {
 
+namespace {
+
+// The packs the template folder carries (11.10), as data.
+QJsonArray carriedAsJson(const Template &t) {
+    QJsonArray out;
+    for (const CarriedPack &pack : t.carriedPacks)
+        out.append(QJsonObject{{"id", pack.id}, {"version", pack.version}, {"folder", pack.folder}});
+    return out;
+}
+
+} // namespace
+
 Reply templateList(const Command &, Context &context) {
     const TemplateLibrary library(TemplateLibrary::standardRoots(), &context.registry);
     FileHashes hashes(FileHashes::defaultPath());
@@ -44,7 +56,8 @@ Reply templateList(const Command &, Context &context) {
                                   {"workflow", t.workflow},
                                   {"preview", t.preview},
                                   {"models", needs},
-                                  {"needed_packs", QJsonArray::fromStringList(t.neededPacks)}});
+                                  {"needed_packs", QJsonArray::fromStringList(t.neededPacks)},
+                                  {"carried_packs", carriedAsJson(t)}});
         QString line = QStringLiteral("%1  %2").arg(t.id, t.title);
         if (missing)
             line += QStringLiteral("  (%1 of %2 models missing)").arg(missing).arg(t.models.size());
@@ -89,7 +102,19 @@ Reply workflowFromTemplate(const Command &command, Context &context) {
                      .arg(model.handle.value("name").toString(),
                           model.source.isEmpty() ? QStringLiteral("its maker") : model.source, model.folder);
     }
-    return Reply::success(QJsonObject{{"file", path}, {"template", chosen->id}, {"missing_models", missing}},
+    // A pack it carries that is not installed: never installed from here without the question
+    // `fugue pack add` asks (6.6), so say how.
+    const QStringList needed = chosen->neededPacks;
+    QJsonArray carried;
+    for (const CarriedPack &pack : chosen->carriedPacks) {
+        if (!needed.contains(pack.id))
+            continue;
+        carried.append(QJsonObject{{"id", pack.id}, {"version", pack.version}, {"folder", pack.folder}});
+        lines << QStringLiteral("The template carries the pack %1 %2, which its nodes need: run `fugue pack add %3`, then `fugue pack trust %1`.")
+                     .arg(pack.id, pack.version, pack.folder);
+    }
+    return Reply::success(QJsonObject{{"file", path}, {"template", chosen->id}, {"missing_models", missing},
+                                      {"carried_packs", carried}},
                           lines.join('\n'));
 }
 
