@@ -49,6 +49,7 @@
 #include "engine/model_library.h"
 #include "engine/model_shape.h"
 #include "engine/vips.h"
+#include "nodes/image_cover.h"
 
 namespace fugue::nodes {
 
@@ -378,6 +379,58 @@ Result<QList<MediaHandle>> referencesOf(const Value &conditioning, FileHashes &h
     return references;
 }
 
+// The size and length an image-to-video first frame was encoded for (Text Encode puts it in its
+// descriptor with the picture, the Sampler checks it against its latent).
+LatentMeta clipOf(const QJsonObject &carried) {
+    LatentMeta clip;
+    clip.width = carried.value(QStringLiteral("width")).toInt();
+    clip.height = carried.value(QStringLiteral("height")).toInt();
+    clip.frames = carried.value(QStringLiteral("frames")).toInt();
+    clip.fps = carried.value(QStringLiteral("fps")).toInt();
+    return clip;
+}
+
+// `frame` scaled to cover the clip's size and cut from the middle, as the PNG the helper reads
+// as the first frame (Generate Video makes it the same way).
+Result<QString> firstFrameFile(const MediaHandle &frame, const LatentMeta &clip, const QString &workDir, const QString &input) {
+    if (frame.width() <= 0 || frame.height() <= 0)
+        return makeInputError(QStringLiteral("media_unreadable"), input, QStringLiteral("The first frame has no size."));
+    if (!initVips())
+        return vipsUnavailable();
+    try {
+        return coverToFile(frame, QSize(clip.width, clip.height), QDir(workDir).filePath(QStringLiteral("first-frame.png")));
+    } catch (const vips::VError &error) {
+        Error unreadable = vipsError(error, QStringLiteral("media_unreadable"));
+        unreadable.message = QStringLiteral("Cannot prepare the first frame: %1").arg(unreadable.message);
+        return unreadable;
+    }
+}
+
+// The first frame a conditioning carries, with the clip it was encoded for; none (an invalid
+// handle) for a text-to-video one. It must still be the picture Text Encode had.
+struct CarriedFrame {
+    MediaHandle frame;
+    LatentMeta clip;
+    bool present = false;
+};
+Result<CarriedFrame> firstFrameOf(const Value &conditioning, FileHashes &hashes) {
+    const QJsonObject meta = conditioning.json().toObject().value(QStringLiteral("meta")).toObject();
+    CarriedFrame carried;
+    if (!meta.contains(QStringLiteral("first_frame")))
+        return carried;
+    const Result<MediaHandle> frame = MediaHandle::fromJson(meta.value(QStringLiteral("first_frame")).toObject());
+    if (!frame)
+        return frame.errors();
+    if (hashes.hash(frame->path()) != frame->hash())
+        return makeInputError(QStringLiteral("file_not_found"), QStringLiteral("conditioning"),
+                              QStringLiteral("The first frame %1 is gone or changed since Text Encode read it.").arg(frame->path()),
+                              QStringLiteral("Run Text Encode again with the picture as it is now."));
+    carried.frame = frame.value();
+    carried.clip = clipOf(meta.value(QStringLiteral("clip")).toObject());
+    carried.present = true;
+    return carried;
+}
+
 // --- the nodes that only make values ---
 
 class LoadModelsKernel : public NodeKernel {
@@ -524,7 +577,23 @@ public:
                 return sent.errors();
             params.insert(QStringLiteral("ref_images"), sent.value());
         }
-        return job(*files, params, true);
+        JobRequest request = job(*files, params, true);
+        // An image-to-video model makes its start from the first frame in the encode (Wan 2.2 I2V's
+        // c_concat), which needs the size and length of the clip: the Clip input's.
+        if (const Value frame = context.input(QStringLiteral("first_frame")); !frame.isEmpty()) {
+            const Result<LatentMeta> clip = clipInput(context);
+            if (!clip)
+                return clip.errors();
+            const Result<QString> file = firstFrameFile(frame.media(), clip.value(), context.workDir, QStringLiteral("first_frame"));
+            if (!file)
+                return file.errors();
+            request.params.insert(QStringLiteral("width"), clip->width);
+            request.params.insert(QStringLiteral("height"), clip->height);
+            request.params.insert(QStringLiteral("video_frames"), clip->frames);
+            request.params.insert(QStringLiteral("fps"), clip->fps);
+            request.inputs.insert(QStringLiteral("image"), QJsonObject{{"path", file.value()}});
+        }
+        return request;
     }
 
     Result<Values> outputs(const NodeContext &context, const Selection &, const JobResult &result) override {
@@ -532,6 +601,16 @@ public:
         if (!path)
             return path.errors();
         QJsonObject descriptor;
+        // The first frame goes on the conditioning with the clip it was made for, so the Sampler
+        // sends the same ones (Wan 2.2 TI2V starts its sampling from the frame).
+        if (const Value frame = context.input(QStringLiteral("first_frame")); !frame.isEmpty()) {
+            const Result<LatentMeta> clip = clipInput(context);
+            if (!clip)
+                return clip.errors();
+            descriptor.insert(QStringLiteral("first_frame"), frame.media().toJson());
+            descriptor.insert(QStringLiteral("clip"), QJsonObject{{"width", clip->width}, {"height", clip->height},
+                                                                   {"frames", clip->frames}, {"fps", clip->fps}});
+        }
         if (const QList<MediaHandle> references = referencesInput(context); !references.isEmpty()) {
             QJsonArray carried;
             for (const MediaHandle &image : references)
@@ -542,6 +621,21 @@ public:
     }
 
 private:
+    // The clip a first frame is for: an Empty Video Latent (or a sampled video one).
+    static Result<LatentMeta> clipInput(const NodeContext &context) {
+        const Value latent = context.input(QStringLiteral("clip"));
+        if (latent.isEmpty())
+            return makeInputError(QStringLiteral("node_failed"), QStringLiteral("clip"),
+                                  QStringLiteral("A first frame needs the size and length of the clip."),
+                                  QStringLiteral("Wire the Empty Video Latent that the Sampler starts from to Clip."));
+        const LatentMeta clip = LatentMeta::of(latent);
+        if (!clip.isVideo())
+            return makeInputError(QStringLiteral("node_failed"), QStringLiteral("clip"),
+                                  QStringLiteral("This latent is an image: a first frame is for a video."),
+                                  QStringLiteral("Use an Empty Video Latent."));
+        return clip;
+    }
+
     static QList<MediaHandle> referencesInput(const NodeContext &context) {
         QList<MediaHandle> references;
         for (const Value &item : context.input(QStringLiteral("references")).items())
@@ -549,6 +643,10 @@ private:
         return references;
     }
 };
+
+bool sameClip(const LatentMeta &a, const LatentMeta &b) {
+    return a.width == b.width && a.height == b.height && a.frames == b.frames && a.fps == b.fps;
+}
 
 class SamplerKernel : public StageKernel {
 public:
@@ -588,8 +686,24 @@ public:
                 return sent.errors();
             params.insert(QStringLiteral("ref_images"), sent.value());
         }
+        // The first frame of an image-to-video conditioning, for the clip it was encoded for.
+        const Result<CarriedFrame> carried = firstFrameOf(context.input(QStringLiteral("conditioning")), *context.hashes);
+        if (!carried)
+            return carried.errors();
+        if (carried->present && !sameClip(carried->clip, from))
+            return makeInputError(QStringLiteral("node_failed"), QStringLiteral("latent"),
+                                  QStringLiteral("Text Encode made the first frame for a clip of %1 x %2, %3 frames at %4 a second; this latent is %5 x %6, %7 frames at %8.")
+                                      .arg(carried->clip.width).arg(carried->clip.height).arg(carried->clip.frames).arg(carried->clip.fps)
+                                      .arg(from.width).arg(from.height).arg(from.frames).arg(from.fps),
+                                  QStringLiteral("Wire the same Empty Video Latent to Text Encode's Clip and to the Sampler."));
         JobRequest request = job(*files, params, true);
         request.inputs.insert(QStringLiteral("conditioning"), fileOf(context.input(QStringLiteral("conditioning"))));
+        if (carried->present) {
+            const Result<QString> frame = firstFrameFile(carried->frame, from, context.workDir, QStringLiteral("conditioning"));
+            if (!frame)
+                return frame.errors();
+            request.inputs.insert(QStringLiteral("image"), QJsonObject{{"path", frame.value()}});
+        }
         if (!from.empty) { // redrawn from a latent, by the amount denoise sets
             request.inputs.insert(QStringLiteral("init_latent"), fileOf(latent));
             request.params.insert(QStringLiteral("strength"), context.input(QStringLiteral("denoise")).number());

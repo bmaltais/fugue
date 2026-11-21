@@ -29,8 +29,8 @@ QString makePng(const QString &path, int width = 400, int height = 200, const QB
     if (!workflow.isEmpty())
         bytes = pngWithWorkflow(bytes, workflow).value();
     QFile file(path);
-    file.open(QIODevice::WriteOnly);
-    file.write(bytes);
+    if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size())
+        qFatal("cannot write %s", qPrintable(path));
     return path;
 }
 

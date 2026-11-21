@@ -8,9 +8,11 @@
 //
 // A request names an operation and its files:
 //
-//   {"op": "encode",     "conditioning": OUT}                  prompts -> conditioning
+//   {"op": "encode",     "conditioning": OUT,                  prompts -> conditioning; a video
+//                        "image": IN (optional)}               model's "image" is its first frame
 //   {"op": "sample",     "conditioning": IN, "latent": OUT,    conditioning -> latent; with
-//                        "init_latent": IN (optional)}         init_latent, image-to-image from it
+//                        "init_latent": IN (optional),         init_latent, image-to-image from it;
+//                        "image": IN (optional)}               "image" as in encode (video only)
 //   {"op": "decode",     "latent": IN, "image": OUT,           latent -> PNG; for a video model
 //                        "video": OUT}                         "video" is written instead (below)
 //   {"op": "vae_encode", "image": IN, "latent": OUT}           PNG -> latent
@@ -505,6 +507,14 @@ json run(const json &request, Contexts &contexts, const Hooks &hooks = {}) {
     const json params = request.value("params", json::object());
     for (const auto &[key, value] : params.items())
         setOption(options.get(), key, value);
+
+    // A start picture (image-to-video: Wan 2.2 I2V's first frame, which the encode turns into its
+    // conditioning, and Wan 2.2 TI2V's, which the sample reads): "image" of encode and sample.
+    if ((op == "encode" || op == "sample") && request.contains("image")) {
+        if (!video)
+            fail("input_invalid", "a start image is for a video model; an image model starts from a latent (vae_encode, then sample)");
+        check(sd_opt_set_tensor(options.get(), "init_image", loadImage(required(request, "image")).get()), "init_image");
+    }
 
     json outputs = json::array();
     auto setPath = [&](const char *key, const std::string &path) {

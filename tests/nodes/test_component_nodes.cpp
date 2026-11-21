@@ -923,6 +923,111 @@ private slots:
         QCOMPARE(QSize(upright.width(), upright.height()), QSize(192, 320));
     }
 
+    // --- image to video (#130): a first frame, encoded for the clip's size and length ---
+
+    // The first frame is cut to the clip's size and goes as the encode's image; the clip's own
+    // size, length and rate are the generation options, as every stage of the generation sends them.
+    void textEncodeSendsAFirstFrameAtTheClipsSize() {
+        Bench bench;
+        const MediaHandle frame = picture(bench, "start.png", 400, 300);
+        const Result<Values> clip = bench.run(kEmptyVideoLatent, {{"width", Value(320)}, {"height", Value(192)},
+                                                                  {"frames", Value(33)}, {"fps", Value(16)}});
+        QVERIFY(clip);
+        const Result<JobRequest> request =
+            bench.request(kTextEncode, {{"model", Value(bench.loaded(bench.wan()))}, {"prompt", Value("a fox runs")},
+                                        {"first_frame", Value(frame)}, {"clip", clip->value("latent")}});
+        QVERIFY2(request, request ? "" : qPrintable(request.error().message));
+        QCOMPARE(request->params.value("width").toInt(), 320);
+        QCOMPARE(request->params.value("height").toInt(), 192);
+        QCOMPARE(request->params.value("video_frames").toInt(), 33);
+        QCOMPARE(request->params.value("fps").toInt(), 16);
+        const QString sent = request->inputs.value("image").toObject().value("path").toString();
+        QCOMPARE(QFileInfo(sent).absolutePath(), bench.workDir());
+        const vips::VImage png = vips::VImage::new_from_file(sent.toUtf8().constData());
+        QCOMPARE(QSize(png.width(), png.height()), QSize(320, 192));
+    }
+
+    void textToVideoEncodesWithoutAFirstFrame() {
+        Bench bench;
+        const Result<Values> clip = bench.run(kEmptyVideoLatent, {});
+        const Result<JobRequest> request =
+            bench.request(kTextEncode, {{"model", Value(bench.loaded(bench.wan()))}, {"prompt", Value("a fox runs")},
+                                        {"clip", clip->value("latent")}});
+        QVERIFY(request);
+        QVERIFY(!request->inputs.contains("image"));
+        QVERIFY(!request->params.contains("video_frames")); // the clip is the Sampler's and the first frame's
+    }
+
+    void aFirstFrameNeedsAVideoClip() {
+        Bench bench;
+        const MediaHandle frame = picture(bench, "start.png", 320, 192);
+        const QJsonObject model = bench.loaded(bench.wan());
+        const Result<JobRequest> none =
+            bench.request(kTextEncode, {{"model", Value(model)}, {"prompt", Value("x")}, {"first_frame", Value(frame)}});
+        QVERIFY(!none);
+        QCOMPARE(none.error().input, QStringLiteral("clip"));
+        const Result<Values> image = bench.run(kEmptyLatent, {});
+        const Result<JobRequest> asImage = bench.request(
+            kTextEncode, {{"model", Value(model)}, {"prompt", Value("x")}, {"first_frame", Value(frame)}, {"clip", image->value("latent")}});
+        QVERIFY(!asImage);
+        QCOMPARE(asImage.error().input, QStringLiteral("clip"));
+        QVERIFY(asImage.error().hint.contains("Empty Video Latent"));
+    }
+
+    // The frame rides the conditioning to the Sampler (Wan 2.2 TI2V samples from it), which sends the
+    // same picture at the same size; a latent of another clip is said so, not sampled.
+    void theConditioningCarriesTheFirstFrameToTheSampler() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.wan());
+        const MediaHandle frame = picture(bench, "start.png", 400, 300);
+        const Result<Values> clip = bench.run(kEmptyVideoLatent, {{"width", Value(320)}, {"height", Value(192)},
+                                                                  {"frames", Value(33)}, {"fps", Value(16)}});
+        const Values inputs{{"model", Value(model)}, {"prompt", Value("a fox runs")}, {"first_frame", Value(frame)},
+                            {"clip", clip->value("latent")}};
+        const Result<Values> out = bench.outputs(
+            kTextEncode, inputs, JobResult{QJsonObject{{"conditioning", QJsonObject{{"path", bench.workDir() + "/conditioning.bin"}}}}, {}});
+        QVERIFY(out);
+        const QJsonObject meta = out->value("conditioning").json().toObject().value("meta").toObject();
+        QCOMPARE(meta.value("first_frame").toObject(), frame.toJson());
+        QCOMPARE(meta.value("clip").toObject().value("frames").toInt(), 33);
+
+        const Values sampling{{"model", Value(model)}, {"conditioning", out->value("conditioning")}, {"latent", clip->value("latent")},
+                              {"seed", Value(1)}, {"steps", Value(4)}};
+        const Result<JobRequest> sample = bench.request(kSampler, sampling);
+        QVERIFY2(sample, sample ? "" : qPrintable(sample.error().message));
+        const QString sent = sample->inputs.value("image").toObject().value("path").toString();
+        QCOMPARE(QFileInfo(sent).absolutePath(), bench.workDir());
+        const vips::VImage png = vips::VImage::new_from_file(sent.toUtf8().constData());
+        QCOMPARE(QSize(png.width(), png.height()), QSize(320, 192));
+
+        const Result<Values> other = bench.run(kEmptyVideoLatent, {{"width", Value(320)}, {"height", Value(192)}, {"frames", Value(81)}});
+        Values wrong = sampling;
+        wrong.insert("latent", other->value("latent"));
+        const Result<JobRequest> mismatch = bench.request(kSampler, wrong);
+        QVERIFY(!mismatch);
+        QCOMPARE(mismatch.error().input, QStringLiteral("latent"));
+        QVERIFY(mismatch.error().message.contains("33 frames"));
+
+        picture(bench, "start.png", 400, 300, 4); // another picture at the same path
+        const Result<JobRequest> changed = bench.request(kSampler, sampling);
+        QVERIFY(!changed);
+        QCOMPARE(changed.error().code, QStringLiteral("file_not_found"));
+    }
+
+    void aTextToVideoConditioningSendsNoFirstFrame() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.wan());
+        const Result<Values> clip = bench.run(kEmptyVideoLatent, {});
+        const Result<Values> out = bench.outputs(
+            kTextEncode, {{"model", Value(model)}, {"prompt", Value("x")}},
+            JobResult{QJsonObject{{"conditioning", QJsonObject{{"path", bench.workDir() + "/conditioning.bin"}}}}, {}});
+        const Result<JobRequest> sample =
+            bench.request(kSampler, {{"model", Value(model)}, {"conditioning", out->value("conditioning")},
+                                     {"latent", clip->value("latent")}, {"seed", Value(1)}, {"steps", Value(4)}});
+        QVERIFY(sample);
+        QVERIFY(!sample->inputs.contains("image"));
+    }
+
     // --- end to end: the shipped binary, the fake helper (no inference here) ---
 
     // Text to image in stages, run by the helper Fugue starts itself (no providers.json: the

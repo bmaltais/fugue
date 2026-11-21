@@ -3,7 +3,7 @@
   "id": "fugue/text-encode",
   "version": "1.0.0",
   "name": "Text Encode",
-  "description": "Turns a prompt into conditioning for the Sampler, with the model's text encoder, and carries the reference pictures of an edit to it. Kept while only the sampling changes, so a new seed does not encode the prompt again.",
+  "description": "Turns a prompt into conditioning for the Sampler, with the model's text encoder, and carries the reference pictures of an edit, or the first frame of a clip, to it. Kept while only the sampling changes, so a new seed does not encode the prompt again.",
   "category": "Diffusion",
   "keywords": ["prompt", "clip text encode", "conditioning", "negative prompt"],
   "runtime": {"kind": "builtin"},
@@ -14,7 +14,11 @@
     {"name": "negative_prompt", "type": "text", "label": "Negative prompt", "default": "", "widget": "multiline",
      "description": "What the image should not show. Used only when the Sampler's guidance is not 1."},
     {"name": "references", "type": "image", "label": "References", "list": true, "optional": true,
-     "description": "Pictures to edit or take from, for a model that edits (FLUX.2 Klein, Qwen-Image Edit). Each goes to the model at most a megapixel; Resize to Megapixels sets it."}
+     "description": "Pictures to edit or take from, for a model that edits (FLUX.2 Klein, Qwen-Image Edit). Each goes to the model at most a megapixel; Resize to Megapixels sets it."},
+    {"name": "first_frame", "type": "image", "label": "First frame", "optional": true,
+     "description": "The picture a clip starts from, for an image-to-video model (Wan 2.2 I2V or TI2V). It is scaled to cover the size of Clip and cut from the middle."},
+    {"name": "clip", "type": "fugue/latent", "label": "Clip", "optional": true,
+     "description": "The Empty Video Latent the clip is made from: with a first frame, the size, length and rate the picture is encoded for. Wire the same one to the Sampler."}
   ],
   "outputs": [
     {"name": "conditioning", "type": "fugue/conditioning", "label": "Conditioning"}

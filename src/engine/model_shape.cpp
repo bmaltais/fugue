@@ -516,6 +516,8 @@ ModelShapes &ModelShapes::shared() {
 }
 
 std::optional<ModelShape> ModelShapes::of(const QString &path) {
+    if (path.isEmpty()) // a checkpoint has no separate diffusion model: nothing to read
+        return std::nullopt;
     const QFileInfo info(path);
     const qint64 size = info.size();
     const qint64 modified = info.lastModified().toMSecsSinceEpoch();
