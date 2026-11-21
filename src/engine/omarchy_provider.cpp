@@ -450,6 +450,11 @@ void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> do
         QList<OfferedModel> models;
         QList<bool> edits;
         QStringList kinds; // each row's kind: image, video, music or text
+        // Models a server offers for a mode its row's kind does not name (supported_modes of its
+        // capabilities): a video row that also serves img_gen, an image row that also serves vid_gen.
+        QList<OfferedModel> extraImages;
+        QList<bool> extraImageEdits;
+        QList<OfferedModel> extraVideos;
         int waiting = 0;
         std::function<void(const Result<Discovery> &)> done;
     };
@@ -477,6 +482,12 @@ void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> do
                     edit.models.append(pending->models.at(i));
             }
         }
+        for (qsizetype i = 0; i < pending->extraImages.size(); ++i) {
+            generate.models.append(pending->extraImages.at(i));
+            if (pending->extraImageEdits.at(i))
+                edit.models.append(pending->extraImages.at(i));
+        }
+        video.models.append(pending->extraVideos);
         for (const CapabilityOffer &offer : {generate, edit, text, video, music})
             if (!offer.models.isEmpty())
                 description.capabilities.append(offer);
@@ -575,6 +586,29 @@ void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> do
                 }
                 if (video)
                     pending->discovery.servers[recipe].loras = body.value("loras").toArray();
+                if (!text && !music) {
+                    // A model is offered for every mode its server says it serves, not only the
+                    // one its row's kind names. Absent supported_modes, the kind decides alone.
+                    const QJsonArray modes = body.value("supported_modes").toArray();
+                    const bool images = modes.contains(QStringLiteral("img_gen"));
+                    const bool videos = modes.contains(QStringLiteral("vid_gen"));
+                    OfferedModel other = model;
+                    if (video && images) {
+                        other.handle.insert("resource", kModelResource);
+                        other.defaults = defaultsOf(body, "img_gen");
+                        const QJsonObject features = body.value("features_by_mode").toObject().value("img_gen").toObject();
+                        // Reference images are what image.edit sends (8.1); no ref_images, no edit.
+                        const bool edits = features.value("ref_images").toBool();
+                        other.properties = QJsonObject{{"edit", edits}, {"input", model.properties.value("input")}};
+                        pending->extraImages.append(other);
+                        pending->extraImageEdits.append(edits);
+                    } else if (!video && videos) {
+                        other.handle.insert("resource", kVideoResource);
+                        other.defaults = defaultsOf(body, "vid_gen");
+                        other.properties = QJsonObject{{"input", model.properties.value("input")}};
+                        pending->extraVideos.append(other);
+                    }
+                }
             } else if (code == 503 && (text || music || body.value("code").toString() == QLatin1String("model_loading"))) {
                 // llama.cpp-style servers answer 503 while the weights load.
                 model.status = ModelStatus::Loading;

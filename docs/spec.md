@@ -1316,6 +1316,16 @@ omarchy-local-ai at commit 703ae0c when the provider was built):
   A job is `POST /sdcpp/v1/vid_gen` and the same job API as images; it asks for WebM with the VAE
   tiled, sends `init_image` for a first frame and every listed LoRA, and the finished job's whole
   container (base64) is written to `video.webm` at once (8.6). No previews are asked for.
+- Modes (image modes): a row's `kind` is what its recipe is for, not all a server can do. When the
+  capabilities of a ready `image` or `video` row list `supported_modes`, the model is also offered for
+  the other mode the server serves: a video row whose server lists `img_gen` is a model of
+  `image.generate` (and of `image.edit` when `features_by_mode.img_gen.ref_images` is true; the
+  row's own `edit` flag decides for an image row), with the `img_gen` defaults; an image row that
+  lists `vid_gen` is a model of `video.generate`. An image job goes to `img_gen` with `init_image`
+  and `strength` (image to image) or `ref_images` (edit), whatever the row's kind. Observed on
+  2026-11-21: MiniMax H3 (`minimax-h3-sdcpp-cuda`, kind `video`, `edit` false, input `["text"]`)
+  reports `supported_modes: ["vid_gen"]` only, so it is offered for Generate Video alone; its image
+  variant (P-H3-Image) is not an Omarchy recipe (it runs on ComfyUI).
 - Music (#28): each `kind: music` row is a `fugue/music-model` of `audio.generate`, probed with
   `GET /health` (ace-server has no capabilities call; 10 to 600 seconds is its documented range). A song is
   two ace-server jobs in turn: `POST /lm` writes it out (lyrics, tempo, key, audio codes), `POST /synth`
@@ -3217,6 +3227,7 @@ Building M4 made these further choices.
 | Generate Video is one node with a first frame as an optional input, not a text node and an image node: the model decides whether it takes one, and the server answers 400 with its own words when it cannot. An end frame, reference images and control frames (`end_image`, `ref_images`, `control_frames` of `vid_gen`) are left out: no model Omarchy ships has them tested (8.7). Split into stages later is #105's | 14.2 | medium-high |
 | Generate Song is one node over ace-server's two jobs (`/lm`, `/synth`), as Fantasi does, with `lyrics` out; the two are one step to the user, since the written song goes back to render unchanged and holds nothing useful alone (3.7). `cover`, `repaint` and the base-DiT tasks are not offered: Omarchy ships the turbo DiT only | 14.2, 8.7, 3.7 | medium-high |
 | Video defaults are Fantasi's (864 x 480 at about 0.4 megapixel, steps of 32, 24 frames a second, 2 seconds here where Fantasi allows 1 to 10), overridden by what the model reports; the length is `duration` in seconds, from which the frames are made, since a person thinks in seconds and the model rounds the count (MiniMax H3: 17n+5) | 14.2 | medium-high |
+| A model is offered for every mode its server's `supported_modes` lists, not only its row's kind: no hard-coded list of "image-capable video models", so a recipe that gains img_gen needs no Fugue change. H3 as Omarchy runs it lists `vid_gen` only, so it stays a video model | 8.7 | high |
 | Every LoRA a video server lists is sent with every job (Fantasi's rule; the server applies none, and MiniMax H3's few-step LoRA is how it is meant to run). A user-chosen LoRA for video is not offered: Omarchy's runtime maps none | 8.7 | high |
 | Load Video and Load Audio are separate from Load Image, one kernel for the three: an `any` file loader would need a type chosen by content, and compatibility is by type (2.3). ComfyUI also has separate LoadVideo and LoadAudio (core, GPL-3.0: read as documentation only, no code taken; its audio loader also takes video files and decodes whole into memory, its video type is an opaque object; Fugue keeps files and probes). Dropping or pasting a video or sound onto the canvas is not built | 14.2 | medium-high |
 | Save Video and Save Audio are two nodes modelled on Save Image, sharing its code for name, folder, embedding and numbering (`nodes/save_files`), not new naming logic. Formats are few: mp4 and webm for video, flac, mp3 and opus for sound, default mp4 and flac. A file already in the format is copied, anything else goes through ffmpeg (already a dependency, run as a program as the probe does). No codec, CRF or `auto` choices, which ComfyUI's SaveVideo has (format auto, mp4, mkv, webm, mov; codec auto, h264, av1, prores; H.264 and AV1 CRF); the defaults are the ones a person would pick. No separate Preview Audio or MP3 and Opus Save nodes (ComfyUI has SaveAudio, SaveAudioMP3, SaveAudioOpus, PreviewAudio): Preview takes any type, and the format is an input | 14.2 | medium-high |
