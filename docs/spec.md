@@ -1169,6 +1169,33 @@ and speaks the protocol of 8.8 to it over `stdio`:
 - Cancel is cooperative (stable-diffusion.cpp stops at its next step); a job not over within 5
   seconds is ended by killing the helper.
 
+**A helper on a paired host** (#80) is an instance of the same type with an `address`:
+`{"name": "gx10", "type": "fugue-helper", "address": "http://<tailnet address>:<port>", "key": "…"}`
+in providers.json (the key stays there, like every key). It speaks the protocol of 8.8 over `http`
+to `fugue-helper --serve-http` ([8.10](#810-gpu-memory-and-the-helper)), which the host's owner
+runs (a systemd user unit, `helper/fugue-helper.service`); Fugue never starts or stops it, and
+`idle_timeout_s` means nothing for it.
+
+- `describe` reaches the host: an unreachable host, a refused key (401, 403) or three failed polls in
+  a row is `provider_unreachable`. It reports `shares_filesystem: false`, its own free memory
+  (`MemAvailable`, which is what the GB10 has) and `host`. The engine id is `sdcpp@<host>`: a stage run
+  on a host does not give the pixels of another machine or build (8.10), and the engine is in the cache
+  key, so a result of one machine never answers for another.
+- Media are data, since the host does not share the filesystem. Every `{"path"}` of a job's inputs
+  (conditioning and latent files, images, reference images) goes as `{"data": base64, "format"}`;
+  each file the host's `result` lists is fetched with `GET /fugue/v1/result/<job>/<i>` into the job's
+  output folder, so the nodes downstream see the same `{"path"}` as with the local helper. A stage's
+  conditioning or latent file made on one machine therefore feeds the next stage on the other: a workflow
+  can mix the machines (encode on the host, sample here), only if both have the same model.
+- Models go as handles, `{name, sha256, size?}`, in place of paths: the stage nodes do not look for the
+  files on this machine, and do not run the checks that read them (parts that do not fit, LoRAs that do
+  not fit); the host does both. The host resolves a handle in its own model folders (`--models`, any
+  layout): the files with the handle's name, checked against `size` when the handle has one and
+  against `sha256`; no such file is `model_missing`, naming the folders searched (and the files found
+  with another content). A string path outside the host's folders is refused: the host reads no other file.
+- Status is polled (500 ms). A job runs on the host one at a time. Errors keep their codes
+  (`out_of_memory`, `cancelled`, `model_missing`); the others are `node_failed`.
+
 **The `omarchy` provider** (from reading omarchy-local-ai and Fantasi's source, checked against
 omarchy-local-ai at commit 703ae0c when the provider was built):
 
@@ -2402,6 +2429,7 @@ Building M2 made these further choices.
 | Helper packaging (#77, the owner's choice): Vulkan helper in `fugue`, CUDA helper in a `fugue-helper-cuda` split package, as Arch splits ollama and ollama-cuda; CI builds the Vulkan one, the CUDA toolkit being several GB | 8.10 | high |
 | Stage hooks as image options (`fugue.*`) of stable-diffusion.cpp's option API, in place of the spike's environment variables; the extensions' encode-time state crosses through two virtual methods on its extension interface | 8.10 | medium-high |
 | No pixel-parity test was built for the first pin (#77): the spike showed identical pixels at this commit (spikes/02), and the owner judged that enough. #77 ran these staged once: Z-Image, FLUX.2 Klein 4B and 9B, FLUX.1, SDXL, SD 1.5, Qwen-Image Edit 2511 (the Qwen-Image 2.1 files at hand did not load, stable-diffusion.cpp failing on them before any stage), image-to-image from a latent, and IP-Adapter. PhotoMaker and PuLID were not run (no ID images or embedding at hand), so their carried state is unverified. A pin move runs only the few checks 8.10 lists, by hand (GPU and model files), as the owner asked: the families are stable-diffusion.cpp's to test | 8.10 | medium-high |
+| A paired host's helper (#80): HTTP server inside `fugue-helper` (`--serve-http`, bearer key, started by the host's owner), not ssh and not a change to Omarchy's `sd-server`: stage operations need the patched engine, and the host's `omarchy` provider keeps serving whole-image jobs beside it. Media as data; models as handles resolved on the host (name, size, sha256), so the nodes skip the local file checks for such a provider; the engine id carries the host. Tried on the GB10 (Klein 4B, all stages on the host, and encode on the host with sample and decode here) | 8.7, 8.8, 8.10 | high |
 | Sources pinned as GitHub commit archives with SHA-256 (stable-diffusion.cpp, ggml, CUTLASS), not git submodules: verifiable, and a package lists them as its own sources | 8.10 | high |
 | Checked on the owner's folders (2026-11-20), after their runs crashed the helper: a file in a quantization stable-diffusion.cpp has no kernels for (ComfyUI's mixed quantization, `comfy_quant`: int8 ConvRot and fp8mixed, both tried and aborting; GPTQ; SVDQuant; AWQ) fits nothing and is `model_unsupported` before the helper; an LLM encoder's family (Qwen3, Qwen3.5, Qwen2.5) must be the one its model reads, so the 4096-wide Qwen3.5-9B no longer fits Klein 9B. LoRAs are judged by every naming they come in (PEFT, kohya, LoKr, LoHa): a native-named LoRA with none of its layers in the model, a UNet's on a transformer, another dominant width, or a block index the model lacks (FLUX.1's on the as-wide Klein 4B) does not fit. The fitting files are one "Fits <model>" group. On the owner's 532 LoRAs: Klein 9B 27 fit, 495 do not, 10 untold; Klein 4B 7, 394, 131 (FLUX.1 LoRAs in other namings, as wide); Z-Image 8, 517, 7 | 2.5, 8.10, 13.3 | medium-high |
 | A model path that is one kind's folder is told by its files when the settings do not say (#86, the owner chose both): a path with any type's folder inside keeps ComfyUI's layout, else up to 8 files are read and the kind more than half share is the path's; a mixed folder holds nothing until set. A LoRA fits a model when the layers it changes that the model has are as wide (names matched without prefixes and separators, so kohya's and PEFT's meet); no layer found tells nothing (diffusers names, an SDXL UNet's), so it is not dimmed. What a folder holds is its own key, `model_folder_kinds` by path, not `{"path", "holds"}` entries in `model_paths` as #86 first said: model_paths stays a plain list an older Fugue reads, and a kind for a path no longer listed is ignored. A LoRA's fit is not checked by the canvas (its model comes from a node that has not run then), only by the stage | 8.9, 2.5, 6.4 | medium-high |

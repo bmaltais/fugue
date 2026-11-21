@@ -166,12 +166,31 @@ std::optional<Error> partsMismatch(const QJsonObject &derived, const QJsonObject
     return std::nullopt;
 }
 
+// A model file as a paired host takes it (8.10): its name, hash and, when the file is here, size.
+// The host finds the file in its own folders and answers model_missing itself.
+QJsonObject remoteHandle(const QJsonValue &value, const ModelLibrary &library, FileHashes &hashes) {
+    const QJsonObject handle = value.toObject();
+    QJsonObject sent{{"name", handle.value(QStringLiteral("name")).toString()}};
+    if (const QString hash = handle.value(QStringLiteral("hash")).toString(); !hash.isEmpty())
+        sent.insert(QStringLiteral("sha256"), hash);
+    // The size tells the host which of two files of one name is meant; known when the file is here
+    // (a check that reads no file, Hashing::RememberedOnly).
+    if (const Result<QString> found = library.resolve(handle, hashes, ModelLibrary::Hashing::RememberedOnly))
+        sent.insert(QStringLiteral("size"), double(QFileInfo(found.value()).size()));
+    return sent;
+}
+
 // The files of the `fugue/model` handle in `input`, found on this machine (8.9). model_missing,
-// blamed on the input, when one is not here.
-Result<ModelFiles> modelFiles(const QJsonObject &model, const QString &input, const NodeContext &context) {
+// blamed on the input, when one is not here. For a provider that does not share the filesystem
+// (`shares` false) the files are handles the host resolves, and nothing is looked for or checked
+// here: the host checks.
+Result<ModelFiles> modelFiles(const QJsonObject &model, const QString &input, const NodeContext &context,
+                              bool shares = true) {
     const ModelLibrary library = ModelLibrary::current(context.registry);
     std::optional<Error> missing;
-    const auto path = [&](const QJsonValue &handle) {
+    const auto path = [&](const QJsonValue &handle) -> QJsonValue {
+        if (!shares)
+            return remoteHandle(handle, library, *context.hashes);
         const Result<QString> found = library.resolve(handle.toObject(), *context.hashes);
         if (!found && !missing) {
             missing = found.error();
@@ -195,6 +214,8 @@ Result<ModelFiles> modelFiles(const QJsonObject &model, const QString &input, co
     }
     if (missing)
         return *missing;
+    if (!shares)
+        return files;
     if (const std::optional<Error> mismatch = partsMismatch(derived, files.context, {input, input, input, input}, files.loras))
         return *mismatch;
     return files;
@@ -396,8 +417,9 @@ public:
 
 protected:
     // The files of the node's `model` input.
-    static Result<ModelFiles> modelInput(const NodeContext &context) {
-        return modelFiles(context.input(QStringLiteral("model")).json().toObject(), QStringLiteral("model"), context);
+    static Result<ModelFiles> modelInput(const NodeContext &context, const Selection &selection) {
+        return modelFiles(context.input(QStringLiteral("model")).json().toObject(), QStringLiteral("model"), context,
+                          selection.sharesFilesystem);
     }
 
     // A job of this stage for `files`, with the generation options `params`; with the model's
@@ -420,8 +442,8 @@ class TextEncodeKernel : public StageKernel {
 public:
     TextEncodeKernel() : StageKernel(QStringLiteral("text.encode")) {}
 
-    Result<JobRequest> request(const NodeContext &context, const Selection &) override {
-        const Result<ModelFiles> files = modelInput(context);
+    Result<JobRequest> request(const NodeContext &context, const Selection &selection) override {
+        const Result<ModelFiles> files = modelInput(context, selection);
         if (!files)
             return files.errors();
         QJsonObject params{{"prompt", context.input(QStringLiteral("prompt")).text()},
@@ -465,8 +487,8 @@ class SamplerKernel : public StageKernel {
 public:
     SamplerKernel() : StageKernel(QStringLiteral("latent.sample")) {}
 
-    Result<JobRequest> request(const NodeContext &context, const Selection &) override {
-        const Result<ModelFiles> files = modelInput(context);
+    Result<JobRequest> request(const NodeContext &context, const Selection &selection) override {
+        const Result<ModelFiles> files = modelInput(context, selection);
         if (!files)
             return files.errors();
         const Value latent = context.input(QStringLiteral("latent"));
@@ -509,14 +531,14 @@ class VaeDecodeKernel : public StageKernel {
 public:
     VaeDecodeKernel() : StageKernel(QStringLiteral("latent.decode")) {}
 
-    Result<JobRequest> request(const NodeContext &context, const Selection &) override {
+    Result<JobRequest> request(const NodeContext &context, const Selection &selection) override {
         const Value latent = context.input(QStringLiteral("latent"));
         const LatentMeta sampled = LatentMeta::of(latent);
         if (sampled.model.isEmpty())
             return makeInputError(QStringLiteral("node_failed"), QStringLiteral("latent"),
                                   QStringLiteral("An Empty Latent has no image in it yet."),
                                   QStringLiteral("Sample it first: wire it through a Sampler."));
-        const Result<ModelFiles> files = modelFiles(sampled.model, QStringLiteral("latent"), context);
+        const Result<ModelFiles> files = modelFiles(sampled.model, QStringLiteral("latent"), context, selection.sharesFilesystem);
         if (!files)
             return files.errors();
         JobRequest request = job(*files, QJsonObject{{"width", sampled.width}, {"height", sampled.height}});
@@ -539,8 +561,8 @@ class VaeEncodeKernel : public StageKernel {
 public:
     VaeEncodeKernel() : StageKernel(QStringLiteral("latent.encode")) {}
 
-    Result<JobRequest> request(const NodeContext &context, const Selection &) override {
-        const Result<ModelFiles> files = modelInput(context);
+    Result<JobRequest> request(const NodeContext &context, const Selection &selection) override {
+        const Result<ModelFiles> files = modelInput(context, selection);
         if (!files)
             return files.errors();
         const MediaHandle image = context.input(QStringLiteral("image")).media();

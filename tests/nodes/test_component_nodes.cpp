@@ -23,9 +23,12 @@
 #include "engine/model_library.h"
 #include "engine/paths.h"
 #include "engine/registry.h"
+#include "engine/remote_helper_provider.h"
 #include "engine/vips.h"
 #include "nodes/builtin.h"
 #include "nodes/kernels.h"
+#include "../engine/fake_http.h"
+#include "../engine/provider_support.h"
 
 using namespace fugue;
 
@@ -70,6 +73,14 @@ Selection helperSelection() {
     chosen.instance = QStringLiteral("Fugue helper");
     chosen.engine = QStringLiteral("sdcpp");
     chosen.model.status = ModelStatus::Ready;
+    return chosen;
+}
+
+// The same on a paired host (8.10): it reads none of this machine's files.
+Selection remoteSelection() {
+    Selection chosen = helperSelection();
+    chosen.instance = QStringLiteral("gx10");
+    chosen.sharesFilesystem = false;
     return chosen;
 }
 
@@ -133,6 +144,10 @@ public:
 
     Result<JobRequest> request(const QString &id, const Values &inputs) {
         return kernels.provider(id)->request(context(id, inputs), helperSelection());
+    }
+
+    Result<JobRequest> remoteRequest(const QString &id, const Values &inputs) {
+        return kernels.provider(id)->request(context(id, inputs), remoteSelection());
     }
 
     Result<Values> outputs(const QString &id, const Values &inputs, const JobResult &result) {
@@ -213,6 +228,102 @@ private slots:
         QCOMPARE(apply.size(), 2);
         QCOMPARE(apply.at(0).toObject(), (QJsonObject{{"lora", detail}, {"strength", 0.8}}));
         QCOMPARE(apply.at(1).toObject(), (QJsonObject{{"lora", ink}, {"strength", 1}})); // the default
+    }
+
+    // --- stages on a paired host (8.10): handles, not paths; the host checks ---
+
+    void aHostThatDoesNotShareTheFilesystemGetsHandlesNotPaths() {
+        Bench bench;
+        const QJsonObject parts = bench.zImage();
+        const QJsonObject lora = bench.model("fugue/lora", "loras/detail.safetensors");
+        const Result<Values> withLora = bench.run(
+            kApplyLora, {{"model", Value(bench.loaded(parts))}, {"lora", Value(lora)}, {"strength", Value(0.5)}});
+        QVERIFY(withLora);
+        const Result<JobRequest> request =
+            bench.remoteRequest(kTextEncode, {{"model", withLora->value("model")}, {"prompt", Value("a fox")}});
+        QVERIFY2(request, request ? "" : qPrintable(request.error().message));
+        const auto handle = [](const QJsonObject &part, const QString &file) {
+            return QJsonObject{{"name", part.value("name")}, {"sha256", part.value("hash")},
+                               {"size", double(QFileInfo(Bench::modelPath(file)).size())}};
+        };
+        QCOMPARE(request->params.value("context").toObject(),
+                 (QJsonObject{{"diffusion_model_path", handle(parts.value("diffusion_model").toObject(), "diffusion_models/z-image-turbo.gguf")},
+                              {"llm_path", handle(parts.value("text_encoder").toObject(), "clip/Qwen3-4B.gguf")},
+                              {"vae_path", handle(parts.value("vae").toObject(), "vae/ae.safetensors")}}));
+        QCOMPARE(request->params.value("loras").toArray(),
+                 (QJsonArray{QJsonObject{{"path", handle(lora, "loras/detail.safetensors")}, {"multiplier", 0.5}}}));
+    }
+
+    void aModelThatIsNotOnThisMachineIsForTheHostToFind() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.zImage());
+        QVERIFY(QFile::remove(Bench::modelPath("vae/ae.safetensors")));
+        const Result<JobRequest> remote = bench.remoteRequest(kTextEncode, {{"model", Value(model)}, {"prompt", Value("a fox")}});
+        QVERIFY2(remote, remote ? "" : qPrintable(remote.error().message));
+        const QJsonObject vae = remote->params.value("context").toObject().value("vae_path").toObject();
+        QCOMPARE(vae.value("name").toString(), QStringLiteral("ae.safetensors"));
+        QVERIFY(vae.value("sha256").toString().startsWith("sha256:"));
+        QVERIFY(!vae.contains("size")); // not here, so not known
+        // On this machine it is still model_missing.
+        QCOMPARE(bench.request(kTextEncode, {{"model", Value(model)}, {"prompt", Value("a fox")}}).error().code,
+                 QStringLiteral("model_missing"));
+    }
+
+    void thePartsAreNotCheckedHereForAHost() {
+        Bench bench;
+        // A text encoder that does not fit, as in aTextEncoderOrVaeThatDoesNotFitIsModelMismatch.
+        const auto file = [&](const QString &type, const QString &path, const QJsonObject &shapes) {
+            return bench.model(type, path, safetensors(shapes));
+        };
+        const QJsonObject parts{
+            {"diffusion_model", file("fugue/diffusion-model", "diffusion_models/z.safetensors",
+                                     {{"cap_embedder.1.weight", QJsonArray{3840, 2560}}, {"x_embedder.weight", QJsonArray{3840, 64}}})},
+            {"text_encoder", file("fugue/text-encoder", "text_encoders/t5.safetensors",
+                                  {{"encoder.block.0.layer.0.SelfAttention.q.weight", QJsonArray{4096, 4096}}})},
+            {"vae", file("fugue/vae", "vae/flux2-vae.safetensors", {{"decoder.conv_in.weight", QJsonArray{512, 32, 3, 3}}})}};
+        const QJsonObject model = bench.loaded(parts);
+        const Result<JobRequest> here = bench.request(kTextEncode, {{"model", Value(model)}, {"prompt", Value("a fox")}});
+        QCOMPARE(here.error().code, QStringLiteral("model_mismatch"));
+        QVERIFY(bench.remoteRequest(kTextEncode, {{"model", Value(model)}, {"prompt", Value("a fox")}}));
+    }
+
+    void stagesOnTwoMachinesPassTheirFilesThroughTheRunFolder() {
+        // Encode on this machine (its conditioning is a file in the local run folder), sample on
+        // the host: the Sampler's job names that file, and the provider uploads it.
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.zImage());
+        const QString conditioning = bench.workDir() + "/conditioning.bin";
+        writeFile(conditioning, "CONDITIONING-BYTES");
+        const Result<Values> encoded = bench.outputs(
+            kTextEncode, {{"model", Value(model)}, {"prompt", Value("a fox")}},
+            JobResult{QJsonObject{{"conditioning", QJsonObject{{"path", conditioning}, {"format", "conditioning"}}}}, {}});
+        QVERIFY(encoded);
+        const Result<Values> size = bench.run(kEmptyLatent, {{"width", Value(512)}, {"height", Value(512)}});
+        QVERIFY(size);
+        const Result<JobRequest> request = bench.remoteRequest(
+            kSampler, {{"model", Value(model)}, {"conditioning", encoded->value("conditioning")}, {"latent", size->value("latent")}});
+        QVERIFY2(request, request ? "" : qPrintable(request.error().message));
+
+        fugue::test::FakeHttpServer host;
+        QVERIFY(host.listen());
+        host.on("POST", "/fugue/v1/submit", [](const fugue::test::HttpRequest &) {
+            return fugue::test::HttpResponse{200, R"({"job":"j1"})"};
+        });
+        ProviderInstance instance;
+        instance.name = QStringLiteral("gx10");
+        instance.type = QStringLiteral("fugue-helper");
+        instance.address = QString::fromLatin1(host.origin());
+        instance.key = QStringLiteral("k");
+        RemoteHelperProvider provider(instance);
+        JobRequest sent = *request;
+        sent.outputDir = bench.workDir();
+        const Result<QString> job = fugue::test::await<QString>([&](Reply<QString> reply) { provider.submit(sent, reply); });
+        QVERIFY(job);
+        const QJsonObject body = QJsonDocument::fromJson(host.requestsTo("POST", "/fugue/v1/submit").first().body).object();
+        const QJsonObject uploaded = body.value("inputs").toObject().value("conditioning").toObject();
+        QCOMPARE(QByteArray::fromBase64(uploaded.value("data").toString().toLatin1()), QByteArray("CONDITIONING-BYTES"));
+        QCOMPARE(uploaded.value("format").toString(), QStringLiteral("conditioning"));
+        QVERIFY(body.value("params").toObject().value("context").toObject().value("vae_path").toObject().contains("sha256"));
     }
 
     // --- Text Encode ---
