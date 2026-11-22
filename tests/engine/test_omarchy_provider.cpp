@@ -1251,6 +1251,47 @@ private slots:
         QCOMPARE(fixture.server.requestsTo("POST", "/sdcpp/v1/vid_gen").size(), 0);
     }
 
+    // An edit job for a video row's image mode sends the reference images to img_gen, never to vid_gen.
+    void anEditJobOnAVideoRowGoesToImgGenWithReferenceImages() {
+        Fixture fixture;
+        fixture.server.on("GET", "/sdcpp/v1/capabilities", [](const HttpRequest &) {
+            QJsonObject caps = capabilities();
+            caps.insert("supported_modes", QJsonArray{"img_gen", "vid_gen"});
+            caps.insert("features_by_mode", QJsonObject{{"img_gen", QJsonObject{{"ref_images", true}}}});
+            return HttpResponse{200, json(caps)};
+        });
+        fixture.acceptJobs("img_1");
+        fixture.writeStatus(QJsonObject{{kVideoModel, row(kVideoModel, "video", "active", fixture.endpoint())}});
+        auto provider = fixture.provider();
+        const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
+        QVERIFY(described.ok());
+        const OfferedModel *model = findModel(described.value(), "image.edit", kVideoModel);
+        QVERIFY(model);
+        const QString a = fixture.writeInput("a.png", "AAA");
+        auto edit = fixture.request("image.edit", {{"prompt", "make it night"}},
+                                    {{"images", QJsonArray{QJsonObject{{"path", a}}}}});
+        edit.model = model->handle;
+        QVERIFY(await<QString>([&](auto reply) { provider->submit(edit, reply); }).ok());
+        QCOMPARE(fixture.server.requestsTo("POST", "/sdcpp/v1/vid_gen").size(), 0);
+        QCOMPARE(requestBody(fixture.server).value("ref_images").toArray().size(), 1);
+    }
+
+    // img_gen without ref_images: a generate model, not an edit model.
+    void aVideoRowServingImgGenWithoutReferenceImagesIsNoEditModel() {
+        Fixture fixture;
+        fixture.server.on("GET", "/sdcpp/v1/capabilities", [](const HttpRequest &) {
+            QJsonObject caps = capabilities();
+            caps.insert("supported_modes", QJsonArray{"img_gen", "vid_gen"});
+            return HttpResponse{200, json(caps)};
+        });
+        fixture.writeStatus(QJsonObject{{kVideoModel, row(kVideoModel, "video", "active", fixture.endpoint())}});
+        auto provider = fixture.provider();
+        const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
+        QVERIFY(described.ok());
+        QVERIFY(findModel(described.value(), "image.generate", kVideoModel));
+        QVERIFY(!findModel(described.value(), "image.edit", kVideoModel));
+    }
+
     void aVideoJobSendsEveryLoraAndTheFirstFrameAndKeepsTheClipAsAFile() {
         Fixture fixture;
         fixture.server.on("GET", "/sdcpp/v1/capabilities", [](const HttpRequest &) {
