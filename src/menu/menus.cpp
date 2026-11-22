@@ -66,6 +66,14 @@ QVariantMap barsMenu() {
     return submenu(QT_TRANSLATE_NOOP("Menu", "&Bars and panels"), windowItems());
 }
 
+// The window's areas (#217, spec 12.16): split, close, the view the active area shows, reset. A submenu at the end
+// of the View menu, after the bars, so the default window's menu reads as before until it is opened.
+QVariantMap areasMenu() {
+    return submenu(QT_TRANSLATE_NOOP("Menu", "&Areas"),
+                   {command("area.split-row"), command("area.split-column"), command("area.close"), separator(),
+                    command("area.view-graph"), command("area.view-canvas"), separator(), command("view.reset-layout")});
+}
+
 QVariantList bar() {
     return {
         submenu(QT_TRANSLATE_NOOP("Menu", "&File"),
@@ -80,7 +88,8 @@ QVariantList bar() {
                  separator(), command("cache.clear-previews"), separator(), command("app.settings")}),
         submenu(QT_TRANSLATE_NOOP("Menu", "&View"),
                 {command("view.fit"), command("view.zoom-in"), command("view.zoom-out"), separator(),
-                 command("view.toggle-links"), separator(), barsMenu(), command("view.focus-mode")}),
+                 command("view.toggle-links"), separator(), barsMenu(), command("view.focus-mode"), separator(),
+                 areasMenu()}),
         submenu(QT_TRANSLATE_NOOP("Menu", "&Node"),
                 {command("node.search"), separator(), command("node.bypass"), command("node.mute"),
                  command("node.collapse"), command("node.pin"), align(false), distribute(false),

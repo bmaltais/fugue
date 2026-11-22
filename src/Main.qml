@@ -119,7 +119,7 @@ ApplicationWindow {
             z: 5 // over the side strip and panel, which the bar slides across
             pinned: win.chromeIsShown("menu-bar")
             edgeShown: !win.focusMode
-            handleInset: win.rightToLeft ? 0 : fugueCanvas.x
+            handleInset: win.rightToLeft ? 0 : win.body.x
             holdOpen: menuBar.anyShown
             handleName: qsTr("Show the menu bar")
             MenuBar {
@@ -187,8 +187,9 @@ ApplicationWindow {
                 floatingBar: (win.runToolbarItem as RunToolbar)?.surface ?? null
                 navigation: win.appSettingsModel ? win.appSettingsModel.navigation : "legacy"
                 hoverMagnifier: win.appSettingsModel ? win.appSettingsModel.hoverMagnifier : false
-                // The auto-hide menu bar's handle hangs over the canvas's top left (#160).
-                leadingClear: Math.max(0, menuBarHost.handleEnd - x)
+                // The auto-hide menu bar's handle hangs over the canvas's top left (#160); over the top start
+                // area's header while the window has areas.
+                leadingClear: win.areaHost ? 0 : Math.max(0, menuBarHost.handleEnd - x)
                 selectionToolbarShown: win.chromeIsShown("selection-toolbar")
                 breadcrumbShown: win.chromeIsShown("breadcrumb")
                 runPillShown: win.chromeIsShown("run-status")
@@ -227,15 +228,100 @@ ApplicationWindow {
     // The command registry's shortcuts, the `?` overlay and the quit question.
     CommandUi { anchors.fill: parent }
 
-    // The window's body is an area tree (#217, spec 12.16) of one area, id 1, showing the Graph: the canvas
-    // above, declared in the column as before and adopted as the area's view. An AreaNode is not an item and,
-    // with no host, makes and moves nothing, so the window has exactly the items it had (test_area_window). A
-    // split tree gets a host for the body from slice 1.
+    // The window's body is an area tree (#217, spec 12.16; App.workspace, workspace/workspace.h). With one area
+    // it shows the Graph: the canvas above, declared in the column as before and adopted as the area's view; an
+    // AreaNode is not an item and, with no host, makes and moves nothing, so the window has exactly the items it
+    // had (test_area_window). With more than one, the column gets a host for the body in the canvas's place (same
+    // margins), the canvas moves into it as its area's view, and the host has the other views, the headers and
+    // the border handles; back to one area, the canvas returns to the column and the host goes.
     AreaNode {
         id: areas
         objectName: "areas"
         node: AreaLayout.defaultTree().root
         views: ({"1": fugueCanvas})
+        area: win.areaHost ? Qt.rect(0, 0, win.areaHost.width, win.areaHost.height) : Qt.rect(0, 0, 0, 0)
+        registry: App.workspace ? App.workspace.views : null
+        controller: App.workspace
+        rightToLeft: win.rightToLeft
+        header: areaHeaderComponent
+        handle: areaHandleComponent
+        // Focus mode hides the headers with the other bars (12.15); the borders stay.
+        headerHeight: win.focusMode ? 0 : 7 * App.theme.look.unit
+        leadingClear: Math.max(0, menuBarHost.handleEnd - win.body.x)
+    }
+    // What the areas sit in: the canvas alone, or the host while there are several.
+    property Item areaHost: null
+    readonly property Item body: areaHost ?? fugueCanvas
+    function syncAreas() {
+        const tree = App.workspace ? App.workspace.tree : AreaLayout.defaultTree()
+        const split = tree.root?.type === "branch"
+        if (split && !areaHost) {
+            areaHost = areaHostComponent.createObject(mainLayout) as Item
+            fugueCanvas.parent = areaHost
+        }
+        const views = {}
+        views[String(App.workspace ? App.workspace.graphArea : 1)] = fugueCanvas
+        areas.views = views
+        areas.host = split ? areaHost : null
+        areas.node = tree.root
+        if (!split && areaHost) {
+            fugueCanvas.parent = mainLayout
+            areaHost.destroy()
+            areaHost = null
+        }
+    }
+    // A press in an area makes it the active one (the commands act on it), and gives its view the keys.
+    function activateAreaAt(point) {
+        const id = areas.areaAt(point.x, point.y)
+        if (id <= 0 || !App.workspace)
+            return
+        App.workspace.active = id
+        const view = areas.viewOf(id)
+        let focused = win.activeFocusItem
+        while (focused && focused !== view)
+            focused = focused.parent
+        if (view && !focused)
+            view.forceActiveFocus()
+    }
+    // So does the keyboard focus arriving in an area (Tab).
+    onActiveFocusItemChanged: {
+        if (!areaHost || !App.workspace)
+            return
+        let item = activeFocusItem
+        while (item && item.parent !== areaHost)
+            item = item.parent
+        const id = item ? areas.areaOfItem(item) : 0
+        if (id > 0)
+            App.workspace.active = id
+    }
+    Connections {
+        target: App.workspace
+        function onChanged() { win.syncAreas() }
+    }
+    Binding {
+        when: App.workspace !== null
+        target: App.workspace
+        property: "bodySize"
+        value: Qt.size(win.body.width, win.body.height)
+    }
+    Component {
+        id: areaHostComponent
+        AreaHost {
+            objectName: "areaHost"
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            Layout.leftMargin: win.stripWidth + win.sidePanelMargin("left")
+            Layout.rightMargin: win.sidePanelMargin("right")
+            onPressed: point => win.activateAreaAt(point)
+        }
+    }
+    Component {
+        id: areaHeaderComponent
+        AreaHeader {}
+    }
+    Component {
+        id: areaHandleComponent
+        AreaHandle { look: App.theme.look }
     }
 
     // The settings panel (#51), made the first time app.settings (Ctrl+,) asks for it.
@@ -340,6 +426,7 @@ ApplicationWindow {
     Component.onCompleted: {
         syncRunBar()
         syncSidePanel()
+        syncAreas()
     }
     Connections {
         target: App.runBar
@@ -466,8 +553,8 @@ ApplicationWindow {
         id: stripLoader
         parent: windowRoot
         active: win.stripWanted
-        y: mainLayout.y + fugueCanvas.y
-        height: fugueCanvas.height
+        y: mainLayout.y + win.body.y
+        height: win.body.height
         sourceComponent: SideTabStrip {
             look: App.theme.look
             panels: App.sidePanels.panels
@@ -494,8 +581,8 @@ ApplicationWindow {
             minWidth: App.sidePanels.minWidth
             maxWidth: App.sidePanels.maxWidth
             x: dock === "right" ? windowRoot.width - width : win.stripWidth
-            y: mainLayout.y + fugueCanvas.y
-            height: fugueCanvas.height
+            y: mainLayout.y + win.body.y
+            height: win.body.height
             onCloseRequested: App.sidePanels.tab = ""
             onDockRequested: dock => App.sidePanels.dock = dock
             onWidthRequested: width => App.sidePanels.width = width

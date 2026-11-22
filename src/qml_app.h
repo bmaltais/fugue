@@ -34,7 +34,9 @@
 #include "workflow/recent_files.h"
 #include "workflow/workflows.h"
 #include "workspace/area_layout_qml.h" // a QML singleton (AreaLayout): the module registers it from here
+#include "workspace/area_host.h" // a QML item (AreaHost): likewise
 #include "workspace/view_registry.h" // a QML type (ViewRegistry): likewise
+#include "workspace/workspace.h"
 
 class QQmlEngine;
 
@@ -59,6 +61,7 @@ struct AppObjects {
     ChromeVisibility *chrome = nullptr;   // optional: which bars and panels are shown (#129)
     MediaLibrary *mediaLibrary = nullptr; // optional: the media browser's results and thumbnails (#133)
     ProjectModel *projects = nullptr;     // optional: the projects dialog and the project chip (spec 1.4.2)
+    Workspace *workspace = nullptr;       // optional: the window's areas (#217); none: one Graph area, as before
 };
 
 class QmlApp : public QObject {
@@ -84,6 +87,7 @@ class QmlApp : public QObject {
     Q_PROPERTY(fugue::ChromeVisibility *chrome READ chrome CONSTANT)
     Q_PROPERTY(fugue::MediaLibrary *mediaLibrary READ mediaLibrary CONSTANT)
     Q_PROPERTY(fugue::ProjectModel *projects READ projects CONSTANT)
+    Q_PROPERTY(fugue::Workspace *workspace READ workspace CONSTANT)
 
 public:
     explicit QmlApp(const AppObjects &objects, QObject *parent = nullptr) : QObject(parent), m_objects(objects) {}
@@ -106,6 +110,7 @@ public:
     ChromeVisibility *chrome() const { return m_objects.chrome; }
     MediaLibrary *mediaLibrary() const { return m_objects.mediaLibrary; }
     ProjectModel *projects() const { return m_objects.projects; }
+    Workspace *workspace() const { return m_objects.workspace; }
 
 private:
     AppObjects m_objects;

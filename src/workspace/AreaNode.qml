@@ -8,12 +8,22 @@ import Fugue
 // It is not an item. Every view goes straight into `host`, at the rectangle of its node, so an area adds no
 // item of its own: the window with its one area has exactly the items it had before areas (the item budget,
 // test_canvas_window), and a resize moves views without reparenting them. A node of the same shape (the same
-// areas, views and axes: AreaLayout.shapeOf) only moves its views when it changes; another shape makes them again.
+// areas, views and axes: AreaLayout.shapeOf) only moves its views when it changes; another shape makes the nodes
+// again, and a view already made for the same area and view type is kept and moved (a split or a close leaves the
+// other areas' views as they were: their zoom, their scroll).
 //
 // A view comes from `views` when the window already has it (Main.qml declares the Graph, and its area adopts that
-// item: never made, moved out of host or destroyed here), else it is made from the registry's component, or it is
-// a placeholder (AreaPlaceholder.qml) for a type this build does not register. With no `host`, nothing is made or
-// moved: the window's one area is the Graph where the window's layout puts it (slice 0). A split tree needs a host.
+// item: never made, moved out of host or destroyed here), else it is made from the registry's component, an
+// AreaView (AreaView.qml: made with its area's id and the state its type has there, and what it says to keep goes
+// to `controller.setAreaState`), or it is a placeholder (AreaPlaceholder.qml) for a type this build does not
+// register. With no `host`, nothing is made or moved: the window's one area is the Graph where the window's layout
+// puts it. A split tree needs a host.
+//
+// With a host, a leaf also gets a `header` (made with {areaId, viewType}; `headerHeight` tall at the top of the
+// area, the view under it; hidden at 0) and a branch a `handle` per border between two children (AreaHandle.qml,
+// centered on the border, across the whole branch), whose requests go to `controller.resizeBorder(path, border,
+// delta, length)` and `controller.equalizeBorder(path, border)`. Views sit at z 0, handles at 1, headers at 2, so a
+// header's buttons win over the handle that reaches into its ends.
 QtObject {
     id: areaNode
 
@@ -27,13 +37,30 @@ QtObject {
     // Area id (as text) to the item that already is that area's view; it must be a child of `host`.
     property var views: ({})
     property bool rightToLeft: false
+    // What the handles and the views ask for (App.workspace in the window); none: nothing is asked.
+    property var controller: null
+    property Component header: null
+    property real headerHeight: 0
+    // How far the window's own furniture reaches into the top start corner of the areas (the auto-hide menu
+    // bar's handle): the header of the area there keeps its menu clear of it.
+    property real leadingClear: 0
+    property Component handle: null
+    // This node's place in the tree: the child indexes from the root.
+    property var path: []
+    // The tree's root node (null: this one), which keeps the views a rebuild may use again.
+    property AreaNode top: null
+    // The root's: during a rebuild, the views made for the old shape, by "<area>:<view type>".
+    property var spare: null
 
     readonly property bool leaf: node?.type === "leaf"
     readonly property int areaId: leaf ? node.area : 0
     readonly property string viewType: leaf ? node.view : ""
-    // Read only: a leaf's view, adopted or made; a branch's child nodes.
+    // Read only: a leaf's view, adopted or made, and its header; a branch's child nodes and border handles.
     property Item view: null
     property bool adopted: false
+    property string viewKey: ""
+    property Item headerItem: null
+    property var handleItems: []
     property var childNodes: []
 
     property string shape: ""
@@ -42,6 +69,9 @@ QtObject {
         AreaPlaceholder {}
     }
 
+    function topNode(): AreaNode {
+        return top ?? areaNode
+    }
     // The view of area `id` in this node, or null.
     function viewOf(id: int): Item {
         if (leaf)
@@ -53,16 +83,52 @@ QtObject {
         }
         return null
     }
+    // The area at a point of `host`, or 0.
+    function areaAt(x: real, y: real): int {
+        if (leaf)
+            return x >= area.x && x < area.x + area.width && y >= area.y && y < area.y + area.height ? areaId : 0
+        for (const child of childNodes) {
+            const found = (child as AreaNode).areaAt(x, y)
+            if (found)
+                return found
+        }
+        return 0
+    }
+    // The area whose view or header `item` is, or 0.
+    function areaOfItem(item: Item): int {
+        if (leaf)
+            return item !== null && (item === view || item === headerItem) ? areaId : 0
+        for (const child of childNodes) {
+            const found = (child as AreaNode).areaOfItem(item)
+            if (found)
+                return found
+        }
+        return 0
+    }
     // The items this node and its children made (adopted views are not counted): none for the window's one area.
     function madeItems(): int {
-        if (leaf)
-            return view && !adopted ? 1 : 0
-        let count = 0
+        let count = (view && !adopted ? 1 : 0) + (headerItem ? 1 : 0) + handleItems.length
         for (const child of childNodes)
             count += (child as AreaNode).madeItems()
         return count
     }
 
+    // The views this node and its children show now.
+    function shownViews(into: var) {
+        if (view)
+            into.push(view)
+        for (const child of childNodes)
+            (child as AreaNode).shownViews(into)
+    }
+    // The views made here and below, by "<area>:<view type>", taken out of the nodes so clear() keeps them.
+    function harvest(into: var) {
+        for (const child of childNodes)
+            (child as AreaNode).harvest(into)
+        if (view && !adopted && viewKey !== "") {
+            into[viewKey] = view
+            view = null
+        }
+    }
     function clear() {
         // The children's views first, here: a node's own destruction comes later, maybe with its context gone.
         for (const child of childNodes) {
@@ -70,32 +136,52 @@ QtObject {
             child.destroy()
         }
         childNodes = []
+        for (const made of handleItems)
+            (made as Item).destroy()
+        handleItems = []
+        if (headerItem)
+            headerItem.destroy()
+        headerItem = null
         if (view && !adopted)
             view.destroy()
         view = null
         adopted = false
+        viewKey = ""
     }
     // These read `node` itself: the bindings above may not have caught up with it inside onNodeChanged.
     function makeView() {
         const type = node.view
-        const existing = views[String(node.area)] ?? null
+        const id = node.area
+        const existing = views[String(id)] ?? null
         if (existing) {
             view = existing
             adopted = true
-            return
-        }
-        if (!host)
-            return
-        let component = null
-        if (registry && registry.contains(type)) {
-            component = Qt.createComponent(registry.component(type))
-            if (component.status === Component.Error) {
-                console.warn(component.errorString())
-                component = null
+        } else if (host) {
+            const key = id + ":" + type
+            const pool = topNode().spare
+            const kept = pool ? pool[key] ?? null : null
+            if (kept) {
+                view = kept
+            } else {
+                let component = null
+                if (registry && registry.contains(type)) {
+                    component = Qt.createComponent(registry.component(type))
+                    if (component.status === Component.Error) {
+                        console.warn(component.errorString())
+                        component = null
+                    }
+                }
+                view = component ? component.createObject(host, {areaId: id, areaState: node.state?.[type] ?? {}}) as Item
+                                 : placeholder.createObject(host, {viewType: type}) as Item
+                const made = view as AreaView
+                const root = topNode()
+                if (made)
+                    made.areaStateEdited.connect(state => root.controller?.setAreaState(id, state))
             }
+            viewKey = key
         }
-        view = component ? component.createObject(host) as Item
-                         : placeholder.createObject(host, {viewType: type}) as Item
+        if (host && header)
+            headerItem = header.createObject(host, {areaId: id, viewType: type, z: 2}) as Item
     }
     // A child's node as a plain object of its own: a part of this node read from a property is a reference into
     // it, which a new tree for this node would change under the child.
@@ -104,21 +190,51 @@ QtObject {
     }
     function makeChildren() {
         const component = Qt.createComponent("AreaNode.qml")
+        const root = topNode()
         const made = []
         for (let i = 0; i < node.children.length; ++i)
             made.push(component.createObject(areaNode, {node: childNode(i), host: host, registry: registry, views: views,
-                                                        rightToLeft: rightToLeft}))
+                                                        rightToLeft: rightToLeft, controller: controller, header: header,
+                                                        headerHeight: headerHeight, leadingClear: leadingClear,
+                                                        handle: handle, path: path.concat([i]), top: root}))
         childNodes = made
+        const handles = []
+        if (host && handle) {
+            for (let border = 0; border + 1 < node.children.length; ++border) {
+                const one = handle.createObject(host, {axis: node.axis, rightToLeft: rightToLeft, z: 1}) as AreaHandle
+                const index = border
+                one.moveRequested.connect(delta => root.controller?.resizeBorder(areaNode.path, index, delta, areaNode.length()))
+                one.equalizeRequested.connect(() => root.controller?.equalizeBorder(areaNode.path, index))
+                handles.push(one)
+            }
+        }
+        handleItems = handles
+    }
+    // A branch's length along its axis.
+    function length(): real {
+        return node?.axis === "column" ? area.height : area.width
     }
     function relayout() {
         if (!ready || !host)
             return
         if (node?.type === "leaf") {
+            const shown = headerItem !== null && headerHeight > 0
+            const above = shown ? Math.min(headerHeight, area.height) : 0
+            if (headerItem) {
+                headerItem.visible = shown
+                headerItem.x = area.x
+                headerItem.y = area.y
+                headerItem.width = area.width
+                headerItem.height = above
+            }
+            const bar = headerItem as AreaHeader
+            if (bar)
+                bar.leadingClear = area.x <= 0.5 && area.y <= 0.5 ? leadingClear : 0
             if (view) {
                 view.x = area.x
-                view.y = area.y
+                view.y = area.y + above
                 view.width = area.width
-                view.height = area.height
+                view.height = area.height - above
             }
             return
         }
@@ -127,7 +243,28 @@ QtObject {
             const child = childNodes[i] as AreaNode
             child.node = childNode(i)
             child.rightToLeft = rightToLeft
+            child.headerHeight = headerHeight
+            child.leadingClear = leadingClear
             child.area = rects[i]
+        }
+        const row = node.axis !== "column"
+        for (let i = 0; i < handleItems.length && i + 1 < rects.length; ++i) {
+            const one = handleItems[i] as AreaHandle
+            const r = rects[i]
+            const t = one.thickness
+            one.rightToLeft = rightToLeft
+            if (row) {
+                const border = rightToLeft ? r.x : r.x + r.width
+                one.x = border - t / 2
+                one.y = area.y
+                one.width = t
+                one.height = area.height
+            } else {
+                one.x = area.x
+                one.y = r.y + r.height - t / 2
+                one.width = area.width
+                one.height = t
+            }
         }
     }
     function rebuild() {
@@ -135,6 +272,13 @@ QtObject {
             return
         const next = AreaLayout.shapeOf(node ?? {})
         if (next !== shape || next === "") {
+            // The root keeps the views made for the old shape, gives them to the nodes of the new one that show the
+            // same view in the same area, and drops the rest.
+            const root = top === null
+            if (root) {
+                spare = {}
+                harvest(spare)
+            }
             clear()
             shape = next
             if (next === "") {
@@ -144,6 +288,14 @@ QtObject {
                 makeView()
             else
                 makeChildren()
+            if (root) {
+                const shown = []
+                shownViews(shown)
+                for (const key of Object.keys(spare))
+                    if (shown.indexOf(spare[key]) < 0)
+                        (spare[key] as Item).destroy()
+                spare = null
+            }
         }
         relayout()
     }
@@ -151,6 +303,8 @@ QtObject {
     onNodeChanged: rebuild()
     onAreaChanged: relayout()
     onRightToLeftChanged: relayout()
+    onHeaderHeightChanged: relayout()
+    onLeadingClearChanged: relayout()
     Component.onCompleted: {
         ready = true
         rebuild()

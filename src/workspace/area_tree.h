@@ -88,6 +88,16 @@ public:
     int split(int id, AreaAxis axis, const QString &view, double share = 0.5, bool atEnd = true);
     // Area `gone` gives its place to `keep`: two leaves side by side in one branch. False when they are not.
     bool join(int keep, int gone);
+    // Area `id` goes and its share goes to the child beside it in its branch: the one before it, or after it
+    // when it is the first (Blender's Close Area). The area that now holds that place's start, the first area in
+    // reading order of that neighbour, or 0 when nothing changed (no such area, or the only one).
+    int close(int id);
+    // Areas `a` and `b` trade what they show: the view and the state of every view they showed. Their places
+    // and ids stay. False when either is missing or they are the same.
+    bool swap(int a, int b);
+    // The two children beside border `border` of the branch at `path` share their place equally. False when
+    // nothing changed.
+    bool equalize(const Path &path, int border);
     // Moves the border after child `border` of the branch at `path` by `delta` pixels, for a branch `length`
     // pixels long along its axis. Neither neighbour goes below its minimum; false when nothing moved.
     bool resize(const Path &path, int border, double delta, double length, const MinimumSize &minimum);

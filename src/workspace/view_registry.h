@@ -5,7 +5,7 @@
 // its name (translated), its glyph, the QML component that draws it, its minimum size and how many areas
 // may show it at once.
 //
-// Names: the node graph is **Graph** (`graph`) and the picture editor of #216 will be **Canvas** (`canvas`).
+// Names: the node graph is **Graph** (`graph`) and the picture editor of #216 is **Canvas** (`canvas`).
 // The code's older names keep "canvas" for the node graph (FugueCanvas, App.canvasModel); a new name never
 // does.
 //
@@ -42,9 +42,10 @@ public:
         Multiplicity multiplicity = Multiplicity::Many;
     };
     static const QString kGraph;
+    static const QString kCanvas;
     static constexpr QSizeF kPlaceholderMinimum{160, 120};
 
-    // The built-in types (today the Graph alone).
+    // The built-in types: the Graph and the Canvas.
     explicit ViewRegistry(QObject *parent = nullptr);
 
     // Adds a type, or replaces the one of its id (a test's own views).
@@ -58,9 +59,10 @@ public:
     Q_INVOKABLE QSizeF minimumSize(const QString &id) const; // kPlaceholderMinimum for an unknown type
     // "many", "one-per-target" or "one-per-window"; "many" for an unknown type.
     Q_INVOKABLE QString multiplicity(const QString &id) const;
+    // The row of a type, or null for one no row registers.
+    const ViewType *find(const QString &id) const;
 
 private:
-    const ViewType *find(const QString &id) const;
 
     QList<ViewType> m_types;
 };

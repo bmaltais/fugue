@@ -53,6 +53,21 @@ Window {
     required property ViewRegistry registry
     property var tree: ({})
     property bool rtl: false
+    // The border handles, and what they ask of their controller (the window's is App.workspace).
+    property bool withHandles: false
+    property var asked: []
+    QtObject {
+        id: controller
+        function resizeBorder(path, border, delta, length) {
+            window.asked = window.asked.concat([{path: path, border: border, delta: delta, length: length}])
+        }
+        function equalizeBorder(path, border) { window.asked = window.asked.concat([{path: path, equal: border}]) }
+        function setAreaState(id, state) {}
+    }
+    Component {
+        id: handleComponent
+        AreaHandle { look: App.theme.look }
+    }
     Item {
         id: host
         objectName: "host"
@@ -69,6 +84,8 @@ Window {
         registry: window.registry
         views: ({"1": graph})
         rightToLeft: window.rtl
+        controller: controller
+        handle: window.withHandles ? handleComponent : null
     }
 }
 )";
@@ -205,6 +222,77 @@ private slots:
         QVERIFY(viewOf(2) && viewOf(2) != test.data());
         QCOMPARE(viewOf(1), graph);
         QCOMPARE(host->childItems().size(), 3);
+        QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join('\n')));
+    }
+
+    void anotherShapeKeepsTheViewsOfTheAreasThatStay() {
+        window->setProperty("tree", split());
+        const QPointer<QQuickItem> test = viewOf(2), unknown = viewOf(3);
+        // Area 3 goes: area 2 keeps its view, and takes the column's place.
+        window->setProperty("tree", branch("row", {{0.6, leaf(1, "graph")}, {0.4, leaf(2, "test")}}));
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QVERIFY(test);
+        QVERIFY(!unknown);
+        QCOMPARE(viewOf(2), test.data());
+        QCOMPARE(geometry(test), QRectF(480, 0, 320, 600));
+        // Area 2 showing another view is another view.
+        window->setProperty("tree", branch("row", {{0.6, leaf(1, "graph")}, {0.4, leaf(2, "storyboard")}}));
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QVERIFY(!test);
+        QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join('\n')));
+    }
+
+    void theBordersAskTheControllerAndMirrorInARightToLeftRow() {
+        window->setProperty("tree", QVariantMap());
+        window->setProperty("withHandles", true);
+        window->setProperty("tree", split());
+        QList<QQuickItem *> handles;
+        for (QQuickItem *child : host->childItems())
+            if (child->objectName() == QLatin1String("areaHandle"))
+                handles << child;
+        QCOMPARE(handles.size(), 2); // the row's border and the column's
+        QCOMPARE(madeItems(), 4);    // two views and two borders
+        QQuickItem *row = handles.at(0)->property("axis").toString() == "row" ? handles.at(0) : handles.at(1);
+        QQuickItem *column = row == handles.at(0) ? handles.at(1) : handles.at(0);
+        QVERIFY(row->width() >= 24);
+        QCOMPARE(row->x() + row->width() / 2, 480.0);
+        QCOMPARE(row->height(), 600.0);
+        QCOMPARE(column->y() + column->height() / 2, 300.0);
+        QCOMPARE(column->x(), 480.0);
+        const auto last = [this] { return window->property("asked").toList().last().toMap(); };
+        // A drag asks for the border under the pointer: 40 px toward the end.
+        const QPoint at(480, 200);
+        QTest::mousePress(window, Qt::LeftButton, {}, at);
+        QTest::mouseMove(window, at + QPoint(20, 0));
+        QTest::mouseMove(window, at + QPoint(40, 0));
+        QTest::mouseRelease(window, Qt::LeftButton, {}, at + QPoint(40, 0));
+        QCOMPARE(last().value("delta").toDouble(), 40.0);
+        QCOMPARE(last().value("length").toDouble(), 800.0);
+        QCOMPARE(last().value("border").toInt(), 0);
+        QVERIFY(last().value("path").toList().isEmpty());
+        QTRY_VERIFY(row->hasActiveFocus()); // a press gives it the keys
+        QTest::keyClick(window, Qt::Key_Left);
+        QCOMPARE(last().value("delta").toDouble(), -8.0);
+        QTest::keyClick(window, Qt::Key_Return);
+        QCOMPARE(last().value("equal").toInt(), 0);
+        // The column's border is inside the row's second child.
+        QTest::mouseDClick(window, Qt::LeftButton, {}, QPoint(640, 300));
+        QCOMPARE(last().value("path").toList(), QVariantList({1}));
+        QCOMPARE(last().value("equal").toInt(), 0);
+        // Right to left: the Graph is at the end, and toward the screen's right is toward the row's start.
+        window->setProperty("rtl", true);
+        QCOMPARE(row->x() + row->width() / 2, 320.0);
+        QTest::mousePress(window, Qt::LeftButton, {}, QPoint(320, 200));
+        QTest::mouseMove(window, QPoint(330, 200));
+        QTest::mouseMove(window, QPoint(350, 200));
+        QTest::mouseRelease(window, Qt::LeftButton, {}, QPoint(350, 200));
+        QCOMPARE(last().value("delta").toDouble(), -30.0);
+        QTest::keyClick(window, Qt::Key_Right, Qt::ShiftModifier);
+        QCOMPARE(last().value("delta").toDouble(), -40.0);
+        window->setProperty("rtl", false);
+        window->setProperty("tree", QVariantMap());
+        window->setProperty("withHandles", false);
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join('\n')));
     }
 

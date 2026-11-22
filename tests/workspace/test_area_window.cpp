@@ -8,50 +8,15 @@
 // writes what the window has now, in that file's form.
 
 #include <QDirIterator>
-#include <QMap>
 #include <QQuickStyle>
 
 #include "../canvas/canvas_app.h"
+#include "window_items.h"
 
 using namespace canvas_test;
+using namespace window_items;
 
 namespace {
-
-int countItems(QQuickItem *from) {
-    int count = 1;
-    for (auto *child : from->childItems())
-        count += countItems(child);
-    return count;
-}
-
-void collectNames(QQuickItem *from, QMap<QString, int> &names) {
-    for (auto *child : from->childItems()) {
-        if (!child->objectName().isEmpty())
-            ++names[child->objectName()];
-        collectNames(child, names);
-    }
-}
-
-// The file's form: "items <count>", then "<name> <count>" per name, sorted.
-QString describe(QQuickItem *content) {
-    QMap<QString, int> names;
-    collectNames(content, names);
-    QString text = QStringLiteral("items %1\n").arg(countItems(content));
-    for (auto it = names.cbegin(); it != names.cend(); ++it)
-        text += QStringLiteral("%1 %2\n").arg(it.key()).arg(it.value());
-    return text;
-}
-
-QString expected() {
-    QFile file(QStringLiteral(FUGUE_SOURCE_DIR "/tests/workspace/data/default-window.txt"));
-    if (!file.open(QIODevice::ReadOnly))
-        return {};
-    QString text;
-    for (const QString &line : QString::fromUtf8(file.readAll()).split('\n'))
-        if (!line.isEmpty() && !line.startsWith('#'))
-            text += line + '\n';
-    return text;
-}
 
 // The files of the test's folder, home and settings, but caches (Qt keeps compiled QML and shaders there).
 QStringList keptFiles(const QString &testFolder) {

@@ -172,10 +172,17 @@ int main(int argc, char *argv[]) {
     projects.registerCommands(commands);
     projects.bindTitle(workflows);
 
+    // The window's areas (#217, spec 12.16): the layout kept in the root's state folder, read before the window is
+    // made so it opens as it was left; a layout that cannot be read is said on the notice line.
+    fugue::Workspace workspace(fugue::stateDir() + "/workspaces.json");
+    QObject::connect(&workspace, &fugue::Workspace::message, &workflows, &fugue::Workflows::notify);
+    workspace.registerCommands(commands);
+    workspace.restore();
+
     const fugue::AppObjects objects{&translator, &theme,   &commands, &canvasModel,  &workflows,
                                     &appSettings, &runs, &imageActions, &colorHistory, &layoutColors,
                                     &runBar,      &runQueue,    &sidePanels,   &nodeLibrary,  &recentFiles,  &chrome,
-                                    &mediaLibrary, &projects};
+                                    &mediaLibrary, &projects, &workspace};
     // The registry is filled again when the packs or the trust change, so what is installed is
     // usable with no restart (#70). Made after what it refreshes, so it goes first.
     fugue::RegistryReloader reloader(&registry, addNodeTypes);
@@ -200,6 +207,7 @@ int main(int argc, char *argv[]) {
     QObject::connect(&appSettings, &fugue::SettingsModel::changed, &workflows,
                      [&workflows, &appSettings] { workflows.setSessionEnabled(appSettings.restoreTabs()); });
     QObject::connect(&app, &QCoreApplication::aboutToQuit, &workflows, &fugue::Workflows::flushSession);
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, &workspace, &fugue::Workspace::flush);
     if (parser.positionalArguments().isEmpty())
         workflows.restoreSession();
     else

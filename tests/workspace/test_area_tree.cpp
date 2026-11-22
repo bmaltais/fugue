@@ -151,6 +151,56 @@ private slots:
         QVERIFY(!tree.join(1, 1));
     }
 
+    void aCloseGivesTheGoneAreasShareToTheChildBeforeIt() {
+        AreaTree tree;
+        tree.split(1, AreaAxis::Row, "a", 0.5);    // row [1 .5, 2 .5]
+        tree.split(2, AreaAxis::Column, "b", 0.5); // row [1, column [2, 3]]
+        QCOMPARE(tree.close(9), 0);
+        // The first child of a branch gives its share to the one after it.
+        QCOMPARE(tree.close(2), 3);
+        QCOMPARE(tree.areaIds(), QList<int>({1, 3}));
+        QVERIFY(tree.root().children[1].leaf); // the column of one is that one
+        QVERIFY(near(shares(tree.root()).at(1), 0.5));
+        // Any other to the one before it; the area that takes the place is the first area of that child.
+        QCOMPARE(tree.split(1, AreaAxis::Column, "c", 0.5), 4); // row [column [1, 4], 3]
+        QCOMPARE(tree.close(3), 1);
+        QCOMPARE(tree.root().axis, AreaAxis::Column);
+        QCOMPARE(tree.areaIds(), QList<int>({1, 4}));
+        QVERIFY(near(tree.root().size, 1));
+        QCOMPARE(tree.close(1), 4);
+        QVERIFY(tree.root().leaf);
+        QCOMPARE(tree.close(4), 0); // the last area stays
+        QCOMPARE(tree.count(), 1);
+    }
+
+    void aSwapTradesViewsAndStatesButNotPlaces() {
+        AreaTree tree;
+        tree.split(1, AreaAxis::Row, "canvas", 0.25);
+        tree.setState(1, {{"zoom", 2}});
+        tree.setState(2, {{"canvasId", "c1"}});
+        QVERIFY(!tree.swap(1, 1));
+        QVERIFY(!tree.swap(1, 9));
+        QVERIFY(tree.swap(1, 2));
+        QCOMPARE(tree.area(1)->view, QString("canvas"));
+        QCOMPARE(tree.area(2)->view, QString("graph"));
+        QCOMPARE(tree.area(1)->state.value("canvas").toObject().value("canvasId").toString(), QString("c1"));
+        QCOMPARE(tree.area(2)->state.value("graph").toObject().value("zoom").toInt(), 2);
+        QCOMPARE(tree.areaIds(), QList<int>({1, 2}));
+        QVERIFY(near(shares(tree.root()).at(0), 0.75)); // the places stay
+    }
+
+    void equalizeSharesABordersTwoChildrenEqually() {
+        AreaTree tree;
+        tree.split(1, AreaAxis::Row, "a", 0.5);
+        tree.split(2, AreaAxis::Row, "b", 0.5); // row [1 .5, 2 .25, 3 .25]
+        QVERIFY(tree.equalize({}, 0));
+        QVERIFY(near(shares(tree.root()).at(0), 0.375) && near(shares(tree.root()).at(1), 0.375));
+        QVERIFY(near(shares(tree.root()).at(2), 0.25));
+        QVERIFY(!tree.equalize({}, 0)); // already
+        QVERIFY(!tree.equalize({}, 2));
+        QVERIFY(!tree.equalize({0}, 0));
+    }
+
     void aResizeMovesABorderAndKeepsBothSidesAtTheirMinimum() {
         AreaTree tree;
         tree.split(1, AreaAxis::Row, "a", 0.5); // graph (min 160) | a (min 100), 1000 px
@@ -313,15 +363,21 @@ private slots:
         QCOMPARE(read.toJson(), AreaTree().toJson());
     }
 
-    void theRegistryKnowsTheGraph() {
+    void theRegistryKnowsTheGraphAndTheCanvas() {
         ViewRegistry views;
-        QCOMPARE(views.ids(), QStringList({"graph"}));
+        QCOMPARE(views.ids(), QStringList({"graph", "canvas"}));
         QVERIFY(views.contains(ViewRegistry::kGraph));
         QCOMPARE(views.name("graph"), QString("Graph"));
         QCOMPARE(views.minimumSize("graph"), QSizeF(160, 120));
         QCOMPARE(views.multiplicity("graph"), QString("one-per-window"));
         QCOMPARE(views.component("graph"), QUrl("qrc:/canvas/FugueCanvas.qml"));
         QCOMPARE(views.glyph("graph"), QString("workflow"));
+        QVERIFY(views.contains(ViewRegistry::kCanvas));
+        QCOMPARE(views.name("canvas"), QString("Canvas"));
+        QCOMPARE(views.minimumSize("canvas"), QSizeF(240, 180));
+        QCOMPARE(views.multiplicity("canvas"), QString("many"));
+        QCOMPARE(views.component("canvas"), QUrl("qrc:/workspace/CanvasArea.qml"));
+        QCOMPARE(views.glyph("canvas"), QString("image"));
     }
 
     void anUnknownViewIsAPlaceholder() {
@@ -337,7 +393,7 @@ private slots:
         ViewRegistry views;
         views.add({"queue", "Queue", "layers", QUrl("qrc:/x.qml"), QSizeF(200, 100), ViewRegistry::Multiplicity::Many});
         views.add({"graph", "Graph", "workflow", QUrl("qrc:/y.qml"), QSizeF(300, 200), ViewRegistry::Multiplicity::OnePerTarget});
-        QCOMPARE(views.ids(), QStringList({"graph", "queue"}));
+        QCOMPARE(views.ids(), QStringList({"graph", "canvas", "queue"}));
         QCOMPARE(views.minimumSize("graph"), QSizeF(300, 200));
         QCOMPARE(views.multiplicity("graph"), QString("one-per-target"));
     }

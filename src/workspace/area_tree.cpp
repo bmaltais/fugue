@@ -259,6 +259,52 @@ bool AreaTree::join(int keep, int gone) {
     return true;
 }
 
+int AreaTree::close(int id) {
+    bool found = false;
+    const Path path = pathOf(id, &found);
+    if (!found || path.isEmpty())
+        return 0;
+    const Path parentPath = path.mid(0, path.size() - 1);
+    Node *parent = nodeAt(m_root, parentPath);
+    const int index = path.last();
+    const int neighbour = index > 0 ? index - 1 : index + 1;
+    Node &receiver = parent->children[size_t(neighbour)];
+    receiver.size += parent->children[size_t(index)].size;
+    QList<int> ids;
+    collectIds(receiver, ids);
+    const int taker = ids.isEmpty() ? 0 : ids.first();
+    parent->children.erase(parent->children.begin() + index);
+    normalize(m_root);
+    return taker;
+}
+
+bool AreaTree::swap(int a, int b) {
+    bool foundA = false, foundB = false;
+    const Path pathA = pathOf(a, &foundA);
+    const Path pathB = pathOf(b, &foundB);
+    if (!foundA || !foundB || a == b)
+        return false;
+    Area &first = nodeAt(m_root, pathA)->area;
+    Area &second = nodeAt(m_root, pathB)->area;
+    std::swap(first.view, second.view);
+    std::swap(first.state, second.state);
+    return true;
+}
+
+bool AreaTree::equalize(const Path &path, int border) {
+    Node *branch = nodeAt(m_root, path);
+    if (!branch || branch->leaf || border < 0 || border + 1 >= int(branch->children.size()))
+        return false;
+    Node &first = branch->children[size_t(border)];
+    Node &second = branch->children[size_t(border + 1)];
+    const double half = (first.size + second.size) / 2;
+    if (std::abs(first.size - half) < 1e-12)
+        return false;
+    first.size = half;
+    second.size = half;
+    return true;
+}
+
 bool AreaTree::resize(const Path &path, int border, double delta, double length, const MinimumSize &minimum) {
     Node *branch = nodeAt(m_root, path);
     if (!branch || branch->leaf || border < 0 || border + 1 >= int(branch->children.size()) || !(length > 0)

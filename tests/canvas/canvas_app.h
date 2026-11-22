@@ -120,6 +120,8 @@ struct App {
     // The color picker's recent colors (#52), in the test's own folder, and layout coloring.
     fugue::ColorHistory colorHistory{dir.path() + "/recent-colors.json"};
     fugue::LayoutColors layoutColors{model};
+    // The window's areas (#217), their layout kept in the test's own folder.
+    fugue::Workspace workspace{dir.path() + "/workspaces.json"};
     QQmlApplicationEngine engine;
     QStringList warnings;
     QList<QUrl> openedUrls; // what help.docs and help.report-issue opened
@@ -152,6 +154,7 @@ struct App {
         nodeLibrary.refresh(); // the registry is filled now
         sidePanels.registerCommands(commands);
         fugue::registerChromeCommands(commands, chrome);
+        workspace.registerCommands(commands);
         recentFiles.follow(&workflows);
         settings.attach(&translator, &model, &registry, &theme); // as main.cpp does
         settings.registerCommands(commands, [this](const QUrl &url) { openedUrls << url; });
@@ -168,7 +171,7 @@ struct App {
     bool open() {
         // As main() does: the English catalog gives counted strings their plural forms.
         QCoreApplication::installTranslator(&translator);
-        const fugue::AppObjects objects{&translator, &theme, &commands, &model, &workflows, &settings, runs, imageActions, &colorHistory, &layoutColors, runBar, runQueue, &sidePanels, &nodeLibrary, &recentFiles, &chrome, &mediaLibrary, projects};
+        const fugue::AppObjects objects{&translator, &theme, &commands, &model, &workflows, &settings, runs, imageActions, &colorHistory, &layoutColors, runBar, runQueue, &sidePanels, &nodeLibrary, &recentFiles, &chrome, &mediaLibrary, projects, &workspace};
         fugue::followNodeTypeReloads(*reloader, objects);
         fugue::exposeToQml(engine, objects);
         engine.load(QUrl("qrc:/Main.qml"));

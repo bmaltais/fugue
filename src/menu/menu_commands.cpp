@@ -15,6 +15,7 @@
 #include "commands/command_registry.h"
 #include "menu/menus.h"
 #include "panels/chrome_commands.h"
+#include "workspace/workspace.h"
 #include "workflow/image_inputs.h"
 
 namespace fugue {
@@ -151,6 +152,7 @@ QList<QPair<const char *, const char *>> menuLabels() {
 
 void registerMenuCommands(CommandRegistry &registry) {
     addChromeCommands(registry); // the Bars and panels menu's rows
+    addAreaCommands(registry);   // the Areas menu's rows (#217)
     for (const Row &row : menuRows()) {
         if (registry.contains(QString::fromLatin1(row.id)))
             continue;
