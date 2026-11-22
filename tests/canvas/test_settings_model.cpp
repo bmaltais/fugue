@@ -189,7 +189,7 @@ private slots:
         QCOMPARE(canvas.document().graph.nodes.value(id).inputs.value("embed").literal(), QJsonValue("no-prompts"));
     }
 
-    // Show new canvas results (#225): on by default, a preferences key; written like the others.
+    // Show new candidates (#225): on by default, a preferences key; written like the others.
     void canvasShowNewResultsIsOnByDefaultAndPersists() {
         SettingsModel model(settingsFile());
         QVERIFY(model.canvasShowNewResults());

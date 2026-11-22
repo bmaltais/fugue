@@ -266,7 +266,7 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
-    // General > Show new canvas results (#225): on by default; the switch turns it off and on and the file keeps it.
+    // General > Show new candidates (#225): on by default; the switch turns it off and on and the file keeps it.
     void theCanvasShowNewResultsSwitchPersists() {
         App app(load(emptyDoc));
         QVERIFY(app.open());

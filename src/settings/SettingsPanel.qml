@@ -157,13 +157,13 @@ Popup {
                     // General
                     SettingsParts.Setting {
                         visible: panel.page === 0
-                        title: qsTr("Canvas navigation")
+                        title: qsTr("Graph navigation") // "canvas" is the picture to a person; the node view is the Graph (#228)
                         key: "navigation"
                         origin: panel.model.origins["navigation"] ?? ""
                         onUseDefaultRequested: panel.apply(panel.model.useDefault("navigation"))
                         note: panel.model.navigation === "legacy"
-                              ? qsTr("Left-drag on empty canvas pans and the wheel zooms; Ctrl+drag selects. ComfyUI's default.")
-                              : qsTr("Left-drag on empty canvas selects and the wheel pans; Ctrl+wheel zooms.")
+                              ? qsTr("Left-drag on an empty part of the graph pans and the wheel zooms; Ctrl+drag selects. ComfyUI's default.")
+                              : qsTr("Left-drag on an empty part of the graph selects and the wheel pans; Ctrl+wheel zooms.")
                         Choices {
                             Layout.fillWidth: true
                             name: "navigation"
@@ -254,7 +254,7 @@ Popup {
                     }
                     SettingsParts.Setting {
                         visible: panel.page === 0
-                        title: qsTr("Show new canvas results")
+                        title: qsTr("Show new candidates")
                         key: "canvas_show_new_results"
                         origin: panel.model.origins["canvas_show_new_results"] ?? ""
                         onUseDefaultRequested: panel.apply(panel.model.useDefault("canvas_show_new_results"))
@@ -428,7 +428,7 @@ Popup {
                     SettingsParts.Setting {
                         visible: panel.page === 5
                         title: qsTr("Theme")
-                        note: qsTr("Fugue follows the Omarchy theme and the desktop text size. Change them in Omarchy. The canvas corners are set on the General page.")
+                        note: qsTr("Fugue follows the Omarchy theme and the desktop text size. Change them in Omarchy. The corner radius of nodes and popups is set on the General page.")
                         GridLayout {
                             Layout.fillWidth: true
                             columns: 2

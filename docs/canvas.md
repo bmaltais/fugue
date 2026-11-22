@@ -89,7 +89,7 @@ When a run leaves a candidate, a Canvas view that is looking at the head (File >
 area) shows it at once over the head, with a banner: **Accept**, **Drop** or **Keep looking at head**.
 Several results at once: the newest is shown and the others are counted. A view on another revision,
 with Compare on, or while you drag the region is never moved (a result that came during a drag shows
-when you let go). Turn it off in Settings > General, **Show new canvas results**. To skip the review
+when you let go). Turn it off in Settings > General, **Show new candidates**. To skip the review
 altogether, turn Canvas Write's **Keep as candidate** off: the head then moves to the result by itself.
 
 - `fugue canvas candidates <id>` lists what waits, newest first; run the template again for another

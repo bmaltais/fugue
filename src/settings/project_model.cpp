@@ -88,7 +88,7 @@ QVariantList ProjectModel::inheritChoices() const {
         {QStringLiteral("prompts"),
          {tr("Prompts"), tr("The Default project's prompt templates. They can hold text of other clients, so this is off unless you choose it.")}},
         {QStringLiteral("preferences"),
-         {tr("Preferences"), tr("Canvas navigation, language, corner radius, hover magnifier, new seeds, embedded workflow, reopening tabs and your keys.")}},
+         {tr("Preferences"), tr("Graph navigation, language, corner radius, hover magnifier, new seeds, embedded workflow, reopening tabs and your keys.")}},
     };
     QVariantList list;
     for (const QString &id : inheritableItems())
