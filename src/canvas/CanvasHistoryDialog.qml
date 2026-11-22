@@ -83,7 +83,7 @@ LargeViewDialog {
         title: qsTr("Save the revision as a picture")
         fileMode: FileDialog.SaveFile
         defaultSuffix: "png"
-        nameFilters: [qsTr("PNG images (*.png)")]
+        nameFilters: [qsTr("PNG images (*.png)"), qsTr("JPEG images (*.jpg *.jpeg)"), qsTr("WebP images (*.webp)"), qsTr("Layered image (*.ora)")]
         onAccepted: backend.exportPicture(selectedFile.toString())
     }
     Component.onDestruction: exportDialog.close()

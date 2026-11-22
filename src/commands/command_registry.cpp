@@ -504,6 +504,15 @@ QVariantList CommandRegistry::resolve(const QVariantList &items, const QVariantM
                 continue;
             item.remove("hideWhenOff");
             item.insert(state);
+        } else if (item.contains("placeholder")) {
+            // Planned, not built: shown greyed with its issue, never a command (the shortcut map does not know it).
+            item.insert("label", QCoreApplication::translate("Menu", item.value("placeholder").toString().toUtf8().constData()));
+            item.insert("command", QString());
+            item.insert("keys", QStringList());
+            item.insert("available", false);
+            item.insert("enabled", false);
+            item.insert("checkable", false);
+            item.insert("checked", false);
         } else if (item.value("separator").toBool()) {
             // Never first, never two in a row; a last one goes below.
             if (resolved.isEmpty() || resolved.last().toMap().value("separator").toBool())
@@ -517,7 +526,8 @@ QVariantList CommandRegistry::resolve(const QVariantList &items, const QVariantM
 }
 
 QVariantList CommandRegistry::menu(const QString &name, const QVariantMap &target) const {
-    return resolve(menus::tree(name), target, name != QLatin1String("bar"));
+    // The bar and the Canvas view's own bar show every row, built or not; a context menu leaves out what is not built.
+    return resolve(menus::tree(name), target, name != QLatin1String("bar") && name != QLatin1String("canvas-view"));
 }
 
 } // namespace fugue

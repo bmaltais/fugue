@@ -63,6 +63,38 @@ void click(App &app, const QString &name) {
     QTest::mouseClick(app.window, Qt::LeftButton, {}, at);
 }
 
+// A command through the view's own menu bar (#232): open the menu by its title and press the row, as a person does.
+void viaMenu(App &app, const QString &menu, const QString &command) {
+    click(app, "canvasMenuTitle-" + menu);
+    click(app, "menuItem-" + command);
+}
+
+// The row of a menu, the menu left open (close it with closeMenu).
+QQuickItem *menuRow(App &app, const QString &menu, const QString &command) {
+    click(app, "canvasMenuTitle-" + menu);
+    QQuickItem *row = nullptr;
+    for (int i = 0; i < 100 && !row; ++i) {
+        row = find(app.window, "menuItem-" + command);
+        if (!row)
+            QTest::qWait(20);
+    }
+    return row;
+}
+
+// Closes the open menu (and its submenu) by pressing its title again.
+void closeMenu(App &app) {
+    for (int i = 0; i < 3; ++i) {
+        QQuickItem *title = nullptr;
+        for (const char *name : {"File", "Edit", "Select", "Layer", "View"})
+            if (QQuickItem *row = find(app.window, QString("canvasMenuTitle-") + name); row && row->property("current").toBool())
+                title = row;
+        if (!title)
+            return;
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(title));
+        QTest::qWait(60);
+    }
+}
+
 PaintDocument withFill(PaintDocument doc, const QString &name, int x) {
     doc.addLayer(LayerKind::Paint, name);
     doc.brush.color = Rgba{200, 10, 10, 255};
@@ -160,8 +192,18 @@ private slots:
         QCOMPARE(model(app)->property("revisionB").toString(), m_head);
         // The head alone: nothing to accept, drop or overlay; Export is there.
         QVERIFY(!find(app.window, "canvasViewAccept"));
-        QVERIFY(!find(app.window, "canvasViewOverlay"));
-        QVERIFY(find(app.window, "canvasViewExport"));
+        QVERIFY(!find(app.window, "canvasViewOverlay")); // it lives in the View menu now
+        QVERIFY(!find(app.window, "canvasViewExport")); // and Export in the File menu
+        QTRY_VERIFY(find(app.window, "canvasMenuBar"));
+        menuRow(app, "File", "canvas-view.new");
+        click(app, "subMenu-Export"); // the submenu opens
+        QQuickItem *exportRow = nullptr;
+        QTRY_VERIFY((exportRow = find(app.window, "menuItem-canvas-view.export")));
+        QVERIFY(exportRow->isEnabled());
+        closeMenu(app);
+        QQuickItem *candidateRow = menuRow(app, "View", "canvas-view.show-candidate");
+        QVERIFY(candidateRow && !candidateRow->isEnabled()); // the head alone: nothing to show over it
+        closeMenu(app);
         QVERIFY(!find(app.window, "canvasViewRegionRow")); // nothing followed
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
@@ -176,9 +218,9 @@ private slots:
         QVERIFY(find(app.window, "canvasViewDrop"));
         QObject *viewer = view(app)->property("viewer").value<QObject *>();
         QCOMPARE(viewer->property("sourceA").toUrl(), model(app)->property("sourceB").toUrl()); // the candidate
-        click(app, "canvasViewOverlay");
+        viaMenu(app, "View", "canvas-view.show-candidate");
         QTRY_COMPARE(viewer->property("sourceA").toUrl(), model(app)->property("headSource").toUrl()); // the head alone
-        click(app, "canvasViewOverlay");
+        viaMenu(app, "View", "canvas-view.show-candidate");
         QTRY_COMPARE(viewer->property("sourceA").toUrl(), model(app)->property("sourceB").toUrl());
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
@@ -190,17 +232,21 @@ private slots:
         showRevision(app, m_a);
         QTRY_COMPARE(model(app)->property("revisionB").toString(), m_a);
         QVERIFY(!find(app.window, "canvasViewMode-slider"));
-        QVERIFY(find(app.window, "canvasViewOverlay")); // the overlay toggle is for the picture alone
-        click(app, "canvasViewCompare");
+        QQuickItem *overlayRow = menuRow(app, "View", "canvas-view.show-candidate");
+        QVERIFY(overlayRow && overlayRow->isEnabled()); // the overlay toggle is for the picture alone
+        closeMenu(app);
+        viaMenu(app, "View", "canvas-view.compare");
         QTRY_VERIFY(find(app.window, "canvasViewMode-slider"));
-        QVERIFY(!find(app.window, "canvasViewOverlay"));
+        overlayRow = menuRow(app, "View", "canvas-view.show-candidate");
+        QVERIFY(overlayRow && !overlayRow->isEnabled());
+        closeMenu(app);
         QObject *viewer = view(app)->property("viewer").value<QObject *>();
         QTRY_COMPARE(viewer->property("mode").toString(), QString("slider"));
         QCOMPARE(viewer->property("sourceA").toUrl(), model(app)->property("sourceA").toUrl());
         QCOMPARE(model(app)->property("revisionA").toString(), m_head);
         click(app, "canvasViewMode-difference");
         QTRY_COMPARE(viewer->property("mode").toString(), QString("difference"));
-        click(app, "canvasViewCompare");
+        viaMenu(app, "View", "canvas-view.compare");
         QTRY_COMPARE(viewer->property("mode").toString(), QString("single"));
     }
 
@@ -326,7 +372,7 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(model(app)->property("head").toString(), m_a, 4000);
         QTRY_COMPARE(model(app)->property("revisionB").toString(), m_a);
         // Compare on (the head against its parent): the new result waits in the strip.
-        click(app, "canvasViewCompare");
+        viaMenu(app, "View", "canvas-view.compare");
         QTRY_VERIFY(find(app.window, "canvasViewMode-slider"));
         std::thread run = arrivesLater(m_canvas, m_a, "run1", 200);
         QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "canvasViewChoice-run1") || model(app)->property("choices").toList().size() > 3, 5000);
@@ -334,7 +380,7 @@ private slots:
         QTest::qWait(300);
         QCOMPARE(model(app)->property("revisionB").toString(), m_a);
         QVERIFY(!find(app.window, "canvasViewNewResult"));
-        click(app, "canvasViewCompare"); // Compare off: now it shows
+        viaMenu(app, "View", "canvas-view.compare"); // Compare off: now it shows
         QTRY_VERIFY(find(app.window, "canvasViewNewResult"));
         click(app, "canvasViewNewBack");
         QTRY_VERIFY(!find(app.window, "canvasViewNewResult"));
@@ -833,7 +879,7 @@ private slots:
         QTRY_VERIFY(!model(app)->property("revisionB").toString().isEmpty());
         QVERIFY(QMetaObject::invokeMethod(model(app), "setOpacity", Q_ARG(QVariantList, QVariantList{0}), Q_ARG(double, 0.5)));
         QTRY_VERIFY(model(app)->property("head").toString() != m_head);
-        click(app, "canvasViewHistory");
+        viaMenu(app, "View", "canvas-view.history");
         QTRY_VERIFY(find(app.window, "canvasHistoryPanel"));
         QQuickItem *list = find(app.window, "canvasHistoryList");
         QTRY_COMPARE(list->property("count").toInt(), 2);
@@ -853,6 +899,130 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // ---- the view's own menu bar (#232 slice B) ----
+
+    void theMenuBarHasFiveMenusAndHonestPlaceholders() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        for (const char *title : {"File", "Edit", "Select", "Layer", "View"})
+            QTRY_VERIFY2(find(app.window, QString("canvasMenuTitle-") + title), title);
+        // A planned feature is a greyed row that is no command: it has no key and pressing it does nothing.
+        QQuickItem *placeholder = menuRow(app, "File", "canvas-view.new"); // opens File
+        QVERIFY(placeholder);
+        QQuickItem *planned = find(app.window, "menuPlanned-236-Place picture…");
+        QVERIFY(planned);
+        QVERIFY(!planned->isEnabled());
+        QCOMPARE(planned->property("plannedNote").toString(), QString("Not built yet (#236)"));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(planned));
+        QVERIFY(dialog(app)->property("opened").toBool());
+        closeMenu(app);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    void deselectClearsTheRegionsRectangleInOneUndoStep() {
+        App app(load(fixture(m_canvas)));
+        openFollowing(app);
+        QCOMPARE(regionOf(app).value("width").toInt(), 160);
+        QCOMPARE(app.model.undoStack()->count(), 0);
+        viaMenu(app, "Select", "canvas-view.deselect");
+        QTRY_COMPARE(regionOf(app).value("width").toInt(), 0);
+        QCOMPARE(regionOf(app).value("height").toInt(), 0);
+        QCOMPARE(app.model.undoStack()->count(), 1);
+        QQuickItem *row = menuRow(app, "Select", "canvas-view.deselect");
+        QVERIFY(row && !row->isEnabled()); // nothing is selected now
+        closeMenu(app);
+        app.model.undoStack()->undo();
+        QTRY_COMPARE(regionOf(app).value("width").toInt(), 160);
+    }
+
+    void escapeAndCtrlDClearTheSelectionAndTheDialogStaysOpen() {
+        App app(load(fixture(m_canvas)));
+        openFollowing(app);
+        QTest::mouseMove(app.window, pixelAt(app, 50, 50)); // the pointer is over the view: its keys are live
+        QTest::keyClick(app.window, Qt::Key_D, Qt::ControlModifier);
+        QTRY_COMPARE(regionOf(app).value("width").toInt(), 0);
+        app.model.undoStack()->undo();
+        QTRY_COMPARE(regionOf(app).value("width").toInt(), 160);
+        QTest::keyClick(app.window, Qt::Key_Escape);
+        QTRY_COMPARE(regionOf(app).value("width").toInt(), 0);
+        QVERIFY(dialog(app)->property("opened").toBool()); // the first Escape was the selection's
+        QTest::keyClick(app.window, Qt::Key_Escape);
+        QTRY_VERIFY(!dialog(app)->property("opened").toBool()); // nothing left to clear: it closes
+    }
+
+    void aFreeRectangleIsDeselectedAndSelectAllDrawsTheWholeCanvas() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        QTRY_VERIFY(find(app.window, "canvasViewFrame") || view(app)->property("freeMode").toBool());
+        QVERIFY(!view(app)->property("hasFreeRect").toBool());
+        viaMenu(app, "Select", "canvas-view.select-all");
+        QTRY_VERIFY(view(app)->property("hasFreeRect").toBool());
+        QCOMPARE(view(app)->property("freeRect").toMap().value("width").toInt(), 512);
+        viaMenu(app, "Select", "canvas-view.deselect");
+        QTRY_VERIFY(!view(app)->property("hasFreeRect").toBool());
+    }
+
+    void aPaintedSelectionIsDeselectedAndInverseIsForIt() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        QTRY_VERIFY(find(app.window, "canvasViewViewer"));
+        QQuickItem *inverse = menuRow(app, "Select", "canvas-view.invert-selection");
+        QVERIFY(inverse && !inverse->isEnabled()); // there is no painted selection yet
+        closeMenu(app);
+        viaMenu(app, "Select", "canvas-view.quick-mask");
+        QTRY_VERIFY(view(app)->property("quickMask").toBool());
+        QObject *mask = view(app)->property("selectionMask").value<QObject *>();
+        QVERIFY(QMetaObject::invokeMethod(mask, "fillRect", Q_ARG(double, 10), Q_ARG(double, 10), Q_ARG(double, 40), Q_ARG(double, 40), Q_ARG(bool, false)));
+        QTRY_VERIFY(view(app)->property("maskSelected").toBool());
+        viaMenu(app, "Select", "canvas-view.invert-selection");
+        QTRY_VERIFY(view(app)->property("maskSelected").toBool());
+        viaMenu(app, "Select", "canvas-view.deselect");
+        QTRY_VERIFY(!view(app)->property("maskSelected").toBool());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    void renameDuplicateClearDeleteAndCloseAreInTheFileMenu() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        QTRY_COMPARE(model(app)->property("canvasId").toString(), m_canvas);
+        // Rename asks for the name.
+        viaMenu(app, "File", "canvas-view.rename");
+        QTRY_VERIFY(find(app.window, "canvasRenameField"));
+        find(app.window, "canvasRenameField")->setProperty("text", "Poster");
+        click(app, "canvasRenameOk");
+        QTRY_COMPARE(canvas::CanvasStore::forSession().info(m_canvas)->name, QString("Poster"));
+        // Clear asks first (Keep leaves it), then is one step that Undo takes back.
+        viaMenu(app, "File", "canvas-view.clear");
+        click(app, "canvasClearKeep");
+        QCOMPARE(model(app)->property("revisionB").toString(), m_head);
+        viaMenu(app, "File", "canvas-view.clear");
+        click(app, "canvasClearYes");
+        QTRY_VERIFY(model(app)->property("revisionB").toString() != m_head);
+        QCOMPARE(model(app)->property("layers").toList().size(), 1);
+        QVERIFY(QMetaObject::invokeMethod(model(app), "undo"));
+        QTRY_COMPARE(model(app)->property("revisionB").toString(), m_head);
+        // Duplicate shows the copy; Delete asks, removes it and shows the other.
+        viaMenu(app, "File", "canvas-view.duplicate");
+        QTRY_VERIFY(model(app)->property("canvasId").toString() != m_canvas);
+        const QString copy = model(app)->property("canvasId").toString();
+        QCOMPARE(canvas::CanvasStore::forSession().info(copy)->name, QString("Poster copy"));
+        viaMenu(app, "File", "canvas-view.delete");
+        click(app, "canvasDeleteKeep");
+        QVERIFY(canvas::CanvasStore::forSession().info(copy).ok());
+        viaMenu(app, "File", "canvas-view.delete");
+        click(app, "canvasDeleteYes");
+        QTRY_COMPARE(model(app)->property("canvasId").toString(), m_canvas);
+        QVERIFY(!canvas::CanvasStore::forSession().info(copy).ok());
+        // Close closes the dialog that hosts the view.
+        viaMenu(app, "File", "canvas-view.close");
+        QTRY_VERIFY(!dialog(app)->property("opened").toBool());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     // ---- the cohesion batch (#228, .ui-ergonomics/2026-11-22-canvas-areas-cohesion.md) ----
 
     // L2: one bar. The frame's own bar is off; Fit, 100% and the close end the view's tools row, in that order.
@@ -863,13 +1033,13 @@ private slots:
         QTRY_VERIFY(find(app.window, "canvasViewClose"));
         QVERIFY(!find(app.window, "canvasViewZoom-fit")); // the frame's own
         QQuickItem *fit = find(app.window, "canvasViewFit"), *actual = find(app.window, "canvasViewActual"),
-                   *close = find(app.window, "canvasViewClose"), *layers = find(app.window, "canvasViewLayers");
-        QVERIFY(fit && actual && layers);
+                   *close = find(app.window, "canvasViewClose");
+        QVERIFY(fit && actual && close);
+        QVERIFY(!find(app.window, "canvasViewLayers")); // the View menu has Layers and History now
         const auto x = [](QQuickItem *item) { return item->mapToScene(QPointF(0, 0)).x(); };
         const auto y = [](QQuickItem *item) { return item->mapToScene(QPointF(0, 0)).y(); };
-        QTRY_VERIFY(x(layers) < x(fit) && x(fit) < x(actual) && x(actual) < x(close)); // once laid out
+        QTRY_VERIFY(x(fit) < x(actual) && x(actual) < x(close)); // once laid out
         QCOMPARE(y(close), y(fit)); // one row
-        QCOMPARE(y(layers), y(fit));
         click(app, "canvasViewClose");
         QTRY_VERIFY(!dialog(app)->property("opened").toBool());
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
@@ -904,21 +1074,23 @@ private slots:
         openDialog(app);
         showRevision(app, m_a);
         QTRY_COMPARE(model(app)->property("revisionB").toString(), m_a);
-        click(app, "canvasViewCompare");
+        viaMenu(app, "View", "canvas-view.compare");
         for (const char *mode : {"slider", "slider_horizontal", "side_by_side", "flip", "difference"})
             QTRY_VERIFY2(find(app.window, QStringLiteral("canvasViewMode-") + mode), mode);
         click(app, "canvasViewMode-slider_horizontal");
         QObject *viewer = view(app)->property("viewer").value<QObject *>();
         QTRY_COMPARE(viewer->property("mode").toString(), QString("slider_horizontal"));
         // Only Accept wears the accent fill: Compare on, its mode and the shown chip are quiet.
-        for (const char *name : {"canvasViewCompare", "canvasViewMode-slider_horizontal"})
+        for (const char *name : {"canvasViewMode-slider_horizontal"})
             QVERIFY2(!find(app.window, name)->property("marked").toBool() && find(app.window, name)->property("current").toBool(), name);
         QVERIFY(!find(app.window, "canvasViewPending")->property("marked").toBool());
         QVERIFY(find(app.window, "canvasViewAccept")->property("marked").toBool());
-        QVERIFY(find(app.window, "canvasViewCompare")->property("checkable").toBool());
-        click(app, "canvasViewCompare");
+        QQuickItem *compareRow = menuRow(app, "View", "canvas-view.compare");
+        QVERIFY(compareRow && compareRow->property("checkable").toBool() && compareRow->property("checked").toBool()); // on, in the menu
+        closeMenu(app);
+        viaMenu(app, "View", "canvas-view.compare");
         QTRY_COMPARE(viewer->property("mode").toString(), QString("single"));
-        click(app, "canvasViewCompare"); // the mode last picked comes back
+        viaMenu(app, "View", "canvas-view.compare"); // the mode last picked comes back
         QTRY_COMPARE(viewer->property("mode").toString(), QString("slider_horizontal"));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
@@ -962,7 +1134,7 @@ private slots:
         QTRY_VERIFY(find(app.window, "canvasViewClose"));
         const auto x = [](QQuickItem *item) { return item->mapToScene(QPointF(0, 0)).x(); };
         QTRY_VERIFY(x(find(app.window, "canvasViewClose")) < x(find(app.window, "canvasViewFit"))); // once laid out
-        QTRY_VERIFY(x(find(app.window, "canvasViewCanvas")) > x(find(app.window, "canvasViewHistory")));
+        QTRY_VERIFY(x(find(app.window, "canvasMenuTitle-File")) > x(find(app.window, "canvasMenuTitle-View"))); // File at the reading end
         QQuickItem *picture = find(app.window, "canvasViewViewer");
         QQuickItem *layers = find(app.window, "canvasLayersPanel");
         QVERIFY(layers && x(layers) < x(picture)); // the panel at the reading end, the left
@@ -1012,10 +1184,10 @@ private slots:
             QTRY_VERIFY(find(app.window, "canvasViewStatusDetails"));
             save(app, "status-line");
             click(app, "canvasViewAdvancedDetails");
-            click(app, "canvasViewHistory");
+            viaMenu(app, "View", "canvas-view.history");
             QTRY_VERIFY(find(app.window, "canvasHistoryPanel"));
             save(app, "history");
-            click(app, "canvasViewHistory");
+            viaMenu(app, "View", "canvas-view.history");
             showRevision(app, model(app)->property("head").toString());
             QTRY_COMPARE(model(app)->property("revisionB").toString(), m_head);
             std::thread run = arrivesLater(m_canvas, m_head, "write", 260);

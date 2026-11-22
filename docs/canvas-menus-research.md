@@ -20,8 +20,8 @@ is a **placeholder**: a greyed row, not a command (no handler, no key, nothing i
 | Open canvas (this root's canvases) | Ph Open, Pp, Kr, Af | built | the canvas picker's rows (`canvasMenu.js`) as the canvas button's menu |
 | Import picture… | Ph Open, Kr Open, Af | built | `importPicture` |
 | Export as… (PNG, JPEG, WebP flattened; .ora with layers) | Ph Export As, Pp, Kr, Af | built | by the file's extension, as `fugue canvas export` does |
-| Export > Export as with quality and scale (Save for web) | Ph, Pp, Af | placeholder, new issue | needs a dialog with a preview and a size estimate |
-| Export > Export layers as files | Ph, Kr, Af | placeholder, new issue | one picture per layer, named |
+| Export > Export as with quality and scale (Save for web) | Ph, Pp, Af | placeholder, #247 | needs a dialog with a preview and a size estimate |
+| Export > Export layers as files | Ph, Kr, Af | placeholder, #248 | one picture per layer, named |
 | Export > Export PSD | Ph, Pp, Kr, Af | placeholder, #227 | issue exists |
 | Rename canvas… | Pp, Kr | built | `CanvasStore::rename` (new) |
 | Duplicate canvas | Pp, Af, Kr | built | `CanvasStore::duplicate` (new): the whole history under a new id |
@@ -31,8 +31,8 @@ is a **placeholder**: a greyed row, not a command (no handler, no key, nothing i
 | Place embedded / linked | Ph, Pp, Af | placeholder, #236 | place a picture as a layer |
 | Canvas size… / Document properties | Ph, Kr, Af | placeholder, #240 | the resize revision |
 | Edit in external editor | Krita plugins | placeholder, #215 | issue exists |
-| Share / Publish | Ph Share, Af | placeholder, new issue | a package that carries a canvas (epic #206) |
-| Automate / Batch | Ph Automate, Kr scripts | placeholder, new issue | a canvas action over a folder of pictures |
+| Share / Publish | Ph Share, Af | placeholder, #249 | a package that carries a canvas (epic #206) |
+| Automate / Batch | Ph Automate, Kr scripts | placeholder, #250 | a canvas action over a folder of pictures |
 | Open recent | Ph, Pp, Kr, Af | skip | the canvas list is newest first and one click away |
 | Save, Save as, Revert, Save a copy | all | skip | autosaved revisions; Undo and History revert; Export is the copy |
 | Print | Ph, Kr, Af | skip | no print path in Fugue; Export is the way out |
@@ -55,7 +55,7 @@ is a **placeholder**: a greyed row, not a command (no handler, no key, nothing i
 | Inverse (Ctrl+Shift+I) | built for the painted selection only | `invert()`; the rectangle has no inverse yet (disabled with the reason) |
 | Quick Mask (Q), Use selection | built | existing |
 | Subject, Sky, by words | placeholder, #238 | AI selection |
-| Modify (feather, grow, shrink), Transform selection | placeholder, new issue | selection model first |
+| Modify (feather, grow, shrink), Transform selection | placeholder, #251 | selection model first |
 
 ## Layer
 
@@ -64,7 +64,7 @@ is a **placeholder**: a greyed row, not a command (no handler, no key, nothing i
 | Add layer mask (Ctrl+Shift+M), Invert mask (Ctrl+I), Overlay (\\) | built | existing commands |
 | Reveal all, Hide all (mask) | built | `fillMask`, `clearMask` |
 | Duplicate, Delete, Rename, Raise, Lower, Show or hide | stay in the Layers panel | the panel has them with keys; doubling them is the follow-up |
-| New layer, Merge down, Flatten, Group, Layer properties | placeholder, new issue | the engine has no new-layer or merge op |
+| New layer, Merge down, Flatten, Group, Layer properties | placeholder, #252 | the engine has no new-layer or merge op |
 
 ## View
 
@@ -75,5 +75,5 @@ is a **placeholder**: a greyed row, not a command (no handler, no key, nothing i
 | Compare, Show candidate, Advanced details | built, checked | |
 | Snap to the node's multiple | built, checked | the options bar's Snap |
 | Tools: Hand, Zoom, Rectangle region, Mask brush, Mask eraser, Quick Mask | built, checked | the strip's commands |
-| Rulers, Grid, Guides | placeholder, new issue | none in the view |
+| Rulers, Grid, Guides | placeholder, #253 | none in the view |
 | Screen modes, Rotate view | skip | |

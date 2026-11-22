@@ -129,7 +129,7 @@ zooms with the wheel and pans with the middle button or Space held (Home or 0 fi
 drag draws a region. The canvas button opens the
 list of your canvases, with **New canvas…** and **Import picture…** under it; with no canvas yet the picture's place
 offers the same two. A candidate shows over the latest version; **Show candidate** off shows the latest alone, so you can
-flip between before and after. **Accept** (or Enter), **Drop** and **Export…** are in the bar (Drop only hides: a dropped
+flip between before and after. **Accept** (or Enter) and **Drop** are in the bar (Export… is in File > Export) (Drop only hides: a dropped
 candidate can still be accepted), and **Compare** opens the views of Compare Images (slider, horizontal slider, side
 by side, flip and difference) against the latest version; the view you pick last comes back next time. The view follows the Canvas
 Region node you select in the graph, or by itself the only one that reads this canvas (a new one with no canvas yet
@@ -153,7 +153,7 @@ File > Canvas history… lists your canvases (or, with none yet, offers New canv
 see its revisions and candidates, and click a revision to see it at full size (zoom and pan; the head is shown
 first). Press **Compare** to see a candidate against the head and any other revision against the one before it (the
 same views as Compare Images), and **Accept** (or Enter) or **Drop** on a candidate. Ctrl+click a revision to use it as the left
-side of a comparison. **Export…** saves the revision you are looking at as a flattened PNG.
+side of a comparison. **File > Export > Export as…** saves the revision you are looking at: a flattened PNG, JPEG or WebP, or an .ora with its layers, by the file's extension.
 
 `fugue canvas export <id>[@<revision>] <file>` writes the same flattened picture from the command line by
 the file extension: `.png`, `.jpg` or `.webp` (a JPEG has no transparency, so it is flattened onto white
@@ -239,11 +239,34 @@ revision of the canvas (History names it "Painted: <layer>"), and Ctrl+Z takes i
 red, which no revision keeps (Ctrl+Z undoes a stroke). With a Canvas Region node followed, **Use selection** gives it the
 selection as the area to change, as one undo step of the workflow: the next run redraws the painted part, and its
 result lands as a layer. Drawing a rectangle afterwards replaces it. Press Q again to leave Quick Mask; the selection
-stays until you clear it (**Clear selection**) or change canvas.
+stays until you clear it (**Select > Deselect**, Ctrl+D, or Escape) or change canvas.
 
 Canvas Region's **Selection** input (advanced) is what Use selection writes: the hash of the stored selection. With
 it, the Mask input and the rectangle are not used; the selection's bounds are in X, Y, Width and Height so the frame
 and the size the model gets read right. A replay of the run reads the same selection.
+
+## The menu bar
+
+The Canvas view has its own menu bar at the top, in the File > Canvas… dialog and in an area alike (#232). Every option of
+the view is a row of a menu, with its key beside it; what does not apply to the canvas now is greyed.
+
+- **File**: New canvas…, Open canvas… (the picker), Import picture…, **Export** (Export as…: PNG, JPEG, WebP flattened, .ora
+  with layers, by the extension; never replaces a file), Rename canvas…, Duplicate canvas (the whole history, under a new
+  id; the copy is shown), **Clear canvas…** (asks; one undoable step that leaves one empty layer of the same size),
+  **Delete canvas…** (asks; permanent; the next canvas is shown, or the empty state) and Close canvas (the dialog closes; an
+  area shows no canvas).
+- **Edit**: Undo and Redo, as the keys do.
+- **Select**: Select all (Ctrl+A: the whole canvas as the rectangle, or the whole Quick Mask), **Deselect** (Ctrl+D, and
+  Escape when nothing is being dragged or run: it clears the free rectangle, sets the Canvas Region node's area back to 0, 0, 0, 0 = the
+  whole canvas as one undo step, and clears a painted selection), Inverse (Ctrl+Shift+I, the painted selection), Quick Mask
+  and Use selection.
+- **Layer**: Add layer mask, Invert mask, Mask overlay, Reveal all, Hide all. The layers panel keeps its own rows.
+- **View**: Fit, 100%, Zoom in, Zoom out, History, Layers, Compare, Show candidate, Advanced details, Snap region, and
+  **Tools** (Hand, Zoom, Rectangle region, Mask brush, Mask eraser, swap, brush size).
+
+A greyed row with the tooltip "Not built yet (#N)" is a feature that is planned and tracked in issue N; it is not a command and has
+no key ([the research](canvas-menus-research.md) says what the other editors have and what was decided). The top bar keeps the
+canvas picker, the pending chip, Accept and Drop, Fit and 100%; each tool's own settings stay in the options bar.
 
 ## The task bar: Generate on the canvas
 

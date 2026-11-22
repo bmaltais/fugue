@@ -19,8 +19,11 @@ MenuItem {
     readonly property real u: look.unit
     readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
     readonly property bool available: entry === undefined || entry.available
+    // A planned feature (#232): greyed, no command, its tooltip says which issue builds it.
+    readonly property bool planned: entry !== undefined && entry.placeholder !== undefined
+    readonly property string plannedNote: planned ? qsTr("Not built yet (#%1)").arg(entry.issue) : ""
 
-    objectName: entry !== undefined ? "menuItem-" + entry.command : subMenu ? "subMenu-" + subMenu.title.replace("&", "") : ""
+    objectName: planned ? "menuPlanned-" + entry.issue + "-" + entry.label : entry !== undefined ? "menuItem-" + entry.command : subMenu ? "subMenu-" + subMenu.title.replace("&", "") : ""
     text: entry !== undefined ? entry.label : subMenu ? subMenu.title : ""
     enabled: entry === undefined || entry.enabled
     checkable: entry !== undefined && entry.checkable
@@ -34,7 +37,10 @@ MenuItem {
     // The capped menu scrolls (`interactive`) and shows its bar then; the bar's own visibility would loop through the menu's size.
     rightPadding: 2.5 * u + (ListView.view && ListView.view.interactive ? (ListView.view.ScrollBar.vertical as FugueScrollBar).breadth : 0)
     Accessible.name: text.replace("&", "")
-    Accessible.description: entry !== undefined && !entry.available ? qsTr("Not available yet") : ""
+    Accessible.description: planned ? plannedNote : entry !== undefined && !entry.available ? qsTr("Not available yet") : ""
+    ToolTip.visible: planned && hovered
+    ToolTip.text: plannedNote
+    ToolTip.delay: 400
 
     onTriggered: {
         if (entry === undefined)
@@ -92,7 +98,7 @@ MenuItem {
             textFormat: Text.PlainText
             elide: Text.ElideRight
             font.pixelSize: row.look.textSize
-            color: row.enabled ? row.look.text : row.look.label
+            color: !row.enabled ? row.look.label : row.entry !== undefined && row.entry.danger === true ? row.look.error : row.look.text
         }
         Text {
             id: keys

@@ -429,7 +429,11 @@ void CanvasViewModel::updateRegion() {
                               {"cap", state.value("cap").toDouble()},
                               {"multiple", state.value("multiple").toInt()},
                               {"selection", state.value("selection").toString()},
-                              {"selectionWritable", state.value("selectionWritable").toBool()}};
+                              {"selectionWritable", state.value("selectionWritable").toBool()},
+                              // The node's numbers are all 0 (and no painted selection): it reads the whole canvas and the
+                              // view shows no selection (Select > Deselect leaves it so, #232).
+                              {"unset", state.value("x").toInt() == 0 && state.value("y").toInt() == 0 && state.value("width").toInt() == 0
+                                            && state.value("height").toInt() == 0 && state.value("selection").toString().isEmpty()}};
         }
     }
     if (out != m_region) {

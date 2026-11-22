@@ -193,6 +193,58 @@ private slots:
         QVERIFY(registry.menu("canvas").isEmpty());
     }
 
+    // The Canvas view's own menu bar (#232 slice B): every row is a registered command or a planned placeholder that is
+    // not one; a placeholder is greyed with its issue and owns no key; the new keys belong to the view.
+    void theCanvasViewMenuHasCommandsAndHonestPlaceholders() {
+        CommandRegistry registry;
+        fugue::registerDefaultCommands(registry);
+        QVERIFY2(registry.problems().isEmpty(), qPrintable(registry.problems().join('\n')));
+        const QVariantList bar = registry.menu("canvas-view");
+        QCOMPARE(bar.size(), 5);
+        QStringList titles, planned;
+        QSet<QString> seen;
+        std::function<void(const QVariantList &)> walk = [&](const QVariantList &items) {
+            for (const QVariant &value : items) {
+                const QVariantMap item = value.toMap();
+                if (item.contains("items")) {
+                    walk(item.value("items").toList());
+                } else if (item.value("placeholder").toBool() || item.contains("placeholder")) {
+                    QVERIFY(item.value("issue").toInt() > 0);
+                    QVERIFY(!item.value("enabled").toBool());
+                    QVERIFY(!item.value("available").toBool());
+                    QVERIFY(item.value("command").toString().isEmpty());
+                    QVERIFY(item.value("keys").toStringList().isEmpty());
+                    QVERIFY(!item.value("label").toString().isEmpty());
+                    planned << item.value("label").toString();
+                } else if (item.contains("command")) {
+                    QVERIFY2(registry.contains(item.value("command").toString()), qPrintable(item.value("command").toString()));
+                    QVERIFY(!item.value("label").toString().isEmpty());
+                    QVERIFY2(!item.value("label").toString().contains(':'), qPrintable(item.value("label").toString())); // a short label, not the description
+                    seen.insert(item.value("command").toString());
+                }
+            }
+        };
+        for (const QVariant &menu : bar)
+            titles << menu.toMap().value("title").toString();
+        walk(bar);
+        QCOMPARE(titles, (QStringList{"&File", "&Edit", "&Select", "&Layer", "&View"}));
+        QVERIFY(planned.size() >= 10);
+        // Every canvas-view command is reachable from the bar.
+        for (const QString &id : registry.ids())
+            if (id.startsWith("canvas-view."))
+                QVERIFY2(seen.contains(id), qPrintable(id + " is in no menu"));
+        // No command id is made for a placeholder.
+        for (const QString &id : registry.ids())
+            QVERIFY2(!id.contains("planned"), qPrintable(id));
+        registry.setContextActive("canvas-view", true);
+        QVERIFY(registry.setHandler("canvas-view.deselect", [] {}));
+        QCOMPARE(registry.ownerOf("Ctrl+D"), QString("canvas-view.deselect"));
+        QCOMPARE(registry.ownerOf("Ctrl+A"), QString("canvas-view.select-all"));
+        QCOMPARE(registry.ownerOf("Ctrl+Shift+I"), QString("canvas-view.invert-selection"));
+        // A planned row does not show in a context menu list either way: the bar of the view shows all, the others do not.
+        QVERIFY(registry.menu("canvas").isEmpty());
+    }
+
     void aContextMenuCommandSeesWhatItWasOpenedOn() {
         CommandRegistry registry;
         QVERIFY(registry.add(spec("node.color.red")).isEmpty());

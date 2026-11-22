@@ -33,6 +33,8 @@ LargeViewDialog {
         anchors.fill: parent
         look: root.look
         ownShortcuts: true // a modal popup: the window's shortcuts sleep, so the layers panel binds its keys
+        hostCloses: true // File > Close canvas closes this dialog
+        onCloseRequested: root.close()
         edits: root.edits
         selection: root.selection
         focus: true

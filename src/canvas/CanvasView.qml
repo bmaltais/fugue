@@ -131,7 +131,11 @@ Item {
         return !latest || canvasData.region.readsId !== latest.id
     }
     // The selection the status line says: the drag's, the node's rectangle, or a drawn one.
-    readonly property var selectionRect: liveRect ?? (regionValid ? canvasData.region : hasFreeRect ? freeRect : null)
+    // The Canvas Region node's rectangle, or the free one; none while the node's numbers are all 0 (it reads the whole canvas
+    // and the view shows no selection: Select > Deselect leaves it so).
+    readonly property bool regionSet: regionValid && canvasData.region.unset !== true
+    readonly property var shownRegion: regionSet ? canvasData.region : regionValid ? noRect : freeRect
+    readonly property var selectionRect: liveRect ?? (regionSet ? canvasData.region : !regionValid && hasFreeRect ? freeRect : null)
     property bool advancedDetails: false
     readonly property bool compareOn: comparing && canvasData.hasParent
     readonly property bool canDecide: canvasData.kindB === "candidate" || canvasData.kindB === "dropped"
@@ -187,7 +191,12 @@ Item {
     readonly property alias layerMaskItem: layerMask
     readonly property alias selectionMask: selectionLayer
     // The view's keys are live (the `canvas-view` context): the pointer is over it, or its picture has the focus.
-    readonly property bool keysHot: viewHover.hovered || pictureView.activeFocus
+    // A menu of the view's own bar is open: the pointer is over the popup, not the view, yet the commands are the view's.
+    property bool menuOpen: false
+    // The host closes the view itself (the dialog): Close canvas asks it with `closeRequested`; an area just shows no canvas.
+    property bool hostCloses: false
+    signal closeRequested()
+    readonly property bool keysHot: viewHover.hovered || pictureView.activeFocus || menuOpen
     onKeysHotChanged: App.commands.setContextActive("canvas-view", keysHot)
     function keysOf(id) { return (App.commands.entry(id).keys ?? []).join(", ") }
     function setTool(name) {
@@ -244,6 +253,103 @@ Item {
             else canvasData.clearMask()
         }, 40)
     }
+
+    // ---- the selection, as the Select menu knows it (#232 slice B) ----
+    // The rectangle (the Region node's, or the free one) has an area; the painted selection has pixels.
+    readonly property bool rectSelected: regionValid ? regionSet : hasFreeRect
+    readonly property bool maskSelected: !selectionLayer.empty
+    // What Deselect can clear now: the free rectangle, the node's area (when its numbers are not linked or compared), the painted selection.
+    readonly property bool deselectable: (rectSelected && (!regionValid || regionEditable)) || maskSelected
+    // Escape clears the selection when nothing else wants it: no drag, no run of the task bar or the Graph.
+    readonly property bool escapeDeselects: deselectable && !taskBar.busy && !dragging && App.commands.entry("run.cancel").enabled !== true
+    // The node's area goes back to 0, 0, 0, 0 (the whole canvas: the run takes the edge, one undo step, a stored selection
+    // goes too); the free rectangle and the painted selection are cleared.
+    function deselect() {
+        selectionProblem = ""
+        if (hasFreeRect)
+            freeRect = noRect
+        if (regionValid && regionEditable && (regionSet || canvasData.region.selection))
+            canvasData.setRegion(noRect)
+        if (maskSelected)
+            selectionLayer.clear()
+    }
+    function selectAll() {
+        const w = canvasData.pictureSize.width, h = canvasData.pictureSize.height
+        if (w <= 0 || h <= 0)
+            return
+        const whole = {x: 0, y: 0, width: w, height: h}
+        if (quickMask)
+            selectionLayer.fill()
+        else if (regionValid)
+            canvasData.setRegion(whole)
+        else if (freeMode)
+            placeFree(whole)
+    }
+    function exportDialogOpen() {
+        exportDialog.currentFolder = StandardPaths.writableLocation(StandardPaths.PicturesLocation)
+        exportDialog.selectedFile = StandardPaths.writableLocation(StandardPaths.PicturesLocation) + "/" + canvasData.exportName
+        exportDialog.open()
+    }
+    // Close canvas: the host's close (the dialog), or the area shows no canvas.
+    function closeCanvas() {
+        if (hostCloses)
+            closeRequested()
+        else
+            canvasData.canvasId = ""
+    }
+    // What the menu bar's rows say about this view now: {enabled, checkable, checked, keys}; undefined for a row that has no
+    // state of its own (a tool's key command, which was never guarded).
+    function menuState(id) {
+        const has = canvasData.canvasId !== ""
+        const shows = pictureView.visible
+        const tool = name => ({enabled: has, checkable: true, checked: root.tool === name})
+        switch (id) {
+        case "canvas-view.new": case "canvas-view.import": return {enabled: true}
+        case "canvas-view.open": return {enabled: canvasData.canvases.length > 0}
+        case "canvas-view.export": return {enabled: canvasData.revisionB !== ""}
+        case "canvas-view.rename": case "canvas-view.duplicate": case "canvas-view.delete": case "canvas-view.close": return {enabled: has}
+        case "canvas-view.clear": return {enabled: canvasData.layersEditable}
+        case "canvas-view.select-all": return {enabled: shows && canvasData.pictureSize.width > 0}
+        case "canvas-view.deselect": return {enabled: deselectable}
+        case "canvas-view.invert-selection": return {enabled: quickMask}
+        case "canvas-view.use-selection": return {enabled: quickMask && regionValid && canvasData.region.selectionWritable === true}
+        case "canvas-view.quick-mask": return {enabled: has, checkable: true, checked: quickMask}
+        case "canvas-view.add-mask": return {enabled: canvasData.layersEditable && layersPanel.current !== null && layersPanel.current.kind !== "mask"}
+        case "canvas-view.mask-invert": return {enabled: quickMask || paintsMask}
+        case "canvas-view.mask-overlay": return {enabled: paintsMask, checkable: true, checked: maskOverlay}
+        case "canvas-view.mask-reveal": case "canvas-view.mask-hide": return {enabled: paintsMask}
+        case "canvas-view.undo": return {enabled: !quickMask || selectionLayer.canUndo}
+        case "canvas-view.redo": return {enabled: !quickMask || selectionLayer.canRedo}
+        // The keys the view handles by hand are shown as text (they are not bound twice).
+        case "canvas-view.fit": return {enabled: shows, keys: ["Home"]}
+        case "canvas-view.actual-size": return {enabled: shows, keys: ["1"]}
+        case "canvas-view.zoom-in": return {enabled: shows, keys: ["+"]}
+        case "canvas-view.zoom-out": return {enabled: shows, keys: ["-"]}
+        case "canvas-view.history": return {enabled: has, checkable: true, checked: showHistory}
+        case "canvas-view.layers": return {enabled: has, checkable: true, checked: showLayers}
+        case "canvas-view.compare": return {enabled: canvasData.hasParent, checkable: true, checked: compareOn}
+        case "canvas-view.show-candidate": return {enabled: canvasData.showsCandidate && !compareOn, checkable: true, checked: canvasData.overlay}
+        case "canvas-view.details": return {enabled: has, checkable: true, checked: advancedDetails}
+        case "canvas-view.snap": return {enabled: root.tool === "region" && regionEditable && canvasData.region.multiple > 1, checkable: true, checked: snap}
+        case "canvas-view.tool-hand": return tool("hand")
+        case "canvas-view.tool-zoom": return tool("zoom")
+        case "canvas-view.tool-region": return tool("region")
+        case "canvas-view.tool-brush": return {enabled: has, checkable: true, checked: root.tool === "brush"}
+        case "canvas-view.tool-eraser": return tool("eraser")
+        case "canvas-view.brush-swap": case "canvas-view.brush-smaller": case "canvas-view.brush-larger": return {enabled: brushing}
+        }
+        return undefined
+    }
+    // Menu `index` of the bar, as CommandMenu shows it: the registry's rows with this view's state put in.
+    function menuItems(index) {
+        const decorate = items => items.map(item => {
+            if (item.items !== undefined)
+                return Object.assign({}, item, {items: decorate(item.items)})
+            const state = item.command ? menuState(item.command) : undefined
+            return state === undefined ? item : Object.assign({}, item, state)
+        })
+        return decorate(App.commands.menu("canvas-view")[index].items)
+    }
     // A command of the strip (the registry's `canvas-view.*`), from a key or a menu.
     function runTool(id) {
         switch (id) {
@@ -260,6 +366,31 @@ Item {
         case "canvas-view.mask-overlay": maskOverlay = !maskOverlay; break
         case "canvas-view.mask-invert": if (quickMask) selectionLayer.invert(); else canvasData.invertMask(); break
         // Undo follows what is being done: a Quick Mask stroke, a layer mask's revision, else the document's (the region).
+        case "canvas-view.new": newCanvas(); break
+        case "canvas-view.open": chooseCanvas(); break
+        case "canvas-view.import": importPicture(); break
+        case "canvas-view.export": exportDialogOpen(); break
+        case "canvas-view.rename": fileDialogs.askRename(); break
+        case "canvas-view.duplicate": canvasData.duplicateCanvas(); break
+        case "canvas-view.clear": fileDialogs.askClear(); break
+        case "canvas-view.delete": fileDialogs.askDelete(); break
+        case "canvas-view.close": closeCanvas(); break
+        case "canvas-view.select-all": selectAll(); break
+        case "canvas-view.deselect": deselect(); break
+        case "canvas-view.invert-selection": if (quickMask) selectionLayer.invert(); break
+        case "canvas-view.use-selection": if (quickMask) useSelection(); break
+        case "canvas-view.mask-reveal": canvasData.fillMask(); break
+        case "canvas-view.mask-hide": canvasData.clearMask(); break
+        case "canvas-view.fit": fit(); break
+        case "canvas-view.actual-size": actualSize(); break
+        case "canvas-view.zoom-in": pictureView.zoomAt(pictureView.width / 2, pictureView.height / 2, 1.25); break
+        case "canvas-view.zoom-out": pictureView.zoomAt(pictureView.width / 2, pictureView.height / 2, 0.8); break
+        case "canvas-view.history": showHistory = !showHistory; break
+        case "canvas-view.layers": showLayers = !showLayers; break
+        case "canvas-view.compare": comparing = !comparing; break
+        case "canvas-view.show-candidate": canvasData.overlay = !canvasData.overlay; break
+        case "canvas-view.details": advancedDetails = !advancedDetails; break
+        case "canvas-view.snap": snap = !snap; break
         case "canvas-view.undo":
             if (quickMask) selectionLayer.undo()
             else if (paintsMask || canvasData.maskPending) canvasData.undo()
@@ -276,9 +407,19 @@ Item {
     Connections {
         target: App.commands
         function onWindowRequested(id) {
-            if (root.keysHot && id.startsWith("canvas-view."))
+            if (!root.keysHot || !id.startsWith("canvas-view."))
+                return
+            const state = root.menuState(id)
+            if (state === undefined || state.enabled)
                 root.runTool(id)
         }
+    }
+    // Escape clears the selection wherever the focus is, as Ctrl+D does (a key to a focused item would miss it after a click
+    // elsewhere in the dialog); `escapeDeselects` is false while a drag or a run wants the key.
+    Shortcut {
+        sequence: "Escape"
+        enabled: root.keysHot && root.escapeDeselects
+        onActivated: root.deselect()
     }
     // In a modal popup (the dialog) the window's shortcuts sleep: the view carries the keys of its own commands.
     Instantiator {
@@ -326,8 +467,12 @@ Item {
         title: qsTr("Save the revision as a picture")
         fileMode: FileDialog.SaveFile
         defaultSuffix: "png"
-        nameFilters: [qsTr("PNG images (*.png)")]
+        nameFilters: [qsTr("PNG images (*.png)"), qsTr("JPEG images (*.jpg *.jpeg)"), qsTr("WebP images (*.webp)"), qsTr("Layered image (*.ora)")]
         onAccepted: canvasData.exportPicture(selectedFile.toString())
+    }
+    CanvasFileDialogs {
+        id: fileDialogs
+        view: root
     }
     Component.onDestruction: {
         exportDialog.close()
@@ -457,7 +602,7 @@ Item {
     Keys.onShortcutOverride: event => {
         const bare = !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))
         if (event.key === Qt.Key_Escape) {
-            event.accepted = root.dragging || taskBar.busy // a drag's, or the task bar's Cancel
+            event.accepted = root.dragging || taskBar.busy || root.escapeDeselects // a drag's, the task bar's Cancel, or Deselect
             return
         }
         const owner = App.commands.ownerOfPress(event.key, event.modifiers)
@@ -467,8 +612,11 @@ Item {
     Keys.onPressed: event => {
         if (event.key === Qt.Key_Escape) {
             const frame = regionFrame.item as CropFrame
-            if ((!frame || !frame.cancel()) && !taskBar.cancelIfBusy())
-                return // not ours: the dialog closes
+            if ((!frame || !frame.cancel()) && !taskBar.cancelIfBusy()) {
+                if (!root.escapeDeselects)
+                    return // not ours: the dialog closes
+                root.deselect()
+            }
             event.accepted = true
             return
         }
@@ -503,9 +651,18 @@ Item {
 
     // One bar (#228, the owner's decision: no strip of revisions, no hashes): the canvas, the pending candidates when
     // there are any, the History and Layers panels, then the tools. It wraps when the view is narrow.
+    CanvasMenuBar {
+        id: menuBar
+        look: root.look
+        view: root
+        width: parent.width
+        height: implicitHeight
+    }
     Flow {
         id: tools
         objectName: "canvasViewTools"
+        anchors.top: menuBar.bottom
+        anchors.topMargin: root.u
         width: parent.width
         spacing: root.u
         Chunk {
@@ -533,56 +690,9 @@ Item {
                 onTapped: root.reviewPending()
             }
         }
-        Chunk {
-            visible: canvasData.canvasId !== ""
-            ViewButton {
-                objectName: "canvasViewHistory"
-                look: root.look
-                text: qsTr("History")
-                tip: root.showHistory ? qsTr("Hide the history of the canvas") : qsTr("Show the history of the canvas: each change, newest first")
-                accented: false
-                checkable: true
-                current: root.showHistory
-                onTapped: root.showHistory = !root.showHistory
-            }
-            ViewButton {
-                objectName: "canvasViewLayers"
-                look: root.look
-                glyph: "layers"
-                text: qsTr("Layers")
-                tip: root.showLayers ? qsTr("Hide the layers panel") : qsTr("Show the layers panel")
-                accented: false
-                checkable: true
-                current: root.showLayers
-                onTapped: root.showLayers = !root.showLayers
-            }
-        }
         // How the shown revision is looked at: over the latest version or alone, or against another (the modes).
         Chunk {
             visible: canvasData.canvasId !== ""
-            ViewButton {
-                objectName: "canvasViewOverlay"
-                look: root.look
-                visible: canvasData.showsCandidate && !root.compareOn
-                text: qsTr("Show candidate")
-                tip: qsTr("Show the candidate over the latest version; off shows the latest version alone")
-                accented: false // on is the quiet marking: Accept is the one accent fill (D7)
-                checkable: true
-                current: canvasData.overlay
-                onTapped: canvasData.overlay = !canvasData.overlay
-            }
-            ViewButton {
-                objectName: "canvasViewCompare"
-                look: root.look
-                enabled: canvasData.hasParent
-                text: qsTr("Compare")
-                tip: canvasData.hasParent ? (canvasData.showsCandidate ? qsTr("Show this candidate against the latest version") : qsTr("Show this step against the one before it"))
-                                       : qsTr("The first step has nothing before it to compare with")
-                accented: false
-                checkable: true
-                current: root.compareOn
-                onTapped: root.comparing = !root.comparing
-            }
             CompareModeButtons {
                 id: modeButtons
                 visible: root.compareOn
@@ -592,21 +702,6 @@ Item {
                 mode: pictureView.mode
                 hasDifference: canvasData.sourceDifference.toString() !== ""
                 onPicked: picked => pictureView.setView({mode: picked})
-            }
-        }
-        Chunk {
-            visible: canvasData.canvasId !== ""
-            ViewButton {
-                objectName: "canvasViewExport"
-                look: root.look
-                enabled: canvasData.revisionB !== ""
-                text: qsTr("Export…")
-                tip: qsTr("Save what is shown as a flattened PNG")
-                onTapped: {
-                    exportDialog.currentFolder = StandardPaths.writableLocation(StandardPaths.PicturesLocation)
-                    exportDialog.selectedFile = StandardPaths.writableLocation(StandardPaths.PicturesLocation) + "/" + canvasData.exportName
-                    exportDialog.open()
-                }
             }
         }
         // The decision, hidden while the banner shows its own (one primary on screen, docs/ui-ergonomics.md Primary).
@@ -859,17 +954,6 @@ Item {
                      : canvasData.region.selectionWritable !== true ? qsTr("This Canvas Region takes no selection")
                      : qsTr("Make %1 redraw the painted part (one undo step)").arg(root.followName)
                 onTapped: root.useSelection()
-            }
-        }
-        Chunk {
-            visible: root.quickMask
-            ViewButton {
-                objectName: "canvasViewClearSelection"
-                look: root.look
-                danger: true
-                text: qsTr("Clear selection")
-                tip: qsTr("Clear the painted selection (Ctrl+Z brings it back)")
-                onTapped: selectionLayer.clear()
             }
         }
         Text {
@@ -1162,7 +1246,7 @@ Item {
                 originX: pictureView.imageX
                 originY: pictureView.imageY
                 zoom: pictureView.imageScale
-                rect: root.regionValid ? canvasData.region : root.freeRect
+                rect: root.shownRegion
                 dimAlpha: 0
                 draw: true
                 editable: root.tool === "region" && (root.regionValid ? root.regionEditable : !root.compareOn)
@@ -1177,7 +1261,7 @@ Item {
         // The padded box: the region picker's, dashes on a dark halo (ContextBox.qml).
         ContextBox {
             objectName: "canvasViewContext"
-            visible: root.regionValid
+            visible: root.regionSet || root.liveRect !== null
             anchors.fill: parent
             look: root.look
             box: regionLayer.context
@@ -1188,7 +1272,7 @@ Item {
             id: contextLabel
             objectName: "canvasViewContextLabel"
             readonly property string text: root.previewReady ? qsTr("Context %1 × %2").arg(root.preview.context.width).arg(root.preview.context.height) : ""
-            visible: root.regionValid && text !== "" && regionLayer.context.width > contextText.implicitWidth + 4 * root.u
+            visible: (root.regionSet || root.liveRect !== null) && text !== "" && regionLayer.context.width > contextText.implicitWidth + 4 * root.u
             x: regionLayer.context.x
             y: regionLayer.context.y >= height ? regionLayer.context.y - height : regionLayer.context.y
             width: contextText.implicitWidth + root.u
@@ -1396,7 +1480,7 @@ Item {
         canvasId: canvasData.canvasId
         revision: canvasData.revisionB
         onHead: root.shownIsHead && !canvasData.showsCandidate
-        rect: root.regionValid ? canvasData.region : root.freeRect
+        rect: root.shownRegion
         quickMask: root.quickMask ? selectionLayer : null
         originX: pictureView.imageX
         originY: pictureView.imageY

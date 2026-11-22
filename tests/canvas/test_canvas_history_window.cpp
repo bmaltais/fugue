@@ -292,10 +292,14 @@ private slots:
         QVERIFY(!ok);
         QVERIFY(!history->property("error").toString().isEmpty());
         QCOMPARE(QFileInfo(target).size(), size);
-        // Another extension gets .png added, and a file URL works as well as a path.
-        QMetaObject::invokeMethod(history, "exportPicture", Q_RETURN_ARG(bool, ok), Q_ARG(QString, QUrl::fromLocalFile(m_dir.filePath("out/other.jpg")).toString()));
+        // An extension that is no picture gets .png added, and a file URL works as well as a path; .jpg is a JPEG (#232).
+        QMetaObject::invokeMethod(history, "exportPicture", Q_RETURN_ARG(bool, ok), Q_ARG(QString, QUrl::fromLocalFile(m_dir.filePath("out/other.txt")).toString()));
         QVERIFY(ok);
-        QVERIFY(QFile::exists(m_dir.filePath("out/other.jpg.png")));
+        QVERIFY(QFile::exists(m_dir.filePath("out/other.txt.png")));
+        QMetaObject::invokeMethod(history, "exportPicture", Q_RETURN_ARG(bool, ok), Q_ARG(QString, m_dir.filePath("out/other.jpg")));
+        QVERIFY(ok);
+        QVERIFY(QFile::exists(m_dir.filePath("out/other.jpg")));
+        QVERIFY(!QFile::exists(m_dir.filePath("out/other.jpg.png")));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 

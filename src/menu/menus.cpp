@@ -12,6 +12,12 @@ QVariantMap command(const char *id) { return {{"command", QString::fromLatin1(id
 // an image's on a node with none), rather than shown off (#72).
 QVariantMap ifOn(const char *id) { return {{"command", QString::fromLatin1(id)}, {"hideWhenOff", true}}; }
 QVariantMap separator() { return {{"separator", true}}; }
+// A feature that is planned and not built: a greyed row, never a command (no handler, no key), whose tooltip says which
+// issue builds it (#232, docs/canvas-menus-research.md).
+QVariantMap planned(const char *title, int issue) {
+    return {{"placeholder", QString::fromUtf8(title)}, {"issue", issue}};
+}
+QVariantMap danger(const char *id) { return {{"command", QString::fromLatin1(id)}, {"danger", true}}; }
 QVariantMap submenu(const char *title, const QVariantList &items) {
     return {{"title", QString::fromUtf8(title)}, {"items", items}};
 }
@@ -104,6 +110,52 @@ QVariantList bar() {
     };
 }
 
+// The Canvas view's own menu bar (#232 slice B), hosted in the view (CanvasView.qml): its File, Edit, Select, Layer and
+// View menus. Every toolbar and tool-strip option of the view is a row here; rows of features not built yet are
+// `planned` placeholders.
+QVariantList canvasView() {
+    return {
+        submenu(QT_TRANSLATE_NOOP("Menu", "&File"),
+                {command("canvas-view.new"), command("canvas-view.open"), command("canvas-view.import"), separator(),
+                 submenu(QT_TRANSLATE_NOOP("Menu", "&Export"),
+                         {command("canvas-view.export"), separator(),
+                          planned(QT_TRANSLATE_NOOP("Menu", "Export with quality and scale…"), 247),
+                          planned(QT_TRANSLATE_NOOP("Menu", "Export layers as files…"), 248),
+                          planned(QT_TRANSLATE_NOOP("Menu", "Export PSD…"), 227)}),
+                 planned(QT_TRANSLATE_NOOP("Menu", "Place picture…"), 236),
+                 planned(QT_TRANSLATE_NOOP("Menu", "Share…"), 249),
+                 planned(QT_TRANSLATE_NOOP("Menu", "Run an action on a folder…"), 250), separator(),
+                 command("canvas-view.rename"), command("canvas-view.duplicate"),
+                 planned(QT_TRANSLATE_NOOP("Menu", "Canvas size…"), 240),
+                 planned(QT_TRANSLATE_NOOP("Menu", "Edit in an external editor…"), 215), separator(),
+                 command("canvas-view.clear"), danger("canvas-view.delete"), separator(), command("canvas-view.close")}),
+        submenu(QT_TRANSLATE_NOOP("Menu", "&Edit"),
+                {command("canvas-view.undo"), command("canvas-view.redo"), separator(),
+                 planned(QT_TRANSLATE_NOOP("Menu", "Copy"), 236), planned(QT_TRANSLATE_NOOP("Menu", "Paste as layer"), 236),
+                 planned(QT_TRANSLATE_NOOP("Menu", "Free transform"), 236)}),
+        submenu(QT_TRANSLATE_NOOP("Menu", "&Select"),
+                {command("canvas-view.select-all"), command("canvas-view.deselect"), command("canvas-view.invert-selection"),
+                 separator(), command("canvas-view.quick-mask"), command("canvas-view.use-selection"), separator(),
+                 planned(QT_TRANSLATE_NOOP("Menu", "Select subject…"), 238),
+                 planned(QT_TRANSLATE_NOOP("Menu", "Modify selection…"), 251)}),
+        submenu(QT_TRANSLATE_NOOP("Menu", "&Layer"),
+                {command("canvas-view.add-mask"), command("canvas-view.mask-invert"), command("canvas-view.mask-overlay"),
+                 command("canvas-view.mask-reveal"), command("canvas-view.mask-hide"), separator(),
+                 planned(QT_TRANSLATE_NOOP("Menu", "New layer"), 252), planned(QT_TRANSLATE_NOOP("Menu", "Merge down"), 252),
+                 planned(QT_TRANSLATE_NOOP("Menu", "Flatten"), 252)}),
+        submenu(QT_TRANSLATE_NOOP("Menu", "&View"),
+                {command("canvas-view.fit"), command("canvas-view.actual-size"), command("canvas-view.zoom-in"),
+                 command("canvas-view.zoom-out"), separator(), command("canvas-view.history"), command("canvas-view.layers"),
+                 command("canvas-view.compare"), command("canvas-view.show-candidate"), command("canvas-view.details"),
+                 command("canvas-view.snap"), separator(),
+                 submenu(QT_TRANSLATE_NOOP("Menu", "&Tools"),
+                         {command("canvas-view.tool-hand"), command("canvas-view.tool-zoom"), command("canvas-view.tool-region"),
+                          command("canvas-view.tool-brush"), command("canvas-view.tool-eraser"), command("canvas-view.brush-swap"),
+                          command("canvas-view.brush-smaller"), command("canvas-view.brush-larger")}),
+                 separator(), planned(QT_TRANSLATE_NOOP("Menu", "Rulers, grid and guides"), 253)}),
+    };
+}
+
 // Right-click on a workflow tab (#59): the tab is made current first, so each command acts on it.
 QVariantList tab() {
     return {command("file.rename"), command("file.duplicate"), command("file.tab-color"), separator(),
@@ -144,7 +196,7 @@ QVariantList frame() {
 
 QStringList names() {
     return {QStringLiteral("bar"), QStringLiteral("canvas"), QStringLiteral("node"), QStringLiteral("frame"),
-            QStringLiteral("tab"), QStringLiteral("colors"), QStringLiteral("run")};
+            QStringLiteral("tab"), QStringLiteral("colors"), QStringLiteral("run"), QStringLiteral("canvas-view")};
 }
 
 QVariantList tree(const QString &name) {
@@ -158,6 +210,8 @@ QVariantList tree(const QString &name) {
         return frame();
     if (name == QLatin1String("tab"))
         return tab();
+    if (name == QLatin1String("canvas-view")) // the Canvas view's own menu bar (#232)
+        return canvasView();
     if (name == QLatin1String("run")) // the run toolbar's split button (#60)
         return runItems();
     if (name == QLatin1String("colors")) // the selection toolbar's color button (#74)
