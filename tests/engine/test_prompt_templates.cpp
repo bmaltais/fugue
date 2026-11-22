@@ -112,6 +112,14 @@ private slots:
                 QVERIFY(!example.idea.isEmpty() && !example.prompt.isEmpty());
         }
         QCOMPARE(templates.find("music")->family, QString("audio"));
+        // Describe Image's own family (#194) stays out of Enhance Prompt's list, and the reverse.
+        for (const QString id : {"image-prompt", "caption", "detailed-description", "tag-list"})
+            QCOMPARE(templates.find(id)->family, QString("describe"));
+        QVERIFY(!templates.ids(promptFamilies()).contains("caption"));
+        QVERIFY(templates.ids(promptFamilies()).contains("detailed"));
+        QCOMPARE(templates.ids({"describe"}).first(), QString("image-prompt"));
+        QVERIFY(!styleSummary(templates, promptFamilies()).contains("tag-list"));
+        QVERIFY(styleSummary(templates, {"describe"}).contains("tag-list"));
         QCOMPARE(templates.find("minimax-video")->family, QString("video"));
     }
     void aFileInTheUsersFolderAddsAndReplaces() {

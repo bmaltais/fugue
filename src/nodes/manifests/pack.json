@@ -16,6 +16,7 @@
     "composite-masked",
     "crop",
     "crop-to-mask",
+    "describe-image",
     "edit-image",
     "empty-latent",
     "empty-video-latent",
