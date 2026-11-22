@@ -17,8 +17,8 @@
 #include <QtQmlIntegration/qqmlintegration.h>
 
 #include <memory>
-#include <set>
 
+#include "canvas/cell_grid.h"
 #include "engine/mask_paint.h"
 
 namespace fugue {
@@ -93,7 +93,7 @@ public:
     // The text of the last failure, for a notice.
     Q_INVOKABLE QString lastError() const { return m_error; }
     // How many cells the last paint node upload sent, for tests (a stroke sends only its own).
-    Q_INVOKABLE int uploadedCells() const { return m_uploaded; }
+    Q_INVOKABLE int uploadedCells() const { return m_cells.uploaded(); }
 
 signals:
     void imageSizeChanged();
@@ -109,9 +109,6 @@ protected:
     void geometryChange(const QRectF &now, const QRectF &before) override;
 
 private:
-    static constexpr int cellSize = 256;
-    int cellsAcross() const { return (m_paint->width() + cellSize - 1) / cellSize; }
-    int cellsDown() const { return (m_paint->height() + cellSize - 1) / cellSize; }
     void changed(bool history);
     void markAllDirty();
 
@@ -123,9 +120,7 @@ private:
     bool m_maskOnly = false;
     QString m_folder;
     QString m_error;
-    std::set<int> m_dirtyCells;
-    bool m_rebuild = true;
-    int m_uploaded = 0;
+    CellGrid m_cells;
 };
 
 } // namespace fugue

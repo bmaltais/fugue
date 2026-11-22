@@ -89,7 +89,7 @@ Widgets come from a fixed set: no pack ships UI code, so every node looks alike.
 | `file`, `folder` | text: opens the file picker; the value is a path |
 | `color` | text: `#rrggbb` or `#rrggbbaa` |
 | `mask` | text: a painted mask, the path of a gray PNG in the inputs folder; `over` names the `image` input it is painted over |
-| `paint` | text: a painted canvas with layers, the path of an `.ora` file in the inputs folder; `over` names the `image` input it is painted over (the window that edits it is not built yet) |
+| `paint` | text: a painted canvas with layers, the path of an `.ora` file in the inputs folder; `over` names the `image` input it is painted over (the paint window edits it, spec 14.4) |
 | `seed` | number: fixed, randomize or increment |
 
 Outputs have `name`, `type`, `label`, `description`, `list`, `optional` and `role` (`"mask"` on an `image` output that holds a mask).

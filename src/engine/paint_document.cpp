@@ -273,6 +273,13 @@ bool PaintDocument::moveLayer(int id, int position) {
     return true;
 }
 
+IRect PaintDocument::takeDirty() {
+    IRect all;
+    for (Layer &l : m_layers)
+        all = all.united(l.pixels->takeDirty());
+    return all;
+}
+
 bool PaintDocument::setActiveLayer(int id) {
     if (!find(id) || m_stroking)
         return false;
@@ -394,40 +401,55 @@ bool PaintDocument::invertLayer() {
 
 // ---- the result ---------------------------------------------------------------------------------
 
-MaskPaint PaintDocument::flatten() const {
-    const size_t count = size_t(m_width) * size_t(m_height);
+MaskPaint PaintDocument::flatten() const { return flattenArea({0, 0, m_width, m_height}); }
+
+MaskPaint PaintDocument::flattenMask() const { return flattenMaskArea({0, 0, m_width, m_height}); }
+
+// The part of the canvas inside `area` (cut to the canvas), as a buffer of its own size.
+MaskPaint PaintDocument::flattenArea(const IRect &want) const {
+    const int x0 = std::clamp(want.x, 0, m_width), y0 = std::clamp(want.y, 0, m_height);
+    const int w = std::clamp(want.x + want.width, x0, m_width) - x0, h = std::clamp(want.y + want.height, y0, m_height) - y0;
+    const size_t count = size_t(w) * size_t(h);
     std::vector<double> color(count * 4, 0.0); // straight, 0 to 1
     for (const Layer &l : m_layers) {
         if (!l.info.visible || l.info.kind == LayerKind::Mask || l.info.opacity <= 0)
             continue;
         const std::vector<uint8_t> &src = l.pixels->pixels();
-        for (size_t i = 0; i < count; ++i) {
-            const double a = src[i * 4 + 3] / 255.0 * l.info.opacity;
-            if (a <= 0)
-                continue;
-            double *d = &color[i * 4];
-            const double outA = a + d[3] * (1 - a);
-            for (int k = 0; k < 3; ++k)
-                d[k] = (src[i * 4 + size_t(k)] / 255.0 * a + d[k] * d[3] * (1 - a)) / outA;
-            d[3] = outA;
-        }
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x) {
+                const size_t i = size_t(y) * size_t(w) + size_t(x);
+                const size_t s = (size_t(y0 + y) * size_t(m_width) + size_t(x0 + x)) * 4;
+                const double a = src[s + 3] / 255.0 * l.info.opacity;
+                if (a <= 0)
+                    continue;
+                double *d = &color[i * 4];
+                const double outA = a + d[3] * (1 - a);
+                for (int k = 0; k < 3; ++k)
+                    d[k] = (src[s + size_t(k)] / 255.0 * a + d[k] * d[3] * (1 - a)) / outA;
+                d[3] = outA;
+            }
     }
     std::vector<uint8_t> out(count * 4);
     for (size_t i = 0; i < out.size(); ++i)
         out[i] = byteOf(color[i]);
-    return MaskPaint(m_width, m_height, out, 4);
+    return MaskPaint(std::max(1, w), std::max(1, h), count == 0 ? std::vector<uint8_t>(4, 0) : out, 4);
 }
 
-MaskPaint PaintDocument::flattenMask() const {
-    std::vector<uint8_t> out(size_t(m_width) * size_t(m_height), 0);
+MaskPaint PaintDocument::flattenMaskArea(const IRect &want) const {
+    const int x0 = std::clamp(want.x, 0, m_width), y0 = std::clamp(want.y, 0, m_height);
+    const int w = std::clamp(want.x + want.width, x0, m_width) - x0, h = std::clamp(want.y + want.height, y0, m_height) - y0;
+    std::vector<uint8_t> out(size_t(w) * size_t(h), 0);
     for (const Layer &l : m_layers) {
         if (!l.info.visible || l.info.kind != LayerKind::Mask)
             continue;
         const std::vector<uint8_t> &src = l.pixels->pixels();
-        for (size_t i = 0; i < out.size(); ++i)
-            out[i] = std::max(out[i], byteOf(src[i] / 255.0 * l.info.opacity));
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x) {
+                uint8_t &o = out[size_t(y) * size_t(w) + size_t(x)];
+                o = std::max(o, byteOf(src[size_t(y0 + y) * size_t(m_width) + size_t(x0 + x)] / 255.0 * l.info.opacity));
+            }
     }
-    return MaskPaint(m_width, m_height, out, 1);
+    return MaskPaint(std::max(1, w), std::max(1, h), out.empty() ? std::vector<uint8_t>(1, 0) : out, 1);
 }
 
 } // namespace fugue::mask

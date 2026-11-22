@@ -292,7 +292,11 @@ QString CanvasRuns::nodeTitle(const QString &tab, const QString &path) const {
 
 // The picture arriving at a Crop's image input (#73).
 CanvasRuns::Picture CanvasRuns::cropSource(const QString &tab, const QString &node) const {
-    const QString from = m_nodeInfo.value(node).cropFrom;
+    return pictureOf(tab, m_nodeInfo.value(node).cropFrom);
+}
+
+// The picture a node `from` shows: its result, else the image of its input file.
+CanvasRuns::Picture CanvasRuns::pictureOf(const QString &tab, const QString &from) const {
     const auto nodes = m_tabs.value(tab).nodes;
     const auto found = nodes.constFind(from);
     if (from.isEmpty() || found == nodes.constEnd())
@@ -922,6 +926,17 @@ QString CanvasRuns::imageFile(const QString &row) const {
     else if (view.text.isEmpty())
         path = expandHome(m_nodeInfo.value(node).imageFile);
     return QDir::isAbsolutePath(path) && QFileInfo(path).isFile() ? path : QString();
+}
+
+QVariantMap CanvasRuns::inputPicture(const QString &row, const QString &input) const {
+    const QString from = m_canvas->linkedFrom(row, input);
+    if (from.isEmpty())
+        return {};
+    const Picture picture = pictureOf(m_shownTab, keyFor(from));
+    const QString path = QDir::isAbsolutePath(picture.path) && QFileInfo(picture.path).isFile() ? picture.path : QString();
+    if (path.isEmpty() || picture.width <= 0 || picture.height <= 0)
+        return {};
+    return {{"file", path}, {"width", picture.width}, {"height", picture.height}};
 }
 
 QString CanvasRuns::inputFile(const QString &literal) const {

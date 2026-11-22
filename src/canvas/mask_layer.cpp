@@ -4,9 +4,6 @@
 #include <QImage>
 #include <QPointF>
 #include <QQuickWindow>
-#include <QSGNode>
-#include <QSGSimpleTextureNode>
-#include <QSGTexture>
 #include <QUrl>
 
 #include <cmath>
@@ -18,18 +15,6 @@
 namespace fugue {
 
 namespace {
-
-// One cell of the layer: its texture node, and the cell it is.
-class CellNode : public QSGSimpleTextureNode {
-public:
-    CellNode() { setOwnsTexture(true); }
-};
-
-class LayerNode : public QSGNode {
-public:
-    int across = 0;
-    int down = 0;
-};
 
 mask::Point pointOf(const QVariant &value) {
     if (value.canConvert<QPointF>() && value.typeId() == QMetaType::QPointF)
@@ -49,10 +34,7 @@ MaskLayer::~MaskLayer() = default;
 void MaskLayer::changed(bool history) {
     const mask::IRect dirty = m_paint->takeDirty();
     if (!dirty.empty()) {
-        const int across = cellsAcross();
-        for (int cy = dirty.y / cellSize; cy <= (dirty.y + dirty.height - 1) / cellSize; ++cy)
-            for (int cx = dirty.x / cellSize; cx <= (dirty.x + dirty.width - 1) / cellSize; ++cx)
-                m_dirtyCells.insert(cy * across + cx);
+        m_cells.markRect(QRect(dirty.x, dirty.y, dirty.width, dirty.height), imageSize());
         update();
     }
     emit edited();
@@ -61,8 +43,7 @@ void MaskLayer::changed(bool history) {
 }
 
 void MaskLayer::markAllDirty() {
-    m_rebuild = true;
-    m_dirtyCells.clear();
+    m_cells.markAll();
     update();
 }
 
@@ -239,63 +220,20 @@ void MaskLayer::geometryChange(const QRectF &now, const QRectF &before) {
 }
 
 QSGNode *MaskLayer::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
-    auto *root = static_cast<LayerNode *>(old);
-    const int across = cellsAcross(), down = cellsDown();
-    if (root && (root->across != across || root->down != down || m_rebuild)) {
-        delete root;
-        root = nullptr;
-    }
-    if (!root) {
-        root = new LayerNode;
-        root->across = across;
-        root->down = down;
-        for (int i = 0; i < across * down; ++i)
-            root->appendChildNode(new CellNode);
-        m_dirtyCells.clear();
-        for (int i = 0; i < across * down; ++i)
-            m_dirtyCells.insert(i);
-        m_rebuild = false;
-    }
-    m_uploaded = 0;
-    const int width = m_paint->width(), height = m_paint->height();
-    const auto cellRect = [&](int index) {
-        const int x = (index % across) * cellSize, y = (index / across) * cellSize;
-        return QRect(x, y, std::min(cellSize, width - x), std::min(cellSize, height - y));
-    };
-    // The cells in view get a texture when they have none or are dirty: cells scrolled away wait.
-    const QRectF view(0, 0, this->width(), this->height());
-    const auto screenRect = [&](const QRect &r) {
-        return QRectF(m_originX + r.x() * m_zoom, m_originY + r.y() * m_zoom, r.width() * m_zoom, r.height() * m_zoom);
-    };
     const QColor tint = m_tint;
     const int pr = tint.red() * tint.alpha() / 255, pg = tint.green() * tint.alpha() / 255, pb = tint.blue() * tint.alpha() / 255;
-    int index = 0;
-    for (QSGNode *child = root->firstChild(); child; child = child->nextSibling(), ++index) {
-        auto *node = static_cast<CellNode *>(child);
-        const QRect cell = cellRect(index);
-        const QRectF where = screenRect(cell);
-        const bool visible = where.intersects(view);
-        const bool stale = m_dirtyCells.count(index) > 0 || !node->texture();
-        if (visible && stale && window()) {
-            QImage image(cell.size(), QImage::Format_ARGB32_Premultiplied);
-            for (int y = 0; y < cell.height(); ++y) {
-                auto *line = reinterpret_cast<QRgb *>(image.scanLine(y));
-                for (int x = 0; x < cell.width(); ++x) {
-                    const int v = m_paint->at(cell.x() + x, cell.y() + y);
-                    line[x] = m_maskOnly ? qRgb(v, v, v)
-                                         : qRgba(pr * v / 255, pg * v / 255, pb * v / 255, tint.alpha() * v / 255);
-                }
+    return m_cells.update(old, window(), imageSize(), QRectF(0, 0, width(), height()), {m_originX, m_originY}, m_zoom,
+                          [&](const QRect &cell) {
+        QImage image(cell.size(), QImage::Format_ARGB32_Premultiplied);
+        for (int y = 0; y < cell.height(); ++y) {
+            auto *line = reinterpret_cast<QRgb *>(image.scanLine(y));
+            for (int x = 0; x < cell.width(); ++x) {
+                const int v = m_paint->at(cell.x() + x, cell.y() + y);
+                line[x] = m_maskOnly ? qRgb(v, v, v) : qRgba(pr * v / 255, pg * v / 255, pb * v / 255, tint.alpha() * v / 255);
             }
-            node->setTexture(window()->createTextureFromImage(image, QQuickWindow::TextureHasAlphaChannel));
-            node->setOwnsTexture(true);
-            m_dirtyCells.erase(index);
-            ++m_uploaded;
         }
-        // Pixels as they are once enlarged; smooth when it is shown smaller than it is.
-        node->setFiltering(m_zoom >= 1 ? QSGTexture::Nearest : QSGTexture::Linear);
-        node->setRect(visible && node->texture() ? where : QRectF());
-    }
-    return root;
+        return image;
+    });
 }
 
 } // namespace fugue

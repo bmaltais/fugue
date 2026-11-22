@@ -8,6 +8,14 @@ import Fugue
 // whose viewer is CompareView in `single` mode with a MaskLayer over it. It knows nothing of nodes:
 // give it the picture and, if there is one, the mask to start from; it says what was saved.
 //
+// `layers: true` is the paint window of the Paint node (#181) in the same frame: the pointer, brush,
+// shapes, zoom, keys and undo are the same code, driving a PaintLayer (the layers drawn as the result
+// will be) instead of a MaskLayer, with a layers panel at the right and a color swatch and an opacity
+// slider in the bar. Its input is `paintPath` (a stored .ora, or empty), `pictureFile` (the input
+// picture's file, empty for a blank canvas) and `imageSize` (the canvas, in pixels); `imageSource` is
+// not used. It saves the layers as one .ora file: `saved(path)` says it, or an empty path when nothing
+// is painted. A mask layer is painted white, whatever the color.
+//
 // Input:  imageSource (the picture), imageSize (its size in pixels, which the mask is in), maskPath
 //         (the stored mask, an 8-bit gray PNG, or empty), look, and `stem` (the name the saved file
 //         starts with; by default the picture's, then "-mask"). Then open().
@@ -28,12 +36,17 @@ LargeViewDialog {
     property url imageSource
     property size imageSize: Qt.size(0, 0)
     property string maskPath
+    // The paint window (see above) instead of the mask editor.
+    property bool layers: false
+    property string paintPath
+    property string pictureFile
     property string stem: {
-        const file = String(imageSource).split("?")[0].split("/").pop()
+        const file = String(layers ? pictureFile : imageSource).split("?")[0].split("/").pop()
         const base = decodeURIComponent(file).replace(/\.[^.]*$/, "")
-        return (base === "" ? "image" : base) + "-mask"
+        return (base === "" ? (layers ? "paint" : "image") : base) + (layers ? "-paint" : "-mask")
     }
-    property alias folder: paintLayer.folder
+    property string folder
+    onFolderChanged: { maskLayer.folder = folder; colorLayer.folder = folder }
     signal saved(string path)
     signal canceled
 
@@ -42,8 +55,14 @@ LargeViewDialog {
     property real brushSize: 64
     property real brushHardness: 0.8
     property bool maskOnly: false
+    // The paint window's brush color (a mask layer ignores it) and opacity 0 to 1.
+    property color color: "#1a1a1a"
+    property real brushOpacity: 1
     readonly property real maxBrush: Math.max(64, Math.min(2048, Math.max(imageSize.width, imageSize.height)))
-    readonly property alias layer: paintLayer
+    // The mask editor's layer, and the paint window's; `canvasLayer` is the one in use. Both have the same calls.
+    readonly property alias layer: maskLayer
+    readonly property alias paintCanvas: colorLayer
+    readonly property var canvasLayer: layers ? colorLayer : maskLayer
     readonly property alias viewer: pictureViewer
     readonly property bool erasing: tool === "eraser"
     property string error
@@ -59,14 +78,17 @@ LargeViewDialog {
     function stepSize(up) { setSize(up ? Math.max(brushSize + 1, brushSize * 1.25) : Math.min(brushSize - 1, brushSize / 1.25)) }
     function stepHardness(up) { setHardness(brushHardness + (up ? 0.1 : -0.1)) }
     function toggleMaskOnly() { maskOnly = !maskOnly }
-    // OK: the mask is stored and its path said; nothing painted is no file, an empty path.
+    function setBrushOpacity(v) { brushOpacity = Math.max(0, Math.min(1, Math.round(v * 100) / 100)) }
+    function pickColor() { colorPicker.openWith(String(color)) }
+    // OK: the mask (or the layers) is stored and its path said; nothing painted is no file, an empty path.
     function accept() {
         error = ""
         let path = ""
-        if (!paintLayer.empty) {
-            path = paintLayer.store(stem)
+        if (!canvasLayer.empty) {
+            path = canvasLayer.store(stem)
             if (path === "") {
-                error = paintLayer.lastError() !== "" ? paintLayer.lastError() : qsTr("The mask could not be saved.")
+                error = canvasLayer.lastError() !== "" ? canvasLayer.lastError()
+                        : layers ? qsTr("The painting could not be saved.") : qsTr("The mask could not be saved.")
                 return
             }
         }
@@ -81,10 +103,22 @@ LargeViewDialog {
         error = ""
         maskOnly = false
         spaceHeld = false
-        paintLayer.imageSize = imageSize
-        paintLayer.reset()
-        if (maskPath !== "" && !paintLayer.loadMask(maskPath))
-            error = paintLayer.lastError()
+        if (layers) {
+            colorLayer.imageSize = imageSize
+            colorLayer.reset()
+            colorLayer.checker = pictureFile === ""
+            if (pictureFile !== "" && !colorLayer.setPicture(pictureFile))
+                error = colorLayer.lastError()
+            else if (paintPath !== "" && !colorLayer.loadPaint(paintPath))
+                error = colorLayer.lastError()
+            else if (colorLayer.warning() !== "")
+                error = colorLayer.warning()
+        } else {
+            maskLayer.imageSize = imageSize
+            maskLayer.reset()
+            if (maskPath !== "" && !maskLayer.loadMask(maskPath))
+                error = maskLayer.lastError()
+        }
         pictureViewer.fit()
     }
     onClosed: if (!done) canceled()
@@ -97,8 +131,8 @@ LargeViewDialog {
         if (event.key === Qt.Key_Space) {
             if (!event.isAutoRepeat) spaceHeld = true
         } else if (ctrl) {
-            if (event.key === Qt.Key_Z && !shift) paintLayer.undo()
-            else if ((event.key === Qt.Key_Z && shift) || event.key === Qt.Key_Y) paintLayer.redo()
+            if (event.key === Qt.Key_Z && !shift) root.canvasLayer.undo()
+            else if ((event.key === Qt.Key_Z && shift) || event.key === Qt.Key_Y) root.canvasLayer.redo()
             else return
         } else if (event.modifiers & (Qt.AltModifier | Qt.MetaModifier)) {
             return
@@ -107,9 +141,9 @@ LargeViewDialog {
         else if (event.key === Qt.Key_X) swapTools()
         else if (event.key === Qt.Key_L) tool = "lasso"
         else if (event.key === Qt.Key_R) tool = "rect"
-        else if (event.key === Qt.Key_I) paintLayer.invert()
+        else if (event.key === Qt.Key_I) root.canvasLayer.invert()
         else if (event.key === Qt.Key_H) toggleMaskOnly()
-        else if (event.key === Qt.Key_Delete && shift) paintLayer.clear()
+        else if (event.key === Qt.Key_Delete && shift) root.canvasLayer.clear()
         else if (event.key === Qt.Key_BracketLeft || event.key === Qt.Key_BraceLeft) { if (shift) stepHardness(false); else stepSize(false) }
         else if (event.key === Qt.Key_BracketRight || event.key === Qt.Key_BraceRight) { if (shift) stepHardness(true); else stepSize(true) }
         else return
@@ -137,6 +171,7 @@ LargeViewDialog {
         ToolButton { objectName: "maskTool-rect"; toolName: "rect"; glyph: "square-dashed"; tip: qsTr("Rectangle (R, Alt erases)") }
         Item { width: root.look.unit; height: 1 }
         ValueSlider {
+            look: root.look
             objectName: "maskSize"
             label: qsTr("Size")
             from: 1
@@ -149,6 +184,7 @@ LargeViewDialog {
             onMoved: v => root.setSize(v)
         }
         ValueSlider {
+            look: root.look
             objectName: "maskHardness"
             label: qsTr("Hardness")
             from: 0
@@ -159,22 +195,60 @@ LargeViewDialog {
             tip: qsTr("Brush hardness (Shift+[ and Shift+])")
             onMoved: v => root.setHardness(v)
         }
+        // The paint window's color and opacity: the swatch opens the shared color picker.
+        Rectangle {
+            objectName: "paintColor"
+            visible: root.layers
+            width: 7 * root.look.unit
+            height: 7 * root.look.unit
+            radius: root.look.smallCorner
+            color: root.color
+            border.width: swatchFocus.activeFocus ? 2 : 1
+            border.color: swatchFocus.activeFocus ? root.look.accent : root.look.hairlineStrong
+            Accessible.role: Accessible.Button
+            Accessible.name: qsTr("Brush color")
+            FocusScope {
+                id: swatchFocus
+                anchors.fill: parent
+                activeFocusOnTab: parent.visible
+                Keys.onReturnPressed: root.pickColor()
+                Keys.onSpacePressed: root.pickColor()
+            }
+            TapHandler { onTapped: root.pickColor() }
+            HoverHandler { id: swatchHover; cursorShape: Qt.PointingHandCursor }
+            ToolTip.visible: swatchHover.hovered
+            ToolTip.delay: root.look.tooltipDelay
+            ToolTip.text: qsTr("Brush color (opens the color picker)")
+        }
+        ValueSlider {
+            look: root.look
+            objectName: "paintOpacity"
+            visible: root.layers
+            label: qsTr("Opacity")
+            from: 0
+            to: 1
+            value: root.brushOpacity
+            shown: qsTr("%1%").arg(Math.round(root.brushOpacity * 100))
+            step: 0.01
+            tip: qsTr("Brush opacity")
+            onMoved: v => root.setBrushOpacity(v)
+        }
         Item { width: root.look.unit; height: 1 }
         ViewButton {
             objectName: "maskUndo"
             look: root.look
             glyph: "undo-2"
             tip: qsTr("Undo (Ctrl+Z)")
-            enabled: paintLayer.canUndo
-            onTapped: paintLayer.undo()
+            enabled: root.canvasLayer.canUndo
+            onTapped: root.canvasLayer.undo()
         }
         ViewButton {
             objectName: "maskRedo"
             look: root.look
             glyph: "redo-2"
             tip: qsTr("Redo (Ctrl+Shift+Z)")
-            enabled: paintLayer.canRedo
-            onTapped: paintLayer.redo()
+            enabled: root.canvasLayer.canRedo
+            onTapped: root.canvasLayer.redo()
         }
         Item { width: root.look.unit; height: 1 }
         ViewButton {
@@ -182,20 +256,20 @@ LargeViewDialog {
             look: root.look
             glyph: "contrast"
             tip: qsTr("Invert (I)")
-            onTapped: paintLayer.invert()
+            onTapped: root.canvasLayer.invert()
         }
         ViewButton {
             objectName: "maskFill"
             look: root.look
             glyph: "paint-bucket"
-            tip: qsTr("Fill the whole picture")
-            onTapped: paintLayer.fill()
+            tip: root.layers ? qsTr("Fill the layer with the color") : qsTr("Fill the whole picture")
+            onTapped: root.canvasLayer.fill()
         }
         ViewButton {
             objectName: "maskOnly"
             look: root.look
             glyph: "eye"
-            tip: qsTr("Show the mask alone (H)")
+            tip: root.layers ? qsTr("Show the mask layers alone (H)") : qsTr("Show the mask alone (H)")
             current: root.maskOnly
             onTapped: root.toggleMaskOnly()
         }
@@ -205,82 +279,10 @@ LargeViewDialog {
             objectName: "maskClear"
             look: root.look
             glyph: "trash-2"
-            tip: qsTr("Clear the mask (Shift+Delete)")
+            tip: root.layers ? qsTr("Clear the layer (Shift+Delete)") : qsTr("Clear the mask (Shift+Delete)")
             danger: true
-            onTapped: paintLayer.clear()
+            onTapped: root.canvasLayer.clear()
         }
-    }
-
-    // A slider in the bar: a well with its fill from the left, the label and the value over it
-    // (the node's slider widget, canvas-look 4.4). A press or drag sets it, Left and Right step it
-    // (Shift: ten steps), the wheel too.
-    component ValueSlider: Rectangle {
-        id: slider
-        property string label
-        property string shown
-        property string tip
-        property real from: 0
-        property real to: 1
-        property real value: 0
-        property real step: 1
-        property bool curved: false // a square-law scale, finer at the small end
-        signal moved(real v)
-        readonly property real fraction: to > from ? Math.max(0, Math.min(1, (value - from) / (to - from))) : 0
-        readonly property real position: curved ? Math.sqrt(fraction) : fraction
-        function valueAt(x) {
-            const f = Math.max(0, Math.min(1, x / width))
-            return from + (to - from) * (curved ? f * f : f)
-        }
-        width: 26 * root.look.unit
-        height: 7 * root.look.unit
-        radius: root.look.smallCorner
-        color: root.look.well
-        border.width: activeFocus ? 2 : 0
-        border.color: root.look.accent
-        activeFocusOnTab: true
-        Accessible.role: Accessible.Slider
-        Accessible.name: label
-        Accessible.description: shown
-        Rectangle {
-            width: slider.width * slider.position
-            height: slider.height
-            radius: root.look.smallCorner
-            color: Qt.alpha(root.look.accent, 0.22)
-        }
-        Text {
-            anchors.verticalCenter: parent.verticalCenter
-            x: 1.5 * root.look.unit
-            text: slider.label
-            color: root.look.label
-            font.pixelSize: root.look.labelSize
-        }
-        Text {
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.right: parent.right
-            anchors.rightMargin: 1.5 * root.look.unit
-            text: slider.shown
-            color: root.look.text
-            font.pixelSize: root.look.labelSize
-            font.features: { "tnum": 1 }
-        }
-        MouseArea {
-            anchors.fill: parent
-            cursorShape: Qt.PointingHandCursor
-            onPressed: mouse => { slider.forceActiveFocus(); slider.moved(slider.valueAt(mouse.x)) }
-            onPositionChanged: mouse => { if (pressed) slider.moved(slider.valueAt(mouse.x)) }
-            onWheel: wheel => slider.moved(slider.value + (wheel.angleDelta.y > 0 ? 1 : -1) * slider.step * (wheel.modifiers & Qt.ShiftModifier ? 10 : 5))
-        }
-        Keys.onPressed: event => {
-            const amount = slider.step * (event.modifiers & Qt.ShiftModifier ? 10 : 1)
-            if (event.key === Qt.Key_Left || event.key === Qt.Key_Down) slider.moved(slider.value - amount)
-            else if (event.key === Qt.Key_Right || event.key === Qt.Key_Up) slider.moved(slider.value + amount)
-            else return
-            event.accepted = true
-        }
-        ToolTip.visible: hover.hovered && slider.tip !== ""
-        ToolTip.text: slider.tip
-        ToolTip.delay: 600
-        HoverHandler { id: hover }
     }
 
     // ---- the picture, the mask over it and the pointer -------------------------------------------
@@ -288,6 +290,7 @@ LargeViewDialog {
     Item {
         id: board
         anchors.fill: parent
+        anchors.rightMargin: root.layers ? layersPanel.width + 2 * root.look.unit : 0
 
         CompareView {
             id: pictureViewer
@@ -295,21 +298,36 @@ LargeViewDialog {
             anchors.fill: parent
             look: root.look
             mode: "single"
-            sourceA: root.imageSource
+            sourceA: root.layers ? "" : root.imageSource
             sizeA: root.imageSize
             labelA: ""
             showZoom: true
         }
         MaskLayer {
-            id: paintLayer
+            id: maskLayer
             objectName: "maskLayer"
             anchors.fill: parent
+            visible: !root.layers
             clip: true
             originX: pictureViewer.imageX
             originY: pictureViewer.imageY
             zoom: pictureViewer.imageScale
             tint: Qt.alpha(root.look.accent, 0.5)
             maskOnly: root.maskOnly
+        }
+        PaintLayer {
+            id: colorLayer
+            objectName: "paintLayer"
+            anchors.fill: parent
+            visible: root.layers
+            clip: true
+            originX: pictureViewer.imageX
+            originY: pictureViewer.imageY
+            zoom: pictureViewer.imageScale
+            tint: Qt.alpha(root.look.accent, 0.5)
+            maskOnly: root.maskOnly
+            color: root.color
+            brushOpacity: root.brushOpacity
         }
 
         // The lasso's outline and the rectangle, in view coordinates, while a drag is on.
@@ -424,7 +442,7 @@ LargeViewDialog {
                     startHardness = root.brushHardness
                 } else if (root.tool === "brush" || root.tool === "eraser") {
                     action = "stroke"
-                    paintLayer.beginStroke(root.erasing, root.brushSize, root.brushHardness, p.x, p.y, pressure)
+                    root.canvasLayer.beginStroke(root.erasing, root.brushSize, root.brushHardness, p.x, p.y, pressure)
                 } else if (root.tool === "lasso") {
                     action = "lasso"
                     path = [p]
@@ -439,7 +457,7 @@ LargeViewDialog {
                     return
                 const p = pixelAt(mouse.x, mouse.y)
                 if (action === "stroke") {
-                    paintLayer.strokeTo(p.x, p.y, pressure)
+                    root.canvasLayer.strokeTo(p.x, p.y, pressure)
                 } else if (action === "lasso") {
                     const prior = screenPath[screenPath.length - 1]
                     if (Math.abs(prior.x - at.x) + Math.abs(prior.y - at.y) >= 2) {
@@ -467,20 +485,34 @@ LargeViewDialog {
             function finish(modifiers) {
                 const erasing = (modifiers & Qt.AltModifier) !== 0
                 if (action === "stroke") {
-                    paintLayer.endStroke()
+                    root.canvasLayer.endStroke()
                 } else if (action === "lasso") {
                     if (path.length >= 3)
-                        paintLayer.fillPolygon(path, erasing)
+                        root.canvasLayer.fillPolygon(path, erasing)
                 } else if (action === "rect") {
                     const a = pixelAt(pressAt.x, pressAt.y), b = pixelAt(at.x, at.y)
                     if (Math.abs(b.x - a.x) >= 1 && Math.abs(b.y - a.y) >= 1)
-                        paintLayer.fillRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y), erasing)
+                        root.canvasLayer.fillRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y), erasing)
                 }
                 action = ""
                 path = []
                 screenPath = []
             }
         }
+    }
+
+    PaintLayersPanel {
+        id: layersPanel
+        visible: root.layers
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        look: root.look
+        painting: colorLayer
+    }
+    ColorPickerPopup {
+        id: colorPicker
+        onPicked: c => root.color = c
     }
 
     // ---- the footer: the keys' reminder, then Cancel and OK ---------------------------------------
@@ -500,6 +532,8 @@ LargeViewDialog {
             color: root.error !== "" ? root.look.error : root.look.label
             font.pixelSize: root.look.captionSize
             text: root.error !== "" ? root.error
+                  : root.layers && !root.canvasLayer.canPaint ? qsTr("The picture is not painted on: pick a paint or mask layer.")
+                  : root.layers ? qsTr("[ ] size · Shift+[ ] hardness · Alt+drag size and hardness · Space+drag pans · H mask layers alone")
                   : qsTr("[ ] size · Shift+[ ] hardness · Alt+drag size and hardness · Space+drag pans · H mask alone")
         }
         Row {

@@ -860,8 +860,8 @@ QString CanvasModel::displayValue(const InputValue &value, const Port &port, boo
         return json.toString().section('\n', 0, 0);
     };
     *isDefault = false;
-    // A painted mask shows the state of it, not the file's name.
-    if (port.widgetType == QLatin1String("mask")) {
+    // A painted mask or canvas shows the state of it, not the file's name.
+    if (port.widgetType == QLatin1String("mask") || port.widgetType == QLatin1String("paint")) {
         const bool painted = value.kind() == InputValue::Kind::Literal && !value.literal().toString().isEmpty();
         *isDefault = !painted;
         return painted ? tr("Painted") : tr("None");

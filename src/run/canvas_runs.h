@@ -117,6 +117,10 @@ public:
     Q_INVOKABLE QString imageFile(const QString &node) const;
     // The same as a file URL, for QML (empty without one).
     Q_INVOKABLE QUrl imageUrl(const QString &node) const;
+    // The picture arriving at an input of a node (the paint window's, #181): {file, width, height} of the
+    // full file of what the linked node shows (its result, else its file's image); empty when the input
+    // is not linked, the node has not run, or the file is gone.
+    Q_INVOKABLE QVariantMap inputPicture(const QString &node, const QString &input) const;
     // The file an input-file literal names (a painted mask, `inputs/x.png`), as the run reads it: a
     // relative path is the workflow folder's. Empty when the literal is empty or the file is not there.
     Q_INVOKABLE QString inputFile(const QString &literal) const;
@@ -194,6 +198,7 @@ private:
         int width = 0, height = 0;
     };
     Picture cropSource(const QString &tab, const QString &node) const;
+    Picture pictureOf(const QString &tab, const QString &from) const;
     void flushProgress();
     void setContext();
     void readNodes();

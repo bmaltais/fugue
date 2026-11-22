@@ -121,7 +121,7 @@ signals:
     // A double-click on empty canvas, and a right-click (both in the unit of the event's point).
     void searchRequested(const QPointF &world);
     void contextMenuRequested(const QPointF &screen);
-    // A double-click on a node's picture. `kind` is "compare", "crop", "mask" or "image". The window
+    // A double-click on a node's picture. `kind` is "compare", "crop", "mask", "paint" or "image". The window
     // opens it when the node has a picture to show, and ends the move the click began first.
     void viewerRequested(const QString &kind, const QString &node);
 

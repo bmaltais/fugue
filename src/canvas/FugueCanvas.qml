@@ -548,13 +548,15 @@ FocusScope {
         function onContextMenuRequested(at) { canvas.contextMenuRequested(at.x, at.y) }
         // A double click on a picture: the viewer of its kind, when the node has a picture to show (#62, #73).
         function onViewerRequested(kind, node) {
-            if (kind !== "compare" && !(App.runs && App.runs.imageFile(node) !== ""))
+            if (kind !== "compare" && kind !== "paint" && !(App.runs && App.runs.imageFile(node) !== ""))
                 return
             canvas.model.endMove()
             if (kind === "compare")
                 canvas.openCompare(node)
             else if (kind === "crop")
                 canvas.openCrop(node)
+            else if (kind === "paint")
+                canvas.openPaint(node) // Paint: its layers over the input picture, or a blank canvas
             else if (kind === "mask")
                 canvas.openMask(node) // Paint Mask: its picture is the editor's; Load Image's is the large view
             else
@@ -614,6 +616,53 @@ FocusScope {
         MaskEditor {
             property string nodeId
             onSaved: path => canvas.model.setMaskPath(nodeId, path)
+        }
+    }
+    // The paint window of a node with a paint input (#181, spec 14.4): the MaskEditor with its layers, on the
+    // picture arriving at the node's image input, or a blank canvas of its Width and Height (else the size
+    // the stored painting has); OK sets the input as one undo step. A linked picture that has not run says so.
+    function openPaint(node) {
+        const state = model.paintState(node)
+        if (state.input === undefined || state.editable === false)
+            return
+        let picture = ""
+        let size = Qt.size(state.width, state.height)
+        if (state.linked) {
+            const found = App.runs ? App.runs.inputPicture(node, state.over) : ({})
+            if (found.file === undefined) {
+                App.workflows.notify(qsTr("Run the node above first: there is no picture to paint on yet."))
+                return
+            }
+            picture = found.file
+            size = Qt.size(found.width, found.height)
+        }
+        if (!paintDialog)
+            paintDialog = paintDialogComponent.createObject(canvas, {look: App.theme.look})
+        const stored = App.runs ? App.runs.inputFile(state.path) : ""
+        if (size.width <= 0 || size.height <= 0)
+            size = stored !== "" ? paintDialog.paintCanvas.fileSize(stored) : Qt.size(0, 0)
+        if (size.width <= 0 || size.height <= 0) {
+            App.workflows.notify(qsTr("Connect a picture, or set Width and Height: there is no canvas to paint on yet."))
+            return
+        }
+        paintDialog.nodeId = node
+        paintDialog.pictureFile = picture
+        paintDialog.imageSize = size
+        paintDialog.paintPath = stored
+        paintDialog.open()
+    }
+    property var paintDialog: null
+    Component {
+        id: paintDialogComponent
+        MaskEditor {
+            property string nodeId
+            objectName: "paintEditor"
+            layers: true
+            onSaved: path => {
+                const problem = canvas.model.setPaintPath(nodeId, path)
+                if (problem !== "")
+                    App.workflows.notify(problem)
+            }
         }
     }
     function openCrop(node) {

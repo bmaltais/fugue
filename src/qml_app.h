@@ -11,6 +11,7 @@
 #include "canvas/canvas_model.h"
 #include "canvas/crop_qml.h" // a QML singleton (CropGeometry): the module registers it from here
 #include "canvas/mask_layer.h" // a QML item (MaskLayer): the module registers it from here
+#include "canvas/paint_layer.h" // a QML item (PaintLayer): likewise
 #include "canvas/float_place_qml.h" // a QML singleton (FloatPlace): the module registers it from here
 #include "commands/command_registry.h"
 #include "menu/color_history.h"

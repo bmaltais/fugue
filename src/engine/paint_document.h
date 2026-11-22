@@ -77,6 +77,10 @@ public:
     // The layer's pixels, for a view to draw (nullptr for no such layer).
     const MaskPaint *pixels(int id) const;
 
+    // The rectangle of the canvas whose pixels changed (a stroke, a step, an undo) since the last call, over
+    // every layer; empty when none. What a view draws again.
+    IRect takeDirty();
+
     int activeLayer() const { return m_active; }
     bool setActiveLayer(int id);
     // Not history steps.
@@ -113,6 +117,9 @@ public:
     MaskPaint flatten() const;
     // Visible mask layers, 1 channel (all 0 when there are none).
     MaskPaint flattenMask() const;
+    // The same for one rectangle of the canvas (cut to it): a view draws only what it shows.
+    MaskPaint flattenArea(const IRect &area) const;
+    MaskPaint flattenMaskArea(const IRect &area) const;
     Result<QByteArray> flattenToPng() const { return flatten().toPng(); }
 
 private:

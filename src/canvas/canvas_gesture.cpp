@@ -325,7 +325,7 @@ void CanvasGesture::doubleClick(const QPointF &screen, const QPointF &world, int
         return;
     }
     // A double click on a picture opens it large (#62, #73): a Compare Images node's own viewer, a
-    // Crop's crop window, a mask node's editor, any other node's large view.
+    // Crop's crop window, a mask node's editor, a Paint node's window, any other node's large view.
     if (!hit.isEmpty() && !onPort) {
         if (m_canvas->isCompare(hit) && m_canvas->compareResult(hit).value(QStringLiteral("a")).isValid()) {
             emit viewerRequested(QStringLiteral("compare"), hit);
@@ -333,6 +333,7 @@ void CanvasGesture::doubleClick(const QPointF &screen, const QPointF &world, int
         }
         if (m_canvas->pictureAt(hit, world.x(), world.y())) {
             const QString kind = m_canvas->isCrop(hit)                                                ? QStringLiteral("crop")
+                               : !m_canvas->paintInput(hit).isEmpty()                              ? QStringLiteral("paint")
                                : m_canvas->maskState(hit).value(QStringLiteral("over")).toBool() ? QStringLiteral("mask")
                                                                                                      : QStringLiteral("image");
             emit viewerRequested(kind, hit);

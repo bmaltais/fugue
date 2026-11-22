@@ -81,7 +81,7 @@ Rectangle {
         : kind === "seed" ? "dices"
         : kind === "folder" ? "folder"
         : kind === "file" ? "file"
-        : kind === "mask" ? "brush" : ""
+        : kind === "mask" || kind === "paint" ? "brush" : ""
     // A 6.2 color (#rrggbb, #rrggbbaa) as QML reads one (#aarrggbb), or `otherwise`.
     function colorOf(text, otherwise) {
         if (!/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(text))
@@ -260,6 +260,8 @@ Rectangle {
             return edits.setValue(nodeId, name, !on)
         case "mask": // the whole row is the Paint mask button (spec 14.4): the editor opens on the node's picture
             return canvasView ? canvasView.openMask(nodeId) : undefined
+        case "paint": // likewise (#181): the paint window, on the node's picture or a blank canvas
+            return canvasView ? canvasView.openPaint(nodeId) : undefined
         case "choice":
             return openMenu(choiceEntries())
         case "seed":

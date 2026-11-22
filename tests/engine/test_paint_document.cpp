@@ -352,7 +352,38 @@ private slots:
         d.endStroke();
         QVERIFY(d.canUndo());
     }
+
+    // ---- a rectangle of the result (what a view draws) -----------------------------------------
+
+    void flattenAreaIsTheSameAsTheWholeCutOut() {
+        PaintDocument d(40, 30);
+        d.addLayer(LayerKind::Picture, "p", solid(40, 30, {10, 200, 30, 255}));
+        d.addLayer(LayerKind::Paint);
+        d.brush = {12, 1, 0.7, {200, 20, 20, 255}};
+        stroke(d, {{5, 5}, {30, 22}});
+        const int mask = d.addLayer(LayerKind::Mask);
+        QVERIFY(d.setOpacity(mask, 0.5));
+        d.brush = {10, 1, 1, {}};
+        stroke(d, {{20, 10}, {36, 10}});
+        const MaskPaint whole = d.flatten(), wholeMask = d.flattenMask();
+        const IRect area{7, 3, 25, 20};
+        const MaskPaint part = d.flattenArea(area), partMask = d.flattenMaskArea(area);
+        QCOMPARE(part.width(), 25);
+        QCOMPARE(part.height(), 20);
+        QCOMPARE(partMask.width(), 25);
+        for (int y = 0; y < area.height; ++y)
+            for (int x = 0; x < area.width; ++x) {
+                QCOMPARE(part.rgbaAt(x, y), whole.rgbaAt(area.x + x, area.y + y));
+                QCOMPARE(partMask.at(x, y), wholeMask.at(area.x + x, area.y + y));
+            }
+        // A rectangle past the edge is cut to the canvas; one outside it is a single empty pixel.
+        QCOMPARE(d.flattenArea({30, 20, 50, 50}).width(), 10);
+        QCOMPARE(d.flattenArea({30, 20, 50, 50}).height(), 10);
+        QCOMPARE(d.flattenArea({100, 100, 5, 5}).rgbaAt(0, 0).a, uint8_t(0));
+    }
+
 };
+
 
 QTEST_GUILESS_MAIN(TestPaintDocument)
 #include "test_paint_document.moc"

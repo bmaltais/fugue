@@ -470,6 +470,16 @@ public:
     // Sets the mask input to the file `path` (empty: no mask) as one undo step; the problem as text, or
     // empty. The mask editor's `saved(path)` goes here.
     Q_INVOKABLE QString setMaskPath(const QString &node, const QString &path);
+    // The painted canvas of a node (spec 14.4, #181): the node's first input of widget `paint`, as the
+    // mask above. `paintState` is {input, over, path, editable, linked, width, height}: `over` is the
+    // picture input, `linked` whether a node feeds it (its picture is known only after a run), and
+    // `width` and `height` the node's Width and Height when they are plain numbers (0 for unset or linked),
+    // the size of a blank canvas. Empty without such an input.
+    Q_INVOKABLE QString paintInput(const QString &node) const;
+    Q_INVOKABLE QVariantMap paintState(const QString &node) const;
+    // Sets the paint input to the file `path` (empty: nothing painted) as one undo step; the problem as
+    // text, or empty. The paint window's `saved(path)` goes here.
+    Q_INVOKABLE QString setPaintPath(const QString &node, const QString &path);
     // The world point (x, y) lies on the node's picture (a result or a file's image), not on a text
     // standing in its place: where a double click opens the large view.
     Q_INVOKABLE bool pictureAt(const QString &node, qreal x, qreal y) const;
@@ -642,6 +652,10 @@ signals:
     void viewMoveRequested();
 
 private:
+    // The first input of a node whose widget is `widget` (mask_edit.cpp: the mask and paint windows).
+    QString widgetInput(const QString &node, const QString &widget) const;
+    // {input, over, path, editable} of that input, empty without one.
+    QVariantMap fileWidgetState(const QString &node, const QString &widget) const;
     void toggleLayoutFlag(const QString &flag, const QString &text);
     // Starts moving these nodes: all but the pinned ones (#55), which are returned.
     QStringList startMoving(const QStringList &ids);
