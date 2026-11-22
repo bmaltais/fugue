@@ -16,6 +16,8 @@
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
 #include "engine/embed.h"
+#include "engine/paint_document.h"
+#include "engine/paint_file.h"
 #include "engine/paths.h"
 #include "engine/registry.h"
 #include "nodes/builtin.h"
@@ -38,6 +40,16 @@ QImage picture(QColor color = Qt::red) {
     QImage image(12, 8, QImage::Format_RGB32);
     image.fill(color);
     return image;
+}
+
+// A small painted canvas as the bytes of its .ora file (#181).
+QByteArray paintBytes() {
+    mask::PaintDocument d(12, 8);
+    d.addLayer(mask::LayerKind::Picture, "Picture");
+    d.addLayer(mask::LayerKind::Paint, "Paint");
+    d.brush.color = mask::Rgba{0, 0, 255, 255};
+    d.fillRect(1, 1, 4, 4);
+    return mask::paintToOra(d).value();
 }
 
 bool write(const QString &path, const QByteArray &bytes) {
@@ -298,6 +310,71 @@ private slots:
         QVERIFY2(mask.startsWith(p.inputs() + "/") && mask.endsWith(".png"), qPrintable(mask));
         QCOMPARE(read(mask), maskPng);
         QVERIFY(document.graph.nodes.value("src").inputs.value("file").literal().toString().startsWith(p.inputs() + "/"));
+    }
+
+    // The same for a `paint` input (#181): its .ora file is carried into `inputs/` on save, made
+    // absolute with the others, and taken in with a template; a file that is not a paint canvas is
+    // not stored as one.
+    void aPaintFileIsCarriedIntoTheInputsFolderOnSave() {
+        Pictures p;
+        QTemporaryDir place;
+        const QByteArray ora = paintBytes();
+        const Result<QString> stored = storeImage(ora, p.inputs(), FileRoots::forInputs(), "sketch");
+        QVERIFY2(stored.ok(), qPrintable(stored.error().message));
+        QVERIFY(stored.value().endsWith(".ora"));
+        QCOMPARE(read(stored.value()), ora);
+        // The same bytes again are the same file.
+        QCOMPARE(storeImage(ora, p.inputs(), FileRoots::forInputs(), "other").value(), stored.value());
+        Registry registry;
+        nodes::addBuiltinNodeTypes(registry);
+        Document document = Document::load(QStringLiteral(R"({"fugue": 1, "graph": {"nodes": {
+            "p": {"type": "fugue/paint", "version": "1.0.0", "inputs": {"width": 12, "height": 8, "paint": "%1"}}}}})")
+                                               .arg(stored.value()).toUtf8()).value();
+        const Errors errors = relocateInputs(document, registry, {}, place.filePath("flow.fugue"));
+        QVERIFY2(!hasErrors(errors), qPrintable(errors.isEmpty() ? QString() : errors.first().message));
+        const QString name = QFileInfo(stored.value()).fileName();
+        QCOMPARE(document.graph.nodes.value("p").inputs.value("paint").literal().toString(), "inputs/" + name);
+        QCOMPARE(read(place.filePath("inputs/" + name)), ora);
+    }
+
+    void aRelativePaintPathBecomesFullWhenMadeAbsolute() {
+        QTemporaryDir place;
+        QVERIFY(QDir().mkpath(place.filePath("inputs")));
+        const QString where = QDir(place.path()).canonicalPath();
+        QVERIFY(write(where + "/inputs/p.ora", paintBytes()));
+        Registry registry;
+        nodes::addBuiltinNodeTypes(registry);
+        Document document = Document::load(QByteArray(R"({"fugue": 1, "graph": {"nodes": {
+            "p": {"type": "fugue/paint", "version": "1.0.0", "inputs": {"paint": "inputs/p.ora"}}}}})")).value();
+        makeInputsAbsolute(document, registry, where + "/flow.fugue");
+        QCOMPARE(document.graph.nodes.value("p").inputs.value("paint").literal().toString(), where + "/inputs/p.ora");
+    }
+
+    void aTemplatesPaintFileIsTakenIn() {
+        Pictures p;
+        QTemporaryDir folder;
+        QVERIFY(QDir().mkpath(folder.filePath("inputs")));
+        const QString root = QDir(folder.path()).canonicalPath();
+        const QByteArray ora = paintBytes();
+        QVERIFY(write(root + "/inputs/sketch.ora", ora));
+        Registry registry;
+        nodes::addBuiltinNodeTypes(registry);
+        Document document = Document::load(QStringLiteral(R"({"fugue": 1, "graph": {"nodes": {
+            "p": {"type": "fugue/paint", "version": "1.0.0", "inputs": {"paint": "%1/inputs/sketch.ora"}}}}})")
+                                               .arg(root).toUtf8()).value();
+        const Errors errors = takeInputsFrom(document, registry, folder.path());
+        QVERIFY2(!hasErrors(errors), qPrintable(errors.isEmpty() ? QString() : errors.first().message));
+        const QString paint = document.graph.nodes.value("p").inputs.value("paint").literal().toString();
+        QVERIFY2(paint.startsWith(p.inputs() + "/") && paint.endsWith(".ora"), qPrintable(paint));
+        QCOMPARE(read(paint), ora);
+    }
+
+    void aZipThatLooksLikeAPaintFileButIsNotOneIsNotStored() {
+        Pictures p;
+        QByteArray fake = paintBytes();
+        fake.truncate(fake.size() / 2); // the header says paint, the zip is cut
+        QVERIFY(!storeImage(fake, p.inputs(), FileRoots::forInputs(), "cut").ok());
+        QVERIFY(names(p.inputs()).isEmpty());
     }
 
     // A template that ships a video (or a song) keeps it where it is: only pictures are taken in.

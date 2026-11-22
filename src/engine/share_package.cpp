@@ -117,11 +117,11 @@ Errors bundleInputs(Document &document, const Registry &registry, const QString 
             value = InputValue::literal(bare);
             return;
         }
-        const std::optional<ImageFormat> format = sniffImage(file.read(16));
+        const std::optional<ImageFormat> format = sniffInputFile(file.read(128));
         if (!format || info.size() > maxImageBytes) {
             warn(node, input,
                  format ? QStringLiteral("%1 is over %2 MB, so it is not in the package.").arg(bare).arg(maxImageBytes >> 20)
-                        : QStringLiteral("%1 is not an image, so it is not in the package.").arg(bare));
+                        : QStringLiteral("%1 is not an image or a paint file, so it is not in the package.").arg(bare));
             value = InputValue::literal(bare);
             return;
         }

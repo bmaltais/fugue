@@ -5,6 +5,7 @@
 #include "engine/file_inputs.h"
 #include "engine/hash.h"
 #include "engine/image_format.h"
+#include "engine/paint_file.h"
 #include "engine/paths.h"
 #include "engine/vips.h"
 
@@ -133,17 +134,23 @@ Result<QString> storeImage(const QByteArray &bytes, const QString &folder, const
         return makeError(QStringLiteral("value_out_of_range"),
                          QStringLiteral("The image is %1 MB; Fugue takes at most %2 MB.")
                              .arg(megabytes(bytes.size()), megabytes(maxImageBytes)));
-    const std::optional<ImageFormat> format = sniffImage(bytes);
+    const std::optional<ImageFormat> format = sniffInputFile(bytes);
     if (!format)
         return makeError(QStringLiteral("media_unreadable"),
                          QStringLiteral("This is not an image Fugue knows (PNG, JPEG, WebP, GIF, TIFF, BMP or AVIF)."));
-    const Result<QSize> size = readableSize(bytes, *format);
-    if (!size)
-        return size.errors();
-    if (qint64(size->width()) * size->height() > maxImagePixels)
-        return makeError(QStringLiteral("value_out_of_range"),
-                         QStringLiteral("The image is %1 x %2 pixels; Fugue takes at most %3 million.")
-                             .arg(size->width()).arg(size->height()).arg(maxImagePixels / 1000000));
+    if (format->extension == QLatin1String("ora")) {
+        // A paint canvas (#181): read whole, with its own caps, so a file that is not one is not stored.
+        if (const Result<mask::PaintDocument> canvas = mask::paintFromOra(bytes); !canvas)
+            return canvas.errors();
+    } else {
+        const Result<QSize> size = readableSize(bytes, *format);
+        if (!size)
+            return size.errors();
+        if (qint64(size->width()) * size->height() > maxImagePixels)
+            return makeError(QStringLiteral("value_out_of_range"),
+                             QStringLiteral("The image is %1 x %2 pixels; Fugue takes at most %3 million.")
+                                 .arg(size->width()).arg(size->height()).arg(maxImagePixels / 1000000));
+    }
     const QString hash = sha256(bytes).mid(QStringLiteral("sha256:").size()).left(10);
     // The same bytes are the file already there, whatever it was called: only a regular file
     // whose whole content is these bytes, so a planted name of the right size is not reused.
@@ -395,7 +402,7 @@ void makeInputsAbsolute(Document &document, const Registry &registry, const QStr
 namespace {
 bool startsLikeAnImage(const QString &path) {
     QFile file(path);
-    return file.open(QIODevice::ReadOnly) && sniffImage(file.read(64)).has_value();
+    return file.open(QIODevice::ReadOnly) && sniffInputFile(file.read(128)).has_value();
 }
 } // namespace
 

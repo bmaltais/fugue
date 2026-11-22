@@ -50,7 +50,7 @@ struct InputSpec {
     QString over; // widget `mask` only: the image input the mask is painted over; empty: the node's own `file` input
 
     // True for an input whose text literal names a file that travels with the workflow (spec 11.2,
-    // 11.5, 11.10, 14.4): a `file` input's picture, or a `mask` input's painted mask. The one
+    // 11.5, 11.10, 14.4): a `file` input's picture, a `mask` input's painted mask, or a `paint` input's .ora canvas. The one
     // predicate that saving, sharing, taking a template in and running read, so they cannot disagree.
     bool holdsInputFile() const;
 

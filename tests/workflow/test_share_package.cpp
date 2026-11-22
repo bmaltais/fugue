@@ -23,6 +23,8 @@
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
 #include "engine/document.h"
+#include "engine/paint_document.h"
+#include "engine/paint_file.h"
 #include "engine/paths.h"
 #include "engine/registry.h"
 #include "engine/share_package.h"
@@ -230,6 +232,51 @@ private slots:
         QVERIFY2(mask.startsWith(inputsDir() + "/"), qPrintable(mask));
         QCOMPARE(readFile(mask), maskBytes);
         QCOMPARE(canvas.document().graph.nodes.value("paint").inputs.value("mask").literal().toString(), mask);
+    }
+
+    // A paint canvas is an input file too (#181): the package carries its .ora, the workflow names it
+    // under `inputs/`, and opening the package takes it into the inputs folder, the same bytes.
+    void aPaintFileTravelsInThePackage() {
+        QTemporaryDir dir, state;
+        mask::PaintDocument canvasDocument(10, 6);
+        canvasDocument.addLayer(mask::LayerKind::Picture, "Picture");
+        canvasDocument.addLayer(mask::LayerKind::Paint, "Paint");
+        canvasDocument.brush.color = mask::Rgba{255, 0, 0, 255};
+        canvasDocument.fillRect(0, 0, 5, 3);
+        const QByteArray ora = mask::paintToOra(canvasDocument).value();
+        writeFile(dir.filePath("sketch.ora"), ora);
+        const QString flowText = QStringLiteral(R"({"fugue": 1, "graph": {"nodes": {
+            "p": {"type": "fugue/paint", "version": "1.0.0", "inputs": {"width": 10, "height": 6, "paint": "%1"}}}}})")
+                                     .arg(dir.filePath("sketch.ora"));
+        const Document document = Document::load(flowText.toUtf8()).value();
+
+        ShareRequest request;
+        request.title = "Sketched";
+        request.appVersion = "0.1.0";
+        QStringList included;
+        const QString zip = dir.filePath("sketched.zip");
+        const Errors written = writeSharePackage(document, m_registry, request, zip, &included);
+        QVERIFY2(!hasErrors(written) && written.isEmpty(), qPrintable(written.isEmpty() ? QString() : written.first().message));
+        QCOMPARE(included, QStringList{"sketch.ora"});
+        QTemporaryDir out;
+        const QString folder = unpackSharePackage(zip, out.path()).value();
+        QCOMPARE(readFile(folder + "/inputs/sketch.ora"), ora);
+        const QJsonObject nodes = readJson(folder + "/workflow.fugue").value("graph").toObject().value("nodes").toObject();
+        QCOMPARE(nodes.value("p").toObject().value("inputs").toObject().value("paint").toString(), QString("inputs/sketch.ora"));
+
+        CanvasModel canvas(&m_registry);
+        CommandRegistry commands;
+        registerMenuCommands(commands);
+        WorkflowLocations locations;
+        locations.recoveryDir = state.filePath("recovery");
+        locations.trustPath = state.filePath("trust.json");
+        locations.templateRoots = {};
+        Workflows workflows(&canvas, &m_registry, &commands, locations);
+        registerFileCommands(commands, workflows);
+        QVERIFY2(workflows.openPath(zip), qPrintable(workflows.notice()));
+        const QString paint = canvas.document().graph.nodes.value("p").inputs.value("paint").literal().toString();
+        QVERIFY2(paint.startsWith(inputsDir() + "/") && paint.endsWith(".ora"), qPrintable(paint));
+        QCOMPARE(readFile(paint), ora);
     }
 
     void unpackingRefusesWhatWouldLeaveItsFolder() {

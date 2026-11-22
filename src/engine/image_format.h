@@ -20,6 +20,12 @@ struct ImageFormat {
 // claims. Nothing for anything else.
 std::optional<ImageFormat> sniffImage(QByteArrayView bytes);
 
+// What an input file is by its bytes: an image (sniffImage), or a paint canvas (an OpenRaster file
+// Fugue writes, engine/paint_file.h: extension "ora"), which a `paint` input holds (#181). Only the
+// places that carry input files (a package, a template, the inputs folder) take the second kind;
+// a paste or a drop of a picture is sniffImage's alone. Needs the first 128 bytes.
+std::optional<ImageFormat> sniffInputFile(QByteArrayView bytes);
+
 // Largest file kept (a camera original is well under it), and the most pixels an image may
 // have (a decompression bomb is refused before it is stored).
 inline constexpr qint64 maxImageBytes = 256 * 1024 * 1024;

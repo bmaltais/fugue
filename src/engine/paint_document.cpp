@@ -25,6 +25,16 @@ MaskPaint asColor(const MaskPaint &in) {
     return MaskPaint(in.width(), in.height(), pixels, 4);
 }
 
+// A color buffer as a mask: its first channel.
+MaskPaint asMask(const MaskPaint &in) {
+    if (in.channels() == 1)
+        return in;
+    std::vector<uint8_t> pixels(in.pixels().size() / 4);
+    for (size_t i = 0; i < pixels.size(); ++i)
+        pixels[i] = in.pixels()[i * 4];
+    return MaskPaint(in.width(), in.height(), pixels, 1);
+}
+
 } // namespace
 
 PaintDocument::PaintDocument(int width, int height) : m_width(std::max(1, width)), m_height(std::max(1, height)) {}
@@ -190,6 +200,45 @@ int PaintDocument::addLayer(LayerKind kind, const QString &name, const MaskPaint
     m_active = l.info.id;
     push(std::move(step));
     return l.info.id;
+}
+
+int PaintDocument::loadLayer(LayerKind kind, const QString &name, bool visible, double opacity, const MaskPaint &pixels) {
+    if (m_stroking)
+        return 0;
+    Layer l;
+    l.info.id = m_nextId++;
+    l.info.kind = kind;
+    l.info.name = name.isEmpty() ? QStringLiteral("Layer %1").arg(l.info.id) : name;
+    l.info.visible = visible;
+    l.info.opacity = clamp01(opacity);
+    l.pixels = std::make_shared<MaskPaint>((kind == LayerKind::Mask ? asMask(pixels) : asColor(pixels)).scaled(m_width, m_height));
+    l.pixels->forgetHistory();
+    m_layers.push_back(l);
+    m_active = l.info.id;
+    return l.info.id;
+}
+
+bool PaintDocument::setPicture(int id, const MaskPaint &picture) {
+    Layer *l = find(id);
+    if (!l || l->info.kind != LayerKind::Picture)
+        return false;
+    l->pixels = std::make_shared<MaskPaint>(asColor(picture).scaled(m_width, m_height));
+    l->pixels->forgetHistory();
+    return true;
+}
+
+PaintDocument PaintDocument::scaledTo(int width, int height) const {
+    PaintDocument out(width, height);
+    for (const Layer &l : m_layers)
+        out.loadLayer(l.info.kind, l.info.name, l.info.visible, l.info.opacity, *l.pixels);
+    return out;
+}
+
+void PaintDocument::forgetHistory() {
+    m_undo.clear();
+    m_redo.clear();
+    for (Layer &l : m_layers)
+        l.pixels->forgetHistory();
 }
 
 bool PaintDocument::removeLayer(int id) {

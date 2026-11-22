@@ -1,5 +1,7 @@
 #include "image_format.h"
 
+#include "engine/paint_file.h"
+
 namespace fugue {
 
 std::optional<ImageFormat> sniffImage(QByteArrayView b) {
@@ -17,6 +19,14 @@ std::optional<ImageFormat> sniffImage(QByteArrayView b) {
         return ImageFormat{QStringLiteral("bmp"), QStringLiteral("image/bmp")};
     if (b.size() >= 12 && b.mid(4, 4) == "ftyp" && (b.mid(8, 4) == "avif" || b.mid(8, 4) == "avis"))
         return ImageFormat{QStringLiteral("avif"), QStringLiteral("image/avif")};
+    return std::nullopt;
+}
+
+std::optional<ImageFormat> sniffInputFile(QByteArrayView b) {
+    if (const std::optional<ImageFormat> image = sniffImage(b))
+        return image;
+    if (mask::looksLikeOra(b))
+        return ImageFormat{QStringLiteral("ora"), QStringLiteral("image/openraster")};
     return std::nullopt;
 }
 

@@ -153,7 +153,7 @@ void MaskLayer::reset() {
 }
 
 void MaskLayer::beginStroke(bool erase, double size, double hardness, double x, double y, double pressure) {
-    m_paint->beginStroke(erase ? mask::Mode::Erase : mask::Mode::Paint, {size, hardness, 1.0});
+    m_paint->beginStroke(erase ? mask::Mode::Erase : mask::Mode::Paint, {size, hardness, 1.0, {}});
     m_paint->strokeTo({x, y}, pressure);
     changed(false);
 }

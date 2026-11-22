@@ -59,6 +59,18 @@ public:
     // `position` 0 is the bottom; one past the last is clamped.
     bool moveLayer(int id, int position);
 
+    // Loading (a file's layers, paint_file.h): puts a layer on top with these pixels and settings, as
+    // is, and not a history step. `pixels` is scaled to the canvas and given the channels of the kind
+    // (one for a mask, four for the others). Returns the new id.
+    int loadLayer(LayerKind kind, const QString &name, bool visible, double opacity, const MaskPaint &pixels);
+    // Puts a picture into a picture layer (scaled to the canvas); false for any other layer. Not a
+    // history step: the picture is the caller's input, not something painted.
+    bool setPicture(int id, const MaskPaint &picture);
+    // The same layers on a canvas of another size, each scaled (bilinear); no history.
+    PaintDocument scaledTo(int width, int height) const;
+    // Drops every undo and redo step (a document just loaded starts with none).
+    void forgetHistory();
+
     int layerCount() const { return int(m_layers.size()); }
     LayerInfo layer(int position) const; // by position, bottom first; an empty LayerInfo (id 0) past the ends
     int positionOf(int id) const;        // -1 when there is no such layer

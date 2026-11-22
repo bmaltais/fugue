@@ -10,6 +10,7 @@
 #include "engine/media.h"
 #include "nodes/kernels.h"
 #include "nodes/mask_input.h"
+#include "nodes/paint_input.h"
 #include "nodes/pixel_io.h"
 #include "nodes/save_files.h"
 
@@ -170,6 +171,7 @@ void addBasicKernels(Kernels &kernels) {
     kernels.add("fugue/save-image", std::make_shared<SaveImageKernel>());
     kernels.add("fugue/preview", std::make_shared<PreviewKernel>());
     addMaskInputKernels(kernels);
+    addPaintInputKernels(kernels);
 }
 
 } // namespace fugue::nodes

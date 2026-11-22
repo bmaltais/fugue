@@ -1,0 +1,24 @@
+{
+  "manifest": 1,
+  "id": "fugue/paint",
+  "version": "1.0.0",
+  "name": "Paint",
+  "description": "Paint on layers over a picture, or on a blank canvas: you get the picture with the paint on it and the mask you painted.",
+  "category": "Image",
+  "keywords": ["draw", "brush", "sketch", "canvas", "layers", "color", "mask", "inpaint"],
+  "runtime": {"kind": "builtin"},
+  "inputs": [
+    {"name": "image", "type": "image", "label": "Image", "optional": true,
+     "description": "The picture to paint over. Unset: a blank canvas of the Width and Height."},
+    {"name": "width", "type": "number", "label": "Width", "optional": true, "integer": true, "min": 1, "max": 8192,
+     "description": "A blank canvas's width. Unset: the picture's, else the painting's own."},
+    {"name": "height", "type": "number", "label": "Height", "optional": true, "integer": true, "min": 1, "max": 8192,
+     "description": "A blank canvas's height. Unset: the picture's, else the painting's own."},
+    {"name": "paint", "type": "text", "label": "Paint", "widget": "paint", "over": "image", "optional": true,
+     "description": "The layers you painted, one file beside your pictures. Nothing painted gives the picture as it is and an empty mask."}
+  ],
+  "outputs": [
+    {"name": "image", "type": "image", "label": "Image"},
+    {"name": "mask", "type": "image", "role": "mask", "label": "Mask"}
+  ]
+}

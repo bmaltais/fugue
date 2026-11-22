@@ -41,7 +41,7 @@ struct ShareRequest {
 // Writes the package to `zipPath`, never over a file there; `included` gets the file names of
 // the images put in. Errors: a file that cannot be read or written, images over 3 GB in all
 // (`value_out_of_range`). Warnings, the package written: a file input whose file is not there,
-// is not an image, or is over 256 MB (its input keeps the bare name).
+// is not an image or a paint file, or is over 256 MB (its input keeps the bare name).
 Errors writeSharePackage(const Document &document, const Registry &registry, const ShareRequest &request,
                          const QString &zipPath, QStringList *included = nullptr);
 

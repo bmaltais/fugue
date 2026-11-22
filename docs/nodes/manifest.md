@@ -75,6 +75,7 @@ and in `fugue pack list`. It never stops Fugue.
 | `choices` | Allowed values of a `text` input; it becomes a choice. |
 | `widget` | One of the set below. |
 | `section`, `advanced` | Group inputs on the node face; `advanced` ones start folded. |
+| `over` | With widget `mask` or `paint`: the name of the `image` input of this node it is painted over. |
 | `role` | `"mask"` on an `image` input that takes a mask (a one-channel image, 1 is the part to change). Only marks the port; an image still connects to it. Any other value is an error. |
 
 Widgets come from a fixed set: no pack ships UI code, so every node looks alike.
@@ -87,6 +88,8 @@ Widgets come from a fixed set: no pack ships UI code, so every node looks alike.
 | `choice` (default when `choices` is set) | text |
 | `file`, `folder` | text: opens the file picker; the value is a path |
 | `color` | text: `#rrggbb` or `#rrggbbaa` |
+| `mask` | text: a painted mask, the path of a gray PNG in the inputs folder; `over` names the `image` input it is painted over |
+| `paint` | text: a painted canvas with layers, the path of an `.ora` file in the inputs folder; `over` names the `image` input it is painted over (the window that edits it is not built yet) |
 | `seed` | number: fixed, randomize or increment |
 
 Outputs have `name`, `type`, `label`, `description`, `list`, `optional` and `role` (`"mask"` on an `image` output that holds a mask).

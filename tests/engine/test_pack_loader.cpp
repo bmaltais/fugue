@@ -226,6 +226,32 @@ private slots:
             QVERIFY2(!reasonOf(loaded, name).isEmpty(), name);
     }
 
+    // The paint widget (#181) is the mask widget's twin: text, `over` naming the picture, an input file.
+    void aPacksPaintWidgetIsATextInputFileOverAnImage() {
+        QTemporaryDir root;
+        const QString id = "io.github.alice.tools";
+        QJsonObject good = nodeJson(id + "/good");
+        good["inputs"] = QJsonArray{QJsonObject{{"name", "image"}, {"type", "image"}},
+                                    QJsonObject{{"name", "art"}, {"type", "text"}, {"widget", "paint"}, {"over", "image"}, {"optional", true}}};
+        QJsonObject onImage = nodeJson(id + "/onimage"); // the paint widget on an image input
+        onImage["inputs"] = QJsonArray{QJsonObject{{"name", "art"}, {"type", "image"}, {"widget", "paint"}}};
+        QJsonObject overLine = nodeJson(id + "/overline"); // `over` on another widget still fails
+        overLine["inputs"] = QJsonArray{QJsonObject{{"name", "image"}, {"type", "image"}},
+                                        QJsonObject{{"name", "art"}, {"type", "text"}, {"widget", "line"}, {"over", "image"}}};
+        const QString dir = makePack(root.path(), id, packJson(id, {"good", "onimage", "overline"}),
+                                     {{"good", good}, {"onimage", onImage}, {"overline", overLine}});
+        Registry registry;
+        const LoadedPack loaded = loadPack(registry, dir);
+        const NodeType *type = registry.nodeType(id + "/good");
+        QVERIFY2(type, qPrintable(reasonOf(loaded, "good")));
+        QCOMPARE(type->input("art")->widget(), QString("paint"));
+        QCOMPARE(type->input("art")->over, QString("image"));
+        QVERIFY(type->input("art")->holdsInputFile());
+        QCOMPARE(NodeType::fromJson(type->toJson()).value().input("art")->widget(), QString("paint"));
+        for (const char *name : {"onimage", "overline"})
+            QVERIFY2(!reasonOf(loaded, name).isEmpty(), name);
+    }
+
     void aBadNodeDisablesOnlyThatNode() {
         QTemporaryDir root;
         const QString id = "io.github.alice.tools";

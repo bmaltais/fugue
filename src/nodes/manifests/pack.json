@@ -43,6 +43,7 @@
     "number-math",
     "overlay-mask",
     "pad",
+    "paint",
     "paint-mask",
     "preview",
     "resize",

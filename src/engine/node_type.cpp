@@ -152,7 +152,7 @@ bool widgetFits(const QString &widget, const InputSpec &input) {
     if (widget == "spin" || widget == "slider" || widget == "seed")
         return type == "number";
     if (widget == "line" || widget == "multiline" || widget == "file" || widget == "folder" ||
-        widget == "color" || widget == "mask")
+        widget == "color" || widget == "mask" || widget == "paint")
         return type == "text";
     if (widget == "toggle")
         return type == "boolean";
@@ -244,8 +244,8 @@ std::optional<InputSpec> readInput(Reader &r, const QJsonValue &value, int index
             r.fail(where + QStringLiteral(" has a \"step\" that is not above 0."), n);
         if (input.minItems && input.maxItems && *input.minItems > *input.maxItems)
             r.fail(where + QStringLiteral(" has \"min_items\" above \"max_items\"."), n);
-        if (!input.over.isEmpty() && input.widgetName != QLatin1String("mask"))
-            r.fail(where + QStringLiteral(" has \"over\", which only applies to the widget \"mask\"."), n);
+        if (!input.over.isEmpty() && input.widgetName != QLatin1String("mask") && input.widgetName != QLatin1String("paint"))
+            r.fail(where + QStringLiteral(" has \"over\", which only applies to the widgets \"mask\" and \"paint\"."), n);
         if (!input.widgetName.isEmpty() && !widgetFits(input.widgetName, input))
             r.fail(where + QStringLiteral(" is %1 and cannot use the widget \"%2\".")
                                .arg(input.type.toString(), input.widgetName),
@@ -360,7 +360,7 @@ QString InputSpec::widget() const {
 
 bool InputSpec::holdsInputFile() const {
     const QString w = widget();
-    return w == QLatin1String("file") || w == QLatin1String("mask");
+    return w == QLatin1String("file") || w == QLatin1String("mask") || w == QLatin1String("paint");
 }
 
 const InputSpec *NodeType::input(const QString &name) const {
