@@ -1,5 +1,8 @@
 #include "engine/templates.h"
 
+#include "engine/fugue_home.h"
+#include "engine/paths.h"
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -160,6 +163,8 @@ TemplateLibrary::TemplateLibrary(QList<TemplateRoot> roots, const Registry *regi
     : m_roots(std::move(roots)), m_registry(registry) {}
 
 QString TemplateLibrary::ownFolder() {
+    if (const QString inRoot = fugueHomeDir(QStringLiteral("documents")); !inRoot.isEmpty())
+        return QDir::cleanPath(inRoot + QStringLiteral("/templates"));
     const QString documents = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
     return QDir::cleanPath((documents.isEmpty() ? QDir::homePath() : documents) + QStringLiteral("/Fugue/templates"));
 }

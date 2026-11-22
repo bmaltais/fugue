@@ -14,6 +14,7 @@
 #include "engine/model_download.h"
 #include "engine/model_library.h"
 #include "engine/model_places.h"
+#include "engine/fugue_home.h"
 #include "engine/paths.h"
 #include "engine/settings.h"
 #include "engine/share_package.h"
@@ -225,6 +226,8 @@ QString Workflows::windowTitle() const {
 }
 
 QUrl Workflows::suggestedFolder() const {
+    if (!fugueHome().isEmpty())
+        return QUrl::fromLocalFile(documentsDir());
     const QString documents = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
     const QString fugue = documents + "/Fugue";
     return QUrl::fromLocalFile(QFileInfo(fugue).isDir() ? fugue : (documents.isEmpty() ? QDir::homePath() : documents));

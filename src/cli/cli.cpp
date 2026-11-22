@@ -69,7 +69,8 @@ const char *helpText =
     "  cache status | cache clear [--kind results|thumbnails|runs|all] [--workflow <file>] [--node <id>]\n"
     "      [--older-than <age, 30d>] [--dry-run]\n"
     "  provider, command (later releases)\n"
-    "With no command, fugue opens the window.\n";
+    "With no command, fugue opens the window.\n"
+    "  --home <dir> (anywhere), or FUGUE_HOME: keep everything fugue writes in one folder (spec 1.4.1)\n";
 
 } // namespace
 
