@@ -245,6 +245,8 @@ public:
     // before a run, so its default stands (padding and the rest) and `editable` is false when any of
     // x, y, width, height is linked. Empty for another node.
     Q_INVOKABLE QVariantMap regionState(const QString &node) const;
+    // The node as user text names it (CanvasModel::nodeName): its title, the id only to tell two of one title apart.
+    Q_INVOKABLE QString nodeName(const QString &node) const;
     // Sets x, y, width and height of the node as ONE undo step; false when nothing changed or one is linked.
     Q_INVOKABLE bool setRegion(const QString &node, int x, int y, int width, int height);
     // The document's undo stack: a view that shows a node's values (the Canvas view's region) re-reads on its index.

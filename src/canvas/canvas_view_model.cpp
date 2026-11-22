@@ -13,9 +13,10 @@ namespace fugue {
 
 namespace {
 
+// A chip of the strip: the row, its `label` the row's `name` (CanvasHistory names every revision in one place).
 QVariantMap choice(const QVariantMap &row) {
     QVariantMap out = row;
-    out.insert("label", row.value("kind").toString() == QLatin1String("head") ? QObject::tr("Head") : row.value("short").toString());
+    out.insert("label", row.value("name"));
     return out;
 }
 
@@ -85,10 +86,12 @@ void CanvasViewModel::refresh() {
 QString CanvasViewModel::newResultFrom() const {
     for (const QVariant &row : revisions())
         if (row.toMap().value("id").toString() == m_newResult) {
-            QString producer = row.toMap().value("producer").toString();
-            if (producer.startsWith(QLatin1String("canvas-write:")))
-                producer = producer.mid(13);
-            return producer;
+            // A person reads the node's title (#228), never its id: the Canvas Write of the open document that made it,
+            // and nothing when the document has no such node (a run of another workflow, the command line).
+            const QString producer = row.toMap().value("producer").toString();
+            if (!producer.startsWith(QLatin1String("canvas-write:")) || !m_edits)
+                return {};
+            return m_edits->nodeName(producer.mid(13));
         }
     return {};
 }

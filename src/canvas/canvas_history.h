@@ -6,8 +6,10 @@
 // work is engine/canvas_store.h and engine/canvas_diff.h; this turns it into properties QML binds to.
 // It makes no window and reads no pixel of a revision until one is selected.
 //
-// A row of `revisions` is {id, short, time, producer, kind, label}: kind is "head", "history",
-// "candidate" or "dropped" (a candidate hidden by drop). Candidates come first, then the history from
+// A row of `revisions` is {id, short, time, producer, kind, onHead, name, tag}: kind is "head", "history",
+// "candidate" or "dropped" (a candidate hidden by drop); `name` is how every surface names the revision ("Head",
+// "Candidate 82d368f5", "Dropped 82d368f5", or the short hash) and `tag` its status word ("Head", "Candidate", "Dropped",
+// or empty), capitalized (docs/ui-ergonomics.md D3). Candidates come first, then the history from
 // the head back. Selecting a revision compares it (B) with its parent (A); compare(a, b) picks both.
 
 #include <QObject>
@@ -88,6 +90,13 @@ public:
     Q_INVOKABLE bool accept(const QString &revision);
     // Hide a candidate; true when done.
     Q_INVOKABLE bool drop(const QString &revision);
+    // Makes a canvas in this store and opens it (#228, the cohesion audit's C7: the empty states and the Canvas view's
+    // menu make one in the app, as the canvas picker does): a blank one of a size, or one from a picture file (a path or
+    // a file: URL; a blank name is the file's). Returns why not, or empty; the new canvas is then `canvasId`.
+    Q_INVOKABLE QString newCanvas(const QString &name, int width, int height);
+    Q_INVOKABLE QString importPicture(const QString &path, const QString &name = QString());
+    // The size a picture file would give ("1920 × 1080"), "" when it cannot be read: the New canvas question's line.
+    Q_INVOKABLE QString pictureSize(const QString &path) const;
 
 signals:
     void storeChanged();

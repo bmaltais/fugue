@@ -1737,6 +1737,15 @@ QString CanvasModel::nodeTitle(const QString &node) const {
     return r < 0 ? QString() : m_rows[size_t(r)].title;
 }
 
+QString CanvasModel::nodeName(const QString &node) const {
+    const int r = rowOf(node);
+    if (r < 0)
+        return {};
+    const QString &title = m_rows[size_t(r)].title;
+    const bool shared = std::any_of(m_rows.begin(), m_rows.end(), [&](const auto &row) { return row.id != node && row.title == title; });
+    return shared ? tr("%1 (%2)").arg(title, node) : title;
+}
+
 bool CanvasModel::isCompare(const QString &node) const {
     return m_document.graph.nodes.value(node).type == QLatin1String("fugue/compare-images");
 }

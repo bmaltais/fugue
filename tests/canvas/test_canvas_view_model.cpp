@@ -191,11 +191,11 @@ private slots:
         QTRY_COMPARE_WITH_TIMEOUT(view.revisionB(), c3, 3000);
         QCOMPARE(view.newResult(), c3);
         QCOMPARE(view.newResultOthers(), 0);
-        QCOMPARE(view.newResultFrom(), QString("c3"));
+        QCOMPARE(view.newResultFrom(), QString()); // no document has the Canvas Write: no id is shown in its place (#228)
         QCOMPARE(view.revisionA(), m_head); // against the head
         QVERIFY(view.showsCandidate() && view.overlay());
         QCOMPARE(view.pictureSource(), view.sourceB()); // the combined picture
-        // Keep looking at the head: the banner ends, the candidate stays in the strip.
+        // Back to Head: the banner ends, the candidate stays in the strip.
         view.show(m_head);
         QCOMPARE(view.newResult(), QString());
         QVERIFY(ids(view.choices()).contains(c3));

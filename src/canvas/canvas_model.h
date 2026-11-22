@@ -431,6 +431,9 @@ public:
     void setRunProgress(const QString &node, qreal progress);
     // The node's title as the canvas shows it; empty when there is no such node.
     Q_INVOKABLE QString nodeTitle(const QString &node) const;
+    // The node as a sentence names it (#228): its title, with its id after it only when another node shown has the same
+    // title ("Canvas Region (12)"); empty when there is no such node. User text names a node so, never by its id alone.
+    Q_INVOKABLE QString nodeName(const QString &node) const;
 
     // A Compare Images node's viewer (#62): what a person changed on it, kept here so the node's
     // face, the large view and the keys share one state. It is session state, like a node's

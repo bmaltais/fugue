@@ -65,7 +65,7 @@ class CanvasViewModel : public CanvasHistory {
     // True while the view must not move on its own: Compare is on or a rectangle is being dragged. The host binds it.
     Q_PROPERTY(bool viewLocked READ viewLocked WRITE setViewLocked NOTIFY newResultChanged)
     // The candidate the view moved to by itself and still shows ("" otherwise), how many more arrived with it, and who
-    // made it (the node of a Canvas Write, else the producer as it is stored).
+    // made it: the name of the open document's Canvas Write that wrote it (WidgetEdit::nodeName, its title), else "".
     Q_PROPERTY(QString newResult READ newResult NOTIFY newResultChanged)
     Q_PROPERTY(int newResultOthers READ newResultOthers NOTIFY newResultChanged)
     Q_PROPERTY(QString newResultFrom READ newResultFrom NOTIFY newResultChanged)

@@ -206,6 +206,8 @@ QUndoStack *WidgetEdit::undoStack() const { return m_canvas->undoStack(); }
 
 QString WidgetEdit::pictureSize(const QString &path) const { return m_canvases.pictureSize(path); }
 
+QString WidgetEdit::nodeName(const QString &node) const { return m_canvas ? m_canvas->nodeName(node) : QString(); }
+
 QVariantMap WidgetEdit::spec(const QString &node, const QString &input) const {
     const Target t = target(node, input);
     if (!t.spec)

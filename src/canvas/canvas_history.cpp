@@ -21,6 +21,20 @@ namespace {
 
 QString shortOf(const QString &revision) { return revision.mid(QStringLiteral("sha256:").size(), 8); }
 
+// The one place a revision is named for a person (#228, the cohesion audit's C2): the strip's chips, the picture's label,
+// History's rows and the menus all read `name` and `tag` from here. Head is capitalized as a name (D3).
+QVariantMap revisionRow(const QString &id, const QString &time, const QString &producer, const QString &kind, bool onHead) {
+    const QString hash = shortOf(id);
+    const QString name = kind == QLatin1String("head") ? QObject::tr("Head")
+                       : kind == QLatin1String("candidate") ? QObject::tr("Candidate %1").arg(hash)
+                       : kind == QLatin1String("dropped") ? QObject::tr("Dropped %1").arg(hash) : hash;
+    const QString tag = kind == QLatin1String("head") ? QObject::tr("Head")
+                      : kind == QLatin1String("candidate") ? QObject::tr("Candidate")
+                      : kind == QLatin1String("dropped") ? QObject::tr("Dropped") : QString();
+    return QVariantMap{{"id", id}, {"short", hash}, {"time", time}, {"producer", producer}, {"kind", kind}, {"onHead", onHead},
+                       {"name", name}, {"tag", tag}};
+}
+
 QString rectText(const mask::IRect &rect) { return QStringLiteral("%1, %2 · %3 × %4").arg(rect.x).arg(rect.y).arg(rect.width).arg(rect.height); }
 
 QString describe(const canvas::LayerDiff &layer) {
@@ -155,8 +169,7 @@ void CanvasHistory::reload() {
     } else {
         for (const canvas::Candidate &candidate : candidates.value()) {
             const QString kind = candidate.dropped ? QStringLiteral("dropped") : QStringLiteral("candidate");
-            m_revisions.append(QVariantMap{{"id", candidate.revision.id}, {"short", shortOf(candidate.revision.id)}, {"time", candidate.revision.time},
-                                           {"producer", candidate.revision.producer}, {"kind", kind}, {"onHead", candidate.onHead}});
+            m_revisions.append(revisionRow(candidate.revision.id, candidate.revision.time, candidate.revision.producer, kind, candidate.onHead));
         }
     }
     const Result<std::vector<canvas::Revision>> history = info->head.isEmpty() ? Result<std::vector<canvas::Revision>>(std::vector<canvas::Revision>{})
@@ -165,8 +178,8 @@ void CanvasHistory::reload() {
         fail(history.errors());
     } else {
         for (const canvas::Revision &revision : history.value())
-            m_revisions.append(QVariantMap{{"id", revision.id}, {"short", shortOf(revision.id)}, {"time", revision.time}, {"producer", revision.producer},
-                                           {"kind", revision.id == m_head ? QStringLiteral("head") : QStringLiteral("history")}, {"onHead", false}});
+            m_revisions.append(revisionRow(revision.id, revision.time, revision.producer,
+                                           revision.id == m_head ? QStringLiteral("head") : QStringLiteral("history"), false));
     }
     emit revisionsChanged();
     // Keep the comparison when both of its revisions are still there, else start from the head.
@@ -311,5 +324,29 @@ bool CanvasHistory::drop(const QString &revision) {
     reload();
     return true;
 }
+
+QString CanvasHistory::newCanvas(const QString &name, int width, int height) {
+    CanvasChoices choices;
+    choices.setStoreRoot(m_root);
+    QString id;
+    if (const QString why = choices.makeBlank(name, width, height, &id); !why.isEmpty())
+        return why;
+    emit storeChanged();
+    setCanvasId(id);
+    return {};
+}
+
+QString CanvasHistory::importPicture(const QString &path, const QString &name) {
+    CanvasChoices choices;
+    choices.setStoreRoot(m_root);
+    QString id;
+    if (const QString why = choices.makeFromFile(path, name, &id); !why.isEmpty())
+        return why;
+    emit storeChanged();
+    setCanvasId(id);
+    return {};
+}
+
+QString CanvasHistory::pictureSize(const QString &path) const { return CanvasChoices().pictureSize(path); }
 
 } // namespace fugue
