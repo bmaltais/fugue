@@ -6,6 +6,7 @@
 // file's: while path, size and time match, that is what comes back.
 
 #include <QDateTime>
+#include <QDir>
 #include <QFile>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -159,6 +160,92 @@ private slots:
         FileHashes hashes(store);
         QCOMPARE(hashes.hash(path), sha256("hello"));
         QVERIFY(hashes.save());
+    }
+
+    // Inheriting the Default's remembered hashes (spec 1.4.2, models): read-only, only for files
+    // under the inherited roots, and only while size and time still match.
+    void anInheritedHashIsUsedWithoutReadingTheFile() {
+        QTemporaryDir dir;
+        QVERIFY(QDir().mkpath(dir.filePath("models")));
+        const QString path = dir.filePath("models/a.bin");
+        writeFile(path, "hello");
+        {
+            FileHashes base(dir.filePath("base.json"));
+            base.remember(path, planted);
+            QVERIFY(base.save());
+        }
+        FileHashes own(dir.filePath("own.json"), {dir.filePath("base.json"), {dir.filePath("models")}});
+        QCOMPARE(own.known(path), planted);
+        QCOMPARE(own.hash(path), planted);
+    }
+
+    void anInheritedHashOfAChangedFileIsNotTrusted() {
+        QTemporaryDir dir;
+        QVERIFY(QDir().mkpath(dir.filePath("models")));
+        const QString path = dir.filePath("models/a.bin");
+        writeFile(path, "hello");
+        FileHashes base(dir.filePath("base.json"));
+        base.remember(path, planted);
+        QVERIFY(base.save());
+        FileHashes sameSize(dir.filePath("own.json"), {dir.filePath("base.json"), {dir.filePath("models")}});
+        setTime(path, QDateTime::currentDateTime().addDays(-3));
+        QCOMPARE(sameSize.known(path), QString());
+        QCOMPARE(sameSize.hash(path), sha256("hello"));
+        writeFile(path, "hello world");
+        FileHashes bigger(dir.filePath("own2.json"), {dir.filePath("base.json"), {dir.filePath("models")}});
+        QCOMPARE(bigger.hash(path), sha256("hello world"));
+    }
+
+    void anInheritedHashOutsideTheInheritedRootsIsIgnored() {
+        QTemporaryDir dir;
+        QVERIFY(QDir().mkpath(dir.filePath("models")));
+        QVERIFY(QDir().mkpath(dir.filePath("modelsX")));
+        const QString outside = dir.filePath("modelsX/a.bin"); // a sibling whose name starts like the root
+        const QString elsewhere = dir.filePath("input.png");
+        writeFile(outside, "hello");
+        writeFile(elsewhere, "image");
+        FileHashes base(dir.filePath("base.json"));
+        base.remember(outside, planted);
+        base.remember(elsewhere, planted);
+        QVERIFY(base.save());
+        FileHashes own(dir.filePath("own.json"), {dir.filePath("base.json"), {dir.filePath("models")}});
+        QCOMPARE(own.known(outside), QString());
+        QCOMPARE(own.known(elsewhere), QString());
+    }
+
+    void inheritedHashesAreNeverWrittenAndOwnOnesWin() {
+        QTemporaryDir dir;
+        QVERIFY(QDir().mkpath(dir.filePath("models")));
+        const QString path = dir.filePath("models/a.bin");
+        const QString fresh = dir.filePath("models/b.bin");
+        writeFile(path, "hello");
+        writeFile(fresh, "fresh");
+        FileHashes base(dir.filePath("base.json"));
+        base.remember(path, planted);
+        QVERIFY(base.save());
+        const QByteArray before = [&] { QFile f(dir.filePath("base.json")); return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray(); }();
+        FileHashes own(dir.filePath("own.json"), {dir.filePath("base.json"), {dir.filePath("models")}});
+        QCOMPARE(own.hash(fresh), sha256("fresh")); // a new hash goes to the project's own store
+        QVERIFY(own.save());
+        QCOMPARE(FileHashes(dir.filePath("own.json")).known(fresh), sha256("fresh"));
+        QCOMPARE(FileHashes(dir.filePath("own.json")).known(path), QString()); // the inherited one was not copied
+        QFile f(dir.filePath("base.json"));
+        QVERIFY(f.open(QIODevice::ReadOnly));
+        QCOMPARE(f.readAll(), before);
+        const QString other = QStringLiteral("sha256:1111111111111111111111111111111111111111111111111111111111111111");
+        own.remember(path, other);
+        QCOMPARE(own.hash(path), other);
+    }
+
+    void noInheritedRootsMeansNoInheritance() {
+        QTemporaryDir dir;
+        const QString path = dir.filePath("a.bin");
+        writeFile(path, "hello");
+        FileHashes base(dir.filePath("base.json"));
+        base.remember(path, planted);
+        QVERIFY(base.save());
+        FileHashes own(dir.filePath("own.json"), {dir.filePath("base.json"), {}});
+        QCOMPARE(own.known(path), QString());
     }
 
     void defaultStoreIsUnderTheStateFolder() {

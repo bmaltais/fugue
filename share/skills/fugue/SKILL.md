@@ -101,7 +101,7 @@ fail with `permission_denied`.
 | `fugue pack update [id]` | Update packs (a person confirms; `--ref`) |
 | `fugue pack remove <id>` | Remove a pack (a person confirms) |
 | `fugue pack trust <id>` | Trust a pack (a person confirms) |
-| `fugue model list` | Models on disk and offered by providers (`--type`, `--hash`); each file and each searched folder says whether it is the project's own or inherited from Default |
+| `fugue model list` | Models on disk and offered by providers (`--type`, `--hash`); each file and each searched folder says whether it is the project's own or inherited from Default; a project that inherits `models` reuses the Default's remembered hashes for files in the inherited folders (so `--hash` and runs do not read them again), and writes its own hashes only in its own folder |
 | `fugue model get <file or template id>` | Download the missing models a workflow or template names (`--into`) |
 | `fugue template list` | Templates, with the models and packs each needs; `origin` is `own`, `bundled` or `inherited from Default` (a project that inherits `templates`) |
 | `fugue cache status` | What the caches hold (results, thumbnails, runs): bytes, files, oldest, and the results per workflow and node |
