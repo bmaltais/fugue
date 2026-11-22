@@ -2293,7 +2293,7 @@ they add no queue of their own.
   this window, or `fugue run` from a terminal. A row has the workflow's name, the node going with its
   progress or "Waiting", where it came from, the time since it began (or was queued), **move to front**
   (waiting runs but the first) and **cancel**. *Finished* lists the last eight runs that ended, newest
-  first: a **thumbnail of the first image the run made** (a glyph for a video or a sound; none when it
+  first: a **thumbnail of the first output the run made** (a frame of a video, a waveform of a sound; none when it
   made nothing), what to call it (the first Text node's text, else the first output's file name, else
   the workflow's name, since many runs are called "workflow"), how it ended, how long it took, when, and
   the workflow's name; a click on the row (or its results button) **opens the media browser on that
@@ -2373,11 +2373,14 @@ and the window keeps its item budget.
   `embeddedSummary` reads prompt, seed and model from a PNG or WebP's embedded workflow (11.7). Thumbnails
   (`media/thumbnail_cache.h`) are PNGs of at most 256 px in `~/.cache/fugue/thumbs/`, named by a hash of path,
   size, modification time and box, made off the main thread by the `image://fuguemedia/` provider the first
-  time and read back after. The panel refreshes the list when Results opens, the workflow changes, a run ends
+  time and read back after. A video's thumbnail is a frame 0.5 s in (from the start when the clip is shorter)
+  and a sound's its waveform (`showwavespic`), both taken by the `ffmpeg` the engine already runs
+  (`engine/ffmpeg.h`, killed after 15 s); a file that cannot be read, or a machine without ffmpeg, gives
+  an image load error and the cell keeps its glyph and name. The queue's finished rows use them too. The panel refreshes the list when Results opens, the workflow changes, a run ends
   or the refresh button is pressed.
 - **Not built** (follow-ups of #133): hosting the browser on a node's face and in the large view, a Media
   Browser node, Preview showing a batch as a filmstrip, Compare Images taking two items from the list;
-  thumbnails of videos (a frame) and the details of a video or sound (container tag, 11.7); saved files that
+  the details of a video or sound (container tag, 11.7); saved files that
   are in no run folder (a scan of the output folder grouped by embedded workflow); favorites, delete,
   re-run with the same seed, send to a Load Image node, open the workflow that made it, drag back onto the
   canvas; remembering the mode and view; zoom and

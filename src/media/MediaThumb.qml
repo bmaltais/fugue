@@ -3,7 +3,9 @@ import Fugue
 import "../canvas"
 
 // One cell of the browser's grid or filmstrip (#133): the item's thumbnail fitted on the well
-// color, or for a video or a sound a glyph and its name, with a ring while it is the current one.
+// color, or the glyph and the name when there is no picture (a file that cannot be read, a
+// video or a sound with no ffmpeg), with a ring while it is the current one. A video's picture
+// is a frame with a small play mark in a corner, a sound's its waveform with a speaker mark.
 // The picture is loaded only once the cell exists (the lists make cells for what is in view) and
 // from the thumbnail cache (`item.thumb`), at the cell's size.
 Item {
@@ -24,9 +26,10 @@ Item {
         color: cell.look.well
     }
     Image {
+        id: picture
         anchors.fill: parent
         anchors.margins: 1
-        visible: (cell.item?.thumb ?? "") !== ""
+        visible: status === Image.Ready
         source: cell.item?.thumb ?? ""
         fillMode: Image.PreserveAspectFit
         asynchronous: true
@@ -34,8 +37,20 @@ Item {
         sourceSize.width: 256
         sourceSize.height: 256
     }
+    // A mark on a picture that is not a still: what it is, before the cell is opened.
+    Glyph {
+        visible: picture.status === Image.Ready && (cell.item?.kind ?? "image") !== "image"
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.margins: cell.look.unit / 2
+        look: cell.look
+        name: cell.item?.kind === "video" ? "play" : "volume-2"
+        color: cell.look.label
+        font.pixelSize: cell.compact ? 10 : 14
+    }
     Column {
-        visible: (cell.item?.thumb ?? "") === ""
+        // Until the picture is ready or failed, only the well: no glyph flashing under a thumbnail.
+        visible: picture.status === Image.Error || picture.status === Image.Null
         anchors.centerIn: parent
         width: parent.width - 2 * cell.look.unit
         spacing: cell.look.unit

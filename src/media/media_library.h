@@ -7,7 +7,8 @@
 //
 // A row of resultsOf is
 //   {path, url (file URL), kind ("image"|"video"|"audio"), title (the file name), group (the run's
-//    heading: its start in local time), run, node, thumb (an image:// source, "" unless an image)}
+//    heading: its start in local time), run, node, thumb (an image:// source; for a video a frame, for a sound its waveform, drawn by
+//    the provider off the UI thread and an image load error when it cannot, so the cell keeps its glyph)}
 // and a row of detailsOf is {label, value}.
 
 #include <QHash>

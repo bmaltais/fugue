@@ -19,8 +19,9 @@ namespace fugue::ffmpeg {
 Result<QString> program(const QString &name);
 
 // Runs a program to the end and returns its stdout. A failure carries the last
-// lines of its stderr, with `code`.
-Result<QByteArray> run(const QString &name, const QStringList &args, const QString &code);
+// lines of its stderr, with `code`. A `timeoutMs` of 0 or more kills the program when it runs longer
+// and fails with `code` (for a short probe of a file that may be on a slow disk); -1 waits for ever.
+Result<QByteArray> run(const QString &name, const QStringList &args, const QString &code, int timeoutMs = -1);
 
 // As run(), for a long job: ffmpeg is given `-progress pipe:1`, `progress` is called with the seconds
 // of output written so far as they advance, and `cancelled` is polled about every 100 ms; when it

@@ -117,6 +117,51 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // A video's cell shows a frame of it, and a file ffmpeg cannot read keeps its glyph and name.
+    void aVideoCellShowsAFrameAndABrokenOneTheGlyph() {
+        const QString ffmpeg = QStandardPaths::findExecutable("ffmpeg");
+        App app(load(small));
+        QVERIFY(app.open());
+        const QString path = app.dir.filePath("vid.fugue");
+        QVERIFY(load(small).saveFile(path).isEmpty());
+        QVERIFY(app.workflows.openPath(path));
+        const QString clip = app.dir.filePath("good.mp4");
+        if (ffmpeg.isEmpty() || QProcess::execute(ffmpeg, {"-nostdin", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                                                          "testsrc=s=160x90:d=2:r=10", clip}) != 0)
+            QSKIP("ffmpeg is not installed (or cannot make the test clip): video cells not tested");
+        QFile bad(app.dir.filePath("bad.mp4"));
+        QVERIFY(bad.open(QIODevice::WriteOnly));
+        bad.write("not a video");
+        bad.close();
+        const fugue::RunFolder folder = fugue::RunFolder::create(app.dir.filePath("runs"), "20261125-100000-000-vvvv").value();
+        const QJsonObject outputs{{"a", QJsonObject{{"type", "video"}, {"path", clip}}},
+                                  {"b", QJsonObject{{"type", "video"}, {"path", bad.fileName()}}}};
+        QVERIFY(folder.writeState({{"workflow", QJsonObject{{"path", path}}},
+                                   {"nodes", QJsonObject{{"save", QJsonObject{{"state", "cached"}, {"outputs", outputs}}}}}}));
+        app.commands.run("panel.workflows");
+        QTRY_VERIFY(named(app, "workflowsViewSwitch"));
+        click(app, named(app, "workflowsView-results"));
+        QTRY_COMPARE(named(app, "workflowsResults")->property("items").toList().size(), 2);
+        // The cell's picture is its Image child: ready for the clip, an error for the broken file.
+        auto status = [&](const QString &cell) {
+            QQuickItem *cellItem = named(app, cell);
+            if (!cellItem)
+                return -1;
+            for (QQuickItem *child : cellItem->childItems())
+                if (child->inherits("QQuickImage"))
+                    return child->property("status").toInt();
+            return -1;
+        };
+        const int ready = 1, error = 3; // QQuickImageBase::Ready, Error
+        QTRY_VERIFY(named(app, "mediaCell-1"));
+        QTRY_VERIFY2(status("mediaCell-0") == ready && status("mediaCell-1") == error,
+                     qPrintable(QString("%1 %2").arg(status("mediaCell-0")).arg(status("mediaCell-1"))));
+        if (qEnvironmentVariableIsSet("FUGUE_MEDIA_GRAB")) {
+            QTest::qWait(300);
+            test_support::grab(app.window).save(qEnvironmentVariable("FUGUE_MEDIA_GRAB"));
+        }
+    }
+
     void aWorkflowThatWasNeverSavedHasNoResultsAndSaysSo() {
         App app(load(small));
         QVERIFY(app.open());

@@ -13,7 +13,7 @@ Result<QString> program(const QString &name) {
     return path;
 }
 
-Result<QByteArray> run(const QString &name, const QStringList &args, const QString &code) {
+Result<QByteArray> run(const QString &name, const QStringList &args, const QString &code, int timeoutMs) {
     const Result<QString> path = program(name);
     if (!path)
         return path.error();
@@ -24,7 +24,11 @@ Result<QByteArray> run(const QString &name, const QStringList &args, const QStri
         return makeError(QStringLiteral("internal"), QStringLiteral("%1 could not be started.").arg(name));
     // No timeout: a long video takes as long as it takes, and cancel is the
     // scheduler's (it ends the node).
-    process.waitForFinished(-1);
+    if (!process.waitForFinished(timeoutMs)) {
+        process.kill();
+        process.waitForFinished(1000);
+        return makeError(code, QStringLiteral("%1 took too long.").arg(name));
+    }
     if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
         const QString detail = tail(process.readAllStandardError());
         return makeError(code, detail.isEmpty() ? QStringLiteral("%1 failed.").arg(name) : detail);

@@ -77,7 +77,7 @@ QVariantList MediaLibrary::rowsOf(const QList<MediaItem> &items) const {
                                 {"group", QLocale().toString(item.time.toLocalTime(), QLocale::ShortFormat)},
                                 {"run", item.run},
                                 {"node", item.node},
-                                {"thumb", item.kind == QLatin1String("image") ? thumbSource(item.path) : QString()}});
+                                {"thumb", thumbSource(item.path)}});
     }
     return rows;
 }

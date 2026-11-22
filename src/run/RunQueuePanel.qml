@@ -32,7 +32,7 @@ Item {
     function leadOf(row) {
         if (!row.lead)
             return null
-        return {kind: row.leadKind, title: row.label, thumb: row.leadKind === "image" ? thumbOf(row.lead) : ""}
+        return {kind: row.leadKind, title: row.label, thumb: thumbOf(row.lead)}
     }
     // The rows' run ids, changed only when the runs or their order change, so a row's buttons
     // stay as they are while its progress and time move.

@@ -418,3 +418,11 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - New: as above; the canvas still shows the results as before, and the old "Open the workflow..." notice shows only in a window with no side panels.
 - Why: recognition over recall (a picture and a prompt tell runs apart where a shared name cannot); the press and its place do not change, so no relearning (Learned place).
 - Rule: Floor (the thumbnail is not a target: the whole row, 9u = 36px tall, is). Primary (the row click). Destructive (none). Gaps (unchanged). Posture: pointer, as before.
+
+### 2026-11-25 video and sound thumbnails (#133)
+
+- Control: `MediaThumb.qml` (grid cells `mediaCell-<n>`, filmstrip cells, queue `historyLead-<run>`): the picture is now a frame of a video or the waveform of a sound, with a small `play` or `volume-2` mark in the lower right corner (10px compact, 14px otherwise); no new control, no new target.
+- Old: a video or a sound showed a glyph and its name in every cell.
+- New: the cell shows the frame (taken 0.5 s in) or waveform once it is made; the glyph and name stay while a file cannot be read (broken file, no ffmpeg) and the cell shows only its well while the picture is loading, so no glyph flashes under a thumbnail.
+- Why: recognition over recall (a frame tells clips apart where a file name cannot); the mark keeps a video from being taken for a still.
+- Rule: Floor (unchanged: the mark is not a target, the cell is). Primary, Destructive, Gaps, Posture: unchanged.

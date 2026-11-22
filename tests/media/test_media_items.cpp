@@ -6,6 +6,8 @@
 
 #include <QImage>
 #include <QJsonDocument>
+#include <QProcess>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -268,6 +270,59 @@ private slots:
         QVERIFY(thumbnail(cache, dir.filePath("missing.png"), 128).isNull());
         // A small image is not enlarged.
         QCOMPARE(thumbnail(cache, makePng(dir.filePath("small.png"), 40, 20), 128).size(), QSize(40, 20));
+    }
+
+    // A two-second test clip (a red picture; a 440 Hz tone for a sound) made by ffmpeg; the test
+    // skips when ffmpeg is not installed.
+    bool makeClip(const QString &path, bool video) {
+        const QString ffmpeg = QStandardPaths::findExecutable("ffmpeg");
+        if (ffmpeg.isEmpty())
+            return false;
+        const QStringList args = video ? QStringList{"-nostdin", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                                                     "color=c=red:s=320x160:d=2:r=10", path}
+                                       : QStringList{"-nostdin", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                                                     "sine=frequency=440:duration=2", path};
+        return QProcess::execute(ffmpeg, args) == 0 && QFileInfo(path).size() > 0;
+    }
+
+    void aVideoGetsAFrameAndASoundItsWaveformAndBothAreCached() {
+        const QString clip = dir.filePath("thumb-clip.mp4");
+        const QString tone = dir.filePath("thumb-tone.wav");
+        if (!makeClip(clip, true) || !makeClip(tone, false))
+            QSKIP("ffmpeg is not installed (or cannot make the test clip): video thumbnails not tested");
+        const QString cache = dir.filePath("vthumbs");
+        QCOMPARE(mediaKindOfPath(clip), QString("video"));
+        QCOMPARE(mediaKindOfPath(tone), QString("audio"));
+        bool fromCache = true;
+        const QImage frame = thumbnail(cache, clip, 64, &fromCache);
+        QVERIFY(!fromCache);
+        QCOMPARE(frame.size(), QSize(64, 32));
+        const QColor centre = frame.pixelColor(32, 16);
+        QVERIFY2(centre.red() > 180 && centre.green() < 80, qPrintable(centre.name()));
+        QVERIFY(thumbnail(cache, clip, 64, &fromCache).size() == frame.size() && fromCache);
+        const QImage wave = thumbnail(cache, tone, 64, &fromCache);
+        QVERIFY(!fromCache);
+        QCOMPARE(wave.width(), 64);
+        QVERIFY(wave.height() > 0 && wave.height() <= 64);
+        QCOMPARE(QDir(cache).entryList(QDir::Files).size(), 2);
+        // The library gives a video and a sound an image:// source too.
+        makeRun("20261125-100000-000-vvvv", "/w/v.fugue", {{"save", {{"v", image(clip, "video")}, {"s", image(tone, "audio")}}}});
+        MediaLibrary library(root(), cache);
+        const QVariantList rows = library.resultsOfRun("20261125-100000-000-vvvv");
+        QCOMPARE(rows.size(), 2);
+        for (const QVariant &row : rows)
+            QVERIFY(row.toMap().value("thumb").toString().startsWith("image://fuguemedia/256/"));
+        forget({"20261125-100000-000-vvvv"});
+    }
+
+    void aBrokenVideoOrSoundGivesNoThumbnail() {
+        QFile bad(dir.filePath("broken.mp4"));
+        QVERIFY(bad.open(QIODevice::WriteOnly));
+        bad.write("not a video");
+        bad.close();
+        QVERIFY(thumbnail(dir.filePath("bthumbs"), dir.filePath("broken.mp4"), 64).isNull());
+        QVERIFY(thumbnail(dir.filePath("bthumbs"), dir.filePath("missing.flac"), 64).isNull());
+        QVERIFY(QDir(dir.filePath("bthumbs")).entryList(QDir::Files).isEmpty());
     }
 
     void aChangedFileGetsANewThumbnail() {
