@@ -122,6 +122,13 @@ Encode with a mask, then a Sampler) instead. The mask must be the size of the st
 result is put back over the start image through it, so everything outside the mask is the start
 image's, to the pixel; put a Feather Mask in front for a soft edge.
 
+**Soft mask (gray as a strength).** The Sampler's advanced input *Soft mask* reads the mask's gray as how
+much to change (differential diffusion): white is redrawn from the first step, black is kept, and a gray
+cell is held to the picture until late in the run, so a 25% gray changes only a little. It gives smooth
+transitions with no seam, where a hard mask plus Feather Mask puts a softened picture back. It needs a
+latent from VAE Encode with a mask, and it does nothing for an inpaint model (FLUX.1 Fill, SDXL Inpaint),
+which reads its mask as white or black. Off, gray is rounded to white or black as before.
+
 ## From the command line
 
 `fugue workflow new my.fugue --template inpaint-region` writes the template with its picture and
@@ -132,5 +139,4 @@ mask beside it; `fugue run my.fugue --wait` runs it. Change the prompt with
 ## Not yet
 
 Automatic masks (remove the background, pick an object by clicking it, or describe it in words)
-will come as optional packs. Soft masks inside the model (differential diffusion), color
-matching for outpaints, and a paint canvas with layers are later issues.
+will come as optional packs. Color matching for outpaints, and a paint canvas with layers are later issues.

@@ -824,6 +824,9 @@ public:
                 return picture.errors();
             request.inputs.insert(QStringLiteral("mask"), QJsonObject{{"path", mask.value()}});
             request.inputs.insert(QStringLiteral("image"), QJsonObject{{"path", picture.value()}});
+            // Differential diffusion (#179): the helper keeps the mask's gray as a strength.
+            if (context.input(QStringLiteral("soft_mask")).json().toBool())
+                request.params.insert(QStringLiteral("fugue.soft_mask"), true);
         }
         if (carried->present) {
             const Result<QString> frame = firstFrameFile(carried->frame, from, context.workDir, QStringLiteral("conditioning"));

@@ -128,7 +128,8 @@ from it. An image model given an `image` and no mask answers `input_invalid` (wi
 data `{"data", "format": "png"}` over HTTP; in a `generate` request the picture is `params.init_image`,
 `{"image": PATH}`). The mask is read with one channel (`stbi_load(..., 1)`: a color PNG becomes gray)
 and must be the request's `width` and `height`; it is checked before any model loads. White is redrawn;
-the library rounds it to 0 or 1 and scales it to the latent's size, so a soft mask is hard here.
+the library rounds it to 0 or 1 and scales it to the latent's size, so a soft mask is hard here, unless
+`fugue.soft_mask` is set (see Opt-in hunks).
 
 What the helper does with it depends on the model, by `sd_get_model_version_name`:
 
@@ -174,6 +175,18 @@ The folder is on the helper's disk, so a paired host (`--serve-http`) does not t
 heard between frames (`cancelled`); inside one image the library has no hook, and Fugue ends the
 helper after its grace period. No change to the stage patch: the upscaler API is the library's own.
 
+## Opt-in hunks (not stage seams)
+
+The patch is stage hooks, plus these hunks that change behaviour only when an option is set and leave
+upstream's output byte-identical when it is off (spec 8.10). Each is listed here with its upstream PR
+and checked at every pin move.
+
+| Option | What it does | Hunks | Upstream PR |
+| --- | --- | --- | --- |
+| `fugue.soft_mask` (bool, image) | Differential diffusion ([arXiv 2306.00950](https://arxiv.org/abs/2306.00950), written from the paper: its repository has no licence). A mask's gray is a change strength: a latent cell with value `m` is redrawn from step `i` of `k` when `m > (k - 1 - i) / k` and held to the start latent before | `config.h`, `api/options.cpp` (the option); `pipeline/image.cpp` (no rounding of the mask when on, still rounded for an inpaint model); `pipeline/diffusion_engine.cpp` (`blend_start_latent`, called where the start latent is put back; one more defaulted parameter of `sample`) | not sent yet: [the description](../docs/differential-diffusion-upstream.md) is ready for the owner (#179) |
+
+When an upstream PR is merged and the pin reaches it, drop the hunks from the patch.
+
 ## Moving the pin
 
 The pin moves only on purpose (spec 8.10).
@@ -186,7 +199,9 @@ The pin moves only on purpose (spec 8.10).
    git rebase --onto <new commit> <old commit>   # fix conflicts as in any rebase
    git diff <new commit> > ../fugue/helper/sdcpp.patch
    ```
-   Keep the patch to hooks at the stage seams: no change to sampling or model code.
+   Keep the patch to hooks at the stage seams: no change to sampling or model code, except the opt-in
+   hunks above. Re-read each one against the new commit: the places it edits (`blend_start_latent`'s
+   callers, the mask rounding in `image.cpp`) may have moved or changed.
 2. Update the commits and hashes in `CMakeLists.txt` and `packaging/PKGBUILD` together.
    `git ls-tree <new commit> ggml thirdparty/cutlass` gives the ggml and CUTLASS commits;
    `curl -sL <tarball URL> | sha256sum` gives each hash.
@@ -207,6 +222,12 @@ The pin moves only on purpose (spec 8.10).
      `fluxFillFP8_v10.safetensors`, SDXL Inpaint as `model_path` plus its `diffusion_model_path`).
      Without the `c_concat` hook the FLUX.1 Fill pictures differ: that is the check that the hook is
      still reached. Also staged FLUX.2 Klein 4B with a mask and `init_latent` against `generate`;
+   - soft mask (`fugue.soft_mask`, #179), FLUX.2 Klein 4B with a gradient mask: (1) off, the picture is
+     the same as with the hunks' original expression, and a hard mask gives the same picture on or off;
+     (2) on, with a gray mask: the picture changes smoothly with the gray (white redrawn, black kept),
+     and staged (`encode`, `vae_encode`, `sample` with `"mask"`, `decode`) equals one `generate` run:
+     the inpainting guard test below with `FUGUE_REAL_HELPER_SOFT=1` and a gray `FUGUE_REAL_HELPER_MASK`
+     (`build/test_helper_provider aRealHelperInpaintsStagedAsInOneRun`);
    - the version names: `grep -rn 'definition.name' src/model/integrations/` at the new commit, and
      which of them set `traits.is_inpaint` (`sd.cpp`, `flux.cpp` at the pin): `isInpaintVersion` in
      `src/main.cpp` and the list above must be the same set.

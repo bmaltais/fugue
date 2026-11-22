@@ -1,8 +1,8 @@
 diff --git i/src/api/options.cpp w/src/api/options.cpp
-index 591cce3..1b7f723 100644
+index 591cce3..a6314ab 100644
 --- i/src/api/options.cpp
 +++ w/src/api/options.cpp
-@@ -502,6 +502,19 @@ static void add_hires_specs(std::vector<ParamSpec>& specs) {
+@@ -502,6 +502,20 @@ static void add_hires_specs(std::vector<ParamSpec>& specs) {
      hires.choice("hires.upscaler", &sd::HiresConfig::upscaler, parse_hires_upscaler, SD_HIRES_UPSCALER_COUNT);
  }
  
@@ -17,12 +17,13 @@ index 591cce3..1b7f723 100644
 +    fugue.string("fugue.latent_in", &sd::FugueStageConfig::latent_in);
 +    fugue.string("fugue.latent_out", &sd::FugueStageConfig::latent_out);
 +    fugue.string("fugue.stop_after", &sd::FugueStageConfig::stop_after);
++    fugue.boolean("fugue.soft_mask", &sd::FugueStageConfig::soft_mask);
 +}
 +
  static void add_tiling_specs(std::vector<ParamSpec>& specs) {
      using namespace sd::api;
      ParamGroup tiling(specs, Image | Video | ADetail, [](sd::OptConfig& config) { return std::tie(config.image.vae_tiling_params, config.video.vae_tiling_params); });
-@@ -547,6 +560,7 @@ static std::vector<ParamSpec> make_specs() {
+@@ -547,6 +561,7 @@ static std::vector<ParamSpec> make_specs() {
      add_sampling_specs(specs);
      add_cache_specs(specs);
      add_hires_specs(specs);
@@ -31,10 +32,10 @@ index 591cce3..1b7f723 100644
      add_postprocess_specs(specs);
      return specs;
 diff --git i/src/config.h w/src/config.h
-index 7331ccc..40b03c1 100644
+index 7331ccc..6e030bc 100644
 --- i/src/config.h
 +++ w/src/config.h
-@@ -172,6 +172,19 @@ namespace sd {
+@@ -172,6 +172,22 @@ namespace sd {
          ContextConfig();
      };
  
@@ -49,12 +50,15 @@ index 7331ccc..40b03c1 100644
 +        const char* latent_in{};
 +        const char* latent_out{};
 +        const char* stop_after{};
++        // Differential diffusion (arXiv 2306.00950): an image mask keeps its values between 0 and 1
++        // and sets how late each latent cell is released from the start latent. Off: upstream.
++        bool soft_mask{};
 +    };
 +
      struct ImageConfig {
          const sd_lora_t* loras{};
          uint32_t lora_count{};
-@@ -203,6 +216,7 @@ namespace sd {
+@@ -203,6 +219,7 @@ namespace sd {
          bool circular_y{};
          sd::ImagePreprocessConfig image_preprocess{};
          enum sd_control_type_t control_type {};
@@ -62,7 +66,7 @@ index 7331ccc..40b03c1 100644
  
          ImageConfig();
      };
-@@ -240,6 +254,7 @@ namespace sd {
+@@ -240,6 +257,7 @@ namespace sd {
          bool circular_y{};
          sd::ImagePreprocessConfig image_preprocess{};
          const char* ref_image_args{};
@@ -162,6 +166,78 @@ index fa660c3..6809531 100644
      void before_diffusion(DiffusionParams& params, int /*step*/) const override {
          if (!enabled || id_embedding.empty()) {
              return;
+diff --git i/src/pipeline/diffusion_engine.cpp w/src/pipeline/diffusion_engine.cpp
+index c2ae6b8..842f6fd 100644
+--- i/src/pipeline/diffusion_engine.cpp
++++ w/src/pipeline/diffusion_engine.cpp
+@@ -2370,7 +2370,8 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+                                               float frame_rate,
+                                               const sd::CacheConfig* cache_params,
+                                               bool preview_final_step,
+-                                              const sd::Tensor<float>& video_positions) {
++                                              const sd::Tensor<float>& video_positions,
++                                              bool soft_mask) {
+     struct RunnerEndOnExit {
+         GGMLRunner* runner = nullptr;
+         ~RunnerEndOnExit() {
+@@ -2484,6 +2485,25 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+                                                         : sampling_init_latent;
+     sd::Tensor<float> denoised                    = x_t;
+ 
++    // Puts the start latent back where the mask holds it. Off, a latent cell is redrawn or held for
++    // the whole run (upstream). fugue.soft_mask, differential diffusion (arXiv 2306.00950, Algorithm 1):
++    // the mask is a change map, and a cell with value m is held until the step where the fraction
++    // of steps left, t / k, falls below m. The paper's map is 1 for no change and its test is
++    // map < (k - t) / k, which is m > t / k for m = 1 - map. Step i is t = k - 1 - i.
++    const int soft_steps = static_cast<int>(sigmas.size()) - 1;
++    auto blend_start_latent = [&](sd::Tensor<float>& denoised_latent, int step) {
++        if (!soft_mask || soft_steps < 1) {
++            denoised_latent = denoised_latent * denoise_mask + sampling_init_latent * (1.0f - denoise_mask);
++            return;
++        }
++        const float threshold = static_cast<float>(soft_steps - 1 - std::min(std::abs(step), soft_steps - 1)) / soft_steps;
++        sd::Tensor<float> released = denoise_mask;
++        for (float& value : released.values()) {
++            value = value > threshold ? 1.f : 0.f;
++        }
++        denoised_latent = denoised_latent * released + sampling_init_latent * (1.0f - released);
++    };
++
+     auto denoise = [&](const sd::Tensor<float>& x, float sigma, int step) -> sd::guidance::GuiderOutput {
+         if (get_cancel_flag() == SD_CANCEL_ALL) {
+             LOG_VERBOSE("cancelling generation");
+@@ -2543,7 +2563,7 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+         if (cache_runtime.spectrum_enabled && cache_runtime.spectrum.should_predict()) {
+             cache_runtime.spectrum.predict(&denoised);
+             if (apply_denoise_mask) {
+-                denoised = denoised * denoise_mask + sampling_init_latent * (1.0f - denoise_mask);
++                blend_start_latent(denoised, step);
+             }
+             if (preview_needed && sd_should_preview_denoised()) {
+                 preview_image(step, denoised, version, preview.mode, preview.callback, preview.data, false);
+@@ -2916,7 +2936,7 @@ sd::Tensor<float> StableDiffusionGGML::sample(const std::shared_ptr<DiffusionMod
+             cache_runtime.spectrum.update(denoised);
+         }
+         if (apply_denoise_mask) {
+-            denoised = denoised * denoise_mask + sampling_init_latent * (1.0f - denoise_mask);
++            blend_start_latent(denoised, step);
+         }
+         if (preview_needed && sd_should_preview_denoised()) {
+             preview_image(step, denoised, version, preview.mode, preview.callback, preview.data, false);
+diff --git i/src/pipeline/diffusion_engine.h w/src/pipeline/diffusion_engine.h
+index ae05dc9..9a081e0 100644
+--- i/src/pipeline/diffusion_engine.h
++++ w/src/pipeline/diffusion_engine.h
+@@ -487,7 +487,8 @@ public:
+                              float frame_rate,
+                              const sd::CacheConfig* cache_params,
+                              bool preview_final_step,
+-                             const sd::Tensor<float>& video_positions = {});
++                             const sd::Tensor<float>& video_positions = {},
++                             bool soft_mask = false);
+ 
+     int get_vae_scale_factor();
+ 
 diff --git i/src/pipeline/fugue_stage_io.h w/src/pipeline/fugue_stage_io.h
 new file mode 100644
 index 0000000..a4b149e
@@ -598,7 +674,7 @@ index 0000000..2febfec
 +
 +#endif  // __SD_PIPELINE_FUGUE_STAGES_H__
 diff --git i/src/pipeline/image.cpp w/src/pipeline/image.cpp
-index f2cdcea..68a8cb6 100644
+index f2cdcea..a240848 100644
 --- i/src/pipeline/image.cpp
 +++ w/src/pipeline/image.cpp
 @@ -10,6 +10,8 @@
@@ -610,7 +686,7 @@ index f2cdcea..68a8cb6 100644
  #include "model/vae/vae.hpp"
  #include "pipeline/image_upscale.h"
  #include "request.h"
-@@ -197,7 +199,7 @@
+@@ -197,7 +199,7 @@ namespace sd::pipeline {
          sd::Tensor<float> mask_image_tensor;
          int image_channels = sd->get_image_channels();
  
@@ -619,7 +695,7 @@ index f2cdcea..68a8cb6 100644
              LOG_INFO("IMG2IMG");
  
              if (request->strength < 1.f) {
-@@ -255,8 +257,10 @@
+@@ -255,13 +257,19 @@ namespace sd::pipeline {
                  plan->sample_steps = static_cast<int>(plan->sigmas.size() - 1);
              }
  
@@ -632,7 +708,17 @@ index f2cdcea..68a8cb6 100644
          }
  
          if (sd_img_gen_params->mask_image.data != nullptr) {
-@@ -974,20 +978,81 @@
+             mask_image_tensor = sd_image_to_tensor(sd_img_gen_params->mask_image, request->width, request->height);
+-            mask_image_tensor = sd::ops::round(mask_image_tensor);
++            // fugue.soft_mask keeps the values for differential diffusion, except for an inpaint model,
++            // which reads the mask as a channel it was trained to see as 0 or 1.
++            if (!sd_img_gen_params->fugue.soft_mask || sd_version_is_inpaint(sd->version)) {
++                mask_image_tensor = sd::ops::round(mask_image_tensor);
++            }
+         }
+ 
+         if (sd_img_gen_params->control_image.data != nullptr) {
+@@ -974,20 +982,81 @@ namespace sd::pipeline {
              return false;
          }
          ImageGenerationLatents latents = std::move(*latents_opt);
@@ -724,7 +810,18 @@ index f2cdcea..68a8cb6 100644
              sd_cancel_mode_t cancel = sd->get_cancel_flag();
              if (cancel == SD_CANCEL_ALL) {
                  LOG_ERROR("cancelling generation");
-@@ -1055,7 +1120,7 @@
+@@ -1032,7 +1101,9 @@ namespace sd::pipeline {
+                                                0,
+                                                static_cast<float>(request.fps),
+                                                request.cache_params,
+-                                               true);
++                                               true,
++                                               {},
++                                               sd_img_gen_params->fugue.soft_mask);
+             int64_t sampling_end  = ggml_time_ms();
+             if (!x_0.empty()) {
+                 LOG_INFO("sampling completed, taking %.2fs", (sampling_end - sampling_start) * 1.0f / 1000);
+@@ -1055,7 +1126,7 @@ namespace sd::pipeline {
              return false;
          }
  
@@ -733,7 +830,18 @@ index f2cdcea..68a8cb6 100644
              if (sd->get_cancel_flag() == SD_CANCEL_ALL) {
                  LOG_ERROR("cancelling generation before hires fix");
                  return false;
-@@ -1201,6 +1266,13 @@
+@@ -1179,7 +1250,9 @@ namespace sd::pipeline {
+                                                         0,
+                                                         static_cast<float>(request.fps),
+                                                         request.cache_params,
+-                                                        false);
++                                                        false,
++                                                        {},
++                                                        sd_img_gen_params->fugue.soft_mask);
+                 int64_t hires_sample_end   = ggml_time_ms();
+                 if (!x_0.empty()) {
+                     LOG_INFO("hires sampling %d/%d completed, taking %.2fs",
+@@ -1201,6 +1274,13 @@ namespace sd::pipeline {
  
              final_latents = std::move(hires_final_latents);
          }

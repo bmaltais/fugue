@@ -350,6 +350,10 @@ private slots:
         QVERIFY(file.open(QIODevice::ReadOnly));
         QJsonObject params = QJsonDocument::fromJson(file.readAll()).object();
         params.insert("seed", 42);
+        // #179: FUGUE_REAL_HELPER_SOFT=1 runs it with `fugue.soft_mask` (differential diffusion) and a
+        // gray mask, staged and single run alike.
+        if (qEnvironmentVariableIsSet("FUGUE_REAL_HELPER_SOFT"))
+            params.insert("fugue.soft_mask", true);
         auto helper = provider(60, program);
         const auto stage = [&](const QString &capability, const QJsonObject &inputs, const QString &output) -> QString {
             JobRequest request;
