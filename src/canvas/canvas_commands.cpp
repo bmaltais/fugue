@@ -67,7 +67,7 @@ void registerCanvasCommands(fugue::CommandRegistry &commands, CanvasModel &canva
         const QVariantMap target = commands.target();
         const QString node = target.value("node").toString();
         if (target.contains("port")
-            && !model->portToRename(node, target.value("port").toString(), target.value("output").toBool()).isEmpty()) {
+            && !model->groups()->portToRename(node, target.value("port").toString(), target.value("output").toBool()).isEmpty()) {
             emit model->portRenameRequested(node, target.value("port").toString(), target.value("output").toBool());
             return;
         }
@@ -82,24 +82,24 @@ void registerCanvasCommands(fugue::CommandRegistry &commands, CanvasModel &canva
     commands.setHandler("frame.delete", [model, &commands] {
         model->deleteFrame(commands.target().value("frame").toString());
     });
-    commands.setHandler("group.make", [model] { model->requestMakeGroup(); });
-    commands.setHandler("group.ungroup", [model] { model->ungroupSelection(); });
+    commands.setHandler("group.make", [model] { model->groups()->requestMakeGroup(); });
+    commands.setHandler("group.ungroup", [model] { model->groups()->ungroupSelection(); });
     commands.setHandler("group.enter", [model] {
         const QStringList selected = model->selectedIds();
         if (selected.size() == 1)
-            model->enterGroup(selected.first());
+            model->groups()->enterGroup(selected.first());
     });
-    commands.setHandler("group.leave", [model] { model->leaveGroup(); });
-    commands.setHandler("group.make-unique", [model] { model->makeUnique(); });
+    commands.setHandler("group.leave", [model] { model->groups()->leaveGroup(); });
+    commands.setHandler("group.make-unique", [model] { model->groups()->makeUnique(); });
     // Inside a group: its face. On a group card (#72): that group's, entered first.
     commands.setHandler("group.interface", [model] {
         const QStringList ids = model->selectedIds();
         if (!model->inGroup() && ids.size() == 1 && model->isGroup(ids.first()))
-            model->enterGroup(ids.first());
+            model->groups()->enterGroup(ids.first());
         emit model->interfaceEditorRequested();
     });
-    commands.setHandler("group.save-to-library", [model] { model->saveGroupToLibrary(); });
-    commands.setHandler("group.update", [model] { model->requestGroupUpdate(); });
+    commands.setHandler("group.save-to-library", [model] { model->groups()->saveGroupToLibrary(); });
+    commands.setHandler("group.update", [model] { model->groups()->requestGroupUpdate(); });
     commands.setHandler("node.move-version", [model] { model->requestMajorMove(); });
     // Compare Images (#62): the node the menu was opened on, else the one selected.
     for (const auto &[id, step] : {std::pair{"compare.flip", "flip"}, {"compare.next-mode", "next-mode"},

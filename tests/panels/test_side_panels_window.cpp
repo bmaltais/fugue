@@ -703,9 +703,9 @@ private slots:
     // A workflow with one group saved to the library as local/group (the library is the test's own).
     static bool saveGroup(App &app) {
         app.model.select({"prompt"});
-        const QString instance = app.model.makeGroup();
+        const QString instance = app.model.groups()->makeGroup();
         app.model.select({instance});
-        return app.model.saveGroupToLibrary();
+        return app.model.groups()->saveGroupToLibrary();
     }
 
     QQuickItem *libraryRow(App &app) {
@@ -719,7 +719,7 @@ private slots:
     void onlyALibraryGroupsRowHasATrashCan() {
         App app(load(small));
         QVERIFY(app.open());
-        QVERIFY2(saveGroup(app), qPrintable(app.model.groupProblem()));
+        QVERIFY2(saveGroup(app), qPrintable(app.model.groups()->problem()));
         QTRY_VERIFY(app.registry.nodeType("local/group"));
         app.commands.run("panel.nodes");
         QTRY_VERIFY(named(app, "nodeLibraryList"));
@@ -751,7 +751,7 @@ private slots:
     void theTrashCanAsksAndCancelKeepsTheGroup() {
         App app(load(small));
         QVERIFY(app.open());
-        QVERIFY2(saveGroup(app), qPrintable(app.model.groupProblem()));
+        QVERIFY2(saveGroup(app), qPrintable(app.model.groups()->problem()));
         QTRY_VERIFY(app.registry.nodeType("local/group"));
         app.commands.run("panel.nodes");
         QTRY_VERIFY(named(app, "nodeLibraryList"));
@@ -793,7 +793,7 @@ private slots:
     void deleteRemovesTheGroupAtOnceAndTheOpenWorkflowKeepsItsCopy() {
         App app(load(small));
         QVERIFY(app.open());
-        QVERIFY2(saveGroup(app), qPrintable(app.model.groupProblem()));
+        QVERIFY2(saveGroup(app), qPrintable(app.model.groups()->problem()));
         QTRY_VERIFY(app.registry.nodeType("local/group"));
         app.commands.run("panel.nodes");
         QTRY_VERIFY(named(app, "nodeLibraryList"));
@@ -814,8 +814,8 @@ private slots:
         QTRY_VERIFY(!rowOfKey(app, named(app, "nodeLibraryList"), "local/group"));
         for (const QVariant &row : rowsOf(app))
             QVERIFY(row.toMap().value("key").toString() != "local/group");
-        QVERIFY2(app.model.groupNotice().contains("Deleted"), qPrintable(app.model.groupNotice()));
-        QCOMPARE(app.model.groupProblem(), QString());
+        QVERIFY2(app.model.groups()->notice().contains("Deleted"), qPrintable(app.model.groups()->notice()));
+        QCOMPARE(app.model.groups()->problem(), QString());
         app.model.search()->openAt(0, 0);
         app.model.search()->setQuery("group");
         // Node search offers the open workflow's own definition of the group (4.4: it stands for its id), so a
@@ -837,7 +837,7 @@ private slots:
     void theTrashCanIsKeyboardReachableAndNotADragHandle() {
         App app(load(small));
         QVERIFY(app.open());
-        QVERIFY2(saveGroup(app), qPrintable(app.model.groupProblem()));
+        QVERIFY2(saveGroup(app), qPrintable(app.model.groups()->problem()));
         QTRY_VERIFY(app.registry.nodeType("local/group"));
         app.commands.run("panel.nodes");
         QTRY_VERIFY(named(app, "nodeLibraryList"));
@@ -915,7 +915,7 @@ private slots:
             QSKIP("set FUGUE_SHOT_DIR to save the pictures");
         App app(load(small));
         QVERIFY(app.open());
-        QVERIFY2(saveGroup(app), qPrintable(app.model.groupProblem()));
+        QVERIFY2(saveGroup(app), qPrintable(app.model.groups()->problem()));
         QTRY_VERIFY(app.registry.nodeType("local/group"));
         app.commands.run("panel.nodes");
         QTRY_VERIFY(named(app, "nodeLibraryList"));

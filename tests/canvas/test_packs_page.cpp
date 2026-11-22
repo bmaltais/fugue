@@ -185,9 +185,9 @@ private slots:
             "layout": {"nodes": {"words": {"pos": [0, 0]}}}})"));
         QVERIFY(app.open());
         app.model.select({"words"});
-        const QString instance = app.model.makeGroup();
+        const QString instance = app.model.groups()->makeGroup();
         app.model.select({instance});
-        QVERIFY2(app.model.saveGroupToLibrary(), qPrintable(app.model.groupProblem()));
+        QVERIFY2(app.model.groups()->saveGroupToLibrary(), qPrintable(app.model.groups()->problem()));
         QVERIFY(QFileInfo(packs() + "/local/group/node.json").isFile());
         app.commands.trigger("app.settings");
         QTRY_VERIFY_WITH_TIMEOUT(panelOpen(app.window), 20000);

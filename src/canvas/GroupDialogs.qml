@@ -20,7 +20,7 @@ Item {
     property alias interfaceEditor: editor
 
     Connections {
-        target: root.model
+        target: root.model.groups
         function onMakeGroupAsked(sinks) {
             sinksAsk.sinks = sinks
             sinksAsk.open()
@@ -30,16 +30,20 @@ Item {
             libraryAsk.name = name
             libraryAsk.open()
         }
-        function onPortRenameRequested(node, port, output) {
-            const found = root.model.portToRename(node, port, output)
-            const prompt = output ? qsTr("Output name on the group") : qsTr("Input name on the group")
-            renameAsk.ask(node, port, output, prompt, found.label || "")
-        }
         function onGroupUpdateAsked(node, changes) {
             updateAsk.node = node
             updateAsk.changes = changes
             updateAsk.major = false
             updateAsk.open()
+        }
+    }
+
+    Connections {
+        target: root.model
+        function onPortRenameRequested(node, port, output) {
+            const found = root.model.groups.portToRename(node, port, output)
+            const prompt = output ? qsTr("Output name on the group") : qsTr("Input name on the group")
+            renameAsk.ask(node, port, output, prompt, found.label || "")
         }
         // A node's newer major version (3.6, #118): the same question, said for one node.
         function onNodeMoveAsked(node, changes) {
@@ -58,7 +62,7 @@ Item {
     // was saved.
     Rectangle {
         objectName: "groupNotice"
-        visible: (root.model.groupProblem !== "" && !editor.visible) || root.model.groupNotice !== ""
+        visible: (root.model.groups.problem !== "" && !editor.visible) || root.model.groups.notice !== ""
         anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
         height: visible ? noticeRow.implicitHeight + 4 * root.look.unit : 0
         color: root.look.popup
@@ -72,13 +76,13 @@ Item {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
                 color: root.look.text
-                text: root.model.groupProblem !== "" ? root.model.groupProblem : root.model.groupNotice
+                text: root.model.groups.problem !== "" ? root.model.groups.problem : root.model.groups.notice
             }
             GlyphButton {
                 glyph: "x"
                 focusPolicy: Qt.NoFocus
                 label: qsTr("Dismiss")
-                onClicked: { root.model.dismissGroupProblem(); root.model.dismissGroupNotice() }
+                onClicked: { root.model.groups.dismiss() }
             }
         }
     }
@@ -123,13 +127,13 @@ Item {
                 ThemedButton {
                     objectName: "groupSinksInside"
                     text: qsTr("Put inside")
-                    onClicked: { sinksAsk.close(); root.model.makeGroup(false) }
+                    onClicked: { sinksAsk.close(); root.model.groups.makeGroup(false) }
                 }
                 ThemedButton {
                     objectName: "groupSinksOutside"
                     text: qsTr("Leave outside")
                     highlighted: true
-                    onClicked: { sinksAsk.close(); root.model.makeGroup(true) }
+                    onClicked: { sinksAsk.close(); root.model.groups.makeGroup(true) }
                 }
             }
         }
@@ -187,7 +191,7 @@ Item {
                         if (updateAsk.major)
                             root.model.moveToNewerMajor(updateAsk.node)
                         else
-                            root.model.updateGroupInstance(updateAsk.node)
+                            root.model.groups.updateGroupInstance(updateAsk.node)
                     }
                 }
             }
@@ -220,7 +224,7 @@ Item {
                     highlighted: true
                     onClicked: {
                         libraryAsk.close()
-                        root.model.renameLibraryGroup(libraryAsk.libraryId, libraryAsk.name)
+                        root.model.groups.renameLibraryGroup(libraryAsk.libraryId, libraryAsk.name)
                     }
                 }
             }
@@ -270,7 +274,7 @@ Item {
                     highlighted: true
                     onClicked: {
                         renameAsk.close()
-                        root.model.renamePort(renameAsk.target, renameAsk.port, renameAsk.output, renameField.text)
+                        root.model.groups.renamePort(renameAsk.target, renameAsk.port, renameAsk.output, renameField.text)
                     }
                 }
             }
@@ -284,7 +288,7 @@ Item {
         width: Math.min(root.width - 12 * root.look.unit, 760)
         height: Math.min(root.height - 12 * root.look.unit, 640)
         property var face: ({})
-        function reload() { face = root.model.groupInterface() }
+        function reload() { face = root.model.groups.groupInterface() }
         onOpened: reload()
         Connections {
             target: root.model
@@ -306,7 +310,7 @@ Item {
                     objectName: "groupName"
                     Layout.fillWidth: true
                     text: editor.face.name || ""
-                    onEditingFinished: if (text !== editor.face.name) root.model.renameGroup(text)
+                    onEditingFinished: if (text !== editor.face.name) root.model.groups.renameGroup(text)
                 }
                 Label {
                     color: root.look.label
@@ -314,11 +318,11 @@ Item {
                 }
             }
             Label {
-                visible: root.model.groupProblem !== ""
+                visible: root.model.groups.problem !== ""
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
                 color: root.look.error
-                text: root.model.groupProblem
+                text: root.model.groups.problem
             }
 
             ScrollView {
@@ -358,7 +362,7 @@ Item {
                                               default: modelData.default === undefined ? "" : String(modelData.default),
                                               choices: modelData.choices}
                                 next[key] = value
-                                root.model.editExposedInput(modelData.name, next)
+                                root.model.groups.editExposedInput(modelData.name, next)
                             }
                             ColumnLayout {
                                 id: inputColumn
@@ -441,13 +445,13 @@ Item {
                                     }
                                     ComboBox {
                                         id: alsoDrive
-                                        readonly property var candidates: editor.visible ? root.model.exposeCandidates(inputRow.modelData.name) : []
+                                        readonly property var candidates: editor.visible ? root.model.groups.exposeCandidates(inputRow.modelData.name) : []
                                         visible: candidates.length > 0
                                         model: [qsTr("Also drive…")].concat(candidates.map(c => c.title))
                                         onActivated: index => {
                                             if (index > 0) {
                                                 const c = candidates[index - 1]
-                                                root.model.exposeInput(c.node, c.input, inputRow.modelData.name)
+                                                root.model.groups.exposeInput(c.node, c.input, inputRow.modelData.name)
                                             }
                                             currentIndex = 0
                                         }
@@ -456,18 +460,18 @@ Item {
                                         glyph: "chevron-up"
                                         enabled: inputRow.index > 0
                                         label: qsTr("Move up")
-                                        onClicked: root.model.moveExposed(false, inputRow.modelData.name, inputRow.index - 1)
+                                        onClicked: root.model.groups.moveExposed(false, inputRow.modelData.name, inputRow.index - 1)
                                     }
                                     GlyphButton {
                                         glyph: "chevron-down"
                                         enabled: inputRow.index < (editor.face.inputs || []).length - 1
                                         label: qsTr("Move down")
-                                        onClicked: root.model.moveExposed(false, inputRow.modelData.name, inputRow.index + 1)
+                                        onClicked: root.model.groups.moveExposed(false, inputRow.modelData.name, inputRow.index + 1)
                                     }
                                     GlyphButton {
                                         glyph: "x"
                                         label: qsTr("Stop exposing")
-                                        onClicked: root.model.removeExposedInput(inputRow.modelData.name)
+                                        onClicked: root.model.groups.removeExposedInput(inputRow.modelData.name)
                                     }
                                 }
                             }
@@ -490,7 +494,7 @@ Item {
                                 Layout.preferredWidth: 35 * root.look.unit
                                 text: outputRow.modelData.name
                                 onEditingFinished: if (text !== outputRow.modelData.name)
-                                                       root.model.renameExposedOutput(outputRow.modelData.name, text)
+                                                       root.model.groups.renameExposedOutput(outputRow.modelData.name, text)
                             }
                             Label {
                                 Layout.fillWidth: true
@@ -501,18 +505,18 @@ Item {
                                 glyph: "chevron-up"
                                 enabled: outputRow.index > 0
                                 label: qsTr("Move up")
-                                onClicked: root.model.moveExposed(true, outputRow.modelData.name, outputRow.index - 1)
+                                onClicked: root.model.groups.moveExposed(true, outputRow.modelData.name, outputRow.index - 1)
                             }
                             GlyphButton {
                                 glyph: "chevron-down"
                                 enabled: outputRow.index < (editor.face.outputs || []).length - 1
                                 label: qsTr("Move down")
-                                onClicked: root.model.moveExposed(true, outputRow.modelData.name, outputRow.index + 1)
+                                onClicked: root.model.groups.moveExposed(true, outputRow.modelData.name, outputRow.index + 1)
                             }
                             GlyphButton {
                                 glyph: "x"
                                 label: qsTr("Stop exposing")
-                                onClicked: root.model.unexposeOutput(outputRow.modelData.name)
+                                onClicked: root.model.groups.unexposeOutput(outputRow.modelData.name)
                             }
                         }
                     }

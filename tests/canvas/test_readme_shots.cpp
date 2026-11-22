@@ -164,7 +164,7 @@ private slots:
         App app(load(templateWithPictures("inpaint-region")), {}, Look{{}, 8});
         QVERIFY(app.open());
         prepare(app);
-        QVERIFY(app.model.enterGroup("inpaint"));
+        QVERIFY(app.model.groups()->enterGroup("inpaint"));
         app.model.select({});
         app.model.requestFit();
         QTest::qWait(1000);

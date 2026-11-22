@@ -17,13 +17,14 @@ void followNodeTypeReloads(RegistryReloader &reloader, const AppObjects &objects
     });
     // Queued: the save's own call (a menu, a button) is over before every row is made again.
     if (objects.canvasModel)
-        QObject::connect(objects.canvasModel, &CanvasModel::librarySaved, &reloader, &RegistryReloader::reload,
+        QObject::connect(objects.canvasModel->groups(), &GroupEdit::librarySaved, &reloader, &RegistryReloader::reload,
                          Qt::QueuedConnection);
     if (objects.settings) {
         QObject::connect(objects.settings->packs(), &PacksModel::packsModified, &reloader, &RegistryReloader::reload);
         if (objects.canvasModel) // a library group renamed in Settings: the workflow shown follows its new id (#74)
-            QObject::connect(objects.settings->packs(), &PacksModel::libraryGroupRenamed, objects.canvasModel,
-                             &CanvasModel::followLibraryRename);
+            QObject::connect(objects.settings->packs(), &PacksModel::libraryGroupRenamed,
+                             objects.canvasModel->groups(),
+                             &GroupEdit::followLibraryRename);
         QObject::connect(objects.settings, &SettingsModel::changed, &reloader, &RegistryReloader::reloadSoon);
     }
 }

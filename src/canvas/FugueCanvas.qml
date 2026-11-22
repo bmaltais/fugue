@@ -614,7 +614,7 @@ FocusScope {
             // On a group's port (its card's, or an exposed mark inside): rename it on the face (#72).
             const port = canvas.portUnder(mouse.x, mouse.y)
             if (port.node !== undefined
-                    && canvas.model.portToRename(port.node, port.port, port.output).name !== undefined) {
+                    && canvas.model.groups.portToRename(port.node, port.port, port.output).name !== undefined) {
                 canvas.model.endLinkDrag()
                 canvas.model.portRenameRequested(port.node, port.port, port.output)
                 return
@@ -631,7 +631,7 @@ FocusScope {
             if (hit !== "" && canvas.model.isGroup(hit) && port.node === undefined
                     && w.y > canvas.model.position(hit).y + canvas.model.headerHeight) {
                 canvas.model.endMove()
-                canvas.model.enterGroup(hit)
+                canvas.model.groups.enterGroup(hit)
                 return
             }
             // On a Frame's title: rename it.
@@ -1736,7 +1736,7 @@ FocusScope {
                             enabled: !crumb.last
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: canvas.model.leaveTo(crumb.index)
+                            onClicked: canvas.model.groups.leaveTo(crumb.index)
                         }
                     }
                 }

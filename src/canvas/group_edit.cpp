@@ -1,16 +1,22 @@
-// The canvas model's group edits (spec 5.2-5.5): Make group, Ungroup, Make unique, and the
-// interface of the group shown (expose, rename, reorder). Each is one undo step. The document
-// changes themselves are engine/groups.h; this file picks the level they apply to, keeps the
-// entered group's face pointing at its nodes, and reports refusals in groupProblem.
+// GroupEdit: the group edits (spec 5.2-5.5) split out of the canvas model: entering and
+// leaving a level, Make group, Ungroup, Make unique, the interface of the group shown (expose,
+// rename, reorder) and the library. Each edit is one undo step. The document changes
+// themselves are engine/groups.h; this file picks the level they apply to, keeps the entered
+// group's face pointing at its nodes, and reports refusals in `problem`. It reaches the model
+// through the commit path WidgetEdit uses (friend), and keeps no state of the level: the
+// scope is the model's.
+
+#include "canvas/group_edit.h"
 
 #include "canvas/canvas_model.h"
-
 #include "engine/group_library.h"
 #include "engine/groups.h"
 #include "engine/registry.h"
 
 #include <QJsonArray>
 #include <QJsonObject>
+
+#include <algorithm>
 
 using namespace fugue;
 
@@ -44,42 +50,115 @@ std::optional<double> numberOf(const QVariant &value) {
 }
 
 } // namespace
+GroupEdit::GroupEdit(const Registry *registry, CanvasModel *canvas, QObject *parent)
+    : QObject(parent), m_registry(registry), m_canvas(canvas) {}
 
-QStringList CanvasModel::selectedSinks() const {
-    return sinksAmong(m_document, registryOr(m_registry), selectedIds());
+QString GroupEdit::libraryPath() const { return m_libraryDir.isEmpty() ? libraryDir() : m_libraryDir; }
+
+void GroupEdit::dismiss() {
+    setProblem({});
+    setNotice({});
 }
 
-void CanvasModel::requestMakeGroup() {
+void GroupEdit::setProblem(const QString &problem) {
+    if (problem == m_problem)
+        return;
+    m_problem = problem;
+    emit problemChanged();
+}
+
+void GroupEdit::setNotice(const QString &notice) {
+    if (notice == m_notice)
+        return;
+    m_notice = notice;
+    emit noticeChanged();
+}
+
+void GroupEdit::announceLibraryResult(const QString &notice, const QString &problem) {
+    setProblem(problem);
+    setNotice(problem.isEmpty() ? notice : QString());
+}
+
+// --- the level shown (5.2) -------------------------------------------------------------
+
+bool GroupEdit::enterGroup(const QString &instance) {
+    if (!m_canvas->isGroup(instance))
+        return false;
+    m_canvas->finishGestures();
+    const Document whole = m_canvas->document();
+    m_canvas->m_outerViews.push_back(m_canvas->m_view);
+    m_canvas->m_root = whole;
+    m_canvas->m_scope << instance;
+    const QVariantMap none;
+    m_canvas->loadLevel(*CanvasModel::levelOf(m_canvas->m_root, m_canvas->m_scope), &none);
+    emit m_canvas->scopeChanged();
+    m_canvas->requestFit();
+    return true;
+}
+
+bool GroupEdit::leaveGroup() {
+    if (m_canvas->m_scope.isEmpty())
+        return false;
+    m_canvas->finishGestures();
+    const Document whole = m_canvas->document();
+    const QString left = m_canvas->m_scope.takeLast();
+    QVariantMap view;
+    if (!m_canvas->m_outerViews.empty()) {
+        view = m_canvas->m_outerViews.back();
+        m_canvas->m_outerViews.pop_back();
+    }
+    if (m_canvas->m_scope.isEmpty()) {
+        m_canvas->m_root = Document();
+        m_canvas->loadLevel(whole, &view);
+    } else {
+        m_canvas->m_root = whole;
+        m_canvas->loadLevel(*CanvasModel::levelOf(m_canvas->m_root, m_canvas->m_scope), &view);
+    }
+    m_canvas->select({left}, QStringLiteral("replace"));
+    emit m_canvas->scopeChanged();
+    return true;
+}
+
+void GroupEdit::leaveTo(int depth) {
+    while (m_canvas->m_scope.size() > std::max(0, depth))
+        leaveGroup();
+}
+
+QStringList GroupEdit::selectedSinks() const {
+    return sinksAmong(m_canvas->m_document, registryOr(m_registry), m_canvas->selectedIds());
+}
+
+void GroupEdit::requestMakeGroup() {
     const QStringList sinks = selectedSinks();
-    if (sinks.isEmpty() || sinks.size() == selectedIds().size()) {
+    if (sinks.isEmpty() || sinks.size() == m_canvas->selectedIds().size()) {
         makeGroup(false);
         return;
     }
     QStringList titles;
     for (const QString &sink : sinks)
-        titles << nodeTitle(sink);
+        titles << m_canvas->nodeTitle(sink);
     emit makeGroupAsked(titles);
 }
 
-QString CanvasModel::makeGroup(bool leaveSinks) {
-    QStringList ids = selectedIds();
+QString GroupEdit::makeGroup(bool leaveSinks) {
+    QStringList ids = m_canvas->selectedIds();
     if (leaveSinks)
         for (const QString &sink : selectedSinks())
             ids.removeAll(sink);
     if (ids.isEmpty()) {
-        setGroupProblem(tr("Select the nodes to put in a group first. A sink stays outside the group."));
+        setProblem(tr("Select the nodes to put in a group first. A sink stays outside the group."));
         return {};
     }
     const Registry &registry = registryOr(m_registry);
-    const Result<GroupMade> made = fugue::makeGroup(scopeDocument(), ids, registry);
+    const Result<GroupMade> made = fugue::makeGroup(m_canvas->scopeDocument(), ids, registry);
     if (!made) {
-        setGroupProblem(problemText(made.error()));
+        setProblem(problemText(made.error()));
         return {};
     }
     Document level = made->document;
     // Inside a group: what its face drove or read among the nodes now goes through the new
     // group's face, so the outer instances keep working.
-    if (const QString outer = scopeGroup(); !outer.isEmpty() && level.groups.contains(outer)) {
+    if (const QString outer = m_canvas->scopeGroup(); !outer.isEmpty() && level.groups.contains(outer)) {
         const QSet<QString> moved(ids.begin(), ids.end());
         GroupDefinition face = level.groups.value(outer);
         for (GroupInput &input : face.inputs) {
@@ -116,28 +195,28 @@ QString CanvasModel::makeGroup(bool leaveSinks) {
         level.groups[outer].inputs = face.inputs;
         level.groups[outer].outputs = face.outputs;
     }
-    setGroupProblem({});
-    commit(level, tr("Make group"));
-    select({made->instance}, QStringLiteral("replace"));
+    setProblem({});
+    m_canvas->commit(level, tr("Make group"));
+    m_canvas->select({made->instance}, QStringLiteral("replace"));
     return made->instance;
 }
 
-QStringList CanvasModel::ungroupSelection() {
+QStringList GroupEdit::ungroupSelection() {
     QStringList instances;
-    for (const QString &id : selectedIds())
-        if (isGroup(id))
+    for (const QString &id : m_canvas->selectedIds())
+        if (m_canvas->isGroup(id))
             instances << id;
     if (instances.isEmpty())
         return {};
-    Document level = scopeDocument();
-    const QString outer = scopeGroup();
+    Document level = m_canvas->scopeDocument();
+    const QString outer = m_canvas->scopeGroup();
     QStringList added, groups;
     for (const QString &id : instances) {
         const QString group = level.graph.nodes.value(id).type;
         const GroupDefinition definition = *level.group(group);
         const Result<Ungrouped> back = fugue::ungroup(level, id);
         if (!back) {
-            setGroupProblem(problemText(back.error()));
+            setProblem(problemText(back.error()));
             return {};
         }
         level = back->document;
@@ -168,30 +247,30 @@ QStringList CanvasModel::ungroupSelection() {
                             output.from = PortRef{back->ids.value(inner.from.node), inner.from.port};
         }
     }
-    setGroupProblem({});
-    beginEdit();
-    commit(level, tr("Ungroup"));
+    setProblem({});
+    m_canvas->beginEdit();
+    m_canvas->commit(level, tr("Ungroup"));
     // The definitions nothing uses any more go with them.
-    Document whole = document();
+    Document whole = m_canvas->document();
     dropUnusedGroups(whole, groups);
-    if (whole.groups.size() != document().groups.size())
-        commitWhole(whole, tr("Ungroup"));
-    select(added, QStringLiteral("replace"));
-    endEdit(tr("Ungroup"));
+    if (whole.groups.size() != m_canvas->document().groups.size())
+        m_canvas->commitWhole(whole, tr("Ungroup"));
+    m_canvas->select(added, QStringLiteral("replace"));
+    m_canvas->endEdit(tr("Ungroup"));
     return added;
 }
 
-QString CanvasModel::makeUnique() {
-    const QStringList ids = selectedIds();
-    if (ids.size() != 1 || !isGroup(ids.first()))
+QString GroupEdit::makeUnique() {
+    const QStringList ids = m_canvas->selectedIds();
+    if (ids.size() != 1 || !m_canvas->isGroup(ids.first()))
         return {};
-    const Result<GroupMade> made = fugue::makeUnique(scopeDocument(), ids.first(), registryOr(m_registry));
+    const Result<GroupMade> made = fugue::makeUnique(m_canvas->scopeDocument(), ids.first(), registryOr(m_registry));
     if (!made) {
-        setGroupProblem(problemText(made.error()));
+        setProblem(problemText(made.error()));
         return {};
     }
-    setGroupProblem({});
-    commit(made->document, tr("Make unique"));
+    setProblem({});
+    m_canvas->commit(made->document, tr("Make unique"));
     return made->group;
 }
 
@@ -199,22 +278,22 @@ QString CanvasModel::makeUnique() {
 
 // A change of the group shown's face (on the whole workflow, so instances elsewhere follow):
 // committed as one step named `text`, or refused with its reason.
-bool CanvasModel::applyFaceEdit(const std::function<Result<Document>(const Document &, const QString &)> &edit,
+bool GroupEdit::applyFaceEdit(const std::function<Result<Document>(const Document &, const QString &)> &edit,
                                 const QString &text) {
-    const QString group = scopeGroup();
+    const QString group = m_canvas->scopeGroup();
     if (group.isEmpty())
         return false;
-    const Result<Document> done = edit(document(), group);
+    const Result<Document> done = edit(m_canvas->document(), group);
     if (!done) {
-        setGroupProblem(problemText(done.error()));
+        setProblem(problemText(done.error()));
         return false;
     }
-    setGroupProblem({});
-    commitWhole(*done, text);
+    setProblem({});
+    m_canvas->commitWhole(*done, text);
     return true;
 }
 
-bool CanvasModel::exposeInput(const QString &node, const QString &input, const QString &into) {
+bool GroupEdit::exposeInput(const QString &node, const QString &input, const QString &into) {
     return applyFaceEdit(
         [&](const Document &whole, const QString &group) {
             return fugue::exposeInput(whole, group, {node, input}, registryOr(m_registry), into);
@@ -222,7 +301,7 @@ bool CanvasModel::exposeInput(const QString &node, const QString &input, const Q
         tr("Expose input"));
 }
 
-bool CanvasModel::unexposeInput(const QString &node, const QString &input) {
+bool GroupEdit::unexposeInput(const QString &node, const QString &input) {
     return applyFaceEdit(
         [&](const Document &whole, const QString &group) {
             return fugue::unexposeInput(whole, group, {node, input});
@@ -230,7 +309,7 @@ bool CanvasModel::unexposeInput(const QString &node, const QString &input) {
         tr("Stop exposing"));
 }
 
-bool CanvasModel::exposeOutput(const QString &node, const QString &output) {
+bool GroupEdit::exposeOutput(const QString &node, const QString &output) {
     return applyFaceEdit(
         [&](const Document &whole, const QString &group) {
             return fugue::exposeOutput(whole, group, {node, output});
@@ -238,7 +317,7 @@ bool CanvasModel::exposeOutput(const QString &node, const QString &output) {
         tr("Expose output"));
 }
 
-bool CanvasModel::unexposeOutput(const QString &name) {
+bool GroupEdit::unexposeOutput(const QString &name) {
     return applyFaceEdit(
         [&](const Document &whole, const QString &group) {
             return fugue::unexposeOutput(whole, group, name);
@@ -246,18 +325,18 @@ bool CanvasModel::unexposeOutput(const QString &name) {
         tr("Stop exposing"));
 }
 
-QVariantMap CanvasModel::portToRename(const QString &node, const QString &port, bool output) const {
+QVariantMap GroupEdit::portToRename(const QString &node, const QString &port, bool output) const {
     QString group, name;
-    if (isGroup(node)) { // a port of a group card, at this level
-        group = m_document.graph.nodes.value(node).type;
+    if (m_canvas->isGroup(node)) { // a port of a group card, at this level
+        group = m_canvas->m_document.graph.nodes.value(node).type;
         name = port;
-    } else if (inGroup()) { // an inner port the group shown exposes
-        group = scopeGroup();
+    } else if (m_canvas->inGroup()) { // an inner port the group shown exposes
+        group = m_canvas->scopeGroup();
         name = exposedName(node, port, output);
     }
     if (group.isEmpty() || name.isEmpty())
         return {};
-    const NodeType face = groupFace(document(), registryOr(m_registry), group);
+    const NodeType face = groupFace(m_canvas->document(), registryOr(m_registry), group);
     QString label;
     if (output) {
         const OutputSpec *spec = face.output(name);
@@ -273,23 +352,23 @@ QVariantMap CanvasModel::portToRename(const QString &node, const QString &port, 
     return {{"group", group}, {"name", name}, {"output", output}, {"label", label}};
 }
 
-bool CanvasModel::renamePort(const QString &node, const QString &port, bool output, const QString &label) {
+bool GroupEdit::renamePort(const QString &node, const QString &port, bool output, const QString &label) {
     const QVariantMap target = portToRename(node, port, output);
     if (target.isEmpty())
         return false;
-    const Result<Document> done = relabelExposed(document(), target.value("group").toString(), output,
+    const Result<Document> done = relabelExposed(m_canvas->document(), target.value("group").toString(), output,
                                                  target.value("name").toString(), label);
     if (!done) {
-        setGroupProblem(problemText(done.error()));
+        setProblem(problemText(done.error()));
         return false;
     }
-    setGroupProblem({});
-    commitWhole(*done, output ? tr("Rename output") : tr("Rename input"));
+    setProblem({});
+    m_canvas->commitWhole(*done, output ? tr("Rename output") : tr("Rename input"));
     return true;
 }
 
-QString CanvasModel::exposedName(const QString &node, const QString &port, bool output) const {
-    const GroupDefinition *group = m_document.group(scopeGroup());
+QString GroupEdit::exposedName(const QString &node, const QString &port, bool output) const {
+    const GroupDefinition *group = m_canvas->m_document.group(m_canvas->scopeGroup());
     if (!group)
         return {};
     if (output) {
@@ -302,9 +381,9 @@ QString CanvasModel::exposedName(const QString &node, const QString &port, bool 
     return exposed ? exposed->name : QString();
 }
 
-bool CanvasModel::removeExposedInput(const QString &name) {
-    const QString group = scopeGroup();
-    Document whole = document();
+bool GroupEdit::removeExposedInput(const QString &name) {
+    const QString group = m_canvas->scopeGroup();
+    Document whole = m_canvas->document();
     const GroupDefinition *definition = whole.group(group);
     if (!definition)
         return false;
@@ -316,36 +395,36 @@ bool CanvasModel::removeExposedInput(const QString &name) {
             if (done)
                 whole = *done;
         }
-        setGroupProblem({});
-        commitWhole(whole, tr("Stop exposing"));
+        setProblem({});
+        m_canvas->commitWhole(whole, tr("Stop exposing"));
         return true;
     }
     return false;
 }
 
-QVariantList CanvasModel::exposeCandidates(const QString &name) const {
-    const GroupDefinition *group = m_document.group(scopeGroup());
+QVariantList GroupEdit::exposeCandidates(const QString &name) const {
+    const GroupDefinition *group = m_canvas->m_document.group(m_canvas->scopeGroup());
     if (!group)
         return {};
     QString type;
     for (const GroupInput &exposed : group->inputs)
         if (exposed.name == name && !exposed.targets.isEmpty())
-            if (const std::optional<PortSpec> spec = portType(exposed.targets.first().node, exposed.targets.first().port, false))
+            if (const std::optional<PortSpec> spec = m_canvas->portType(exposed.targets.first().node, exposed.targets.first().port, false))
                 type = spec->toString();
     if (type.isEmpty())
         return {};
     QVariantList candidates;
-    for (const NodeRow &row : m_rows)
-        for (const Port &port : row.inputs)
+    for (const CanvasModel::NodeRow &row : m_canvas->m_rows)
+        for (const CanvasModel::Port &port : row.inputs)
             if (port.type && port.type->toString() == type && !exposedFor(*group, {row.id, port.name}))
                 candidates.append(QVariantMap{{"node", row.id}, {"input", port.name},
                                               {"title", row.title + QStringLiteral(" \u203a ") + port.label}});
     return candidates;
 }
 
-QVariantMap CanvasModel::groupInterface() const {
-    const QString id = scopeGroup();
-    const Document whole = document();
+QVariantMap GroupEdit::groupInterface() const {
+    const QString id = m_canvas->scopeGroup();
+    const Document whole = m_canvas->document();
     const GroupDefinition *group = whole.group(id);
     if (!group)
         return {};
@@ -381,7 +460,7 @@ QVariantMap CanvasModel::groupInterface() const {
             {"outputs", outputs}};
 }
 
-bool CanvasModel::editExposedInput(const QString &name, const QVariantMap &change) {
+bool GroupEdit::editExposedInput(const QString &name, const QVariantMap &change) {
     ExposedChange edit;
     edit.name = change.value("name").toString().trimmed();
     edit.label = change.value("label").toString().trimmed();
@@ -412,7 +491,7 @@ bool CanvasModel::editExposedInput(const QString &name, const QVariantMap &chang
         tr("Edit exposed input"));
 }
 
-bool CanvasModel::renameExposedOutput(const QString &name, const QString &newName) {
+bool GroupEdit::renameExposedOutput(const QString &name, const QString &newName) {
     return applyFaceEdit(
         [&](const Document &whole, const QString &group) {
             return fugue::renameExposedOutput(whole, group, name, newName.trimmed());
@@ -420,7 +499,7 @@ bool CanvasModel::renameExposedOutput(const QString &name, const QString &newNam
         tr("Rename output"));
 }
 
-bool CanvasModel::moveExposed(bool output, const QString &name, int to) {
+bool GroupEdit::moveExposed(bool output, const QString &name, int to) {
     return applyFaceEdit(
         [&](const Document &whole, const QString &group) {
             return fugue::moveExposed(whole, group, output, name, to);
@@ -428,15 +507,15 @@ bool CanvasModel::moveExposed(bool output, const QString &name, int to) {
         output ? tr("Move output") : tr("Move input"));
 }
 
-bool CanvasModel::renameGroup(const QString &name) {
+bool GroupEdit::renameGroup(const QString &name) {
     const bool done = applyFaceEdit(
         [&](const Document &whole, const QString &group) {
             return fugue::renameGroup(whole, group, name, registryOr(m_registry));
         },
         tr("Rename group"));
     if (done) {
-        emit scopeChanged(); // the breadcrumb shows the name
-        const GroupDefinition *definition = document().group(scopeGroup());
+        emit m_canvas->scopeChanged(); // the breadcrumb shows the name
+        const GroupDefinition *definition = m_canvas->document().group(m_canvas->scopeGroup());
         const QString library = definition ? definition->extra.value(QLatin1String(kLibraryKey)).toString() : QString();
         if (!library.isEmpty())
             emit libraryRenameOffered(library, name.trimmed());
@@ -444,130 +523,86 @@ bool CanvasModel::renameGroup(const QString &name) {
     return done;
 }
 
-// --- sections (5.4, 6.1) ---------------------------------------------------------------
-
-QString CanvasModel::advancedHeaderAt(qreal x, qreal y) const {
-    for (int r = int(m_rows.size()) - 1; r >= 0; --r) {
-        const NodeRow &row = m_rows[size_t(r)];
-        if (row.collapsed || x < row.pos.x() || x > row.pos.x() + row.shownWidth())
-            continue;
-        for (const Port &port : row.inputs)
-            if (port.header == QLatin1String(kAdvancedSection) && y >= row.pos.y() + port.headerTop
-                && y < row.pos.y() + port.headerTop + m_rowHeight)
-                return row.id;
-    }
-    return {};
-}
-
-void CanvasModel::toggleAdvanced(const QString &node) {
-    const int r = rowOf(node);
-    if (r < 0)
-        return;
-    Document document = scopeDocument();
-    QJsonObject entries = document.layout.value("nodes").toObject();
-    QJsonObject entry = entries.value(node).toObject();
-    const bool open = !m_rows[size_t(r)].advancedOpen;
-    if (open)
-        entry.insert("advanced", true);
-    else
-        entry.remove("advanced");
-    entries.insert(node, entry);
-    document.layout.insert("nodes", entries);
-    commit(document, open ? tr("Show advanced inputs") : tr("Fold advanced inputs"));
-}
-
 // --- the library (5.3) ---------------------------------------------------------------
 
-void CanvasModel::setGroupNotice(const QString &notice) {
-    if (notice == m_groupNotice)
-        return;
-    m_groupNotice = notice;
-    emit groupNoticeChanged();
-}
-
-void CanvasModel::announceLibraryResult(const QString &notice, const QString &problem) {
-    setGroupProblem(problem);
-    setGroupNotice(problem.isEmpty() ? notice : QString());
-}
-
-void CanvasModel::renameGroupCard(const QString &node, const QString &name) {
+void GroupEdit::renameGroupCard(const QString &node, const QString &name) {
     const QString shown = name.trimmed();
-    const QString group = m_document.graph.nodes.value(node).type;
-    const GroupDefinition *definition = isGroup(node) ? document().group(group) : nullptr;
+    const QString group = m_canvas->m_document.graph.nodes.value(node).type;
+    const GroupDefinition *definition = m_canvas->isGroup(node) ? m_canvas->document().group(group) : nullptr;
     if (shown.isEmpty() || !definition || definition->name == shown)
         return; // nothing to rename (F2 then Enter): no step, no question
     QString renamedId;
-    const Result<Document> renamed = fugue::renameGroup(document(), group, shown, registryOr(m_registry), &renamedId);
+    const Result<Document> renamed = fugue::renameGroup(m_canvas->document(), group, shown, registryOr(m_registry), &renamedId);
     if (!renamed) {
-        setGroupProblem(problemText(renamed.error()));
+        setProblem(problemText(renamed.error()));
         return;
     }
-    setGroupProblem({});
-    beginEdit();
-    commitWhole(*renamed, tr("Rename group"));
+    setProblem({});
+    m_canvas->beginEdit();
+    m_canvas->commitWhole(*renamed, tr("Rename group"));
     // The card shows the group's name: a title of its own would hide the new one.
-    Document level = scopeDocument();
+    Document level = m_canvas->scopeDocument();
     QJsonObject entries = level.layout.value("nodes").toObject();
     if (QJsonObject entry = entries.value(node).toObject(); entry.contains("title")) {
         entry.remove("title");
         entries.insert(node, entry);
         level.layout.insert("nodes", entries);
-        commit(level, tr("Rename group"));
+        m_canvas->commit(level, tr("Rename group"));
     }
-    endEdit(tr("Rename group"));
-    emit scopeChanged(); // the breadcrumb shows the name
-    if (const GroupDefinition *renamedDefinition = document().group(renamedId))
+    m_canvas->endEdit(tr("Rename group"));
+    emit m_canvas->scopeChanged(); // the breadcrumb shows the name
+    if (const GroupDefinition *renamedDefinition = m_canvas->document().group(renamedId))
         if (const QString library = renamedDefinition->extra.value(QLatin1String(kLibraryKey)).toString();
             !library.isEmpty())
             emit libraryRenameOffered(library, shown);
 }
 
-bool CanvasModel::renameLibraryGroup(const QString &libraryId, const QString &name) {
+bool GroupEdit::renameLibraryGroup(const QString &libraryId, const QString &name) {
     const Result<QString> renamed = renameInLibrary(libraryId, name, registryOr(m_registry),
-                                                    m_libraryDir.isEmpty() ? libraryDir() : m_libraryDir);
+                                                    libraryPath());
     if (!renamed) {
-        setGroupProblem(problemText(renamed.error()));
+        setProblem(problemText(renamed.error()));
         return false;
     }
-    setGroupProblem({});
+    setProblem({});
     followLibraryRename(libraryId, *renamed);
-    setGroupNotice(tr("Renamed %1 to %2 in the library.").arg(libraryId, *renamed));
+    setNotice(tr("Renamed %1 to %2 in the library.").arg(libraryId, *renamed));
     emit librarySaved();
     return true;
 }
 
-void CanvasModel::followLibraryRename(const QString &from, const QString &to) {
-    rewriteDocuments([&](Document &document) {
+void GroupEdit::followLibraryRename(const QString &from, const QString &to) {
+    m_canvas->rewriteDocuments([&](Document &document) {
         for (GroupDefinition &definition : document.groups)
             if (definition.extra.value(QLatin1String(kLibraryKey)).toString() == from)
                 definition.extra.insert(QLatin1String(kLibraryKey), to);
     });
 }
 
-bool CanvasModel::saveGroupToLibrary() {
+bool GroupEdit::saveGroupToLibrary() {
     QString group;
-    const QStringList ids = selectedIds();
-    if (ids.size() == 1 && isGroup(ids.first()))
-        group = m_document.graph.nodes.value(ids.first()).type;
+    const QStringList ids = m_canvas->selectedIds();
+    if (ids.size() == 1 && m_canvas->isGroup(ids.first()))
+        group = m_canvas->m_document.graph.nodes.value(ids.first()).type;
     else
-        group = scopeGroup();
+        group = m_canvas->scopeGroup();
     if (group.isEmpty())
         return false;
     const Registry &registry = registryOr(m_registry);
-    Document whole = document();
+    Document whole = m_canvas->document();
     // Saved as local/<name>: a different group of this workflow with that id would be overwritten.
     const QString target = QStringLiteral("local/") + group.section(QLatin1Char('/'), 1);
     if (target != group && whole.groups.contains(target)) {
-        setGroupProblem(tr("This workflow has another group with the id %1; rename one of them first.").arg(target));
+        setProblem(tr("This workflow has another group with the id %1; rename one of them first.").arg(target));
         return false;
     }
     const Result<SavedGroup> saved =
-        saveToLibrary(whole, group, registry, m_libraryDir.isEmpty() ? libraryDir() : m_libraryDir);
+        saveToLibrary(whole, group, registry, libraryPath());
     if (!saved) {
-        setGroupProblem(problemText(saved.error()));
+        setProblem(problemText(saved.error()));
         return false;
     }
-    setGroupProblem({});
+    setProblem({});
     // The workflow takes the library's id and version, so it is in step with it.
     whole = renameGroupId(whole, group, saved->id);
     whole.groups[saved->id].version = saved->version;
@@ -577,9 +612,9 @@ bool CanvasModel::saveGroupToLibrary() {
             if (node.type == saved->id)
                 node.version = saved->version;
     });
-    commitWhole(whole, tr("Save to library"));
-    emit scopeChanged(); // the breadcrumb's group may have a new id
-    setGroupNotice(saved->changed ? tr("Saved %1 %2 to the library. Every open workflow can add it from node search.")
+    m_canvas->commitWhole(whole, tr("Save to library"));
+    emit m_canvas->scopeChanged(); // the breadcrumb's group may have a new id
+    setNotice(saved->changed ? tr("Saved %1 %2 to the library. Every open workflow can add it from node search.")
                                         .arg(saved->id, saved->version.toString())
                                   : tr("The library has this version of %1 already (%2).")
                                         .arg(saved->id, saved->version.toString()));
@@ -588,26 +623,15 @@ bool CanvasModel::saveGroupToLibrary() {
     return true;
 }
 
-QString CanvasModel::updateAvailable(const QString &node) const {
-    const auto it = m_document.graph.nodes.constFind(node);
-    if (it == m_document.graph.nodes.constEnd() || !m_registry)
+QVariantMap GroupEdit::groupUpdate(const QString &node) const {
+    if (m_canvas->updateAvailable(node).isEmpty())
         return {};
-    const GroupDefinition *group = m_document.group(it->type);
-    const NodeType *library = m_registry->nodeType(it->type);
-    if (!group || !library || library->runtime.value("kind") != QLatin1String("group") || library->version <= group->version)
-        return {};
-    return library->version.toString();
-}
-
-QVariantMap CanvasModel::groupUpdate(const QString &node) const {
-    if (updateAvailable(node).isEmpty())
-        return {};
-    const QString group = m_document.graph.nodes.value(node).type;
+    const QString group = m_canvas->m_document.graph.nodes.value(node).type;
     const Result<Document> library = loadLibraryGroup(*m_registry->nodeType(group));
     if (!library)
         return {{"problem", library.error().message}};
-    const GroupChanges changes = groupChanges(document(), *library, group, *m_registry);
-    return {{"name", m_document.group(group)->name},
+    const GroupChanges changes = groupChanges(m_canvas->document(), *library, group, *m_registry);
+    return {{"name", m_canvas->m_document.group(group)->name},
             {"from", changes.from.toString()},
             {"to", changes.to.toString()},
             {"addedInputs", changes.addedInputs},
@@ -616,22 +640,22 @@ QVariantMap CanvasModel::groupUpdate(const QString &node) const {
             {"removedOutputs", changes.removedOutputs}};
 }
 
-bool CanvasModel::updateGroupInstance(const QString &node) {
-    if (updateAvailable(node).isEmpty())
+bool GroupEdit::updateGroupInstance(const QString &node) {
+    if (m_canvas->updateAvailable(node).isEmpty())
         return false;
-    const QString group = m_document.graph.nodes.value(node).type;
+    const QString group = m_canvas->m_document.graph.nodes.value(node).type;
     const Result<Document> library = loadLibraryGroup(*m_registry->nodeType(group));
     if (!library) {
-        setGroupProblem(problemText(library.error()));
+        setProblem(problemText(library.error()));
         return false;
     }
-    setGroupProblem({});
-    commitWhole(updateGroup(document(), *library, group, *m_registry), tr("Update group"));
+    setProblem({});
+    m_canvas->commitWhole(updateGroup(m_canvas->document(), *library, group, *m_registry), tr("Update group"));
     return true;
 }
 
-void CanvasModel::requestGroupUpdate() {
-    const QStringList ids = selectedIds();
-    if (ids.size() == 1 && !updateAvailable(ids.first()).isEmpty())
+void GroupEdit::requestGroupUpdate() {
+    const QStringList ids = m_canvas->selectedIds();
+    if (ids.size() == 1 && !m_canvas->updateAvailable(ids.first()).isEmpty())
         emit groupUpdateAsked(ids.first(), groupUpdate(ids.first()));
 }

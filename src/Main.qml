@@ -461,9 +461,9 @@ ApplicationWindow {
             onGroupDeleted: (typeId, name) => {
                 const packs = App.settings ? App.settings.packs : null
                 const done = packs !== null && packs.removeLibraryGroup(typeId)
-                App.canvasModel.announceLibraryResult(qsTr("Deleted %1 from the library").arg(name),
-                                                      done ? "" : (packs && packs.failure !== "" ? packs.failure
-                                                                   : qsTr("%1 could not be deleted from the library.").arg(name)))
+                App.canvasModel.groups.announceLibraryResult(qsTr("Deleted %1 from the library").arg(name),
+                    done ? "" : (packs && packs.failure !== "" ? packs.failure
+                                 : qsTr("%1 could not be deleted from the library.").arg(name)))
             }
             // A click adds the node in the middle of the view; a drop, where it was let go.
             onNodeActivated: typeId => {

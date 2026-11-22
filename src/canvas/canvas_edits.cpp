@@ -679,7 +679,7 @@ void CanvasModel::renameNode(const QString &node, const QString &title) {
     if (rowOf(node) < 0)
         return;
     if (isGroup(node)) {
-        renameGroupCard(node, title);
+        m_groups->renameGroupCard(node, title);
         return;
     }
     Document document = this->scopeDocument();
@@ -959,7 +959,7 @@ QStringList CanvasModel::insertCopy(const Document &copy, QPointF topLeft, bool 
     for (const QString &id : std::as_const(fresh)) {
         const QString type = document.graph.nodes.value(id).type;
         if (document.group(type) && !canHoldGroup(document, type)) {
-            setGroupProblem(tr("A group cannot hold itself: the copy has an instance of %1, which holds the group shown.")
+            m_groups->setProblem(tr("A group cannot hold itself: the copy has an instance of %1, which holds the group shown.")
                                 .arg(document.group(type)->name.isEmpty() ? type : document.group(type)->name));
             return {};
         }
@@ -1023,4 +1023,36 @@ bool CanvasModel::fitView(qreal width, qreal height, qreal reservedTop, qreal re
     const qreal shift = (reservedTop - reservedBottom) / 2 / zoom;
     m_view = {{"center", QVariantList{bounds.center().x(), bounds.center().y() - shift}}, {"zoom", zoom}};
     return true;
+}
+
+// --- sections (5.4, 6.1) ---------------------------------------------------------------
+
+QString CanvasModel::advancedHeaderAt(qreal x, qreal y) const {
+    for (int r = int(m_rows.size()) - 1; r >= 0; --r) {
+        const NodeRow &row = m_rows[size_t(r)];
+        if (row.collapsed || x < row.pos.x() || x > row.pos.x() + row.shownWidth())
+            continue;
+        for (const Port &port : row.inputs)
+            if (port.header == QLatin1String(kAdvancedSection) && y >= row.pos.y() + port.headerTop
+                && y < row.pos.y() + port.headerTop + m_rowHeight)
+                return row.id;
+    }
+    return {};
+}
+
+void CanvasModel::toggleAdvanced(const QString &node) {
+    const int r = rowOf(node);
+    if (r < 0)
+        return;
+    Document document = scopeDocument();
+    QJsonObject entries = document.layout.value("nodes").toObject();
+    QJsonObject entry = entries.value(node).toObject();
+    const bool open = !m_rows[size_t(r)].advancedOpen;
+    if (open)
+        entry.insert("advanced", true);
+    else
+        entry.remove("advanced");
+    entries.insert(node, entry);
+    document.layout.insert("nodes", entries);
+    commit(document, open ? tr("Show advanced inputs") : tr("Fold advanced inputs"));
 }
