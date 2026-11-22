@@ -124,6 +124,48 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // Clear all (spec 10.6): one button beside the total, off while there is nothing to clear;
+    // it asks first, with the total and what is lost, and the yes clears every kind.
+    void clearAllAsksFirstAndClearsEveryKind() {
+        QDir(fugue::thumbnailsDir()).removeRecursively();
+        App app(load(emptyDoc));
+        QVERIFY(app.open());
+        app.commands.trigger("cache.clear-previews");
+        QTRY_VERIFY(panelOpen(app.window));
+        NEED("cacheQuestion"); // the previews' question, shown by the command
+        click(app, NEED("cacheNo"));
+        QQuickItem *clearAll = NEED("cacheClearAll");
+        QTRY_VERIFY(!clearAll->property("enabled").toBool()); // nothing there yet (and not while measuring)
+        QVERIFY(QFile::exists(fugue::thumbnailsDir()) || QDir().mkpath(fugue::thumbnailsDir()));
+        const QString file = fugue::thumbnailsDir() + "/probe-all-512.png";
+        QFile probe(file);
+        QVERIFY(probe.open(QIODevice::WriteOnly));
+        probe.write(QByteArray(1000, 'x'));
+        probe.close();
+        // Something to clear: measured again when the page is made again.
+        app.commands.trigger("cache.clear-previews");
+        click(app, NEED("cacheNo"));
+        QQuickItem *button = NEED("cacheClearAll");
+        QTRY_VERIFY(button->property("enabled").toBool());
+        QVERIFY(button->height() >= 28);
+        click(app, button);
+        NEED("cacheQuestion");
+        const QString detail = NEED("cacheQuestionDetail")->property("text").toString();
+        QVERIFY(detail.contains("run again"));
+        QVERIFY(detail.contains("history of past runs"));
+        QVERIFY(detail.contains("Pictures on the canvas"));
+        // A no keeps everything.
+        click(app, NEED("cacheNo"));
+        QTRY_VERIFY(!find(app.window, "cacheQuestion"));
+        QVERIFY(QFile::exists(file));
+        // The yes clears it, and the page says how much.
+        click(app, NEED("cacheClearAll"));
+        click(app, NEED("cacheYes"));
+        QTRY_VERIFY(!QFile::exists(file));
+        QTRY_VERIFY(NEED("cacheMessage")->property("text").toString().contains("everything cached"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void theCacheLimitsAreChoicesThatPersist() {
         App app(load(emptyDoc));
         QVERIFY(app.open());

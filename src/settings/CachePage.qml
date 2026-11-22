@@ -4,7 +4,7 @@ import QtQuick.Layouts
 import Fugue
 
 // The Cache page of the settings panel (spec 10.6, #141): what Fugue keeps under ~/.cache/fugue
-// with a Clear for each kind and, under it, the limits that keep each kind in bounds. Clear asks
+// with a Clear for each kind (and one Clear all) and, under it, the limits that keep each kind in bounds. Clear asks
 // first, in words that say what is lost. The measuring and clearing are the CacheModel's.
 ColumnLayout {
     id: page
@@ -20,11 +20,23 @@ ColumnLayout {
     SettingsParts.Setting {
         title: qsTr("Cache")
         note: qsTr("Copies Fugue can make again, kept to speed things up. Your saved pictures and the inputs folder are never in this list.")
-        Text {
-            objectName: "cacheTotal"
-            text: page.cache.busy && page.cache.kinds.length === 0 ? qsTr("Measuring…") : qsTr("%1 in all").arg(page.cache.total)
-            color: page.look.label
-            font.pixelSize: page.look.labelSize
+        // The total, and the page's one big action beside it: on the left, away from the
+        // per-kind Clear… at the right edge of the rows below, so the two are not mistaken.
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 4 * page.u
+            Text {
+                objectName: "cacheTotal"
+                text: page.cache.busy && page.cache.kinds.length === 0 ? qsTr("Measuring…") : qsTr("%1 in all").arg(page.cache.total)
+                color: page.look.label
+                font.pixelSize: page.look.labelSize
+            }
+            SettingsParts.SmallButton {
+                objectName: "cacheClearAll"
+                text: qsTr("Clear all…")
+                enabled: page.cache.canClearAll && !page.cache.busy
+                onClicked: page.cache.ask("all")
+            }
         }
     }
 
