@@ -22,6 +22,8 @@ namespace {
 // Least to most specific (12.4: the more specific context owns the key).
 const QStringList kContexts = {QStringLiteral("app"), QStringLiteral("canvas"), QStringLiteral("group-selected"),
                                QStringLiteral("compare"), QStringLiteral("group"), QStringLiteral("run"),
+                               // #230: the pointer is over a Canvas view (or it has the focus): its tools' keys
+                               QStringLiteral("canvas-view"),
                                // #226: the pointer is over a Canvas view's layers panel (or it has the focus): its keys win there
                                QStringLiteral("canvas-layers")};
 
@@ -217,7 +219,7 @@ bool CommandRegistry::actsOnGraph(const QString &id) const {
     // The window's own contexts are not the Graph's: `app` (quit, undo, save: the document's undo is the region's too),
     // `run` and the layers panel's.
     const QString &context = m_entries[*it].spec.context;
-    if (context == QLatin1String("app") || context == QLatin1String("run") || context == QLatin1String("canvas-layers"))
+    if (context == QLatin1String("app") || context == QLatin1String("run") || context == QLatin1String("canvas-layers") || context == QLatin1String("canvas-view"))
         return false;
     // The panels and bars share the `canvas` context and act on the window.
     static const QStringList graphViews = {QStringLiteral("view.fit"), QStringLiteral("view.zoom-in"), QStringLiteral("view.zoom-out"),

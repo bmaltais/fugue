@@ -16,9 +16,11 @@ import "widgets"
 // Pointer: a click selects (Ctrl adds or takes away, Shift a range), a double click on the name or F2 renames, a drag
 // moves the selected layers (a line shows where), a right click opens the menu of the same operations with their keys.
 // The eye shows or hides (the selection when the row is selected), Alt+click shows that layer alone (solo: a view, never a
-// revision; again ends it). Shift+click on the mask turns it off or on. Keys, while the pointer is over the panel or it has
-// the focus (the `canvas-layers` context of the command registry, rebindable): H, F2, Ctrl+D, ] and [, X or Delete,
-// Ctrl+Z and Ctrl+Shift+Z. `ownShortcuts` binds them here as well, for a host that is a modal popup (the File > Canvas…
+// revision; again ends it). A click on the mask's thumbnail makes the view's brush paint that mask (#230, Photoshop's:
+// the thumbnail gets an accent frame, and `maskTargeted` tells the view to take the brush); **Add mask** gives the
+// selected layer a fully revealing one (one revision) and targets it. Shift+click on the mask turns it off or on. Keys,
+// while the pointer is over the panel or it has the focus (the `canvas-layers` context of the command registry,
+// rebindable): H, F2, Ctrl+D, ] and [, X or Delete, Ctrl+Z and Ctrl+Shift+Z. `ownShortcuts` binds them here as well, for a host that is a modal popup (the File > Canvas…
 // dialog), whose window's shortcuts sleep.
 //
 // Rows are 8u (32px) with 24px thumbnails and a 28px eye; every control is 28px. Groups are later: a row has `depth`,
@@ -32,6 +34,8 @@ Rectangle {
     // The view shows its own Accept and Drop for this candidate where the eye is (the new-candidate banner): the panel
     // then offers only Back to latest, so no decision is offered twice.
     property bool decisionElsewhere: false
+    // A layer mask became the brush's target (a click on its thumbnail, Add mask): the view takes the brush.
+    signal maskTargeted
     readonly property real u: look.unit
     readonly property var rows: model.layers
     readonly property var chosen: model.selection
@@ -63,6 +67,14 @@ Rectangle {
     function blendLabel(id) {
         const found = model.blendModes.find(b => b.id === id)
         return found ? found.label : (current ? current.compositeOp : "")
+    }
+    function addMask(position) {
+        if (editable && model.addMask(position))
+            maskTargeted()
+    }
+    function paintMask(position) {
+        if (editable && model.targetMask(position))
+            maskTargeted()
     }
     function startRename(position) {
         if (editable)
@@ -135,7 +147,11 @@ Rectangle {
         if (row.hasMask)
             entries.push({heading: true, enabled: false, text: qsTr("Layer mask")},
                          {text: qsTr("Delete the mask"), value: "mask-delete", enabled: !off},
+                         {text: qsTr("Paint the mask"), value: "mask-paint", detail: qsTr("Click the mask"), enabled: !off},
                          {text: row.maskEnabled ? qsTr("Turn the mask off") : qsTr("Turn the mask on"), value: "mask", detail: qsTr("Shift+click the mask"), enabled: !off})
+        else if (row.kind !== "mask")
+            entries.push({heading: true, enabled: false, text: qsTr("Layer mask")},
+                         {text: qsTr("Add mask"), value: "mask-add", detail: keysOf("canvas-view.add-mask"), enabled: !off && sel.length === 1})
         openMenu(item, x, y, entries, value => {
             switch (value) {
             case "visible": model.toggleVisible(sel); break
@@ -147,6 +163,8 @@ Rectangle {
             case "lower": model.lower(sel); break
             case "mask": model.setMaskEnabled(sel, !row.maskEnabled); break
             case "mask-delete": model.removeMask(sel); break
+            case "mask-paint": root.paintMask(row.position); break
+            case "mask-add": root.addMask(row.position); break
             }
         })
     }
@@ -230,10 +248,11 @@ Rectangle {
                 opacity: drag.active ? 0.6 : 1
 
                 HoverHandler { id: rowHover }
-                // A press on the eye is the eye's, not a selection; so is a Shift+press on the mask.
+                // A press on the eye is the eye's, not a selection; so is a press on the mask (a click targets it, #230;
+                // Shift+click turns it off), whatever the modifiers.
                 function onToggle(point: eventPoint, shifted: bool): bool {
                     const onEye = eye.contains(eye.mapFromItem(row, point.position))
-                    const onMask = shifted && maskThumb.visible && maskThumb.contains(maskThumb.mapFromItem(row, point.position))
+                    const onMask = maskThumb.visible && maskThumb.contains(maskThumb.mapFromItem(row, point.position))
                     return onEye || onMask
                 }
                 ToolTip.visible: rowHover.hovered && modelData.from !== "" && !drag.active && root.renaming !== position
@@ -332,20 +351,22 @@ Rectangle {
                             smooth: true
                         }
                     }
-                    // The layer mask: Shift+click turns it off or on; off, it is crossed and dim.
+                    // The layer mask: a click makes the brush paint it (an accent frame says so, #230), Shift+click turns it
+                    // off or on; off, it is crossed and dim.
                     Rectangle {
                         id: maskThumb
                         objectName: "canvasLayerMask-" + row.position
+                        readonly property bool targeted: root.model.maskTarget === row.position
                         visible: row.modelData.hasMask
                         width: 6 * root.u
                         height: 6 * root.u
                         color: "black"
-                        border.width: 1
-                        border.color: root.look.hairline
+                        border.width: targeted ? 2 : 1
+                        border.color: targeted ? root.look.accent : root.look.hairline
                         opacity: row.modelData.maskEnabled ? 1 : 0.45
                         Image {
                             anchors.fill: parent
-                            anchors.margins: 1
+                            anchors.margins: maskThumb.border.width
                             source: row.modelData.maskThumbnail
                             fillMode: Image.PreserveAspectFit
                             asynchronous: true
@@ -361,10 +382,18 @@ Rectangle {
                             acceptedModifiers: Qt.ShiftModifier
                             onTapped: if (root.editable) root.model.setMaskEnabled([row.position], !row.modelData.maskEnabled)
                         }
+                        TapHandler {
+                            acceptedModifiers: Qt.NoModifier
+                            onTapped: root.paintMask(row.position)
+                        }
+                        Accessible.role: Accessible.Button
+                        Accessible.name: qsTr("Layer mask of %1").arg(row.modelData.name)
+                        Accessible.checked: targeted
                         ToolTip.visible: maskHover.hovered
                         ToolTip.delay: root.look.tooltipDelay
-                        ToolTip.text: row.modelData.maskEnabled ? qsTr("Layer mask: white shows the layer, black hides it. Shift+click turns it off.")
-                                                                : qsTr("Layer mask, off: the layer shows whole. Shift+click turns it on.")
+                        ToolTip.text: maskThumb.targeted ? qsTr("The brush paints this mask: black hides the layer, white shows it. Shift+click turns it off.")
+                                      : row.modelData.maskEnabled ? qsTr("Layer mask: white shows the layer, black hides it. Click to paint it, Shift+click turns it off.")
+                                      : qsTr("Layer mask, off: the layer shows whole. Click to paint it, Shift+click turns it on.")
                         HoverHandler { id: maskHover }
                     }
                 }
@@ -560,6 +589,17 @@ Rectangle {
                     root.openMenu(this, 0, height, root.model.blendModes.map(b => ({text: b.label, value: b.id, checked: b.id === now})),
                                   value => root.model.setBlend(root.chosen, value))
                 }
+            }
+            // A layer with no mask: Add mask (#230), which the brush then paints.
+            ViewButton {
+                objectName: "canvasLayerAddMask"
+                visible: root.current !== null && root.current.hasMask !== true && root.current.kind !== "mask"
+                look: root.look
+                accented: false
+                enabled: root.editable && root.chosen.length === 1
+                text: qsTr("Add mask")
+                tip: qsTr("Give the layer a mask that shows it all, and paint it to hide parts (%1)").arg(root.keysOf("canvas-view.add-mask"))
+                onTapped: root.addMask(root.current.position)
             }
             // The layer mask of the selected layer, when it has one.
             Row {

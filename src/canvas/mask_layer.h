@@ -34,6 +34,10 @@ class MaskLayer : public QQuickItem {
     // The overlay color, with its alpha: the accent at 50% by default.
     Q_PROPERTY(QColor tint READ tint WRITE setTint NOTIFY tintChanged FINAL)
     Q_PROPERTY(bool maskOnly READ maskOnly WRITE setMaskOnly NOTIFY tintChanged FINAL)
+    // The tint marks the 0s instead of the 255s (#230): a layer mask's hidden part, Photoshop's red overlay of a mask.
+    Q_PROPERTY(bool inverted READ inverted WRITE setInverted NOTIFY tintChanged FINAL)
+    // The opacity of a stroke, 0 to 1 (1: a stroke sets the mask fully where the brush is hard).
+    Q_PROPERTY(qreal brushOpacity READ brushOpacity WRITE setBrushOpacity NOTIFY tintChanged FINAL)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY historyChanged FINAL)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY historyChanged FINAL)
     // Nothing painted: every pixel is 0.
@@ -57,6 +61,14 @@ public:
     void setTint(const QColor &color);
     bool maskOnly() const { return m_maskOnly; }
     void setMaskOnly(bool on);
+    bool inverted() const { return m_inverted; }
+    void setInverted(bool on);
+    qreal brushOpacity() const { return m_brushOpacity; }
+    void setBrushOpacity(qreal opacity);
+    // The mask itself, for a caller that stores it (the Canvas view's layer mask and selection, #230), and a mask to start
+    // from: its size becomes the layer's, and the history starts here (as loadMask).
+    const mask::MaskPaint &paint() const { return *m_paint; }
+    void setPaint(const mask::MaskPaint &paint);
     bool canUndo() const { return m_paint->canUndo(); }
     bool canRedo() const { return m_paint->canRedo(); }
     bool isEmpty() const { return m_paint->isEmpty(); }
@@ -118,6 +130,8 @@ private:
     qreal m_zoom = 1;
     QColor m_tint = QColor(255, 59, 48, 128);
     bool m_maskOnly = false;
+    bool m_inverted = false;
+    qreal m_brushOpacity = 1;
     QString m_folder;
     QString m_error;
     CellGrid m_cells;

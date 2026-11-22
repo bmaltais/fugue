@@ -58,3 +58,6 @@ settings e158
 columns-2 e09c
 rows-2 e43e
 waypoints e547
+hand e1d7
+zoom-in e1b6
+circle-dashed e4b5

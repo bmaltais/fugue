@@ -27,7 +27,8 @@ struct CommandSpec {
     QStringList keys;    // default key bindings, as QKeySequence portable text ("Ctrl+S")
     QStringList gestures; // bindings that are not keys, shown but not rebindable ("Alt+drag")
     // Where the keys apply: app (everywhere), canvas, group-selected, compare, group (inside one),
-    // run (a run is in progress) or canvas-layers (over a Canvas view's layers panel, #226). The
+    // run (a run is in progress), canvas-view (over a Canvas view or while it has the focus: its tools, #230) or
+    // canvas-layers (over a Canvas view's layers panel, #226). The
     // more specific context owns a key (12.4).
     QString context = QStringLiteral("app");
     // How it compares to ComfyUI (12.4): "same", or what differs ("added", "Omarchy").
@@ -112,7 +113,7 @@ public:
     Q_INVOKABLE QString ownerOfPress(int key, int modifiers) const;
     // True for a command that acts on the Graph (its document, selection or view): the commands of the `canvas`, group
     // and compare contexts but the window's panels and bars, which share `canvas` (panel.*, the view.* bars and focus
-    // mode). Never one of `app` (quit, save, the document's undo, which is the region's too), `run` or `canvas-layers`.
+    // mode). Never one of `app` (quit, save, the document's undo, which is the region's too), `run`, `canvas-view` or `canvas-layers`.
     // A Canvas view with the focus keeps these keys from the Graph behind it (Blender's rule: the keys are the focused
     // editor's).
     Q_INVOKABLE bool actsOnGraph(const QString &id) const;

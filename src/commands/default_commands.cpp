@@ -74,6 +74,22 @@ QList<Row> defaultRows() {
         {"canvas-layers.mask", QT_TRANSLATE_NOOP("Command", "Turn the layer mask off or on"), {}, {"Shift+click the mask"}, "canvas-layers", "added"},
         {"canvas-layers.undo", QT_TRANSLATE_NOOP("Command", "Undo the last canvas change"), {"Ctrl+Z"}, {}, "canvas-layers", "added"},
         {"canvas-layers.redo", QT_TRANSLATE_NOOP("Command", "Redo the canvas change"), {"Ctrl+Shift+Z", "Ctrl+Y"}, {}, "canvas-layers", "added"},
+        // The Canvas view's tool strip (#230): its keys while the pointer is over the view or it has the focus (Blender's
+        // hover rule); Photoshop's keys (docs/ui-ergonomics.md References). Over the layers panel the panel's own win.
+        {"canvas-view.tool-hand", QT_TRANSLATE_NOOP("Command", "Hand: drag the picture to pan"), {"H"}, {"Space held"}, "canvas-view", "added"},
+        {"canvas-view.tool-zoom", QT_TRANSLATE_NOOP("Command", "Zoom: click to zoom in, Alt+click to zoom out"), {"Z"}, {}, "canvas-view", "added"},
+        {"canvas-view.tool-region", QT_TRANSLATE_NOOP("Command", "Rectangle region"), {"M", "R"}, {}, "canvas-view", "added"},
+        {"canvas-view.tool-brush", QT_TRANSLATE_NOOP("Command", "Mask brush"), {"B"}, {}, "canvas-view", "added"},
+        {"canvas-view.tool-eraser", QT_TRANSLATE_NOOP("Command", "Mask eraser"), {"E"}, {}, "canvas-view", "added"},
+        {"canvas-view.brush-swap", QT_TRANSLATE_NOOP("Command", "Swap the mask brush and eraser"), {"X"}, {}, "canvas-view", "added"},
+        {"canvas-view.brush-smaller", QT_TRANSLATE_NOOP("Command", "Make the brush smaller"), {"["}, {}, "canvas-view", "added"},
+        {"canvas-view.brush-larger", QT_TRANSLATE_NOOP("Command", "Make the brush larger"), {"]"}, {"Alt+drag"}, "canvas-view", "added"},
+        {"canvas-view.quick-mask", QT_TRANSLATE_NOOP("Command", "Quick Mask: paint the selection"), {"Q"}, {}, "canvas-view", "added"},
+        {"canvas-view.add-mask", QT_TRANSLATE_NOOP("Command", "Add a layer mask to the selected layer"), {"Ctrl+Shift+M"}, {}, "canvas-view", "added"},
+        {"canvas-view.mask-overlay", QT_TRANSLATE_NOOP("Command", "Show or hide the mask overlay"), {"\\"}, {}, "canvas-view", "added"},
+        {"canvas-view.mask-invert", QT_TRANSLATE_NOOP("Command", "Invert the mask"), {"Ctrl+I"}, {}, "canvas-view", "added"},
+        {"canvas-view.undo", QT_TRANSLATE_NOOP("Command", "Undo in the Canvas view (a mask stroke, the selection, the region)"), {"Ctrl+Z"}, {}, "canvas-view", "added"},
+        {"canvas-view.redo", QT_TRANSLATE_NOOP("Command", "Redo in the Canvas view"), {"Ctrl+Shift+Z", "Ctrl+Y"}, {}, "canvas-view", "added"},
     };
 }
 
@@ -95,9 +111,10 @@ void registerDefaultCommands(CommandRegistry &registry) {
     registry.setHandler("app.quit", [&registry] { registry.requestQuit(); });
     registry.setHandler("file.close", [&registry] { registry.requestClose(); });
     registry.setHandler("app.shortcuts", [&registry] { emit registry.shortcutsToggleRequested(); });
-    // The layers panel under the pointer does the work (CanvasView.qml listens for these ids).
+    // The layers panel or the Canvas view under the pointer does the work (CanvasLayersPanel.qml, CanvasView.qml listen
+    // for these ids).
     for (const QString &id : registry.ids())
-        if (id.startsWith(QLatin1String("canvas-layers.")))
+        if (id.startsWith(QLatin1String("canvas-layers.")) || id.startsWith(QLatin1String("canvas-view.")))
             registry.setHandler(id, [&registry, id] { emit registry.windowRequested(id); });
 }
 

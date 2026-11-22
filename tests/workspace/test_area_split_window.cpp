@@ -403,8 +403,11 @@ private slots:
         app.key(Qt::Key_Delete);
         app.key(Qt::Key_A, Qt::ControlModifier);
         app.commands.setUnsavedWork(true);
+        app.key(Qt::Key_Q); // Quick Mask (#230), never Quit; again leaves it and gives the region tool back
+        QTRY_VERIFY(view->property("quickMask").toBool());
         app.key(Qt::Key_Q);
-        QTest::qWait(50);
+        QTRY_VERIFY(!view->property("quickMask").toBool());
+        QCOMPARE(view->property("tool").toString(), QString("region"));
         QCOMPARE(app.zoom(), graphZoom);
         QVERIFY(app.model.document().graph.nodes.contains("region"));
         QCOMPARE(quits.count(), 0);
@@ -419,7 +422,8 @@ private slots:
         QTRY_COMPARE(cancels, 1);
         app.key(Qt::Key_0);
         settle();
-        const QPoint from = viewer->mapToScene(QPointF(viewer->width() * 0.3, viewer->height() * 0.7)).toPoint();
+        // On the picture itself (the tool strip narrows the view, so the fitted picture is letterboxed: its middle row).
+        const QPoint from = viewer->mapToScene(QPointF(viewer->width() * 0.3, viewer->height() * 0.5)).toPoint();
         QTest::mouseMove(app.window, from);
         QTest::mousePress(app.window, Qt::LeftButton, {}, from);
         for (int i = 1; i <= 4; ++i)

@@ -183,7 +183,10 @@ QVariantMap WidgetEdit::regionState(const QString &node) const {
                       {"canvasLinked", linked("canvas")},
                       {"maskLinked", linked("mask")},
                       {"revisionLinked", linked("revision")},
-                      {"editable", !(linked("x") || linked("y") || linked("width") || linked("height"))}};
+                      {"editable", !(linked("x") || linked("y") || linked("width") || linked("height"))},
+                      // Region 1.2 (#230): the selection painted in a Canvas view, a hash; "" for none (an older Region has no such input).
+                      {"selection", target(node, QStringLiteral("selection")).spec ? text("selection") : QString()},
+                      {"selectionWritable", target(node, QStringLiteral("selection")).spec != nullptr && !linked("selection")}};
     for (const char *name : kRegionNumbers)
         state.insert(QLatin1String(name) == QLatin1String("max_megapixels") ? QStringLiteral("cap") : QLatin1String(name), number(name));
     return state;
@@ -198,12 +201,36 @@ bool WidgetEdit::setRegion(const QString &node, int x, int y, int width, int hei
     for (auto it = wanted.cbegin(); it != wanted.cend(); ++it)
         if (it.value().toInt() != now.value(it.key()).toInt())
             changed << it.key();
-    if (changed.isEmpty())
+    // A rectangle drawn replaces a painted selection (as a new selection does in Photoshop): the node reads the rectangle.
+    const bool dropSelection = !now.value("selection").toString().isEmpty() && now.value("selectionWritable").toBool();
+    if (changed.isEmpty() && !dropSelection)
         return false;
     m_canvas->beginEdit();
     for (const QString &name : std::as_const(changed))
         setValue(node, name, wanted.value(name).toInt());
+    if (dropSelection)
+        setText(node, QStringLiteral("selection"), QString());
     m_canvas->endEdit(tr("Pick region"));
+    return true;
+}
+
+bool WidgetEdit::setSelection(const QString &node, const QString &selection, int x, int y, int width, int height) {
+    const QVariantMap now = regionState(node);
+    if (now.isEmpty() || !now.value("selectionWritable").toBool())
+        return false;
+    const bool rect = now.value("editable").toBool();
+    const QVariantMap wanted{{"x", x}, {"y", y}, {"width", width}, {"height", height}};
+    QStringList changed;
+    for (auto it = wanted.cbegin(); rect && it != wanted.cend(); ++it)
+        if (it.value().toInt() != now.value(it.key()).toInt())
+            changed << it.key();
+    if (changed.isEmpty() && now.value("selection").toString() == selection)
+        return false;
+    m_canvas->beginEdit();
+    setText(node, QStringLiteral("selection"), selection);
+    for (const QString &name : std::as_const(changed))
+        setValue(node, name, wanted.value(name).toInt());
+    m_canvas->endEdit(tr("Use selection"));
     return true;
 }
 

@@ -6,6 +6,7 @@
 #include <QQuickWindow>
 #include <QUrl>
 
+#include <algorithm>
 #include <cmath>
 
 #include "engine/file_roots.h"
@@ -98,6 +99,32 @@ void MaskLayer::setMaskOnly(bool on) {
     emit tintChanged();
 }
 
+void MaskLayer::setInverted(bool on) {
+    if (on == m_inverted)
+        return;
+    m_inverted = on;
+    markAllDirty();
+    emit tintChanged();
+}
+
+void MaskLayer::setBrushOpacity(qreal opacity) {
+    opacity = std::clamp(opacity, 0.0, 1.0);
+    if (opacity == m_brushOpacity)
+        return;
+    m_brushOpacity = opacity;
+    emit tintChanged();
+}
+
+void MaskLayer::setPaint(const mask::MaskPaint &paint) {
+    const bool resized = paint.width() != m_paint->width() || paint.height() != m_paint->height();
+    m_paint = std::make_unique<mask::MaskPaint>(paint.width(), paint.height(), paint.pixels());
+    markAllDirty();
+    if (resized)
+        emit imageSizeChanged();
+    emit historyChanged();
+    emit edited();
+}
+
 QString MaskLayer::folder() const { return m_folder.isEmpty() ? inputsDir() : m_folder; }
 
 void MaskLayer::setFolder(const QString &folder) {
@@ -134,7 +161,7 @@ void MaskLayer::reset() {
 }
 
 void MaskLayer::beginStroke(bool erase, double size, double hardness, double x, double y, double pressure) {
-    m_paint->beginStroke(erase ? mask::Mode::Erase : mask::Mode::Paint, {size, hardness, 1.0, {}});
+    m_paint->beginStroke(erase ? mask::Mode::Erase : mask::Mode::Paint, {size, hardness, m_brushOpacity, {}});
     m_paint->strokeTo({x, y}, pressure);
     changed(false);
 }
@@ -228,8 +255,9 @@ QSGNode *MaskLayer::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
         for (int y = 0; y < cell.height(); ++y) {
             auto *line = reinterpret_cast<QRgb *>(image.scanLine(y));
             for (int x = 0; x < cell.width(); ++x) {
-                const int v = m_paint->at(cell.x() + x, cell.y() + y);
-                line[x] = m_maskOnly ? qRgb(v, v, v) : qRgba(pr * v / 255, pg * v / 255, pb * v / 255, tint.alpha() * v / 255);
+                const int stored = m_paint->at(cell.x() + x, cell.y() + y);
+                const int v = m_inverted ? 255 - stored : stored;
+                line[x] = m_maskOnly ? qRgb(stored, stored, stored) : qRgba(pr * v / 255, pg * v / 255, pb * v / 255, tint.alpha() * v / 255);
             }
         }
         return image;

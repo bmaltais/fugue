@@ -31,6 +31,15 @@
 //    the head (`layersEditable`): ONE new revision each, producer `canvas-view:<op>`, the view moving on to it. undo()
 //    and redo() move the head along its parents (CanvasStore::undo, redo). `solo` shows one layer alone: a view-only
 //    state, never a revision, dropped when the shown revision changes.
+//  - the mask brush (#230): `maskTarget` is the position of the layer whose layer mask the view's brush paints (-1: none),
+//    set by targetMask() (a click on the mask's thumbnail) or addMask() (a new, fully revealing mask: one revision, and
+//    the brush then targets it, as Photoshop does). The mask is painted into `maskLayer` (the view's MaskLayer item); each
+//    maskPainted() (a stroke or shape ended) restarts a short idle (`maskIdle` ms), and when it runs out the strokes made
+//    meanwhile are stored as ONE revision (CanvasStore::setLayerMask, producer `canvas-view:mask-paint`; its unchanged tiles
+//    shared). Anything that needs the head first (undo, redo, another layer, another tool) commits at once
+//    (commitMask). invertMask, fillMask and clearMask are one revision each. Undo goes back one revision and the mask
+//    is read again from it. useSelection() stores a selection painted in the view (Quick Mask) by content and writes its
+//    hash and bounds into the followed Canvas Region's `selection` input as one undo step (Region 1.2).
 // It makes no window. The `region` map is {valid, reason, x, y, width, height, context: {x, y, width, height}, reads,
 // readsId, readsShown, writable, editable, adopts, padding, scale, cap, multiple}: `editable` is false while X, Y, Width or
 // Height is linked to another node (the rectangle is then drawn but not edited); `adopts` is true for a node with no
@@ -39,10 +48,12 @@
 // input is linked), "otherCanvas" (with `nodeCanvas`, `known`, `nodeCanvasName`: useCanvasForNode, showNodeCanvas).
 
 #include <QFileSystemWatcher>
+#include <QPointer>
 #include <QTimer>
 #include <QtQmlIntegration/qqmlintegration.h>
 
 #include "canvas/canvas_history.h"
+#include "canvas/mask_layer.h"
 #include "engine/canvas_layer_ops.h"
 #include "canvas/widget_edit.h"
 
@@ -92,6 +103,11 @@ class CanvasViewModel : public CanvasHistory {
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY layersChanged)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY layersChanged)
     Q_PROPERTY(int solo READ solo WRITE setSolo NOTIFY layersChanged)
+    // The mask brush (#230): see the header.
+    Q_PROPERTY(fugue::MaskLayer *maskLayer READ maskLayer WRITE setMaskLayer NOTIFY maskChanged)
+    Q_PROPERTY(int maskTarget READ maskTarget NOTIFY maskChanged)
+    Q_PROPERTY(bool maskPending READ maskPending NOTIFY maskChanged)
+    Q_PROPERTY(int maskIdle READ maskIdle WRITE setMaskIdle NOTIFY maskChanged)
     // [{id, label}] of the blend modes, Normal first.
     Q_PROPERTY(QVariantList blendModes READ blendModes CONSTANT)
 
@@ -162,6 +178,31 @@ public:
     Q_INVOKABLE bool undo();
     Q_INVOKABLE bool redo();
 
+    // ---- the mask brush (#230) ----
+    MaskLayer *maskLayer() const { return m_maskLayer; }
+    void setMaskLayer(MaskLayer *layer);
+    int maskTarget() const { return m_maskTarget; }
+    bool maskPending() const { return m_maskDirty; }
+    int maskIdle() const { return m_maskIdle.interval(); }
+    void setMaskIdle(int ms);
+    // A fully revealing (white) layer mask on the layer, one revision of the head; the brush then targets it. A layer that
+    // has one already is only targeted. False when nothing could be done (not the head, a mask layer).
+    Q_INVOKABLE bool addMask(int position);
+    // The brush paints this layer's mask (selects the layer alone and reads its mask into `maskLayer`); false when it has none.
+    Q_INVOKABLE bool targetMask(int position);
+    // The brush paints no layer mask any more (what was painted is stored first).
+    Q_INVOKABLE void untargetMask();
+    // A stroke or shape ended on `maskLayer`: the idle starts again.
+    Q_INVOKABLE void maskPainted();
+    // Stores what was painted since the last revision now, as one revision (`what` names it: canvas-view:<what>).
+    Q_INVOKABLE bool commitMask(const QString &what = QStringLiteral("mask-paint"));
+    Q_INVOKABLE bool invertMask();
+    Q_INVOKABLE bool fillMask();
+    Q_INVOKABLE bool clearMask();
+    // The selection painted in `selection` (a MaskLayer, Quick Mask) for the followed Canvas Region: stored by content and
+    // written to its `selection` input with its bounds, one undo step. {ok, hash, reason}: `reason` says in words why not.
+    Q_INVOKABLE QVariantMap useSelection(fugue::MaskLayer *selection);
+
     // Looks at a revision: the head, a candidate (against the head) or any other (against its parent).
     Q_INVOKABLE void show(const QString &revision);
     // Writes the shown revision to the followed node's `revision` (the head as "head", so the node keeps reading the
@@ -191,10 +232,16 @@ signals:
     void newResultChanged();
     void headNoticeChanged();
     void layersChanged();
+    void maskChanged();
 
 private:
     // Stores the edit on the shown head and moves the view to it, with `select` as the selection there.
     bool applyEdit(const canvas::LayerEdit &edit, const QList<int> &select);
+    // A stored edit: the view moves on to it (false, with `error`, when it did not land).
+    bool land(const Result<canvas::Commit> &done, const QList<int> &select);
+    // The target's mask read again from the shown revision when it is another one (an undo, a run's layer).
+    void syncMask();
+    bool loadMask(int position);
     void rebuildLayers();
     void updateSoloPicture();
     QList<int> positionsOf(const QVariantList &list) const;
@@ -239,6 +286,11 @@ private:
     bool m_canRedo = false;
     int m_solo = -1;
     QUrl m_soloSource;
+    QPointer<MaskLayer> m_maskLayer;
+    int m_maskTarget = -1;
+    QString m_maskOf; // the revision whose mask `m_maskLayer` holds
+    bool m_maskDirty = false;
+    QTimer m_maskIdle;
 };
 
 } // namespace fugue

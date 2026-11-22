@@ -39,7 +39,7 @@ import "canvasMenu.js" as CanvasMenu
 // "N pending" opens the newest for Accept or Drop. A candidate shows over the latest version; Show candidate switches it
 // off to see the latest alone. Compare (against the latest for a candidate, else the step before) opens
 // the compare modes of Compare Images (CompareModeButtons.qml). One bar (#228): the canvas and the pending chip, then the
-// tools in chunks (History and Layers, the look, the region, Export, the decision, Drop, Fit and 100%) and the host's `trailing` items
+// tools in chunks (History and Layers, the look, Export, the decision, Drop, Fit and 100%) and the host's `trailing` items
 // last (the dialog's close). A run's layer that lands on the latest version is followed, with a short notice "Layer
 // <name> added" and Undo. A real candidate (a Canvas Write with Keep as candidate on, or one that could not land on a
 // moved latest version) shows at once under a banner over the picture's foot (it never moves the picture): Back to
@@ -50,6 +50,21 @@ import "canvasMenu.js" as CanvasMenu
 // focus the window's bare Q (quit) does not fire here: it is kept for a quick mask (docs/ui-ergonomics.md References);
 // Ctrl+Q and the close button still quit, and the Graph's keys sleep while a Canvas area is the active one (Workspace).
 // Right to left the bar, the notes and the layers panel mirror with the window; the picture never does.
+//
+// The tool strip (#230; Photoshop's toolbar, Blender's toolbar: docs/ui-ergonomics.md References) is a narrow column at
+// the start of the picture, one icon button per tool with its key in the tooltip, the current one in the quiet marking:
+// Hand (H; Space held for a moment), Zoom (Z; Alt zooms out), Rectangle region (M or R: the frame above, the default),
+// Mask brush (B) and eraser (E; X swaps them), then Quick Mask (Q) at its foot. The options bar over the picture holds the
+// current tool's settings: Snap for the region; Zoom in or out; for the brush what it paints (the mask of a layer, the
+// Quick Mask selection, or nothing yet: Add mask, Quick Mask), Size, Hardness and Opacity as drag-number fields ([ and ]
+// size it, Alt+drag too), the mask's overlay (\, red over the hidden part) and its menu (Invert, Ctrl+I; Reveal all,
+// Hide all), Quick Mask's Use selection and Clear selection. The tools are commands of the registry (`canvas-view.*`, the
+// `canvas-view` context, on while the pointer is over the view or it has the focus); the layers panel's own keys win over
+// it. A layer mask is painted into `layerMask` (a MaskLayer): the brush hides (the painted part is the hidden part, in
+// red) and the eraser shows, and the strokes are ONE revision of the Head once the brush rests (CanvasViewModel's mask
+// brush); Ctrl+Z then takes the canvas back a step. Quick Mask paints the selection into `selectionMask` (view-only,
+// undone stroke by stroke); Use selection stores it by content and hands it to the followed Canvas Region's `selection`
+// input (Region 1.2, one undo step), so the next run redraws the painted part and lands as a layer.
 Item {
     id: root
     objectName: "canvasView"
@@ -142,9 +157,132 @@ Item {
     }
     property bool showHistory: false
 
+    // ---- the tool strip and its options (#230) ----
+    property string tool: "region" // hand, zoom, region, brush, eraser
+    property bool quickMask: false
+    property bool zoomOut: false
+    property real brushSize: 64
+    property real brushHardness: 0.8
+    property real brushOpacity: 1
+    property bool maskOverlay: true
+    // Why the last Use selection did nothing (the options bar says it; a stroke clears it).
+    property string selectionProblem: ""
+    readonly property bool brushing: tool === "brush" || tool === "eraser"
+    readonly property real maxBrush: Math.max(64, Math.min(2048, Math.max(canvasData.pictureSize.width, canvasData.pictureSize.height)))
+    readonly property bool paintsMask: !quickMask && canvasData.maskTarget >= 0
+    readonly property var maskRow: canvasData.layers.find(r => r.position === canvasData.maskTarget) ?? null
+    readonly property var paintTarget: quickMask ? selectionLayer : paintsMask ? layerMask : null
+    readonly property alias layerMaskItem: layerMask
+    readonly property alias selectionMask: selectionLayer
+    // The view's keys are live (the `canvas-view` context): the pointer is over it, or its picture has the focus.
+    readonly property bool keysHot: viewHover.hovered || pictureView.activeFocus
+    onKeysHotChanged: App.commands.setContextActive("canvas-view", keysHot)
+    function keysOf(id) { return (App.commands.entry(id).keys ?? []).join(", ") }
+    function setTool(name) {
+        toolBeforeQuickMask = "" // a tool picked by hand stays when Quick Mask ends
+        if (name === tool)
+            return
+        canvasData.commitMask() // the strokes so far are their own step
+        tool = name
+    }
+    function setSize(v) { brushSize = Math.max(1, Math.min(maxBrush, Math.round(v))) }
+    function setHardness(v) { brushHardness = Math.max(0, Math.min(1, Math.round(v * 100) / 100)) }
+    function stepSize(up) { setSize(up ? Math.max(brushSize + 1, brushSize * 1.25) : Math.min(brushSize - 1, brushSize / 1.25)) }
+    // Quick Mask takes the brush, and leaving it gives back the tool it took the place of.
+    property string toolBeforeQuickMask: ""
+    function toggleQuickMask() {
+        canvasData.commitMask()
+        quickMask = !quickMask
+        selectionProblem = ""
+        if (quickMask && !brushing) {
+            toolBeforeQuickMask = tool
+            tool = "brush"
+        } else if (!quickMask && toolBeforeQuickMask !== "" && brushing) {
+            tool = toolBeforeQuickMask
+        }
+        if (!quickMask)
+            toolBeforeQuickMask = ""
+    }
+    // The brush goes to a layer mask just targeted (Add mask, a click on a mask's thumbnail), as Photoshop's does.
+    function paintTheMask() {
+        quickMask = false
+        if (!brushing)
+            tool = "brush"
+    }
+    function addMaskToCurrent() {
+        const row = root.layersPanel.current
+        if (row && canvasData.addMask(row.position))
+            paintTheMask()
+    }
+    function useSelection() {
+        const answer = canvasData.useSelection(selectionLayer)
+        selectionProblem = answer.ok ? "" : answer.reason
+    }
+    function maskMenu(button) {
+        const entries = quickMask
+              ? [{text: qsTr("Invert"), value: "invert", detail: keysOf("canvas-view.mask-invert")},
+                 {text: qsTr("Select all"), value: "fill"}]
+              : [{text: qsTr("Invert"), value: "invert", detail: keysOf("canvas-view.mask-invert")},
+                 {text: qsTr("Reveal all"), value: "fill"},
+                 {text: qsTr("Hide all"), value: "clear"}]
+        openMenu(button, entries, value => {
+            if (value === "invert") root.runTool("canvas-view.mask-invert")
+            else if (root.quickMask) selectionLayer.fill()
+            else if (value === "fill") canvasData.fillMask()
+            else canvasData.clearMask()
+        }, 40)
+    }
+    // A command of the strip (the registry's `canvas-view.*`), from a key or a menu.
+    function runTool(id) {
+        switch (id) {
+        case "canvas-view.tool-hand": setTool("hand"); break
+        case "canvas-view.tool-zoom": setTool("zoom"); break
+        case "canvas-view.tool-region": setTool("region"); break
+        case "canvas-view.tool-brush": setTool("brush"); break
+        case "canvas-view.tool-eraser": setTool("eraser"); break
+        case "canvas-view.brush-swap": if (brushing) tool = tool === "brush" ? "eraser" : "brush"; break
+        case "canvas-view.brush-smaller": stepSize(false); break
+        case "canvas-view.brush-larger": stepSize(true); break
+        case "canvas-view.quick-mask": toggleQuickMask(); break
+        case "canvas-view.add-mask": addMaskToCurrent(); break
+        case "canvas-view.mask-overlay": maskOverlay = !maskOverlay; break
+        case "canvas-view.mask-invert": if (quickMask) selectionLayer.invert(); else canvasData.invertMask(); break
+        // Undo follows what is being done: a Quick Mask stroke, a layer mask's revision, else the document's (the region).
+        case "canvas-view.undo":
+            if (quickMask) selectionLayer.undo()
+            else if (paintsMask || canvasData.maskPending) canvasData.undo()
+            else App.commands.trigger("edit.undo")
+            break
+        case "canvas-view.redo":
+            if (quickMask) selectionLayer.redo()
+            else if (paintsMask) canvasData.redo()
+            else App.commands.trigger("edit.redo")
+            break
+        }
+    }
+    HoverHandler { id: viewHover }
+    Connections {
+        target: App.commands
+        function onWindowRequested(id) {
+            if (root.keysHot && id.startsWith("canvas-view."))
+                root.runTool(id)
+        }
+    }
+    // In a modal popup (the dialog) the window's shortcuts sleep: the view carries the keys of its own commands.
+    Instantiator {
+        model: root.ownShortcuts ? App.commands.activeKeys.filter(k => App.commands.ownerOf(k).startsWith("canvas-view.")) : []
+        delegate: Shortcut {
+            required property string modelData
+            sequence: modelData
+            enabled: root.keysHot && !(App.commands.textFieldFocus && App.commands.belongsToTextField(modelData))
+            onActivated: App.commands.triggerKey(modelData)
+        }
+    }
+
     CanvasViewModel {
         id: canvasData
-        onCanvasChanged: root.freeRect = root.noRect
+        onCanvasChanged: { root.freeRect = root.noRect; selectionLayer.reset() }
+        maskLayer: layerMask
         onFollowChanged: root.freeRect = root.noRect
         // A run's new candidate is shown at once (settings.json's canvas_show_new_results, live), unless the view is busy:
         // Compare on, or a rectangle being dragged. Then it waits, and shows when that ends (if still on the Head).
@@ -179,7 +317,11 @@ Item {
         nameFilters: [qsTr("PNG images (*.png)")]
         onAccepted: canvasData.exportPicture(selectedFile.toString())
     }
-    Component.onDestruction: exportDialog.close()
+    Component.onDestruction: {
+        exportDialog.close()
+        if (keysHot)
+            App.commands.setContextActive("canvas-view", false)
+    }
 
     // New canvas… and Import picture… (#228, C7), as the canvas picker has them: the canvas is made in this store and shown.
     // The New canvas dialog (#232), made the first time: the canvas is made in this view's store and shown at once.
@@ -294,7 +436,8 @@ Item {
             return
         }
         const owner = App.commands.ownerOfPress(event.key, event.modifiers)
-        event.accepted = (event.key === Qt.Key_Q && bare) || (owner !== "" && App.commands.actsOnGraph(owner))
+        // The bare Q is Quick Mask's here (#230, the `canvas-view` context); it never quits from the view.
+        event.accepted = (event.key === Qt.Key_Q && bare && !owner.startsWith("canvas-view.")) || (owner !== "" && App.commands.actsOnGraph(owner))
     }
     Keys.onPressed: event => {
         if (event.key === Qt.Key_Escape) {
@@ -426,21 +569,6 @@ Item {
                 onPicked: picked => pictureView.setView({mode: picked})
             }
         }
-        // The region's own tool, a chunk of its own after the look.
-        Chunk {
-            visible: root.regionValid
-            ViewButton {
-                objectName: "canvasViewSnap"
-                look: root.look
-                enabled: root.regionEditable && canvasData.region.multiple > 1
-                text: qsTr("Snap to %1").arg(canvasData.region.multiple)
-                tip: qsTr("Put the region's edges on multiples of the node's Multiple of; with a ratio held only the corner moves")
-                accented: false
-                checkable: true
-                current: root.snap
-                onTapped: root.snap = !root.snap
-            }
-        }
         Chunk {
             visible: canvasData.canvasId !== ""
             ViewButton {
@@ -509,6 +637,277 @@ Item {
         }
     }
 
+
+    // The options of the current tool (#230), one row over the picture (Photoshop's options bar, Blender's tool
+    // settings): never a text block, only what the tool needs to act. It wraps in a narrow area.
+    Flow {
+        id: optionsBar
+        objectName: "canvasViewOptions"
+        anchors.top: tools.bottom
+        anchors.topMargin: visible ? root.u : 0
+        width: parent.width
+        height: visible ? implicitHeight : 0
+        visible: canvasData.canvasId !== ""
+        spacing: root.u
+        Text {
+            objectName: "canvasViewToolName"
+            height: 7 * root.u
+            verticalAlignment: Text.AlignVCenter
+            rightPadding: root.u
+            color: root.look.label
+            font.pixelSize: root.look.labelSize
+            text: root.quickMask && root.brushing ? qsTr("Quick Mask") : root.tool === "hand" ? qsTr("Hand") : root.tool === "zoom" ? qsTr("Zoom")
+                  : root.tool === "brush" ? qsTr("Mask brush") : root.tool === "eraser" ? qsTr("Mask eraser") : qsTr("Rectangle region")
+        }
+        // The region: Snap to the node's Multiple of.
+        ViewButton {
+            objectName: "canvasViewSnap"
+            visible: root.tool === "region" && root.regionValid
+            look: root.look
+            enabled: root.regionEditable && canvasData.region.multiple > 1
+            text: qsTr("Snap to %1").arg(canvasData.region.multiple)
+            tip: qsTr("Put the region's edges on multiples of the node's Multiple of; with a ratio held only the corner moves")
+            accented: false
+            checkable: true
+            current: root.snap
+            onTapped: root.snap = !root.snap
+        }
+        // Zoom: in or out with a click (Alt does the other).
+        Chunk {
+            lead: false
+            visible: root.tool === "zoom"
+            ViewButton {
+                objectName: "canvasViewZoomIn"
+                look: root.look
+                text: qsTr("Zoom in")
+                tip: qsTr("A click zooms in; Alt+click zooms out")
+                accented: false
+                checkable: true
+                current: !root.zoomOut
+                onTapped: root.zoomOut = false
+            }
+            ViewButton {
+                objectName: "canvasViewZoomOut"
+                look: root.look
+                text: qsTr("Zoom out")
+                tip: qsTr("A click zooms out; Alt+click zooms in")
+                accented: false
+                checkable: true
+                current: root.zoomOut
+                onTapped: root.zoomOut = true
+            }
+        }
+        // The brush: what it paints, then its settings, then the mask's own.
+        Rectangle {
+            objectName: "canvasViewBrushTarget"
+            visible: root.brushing && root.paintTarget !== null
+            width: targetRow.implicitWidth + 4 * root.u
+            height: 7 * root.u
+            radius: root.look.smallCorner
+            color: root.look.selectedRow
+            Accessible.role: Accessible.StaticText
+            Accessible.name: targetText.text
+            Row {
+                id: targetRow
+                anchors.centerIn: parent
+                spacing: root.u
+                Glyph {
+                    anchors.verticalCenter: parent.verticalCenter
+                    look: root.look
+                    name: root.quickMask ? "circle-dashed" : "layers"
+                    color: root.look.text
+                }
+                Text {
+                    id: targetText
+                    objectName: "canvasViewBrushTargetText"
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: root.look.text
+                    font.pixelSize: root.look.labelSize
+                    text: root.quickMask ? qsTr("Selection") : qsTr("Mask of %1").arg(root.maskRow ? root.maskRow.name : "")
+                }
+            }
+        }
+        Chunk {
+            lead: false
+            visible: root.brushing && root.paintTarget === null
+            ViewButton {
+                objectName: "canvasViewBrushAddMask"
+                look: root.look
+                enabled: canvasData.layersEditable && root.layersPanel.current !== null && root.layersPanel.current.kind !== "mask"
+                text: qsTr("Add mask")
+                tip: root.layersPanel.current ? qsTr("Give %1 a layer mask and paint it (%2)").arg(root.layersPanel.current.name).arg(root.keysOf("canvas-view.add-mask"))
+                                         : qsTr("Select a layer to give it a mask")
+                onTapped: root.addMaskToCurrent()
+            }
+            ViewButton {
+                objectName: "canvasViewBrushQuickMask"
+                look: root.look
+                glyph: "circle-dashed"
+                text: qsTr("Quick Mask")
+                tip: qsTr("Paint the part to change as a selection (%1)").arg(root.keysOf("canvas-view.quick-mask"))
+                onTapped: root.toggleQuickMask()
+            }
+        }
+        Chunk {
+            visible: root.brushing
+            DragNumberField {
+                objectName: "canvasViewBrushSize"
+                width: 30 * root.u
+                look: root.look
+                label: qsTr("Size")
+                tip: qsTr("The brush's size in canvas pixels ([ and ], Alt+drag on the picture)")
+                value: root.brushSize
+                from: 1
+                to: root.maxBrush
+                step: 1
+                snap: 16
+                defaultValue: 64
+                format: v => qsTr("%1 px").arg(Math.round(v))
+                parse: text => Number(String(text).replace("px", "").trim())
+                onCommitted: v => root.setSize(v)
+            }
+            DragNumberField {
+                objectName: "canvasViewBrushHardness"
+                width: 30 * root.u
+                look: root.look
+                label: qsTr("Hardness")
+                tip: qsTr("How sharp the brush's edge is (Alt+drag up and down on the picture)")
+                value: root.brushHardness
+                from: 0
+                to: 1
+                step: 0.01
+                snap: 0.1
+                defaultValue: 0.8
+                format: v => qsTr("%1%").arg(Math.round(v * 100))
+                parse: text => Number(String(text).replace("%", "").trim()) / 100
+                onCommitted: v => root.setHardness(v)
+            }
+            DragNumberField {
+                objectName: "canvasViewBrushOpacity"
+                width: 30 * root.u
+                look: root.look
+                label: qsTr("Opacity")
+                tip: qsTr("How much one stroke covers")
+                value: root.brushOpacity
+                from: 0.01
+                to: 1
+                step: 0.01
+                snap: 0.1
+                defaultValue: 1
+                format: v => qsTr("%1%").arg(Math.round(v * 100))
+                parse: text => Number(String(text).replace("%", "").trim()) / 100
+                onCommitted: v => root.brushOpacity = v
+            }
+        }
+        Chunk {
+            visible: root.brushing && root.paintTarget !== null
+            ViewButton {
+                objectName: "canvasViewMaskOverlay"
+                visible: root.paintsMask
+                look: root.look
+                text: qsTr("Overlay")
+                tip: qsTr("Show the hidden part of the mask in red (%1)").arg(root.keysOf("canvas-view.mask-overlay"))
+                accented: false
+                checkable: true
+                current: root.maskOverlay
+                onTapped: root.maskOverlay = !root.maskOverlay
+            }
+            ViewButton {
+                id: maskMenuButton
+                objectName: "canvasViewMaskMenu"
+                look: root.look
+                glyph: "ellipsis"
+                accented: false
+                tip: root.quickMask ? qsTr("Invert or select all") : qsTr("Invert, reveal or hide the whole mask")
+                onTapped: root.maskMenu(maskMenuButton)
+            }
+        }
+        // Quick Mask: hand the selection to the run, or clear it (apart, last).
+        Chunk {
+            visible: root.quickMask
+            ViewButton {
+                objectName: "canvasViewUseSelection"
+                look: root.look
+                enabled: root.regionValid && canvasData.region.selectionWritable === true
+                text: qsTr("Use selection")
+                tip: !root.regionValid ? qsTr("Add or select a Canvas Region node first: it is what a run redraws")
+                     : canvasData.region.selectionWritable !== true ? qsTr("This Canvas Region takes no selection")
+                     : qsTr("Make %1 redraw the painted part (one undo step)").arg(root.followName)
+                onTapped: root.useSelection()
+            }
+        }
+        Chunk {
+            visible: root.quickMask
+            ViewButton {
+                objectName: "canvasViewClearSelection"
+                look: root.look
+                danger: true
+                text: qsTr("Clear selection")
+                tip: qsTr("Clear the painted selection (Ctrl+Z brings it back)")
+                onTapped: selectionLayer.clear()
+            }
+        }
+        Text {
+            objectName: "canvasViewSelectionProblem"
+            visible: root.quickMask && root.selectionProblem !== ""
+            height: 7 * root.u
+            verticalAlignment: Text.AlignVCenter
+            color: root.look.error
+            font.pixelSize: root.look.labelSize
+            text: root.selectionProblem
+        }
+    }
+
+    // The tools (#230), a narrow column at the start of the picture; it scrolls in a short area, never wraps.
+    Flickable {
+        id: toolStrip
+        objectName: "canvasViewToolStrip"
+        anchors.top: pictureView.top
+        anchors.bottom: pictureView.bottom
+        anchors.left: parent.left
+        width: 7 * root.u
+        visible: canvasData.canvasId !== ""
+        contentHeight: stripColumn.height
+        clip: true
+        interactive: contentHeight > height
+        boundsBehavior: Flickable.StopAtBounds
+        // A tool of the strip: its glyph, its name and key in the tooltip, the current one in the quiet marking (D7).
+        component ToolButton: ViewButton {
+            required property string toolName
+            required property string command
+            required property string name
+            objectName: "canvasViewTool-" + toolName
+            look: root.look
+            accented: false
+            checkable: true
+            current: root.tool === toolName
+            tip: qsTr("%1 (%2)").arg(name).arg(root.keysOf(command))
+            onTapped: root.setTool(toolName)
+        }
+        Column {
+            id: stripColumn
+            spacing: root.u
+            ToolButton { toolName: "hand"; command: "canvas-view.tool-hand"; glyph: "hand"; name: qsTr("Hand: drag to pan; Space held does it with any tool") }
+            ToolButton { toolName: "zoom"; command: "canvas-view.tool-zoom"; glyph: "zoom-in"; name: qsTr("Zoom: click to zoom in, Alt+click to zoom out") }
+            Item { width: 1; height: 2 * root.u }
+            ToolButton { toolName: "region"; command: "canvas-view.tool-region"; glyph: "square-dashed"; name: qsTr("Rectangle region: drag the area a run redraws") }
+            Item { width: 1; height: 2 * root.u }
+            ToolButton { toolName: "brush"; command: "canvas-view.tool-brush"; glyph: "brush"; name: qsTr("Mask brush: paint a layer mask or the Quick Mask") }
+            ToolButton { toolName: "eraser"; command: "canvas-view.tool-eraser"; glyph: "eraser"; name: qsTr("Mask eraser (X swaps with the brush)") }
+            Item { width: 1; height: 2 * root.u }
+            ViewButton {
+                objectName: "canvasViewQuickMask"
+                look: root.look
+                glyph: "circle-dashed"
+                accented: false
+                checkable: true
+                current: root.quickMask
+                tip: qsTr("Quick Mask: paint the part to change, in red (%1)").arg(root.keysOf("canvas-view.quick-mask"))
+                onTapped: root.toggleQuickMask()
+            }
+        }
+    }
+
     // The picture, and over it the region of the followed node. Never mirrored: a picture is not text.
     CompareView {
         id: pictureView
@@ -516,10 +915,10 @@ Item {
         look: root.look
         LayoutMirroring.enabled: false
         LayoutMirroring.childrenInherit: true
-        readonly property real startReserve: historyPanel.visible ? historyPanel.width + 2 * root.u : 0
+        readonly property real startReserve: (toolStrip.visible ? toolStrip.width + 2 * root.u : 0) + (historyPanel.visible ? historyPanel.width + 2 * root.u : 0)
         readonly property real endReserve: layersPanel.visible ? layersPanel.width + 2 * root.u : 0
         x: root.mirrored ? endReserve : startReserve
-        anchors.top: tools.bottom
+        anchors.top: optionsBar.bottom
         anchors.topMargin: root.u
         anchors.bottom: notes.top
         anchors.bottomMargin: root.u
@@ -548,7 +947,8 @@ Item {
         readonly property var rows: showAll ? canvasData.allSteps : canvasData.steps
         anchors.top: pictureView.top
         anchors.bottom: pictureView.bottom
-        anchors.left: parent.left
+        anchors.left: toolStrip.visible ? toolStrip.right : parent.left
+        anchors.leftMargin: toolStrip.visible ? 2 * root.u : 0
         width: 56 * root.u
         visible: root.showHistory && canvasData.canvasId !== "" && !root.compareOn
         radius: root.look.smallCorner
@@ -674,6 +1074,41 @@ Item {
         model: canvasData
         ownShortcuts: root.ownShortcuts
         decisionElsewhere: root.newResultShown
+        onMaskTargeted: root.paintTheMask()
+    }
+    // The masks painted on the picture (#230): the targeted layer mask (its hidden part in red, while Overlay is on) and
+    // the Quick Mask selection (red where painted). Under the region's frame, over the picture.
+    Item {
+        anchors.fill: pictureView
+        LayoutMirroring.enabled: false
+        LayoutMirroring.childrenInherit: true
+        visible: pictureView.visible && !root.compareOn && !pictureView.paired && pictureView.mode !== "difference"
+        MaskLayer {
+            id: layerMask
+            objectName: "canvasViewLayerMask"
+            anchors.fill: parent
+            clip: true
+            visible: root.paintsMask && root.maskOverlay
+            originX: pictureView.imageX
+            originY: pictureView.imageY
+            zoom: pictureView.imageScale
+            inverted: true
+            tint: Qt.alpha(root.look.error, 0.5)
+            brushOpacity: root.brushOpacity
+        }
+        MaskLayer {
+            id: selectionLayer
+            objectName: "canvasViewSelection"
+            anchors.fill: parent
+            clip: true
+            visible: root.quickMask
+            imageSize: canvasData.pictureSize
+            originX: pictureView.imageX
+            originY: pictureView.imageY
+            zoom: pictureView.imageScale
+            tint: Qt.alpha(root.look.error, 0.5)
+            brushOpacity: root.brushOpacity
+        }
     }
     Item {
         id: regionLayer
@@ -704,7 +1139,7 @@ Item {
                 rect: root.regionValid ? canvasData.region : root.freeRect
                 dimAlpha: 0
                 draw: true
-                editable: root.regionValid ? root.regionEditable : !root.compareOn
+                editable: root.tool === "region" && (root.regionValid ? root.regionEditable : !root.compareOn)
                 yieldPress: root.panKey
                 constrain: root.snap && root.regionValid ? ((r, keepSize) => canvasData.snapRegion(r, keepSize)) : null
                 onPressed: pictureView.forceActiveFocus()
@@ -721,6 +1156,51 @@ Item {
             look: root.look
             box: regionLayer.context
         }
+    }
+
+
+    // The pointer of the other tools, over the region's frame (#230): the mask brush (BrushPen, the Mask editor's own),
+    // the zoom's click, the hand's cursor (its drag is the viewer's pan: the frame is not edited then).
+    BrushPen {
+        id: brushPen
+        anchors.fill: pictureView
+        LayoutMirroring.enabled: false
+        LayoutMirroring.childrenInherit: true
+        visible: root.brushing && pictureView.visible && !root.compareOn
+        look: root.look
+        viewer: pictureView
+        target: root.paintTarget
+        imageSize: canvasData.pictureSize
+        tool: root.tool
+        brushSize: root.brushSize
+        brushHardness: root.brushHardness
+        spaceHeld: root.panKey
+        flipErase: root.paintsMask
+        prefix: "canvasViewBrush"
+        onPressedAt: pictureView.forceActiveFocus()
+        onResize: (size, hardness) => { root.setSize(size); root.setHardness(hardness) }
+        onPainted: {
+            root.selectionProblem = ""
+            if (!root.quickMask)
+                canvasData.maskPainted()
+        }
+    }
+    MouseArea {
+        objectName: "canvasViewZoomTool"
+        anchors.fill: pictureView
+        visible: root.tool === "zoom" && pictureView.visible && !root.panKey
+        acceptedButtons: Qt.LeftButton
+        cursorShape: Qt.CrossCursor
+        onClicked: mouse => {
+            pictureView.forceActiveFocus()
+            const out = ((mouse.modifiers & Qt.AltModifier) !== 0) !== root.zoomOut
+            pictureView.zoomAt(mouse.x, mouse.y, out ? 0.8 : 1.25)
+        }
+    }
+    Item {
+        anchors.fill: pictureView
+        visible: root.tool === "hand" && pictureView.visible
+        HoverHandler { cursorShape: Qt.OpenHandCursor }
     }
 
     // A run made a new candidate and the view moved to it (it shows over the Head): what to do with it, in one place, over

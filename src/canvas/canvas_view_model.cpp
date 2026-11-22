@@ -30,6 +30,10 @@ CanvasViewModel::CanvasViewModel(QObject *parent) : CanvasHistory(parent) {
     m_settle.setInterval(120);
     connect(&m_settle, &QTimer::timeout, this, &CanvasViewModel::refresh);
     connect(&m_watcher, &QFileSystemWatcher::directoryChanged, this, [this] { m_settle.start(); });
+    // The strokes of a mask, batched: one revision once the brush has rested this long (#230).
+    m_maskIdle.setSingleShot(true);
+    m_maskIdle.setInterval(400);
+    connect(&m_maskIdle, &QTimer::timeout, this, [this] { commitMask(); });
     connect(this, &CanvasHistory::revisionsChanged, this, [this] { rebuild(); });
     connect(this, &CanvasHistory::compareChanged, this, [this] {
         rebuildLayers();
@@ -423,7 +427,9 @@ void CanvasViewModel::updateRegion() {
                               {"padding", state.value("padding").toInt()},
                               {"scale", state.value("scale").toDouble()},
                               {"cap", state.value("cap").toDouble()},
-                              {"multiple", state.value("multiple").toInt()}};
+                              {"multiple", state.value("multiple").toInt()},
+                              {"selection", state.value("selection").toString()},
+                              {"selectionWritable", state.value("selectionWritable").toBool()}};
         }
     }
     if (out != m_region) {
@@ -659,12 +665,15 @@ void CanvasViewModel::rebuildLayers() {
         m_solo = -1;
     m_layersOf = shown;
     emit layersChanged();
+    syncMask();
 }
 
 void CanvasViewModel::selectLayer(int position, const QString &mode) {
     int count = int(m_layers.size());
     if (position < 0 || position >= count)
         return;
+    if (m_maskTarget >= 0 && (position != m_maskTarget || mode != QLatin1String("only")))
+        untargetMask(); // the brush paints the mask of the one layer it was on
     if (mode == QLatin1String("toggle")) {
         if (!m_selected.removeOne(position))
             m_selected.append(position);
@@ -721,11 +730,17 @@ void CanvasViewModel::updateSoloPicture() {
 bool CanvasViewModel::applyEdit(const canvas::LayerEdit &edit, const QList<int> &select) {
     if (!layersEditable() || edit.layers.empty())
         return false;
+    commitMask(); // the strokes painted so far are a step of their own, before this one
+    if (!layersEditable())
+        return false;
+    return land(store().editLayers(canvasId(), revisionB(), edit, QStringLiteral("canvas-view:") + canvas::layerOpName(edit.op)), select);
+}
+
+bool CanvasViewModel::land(const Result<canvas::Commit> &done, const QList<int> &select) {
     if (!error().isEmpty()) {
         m_error.clear();
         emit errorChanged();
     }
-    const Result<canvas::Commit> done = store().editLayers(canvasId(), revisionB(), edit, QStringLiteral("canvas-view:") + canvas::layerOpName(edit.op));
     if (!done) {
         fail(done.errors());
         return false;
@@ -872,6 +887,7 @@ bool CanvasViewModel::setMaskEnabled(const QVariantList &positions, bool enabled
 bool CanvasViewModel::removeMask(const QVariantList &positions) { return applyEdit(makeEdit(canvas::LayerOp::RemoveMask, positionsOf(positions)), m_selected); }
 
 bool CanvasViewModel::undo() {
+    commitMask(); // a stroke not stored yet is the step undone
     if (!canUndo())
         return false;
     const Result<canvas::HeadMove> moved = store().undo(canvasId(), m_head);
@@ -891,6 +907,7 @@ bool CanvasViewModel::undo() {
 }
 
 bool CanvasViewModel::redo() {
+    commitMask();
     if (!canRedo())
         return false;
     const Result<canvas::HeadMove> moved = store().redo(canvasId(), m_head);
@@ -907,6 +924,211 @@ bool CanvasViewModel::redo() {
     reload();
     m_editing = false;
     return true;
+}
+
+// ---- the mask brush (#230) -----------------------------------------------------------------------------------------
+
+void CanvasViewModel::setMaskLayer(MaskLayer *layer) {
+    if (layer == m_maskLayer)
+        return;
+    m_maskLayer = layer;
+    if (m_maskTarget >= 0 && !loadMask(m_maskTarget))
+        m_maskTarget = -1;
+    emit maskChanged();
+}
+
+void CanvasViewModel::setMaskIdle(int ms) {
+    if (ms == m_maskIdle.interval())
+        return;
+    m_maskIdle.setInterval(std::max(0, ms));
+    emit maskChanged();
+}
+
+bool CanvasViewModel::loadMask(int position) {
+    const canvas::CanvasStore s = store();
+    const Result<canvas::Revision> revision = s.revision(canvasId(), revisionB());
+    const Result<canvas::Tree> tree = revision ? s.tree(revision->tree) : Result<canvas::Tree>(revision.errors());
+    if (!tree || position < 0 || position >= int(tree->layers.size()) || !tree->layers[size_t(position)].hasMask)
+        return false;
+    if (!m_maskLayer) {
+        m_maskOf = revisionB();
+        return true; // read when the view gives its layer
+    }
+    const int width = tree->width, height = tree->height;
+    const Result<mask::MaskPaint> pixels = canvas::assembleLayer(width, height, 1, tree->layers[size_t(position)].maskTiles,
+                                                                 [&](const canvas::TileKey &key, const QString &hash) {
+        const mask::IRect rect = canvas::tileRect(key, width, height);
+        return s.tilePixels(hash, rect.width, rect.height, 1);
+    });
+    if (!pixels) {
+        fail(pixels.errors());
+        return false;
+    }
+    m_maskLayer->setPaint(pixels.value());
+    m_maskOf = revisionB();
+    return true;
+}
+
+bool CanvasViewModel::targetMask(int position) {
+    if (!layersEditable())
+        return false;
+    if (position == m_maskTarget && m_maskOf == revisionB())
+        return true;
+    commitMask();
+    if (!loadMask(position))
+        return false;
+    m_maskTarget = position;
+    m_selected = {position};
+    m_anchor = position;
+    emit layersChanged();
+    emit maskChanged();
+    return true;
+}
+
+void CanvasViewModel::untargetMask() {
+    if (m_maskTarget < 0)
+        return;
+    commitMask();
+    m_maskTarget = -1;
+    m_maskOf.clear();
+    emit maskChanged();
+}
+
+void CanvasViewModel::syncMask() {
+    if (m_maskTarget < 0 || m_maskOf == revisionB())
+        return;
+    // Another revision is shown (an undo, a run's layer, a step of History): the target goes when it cannot be painted
+    // there, else its mask is read again from it. Strokes not stored yet were committed before (undo, redo) or are lost
+    // with a head that moved under them (commitMask places them when it can).
+    m_maskDirty = false;
+    m_maskIdle.stop();
+    if (!layersEditable() || !loadMask(m_maskTarget)) {
+        m_maskTarget = -1;
+        m_maskOf.clear();
+    }
+    emit maskChanged();
+}
+
+void CanvasViewModel::maskPainted() {
+    if (m_maskTarget < 0)
+        return;
+    const bool was = m_maskDirty;
+    m_maskDirty = true;
+    m_maskIdle.start();
+    if (!was)
+        emit maskChanged();
+}
+
+bool CanvasViewModel::commitMask(const QString &what) {
+    m_maskIdle.stop();
+    if (!m_maskDirty)
+        return false;
+    m_maskDirty = false;
+    emit maskChanged();
+    if (m_maskTarget < 0 || !m_maskLayer || !layersEditable())
+        return false;
+    const QString producer = QStringLiteral("canvas-view:") + what;
+    Result<canvas::Commit> done = store().setLayerMask(canvasId(), revisionB(), m_maskTarget, m_maskLayer->paint(), producer);
+    if (done && !done->move.moved && done->move.head != revisionB()) {
+        // A run's layer landed while the strokes rested: they go onto the head as it is now when the layer is still
+        // there (a run adds its layer on top, so the positions below stay).
+        canvas::CanvasStore s = store();
+        const Result<canvas::Revision> was = s.revision(canvasId(), revisionB()), now = s.revision(canvasId(), done->move.head);
+        const Result<canvas::Tree> before = was ? s.tree(was->tree) : Result<canvas::Tree>(was.errors());
+        const Result<canvas::Tree> after = now ? s.tree(now->tree) : Result<canvas::Tree>(now.errors());
+        if (before && after && m_maskTarget < int(after->layers.size()) && after->layers[size_t(m_maskTarget)].name == before->layers[size_t(m_maskTarget)].name)
+            done = s.setLayerMask(canvasId(), done->move.head, m_maskTarget, m_maskLayer->paint(), producer);
+    }
+    if (!done || !done->move.moved)
+        return land(done, m_selected);
+    m_maskOf = done->revision.id; // the layer holds this revision's mask already: no read back
+    return land(done, {m_maskTarget});
+}
+
+bool CanvasViewModel::addMask(int position) {
+    if (!layersEditable() || position < 0 || position >= int(m_layers.size()))
+        return false;
+    for (const QVariant &row : std::as_const(m_layers)) {
+        const QVariantMap layer = row.toMap();
+        if (layer.value("position").toInt() != position)
+            continue;
+        if (layer.value("kind").toString() == QLatin1String("mask"))
+            return false;
+        if (layer.value("hasMask").toBool())
+            return targetMask(position);
+    }
+    commitMask();
+    const QSize size = sizeB();
+    mask::MaskPaint full(std::max(1, size.width()), std::max(1, size.height()));
+    full.fill();
+    if (!land(store().setLayerMask(canvasId(), revisionB(), position, full, QStringLiteral("canvas-view:mask-add")), {position}))
+        return false;
+    return targetMask(position);
+}
+
+bool CanvasViewModel::invertMask() {
+    if (m_maskTarget < 0 || !m_maskLayer || !layersEditable())
+        return false;
+    commitMask();
+    m_maskLayer->invert();
+    m_maskDirty = true;
+    return commitMask(QStringLiteral("mask-invert"));
+}
+
+bool CanvasViewModel::fillMask() {
+    if (m_maskTarget < 0 || !m_maskLayer || !layersEditable())
+        return false;
+    commitMask();
+    m_maskLayer->fill();
+    m_maskDirty = true;
+    return commitMask(QStringLiteral("mask-fill"));
+}
+
+bool CanvasViewModel::clearMask() {
+    if (m_maskTarget < 0 || !m_maskLayer || !layersEditable())
+        return false;
+    commitMask();
+    m_maskLayer->clear();
+    m_maskDirty = true;
+    return commitMask(QStringLiteral("mask-clear"));
+}
+
+QVariantMap CanvasViewModel::useSelection(MaskLayer *selection) {
+    const auto no = [](const QString &why) { return QVariantMap{{"ok", false}, {"reason", why}}; };
+    if (!selection)
+        return no(tr("Nothing is selected."));
+    if (!m_edits || m_follow.isEmpty() || !m_region.value("valid").toBool())
+        return no(tr("No Canvas Region reads this canvas: add one to use the selection."));
+    if (!m_region.value("selectionWritable").toBool())
+        return no(tr("This Canvas Region takes no selection: its Selection input is linked, or the node is an older version without one."));
+    const mask::MaskPaint &painted = selection->paint();
+    int left = painted.width(), top = painted.height(), right = -1, bottom = -1;
+    for (int y = 0; y < painted.height(); ++y)
+        for (int x = 0; x < painted.width(); ++x)
+            if (painted.at(x, y) > 0) {
+                left = std::min(left, x);
+                right = std::max(right, x);
+                top = std::min(top, y);
+                bottom = std::max(bottom, y);
+            }
+    if (right < 0)
+        return no(tr("Nothing is selected: paint the part to change first."));
+    const Result<QString> hash = store().storeSelection(painted);
+    if (!hash) {
+        fail(hash.errors());
+        return no(hash.error().message);
+    }
+    const bool adopts = m_region.value("adopts").toBool();
+    QUndoStack *stack = m_edits->undoStack();
+    if (adopts) { // the canvas too, in the same undo step
+        stack->beginMacro(tr("Use selection"));
+        m_edits->setText(m_follow, QStringLiteral("canvas"), canvasId());
+    }
+    const bool written = m_edits->setSelection(m_follow, hash.value(), left, top, right - left + 1, bottom - top + 1) || adopts;
+    if (adopts)
+        stack->endMacro();
+    updateRegion();
+    return written ? QVariantMap{{"ok", true}, {"hash", hash.value()}} : no(tr("The Canvas Region uses this selection already."));
 }
 
 } // namespace fugue

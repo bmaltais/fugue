@@ -245,7 +245,7 @@ public:
     // --- the region picker (#213) ---
     // What the picker window needs of a node with a canvas and a rectangle (Canvas Region): {ok: true,
     // canvas, revision, storeRoot ("" is the session's), x, y, width, height, padding, scale, cap, multiple, canvasLinked, maskLinked, revisionLinked,
-    // editable}. The numbers are the stored ones or the defaults; a linked input's value is not known
+    // editable, selection (the painted selection's hash, #230), selectionWritable}. The numbers are the stored ones or the defaults; a linked input's value is not known
     // before a run, so its default stands (padding and the rest) and `editable` is false when any of
     // x, y, width, height is linked. Empty for another node.
     Q_INVOKABLE QVariantMap regionState(const QString &node) const;
@@ -259,7 +259,13 @@ public:
     // node becomes. Its id, or "" when it could not be made.
     Q_INVOKABLE QString addRegionNode(const QString &canvas, const QVariantMap &rect);
     // Sets x, y, width and height of the node as ONE undo step; false when nothing changed or one is linked.
+    // A drawn rectangle replaces a painted selection: the node's `selection` is emptied in the same step (#230).
     Q_INVOKABLE bool setRegion(const QString &node, int x, int y, int width, int height);
+    // A selection painted in a Canvas view (#230): the node's `selection` input becomes the stored selection's hash and
+    // x, y, width and height its bounds (so the frame, the padded box and the size the model gets read right), as ONE
+    // undo step ("Use selection"); the rectangle stays as it was when it is linked. False when nothing changed, the node
+    // has no `selection` input or it is linked.
+    Q_INVOKABLE bool setSelection(const QString &node, const QString &selection, int x, int y, int width, int height);
     // The document's undo stack: a view that shows a node's values (the Canvas view's region) re-reads on its index.
     QUndoStack *undoStack() const;
     int canvasesRevision() const { return m_canvases.revision(); }

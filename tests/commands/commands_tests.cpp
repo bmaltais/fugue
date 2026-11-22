@@ -278,6 +278,41 @@ private slots:
             QVERIFY2(!registry.actsOnGraph(id), id);
     }
 
+    // The Canvas view's tools (#230): the `canvas-view` context owns their keys over the view (Q is Quick Mask, not
+    // Quit; Ctrl+Z the view's), the layers panel's keys still win over it, no two tools share a key, and none acts on
+    // the Graph.
+    void theCanvasViewsToolsOwnTheirKeysOverTheView() {
+        CommandRegistry registry;
+        fugue::registerDefaultCommands(registry);
+        QVERIFY2(registry.problems().isEmpty(), qPrintable(registry.problems().join('\n')));
+        QVERIFY(registry.setHandler("app.quit", [] {}));
+        QVERIFY(registry.setHandler("edit.undo", [] {}));
+        registry.setContextActive("canvas", true);
+        QCOMPARE(registry.ownerOf("Q"), QString("app.quit"));
+        QVERIFY(registry.ownerOf("B").isEmpty());
+        registry.setContextActive("canvas-view", true);
+        QCOMPARE(registry.ownerOf("Q"), QString("canvas-view.quick-mask"));
+        QCOMPARE(registry.ownerOf("B"), QString("canvas-view.tool-brush"));
+        QCOMPARE(registry.ownerOf("Ctrl+Z"), QString("canvas-view.undo"));
+        QCOMPARE(registry.ownerOf("\\"), QString("canvas-view.mask-overlay"));
+        QCOMPARE(registry.ownerOf("X"), QString("canvas-view.brush-swap"));
+        registry.setContextActive("canvas-layers", true);
+        QCOMPARE(registry.ownerOf("X"), QString("canvas-layers.delete"));
+        QCOMPARE(registry.ownerOf("Ctrl+Z"), QString("canvas-layers.undo"));
+        QCOMPARE(registry.ownerOf("B"), QString("canvas-view.tool-brush")); // the panel binds no B
+        QSet<QString> keys;
+        for (const QString &id : registry.ids()) {
+            if (!id.startsWith("canvas-view."))
+                continue;
+            QVERIFY2(!registry.actsOnGraph(id), qPrintable(id));
+            for (const QString &key : registry.keys(id)) {
+                QVERIFY2(!keys.contains(key), qPrintable(id + " " + key));
+                keys.insert(key);
+            }
+        }
+        QVERIFY(keys.contains("Ctrl+Shift+M") && keys.contains("Ctrl+I") && keys.contains("M") && keys.contains("R"));
+    }
+
     void textFieldsOwnBareAndShiftKeys() {
         for (const char *key : {"Q", "?", "N", "Shift+A", "Shift+Return", "Backspace", "Delete", "Tab", "Ctrl+A",
                                 "Ctrl+C", "Ctrl+V", "Ctrl+X", "Ctrl+Z", "Ctrl+Y", "Ctrl+Shift+Z", "Shift+Z"})

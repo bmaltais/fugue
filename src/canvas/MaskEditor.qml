@@ -1,7 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Shapes
 import Fugue
 
 // The mask editor (#172, spec 14.4): a picture at full size to paint a mask on. A LargeViewDialog
@@ -333,174 +332,21 @@ LargeViewDialog {
             brushOpacity: root.brushOpacity
         }
 
-        // The lasso's outline and the rectangle, in view coordinates, while a drag is on.
-        Shape {
-            anchors.fill: parent
-            visible: pen.action === "lasso" && pen.screenPath.length > 1
-            ShapePath {
-                strokeColor: Qt.rgba(0, 0, 0, 0.7)
-                strokeWidth: 3
-                fillColor: "transparent"
-                PathPolyline { path: pen.screenPath }
-            }
-            ShapePath {
-                strokeColor: "white"
-                strokeWidth: 1
-                fillColor: Qt.alpha(root.look.accent, 0.2)
-                PathPolyline { path: pen.screenPath }
-            }
-        }
-        Rectangle {
-            objectName: "maskRectPreview"
-            visible: pen.action === "rect"
-            x: Math.min(pen.pressAt.x, pen.at.x)
-            y: Math.min(pen.pressAt.y, pen.at.y)
-            width: Math.abs(pen.at.x - pen.pressAt.x)
-            height: Math.abs(pen.at.y - pen.pressAt.y)
-            color: Qt.alpha(root.look.accent, 0.2)
-            border.width: 1
-            border.color: "white"
-        }
-
-        // The brush: its circle, and the hardness as an inner ring. Drawn dark under white so it reads
-        // on any picture.
-        Item {
-            id: ring
-            objectName: "maskBrushRing"
-            readonly property bool shown: pen.over && !root.spaceHeld && (root.tool === "brush" || root.tool === "eraser")
-                                          && pen.action !== "pan"
-            readonly property real diameter: Math.max(2, root.brushSize * pictureViewer.imageScale)
-            readonly property point center: pen.action === "resize" ? pen.pressAt : pen.at
-            visible: shown
-            x: center.x
-            y: center.y
-            component Circle: Rectangle {
-                required property real across
-                property color edge: "white"
-                property real thickness: 1
-                x: -across / 2
-                y: -across / 2
-                width: across
-                height: across
-                radius: across / 2
-                color: "transparent"
-                border.width: thickness
-                border.color: edge
-            }
-            Circle { across: ring.diameter + 2; edge: Qt.rgba(0, 0, 0, 0.6); thickness: 1 }
-            Circle { across: ring.diameter; edge: root.erasing ? "#ff9f9a" : "white" }
-            Circle {
-                visible: root.brushHardness < 0.97 && ring.diameter * root.brushHardness > 6
-                across: ring.diameter * root.brushHardness
-                edge: Qt.rgba(1, 1, 1, 0.55)
-            }
-            Rectangle { x: -1; y: -1; width: 3; height: 3; radius: 1.5; color: "white" }
-        }
-
-        MouseArea {
+        // The pointer: brush, eraser, lasso and rectangle, Alt+drag sizing, pan and zoom (BrushPen.qml, the Canvas
+        // view's mask brush too).
+        BrushPen {
             id: pen
-            objectName: "maskPointer"
             anchors.fill: parent
-            hoverEnabled: true
-            acceptedButtons: Qt.LeftButton | Qt.MiddleButton // the middle button pans
-            preventStealing: true
-            cursorShape: root.spaceHeld ? (pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor)
-                         : root.tool === "brush" || root.tool === "eraser" ? Qt.BlankCursor : Qt.CrossCursor
-
-            property bool over: containsMouse
-            property point at: Qt.point(0, 0)        // the pointer, in view coordinates
-            property point pressAt: Qt.point(0, 0)   // where the press was
-            property point last: Qt.point(0, 0)
-            property string action: ""               // stroke, lasso, rect, pan, resize ("" when no drag)
-            property var path: []                    // the lasso's points, in picture pixels
-            property var screenPath: []              // the same, in view coordinates
-            property real startSize: 64
-            property real startHardness: 0.8
-            property bool erase: false
-
-            // A tablet's pressure scales the brush; a mouse is full.
-            PointHandler {
-                id: stylus
-                acceptedDevices: PointerDevice.Stylus
-            }
-            readonly property real pressure: stylus.active ? Math.max(0.05, stylus.point.pressure) : 1
-
-            // View coordinates to picture pixels.
-            function pixelAt(x, y) {
-                const f = pictureViewer.pointAt(x, y)
-                return Qt.point(f.x * root.imageSize.width, f.y * root.imageSize.height)
-            }
-
-            onPressed: mouse => {
-                pictureViewer.forceActiveFocus()
-                at = Qt.point(mouse.x, mouse.y)
-                pressAt = at
-                last = at
-                const p = pixelAt(mouse.x, mouse.y)
-                if (root.spaceHeld || mouse.button === Qt.MiddleButton) {
-                    action = "pan"
-                } else if ((mouse.modifiers & Qt.AltModifier) && (root.tool === "brush" || root.tool === "eraser")) {
-                    action = "resize"
-                    startSize = root.brushSize
-                    startHardness = root.brushHardness
-                } else if (root.tool === "brush" || root.tool === "eraser") {
-                    action = "stroke"
-                    root.canvasLayer.beginStroke(root.erasing, root.brushSize, root.brushHardness, p.x, p.y, pressure)
-                } else if (root.tool === "lasso") {
-                    action = "lasso"
-                    path = [p]
-                    screenPath = [Qt.point(at.x, at.y)]
-                } else {
-                    action = "rect"
-                }
-            }
-            onPositionChanged: mouse => {
-                at = Qt.point(mouse.x, mouse.y)
-                if (!pressed)
-                    return
-                const p = pixelAt(mouse.x, mouse.y)
-                if (action === "stroke") {
-                    root.canvasLayer.strokeTo(p.x, p.y, pressure)
-                } else if (action === "lasso") {
-                    const prior = screenPath[screenPath.length - 1]
-                    if (Math.abs(prior.x - at.x) + Math.abs(prior.y - at.y) >= 2) {
-                        path = path.concat([p])
-                        screenPath = screenPath.concat([Qt.point(at.x, at.y)])
-                    }
-                } else if (action === "resize") {
-                    // Right grows and up hardens, as ComfyUI's Alt+drag does; the ring follows the pointer's edge.
-                    root.setSize(startSize + 2 * (at.x - pressAt.x) / pictureViewer.imageScale)
-                    root.setHardness(startHardness + (pressAt.y - at.y) / 200)
-                } else if (action === "pan") {
-                    if (!pictureViewer.actual && pictureViewer.zoom <= 1)
-                        return // at Fit the picture stays put
-                    pictureViewer.setView({centerX: pictureViewer.centerX - (at.x - last.x) / (pictureViewer.aw * pictureViewer.imageScale),
-                                    centerY: pictureViewer.centerY - (at.y - last.y) / (pictureViewer.ah * pictureViewer.imageScale)})
-                    last = at
-                }
-            }
-            // The wheel zooms at the pointer, as the viewer's does (this area is over it).
-            onWheel: wheel => pictureViewer.zoomAt(wheel.x, wheel.y, Math.pow(1.15, wheel.angleDelta.y / 120))
-            onReleased: mouse => finish(mouse.modifiers)
-            onCanceled: finish(Qt.NoModifier)
-            onContainsMouseChanged: if (!containsMouse && !pressed) action = ""
-
-            function finish(modifiers) {
-                const erasing = (modifiers & Qt.AltModifier) !== 0
-                if (action === "stroke") {
-                    root.canvasLayer.endStroke()
-                } else if (action === "lasso") {
-                    if (path.length >= 3)
-                        root.canvasLayer.fillPolygon(path, erasing)
-                } else if (action === "rect") {
-                    const a = pixelAt(pressAt.x, pressAt.y), b = pixelAt(at.x, at.y)
-                    if (Math.abs(b.x - a.x) >= 1 && Math.abs(b.y - a.y) >= 1)
-                        root.canvasLayer.fillRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y), erasing)
-                }
-                action = ""
-                path = []
-                screenPath = []
-            }
+            look: root.look
+            viewer: pictureViewer
+            target: root.canvasLayer
+            imageSize: root.imageSize
+            tool: root.tool
+            brushSize: root.brushSize
+            brushHardness: root.brushHardness
+            spaceHeld: root.spaceHeld
+            onPressedAt: pictureViewer.forceActiveFocus()
+            onResize: (size, hardness) => { root.setSize(size); root.setHardness(hardness) }
         }
     }
 
