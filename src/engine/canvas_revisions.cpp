@@ -20,7 +20,8 @@ Errors resolveCanvasRevisions(CompiledGraph &graph, const CanvasRevisionResolver
             continue;
         const InputValue canvas = node.inputs.value(QStringLiteral("canvas"));
         const InputValue revision = node.inputs.value(QStringLiteral("revision"));
-        const bool canvasKnown = canvas.kind() == InputValue::Kind::Literal && canvas.literal().isString() && !canvas.isEmpty();
+        // A canvas that is not chosen yet (a template's blank) is left for the kernel to refuse at run time.
+        const bool canvasKnown = canvas.kind() == InputValue::Kind::Literal && canvas.literal().isString() && !canvas.literal().toString().trimmed().isEmpty();
         const bool revisionKnown = revision.isEmpty() || (revision.kind() == InputValue::Kind::Literal && revision.literal().isString());
         if (!canvasKnown || !revisionKnown)
             continue;

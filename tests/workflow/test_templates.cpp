@@ -966,6 +966,28 @@ private slots:
         QCOMPARE(library.find("text-to-video")->categoryTitle, QStringLiteral("Video"));
     }
 
+    // The generative fill template (#210, spec 14.5): Canvas Region, a Klein inpaint and Canvas Write
+    // that keeps its result as a candidate, in plain nodes (no group), with no canvas chosen.
+    void theGenerativeFillTemplateFillsACanvasRegionAndKeepsACandidate() {
+        const QString root = QStringLiteral(FUGUE_SOURCE_DIR "/templates");
+        QVERIFY2(bundledProblem(root).isEmpty(), qPrintable(bundledProblem(root)));
+        Fixture f;
+        const TemplateLibrary library({{root, false}}, &f.registry);
+        const auto found = library.find("generative-fill");
+        QVERIFY2(found.has_value(), "the template generative-fill is not here; the templates submodule is stale");
+        QCOMPARE(found->category, QStringLiteral("edit"));
+        const Document document = Document::loadFile(found->workflow).value();
+        QVERIFY(!hasErrors(compile(document, f.registry).problems()));
+        const auto &nodes = document.graph.nodes;
+        QCOMPARE(nodes.value("region").type, QStringLiteral("fugue/canvas-region"));
+        QCOMPARE(nodes.value("write").type, QStringLiteral("fugue/canvas-write"));
+        QVERIFY(nodes.value("write").inputs.value("candidate").literal().toBool());
+        QVERIFY(nodes.value("region").inputs.value("canvas").literal().toString().isEmpty()); // the person picks one
+        QCOMPARE(nodes.value("sample").inputs.value("steps").literal().toInt(), 4);
+        QCOMPARE(nodes.value("sample").inputs.value("guidance").literal().toDouble(), 1.0);
+        QVERIFY(document.groups.isEmpty());
+    }
+
     // The two masking templates (#177, spec 14.4): in Image editing, with the painted sample mask
     // beside the picture (an input file, as a picture is), and the settings that a group or a node
     // leaves without a default set for Klein: 4 steps, guidance 1.

@@ -117,6 +117,18 @@ private slots:
         QCOMPARE(compileForRun(doc, first, {}, setup)->toJson(), compileForRun(doc, second, {}, setup)->toJson());
     }
 
+    // A template ships with no canvas chosen: that compiles, and the kernel asks for one at run time.
+    void aBlankCanvasIsLeftAloneAndNeverAsked() {
+        Fake fake;
+        RunCompileSetup setup;
+        setup.resolveCanvas = fake.resolver();
+        Registry registry = makeRegistry();
+        const Compilation c = compileForRun(document("'canvas': ' '"), registry, {}, setup);
+        QVERIFY(c.ok());
+        QCOMPARE(fake.asked, 0);
+        QVERIFY(regionRevision(c) != hashA);
+    }
+
     void aMissingCanvasIsAnErrorOnTheNode() {
         Fake fake;
         RunCompileSetup setup;
