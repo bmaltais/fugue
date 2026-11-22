@@ -97,6 +97,10 @@ picture around it. (The inpaint template is the other way: there the reference h
   Padding 64 px, 1 megapixel and Blend 16 px are the defaults; Megapixels 0 keeps the crop's size.
 - **Denoise.** 1 replaces what is under the mask. Lower keeps its shapes and colors. Below 1, put
   a Fill Masked (blur) before VAE Encode when the old content should not show through.
+- **Color shift.** An edit can come back a little lighter, darker or tinted at the seam. Color Match
+  (the picture, a reference, and the mask so only the kept part is measured) moves the picture's
+  colors to the reference's; put it before Composite Masked or Stitch, and lower Strength to keep
+  some of the new color. The reference is the original picture.
 - **Wrong way round.** If the rest of the picture changed and the painted part did not, the mask
   is inverted: use Invert in the editor or an Invert Mask node.
 
