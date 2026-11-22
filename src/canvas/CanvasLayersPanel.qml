@@ -29,6 +29,9 @@ Rectangle {
     required property CanvasLook look
     required property CanvasViewModel model
     property bool ownShortcuts: false
+    // The view shows its own Accept and Drop for this candidate where the eye is (the new-candidate banner): the panel
+    // then offers only Go to Head, so no decision is offered twice.
+    property bool decisionElsewhere: false
     readonly property real u: look.unit
     readonly property var rows: model.layers
     readonly property var chosen: model.selection
@@ -443,14 +446,55 @@ Rectangle {
             width: parent.width
             spacing: root.u
 
-            Text {
+            // Read only (another revision than the Head is shown): why, in plain words, and what to do about it here.
+            Column {
                 objectName: "canvasLayersReadOnly"
+                readonly property string kind: root.model.kindB
                 visible: !root.editable && root.rows.length > 0
                 width: parent.width
-                wrapMode: Text.Wrap
-                color: root.look.label
-                font.pixelSize: root.look.captionSize
-                text: qsTr("Layers are changed on the Head: go to Head to change them.")
+                spacing: root.u
+                Text {
+                    objectName: "canvasLayersReadOnlyText"
+                    width: parent.width
+                    wrapMode: Text.Wrap
+                    color: root.look.label
+                    font.pixelSize: root.look.captionSize
+                    text: parent.kind === "candidate" ? qsTr("You are looking at a new candidate. Accept or Drop it, or go to Head, to change layers.")
+                          : parent.kind === "dropped" ? qsTr("You are looking at a dropped candidate. Accept it, or go to Head, to change layers.")
+                          : qsTr("You are looking at an earlier revision. Go to Head to change layers.")
+                }
+                // Go to Head, then the candidate's decision (Accept is not the accent fill here: the view's bar has the
+                // one primary), Drop apart and last.
+                Flow {
+                    width: parent.width
+                    spacing: root.u
+                    ViewButton {
+                        objectName: "canvasLayersGoHead"
+                        look: root.look
+                        text: qsTr("Go to Head")
+                        tip: qsTr("Show the Head, whose layers can be changed")
+                        onTapped: root.model.show(root.model.head)
+                    }
+                    ViewButton {
+                        objectName: "canvasLayersAccept"
+                        look: root.look
+                        visible: !root.decisionElsewhere && (root.model.kindB === "candidate" || root.model.kindB === "dropped")
+                        text: qsTr("Accept")
+                        tip: qsTr("Make this candidate the Head of the canvas")
+                        onTapped: root.model.accept(root.model.revisionB)
+                    }
+                    Item { width: 2 * root.u; height: 1; visible: dropButton.visible }
+                    ViewButton {
+                        id: dropButton
+                        objectName: "canvasLayersDrop"
+                        look: root.look
+                        visible: !root.decisionElsewhere && root.model.kindB === "candidate"
+                        danger: true
+                        text: qsTr("Drop")
+                        tip: qsTr("Hide this candidate (it is kept, and Accept still takes it)")
+                        onTapped: root.model.drop(root.model.revisionB)
+                    }
+                }
             }
             // A notice with its action, in the window's one notice look (Banner.qml), not an accent tint.
             Banner {

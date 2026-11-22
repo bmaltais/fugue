@@ -294,10 +294,43 @@ private slots:
         QTRY_COMPARE(revisions(), 2);
         QVERIFY(QMetaObject::invokeMethod(model(app), "show", Q_ARG(QString, m_head)));
         QTRY_VERIFY(find(app.window, "canvasLayersReadOnly"));
+        QCOMPARE(find(app.window, "canvasLayersReadOnlyText")->property("text").toString(),
+                 QString("You are looking at an earlier revision. Go to Head to change layers."));
+        QVERIFY(!find(app.window, "canvasLayersAccept")); // nothing to decide on an earlier revision
         QVERIFY(!find(app.window, "canvasLayerDelete")->isEnabled());
         click(app, "canvasLayerEye-1");
         QTest::qWait(100);
         QCOMPARE(revisions(), 2);
+        // The list still selects (a view-only state), and Go to Head is the way to change it (#228, the owner's report).
+        click(app, "canvasLayer-1");
+        QTRY_VERIFY(model(app)->property("selection").toList().contains(1));
+        click(app, "canvasLayersGoHead");
+        QTRY_VERIFY(!find(app.window, "canvasLayersReadOnly"));
+        QTRY_VERIFY(find(app.window, "canvasLayerDelete")->isEnabled());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // A pending candidate shown: the panel says so and offers Go to Head, Accept and Drop (Accept not in the accent: the
+    // view's bar has the one primary); once accepted, its layers can be changed.
+    void aCandidateShownOffersItsDecisionInThePanel() {
+        PaintDocument d(256, 256);
+        d.loadLayer(LayerKind::Paint, "Base", true, 1, solid(256, 256, {30, 60, 200, 255}));
+        d.loadLayer(LayerKind::Paint, "Candidate fill", true, 1, solid(256, 256, {200, 200, 10, 255}));
+        const QString candidate = canvas::CanvasStore::forSession().addRevision(m_canvas, d, m_head, "canvas-write:write").value().id;
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        click(app, "canvasViewChoice-" + candidate.mid(7, 8));
+        QTRY_COMPARE(model(app)->property("revisionB").toString(), candidate);
+        QTRY_VERIFY(find(app.window, "canvasLayersReadOnly"));
+        QCOMPARE(find(app.window, "canvasLayersReadOnlyText")->property("text").toString(),
+                 QString("You are looking at a new candidate. Accept or Drop it, or go to Head, to change layers."));
+        QVERIFY(find(app.window, "canvasLayersGoHead") && find(app.window, "canvasLayersDrop"));
+        QVERIFY(!find(app.window, "canvasLayersAccept")->property("marked").toBool()); // one primary: the bar's
+        click(app, "canvasLayersAccept");
+        QTRY_COMPARE(model(app)->property("head").toString(), candidate);
+        QTRY_VERIFY(!find(app.window, "canvasLayersReadOnly"));
+        QTRY_VERIFY(find(app.window, "canvasLayerDelete")->isEnabled());
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
