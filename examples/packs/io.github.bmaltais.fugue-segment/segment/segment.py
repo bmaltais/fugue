@@ -57,22 +57,29 @@ def parse_prompts(positive: str, negative: str, box: str, size: tuple[int, int])
     """Points and box from the node's text inputs, in the picture's pixels. `size` is (width, height)."""
     include = parse_coordinates(positive, 2, "Include points")
     exclude = parse_coordinates(negative, 2, "Exclude points")
-    boxes = parse_coordinates(box, 4, "Box")
-    if len(boxes) > 1:
-        raise NodeError("prompt_invalid", "Box takes one line: x1 y1 x2 y2.")
+    rows = parse_coordinates(box, 4, "Box")
     for x, y in include + exclude:
         check_inside(x, y, size, "A point")
-    rectangle = None
-    if boxes:
-        x1, y1, x2, y2 = boxes[0]
+    rectangles = []
+    for x1, y1, x2, y2 in rows:
         check_inside(x1, y1, size, "The box corner")
         check_inside(x2, y2, size, "The box corner")
         rectangle = (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
         if rectangle[0] == rectangle[2] or rectangle[1] == rectangle[3]:
             raise NodeError("prompt_invalid", "The box has no area: its two corners share an x or a y.")
-    if rectangle is None and not include:
+        rectangles.append(rectangle)
+    if len(rectangles) > 1 and (include or exclude):
+        raise NodeError("prompt_invalid", "Points go with one box: with several boxes (one object each, as Find by Text gives) "
+                        "leave Include points and Exclude points empty.")
+    if not rectangles and not include:
         raise NodeError("prompt_missing", "Nothing to segment. Give at least one Include point, or a Box.")
-    return {"include": include, "exclude": exclude, "box": rectangle}
+    return {"include": include, "exclude": exclude, "boxes": rectangles}
+
+
+def objects(prompts: dict) -> list[dict]:
+    """One prompt set per object: each box is an object (the points go with the only box, or with no box)."""
+    boxes = prompts["boxes"] or [None]
+    return [{"include": prompts["include"], "exclude": prompts["exclude"], "box": box} for box in boxes]
 
 
 def decoder_prompts(prompts: dict, size: tuple[int, int]) -> tuple[np.ndarray, np.ndarray]:
@@ -174,14 +181,17 @@ class Runner:
         say(0.2, "looking at the picture")
         embedding = self.embed(Path(inputs["image"]["path"]), image)
         say(0.8, "finding the object")
-        coords, labels = decoder_prompts(prompts, image.size)
-        feed = {"point_coords": coords, "point_labels": labels,
-                "mask_input": np.zeros((1, 1, 256, 256), np.float32), "has_mask_input": np.zeros(1, np.float32), **embedding}
         wanted = {i.name for i in self.decoder.get_inputs()}
-        masks, scores = self.decoder.run(None, {k: v for k, v in feed.items() if k in wanted})[:2]
-        best = int(np.argmax(np.asarray(scores).reshape(-1)))
+        union = None  # the logits of the objects, each cell the largest: the union of their masks
+        for each in objects(prompts):
+            coords, labels = decoder_prompts(each, image.size)
+            feed = {"point_coords": coords, "point_labels": labels,
+                    "mask_input": np.zeros((1, 1, 256, 256), np.float32), "has_mask_input": np.zeros(1, np.float32), **embedding}
+            masks, scores = self.decoder.run(None, {k: v for k, v in feed.items() if k in wanted})[:2]
+            best = np.asarray(masks)[0, int(np.argmax(np.asarray(scores).reshape(-1)))]
+            union = best if union is None else np.maximum(union, best)
         say(0.95, "making the mask")
-        mask = to_mask(np.asarray(masks)[0, best], image.size, bool(inputs.get("invert")), bool(inputs.get("soft")))
+        mask = to_mask(union, image.size, bool(inputs.get("invert")), bool(inputs.get("soft")))
         work.mkdir(parents=True, exist_ok=True)
         mask.save(work / "mask.png")
         return {"mask": {"path": "mask.png"},

@@ -6,8 +6,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import segment as sg
 from PIL import Image
+
+import segment as sg
 
 FIXTURE = Path(__file__).parent / "fixtures" / "tiny-sam.zip"
 SIZE = (100, 80)  # width, height of the test picture
@@ -44,7 +45,20 @@ def test_text_that_is_not_numbers_is_refused():
 
 def test_a_box_is_put_in_order_whatever_corner_comes_first():
     prompts = sg.parse_prompts("", "", "90 70, 10 20", SIZE)
-    assert prompts["box"] == (10, 20, 90, 70) and prompts["include"] == []
+    assert prompts["boxes"] == [(10, 20, 90, 70)] and prompts["include"] == []
+
+
+def test_several_boxes_are_several_objects_one_per_line():
+    prompts = sg.parse_prompts("", "", "1 1 5 5\n\n20 20 10 10", SIZE)
+    assert prompts["boxes"] == [(1, 1, 5, 5), (10, 10, 20, 20)]
+    assert [o["box"] for o in sg.objects(prompts)] == [(1, 1, 5, 5), (10, 10, 20, 20)]
+
+
+def test_points_go_with_one_object_so_several_boxes_refuse_them():
+    for args in (("5 5", "", "1 1 9 9\n2 2 8 8"), ("", "5 5", "1 1 9 9\n2 2 8 8")):
+        with pytest.raises(sg.NodeError) as error:
+            sg.parse_prompts(*args, SIZE)
+        assert error.value.code == "prompt_invalid" and "one box" in str(error.value)
 
 
 def test_something_to_segment_is_needed():
@@ -60,8 +74,8 @@ def test_a_point_outside_the_picture_says_the_size():
     assert error.value.code == "prompt_outside" and "100 x 80" in str(error.value)
 
 
-def test_a_box_with_no_area_or_two_lines_is_refused():
-    for box in ("10 10 10 50", "1 1 5 5\n2 2 6 6"):
+def test_a_box_with_no_area_is_refused():
+    for box in ("10 10 10 50", "1 1 5 5\n7 7 7 9"):
         with pytest.raises(sg.NodeError) as error:
             sg.parse_prompts("", "", box, SIZE)
         assert error.value.code == "prompt_invalid"
@@ -71,14 +85,14 @@ def test_a_box_with_no_area_or_two_lines_is_refused():
 
 def test_decoder_prompts_put_the_box_first_then_include_then_exclude_in_model_space():
     prompts = sg.parse_prompts("50 40", "10 20", "0 0 100 80", SIZE)
-    coords, labels = sg.decoder_prompts(prompts, SIZE)
+    coords, labels = sg.decoder_prompts(sg.objects(prompts)[0], SIZE)
     assert coords.shape == (1, 4, 2) and labels.shape == (1, 4)
     assert labels[0].tolist() == [2, 3, 1, 0]
     np.testing.assert_allclose(coords[0], [[0, 0], [1024, 1024], [512, 512], [102.4, 256]], rtol=1e-5)
 
 
 def test_decoder_prompts_with_one_point_have_no_padding_point():
-    coords, labels = sg.decoder_prompts(sg.parse_prompts("50 40", "", "", SIZE), SIZE)
+    coords, labels = sg.decoder_prompts(sg.objects(sg.parse_prompts("50 40", "", "", SIZE))[0], SIZE)
     assert coords.shape == (1, 1, 2) and labels.tolist() == [[1.0]]
 
 
@@ -150,6 +164,12 @@ def test_a_box_gives_that_box(tmp_path):
     assert 0.9 < (a[10:50, 20:60] == 255).mean()
 
 
+def test_two_boxes_give_the_union_of_their_objects(tmp_path):
+    request, work = run_request(tmp_path, FIXTURE, box="10 10 30 30\n60 40 90 70")
+    a = mask_of(sg.Runner(), request, work)
+    assert a[20, 20] == 255 and a[55, 75] == 255 and a[50, 40] == 0 and a[75, 10] == 0
+
+
 def test_an_exclude_point_is_not_taken_for_an_include_point(tmp_path):
     request, work = run_request(tmp_path, FIXTURE, positive="50 40", negative="5 5")
     a = mask_of(sg.Runner(), request, work)
@@ -164,7 +184,7 @@ def test_invert_flips_the_mask(tmp_path):
 
 def test_the_picture_is_embedded_once_while_only_the_prompts_change(tmp_path):
     runner = sg.Runner()
-    request, work = run_request(tmp_path, FIXTURE, positive="50 40")
+    request, _ = run_request(tmp_path, FIXTURE, positive="50 40")
     runner.run(request, lambda *a: None)
     sessions = runner.encoder, runner.decoder
     request["inputs"]["positive"] = "20 20"

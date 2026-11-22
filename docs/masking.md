@@ -166,7 +166,7 @@ the picture's size is on its node):
 | --- | --- |
 | Include points | One point per line, `x y`, inside the object. Add one on each part the first mask missed. |
 | Exclude points | One point per line, `x y`, on what must stay out (the shadow, the object next to it). |
-| Box | `x1 y1 x2 y2`: two opposite corners of a box around the object. With a box the points are optional. |
+| Box | `x1 y1 x2 y2`: two opposite corners of a box around the object. With a box the points are optional. Several lines are several objects, joined in one mask (then leave the points empty): this is how Find by Text's boxes arrive. |
 
 You need a Box or at least one Include point. A box and points together refine each other. The text inputs can also be
 wired from other nodes, so a script or another node can give the points. There is no picker on the node's face yet (click the
@@ -183,6 +183,33 @@ points or the box and running again takes a twentieth of a second. It needs a fe
 after the last run. Invert gives everything but the object. Soft edge (advanced) gives the model's confidence instead of a hard
 edge. For a cleaner seam, follow it with Grow Mask or Feather Mask. The pack's folder has its own README with the tests.
 
+## Select by words
+
+To cut out what you can name, use two nodes of the same pack, **Find by Text** then **Segment by Points or Box**
+(both under Image > Mask; one install, `fugue pack add examples/packs/io.github.bmaltais.fugue-segment`). Find by Text
+looks for what you name and gives a **box** around each match; Segment turns the boxes into the mask. Wire Find by Text's
+`Boxes` to Segment's `Box` and leave Segment's points empty: each box is one object, and the mask is all of them together.
+
+| Find by Text | What goes in it |
+| --- | --- |
+| Query | What to find, in a few words: `red balloon`. Several things: `glove, red balloon` (periods, commas and new lines separate). A short noun phrase works best. |
+| Threshold | How sure the model must be, 0.05 to 0.95 (default 0.3). Lower finds more and more wrong ones; higher keeps the clear matches. |
+| Most matches (advanced) | Keep only this many, the best first. 0 keeps all. Use 1 for "the clown", 0 for "every glove". |
+
+The `Preview` output is the picture with each box, its phrase and its score drawn on it: look at it to choose the threshold. When nothing
+matches, Boxes is empty and Segment says it has nothing to segment.
+
+The model is not part of the pack. Open Find by Text's Model picker: under Download it lists **GroundingDINO tiny** (360 MB,
+half precision, the same boxes as the full-precision file) and the full-precision file (719 MB). Picking one asks first,
+naming the licence (Apache-2.0, credit to IDEA-Research and the exporter, commercial use allowed), the size, the host
+(huggingface.co) and the folder. A GroundingDINO `.onnx` file of your own goes in the `grounding-dino` models folder (the `.pth`
+checkpoints of ComfyUI's custom node, which may sit in the same folder, are not read).
+
+It looks once for each phrase: about a second each on an NVIDIA GPU, about 4 s on a CPU. It does best on one clear thing ("the dog",
+"a red mug", "glove"), and finds each of several ("tree") but takes a whole thicket for one tree when they overlap: raise the threshold
+until the Preview shows one box on each, or give Segment a box or points of your own. It follows names it knows, not
+positions ("the left one") or reading text. The first stage gives only boxes, so Boxes can also feed a crop or a script.
+
 ## From the command line
 
 `fugue workflow new my.fugue --template inpaint-region` writes the template with its picture and
@@ -192,4 +219,4 @@ mask beside it; `fugue run my.fugue --wait` runs it. Change the prompt with
 
 ## Not yet
 
-Clicking the picture to place the points, and describing an object in words, are later slices (the second needs another pack). Color matching for outpaints, and a paint canvas with layers are later issues.
+Clicking the picture to place the points is a later slice. Color matching for outpaints, and a paint canvas with layers are later issues.
