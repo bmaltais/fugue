@@ -62,6 +62,15 @@ class CanvasViewModel : public CanvasHistory {
     Q_PROPERTY(QUrl pictureSource READ pictureSource NOTIFY pictureChanged)
     Q_PROPERTY(QSize pictureSize READ pictureSize NOTIFY pictureChanged)
     Q_PROPERTY(QString head READ head NOTIFY choicesChanged)
+    // The canvas's history as a person reads it (#228, the owner's decision: Photoshop's History panel, no hashes): the
+    // Head's revisions newest first, each {id, name, time, timeText, kind ("head" or "history"), latest}, `name` a step
+    // in words from what changed against its parent ("Layer added: A wooden table", "Opacity 50%: Fill", "Layer
+    // deleted: Sketch", "Mask added: Fill", "Painted: Base", "Canvas made"), whoever made it (a run, this view, the
+    // command line). `allSteps` adds the candidates, open and dropped ("Candidate: …", "Dropped: …"), first, for
+    // `Show all revisions`. `pendingCount` counts the open candidates (the "N pending" chip).
+    Q_PROPERTY(QVariantList steps READ steps NOTIFY choicesChanged)
+    Q_PROPERTY(QVariantList allSteps READ allSteps NOTIFY choicesChanged)
+    Q_PROPERTY(int pendingCount READ pendingCount NOTIFY choicesChanged)
     Q_PROPERTY(QVariantMap region READ region NOTIFY regionChanged)
     // Show a candidate that a run produced as soon as it arrives (the setting; the host binds it). On by default.
     Q_PROPERTY(bool showNewResults READ showNewResults WRITE setShowNewResults NOTIFY newResultChanged)
@@ -98,6 +107,11 @@ public:
     void setFollowNode(const QString &node);
     QVariantList choices() const { return m_choices; }
     QVariantList earlier() const { return m_earlier; }
+    QVariantList steps() const { return m_steps; }
+    QVariantList allSteps() const { return m_allSteps; }
+    int pendingCount() const { return m_pending; }
+    // The name of the step a revision is (see `steps`); read once per revision (they never change).
+    Q_INVOKABLE QString stepName(const QString &revision);
     bool overlay() const { return m_overlay; }
     void setOverlay(bool on);
     bool showsCandidate() const;
@@ -195,6 +209,9 @@ private:
     QString m_follow;
     bool m_overlay = true;
     QVariantList m_choices, m_earlier;
+    QVariantList m_steps, m_allSteps;
+    int m_pending = 0;
+    QHash<QString, QString> m_stepNames; // revision id -> its step's name
     QUrl m_headSource;
     QSize m_headSize;
     QVariantMap m_region;

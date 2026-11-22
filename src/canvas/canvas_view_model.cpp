@@ -1,7 +1,9 @@
 #include "canvas/canvas_view_model.h"
 
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QLocale>
 #include <QPointer>
 #include <QUndoStack>
 
@@ -211,12 +213,98 @@ void CanvasViewModel::rebuild() {
     std::stable_sort(m_choices.begin(), m_choices.end(), [](const QVariant &a, const QVariant &b) {
         return (a.toMap().value("kind").toString() == QLatin1String("head")) && (b.toMap().value("kind").toString() != QLatin1String("head"));
     });
+    // The History panel's steps: the Head's revisions in words; with Show all revisions the candidates first.
+    m_steps.clear();
+    m_allSteps.clear();
+    m_pending = 0;
+    QVariantList candidates;
+    for (const QVariant &value : revisions()) {
+        const QVariantMap row = value.toMap();
+        const QString kind = row.value("kind").toString();
+        const QString id = row.value("id").toString();
+        const QDateTime time = QDateTime::fromString(row.value("time").toString(), Qt::ISODateWithMs).toLocalTime();
+        QVariantMap step{{"id", id}, {"time", row.value("time")}, {"kind", kind}, {"latest", kind == QLatin1String("head")},
+                         {"timeText", time.isValid() ? QLocale().toString(time, QLocale::ShortFormat) : QString()}};
+        const QString name = stepName(id);
+        if (kind == QLatin1String("candidate") || kind == QLatin1String("dropped")) {
+            m_pending += kind == QLatin1String("candidate") ? 1 : 0;
+            step.insert("name", kind == QLatin1String("candidate") ? tr("Candidate: %1").arg(name) : tr("Dropped: %1").arg(name));
+            candidates.append(step);
+        } else {
+            step.insert("name", name);
+            m_steps.append(step);
+        }
+    }
+    m_allSteps = candidates + m_steps;
     m_headSource = QUrl();
     m_headSize = QSize();
     if (!m_head.isEmpty())
         picture(m_head, &m_headSource, &m_headSize);
     emit choicesChanged();
     emit pictureChanged();
+}
+
+QString CanvasViewModel::stepName(const QString &revisionId) {
+    if (const auto known = m_stepNames.constFind(revisionId); known != m_stepNames.constEnd())
+        return *known;
+    const canvas::CanvasStore s = store();
+    const Result<canvas::Revision> revision = s.revision(canvasId(), revisionId);
+    if (!revision)
+        return tr("A change");
+    const Result<canvas::Tree> tree = s.tree(revision->tree);
+    if (revision->parent.isEmpty() || !tree) {
+        const QString first = revision->producer == QLatin1String("import") ? tr("Picture imported") : tr("Canvas made");
+        m_stepNames.insert(revisionId, first);
+        return first;
+    }
+    const Result<canvas::Revision> parentRevision = s.revision(canvasId(), revision->parent);
+    const Result<canvas::Tree> parent = parentRevision ? s.tree(parentRevision->tree) : Result<canvas::Tree>(parentRevision.errors());
+    QString name = tr("A change");
+    if (parent) {
+        const std::vector<canvas::LayerRecord> &now = tree->layers, &was = parent->layers;
+        QStringList before, after;
+        for (const auto &layer : was)
+            before << layer.name;
+        for (const auto &layer : now)
+            after << layer.name;
+        QStringList added = after, removed = before;
+        for (const QString &n : before)
+            added.removeOne(n);
+        for (const QString &n : after)
+            removed.removeOne(n);
+        if (tree->width != parent->width || tree->height != parent->height)
+            name = tr("Canvas size %1 × %2").arg(tree->width).arg(tree->height);
+        else if (now.size() > was.size())
+            name = added.size() == 1 ? tr("Layer added: %1").arg(added.first()) : tr("%n layers added", nullptr, int(now.size() - was.size()));
+        else if (now.size() < was.size())
+            name = removed.size() == 1 ? tr("Layer deleted: %1").arg(removed.first()) : tr("%n layers deleted", nullptr, int(was.size() - now.size()));
+        else if (added.size() == 1 && removed.size() == 1)
+            name = tr("Renamed: %1").arg(added.first());
+        else if (before != after)
+            name = tr("Layers reordered");
+        else {
+            for (size_t i = 0; i < now.size(); ++i) {
+                const canvas::LayerRecord &a = was[i], &b = now[i];
+                if (a == b)
+                    continue;
+                if (a.visible != b.visible)
+                    name = b.visible ? tr("Shown: %1").arg(b.name) : tr("Hidden: %1").arg(b.name);
+                else if (a.opacity != b.opacity)
+                    name = tr("Opacity %1%: %2").arg(qRound(b.opacity * 100)).arg(b.name);
+                else if (a.compositeOp != b.compositeOp)
+                    name = tr("Blend mode: %1").arg(b.name);
+                else if (a.hasMask != b.hasMask)
+                    name = b.hasMask ? tr("Mask added: %1").arg(b.name) : tr("Mask deleted: %1").arg(b.name);
+                else if (a.maskEnabled != b.maskEnabled)
+                    name = b.maskEnabled ? tr("Mask on: %1").arg(b.name) : tr("Mask off: %1").arg(b.name);
+                else
+                    name = tr("Painted: %1").arg(b.name);
+                break;
+            }
+        }
+    }
+    m_stepNames.insert(revisionId, name);
+    return name;
 }
 
 void CanvasViewModel::setEdits(WidgetEdit *edits) {

@@ -103,6 +103,11 @@ class TestCanvasViewWindow : public QObject {
     QObject *dialog(App &app) const { return app.window->findChild<QObject *>("canvasViewDialog"); }
     QObject *view(App &app) const { return dialog(app)->property("view").value<QObject *>(); }
     QObject *model(App &app) const { return view(app)->property("backend").value<QObject *>(); }
+    // Shows a revision as the History panel's click does (the strip of chips is gone, #228).
+    void showRevision(App &app, const QString &id) {
+        QVERIFY(QMetaObject::invokeMethod(model(app), "show", Q_ARG(QString, id)));
+        QTRY_COMPARE(model(app)->property("revisionB").toString(), id);
+    }
     void openDialog(App &app) {
         QVERIFY(app.commands.trigger("file.canvas-view"));
         QTRY_VERIFY(dialog(app) && dialog(app)->property("opened").toBool());
@@ -147,9 +152,11 @@ private slots:
         QVERIFY(app.open());
         openDialog(app);
         QTRY_COMPARE(model(app)->property("canvasId").toString(), m_canvas);
-        QTRY_VERIFY(find(app.window, "canvasViewChoice-head"));
-        QVERIFY(find(app.window, "canvasViewChoice-" + shortOf(m_a)));
-        QVERIFY(find(app.window, "canvasViewChoice-" + shortOf(m_b)));
+        QTRY_VERIFY(!model(app)->property("revisionB").toString().isEmpty());
+        // No strip and no hashes (#228): the two candidates are one chip.
+        QVERIFY(!find(app.window, "canvasViewChoice-head"));
+        QTRY_COMPARE(find(app.window, "canvasViewPending")->property("text").toString(), QString("2 pending"));
+        QVERIFY(!find(app.window, "canvasHistoryPanel")); // closed at first
         QCOMPARE(model(app)->property("revisionB").toString(), m_head);
         // The head alone: nothing to accept, drop or overlay; Export is there.
         QVERIFY(!find(app.window, "canvasViewAccept"));
@@ -163,7 +170,7 @@ private slots:
         App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
         QVERIFY(app.open());
         openDialog(app);
-        click(app, "canvasViewChoice-" + shortOf(m_a));
+        showRevision(app, m_a);
         QTRY_COMPARE(model(app)->property("revisionB").toString(), m_a);
         QVERIFY(find(app.window, "canvasViewAccept"));
         QVERIFY(find(app.window, "canvasViewDrop"));
@@ -180,7 +187,7 @@ private slots:
         App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
         QVERIFY(app.open());
         openDialog(app);
-        click(app, "canvasViewChoice-" + shortOf(m_a));
+        showRevision(app, m_a);
         QTRY_COMPARE(model(app)->property("revisionB").toString(), m_a);
         QVERIFY(!find(app.window, "canvasViewMode-slider"));
         QVERIFY(find(app.window, "canvasViewOverlay")); // the overlay toggle is for the picture alone
@@ -201,10 +208,10 @@ private slots:
         App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
         QVERIFY(app.open());
         openDialog(app);
-        click(app, "canvasViewChoice-" + shortOf(m_b));
+        showRevision(app, m_b);
         click(app, "canvasViewDrop");
-        QTRY_VERIFY(!find(app.window, "canvasViewChoice-" + shortOf(m_b)));
-        click(app, "canvasViewChoice-" + shortOf(m_a));
+        QTRY_COMPARE(model(app)->property("pendingCount").toInt(), 1);
+        showRevision(app, m_a);
         click(app, "canvasViewAccept");
         QTRY_COMPARE(model(app)->property("head").toString(), m_a);
         QTRY_VERIFY(!find(app.window, "canvasViewAccept"));
@@ -217,14 +224,15 @@ private slots:
         App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
         QVERIFY(app.open());
         openDialog(app);
-        QTRY_VERIFY(find(app.window, "canvasViewChoice-head"));
+        QTRY_VERIFY(!model(app)->property("revisionB").toString().isEmpty());
         PaintDocument base(512, 512);
         base.addLayer(LayerKind::Paint, "Base");
         const QString c = canvas::CanvasStore::forSession()
                               .addRevision(m_canvas, withFill(base, "Fill C", 200), m_head, "canvas-write:c")
                               .value()
                               .id;
-        QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "canvasViewChoice-" + shortOf(c)), 4000);
+        QTRY_COMPARE_WITH_TIMEOUT(model(app)->property("pendingCount").toInt(), 3, 4000);
+        QVERIFY(c.size() > 0);
     }
 
     // A running workflow adds a candidate the way Canvas Write does (addRevision from the head, the head left where it is),
@@ -242,7 +250,7 @@ private slots:
         App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
         QVERIFY(app.open());
         openDialog(app);
-        QTRY_VERIFY(find(app.window, "canvasViewChoice-head"));
+        QTRY_VERIFY(!model(app)->property("revisionB").toString().isEmpty());
         QVERIFY(!find(app.window, "canvasViewNewResult"));
         std::thread run = arrivesLater(m_canvas, m_head, "run1", 200);
         QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "canvasViewNewResult"), 5000); // the strip refreshed and the view moved
@@ -250,9 +258,9 @@ private slots:
         const QString shown = model(app)->property("revisionB").toString();
         QCOMPARE(model(app)->property("newResult").toString(), shown);
         QCOMPARE(model(app)->property("revisionA").toString(), m_head);
-        QVERIFY(find(app.window, "canvasViewChoice-" + shortOf(shown)));
+        QVERIFY(model(app)->property("pendingCount").toInt() >= 3); // it stays pending
         const QString said = find(app.window, "canvasViewNewResultText")->property("text").toString();
-        QVERIFY2(said.startsWith("New candidate") && !said.contains("run1"), qPrintable(said)); // a node by its title, never its id
+        QVERIFY2(said.startsWith("A new candidate") && !said.contains("run1"), qPrintable(said)); // a node by its title, never its id
         QVERIFY(!find(app.window, "canvasViewAccept")); // the bar's pair hides while the banner shows its own: one primary
         QVERIFY(!find(app.window, "canvasViewDrop"));
         QObject *viewer = view(app)->property("viewer").value<QObject *>();
@@ -261,7 +269,7 @@ private slots:
         click(app, "canvasViewNewBack");
         QTRY_COMPARE(model(app)->property("revisionB").toString(), m_head);
         QTRY_VERIFY(!find(app.window, "canvasViewNewResult"));
-        QVERIFY(find(app.window, "canvasViewChoice-" + shortOf(shown)));
+        QVERIFY(model(app)->property("pendingCount").toInt() >= 3); // it stays pending
         // Another run: Accept from the banner moves the head to it.
         std::thread again = arrivesLater(m_canvas, m_head, "run2", 300);
         QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "canvasViewNewResult"), 5000);
@@ -274,10 +282,10 @@ private slots:
         std::thread third = arrivesLater(m_canvas, second, "run3", 100);
         QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "canvasViewNewResult"), 5000);
         third.join();
-        const QString last = model(app)->property("revisionB").toString();
+        const int pending = model(app)->property("pendingCount").toInt();
         click(app, "canvasViewNewDrop");
         QTRY_VERIFY(!find(app.window, "canvasViewNewResult"));
-        QTRY_VERIFY(!find(app.window, "canvasViewChoice-" + shortOf(last)));
+        QTRY_COMPARE(model(app)->property("pendingCount").toInt(), pending - 1);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
@@ -287,7 +295,7 @@ private slots:
         App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
         QVERIFY(app.open());
         openDialog(app);
-        QTRY_VERIFY(find(app.window, "canvasViewChoice-head"));
+        QTRY_VERIFY(!model(app)->property("revisionB").toString().isEmpty());
         const QString canvas = m_canvas, head = m_head;
         std::thread run([canvas, head] {
             QThread::msleep(300);
@@ -312,7 +320,7 @@ private slots:
         App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
         QVERIFY(app.open());
         openDialog(app);
-        QTRY_VERIFY(find(app.window, "canvasViewChoice-head"));
+        QTRY_VERIFY(!model(app)->property("revisionB").toString().isEmpty());
         // A head with a parent, so Compare is possible.
         QVERIFY(canvas::CanvasStore::forSession().accept(m_canvas, m_a));
         QTRY_COMPARE_WITH_TIMEOUT(model(app)->property("head").toString(), m_a, 4000);
@@ -393,20 +401,20 @@ private slots:
         QQuickItem *use = find(app.window, "canvasViewUseRegion");
         QVERIFY(use);
         QVERIFY(!use->isEnabled());
-        QVERIFY(find(app.window, "canvasViewRegionNote")->property("text").toString().startsWith("Canvas Region reads Head")); // its title
+        QVERIFY(find(app.window, "canvasViewRegionNote")->property("text").toString().startsWith("Canvas Region reads the latest version")); // its title
         // Zoom moves the rectangle with the picture.
         QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(find(app.window, "canvasViewViewer")));
         QTest::keyClick(app.window, Qt::Key_1);
         QTRY_VERIFY(qAbs(frameRect().width() - 160) < 0.5);
         // A candidate: the button writes its revision, one undo step.
-        click(app, "canvasViewChoice-" + shortOf(m_a));
+        showRevision(app, m_a);
         QTRY_VERIFY(find(app.window, "canvasViewUseRegion")->isEnabled());
         QCOMPARE(app.model.undoStack()->count(), 0); // looking is no edit
         click(app, "canvasViewUseRegion");
         QTRY_VERIFY(!find(app.window, "canvasViewUseRegion")->isEnabled());
         QCOMPARE(app.model.undoStack()->count(), 1);
         QCOMPARE(app.model.widgets()->regionState("region").value("revision").toString(), m_a);
-        QVERIFY(find(app.window, "canvasViewRegionNote")->property("text").toString().contains(shortOf(m_a)));
+        QVERIFY(find(app.window, "canvasViewRegionNote")->property("text").toString().contains("“Layer added: Fill A”")); // the step in words, no hash
         app.model.undoStack()->undo();
         QTRY_VERIFY(find(app.window, "canvasViewUseRegion")->isEnabled());
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
@@ -568,7 +576,7 @@ private slots:
     void aCandidateShownIsDrawnOnWithoutRepinningTheNode() {
         App app(load(fixture(m_canvas)));
         openFollowing(app);
-        click(app, "canvasViewChoice-" + shortOf(m_a));
+        showRevision(app, m_a);
         QTRY_COMPARE(model(app)->property("revisionB").toString(), m_a);
         QTRY_VERIFY(find(app.window, "canvasViewFrame"));
         QTest::keyClick(app.window, Qt::Key_0);
@@ -764,6 +772,35 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // The History panel (#228, the owner's decision: no strip, no hashes; Photoshop's History): steps in words, newest
+    // first; a click shows that step read only and Back to latest returns; All revisions adds the candidates.
+    void theHistoryPanelListsStepsInWordsAndShowsOne() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        QTRY_VERIFY(!model(app)->property("revisionB").toString().isEmpty());
+        QVERIFY(QMetaObject::invokeMethod(model(app), "setOpacity", Q_ARG(QVariantList, QVariantList{0}), Q_ARG(double, 0.5)));
+        QTRY_VERIFY(model(app)->property("head").toString() != m_head);
+        click(app, "canvasViewHistory");
+        QTRY_VERIFY(find(app.window, "canvasHistoryPanel"));
+        QQuickItem *list = find(app.window, "canvasHistoryList");
+        QTRY_COMPARE(list->property("count").toInt(), 2);
+        QCOMPARE(model(app)->property("steps").toList().at(0).toMap().value("name").toString(), QString("Opacity 50%: Base"));
+        QCOMPARE(model(app)->property("steps").toList().at(1).toMap().value("name").toString(), QString("Canvas made"));
+        QVERIFY(!find(app.window, "canvasHistoryBackLatest"));
+        click(app, "canvasHistoryStep-1");
+        QTRY_COMPARE(model(app)->property("revisionB").toString(), m_head);
+        QTRY_VERIFY(find(app.window, "canvasLayersReadOnly")); // an earlier step: read only, and says so
+        click(app, "canvasHistoryBackLatest");
+        QTRY_COMPARE(model(app)->property("revisionB").toString(), model(app)->property("head").toString());
+        click(app, "canvasHistoryShowAll");
+        QTRY_COMPARE(list->property("count").toInt(), 4); // the two candidates, first
+        // The picture's label is a word, never a hash.
+        QObject *viewer = view(app)->property("viewer").value<QObject *>();
+        QCOMPARE(viewer->property("labelA").toString(), QString("Latest"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     // ---- the cohesion batch (#228, .ui-ergonomics/2026-11-22-canvas-areas-cohesion.md) ----
 
     // L2: one bar. The frame's own bar is off; Fit, 100% and the close end the view's tools row, in that order.
@@ -800,7 +837,7 @@ private slots:
         QTest::keyClick(app.window, Qt::Key_Return); // the Head: nothing to accept, nothing happens
         QCOMPARE(model(app)->property("head").toString(), m_head);
         QVERIFY(dialog(app)->property("opened").toBool());
-        click(app, "canvasViewChoice-" + shortOf(m_a));
+        showRevision(app, m_a);
         QTRY_COMPARE(model(app)->property("revisionB").toString(), m_a);
         QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(find(app.window, "canvasViewViewer")));
         QTest::keyClick(app.window, Qt::Key_Return);
@@ -813,7 +850,7 @@ private slots:
         App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
         QVERIFY(app.open());
         openDialog(app);
-        click(app, "canvasViewChoice-" + shortOf(m_a));
+        showRevision(app, m_a);
         QTRY_COMPARE(model(app)->property("revisionB").toString(), m_a);
         click(app, "canvasViewCompare");
         for (const char *mode : {"slider", "slider_horizontal", "side_by_side", "flip", "difference"})
@@ -824,7 +861,7 @@ private slots:
         // Only Accept wears the accent fill: Compare on, its mode and the shown chip are quiet.
         for (const char *name : {"canvasViewCompare", "canvasViewMode-slider_horizontal"})
             QVERIFY2(!find(app.window, name)->property("marked").toBool() && find(app.window, name)->property("current").toBool(), name);
-        QVERIFY(!find(app.window, "canvasViewChoice-" + shortOf(m_a))->property("marked").toBool());
+        QVERIFY(!find(app.window, "canvasViewPending")->property("marked").toBool());
         QVERIFY(find(app.window, "canvasViewAccept")->property("marked").toBool());
         QVERIFY(find(app.window, "canvasViewCompare")->property("checkable").toBool());
         click(app, "canvasViewCompare");
@@ -873,7 +910,7 @@ private slots:
         QTRY_VERIFY(find(app.window, "canvasViewClose"));
         const auto x = [](QQuickItem *item) { return item->mapToScene(QPointF(0, 0)).x(); };
         QTRY_VERIFY(x(find(app.window, "canvasViewClose")) < x(find(app.window, "canvasViewFit"))); // once laid out
-        QTRY_VERIFY(x(find(app.window, "canvasViewCanvas")) > x(find(app.window, "canvasViewChoice-head")));
+        QTRY_VERIFY(x(find(app.window, "canvasViewCanvas")) > x(find(app.window, "canvasViewHistory")));
         QQuickItem *picture = find(app.window, "canvasViewViewer");
         QQuickItem *layers = find(app.window, "canvasLayersPanel");
         QVERIFY(layers && x(layers) < x(picture)); // the panel at the reading end, the left
@@ -915,10 +952,14 @@ private slots:
             QVERIFY(app.open());
             app.model.select({"region"});
             openDialog(app);
-            click(app, "canvasViewChoice-" + shortOf(m_a));
+            showRevision(app, m_a);
             QTRY_VERIFY(find(app.window, "canvasViewRegion"));
             save(app, "candidate");
-            click(app, "canvasViewChoice-head");
+            click(app, "canvasViewHistory");
+            QTRY_VERIFY(find(app.window, "canvasHistoryPanel"));
+            save(app, "history");
+            click(app, "canvasViewHistory");
+            showRevision(app, model(app)->property("head").toString());
             QTRY_COMPARE(model(app)->property("revisionB").toString(), m_head);
             std::thread run = arrivesLater(m_canvas, m_head, "write", 260);
             QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "canvasViewNewResult"), 5000);

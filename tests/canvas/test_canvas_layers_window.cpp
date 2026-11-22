@@ -295,7 +295,7 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(model(app), "show", Q_ARG(QString, m_head)));
         QTRY_VERIFY(find(app.window, "canvasLayersReadOnly"));
         QCOMPARE(find(app.window, "canvasLayersReadOnlyText")->property("text").toString(),
-                 QString("You are looking at an earlier revision. Go to Head to change layers."));
+                 QString("You are looking at an earlier step. Go back to the latest version to change layers."));
         QVERIFY(!find(app.window, "canvasLayersAccept")); // nothing to decide on an earlier revision
         QVERIFY(!find(app.window, "canvasLayerDelete")->isEnabled());
         click(app, "canvasLayerEye-1");
@@ -320,11 +320,11 @@ private slots:
         App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
         QVERIFY(app.open());
         openDialog(app);
-        click(app, "canvasViewChoice-" + candidate.mid(7, 8));
+        QVERIFY(QMetaObject::invokeMethod(model(app), "show", Q_ARG(QString, candidate)));
         QTRY_COMPARE(model(app)->property("revisionB").toString(), candidate);
         QTRY_VERIFY(find(app.window, "canvasLayersReadOnly"));
         QCOMPARE(find(app.window, "canvasLayersReadOnlyText")->property("text").toString(),
-                 QString("You are looking at a new candidate. Accept or Drop it, or go to Head, to change layers."));
+                 QString("You are looking at a new candidate. Accept or Drop it, or go back to the latest version, to change layers."));
         QVERIFY(find(app.window, "canvasLayersGoHead") && find(app.window, "canvasLayersDrop"));
         QVERIFY(!find(app.window, "canvasLayersAccept")->property("marked").toBool()); // one primary: the bar's
         click(app, "canvasLayersAccept");

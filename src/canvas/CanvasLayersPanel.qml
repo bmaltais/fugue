@@ -30,7 +30,7 @@ Rectangle {
     required property CanvasViewModel model
     property bool ownShortcuts: false
     // The view shows its own Accept and Drop for this candidate where the eye is (the new-candidate banner): the panel
-    // then offers only Go to Head, so no decision is offered twice.
+    // then offers only Back to latest, so no decision is offered twice.
     property bool decisionElsewhere: false
     readonly property real u: look.unit
     readonly property var rows: model.layers
@@ -446,7 +446,7 @@ Rectangle {
             width: parent.width
             spacing: root.u
 
-            // Read only (another revision than the Head is shown): why, in plain words, and what to do about it here.
+            // Read only (another step than the latest is shown): why, in plain words, and what to do about it here.
             Column {
                 objectName: "canvasLayersReadOnly"
                 readonly property string kind: root.model.kindB
@@ -459,11 +459,11 @@ Rectangle {
                     wrapMode: Text.Wrap
                     color: root.look.label
                     font.pixelSize: root.look.captionSize
-                    text: parent.kind === "candidate" ? qsTr("You are looking at a new candidate. Accept or Drop it, or go to Head, to change layers.")
-                          : parent.kind === "dropped" ? qsTr("You are looking at a dropped candidate. Accept it, or go to Head, to change layers.")
-                          : qsTr("You are looking at an earlier revision. Go to Head to change layers.")
+                    text: parent.kind === "candidate" ? qsTr("You are looking at a new candidate. Accept or Drop it, or go back to the latest version, to change layers.")
+                          : parent.kind === "dropped" ? qsTr("You are looking at a dropped candidate. Accept it, or go back to the latest version, to change layers.")
+                          : qsTr("You are looking at an earlier step. Go back to the latest version to change layers.")
                 }
-                // Go to Head, then the candidate's decision (Accept is not the accent fill here: the view's bar has the
+                // Back to latest, then the candidate's decision (Accept is not the accent fill here: the view's bar has the
                 // one primary), Drop apart and last.
                 Flow {
                     width: parent.width
@@ -471,8 +471,8 @@ Rectangle {
                     ViewButton {
                         objectName: "canvasLayersGoHead"
                         look: root.look
-                        text: qsTr("Go to Head")
-                        tip: qsTr("Show the Head, whose layers can be changed")
+                        text: qsTr("Back to latest")
+                        tip: qsTr("Show the latest version, whose layers can be changed")
                         onTapped: root.model.show(root.model.head)
                     }
                     ViewButton {
@@ -480,7 +480,7 @@ Rectangle {
                         look: root.look
                         visible: !root.decisionElsewhere && (root.model.kindB === "candidate" || root.model.kindB === "dropped")
                         text: qsTr("Accept")
-                        tip: qsTr("Make this candidate the Head of the canvas")
+                        tip: qsTr("Make this candidate the latest version of the canvas")
                         onTapped: root.model.accept(root.model.revisionB)
                     }
                     Item { width: 2 * root.u; height: 1; visible: dropButton.visible }

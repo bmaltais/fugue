@@ -5,6 +5,7 @@
 #include <QQuickStyle>
 #include <QTemporaryDir>
 #include <QUndoStack>
+#include <QRegularExpression>
 #include <QtTest>
 
 #include "canvas/canvas_view_model.h"
@@ -149,6 +150,31 @@ private slots:
         QVERIFY(QFileInfo(target).size() > 0);
         QVERIFY(!view.exportPicture(target)); // never replaced
         QVERIFY(!view.error().isEmpty());
+    }
+
+    // The History panel's steps (#228, the owner's decision): what changed, in words, newest first, no hash; the open
+    // candidates counted and listed only with all revisions.
+    void theHistoryNamesEachStepInWords() {
+        CanvasViewModel view;
+        view.setStoreRoot(m_dir.filePath("store"));
+        view.setCanvasId(m_canvas);
+        QCOMPARE(view.pendingCount(), 2);
+        const QString added = store().commit(m_canvas, withFill(m_base, "A wooden table", 200), m_head, "canvas-write:w").value().revision.id;
+        view.refresh();
+        QCOMPARE(view.head(), added);
+        const int top = 0; // newest first: the table's layer sits on top
+        QVERIFY(view.setOpacity({top + 1}, 0.5));
+        QVERIFY(view.setVisible({0}, false));
+        QVERIFY(view.removeLayers({0}));
+        QStringList names;
+        for (const QVariant &step : view.steps())
+            names << step.toMap().value("name").toString();
+        QCOMPARE(names, (QStringList{"Layer deleted: Base", "Hidden: Base", "Opacity 50%: A wooden table", "Layer added: A wooden table", "Canvas made"}));
+        QVERIFY(view.steps().first().toMap().value("latest").toBool());
+        for (const QString &name : names)
+            QVERIFY2(!name.contains(QRegularExpression("[0-9a-f]{8}")), qPrintable(name));
+        QCOMPARE(view.allSteps().size(), view.steps().size() + 2); // the two candidates, first
+        QVERIFY(view.allSteps().first().toMap().value("name").toString().startsWith("Candidate: Layer added: Fill"));
     }
 
     void aStoreChangeShowsWithinAMoment() {

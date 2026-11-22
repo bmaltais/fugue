@@ -32,14 +32,18 @@ import "canvasMenu.js" as CanvasMenu
 // revision of the Head, Undo and Redo of the canvas; **Layers** in the tools shows or hides it. `ownShortcuts` is for a
 // host that is a modal popup (the dialog): the panel then binds its keys itself.
 //
-// Simple by default: a canvas, the strip of revisions (Head, candidates, the latest few, Earlier…), the picture
-// (wheel zoom, drag to pan, Fit, 100%), and for a candidate Accept, Drop and Export. A candidate shows over the Head;
-// Show candidate switches it off to see the Head alone. Compare (against the Head for a candidate, else the parent) opens
-// the compare modes of Compare Images (CompareModeButtons.qml). One bar (#228): the canvas and the strip, then the tools
-// in chunks (the view, the look, the region, Export, the decision, Drop, Fit and 100%) and the host's `trailing` items
-// last (the dialog's close). A run's layer that lands on the Head is followed, with a short notice "Layer <name> added"
-// and Undo. A real candidate (a Canvas Write with Keep as candidate on, or one that could not land on a moved Head) shows
-// at once under a banner over the picture's foot (it never moves the picture): Back to Head, Accept and Drop; the bar's
+// Simple by default (#228, the owner's decision: Photoshop's History, no strip, no hashes): the canvas, the picture
+// (wheel zoom, Fit, 100%), the Layers panel with Undo and Redo, and **History** (closed at first): the canvas's changes
+// in words, newest first; a click shows that step (read only) and **Back to latest** returns; **Show all revisions**
+// adds the candidates for those who need them. Candidates are rare now (runs land on the latest version): one chip
+// "N pending" opens the newest for Accept or Drop. A candidate shows over the latest version; Show candidate switches it
+// off to see the latest alone. Compare (against the latest for a candidate, else the step before) opens
+// the compare modes of Compare Images (CompareModeButtons.qml). One bar (#228): the canvas and the pending chip, then the
+// tools in chunks (History and Layers, the look, the region, Export, the decision, Drop, Fit and 100%) and the host's `trailing` items
+// last (the dialog's close). A run's layer that lands on the latest version is followed, with a short notice "Layer
+// <name> added" and Undo. A real candidate (a Canvas Write with Keep as candidate on, or one that could not land on a
+// moved latest version) shows at once under a banner over the picture's foot (it never moves the picture): Back to
+// latest, Accept and Drop; the bar's
 // own Accept and Drop hide meanwhile, so one primary is on screen.
 // Keys (docs/ui-ergonomics.md D5, one keymap with the Graph): Home or 0 Fit, 1 100%, + and - zoom, Enter accepts the
 // shown candidate (when the focus is in no field and no button), Escape ends a drag, Space held pans. While it has the
@@ -104,7 +108,6 @@ Item {
     readonly property bool previewReady: preview.context !== undefined
     readonly property bool compareOn: comparing && canvasData.hasParent
     readonly property bool canDecide: canvasData.kindB === "candidate" || canvasData.kindB === "dropped"
-    readonly property string shownShort: canvasData.revisionB.slice(7, 15)
     readonly property bool shownIsHead: canvasData.revisionB !== "" && canvasData.revisionB === canvasData.head
     // The revisions shown, as CanvasHistory names them ({name, tag, kind, ...}; {} before any).
     readonly property var rowB: canvasData.revisions.find(row => row.id === canvasData.revisionB) ?? ({})
@@ -124,14 +127,20 @@ Item {
         canvasData.accept(canvasData.revisionB)
         return true
     }
-    // Who made a revision, as a person reads it: a Canvas Write of the open document by its title.
-    function producerText(producer) {
-        if (producer.startsWith("canvas-write:")) {
-            const name = canvasData.edits ? canvasData.edits.nodeName(producer.slice(13)) : ""
-            return name !== "" ? qsTr("From %1").arg(name) : qsTr("From a Canvas Write")
-        }
-        return producer.startsWith("canvas-view:") ? qsTr("From an edit in the Canvas view") : producer
+    // What a person calls the revision shown (no hashes, #228): the latest version, a candidate, or the step it is.
+    function labelOf(row) {
+        if (row.kind === undefined)
+            return ""
+        return row.kind === "head" ? qsTr("Latest") : row.kind === "candidate" ? qsTr("Candidate")
+             : row.kind === "dropped" ? qsTr("Dropped candidate") : canvasData.stepName(row.id)
     }
+    // The pending chip: the newest open candidate, shown for its review (Accept, Drop in the bar).
+    function reviewPending() {
+        const row = canvasData.revisions.find(r => r.kind === "candidate")
+        if (row)
+            canvasData.show(row.id)
+    }
+    property bool showHistory: false
 
     CanvasViewModel {
         id: canvasData
@@ -229,11 +238,6 @@ Item {
                 canvasData.canvasId = value.id
         }, 80) // the rows carry a name, a size and a time, and the id under them
     }
-    function chooseEarlier() {
-        openMenu(earlierButton, canvasData.earlier.map(row => ({text: row.name, value: row.id, detail: root.producerText(row.producer),
-                                                                checked: row.id === canvasData.revisionB})),
-                 value => canvasData.show(value))
-    }
     // A rectangle drawn with no node followed: kept, and with several Region nodes on this canvas, which one is it for?
     function placeFree(r) {
         freeRect = r
@@ -266,7 +270,8 @@ Item {
             chosenRegion = node
     }
     function readsText(region) {
-        return region.reads === "head" || region.reads === "" ? qsTr("Head") : region.readsId !== "" ? region.readsId.slice(7, 15) : region.reads
+        return region.reads === "head" || region.reads === "" ? qsTr("the latest version")
+             : region.readsId !== "" ? qsTr("“%1”").arg(canvasData.stepName(region.readsId)) : qsTr("an unknown step")
     }
 
     Keys.onReleased: event => {
@@ -323,60 +328,50 @@ Item {
         rightPadding: lead && root.mirrored ? 3 * root.u : 0
     }
 
-    // The bar: the canvas and the revisions, then the tools. It wraps when the view is narrow.
-    Flow {
-        id: bar
-        objectName: "canvasViewBar"
-        width: parent.width
-        spacing: root.u
-        ViewButton {
-            id: canvasButton
-            objectName: "canvasViewCanvas"
-            look: root.look
-            text: canvasData.canvases.find(row => row.id === canvasData.canvasId)?.name ?? qsTr("Canvas")
-            trailingGlyph: "chevron-down"
-            tip: qsTr("Choose the canvas to look at, or make one")
-            accented: false
-            onTapped: root.chooseCanvas()
-        }
-        Chunk {
-            // The strip: what to look at. The shown chip is the quiet marking: Accept is the one accent fill (D7).
-            Repeater {
-                model: canvasData.choices
-                delegate: ViewButton {
-                    required property var modelData
-                    objectName: "canvasViewChoice-" + (modelData.kind === "head" ? "head" : modelData.short)
-                    look: root.look
-                    text: modelData.label
-                    tip: root.producerText(modelData.producer)
-                    accented: false
-                    current: modelData.id === canvasData.revisionB
-                    onTapped: canvasData.show(modelData.id)
-                }
-            }
-            ViewButton {
-                id: earlierButton
-                objectName: "canvasViewEarlier"
-                look: root.look
-                visible: canvasData.earlier.length > 0
-                text: qsTr("Earlier")
-                trailingGlyph: "chevron-down"
-                tip: qsTr("Revisions before these")
-                accented: false
-                onTapped: root.chooseEarlier()
-            }
-        }
-    }
+    // One bar (#228, the owner's decision: no strip of revisions, no hashes): the canvas, the pending candidates when
+    // there are any, the History and Layers panels, then the tools. It wraps when the view is narrow.
     Flow {
         id: tools
         objectName: "canvasViewTools"
-        anchors.top: bar.bottom
-        anchors.topMargin: root.u
         width: parent.width
         spacing: root.u
         Chunk {
             lead: false
+            ViewButton {
+                id: canvasButton
+                objectName: "canvasViewCanvas"
+                look: root.look
+                text: canvasData.canvases.find(row => row.id === canvasData.canvasId)?.name ?? qsTr("Canvas")
+                trailingGlyph: "chevron-down"
+                tip: qsTr("Choose the canvas to look at, or make one")
+                accented: false
+                onTapped: root.chooseCanvas()
+            }
+            // Candidates waiting (rare: a Canvas Write with Keep as candidate on, or one that could not land on the
+            // latest version): one chip; nothing when there are none.
+            ViewButton {
+                objectName: "canvasViewPending"
+                look: root.look
+                visible: canvasData.pendingCount > 0
+                text: qsTr("%n pending", "", canvasData.pendingCount)
+                tip: qsTr("Review the candidates waiting: Accept or Drop")
+                accented: false
+                current: root.canDecide
+                onTapped: root.reviewPending()
+            }
+        }
+        Chunk {
             visible: canvasData.canvasId !== ""
+            ViewButton {
+                objectName: "canvasViewHistory"
+                look: root.look
+                text: qsTr("History")
+                tip: root.showHistory ? qsTr("Hide the history of the canvas") : qsTr("Show the history of the canvas: each change, newest first")
+                accented: false
+                checkable: true
+                current: root.showHistory
+                onTapped: root.showHistory = !root.showHistory
+            }
             ViewButton {
                 objectName: "canvasViewLayers"
                 look: root.look
@@ -389,7 +384,7 @@ Item {
                 onTapped: root.showLayers = !root.showLayers
             }
         }
-        // How the shown revision is looked at: over the Head or alone, or against another (the modes).
+        // How the shown revision is looked at: over the latest version or alone, or against another (the modes).
         Chunk {
             visible: canvasData.canvasId !== ""
             ViewButton {
@@ -397,7 +392,7 @@ Item {
                 look: root.look
                 visible: canvasData.showsCandidate && !root.compareOn
                 text: qsTr("Show candidate")
-                tip: qsTr("Show the candidate over the Head; off shows the Head alone")
+                tip: qsTr("Show the candidate over the latest version; off shows the latest version alone")
                 accented: false // on is the quiet marking: Accept is the one accent fill (D7)
                 checkable: true
                 current: canvasData.overlay
@@ -408,8 +403,8 @@ Item {
                 look: root.look
                 enabled: canvasData.hasParent
                 text: qsTr("Compare")
-                tip: canvasData.hasParent ? (canvasData.showsCandidate ? qsTr("Show this candidate against the Head") : qsTr("Show this revision against its parent"))
-                                       : qsTr("The first revision has no parent to compare with")
+                tip: canvasData.hasParent ? (canvasData.showsCandidate ? qsTr("Show this candidate against the latest version") : qsTr("Show this step against the one before it"))
+                                       : qsTr("The first step has nothing before it to compare with")
                 accented: false
                 checkable: true
                 current: root.compareOn
@@ -448,7 +443,7 @@ Item {
                 look: root.look
                 enabled: canvasData.revisionB !== ""
                 text: qsTr("Export…")
-                tip: qsTr("Save this revision as a flattened PNG")
+                tip: qsTr("Save what is shown as a flattened PNG")
                 onTapped: {
                     exportDialog.currentFolder = StandardPaths.writableLocation(StandardPaths.PicturesLocation)
                     exportDialog.selectedFile = StandardPaths.writableLocation(StandardPaths.PicturesLocation) + "/" + canvasData.exportName
@@ -464,7 +459,7 @@ Item {
                 look: root.look
                 primary: true
                 text: qsTr("Accept")
-                tip: qsTr("Make this candidate the Head of the canvas (Enter)")
+                tip: qsTr("Make this candidate the latest version of the canvas (Enter)")
                 onTapped: canvasData.accept(canvasData.revisionB)
             }
         }
@@ -516,12 +511,14 @@ Item {
         look: root.look
         LayoutMirroring.enabled: false
         LayoutMirroring.childrenInherit: true
-        x: root.mirrored ? parent.width - width : 0
+        readonly property real startReserve: historyPanel.visible ? historyPanel.width + 2 * root.u : 0
+        readonly property real endReserve: layersPanel.visible ? layersPanel.width + 2 * root.u : 0
+        x: root.mirrored ? endReserve : startReserve
         anchors.top: tools.bottom
         anchors.topMargin: root.u
         anchors.bottom: notes.top
         anchors.bottomMargin: root.u
-        width: parent.width - (layersPanel.visible ? layersPanel.width + 2 * root.u : 0)
+        width: parent.width - startReserve - endReserve
         visible: canvasData.canvasId !== "" && canvasData.revisionB !== ""
         onActiveFocusChanged: if (!activeFocus) root.panKey = false
         mode: "single"
@@ -533,8 +530,133 @@ Item {
         sourceDifference: canvasData.sourceDifference
         sizeA: root.compareOn ? canvasData.sizeA : canvasData.pictureSize
         sizeB: canvasData.sizeB
-        labelA: root.compareOn ? (root.rowA.name ?? "") : canvasData.showsCandidate && !canvasData.overlay ? qsTr("Head") : (root.rowB.name ?? "")
-        labelB: root.rowB.name ?? ""
+        labelA: root.compareOn ? root.labelOf(root.rowA) : canvasData.showsCandidate && !canvasData.overlay ? qsTr("Latest") : root.labelOf(root.rowB)
+        labelB: root.labelOf(root.rowB)
+    }
+    // History (#228, the owner's decision; Photoshop's History panel is the reference): the canvas's changes in words,
+    // newest first, at the start side of the picture, closed at first. A click shows that step (read only: the Layers
+    // panel says so and offers Back to latest); Up and Down move through the steps. The hash is only in the tooltip.
+    Rectangle {
+        id: historyPanel
+        objectName: "canvasHistoryPanel"
+        property bool showAll: false
+        readonly property var rows: showAll ? canvasData.allSteps : canvasData.steps
+        anchors.top: pictureView.top
+        anchors.bottom: pictureView.bottom
+        anchors.left: parent.left
+        width: 56 * root.u
+        visible: root.showHistory && canvasData.canvasId !== "" && !root.compareOn
+        radius: root.look.smallCorner
+        color: root.look.body
+        border.width: 1
+        border.color: root.look.hairline
+        Column {
+            anchors.fill: parent
+            anchors.margins: root.u
+            spacing: root.u
+            Item {
+                width: parent.width
+                height: 7 * root.u
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    leftPadding: root.u
+                    text: qsTr("History")
+                    color: root.look.label
+                    font.pixelSize: root.look.captionSize
+                }
+                ViewButton {
+                    objectName: "canvasHistoryShowAll"
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    look: root.look
+                    text: qsTr("All revisions")
+                    tip: qsTr("Show all revisions: the candidates too, pending and dropped")
+                    accented: false
+                    checkable: true
+                    compact: true
+                    current: historyPanel.showAll
+                    onTapped: historyPanel.showAll = !historyPanel.showAll
+                }
+            }
+            ListView {
+                id: historyList
+                objectName: "canvasHistoryList"
+                width: parent.width
+                height: parent.height - y - (backLatest.visible ? backLatest.height + parent.spacing : 0)
+                clip: true
+                spacing: root.u / 2
+                model: historyPanel.rows
+                boundsBehavior: Flickable.StopAtBounds
+                activeFocusOnTab: true
+                ScrollBar.vertical: FugueScrollBar { look: root.look }
+                Keys.onPressed: event => {
+                    const rows = historyPanel.rows
+                    const at = rows.findIndex(r => r.id === canvasData.revisionB)
+                    if (event.key === Qt.Key_Down && at < rows.length - 1) canvasData.show(rows[at + 1].id)
+                    else if (event.key === Qt.Key_Up && at > 0) canvasData.show(rows[at - 1].id)
+                    else return
+                    event.accepted = true
+                }
+                delegate: Rectangle {
+                    id: stepRow
+                    required property var modelData
+                    required property int index
+                    objectName: "canvasHistoryStep-" + index
+                    readonly property bool shown: modelData.id === canvasData.revisionB
+                    width: historyList.width
+                    height: 8 * root.u
+                    radius: root.look.smallCorner
+                    color: shown ? root.look.selectedRow : stepHover.hovered ? root.look.menuRow : "transparent"
+                    border.width: shown && historyList.activeFocus ? 2 : 0
+                    border.color: root.look.accent
+                    Accessible.role: Accessible.ListItem
+                    Accessible.name: modelData.name
+                    Accessible.selected: shown
+                    Text {
+                        anchors.left: parent.left
+                        anchors.leftMargin: root.u
+                        anchors.right: stepTime.left
+                        anchors.rightMargin: root.u
+                        anchors.verticalCenter: parent.verticalCenter
+                        elide: Text.ElideRight
+                        textFormat: Text.PlainText
+                        text: stepRow.modelData.name
+                        color: stepRow.modelData.kind === "dropped" ? root.look.label : root.look.text
+                        font.pixelSize: root.look.labelSize
+                        font.weight: stepRow.modelData.latest ? Font.DemiBold : Font.Normal
+                    }
+                    Text {
+                        id: stepTime
+                        anchors.right: parent.right
+                        anchors.rightMargin: root.u
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: stepRow.modelData.latest ? qsTr("Latest") : stepRow.modelData.timeText.split(" ").pop()
+                        color: root.look.label
+                        font.pixelSize: root.look.captionSize
+                        font.features: { "tnum": 1 }
+                    }
+                    HoverHandler { id: stepHover }
+                    TapHandler {
+                        onTapped: {
+                            canvasData.show(stepRow.modelData.id)
+                            historyList.forceActiveFocus()
+                        }
+                    }
+                    ToolTip.visible: stepHover.hovered
+                    ToolTip.delay: root.look.tooltipDelay
+                    ToolTip.text: qsTr("%1, %2 · revision %3").arg(stepRow.modelData.name).arg(stepRow.modelData.timeText).arg(stepRow.modelData.id.slice(7, 15))
+                }
+            }
+            ViewButton {
+                id: backLatest
+                objectName: "canvasHistoryBackLatest"
+                look: root.look
+                visible: canvasData.revisionB !== canvasData.head && canvasData.head !== ""
+                text: qsTr("Back to latest")
+                tip: qsTr("Show the latest version again")
+                onTapped: canvasData.show(canvasData.head)
+            }
+        }
     }
     // The layers of the shown revision, at the right of the picture (the left, right to left), 2u from it.
     CanvasLayersPanel {
@@ -618,9 +740,9 @@ Item {
                 wrapMode: Text.Wrap
                 color: root.look.text
                 font.pixelSize: root.look.labelSize
-                text: (canvasData.newResultFrom !== "" ? qsTr("New candidate %1 from %2: it is shown over the Head.").arg(root.shownShort).arg(canvasData.newResultFrom)
-                                                         : qsTr("New candidate %1: it is shown over the Head.").arg(root.shownShort))
-                      + (canvasData.newResultOthers > 0 ? " " + qsTr("%n more new candidates wait in the strip.", "", canvasData.newResultOthers) : "")
+                text: (canvasData.newResultFrom !== "" ? qsTr("A new candidate from %1 is shown over the latest version.").arg(canvasData.newResultFrom)
+                                                         : qsTr("A new candidate is shown over the latest version."))
+                      + (canvasData.newResultOthers > 0 ? " " + qsTr("%n more candidates are pending.", "", canvasData.newResultOthers) : "")
             }
             // Back first, the primary, then Drop in a chunk of its own last (docs/ui-ergonomics.md Order and Destructive).
             Flow {
@@ -629,8 +751,8 @@ Item {
                 ViewButton {
                     objectName: "canvasViewNewBack"
                     look: root.look
-                    text: qsTr("Back to Head")
-                    tip: qsTr("Show the Head; the candidate stays in the strip")
+                    text: qsTr("Back to latest")
+                    tip: qsTr("Show the latest version; the candidate stays pending")
                     onTapped: canvasData.show(canvasData.head)
                 }
                 Chunk {
@@ -639,7 +761,7 @@ Item {
                         look: root.look
                         primary: true
                         text: qsTr("Accept")
-                        tip: qsTr("Make this candidate the Head of the canvas (Enter)")
+                        tip: qsTr("Make this candidate the latest version of the canvas (Enter)")
                         onTapped: canvasData.accept(canvasData.revisionB)
                     }
                 }
@@ -698,7 +820,7 @@ Item {
                 glyph: "undo-2"
                 text: qsTr("Undo")
                 enabled: canvasData.canUndo
-                tip: qsTr("Take the Head back one step (%1)").arg((App.commands.entry("canvas-layers.undo").keys ?? []).join(", "))
+                tip: qsTr("Take the canvas back one step (%1)").arg((App.commands.entry("canvas-layers.undo").keys ?? []).join(", "))
                 onTapped: canvasData.undo()
             }
             ViewButton {
@@ -845,7 +967,7 @@ Item {
                 text: qsTr("Use for region")
                 tip: canvasData.region.writable !== true ? qsTr("The Revision input is linked to another node: change it there")
                      : canvasData.region.readsShown === true ? qsTr("The region reads this revision already")
-                     : root.shownIsHead ? qsTr("Make the region read the Head, whichever revision that is") : qsTr("Make the region read exactly this revision")
+                     : root.shownIsHead ? qsTr("Make the region read the latest version, whichever step that is") : qsTr("Make the region read exactly this step")
                 onTapped: canvasData.useForRegion()
             }
         }

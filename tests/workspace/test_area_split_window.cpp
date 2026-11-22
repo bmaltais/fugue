@@ -289,7 +289,7 @@ private slots:
         QVERIFY(shown != head);
         QCOMPARE(backend->property("newResult").toString(), shown);
         const QString said = find(app.window, "canvasViewNewResultText")->property("text").toString();
-        QVERIFY2(said.contains("New candidate") && said.contains("from Canvas Write") && !said.contains("pot"), qPrintable(said));
+        QVERIFY2(said.startsWith("A new candidate from Canvas Write") && !said.contains("pot"), qPrintable(said));
         QVERIFY(!find(app.window, "canvasViewAccept")); // the bar's pair hides while the banner has it: one primary
         QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(find(app.window, "canvasViewNewAccept")));
         QTRY_COMPARE(backend->property("head").toString(), shown);
