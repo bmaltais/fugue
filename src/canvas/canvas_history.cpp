@@ -26,7 +26,7 @@ QString describe(const canvas::LayerDiff &layer) {
     case canvas::LayerChange::Changed: line = QObject::tr("Layer %1 changed").arg(layer.name); break;
     }
     if (layer.tilesChanged > 0)
-        line += QObject::tr(": %n tile(s) in %1", nullptr, layer.tilesChanged).arg(rectText(layer.bounds));
+        line += QStringLiteral(": ") + QObject::tr("%n tiles in %1", nullptr, layer.tilesChanged).arg(rectText(layer.bounds));
     if (!layer.properties.isEmpty())
         line += QStringLiteral(" (%1)").arg(layer.properties.join(QStringLiteral(", ")));
     return line;
