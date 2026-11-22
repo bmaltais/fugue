@@ -177,9 +177,9 @@ Item {
             onClosed: menu.destroy()
         }
     }
-    function openMenu(button, entries, picked) {
+    function openMenu(button, entries, picked, wide) {
         const at = button.mapToItem(Overlay.overlay, 0, button.height)
-        const menu = menuComponent.createObject(root, {wantX: at.x, wantY: at.y, width: Math.max(button.width, 40 * u),
+        const menu = menuComponent.createObject(root, {wantX: at.x, wantY: at.y, width: Math.max(button.width, (wide ?? 40) * u),
                                                        anchorHeight: button.height, entries: entries, searchable: entries.length > 12}) as WidgetMenu
         menu.picked.connect(picked)
         menu.open()
@@ -193,7 +193,7 @@ Item {
                 root.importPicture()
             else if (value.id !== undefined)
                 canvasData.canvasId = value.id
-        })
+        }, 80) // the rows carry a name, a size and a time, and the id under them
     }
     function chooseEarlier() {
         openMenu(earlierButton, canvasData.earlier.map(row => ({text: row.name, value: row.id, detail: root.producerText(row.producer),
@@ -439,6 +439,7 @@ Item {
         }
         Chunk {
             id: trailingChunk
+            lead: canvasData.canvasId !== "" // with no canvas it is the row's only chunk
             visible: children.length > 0
         }
     }
@@ -537,6 +538,7 @@ Item {
         anchors.right: pictureView.right
         anchors.bottom: pictureView.bottom
         anchors.margins: 2 * root.u
+        anchors.bottomMargin: 8 * root.u // the picture's size and zoom notice stays readable under it
         visible: root.newResultShown
         look: root.look
         decision: true

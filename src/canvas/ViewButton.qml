@@ -54,6 +54,7 @@ Rectangle {
     height: implicitHeight
     radius: look.smallCorner
     color: marked ? look.accent
+         : alarmed && flat ? (hovered || pressed ? look.dangerHover : "transparent") // chrome: red only when aimed at
          : alarmed ? (hovered || pressed ? look.dangerHover : look.dangerFill)
          : pressed ? look.menuRow
          : current ? look.selectedRow

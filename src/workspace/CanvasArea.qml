@@ -15,9 +15,16 @@ AreaView {
     property var selection: App.canvasModel.selection
     readonly property string selectedRegion: edits && selection.length === 1 && edits.regionState(selection[0]).ok === true ? selection[0] : ""
 
+    // The area's own ground, the File > Canvas… dialog's surface color (nothing else draws behind an area), and the
+    // dialog's 2u inset, so the view reads the same in both hosts.
+    Rectangle {
+        anchors.fill: parent
+        color: App.theme.look.popup
+    }
     CanvasView {
         id: content
         anchors.fill: parent
+        anchors.margins: 2 * App.theme.look.unit
         look: App.theme.look
         canvasId: root.areaState?.canvasId ?? ""
         edits: root.edits
