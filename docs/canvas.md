@@ -87,11 +87,17 @@ read, waiting for you. The `generative-fill` template (File > Browse templates, 
 `fugue workflow new fill.fugue --template generative-fill`) is Canvas Region, a FLUX.2 Klein redraw
 and Canvas Write, with that off. Turn it on for the review below. Put your canvas's id and the rectangle in Canvas Region and run it.
 
-When a run leaves a candidate, a Canvas view that is looking at the head (File > Canvas…, or a Canvas
-area) shows it at once over the head, with a banner: **Accept**, **Drop** or **Keep looking at head**.
-Several results at once: the newest is shown and the others are counted. A view on another revision,
-with Compare on, or while you drag the region is never moved (a result that came during a drag shows
-when you let go). Turn it off in Settings > General, **Show new candidates**. With Keep as candidate off (the default), nothing waits: the head moves to the result by itself.
+When a run's layer lands on the head, a Canvas view that is looking at the head (File > Canvas…, or a Canvas area)
+goes along to it and says so for a moment, "Layer <name> added", with **Undo** (the head back one step; Ctrl+Z over the
+Layers panel does the same). Delete a layer you do not want in the Layers panel.
+
+When a run leaves a candidate instead (Keep as candidate on, or a head that moved in a way the layer could not follow),
+the view shows it at once over the head, with a banner over the foot of the picture, "New candidate <hash> from <the
+Canvas Write's title>": **Back to Head** (the candidate stays in the strip), **Accept** (or Enter) or **Drop**. Several
+candidates at once: the newest is shown and the others are counted. A view on another revision, with Compare on, or
+while you drag the region is never moved (a candidate that came during a drag shows when you let go). Turn it off in
+Settings > General, **Show new candidates**. While a candidate or an earlier revision is shown, the Layers panel says
+so and offers **Go to Head** (and, for a candidate, Accept and Drop): layers are changed on the head.
 
 - `fugue canvas candidates <id>` lists what waits, newest first; run the template again for another
   candidate to compare (they are all made from the head you started at).
@@ -106,12 +112,18 @@ when you let go). Turn it off in Settings > General, **Show new candidates**. Wi
 
 In the window, File > Canvas… is the picture of one canvas (the newest at first): the strip above it says what
 you are looking at (Head, the candidates waiting for you, the latest revisions, Earlier…), and the picture
-zooms with the wheel and pans with a drag. A candidate shows over the head; **Show candidate** off shows the
-head alone, so you can flip between before and after. **Accept**, **Drop** and **Export…** are in the bar
-(Drop only hides: a dropped candidate can still be accepted), and **Compare** opens the slider, side by side,
-flip and difference views against the head. Select a Canvas Region node in the graph before you open it and its
-rectangle (and the padded box the node cuts) is drawn on the picture; **Region reads from this revision** makes the
-node read the revision you are looking at (the head, if you are on the head), as one undo step. That rectangle is
+zooms with the wheel and pans with a drag (Home or 0 fits, 1 is 100%, + and - zoom). The canvas button opens the
+list of your canvases, with **New canvas…** and **Import picture…** under it; with no canvas yet the picture's place
+offers the same two. A candidate shows over the head; **Show candidate** off shows the head alone, so you can flip
+between before and after. **Accept** (or Enter), **Drop** and **Export…** are in the bar (Drop only hides: a dropped
+candidate can still be accepted), and **Compare** opens the views of Compare Images (slider, horizontal slider, side
+by side, flip and difference) against the head; the view you pick last comes back next time. The view follows the Canvas
+Region node you select in the graph, or by itself the only one that reads this canvas (a new one with no canvas yet
+takes this canvas at your first change): its rectangle (and the padded box the node cuts) is drawn on the picture;
+**Use for region** makes the node read the revision you are looking at (the head, if you are on the head), as one
+undo step. With no node followed a drag still draws a rectangle: with several Region nodes the view asks which one it
+is for, with none it offers **Add a Canvas Region node** (one undo step); until then the rectangle is not kept. A node
+that reads another canvas says so, with **Show** its canvas and **Use** this canvas **for this node**. That rectangle is
 the next work area, and you pick it on the picture: drag in empty space to draw a new one, drag inside it to move it
 or a handle to resize it (Shift keeps its shape, or makes a new one square; Alt works from the center). The numbers
 under the picture, the padded box and the size the model will get follow the pointer, and **Snap to 16** (the node's
@@ -121,10 +133,10 @@ neither moves the rectangle. It works on whichever revision you are looking at, 
 Width or Height linked to another node, or while Compare is on, it is only drawn; with no Canvas Region selected the
 view says so. The view refreshes by itself when a run adds a candidate or moves the head.
 
-File > Canvas history… lists your canvases; open one to see its revisions and
-candidates, and click a revision to see it at full size (zoom and pan; the head is shown first). Press
-**Compare** to see it against the one before it (the same slider, side by side, flip and difference views
-as Compare Images), and **Accept** or **Drop** on a candidate. Ctrl+click a revision to use it as the left
+File > Canvas history… lists your canvases (or, with none yet, offers New canvas… and Import picture…); open one to
+see its revisions and candidates, and click a revision to see it at full size (zoom and pan; the head is shown
+first). Press **Compare** to see a candidate against the head and any other revision against the one before it (the
+same views as Compare Images), and **Accept** (or Enter) or **Drop** on a candidate. Ctrl+click a revision to use it as the left
 side of a comparison. **Export…** saves the revision you are looking at as a flattened PNG.
 
 `fugue canvas export <id>[@<revision>] <file>` writes the same flattened picture from the command line by
