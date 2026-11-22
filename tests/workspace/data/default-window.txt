@@ -2,7 +2,7 @@
 # 1ba1e815 before areas (#220): its item count, then each item name and how many items carry it.
 # tests/workspace/test_area_window.cpp compares the window with this. Changing it means the default window
 # changed: say why in the commit (epic #217: the default window stays as simple as it is).
-items 193
+items 197
 ApplicationWindow 1
 ApplicationWindowContentControl 1
 autoHide 1
@@ -12,6 +12,7 @@ autoHideHandle 1
 breadcrumb 1
 canvas 1
 canvasInput 1
+closeApp 1
 closeTab-0 1
 commandUi 1
 contextMenu 1
