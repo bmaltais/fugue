@@ -12,11 +12,14 @@
 #include <QJsonDocument>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QFileInfo>
 #include <QPointer>
 #include <QUrl>
+#include <QUuid>
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace fugue {
 
@@ -295,7 +298,9 @@ QJsonObject vidGenBody(const JobRequest &request, const QJsonArray &loras, Error
 }
 
 // The /lm body for audio.generate (8.1): ace-server's AceRequest fields caption, lyrics, duration,
-// vocal_language and seed (docs/ARCHITECTURE.md, "Request JSON reference"). A seed of -1 is random.
+// vocal_language and seed (docs/ARCHITECTURE.md, "Request JSON reference"), and the ones a node may set:
+// bpm, keyscale, timesignature (the LM fills what is left out), lm_temperature and use_cot_caption
+// (false keeps the caption as written). A seed of -1 is random.
 QJsonObject aceBody(const JobRequest &request) {
     const QJsonObject &params = request.params;
     QJsonObject body{{"caption", params.value("prompt").toString()},
@@ -305,6 +310,30 @@ QJsonObject aceBody(const JobRequest &request) {
         body.insert("vocal_language", params.value("language"));
     if (params.contains("seed"))
         body.insert("seed", params.value("seed"));
+    for (const auto &[from, to] : {std::pair{"bpm", "bpm"}, {"key", "keyscale"}, {"time_signature", "timesignature"},
+                                   {"creativity", "lm_temperature"}, {"keep_description", "use_cot_caption"}}) {
+        if (!params.contains(QLatin1String(from)))
+            continue;
+        // keep_description is the opposite of the server's use_cot_caption.
+        body.insert(QLatin1String(to), QLatin1String(from) == QLatin1String("keep_description")
+                                           ? QJsonValue(!params.value("keep_description").toBool())
+                                           : params.value(QLatin1String(from)));
+    }
+    return body;
+}
+
+// The /synth body of Remix Song and Repaint Song: the LM is skipped, caption and lyrics reach the DiT as
+// they are (docs/ARCHITECTURE.md, "Generation modes"). `task` is cover, cover-nofsq or repaint.
+QJsonObject aceEditBody(const JobRequest &request) {
+    const QJsonObject &params = request.params;
+    QJsonObject body{{"task_type", params.value("task")},
+                     {"caption", params.value("prompt").toString()},
+                     {"lyrics", params.value("lyrics").toString()},
+                     {"output_format", "mp3"}};
+    for (const auto &[from, to] : {std::pair{"seed", "seed"}, {"strength", "audio_cover_strength"},
+                                   {"start", "repainting_start"}, {"end", "repainting_end"}, {"steps", "inference_steps"}})
+        if (params.contains(QLatin1String(from)))
+            body.insert(QLatin1String(to), params.value(QLatin1String(from)));
     return body;
 }
 
@@ -387,13 +416,14 @@ OmarchyProvider::OmarchyProvider(ProviderInstance instance, OmarchyPaths paths, 
 OmarchyProvider::~OmarchyProvider() = default;
 
 QNetworkReply *OmarchyProvider::send(const Server &server, const QByteArray &method,
-                                     const QString &path, const QByteArray &body, int timeoutMs) {
+                                     const QString &path, const QByteArray &body, int timeoutMs,
+                                     const QByteArray &contentType) {
     QNetworkRequest request(QUrl(server.base + path));
     if (timeoutMs > 0)
         request.setTransferTimeout(timeoutMs);
     request.setRawHeader("Authorization", "Bearer " + server.key);
     if (!body.isEmpty() || method == "POST")
-        request.setHeader(QNetworkRequest::ContentTypeHeader, QByteArrayLiteral("application/json"));
+        request.setHeader(QNetworkRequest::ContentTypeHeader, contentType);
     return m_network.sendCustomRequest(request, method, body);
 }
 
@@ -1102,6 +1132,8 @@ void OmarchyProvider::finishVideo(const QString &id, const QJsonObject &result) 
 // progress counter or preview, so progress is the half each job is.
 void OmarchyProvider::submitSong(const Server &server, const JobRequest &request, const QJsonObject &model,
                                  Reply<QString> reply) {
+    if (request.params.contains("task"))
+        return submitSongEdit(server, request, model, std::move(reply));
     QNetworkReply *posted = send(server, "POST", QStringLiteral("/lm"),
                                  QJsonDocument(aceBody(request)).toJson(QJsonDocument::Compact));
     connect(posted, &QNetworkReply::finished, this, [this, posted, server, request, model, reply] {
@@ -1121,6 +1153,57 @@ void OmarchyProvider::submitSong(const Server &server, const JobRequest &request
         job->model = model;
         job->status.state = QStringLiteral("running");
         job->status.stage = QStringLiteral("writing");
+        const QString id = QStringLiteral("%1/song-%2").arg(server.recipe).arg(++m_chats);
+        m_jobs.insert(id, job);
+        if (!m_poll.isActive())
+            m_poll.start();
+        reply(Result<QString>(id));
+    });
+}
+
+// Remix Song and Repaint Song: one /synth job with the request and the source audio as a multipart
+// form (the parts `request` and `audio`, ace-server's own). There is no first job, so the job starts
+// at rendering and the song's lyrics are the ones that were sent.
+void OmarchyProvider::submitSongEdit(const Server &server, const JobRequest &request, const QJsonObject &model,
+                                     Reply<QString> reply) {
+    const QString path = request.inputs.value("audio").toObject().value("path").toString();
+    QFile source(path);
+    if (!source.open(QIODevice::ReadOnly))
+        return reply(Result<QString>(makeError(QStringLiteral("file_not_found"),
+                                               QStringLiteral("Cannot read the source audio %1.").arg(path))));
+    const QByteArray boundary = "----fugue" + QUuid::createUuid().toByteArray(QUuid::Id128);
+    const auto part = [&](const QByteArray &name, const QByteArray &file, const QByteArray &type, const QByteArray &data) {
+        return "--" + boundary + "\r\nContent-Disposition: form-data; name=\"" + name + "\"; filename=\"" + file +
+               "\"\r\nContent-Type: " + type + "\r\n\r\n" + data + "\r\n";
+    };
+    const QByteArray body = part("request", "request.json", "application/json",
+                                 QJsonDocument(aceEditBody(request)).toJson(QJsonDocument::Compact)) +
+                            part("audio", QFileInfo(path).fileName().toUtf8(), "application/octet-stream", source.readAll()) +
+                            "--" + boundary + "--\r\n";
+    QNetworkReply *posted = send(server, "POST", QStringLiteral("/synth"), body, 0,
+                                 "multipart/form-data; boundary=" + boundary);
+    connect(posted, &QNetworkReply::finished, this, [this, posted, server, request, model, reply] {
+        posted->deleteLater();
+        const int code = httpStatus(posted);
+        const QJsonObject answer = jsonBody(posted);
+        const QString serverId = answer.value("id").toString();
+        if (code != 200 && code != 202)
+            return reply(Result<QString>(refusal(server.recipe, server.base, code, answer, false)));
+        if (serverId.isEmpty())
+            return reply(Result<QString>(jobError(QStringLiteral("%1 took the job but gave no id.").arg(server.recipe))));
+        auto job = std::make_shared<Job>();
+        job->music = true;
+        job->rendering = true;
+        job->server = server;
+        job->serverId = serverId;
+        job->request = request;
+        job->model = model;
+        job->song = QJsonObject{{"lyrics", request.params.value("lyrics").toString()}};
+        if (request.params.contains("seed"))
+            job->song.insert("seed", request.params.value("seed"));
+        job->status.state = QStringLiteral("running");
+        job->status.stage = QStringLiteral("rendering");
+        job->status.progress = 0.5;
         const QString id = QStringLiteral("%1/song-%2").arg(server.recipe).arg(++m_chats);
         m_jobs.insert(id, job);
         if (!m_poll.isActive())

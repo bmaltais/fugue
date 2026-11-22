@@ -1409,6 +1409,65 @@ private slots:
         QCOMPARE(result->used.value("seed").toInt(), 4242);
     }
 
+    // Remix Song and Repaint Song: one /synth job with the request and the audio as a multipart form
+    // (the parts ace-server reads: `request` and `audio`); the LM job is skipped.
+    void aSongRemixGoesStraightToSynthAsAMultipartWithTheSourceAudio() {
+        Fixture fixture;
+        fixture.server.on("GET", "/health", [](const HttpRequest &) { return HttpResponse{200, "{\"status\":\"ok\"}"}; });
+        fixture.server.on("POST", "/synth", [](const HttpRequest &) { return HttpResponse{200, "{\"id\":\"7\"}"}; });
+        fixture.server.on("GET", "/job?id=7", [](const HttpRequest &) { return HttpResponse{200, "{\"status\":\"done\"}"}; });
+        const QByteArray mp3 = "ID3 remixed bytes";
+        fixture.server.on("GET", "/job?id=7&result=1", [mp3](const HttpRequest &) {
+            return HttpResponse{200, "--B9\r\nContent-Type: audio/mpeg\r\n\r\n" + mp3 + "\r\n--B9\r\nContent-Type: application/octet-stream\r\n\r\nLATENT\r\n--B9--\r\n",
+                                "multipart/mixed; boundary=B9"};
+        });
+        fixture.writeStatus(QJsonObject{{kMusicModel, row(kMusicModel, "music", "active", fixture.endpoint())}});
+        const QString source = fixture.writeInput("source.mp3", "SOURCE-AUDIO-BYTES");
+        auto provider = fixture.provider();
+        auto request = fixture.request("audio.generate", {{"prompt", "jazz"}, {"lyrics", "[Instrumental]"}, {"task", "repaint"},
+                                                          {"start", 1.5}, {"end", 6.0}, {"seed", 5}},
+                                         QJsonObject{{"audio", QJsonObject{{"path", source}}}});
+        const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value();
+        JobStatus status;
+        QTRY_VERIFY((status = await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value()).isTerminal());
+        QCOMPARE(status.state, QStringLiteral("done"));
+
+        QVERIFY(fixture.server.requestsTo("POST", "/lm").isEmpty());
+        const HttpRequest sent = fixture.server.requestsTo("POST", "/synth").first();
+        QVERIFY(sent.headers.value("content-type").startsWith("multipart/form-data; boundary="));
+        QVERIFY(sent.body.contains("name=\"request\""));
+        QVERIFY(sent.body.contains("name=\"audio\""));
+        QVERIFY(sent.body.contains("SOURCE-AUDIO-BYTES"));
+        QVERIFY(sent.body.contains("\"task_type\":\"repaint\""));
+        QVERIFY(sent.body.contains("\"repainting_start\":1.5"));
+        QVERIFY(sent.body.contains("\"repainting_end\":6"));
+        QVERIFY(sent.body.contains("\"output_format\":\"mp3\""));
+        const auto result = await<JobResult>([&](auto reply) { provider->result(id, reply); });
+        QVERIFY(result.ok());
+        QCOMPARE(readAll(result->outputs.value("audio").toObject().value("path").toString()), mp3);
+        QCOMPARE(result->used.value("seed").toInt(), 5);
+    }
+
+    // The song's tempo, key, time signature, creativity and "keep my description" reach /lm as ace-server's
+    // own fields (use_cot_caption is the opposite of keeping the description).
+    void aSongsOwnSettingsReachTheModelThatWritesIt() {
+        Fixture fixture;
+        fixture.server.on("GET", "/health", [](const HttpRequest &) { return HttpResponse{200, "{}"}; });
+        fixture.server.on("POST", "/lm", [](const HttpRequest &) { return HttpResponse{200, "{\"id\":\"1\"}"}; });
+        fixture.server.on("GET", "/job?id=1", [](const HttpRequest &) { return HttpResponse{200, "{\"status\":\"running\"}"}; });
+        fixture.writeStatus(QJsonObject{{kMusicModel, row(kMusicModel, "music", "active", fixture.endpoint())}});
+        auto provider = fixture.provider();
+        auto request = fixture.request("audio.generate", {{"prompt", "x"}, {"lyrics", ""}, {"duration", 30}, {"bpm", 96}, {"key", "F# minor"},
+                                                          {"time_signature", "3"}, {"creativity", 0.4}, {"keep_description", true}});
+        await<QString>([&](auto reply) { provider->submit(request, reply); }).value();
+        const QJsonObject lm = QJsonDocument::fromJson(fixture.server.requestsTo("POST", "/lm").first().body).object();
+        QCOMPARE(lm.value("bpm").toInt(), 96);
+        QCOMPARE(lm.value("keyscale").toString(), QStringLiteral("F# minor"));
+        QCOMPARE(lm.value("timesignature").toString(), QStringLiteral("3"));
+        QCOMPARE(lm.value("lm_temperature").toDouble(), 0.4);
+        QCOMPARE(lm.value("use_cot_caption").toBool(true), false);
+    }
+
     void aSongThatFailsAndACancelledSongSayWhere() {
         Fixture fixture;
         fixture.server.on("GET", "/health", [](const HttpRequest &) { return HttpResponse{200, "{}"}; });

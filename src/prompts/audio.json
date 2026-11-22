@@ -19,6 +19,25 @@
           "prompt": "lo-fi hip hop, mellow and nostalgic, dusty Rhodes piano chords, soft vinyl crackle, warm sub bass, relaxed swung drums with brushed snare, a faint rain ambience, instrumental, tape-saturated and intimate"
         }
       ]
+    },
+    {
+      "id": "lyrics",
+      "label": "Song lyrics",
+      "family": "audio",
+      "target": "ACE-Step and other text-to-music models (Generate Song, Lyrics input)",
+      "notes": "Writes lyrics with [Verse] and [Chorus] tags from an idea. Put a style caption in Generate Song's Description, not here.",
+      "system": [
+        "You write song lyrics for a text-to-music model from a short idea. Keep every theme, character, mood and constraint the idea gives, and do not change what it asks for. ",
+        "Use section tags on their own lines, in square brackets: [Intro], [Verse], [Pre-Chorus], [Chorus], [Bridge], [Outro]. A typical song has two verses, a chorus that comes back, and a bridge. Write short lines that can be sung, 4 to 8 syllables to a beat group, with a plain rhyme or a steady rhythm; repeat the chorus words exactly each time. Use only what can be sung: no stage directions, no chords, no notes in parentheses except backing vocals. Unless the idea names a length, write about 200 words. ",
+        "Answer with the lyrics alone: no title, no quotes, no notes."
+      ],
+      "language_note": "Write the lyrics in {language}.",
+      "examples": [
+        {
+          "idea": "a road trip with an old friend, hopeful",
+          "prompt": "[Verse]\nTwo lanes of morning, a coffee gone cold\nYour hand on the wheel, the radio low\n\n[Chorus]\nDrive, drive, we have nowhere to be\nThe sun on the dash and the whole road to see\n\n[Verse]\nMile after mile we are laughing again\nThe same old stories, the same old friend\n\n[Chorus]\nDrive, drive, we have nowhere to be\nThe sun on the dash and the whole road to see"
+        }
+      ]
     }
   ]
 }

@@ -1,34 +1,166 @@
 {
   "manifest": 1,
   "id": "fugue/generate-song",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "Generate Song",
-  "description": "Makes a song from a description and, optionally, lyrics on a music model.",
+  "description": "Makes a song from a description and, optionally, lyrics on a music model. The tempo, key and time signature are for you to set or for the model to choose.",
   "category": "Generate",
-  "keywords": ["music", "text to music", "audio", "lyrics", "sing", "instrumental", "ace-step"],
-  "runtime": {"kind": "builtin"},
-  "capabilities": ["audio.generate"],
+  "keywords": [
+    "music",
+    "text to music",
+    "audio",
+    "lyrics",
+    "sing",
+    "instrumental",
+    "ace-step",
+    "tempo",
+    "bpm",
+    "key"
+  ],
+  "runtime": {
+    "kind": "builtin"
+  },
+  "capabilities": [
+    "audio.generate"
+  ],
   "inputs": [
-    {"name": "prompt", "type": "text", "label": "Description", "widget": "multiline",
-     "description": "The style, mood, instruments and tempo of the song."},
-    {"name": "lyrics", "type": "text", "label": "Lyrics", "default": "", "widget": "multiline",
-     "description": "Sung as written, with [verse] and [chorus] lines to part it. Empty: the model writes them."},
-    {"name": "instrumental", "type": "boolean", "label": "Instrumental", "default": false,
-     "description": "No singing. The lyrics are ignored."},
-    {"name": "model", "type": "fugue/music-model", "label": "Model", "optional": true,
-     "description": "Unset: any ready music model."},
-    {"name": "duration", "type": "number", "label": "Length (seconds)", "default": 30, "integer": true, "min": 10,
-     "max": 600, "step": 5},
-    {"name": "language", "type": "text", "label": "Language", "default": "en", "advanced": true,
-     "description": "The language sung, by its code (en, fr, pt, ja)."},
-    {"name": "seed", "type": "number", "label": "Seed", "default": 0, "integer": true, "min": 0,
-     "max": 9007199254740991, "widget": "seed"}
+    {
+      "name": "prompt",
+      "type": "text",
+      "label": "Description",
+      "widget": "multiline",
+      "description": "The style, mood, instruments and tempo of the song."
+    },
+    {
+      "name": "lyrics",
+      "type": "text",
+      "label": "Lyrics",
+      "default": "",
+      "widget": "multiline",
+      "description": "Sung as written, with [verse] and [chorus] lines to part it. Empty: the model writes them."
+    },
+    {
+      "name": "instrumental",
+      "type": "boolean",
+      "label": "Instrumental",
+      "default": false,
+      "description": "No singing. The lyrics are ignored."
+    },
+    {
+      "name": "model",
+      "type": "fugue/music-model",
+      "label": "Model",
+      "optional": true,
+      "description": "Unset: any ready music model."
+    },
+    {
+      "name": "duration",
+      "type": "number",
+      "label": "Length (seconds)",
+      "default": 30,
+      "integer": true,
+      "min": 10,
+      "max": 600,
+      "step": 5
+    },
+    {
+      "name": "language",
+      "type": "text",
+      "label": "Language",
+      "default": "en",
+      "advanced": true,
+      "description": "The language sung, by its code (en, fr, pt, ja)."
+    },
+    {
+      "name": "bpm",
+      "type": "number",
+      "label": "Tempo (BPM)",
+      "default": 0,
+      "integer": true,
+      "min": 0,
+      "max": 300,
+      "advanced": true,
+      "description": "Beats a minute. 0: the model chooses."
+    },
+    {
+      "name": "key",
+      "type": "text",
+      "label": "Key",
+      "default": "",
+      "advanced": true,
+      "widget": "line",
+      "description": "For example C major or F# minor. Empty: the model chooses."
+    },
+    {
+      "name": "time_signature",
+      "type": "text",
+      "label": "Time signature",
+      "default": "",
+      "choices": [
+        "",
+        "2",
+        "3",
+        "4",
+        "6"
+      ],
+      "advanced": true,
+      "description": "Beats to the bar: 4 is 4/4, 3 is 3/4. Empty: the model chooses."
+    },
+    {
+      "name": "creativity",
+      "type": "number",
+      "label": "Creativity",
+      "optional": true,
+      "min": 0,
+      "max": 2,
+      "step": 0.05,
+      "advanced": true,
+      "description": "How freely the model that writes the song picks its ideas. Lower is steadier. Unset: the model's own (0.85)."
+    },
+    {
+      "name": "keep_description",
+      "type": "boolean",
+      "label": "Keep my description",
+      "default": false,
+      "advanced": true,
+      "description": "Use the description exactly as written. Otherwise the model first rewrites it with more detail."
+    },
+    {
+      "name": "seed",
+      "type": "number",
+      "label": "Seed",
+      "default": 0,
+      "integer": true,
+      "min": 0,
+      "max": 9007199254740991,
+      "widget": "seed"
+    }
   ],
   "outputs": [
-    {"name": "audio", "type": "audio", "label": "Audio"},
-    {"name": "lyrics", "type": "text", "label": "Lyrics used"},
-    {"name": "seed", "type": "number", "label": "Seed used"},
-    {"name": "duration", "type": "number", "label": "Length (seconds) made"},
-    {"name": "model", "type": "fugue/music-model", "label": "Model used"}
+    {
+      "name": "audio",
+      "type": "audio",
+      "label": "Audio"
+    },
+    {
+      "name": "lyrics",
+      "type": "text",
+      "label": "Lyrics used"
+    },
+    {
+      "name": "seed",
+      "type": "number",
+      "label": "Seed used"
+    },
+    {
+      "name": "duration",
+      "type": "number",
+      "label": "Length (seconds) made"
+    },
+    {
+      "name": "model",
+      "type": "fugue/music-model",
+      "label": "Model used"
+    }
   ]
 }

@@ -1,0 +1,113 @@
+{
+  "manifest": 1,
+  "id": "fugue/repaint-song",
+  "version": "1.0.0",
+  "name": "Repaint Song",
+  "description": "Redraws one stretch of a song and keeps the rest as it was: a new solo, a different verse, a better ending.",
+  "category": "Generate",
+  "keywords": [
+    "music",
+    "repaint",
+    "inpaint",
+    "edit",
+    "section",
+    "audio",
+    "ace-step",
+    "song"
+  ],
+  "runtime": {
+    "kind": "builtin"
+  },
+  "capabilities": [
+    "audio.generate"
+  ],
+  "inputs": [
+    {
+      "name": "audio",
+      "type": "audio",
+      "label": "Song",
+      "description": "The song to start from."
+    },
+    {
+      "name": "prompt",
+      "type": "text",
+      "label": "Description",
+      "widget": "multiline",
+      "description": "What the redrawn part should be: genre, mood, instruments, voice."
+    },
+    {
+      "name": "lyrics",
+      "type": "text",
+      "label": "Lyrics",
+      "default": "",
+      "widget": "multiline",
+      "description": "Sung as written, with [verse] and [chorus] lines to part it. Empty: no words are given to the model, so the singing may change or go."
+    },
+    {
+      "name": "instrumental",
+      "type": "boolean",
+      "label": "Instrumental",
+      "default": false,
+      "description": "No singing. The lyrics are ignored."
+    },
+    {
+      "name": "model",
+      "type": "fugue/music-model",
+      "label": "Model",
+      "optional": true,
+      "description": "Unset: any ready music model."
+    },
+    {
+      "name": "start",
+      "type": "number",
+      "label": "From (seconds)",
+      "default": 0,
+      "min": 0,
+      "max": 3600,
+      "step": 0.5,
+      "description": "Where the part to redraw begins."
+    },
+    {
+      "name": "end",
+      "type": "number",
+      "label": "To (seconds)",
+      "default": 0,
+      "min": 0,
+      "max": 3600,
+      "step": 0.5,
+      "description": "Where it ends. 0: the end of the song."
+    },
+    {
+      "name": "seed",
+      "type": "number",
+      "label": "Seed",
+      "default": 0,
+      "integer": true,
+      "min": 0,
+      "max": 9007199254740991,
+      "widget": "seed"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "audio",
+      "type": "audio",
+      "label": "Audio"
+    },
+    {
+      "name": "seed",
+      "type": "number",
+      "label": "Seed used"
+    },
+    {
+      "name": "duration",
+      "type": "number",
+      "label": "Length (seconds) made"
+    },
+    {
+      "name": "model",
+      "type": "fugue/music-model",
+      "label": "Model used"
+    }
+  ]
+}

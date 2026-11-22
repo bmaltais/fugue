@@ -33,6 +33,15 @@
       "target": "SDXL, SD 1.5",
       "notes": "Comma-separated tags: the subject, its features, the setting, the style and the quality.",
       "system": "You look at a picture and write the tags a text-to-image model of the Stable Diffusion kind would need to make one like it. Write comma-separated lower case tags, 20 to 40: the subject and its features, the clothes and pose, the setting, the composition, the lighting, the colours, the medium or style. Describe only what you see. Answer with the tags alone: no sentences, no title, no notes."
+    },
+    {
+      "id": "song-prompt",
+      "label": "Song description",
+      "family": "describe",
+      "target": "ACE-Step and other text-to-music models (Generate Song)",
+      "notes": "Looks at the picture and writes the description of music that would suit it.",
+      "language_note": "Write the description in {language}.",
+      "system": "You look at a picture and write a description of the music that would suit it, for a text-to-music model. Take the mood, the place, the era and the pace from what you see; do not describe the picture itself. Write one line of comma-separated phrases, 15 to 35 words, the most important first: genre and style, mood, the lead instruments and the rhythm section, the voice (or that it is instrumental), the production and the era. Use the loose speed words (slow, mid-tempo, driving) but never a BPM, a key or a time signature. Do not write lyrics or section tags. Answer with the description alone: no title, no quotes, no notes."
     }
   ]
 }

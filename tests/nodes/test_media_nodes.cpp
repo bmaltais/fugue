@@ -34,6 +34,8 @@ namespace {
 
 const QString kVideoNode = QStringLiteral("fugue/generate-video");
 const QString kSongNode = QStringLiteral("fugue/generate-song");
+const QString kRemixNode = QStringLiteral("fugue/remix-song");
+const QString kRepaintNode = QStringLiteral("fugue/repaint-song");
 
 bool ffmpeg(const QStringList &args) {
     QProcess process;
@@ -425,6 +427,67 @@ private slots:
         QVERIFY(!refused.ok());
         QCOMPARE(refused.error().code, QStringLiteral("value_out_of_range"));
         QCOMPARE(refused.error().input, QStringLiteral("duration"));
+    }
+
+    // Tempo, key, time signature, creativity and "keep my description" go along only when they are set:
+    // an unset one is left for the model to work out.
+    void aSongSendsTempoKeyAndTheRestOnlyWhenSet() {
+        Bench bench;
+        const Result<JobRequest> plain = bench.request(kSongNode, {{"prompt", "x"}, {"bpm", 0}, {"key", ""}, {"time_signature", ""},
+                                                                   {"keep_description", false}}, musicModel());
+        QVERIFY(plain.ok());
+        for (const char *key : {"bpm", "key", "time_signature", "creativity", "keep_description"})
+            QVERIFY2(!plain->params.contains(QLatin1String(key)), key);
+        const Result<JobRequest> set = bench.request(kSongNode, {{"prompt", "x"}, {"bpm", 96}, {"key", " F# minor "}, {"time_signature", "3"},
+                                                                 {"creativity", 0.4}, {"keep_description", true}}, musicModel());
+        QVERIFY(set.ok());
+        QCOMPARE(set->params.value("bpm").toInt(), 96);
+        QCOMPARE(set->params.value("key").toString(), QStringLiteral("F# minor"));
+        QCOMPARE(set->params.value("time_signature").toString(), QStringLiteral("3"));
+        QCOMPARE(set->params.value("creativity").toDouble(), 0.4);
+        QVERIFY(set->params.value("keep_description").toBool());
+    }
+
+    // --- Remix Song and Repaint Song ---
+
+    void aRemixSendsTheSongAsACoverOrAStayCloseCover() {
+        Bench bench;
+        const Value song = bench.media(MediaType::Audio, makeAudio(bench.file("in.mp3"), 3));
+        const Result<JobRequest> loose = bench.request(kRemixNode, {{"audio", song}, {"prompt", " jazz "}, {"strength", 0.6}}, musicModel());
+        QVERIFY2(loose.ok(), qPrintable(loose.ok() ? QString() : loose.error().message));
+        QCOMPARE(loose->capability, QStringLiteral("audio.generate"));
+        QCOMPARE(loose->params.value("task").toString(), QStringLiteral("cover"));
+        QCOMPARE(loose->params.value("prompt").toString(), QStringLiteral("jazz"));
+        QCOMPARE(loose->params.value("strength").toDouble(), 0.6);
+        QCOMPARE(loose->params.value("lyrics").toString(), QString());
+        QCOMPARE(loose->inputs.value("audio").toObject().value("path").toString(), song.media().path());
+        const Result<JobRequest> close = bench.request(kRemixNode, {{"audio", song}, {"prompt", "x"}, {"stay_close", true}, {"instrumental", true}}, musicModel());
+        QCOMPARE(close->params.value("task").toString(), QStringLiteral("cover-nofsq"));
+        QCOMPARE(close->params.value("lyrics").toString(), QStringLiteral("[Instrumental]"));
+    }
+
+    void aRepaintNamesTheStretchAndZeroEndsAtTheEndOfTheSong() {
+        Bench bench;
+        const Value song = bench.media(MediaType::Audio, makeAudio(bench.file("in.mp3"), 4));
+        const Result<JobRequest> job = bench.request(kRepaintNode, {{"audio", song}, {"prompt", "guitar solo"}, {"start", 1.0}}, musicModel());
+        QVERIFY2(job.ok(), qPrintable(job.ok() ? QString() : job.error().message));
+        QCOMPARE(job->params.value("task").toString(), QStringLiteral("repaint"));
+        QCOMPARE(job->params.value("start").toDouble(), 1.0);
+        QVERIFY(qAbs(job->params.value("end").toDouble() - 4.0) < 0.2);
+        const Result<JobRequest> backwards = bench.request(kRepaintNode, {{"audio", song}, {"prompt", "x"}, {"start", 3.0}, {"end", 2.0}}, musicModel());
+        QVERIFY(!backwards.ok());
+        QCOMPARE(backwards.error().input, QStringLiteral("end"));
+    }
+
+    void aRemixComesBackAsAFileWithTheSeedUsed() {
+        Bench bench;
+        const QString made = makeAudio(bench.file("made.mp3"), 2);
+        const Result<Values> out = bench.outputs(kRemixNode, {{"prompt", "x"}, {"seed", 1}}, musicModel(),
+                                                 JobResult{QJsonObject{{"audio", QJsonObject{{"path", made}, {"format", "mp3"}}}},
+                                                           QJsonObject{{"seed", 8}}});
+        QVERIFY2(out.ok(), qPrintable(out.ok() ? QString() : out.error().message));
+        QCOMPARE(out->value("audio").media().type(), MediaType::Audio);
+        QCOMPARE(out->value("seed").number(), 8.0);
     }
 
     void theSongComesBackAsAFileWithItsLyricsAndLength() {

@@ -95,7 +95,8 @@ private:
     void discover(std::function<void(const Result<Discovery> &)> done);
     // `timeoutMs`: how long the transfer may go silent; 0 keeps the network's 15 seconds.
     QNetworkReply *send(const Server &server, const QByteArray &method, const QString &path,
-                        const QByteArray &body = {}, int timeoutMs = 0);
+                        const QByteArray &body = {}, int timeoutMs = 0,
+                        const QByteArray &contentType = QByteArrayLiteral("application/json"));
     void submitChat(const Server &server, const JobRequest &request, const QJsonObject &model, Reply<QString> reply);
     void readChat(const QString &id, bool atEnd = false);
     void finishChat(const QString &id);
@@ -104,6 +105,8 @@ private:
     void finishJob(const QString &id, const QJsonObject &job);
     void finishVideo(const QString &id, const QJsonObject &result);
     void submitSong(const Server &server, const JobRequest &request, const QJsonObject &model, Reply<QString> reply);
+    // Remix and Repaint Song: no LM pass, the source audio goes with the request straight to /synth.
+    void submitSongEdit(const Server &server, const JobRequest &request, const QJsonObject &model, Reply<QString> reply);
     void pollSong(const QString &id);
     void fetchSong(const QString &id);
     void change(const QString &id, const JobStatus &status);

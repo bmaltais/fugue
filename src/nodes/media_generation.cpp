@@ -219,6 +219,21 @@ public:
         const Value seed = context.input(QStringLiteral("seed"));
         if (!seed.isEmpty())
             params.insert(QStringLiteral("seed"), seed.json().toInteger());
+        // What the model works out itself when it is left out (ace-server, "Metadata (LLM-filled if unset)"):
+        // 0 tempo, an empty key or time signature are "unset", so they are not sent.
+        const int tempo = int(context.input(QStringLiteral("bpm")).number());
+        if (tempo > 0)
+            params.insert(QStringLiteral("bpm"), tempo);
+        for (const QString &name : {QStringLiteral("key"), QStringLiteral("time_signature")}) {
+            const QString text = context.input(name).text().trimmed();
+            if (!text.isEmpty())
+                params.insert(name, text);
+        }
+        const Value creativity = context.input(QStringLiteral("creativity"));
+        if (!creativity.isEmpty())
+            params.insert(QStringLiteral("creativity"), creativity.number());
+        if (context.input(QStringLiteral("keep_description")).json().toBool())
+            params.insert(QStringLiteral("keep_description"), true);
         return request;
     }
 
@@ -235,11 +250,79 @@ public:
     }
 };
 
+// Remix Song and Repaint Song: a song in, a song out, on the same music models (the provider sends the
+// source with the job and skips the model that writes songs, so the description and the lyrics reach the
+// renderer as they are). Remix is ace-step's cover (re-played in another style; "stay close" keeps its
+// tune and timing), Repaint redraws one stretch of the song and keeps the rest.
+class SongEditKernel : public ProviderKernel {
+public:
+    explicit SongEditKernel(bool repaint) : m_repaint(repaint) {}
+
+    Requirement requirement(const NodeType &, const Values &inputs) const override {
+        Requirement requirement;
+        requirement.capability = kAudio;
+        requirement.model = inputs.value(QStringLiteral("model")).json().toObject();
+        return requirement;
+    }
+
+    Result<JobRequest> request(const NodeContext &context, const Selection &selection) override {
+        JobRequest request;
+        request.capability = kAudio;
+        request.model = selection.model.handle;
+        const MediaHandle source = context.input(QStringLiteral("audio")).media();
+        if (source.path().isEmpty() || source.duration() <= 0)
+            return makeInputError(QStringLiteral("media_unreadable"), QStringLiteral("audio"),
+                                  QStringLiteral("The source song cannot be read."));
+        QJsonObject &params = request.params;
+        params.insert(QStringLiteral("prompt"), context.input(QStringLiteral("prompt")).text().trimmed());
+        const bool instrumental = context.input(QStringLiteral("instrumental")).json().toBool();
+        params.insert(QStringLiteral("lyrics"),
+                      instrumental ? QStringLiteral("[Instrumental]") : context.input(QStringLiteral("lyrics")).text().trimmed());
+        const Value seed = context.input(QStringLiteral("seed"));
+        if (!seed.isEmpty())
+            params.insert(QStringLiteral("seed"), seed.json().toInteger());
+        if (m_repaint) {
+            const double start = context.input(QStringLiteral("start")).number();
+            // 0 for the end is the end of the song.
+            const double end = context.input(QStringLiteral("end")).number();
+            const double stop = end > 0 ? end : source.duration();
+            if (stop <= start)
+                return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("end"),
+                                      QStringLiteral("The part to redraw ends at %1 seconds, before it starts at %2.")
+                                          .arg(stop).arg(start));
+            params.insert(QStringLiteral("task"), QStringLiteral("repaint"));
+            params.insert(QStringLiteral("start"), start);
+            params.insert(QStringLiteral("end"), stop);
+        } else {
+            params.insert(QStringLiteral("task"), context.input(QStringLiteral("stay_close")).json().toBool()
+                                                      ? QStringLiteral("cover-nofsq") : QStringLiteral("cover"));
+            params.insert(QStringLiteral("strength"), context.input(QStringLiteral("strength")).number());
+        }
+        request.inputs.insert(QStringLiteral("audio"), QJsonObject{{"path", source.path()}});
+        return request;
+    }
+
+    Result<Values> outputs(const NodeContext &context, const Selection &selection, const JobResult &result) override {
+        const Result<MediaHandle> audio = outputMedia(MediaType::Audio, context, selection, result);
+        if (!audio)
+            return audio.errors();
+        return Values{{QStringLiteral("audio"), Value(audio.value())},
+                      {QStringLiteral("seed"), usedNumber(result.used, QStringLiteral("seed"), context.input(QStringLiteral("seed")))},
+                      {QStringLiteral("duration"), Value(audio->duration())},
+                      {QStringLiteral("model"), usedModel(result.used, selection)}};
+    }
+
+private:
+    bool m_repaint;
+};
+
 } // namespace
 
 void addMediaGenerationKernels(Kernels &kernels) {
     kernels.add(QStringLiteral("fugue/generate-video"), std::make_shared<VideoKernel>());
     kernels.add(QStringLiteral("fugue/generate-song"), std::make_shared<SongKernel>());
+    kernels.add(QStringLiteral("fugue/remix-song"), std::make_shared<SongEditKernel>(false));
+    kernels.add(QStringLiteral("fugue/repaint-song"), std::make_shared<SongEditKernel>(true));
 }
 
 } // namespace fugue::nodes

@@ -1,0 +1,110 @@
+{
+  "manifest": 1,
+  "id": "fugue/remix-song",
+  "version": "1.0.0",
+  "name": "Remix Song",
+  "description": "Plays a song again in another style: the same song as a cover, a remix or a different genre, on a music model.",
+  "category": "Generate",
+  "keywords": [
+    "music",
+    "cover",
+    "remix",
+    "style",
+    "genre",
+    "audio",
+    "ace-step",
+    "song"
+  ],
+  "runtime": {
+    "kind": "builtin"
+  },
+  "capabilities": [
+    "audio.generate"
+  ],
+  "inputs": [
+    {
+      "name": "audio",
+      "type": "audio",
+      "label": "Song",
+      "description": "The song to start from."
+    },
+    {
+      "name": "prompt",
+      "type": "text",
+      "label": "Description",
+      "widget": "multiline",
+      "description": "The style to play it in: genre, mood, instruments, voice."
+    },
+    {
+      "name": "lyrics",
+      "type": "text",
+      "label": "Lyrics",
+      "default": "",
+      "widget": "multiline",
+      "description": "Sung as written, with [verse] and [chorus] lines to part it. Empty: no words are given to the model, so the singing may change or go."
+    },
+    {
+      "name": "instrumental",
+      "type": "boolean",
+      "label": "Instrumental",
+      "default": false,
+      "description": "No singing. The lyrics are ignored."
+    },
+    {
+      "name": "model",
+      "type": "fugue/music-model",
+      "label": "Model",
+      "optional": true,
+      "description": "Unset: any ready music model."
+    },
+    {
+      "name": "strength",
+      "type": "number",
+      "label": "Strength",
+      "default": 0.7,
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "description": "How much of the original is kept: 1 follows it throughout, lower leaves the model more freedom, 0 ignores it."
+    },
+    {
+      "name": "stay_close",
+      "type": "boolean",
+      "label": "Stay close",
+      "default": false,
+      "description": "Keep the tune, timing and sound of the original and change the style around it. Off: a looser reinterpretation."
+    },
+    {
+      "name": "seed",
+      "type": "number",
+      "label": "Seed",
+      "default": 0,
+      "integer": true,
+      "min": 0,
+      "max": 9007199254740991,
+      "widget": "seed"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "audio",
+      "type": "audio",
+      "label": "Audio"
+    },
+    {
+      "name": "seed",
+      "type": "number",
+      "label": "Seed used"
+    },
+    {
+      "name": "duration",
+      "type": "number",
+      "label": "Length (seconds) made"
+    },
+    {
+      "name": "model",
+      "type": "fugue/music-model",
+      "label": "Model used"
+    }
+  ]
+}
