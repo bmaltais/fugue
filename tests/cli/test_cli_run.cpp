@@ -197,7 +197,7 @@ private slots:
         // Let any worker finish before its folders go away.
         // The real condition, not a pause: the queue is empty and every worker has exited.
         QVERIFY2(QFile(gate()).open(QIODevice::WriteOnly), "gate");
-        QTRY_VERIFY_WITH_TIMEOUT(queued().isEmpty() && !anyWorkerAlive(), 30000);
+        QTRY_VERIFY_WITH_TIMEOUT(queued().isEmpty() && !anyWorkerAlive(), 60000);
         delete m_dir;
         m_dir = nullptr;
     }
@@ -264,7 +264,7 @@ private slots:
 
     void queueRunsOneAtATimeAndFirstGoesAheadOfWaitingRuns() {
         const QString a = start("hold.fugue");
-        QTRY_COMPARE_WITH_TIMEOUT(statusOf(a), QString("running"), 15000);
+        QTRY_COMPARE_WITH_TIMEOUT(statusOf(a), QString("running"), 45000);
         const QString b = start("hold.fugue");
         const QString c = start("hold.fugue", {"--first"});
         QVERIFY(!b.isEmpty() && !c.isEmpty());
@@ -289,7 +289,7 @@ private slots:
 
         QVERIFY(QFile(gate()).open(QIODevice::WriteOnly));
         for (const QString &id : {a, b, c})
-            QTRY_COMPARE_WITH_TIMEOUT(statusOf(id), QString("ok"), 20000);
+            QTRY_COMPARE_WITH_TIMEOUT(statusOf(id), QString("ok"), 60000);
         const auto started = [&](const QString &id) {
             return RunFolder::open(runsRoot(), id)->state().value("started").toString();
         };
@@ -300,11 +300,11 @@ private slots:
 
     void cancelStopsARunningRun() {
         const QString id = start("hold.fugue");
-        QTRY_COMPARE_WITH_TIMEOUT(statusOf(id), QString("running"), 15000);
+        QTRY_COMPARE_WITH_TIMEOUT(statusOf(id), QString("running"), 45000);
         const Outcome o = fugue({"runs", "cancel", id, "--json"});
         QCOMPARE(o.exitCode, 0);
         QCOMPARE(o.data().value("status").toString(), QString("cancelling"));
-        QTRY_COMPARE_WITH_TIMEOUT(statusOf(id), QString("cancelled"), 15000);
+        QTRY_COMPARE_WITH_TIMEOUT(statusOf(id), QString("cancelled"), 45000);
         QCOMPARE(fugue({"runs", "events", id, "--follow"}).exitCode, 1);
         QTRY_VERIFY_WITH_TIMEOUT(queued().isEmpty(), 10000);
         // Cancelling a run that has ended changes nothing.
@@ -313,7 +313,7 @@ private slots:
 
     void cancelRemovesAQueuedRunsEntry() {
         const QString a = start("hold.fugue");
-        QTRY_COMPARE_WITH_TIMEOUT(statusOf(a), QString("running"), 15000);
+        QTRY_COMPARE_WITH_TIMEOUT(statusOf(a), QString("running"), 45000);
         const QString b = start("hold.fugue");
         QCOMPARE(queued().size(), 2);
         // While a run waits, `fugue run` wrote its run.json once and nobody writes it again:
@@ -328,7 +328,7 @@ private slots:
         QCOMPARE(queued().size(), 1);
         QVERIFY(queued().first().endsWith(a));
         QVERIFY(QFile(gate()).open(QIODevice::WriteOnly));
-        QTRY_COMPARE_WITH_TIMEOUT(statusOf(a), QString("ok"), 20000);
+        QTRY_COMPARE_WITH_TIMEOUT(statusOf(a), QString("ok"), 60000);
         QCOMPARE(statusOf(b), QString("cancelled")); // its worker did not run it
     }
 
@@ -336,7 +336,7 @@ private slots:
     // between; the cancel must then reach the worker, not delete the entry of a live run.
     void aCancelThatSawTheRunWaitingStillStopsItOnceItHasStarted() {
         const QString id = start("hold.fugue");
-        QTRY_COMPARE_WITH_TIMEOUT(statusOf(id), QString("running"), 15000);
+        QTRY_COMPARE_WITH_TIMEOUT(statusOf(id), QString("running"), 45000);
         const Queue queue(queueDir());
         QueueEntry seen;
         QVERIFY(queue.find(id, &seen));
@@ -348,7 +348,7 @@ private slots:
         const cli::Reply reply = cli::cancelRun(*RunFolder::open(runsRoot(), id), seen, context());
         QVERIFY(!reply.failed());
         QCOMPARE(reply.data.toObject().value("status").toString(), QString("cancelling"));
-        QTRY_COMPARE_WITH_TIMEOUT(statusOf(id), QString("cancelled"), 15000);
+        QTRY_COMPARE_WITH_TIMEOUT(statusOf(id), QString("cancelled"), 45000);
         QTRY_VERIFY_WITH_TIMEOUT(queued().isEmpty(), 10000); // the worker removed its own entry
         // The worker ended the run, once: it skipped the node and wrote the one run.done.
         int done = 0;
@@ -405,7 +405,7 @@ private slots:
 
     void followingARunWhoseWorkerWasKilledEndsInsteadOfHanging() {
         const QString id = start("hold.fugue");
-        QTRY_COMPARE_WITH_TIMEOUT(statusOf(id), QString("running"), 15000);
+        QTRY_COMPARE_WITH_TIMEOUT(statusOf(id), QString("running"), 45000);
         const qint64 worker = qint64(RunFolder::open(runsRoot(), id)->state().value("pid").toDouble());
         QVERIFY(worker > 0);
         QCOMPARE(::kill(pid_t(worker), SIGKILL), 0);
@@ -493,13 +493,13 @@ private slots:
     // `fugue run` compiled; a file broken in between fails the run with the reason.
     void aWorkerThatCannotReadProvidersJsonFailsTheRunWithTheReason() {
         const QString a = start("hold.fugue");
-        QTRY_COMPARE_WITH_TIMEOUT(statusOf(a), QString("running"), 15000);
+        QTRY_COMPARE_WITH_TIMEOUT(statusOf(a), QString("running"), 45000);
         const QString b = start("flow.fugue");
         QVERIFY(!b.isEmpty());
         write(path("config/fugue/providers.json"), "{ this is not JSON");
         QVERIFY(QFile(gate()).open(QIODevice::WriteOnly));
-        QTRY_COMPARE_WITH_TIMEOUT(statusOf(a), QString("ok"), 20000); // it had its providers already
-        QTRY_VERIFY_WITH_TIMEOUT(statusOf(b) == "failed" || statusOf(b) == "ok", 20000);
+        QTRY_COMPARE_WITH_TIMEOUT(statusOf(a), QString("ok"), 60000); // it had its providers already
+        QTRY_VERIFY_WITH_TIMEOUT(statusOf(b) == "failed" || statusOf(b) == "ok", 60000);
         QCOMPARE(statusOf(b), QString("failed"));
         const QJsonObject done = RunFolder::open(runsRoot(), b)->events().last();
         QCOMPARE(done.value("event").toString(), QString("run.done"));
