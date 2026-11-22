@@ -26,7 +26,8 @@ Vulkan helper into `fugue` and the CUDA one into `fugue-helper-cuda` (`packaging
 The Arch package cannot serve a paired host that runs Ubuntu on aarch64 (CUDA 13, sm_121). A release
 carries `fugue-helper-cuda-aarch64-linux.tar.zst` for it: the binary (it links the host's CUDA
 runtime and cuBLAS dynamically; unsigned) and `fugue-helper.service`, with its line in `SHA256SUMS`.
-`package.yml` builds it on an arm runner (`helper-aarch64`) for each `v*` tag. By hand, on the host,
+`package.yml` builds it on an arm runner (`helper-aarch64`) for each `v*` tag, next to the
+aarch64 Arch package (`package-aarch64`; it holds the Vulkan helper). By hand, on the host,
 from a checkout of the tag, with the same script (portable settings: no `-march=native`; sm_121 code plus PTX):
 
 ```sh

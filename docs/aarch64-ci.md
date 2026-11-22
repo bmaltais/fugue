@@ -1,5 +1,11 @@
 # aarch64 CI
 
+`.github/workflows/package.yml` has a third arm job, `package-aarch64`: it makes the same container, runs
+`makepkg` as user `builder` (like the x86 job, `FUGUE_SKIP_CUDA=1`), prints the checksums, runs
+`scripts/check-elf-align` and uploads the `package-aarch64` artifact. A `v*` tag puts its
+`fugue-*-aarch64.pkg.tar.zst` and its `SHA256SUMS` lines in the release beside the x86 package (the file names
+carry the arch). Its ccache key is `package-aarch64-ccache-`.
+
 `.github/workflows/test.yml` has two jobs: `test` (x86_64, Arch container) and `test-aarch64`
 (GitHub's free `ubuntu-24.04-arm` runner). Both run `bin/build` and `bin/test` offscreen, with ccache.
 
@@ -17,4 +23,5 @@
 ## Not covered
 
 - GPU: runners have none, so tests that need Vulkan or CUDA are not run on either architecture.
-- Apple Silicon Linux (Asahi) uses 16 KB pages. Nothing in CI checks that; it needs a real Asahi machine.
+- Apple Silicon Linux (Asahi) uses 16 KB pages. `package-aarch64` checks statically that every ELF binary in the
+  package has LOAD segments aligned to 0x4000 or more (`scripts/check-elf-align`); running it needs a real Asahi machine.

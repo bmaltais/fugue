@@ -6,7 +6,10 @@ name: Package
 # the package and its checksum, and by hand. Not on pull requests: it is slow. Tests are test.yml's job,
 # so makepkg skips them here (and does not compile them).
 #
-# fugue-helper-cuda-aarch64-linux.tar.zst (the CUDA helper for a DGX Spark) is built on an arm runner.
+# Two more jobs run on an arm runner: fugue-helper-cuda-aarch64-linux.tar.zst (the CUDA helper for a DGX
+# Spark) and the aarch64 package (`package-aarch64`, built in an Arch Linux ARM container like test.yml's
+# test-aarch64; its file name carries the arch, fugue-*-aarch64.pkg.tar.zst, so it cannot collide with the x86 one).
+# The release gets both packages, the helper tarball and one SHA256SUMS.
 #
 # Only `fugue` (the Vulkan helper, any GPU) is built here: the CUDA toolkit is too big for a hosted
 # runner, so fugue-helper-cuda is built where there is an NVIDIA card (`makepkg -si` in packaging/).
@@ -123,9 +126,94 @@ jobs:
           name: helper-aarch64
           path: dist/*
 
+  package-aarch64:
+    name: Build the package (aarch64)
+    # The same package for Arch Linux ARM (and Asahi Linux: Apple Silicon, 16 KB pages, so the job checks
+    # the ELF segment alignment). Arch has no official arm64 container: see docs/aarch64-ci.md.
+    runs-on: ubuntu-24.04-arm
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 800M
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # tags, for the package version
+
+      - name: Restore the compiler cache
+        uses: actions/cache@v6
+        with:
+          path: .ccache
+          key: package-aarch64-ccache-${{ github.sha }}
+          restore-keys: package-aarch64-ccache-
+
+      - name: Make the Arch Linux ARM container
+        run: |
+          mkdir -p .ccache
+          cd "$RUNNER_TEMP"
+          base=http://os.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz
+          curl -fsSL --retry 3 -O "$base" -O "$base.md5"
+          md5sum -c ArchLinuxARM-aarch64-latest.tar.gz.md5
+          docker import ArchLinuxARM-aarch64-latest.tar.gz archlinuxarm
+          rm ArchLinuxARM-aarch64-latest.tar.gz
+          docker run -d --name arch -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE" \
+            -e CCACHE_DIR -e CCACHE_MAXSIZE archlinuxarm sleep infinity
+
+      - name: Install the package's dependencies
+        run: |
+          docker exec arch bash -c '
+            set -euo pipefail
+            export FUGUE_SKIP_CUDA=1
+            sed -i "s/^CheckSpace/#CheckSpace/; s/^\[options\]/[options]\nDisableSandbox/" /etc/pacman.conf
+            pacman-key --init && pacman-key --populate archlinuxarm
+            pacman -Syu --noconfirm --needed git
+            source packaging/PKGBUILD
+            deps=("${depends[@]}" "${makedepends[@]}")
+            pacman -S --noconfirm --needed base-devel ccache sudo "${deps[@]%%[<>=]*}"
+            git config --system --add safe.directory "*"
+            useradd -m builder
+            chown -R builder .'
+
+      - name: Build the package
+        # The commit is put on a branch so the clone makepkg makes of this checkout has it.
+        run: |
+          docker exec arch mkdir dist
+          docker exec arch chown builder dist
+          if [[ $GITHUB_REF_TYPE == tag ]]; then ref="tag=$GITHUB_REF_NAME"; else
+            docker exec arch git branch -f ci-build HEAD; ref="branch=ci-build"; fi
+          docker exec arch su builder -c "cd packaging && FUGUE_SKIP_CUDA=1 FUGUE_SRC='$GITHUB_WORKSPACE' FUGUE_REF='$ref' \
+            PKGDEST='$GITHUB_WORKSPACE/dist' CCACHE_DIR='$CCACHE_DIR' makepkg --noconfirm --nocheck --nodeps -f"
+
+      - name: Checksums and what is inside
+        run: |
+          docker exec arch bash -c '
+            set -euo pipefail
+            cd dist
+            ls -l
+            sha256sum *.pkg.tar.zst | tee SHA256SUMS
+            for pkg in *.pkg.tar.zst; do pacman -Qip "$pkg" | grep -E "^(Name|Version|Architecture|Depends On)"; done
+            pacman -Qlp *.pkg.tar.zst | grep -E "bin/fugue|applications/fugue.desktop|icons/.*fugue|fugue-helper" | head'
+
+      - name: Check the ELF segment alignment (Asahi Linux uses 16 KB pages)
+        # A binary whose LOAD segments are aligned to less than 0x4000 does not start on a 16 KB-page kernel.
+        run: docker exec arch scripts/check-elf-align dist/*.pkg.tar.zst
+
+      - name: Compiler cache use
+        if: always()
+        run: docker exec arch su builder -c 'ccache -s' || true
+
+      - name: Give the files back to the runner
+        # So the cache step after this job can read the compiler cache, and the workspace can be cleaned.
+        if: always()
+        run: docker exec arch chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" || true
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: package-aarch64
+          path: dist/*
+
   release:
     name: Make the release
-    needs: [package, helper-aarch64]
+    needs: [package, package-aarch64, helper-aarch64]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
@@ -138,8 +226,9 @@ jobs:
       - name: Gather the assets
         run: |
           mkdir dist
-          cp parts/package/*.pkg.tar.zst parts/helper-aarch64/*.tar.zst dist/
-          cat parts/package/SHA256SUMS parts/helper-aarch64/SHA256SUMS > dist/SHA256SUMS
+          # The package file names carry the arch (-x86_64, -aarch64), so the two sets do not collide.
+          cp parts/package/*.pkg.tar.zst parts/package-aarch64/*.pkg.tar.zst parts/helper-aarch64/*.tar.zst dist/
+          cat parts/package/SHA256SUMS parts/package-aarch64/SHA256SUMS parts/helper-aarch64/SHA256SUMS > dist/SHA256SUMS
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
