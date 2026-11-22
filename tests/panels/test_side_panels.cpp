@@ -101,21 +101,24 @@ private slots:
         ChromeVisibility chrome({});
         SidePanels panels({}, &chrome);
         const QVariantList list = panels.panels();
-        QCOMPARE(list.size(), 3);
+        QCOMPARE(list.size(), 4);
         int panelRows = 0, actionRows = 0;
         for (const QVariant &row : list) {
             const QVariantMap map = row.toMap();
             (map.value("kind").toString() == "action" ? actionRows : panelRows)++;
         }
         QCOMPARE(panelRows, 2);
-        QCOMPARE(actionRows, 1);
-        QCOMPARE(list.last().toMap().value("tab").toString(), QString("templates"));
-        panels.toggle("templates");
-        QCOMPARE(panels.tab(), QString());
-        panels.setTab("templates");
-        QCOMPARE(panels.tab(), QString());
-        QVERIFY(!panels.panels().last().toMap().value("open").toBool());
-        QVERIFY(!chrome.isVisible("templates"));
+        QCOMPARE(actionRows, 2);
+        QCOMPARE(list.last().toMap().value("tab").toString(), QString("settings"));
+        for (const QString &action : {QString("templates"), QString("settings")}) {
+            panels.toggle(action);
+            QCOMPARE(panels.tab(), QString());
+            panels.setTab(action);
+            QCOMPARE(panels.tab(), QString());
+            QVERIFY(!chrome.isVisible(action));
+        }
+        for (const QVariant &row : panels.panels())
+            QVERIFY(!row.toMap().value("open").toBool());
     }
     void aDamagedFileGivesTheDefaults() {
         QTemporaryDir dir;
@@ -135,7 +138,7 @@ private slots:
         SidePanels panels({});
         panels.registerCommands(commands);
         QVariantList list = panels.panels();
-        QCOMPARE(list.size(), 3); // two panels and the Templates action (#192)
+        QCOMPARE(list.size(), 4); // two panels, then the Templates action (#192) at the top, the Settings action at the bottom
         QCOMPARE(list[0].toMap().value("tab").toString(), QString("nodes"));
         QCOMPARE(list[0].toMap().value("keys").toStringList(), QStringList{"N"});
         QCOMPARE(list[1].toMap().value("tab").toString(), QString("workflows"));
@@ -144,6 +147,15 @@ private slots:
         QCOMPARE(list[2].toMap().value("kind").toString(), QString("action"));
         QCOMPARE(list[2].toMap().value("command").toString(), QString("file.templates"));
         QCOMPARE(list[2].toMap().value("glyph").toString(), QString("layout-template"));
+        QCOMPARE(list[3].toMap().value("tab").toString(), QString("settings"));
+        QCOMPARE(list[3].toMap().value("kind").toString(), QString("action"));
+        QCOMPARE(list[3].toMap().value("command").toString(), QString("app.settings"));
+        QCOMPARE(list[3].toMap().value("glyph").toString(), QString("settings"));
+        QCOMPARE(list[3].toMap().value("keys").toStringList(), QStringList{"Ctrl+,"});
+        // The registry says where each sits: the panels and Templates at the top, Settings at the bottom.
+        for (int i = 0; i < 3; ++i)
+            QCOMPARE(list[i].toMap().value("edge").toString(), QString("top"));
+        QCOMPARE(list[3].toMap().value("edge").toString(), QString("bottom"));
         for (const QVariant &row : list) {
             QVERIFY(!row.toMap().value("name").toString().isEmpty());
             QVERIFY(!row.toMap().value("glyph").toString().isEmpty());
@@ -159,6 +171,8 @@ private slots:
         QVERIFY(list[1].toMap().value("open").toBool());
         QCOMPARE(changed.count(), 1); // the strip's `panels` binding follows tabChanged
         QVERIFY(!list[2].toMap().value("open").toBool());
+        QVERIFY(!list[3].toMap().value("open").toBool());
+        QVERIFY(!commands.entry("app.settings").value("checked").toBool());
         QVERIFY(!commands.entry("file.templates").value("checked").toBool()); // an action is never checked
     }
     void theStripIsShownButFocusModeHidesIt() {

@@ -222,6 +222,7 @@ private slots:
         // 3820 since the tab strip (#159) added about a dozen to every window: a loader, the strip
         // and a tab with its glyph and mark for each side panel.
         // 3870 since the window's scroll bars and the auto-hide menu bar (#187, #160): main stood at 3843.
+        // 3844 with the Settings action tab on the strip (four tabs).
         QVERIFY2(items < 3870, qPrintable(QString::number(items)));
         QCOMPARE(item(app.window->contentItem(), "nodes")->property("count").toInt(), 302);
         QCOMPARE(item(app.window->contentItem(), "wires")->property("count").toInt(), 600);

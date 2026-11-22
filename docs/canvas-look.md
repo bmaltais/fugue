@@ -562,9 +562,11 @@ A dashed edge in QML is a `Shape` with `strokeStyle: ShapePath.DashLine` around 
   on the canvas-facing edge, no shadow and no corner. One tab per side panel, 11u square (a 44 px target), a 24 px glyph
   centered (`boxes`, `workflow`) in `label`; hovered: `menu-row` wash and `text` glyph; the open tab: `selected-row` wash, the
   glyph in `accent` and a 3 px `accent` bar on its left edge; a focused tab a 2 px `accent` ring inside it. The first tab is 1u
-  from the top. Tooltip after 600 ms: "Node library (N)". Hidden in focus mode. An **action tab** (#192, `layout-template`,
-  Templates) sits at the lower end, past a `hairline` rule inset 1u and a half-unit gap, drawn like a panel tab but never marked
-  open (no wash, bar or accent glyph: it launches the Templates dialog, it does not toggle a panel); tooltip "Templates (<key>)". The strip works in both themes through those
+  from the top. Tooltip after 600 ms: "Node library (N)". Hidden in focus mode. An **action tab** (#192) is drawn like a panel tab but never marked
+  open (no wash, bar or accent glyph: it launches, it does not toggle a panel). Templates (`layout-template`) is the third tab
+  of the top group, directly under Workflows; Settings (`settings`, the gear) sits alone at the lower end, past a `hairline` rule inset
+  1u and a half-unit gap, 1u from the bottom. Tooltips "Templates (<key>)" and "Settings (Ctrl+,)". Which end a tab sits at is a field
+  of its registry row (`edge`), not a place in the QML. The strip works in both themes through those
   tokens alone.
 - **Side panel** (#56, ComfyUI's sidebar): docked at the left or right edge of the canvas, which gives up its
   width (288 px at first, 200 to 640), full height of the canvas, `popup` fill, one `hairline` on the canvas-facing
@@ -673,8 +675,8 @@ A subset of Lucide (ISC) as an icon font in the resources, loaded with `FontLoad
 `Text { font.family: icons.name; text: "\ue..." }`: check, refresh-cw, loader-circle, snowflake,
 triangle-alert, corner-down-right, ban, skip-forward, circle-help, pin, layers, dices,
 chevron-down, chevron-left, chevron-right, folder, box, search, circle-x, x, play, and for the player (#116) pause, volume-2, volume-x, maximize-2, and for the
-selection toolbar (#74) trash-2, ellipsis, frame, image, log-in, and for the side tab strip (#159) boxes and workflow, and for its Templates action (#192) layout-template, and for where a model lives (#164) monitor and server, and for the mask editor (#172) brush, eraser, lasso-select, square-dashed, contrast, paint-bucket, undo-2, redo-2 and eye; the full list with code points in
-`share/fonts/lucide-fugue.txt`. About 48 glyphs, about 16 KB. Text glyphs recolor through `color`, render through the same distance-field text as
+selection toolbar (#74) trash-2, ellipsis, frame, image, log-in, and for the side tab strip (#159) boxes and workflow, and for its Templates action (#192) layout-template and its Settings action settings, and for where a model lives (#164) monitor and server, and for the mask editor (#172) brush, eraser, lasso-select, square-dashed, contrast, paint-bucket, undo-2, redo-2 and eye; the full list with code points in
+`share/fonts/lucide-fugue.txt`. About 53 glyphs, about 17 KB. Text glyphs recolor through `color`, render through the same distance-field text as
 labels and batch with them; an SVG `Image` would need a separate texture per color.
 
 ### 16.1 Scroll bars

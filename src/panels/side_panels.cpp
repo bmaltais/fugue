@@ -15,11 +15,14 @@ namespace {
 // The registered tabs, in the strip's order. A `panel` row is a docked panel: add it here, give its
 // command a handler (registerCommands does it for every panel row), and the strip shows its tab.
 // An `action` row (#192) is a tab that launches a command someone else owns (the Templates dialog):
-// it has no panel, no registry id, no handler and no checked state here, and the strip draws it
-// below the panel tabs.
+// it has no panel, no registry id, no handler and no checked state here. Any row sits at the strip's
+// `Top` (under the window bars, in table order) or its `Bottom` (the lower end, past a hairline, in
+// table order): the table is the one place that says where a tab goes.
 enum class Kind { Panel, Action };
+enum class Edge { Top, Bottom };
 struct Panel {
     Kind kind;
+    Edge edge;
     const char *tab;
     const char *chromeId;
     const char *command;
@@ -27,9 +30,10 @@ struct Panel {
     const char *name;
 };
 constexpr Panel panelTable[] = {
-    {Kind::Panel, "nodes", "node-library", "panel.nodes", "boxes", QT_TRANSLATE_NOOP("Panel", "Node library")},
-    {Kind::Panel, "workflows", "workflows-panel", "panel.workflows", "workflow", QT_TRANSLATE_NOOP("Panel", "Workflows")},
-    {Kind::Action, "templates", "", "file.templates", "layout-template", QT_TRANSLATE_NOOP("Panel", "Templates")},
+    {Kind::Panel, Edge::Top, "nodes", "node-library", "panel.nodes", "boxes", QT_TRANSLATE_NOOP("Panel", "Node library")},
+    {Kind::Panel, Edge::Top, "workflows", "workflows-panel", "panel.workflows", "workflow", QT_TRANSLATE_NOOP("Panel", "Workflows")},
+    {Kind::Action, Edge::Top, "templates", "", "file.templates", "layout-template", QT_TRANSLATE_NOOP("Panel", "Templates")},
+    {Kind::Action, Edge::Bottom, "settings", "", "app.settings", "settings", QT_TRANSLATE_NOOP("Panel", "Settings")},
 };
 
 // The panel row for `tab`; an action row is not one.
@@ -90,6 +94,7 @@ QVariantList SidePanels::panels() const {
         list << QVariantMap{
             {"tab", QString::fromLatin1(panel.tab)},
             {"kind", QString::fromLatin1(panel.kind == Kind::Action ? "action" : "panel")},
+            {"edge", QString::fromLatin1(panel.edge == Edge::Bottom ? "bottom" : "top")},
             {"name", QCoreApplication::translate("Panel", panel.name)},
             {"glyph", QString::fromLatin1(panel.glyph)},
             {"command", command},

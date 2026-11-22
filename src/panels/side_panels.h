@@ -15,8 +15,9 @@
 // Kept in a small file of the state folder: {"dock": "left"|"right", "width"}.
 //
 // The panels are a table in side_panels.cpp (kind, tab id, registry id, command, glyph, name): a new
-// panel is one row there, and so is an action (#192: a tab that runs a command, such as Templates;
-// it is never open and `toggle` and `setTab` ignore it), and the tab strip (src/panels/SideTabStrip.qml, #159) shows `panels` as one
+// panel is one row there, and so is an action (#192: a tab that runs a command, such as Templates or Settings;
+// it is never open and `toggle` and `setTab` ignore it). A row also says which end of the strip it
+// sits at (`Edge::Top` or `Edge::Bottom`, in table order within the end), and the tab strip (src/panels/SideTabStrip.qml, #159) shows `panels` as one
 // icon each, so the strip, the keys and the View menu all read the same list.
 //
 // Commands: panel.nodes (N) and panel.workflows (W), each toggling its panel and checked in the
@@ -40,7 +41,8 @@ class SidePanels : public QObject {
     Q_PROPERTY(QString tab READ tab WRITE setTab NOTIFY tabChanged)
     // "left" or "right": the side of the window it sits on (the canvas never mirrors, so neither does this).
     Q_PROPERTY(QString dock READ dock WRITE setDock NOTIFY dockChanged)
-    // One map per registered tab, in the strip's order: tab, kind ("panel" or "action", #192), name
+    // One map per registered tab, in table order: tab, kind ("panel" or "action", #192), edge ("top" or
+    // "bottom": the end of the strip it sits at), name
     // (translated), glyph, command, keys (the command's, as bound now), open (always false for an action).
     Q_PROPERTY(QVariantList panels READ panels NOTIFY tabChanged)
     // The strip's own place in the registry (id "side-tabs"): shown, but focus mode hides it.
