@@ -60,6 +60,17 @@ target_compile_options(fugue_core PUBLIC -Wall -Wextra)
 qt_add_qml_module(fugue_core URI Fugue VERSION 1.0 NO_PLUGIN RESOURCE_PREFIX /qt/qml
   OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/qml/Fugue)
 
+# The bundled canvas actions (#231, docs/canvas-actions-design.md): share/actions/*.fugue compiled in under
+# :/fugue/actions, where CanvasActions lists them. They move to fugue-workflows (category `canvas`) when the
+# template library lists actions (slice 2 of #231).
+file(GLOB fugue_action_files CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/share/actions share/actions/*.fugue)
+set(fugue_action_sources)
+foreach(action ${fugue_action_files})
+  set_source_files_properties(share/actions/${action} PROPERTIES QT_RESOURCE_ALIAS ${action})
+  list(APPEND fugue_action_sources share/actions/${action})
+endforeach()
+qt_add_resources(fugue_core fugue_actions PREFIX /fugue/actions FILES ${fugue_action_sources})
+
 # A folder of the window's QML: its .qml files compiled in under qrc:<prefix>, where the
 # others import them by folder. A new .qml file there needs no line here. The same files are
 # written as build/qmllint/<name>.qrc too, so the qmllint test reads them where the app does.
@@ -200,7 +211,8 @@ foreach(test_source ${fugue_nodes_tests})
   add_executable(${test_name} ${test_source} tests/test_environment.cpp)
   target_link_libraries(${test_name} PRIVATE fugue_nodes Qt6::Test)
   target_compile_definitions(${test_name} PRIVATE FUGUE_BINARY="$<TARGET_FILE:fugue>"
-                             FUGUE_FAKE_HELPER="$<TARGET_FILE:fake_fugue_helper>")
+                             FUGUE_FAKE_HELPER="$<TARGET_FILE:fake_fugue_helper>"
+                             FUGUE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
   add_dependencies(${test_name} fugue fake_fugue_helper)
   add_test(NAME ${test_name} COMMAND ${test_name})
 endforeach()
