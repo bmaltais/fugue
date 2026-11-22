@@ -65,6 +65,8 @@ canvas is put in the input. The input still holds the id (a workflow file is the
 folder has no canvas by, such as one copied from the Default into a project, shows as `canvas-… (missing)`
 and the list is there to pick the right one. The list follows `fugue canvas new` and runs as they happen.
 
+**Pick region…**, the last entry of that list, opens the canvas at the node's revision (`head` is read as it is now) in a large view with a rectangle on it, so the region is dragged out instead of typed. Drag inside the rectangle to move it, drag a handle to resize it (Shift keeps its shape, Alt resizes from the center), or type X, Y, Width and Height under the picture; Free, Original, 1:1, 4:3, 3:2, 16:9 and Turn lock its shape, and **Snap to 16** (the node's Multiple of) puts its edges on multiples of 16. The dashed outer box is what the node will cut (the rectangle and its Padding), and the line under the picture says the size the model will get (Scale, Cap and Multiple of applied, as the node does). Zoom and pan work as in every large view; a large canvas is drawn from a smaller copy, the numbers stay in the canvas's pixels. **Apply** writes X, Y, Width and Height in one step (Undo takes all four back); Cancel or Escape change nothing. With a mask connected the node uses the mask's bounds and the window says so; with X, Y, Width or Height linked to another node there is nothing to apply.
+
 ## Review a fill
 
 A fill does not have to change the canvas at once. Canvas Write with **Keep as candidate** on leaves

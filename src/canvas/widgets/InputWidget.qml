@@ -363,6 +363,11 @@ Rectangle {
             entries.push({ text: qsTr("No canvases yet"), enabled: false, note: "" })
         entries.push({ text: qsTr("New canvas…"), value: { action: "new" }, keep: true })
         entries.push({ text: qsTr("Import picture…"), value: { action: "import" }, keep: true })
+        // A node with a rectangle too (Canvas Region): drag it out on the canvas (#213).
+        if (edits.regionState(nodeId).ok === true)
+            entries.push({ text: qsTr("Pick region…"), value: { action: "region" }, keep: true,
+                           enabled: canvasId !== "" && !canvasMissing,
+                           note: qsTr("Drag the rectangle on the canvas instead of typing X, Y, Width and Height.") })
         return entries
     }
     function seedEntries() {
@@ -465,6 +470,8 @@ Rectangle {
                 return picker().askNewCanvas()
             if (value.action === "import")
                 return picker().askPicture(false)
+            if (value.action === "region")
+                return canvasView ? canvasView.openRegion(nodeId) : undefined
             return edits.setValue(nodeId, name, value.id)
         case "choice":
             return edits.setValue(nodeId, name, value)

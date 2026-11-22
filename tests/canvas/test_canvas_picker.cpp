@@ -117,7 +117,9 @@ private slots:
         QCOMPARE(app.face(), QString("Choose a canvas"));
         app.openList();
         QTRY_VERIFY2(app.listOpen(), qPrintable(app.warnings.join('\n')));
-        QCOMPARE(app.texts(), (QStringList{"No canvases yet", "New canvas…", "Import picture…"}));
+        QCOMPARE(app.texts(), (QStringList{"No canvases yet", "New canvas…", "Import picture…", "Pick region…"}));
+        // No canvas chosen: there is nothing to pick a region on.
+        QVERIFY(!app.entries().last().toMap().value("enabled", true).toBool());
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
@@ -129,7 +131,7 @@ private slots:
         QVERIFY(app.open());
         app.openList();
         QTRY_VERIFY2(app.listOpen(), qPrintable(app.warnings.join('\n')));
-        QCOMPARE(app.texts(), (QStringList{"Photo", "Sketch", "New canvas…", "Import picture…"}));
+        QCOMPARE(app.texts(), (QStringList{"Photo", "Sketch", "New canvas…", "Import picture…", "Pick region…"}));
         const QVariantMap photo = app.entries().at(0).toMap();
         QVERIFY2(photo.value("detail").toString().startsWith("320 × 200 · "), qPrintable(photo.value("detail").toString()));
         QCOMPARE(photo.value("note").toString(), second); // the id, so two canvases of one name can be told apart
@@ -157,7 +159,7 @@ private slots:
         QCOMPARE(app.face(), QString("canvas-0123456789ab (missing)"));
         app.openList();
         QTRY_VERIFY2(app.listOpen(), qPrintable(app.warnings.join('\n')));
-        QCOMPARE(app.texts(), (QStringList{"canvas-0123456789ab", "Mine", "New canvas…", "Import picture…"}));
+        QCOMPARE(app.texts(), (QStringList{"canvas-0123456789ab", "Mine", "New canvas…", "Import picture…", "Pick region…"}));
         const QVariantMap gone = app.entries().at(0).toMap();
         QVERIFY(gone.value("dim").toBool());
         QVERIFY(gone.value("checked").toBool());
@@ -256,9 +258,9 @@ private slots:
         QVERIFY(app.open());
         app.openList();
         QTRY_VERIFY(app.listOpen());
-        QCOMPARE(app.texts(), (QStringList{"No canvases yet", "New canvas…", "Import picture…"}));
+        QCOMPARE(app.texts(), (QStringList{"No canvases yet", "New canvas…", "Import picture…", "Pick region…"}));
         app.makeCanvas("Arrived"); // `fugue canvas new` in another process, or a Canvas Write
-        QTRY_COMPARE(app.texts(), (QStringList{"Arrived", "New canvas…", "Import picture…"}));
+        QTRY_COMPARE(app.texts(), (QStringList{"Arrived", "New canvas…", "Import picture…", "Pick region…"}));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 };

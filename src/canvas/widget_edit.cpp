@@ -151,6 +151,56 @@ QString WidgetEdit::importCanvas(const QString &node, const QString &input, cons
     return setText(node, input, id);
 }
 
+namespace {
+const char *const kRegionNumbers[] = {"x", "y", "width", "height", "padding", "scale", "max_megapixels", "multiple"};
+}
+
+QVariantMap WidgetEdit::regionState(const QString &node) const {
+    if (!canvasTarget(node, "canvas").spec)
+        return {};
+    for (const char *name : kRegionNumbers)
+        if (!target(node, QLatin1String(name)).spec)
+            return {};
+    const Node &n = m_canvas->m_document.graph.nodes.value(node);
+    const auto linked = [&n](const char *name) { return n.inputs.value(QLatin1String(name)).kind() == InputValue::Kind::Link; };
+    const auto number = [&](const char *name) {
+        QVariant stored = value(node, QLatin1String(name));
+        return (stored.isValid() ? stored : spec(node, QLatin1String(name)).value("default")).toDouble();
+    };
+    const auto text = [&](const char *name) {
+        QVariant stored = value(node, QLatin1String(name));
+        return (stored.isValid() ? stored : spec(node, QLatin1String(name)).value("default")).toString();
+    };
+    QVariantMap state{{"ok", true},
+                      {"canvas", text("canvas")},
+                      {"revision", text("revision").isEmpty() ? QStringLiteral("head") : text("revision")},
+                      {"storeRoot", m_canvases.storeRoot()},
+                      {"canvasLinked", linked("canvas")},
+                      {"maskLinked", linked("mask")},
+                      {"editable", !(linked("x") || linked("y") || linked("width") || linked("height"))}};
+    for (const char *name : kRegionNumbers)
+        state.insert(QLatin1String(name) == QLatin1String("max_megapixels") ? QStringLiteral("cap") : QLatin1String(name), number(name));
+    return state;
+}
+
+bool WidgetEdit::setRegion(const QString &node, int x, int y, int width, int height) {
+    const QVariantMap now = regionState(node);
+    if (now.isEmpty() || !now.value("editable").toBool())
+        return false;
+    const QVariantMap wanted{{"x", x}, {"y", y}, {"width", width}, {"height", height}};
+    QStringList changed;
+    for (auto it = wanted.cbegin(); it != wanted.cend(); ++it)
+        if (it.value().toInt() != now.value(it.key()).toInt())
+            changed << it.key();
+    if (changed.isEmpty())
+        return false;
+    m_canvas->beginEdit();
+    for (const QString &name : std::as_const(changed))
+        setValue(node, name, wanted.value(name).toInt());
+    m_canvas->endEdit(tr("Pick region"));
+    return true;
+}
+
 QString WidgetEdit::pictureSize(const QString &path) const { return m_canvases.pictureSize(path); }
 
 QVariantMap WidgetEdit::spec(const QString &node, const QString &input) const {

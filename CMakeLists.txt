@@ -125,6 +125,9 @@ file(GLOB fugue_nodes_sources CONFIGURE_DEPENDS src/nodes/*.cpp src/nodes/*.h)
 add_library(fugue_nodes STATIC ${fugue_nodes_sources})
 target_include_directories(fugue_nodes PUBLIC src)
 target_link_libraries(fugue_nodes PUBLIC fugue_engine)
+# The region picker (src/canvas/region_pick.cpp) calls the Canvas Region node's own geometry, so the box and
+# size it shows are the node's, and every program with the window code links the nodes (#213).
+target_link_libraries(fugue_core PUBLIC fugue_nodes)
 file(GLOB fugue_node_manifests CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/src/nodes/manifests
      src/nodes/manifests/*/node.json)
 set(fugue_node_manifest_files src/nodes/manifests/pack.json) # the fugue pack's pack.json lists the nodes

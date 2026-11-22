@@ -665,6 +665,17 @@ FocusScope {
             }
         }
     }
+    // The region picker of a Canvas Region (#213), made on the first use.
+    function openRegion(node) {
+        if (!regionDialog)
+            regionDialog = regionDialogComponent.createObject(canvas, {edits: model.widgets})
+        regionDialog.openFor(node)
+    }
+    property var regionDialog: null
+    Component {
+        id: regionDialogComponent
+        RegionDialog {}
+    }
     function openCrop(node) {
         if (!cropDialog)
             cropDialog = cropDialogComponent.createObject(canvas, {canvasModel: canvas.model})

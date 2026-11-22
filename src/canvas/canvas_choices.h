@@ -37,6 +37,7 @@ public:
 
     // The folder of the store; empty is the session's. A test sets its own.
     void setStoreRoot(const QString &root);
+    QString storeRoot() const { return m_root; }
     int revision() const { return m_revision; }
 
     // The rows now (read from disk each time; a few small files per canvas), and the store watched.

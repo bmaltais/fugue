@@ -9,7 +9,7 @@ import Fugue
 // Input:  source (the picture; a smaller copy is fine), pixels (the file's size, which the frame is
 //         in), rect ({x, y, width, height}; none draws no frame), ratio (0 = free), editable, look,
 //         and the viewer's own: `viewer` (zoom, pan, Fit, 100%, `wheelModifiers`, `interactive`).
-// Output: committed(rect) at the end of a drag, pressed, activated (a double click), as CropFrame.
+// Output: committed(rect) at the end of a drag, changing(rect) during it, pressed, activated (a double click), as CropFrame.
 Item {
     id: root
     required property CanvasLook look
@@ -22,6 +22,7 @@ Item {
     readonly property alias viewer: viewer
 
     signal committed(var rect)
+    signal changing(var rect) // at every step of a drag, as CropFrame's
     signal pressed
     signal activated
 
@@ -53,6 +54,7 @@ Item {
             ratio: root.ratio
             editable: root.editable
             onCommitted: r => root.committed(r)
+            onChanging: r => root.changing(r)
             onPressed: root.pressed()
             onActivated: root.activated()
         }

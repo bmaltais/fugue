@@ -24,7 +24,7 @@ before guessing a fix.
 2. Write the `.fugue` file (format below), or start from `fugue workflow new <file>` or
    `fugue template list` and `fugue workflow new <file> --template <id>`. To redraw part of a
    picture start from `inpaint-region` (a painted mask file in `inputs/`, white is redrawn), and
-   to extend one from `outpaint`, and to fill a region of a canvas (`fugue canvas new`, then the canvas id and rectangle in Canvas Region; the window picks the id from the root's canvases, a canvas belongs to the Default or project it was made in) from `generative-fill`, which keeps the result as a candidate to `fugue canvas accept` or `drop`; docs/masking.md has the rest.
+   to extend one from `outpaint`, and to fill a region of a canvas (`fugue canvas new`, then the canvas id and rectangle in Canvas Region; the window picks the id from the root's canvases, a canvas belongs to the Default or project it was made in, and its Pick region… entry drags the rectangle out on the canvas) from `generative-fill`, which keeps the result as a candidate to `fugue canvas accept` or `drop`; docs/masking.md has the rest.
 3. `fugue validate <file> --json`. Nothing runs. Fix every error it names, then re-validate.
    `fugue workflow describe <file>` summarizes nodes, links and sinks.
 4. `fugue run <file> --wait` streams events (JSON lines) and ends with `run.done`; without `--wait`
