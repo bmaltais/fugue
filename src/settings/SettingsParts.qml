@@ -100,19 +100,24 @@ QtObject {
         }
     }
 
-    // A small button: a hairline edge on `well`, its label or glyph inside.
+    // A small button: a hairline edge on `well`, its label or glyph inside. `danger`: a removal, in the red tint of
+    // ViewButton's danger (docs/canvas-look.md 11) while it can act.
     component SmallButton: Rectangle {
         id: button
         property string text
         property string glyph
         property bool highlighted: false
+        property bool danger: false
+        readonly property bool alarmed: danger && enabled && !highlighted
         signal clicked()
         implicitWidth: glyph !== "" && text === "" ? 7 * App.theme.look.unit : label.implicitWidth + 6 * App.theme.look.unit
         implicitHeight: 7 * App.theme.look.unit
         radius: App.theme.look.smallCorner
-        color: highlighted ? App.theme.look.accent : hover.hovered ? App.theme.look.selectedRow : App.theme.look.well
+        color: highlighted ? App.theme.look.accent
+             : alarmed ? (hover.hovered ? App.theme.look.dangerHover : App.theme.look.dangerFill)
+             : hover.hovered ? App.theme.look.selectedRow : App.theme.look.well
         border.width: 1
-        border.color: activeFocus ? App.theme.look.accent : App.theme.look.hairlineStrong
+        border.color: activeFocus ? (alarmed ? App.theme.look.error : App.theme.look.accent) : App.theme.look.hairlineStrong
         opacity: enabled ? 1 : 0.5
         activeFocusOnTab: true
         Accessible.role: Accessible.Button

@@ -179,7 +179,7 @@ Popup {
                                 Text {
                                     objectName: "projectState-" + row.index
                                     visible: row.modelData.state !== "ok"
-                                    text: row.modelData.state === "missing" ? qsTr("missing") : qsTr("invalid")
+                                    text: row.modelData.state === "missing" ? qsTr("Missing") : qsTr("Invalid") // status words capitalized, as Current
                                     color: dialog.look.error
                                     font.pixelSize: dialog.look.captionSize
                                     font.weight: Font.DemiBold
@@ -241,19 +241,24 @@ Popup {
                                 SettingsParts.SmallButton {
                                     objectName: "projectRemove-" + row.index
                                     visible: !row.modelData.isDefault && !row.asking && row.modelData.registered
+                                    danger: true
                                     text: qsTr("Remove from list…")
                                     onClicked: dialog.removing = row.modelData.root
                                 }
+                                // The safe answer is the highlighted one, the removal last and apart, in the danger tint
+                                // (docs/ui-ergonomics.md: Destructive; the cohesion audit's D8).
                                 SettingsParts.SmallButton {
                                     objectName: "projectRemoveNo-" + row.index
                                     visible: row.asking
+                                    highlighted: true
                                     text: qsTr("Keep")
                                     onClicked: dialog.removing = ""
                                 }
+                                Item { width: dialog.u; height: 1; visible: row.asking }
                                 SettingsParts.SmallButton {
                                     objectName: "projectRemoveYes-" + row.index
                                     visible: row.asking
-                                    highlighted: true
+                                    danger: true
                                     text: qsTr("Remove from list")
                                     onClicked: {
                                         dialog.removing = ""
@@ -363,18 +368,14 @@ Popup {
                         }
                     }
                 }
-                Flow {
-                    Layout.fillWidth: true
+                // Back or Cancel first, the primary last at the right (docs/ui-ergonomics.md, Cohesion checklist: Order).
+                Row {
+                    Layout.alignment: Qt.AlignRight
                     spacing: dialog.u
                     SettingsParts.SmallButton {
-                        objectName: "newProjectCreateOpen"
-                        highlighted: true
-                        text: qsTr("Create and open")
-                        onClicked: {
-                            const made = dialog.model.create(newName.input.text, newFolder.input.text, dialog.newInherits)
-                            if (dialog.apply(made.error))
-                                dialog.apply(dialog.model.switchTo(made.root))
-                        }
+                        objectName: "newProjectBack"
+                        text: qsTr("Back")
+                        onClicked: { dialog.error = ""; dialog.view = "list" }
                     }
                     SettingsParts.SmallButton {
                         objectName: "newProjectCreate"
@@ -385,9 +386,14 @@ Popup {
                         }
                     }
                     SettingsParts.SmallButton {
-                        objectName: "newProjectBack"
-                        text: qsTr("Back")
-                        onClicked: { dialog.error = ""; dialog.view = "list" }
+                        objectName: "newProjectCreateOpen"
+                        highlighted: true
+                        text: qsTr("Create and open")
+                        onClicked: {
+                            const made = dialog.model.create(newName.input.text, newFolder.input.text, dialog.newInherits)
+                            if (dialog.apply(made.error))
+                                dialog.apply(dialog.model.switchTo(made.root))
+                        }
                     }
                 }
             }
@@ -457,9 +463,16 @@ Popup {
                         }
                     }
                 }
-                Flow {
-                    Layout.fillWidth: true
+                // Back or Cancel first, the primary last at the right (docs/ui-ergonomics.md, Cohesion checklist: Order).
+                Row {
+                    Layout.alignment: Qt.AlignRight
                     spacing: dialog.u
+                    SettingsParts.SmallButton {
+                        objectName: "projectSettingsBack"
+                        highlighted: dialog.model.currentIsDefault
+                        text: dialog.model.currentIsDefault ? qsTr("Close") : qsTr("Back")
+                        onClicked: { dialog.error = ""; dialog.view = "list" }
+                    }
                     SettingsParts.SmallButton {
                         objectName: "projectSettingsSave"
                         visible: !dialog.model.currentIsDefault
@@ -472,12 +485,6 @@ Popup {
                                 dialog.view = "list"
                             }
                         }
-                    }
-                    SettingsParts.SmallButton {
-                        objectName: "projectSettingsBack"
-                        highlighted: dialog.model.currentIsDefault
-                        text: dialog.model.currentIsDefault ? qsTr("Close") : qsTr("Back")
-                        onClicked: { dialog.error = ""; dialog.view = "list" }
                     }
                 }
             }
@@ -501,9 +508,15 @@ Popup {
                     color: dialog.look.text
                     font.pixelSize: dialog.look.textSize
                 }
-                Flow {
-                    Layout.fillWidth: true
+                // Back or Cancel first, the primary last at the right (docs/ui-ergonomics.md, Cohesion checklist: Order).
+                Row {
+                    Layout.alignment: Qt.AlignRight
                     spacing: dialog.u
+                    SettingsParts.SmallButton {
+                        objectName: "projectBlockedCancel"
+                        text: qsTr("Cancel")
+                        onClicked: { dialog.error = ""; dialog.view = "list" }
+                    }
                     SettingsParts.SmallButton {
                         objectName: "projectBlockedNewWindow"
                         highlighted: true
@@ -512,11 +525,6 @@ Popup {
                             if (dialog.apply(dialog.model.openInNewWindow(dialog.blockedRoot)))
                                 dialog.view = "list"
                         }
-                    }
-                    SettingsParts.SmallButton {
-                        objectName: "projectBlockedCancel"
-                        text: qsTr("Cancel")
-                        onClicked: { dialog.error = ""; dialog.view = "list" }
                     }
                 }
             }

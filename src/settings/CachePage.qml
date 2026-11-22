@@ -85,18 +85,22 @@ ColumnLayout {
                 font.pixelSize: page.look.labelSize
                 text: ask.q.what === undefined ? "" : ask.q.what
             }
+            // The safe answer is the highlighted one; Clear is last and apart, in the danger tint (docs/ui-ergonomics.md:
+            // Destructive; the cohesion audit's D8).
             Row {
                 spacing: page.u
                 SettingsParts.SmallButton {
-                    objectName: "cacheYes"
-                    highlighted: true
-                    text: qsTr("Clear")
-                    onClicked: page.cache.answer(true)
-                }
-                SettingsParts.SmallButton {
                     objectName: "cacheNo"
+                    highlighted: true
                     text: qsTr("Cancel")
                     onClicked: page.cache.answer(false)
+                }
+                Item { width: page.u; height: 1 }
+                SettingsParts.SmallButton {
+                    objectName: "cacheYes"
+                    danger: true
+                    text: qsTr("Clear")
+                    onClicked: page.cache.answer(true)
                 }
             }
         }

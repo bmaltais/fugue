@@ -257,6 +257,9 @@ private slots:
         QTRY_VERIFY(open(app.window, "projectsDialog"));
         QVERIFY(find(app.window, "projectCurrent-0")); // the Default, current
         click(app, NEED("projectNew"));
+        // The form's buttons: Back, Create, then the primary Create and open last at the right (the cohesion audit's D9).
+        QVERIFY(NEED("newProjectBack")->mapToScene({0, 0}).x() < NEED("newProjectCreate")->mapToScene({0, 0}).x());
+        QVERIFY(NEED("newProjectCreate")->mapToScene({0, 0}).x() < NEED("newProjectCreateOpen")->mapToScene({0, 0}).x());
         type(app, NEED("newProjectName"), "acme");
         click(app, NEED("newProjectCreate"));
         QTRY_VERIFY(find(app.window, "project-1"));
@@ -293,8 +296,14 @@ private slots:
         app.commands.trigger("file.projects");
         QTRY_VERIFY(open(app.window, "projectsDialog"));
         QVERIFY(!find(app.window, "projectRemove-0")); // nothing to remove on the Default
+        QVERIFY(NEED("projectRemove-1")->property("danger").toBool());
         click(app, NEED("projectRemove-1"));
         QVERIFY(textOf(NEED("projectRemoveQuestion-1")).contains("folder and files are kept"));
+        // Keep, the safe answer, is the highlighted one; Remove from list is the danger tint, last (the cohesion audit's D8).
+        QVERIFY(NEED("projectRemoveNo-1")->property("highlighted").toBool());
+        QVERIFY(!NEED("projectRemoveYes-1")->property("highlighted").toBool());
+        QVERIFY(NEED("projectRemoveYes-1")->property("danger").toBool());
+        QTRY_VERIFY(NEED("projectRemoveNo-1")->mapToScene({0, 0}).x() < NEED("projectRemoveYes-1")->mapToScene({0, 0}).x());
         click(app, NEED("projectRemoveNo-1")); // Keep
         QCOMPARE(model->projects().size(), 2);
         click(app, NEED("projectRemove-1"));

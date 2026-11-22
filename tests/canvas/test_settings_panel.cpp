@@ -144,6 +144,11 @@ private slots:
         QTRY_VERIFY(panelOpen(app.window));
         NEED("cacheQuestion");
         QTRY_VERIFY(NEED("cacheQuestionDetail")->property("text").toString().contains("Nothing is lost for good"));
+        // The safe answer is the highlighted one and comes first; Clear is the danger tint, last (the cohesion audit's D8).
+        QVERIFY(NEED("cacheNo")->property("highlighted").toBool());
+        QVERIFY(!NEED("cacheYes")->property("highlighted").toBool());
+        QVERIFY(NEED("cacheYes")->property("danger").toBool());
+        QVERIFY(NEED("cacheNo")->mapToScene({0, 0}).x() < NEED("cacheYes")->mapToScene({0, 0}).x());
         click(app, NEED("cacheNo"));
         QTRY_VERIFY(!find(app.window, "cacheQuestion"));
         QVERIFY(QFile::exists(file));
