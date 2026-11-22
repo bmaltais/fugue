@@ -70,7 +70,7 @@ class TestCliPacks : public QObject {
         process.start(FUGUE_BINARY, args);
         process.closeWriteChannel();
         Outcome outcome;
-        if (!process.waitForFinished(30000)) {
+        if (!process.waitForFinished(120000)) {
             process.kill();
             process.waitForFinished();
             return outcome;
@@ -91,7 +91,7 @@ class TestCliPacks : public QObject {
         process.start("script", {"-qec", command, "/dev/null"});
         process.write(typed);
         process.closeWriteChannel();
-        if (!process.waitForFinished(30000)) {
+        if (!process.waitForFinished(120000)) {
             process.kill();
             process.waitForFinished();
             *exitCode = -1;

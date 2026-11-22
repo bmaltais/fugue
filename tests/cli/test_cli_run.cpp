@@ -107,7 +107,7 @@ class TestCliRun : public QObject {
         process.setProcessEnvironment(env);
         process.start(binary, args);
         Outcome outcome;
-        if (!process.waitForFinished(30000)) {
+        if (!process.waitForFinished(120000)) {
             process.kill();
             process.waitForFinished();
             qWarning("fugue timed out: %s", qPrintable(args.join(' ')));

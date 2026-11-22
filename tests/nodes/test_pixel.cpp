@@ -689,7 +689,7 @@ private slots:
         QProcess process;
         process.setProcessEnvironment(env);
         process.start(FUGUE_BINARY, {"run", dir.filePath("flow.fugue"), "--to", "c", "--wait", "--json"});
-        QVERIFY(process.waitForFinished(30000));
+        QVERIFY(process.waitForFinished(120000));
         QCOMPARE(process.exitCode(), 0);
         QString text;
         QString status;

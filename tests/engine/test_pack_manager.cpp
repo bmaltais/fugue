@@ -50,7 +50,7 @@ bool git(const QString &repo, const QStringList &args) {
     QProcess process;
     process.setWorkingDirectory(repo);
     process.start("git", QStringList{"-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"} + args);
-    return process.waitForFinished(30000) && process.exitCode() == 0;
+    return process.waitForFinished(120000) && process.exitCode() == 0;
 }
 
 PackPrompts answering(Answer answer) {

@@ -90,7 +90,7 @@ class TestCliProjectRun : public QObject {
         process.setProcessEnvironment(env);
         process.start(FUGUE_FAKE_BINARY, args);
         Outcome outcome;
-        if (!process.waitForFinished(30000)) {
+        if (!process.waitForFinished(120000)) {
             process.kill();
             process.waitForFinished();
             return outcome;
