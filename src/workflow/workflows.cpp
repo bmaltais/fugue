@@ -11,6 +11,7 @@
 #include "engine/json.h"
 #include "engine/model_download.h"
 #include "engine/model_library.h"
+#include "engine/model_places.h"
 #include "engine/paths.h"
 #include "engine/settings.h"
 #include "engine/share_package.h"
@@ -23,6 +24,7 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QPointer>
 #include <QSaveFile>
 #include <QGuiApplication>
 #include <QClipboard>
@@ -648,6 +650,17 @@ QVariantList Workflows::templates() const {
             missing.append(QVariantMap{{"name", model.handle.value(QStringLiteral("name")).toString()},
                                        {"source", model.source},
                                        {"folder", model.folder}});
+        // Where each model is: on disk (not among `absent`), or served (#164).
+        QList<ModelPlaces> placed;
+        for (const QJsonValue &value : t.models) {
+            const QJsonObject handle = value.toObject();
+            const bool absentHere = std::any_of(absent.cbegin(), absent.cend(), [&](const MissingModel &m) {
+                return m.handle.value(QStringLiteral("name")) == handle.value(QStringLiteral("name"))
+                       && m.handle.value(QStringLiteral("resource")) == handle.value(QStringLiteral("resource"));
+            });
+            placed.append(placesOf(handle, !absentHere, m_served));
+        }
+        const TemplatePlaces places = summarizePlaces(placed);
         QStringList status;
         if (!missing.isEmpty())
             status << tr("Models missing: %1 of %2").arg(missing.size()).arg(t.models.size());
@@ -671,12 +684,27 @@ QVariantList Workflows::templates() const {
                                {"preview", t.preview.isEmpty() ? QString() : QUrl::fromLocalFile(t.preview).toString()},
                                {"own", t.own},
                                {"missingModels", missing},
+                               {"ready", places.ready},
+                               {"local", places.local},
+                               {"hosts", places.hosts},
+                               {"offlineHosts", places.offlineHosts},
                                {"download", offerText(absent)},
                                {"downloadSize", downloadSize(absent)},
                                {"neededPacks", t.neededPacks},
                                {"status", status.join(QStringLiteral(" · "))}});
     }
     return out;
+}
+
+void Workflows::loadHostModels() {
+    const ModelSource source = m_source ? m_source : ModelSource(listOfferedModels);
+    QPointer<Workflows> self(this);
+    source(QString(), {}, [self](QList<ListedModel> models) {
+        if (!self)
+            return;
+        self->m_served = std::move(models);
+        emit self->templatesChanged();
+    });
 }
 
 bool Workflows::openTemplateById(const QString &id) {

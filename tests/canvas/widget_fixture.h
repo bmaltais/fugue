@@ -41,7 +41,8 @@ inline void addWidgetType(fugue::Registry &registry) {
 
 // A model a provider offers, as the model picker's source lists it.
 inline fugue::ListedModel served(const QString &name, const QJsonObject &handle, const QString &status,
-                                 const QString &provider, const QString &title = {}, const QString &note = {}) {
+                                 const QString &provider, const QString &title = {}, const QString &note = {},
+                                 const QString &host = {}) {
     fugue::ListedModel model;
     model.name = name;
     model.handle = handle;
@@ -49,6 +50,7 @@ inline fugue::ListedModel served(const QString &name, const QJsonObject &handle,
     model.provider = provider;
     model.title = title;
     model.note = note;
+    model.host = host;
     return model;
 }
 

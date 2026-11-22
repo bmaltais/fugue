@@ -65,8 +65,8 @@ PromptTemplates PromptTemplates::parse(const QByteArray &json, const QString &wh
             why = QStringLiteral("its id is not lower case words joined by hyphens");
         else if (prompt.label.isEmpty())
             why = QStringLiteral("it has no label");
-        else if (!QStringList{"image", "video", "audio"}.contains(prompt.family))
-            why = QStringLiteral("its family is not image, video or audio");
+        else if (!QStringList{"image", "video", "audio", "describe"}.contains(prompt.family))
+            why = QStringLiteral("its family is not image, video, audio or describe");
         else if (prompt.system.isEmpty())
             why = QStringLiteral("it has no system prompt");
         else if (prompt.system.size() > kLongest)
@@ -104,7 +104,7 @@ PromptTemplates PromptTemplates::load(const QString &userFolder) {
         add(user.filePath(name));
     // Image, video, then audio, each in the order its files list them: the dropdown reads by what a
     // prompt is for, and "detailed" stays first.
-    const QStringList families{"image", "video", "audio"};
+    const QStringList families{"image", "video", "audio", "describe"};
     std::stable_sort(templates.m_templates.begin(), templates.m_templates.end(),
                      [&](const PromptTemplate &a, const PromptTemplate &b) {
                          return families.indexOf(a.family) < families.indexOf(b.family);
@@ -138,6 +138,16 @@ QStringList PromptTemplates::ids() const {
     return ids;
 }
 
+QStringList PromptTemplates::ids(const QStringList &families) const {
+    QStringList ids;
+    for (const PromptTemplate &prompt : m_templates)
+        if (families.contains(prompt.family))
+            ids << prompt.id;
+    return ids;
+}
+
+QStringList promptFamilies() { return {QStringLiteral("image"), QStringLiteral("video"), QStringLiteral("audio")}; }
+
 QString systemPrompt(const PromptTemplate &prompt, const PromptOptions &options) {
     QString system = prompt.system;
     if (!prompt.examples.isEmpty()) {
@@ -160,9 +170,11 @@ QString systemPrompt(const PromptTemplate &prompt, const PromptOptions &options)
     return system;
 }
 
-QString styleSummary(const PromptTemplates &templates) {
+QString styleSummary(const PromptTemplates &templates, const QStringList &families) {
     QStringList lines;
     for (const PromptTemplate &prompt : templates.all()) {
+        if (!families.isEmpty() && !families.contains(prompt.family))
+            continue;
         QString line = prompt.id + QStringLiteral(": ") + prompt.label;
         if (!prompt.target.isEmpty())
             line += QStringLiteral(", for ") + prompt.target;

@@ -1,0 +1,31 @@
+{
+  "manifest": 1,
+  "id": "fugue/describe-image",
+  "version": "1.0.0",
+  "name": "Describe Image",
+  "description": "Writes a prompt, a caption or tags from a picture with a language model that reads images.",
+  "category": "Text",
+  "keywords": ["caption", "image to prompt", "interrogate", "vision", "vlm", "tags", "describe", "reverse prompt", "llm"],
+  "runtime": {"kind": "builtin"},
+  "capabilities": ["text.generate"],
+  "inputs": [
+    {"name": "image", "type": "image", "label": "Image",
+     "description": "Sent at most 1024 pixels on a side, to a model that takes images."},
+    {"name": "style", "type": "text", "label": "Style", "default": "image-prompt",
+     "choices": ["image-prompt"],
+     "description": "What to write about the picture. The list is the prompt templates of the describe family (Fugue's own and the files in the data folder's prompts folder), filled in when Fugue starts."},
+    {"name": "instructions", "type": "text", "label": "Also", "default": "", "widget": "multiline",
+     "description": "Anything more the model should do, such as \"ignore the background\"."},
+    {"name": "language", "type": "text", "label": "Language", "default": "", "advanced": true,
+     "description": "The language to write in, such as English. Empty: the model's own, usually English."},
+    {"name": "model", "type": "fugue/text-model", "label": "Model", "optional": true,
+     "description": "Unset: any ready text model. It must read images."},
+    {"name": "seed", "type": "number", "label": "Seed", "default": 0, "integer": true, "min": 0,
+     "max": 9007199254740991, "widget": "seed"}
+  ],
+  "outputs": [
+    {"name": "text", "type": "text", "label": "Text"},
+    {"name": "seed", "type": "number", "label": "Seed used"},
+    {"name": "model", "type": "fugue/text-model", "label": "Model used"}
+  ]
+}

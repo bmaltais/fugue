@@ -1,0 +1,57 @@
+{
+  "manifest": 1,
+  "id": "fugue/color-match",
+  "version": "1.0.0",
+  "name": "Color Match",
+  "description": "Move a picture's colors to a reference's (mean and spread of each color axis, Reinhard et al.'s color transfer), so a redrawn region does not show a color shift at its seam. With a mask, the colors are measured only where the mask is 0: the part that was kept.",
+  "category": "Image/Adjust",
+  "keywords": [
+    "color transfer",
+    "reinhard",
+    "seam",
+    "inpaint",
+    "outpaint",
+    "tone",
+    "match",
+    "grade"
+  ],
+  "runtime": {
+    "kind": "builtin"
+  },
+  "inputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    },
+    {
+      "name": "reference",
+      "type": "image",
+      "label": "Reference"
+    },
+    {
+      "name": "mask",
+      "type": "image",
+      "role": "mask",
+      "label": "Mask",
+      "optional": true
+    },
+    {
+      "name": "strength",
+      "type": "number",
+      "label": "Strength",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "step": 0.01,
+      "widget": "slider"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    }
+  ]
+}

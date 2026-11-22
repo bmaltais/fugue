@@ -23,6 +23,7 @@
 #include "engine/file_hashes.h"
 #include "engine/hash.h"
 #include "engine/model_library.h"
+#include "engine/model_offers.h"
 #include "engine/paths.h"
 #include "engine/settings.h"
 #include "engine/registry.h"
@@ -128,6 +129,28 @@ void makeTemplateNeeding(const QString &folder, const QString &title, const QByt
     makeTemplate(folder, {{"title", title}},
                  workflow({{"models", node("fugue/load-models", {{"diffusion_model", model}})}},
                           {{"models", QJsonArray{recorded}}}));
+}
+
+
+// A template that needs the diffusion model `bytes` and the text encoder `encoder` (#164).
+void makeTemplateNeedingTwo(const QString &folder, const QString &title, const QByteArray &diffusion,
+                            const QByteArray &encoder, const QString &diffusionName, const QString &encoderName) {
+    const QJsonObject first{{"resource", "fugue/diffusion-model"}, {"hash", sha256(diffusion)}, {"name", diffusionName}};
+    const QJsonObject second{{"resource", "fugue/text-encoder"}, {"hash", sha256(encoder)}, {"name", encoderName}};
+    makeTemplate(folder, {{"title", title}},
+                 workflow({{"models", node("fugue/load-models", {{"diffusion_model", first}, {"text_encoder", second}})}}));
+}
+
+// What a paired host serves: the model of `bytes`, by its hash.
+ListedModel servedBy(const QString &host, const QString &resource, const QByteArray &bytes, const QString &name,
+                     const QString &status = "ready") {
+    ListedModel model;
+    model.name = name;
+    model.handle = QJsonObject{{"resource", resource}, {"hash", sha256(bytes)}, {"name", name}};
+    model.status = status;
+    model.provider = host;
+    model.host = host;
+    return model;
 }
 
 // Under ctest a test's home stays between runs: no model, remembered hash or setting of an
@@ -702,6 +725,168 @@ private slots:
         QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join("\n")));
         forgetDownloads();
     }
+
+    // #164: a card says where its models are: on this machine, on a paired host, both, or
+    // nowhere (then the Models missing line); a host that is offline is not a place.
+    void aTemplateSaysWhereItsModelsAre() {
+        forgetDownloads();
+        Fixture f;
+        QTemporaryDir models;
+        QDir().mkpath(models.filePath("diffusion_models"));
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{models.path()}).isEmpty());
+        const QByteArray a = "model a", b = "model b", c = "model c", d = "model d";
+        writeFile(models.filePath("diffusion_models/a.gguf"), a);
+        makeTemplateNeeding(f.bundled.filePath("local"), "Local", a, "https://x/a", "a.gguf");
+        makeTemplateNeeding(f.bundled.filePath("host"), "Host", b, "https://x/b", "b.gguf");
+        makeTemplateNeedingTwo(f.bundled.filePath("mix"), "Mix", a, b, "a.gguf", "b.gguf"); // a here, b's encoder on the host
+        makeTemplateNeeding(f.bundled.filePath("gone"), "Gone", c, "https://x/c", "c.gguf");
+        makeTemplateNeeding(f.bundled.filePath("dark"), "Dark", d, "https://x/d", "d.gguf");
+        makeTemplate(f.bundled.filePath("plain"), {{"title", "Plain"}}); // no model file
+
+        CanvasModel canvas(&f.registry);
+        CommandRegistry commands;
+        QTemporaryDir state;
+        WorkflowLocations locations;
+        locations.recoveryDir = state.filePath("recovery");
+        locations.trustPath = state.filePath("trust.json");
+        locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        Workflows workflows(&canvas, &f.registry, &commands, locations);
+        workflows.setModelSource([&](const QString &, const QStringList &, std::function<void(QList<ListedModel>)> done) {
+            done({servedBy("gx10", "fugue/diffusion-model", b, "b.gguf"),
+                  servedBy("gx10", "fugue/text-encoder", b, "b.gguf"),
+                  servedBy("spark", "fugue/diffusion-model", d, "d.gguf", "unavailable")});
+        });
+        const auto byId = [&] {
+            QHash<QString, QVariantMap> out;
+            for (const QVariant &t : workflows.templates())
+                out.insert(t.toMap().value("id").toString(), t.toMap());
+            return out;
+        };
+        // Before the hosts have answered: only the disk is known.
+        QVERIFY(byId().value("local").value("ready").toBool());
+        QVERIFY(!byId().value("host").value("ready").toBool());
+
+        QSignalSpy changed(&workflows, &Workflows::templatesChanged);
+        workflows.loadHostModels();
+        QCOMPARE(changed.size(), 1);
+        const QHash<QString, QVariantMap> t = byId();
+        QVERIFY(t.value("local").value("local").toBool());
+        QVERIFY(t.value("local").value("hosts").toStringList().isEmpty());
+        QVERIFY(t.value("local").value("ready").toBool());
+        QVERIFY(!t.value("host").value("local").toBool());
+        QCOMPARE(t.value("host").value("hosts").toStringList(), QStringList{"gx10"});
+        QVERIFY(t.value("host").value("ready").toBool());
+        QVERIFY(t.value("mix").value("local").toBool()); // a on disk,
+        QCOMPARE(t.value("mix").value("hosts").toStringList(), QStringList{"gx10"}); // the encoder on the host
+        QVERIFY(t.value("mix").value("ready").toBool());
+        QVERIFY(!t.value("gone").value("ready").toBool());
+        QVERIFY(!t.value("gone").value("local").toBool());
+        QVERIFY(t.value("gone").value("hosts").toStringList().isEmpty());
+        QCOMPARE(t.value("gone").value("status").toString(), QString("Models missing: 1 of 1"));
+        QVERIFY(!t.value("dark").value("ready").toBool());
+        QVERIFY(t.value("dark").value("hosts").toStringList().isEmpty());
+        QCOMPARE(t.value("dark").value("offlineHosts").toStringList(), QStringList{"spark"});
+        QVERIFY(t.value("plain").value("ready").toBool());
+        QVERIFY(!t.value("plain").value("local").toBool());
+    }
+
+    // #164 in the window: the badges on the cards, their tooltips, the Ready to run chip, and
+    // ready templates first within a category.
+    void theDialogShowsThePlacesAndFiltersByReadyToRun() {
+        forgetDownloads();
+        Fixture f;
+        QTemporaryDir models;
+        QDir().mkpath(models.filePath("diffusion_models"));
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{models.path()}).isEmpty());
+        const QByteArray a = "model a", b = "model b", c = "model c", d = "model d";
+        writeFile(models.filePath("diffusion_models/a.gguf"), a);
+        writeJson(f.bundled.filePath("categories.json"),
+                  {{"categories", QJsonArray{QJsonObject{{"id", "image"}, {"title", "Image generation"}}}}});
+        // Title order is Alpha, Beta, Gamma, Delta: Alpha needs c (nowhere), so it sorts after the ready ones.
+        makeTemplateNeeding(f.bundled.filePath("alpha"), "Alpha", c, "https://x/c", "c.gguf");
+        makeTemplateNeeding(f.bundled.filePath("beta"), "Beta", a, "https://x/a", "a.gguf");
+        makeTemplateNeeding(f.bundled.filePath("gamma"), "Gamma", b, "https://x/b", "b.gguf");
+        makeTemplateNeedingTwo(f.bundled.filePath("delta"), "Delta", a, b, "a.gguf", "b.gguf");
+        for (const char *id : {"alpha", "beta", "gamma", "delta"}) {
+            QJsonObject about = QJsonDocument::fromJson(readFile(f.bundled.filePath(QString(id) + "/template.json"))).object();
+            about.insert("category", "image");
+            writeJson(f.bundled.filePath(QString(id) + "/template.json"), about);
+        }
+        QTemporaryDir dir;
+        QFile shell(dir.filePath("shell.toml"));
+        QVERIFY(shell.open(QIODevice::WriteOnly));
+        shell.write("[font]\nbase-size = 12\n");
+        shell.close();
+        Translator translator(dir.path() + "/language");
+        Theme theme(dir.path());
+        CanvasModel canvas(&f.registry);
+        CommandRegistry commands;
+        registerDefaultCommands(commands);
+        WorkflowLocations locations;
+        locations.recoveryDir = dir.filePath("recovery");
+        locations.trustPath = dir.filePath("trust.json");
+        locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        registerMenuCommands(commands);
+        Workflows workflows(&canvas, &f.registry, &commands, locations);
+        registerFileCommands(commands, workflows);
+        workflows.setModelSource([&](const QString &, const QStringList &, std::function<void(QList<ListedModel>)> done) {
+            done({servedBy("gx10", "fugue/diffusion-model", b, "b.gguf"), servedBy("gx10", "fugue/text-encoder", b, "b.gguf")});
+        });
+
+        QQmlApplicationEngine engine;
+        QStringList warnings;
+        connect(&engine, &QQmlEngine::warnings, this, [&](const QList<QQmlError> &errors) {
+            for (const auto &error : errors)
+                warnings << error.toString();
+        });
+        fugue::exposeToQml(engine, {&translator, &theme, &commands, &canvas, &workflows});
+        engine.load(QUrl("qrc:/Main.qml"));
+        QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        const auto visible = [&](const QString &name) {
+            QQuickItem *found = item(window->contentItem(), name);
+            return found && found->isVisible();
+        };
+
+        QVERIFY(commands.run("file.templates"));
+        QTRY_VERIFY(visible("templatePlaceLocal-beta"));
+        // Beta: this machine only. Gamma: the host only. Delta: both. Alpha: nowhere.
+        QTRY_VERIFY(visible("templatePlaceHost-gamma"));
+        QVERIFY(!visible("templatePlaceHost-beta"));
+        QVERIFY(!visible("templatePlaceLocal-gamma"));
+        QVERIFY(visible("templatePlaceLocal-delta") && visible("templatePlaceHost-delta"));
+        QVERIFY(!visible("templatePlaces-alpha"));
+        QCOMPARE(item(window->contentItem(), "templatePlaceLocal-beta")->property("tip").toString(), QString("On this machine"));
+        QCOMPARE(item(window->contentItem(), "templatePlaceHost-gamma")->property("tip").toString(), QString("Shared by gx10"));
+        QVERIFY(qFuzzyCompare(item(window->contentItem(), "templatePlaceHost-gamma")->opacity(), 1.0));
+        // Ready ones first within the category (list order is Alpha, Beta, Delta, Gamma).
+        const auto order = [&] {
+            QList<QPair<qreal, QString>> cards;
+            for (const char *id : {"alpha", "beta", "gamma", "delta"})
+                if (QQuickItem *card = item(window->contentItem(), QString("templateCard-") + id))
+                    cards.append({card->mapToScene(QPointF(0, 0)).y() * 10000 + card->mapToScene(QPointF(0, 0)).x(), id});
+            std::sort(cards.begin(), cards.end());
+            QStringList ids;
+            for (const auto &card : cards)
+                ids << card.second;
+            return ids;
+        };
+        QTRY_COMPARE(order().last(), QString("alpha"));
+
+        // The chip hides the one that cannot run.
+        QQuickItem *chip = item(window->contentItem(), "templatesReadyOnly");
+        QVERIFY(chip);
+        QTest::mouseClick(window, Qt::LeftButton, {}, chip->mapToScene(QPointF(chip->width() / 2, chip->height() / 2)).toPoint());
+        QTRY_VERIFY(!item(window->contentItem(), "templateCard-alpha"));
+        QVERIFY(item(window->contentItem(), "templateCard-beta"));
+        QVERIFY(item(window->contentItem(), "templateCard-gamma"));
+        QVERIFY(item(window->contentItem(), "templateCard-delta"));
+        QTest::mouseClick(window, Qt::LeftButton, {}, chip->mapToScene(QPointF(chip->width() / 2, chip->height() / 2)).toPoint());
+        QTRY_VERIFY(item(window->contentItem(), "templateCard-alpha"));
+        QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join("\n")));
+    }
+
 
     // The bundled templates (the templates submodule, fugue-workflows at the pinned commit): this
     // Fugue lists every one with nothing wrong, each compiles and opens with every node known,

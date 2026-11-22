@@ -6,7 +6,7 @@ import ".."
 import "../../menu/placement.js" as Placement
 
 // The list a choice, seed or model widget opens: entries of {text, value, detail, note,
-// checked, enabled, heading, keep, dim, keywords}. A `heading` names the group of entries below it; a
+// checked, enabled, heading, keep, dim, keywords, place, placeHost}. A `heading` names the group of entries below it; a
 // `note` is a second, smaller line; a `dim` entry can be chosen but reads as one the list
 // advises against. Modal, so the window's keys sleep while it is open; Up and Down move
 // between the entries that can be chosen, Enter chooses, Escape or a press outside closes it.
@@ -186,7 +186,7 @@ Popup {
             }
             Text {
                 x: entry.hasThumbnail ? parent.height + 4 : entry.heading ? 8 : 8 + 12 + 6
-                width: parent.width - x - 8 - detail.width - list.edge
+                width: parent.width - x - 8 - detail.width - list.edge - (placeBadge.visible ? placeBadge.width + 4 : 0)
                 height: entry.hasThumbnail ? parent.height : menu.rowHeight
                 verticalAlignment: entry.heading ? Text.AlignBottom : Text.AlignVCenter
                 bottomPadding: entry.heading ? 2 : 0
@@ -212,6 +212,19 @@ Popup {
                 color: menu.look.label
                 font.pixelSize: menu.look.captionSize
                 bottomPadding: 6
+            }
+            // Where the model lives (#164): this machine or a paired host, left of the detail.
+            PlaceBadge {
+                id: placeBadge
+                objectName: "widgetMenuPlace"
+                visible: entry.modelData.place !== undefined && !entry.heading
+                anchors.right: detail.left
+                anchors.rightMargin: 4
+                y: (menu.rowHeight - height) / 2
+                look: menu.look
+                kind: entry.modelData.place === "host" ? "host" : "local"
+                hosts: entry.modelData.placeHost !== undefined ? [entry.modelData.placeHost] : []
+                offline: entry.modelData.dim === true && entry.modelData.place === "host"
             }
             Text {
                 id: detail
