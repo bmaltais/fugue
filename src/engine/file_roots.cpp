@@ -99,7 +99,7 @@ FileRoots FileRoots::defaults(const QString &workingDirectory, const QString &wo
     roots.read = {QDir::homePath(), inputsDir()};
     if (!workflowPath.isEmpty())
         roots.read.append(inputsDirBeside(workflowPath));
-    roots.write = {workingDirectory, outputDir(), QDir::homePath() + QStringLiteral("/Documents/Fugue")};
+    roots.write = {workingDirectory, outputDir(), documentsDir()};
     return roots;
 }
 

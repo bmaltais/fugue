@@ -1,6 +1,7 @@
 #pragma once
 
-// Fugue's own folders (spec 1.4). XDG variables are honored; the defaults are shown.
+// Fugue's own folders (spec 1.4). XDG variables are honored; the defaults are shown. Under a FUGUE_HOME
+// root (engine/fugue_home.h) they all lie in it.
 
 #include <QString>
 #include <QStringList>
@@ -13,6 +14,16 @@ QString dataDir();   // $XDG_DATA_HOME/fugue    (~/.local/share/fugue)
 QString cacheDir();  // $XDG_CACHE_HOME/fugue   (~/.cache/fugue)
 // The 512 px copies of the pictures the canvas shows (spec 12.7): <cacheDir>/thumbnails.
 QString thumbnailsDir();
+// The media library's thumbnails of the user's own files (spec 12.7): <cacheDir>/thumbs.
+QString mediaThumbnailsDir();
+// The folder Fugue may write documents into besides the output folder (workflows, templates): ~/Documents/Fugue,
+// or <FUGUE_HOME>/documents.
+QString documentsDir();
+// The folder of private per-session files (copies for an external viewer): $XDG_RUNTIME_DIR, else the desktop's
+// runtime folder; <FUGUE_HOME>/run under a root. Empty when there is none.
+QString runtimeDir();
+// providers.json as the messages name it: "~/.config/fugue/providers.json", or its real path under FUGUE_HOME.
+QString providersFilePath();
 // The default output folder of Save nodes: Fugue under the user's pictures folder
 // ($XDG_PICTURES_DIR, else the desktop's setting, else ~/Pictures): ~/Pictures/Fugue, unless
 // settings.json's output_folder names another (engine/settings.h).

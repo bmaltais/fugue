@@ -9,6 +9,7 @@
 #include <QStandardPaths>
 
 #include "engine/ffmpeg.h"
+#include "engine/paths.h"
 
 namespace fugue {
 
@@ -54,7 +55,7 @@ QString mediaKindOfPath(const QString &path) {
 }
 
 QString defaultThumbnailDir() {
-    return QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation) + QStringLiteral("/fugue/thumbs");
+    return mediaThumbnailsDir();
 }
 
 QString thumbnailCachePath(const QString &cacheDir, const QString &path, int box) {

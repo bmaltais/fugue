@@ -100,6 +100,24 @@ XDG variables are honored; the defaults are shown.
 | `~/Pictures/Fugue/` | Default output folder for Save nodes. A setting. |
 | `~/Pictures/Fugue/inputs/` | Images pasted or dropped into Load Image, `<name>-<10 hex of the content hash>.<ext>` ([14.1](#141-m1-the-first-twelve)). Follows the output folder unless set on its own. |
 
+#### 1.4.1 One root: FUGUE_HOME
+
+`FUGUE_HOME=<dir>`, or `--home <dir>` anywhere on the command line (the window and `fugue <command>`; the option beats the variable), makes one folder the home of everything a session writes (epic #204: projects and private mode build on it; a portable install needs it too). The folder must be absolute. Fugue makes it (mode 0700) and, before Qt starts, points these at subfolders of it, so Fugue's own folders (the table above) and every child process, the GPU helper, ffmpeg and the packs, inherit them:
+
+| Variable | Under the root | Table above becomes |
+| --- | --- | --- |
+| `XDG_CONFIG_HOME` | `config/` | `config/fugue/settings.json`, `providers.json`, `keybindings.json` |
+| `XDG_DATA_HOME` | `data/` | `data/fugue/packs/`, `providers/`, `models/` |
+| `XDG_STATE_HOME` | `state/` | `state/fugue/recovery/`, `trust.json`, `hashes.json`, the run queue |
+| `XDG_CACHE_HOME` | `cache/` | `cache/fugue/results/`, `runs/`, `thumbnails/`, `thumbs/`, Qt's shader and QML caches |
+| `XDG_RUNTIME_DIR` | `run/` | copies handed to an external viewer (`run/fugue-view/`) |
+| `TMPDIR` | `tmp/` | the helper's work folder, ffmpeg logs, scratch folders |
+| `CUDA_CACHE_PATH`, `__GL_SHADER_DISK_CACHE_PATH` | `cache/gpu/` | the NVIDIA kernel and shader caches (not under XDG) |
+
+Four defaults no environment variable can move follow the root by code (`engine/paths.h`): the output folder (`outputs/`, so `outputs/inputs/` too), the folder for documents (`documents/`: the suggested place for workflows, `documents/templates/`, a write root of the file nodes), the media library's thumbnails and the path that messages give for `providers.json`. The Wayland socket, the session bus and the sound server live in the real runtime folder, so `WAYLAND_DISPLAY`, `DBUS_SESSION_BUS_ADDRESS`, `PIPEWIRE_RUNTIME_DIR` and `PULSE_RUNTIME_PATH` are made to name it (unless set already). `HOME` is left as it is: Omarchy's theme and language files are read from it, and a file the user picks is theirs.
+
+With no root nothing changes. What a root does **not** do: the user's own files (a saved workflow, `inputs/` beside it, a folder chosen in settings, `model_paths`) are where the user put them; file nodes may still read under `$HOME` (the read root shrinks only with projects, #204); a pack or a program run by one can write anywhere it chooses (only a sandbox guarantees otherwise, #204); the window title still names the open workflow; the portals, the clipboard, the journal, a core dump and swap are outside Fugue. `tests/cli/test_cli_home_guard.cpp` runs workflows (images; ffmpeg) with an empty `HOME` and asserts nothing was written outside the root, and under `strace -f` where it is available; add any new write path to `engine/paths.h` so that test keeps holding.
+
 ### 1.5 Hashes and canonical JSON
 
 - All content hashes are SHA-256, written `sha256:<64 hex digits>`.

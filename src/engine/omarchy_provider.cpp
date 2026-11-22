@@ -1,5 +1,8 @@
 #include "omarchy_provider.h"
 
+#include "engine/fugue_home.h"
+#include "engine/paths.h"
+
 #include "engine/json.h"
 
 #include <QDateTime>
@@ -427,7 +430,7 @@ void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> do
         if (key.isEmpty())
             return fail(QStringLiteral("No key to talk to Omarchy's model servers (no %1).").arg(config.filePath("key")),
                         QStringLiteral("Set up a model with omarchy-agent-local, which writes the key, "
-                                       "or set this provider's key in ~/.config/fugue/providers.json."));
+                                       "or set this provider's key in %1.").arg(providersFilePath()));
     } else {
         // No network.json means no paired host; one that cannot be read is said as such.
         const Result<QJsonObject> network = readJsonObject(state.filePath("network.json"));
@@ -639,7 +642,7 @@ void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> do
                 model.reason = QStringLiteral("%1 refused the key.").arg(recipe);
                 model.hint = m_instance.key.isEmpty()
                                  ? QStringLiteral("Check Omarchy's key file, or pair again.")
-                                 : QStringLiteral("Check this provider's key in ~/.config/fugue/providers.json.");
+                                 : QStringLiteral("Check this provider's key in %1.").arg(providersFilePath());
             } else if (code == 502 || code == 404) {
                 // The share proxy's answers for a model whose port refuses (stopped) or that is not
                 // shared (agent_local.py make_share_proxy _forward).

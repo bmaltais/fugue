@@ -18,11 +18,10 @@ namespace fugue {
 
 namespace {
 
-const QString kProvidersFile = QStringLiteral("~/.config/fugue/providers.json");
 
 Error invalid(const QString &message) {
     return makeError(QStringLiteral("invalid_document"), message,
-                         QStringLiteral("Fix %1.").arg(kProvidersFile));
+                         QStringLiteral("Fix %1.").arg(providersFilePath()));
 }
 
 QString modelName(const QJsonObject &handle) {
@@ -159,9 +158,9 @@ Result<Selection> choose(const QList<const Candidate *> &usable, const Requireme
     if (pinned.isEmpty()) {
         message = QStringLiteral("Nothing can serve %1 right now.").arg(requirement.capability);
         appendUnique(fixes, QStringLiteral("Start a model that offers %1, or add a provider to %2.")
-                                .arg(requirement.capability, kProvidersFile));
+                                .arg(requirement.capability, providersFilePath()));
         if (!disabled.isEmpty())
-            fixes.append(QStringLiteral("Enable %1 in %2.").arg(either(disabled), kProvidersFile));
+            fixes.append(QStringLiteral("Enable %1 in %2.").arg(either(disabled), providersFilePath()));
         for (const QString &line : unreachable)
             fixes.append(line);
     } else if (fitting.isEmpty()) {
@@ -387,7 +386,7 @@ Result<std::shared_ptr<Provider>> createProvider(const ProviderInstance &instanc
             message += QLatin1Char(' ') + problem.message;
     Error error = makeError(
         QStringLiteral("unknown_provider"), message,
-        QStringLiteral("Change its type in %1, or install the module in %2.").arg(kProvidersFile, modulesRoot));
+        QStringLiteral("Change its type in %1, or install the module in %2.").arg(providersFilePath(), modulesRoot));
     error.valid = ids;
     return Result<std::shared_ptr<Provider>>(error);
 }
@@ -418,7 +417,7 @@ Result<Selection> selectProvider(const QList<Candidate> &candidates, const Requi
             Error error = makeError(
                 QStringLiteral("unknown_provider"),
                 QStringLiteral("No provider is named %1.").arg(pin),
-                QStringLiteral("Pin one of the configured providers, or add %1 to %2.").arg(pin, kProvidersFile));
+                QStringLiteral("Pin one of the configured providers, or add %1 to %2.").arg(pin, providersFilePath()));
             error.valid = names;
             return failed(error);
         }
@@ -426,7 +425,7 @@ Result<Selection> selectProvider(const QList<Candidate> &candidates, const Requi
             return failed(makeError(
                 QStringLiteral("capability_unavailable"),
                 QStringLiteral("The pinned provider %1 is disabled.").arg(pin),
-                QStringLiteral("Enable %1 in %2, or remove the pin.").arg(pin, kProvidersFile)));
+                QStringLiteral("Enable %1 in %2, or remove the pin.").arg(pin, providersFilePath())));
         if (!pinned->description.ok())
             return Result<Selection>(pinned->description.errors());
         return choose({pinned}, requirement, pin, {}, {});

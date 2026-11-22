@@ -21,6 +21,7 @@
 #include "commands/command_registry.h"
 #include "engine/atomic_file.h"
 #include "engine/file_roots.h"
+#include "engine/fugue_home.h"
 #include "engine/paths.h"
 #include "run/canvas_runs.h"
 #include "workflow/image_inputs.h"
@@ -75,9 +76,7 @@ bool hasExtension(const QString &path, const QString &extension) {
 // (`fugue-view` in the runtime folder, 0700), named by the path, size and modification time so
 // a changed file gets a fresh copy. Empty when it could not be made.
 QString viewCopy(const QString &path, const QString &extension) {
-    QString runtime = qEnvironmentVariable("XDG_RUNTIME_DIR");
-    if (runtime.isEmpty() || !QFileInfo(runtime).isDir())
-        runtime = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
+    const QString runtime = runtimeDir();
     if (runtime.isEmpty())
         return {};
     const QString dir = runtime + QStringLiteral("/fugue-view");
@@ -109,10 +108,12 @@ QString viewCopy(const QString &path, const QString &extension) {
 }
 
 QString suggestedFolder() {
-    for (const QString &dir : {outputDir(), QStandardPaths::writableLocation(QStandardPaths::PicturesLocation)})
+    // Under a FUGUE_HOME root the desktop's pictures folder is not Fugue's to offer.
+    const QString desktopPictures = fugueHome().isEmpty() ? QStandardPaths::writableLocation(QStandardPaths::PicturesLocation) : QString();
+    for (const QString &dir : {outputDir(), desktopPictures})
         if (!dir.isEmpty() && QFileInfo(dir).isDir())
             return dir;
-    return QDir::homePath();
+    return fugueHome().isEmpty() ? QDir::homePath() : outputDir();
 }
 
 } // namespace

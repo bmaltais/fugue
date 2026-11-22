@@ -4,6 +4,7 @@
 #include <QFileInfo>
 #include <QStandardPaths>
 
+#include "engine/fugue_home.h"
 #include "engine/settings.h"
 
 namespace fugue {
@@ -20,9 +21,34 @@ QString configDir() { return under(QStandardPaths::GenericConfigLocation); }
 QString stateDir() { return under(QStandardPaths::GenericStateLocation); }
 QString dataDir() { return under(QStandardPaths::GenericDataLocation); }
 QString cacheDir() { return under(QStandardPaths::GenericCacheLocation); }
+QString mediaThumbnailsDir() { return cacheDir() + QStringLiteral("/thumbs"); }
 QString thumbnailsDir() { return cacheDir() + QStringLiteral("/thumbnails"); }
 
+QString documentsDir() {
+    if (const QString inRoot = fugueHomeDir(QStringLiteral("documents")); !inRoot.isEmpty())
+        return inRoot;
+    return QDir::homePath() + QStringLiteral("/Documents/Fugue");
+}
+
+QString runtimeDir() {
+    if (const QString inRoot = fugueHomeDir(QStringLiteral("run")); !inRoot.isEmpty())
+        return inRoot;
+    if (const QString env = qEnvironmentVariable("XDG_RUNTIME_DIR"); !env.isEmpty() && QFileInfo(env).isDir())
+        return env;
+    return QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
+}
+
+QString providersFilePath() {
+    // Shown to the user in messages: "~/.config/fugue/providers.json" as it always was, or the real file
+    // under a FUGUE_HOME root.
+    if (fugueHome().isEmpty())
+        return QStringLiteral("~/.config/fugue/providers.json");
+    return configDir() + QStringLiteral("/providers.json");
+}
+
 QString defaultOutputDir() {
+    if (const QString inRoot = fugueHomeDir(QStringLiteral("outputs")); !inRoot.isEmpty())
+        return inRoot;
     const QString pictures = qEnvironmentVariable("XDG_PICTURES_DIR");
     return (pictures.isEmpty() ? QStandardPaths::writableLocation(QStandardPaths::PicturesLocation) : pictures) +
            QStringLiteral("/Fugue");

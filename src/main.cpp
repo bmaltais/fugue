@@ -27,6 +27,7 @@
 #include "engine/registry.h"
 #include "engine/trust_store.h"
 #include "node_type_reloads.h"
+#include "engine/fugue_home.h"
 #include "nodes/builtin.h"
 #include "qml_app.h"
 #include "run/canvas_runs.h"
@@ -44,6 +45,12 @@
 #include "translator.h"
 
 int main(int argc, char *argv[]) {
+    // FUGUE_HOME or `--home <dir>`: one root for everything Fugue writes (spec 1.4.1). Before Qt and
+    // every other call, so each QStandardPaths lookup and each child process sees the redirected folders.
+    if (QString homeError; !fugue::applyFugueHome(argc, argv, &homeError)) {
+        std::fprintf(stderr, "fugue: %s\n", qPrintable(homeError));
+        return 2;
+    }
     // `fugue <command>` is the command line (spec 13): no QGuiApplication, no
     // display, no QML. It must be decided before any application object exists.
     if (fugue::cli::wantsCli(argc, argv))
