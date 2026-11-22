@@ -53,9 +53,9 @@ bool panelOpen(QQuickWindow *window) {
         return found;                                                                                                  \
     }()
 
-// Clicks an item once the layouts have placed it: a list that just changed moves its rows
+// Where `item` is once the layouts have placed it: a list that just changed moves its rows
 // when the next frame is polished, so the item must stay put for a few frames first.
-void click(App &app, QQuickItem *item) {
+QPoint settled(QQuickItem *item) {
     QPoint at = centerOf(item);
     for (int still = 0, i = 0; still < 3 && i < 50; ++i) {
         QTest::qWait(20);
@@ -63,6 +63,37 @@ void click(App &app, QQuickItem *item) {
         still = now == at ? still + 1 : 0;
         at = now;
     }
+    return at;
+}
+
+// Scrolls the page that holds `item` until all of it shows, as a person scrolls to a control
+// below the fold. Where the fold falls depends on the fonts: CI's Noto Sans makes the pages
+// taller than the sans of a desktop, so a row that shows here can be under the fold there.
+// Says whether it scrolled.
+bool scrollIntoView(QQuickItem *item) {
+    QQuickItem *view = item->parentItem();
+    while (view && !view->inherits("QQuickFlickable"))
+        view = view->parentItem();
+    if (!view)
+        return false;
+    const QRectF in = item->mapRectToItem(view, QRectF(0, 0, item->width(), item->height()));
+    qreal y = view->property("contentY").toReal();
+    if (in.bottom() > view->height())
+        y += in.bottom() - view->height();
+    else if (in.top() < 0)
+        y += in.top();
+    else
+        return false;
+    const qreal most = qMax(0.0, view->property("contentHeight").toReal() - view->height());
+    view->setProperty("contentY", qBound(0.0, y, most));
+    return true;
+}
+
+// Clicks an item where it settles, scrolled into view first.
+void click(App &app, QQuickItem *item) {
+    QPoint at = settled(item);
+    if (scrollIntoView(item))
+        at = settled(item);
     QTest::mouseClick(app.window, Qt::LeftButton, {}, at);
 }
 
@@ -175,14 +206,7 @@ private slots:
         QTRY_COMPARE(fugue::SettingsModel(app.settings.path()).cacheResultsGb(), 5.0);
         click(app, NEED("cacheThumbnails-0"));
         QTRY_COMPARE(fugue::SettingsModel(app.settings.path()).cacheThumbnailsGb(), 0.0);
-        // The last limit is below the fold of the page: scroll to it, as a person would.
-        QQuickItem *runs = NEED("runsKept-50");
-        for (QQuickItem *up = runs->parentItem(); up; up = up->parentItem())
-            if (up->inherits("QQuickFlickable")) {
-                up->setProperty("contentY", up->property("contentHeight").toReal() - up->height());
-                break;
-            }
-        click(app, runs);
+        click(app, NEED("runsKept-50")); // below the fold of the page: click() scrolls to it
         QTRY_COMPARE(fugue::SettingsModel(app.settings.path()).runsKept(), 50);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
