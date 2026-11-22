@@ -82,6 +82,9 @@ Fugue is packaged for Arch and Omarchy. Download the packages from the
 sudo pacman -U fugue-*.pkg.tar.zst
 ```
 
+Each release has the packages for x86_64 and for aarch64 (Arch Linux ARM, Asahi Linux); take the ones whose
+file name ends in your architecture, for example `fugue-*-aarch64.pkg.tar.zst`.
+
 For generation on an NVIDIA GPU, also install the helper with `fugue-helper-cuda-*.pkg.tar.zst`
 (`sudo pacman -U fugue-helper-cuda-*.pkg.tar.zst`). The release includes `SHA256SUMS`.
 
