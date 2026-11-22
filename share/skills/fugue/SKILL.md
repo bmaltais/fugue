@@ -24,7 +24,7 @@ before guessing a fix.
 2. Write the `.fugue` file (format below), or start from `fugue workflow new <file>` or
    `fugue template list` and `fugue workflow new <file> --template <id>`. To redraw part of a
    picture start from `inpaint-region` (a painted mask file in `inputs/`, white is redrawn), and
-   to extend one from `outpaint`; docs/masking.md has the rest.
+   to extend one from `outpaint`, and to fill a region of a canvas (`fugue canvas new`, then the canvas id and rectangle in Canvas Region) from `generative-fill`, which keeps the result as a candidate to `fugue canvas accept` or `drop`; docs/masking.md has the rest.
 3. `fugue validate <file> --json`. Nothing runs. Fix every error it names, then re-validate.
    `fugue workflow describe <file>` summarizes nodes, links and sinks.
 4. `fugue run <file> --wait` streams events (JSON lines) and ends with `run.done`; without `--wait`
@@ -117,6 +117,10 @@ fail with `permission_denied`.
 | `fugue canvas export <id>[@<revision>] <file.ora>` | Write a revision (head by default) as an `.ora`; never replaces a file; the same revision gives the same bytes |
 | `fugue canvas log <id>[@<revision>]` | Revisions newest first along their parents (`--limit`, default 20): revision, time, producer |
 | `fugue canvas show <id>[@<revision>]` | One revision: tree hash (pixels and layer properties only, same pixels same hash), parent, producer, time, layers. A revision is `head`, a full hash or 8+ hex digits of one |
+| `fugue canvas candidates <id>` | Revisions nobody points at that are not accepted or dropped (`--all` adds dropped), newest first; Canvas Write with `candidate` on leaves its result as one |
+| `fugue canvas accept <id>[@<revision>]` | Accept a candidate into the head (its added layers are placed on the head when it was made from an older revision); with no `@revision`, the only open candidate |
+| `fugue canvas drop <id>[@<revision>]` | Hide a candidate (nothing is deleted) |
+| `fugue canvas diff <id>[@<revision>] [@<revision>]` | Layers added, removed or changed, tiles that differ and their rectangle; one revision is compared with its parent |
 | `fugue settings list` | Every setting in effect, with where each value comes from (`own`, `inherited from Default`, `built-in`) |
 | `fugue skill install` | Install or update this skill (`--target`, `--dry-run`, `--force`) |
 | `fugue skill uninstall` | Remove it (`--target`, `--dry-run`, `--force`) |
@@ -145,8 +149,8 @@ Every failure has a stable `code`. Fix by code, not by message text:
   `node_test_failed`
 - Masks: `mask_empty` (paint the part to change), `mask_unsupported` (the provider or model cannot take a mask: Generate Image's `mask` needs a model whose provider lists `mask` in its `inputs`; the error names the ones that can), `stitch_mismatch` (Stitch got a picture of another shape than its crop); warnings `mask_full` (everything is masked: plain generation), `mask_resized` (the mask was stretched to the picture)
 - Cache: `cache_busy` (a warning: a run is going, so `cache clear` left its results and previews alone)
-- Canvas nodes: Canvas Region reads a rectangle or mask of a canvas at one revision (`head` is named once at compile and recorded in `compiled.json`); Canvas Write adds a layer as a new revision and moves the head only if it is still where Region read it, else warning `canvas_head_moved`, `accepted` false, the candidate kept
-- Canvas: `canvas_not_found` (no such canvas or revision), `canvas_ambiguous` (a revision prefix that starts more than one: write more of it), `canvas_corrupt` (a stored object is not what it is named for)
+- Canvas nodes: Canvas Region reads a rectangle or mask of a canvas at one revision (`head` is named once at compile and recorded in `compiled.json`); Canvas Write adds a layer as a new revision and moves the head only if it is still where Region read it, else warning `canvas_head_moved`, `accepted` false, the candidate kept (with its `candidate` input on it never moves the head: the result waits as a candidate); a Canvas Region with no canvas chosen is `input_invalid` on `canvas` when it runs
+- Canvas: `canvas_not_found` (no such canvas or revision), `canvas_ambiguous` (a revision prefix that starts more than one: write more of it), `canvas_corrupt` (a stored object is not what it is named for), `canvas_not_candidate` (accept or drop of a revision that is already history or accepted), `canvas_conflict` (a candidate from an older revision changed more than it added layers: drop it and run again), `canvas_head_moved` (the head moved while `accept` ran: nothing changed, run it again)
 - Projects: `project_invalid`, `project_exists`, `unknown_project`, `project_inherits_ignored` (a warning)
 - Skill: `skill_modified`
 - Other: `unknown_run`, `usage`, `internal`

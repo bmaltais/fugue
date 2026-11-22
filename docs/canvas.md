@@ -2,8 +2,8 @@
 
 A canvas is a layered picture that Fugue keeps as a chain of revisions: a change never edits a
 canvas in place, it makes a new revision and the old ones stay. The canvas work
-([epic #206](canvas-research.md)) so far is the store, the command line and the two nodes that read a
-region from a canvas and write a result back; the window comes next. The design and its reasons
+([epic #206](canvas-research.md)) so far is the store, the command line, the two nodes that read a
+region from a canvas and write a result back, and the review of what they wrote. The design and its reasons
 are in [spec 14.5](spec.md#145-the-canvas-revision-store-206-208).
 
 ```
@@ -12,6 +12,10 @@ fugue canvas import photo.ora                      # a canvas from an OpenRaster
 fugue canvas log canvas-0123456789ab               # the revisions, newest first
 fugue canvas show canvas-0123456789ab@sha256:ab12cd34   # one revision: tree hash, layers, tiles
 fugue canvas export canvas-0123456789ab out.ora    # the head as an .ora (never replaces a file)
+fugue canvas candidates canvas-0123456789ab        # results waiting for your review
+fugue canvas diff canvas-0123456789ab@sha256:ab12cd34   # what a revision changed, against its parent
+fugue canvas accept canvas-0123456789ab            # the one candidate becomes the head
+fugue canvas drop canvas-0123456789ab@sha256:ab12cd34   # hide one (it is kept)
 ```
 
 `<id>@<revision>` names a revision by `head`, its full hash, or the first 8 hex digits or more.
@@ -49,3 +53,22 @@ head as it has become. To keep reading one revision (to try several fills of the
 Region that revision's hash, or freeze it.
 
 Region's picture keeps the canvas's transparency. A stitch from Region also goes to Stitch.
+
+## Review a fill
+
+A fill does not have to change the canvas at once. Canvas Write with **Keep as candidate** on leaves
+the head where it is and stores the new layer as a **candidate**: a revision made from the one Region
+read, waiting for you. The `generative-fill` template (File > Browse templates, or
+`fugue workflow new fill.fugue --template generative-fill`) is Canvas Region, a FLUX.2 Klein redraw
+and Canvas Write with that on. Put your canvas's id and the rectangle in Canvas Region and run it.
+
+- `fugue canvas candidates <id>` lists what waits, newest first; run the template again for another
+  candidate to compare (they are all made from the head you started at).
+- `fugue canvas diff <id>@<candidate>` says what a candidate adds: the layer, how many tiles, and
+  the rectangle they cover.
+- `fugue canvas accept <id>@<candidate>` makes it the head. If something else became the head
+  meanwhile and the candidate only added a layer, the layer is placed on the new head as a new
+  revision; if the candidate changed more than that, `canvas_conflict` says so and you run the fill
+  again. `fugue canvas drop <id>@<candidate>` hides it. Neither deletes anything: a dropped one can
+  still be accepted, and every revision stays in `fugue canvas log` or `candidates --all`.
+- A Write that lost the race for the head (`canvas_head_moved`) is a candidate too.
