@@ -347,10 +347,8 @@ ApplicationWindow {
             onFrontRequested: run => App.runQueue.moveToFront(run)
             onFolderRequested: run => App.runQueue.openFolder(run)
             onCloseRequested: App.runBar.queueOpen = false
-            onResultsRequested: run => {
-                if (!App.runs.showResults(run, App.runQueue.workflowOf(run)))
-                    App.workflows.notify(qsTr("Open the workflow that run started from to see its results."))
-            }
+            thumbOf: path => App.mediaLibrary.thumbSource(path, 64)
+            onResultsRequested: run => win.showRunResults(run)
             // Escape closes it while it has the focus, so the run's cancel keys sleep then.
             Binding {
                 target: App.runs
@@ -365,6 +363,27 @@ ApplicationWindow {
     // open and dropped when none is, and not at all in a window without them: the window keeps
     // few items (#5). The panels know nothing of the canvas or of App; what they ask is done here.
     property Item sidePanelItem: null
+    // A run whose results the workflows panel opens on once it is made (see showRunResults).
+    property string pendingResultsRun: ""
+    // What a finished row of the run queue asks for (#133): the media browser opens on that run's
+    // results, in the workflows panel; the nodes of the saved workflow it came from show them too
+    // when that workflow is the one open. A window without side panels only has the canvas, and
+    // says when that cannot show them.
+    function showRunResults(run) {
+        const onCanvas = App.runs.showResults(run, App.runQueue.workflowOf(run))
+        if (!sidePanelsWanted || App.mediaLibrary === null) {
+            if (!onCanvas)
+                App.workflows.notify(qsTr("Open the workflow that run started from to see its results."))
+            return
+        }
+        const panel = App.sidePanels.tab === "workflows" ? sidePanelContent as WorkflowsPanel : null
+        if (panel) {
+            panel.showRun(run)
+        } else {
+            pendingResultsRun = run
+            App.sidePanels.tab = "workflows"
+        }
+    }
     // The tab strip (#159) on the left edge under the bars: made while the registry shows it
     // (focus mode hides it), and not at all in a window without side panels.
     readonly property bool stripWanted: sidePanelsWanted && win.chromeIsShown("side-tabs")
@@ -494,10 +513,18 @@ ApplicationWindow {
                     App.recentFiles.forget(path)
             }
             onCloseRequested: App.sidePanels.tab = ""
+            // Made for a run's results (the queue's row asked): it opens on that run.
+            Component.onCompleted: {
+                if (win.pendingResultsRun !== "") {
+                    showRun(win.pendingResultsRun)
+                    win.pendingResultsRun = ""
+                }
+            }
             // The results of the current workflow (#133): looked up when the view opens, when the
             // workflow changes, and when a run ends; the list is replaced only when it differs.
             function refreshResults() {
-                const rows = App.mediaLibrary.resultsOf(workflowsPanel.workflowPath)
+                const rows = workflowsPanel.resultsRun !== "" ? App.mediaLibrary.resultsOfRun(workflowsPanel.resultsRun)
+                                                              : App.mediaLibrary.resultsOf(workflowsPanel.workflowPath)
                 if (JSON.stringify(rows.map(r => r.path)) !== JSON.stringify(workflowsPanel.results.map(r => r.path)))
                     workflowsPanel.results = rows
             }

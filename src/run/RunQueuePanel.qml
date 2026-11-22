@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import Fugue
 import "../canvas"
+import "../media"
 
 // The run queue panel (#60, as ComfyUI's queue sidebar): the runs going and waiting, then the last few
 // that ended. It knows nothing of where the runs come from (this window, a `fugue run` from a
@@ -12,8 +13,10 @@ import "../canvas"
 //
 //   going and waiting: status, name, the node going and its progress, time since it began or was
 //     queued, "move to front" (waiting runs but the first) and "cancel"
-//   history: how it ended, name, how long it took and when, "show results" (a click on the row
-//     too) and "open the run folder"
+//   history: how it ended, a thumbnail of the first thing it made (a glyph for a video or a sound),
+//     what to call it (its prompt, else the first output's file name, else the workflow's name), how
+//     it ended, how long it took, when and the workflow's name, "show results" (a click on the row
+//     too: the caller opens the media browser on that run) and "open the run folder"
 //
 // A press on the panel stays on it: it never reaches what lies under it.
 Item {
@@ -23,6 +26,14 @@ Item {
     property var entries: []
     property var history: []
     property real maxHeight: 80 * look.unit
+    // The image:// source of a thumbnail of a file (the media library's); "" shows no picture.
+    property var thumbOf: path => ""
+    // What a finished row's thumbnail shows, as the media browser's items do.
+    function leadOf(row) {
+        if (!row.lead)
+            return null
+        return {kind: row.leadKind, title: row.label, thumb: row.leadKind === "image" ? thumbOf(row.lead) : ""}
+    }
     // The rows' run ids, changed only when the runs or their order change, so a row's buttons
     // stay as they are while its progress and time move.
     property var entryIds: []
@@ -33,7 +44,7 @@ Item {
         const wanted = rows.map(r => r.run)
         return wanted.join("\n") === ids.join("\n") ? ids : wanted
     }
-    readonly property var noRow: ({run: "", name: "", workflow: "", status: "waiting", position: 0, source: "cli",
+    readonly property var noRow: ({run: "", name: "", workflow: "", status: "waiting", position: 0, source: "cli", label: "", lead: "", leadKind: "",
                                    since: 0, node: "", progress: -1, seconds: -1, ended: 0})
     readonly property real u: look.unit
     // Milliseconds since the epoch, read each second while the panel is shown.
@@ -62,7 +73,7 @@ Item {
         return h < 24 ? qsTr("%1 h ago").arg(h) : qsTr("%n days ago", "", Math.floor(h / 24))
     }
 
-    width: 96 * u
+    width: 104 * u
     // The height it wants with room enough, for a caller that picks the side it hangs on.
     readonly property real wantedHeight: Math.min(80 * u, column.implicitHeight + 2 * u)
     height: Math.min(maxHeight, column.implicitHeight + 2 * u)
@@ -323,13 +334,27 @@ Item {
                         name: done.row.status === "ok" ? "check" : done.row.status === "failed" ? "circle-x" : "ban"
                         color: done.row.status === "failed" ? panel.look.error : panel.look.label
                     }
-                    Column {
+                    // The first thing the run made; room is kept when it made nothing, so the names line up.
+                    MediaThumb {
+                        id: lead
+                        objectName: "historyLead-" + done.modelData
                         x: 7 * panel.u
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 7 * panel.u
+                        height: 7 * panel.u
+                        look: panel.look
+                        compact: true
+                        item: panel.leadOf(done.row)
+                        visible: item !== null
+                    }
+                    Column {
+                        x: 15 * panel.u
                         width: parent.width - x - doneButtons.width - 2 * panel.u
                         anchors.verticalCenter: parent.verticalCenter
                         Text {
+                            objectName: "historyName"
                             width: parent.width
-                            text: done.row.name
+                            text: done.row.label !== "" ? done.row.label : done.row.name
                             elide: Text.ElideRight
                             textFormat: Text.PlainText
                             color: panel.look.text
@@ -346,6 +371,7 @@ Item {
                                 const m = done.row
                                 const how = m.status === "ok" ? qsTr("Done") : m.status === "failed" ? qsTr("Failed") : qsTr("Cancelled")
                                 return how + (m.seconds >= 0 ? " · " + panel.clock(m.seconds) : "") + " · " + panel.ago(m.ended)
+                                       + (m.label !== "" ? " · " + m.name : "")
                             }
                         }
                     }
@@ -359,7 +385,7 @@ Item {
                             objectName: "historyResults-" + done.modelData
                             look: panel.look
                             glyph: "image"
-                            tip: qsTr("Show its results on the canvas")
+                            tip: qsTr("Show its results")
                             onTapped: panel.resultsRequested(done.modelData)
                         }
                         ViewButton {

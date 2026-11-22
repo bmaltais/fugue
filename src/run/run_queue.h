@@ -19,9 +19,12 @@
 //    source: "window"|"cli", mine (a run of this window), since (ms since the epoch: when it
 //    started, or was queued), node (path id of the node going, or ""), progress (0..1, or -1)}
 // and a row of `history` (newest first)
-//   {run, name, workflow, status: "ok"|"failed"|"cancelled", seconds (or -1), ended (ms)}.
+//   {run, name, workflow, status: "ok"|"failed"|"cancelled", seconds (or -1), ended (ms),
+//    label (the prompt, else the first output's file name, else ""), lead (the file of the first image
+//    it made, else its first video or sound, else ""), leadKind ("image"|"video"|"audio"|"")}.
 
 #include <QFileSystemWatcher>
+#include <QHash>
 #include <QJsonObject>
 #include <QObject>
 #include <QSet>
@@ -31,6 +34,8 @@
 #include <QtQmlIntegration/qqmlintegration.h>
 
 #include <functional>
+
+#include "media/media_items.h"
 
 namespace fugue {
 
@@ -92,6 +97,7 @@ private:
     QTimer m_tick;  // one second while watching: the going run's progress
     QVariantList m_entries;
     QVariantList m_history;
+    QHash<QString, RunIdentity> m_identities; // by run id: ended runs do not change
     bool m_watching = false;
 };
 

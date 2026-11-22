@@ -2282,9 +2282,15 @@ they add no queue of their own.
   this window, or `fugue run` from a terminal. A row has the workflow's name, the node going with its
   progress or "Waiting", where it came from, the time since it began (or was queued), **move to front**
   (waiting runs but the first) and **cancel**. *Finished* lists the last eight runs that ended, newest
-  first: how it ended, how long it took, when; a click on the row **shows its results on the nodes**
-  (when it is the workflow of the tab shown: a run's node ids mean something only there), and a
-  button opens its run folder. Cancel of a run of this window goes through the run thread; of any
+  first: a **thumbnail of the first image the run made** (a glyph for a video or a sound; none when it
+  made nothing), what to call it (the first Text node's text, else the first output's file name, else
+  the workflow's name, since many runs are called "workflow"), how it ended, how long it took, when, and
+  the workflow's name; a click on the row (or its results button) **opens the media browser on that
+  run** (#133: the workflows panel's Results view, scoped to the one run, with an *All runs* button to
+  widen it to the workflow), and it also shows the results on the nodes when it is the workflow of the
+  tab shown (a run's node ids mean something only there); a button opens its run folder. The lead and
+  label are `RunIdentity` (`media/media_items.h`, `runIdentityOf`), read once per ended run. A
+  Preview's or Compare's `shown` values count as results beside `outputs` (they have no outputs). Cancel of a run of this window goes through the run thread; of any
   other run it does what `fugue runs cancel` does, so both ways end a run the same way. Move to
   front renames a waiting entry into class 3 ahead of the other waiting ones (9.8); it never goes
   ahead of the run going.
@@ -2363,7 +2369,7 @@ and the window keeps its item budget.
   thumbnails of videos (a frame) and the details of a video or sound (container tag, 11.7); saved files that
   are in no run folder (a scan of the output folder grouped by embedded workflow); favorites, delete,
   re-run with the same seed, send to a Load Image node, open the workflow that made it, drag back onto the
-  canvas; remembering the mode and view; the queue's "show results" row opening the browser; zoom and
+  canvas; remembering the mode and view; zoom and
   fine-grained image compare in Single.
 - **Not built** (follow-ups): a model library tab (M), assets, a log or terminal panel at the bottom,
   bookmarks and a preview of a node in the library.

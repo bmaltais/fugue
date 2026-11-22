@@ -11,6 +11,9 @@
 //   mediaOfWorkflow   the same over the newest runs of one workflow file, newest first; a file
 //                     that came back in a later run stays with the newest, and one that is gone
 //                     from the disk is left out.
+//   runIdentityOf    what to call a run in a list of runs: a lead file (the first image it made, else
+//                     the first video or sound), and a label (the prompt, else the lead's file name),
+//                     so a row is not just the workflow's name.
 //   groupByRun        the items in groups of one run each, in the order given.
 //   embeddedSummary   what a PNG or WebP file's embedded workflow says (11.7): the prompt, the
 //                     seed and the model that made it.
@@ -43,6 +46,13 @@ QDateTime runStartOf(const QString &runId);
 
 QList<MediaItem> mediaOfRun(const QString &runsRoot, const QString &runId);
 QList<MediaItem> mediaOfWorkflow(const QString &runsRoot, const QString &workflow, int maxRuns = 40);
+struct RunIdentity {
+    QString leadPath; // the first image the run made, else its first video or sound, else ""
+    QString leadKind; // "image", "video", "audio" or ""
+    QString label;    // the first Text node's text on one line, else the lead's file name, else ""
+};
+RunIdentity runIdentityOf(const QString &runsRoot, const QString &runId);
+
 QList<MediaGroup> groupByRun(const QList<MediaItem> &items);
 
 // {"embedded": bool, "prompt", "seed", "model" (each only when found), "nodes": count}. The prompt is

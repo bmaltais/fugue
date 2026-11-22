@@ -1534,10 +1534,22 @@ echo '{"outputs": {"text": "painted"}}'
         QTRY_VERIFY(!r.role("show", NodeList::Thumbnail).toString().isEmpty());
         QCOMPARE(r.state("gen"), QStringLiteral("cached")); // what it made, as when the run ended
 
-        // Another file's run cannot be shown here.
+        // The row names the run by what it made and the same press opens the media browser on that
+        // run alone, in the workflows panel, whatever workflow is open.
+        QQuickItem *lead = named(r, "historyLead-" + run);
+        QVERIFY(lead && lead->isVisible());
+        QVERIFY(lead->property("item").toMap().value("kind").toString() == "image");
+        QTRY_VERIFY(named(r, "workflowsResults")); // opened by the click above
         QVERIFY(r.app.workflows.openText(QString::fromUtf8(kGraph)));
         click(r, named(r, "historyResults-" + run));
-        QTRY_VERIFY(r.app.workflows.notice().contains("Open the workflow"));
+        QTRY_VERIFY(named(r, "workflowsResultsAllRuns")->isVisible());
+        QVERIFY(named(r, "workflowsResultsAllRuns")->isVisible());
+        const QVariantList shown = named(r, "workflowsResults")->property("items").toList();
+        QVERIFY(!shown.isEmpty());
+        for (const QVariant &item : shown)
+            QCOMPARE(item.toMap().value("run").toString(), run);
+        click(r, named(r, "workflowsResultsAllRuns"));
+        QTRY_VERIFY(!named(r, "workflowsResultsAllRuns")->isVisible());
         QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
     }
 };
