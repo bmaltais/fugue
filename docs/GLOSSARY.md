@@ -139,6 +139,10 @@ _Avoid_: interface node, proxy
 One graph the canvas shows: the workflow's own, or the inside of a group entered. The groups entered, outside in, are the canvas's scope (`scopePath`, the breadcrumb).
 _Avoid_: layer, depth
 
+**Canvas gesture**:
+What one press of a pointer button on the canvas does from press to release: a pan, a move, a resize, a link drag or a marquee (`CanvasGesture`, `model.gesture`). It decides by what is under the press and the modifiers, and makes the model edits itself; the window only passes the pointer in and draws.
+_Avoid_: drag handler, mouse state
+
 **Section**:
 A named run of inputs on a node face, under a header row. The section "Advanced" is folded until opened.
 _Avoid_: tab, panel

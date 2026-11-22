@@ -68,20 +68,18 @@ FocusScope {
     signal menuRequested(string kind, real x, real y)
 
     property bool spaceHeld: false
-    // "pan", "move", "link", "marquee", or "alt" (a press with Alt on a node, not yet a drag)
+    // What a press, a drag and a release mean is the gesture module's (canvas_gesture.h, model.gesture): this
+    // file passes it the pointer and what only it knows (the zoom, the magnifier, the cut handle), and
+    // carries out what it asks for (the pan, the search, the drop choice, a viewer).
+    // "pan", "move", "link", "marquee", "resize", or "alt" (a press with Alt on a node, not yet a drag)
     // while a button is down
-    property string gesture: ""
-    property int gestureButton: 0  // the button that holds the gesture
-    property int ignoredButtons: 0 // pressed while another held a gesture: their release does nothing
-    property point pressAt        // where the gesture began, in canvas coordinates
-    property point rightPressAt   // where the right button went down
+    readonly property string gesture: model.gesture.current
+    readonly property point pressAt: model.gesture.pressAt     // where the gesture began, in canvas coordinates
+    readonly property point pointer: model.gesture.pointer     // the pointer in canvas coordinates
+    readonly property bool travelled: model.gesture.travelled
+    readonly property string pressedNode: model.gesture.pressedNode
+    readonly property string resizeCorner: model.gesture.resizeCorner // the corner being dragged
     property point panStart       // world.x, world.y when a pan began
-    property point pressWorld     // the press in world coordinates
-    property point pointer        // the pointer in canvas coordinates during a gesture
-    property bool travelled: false
-    property string pressedNode: ""
-    property bool pressedWasSelected: false
-    property int pressModifiers: 0
     property string hoverProblem: ""
     readonly property var linkDrag: model.linkDrag
     readonly property bool dragging: linkDrag.node !== undefined
@@ -99,7 +97,6 @@ FocusScope {
     // node, a square 4u wide (at least 12 screen px) inside it, unless a port is there too
     // (a port wins: a link drag from it); and the one being dragged.
     property var hoverCorner: ({})
-    property string resizeCorner: ""
     function cornerAt(w) {
         if (tier !== 0 || model.portAt(w.x, w.y, Math.max(8, 10 / world.scale)).node !== undefined)
             return ({})
@@ -348,10 +345,15 @@ FocusScope {
     // A port is hit within 10 pixels on screen, and never less than its own size, wherever ports
     // are drawn: the map tier too (#74, as ComfyUI). In the overview a press is on the node.
     function portUnder(px, py) {
-        if (tier > 1 && !inLens(px, py))
+        const tolerance = portTolerance(px, py)
+        if (tolerance <= 0)
             return ({})
         const w = toWorld(px, py)
-        return model.portAt(w.x, w.y, Math.max(8, 10 / scaleAt(px, py)))
+        return model.portAt(w.x, w.y, tolerance)
+    }
+    // The reach of a port at a screen point in world units there, or 0 where none can be hit (the overview).
+    function portTolerance(px, py) {
+        return tier > 1 && !inLens(px, py) ? 0 : Math.max(8, 10 / scaleAt(px, py))
     }
 
     clip: true
@@ -447,15 +449,9 @@ FocusScope {
             canvas.closeWarnings() // a pinned warnings card goes at a click elsewhere
             if (canvas.dropChoice.node !== undefined)
                 canvas.chooseDrop(null) // so does a wire waiting for its port
-            // A second button while one holds a gesture is left out of it: the gesture goes
-            // on, and that button's release does nothing (no context menu mid-drag).
-            if (canvas.gesture !== "") {
-                if (mouse.buttons & canvas.gestureButton) {
-                    canvas.ignoredButtons |= mouse.button
-                    return
-                }
-                canvas.finishGesture(canvas.pointer.x, canvas.pointer.y, 0) // its release never came
-            }
+            // A second button while one holds a gesture is left out of it (no context menu mid-drag).
+            if (!canvas.model.gesture.admit(mouse.button, mouse.buttons))
+                return
             // A field on the canvas (a widget being typed into) gives up its focus first: the
             // canvas is its focus scope, so forceActiveFocus alone would hand focus back to it.
             if (canvas.Window.activeFocusItem)
@@ -465,205 +461,34 @@ FocusScope {
             // it and is a press on the canvas under it.
             if (canvas.inLens(mouse.x, mouse.y) && canvas.portUnder(mouse.x, mouse.y).node === undefined)
                 canvas.closeLens()
-            if (mouse.button === Qt.RightButton) {
-                canvas.rightPressAt = Qt.point(mouse.x, mouse.y) // a click opens the menu on release
-                return
-            }
-            canvas.gestureButton = mouse.button
-            canvas.pressAt = Qt.point(mouse.x, mouse.y)
-            canvas.pointer = canvas.pressAt
-            canvas.pressWorld = canvas.toWorld(mouse.x, mouse.y)
-            canvas.travelled = false
-            canvas.pressModifiers = mouse.modifiers
-            if (mouse.button === Qt.MiddleButton || canvas.spaceHeld) {
-                canvas.startPan()
-                return
-            }
-            // The hovered wire's cut handle removes its link (8.2).
-            if (cutHandle.visible && Math.hypot(mouse.x - cutHandle.cx, mouse.y - cutHandle.cy) <= cutHandle.width / 2) {
-                const l = canvas.hoverLink
-                canvas.clearHover()
-                canvas.model.disconnectInput(l.toNode, l.toPort, l.item)
-                return
-            }
-            // A node's corner resizes it.
-            const corner = mouse.button === Qt.LeftButton ? canvas.cornerAt(canvas.pressWorld) : ({})
-            canvas.clearHover()
-            if (corner.node !== undefined) {
-                canvas.gesture = "resize"
-                canvas.pressedNode = corner.node
-                canvas.resizeCorner = corner.corner
-                canvas.model.beginResize(corner.node, corner.corner)
-                return
-            }
-            const port = canvas.portUnder(mouse.x, mouse.y)
-            if (port.node !== undefined) {
-                if ((mouse.modifiers & Qt.ControlModifier) && (mouse.modifiers & Qt.AltModifier)) {
-                    canvas.model.disconnectPort(port.node, port.port, port.output)
-                    return
-                }
-                canvas.gesture = "link"
+            const onCut = cutHandle.visible && Math.hypot(mouse.x - cutHandle.cx, mouse.y - cutHandle.cy) <= cutHandle.width / 2
+            canvas.model.gesture.press(Qt.point(mouse.x, mouse.y), canvas.toWorld(mouse.x, mouse.y), mouse.button,
+                                       mouse.modifiers, canvas.portTolerance(mouse.x, mouse.y), onCut)
+            if (canvas.gesture === "link") {
                 canvas.lensSource = canvas.inLens(mouse.x, mouse.y)
                 canvas.hoverProblem = ""
-                if (port.output && (mouse.modifiers & Qt.ShiftModifier))
-                    canvas.model.beginLinksMove(port.node, port.port)
-                else
-                    canvas.model.beginLinkDrag(port.node, port.port, port.output)
-                return
             }
-            // The Advanced section's header opens and folds it (5.4, 6.1).
-            if (mouse.button === Qt.LeftButton && canvas.tier === 0) {
-                const folded = canvas.model.advancedHeaderAt(canvas.pressWorld.x, canvas.pressWorld.y)
-                if (folded !== "") {
-                    canvas.model.toggleAdvanced(folded)
-                    return
-                }
-            }
-            const hit = canvas.model.nodeAt(canvas.pressWorld.x, canvas.pressWorld.y)
-            if (hit !== "") {
-                canvas.pressedNode = hit
-                canvas.pressedWasSelected = canvas.model.selectedIds().indexOf(hit) >= 0
-                if ((mouse.modifiers & Qt.AltModifier) && !(mouse.modifiers & Qt.ControlModifier)) {
-                    canvas.gesture = "alt" // a clone once it travels
-                    return
-                }
-                if (mouse.modifiers & (Qt.ShiftModifier | Qt.ControlModifier))
-                    canvas.model.select([hit], "add")
-                else if (!canvas.pressedWasSelected)
-                    canvas.model.select([hit], "replace")
-                canvas.gesture = "move"
-                canvas.model.beginMove(hit)
-                return
-            }
-            // A Frame's title band moves it with what it holds (5.1).
-            const frame = mouse.button === Qt.LeftButton ? canvas.frameTitleAt(canvas.pressWorld) : ""
-            if (frame !== "") {
-                canvas.pressedNode = ""
-                canvas.gesture = "move"
-                canvas.model.beginFrameMove(frame)
-                return
-            }
-            const marquee = canvas.navigation === "standard" || (mouse.modifiers & Qt.ControlModifier)
-            if (marquee)
-                canvas.gesture = "marquee"
-            else
-                canvas.startPan()
         }
 
         onPositionChanged: mouse => {
-            const w = canvas.toWorld(mouse.x, mouse.y)
-            canvas.pointer = Qt.point(mouse.x, mouse.y)
-            if (!canvas.travelled && Math.hypot(mouse.x - canvas.pressAt.x, mouse.y - canvas.pressAt.y)
-                    >= Application.styleHints.startDragDistance)
-                canvas.travelled = true
-            if (canvas.gesture === "alt" && canvas.travelled) {
-                canvas.model.beginCloneMove(canvas.pressedNode)
-                canvas.gesture = "move"
-            }
-            switch (canvas.gesture) {
-            case "pan":
+            canvas.model.gesture.move(Qt.point(mouse.x, mouse.y), canvas.toWorld(mouse.x, mouse.y),
+                                      canvas.portTolerance(mouse.x, mouse.y))
+            if (canvas.gesture === "pan") {
                 world.x = canvas.panStart.x + mouse.x - canvas.pressAt.x
                 world.y = canvas.panStart.y + mouse.y - canvas.pressAt.y
-                break
-            case "move":
-                canvas.model.moveBy(w.x - canvas.pressWorld.x, w.y - canvas.pressWorld.y)
-                break
-            case "resize":
-                canvas.model.resizeBy(w.x - canvas.pressWorld.x, w.y - canvas.pressWorld.y)
-                break
-            case "link": {
+            } else if (canvas.gesture === "link") {
                 const port = canvas.portUnder(mouse.x, mouse.y)
                 canvas.hoverProblem = port.node !== undefined
                     ? canvas.model.dragProblem(port.node, port.port, port.output, true) : ""
                 canvas.updateHover(mouse.x, mouse.y)
-                break
-            }
             }
         }
 
-        onReleased: mouse => {
-            if (canvas.ignoredButtons & mouse.button) {
-                canvas.ignoredButtons &= ~mouse.button
-                return
-            }
-            // A right-click opens the context menu; a right-drag does nothing (12.3).
-            if (mouse.button === Qt.RightButton) {
-                if (canvas.gesture === "" && Math.hypot(mouse.x - canvas.rightPressAt.x, mouse.y - canvas.rightPressAt.y)
-                        < Application.styleHints.startDragDistance)
-                    canvas.contextMenuRequested(mouse.x, mouse.y)
-                return
-            }
-            canvas.finishGesture(mouse.x, mouse.y, mouse.modifiers)
-        }
-        onCanceled: {
-            canvas.ignoredButtons = 0
-            canvas.finishGesture(canvas.pointer.x, canvas.pointer.y, 0)
-        }
-
-        onDoubleClicked: mouse => {
-            if (mouse.button !== Qt.LeftButton)
-                return
-            const w = canvas.toWorld(mouse.x, mouse.y)
-            // A double click on a corner returns the node to auto-size.
-            const corner = canvas.cornerAt(w)
-            if (corner.node !== undefined) {
-                canvas.model.endResize()
-                canvas.model.autoSize(corner.node)
-                return
-            }
-            // On a group's port (its card's, or an exposed mark inside): rename it on the face (#72).
-            const port = canvas.portUnder(mouse.x, mouse.y)
-            if (port.node !== undefined
-                    && canvas.model.portToRename(port.node, port.port, port.output).name !== undefined) {
-                canvas.model.endLinkDrag()
-                canvas.model.portRenameRequested(port.node, port.port, port.output)
-                return
-            }
-            const hit = canvas.model.nodeAt(w.x, w.y)
-            // On a node's title: rename it (#55).
-            if (hit !== "" && port.node === undefined
-                    && w.y <= canvas.model.position(hit).y + canvas.model.headerHeight) {
-                canvas.model.endMove()
-                canvas.model.nodeRenameRequested(hit)
-                return
-            }
-            // A double click on a group's body enters it (5.2); its title stays for renaming.
-            if (hit !== "" && canvas.model.isGroup(hit) && port.node === undefined
-                    && w.y > canvas.model.position(hit).y + canvas.model.headerHeight) {
-                canvas.model.endMove()
-                canvas.model.enterGroup(hit)
-                return
-            }
-            // On a Frame's title: rename it.
-            const frame = hit === "" ? canvas.frameTitleAt(w) : ""
-            if (frame !== "") {
-                canvas.model.endMove()
-                canvas.model.frameRenameRequested(frame)
-                return
-            }
-            // A double click on a Compare Images node's picture opens the large view (#62).
-            if (hit !== "" && port.node === undefined && canvas.model.isCompare(hit)
-                    && canvas.model.compareResult(hit).a !== undefined) {
-                canvas.model.endMove()
-                canvas.openCompare(hit)
-                return
-            }
-            // A double click on any other node's picture opens it large (#73); a Crop's opens the
-            // crop window, a Compare Images', as above, its own.
-            if (hit !== "" && port.node === undefined && canvas.model.pictureAt(hit, w.x, w.y)
-                    && App.runs && App.runs.imageFile(hit) !== "") {
-                canvas.model.endMove()
-                if (canvas.model.isCrop(hit))
-                    canvas.openCrop(hit)
-                else if (canvas.model.maskState(hit).over)
-                    canvas.openMask(hit) // Paint Mask: its picture is the editor's; Load Image's is the large view
-                else
-                    canvas.openImage(hit)
-                return
-            }
-            if (hit === "" && port.node === undefined)
-                canvas.searchRequested(w.x, w.y)
-        }
+        onReleased: mouse => canvas.model.gesture.release(Qt.point(mouse.x, mouse.y), canvas.toWorld(mouse.x, mouse.y),
+                                                          mouse.button, mouse.modifiers, canvas.portTolerance(mouse.x, mouse.y))
+        onCanceled: canvas.model.gesture.cancel()
+        onDoubleClicked: mouse => canvas.model.gesture.doubleClick(Qt.point(mouse.x, mouse.y), canvas.toWorld(mouse.x, mouse.y),
+                                                                   mouse.button, canvas.portTolerance(mouse.x, mouse.y))
 
         onWheel: wheel => {
             // A touchpad is told by its scroll phase alone. Never by the device type (Qt on
@@ -689,11 +514,52 @@ FocusScope {
     // titles do, down to 10 px on screen, where it stops so it still reads.
     readonly property real frameTitleWorld: Math.max(look.frameTitleSize, Math.ceil(10 / world.scale))
 
-    // The Frame whose title band (as tall as its title, at least a node header) holds the world
-    // point, or "".
-    function frameTitleAt(w) {
-        const band = Math.max(model.headerHeight, frameTitleWorld + 4 * look.unit / Math.min(1, world.scale))
-        return model.frameAt(w.x, w.y, band)
+    // The height of a Frame's title band in world units (at least a node header): what the gesture
+    // module takes a press on a Frame's title to be.
+    readonly property real frameBand: Math.max(model.headerHeight, frameTitleWorld + 4 * look.unit / Math.min(1, world.scale))
+
+    Binding { target: canvas.model.gesture; property: "navigation"; value: canvas.navigation }
+    Binding { target: canvas.model.gesture; property: "spaceHeld"; value: canvas.spaceHeld }
+    Binding { target: canvas.model.gesture; property: "tier"; value: canvas.tier }
+    Binding { target: canvas.model.gesture; property: "zoom"; value: world.scale }
+    Binding { target: canvas.model.gesture; property: "panX"; value: world.x }
+    Binding { target: canvas.model.gesture; property: "panY"; value: world.y }
+    Binding { target: canvas.model.gesture; property: "frameBand"; value: canvas.frameBand }
+    // What the gesture module asks the window for.
+    Connections {
+        target: canvas.model.gesture
+        function onPanStarted() { canvas.panStart = Qt.point(world.x, world.y) }
+        function onPanFinished() { canvas.rememberView() }
+        function onPressStarted() { canvas.clearHover() }
+        // The hovered wire's cut handle removes its link (8.2).
+        function onCutHandlePressed() {
+            const l = canvas.hoverLink
+            canvas.clearHover()
+            canvas.model.disconnectInput(l.toNode, l.toPort, l.item)
+        }
+        function onFinished(kind) {
+            canvas.hoverPort = ({})
+            if (kind === "link")
+                canvas.hoverProblem = ""
+        }
+        function onDropRequested(node, at) { canvas.dropOnNode(node, at.x, at.y) }
+        function onLinkReleased(from, at) { canvas.linkReleased(from, at.x, at.y) }
+        function onSearchRequested(at) { canvas.searchRequested(at.x, at.y) }
+        function onContextMenuRequested(at) { canvas.contextMenuRequested(at.x, at.y) }
+        // A double click on a picture: the viewer of its kind, when the node has a picture to show (#62, #73).
+        function onViewerRequested(kind, node) {
+            if (kind !== "compare" && !(App.runs && App.runs.imageFile(node) !== ""))
+                return
+            canvas.model.endMove()
+            if (kind === "compare")
+                canvas.openCompare(node)
+            else if (kind === "crop")
+                canvas.openCrop(node)
+            else if (kind === "mask")
+                canvas.openMask(node) // Paint Mask: its picture is the editor's; Load Image's is the large view
+            else
+                canvas.openImage(node)
+        }
     }
 
     // The large view of a Compare Images node (#62): its viewer on the full files.
@@ -784,74 +650,6 @@ FocusScope {
     Component {
         id: compareDialogComponent
         CompareDialog {}
-    }
-
-    function startPan() {
-        gesture = "pan"
-        panStart = Qt.point(world.x, world.y)
-    }
-
-    function finishGesture(px, py, modifiers) {
-        const g = gesture
-        gesture = ""
-        hoverPort = ({})
-        switch (g) {
-        case "pan":
-            // A left click on empty canvas, not a drag, clears the selection.
-            if (!travelled && !spaceHeld && navigation === "legacy")
-                model.select([], "replace")
-            rememberView()
-            break
-        case "resize":
-            model.endResize()
-            resizeCorner = ""
-            break
-        case "move":
-            model.endMove()
-            if (!travelled && pressedNode !== "") {
-                if (!(pressModifiers & (Qt.ShiftModifier | Qt.ControlModifier)))
-                    model.select([pressedNode], "replace")
-                else if (pressedWasSelected)
-                    model.select([pressedNode], "subtract")
-            }
-            break
-        case "alt":
-            // Alt+click, not a drag: the node leaves the selection.
-            model.select([pressedNode], "subtract")
-            break
-        case "link": {
-            // The model ended the drag already (an undo, an edit from a key): nothing to let go.
-            if (!dragging) {
-                hoverProblem = ""
-                break
-            }
-            const from = { node: linkDrag.node, port: linkDrag.port, output: linkDrag.output }
-            // Links being moved (Shift+drag) let go on nothing stay as they were: no search.
-            const moving = linkDrag.targets !== undefined
-            const port = portUnder(px, py)
-            const w = toWorld(px, py)
-            const onNode = model.nodeAt(w.x, w.y)
-            if (port.node !== undefined) {
-                model.endLinkDrag(port.node, port.port, port.output)
-            } else if (onNode !== "" && travelled && !moving) {
-                dropOnNode(onNode, px, py)
-            } else {
-                model.endLinkDrag()
-                if (travelled && !moving && onNode === "")
-                    linkReleased(from, w.x, w.y)
-            }
-            hoverProblem = ""
-            break
-        }
-        case "marquee": {
-            const a = toWorld(Math.min(pressAt.x, px), Math.min(pressAt.y, py))
-            const b = toWorld(Math.max(pressAt.x, px), Math.max(pressAt.y, py))
-            const mode = (modifiers & Qt.ShiftModifier) ? "add"
-                       : (modifiers & Qt.AltModifier) ? "subtract" : "replace"
-            model.select(travelled ? model.nodesIn(Qt.rect(a.x, a.y, b.x - a.x, b.y - a.y)) : [], mode)
-            break
-        }
-        }
     }
 
     PinchHandler {
@@ -1736,7 +1534,7 @@ FocusScope {
                             enabled: !crumb.last
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: canvas.model.leaveTo(crumb.index)
+                            onClicked: canvas.model.groups.leaveTo(crumb.index)
                         }
                     }
                 }

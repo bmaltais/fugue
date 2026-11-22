@@ -203,7 +203,7 @@ void bindMenuCommands(CommandRegistry &registry, CanvasModel &canvas, std::funct
     registry.setEnabledWhen("edit.rename", [model, &registry] {
         const QVariantMap target = registry.target();
         if (target.contains("port")
-            && !model->portToRename(target.value("node").toString(), target.value("port").toString(),
+            && !model->groups()->portToRename(target.value("node").toString(), target.value("port").toString(),
                                     target.value("output").toBool()).isEmpty())
             return true;
         return model->selectedIds().size() == 1;
@@ -230,7 +230,7 @@ void bindMenuCommands(CommandRegistry &registry, CanvasModel &canvas, std::funct
     // A right-click on a port inside a group: the menu's target names it.
     const auto exposed = [model, &registry] {
         const QVariantMap target = registry.target();
-        return model->exposedName(target.value("node").toString(), target.value("port").toString(),
+        return model->groups()->exposedName(target.value("node").toString(), target.value("port").toString(),
                                   target.value("output").toBool());
     };
     const auto onPort = [model, &registry] { return model->inGroup() && registry.target().contains("port"); };
@@ -239,16 +239,16 @@ void bindMenuCommands(CommandRegistry &registry, CanvasModel &canvas, std::funct
     registry.setHandler("group.expose", [model, &registry] {
         const QVariantMap target = registry.target();
         if (target.value("output").toBool())
-            model->exposeOutput(target.value("node").toString(), target.value("port").toString());
+            model->groups()->exposeOutput(target.value("node").toString(), target.value("port").toString());
         else
-            model->exposeInput(target.value("node").toString(), target.value("port").toString());
+            model->groups()->exposeInput(target.value("node").toString(), target.value("port").toString());
     });
     registry.setHandler("group.unexpose", [model, &registry, exposed] {
         const QVariantMap target = registry.target();
         if (target.value("output").toBool())
-            model->unexposeOutput(exposed());
+            model->groups()->unexposeOutput(exposed());
         else
-            model->unexposeInput(target.value("node").toString(), target.value("port").toString());
+            model->groups()->unexposeInput(target.value("node").toString(), target.value("port").toString());
     });
     registry.setEnabledWhen("group.save-to-library", [model] {
         const QStringList ids = model->selectedIds();

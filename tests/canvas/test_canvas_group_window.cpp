@@ -165,7 +165,7 @@ private slots:
         app.key(Qt::Key_E, Qt::ControlModifier | Qt::ShiftModifier);
         QTRY_COMPARE(app.model.document().groups.size(), 1);
         const QString instance = app.model.selectedIds().value(0);
-        const QVariantMap target = app.model.portToRename(instance, "image", true);
+        const QVariantMap target = app.model.groups()->portToRename(instance, "image", true);
         QVERIFY(!target.isEmpty());
         QPointF port;
         const NodeList *nodes = app.model.nodes();
@@ -178,7 +178,7 @@ private slots:
         QVERIFY(!port.isNull());
         QTest::mouseDClick(app.window, Qt::LeftButton, {}, app.screen(port.x(), port.y()));
         answer("Picture");
-        QTRY_COMPARE(app.model.portToRename(instance, "image", true).value("label").toString(), QStringLiteral("Picture"));
+        QTRY_COMPARE(app.model.groups()->portToRename(instance, "image", true).value("label").toString(), QStringLiteral("Picture"));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
@@ -305,7 +305,7 @@ private slots:
         app.key(Qt::Key_E, Qt::ControlModifier | Qt::ShiftModifier);
         QTRY_COMPARE(app.model.document().groups.size(), 1);
         const QString instance = app.model.selectedIds().value(0);
-        QVERIFY2(app.model.saveGroupToLibrary(), qPrintable(app.model.groupProblem()));
+        QVERIFY2(app.model.groups()->saveGroupToLibrary(), qPrintable(app.model.groups()->problem()));
         const QString library = fugue::libraryDir();
         QVERIFY(QFileInfo(library + "/group/node.json").isFile());
         app.model.select({instance});

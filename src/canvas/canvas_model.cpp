@@ -162,6 +162,7 @@ QHash<int, QByteArray> LinkList::roleNames() const {
 CanvasModel::CanvasModel(const Registry *registry, QObject *parent)
     : QObject(parent), m_registry(registry), m_nodeList(new NodeList(this)), m_linkList(new LinkList(this)),
       m_search(new NodeSearch(registry, this, this)), m_widgets(new WidgetEdit(registry, this, this)),
+      m_groups(new GroupEdit(registry, this, this)), m_gesture(new CanvasGesture(this, this)),
       m_undo(makeUndoStack()) {
     watchUndoStack();
     m_lensNodes = new QSortFilterProxyModel(this);
@@ -1392,7 +1393,7 @@ QString CanvasModel::addNode(const QString &typeId, qreal x, qreal y) {
         type && type->runtime.value("kind") == QLatin1String("group") && !m_document.group(typeId)) {
         const Result<Document> file = loadLibraryGroup(*type);
         if (!file) {
-            setGroupProblem(file.error().message);
+            m_groups->setProblem(file.error().message);
             return {};
         }
         Document copy = *file;
@@ -1408,7 +1409,7 @@ QString CanvasModel::addNode(const QString &typeId, qreal x, qreal y) {
     // shown is inside it.
     if (const GroupDefinition *group = m_document.group(typeId)) {
         if (!canHoldGroup(m_document, typeId)) {
-            setGroupProblem(tr("A group cannot hold itself: %1 holds the group shown.")
+            m_groups->setProblem(tr("A group cannot hold itself: %1 holds the group shown.")
                                 .arg(group->name.isEmpty() ? typeId : group->name));
             return {};
         }

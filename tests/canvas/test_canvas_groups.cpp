@@ -103,15 +103,15 @@ private slots:
         CanvasModel canvas(&m_registry);
         canvas.setDocument(document(chain));
         canvas.select({"gen"});
-        const QString instance = canvas.makeGroup();
-        QVERIFY2(!instance.isEmpty(), qPrintable(canvas.groupProblem()));
+        const QString instance = canvas.groups()->makeGroup();
+        QVERIFY2(!instance.isEmpty(), qPrintable(canvas.groups()->problem()));
         QStringList top{"join", "prompt", "save", instance};
         top.sort();
         QCOMPARE(rowIds(canvas), top);
         const QString group = canvas.document().graph.nodes.value(instance).type;
 
         QSignalSpy scope(&canvas, &CanvasModel::scopeChanged);
-        QVERIFY(canvas.enterGroup(instance));
+        QVERIFY(canvas.groups()->enterGroup(instance));
         QCOMPARE(scope.count(), 1);
         QVERIFY(canvas.inGroup());
         QCOMPARE(canvas.scopePath(), instance);
@@ -131,7 +131,7 @@ private slots:
         // The whole workflow is what is saved: the instance and the rest are there.
         QVERIFY(canvas.document().graph.nodes.contains("save"));
 
-        QVERIFY(canvas.leaveGroup());
+        QVERIFY(canvas.groups()->leaveGroup());
         QVERIFY(!canvas.inGroup());
         QCOMPARE(canvas.selectedIds(), QStringList{instance});
         QCOMPARE(canvas.document().group(group)->nodes.value("gen").mode, NodeMode::Bypass);
@@ -139,15 +139,15 @@ private slots:
         canvas.undo();
         QCOMPARE(canvas.document().group(group)->nodes.value("gen").mode, NodeMode::Normal);
         QVERIFY(!canvas.inGroup());
-        QVERIFY(!canvas.leaveGroup());
+        QVERIFY(!canvas.groups()->leaveGroup());
     }
 
     void undoingTheMakeGroupWhileInsideGoesBackUp() {
         CanvasModel canvas(&m_registry);
         canvas.setDocument(document(chain));
         canvas.select({"gen"});
-        const QString instance = canvas.makeGroup();
-        QVERIFY(canvas.enterGroup(instance));
+        const QString instance = canvas.groups()->makeGroup();
+        QVERIFY(canvas.groups()->enterGroup(instance));
         canvas.undo();
         QVERIFY(!canvas.inGroup());
         QCOMPARE(rowIds(canvas), (QStringList{"gen", "join", "prompt", "save"}));
@@ -161,11 +161,11 @@ private slots:
         CanvasModel canvas(&m_registry);
         canvas.setDocument(document(chain));
         canvas.select({"gen", "save"});
-        QSignalSpy asked(&canvas, &CanvasModel::makeGroupAsked);
-        canvas.requestMakeGroup();
+        QSignalSpy asked(canvas.groups(), &GroupEdit::makeGroupAsked);
+        canvas.groups()->requestMakeGroup();
         QCOMPARE(asked.count(), 1);
         QCOMPARE(asked.first().first().toStringList(), QStringList{"Save Image"});
-        const QString instance = canvas.makeGroup(true);
+        const QString instance = canvas.groups()->makeGroup(true);
         const Document doc = canvas.document();
         QVERIFY(doc.graph.nodes.contains("save"));
         QCOMPARE(doc.graph.nodes.value("save").inputs.value("image").from().toString(), instance + ".image");
@@ -178,10 +178,10 @@ private slots:
         canvas.setDocument(document(chain));
         const QByteArray before = canvas.document().save();
         canvas.select({"gen", "join"});
-        const QString instance = canvas.makeGroup();
+        const QString instance = canvas.groups()->makeGroup();
         canvas.select({instance});
         const int steps = canvas.undoStack()->count();
-        const QStringList back = canvas.ungroupSelection();
+        const QStringList back = canvas.groups()->ungroupSelection();
         QCOMPARE(back, (QStringList{"gen", "join"}));
         QCOMPARE(canvas.undoStack()->count(), steps + 1);
         QCOMPARE(canvas.selectedIds(), (QStringList{"gen", "join"}));
@@ -194,12 +194,12 @@ private slots:
         CanvasModel canvas(&m_registry);
         canvas.setDocument(document(chain));
         canvas.select({"gen"});
-        const QString first = canvas.makeGroup();
+        const QString first = canvas.groups()->makeGroup();
         canvas.select({first});
         const QString second = canvas.cloneSelection().value(0);
         QCOMPARE(canvas.document().graph.nodes.value(second).type, canvas.document().graph.nodes.value(first).type);
         canvas.select({second});
-        const QString unique = canvas.makeUnique();
+        const QString unique = canvas.groups()->makeUnique();
         QCOMPARE(unique, QStringLiteral("local/group-2"));
         QCOMPARE(canvas.document().graph.nodes.value(second).type, unique);
         QCOMPARE(canvas.document().graph.nodes.value(first).type, QStringLiteral("local/group"));
@@ -211,8 +211,8 @@ private slots:
         CanvasModel canvas(&m_registry);
         canvas.setDocument(document(chain));
         canvas.select({"gen"});
-        const QString instance = canvas.makeGroup();
-        QVERIFY(canvas.enterGroup(instance));
+        const QString instance = canvas.groups()->makeGroup();
+        QVERIFY(canvas.groups()->enterGroup(instance));
         QSignalSpy changed(canvas.nodes(), &QAbstractItemModel::dataChanged);
         auto inputsChanged = [&](const QString &id) {
             for (const QList<QVariant> &call : changed) {
@@ -223,16 +223,16 @@ private slots:
             }
             return false;
         };
-        QVERIFY(canvas.exposeInput("gen", "seed"));
+        QVERIFY(canvas.groups()->exposeInput("gen", "seed"));
         QVERIFY(inputsChanged("gen"));
         changed.clear();
-        QVERIFY(canvas.unexposeInput("gen", "seed"));
+        QVERIFY(canvas.groups()->unexposeInput("gen", "seed"));
         QVERIFY(inputsChanged("gen"));
         QCOMPARE(port(canvas, "gen", "seed").value("exposedAs").toString(), QString());
         // An output too: un-exposed, its mark goes at once.
         QCOMPARE(port(canvas, "gen", "image", true).value("exposedAs").toString(), QStringLiteral("image"));
         changed.clear();
-        QVERIFY(canvas.unexposeOutput("image"));
+        QVERIFY(canvas.groups()->unexposeOutput("image"));
         QVERIFY(inputsChanged("gen")); // the whole row: its outputs with it
         QCOMPARE(port(canvas, "gen", "image", true).value("exposedAs").toString(), QString());
     }
@@ -243,22 +243,22 @@ private slots:
         CanvasModel canvas(&m_registry);
         canvas.setDocument(document(chain));
         canvas.select({"gen"});
-        const QString instance = canvas.makeGroup();
-        QCOMPARE(canvas.portToRename(instance, "image", true).value("name").toString(), QStringLiteral("image"));
-        QVERIFY(canvas.portToRename("prompt", "text", true).isEmpty()); // not a group's port
-        QVERIFY(canvas.renamePort(instance, "image", true, "Picture"));
+        const QString instance = canvas.groups()->makeGroup();
+        QCOMPARE(canvas.groups()->portToRename(instance, "image", true).value("name").toString(), QStringLiteral("image"));
+        QVERIFY(canvas.groups()->portToRename("prompt", "text", true).isEmpty()); // not a group's port
+        QVERIFY(canvas.groups()->renamePort(instance, "image", true, "Picture"));
         QCOMPARE(port(canvas, instance, "image", true).value("label").toString(), QStringLiteral("Picture"));
-        QCOMPARE(canvas.portToRename(instance, "image", true).value("label").toString(), QStringLiteral("Picture"));
+        QCOMPARE(canvas.groups()->portToRename(instance, "image", true).value("label").toString(), QStringLiteral("Picture"));
         canvas.undo();
         QVERIFY(port(canvas, instance, "image", true).value("label").toString() != QStringLiteral("Picture"));
-        QVERIFY(canvas.enterGroup(instance));
-        QCOMPARE(canvas.portToRename("gen", "image", true).value("name").toString(), QStringLiteral("image"));
-        QVERIFY(canvas.portToRename("gen", "steps", false).isEmpty()); // not exposed
-        QVERIFY(canvas.renamePort("gen", "image", true, "Result"));
+        QVERIFY(canvas.groups()->enterGroup(instance));
+        QCOMPARE(canvas.groups()->portToRename("gen", "image", true).value("name").toString(), QStringLiteral("image"));
+        QVERIFY(canvas.groups()->portToRename("gen", "steps", false).isEmpty()); // not exposed
+        QVERIFY(canvas.groups()->renamePort("gen", "image", true, "Result"));
         // #74: the exposed mark inside shows the new label at once, as the card does.
         QCOMPARE(port(canvas, "gen", "image", true).value("exposedLabel").toString(), QStringLiteral("Result"));
         QCOMPARE(port(canvas, "gen", "image", true).value("exposedAs").toString(), QStringLiteral("image"));
-        QVERIFY(canvas.leaveGroup());
+        QVERIFY(canvas.groups()->leaveGroup());
         QCOMPARE(port(canvas, instance, "image", true).value("label").toString(), QStringLiteral("Result"));
     }
 
@@ -266,29 +266,29 @@ private slots:
         CanvasModel canvas(&m_registry);
         canvas.setDocument(document(chain));
         canvas.select({"gen"});
-        const QString instance = canvas.makeGroup();
-        QVERIFY(canvas.enterGroup(instance));
-        QVERIFY2(canvas.exposeInput("gen", "seed"), qPrintable(canvas.groupProblem()));
-        QCOMPARE(canvas.exposedName("gen", "seed", false), QStringLiteral("seed"));
+        const QString instance = canvas.groups()->makeGroup();
+        QVERIFY(canvas.groups()->enterGroup(instance));
+        QVERIFY2(canvas.groups()->exposeInput("gen", "seed"), qPrintable(canvas.groups()->problem()));
+        QCOMPARE(canvas.groups()->exposedName("gen", "seed", false), QStringLiteral("seed"));
         QCOMPARE(port(canvas, "gen", "seed").value("exposedAs").toString(), QStringLiteral("seed"));
-        QVERIFY(!canvas.exposeInput("gen", "seed"));
-        QVERIFY(!canvas.groupProblem().isEmpty());
+        QVERIFY(!canvas.groups()->exposeInput("gen", "seed"));
+        QVERIFY(!canvas.groups()->problem().isEmpty());
         // steps goes in Advanced, renamed.
-        QVERIFY(canvas.exposeInput("gen", "steps"));
-        QVERIFY(canvas.editExposedInput("steps", {{"name", "quality"}, {"label", "Quality"}, {"section", "Advanced"},
+        QVERIFY(canvas.groups()->exposeInput("gen", "steps"));
+        QVERIFY(canvas.groups()->editExposedInput("steps", {{"name", "quality"}, {"label", "Quality"}, {"section", "Advanced"},
                                                   {"min", 2}, {"max", 20}}));
-        const QVariantMap face = canvas.groupInterface();
+        const QVariantMap face = canvas.groups()->groupInterface();
         QCOMPARE(face.value("inputs").toList().size(), 3);
         QCOMPARE(face.value("inputs").toList().last().toMap().value("name").toString(), QStringLiteral("quality"));
-        QVERIFY(canvas.moveExposed(false, "quality", 0));
-        QCOMPARE(canvas.groupInterface().value("inputs").toList().first().toMap().value("name").toString(),
+        QVERIFY(canvas.groups()->moveExposed(false, "quality", 0));
+        QCOMPARE(canvas.groups()->groupInterface().value("inputs").toList().first().toMap().value("name").toString(),
                  QStringLiteral("quality"));
-        QVERIFY(!canvas.editExposedInput("quality", {{"name", "Not A Name"}}));
-        QVERIFY(canvas.renameGroup("Two pass"));
+        QVERIFY(!canvas.groups()->editExposedInput("quality", {{"name", "Not A Name"}}));
+        QVERIFY(canvas.groups()->renameGroup("Two pass"));
         QCOMPARE(canvas.scopeGroup(), QStringLiteral("local/two-pass"));
         QCOMPARE(canvas.breadcrumb().first().toMap().value("title").toString(), QStringLiteral("Two pass"));
 
-        canvas.leaveGroup();
+        canvas.groups()->leaveGroup();
         QCOMPARE(canvas.document().graph.nodes.value(instance).type, QStringLiteral("local/two-pass"));
         // On the face: quality first, in a folded Advanced section, with the narrowed range.
         const QVariantMap quality = port(canvas, instance, "quality");
@@ -301,11 +301,11 @@ private slots:
         QVERIFY(port(canvas, instance, "seed").value("widget").toBool());
 
         // Deleting an exposed node inside drops it from the face, and the instance's value.
-        canvas.enterGroup(instance);
+        canvas.groups()->enterGroup(instance);
         canvas.select({"gen"});
         canvas.deleteSelection();
-        QVERIFY(canvas.groupInterface().value("inputs").toList().isEmpty());
-        canvas.leaveGroup();
+        QVERIFY(canvas.groups()->groupInterface().value("inputs").toList().isEmpty());
+        canvas.groups()->leaveGroup();
         QVERIFY(!canvas.document().graph.nodes.value(instance).inputs.contains("prompt"));
         QVERIFY(!canvas.document().graph.nodes.value("save").inputs.contains("image"));
     }
@@ -315,11 +315,11 @@ private slots:
         canvas.setDocument(document(chain));
         const QStringList flat = compiledTypes(canvas.document(), m_registry);
         canvas.select({"gen", "join"});
-        const QString outer = canvas.makeGroup();
-        QVERIFY(canvas.enterGroup(outer));
+        const QString outer = canvas.groups()->makeGroup();
+        QVERIFY(canvas.groups()->enterGroup(outer));
         canvas.select({"gen"});
-        const QString inner = canvas.makeGroup();
-        QVERIFY2(!inner.isEmpty(), qPrintable(canvas.groupProblem()));
+        const QString inner = canvas.groups()->makeGroup();
+        QVERIFY2(!inner.isEmpty(), qPrintable(canvas.groups()->problem()));
         // The outer group's prompt drove gen.prompt; now it drives the inner instance.
         const GroupDefinition *face = canvas.document().group(canvas.scopeGroup());
         bool through = false;
@@ -334,15 +334,15 @@ private slots:
         QVERIFY(reloaded.ok());
         QCOMPARE(compiledTypes(*reloaded, m_registry), flat);
         // Entering the inner one: two crumbs; the first one leads back to the top.
-        QVERIFY(canvas.enterGroup(inner));
+        QVERIFY(canvas.groups()->enterGroup(inner));
         QCOMPARE(canvas.scopePath(), outer + "/" + inner);
         QCOMPARE(canvas.breadcrumb().size(), 2);
-        canvas.leaveTo(0);
+        canvas.groups()->leaveTo(0);
         QVERIFY(!canvas.inGroup());
         // Ungrouping inside the outer group puts gen back and the face follows.
-        QVERIFY(canvas.enterGroup(outer));
+        QVERIFY(canvas.groups()->enterGroup(outer));
         canvas.select({inner});
-        canvas.ungroupSelection();
+        canvas.groups()->ungroupSelection();
         QCOMPARE(compiledTypes(canvas.document(), m_registry), flat);
         QCOMPARE(canvas.document().groups.size(), 1);
     }
@@ -351,13 +351,13 @@ private slots:
         CanvasModel canvas(&m_registry);
         canvas.setDocument(document(chain));
         canvas.select({"gen"});
-        const QString instance = canvas.makeGroup();
+        const QString instance = canvas.groups()->makeGroup();
         const QString group = canvas.document().graph.nodes.value(instance).type;
         canvas.select({instance});
         const QString copy = canvas.copySelection();
-        QVERIFY(canvas.enterGroup(instance));
+        QVERIFY(canvas.groups()->enterGroup(instance));
         QVERIFY(canvas.paste(copy).isEmpty());
-        QVERIFY(!canvas.groupProblem().isEmpty());
+        QVERIFY(!canvas.groups()->problem().isEmpty());
         QVERIFY(canvas.addNode(group, 0, 0).isEmpty());
         QVERIFY(!canvas.canAddGroup(group));
         // Node search leaves it out inside, and lists it at the top.
@@ -366,7 +366,7 @@ private slots:
         for (int i = 0; i < canvas.search()->count(); ++i)
             QVERIFY(canvas.search()->results()->data(canvas.search()->results()->index(i), SearchResults::TypeId) != group);
         canvas.search()->close();
-        canvas.leaveGroup();
+        canvas.groups()->leaveGroup();
         canvas.search()->openAt(0, 0);
         canvas.search()->setQuery("Group");
         int row = -1;
@@ -443,11 +443,11 @@ private slots:
     void renamingAGroupCardRenamesTheGroupAndOffersTheLibrary() {
         QTemporaryDir packs;
         CanvasModel canvas(&m_registry);
-        canvas.setLibraryDir(packs.filePath("local"));
+        canvas.groups()->setLibraryDir(packs.filePath("local"));
         canvas.setDocument(document(chain));
         canvas.select({"gen"});
-        const QString instance = canvas.makeGroup();
-        QSignalSpy offered(&canvas, &CanvasModel::libraryRenameOffered);
+        const QString instance = canvas.groups()->makeGroup();
+        QSignalSpy offered(canvas.groups(), &GroupEdit::libraryRenameOffered);
         canvas.renameNode(instance, "Two pass");
         QCOMPARE(canvas.nodeTitle(instance), QStringLiteral("Two pass"));
         const QString type = canvas.document().graph.nodes.value(instance).type;
@@ -461,12 +461,12 @@ private slots:
         QCOMPARE(canvas.nodeTitle(instance), QStringLiteral("Two pass"));
 
         canvas.select({instance});
-        QVERIFY(canvas.saveGroupToLibrary());
+        QVERIFY(canvas.groups()->saveGroupToLibrary());
         canvas.renameNode(instance, "Final pass");
         QCOMPARE(offered.size(), 1);
         const QString libraryId = offered.first().at(0).toString();
         QCOMPARE(libraryId, QStringLiteral("local/two-pass"));
-        QVERIFY2(canvas.renameLibraryGroup(libraryId, "Final pass"), qPrintable(canvas.groupProblem()));
+        QVERIFY2(canvas.groups()->renameLibraryGroup(libraryId, "Final pass"), qPrintable(canvas.groups()->problem()));
         QCOMPARE(libraryGroups(packs.filePath("local")).first().id, QStringLiteral("local/final-pass"));
         const QString now = canvas.document().graph.nodes.value(instance).type;
         QCOMPARE(canvas.document().group(now)->extra.value(kLibraryKey).toString(), QStringLiteral("local/final-pass"));
@@ -477,13 +477,13 @@ private slots:
         canvas.redo();
 
         // Renamed from the group's own name field too, the library is offered.
-        QVERIFY(canvas.enterGroup(instance));
-        QVERIFY(canvas.renameGroup("Last pass"));
+        QVERIFY(canvas.groups()->enterGroup(instance));
+        QVERIFY(canvas.groups()->renameGroup("Last pass"));
         QCOMPARE(offered.size(), 2);
         QCOMPARE(offered.last().at(0).toString(), QStringLiteral("local/final-pass"));
-        QVERIFY(canvas.leaveGroup());
+        QVERIFY(canvas.groups()->leaveGroup());
         // A rename made in Settings (another window's) reaches this workflow's link to it.
-        canvas.followLibraryRename("local/final-pass", "local/elsewhere");
+        canvas.groups()->followLibraryRename("local/final-pass", "local/elsewhere");
         const QString later = canvas.document().graph.nodes.value(instance).type;
         QCOMPARE(canvas.document().group(later)->extra.value(kLibraryKey).toString(), QStringLiteral("local/elsewhere"));
     }
@@ -491,13 +491,13 @@ private slots:
     void theLibraryRoundTrip() {
         QTemporaryDir packs;
         CanvasModel canvas(&m_registry);
-        canvas.setLibraryDir(packs.filePath("local"));
+        canvas.groups()->setLibraryDir(packs.filePath("local"));
         canvas.setDocument(document(chain));
         canvas.select({"gen"});
-        const QString instance = canvas.makeGroup();
+        const QString instance = canvas.groups()->makeGroup();
         canvas.select({instance});
-        QVERIFY2(canvas.saveGroupToLibrary(), qPrintable(canvas.groupProblem()));
-        QVERIFY(canvas.groupNotice().contains("local/group"));
+        QVERIFY2(canvas.groups()->saveGroupToLibrary(), qPrintable(canvas.groups()->problem()));
+        QVERIFY(canvas.groups()->notice().contains("local/group"));
 
         // Another window's registry has it as a node type; adding it embeds the definition.
         Registry library;
@@ -507,29 +507,29 @@ private slots:
         CanvasModel other(&library);
         other.setDocument(document(R"({"fugue": 1, "graph": {"nodes": {}}})"));
         const QString added = other.addNode("local/group", 100, 100);
-        QVERIFY2(!added.isEmpty(), qPrintable(other.groupProblem()));
+        QVERIFY2(!added.isEmpty(), qPrintable(other.groups()->problem()));
         QVERIFY(other.document().group("local/group"));
         QCOMPARE(other.updateAvailable(added), QString());
 
         // The library moves on: the other workflow sees an update, and takes it.
-        canvas.enterGroup(instance);
-        canvas.exposeInput("gen", "seed");
-        canvas.leaveGroup();
+        canvas.groups()->enterGroup(instance);
+        canvas.groups()->exposeInput("gen", "seed");
+        canvas.groups()->leaveGroup();
         canvas.select({instance});
-        QVERIFY(canvas.saveGroupToLibrary());
+        QVERIFY(canvas.groups()->saveGroupToLibrary());
         Registry newer;
         nodes::addBuiltinNodeTypes(newer);
         loadPacks(newer, {packs.path()});
         CanvasModel later(&newer);
         later.setDocument(other.document());
         QCOMPARE(later.updateAvailable(added), QStringLiteral("1.1.0"));
-        const QVariantMap changes = later.groupUpdate(added);
+        const QVariantMap changes = later.groups()->groupUpdate(added);
         QCOMPARE(changes.value("addedInputs").toStringList(), QStringList{"seed"});
-        QSignalSpy asked(&later, &CanvasModel::groupUpdateAsked);
+        QSignalSpy asked(later.groups(), &GroupEdit::groupUpdateAsked);
         later.select({added});
-        later.requestGroupUpdate();
+        later.groups()->requestGroupUpdate();
         QCOMPARE(asked.count(), 1);
-        QVERIFY(later.updateGroupInstance(added));
+        QVERIFY(later.groups()->updateGroupInstance(added));
         QCOMPARE(later.document().graph.nodes.value(added).version.toString(), QStringLiteral("1.1.0"));
         QCOMPARE(later.updateAvailable(added), QString());
         QVERIFY(port(later, added, "seed").value("name").isValid());

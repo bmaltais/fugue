@@ -290,7 +290,7 @@ private slots:
 
         // A group: Ungroup and Enter are there; Make unique only once another instance shares it.
         app.model.select({"a", "b"});
-        const QString group = app.model.makeGroup();
+        const QString group = app.model.groups()->makeGroup();
         QVERIFY(app.model.isGroup(group));
         app.model.select({group});
         node = ids(app.commands.menu("node", {{"node", group}}));
@@ -301,9 +301,9 @@ private slots:
         node = ids(app.commands.menu("node", {{"node", app.model.selectedIds().first()}}));
         QVERIFY2(node.contains("group.make-unique"), qPrintable(node.join(',')));
         // Inside it, the canvas menu leaves it.
-        QVERIFY(app.model.enterGroup(group));
+        QVERIFY(app.model.groups()->enterGroup(group));
         QVERIFY(ids(app.commands.menu("canvas", {})).contains("group.leave"));
-        QVERIFY(app.model.leaveGroup());
+        QVERIFY(app.model.groups()->leaveGroup());
 
         // The menu bar keeps every command, off where it does not apply.
         app.model.select({"c"});
@@ -346,7 +346,7 @@ private slots:
                      QStringLiteral("red"));
         // A group's toolbar enters it; none while nothing is selected.
         app.model.select({"a", "b"});
-        const QString group = app.model.makeGroup();
+        const QString group = app.model.groups()->makeGroup();
         app.model.select({group});
         QTRY_VERIFY(find(app.window, "toolbar-group.enter"));
         QTest::qWait(50); // the row places it

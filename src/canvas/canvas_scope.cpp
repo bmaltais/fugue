@@ -1,5 +1,5 @@
-// The canvas model's levels and Frames (spec 5.1, 5.2): entering and leaving a group, the
-// breadcrumb, and Frames made, moved, renamed and deleted. canvas_model.h explains the design.
+// The canvas model's levels and Frames (spec 5.1, 5.2): the scope and its breadcrumb (entering
+// and leaving are GroupEdit's, canvas/group_edit.cpp), and Frames made, moved, renamed and deleted. canvas_model.h explains the design.
 
 #include "canvas/canvas_model.h"
 #include "canvas/input_links.h"
@@ -141,47 +141,15 @@ int CanvasModel::groupInstances(const QString &node) const {
     return count;
 }
 
-bool CanvasModel::enterGroup(const QString &instance) {
-    if (!isGroup(instance))
-        return false;
-    finishGestures();
-    const Document whole = document();
-    m_outerViews.push_back(m_view);
-    m_root = whole;
-    m_scope << instance;
-    const QVariantMap none;
-    loadLevel(*levelOf(m_root, m_scope), &none);
-    emit scopeChanged();
-    requestFit();
-    return true;
-}
-
-bool CanvasModel::leaveGroup() {
-    if (m_scope.isEmpty())
-        return false;
-    finishGestures();
-    const Document whole = document();
-    const QString left = m_scope.takeLast();
-    QVariantMap view;
-    if (!m_outerViews.empty()) {
-        view = m_outerViews.back();
-        m_outerViews.pop_back();
-    }
-    if (m_scope.isEmpty()) {
-        m_root = Document();
-        loadLevel(whole, &view);
-    } else {
-        m_root = whole;
-        loadLevel(*levelOf(m_root, m_scope), &view);
-    }
-    select({left}, QStringLiteral("replace"));
-    emit scopeChanged();
-    return true;
-}
-
-void CanvasModel::leaveTo(int depth) {
-    while (m_scope.size() > std::max(0, depth))
-        leaveGroup();
+QString CanvasModel::updateAvailable(const QString &node) const {
+    const auto it = m_document.graph.nodes.constFind(node);
+    if (it == m_document.graph.nodes.constEnd() || !m_registry)
+        return {};
+    const GroupDefinition *group = m_document.group(it->type);
+    const NodeType *library = m_registry->nodeType(it->type);
+    if (!group || !library || library->runtime.value("kind") != QLatin1String("group") || library->version <= group->version)
+        return {};
+    return library->version.toString();
 }
 
 bool CanvasModel::canHoldGroup(const Document &document, const QString &group) const {
@@ -192,13 +160,6 @@ bool CanvasModel::canHoldGroup(const Document &document, const QString &group) c
         return true;
     return std::none_of(chain->begin(), chain->end(),
                         [&](const QString &outer) { return groupContains(document, group, outer); });
-}
-
-void CanvasModel::setGroupProblem(const QString &problem) {
-    if (problem == m_groupProblem)
-        return;
-    m_groupProblem = problem;
-    emit groupProblemChanged();
 }
 
 // --- Frames (5.1) ------------------------------------------------------------------

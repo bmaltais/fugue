@@ -50,6 +50,9 @@ struct WorkflowLocations {
     QString tabColorsPath = TrustStore::defaultPath().section('/', 0, -2) + "/tab-colors.json";
     // Where the templates are (11.10): the person's own folder, then the bundled one.
     QList<TemplateRoot> templateRoots = TemplateLibrary::standardRoots();
+    // How File > Export compiled puts the provider instances into the registry it compiles with,
+    // as a run does (RunSetup::registerProviders). Default: cli::registerProviders (providers.json).
+    std::function<Errors(Registry &)> registerProviders = nullptr;
 };
 
 class Workflows : public QObject {
@@ -310,6 +313,7 @@ private:
     QList<TemplateRoot> m_templateRoots;
     RecoveryStore m_recovery;
     TrustStore m_trust;
+    std::function<Errors(Registry &)> m_registerProviders;
     QTimer m_timer;
     std::vector<Tab> m_tabs;
     QString m_tabColorsPath;

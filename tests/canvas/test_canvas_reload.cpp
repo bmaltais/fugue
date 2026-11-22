@@ -123,21 +123,21 @@ private slots:
         CanvasModel elsewhere(&registry);
         elsewhere.setDocument(load(kChain));
         elsewhere.select({"gen"});
-        const QString instance = elsewhere.makeGroup();
+        const QString instance = elsewhere.groups()->makeGroup();
         elsewhere.select({instance});
-        QVERIFY2(elsewhere.saveGroupToLibrary(), qPrintable(elsewhere.groupProblem()));
-        QVERIFY(elsewhere.groupNotice().contains("Every open workflow"));
+        QVERIFY2(elsewhere.groups()->saveGroupToLibrary(), qPrintable(elsewhere.groups()->problem()));
+        QVERIFY(elsewhere.groups()->notice().contains("Every open workflow"));
 
         QTRY_VERIFY_WITH_TIMEOUT(here.registry.nodeType("local/group"), 5000);
         const QString added = here.model.addNode("local/group", 100, 100);
-        QVERIFY2(!added.isEmpty(), qPrintable(here.model.groupProblem()));
+        QVERIFY2(!added.isEmpty(), qPrintable(here.model.groups()->problem()));
         QCOMPARE(role(here.model, added, NodeList::UpdateAvailable).toString(), QString());
 
-        elsewhere.enterGroup(instance);
-        QVERIFY(elsewhere.exposeInput("gen", "seed"));
-        elsewhere.leaveGroup();
+        elsewhere.groups()->enterGroup(instance);
+        QVERIFY(elsewhere.groups()->exposeInput("gen", "seed"));
+        elsewhere.groups()->leaveGroup();
         elsewhere.select({instance});
-        QVERIFY(elsewhere.saveGroupToLibrary());
+        QVERIFY(elsewhere.groups()->saveGroupToLibrary());
         QTRY_COMPARE_WITH_TIMEOUT(role(here.model, added, NodeList::UpdateAvailable).toString(), QStringLiteral("1.1.0"), 5000);
         QVERIFY2(here.warnings.isEmpty(), qPrintable(here.warnings.join('\n')));
     }
@@ -149,9 +149,9 @@ private slots:
         QVERIFY(app.open());
         app.reloader->setSettleMs(60000); // only the save's own reload can bring it in time
         app.model.select({"gen"});
-        const QString instance = app.model.makeGroup();
+        const QString instance = app.model.groups()->makeGroup();
         app.model.select({instance});
-        QVERIFY(app.model.saveGroupToLibrary());
+        QVERIFY(app.model.groups()->saveGroupToLibrary());
         QTRY_VERIFY(app.registry.nodeType("local/group"));
 
         app.workflows.newWorkflow();

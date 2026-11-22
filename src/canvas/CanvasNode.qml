@@ -610,7 +610,7 @@ Item {
                                     anchors.fill: parent
                                     hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: node.canvasModel.enterGroup(node.nodeId)
+                                    onClicked: node.canvasModel.groups.enterGroup(node.nodeId)
                                 }
                             }
                         }
@@ -689,7 +689,7 @@ Item {
                             onClicked: {
                                 node.canvasModel.select([node.nodeId], "replace")
                                 if (node.updateAvailable !== "")
-                                    node.canvasModel.requestGroupUpdate()
+                                    node.canvasModel.groups.requestGroupUpdate()
                                 else
                                     node.canvasModel.requestMajorMove()
                             }

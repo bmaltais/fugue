@@ -1,7 +1,9 @@
 #include "workflow/workflows.h"
 #include "canvas/widget_edit.h"
 
+#include "cli/process.h"
 #include "engine/atomic_file.h"
+#include "engine/compile_for_run.h"
 #include "engine/compiler.h"
 #include "engine/embed.h"
 #include "engine/file_inputs.h"
@@ -139,6 +141,7 @@ Workflows::Workflows(CanvasModel *canvas, const Registry *registry, CommandRegis
                      WorkflowLocations locations, QObject *parent)
     : QObject(parent), m_canvas(canvas), m_registry(registry), m_commands(commands),
       m_templateRoots(locations.templateRoots), m_recovery(locations.recoveryDir), m_trust(locations.trustPath),
+      m_registerProviders(locations.registerProviders ? locations.registerProviders : cli::registerProviders),
       m_tabColorsPath(locations.tabColorsPath) {
     if (QFile file(m_tabColorsPath); file.open(QIODevice::ReadOnly)) {
         const QJsonObject stored = QJsonDocument::fromJson(file.readAll()).object();
@@ -514,10 +517,11 @@ bool Workflows::exportCompiled(const QString &pathOrUrl) {
     if (QFileInfo(path).suffix().isEmpty())
         path += QStringLiteral(".json");
     const QString title = m_tabs[size_t(m_current)].title;
-    // As a run compiles it: a library or pack group named only by its type runs from its definition.
-    Document document = documentOf(m_current);
-    embedGroupTypes(document, *m_registry);
-    const Compilation compilation = compile(document, *m_registry);
+    // As a run compiles it (compileForRun): its providers and trust apply, so this is the graph a run
+    // would run. The providers go into a copy, not into the registry the window shows.
+    Registry registry = *m_registry;
+    const Compilation compilation = compileForRun(documentOf(m_current), registry, {},
+                                                  runCompileSetup(m_registerProviders, m_trust));
     if (!compilation) {
         setNotice(tr("%1 does not compile: %2").arg(title, withHints(compilation.errors())));
         return false;

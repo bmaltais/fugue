@@ -28,6 +28,7 @@
 #include "engine/share_package.h"
 #include "menu/menu_commands.h"
 #include "nodes/builtin.h"
+#include "run/run_service.h"
 #include "workflow/workflows.h"
 
 using namespace fugue;
@@ -325,6 +326,67 @@ private slots:
 
     // File > Export for sharing writes the shown workflow; opening the .fuguepack (File > Open, a drop)
     // opens it as a new workflow with its images.
+    // File > Export compiled writes the graph a run of the same document compiles to: the providers
+    // of the setup and its trust apply to both, and a pin to an instance the setup has is kept.
+    void exportCompiledIsWhatARunCompiles() {
+        QTemporaryDir dir, state;
+        const auto studio = [](Registry &registry) {
+            ProviderEntry entry;
+            entry.instance.name = "Studio";
+            entry.instance.type = "fake";
+            return registry.setProviders({entry});
+        };
+        CanvasModel canvas(&m_registry);
+        CommandRegistry commands;
+        registerMenuCommands(commands);
+        WorkflowLocations locations;
+        locations.recoveryDir = state.filePath("recovery");
+        locations.trustPath = state.filePath("trust.json");
+        locations.templateRoots = {};
+        locations.registerProviders = studio;
+        Workflows workflows(&canvas, &m_registry, &commands, locations);
+        const QByteArray text = R"({"fugue": 1, "graph": {"nodes": {"t": {"type": "fugue/text", "version": "1.0.0",
+            "provider": "Studio", "inputs": {"text": "hi"}}, "p": {"type": "fugue/preview", "version": "1.0.0",
+            "inputs": {"value": {"from": "t.text"}}}}}})";
+        QVERIFY(workflows.openText(QString::fromUtf8(text)));
+        QVERIFY2(workflows.exportCompiled(dir.filePath("graph")), qPrintable(workflows.notice()));
+        const QJsonObject exported = readJson(dir.filePath("graph.json"));
+        QCOMPARE(exported.value("nodes").toObject().value("t").toObject().value("provider").toString(), QString("Studio"));
+
+        RunSetup setup;
+        setup.addNodeTypes = [](Registry &registry) { nodes::addBuiltinNodeTypes(registry); };
+        setup.addKernels = nodes::addBuiltinKernels;
+        setup.registerProviders = studio;
+        setup.runsRoot = dir.filePath("runs");
+        setup.queueDir = dir.filePath("queue");
+        setup.lockPath = dir.filePath("engine.lock");
+        setup.cacheRoot = dir.filePath("results");
+        setup.hashesPath = dir.filePath("hashes.json");
+        setup.thumbnailDir = dir.filePath("thumbnails");
+        setup.trustPath = state.filePath("trust.json");
+        setup.collectGarbage = false;
+        RunService service(setup);
+        QString run, status;
+        connect(&service, &RunService::event, this, [&](const QString &id, const QJsonObject &event) {
+            if (id == run && event.value("event").toString() == "run.done")
+                status = event.value("status").toString();
+        });
+        RunRequest request;
+        request.document = Document::load(text).value();
+        run = service.start(request);
+        QTRY_VERIFY_WITH_TIMEOUT(!status.isEmpty(), 20000);
+        QCOMPARE(status, QString("ok"));
+        QCOMPARE(readJson(dir.filePath("runs/" + run + "/compiled.json")), exported);
+
+        // Without the instance, neither compiles the pin.
+        locations.registerProviders = [](Registry &registry) { return registry.setProviders({}); };
+        Workflows bare(&canvas, &m_registry, &commands, locations);
+        QVERIFY(bare.openText(QString::fromUtf8(text)));
+        QVERIFY(!bare.exportCompiled(dir.filePath("bare")));
+        QVERIFY(bare.notice().contains("unknown_provider") || bare.notice().contains("Studio"));
+        QVERIFY(!QFileInfo::exists(dir.filePath("bare.json")));
+    }
+
     void theWindowExportsAndOpensAPackage() {
         QTemporaryDir dir, state;
         writeFile(dir.filePath("cat.png"), png());

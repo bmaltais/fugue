@@ -61,6 +61,8 @@
 //   edits below; canvas_commands.h registers them.
 // - Text size: FugueCanvas binds textSize to the theme's; rows and titles follow it.
 
+#include "canvas/canvas_gesture.h"
+#include "canvas/group_edit.h"
 #include "canvas/widget_edit.h"
 #include "engine/document.h"
 #include "engine/node_type.h"
@@ -199,6 +201,11 @@ class CanvasModel : public QObject {
     Q_PROPERTY(fugue::NodeSearch *search READ search CONSTANT)
     // Editing input values in place (canvas/widget_edit.h), for the widgets on the node face.
     Q_PROPERTY(WidgetEdit *widgets READ widgets CONSTANT)
+    // Group scope and interface editing (canvas/group_edit.h): enter and leave a group, Make
+    // group, the exposed inputs and outputs, the library.
+    Q_PROPERTY(GroupEdit *groups READ groups CONSTANT)
+    // What a press, a drag and a release on the canvas do (canvas/canvas_gesture.h).
+    Q_PROPERTY(CanvasGesture *gesture READ gesture CONSTANT)
     // The base text size in px (theme.textSize); a node's title and rows are sized from it.
     Q_PROPERTY(int textSize READ textSize WRITE setTextSize NOTIFY metricsChanged)
     Q_PROPERTY(qreal headerHeight READ headerHeight NOTIFY metricsChanged)
@@ -219,8 +226,6 @@ class CanvasModel : public QObject {
     // The group levels entered (spec 5.2): [{id, title}] from the outside in; empty at the top.
     Q_PROPERTY(QVariantList breadcrumb READ breadcrumb NOTIFY scopeChanged)
     Q_PROPERTY(bool inGroup READ inGroup NOTIFY scopeChanged)
-    Q_PROPERTY(QString groupProblem READ groupProblem NOTIFY groupProblemChanged)
-    Q_PROPERTY(QString groupNotice READ groupNotice NOTIFY groupNoticeChanged)
 
 public:
     explicit CanvasModel(const fugue::Registry *registry, QObject *parent = nullptr);
@@ -232,6 +237,8 @@ public:
     LinkList *links() const { return m_linkList; }
     fugue::NodeSearch *search() const { return m_search; }
     WidgetEdit *widgets() const { return m_widgets; }
+    GroupEdit *groups() const { return m_groups; }
+    CanvasGesture *gesture() const { return m_gesture; }
     // Pasting and dropping images (workflow/image_inputs.h): set by Workflows; the paste command
     // and the Paste button of Load Image go through it. Null without one.
     fugue::ImageInputs *images() const { return m_images; }
@@ -259,7 +266,7 @@ public:
     // Entering a group shows its definition's inside; editing it edits the definition, so every
     // instance changes (5.3). Entering and leaving are not edits, like the viewport; an undo
     // restores the whole workflow and the canvas stays on its level, or goes up to the nearest
-    // level that is still there. canvas_groups.cpp has the group edits.
+    // level that is still there. canvas/group_edit.h has the group edits (`groups`); the scope itself is kept here.
 
     // The instances entered, outside in ({id, title}), for the breadcrumb; empty at the top.
     QVariantList breadcrumb() const;
@@ -277,18 +284,6 @@ public:
     // How many nodes in the whole workflow (inside groups too) are instances of the group `node`
     // is one of; 0 when it is not a group.
     int groupInstances(const QString &node) const;
-    // A port a rename can relabel (#72): on a group card, or an inner port the group shown
-    // exposes; {group, name, output, label (as shown)}, or empty.
-    Q_INVOKABLE QVariantMap portToRename(const QString &node, const QString &port, bool output) const;
-    // Sets the label the group's face shows for that port; the name stays. One undo step.
-    Q_INVOKABLE bool renamePort(const QString &node, const QString &port, bool output, const QString &label);
-    // Shows the inside of a group instance of the level (Tab, a double-click on its body).
-    Q_INVOKABLE bool enterGroup(const QString &instance);
-    // Back to the level above (Escape), with the instance selected; false at the top.
-    Q_INVOKABLE bool leaveGroup();
-    // Back to the level `depth` (0: the top), as a breadcrumb click does.
-    Q_INVOKABLE void leaveTo(int depth);
-
     // Frame the selection (5.1, Ctrl+G): a Frame around the selected nodes, holding them.
     Q_INVOKABLE QString frameSelection();
     // Moving a Frame moves the nodes it holds with it (5.1): beginFrameMove, then moveBy and
@@ -299,58 +294,9 @@ public:
     Q_INVOKABLE void renameFrame(const QString &frame, const QString &title);
     Q_INVOKABLE void deleteFrame(const QString &frame);
 
-    // Make group (Ctrl+Shift+E) from the selection; `leaveSinks` leaves its sinks outside,
-    // wired to the group's outputs (5.5). The instance's id, or empty (then groupProblem says
-    // why). Inside a group, the exposed inputs and outputs of the group shown that led to the
-    // nodes now lead through the new one.
-    Q_INVOKABLE QString makeGroup(bool leaveSinks = true);
-    // The sinks among the selected nodes, for the question Make group asks first.
-    Q_INVOKABLE QStringList selectedSinks() const;
-    // The group.make command: with sinks selected, makeGroupAsked(their titles) first, for the
-    // window to ask whether they stay outside (5.5); without, makeGroup() at once.
-    Q_INVOKABLE void requestMakeGroup();
-    // Ungroup (Ctrl+Shift+G) the selected group instances; their inner nodes are selected.
-    Q_INVOKABLE QStringList ungroupSelection();
-    // Make unique (5.3): the selected instance gets its own copy of its definition.
-    Q_INVOKABLE QString makeUnique();
-    // Inside a group: expose an inner input (into: as one more target of that exposed input) or
-    // output, and stop exposing it. False with groupProblem set when refused.
-    Q_INVOKABLE bool exposeInput(const QString &node, const QString &input, const QString &into = {});
-    Q_INVOKABLE bool unexposeInput(const QString &node, const QString &input);
-    Q_INVOKABLE bool exposeOutput(const QString &node, const QString &output);
-    Q_INVOKABLE bool unexposeOutput(const QString &name);
-    // Inside a group: the name the face exposes an inner port under, or empty.
-    Q_INVOKABLE QString exposedName(const QString &node, const QString &port, bool output) const;
-    // Stops exposing an exposed input altogether (every target).
-    Q_INVOKABLE bool removeExposedInput(const QString &name);
-    // The inner inputs that could join an exposed input (one-to-many, 5.4): of its type and not
-    // exposed yet, as [{node, input, title}].
-    Q_INVOKABLE QVariantList exposeCandidates(const QString &name) const;
-    // The interface of the group shown (the interface editor): {name, version, inputs: [{name,
-    // label, section, min, max, targets: ["node.input"], type}], outputs: [{name, from, type}]};
-    // empty at the top.
-    Q_INVOKABLE QVariantMap groupInterface() const;
-    // Interface edits of the group shown, each one undo step. False with groupProblem set when refused.
-    Q_INVOKABLE bool editExposedInput(const QString &name, const QVariantMap &change);
-    Q_INVOKABLE bool renameExposedOutput(const QString &name, const QString &newName);
-    Q_INVOKABLE bool moveExposed(bool output, const QString &name, int to);
-    Q_INVOKABLE bool renameGroup(const QString &name);
-    // The library (5.3, engine/group_library.h). Save to library: the selected group instance's
-    // definition, or the group shown, goes to the library as local/<name> at the version 3.6
-    // gives, which the workflow's definition and its instances take. False with groupProblem
-    // set when refused; groupNotice says where it went.
-    Q_INVOKABLE bool saveGroupToLibrary();
     // The version the library has of the node's group when it is newer than the workflow's
     // definition ("update available"), else empty.
-    Q_INVOKABLE QString updateAvailable(const QString &node) const;
-    // What updating the node's group would change: {name, from, to, addedInputs, removedInputs,
-    // addedOutputs, removedOutputs}; empty when there is no update.
-    Q_INVOKABLE QVariantMap groupUpdate(const QString &node) const;
-    // Replaces the workflow's definition of the node's group with the library's: every instance
-    // moves together (5.3). One undo step.
-    Q_INVOKABLE bool updateGroupInstance(const QString &node);
-    // The group.update command: groupUpdateAsked(groupUpdate(selected)) for the window to show.
-    Q_INVOKABLE void requestGroupUpdate();
+    QString updateAvailable(const QString &node) const;
     // A node that runs on an older major of its type while a newer one is installed (3.6, #90):
     // the newest version it can move to, else empty. Never a group instance (it has its update).
     Q_INVOKABLE QString newerMajor(const QString &node) const;
@@ -362,18 +308,6 @@ public:
     Q_INVOKABLE bool moveToNewerMajor(const QString &node);
     // The node.move-version command: nodeMoveAsked(majorMove(selected)) for the window to show.
     Q_INVOKABLE void requestMajorMove();
-    // Where the library is (tests point it elsewhere).
-    void setLibraryDir(const QString &dir) { m_libraryDir = dir; }
-    QString groupNotice() const { return m_groupNotice; }
-    Q_INVOKABLE void dismissGroupNotice() { setGroupNotice({}); }
-    // Says the outcome of a library action made elsewhere (a group deleted from the node
-    // library, #156) on the window's notice line: `problem` when it failed, else `notice`.
-    Q_INVOKABLE void announceLibraryResult(const QString &notice, const QString &problem);
-
-    // Why the last group edit was refused, one sentence; empty after one that worked.
-    QString groupProblem() const { return m_groupProblem; }
-    Q_INVOKABLE void dismissGroupProblem() { setGroupProblem({}); }
-
     QVariantList frames() const;
     QVariantList comments() const;
     QVariantList reroutes() const;
@@ -482,11 +416,6 @@ public:
     // On a group card it renames the group (#74, as ComfyUI renames a subgraph from its node's
     // title), and when the group is in the library offers to rename it there (libraryRenameOffered).
     Q_INVOKABLE void renameNode(const QString &node, const QString &title);
-    // Renames a library group and points this workflow's definitions at its new id (#74).
-    Q_INVOKABLE bool renameLibraryGroup(const QString &libraryId, const QString &name);
-    // A library group's id changed (renamed here or in Settings): every definition linked to it
-    // follows, in every undo step too, as the old folder is gone.
-    void followLibraryRename(const QString &from, const QString &to);
     // True when the selection is not empty and every selected node has the state the toggle
     // commands act on: "bypass", "mute", "collapsed" or "pinned" (what they would remove).
     bool selectionAll(const QString &state) const;
@@ -681,10 +610,6 @@ signals:
     void documentReplaced();
     // The level shown changed: a group was entered or left (the rows were reset just before).
     void scopeChanged();
-    void groupProblemChanged();
-    void makeGroupAsked(const QStringList &sinks);
-    void groupNoticeChanged();
-    void groupUpdateAsked(const QString &node, const QVariantMap &changes);
     void nodeMoveAsked(const QString &node, const QVariantMap &changes);
     // The group.interface command: the window opens the interface editor of the group shown.
     void interfaceEditorRequested();
@@ -697,10 +622,6 @@ signals:
     // window asks for the new title or label.
     void nodeRenameRequested(const QString &node);
     void portRenameRequested(const QString &node, const QString &port, bool output);
-    // saveGroupToLibrary() wrote a new version: the node types are read again (#70).
-    void librarySaved();
-    // A group of the library was renamed in this workflow: rename it there too? (#74)
-    void libraryRenameOffered(const QString &libraryId, const QString &name);
     // A paste added nodes from this document: the same questions as for opening it (missing
     // nodes, packs to trust) are asked of it (Workflows).
     void pasted(const fugue::Document &document);
@@ -722,13 +643,13 @@ signals:
 
 private:
     void toggleLayoutFlag(const QString &flag, const QString &text);
-    void renameGroupCard(const QString &node, const QString &name);
     // Starts moving these nodes: all but the pinned ones (#55), which are returned.
     QStringList startMoving(const QStringList &ids);
     friend class NodeList;
     friend class LinkList;
     friend class EditCommand;
     friend class WidgetEdit;
+    friend class GroupEdit;
 
     // The document with positions folded in, and the nodes in drawing order.
     struct Snapshot {
@@ -831,10 +752,6 @@ private:
     void loadLevel(const fugue::Document &level, const QVariantMap *view = nullptr);
     // Commits a change of the whole workflow (a face edit, which instances elsewhere follow).
     void commitWhole(const fugue::Document &whole, const QString &text);
-    void setGroupProblem(const QString &problem);
-    void setGroupNotice(const QString &notice);
-    bool applyFaceEdit(const std::function<fugue::Result<fugue::Document>(const fugue::Document &, const QString &)> &edit,
-                       const QString &text);
     // An instance of `group` may go in the level shown: false when it would hold itself (5.2).
     bool canHoldGroup(const fugue::Document &document, const QString &group) const;
     // Makes the document this one: only nodes that differ are touched, and their links.
@@ -889,6 +806,8 @@ private:
     LinkList *m_linkList;
     fugue::NodeSearch *m_search;
     WidgetEdit *m_widgets;
+    GroupEdit *m_groups;
+    CanvasGesture *m_gesture;
     fugue::ImageInputs *m_images = nullptr;
     std::vector<NodeRow> m_rows;
     QHash<QString, int> m_rowOf;
@@ -928,10 +847,7 @@ private:
     fugue::Document m_root;
     QStringList m_scope;
     std::vector<QVariantMap> m_outerViews;
-    QString m_groupProblem;
-    QString m_groupNotice;
     QSortFilterProxyModel *m_lensNodes = nullptr;
-    QString m_libraryDir;
     QStringList m_movingFrames; // Frames a move carries (beginFrameMove)
     std::vector<QRectF> m_frameStart;
 

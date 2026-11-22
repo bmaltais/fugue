@@ -445,16 +445,16 @@ private slots:
         Fixture f;
         f.edits.setModelRoots({models.path()});
         f.canvas.select({"prompt", "join"});
-        const QString group = f.canvas.makeGroup();
-        QVERIFY2(!group.isEmpty(), qPrintable(f.canvas.groupProblem()));
+        const QString group = f.canvas.groups()->makeGroup();
+        QVERIFY2(!group.isEmpty(), qPrintable(f.canvas.groups()->problem()));
         // Picked on the top level, then into a group while it is read: the group's nodes never
         // show it, and the handle is stored once the top level is back.
         QCOMPARE(f.edits.setDiskModel("all", "model", path), QString());
-        QVERIFY(f.canvas.enterGroup(group));
+        QVERIFY(f.canvas.groups()->enterGroup(group));
         QVERIFY(f.edits.hashState("all", "model").isEmpty());
         QTRY_COMPARE(FileHashes(FileHashes::defaultPath()).known(path), sha256(bytes));
         QTest::qWait(50);
-        QVERIFY(f.canvas.leaveGroup());
+        QVERIFY(f.canvas.groups()->leaveGroup());
         QCOMPARE(f.stored("all", "model").toObject().value("hash").toString(), sha256(bytes));
 
         // Another document (a tab, a file opened) drops a pick still being read.

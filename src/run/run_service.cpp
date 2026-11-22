@@ -17,8 +17,8 @@
 
 #include "cli/process.h"
 #include "cli/runs.h"
+#include "engine/compile_for_run.h"
 #include "engine/compiler.h"
-#include "engine/group_library.h"
 #include "engine/trust_store.h"
 #include "engine/file_hashes.h"
 #include "engine/paths.h"
@@ -374,22 +374,8 @@ private:
     // into the registry runs do not use, so a run under way keeps its providers.
     Compilation compileRequest(const RunRequest &request) {
         refill(m_compileRegistry, m_compileTypes);
-        const Errors providerProblems = m_setup.registerProviders(m_compileRegistry);
-        if (hasErrors(providerProblems))
-            return Compilation(providerProblems);
-        CompileOptions options;
-        options.target = request.target;
-        options.entered = request.entered;
-        options.providers = m_compileRegistry.providerNames();
-        options.trusted = [store = m_trust](const QString &pack, const QString &version) {
-            return store.isTrusted(pack, version);
-        };
-        // A library or pack group named only by its type id runs from its definition (5.3, 6.1).
-        Document document = request.document;
-        embedGroupTypes(document, m_compileRegistry);
-        const Compilation compilation = compile(document, m_compileRegistry, options);
-        const Errors problems = providerProblems + compilation.problems();
-        return compilation ? Compilation(compilation.value(), problems) : Compilation(problems);
+        return compileForRun(request.document, m_compileRegistry, {request.target, {}, request.entered},
+                             runCompileSetup(m_setup.registerProviders, m_trust));
     }
 
     // The run.done of a waiting run whose entry someone else took: only a cancel does that
