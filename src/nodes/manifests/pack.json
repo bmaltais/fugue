@@ -11,6 +11,7 @@
     "blend",
     "blur",
     "brightness-contrast",
+    "color-match",
     "combine-masks",
     "compare-images",
     "composite-masked",
