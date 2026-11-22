@@ -19,9 +19,8 @@ struct CompileSettings {
     QString provider;
 };
 
-// Registers the configured providers in the registry (registerProviders), then compile()
-// with their names passed as `providers`, so a pin to an unknown instance is
-// unknown_provider. A providers.json that cannot be used fails the compile; a provider
+// compileForRun (engine/compile_for_run.h) with the configured providers (registerProviders) and
+// the user's trust, so a pin to an unknown instance is unknown_provider. A providers.json that cannot be used fails the compile; a provider
 // instance that cannot be made is a warning among the errors.
 Compilation compileDocument(const Document &document, Registry &registry, const CompileSettings &settings = {});
 

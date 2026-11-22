@@ -1669,7 +1669,14 @@ problems at once as structured errors ([13.3](#133-errors)):
 - every link names an existing node and output, and the types are compatible;
 - required inputs are set; literals fit their constraints and choices;
 - no cycles; no group recursion;
-- pinned providers exist.
+- pinned providers exist (the configured instances, as `providers.json` lists them);
+- a node of a pack the user has not allowed ([6.7](#67-trust)) is refused.
+
+One step does all of it, with the provider setup and the trust a run uses (`compileForRun`): the
+providers are registered first, a library or pack group named only by its type id is embedded, and
+the provider problems come before the compiler's. `fugue compile`, `validate` and `run`, the
+window's runs and File > Export the compiled graph all go through it, so the exported graph is
+the one a run would run, and an untrusted pack's node is refused by the export as by a run.
 
 `fugue validate` is this step with nothing executed. It also reports warnings: nodes that are
 not part of any output, missing models, untrusted packs, a frozen result that is gone.
