@@ -139,6 +139,7 @@ Every failure has a stable `code`. Fix by code, not by message text:
 - Trust: `pack_untrusted`, `needs_confirmation`
 - Packs: `pack_invalid`, `pack_exists`, `unknown_pack`, `fetch_failed`, `setup_failed`
 - Groups: `group_invalid`
+- Inputs: `input_invalid` (a value the node cannot use, for example a canvas revision not named in full)
 - Providers: `capability_unavailable`, `model_not_running`, `provider_unreachable`
 - Running: `node_failed`, `node_bad_output`, `node_timeout`, `out_of_memory`, `cancelled`,
   `node_test_failed`
