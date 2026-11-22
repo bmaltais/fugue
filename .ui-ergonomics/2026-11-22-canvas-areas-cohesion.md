@@ -250,9 +250,13 @@ Severity: **high** breaks a written rule or will mislead a person; **medium** th
 
 The two show revisions, compare, export, accept and drop, with different layouts (a list column against a strip of chips) and **different meanings for the same button**: Compare on a candidate is against its parent in History (`CanvasHistoryDialog.qml:82`) and against the head in the view (`CanvasView.qml:236`). History alone lists dropped candidates and the canvases of the store; the view alone has the overlay, the region and the live refresh. Options: (a) retire History into the view (dropped candidates in Earlier, a "Show dropped" row), File > Canvas history… removed; (b) keep both, with History renamed to what it is now (an audit list) and its Compare matching the view. Recommendation: (a), high confidence: one place to decide on a candidate, one meaning of Compare.
 
+**Decided** (coordinator for the owner, 2026-11-22, high): retire Canvas history into the Canvas view later; History stays until the view does everything it does (the dropped candidates, the list of canvases). One meaning of Compare from now on: a candidate is compared with the head, as in the view.
+
 #### D2. File > Canvas… once areas host the view
 
 The dialog is the stop-gap "until the areas can host it" (`CanvasViewDialog.qml` header). Areas host it now (View > Areas > Canvas). Keep both entries, or make File > Canvas… split the window and show a Canvas area? Recommendation: keep the dialog for the one-area window (hobbyists) and leave it as is; revisit after workspaces 2.
+
+**Decided** (coordinator for the owner, 2026-11-22, high): keep File > Canvas… for the one-area window.
 
 #### D3. The user's words: candidate or result; Head or head; status-word case
 
@@ -260,37 +264,55 @@ The dialog is the stop-gap "until the areas can host it" (`CanvasViewDialog.qml`
 - **Head** is capitalized on a chip and lowercase in sentences and tags. Recommendation: a chip or label is a name, capitalized; inside a sentence lowercase.
 - Status words: "Current" (capital) beside "missing" and "invalid" (lowercase) in one Projects row (`ProjectsDialog.qml:174`, `:182`), History tags lowercase (`:230`), the picker's "not in this root" lowercase. Recommendation: status chips capitalized, as "Current" and "Inherited from Default".
 
+**Decided** (coordinator for the owner, 2026-11-22, high): **candidate** for a pending run result in every surface; **Head** capitalized as a name in UI text; status words capitalized (Current, Missing, Invalid, Candidate, Dropped).
+
 #### D4. Three button families of the same size
 
 `ViewButton` (pictures and toolbars: no edge, 0.4 when disabled, 2px focus ring, no hover color), `SettingsParts.SmallButton` (settings and Projects: a hairline edge, 0.5 disabled, 1px accent edge on focus, `selectedRow` hover) and `AreaHeader`'s private `BarButton` (24px, transparent, `menuRow` hover). Both large ones are 28px and do the same job; the screenshots show bordered buttons in Projects and borderless ones in the Canvas view. Options: one component with `flat`, `compact`, `danger`, `primary` and a hover state, or a written split (pictures: borderless; forms: bordered). Recommendation: one component (**C3**), medium confidence (it touches every dialog's look).
+
+**Decided** (coordinator for the owner, 2026-11-22, medium-high): one button component with variants (primary, toggle, quiet, danger); `SmallButton` and `BarButton` stay as thin aliases so names and objectNames do not move. Not done in the fix-now batch: a refactor of every dialog's buttons of its own.
 
 #### D5. Two keymaps for fit and zoom in one window
 
 The Graph fits on `.` and Home and zooms on Ctrl+= (`default_commands.cpp`, `view.fit`, `view.zoom-in`); every picture view fits on `0`, shows 100% on `1` and zooms on `+` (`LargeViewDialog.qml:131-134`, `CanvasView.qml:147-150`). With areas both views sit side by side. Blender fits on Home; Photoshop on Ctrl+0 and 100% on Ctrl+1. The Compare Images keys (`\` flip, `M` next mode, `menu_commands.cpp:90-93`) do not reach the compare in History or the view; Accept and Drop have no keys anywhere. Recommendation: Home fits in every view (keep `.` and `0` as second keys), `1` stays 100%; the compare keys work wherever a compare is shown; Enter accepts a shown candidate (the `LargeViewDialog.confirm` the Canvas view does not connect). Check first that a focused Canvas area does not hand `Q` (quit), `.` and Escape to the window's shortcuts (not tested; see **Not checked**).
 
+**Decided** (coordinator for the owner, 2026-11-22, medium): one fit and zoom keymap in the pictures and the Graph: Home fits, 1 is 100%, + and - zoom; Enter accepts where Accept is the surface's primary and the focus is not in a text field. Not done in the fix-now batch (the Canvas view and the Graph keymap, spec 12.4, change with it).
+
 #### D6. A rectangle edited in two places with two commit models
 
 The region picker (`RegionDialog.qml`: ratio buttons, four fields, Apply) and the view's frame (`CanvasView.qml:407-430`: live, one undo step, no ratios, no fields) edit the same four numbers; Pick region… in the canvas menu (`InputWidget.qml:367-370`) opens the first while the Canvas view offers the second. Spec 14.5 choices (4) and (5) keep both on purpose. Options: retire the picker and add the ratio buttons and the fields to the view; or keep the picker for exact work. Recommendation: retire it once the view has ratios (medium).
+
+**Decided** (coordinator for the owner, 2026-11-22, medium): the region picker becomes redundant once the Canvas view edits live; keep it for now and retire it later. The commit model is live with one undo step.
 
 #### D7. A toggle that is on looks like the primary
 
 `ViewButton` fills `current && accented` and `primary` with the same accent (`ViewButton.qml:25`, `:33`). In `canvas-view-candidate.png` Show candidate, the shown chip "Candidate 82d368f5" and Accept are the same yellow; History's Compare and mode buttons likewise. The Mask editor's current tool and its OK share the accent too (an existing case). Recommendation: on a surface with a primary, toggles and choices use the quiet marking (`accented: false`, `selectedRow`), as Fit and 100% already do; the accent belongs to the primary alone.
 
+**Decided** (coordinator for the owner, 2026-11-22, high): a toggle that is on uses a quiet marking, never the primary's accent fill, on any surface that has a primary. As built in the fix-now batch: `ViewButton`'s existing quiet marking (`accented: false`: the `selectedRow` fill, text color), the marking Fit and 100% already use. The coordinator's note said "inset and label color"; the label color on an on toggle reads dimmer than an off one, so the text color stays (to confirm).
+
 #### D8. Which answer of a destructive question is highlighted
 
 Projects highlights the destructive "Remove from list" (`ProjectsDialog.qml:253-256`); the delete-group question highlights Cancel (#156); the Cache question highlights Clear (#141). Recommendation: the safe answer is highlighted when the loss cannot be undone (delete group), the action when it can (Remove from list, Clear previews); write it as a rule.
+
+**Decided** (coordinator for the owner, 2026-11-22, medium): a destructive question highlights the safe answer (Cancel, Keep); the destructive answer is never the default.
 
 #### D9. The order of a form's buttons
 
 Projects' New form: Create and open (highlighted), Create, Back, primary **first** (`ProjectsDialog.qml:369-391`); Project settings: Save, then Back; the unsaved question: Open in new window, then Cancel. Every other dialog: Cancel, then the highlighted answer **last at the right** (Crop, Mask, color picker #122, questions). Recommendation: Back, Create, Create and open, right-aligned.
 
+**Decided** (coordinator for the owner, 2026-11-22, high): the primary last at the right everywhere; Projects' Create and open moves there.
+
 #### D10. "Canvas" still means the graph in user-facing text
 
 Now that a Canvas is a picture and the node view is the Graph (`view_registry.cpp:13`, `:17`): Settings > General "Canvas navigation" and "Left-drag on empty canvas…" (`SettingsPanel.qml:160-166`), "The canvas corners" (`:431`) mean the graph. In code `canvas` stays the graph (`FugueCanvas`, `App.canvasModel`); that is a code name, not this question. Recommendation: the user-facing words become "Graph navigation", "empty graph", "node corners".
 
+**Decided** (coordinator for the owner, 2026-11-22, high): user-facing "canvas" meaning the node graph becomes "graph" in Settings and the docs' wording; code names stay.
+
 #### D11. The Graph's glyph is the Workflows panel's
 
 The Graph view type's glyph is `workflow` (`view_registry.cpp:13`), the glyph of the Workflows side tab (#159); the Canvas view's `image` is the selection toolbar's Open image. Recommendation: a glyph of its own for the Graph (`git-fork` or `network` added to the subset).
+
+**Decided** (coordinator for the owner, 2026-11-22, high): the Graph view gets a glyph of its own, apart from the Workflows panel tab's.
 
 ## The same action in two places
 
