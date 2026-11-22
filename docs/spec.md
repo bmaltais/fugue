@@ -2291,6 +2291,8 @@ belong to the field. Hence the Ctrl and F1 alternatives for quit and the overlay
 - The menu bar and the context menus list command ids; each item's name, key and enabled
   state come from the registry when the menu opens, and a command not built yet shows as
   unavailable. Alt+letter opens a top menu where 12.4 binds nothing to it.
+- A close button (`closeApp`, #218) at the bar's right end runs `app.quit`, so the unsaved-content
+  question applies; its tooltip shows the command's key. Always shown.
 - The user's keymap is a diff against the defaults at `~/.config/fugue/keybindings.json`:
 
 ```json

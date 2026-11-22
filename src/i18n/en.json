@@ -935,6 +935,8 @@
   "Cannot be used: %1": "Cannot be used: %1",
   "Canvas navigation, language, corner radius, hover magnifier, new seeds, embedded workflow, reopening tabs and your keys.": "Canvas navigation, language, corner radius, hover magnifier, new seeds, embedded workflow, reopening tabs and your keys.",
   "Choose the folder of the project.": "Choose the folder of the project.",
+  "Close Fugue": "Close Fugue",
+  "Close Fugue (%1)": "Close Fugue (%1)",
   "Create": "Create",
   "Create and open": "Create and open",
   "Default project": "Default project",

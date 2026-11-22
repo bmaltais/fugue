@@ -3,6 +3,7 @@
 // commands with the registry's state, the hamburger takes over when narrow, and right-clicks
 // open the canvas, node and Frame menus with their colors.
 
+#include <QAccessible>
 #include <QClipboard>
 #include <QImage>
 #include <QGuiApplication>
@@ -120,6 +121,43 @@ class MenusTests : public QObject {
 
 private slots:
     void initTestCase() { QQuickStyle::setStyle("Material"); }
+
+    // The close button (#218) at the bar's far corner runs app.quit: with unsaved work the quit
+    // question opens and nothing quits, clean it quits at once.
+    void theCloseButtonRunsTheQuitCommand() {
+        App app(load(framed));
+        QVERIFY(app.open());
+        QQuickItem *button = NEED("closeApp");
+        QAccessibleInterface *access = QAccessible::queryAccessibleInterface(button);
+        QVERIFY(access);
+        QCOMPARE(access->text(QAccessible::Name), QString("Close Fugue"));
+        QCOMPARE(access->role(), QAccessible::Button);
+        QQuickItem *bar = NEED("menuBar");
+        QCOMPARE(sceneRect(button).right(), sceneRect(bar).right()); // the corner: no margin to miss it by
+        QVERIFY(sceneRect(button).height() >= 24 && sceneRect(button).width() >= 24);
+        auto *ask = app.window->findChild<QObject *>("quitAsk");
+        QVERIFY(ask);
+
+        app.commands.setUnsavedWork(true);
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(button));
+        QTRY_VERIFY(ask->property("opened").toBool());
+        app.key(Qt::Key_Escape);
+        QTRY_VERIFY(!ask->property("visible").toBool());
+
+        // Clean: the command's own handler runs (replaced here, so the test process stays up).
+        app.commands.setUnsavedWork(false);
+        int quits = 0;
+        app.commands.setHandler("app.quit", [&quits] { ++quits; });
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(button));
+        QCOMPARE(quits, 1);
+        QVERIFY(!ask->property("visible").toBool());
+
+        // Hovering shows the tooltip with the key.
+        QTest::mouseMove(app.window, centerOf(button));
+        QTRY_VERIFY(button->property("hovered").toBool());
+        QVERIFY(button->property("entry").toMap().value("keys").toStringList().size() > 0);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
 
     void eachTopMenuOpensWithTheMouseAndItsAltKey() {
         App app(load(framed));

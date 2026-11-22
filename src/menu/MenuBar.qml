@@ -233,8 +233,8 @@ Rectangle {
         id: chipLoader
         objectName: "projectChipLoader"
         active: App.projects !== null && App.projects.indicatorShown
-        anchors.right: parent.right
-        anchors.rightMargin: 1.5 * bar.u
+        anchors.right: closeButton.left
+        anchors.rightMargin: 2 * bar.u
         anchors.verticalCenter: parent.verticalCenter
         sourceComponent: AbstractButton {
             id: chip
@@ -264,6 +264,50 @@ Rectangle {
                 color: chip.inProject ? bar.look.accent : bar.look.label
                 verticalAlignment: Text.AlignVCenter
             }
+        }
+    }
+
+    // Close Fugue (#218): the window has no title bar on a tiling desktop, so the bar's far corner
+    // quits. It runs app.quit, so the question about unsaved content applies. It reaches the window's
+    // edge and the bar's full height (a corner is the easiest target to hit, Fitts), and the project
+    // chip sits 2u away from it, so a slip next to either does not press the other.
+    AbstractButton {
+        id: closeButton
+        objectName: "closeApp"
+        // Read as the pointer arrives, so a remapped key shows.
+        property var entry: ({})
+        readonly property string key: entry.keys && entry.keys.length > 0
+            ? entry.keys[0].replace("Return", "Enter").replace("Escape", "Esc") : ""
+        anchors.right: parent.right
+        width: 10 * bar.u
+        height: parent.height - 1
+        focusPolicy: Qt.TabFocus
+        hoverEnabled: true
+        onHoveredChanged: if (hovered) entry = App.commands.entry("app.quit")
+        onClicked: App.commands.trigger("app.quit")
+        Accessible.role: Accessible.Button
+        Accessible.name: qsTr("Close Fugue")
+        Accessible.onPressAction: clicked()
+        ToolTip.visible: hovered
+        ToolTip.delay: bar.look.tooltipDelay
+        ToolTip.text: key !== "" ? qsTr("Close Fugue (%1)").arg(key) : qsTr("Close Fugue")
+        background: Rectangle {
+            color: closeButton.pressed ? bar.look.dangerHover : closeButton.hovered ? bar.look.dangerFill : "transparent"
+            Rectangle {
+                anchors { fill: parent; margins: 1 }
+                visible: closeButton.visualFocus
+                color: "transparent"
+                border { width: 1; color: bar.look.accent }
+                radius: bar.look.smallCorner
+            }
+        }
+        contentItem: Glyph {
+            look: bar.look
+            name: "x"
+            font.pixelSize: 16
+            color: closeButton.hovered || closeButton.visualFocus ? bar.look.error : bar.look.label
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
         }
     }
 
