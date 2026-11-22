@@ -102,7 +102,7 @@ Severity: **high** breaks a written rule or will mislead a person; **medium** th
 #### N9. One action, three names: make a canvas from a picture (low)
 
 - File: `InputWidget.qml:365` ("Import picture…", makes the canvas at once), `WidgetPicker.qml:251` ("From a picture…" inside New canvas), `WidgetPicker.qml:163` (file dialog title "Make a canvas from a picture").
-- Fix: menu "New canvas from a picture…", the question's flat button "From a picture…", the file dialog "New canvas from a picture". "Import" is not used anywhere else in the app for this.
+- Fix: keep the menu's "Import picture…" (the CLI's word, `fugue canvas import`) and the question's "From a picture…" (it reads under New canvas); the file dialog becomes "Import a picture as a canvas".
 
 #### N10. The canvas picker's actions are not a chunk of their own (low)
 
@@ -175,7 +175,7 @@ Severity: **high** breaks a written rule or will mislead a person; **medium** th
 
 - File: `src/canvas/CanvasView.qml:457` and `src/canvas/CanvasHistoryDialog.qml:152` ("No canvas yet: fugue canvas new, or fugue canvas import, makes one.").
 - Reference: the canvas picker offers New canvas… and Import picture… in the app (`InputWidget.qml:364-365`); the picker's own empty text is "No canvases yet" (`:363`), a second wording for the same state.
-- Fix: the empty state says "No canvas yet" and shows New canvas… and New canvas from a picture… buttons (**C7**), the same words in all three places.
+- Fix: the empty state says "No canvas yet" and shows New canvas… and Import picture… buttons (**C7**), the same words in all three places.
 
 #### L7. Node ids where a person reads a name (medium)
 
@@ -313,6 +313,14 @@ Now that a Canvas is a picture and the node view is the Graph (`view_registry.cp
 The Graph view type's glyph is `workflow` (`view_registry.cpp:13`), the glyph of the Workflows side tab (#159); the Canvas view's `image` is the selection toolbar's Open image. Recommendation: a glyph of its own for the Graph (`git-fork` or `network` added to the subset).
 
 **Decided** (coordinator for the owner, 2026-11-22, high): the Graph view gets a glyph of its own, apart from the Workflows panel tab's.
+
+## Status
+
+2026-11-22, first batch (commits `d75a7b18` to `7e587afa` on `cohesion-audit`; the Decisions row "cohesion fixes, first batch" in docs/ui-ergonomics.md lists the controls):
+
+- **Fixed:** N1 to N15. N9 kept the menu's "Import picture…" (the CLI's word) and renamed only the file dialog. N12 fixed the menu bar's ring; the SmallButton and Toggle rings wait for D4. N10 is a `WidgetMenu` `separator` entry, not a heading.
+- **Decisions built:** D1 (History compares a candidate with the head; History itself stays until the view does everything it does), D3 (History's tags, Projects' status words, the setting "Show new candidates"), D7 (History's Compare and modes, the region picker's Snap and ratios, the Crop window's ratios), D8 (Projects' remove question, the Cache question; the delete-group question already did), D9 (Projects' forms), D10 (Settings and the project's Preferences word), D11 (`waypoints`).
+- **Left for the Canvas view's batch** (`CanvasView.qml` and `canvas_view_model.*` are being rewritten): L1 to L18; D3 in the banner and in docs/canvas.md ("New result…", "Keep looking at head"); D7 in the view's toggles and strip; D5 (one keymap, with the Graph's in spec 12.4); D4 (one button component); D6 (retire the region picker once the view has ratios and fields); D7 in the Mask editor's tools and the paint panel's eye (left alone while the layers work is open); D10 in the spec's own wording (section 12 still says "canvas" for the graph throughout).
 
 ## The same action in two places
 
