@@ -242,3 +242,33 @@ stays until you clear it (**Clear selection**) or change canvas.
 Canvas Region's **Selection** input (advanced) is what Use selection writes: the hash of the stored selection. With
 it, the Mask input and the rectangle are not used; the selection's bounds are in X, Y, Width and Height so the frame
 and the size the model gets read right. A replay of the run reads the same selection.
+
+## The task bar: Generate on the canvas
+
+You can change the canvas without opening a workflow (#231, [design](canvas-actions-design.md)). Draw a rectangle on
+the picture, or paint a selection with Quick Mask, and a bar appears under it (above it when there is no room; across
+the foot of the picture in a small area):
+
+- the **action** menu: **Auto** (picks the action from the selection and the prompt) and the actions, Generative fill
+  for now;
+- the **prompt**: type what should be in the selection and press Enter (Ctrl+Enter is still Run of the Graph). Up and
+  Down in an empty field bring back earlier prompts; the clock button lists the last 20;
+- **Generate**, which becomes **Cancel** while it runs (Escape too); a cancelled run adds nothing;
+- `⋯`: **Clear prompt history…** (it asks first).
+
+While it runs, the selection's outline moves and the bar says "Generating… 45%". The result is a layer on the latest
+version, named from the prompt, with the selection's soft edge as its layer mask; Undo takes it back. Generate works on
+the latest version only: on an older step the bar says so and offers **Back to latest**. When something goes wrong the
+bar says it in one line ("Not enough GPU memory. Try a smaller selection."). On first use it says which models are
+missing and how large they are ("Generative fill needs 3 models, 8.9 GB.") with **Download**, which goes through the
+window's download line; Generate stays off until they are here.
+
+An action is an ordinary workflow with an `action` block (see the design): the bar copies it, puts in the canvas, the
+latest version it showed (by full hash), the selection (a rectangle, or the painted selection stored by content), the
+prompt and a random seed, takes the Canvas Region's padding and scale from the router
+([research 6](inpaint-outpaint-research.md#6-the-router)), and queues it as an ordinary run: it shows in the queue
+panel under the action's name and waits for the GPU like any run. The bundled Generative fill
+(`share/actions/generative-fill.fugue`, compiled into Fugue) is the recommended workflow of the research: FLUX.2 Klein
+4B Q8, 4 steps, the selection redrawn near 1 MP with the crop as its reference, a Blend of 16. If you generate again
+with exactly the same prompt, seed and selection on the same version after an Undo, the cached result is placed again.
+The prompts you type are kept per project, 200 per action, and never shared with another project.

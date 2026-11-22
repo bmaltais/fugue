@@ -5,7 +5,9 @@ Generative fill, Remove, Expand and Refine. They come out of the benchmark in
 [inpaint-outpaint-research.md](../inpaint-outpaint-research.md) (section 5 has the reasons). They are scratch files
 here, not templates: they move to fugue-workflows (category `canvas`) when the action slices of #231 land. Each is a
 plain canvas workflow with the top-level `action` block of the design (1.2), so it also opens and runs from the
-Graph today with the canvas id and the rectangle filled in.
+Graph today with the canvas id and the rectangle filled in. Generative fill is bundled with Fugue as
+`share/actions/generative-fill.fugue` (#231 slice 1: Region 1.2 and a prompt that is not optional); the others follow
+with their slices.
 
 | Folder | Action | Model | Key settings |
 | --- | --- | --- | --- |
