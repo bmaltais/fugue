@@ -8,6 +8,7 @@ RunCompileSetup runCompileSetup(std::function<Errors(Registry &)> registerProvid
     RunCompileSetup setup;
     setup.registerProviders = std::move(registerProviders);
     setup.trusted = [trust](const QString &pack, const QString &version) { return trust.isTrusted(pack, version); };
+    setup.resolveCanvas = sessionCanvasResolver();
     return setup;
 }
 
@@ -30,8 +31,14 @@ Compilation compileForRun(const Document &document, Registry &registry, const Ru
     Document embedded = document;
     embedGroupTypes(embedded, registry);
     const Compilation compilation = compile(embedded, registry, options);
-    const Errors problems = providerProblems + compilation.problems();
-    return compilation ? Compilation(compilation.value(), problems) : Compilation(problems);
+    if (!compilation)
+        return Compilation(providerProblems + compilation.problems());
+    // After the compile, so a group's inner nodes (path ids) are pinned too, and only a graph that
+    // can run is looked up in the store.
+    CompiledGraph graph = compilation.value();
+    const Errors canvasProblems = resolveCanvasRevisions(graph, setup.resolveCanvas);
+    const Errors problems = providerProblems + compilation.problems() + canvasProblems;
+    return hasErrors(canvasProblems) ? Compilation(problems) : Compilation(graph, problems);
 }
 
 } // namespace fugue

@@ -14,6 +14,7 @@
 
 #include <functional>
 
+#include "engine/canvas_revisions.h"
 #include "engine/compiler.h"
 #include "engine/document.h"
 #include "engine/registry.h"
@@ -28,9 +29,14 @@ struct RunCompileSetup {
     std::function<Errors(Registry &)> registerProviders;
     // Whether the user allowed the pack at this version (6.7). None: nothing is checked.
     std::function<bool(const QString &pack, const QString &version)> trusted;
+    // Names the revision of a canvas (canvas_revisions.h): `head` becomes the hash it is at, once,
+    // here, so the hash is in the cache key and in compiled.json. None: a Canvas Region keeps
+    // whatever revision it was given.
+    CanvasRevisionResolver resolveCanvas;
 };
 
-// The setup with `trust` as the check: what every caller means by "the user's trust".
+// The setup with `trust` as the check: what every caller means by "the user's trust", and the
+// session's canvas store for the canvas revisions.
 RunCompileSetup runCompileSetup(std::function<Errors(Registry &)> registerProviders, const TrustStore &trust);
 
 // What one compile asks for.

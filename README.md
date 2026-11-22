@@ -65,8 +65,9 @@ Read it first at [install.sh](install.sh); `bash -s -- --dry-run` shows what it 
   and Outpaint: extend a picture run FLUX.2 Klein 9B, and the group Inpaint (crop and stitch) gives a
   small region the model's full detail with no seam. The mask editor is built in. See
   [docs/masking.md](docs/masking.md).
-- **Canvases (first slice).** `fugue canvas new|import|export|log|show` keeps a layered picture as a chain of
-  immutable revisions, stored as tiles; the nodes and the window come next. See [docs/canvas.md](docs/canvas.md).
+- **Canvases.** `fugue canvas new|import|export|log|show` keeps a layered picture as a chain of
+  immutable revisions, stored as tiles; Canvas Region and Canvas Write read a region of it and put a result
+  back as a new layer; the window comes next. See [docs/canvas.md](docs/canvas.md).
 
 <p align="center"><img src="docs/images/inpaint-result.png" alt="Inpaint: the picture with an armchair painted over, the result and the difference" width="720"></p>
 

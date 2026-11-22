@@ -11,6 +11,8 @@
     "blend",
     "blur",
     "brightness-contrast",
+    "canvas-region",
+    "canvas-write",
     "color-match",
     "combine-masks",
     "compare-images",

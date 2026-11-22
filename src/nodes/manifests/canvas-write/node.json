@@ -1,0 +1,30 @@
+{
+  "manifest": 1,
+  "id": "fugue/canvas-write",
+  "version": "1.0.0",
+  "name": "Canvas Write",
+  "description": "Put a result on a canvas as a new layer. The canvas is not edited: a new revision is made from the one Canvas Region read, and the head moves to it only when nothing else moved it meanwhile. When something did, the new revision stays as a candidate and the node says so (accepted is off, a warning is shown), and nothing is lost: the head is the other change. The picture is resized to the stitch's box and blended in through the mask, softened outward by Blend pixels, as Stitch does; the layer holds only that part.",
+  "category": "Image/Canvas",
+  "keywords": ["canvas", "write", "layer", "revision", "generative fill", "accept", "place"],
+  "sink": true,
+  "runtime": {"kind": "builtin"},
+  "inputs": [
+    {"name": "canvas", "type": "fugue/canvas", "label": "Canvas",
+     "description": "The canvas and the revision the work started from: Canvas Region's canvas output."},
+    {"name": "image", "type": "image", "label": "Image",
+     "description": "The picture to place. With a stitch it must have the region's shape to within 2%; without one it covers the whole canvas."},
+    {"name": "stitch", "type": "fugue/stitch", "label": "Stitch", "optional": true,
+     "description": "Where the picture goes, and the mask to blend through: Canvas Region's stitch output."},
+    {"name": "mask", "type": "image", "role": "mask", "label": "Mask", "optional": true,
+     "description": "The mask to blend through, at the canvas's size. Without one, the stitch's, and without a stitch the whole picture."},
+    {"name": "blend", "type": "number", "label": "Blend", "default": 16, "min": 0, "max": 512, "step": 1, "integer": true,
+     "description": "How far the edge of the mask fades outward, in canvas pixels."},
+    {"name": "name", "type": "text", "label": "Layer name", "default": "Fill", "widget": "line",
+     "description": "The new layer's name."}
+  ],
+  "outputs": [
+    {"name": "canvas", "type": "fugue/canvas", "label": "Canvas", "description": "The new revision."},
+    {"name": "accepted", "type": "boolean", "label": "Accepted", "description": "Whether the head moved to the new revision."},
+    {"name": "head", "type": "text", "label": "Head", "description": "The canvas's head after the write: the new revision when accepted, else the revision that got there first."}
+  ]
+}

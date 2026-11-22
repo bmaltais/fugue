@@ -19,27 +19,6 @@ using mask::LayerKind;
 using mask::MaskPaint;
 using mask::PaintDocument;
 
-// Straight RGBA bytes from float pixels (gray and RGB get an opaque alpha).
-MaskPaint toBytes(const Pixels &in) {
-    std::vector<uint8_t> out(size_t(in.width) * in.height * 4);
-    const auto byte = [](float v) { return uint8_t(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f)); };
-    for (int y = 0; y < in.height; ++y)
-        for (int x = 0; x < in.width; ++x) {
-            uint8_t *p = &out[(size_t(y) * in.width + x) * 4];
-            for (int k = 0; k < 3; ++k)
-                p[k] = byte(in.at(x, y, std::min(k, in.channels - 1)));
-            p[3] = in.channels == 4 ? byte(in.at(x, y, 3)) : 255;
-        }
-    return MaskPaint(in.width, in.height, out, 4);
-}
-
-Pixels toPixels(const MaskPaint &in) {
-    Pixels out(in.width(), in.height(), in.channels());
-    for (size_t i = 0; i < out.data.size(); ++i)
-        out.data[i] = float(in.pixels()[i]) / 255.0f;
-    return out;
-}
-
 // The picture is what the layers are painted over, so it is all that is left of it: nothing else
 // is in the way when every layer is a visible, whole picture.
 bool onlyThePicture(const PaintDocument &document) {
@@ -137,7 +116,7 @@ public:
             const Result<Pixels> pixels = pixelsOf(image, QStringLiteral("image"));
             if (!pixels.ok())
                 return Result<Values>(pixels.errors());
-            const MaskPaint picture = toBytes(pixels.value());
+            const MaskPaint picture = pixelsToLayer(pixels.value());
             for (int i = 0; i < document->layerCount(); ++i)
                 document->setPicture(document->layer(i).id, picture);
         }
@@ -146,12 +125,12 @@ public:
         if (hasImage && onlyThePicture(*document)) {
             out.insert(QStringLiteral("image"), image); // nothing painted over it: the picture itself, exactly
         } else {
-            Result<Values> flat = imageOutput(toPixels(document->flatten()));
+            Result<Values> flat = imageOutput(layerToPixels(document->flatten()));
             if (!flat.ok())
                 return flat;
             out.insert(QStringLiteral("image"), flat.value().value(QStringLiteral("image")));
         }
-        Result<Values> mask = namedOutput(toPixels(document->flattenMask()), "mask");
+        Result<Values> mask = namedOutput(layerToPixels(document->flattenMask()), "mask");
         if (!mask.ok())
             return mask;
         out.insert(QStringLiteral("mask"), mask.value().value(QStringLiteral("mask")));

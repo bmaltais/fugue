@@ -9,6 +9,7 @@
 namespace fugue::nodes {
 
 void addBasicKernels(Kernels &kernels);           // basic.cpp
+void addCanvasKernels(Kernels &kernels);          // canvas_nodes.cpp
 void addColorMatchKernels(Kernels &kernels);      // color_match.cpp
 void addComponentKernels(Kernels &kernels);       // components.cpp
 void addCropStitchKernels(Kernels &kernels);      // crop_stitch.cpp

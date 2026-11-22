@@ -58,21 +58,26 @@ Pixels cutBox(const Pixels &source, const CropBox &box) {
     return out;
 }
 
+Cropped cropAt(const Pixels &image, const Pixels &mask, const CropBox &box, const CropSize &size) {
+    Cropped out;
+    out.box = box;
+    out.size = size;
+    const Pixels pictureBox = cutBox(image, box);
+    const Pixels maskBox = cutBox(mask, box);
+    const bool same = size.width == box.width && size.height == box.height;
+    out.image = same ? pictureBox : resample(pictureBox, size.width, size.height, ResizeMethod::Lanczos);
+    out.mask = same ? maskBox : resample(maskBox, size.width, size.height, ResizeMethod::Bilinear);
+    for (float &v : out.mask.data)
+        v = std::clamp(v, 0.0f, 1.0f);
+    return out;
+}
+
 std::optional<Cropped> cropToMask(const Pixels &image, const Pixels &mask, int padding, double megapixels, int multiple) {
     const std::optional<CropBox> bounds = maskBounds(mask);
     if (!bounds)
         return std::nullopt;
-    Cropped out;
-    out.box = paddedBox(*bounds, padding, image.width, image.height);
-    out.size = cropSizeFor(out.box, megapixels, multiple);
-    const Pixels pictureBox = cutBox(image, out.box);
-    const Pixels maskBox = cutBox(mask, out.box);
-    const bool same = out.size.width == out.box.width && out.size.height == out.box.height;
-    out.image = same ? pictureBox : resample(pictureBox, out.size.width, out.size.height, ResizeMethod::Lanczos);
-    out.mask = same ? maskBox : resample(maskBox, out.size.width, out.size.height, ResizeMethod::Bilinear);
-    for (float &v : out.mask.data)
-        v = std::clamp(v, 0.0f, 1.0f);
-    return out;
+    const CropBox box = paddedBox(*bounds, padding, image.width, image.height);
+    return cropAt(image, mask, box, cropSizeFor(box, megapixels, multiple));
 }
 
 bool shapeFits(const CropSize &size, int width, int height) {

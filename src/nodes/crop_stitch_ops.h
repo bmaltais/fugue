@@ -50,6 +50,10 @@ struct Cropped {
     Pixels mask;     // the mask's box, resized to `size` (bilinear); one channel
 };
 
+// The part of `image` and `mask` (the picture's size) inside `box`, redrawn at `size`: what Crop to
+// Mask and Canvas Region both cut. The mask is clamped to 0..1 after the bilinear resize.
+Cropped cropAt(const Pixels &image, const Pixels &mask, const CropBox &box, const CropSize &size);
+
 // Crop to Mask: the box of `mask` (which has the picture's size) grown by `padding`, cut out and
 // resized as cropSizeFor says. None for a mask with nothing in it.
 std::optional<Cropped> cropToMask(const Pixels &image, const Pixels &mask, int padding, double megapixels, int multiple);

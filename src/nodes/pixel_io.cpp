@@ -78,6 +78,26 @@ Result<Values> imageOutput(Pixels pixels) {
     }
 }
 
+mask::MaskPaint pixelsToLayer(const Pixels &in) {
+    std::vector<uint8_t> out(size_t(in.width) * in.height * 4);
+    const auto byte = [](float v) { return uint8_t(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f)); };
+    for (int y = 0; y < in.height; ++y)
+        for (int x = 0; x < in.width; ++x) {
+            uint8_t *p = &out[(size_t(y) * in.width + x) * 4];
+            for (int k = 0; k < 3; ++k)
+                p[k] = byte(in.at(x, y, std::min(k, in.channels - 1)));
+            p[3] = in.channels == 4 ? byte(in.at(x, y, 3)) : 255;
+        }
+    return mask::MaskPaint(in.width, in.height, out, 4);
+}
+
+Pixels layerToPixels(const mask::MaskPaint &in) {
+    Pixels out(in.width(), in.height(), in.channels());
+    for (size_t i = 0; i < out.data.size(); ++i)
+        out.data[i] = float(in.pixels()[i]) / 255.0f;
+    return out;
+}
+
 // A number input as a whole number, held within plus or minus a billion so a huge value cannot
 // wrap around (lround past the int range is undefined); not a number is 0.
 int toInt(const Value &value) {

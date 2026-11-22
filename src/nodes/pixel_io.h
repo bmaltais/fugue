@@ -6,6 +6,7 @@
 
 #include <QString>
 
+#include "engine/mask_paint.h"
 #include "engine/node_kernel.h"
 #include "nodes/resample.h"
 
@@ -24,6 +25,11 @@ int toInt(const Value &value);
 
 // A mask input as one channel: an image's first channel (a gray mask is its own).
 Result<Pixels> maskOf(const Value &value, const QString &input);
+
+// Straight 8-bit RGBA from float pixels (gray and RGB get an opaque alpha), the paint canvas's layers
+// (engine/mask_paint.h); and back, 4 channels or 1 as the buffer has.
+mask::MaskPaint pixelsToLayer(const Pixels &in);
+Pixels layerToPixels(const mask::MaskPaint &in);
 
 // A result image under the output name `name` ("image", or "mask" for a one-channel mask).
 Result<Values> namedOutput(Pixels pixels, const char *name);

@@ -144,6 +144,7 @@ Every failure has a stable `code`. Fix by code, not by message text:
   `node_test_failed`
 - Masks: `mask_empty` (paint the part to change), `mask_unsupported` (the provider or model cannot take a mask: Generate Image's `mask` needs a model whose provider lists `mask` in its `inputs`; the error names the ones that can), `stitch_mismatch` (Stitch got a picture of another shape than its crop); warnings `mask_full` (everything is masked: plain generation), `mask_resized` (the mask was stretched to the picture)
 - Cache: `cache_busy` (a warning: a run is going, so `cache clear` left its results and previews alone)
+- Canvas nodes: Canvas Region reads a rectangle or mask of a canvas at one revision (`head` is named once at compile and recorded in `compiled.json`); Canvas Write adds a layer as a new revision and moves the head only if it is still where Region read it, else warning `canvas_head_moved`, `accepted` false, the candidate kept
 - Canvas: `canvas_not_found` (no such canvas or revision), `canvas_ambiguous` (a revision prefix that starts more than one: write more of it), `canvas_corrupt` (a stored object is not what it is named for)
 - Projects: `project_invalid`, `project_exists`, `unknown_project`, `project_inherits_ignored` (a warning)
 - Skill: `skill_modified`

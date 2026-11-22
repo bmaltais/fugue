@@ -9,9 +9,6 @@
 // meta names the original picture and the mask as media handles (so it changes with either), the
 // box the crop came from, and the crop's size.
 
-#include <QDir>
-#include <QFile>
-#include <QJsonDocument>
 #include <QJsonObject>
 #include <QString>
 
@@ -21,12 +18,11 @@
 #include "engine/file_hashes.h"
 #include "nodes/crop_stitch_ops.h"
 #include "nodes/pixel_io.h"
+#include "nodes/stitch_handle.h"
 
 namespace fugue::nodes {
 
 namespace {
-
-const QString kStitchType = QStringLiteral("fugue/stitch");
 
 // Crop to Mask's padding and Stitch's blend, as their manifests' `max`.
 constexpr int kMaxPadding = 4096;
@@ -35,16 +31,6 @@ constexpr int kMaxBlend = 512;
 Error warning(Error error) {
     error.severity = Error::Severity::Warning;
     return error;
-}
-
-// A handle that has a file and a hash, for naming in the descriptor: an input from the scheduler
-// has both already.
-Result<MediaHandle> named(const MediaHandle &handle, const NodeContext &context, const QString &name) {
-    if (handle.hasFile() && !handle.hash().isEmpty())
-        return handle;
-    if (!context.hashes)
-        return makeError(QStringLiteral("node_failed"), QStringLiteral("The %1 has no file to name.").arg(name));
-    return handle.saved(context.workDir, name, *context.hashes);
 }
 
 class CropToMaskKernel : public NodeKernel {
@@ -85,22 +71,16 @@ public:
                                   QStringLiteral("Nothing is painted in the mask."),
                                   QStringLiteral("Paint the part to change."));
 
-        const Result<MediaHandle> original = named(imageValue.media(), context, QStringLiteral("original"));
+        const Result<MediaHandle> original = namedHandle(imageValue.media(), context, QStringLiteral("original"));
         if (!original.ok())
             return Result<Values>(original.errors());
-        const Result<MediaHandle> maskHandle = named(maskValue.media(), context, QStringLiteral("mask"));
+        const Result<MediaHandle> maskHandle = namedHandle(maskValue.media(), context, QStringLiteral("mask"));
         if (!maskHandle.ok())
             return Result<Values>(maskHandle.errors());
-        const QJsonObject meta{
-            {"image", original->toJson()},
-            {"mask", maskHandle->toJson()},
-            {"box", QJsonObject{{"x", crop->box.x}, {"y", crop->box.y}, {"width", crop->box.width}, {"height", crop->box.height}}},
-            {"size", QJsonObject{{"width", crop->size.width}, {"height", crop->size.height}}}};
-        const QByteArray bytes = QJsonDocument(meta).toJson(QJsonDocument::Compact);
-        const QString path = QDir(context.workDir).filePath(QStringLiteral("stitch.json"));
-        QFile file(path);
-        if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.flush())
-            return makeError(QStringLiteral("node_failed"), QStringLiteral("Cannot write %1.").arg(path));
+        const Result<Value> handle = writeStitchHandle(
+            context.workDir, {original.value(), maskHandle.value(), crop->box, crop->size});
+        if (!handle.ok())
+            return Result<Values>(handle.errors());
 
         Result<Values> cropped = imageOutput(std::move(crop->image));
         Result<Values> croppedMask = namedOutput(std::move(crop->mask), "mask");
@@ -109,60 +89,20 @@ public:
         Values out;
         out.insert(QStringLiteral("image"), cropped.value().value("image"));
         out.insert(QStringLiteral("mask"), croppedMask.value().value("mask"));
-        out.insert(QStringLiteral("stitch"), Value(QJsonObject{{"data", kStitchType}, {"path", path}, {"meta", meta}}));
+        out.insert(QStringLiteral("stitch"), handle.value());
         out.insert(QStringLiteral("width"), Value(crop->size.width));
         out.insert(QStringLiteral("height"), Value(crop->size.height));
         return Result<Values>(out, warnings);
     }
 };
 
-// What a stitch handle names: the picture and mask, each of which must still be the file Crop to
-// Mask read; where the crop came from and its size.
-struct Descriptor {
-    MediaHandle image;
-    MediaHandle mask;
-    CropBox box;
-    CropSize size;
-};
-
-Result<Descriptor> descriptorOf(const Value &stitch, FileHashes *hashes) {
-    const QJsonObject meta = stitch.json().toObject().value(QStringLiteral("meta")).toObject();
-    const auto bad = [] {
-        return makeInputError(QStringLiteral("input_invalid"), QStringLiteral("stitch"),
-                              QStringLiteral("This is not the stitch handle of a Crop to Mask."),
-                              QStringLiteral("Wire Crop to Mask's stitch output to this input."));
-    };
-    if (stitch.json().toObject().value(QStringLiteral("data")).toString() != kStitchType)
-        return bad();
-    Descriptor d;
-    const Result<MediaHandle> image = MediaHandle::fromJson(meta.value(QStringLiteral("image")).toObject());
-    const Result<MediaHandle> mask = MediaHandle::fromJson(meta.value(QStringLiteral("mask")).toObject());
-    if (!image || !mask)
-        return bad();
-    d.image = image.value();
-    d.mask = mask.value();
-    const QJsonObject box = meta.value(QStringLiteral("box")).toObject();
-    const QJsonObject size = meta.value(QStringLiteral("size")).toObject();
-    d.box = {box.value("x").toInt(), box.value("y").toInt(), box.value("width").toInt(), box.value("height").toInt()};
-    d.size = {size.value("width").toInt(), size.value("height").toInt()};
-    if (d.box.width <= 0 || d.box.height <= 0 || d.size.width <= 0 || d.size.height <= 0 || d.box.x < 0 || d.box.y < 0)
-        return bad();
-    if (hashes)
-        for (const MediaHandle &file : {d.image, d.mask})
-            if (hashes->hash(file.path()) != file.hash())
-                return makeInputError(QStringLiteral("file_not_found"), QStringLiteral("stitch"),
-                                      QStringLiteral("The picture or mask %1 is gone or changed since Crop to Mask read it.").arg(file.path()),
-                                      QStringLiteral("Run Crop to Mask again."));
-    return d;
-}
-
 class StitchKernel : public NodeKernel {
 public:
     Result<Values> run(const NodeContext &context) override {
-        const Result<Descriptor> described = descriptorOf(context.input("stitch"), context.hashes);
+        const Result<StitchDescriptor> described = readStitchHandle(context.input("stitch"), context.hashes);
         if (!described.ok())
             return Result<Values>(described.errors());
-        const Descriptor &d = described.value();
+        const StitchDescriptor &d = described.value();
         const int blend = toInt(context.input("blend"));
         if (blend < 0 || blend > kMaxBlend)
             return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("blend"),
