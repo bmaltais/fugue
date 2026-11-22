@@ -244,6 +244,11 @@ public:
     Q_INVOKABLE void downloadMissing();
     // Downloads the missing models of the template with this id.
     Q_INVOKABLE void downloadTemplate(const QString &id);
+    // A workflow's models (its `requires.models`) that are not on this machine, as a template card counts them (a canvas
+    // action's, #231): {count (missing), total, download (the button's text, empty when none has a source), size}.
+    QVariantMap missingModels(const QJsonArray &models) const;
+    // Downloads those of them that have a source, as a template's Download does; `what` names who asked ("action:<id>").
+    void downloadModels(const QJsonArray &models, const QString &what) { startDownloads(models, what); }
     // Makes `root` (one of downloadRoots) where downloads go from now on: the settings'
     // download_folder.
     Q_INVOKABLE void setDownloadRoot(const QString &root);

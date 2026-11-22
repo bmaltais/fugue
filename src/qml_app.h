@@ -8,6 +8,7 @@
 #include <QObject>
 #include <QtQmlIntegration/qqmlintegration.h>
 
+#include "canvas/canvas_actions.h"
 #include "canvas/canvas_history.h" // a QML type (CanvasHistory): the module registers it from here
 #include "canvas/canvas_view_model.h" // a QML type (CanvasViewModel): the module registers it from here
 #include "canvas/canvas_model.h"
@@ -63,6 +64,7 @@ struct AppObjects {
     MediaLibrary *mediaLibrary = nullptr; // optional: the media browser's results and thumbnails (#133)
     ProjectModel *projects = nullptr;     // optional: the projects dialog and the project chip (spec 1.4.2)
     Workspace *workspace = nullptr;       // optional: the window's areas (#217); none: one Graph area, as before
+    CanvasActions *canvasActions = nullptr; // optional: the Canvas view's task bar (#231); none: no bar
 };
 
 class QmlApp : public QObject {
@@ -89,6 +91,7 @@ class QmlApp : public QObject {
     Q_PROPERTY(fugue::MediaLibrary *mediaLibrary READ mediaLibrary CONSTANT)
     Q_PROPERTY(fugue::ProjectModel *projects READ projects CONSTANT)
     Q_PROPERTY(fugue::Workspace *workspace READ workspace CONSTANT)
+    Q_PROPERTY(fugue::CanvasActions *canvasActions READ canvasActions CONSTANT)
 
 public:
     explicit QmlApp(const AppObjects &objects, QObject *parent = nullptr) : QObject(parent), m_objects(objects) {}
@@ -112,6 +115,7 @@ public:
     MediaLibrary *mediaLibrary() const { return m_objects.mediaLibrary; }
     ProjectModel *projects() const { return m_objects.projects; }
     Workspace *workspace() const { return m_objects.workspace; }
+    CanvasActions *canvasActions() const { return m_objects.canvasActions; }
 
 private:
     AppObjects m_objects;

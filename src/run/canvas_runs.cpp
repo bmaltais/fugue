@@ -411,6 +411,9 @@ void CanvasRuns::flushProgress() {
 }
 
 void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
+    // A run of no tab (a canvas action's, canvas/canvas_actions.h) is not this one's to show.
+    if (!m_tabOf.contains(run))
+        return;
     const QString tab = m_tabOf.value(run);
     TabRuns &runs = m_tabs[tab];
     const QString kind = event.value("event").toString();

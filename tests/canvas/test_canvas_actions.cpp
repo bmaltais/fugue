@@ -1,0 +1,367 @@
+// The canvas actions' runner (#231, docs/canvas-actions-design.md 5, 12): CanvasActions with the window's RunService, a
+// FakeProvider on the run thread and the session's canvas store in the test's own FUGUE_HOME, no window. Generate binds
+// the action's workflow and queues one ordinary run, whose Canvas Write lands one layer on the head; progress, cancel and
+// errors come back in plain words; a fully cached Write after an undo is placed again; CanvasRuns ignores these runs.
+
+#include <QBuffer>
+#include <QDir>
+#include <QFile>
+#include <QImage>
+#include <QJsonDocument>
+#include <QTemporaryDir>
+#include <QtTest>
+
+#include "canvas_app.h"
+#include "canvas/canvas_actions.h"
+#include "canvas/mask_layer.h"
+#include "engine/canvas_store.h"
+#include "engine/fake_provider.h"
+#include "engine/pack_loader.h"
+#include "run/canvas_runs.h"
+#include "run/run_service.h"
+
+using namespace canvas_test;
+using namespace fugue;
+using namespace fugue::mask;
+
+namespace {
+
+// A fill the fake provider can serve: Canvas Region, Generate Image from the region (image.generate), Canvas Write.
+const QByteArray kTestFill = R"({
+  "fugue": 1,
+  "action": {"format": 1, "name": "Test fill", "glyph": "sparkles", "selection": "required", "region": "region",
+             "inputs": [{"role": "prompt", "targets": ["gen.prompt"]}, {"role": "seed", "targets": ["gen.seed"]}]},
+  "graph": {"nodes": {
+    "region": {"type": "fugue/canvas-region", "version": "1.2.0",
+               "inputs": {"canvas": "", "revision": "head", "x": 0, "y": 0, "width": 16, "height": 16, "padding": 8, "scale": 1,
+                          "max_megapixels": 1, "feather": 0, "multiple": 16}},
+    "gen": {"type": "fugue/generate-image", "version": "1.1.0",
+            "inputs": {"prompt": "old", "image": {"from": "region.image"}, "strength": 1, "seed": 0}},
+    "write": {"type": "fugue/canvas-write", "version": "1.3.0",
+              "inputs": {"canvas": {"from": "region.canvas"}, "image": {"from": "gen.image"}, "stitch": {"from": "region.stitch"},
+                         "blend": 0, "name": "Fill"}}
+  }}
+})";
+
+// Its block names a node the graph lacks.
+const QByteArray kBroken = R"({
+  "fugue": 1,
+  "action": {"name": "Broken", "inputs": [{"role": "prompt", "targets": ["nowhere.prompt"]}]},
+  "graph": {"nodes": {
+    "region": {"type": "fugue/canvas-region", "version": "1.2.0", "inputs": {"canvas": ""}},
+    "write": {"type": "fugue/canvas-write", "version": "1.3.0", "inputs": {"canvas": {"from": "region.canvas"}, "image": {"from": "region.image"}}}
+  }}
+})";
+
+QByteArray png(int width, int height, QColor color = Qt::darkCyan) {
+    QImage image(width, height, QImage::Format_RGB32);
+    image.fill(color);
+    QByteArray bytes;
+    QBuffer buffer(&bytes);
+    buffer.open(QIODevice::WriteOnly);
+    image.save(&buffer, "PNG");
+    return bytes;
+}
+
+Description imageDescription() {
+    OfferedModel model;
+    model.handle = QJsonObject{{"resource", "fugue/image-model"}, {"name", "flux"}};
+    model.status = ModelStatus::Ready;
+    CapabilityOffer offer;
+    offer.capability = QStringLiteral("image.generate");
+    offer.models.append(model);
+    Description description;
+    description.engine = QStringLiteral("fake");
+    description.capabilities.append(offer);
+    return description;
+}
+
+MaskPaint solid(int w, int h, Rgba c) {
+    MaskPaint m(w, h, 4);
+    m.fill(c);
+    return m;
+}
+
+void writeFile(const QString &path, const QByteArray &bytes) {
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write(bytes);
+}
+
+// The window's run objects without a window: RunService with the fake, CanvasRuns, CanvasActions.
+struct Rig {
+    App app{load(R"({"fugue": 1, "graph": {"nodes": {}}})")};
+    std::shared_ptr<FakeProvider> fake;
+    std::unique_ptr<RunService> service;
+    std::unique_ptr<CanvasRuns> runs;
+    std::unique_ptr<CanvasActions> actions;
+    QString actionsDir;
+
+    Rig() {
+        RunSetup setup;
+        setup.addNodeTypes = [](Registry &registry) { nodes::addBuiltinNodeTypes(registry); };
+        setup.addKernels = nodes::addBuiltinKernels;
+        auto *self = this;
+        setup.registerProviders = [self](Registry &registry) {
+            if (!self->fake)
+                self->fake = std::make_shared<FakeProvider>(imageDescription());
+            ProviderInstance instance;
+            instance.name = QStringLiteral("This machine");
+            instance.type = QStringLiteral("fake");
+            return registry.setProviders({ProviderEntry{instance, self->fake}});
+        };
+        const QString root = app.dir.path();
+        setup.runsRoot = root + "/runs";
+        setup.queueDir = root + "/queue";
+        setup.lockPath = root + "/engine.lock";
+        setup.cacheRoot = root + "/results";
+        setup.hashesPath = root + "/hashes.json";
+        setup.thumbnailDir = root + "/thumbnails";
+        setup.collectGarbage = false;
+        service = std::make_unique<RunService>(setup);
+        runs = std::make_unique<CanvasRuns>(&app.model, &app.workflows, service.get(), &app.registry);
+        actionsDir = root + "/actions";
+        QDir().mkpath(actionsDir);
+        writeFile(actionsDir + "/test-fill.fugue", kTestFill);
+        writeFile(actionsDir + "/broken.fugue", kBroken);
+        actions = std::make_unique<CanvasActions>(service.get(), &app.registry, &app.workflows);
+        actions->setRoots({CanvasActions::bundledRoot(), actionsDir});
+        actions->setHistoryPath(root + "/state/canvas-prompts.json");
+    }
+    ~Rig() {
+        actions.reset();
+        runs.reset();
+        service.reset(); // stops the run thread before the fake goes
+    }
+    QStringList jobs() {
+        QStringList list;
+        service->onRunThread([&] { list = fake ? fake->jobs() : QStringList(); });
+        return list;
+    }
+    void onFake(const std::function<void(FakeProvider &)> &call) { service->onRunThread([&] { call(*fake); }); }
+    QVariantMap row(const QString &id) const {
+        for (const QVariant &v : actions->actions())
+            if (v.toMap().value("id") == id)
+                return v.toMap();
+        return {};
+    }
+};
+
+QVariantMap rect(int x, int y, int w, int h) { return {{"x", x}, {"y", y}, {"width", w}, {"height", h}}; }
+
+} // namespace
+
+class TestCanvasActions : public QObject {
+    Q_OBJECT
+    QTemporaryDir m_dir;
+    QString m_canvas, m_head;
+
+    canvas::CanvasStore store() const { return canvas::CanvasStore::forSession(); }
+    QString head() const { return store().info(m_canvas)->head; }
+    int layers(const QString &revision) const {
+        return int(store().tree(store().revision(m_canvas, revision)->tree)->layers.size());
+    }
+    QString topLayer(const QString &revision) const {
+        return store().tree(store().revision(m_canvas, revision)->tree)->layers.back().name;
+    }
+    QVariantMap press(Rig &r, const QVariantMap &extra = {}) {
+        QVariantMap request{{"action", "test-fill"}, {"canvas", m_canvas}, {"revision", head()}, {"prompt", "a red umbrella"},
+                            {"rect", rect(96, 96, 64, 64)}};
+        for (auto it = extra.begin(); it != extra.end(); ++it)
+            request.insert(it.key(), it.value());
+        return r.actions->generate(request);
+    }
+    // One press through to its layer: the job answered with a square picture.
+    void pressAndFinish(Rig &r, const QVariantMap &extra = {}) {
+        const int before = int(r.jobs().size());
+        const QVariantMap started = press(r, extra);
+        QVERIFY2(started.value("ok").toBool(), qPrintable(started.value("reason").toString()));
+        QTRY_COMPARE(r.jobs().size(), before + 1);
+        r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(before), {{"image.png", png(64, 64)}}); });
+        QTRY_VERIFY(!r.actions->busy());
+    }
+
+private slots:
+    void initTestCase() {
+        QVERIFY(m_dir.isValid());
+        for (const char *variable : {"FUGUE_PROJECT", "FUGUE_BASE_XDG_CONFIG_HOME", "FUGUE_BASE_XDG_DATA_HOME", "FUGUE_BASE_XDG_STATE_HOME",
+                                     "FUGUE_BASE_XDG_CACHE_HOME", "FUGUE_BASE_XDG_RUNTIME_DIR"})
+            qunsetenv(variable);
+        qputenv("FUGUE_HOME", m_dir.filePath("home").toLocal8Bit());
+        qputenv("XDG_CONFIG_HOME", m_dir.filePath("config").toLocal8Bit());
+        qputenv("XDG_DATA_HOME", m_dir.filePath("data").toLocal8Bit());
+        qputenv("XDG_STATE_HOME", m_dir.filePath("state").toLocal8Bit());
+        qputenv("XDG_CACHE_HOME", m_dir.filePath("cache").toLocal8Bit());
+        QDir().mkpath(m_dir.filePath("run"));
+        qputenv("XDG_RUNTIME_DIR", m_dir.filePath("run").toLocal8Bit());
+    }
+
+    void init() {
+        QDir(m_dir.filePath("home")).removeRecursively();
+        PaintDocument d(256, 256);
+        d.loadLayer(LayerKind::Paint, "Base", true, 1, solid(256, 256, {30, 60, 200, 255}));
+        const auto made = store().create("Actions", d, "new");
+        QVERIFY(made);
+        m_canvas = made->id;
+        m_head = made->head;
+    }
+
+    void theActionsAreListedWithWhatIsBrokenAndWhatIsMissing() {
+        Rig r;
+        const QVariantMap fill = r.row("generative-fill");
+        QCOMPARE(fill.value("name").toString(), QStringLiteral("Generative fill"));
+        QCOMPARE(fill.value("broken").toBool(), false);
+        QCOMPARE(fill.value("missing").toInt(), 3); // Klein 4B, Qwen3 4B and the VAE are not in the test's model folders
+        QVERIFY(fill.value("download").toString().startsWith("Download 3 models"));
+        QCOMPARE(r.row("test-fill").value("missing").toInt(), 0);
+        QCOMPARE(r.row("broken").value("broken").toBool(), true);
+        QVERIFY(r.row("broken").value("reason").toString().contains("has no node nowhere"));
+        // Generate on an action whose models are missing says so and offers the download; nothing is queued.
+        const QVariantMap refused = press(r, {{"action", "generative-fill"}});
+        QVERIFY(!refused.value("ok").toBool());
+        QVERIFY(r.actions->error().contains("needs models"));
+        QCOMPARE(r.actions->errorAction(), QStringLiteral("generative-fill"));
+        QVERIFY(!r.actions->busy());
+        const QVariantMap broken = press(r, {{"action", "broken"}});
+        QVERIFY(broken.value("reason").toString().contains("has no node nowhere"));
+    }
+
+    void generateQueuesOneRunThatLandsALayerOnTheHead() {
+        Rig r;
+        const QVariantMap started = press(r);
+        QVERIFY2(started.value("ok").toBool(), qPrintable(started.value("reason").toString()));
+        QVERIFY(r.actions->busy());
+        QCOMPARE(r.actions->canvas(), m_canvas);
+        QTRY_COMPARE(r.jobs().size(), 1);
+        // The bound copy: the prompt, a seed of the runner's, the shown head in full.
+        QJsonObject params;
+        r.onFake([&](FakeProvider &f) { params = f.submitted(f.jobs().at(0)).params; });
+        QCOMPARE(params.value("prompt").toString(), QStringLiteral("a red umbrella"));
+        QVERIFY(params.contains("seed"));
+        QFile workflow(r.app.dir.path() + "/runs/" + started.value("run").toString() + "/workflow.json");
+        QVERIFY(workflow.open(QIODevice::ReadOnly));
+        const QJsonObject region = QJsonDocument::fromJson(workflow.readAll()).object().value("graph").toObject()
+                                       .value("nodes").toObject().value("region").toObject().value("inputs").toObject();
+        QCOMPARE(region.value("canvas").toString(), m_canvas);
+        QCOMPARE(region.value("revision").toString(), m_head);
+        QCOMPARE(region.value("x").toInt(), 96);
+        QCOMPARE(region.value("padding").toInt(), 64); // the router's: half the longer side, at least 64
+        QVERIFY(region.value("scale").toDouble() > 1.0); // a small region is brought up toward 1 MP
+        // Progress from the provider's node.
+        r.onFake([&](FakeProvider &f) { f.progress(f.jobs().at(0), 0.45, "sampling"); });
+        QTRY_COMPARE(r.actions->progress(), 0.45);
+        QVERIFY(r.actions->running());
+        QVERIFY(!r.runs->running()); // CanvasRuns ignores a run of no tab
+        QVERIFY(!r.runs->busy());
+        QSignalSpy finished(r.actions.get(), &CanvasActions::finished);
+        r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(0), {{"image.png", png(64, 64)}}); });
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(finished.first().at(1).toString(), QStringLiteral("ok"));
+        QVERIFY(!r.actions->busy());
+        QCOMPARE(r.actions->error(), QString());
+        QVERIFY(head() != m_head);
+        QCOMPARE(layers(head()), 2);
+        QCOMPARE(topLayer(head()), QStringLiteral("a red umbrella")); // named from the prompt
+        QCOMPARE(r.runs->lastStatus(), QString());
+        QCOMPARE(r.actions->history("test-fill"), QStringList{"a red umbrella"});
+    }
+
+    void cancelEndsTheRunAndWritesNothing() {
+        Rig r;
+        QVERIFY(press(r).value("ok").toBool());
+        QTRY_COMPARE(r.jobs().size(), 1);
+        QSignalSpy finished(r.actions.get(), &CanvasActions::finished);
+        r.actions->cancel();
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(finished.first().at(1).toString(), QStringLiteral("cancelled"));
+        QCOMPARE(r.actions->error(), QString()); // a cancel is not news
+        QCOMPARE(head(), m_head);
+    }
+
+    void aFailedRunSaysItInPlainWords() {
+        Rig r;
+        QVERIFY(press(r).value("ok").toBool());
+        QTRY_COMPARE(r.jobs().size(), 1);
+        r.onFake([&](FakeProvider &f) { f.fail(f.jobs().at(0), makeError("out_of_memory", "CUDA out of memory: tried to allocate 2 GiB.")); });
+        QTRY_VERIFY(!r.actions->busy());
+        QCOMPARE(r.actions->error(), QStringLiteral("Not enough GPU memory. Try a smaller selection."));
+        QCOMPARE(r.actions->errorCode(), QStringLiteral("out_of_memory"));
+        QCOMPARE(head(), m_head);
+        QCOMPARE(CanvasActions::plainWords(makeError("mask_empty", "x"), "Fill"), QStringLiteral("The selection is empty. Draw one, then Generate."));
+        QCOMPARE(CanvasActions::plainWords(makeError("capability_unavailable", "x"), "Generative fill"),
+                 QStringLiteral("No model on this machine can run Generative fill."));
+    }
+
+    void whatCannotRunIsRefusedBeforeAnythingIsQueued() {
+        Rig r;
+        QCOMPARE(press(r, {{"rect", QVariantMap()}}).value("reason").toString(), QStringLiteral("Select an area first."));
+        QCOMPARE(press(r, {{"rect", rect(10, 10, 4, 4)}}).value("reason").toString(), QStringLiteral("The selection is empty. Draw one, then Generate."));
+        QCOMPARE(r.actions->errorCode(), QStringLiteral("mask_empty"));
+        QCOMPARE(press(r, {{"prompt", ""}}).value("reason").toString(), QStringLiteral("Type what to put in the selection, then Generate."));
+        // Auto: the router picks Generative fill for a selection and a prompt; with no prompt it would be Remove.
+        QCOMPARE(r.actions->route(m_canvas, head(), rect(96, 96, 64, 64), true).value("action").toString(), QStringLiteral("generative-fill"));
+        QCOMPARE(press(r, {{"action", "auto"}, {"prompt", ""}}).value("reason").toString(), QStringLiteral("Type what to put in the selection, then Generate."));
+        QCOMPARE(press(r, {{"action", "auto"}, {"rect", QVariantMap()}, {"prompt", ""}}).value("reason").toString(),
+                 QStringLiteral("Select an area first, or type what to change in the whole picture."));
+        QCOMPARE(r.jobs().size(), 0);
+        QVERIFY(!r.actions->busy());
+    }
+
+    // Design decision 5: the same prompt, seed, selection and head after an undo is a cache hit to the end, Write
+    // included; the runner places the revision it landed again, so Generate always shows a result.
+    void aFullyCachedWriteAfterAnUndoIsPlacedAgain() {
+        Rig r;
+        pressAndFinish(r, {{"seed", 7}});
+        const QString landed = head();
+        QVERIFY(landed != m_head);
+        QVERIFY(store().undo(m_canvas, landed)->moved);
+        QCOMPARE(head(), m_head);
+        QSignalSpy finished(r.actions.get(), &CanvasActions::finished);
+        QVERIFY(press(r, {{"seed", 7}}).value("ok").toBool());
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(finished.first().at(1).toString(), QStringLiteral("ok"));
+        QCOMPARE(r.jobs().size(), 1); // nothing ran again
+        QCOMPARE(head(), landed);     // the layer is back
+        QCOMPARE(r.actions->error(), QString());
+        // Read from the same revision again while the layer is still there (what slice 4's "generate again" pins): the
+        // cache is right, and the bar says why nothing new came.
+        QVERIFY(press(r, {{"seed", 7}, {"revision", m_head}}).value("ok").toBool());
+        QTRY_COMPARE(finished.size(), 2);
+        QCOMPARE(head(), landed);
+        QVERIFY2(r.actions->notice().startsWith("Same prompt, seed and selection as “a red umbrella”"), qPrintable(r.actions->notice()));
+        // Another seed is a new layer.
+        pressAndFinish(r, {{"seed", 8}});
+        QCOMPARE(layers(head()), 3);
+    }
+
+    // A Quick Mask selection goes in by its hash (Region 1.2), with its bounds as the rectangle.
+    void aQuickMaskSelectionIsStoredByContentAndRuns() {
+        Rig r;
+        MaskLayer selection;
+        selection.setImageSize(QSize(256, 256));
+        QVERIFY(!r.actions->storeSelection(&selection).value("ok").toBool()); // nothing painted
+        selection.fillRect(100, 110, 40, 40, false); // square, as the fake answers
+        const QVariantMap stored = r.actions->storeSelection(&selection);
+        QVERIFY2(stored.value("ok").toBool(), qPrintable(stored.value("reason").toString()));
+        QVERIFY(stored.value("hash").toString().startsWith("sha256:"));
+        QCOMPARE(stored.value("width").toInt(), 40);
+        QVERIFY(store().selection(stored.value("hash").toString()));
+        pressAndFinish(r, {{"selection", stored.value("hash")}, {"rect", rect(100, 110, 40, 40)}});
+        QCOMPARE(r.actions->error(), QString());
+        QCOMPARE(layers(head()), 2);
+    }
+
+    void thePromptHistoryIsPerActionNewestFirstAndClearable() {
+        Rig r;
+        pressAndFinish(r, {{"prompt", "one"}});
+        pressAndFinish(r, {{"prompt", "two"}});
+        pressAndFinish(r, {{"prompt", "one"}});
+        QCOMPARE(r.actions->history("test-fill"), (QStringList{"one", "two"}));
+        QCOMPARE(r.actions->history("generative-fill"), QStringList());
+        r.actions->clearHistory();
+        QCOMPARE(r.actions->history("test-fill"), QStringList());
+    }
+};
+
+QTEST_MAIN(TestCanvasActions)
+#include "test_canvas_actions.moc"

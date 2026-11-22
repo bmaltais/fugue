@@ -14,6 +14,8 @@ void followNodeTypeReloads(RegistryReloader &reloader, const AppObjects &objects
             objects.settings->packs()->refresh();
         if (objects.nodeLibrary)
             objects.nodeLibrary->refresh();
+        if (objects.canvasActions) // an action's nodes may be installed, or gone, now
+            objects.canvasActions->refresh();
     });
     // Queued: the save's own call (a menu, a button) is over before every row is made again.
     if (objects.canvasModel)

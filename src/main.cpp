@@ -148,6 +148,8 @@ int main(int argc, char *argv[]) {
     fugue::RunBar runBar(&runs, fugue::stateDir() + "/run-bar.json", &chrome);
     runBar.registerCommands(commands);
     fugue::RunQueue runQueue({}, &runService);
+    // The Canvas view's task bar (#231): the bundled actions, queued through the same runs.
+    fugue::CanvasActions canvasActions(&runService, &registry, &workflows);
     // Open, Copy and Save Image on a node's menu (#57); failures go to the window banner.
     fugue::ImageActions imageActions(commands, canvasModel, runs);
     QObject::connect(&imageActions, &fugue::ImageActions::message, &workflows, &fugue::Workflows::notify);
@@ -182,7 +184,7 @@ int main(int argc, char *argv[]) {
     const fugue::AppObjects objects{&translator, &theme,   &commands, &canvasModel,  &workflows,
                                     &appSettings, &runs, &imageActions, &colorHistory, &layoutColors,
                                     &runBar,      &runQueue,    &sidePanels,   &nodeLibrary,  &recentFiles,  &chrome,
-                                    &mediaLibrary, &projects, &workspace};
+                                    &mediaLibrary, &projects, &workspace, &canvasActions};
     // The registry is filled again when the packs or the trust change, so what is installed is
     // usable with no restart (#70). Made after what it refreshes, so it goes first.
     fugue::RegistryReloader reloader(&registry, addNodeTypes);
