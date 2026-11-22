@@ -80,6 +80,15 @@ Reply packTrust(const Command &command, Context &context);
 Reply cacheStatus(const Command &command, Context &context);
 Reply cacheClear(const Command &command, Context &context);
 
+// project.cpp: the `project` commands (1.4.2, 13.1). None needs a person: they only change the registry
+// and project.json files, never delete a project's files.
+Reply projectList(const Command &command, Context &context);
+Reply projectShow(const Command &command, Context &context);
+Reply projectNew(const Command &command, Context &context);
+Reply projectAdd(const Command &command, Context &context);
+Reply projectRemove(const Command &command, Context &context);
+Reply projectInherits(const Command &command, Context &context);
+
 // skill.cpp: `skill install` and `skill uninstall` (13.5).
 Reply skillInstall(const Command &command, Context &context);
 Reply skillUninstall(const Command &command, Context &context);

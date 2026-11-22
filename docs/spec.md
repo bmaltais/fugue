@@ -102,7 +102,7 @@ XDG variables are honored; the defaults are shown.
 
 #### 1.4.1 One root: FUGUE_HOME
 
-`FUGUE_HOME=<dir>`, or `--home <dir>` anywhere on the command line (the window and `fugue <command>`; the option beats the variable), makes one folder the home of everything a session writes (epic #204: projects and private mode build on it; a portable install needs it too). The folder must be absolute. Fugue makes it (mode 0700) and, before Qt starts, points these at subfolders of it, so Fugue's own folders (the table above) and every child process, the GPU helper, ffmpeg and the packs, inherit them:
+`FUGUE_HOME=<dir>`, or `--home <dir>` anywhere on the command line (the window and `fugue <command>`; the option beats the variable), makes one folder the home of everything a session writes (epic #204: projects ([1.4.2](#142-projects)) and private mode build on it; a portable install needs it too). The folder must be absolute. Fugue makes it (mode 0700) and, before Qt starts, points these at subfolders of it, so Fugue's own folders (the table above) and every child process, the GPU helper, ffmpeg and the packs, inherit them:
 
 | Variable | Under the root | Table above becomes |
 | --- | --- | --- |
@@ -117,6 +117,24 @@ XDG variables are honored; the defaults are shown.
 Four defaults no environment variable can move follow the root by code (`engine/paths.h`): the output folder (`outputs/`, so `outputs/inputs/` too), the folder for documents (`documents/`: the suggested place for workflows, `documents/templates/`, a write root of the file nodes), the media library's thumbnails and the path that messages give for `providers.json`. The Wayland socket, the session bus and the sound server live in the real runtime folder, so `WAYLAND_DISPLAY`, `DBUS_SESSION_BUS_ADDRESS`, `PIPEWIRE_RUNTIME_DIR` and `PULSE_RUNTIME_PATH` are made to name it (unless set already). `HOME` is left as it is: Omarchy's theme and language files are read from it, and a file the user picks is theirs.
 
 With no root nothing changes. What a root does **not** do: the user's own files (a saved workflow, `inputs/` beside it, a folder chosen in settings, `model_paths`) are where the user put them; file nodes may still read under `$HOME` (the read root shrinks only with projects, #204); a pack or a program run by one can write anywhere it chooses (only a sandbox guarantees otherwise, #204); the window title still names the open workflow; the portals, the clipboard, the journal, a core dump and swap are outside Fugue. `tests/cli/test_cli_home_guard.cpp` runs workflows (images; ffmpeg) with an empty `HOME` and asserts nothing was written outside the root, and under `strace -f` where it is available; add any new write path to `engine/paths.h` so that test keeps holding.
+
+#### 1.4.2 Projects
+
+A **project** is a `FUGUE_HOME` root ([1.4.1](#141-one-root-fugue_home)) with a `project.json` in it (epic #204). Everything 1.4.1 says of a root holds; the file names it and says what it takes from the ordinary session. The **Default project** is today's install: no `project.json`, nothing moved; the name `default` is reserved for it. A root with no `project.json` (a bare `--home <dir>`) stays an anonymous project that inherits nothing.
+
+```json
+{"format": 1, "name": "Acme", "inherits": ["models", "packs", "preferences"]}
+```
+
+- `name`: 1 to 64 characters, no `/`, `\` or `.` (so a name is never taken for a path) and no control character; not `default`, in any case. Names are unique among the registered projects, compared without regard to case.
+- `inherits`: words from `models`, `packs`, `templates`, `prompts`, `preferences`, and only the Default project can be inherited from (no chains). A word that is unknown or can never be inherited (providers and keys, recent files, recovery, hashes, results, runs, thumbnails, queue, outputs, inputs, workflows, documents, the output, inputs and download folders, the cache limits) is ignored and reported as a `project_inherits_ignored` warning; the project still opens. A new project inherits `models`, `packs` and `preferences`. This release only records the list; what inheriting does is a later step of #204. Keys this version does not know are kept when it rewrites the file.
+- The **registry** `projects.json` is in the base config folder, `~/.config/fugue/projects.json`, also from inside a project: `{"format": 1, "last": "<path>", "projects": ["<absolute path>", ...]}`. It is a list, not a scan, so a project may sit on another drive or in a client's folder. A listed path whose folder or `project.json` is gone lists as `missing` (and stays listed); one whose `project.json` cannot be used lists as `invalid`. The file appears with the first `fugue project new` or `add`; a file that cannot be read is an error and is never replaced by an empty one.
+- **Base folders.** Before `setFugueHome` redirects anything it saves the ordinary session's XDG folders once, as `FUGUE_BASE_XDG_CONFIG_HOME`, `FUGUE_BASE_XDG_DATA_HOME` and `FUGUE_BASE_XDG_STATE_HOME` (never overwritten, so a child process or a second call keeps them); `baseConfigDir()`, `baseDataDir()` and `baseStateDir()` in `engine/paths.h` give the Fugue folders in them. Without a root they are `configDir()` and the others.
+- **Location.** A new project's root is `<base data>/projects/<slug>` (`~/.local/share/fugue/projects/acme`; the slug is the name in lowercase letters and digits joined by `-`, with `-2`, `-3` added when the folder is taken), or any folder with `--in <dir>`.
+
+**Selection**, first match wins: `--home <dir>`, `--project <name|path>`, `FUGUE_HOME`, `FUGUE_PROJECT`, then, for the window only, the project it last ran in (the registry's `last`; gone or unusable means Default), then Default. `--home` together with `--project` is an error (exit code 2, as for any unusable root). The command line never uses the last project, so scripts and agents get the same session every time. A value with a `/` or starting with `.` or `~` is a path (any folder with a `project.json`, registered or not); anything else is a name looked up in the registry. `default` selects the ordinary session, except from inside a project (`FUGUE_HOME` set), where it is refused. A selection that fails (unknown name, missing or invalid project, no `project.json` at the path) is an error with exit code 2 and nothing is started. A child process inherits `FUGUE_HOME` and reads `project.json` again. The window records where it runs as `last` (Default clears it, an anonymous `--home` leaves it); the command line never does.
+
+`fugue project` ([13.1](#131-commands)) works on the registry from any session. It never deletes anything: `remove` only takes a project off the list, its folder and files stay.
 
 ### 1.5 Hashes and canonical JSON
 
@@ -2517,11 +2535,20 @@ Each command works with no display, never opens a dialog, and takes `--json`. Fo
 | `fugue model list [--type <resource type>] [--hash]` | Models found on disk and offered by providers. A file on disk has a `handle` only once its hash is known (listing reads no model file); `--hash` hashes the others, once each, so every file gets a full handle; a file it cannot read is a `media_unreadable` warning. |
 | `fugue cache status` | What Fugue keeps under `~/.cache/fugue` ([10.6](#106-cache-management), #141): per kind (results, thumbnails including the media browser's, runs) the bytes, files, oldest and limit, and the results per workflow and per node. |
 | `fugue cache clear [--kind results\|thumbnails\|runs\|all] [--workflow <file>] [--node <id>] [--older-than <age>] [--dry-run]` | Clear one kind (results unless `--kind` says), narrowed by workflow (results and runs), node (results) and age (`30d`, `12h`, `2w`); `--dry-run` says what would go and changes nothing. Frozen results, saved outputs and a run going or queued are never removed; while a run is going its results and previews are left alone (the `cache_busy` warning). |
+| `fugue project list` | The registered projects ([1.4.2](#142-projects)): name, folder, state (`ok`, `missing`, `invalid`), what each inherits, and the one this session is in; the Default project first. |
+| `fugue project show [<name\|path>]` | One project: with no argument, the one this session is in (`default` with none). |
+| `fugue project new <name> [--in <dir>] [--inherits a,b]` | Make a project (its `project.json`) and register it. `--in` is its root (made if needed; it may not hold a project already), else `<base data>/projects/<slug>`; `--inherits` is a list of `models`, `packs`, `templates`, `prompts`, `preferences` or `none`, default `models,packs,preferences`. A word that cannot be inherited is a `project_inherits_ignored` warning. |
+| `fugue project add <dir>` | Register the project already in `<dir>` (again is fine). |
+| `fugue project remove <name\|path>` | Take a project off the list; its folder and files are never touched. |
+| `fugue project inherits <name\|path> <items\|none>` | Replace what the project inherits (recorded only, see 1.4.2). |
 | `fugue command list` | The command registry and current key bindings. |
 | `fugue skill install [--target agents\|claude\|all] [--dry-run] [--force]`, `fugue skill uninstall` (same options) | Install, update or remove the bundled agent skill ([13.5](#135-agent-skill)). |
 
 Exit codes: 0 for success, 1 for any failure. A run that ends `failed` or `cancelled` under
-`--wait` exits 1.
+`--wait` exits 1. 2 is a session that could not start because of its root or project selection
+(`--home` and `--project` together, an unknown or unusable project, a root that cannot be made); nothing ran.
+
+`--home <dir>` and `--project <name|path>` may stand anywhere on the line and take no part in a command's own options ([1.4.1](#141-one-root-fugue_home), [1.4.2](#142-projects)).
 
 ### 13.2 Output
 
@@ -2584,6 +2611,7 @@ Codes in v0.1:
 | Masks (#167) | `mask_empty`, `mask_unsupported`, `stitch_mismatch`; warnings `mask_full`, `mask_resized` (Paint too) ([14.4](#144-masking-and-inpainting-167)) |
 | Running | `node_failed`, `node_bad_output`, `node_timeout`, `out_of_memory`, `cancelled`, `node_test_failed` (`fugue node test`: an output is not what the test expects) |
 | Cache | `cache_busy` (a warning: `fugue cache clear` left the results and previews alone because a run is going) |
+| Projects | `project_invalid` (a name or `project.json` that cannot be used, or a folder that holds none), `project_exists` (a registered project has the name, or the folder holds one), `unknown_project`, `project_inherits_ignored` (a warning: a word of `inherits` that is unknown or can never be inherited) |
 | Skill | `skill_modified` (`fugue skill install\|uninstall`: the installed skill is not the one Fugue wrote, so it is left alone) |
 | Other | `unknown_run`, `usage`, `internal` |
 

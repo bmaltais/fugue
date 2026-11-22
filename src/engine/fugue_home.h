@@ -18,6 +18,14 @@ namespace fugue {
 // value); nothing is changed then. Without a root it does nothing and returns true.
 bool applyFugueHome(int &argc, char **argv, QString *error);
 
+// Projects (spec 1.4.2) pick the root too, with this order: `--home`, `--project <name|path>`, FUGUE_HOME,
+// FUGUE_PROJECT, else the ordinary session (Default). `--home` with `--project` is an error. `default`
+// names the ordinary session. "Last used" is not part of it: a script must always get the same session.
+//
+// The window only, after applyFugueHome when nothing selected a root: opens the project the window last
+// ran in (the registry's `last`), if it is still a project. A gone or broken one means Default, silently.
+bool applyLastUsedProject(QString *error);
+
 // The same with the root given (the unit tests'): an absolute folder.
 bool setFugueHome(const QString &root, QString *error);
 

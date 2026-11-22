@@ -4,8 +4,11 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QStandardPaths>
 
 #include <cstring>
+
+#include "engine/project.h"
 
 namespace fugue {
 
@@ -64,6 +67,17 @@ bool setFugueHome(const QString &given, QString *error) {
     for (const Redirect &redirect : kRedirects)
         if (!makePrivateFolder(root + QLatin1Char('/') + QLatin1String(redirect.folder), error))
             return false;
+    // The ordinary session's folders, once: a project inside a project (or a child process) must not
+    // take the redirected ones for the base.
+    struct Base {
+        const char *variable;
+        QStandardPaths::StandardLocation location;
+    };
+    for (const Base &base : {Base{"FUGUE_BASE_XDG_CONFIG_HOME", QStandardPaths::GenericConfigLocation},
+                             Base{"FUGUE_BASE_XDG_DATA_HOME", QStandardPaths::GenericDataLocation},
+                             Base{"FUGUE_BASE_XDG_STATE_HOME", QStandardPaths::GenericStateLocation}})
+        if (qEnvironmentVariable(base.variable).isEmpty())
+            qputenv(base.variable, QStandardPaths::writableLocation(base.location).toLocal8Bit());
     const QByteArray realRuntime = qgetenv("XDG_RUNTIME_DIR");
     for (const Redirect &redirect : kRedirects)
         qputenv(redirect.variable, (root + QLatin1Char('/') + QLatin1String(redirect.folder)).toLocal8Bit());
@@ -76,30 +90,99 @@ bool setFugueHome(const QString &given, QString *error) {
     return true;
 }
 
-bool applyFugueHome(int &argc, char **argv, QString *error) {
-    QString root = qEnvironmentVariable("FUGUE_HOME");
+namespace {
+
+bool g_selected = false; // a root or Default was named by an option or a variable: no "last used"
+
+// Takes `--<name> <value>` or `--<name>=<value>` out of argv. `present` says it was there.
+bool takeOption(int &argc, char **argv, const char *name, QString *value, bool *present, QString *error) {
+    const QByteArray flag = QByteArray("--") + name;
+    *present = false;
     for (int i = 1; i < argc; ++i) {
-        const bool separate = std::strcmp(argv[i], "--home") == 0;
-        if (!separate && std::strncmp(argv[i], "--home=", 7) != 0)
+        const bool separate = flag == argv[i];
+        if (!separate && std::strncmp(argv[i], flag.constData(), size_t(flag.size())) != 0)
+            continue;
+        if (!separate && argv[i][flag.size()] != '=')
             continue;
         int used = 1;
         if (separate) {
             if (i + 1 >= argc) {
                 if (error)
-                    *error = QStringLiteral("--home needs a folder");
+                    *error = QStringLiteral("%1 needs a value").arg(QString::fromLatin1(flag));
                 return false;
             }
-            root = QString::fromLocal8Bit(argv[i + 1]);
+            *value = QString::fromLocal8Bit(argv[i + 1]);
             used = 2;
         } else {
-            root = QString::fromLocal8Bit(argv[i] + 7);
+            *value = QString::fromLocal8Bit(argv[i] + flag.size() + 1);
         }
         for (int j = i; j + used <= argc; ++j) // also moves the terminating null
             argv[j] = argv[j + used];
         argc -= used;
+        *present = true;
         break;
     }
+    return true;
+}
+
+// The root a project named by `selector` has; empty with `ok` for Default.
+bool projectRoot(const QString &selector, QString *root, QString *error) {
+    root->clear();
+    if (selector.compare(QStringLiteral("default"), Qt::CaseInsensitive) == 0) {
+        if (!qEnvironmentVariable("FUGUE_HOME").isEmpty()) {
+            if (error)
+                *error = QStringLiteral("cannot select the default project from inside a project; start fugue from a normal shell");
+            return false;
+        }
+        return true;
+    }
+    const Result<QString> found = resolveProjectRoot(selector);
+    if (!found) {
+        if (error)
+            *error = found.error().message + (found.error().hint.isEmpty() ? QString() : QStringLiteral(" (") + found.error().hint + QLatin1Char(')'));
+        return false;
+    }
+    *root = *found;
+    return true;
+}
+
+} // namespace
+
+bool applyFugueHome(int &argc, char **argv, QString *error) {
+    g_selected = false;
+    QString home, project;
+    bool hasHome = false, hasProject = false;
+    if (!takeOption(argc, argv, "home", &home, &hasHome, error) || !takeOption(argc, argv, "project", &project, &hasProject, error))
+        return false;
+    if (hasHome && hasProject) {
+        if (error)
+            *error = QStringLiteral("--home and --project cannot be used together");
+        return false;
+    }
+    QString root;
+    if (hasHome) {
+        root = home;
+    } else if (hasProject) {
+        g_selected = true;
+        if (!projectRoot(project, &root, error))
+            return false;
+    } else if (const QString env = qEnvironmentVariable("FUGUE_HOME"); !env.isEmpty()) {
+        root = env;
+    } else if (const QString named = qEnvironmentVariable("FUGUE_PROJECT"); !named.isEmpty()) {
+        g_selected = true;
+        if (!projectRoot(named, &root, error))
+            return false;
+    }
+    if (!root.isEmpty())
+        g_selected = true;
     return root.isEmpty() ? true : setFugueHome(root, error);
+}
+
+bool applyLastUsedProject(QString *error) {
+    if (g_selected || !fugueHome().isEmpty())
+        return true;
+    const QString last = lastUsedProjectRoot();
+    return last.isEmpty() ? true : setFugueHome(last, error);
 }
 
 QString fugueHome() {

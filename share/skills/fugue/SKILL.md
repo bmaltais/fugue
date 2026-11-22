@@ -106,6 +106,12 @@ fail with `permission_denied`.
 | `fugue template list` | Templates, with the models and packs each needs |
 | `fugue cache status` | What the caches hold (results, thumbnails, runs): bytes, files, oldest, and the results per workflow and node |
 | `fugue cache clear` | Clear a cache, results unless `--kind results\|thumbnails\|runs\|all`; `--workflow`, `--node`, `--older-than 30d`, `--dry-run` first. Saved outputs, frozen results and a run going or queued are never removed |
+| `fugue project list` | The registered projects (folder isolation, spec 1.4.2): name, folder, state, what each inherits; the current one is marked |
+| `fugue project show` | One project (no name: the one this session is in); `--project <name or path>` anywhere on the line runs a command inside one, `FUGUE_PROJECT` likewise, never together with `--home` |
+| `fugue project new <name>` | Make and register a project (`--in <dir>`, `--inherits models,packs,preferences`) |
+| `fugue project add <dir>` | Register the project in a folder |
+| `fugue project remove <name>` | Take it off the list; its files stay |
+| `fugue project inherits <name> <items>` | Set what it inherits (`models`, `packs`, `templates`, `prompts`, `preferences`, or `none`) |
 | `fugue skill install` | Install or update this skill (`--target`, `--dry-run`, `--force`) |
 | `fugue skill uninstall` | Remove it (`--target`, `--dry-run`, `--force`) |
 
@@ -132,6 +138,7 @@ Every failure has a stable `code`. Fix by code, not by message text:
   `node_test_failed`
 - Masks: `mask_empty` (paint the part to change), `mask_unsupported` (the provider or model cannot take a mask: Generate Image's `mask` needs a model whose provider lists `mask` in its `inputs`; the error names the ones that can), `stitch_mismatch` (Stitch got a picture of another shape than its crop); warnings `mask_full` (everything is masked: plain generation), `mask_resized` (the mask was stretched to the picture)
 - Cache: `cache_busy` (a warning: a run is going, so `cache clear` left its results and previews alone)
+- Projects: `project_invalid`, `project_exists`, `unknown_project`, `project_inherits_ignored` (a warning)
 - Skill: `skill_modified`
 - Other: `unknown_run`, `usage`, `internal`
 

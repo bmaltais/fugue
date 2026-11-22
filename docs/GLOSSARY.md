@@ -191,6 +191,6 @@ _Avoid_: lock, pin (that is the canvas action that fixes a node's position)
 An action of the window with a string id (`file.save`), registered once with its description, default keys, context and a handler. The menus, the `?` overlay and the settings read the one registry. The user's keymap is a diff against its defaults.
 _Avoid_: action id, menu item, shortcut (a shortcut is only one key bound to a command)
 
-**Project** (planned, epic #204; not built yet):
-An isolated workspace: one root folder (`FUGUE_HOME`) with its own settings, providers, model sources, packs, recent files and saved results, and a short explicit list of what it inherits from the ordinary session. A *private* project has a vault (ephemeral or encrypted) as its root and stricter defaults; an ephemeral one is a *temporary project*. A workflow stays the saved document; a project holds the sessions that use workflows.
+**Project** (epic #204, spec 1.4.2; selection, registry and `fugue project` are built, inheriting and the window's switcher are not yet):
+An isolated workspace: one root folder (`FUGUE_HOME`) with a `project.json` and its own settings, providers, model sources, packs, recent files and saved results, and a short explicit list (`inherits`) of what it takes from the *Default project*, the ordinary session, which has no `project.json` and the reserved name `default`. A *private* project has a vault (ephemeral or encrypted) as its root and stricter defaults; an ephemeral one is a *temporary project*. A workflow stays the saved document; a project holds the sessions that use workflows.
 _Avoid_: workspace, profile, vault (the vault is a project's storage, not the project)

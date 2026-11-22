@@ -65,12 +65,15 @@ const char *helpText =
     "  pack list | pack add <folder|git-url> [--ref <tag|commit>] | pack update [id] [--ref ...] | pack remove|trust <id>\n"
     "  model list [--type <resource type>] [--hash]\n"
     "  template list\n"
+    "  project list | project show [name|path] | project new <name> [--in <dir>] [--inherits a,b] | project add <dir>\n"
+    "  project remove <name|path> | project inherits <name|path> <items|none>\n"
     "  skill install|uninstall [--target agents|claude|all] [--dry-run] [--force]\n"
     "  cache status | cache clear [--kind results|thumbnails|runs|all] [--workflow <file>] [--node <id>]\n"
     "      [--older-than <age, 30d>] [--dry-run]\n"
     "  provider, command (later releases)\n"
     "With no command, fugue opens the window.\n"
-    "  --home <dir> (anywhere), or FUGUE_HOME: keep everything fugue writes in one folder (spec 1.4.1)\n";
+    "  --home <dir> (anywhere), or FUGUE_HOME: keep everything fugue writes in one folder (spec 1.4.1)\n"
+    "  --project <name|path> (anywhere), or FUGUE_PROJECT: work in a project (spec 1.4.2); not with --home\n";
 
 } // namespace
 

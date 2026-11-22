@@ -12,6 +12,13 @@ QString configDir(); // $XDG_CONFIG_HOME/fugue  (~/.config/fugue)
 QString stateDir();  // $XDG_STATE_HOME/fugue   (~/.local/state/fugue)
 QString dataDir();   // $XDG_DATA_HOME/fugue    (~/.local/share/fugue)
 QString cacheDir();  // $XDG_CACHE_HOME/fugue   (~/.cache/fugue)
+// The ordinary session's folders even from inside a project (spec 1.4.2): the XDG folders as they were before
+// setFugueHome redirected them (it saves them once in FUGUE_BASE_XDG_{CONFIG,DATA,STATE}_HOME). Without a root
+// they are configDir(), dataDir() and stateDir(). The project registry, the default location of new projects
+// and, later, what a project inherits are found through these.
+QString baseConfigDir();
+QString baseDataDir();
+QString baseStateDir();
 // The 512 px copies of the pictures the canvas shows (spec 12.7): <cacheDir>/thumbnails.
 QString thumbnailsDir();
 // The media library's thumbnails of the user's own files (spec 12.7): <cacheDir>/thumbs.

@@ -28,6 +28,7 @@
 #include "engine/trust_store.h"
 #include "node_type_reloads.h"
 #include "engine/fugue_home.h"
+#include "engine/project.h"
 #include "nodes/builtin.h"
 #include "qml_app.h"
 #include "run/canvas_runs.h"
@@ -60,6 +61,12 @@ int main(int argc, char *argv[]) {
                                     fugue::loadInstalledPacks(registry);
                                 },
                                 fugue::nodes::addBuiltinKernels});
+
+    // The window only: with nothing selected it opens the project it last ran in (never the command line, so
+    // scripts get the same session every time), and remembers where it is running.
+    if (QString lastError; !fugue::applyLastUsedProject(&lastError))
+        std::fprintf(stderr, "fugue: %s\n", qPrintable(lastError));
+    fugue::recordLastUsedProject();
 
     QGuiApplication app(argc, argv);
     app.setApplicationName("fugue");

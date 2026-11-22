@@ -21,6 +21,17 @@ QString configDir() { return under(QStandardPaths::GenericConfigLocation); }
 QString stateDir() { return under(QStandardPaths::GenericStateLocation); }
 QString dataDir() { return under(QStandardPaths::GenericDataLocation); }
 QString cacheDir() { return under(QStandardPaths::GenericCacheLocation); }
+
+namespace {
+QString baseUnder(const char *variable, const QString &current) {
+    const QString saved = qEnvironmentVariable(variable);
+    return saved.isEmpty() ? current : QDir::cleanPath(saved) + QStringLiteral("/fugue");
+}
+} // namespace
+
+QString baseConfigDir() { return baseUnder("FUGUE_BASE_XDG_CONFIG_HOME", configDir()); }
+QString baseDataDir() { return baseUnder("FUGUE_BASE_XDG_DATA_HOME", dataDir()); }
+QString baseStateDir() { return baseUnder("FUGUE_BASE_XDG_STATE_HOME", stateDir()); }
 QString mediaThumbnailsDir() { return cacheDir() + QStringLiteral("/thumbs"); }
 QString thumbnailsDir() { return cacheDir() + QStringLiteral("/thumbnails"); }
 
