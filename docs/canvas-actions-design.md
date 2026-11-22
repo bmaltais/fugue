@@ -172,6 +172,9 @@ Why a hash rather than a PNG fed through a Load Image node:
 workflow run from the Graph and an action read a selection the same way. That needs coordinating with the agent on
 #230 (see 12). For a rectangle, the hash is not used: the four literals are enough.
 
+Built with #230 (2026-11-22): Region 1.2's `selection`, `CanvasStore::storeSelection` and `selection`, and Quick Mask's
+**Use selection**, which writes the hash and the selection's bounds into the followed Region as one undo step (spec 14.5).
+
 ## 4. The task bar
 
 **Placement.** It is a floating bar inside the Canvas view's picture rectangle, in both hosts (the File > Canvas…

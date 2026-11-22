@@ -38,7 +38,8 @@ Two canvases with the same pixels and layer settings have the same **tree hash**
 Two nodes in the `Image/Canvas` category use a canvas by its id (Canvas Region's Canvas is a drop-down in
 the window, see below):
 
-- **Canvas Region** takes a rectangle (X, Y, Width, Height; 0 runs to the edge) or a mask you connect,
+- **Canvas Region** takes a rectangle (X, Y, Width, Height; 0 runs to the edge), a mask you connect, or a selection
+  painted in the Canvas view (Selection, see Tools below),
   adds Padding around it, and gives you that part of the canvas as a picture, the mask of the part to
   change, and a stitch. Scale and Cap set the size it is redrawn at (a small region is drawn larger,
   up to the megapixel cap); Feather softens the mask's edge outward. Its Revision is `head` unless you
@@ -208,3 +209,36 @@ an eye:
   the panel go back and forward. Layers are changed on the head only: on an older revision or a
   candidate the list is there to look at.
 - Hover a layer to see where it came from (the Canvas Write that made it, and when).
+
+## Tools, masks and Quick Mask
+
+The Canvas view has a narrow column of tools at the left of the picture, with Photoshop's keys (they work while the
+pointer is over the view; over the Layers panel the panel's own keys win). The tooltip of each says its key:
+
+- **Hand** (H, or hold Space with any tool): drag the picture to pan. **Zoom** (Z): click to zoom in, Alt+click to
+  zoom out. The wheel zooms and the middle button pans with every tool.
+- **Rectangle region** (M or R), the tool you start with: the region rectangle described above.
+- **Mask brush** (B) and **eraser** (E; X swaps them): paint a layer mask, or the Quick Mask selection. `[` and `]`
+  make the brush smaller and larger; Alt+drag on the picture sizes it (left and right) and sets its hardness (up and
+  down). Size, Hardness and Opacity are in the bar over the picture.
+- **Quick Mask** (Q), at the foot of the column.
+
+The bar over the picture shows the current tool's settings and what the brush paints.
+
+**Paint a layer mask.** Select a layer and press **Add mask** (under the Layers list, in the layer's right-click menu,
+or Ctrl+Shift+M): the layer gets a mask that shows it all, and the brush takes it ("Mask of <layer>" in the bar; the
+mask's thumbnail gets a frame). A click on the mask thumbnail of a layer that has one does the same. The brush hides
+the layer where you paint and the eraser shows it again; the hidden part is red while **Overlay** is on (\ turns it
+off to see the result). The strokes you make in a row are one step: when you stop for a moment they become a new
+revision of the canvas (History names it "Painted: <layer>"), and Ctrl+Z takes it back. The `⋯` menu has Invert
+(Ctrl+I), Reveal all and Hide all, one step each.
+
+**Paint the area to change (Quick Mask).** Press Q, or the Quick Mask button: the same brush now paints a selection, in
+red, which no revision keeps (Ctrl+Z undoes a stroke). With a Canvas Region node followed, **Use selection** gives it the
+selection as the area to change, as one undo step of the workflow: the next run redraws the painted part, and its
+result lands as a layer. Drawing a rectangle afterwards replaces it. Press Q again to leave Quick Mask; the selection
+stays until you clear it (**Clear selection**) or change canvas.
+
+Canvas Region's **Selection** input (advanced) is what Use selection writes: the hash of the stored selection. With
+it, the Mask input and the rectangle are not used; the selection's bounds are in X, Y, Width and Height so the frame
+and the size the model gets read right. A replay of the run reads the same selection.
