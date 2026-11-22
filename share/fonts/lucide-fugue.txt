@@ -51,3 +51,4 @@ paint-bucket e2e6
 undo-2 e2a1
 redo-2 e2a0
 eye e0be
+layout-template e207

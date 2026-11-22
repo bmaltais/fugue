@@ -275,9 +275,9 @@ Popup {
                                     font.pixelSize: dialog.look.captionSize
                                     // Which files and where each goes, or the whole failure, on hover.
                                     ToolTip.visible: statusHover.hovered && (statusRow.failed || cell.modelData.missingModels.length > 0)
+                                    ToolTip.delay: App.theme.look.tooltipDelay
                                     ToolTip.text: statusRow.failed ? statusRow.downloads.failure
                                                   : cell.modelData.missingModels.map(m => qsTr("%1, into %2").arg(m.name, m.folder)).join("\n")
-                                    ToolTip.delay: 300
                                     HoverHandler { id: statusHover }
                                 }
                                 // Its own press target: a click here does not open the template.
@@ -296,6 +296,7 @@ Popup {
                                           : qsTr("Download")
                                     Accessible.name: statusRow.downloading ? qsTr("Cancel the download") : cell.modelData.download
                                     ToolTip.visible: hovered && !statusRow.downloading
+                                    ToolTip.delay: App.theme.look.tooltipDelay
                                     ToolTip.text: cell.modelData.download
                                     onClicked: statusRow.downloading ? statusRow.downloads.cancel()
                                                                      : App.workflows.downloadTemplate(cell.modelData.id)

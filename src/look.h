@@ -150,6 +150,7 @@ class CanvasLook : public QObject {
     Q_PROPERTY(int popupCorner MEMBER m_popupCorner NOTIFY changed) // R: popups, overlay
     Q_PROPERTY(int smallCorner MEMBER m_smallCorner NOTIFY changed) // wells, chips, keycaps
     Q_PROPERTY(int thumbCorner MEMBER m_thumbCorner NOTIFY changed)
+    Q_PROPERTY(int tooltipDelay MEMBER m_tooltipDelay NOTIFY changed)   // ms a pointer rests before a tooltip shows
     Q_PROPERTY(int labelSize MEMBER m_labelSize NOTIFY changed)     // port and widget labels, values
     Q_PROPERTY(int captionSize MEMBER m_captionSize NOTIFY changed) // times, status words, chips
     Q_PROPERTY(int frameTitleSize MEMBER m_frameTitleSize NOTIFY changed)
@@ -209,6 +210,7 @@ private:
     QVariantList m_tabColors;
     int m_textSize = 12;
     qreal m_unit = 4;
+    int m_tooltipDelay = 700;
     int m_corner = 0, m_popupCorner = 0, m_smallCorner = 0, m_thumbCorner = 0;
     int m_labelSize = 11, m_captionSize = 10, m_frameTitleSize = 16, m_searchFieldSize = 15, m_resultSize = 13,
         m_overlayTitleSize = 18;

@@ -169,8 +169,8 @@ Item {
             TapHandler { onTapped: { button.forceActiveFocus(); button.tapped() } }
             HoverHandler { cursorShape: button.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor }
             ToolTip.visible: hoverTip.hovered && button.tip !== ""
+            ToolTip.delay: App.theme.look.tooltipDelay
             ToolTip.text: button.tip
-            ToolTip.delay: 600
             HoverHandler { id: hoverTip }
         }
 

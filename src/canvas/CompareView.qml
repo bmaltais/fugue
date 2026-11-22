@@ -351,6 +351,8 @@ Item {
         }
     }
     WheelHandler {
+        // Wayland calls an ordinary mouse a TouchPad: take both device types.
+        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
         enabled: view.interactive
         acceptedModifiers: view.wheelModifiers
         onWheel: event => view.zoomAt(point.position.x, point.position.y, Math.pow(1.15, event.angleDelta.y / 120))

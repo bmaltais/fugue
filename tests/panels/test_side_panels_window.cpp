@@ -142,7 +142,7 @@ private slots:
         QCOMPARE(strip->x(), 0.0);
         QCOMPARE(app.canvas->x(), strip->width()); // the canvas starts at the strip's edge
         const QVariantList panels = app.sidePanels.panels();
-        QCOMPARE(panels.size(), 2);
+        QCOMPARE(panels.size(), 3); // two panels and the Templates action (#192)
         for (const QVariant &panel : panels) {
             QQuickItem *tab = named(app, "sideTab-" + panel.toMap().value("tab").toString());
             QVERIFY(tab);
@@ -207,6 +207,62 @@ private slots:
         QCOMPARE(tab->property("tip").toString(), QString("Workflows (W)"));
     }
 
+    // The Templates action tab (#192): at the lower end past the panel tabs, it runs its command and
+    // is never a checked panel; a click, Enter and Space all open the dialog.
+    void theTemplatesActionTabOpensTheDialogAndIsNeverChecked() {
+        App app(load(small));
+        QVERIFY(app.open());
+        QQuickItem *strip = named(app, "sideTabStrip");
+        QQuickItem *tab = named(app, "sideTab-templates");
+        QVERIFY(strip && tab);
+        QVERIFY(tab->isVisible());
+        QVERIFY(tab->width() >= 36 && tab->height() >= 36);
+        QVERIFY(tab->activeFocusOnTab());
+        // Below the panel tabs, with room between, and inside the strip.
+        const qreal templatesTop = tab->mapToItem(strip, QPointF(0, 0)).y();
+        const QQuickItem *workflows = named(app, "sideTab-workflows");
+        QVERIFY(templatesTop >= workflows->mapToItem(strip, QPointF(0, 0)).y() + workflows->height());
+        QVERIFY(templatesTop + tab->height() <= strip->height());
+        // The panel registry still gives one panel tab per panel, and the action is not one.
+        const QVariantList list = app.sidePanels.panels();
+        QCOMPARE(list.size(), 3);
+        QCOMPARE(list.at(2).toMap().value("kind").toString(), QString("action"));
+        QCOMPARE(list.at(2).toMap().value("command").toString(), QString("file.templates"));
+        QCOMPARE(list.at(0).toMap().value("kind").toString(), QString("panel"));
+        QVERIFY(!tab->property("open").toBool());
+        QVERIFY(tab->property("isAction").toBool());
+        // The tooltip names the command's key, when it has one, as the other tabs do.
+        const QStringList keys = app.commands.entry("file.templates").value("keys").toStringList();
+        const QString name = list.at(2).toMap().value("name").toString();
+        QCOMPARE(tab->property("tip").toString(), keys.isEmpty() ? name : QString("%1 (%2)").arg(name, keys.first()));
+        QCOMPARE(name, QString("Templates"));
+
+        const auto dialog = [&app]() { return app.window->findChild<QObject *>("templatesDialog"); };
+        const auto isOpen = [&]() { return dialog() && dialog()->property("opened").toBool(); };
+        const auto close = [&]() {
+            QMetaObject::invokeMethod(dialog(), "close");
+            QTRY_VERIFY(!isOpen());
+        };
+        click(app, tab);
+        QTRY_VERIFY(isOpen());
+        QVERIFY(!tab->property("open").toBool());
+        QCOMPARE(app.sidePanels.tab(), QString()); // no panel opened
+        close();
+        tab->forceActiveFocus(Qt::TabFocusReason);
+        QVERIFY(tab->hasActiveFocus());
+        app.key(Qt::Key_Return);
+        QTRY_VERIFY(isOpen());
+        close();
+        tab->forceActiveFocus(Qt::TabFocusReason);
+        app.key(Qt::Key_Space);
+        QTRY_VERIFY(isOpen());
+        close();
+        // The menu command opens the same dialog.
+        QVERIFY(app.commands.trigger("file.templates"));
+        QTRY_VERIFY(isOpen());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void theStripSurvivesANarrowWindowAndFocusModeHidesIt() {
         App app(load(small));
         app.sidePanels.setTab("nodes");
@@ -218,6 +274,13 @@ private slots:
         QVERIFY(strip);
         QTRY_VERIFY(app.canvas->width() >= 160 - 1); // the canvas is never squeezed out by the panel
         QVERIFY(named(app, "sideTab-nodes")->height() >= 36);
+        // The action tab stays inside a short strip, below the panel tabs.
+        app.window->resize(420, 300);
+        QTRY_COMPARE(app.window->height(), 300);
+        QQuickItem *templates = named(app, "sideTab-templates");
+        QVERIFY(templates->height() >= 36);
+        QTRY_VERIFY(templates->mapToItem(strip, QPointF(0, 0)).y() + templates->height() <= strip->height());
+        QTRY_VERIFY(templates->mapToItem(strip, QPointF(0, 0)).y() >= named(app, "sideTab-workflows")->mapToItem(strip, QPointF(0, 0)).y() + 36);
         app.commands.run("view.focus-mode");
         QTRY_VERIFY(!named(app, "sideTabStrip"));
         QTRY_COMPARE(app.canvas->x(), 0.0);
@@ -333,6 +396,119 @@ private slots:
         const QPoint below = bar->mapToScene(QPointF(bar->width() / 2, bar->height() - 4)).toPoint();
         QTest::mouseClick(app.window, Qt::LeftButton, {}, below);
         QTRY_VERIFY(y() > 0);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // The owner's real session: the pointer rests on a row until its tooltip shows, and then the wheel
+    // turns. The list must scroll with the tooltip up, by a mouse notch and by a scroll phase, over a
+    // node row, a category row and the empty part of the panel.
+    void theWheelScrollsWhileARowTooltipShows() {
+        App app(load(small));
+        QVERIFY(app.open());
+        app.commands.run("panel.nodes");
+        QTRY_VERIFY(named(app, "nodeLibraryList"));
+        QQuickItem *list = named(app, "nodeLibraryList");
+        app.nodeLibrary.setQuery("e");
+        QTRY_VERIFY(list->property("contentHeight").toDouble() > list->height() * 2);
+        const auto y = [&] { return list->property("contentY").toDouble(); };
+        const auto tooltipShowing = [&] {
+            for (QObject *o : app.engine.findChildren<QObject *>())
+                if (QByteArray(o->metaObject()->className()).contains("ToolTip") && o->property("contentItem").isValid() && o->property("visible").toBool())
+                    return true;
+            return false;
+        };
+        struct Case { const char *name; bool category; int pixel; };
+        for (const Case c : {Case{"node row, mouse", false, 0}, Case{"category row, mouse", true, 0},
+                             Case{"node row, scroll phase", false, -30}}) {
+            list->setProperty("contentY", 200.0);
+            QTRY_COMPARE(y(), 200.0);
+            QQuickItem *row = nullptr;
+            for (int i = 0; i < rowsOf(app).size() && !row; ++i)
+                if (QQuickItem *r = rowItem(list, i); r && rowsOf(app)[i].toMap().value("category").toBool() == c.category
+                                                      && !rowsOf(app)[i].toMap().value("description").toString().isEmpty() == !c.category
+                                                      && r->y() - y() >= 0)
+                    row = r;
+            QVERIFY2(row, c.name);
+            QTest::mouseMove(app.window, center(row) + QPoint(-20, 0));
+            QTest::mouseMove(app.window, center(row));
+            if (!c.category)
+                QTRY_VERIFY_WITH_TIMEOUT(tooltipShowing(), 3000);
+            const qreal before = y();
+            const QPoint pointer = center(row);
+            wheelAt(app.window, pointer, -120, c.pixel);
+            QTRY_VERIFY2(y() > before, c.name);
+            const qreal mid = y();
+            // The notch hides the tooltip of the row that moved away, at once and until the pointer moves.
+            QVERIFY2(!tooltipShowing(), c.name);
+            wheelAt(app.window, pointer, 120, c.pixel ? 30 : 0);
+            QTRY_VERIFY2(y() < mid, c.name);
+            // The wheel as the owner's Wayland session sends it: a TouchPad device, no phase, angle and pixels.
+            const qreal low = y();
+            scroll_checks::waylandWheelAt(app.window, pointer, -1);
+            QTRY_VERIFY2(y() > low, qPrintable(QStringLiteral("%1, Wayland wheel").arg(c.name)));
+        }
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // The shared tooltip (canvas/ToolTipStyle.qml): a node's long description is wrapped at the
+    // maximum width, inside the window, shown after the delay and beside the row, in the library and
+    // on another surface (a side tab), with a very long text too.
+    void aRowTooltipIsWrappedAndInsideTheWindow() {
+        App app(load(small));
+        QVERIFY(app.open());
+        app.commands.run("panel.nodes");
+        QTRY_VERIFY(named(app, "nodeLibraryList"));
+        QQuickItem *list = named(app, "nodeLibraryList");
+        app.nodeLibrary.setQuery("sampler");
+        QTRY_VERIFY(!rowsOf(app).isEmpty());
+        const double maxWidth = 80 * app.theme.look()->property("unit").toDouble();
+        QVERIFY(maxWidth > 100);
+        const auto tooltip = [&]() -> QObject * {
+            for (QObject *o : app.engine.findChildren<QObject *>())
+                if (QByteArray(o->metaObject()->className()).contains("ToolTip") && o->property("contentItem").isValid() && o->property("visible").toBool())
+                    return o;
+            return nullptr;
+        };
+        const auto inside = [&](QObject *tip, QQuickItem *parent) {
+            const QQuickItem *content = tip->property("contentItem").value<QQuickItem *>();
+            const QPointF at = parent->mapToScene(QPointF(tip->property("x").toDouble(), tip->property("y").toDouble()));
+            return QRectF(at, QSizeF(tip->property("width").toDouble(), tip->property("height").toDouble()))
+                       .intersected(QRectF(QPointF(0, 0), QSizeF(app.window->size()))) ==
+                   QRectF(at, QSizeF(tip->property("width").toDouble(), tip->property("height").toDouble())) && content;
+        };
+        // A row with a description, hovered.
+        QQuickItem *row = nullptr;
+        for (int i = 0; i < rowsOf(app).size() && !row; ++i)
+            if (!rowsOf(app)[i].toMap().value("category").toBool() && rowsOf(app)[i].toMap().value("description").toString().size() > 80)
+                row = rowItem(list, i);
+        QVERIFY2(row, "a node with a long description");
+        QTest::mouseMove(app.window, center(row) + QPoint(-10, 0));
+        QTest::mouseMove(app.window, center(row));
+        QTest::qWait(300);
+        QVERIFY2(!tooltip(), "not before the delay");
+        QTRY_VERIFY_WITH_TIMEOUT(tooltip(), 3000);
+        QObject *tip = tooltip();
+        QVERIFY2(tip->property("width").toDouble() <= maxWidth + 0.5,
+                 qPrintable(QStringLiteral("tooltip %1px wide, maximum %2").arg(tip->property("width").toDouble()).arg(maxWidth)));
+        QVERIFY(tip->property("height").toDouble() > 40); // wrapped to more than one line
+        QVERIFY(inside(tip, row));
+        // It is below the row, not over it.
+        QVERIFY(tip->property("y").toDouble() >= row->height());
+        if (const QByteArray dir = qgetenv("FUGUE_SHOT_DIR"); !dir.isEmpty()) {
+            QTest::qWait(600); // the fade in
+            test_support::grab(app.window).save(QString::fromLocal8Bit(dir) + "/library-tooltip.png");
+        }
+        // Another surface, with a text far wider than the window.
+        QQuickItem *tab = named(app, "sideTab-nodes");
+        QVERIFY(tab);
+        tip->setProperty("text", QString("word ").repeated(600));
+        QMetaObject::invokeMethod(tip, "close");
+        tip->setProperty("parent", QVariant::fromValue(tab));
+        QMetaObject::invokeMethod(tip, "open");
+        QTRY_VERIFY(tooltip());
+        QVERIFY2(tip->property("width").toDouble() <= maxWidth + 0.5, "a very long text stays at the maximum");
+        QVERIFY(tip->property("width").toDouble() <= app.window->width());
+        QVERIFY(inside(tip, tab));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
@@ -690,6 +866,12 @@ private slots:
         QTest::mouseMove(app.window, QPoint(700, 500));
         QTest::qWait(300);
         test_support::grab(app.window).save(QString::fromLocal8Bit(dir) + "/" + name + "-open.png");
+        // The Templates tab pressed: the dialog is up over the strip, whose action tab is not marked.
+        click(app, named(app, "sideTab-templates"));
+        QTRY_VERIFY(app.window->findChild<QObject *>("templatesDialog")
+                    && app.window->findChild<QObject *>("templatesDialog")->property("opened").toBool());
+        QTest::qWait(300);
+        test_support::grab(app.window).save(QString::fromLocal8Bit(dir) + "/" + name + "-templates.png");
     }
 
     // Not a check: with FUGUE_SHOT_DIR set, saves the panel with a library group and the question.

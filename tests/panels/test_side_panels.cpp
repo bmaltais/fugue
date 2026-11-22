@@ -95,6 +95,28 @@ private slots:
         panels.toggle("workflows"); // switching sends one change
         QCOMPARE(changed.count(), 4);
     }
+    // #192: an action row is a tab, not a panel: it has no chrome id, toggle and setTab ignore it,
+    // and it is never open.
+    void anActionRowIsATabButNeverAPanel() {
+        ChromeVisibility chrome({});
+        SidePanels panels({}, &chrome);
+        const QVariantList list = panels.panels();
+        QCOMPARE(list.size(), 3);
+        int panelRows = 0, actionRows = 0;
+        for (const QVariant &row : list) {
+            const QVariantMap map = row.toMap();
+            (map.value("kind").toString() == "action" ? actionRows : panelRows)++;
+        }
+        QCOMPARE(panelRows, 2);
+        QCOMPARE(actionRows, 1);
+        QCOMPARE(list.last().toMap().value("tab").toString(), QString("templates"));
+        panels.toggle("templates");
+        QCOMPARE(panels.tab(), QString());
+        panels.setTab("templates");
+        QCOMPARE(panels.tab(), QString());
+        QVERIFY(!panels.panels().last().toMap().value("open").toBool());
+        QVERIFY(!chrome.isVisible("templates"));
+    }
     void aDamagedFileGivesTheDefaults() {
         QTemporaryDir dir;
         QFile file(dir.filePath("side-panels.json"));
@@ -113,16 +135,22 @@ private slots:
         SidePanels panels({});
         panels.registerCommands(commands);
         QVariantList list = panels.panels();
-        QCOMPARE(list.size(), 2);
+        QCOMPARE(list.size(), 3); // two panels and the Templates action (#192)
         QCOMPARE(list[0].toMap().value("tab").toString(), QString("nodes"));
         QCOMPARE(list[0].toMap().value("keys").toStringList(), QStringList{"N"});
         QCOMPARE(list[1].toMap().value("tab").toString(), QString("workflows"));
         QCOMPARE(list[1].toMap().value("keys").toStringList(), QStringList{"W"});
+        QCOMPARE(list[2].toMap().value("tab").toString(), QString("templates"));
+        QCOMPARE(list[2].toMap().value("kind").toString(), QString("action"));
+        QCOMPARE(list[2].toMap().value("command").toString(), QString("file.templates"));
+        QCOMPARE(list[2].toMap().value("glyph").toString(), QString("layout-template"));
         for (const QVariant &row : list) {
             QVERIFY(!row.toMap().value("name").toString().isEmpty());
             QVERIFY(!row.toMap().value("glyph").toString().isEmpty());
             QVERIFY(!row.toMap().value("open").toBool());
-            QVERIFY(commands.entry(row.toMap().value("command").toString()).value("available").toBool());
+            // An action's command is the window's (file.templates asks it for the dialog): no handler here.
+            if (row.toMap().value("kind").toString() == "panel")
+                QVERIFY(commands.entry(row.toMap().value("command").toString()).value("available").toBool());
         }
         QSignalSpy changed(&panels, &SidePanels::tabChanged);
         commands.run("panel.workflows");
@@ -130,6 +158,8 @@ private slots:
         QVERIFY(!list[0].toMap().value("open").toBool());
         QVERIFY(list[1].toMap().value("open").toBool());
         QCOMPARE(changed.count(), 1); // the strip's `panels` binding follows tabChanged
+        QVERIFY(!list[2].toMap().value("open").toBool());
+        QVERIFY(!commands.entry("file.templates").value("checked").toBool()); // an action is never checked
     }
     void theStripIsShownButFocusModeHidesIt() {
         ChromeVisibility chrome({});

@@ -21,6 +21,20 @@ inline void wheelAt(QWindow *window, QPoint at, int angleY, int pixelY = 0) {
     QGuiApplication::sendEvent(window, &event);
 }
 
+// What an ordinary mouse wheel sends on the owner's Wayland session (seen there): a device of type
+// TouchPad, no scroll phase, an angle of 120 per notch and a pixel delta of 15 (the same sign).
+inline void waylandWheelAt(QWindow *window, QPoint at, int notches) {
+    static QPointingDevice pad(QStringLiteral("wayland pointer"), 1, QInputDevice::DeviceType::TouchPad,
+                               QPointingDevice::PointerType::Generic, QInputDevice::Capability::Position
+                                   | QInputDevice::Capability::Scroll | QInputDevice::Capability::PixelScroll,
+                               1, 0);
+    const int sign = notches < 0 ? -1 : 1;
+    QWheelEvent event(QPointF(at), QPointF(window->mapToGlobal(at)), QPoint(0, 15 * sign * qAbs(notches)),
+                      QPoint(0, 120 * notches), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false,
+                      Qt::MouseEventNotSynthesized, &pad);
+    QGuiApplication::sendEvent(window, &event);
+}
+
 // The scroll bar of a view, or null.
 inline QQuickItem *barOf(QQuickItem *view) {
     for (QQuickItem *child : view->childItems())
@@ -60,6 +74,13 @@ inline QString scrollsByWheelAndThumb(QWindow *window, QQuickItem *view) {
     QTest::qWait(30);
     if (!(at() > 0))
         return QStringLiteral("the wheel did not scroll");
+    view->setProperty(axis, 0.0);
+    QTest::qWait(20);
+    waylandWheelAt(window, centerOf(view), -1);
+    for (int waited = 0; waited < 600 && !(at() > 0); waited += 20)
+        QTest::qWait(20);
+    if (!(at() > 0))
+        return QStringLiteral("the wheel as the Wayland session sends it (a TouchPad, no phase) did not scroll");
     view->setProperty(axis, 0.0);
     QTest::qWait(20);
     dragThumb(window, bar, 40);

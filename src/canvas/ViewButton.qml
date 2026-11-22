@@ -69,8 +69,8 @@ Rectangle {
         cursorShape: button.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
     }
     ToolTip.visible: hover.hovered && button.tip !== "" && button.enabled
+    ToolTip.delay: App.theme.look.tooltipDelay
     ToolTip.text: button.tip
-    ToolTip.delay: 600
     Keys.onReturnPressed: button.tapped()
     Keys.onSpacePressed: button.tapped()
 }

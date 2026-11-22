@@ -562,7 +562,9 @@ A dashed edge in QML is a `Shape` with `strokeStyle: ShapePath.DashLine` around 
   on the canvas-facing edge, no shadow and no corner. One tab per side panel, 11u square (a 44 px target), a 24 px glyph
   centered (`boxes`, `workflow`) in `label`; hovered: `menu-row` wash and `text` glyph; the open tab: `selected-row` wash, the
   glyph in `accent` and a 3 px `accent` bar on its left edge; a focused tab a 2 px `accent` ring inside it. The first tab is 1u
-  from the top. Tooltip after 600 ms: "Node library (N)". Hidden in focus mode. The strip works in both themes through those
+  from the top. Tooltip after 600 ms: "Node library (N)". Hidden in focus mode. An **action tab** (#192, `layout-template`,
+  Templates) sits at the lower end, past a `hairline` rule inset 1u and a half-unit gap, drawn like a panel tab but never marked
+  open (no wash, bar or accent glyph: it launches the Templates dialog, it does not toggle a panel); tooltip "Templates (<key>)". The strip works in both themes through those
   tokens alone.
 - **Side panel** (#56, ComfyUI's sidebar): docked at the left or right edge of the canvas, which gives up its
   width (288 px at first, 200 to 640), full height of the canvas, `popup` fill, one `hairline` on the canvas-facing
@@ -671,13 +673,17 @@ A subset of Lucide (ISC) as an icon font in the resources, loaded with `FontLoad
 `Text { font.family: icons.name; text: "\ue..." }`: check, refresh-cw, loader-circle, snowflake,
 triangle-alert, corner-down-right, ban, skip-forward, circle-help, pin, layers, dices,
 chevron-down, chevron-left, chevron-right, folder, box, search, circle-x, x, play, and for the player (#116) pause, volume-2, volume-x, maximize-2, and for the
-selection toolbar (#74) trash-2, ellipsis, frame, image, log-in, and for the side tab strip (#159) boxes and workflow, and for the mask editor (#172) brush, eraser, lasso-select, square-dashed, contrast, paint-bucket, undo-2, redo-2 and eye; the full list with code points in
+selection toolbar (#74) trash-2, ellipsis, frame, image, log-in, and for the side tab strip (#159) boxes and workflow, and for its Templates action (#192) layout-template, and for the mask editor (#172) brush, eraser, lasso-select, square-dashed, contrast, paint-bucket, undo-2, redo-2 and eye; the full list with code points in
 `share/fonts/lucide-fugue.txt`. About 48 glyphs, about 16 KB. Text glyphs recolor through `color`, render through the same distance-field text as
 labels and batch with them; an SVG `Image` would need a separate texture per color.
 
 ### 16.1 Scroll bars
 
-One component, `src/canvas/FugueScrollBar.qml`, attached as `ScrollBar.vertical` or `.horizontal` on every list, grid, Flickable and ScrollView that can overflow (node library, workflows panel, media grid, details and filmstrip, node search, templates, settings pages, the command help, the run queue, the group editor, the widget menus, the multiline editor, command menus). 10px wide gutter over the view's edge. It lies over the view, but content never sits under it: the bar's `inset` is its breadth while it shows (else 0) and every host pads its content by `view.ScrollBar.vertical.inset` (the bottom edge for a horizontal bar). The templates grid and the media grid keep the gutter free always, so cards do not reflow as the bar appears. A panel's width grip (8px on its outer edge) is not over the content either: the panel's body stops short of it, or the grip would take the presses meant for the bar's thumb, track `well` at 60%, a 6px round thumb in `label` at 45% (70% hovered, 90% pressed). It shows while the content is longer than the view, whether or not the pointer is near, and hides when it fits. The thumb is never shorter than 32px, so a list of hundreds of rows keeps one to grab; a press on the track outside the thumb moves one page toward it. Wheel and keys are unchanged.
+One component, `src/canvas/FugueScrollBar.qml`, attached as `ScrollBar.vertical` or `.horizontal` on every list, grid, Flickable and ScrollView that can overflow (node library, workflows panel, media grid, details and filmstrip, node search, templates, settings pages, the command help, the run queue, the group editor, the widget menus, the multiline editor, command menus). 10px wide gutter over the view's edge. It lies over the view, but content never sits under it: the bar's `inset` is its breadth while it shows (else 0) and every host pads its content by `view.ScrollBar.vertical.inset` (the bottom edge for a horizontal bar). The templates grid and the media grid keep the gutter free always, so cards do not reflow as the bar appears. A panel's width grip (8px on its outer edge) is not over the content either: the panel's body stops short of it, or the grip would take the presses meant for the bar's thumb, track `well` at 60%, a 6px round thumb in `label` at 45% (70% hovered, 90% pressed). It shows while the content is longer than the view, whether or not the pointer is near, and hides when it fits. The thumb is never shorter than 32px, so a list of hundreds of rows keeps one to grab; a press on the track outside the thumb moves one page toward it. The bar also gives its view the mouse wheel (a Mouse or TouchPad device; Wayland reports an ordinary mouse as a TouchPad with no scroll phase, which Qt's own handling of a Flickable and a bare `WheelHandler` do not hear): a notch moves 60px, a touchpad its own pixels.
+
+### 16.2 Tooltips
+
+One look, `src/canvas/ToolTipStyle.qml`, for every tooltip: Material's dark tooltip (the style's own colors), wrapped at 80u wide (320px at the default text size, about 45 characters) and never wider than the window less its 12px margins, 8px padding, shown 1u below its control with the left edges aligned (the popup keeps itself inside the window), after `look.tooltipDelay` (700ms), no fade out. Sites set `ToolTip.delay: App.theme.look.tooltipDelay`.
 
 ## 17. What step 2 changes
 

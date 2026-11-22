@@ -8,7 +8,10 @@ import Fugue
 // on hover), and hides when it fits. It lies over the view's edge, so every host keeps its
 // content clear of it by `inset` (the bar's breadth while it shows, else 0). The thumb never
 // gets shorter than `minThumb`, so a list of hundreds of rows keeps a thumb to grab, and a press
-// on the track outside the thumb moves one page toward it.
+// on the track outside the thumb moves one page toward it. It also gives its view the mouse wheel
+// (below): Qt's own wheel handling of a Flickable does not hear the wheel as the owner's Wayland
+// session sends it (a device of type TouchPad, no scroll phase, an angle of 120 and a pixel delta
+// of 15 per notch), so the wheel did not scroll any list or panel.
 ScrollBar {
     id: bar
     objectName: "fugueScrollBar"
@@ -30,6 +33,47 @@ ScrollBar {
     implicitWidth: vertical ? breadth : 0
     implicitHeight: vertical ? 0 : breadth
     padding: 0
+
+    // The wheel over the whole view, not only the bar. A notch moves the view 60px; a touchpad,
+    // told by its scroll phase alone, moves it by its own pixels. The view's own wheel handling
+    // never sees the event (this handler takes it), so a view does not scroll twice.
+    // Only a view that can scroll takes the wheel: one whose content fits lets the event through to
+    // what is behind it (the canvas zooms under a field that does not overflow).
+    readonly property bool wheelScrolls: {
+        const view = bar.parent as Flickable
+        if (!view)
+            return false
+        return bar.vertical ? view.contentHeight > view.height - view.topMargin - view.bottomMargin
+                            : view.contentWidth > view.width - view.leftMargin - view.rightMargin
+    }
+    WheelHandler {
+        parent: bar.parent
+        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+        blocking: bar.wheelScrolls
+        onWheel: event => {
+            const view = bar.parent as Flickable
+            if (!view)
+                return
+            const touchpad = event.phase !== Qt.NoScrollPhase
+            const dy = touchpad && event.pixelDelta.y !== 0 ? event.pixelDelta.y : event.angleDelta.y / 2
+            const dx = touchpad && event.pixelDelta.x !== 0 ? event.pixelDelta.x : event.angleDelta.x / 2
+            // The bar's own axis; a horizontal bar also takes the vertical wheel (a filmstrip).
+            const by = bar.vertical ? dy : (dx !== 0 ? dx : dy)
+            if (by === 0)
+                return
+            if (bar.vertical) {
+                const low = view.originY - view.topMargin
+                const high = view.originY + view.contentHeight - view.height + view.bottomMargin
+                if (high > low)
+                    view.contentY = Math.max(low, Math.min(high, view.contentY - by))
+            } else {
+                const low = view.originX - view.leftMargin
+                const high = view.originX + view.contentWidth - view.width + view.rightMargin
+                if (high > low)
+                    view.contentX = Math.max(low, Math.min(high, view.contentX - by))
+            }
+        }
+    }
 
     contentItem: Rectangle {
         implicitWidth: bar.vertical ? 6 : bar.minThumb

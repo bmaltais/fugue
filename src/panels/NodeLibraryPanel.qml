@@ -163,11 +163,7 @@ Item {
         activeFocusOnTab: true
         keyNavigationEnabled: false
         ScrollBar.vertical: FugueScrollBar { look: root.look }
-        WheelHandler {
-            onWheel: event => {
-                list.contentY = Math.max(0, Math.min(list.contentHeight - list.height, list.contentY - (event.pixelDelta.y !== 0 ? event.pixelDelta.y : event.angleDelta.y / 2)))
-            }
-        }
+        TipGate { id: tipGate; view: list }
         Accessible.role: Accessible.List
         Accessible.name: qsTr("Nodes")
 
@@ -262,9 +258,9 @@ Item {
                     objectName: "nodeLibraryTrash"
                     look: root.look
                     label: qsTr("Delete %1 from the library").arg(row.modelData.label)
-                    ToolTip.visible: hovered
+                    ToolTip.visible: hovered && tipGate.open
+                    ToolTip.delay: App.theme.look.tooltipDelay
                     ToolTip.text: label
-                    ToolTip.delay: 600
                     onClicked: {
                         list.currentIndex = row.index
                         root.askDelete(row.modelData)
@@ -310,9 +306,9 @@ Item {
                 }
                 onCentroidChanged: if (active && !fromTrash) ghost.follow(centroid.scenePosition)
             }
-            ToolTip.visible: hover.hovered && !row.category && row.modelData.description !== ""
+            ToolTip.visible: hover.hovered && tipGate.open && !row.category && row.modelData.description !== ""
+            ToolTip.delay: App.theme.look.tooltipDelay
             ToolTip.text: row.modelData.description
-            ToolTip.delay: 600
             Accessible.role: Accessible.ListItem
             Accessible.name: row.modelData.label
         }

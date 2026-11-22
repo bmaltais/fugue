@@ -34,6 +34,8 @@ ApplicationWindow {
     readonly property SettingsModel appSettingsModel: App.settings
 
     HelperNotice { id: helperNotice }
+    // The width, place and delay of every tooltip in the window (canvas/ToolTipStyle.qml).
+    ToolTipStyle { look: App.theme.look; windowWidth: win.width }
 
     // Which bars and panels are shown (#129, panels/chrome_visibility.h). A window without the
     // registry (a test window) shows them all.
@@ -413,6 +415,7 @@ ApplicationWindow {
             look: App.theme.look
             panels: App.sidePanels.panels
             onTabRequested: tab => App.sidePanels.toggle(tab)
+            onActionRequested: command => App.commands.trigger(command)
         }
         onLoaded: (item as Item).height = Qt.binding(() => stripLoader.height)
     }
