@@ -183,6 +183,12 @@
       "version": 1,
       "kind": "data",
       "name": "Stitch"
+    },
+    {
+      "id": "fugue/canvas",
+      "version": 1,
+      "kind": "data",
+      "name": "Canvas"
     }
   ]
 }

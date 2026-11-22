@@ -112,6 +112,11 @@ fail with `permission_denied`.
 | `fugue project add <dir>` | Register the project in a folder |
 | `fugue project remove <name>` | Take it off the list; its files stay |
 | `fugue project inherits <name> <items>` | Set what it inherits (`models`, `packs`, `templates`, `prompts`, `preferences`, or `none`); all five words take effect now: inherited model folders, packs (with the Default's trust), templates and prompts are read-only and installs, downloads and saves go to the project's own |
+| `fugue canvas new` | Make a canvas (`--name`, `--size <w>x<h>`, default 1024x1024): one empty paint layer; prints the canvas id and its first revision |
+| `fugue canvas import <file.ora>` | Make a canvas from an OpenRaster file Fugue wrote (`--name`) |
+| `fugue canvas export <id>[@<revision>] <file.ora>` | Write a revision (head by default) as an `.ora`; never replaces a file; the same revision gives the same bytes |
+| `fugue canvas log <id>[@<revision>]` | Revisions newest first along their parents (`--limit`, default 20): revision, time, producer |
+| `fugue canvas show <id>[@<revision>]` | One revision: tree hash (pixels and layer properties only, same pixels same hash), parent, producer, time, layers. A revision is `head`, a full hash or 8+ hex digits of one |
 | `fugue settings list` | Every setting in effect, with where each value comes from (`own`, `inherited from Default`, `built-in`) |
 | `fugue skill install` | Install or update this skill (`--target`, `--dry-run`, `--force`) |
 | `fugue skill uninstall` | Remove it (`--target`, `--dry-run`, `--force`) |
@@ -139,6 +144,7 @@ Every failure has a stable `code`. Fix by code, not by message text:
   `node_test_failed`
 - Masks: `mask_empty` (paint the part to change), `mask_unsupported` (the provider or model cannot take a mask: Generate Image's `mask` needs a model whose provider lists `mask` in its `inputs`; the error names the ones that can), `stitch_mismatch` (Stitch got a picture of another shape than its crop); warnings `mask_full` (everything is masked: plain generation), `mask_resized` (the mask was stretched to the picture)
 - Cache: `cache_busy` (a warning: a run is going, so `cache clear` left its results and previews alone)
+- Canvas: `canvas_not_found` (no such canvas or revision), `canvas_ambiguous` (a revision prefix that starts more than one: write more of it), `canvas_corrupt` (a stored object is not what it is named for)
 - Projects: `project_invalid`, `project_exists`, `unknown_project`, `project_inherits_ignored` (a warning)
 - Skill: `skill_modified`
 - Other: `unknown_run`, `usage`, `internal`

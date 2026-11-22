@@ -92,6 +92,13 @@ Reply projectAdd(const Command &command, Context &context);
 Reply projectRemove(const Command &command, Context &context);
 Reply projectInherits(const Command &command, Context &context);
 
+// canvas.cpp: the `canvas` commands (13.1, 14.5): the canvas revision store.
+Reply canvasNew(const Command &command, Context &context);
+Reply canvasImport(const Command &command, Context &context);
+Reply canvasExport(const Command &command, Context &context);
+Reply canvasLog(const Command &command, Context &context);
+Reply canvasShow(const Command &command, Context &context);
+
 // skill.cpp: `skill install` and `skill uninstall` (13.5).
 Reply skillInstall(const Command &command, Context &context);
 Reply skillUninstall(const Command &command, Context &context);

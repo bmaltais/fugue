@@ -441,7 +441,7 @@ void MaskPaint::fill(Rgba color) {
 
 // ---- files and scaling ------------------------------------------------------------------------
 
-Result<QByteArray> MaskPaint::toPng() const {
+Result<QByteArray> MaskPaint::toPng(int compression) const {
     if (!initVips())
         return vipsUnavailable();
     try {
@@ -450,7 +450,7 @@ Result<QByteArray> MaskPaint::toPng() const {
         size_t size = 0;
         // No metadata and a fixed compression: the same mask is the same bytes.
         image.write_to_buffer(".png", &buffer, &size,
-                              vips::VImage::option()->set("compression", 6)->set("keep", VIPS_FOREIGN_KEEP_NONE));
+                              vips::VImage::option()->set("compression", std::clamp(compression, 0, 9))->set("keep", VIPS_FOREIGN_KEEP_NONE));
         QByteArray bytes(static_cast<const char *>(buffer), qsizetype(size));
         g_free(buffer);
         return bytes;

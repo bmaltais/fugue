@@ -2,6 +2,8 @@
 
 Research notes for the canvas document: prior art for the select-run-place loop, storage of immutable revisions, and how it fits the engine. Written 2026-11-22 by research agents from primary sources, measurements on this machine and a read of this repo; claims marked **[U]** or "unverified" could not be checked against a source and must be re-checked before they drive a decision. The decisions themselves are in issue #206.
 
+Status: slice 1 (#208) is built: the tile store, the `fugue/canvas` handle and `fugue canvas`, as [spec 14.5](spec.md#145-the-canvas-revision-store-206-208) and [canvas.md](canvas.md) describe.
+
 1. [Prior art](#prior-art-canvas-with-a-generative-select-run-place-loop-fugue-epic-206)
 2. [Revision storage](#canvas-revision-storage-fugue-epic-206)
 3. [Engine integration](#fugue-epic-206-canvas-document-code-research)

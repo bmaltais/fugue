@@ -1,0 +1,405 @@
+#include "canvas_store.h"
+
+#include <QDir>
+#include <QDirIterator>
+#include <QFile>
+#include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QLockFile>
+#include <QRegularExpression>
+#include <QUuid>
+
+#include "engine/atomic_file.h"
+#include "engine/canonical.h"
+#include "engine/hash.h"
+#include "engine/paint_file.h"
+#include "engine/paths.h"
+
+namespace fugue::canvas {
+
+using mask::LayerKind;
+using mask::MaskPaint;
+using mask::PaintDocument;
+
+namespace {
+
+Error corrupt(const QString &what) {
+    return makeError(QStringLiteral("canvas_corrupt"), QStringLiteral("The canvas store is damaged: %1.").arg(what),
+                     QStringLiteral("The files under the store folder are written once and never changed; restore them from a backup, or export the canvas from another copy."));
+}
+
+Error notFound(const QString &what) {
+    return makeError(QStringLiteral("canvas_not_found"), QStringLiteral("There is no %1.").arg(what),
+                     QStringLiteral("`fugue canvas new` or `fugue canvas import` makes a canvas and prints its id."));
+}
+
+QString kindName(LayerKind kind) {
+    return kind == LayerKind::Mask ? QStringLiteral("mask") : kind == LayerKind::Picture ? QStringLiteral("picture") : QStringLiteral("paint");
+}
+
+bool kindFromName(const QString &name, LayerKind *kind) {
+    if (name == QLatin1String("paint"))
+        *kind = LayerKind::Paint;
+    else if (name == QLatin1String("mask"))
+        *kind = LayerKind::Mask;
+    else if (name == QLatin1String("picture"))
+        *kind = LayerKind::Picture;
+    else
+        return false;
+    return true;
+}
+
+QString hexOf(const QString &hash) { return hash.mid(QStringLiteral("sha256:").size()); }
+
+bool readFile(const QString &path, QByteArray *bytes) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return false;
+    *bytes = file.readAll();
+    return true;
+}
+
+QByteArray jsonBytes(const QJsonObject &object) { return QJsonDocument(object).toJson(QJsonDocument::Indented); }
+
+// Writes an object once: an existing file of this name is the same content, since the name is its hash.
+Errors writeOnce(const QString &path, const QByteArray &bytes, const QString &what) {
+    if (QFileInfo::exists(path))
+        return {};
+    return replaceFile(path, bytes, what);
+}
+
+} // namespace
+
+bool isCanvasId(const QString &text) {
+    static const QRegularExpression pattern(QStringLiteral("^[a-z0-9][a-z0-9_-]{0,63}$"));
+    return pattern.match(text).hasMatch();
+}
+
+int Tree::tileCount() const {
+    int count = 0;
+    for (const LayerRecord &layer : layers)
+        count += int(layer.tiles.size());
+    return count;
+}
+
+QJsonObject treeToJson(const Tree &tree) {
+    QJsonArray layers;
+    for (const LayerRecord &layer : tree.layers) {
+        QJsonObject tiles;
+        for (const auto &[key, hash] : layer.tiles)
+            tiles.insert(key.text(), hash);
+        layers.append(QJsonObject{{"name", layer.name},
+                                  {"kind", kindName(layer.kind)},
+                                  {"visible", layer.visible},
+                                  {"opacity", layer.opacity},
+                                  {"tiles", tiles}});
+    }
+    return QJsonObject{{"format", storeFormat}, {"width", tree.width}, {"height", tree.height}, {"layers", layers}};
+}
+
+Result<Tree> treeFromJson(const QJsonObject &object) {
+    if (object.value("format").toInt() != storeFormat)
+        return corrupt(QStringLiteral("a tree has an unknown format"));
+    Tree tree;
+    tree.width = object.value("width").toInt();
+    tree.height = object.value("height").toInt();
+    if (tree.width < 1 || tree.height < 1 || qint64(tree.width) * tree.height > mask::paintFileMaxPixels)
+        return corrupt(QStringLiteral("a tree has a size that cannot be"));
+    for (const QJsonValue &value : object.value("layers").toArray()) {
+        const QJsonObject item = value.toObject();
+        LayerRecord layer;
+        if (!kindFromName(item.value("kind").toString(), &layer.kind) || !item.value("name").isString() || !item.value("visible").isBool() ||
+            !item.value("opacity").isDouble())
+            return corrupt(QStringLiteral("a layer of a tree is not well formed"));
+        layer.name = item.value("name").toString();
+        layer.visible = item.value("visible").toBool();
+        layer.opacity = item.value("opacity").toDouble();
+        const QJsonObject tiles = item.value("tiles").toObject();
+        if (layer.kind == LayerKind::Picture && !tiles.isEmpty())
+            return corrupt(QStringLiteral("a picture layer has tiles"));
+        for (auto it = tiles.begin(); it != tiles.end(); ++it) {
+            TileKey key;
+            if (!TileKey::parse(it.key(), &key) || key.x >= tilesAcross(tree.width) || key.y >= tilesDown(tree.height) || !isSha256(it.value().toString()))
+                return corrupt(QStringLiteral("a tile of a tree is not well formed"));
+            layer.tiles.emplace(key, it.value().toString());
+        }
+        tree.layers.push_back(std::move(layer));
+    }
+    return tree;
+}
+
+Result<Tree> treeOf(const PaintDocument &document, const TileSink &consume) {
+    Tree tree;
+    tree.width = document.width();
+    tree.height = document.height();
+    for (int position = 0; position < document.layerCount(); ++position) {
+        const mask::LayerInfo info = document.layer(position);
+        LayerRecord layer;
+        layer.name = info.name;
+        layer.kind = info.kind;
+        layer.visible = info.visible;
+        layer.opacity = info.opacity;
+        if (info.kind != LayerKind::Picture) {
+            const MaskPaint *pixels = document.pixels(info.id);
+            if (!pixels)
+                return corrupt(QStringLiteral("a layer has no pixels"));
+            Result<TileMap> tiles = cutLayer(*pixels, consume);
+            if (!tiles)
+                return Result<Tree>(tiles.errors());
+            layer.tiles = std::move(tiles.value());
+        }
+        tree.layers.push_back(std::move(layer));
+    }
+    return tree;
+}
+
+CanvasStore::CanvasStore(QString root, Clock clock) : m_root(QDir::cleanPath(std::move(root))), m_clock(std::move(clock)) {}
+
+CanvasStore CanvasStore::forSession() { return CanvasStore(dataDir() + QStringLiteral("/canvases")); }
+
+QString CanvasStore::canvasDir(const QString &canvasId) const { return m_root + QStringLiteral("/canvases/") + canvasId; }
+QString CanvasStore::blobPath(const QString &hash) const {
+    const QString hex = hexOf(hash);
+    return m_root + QStringLiteral("/blobs/") + hex.left(2) + QLatin1Char('/') + hex + QStringLiteral(".png");
+}
+QString CanvasStore::treePath(const QString &hash) const { return m_root + QStringLiteral("/trees/") + hexOf(hash) + QStringLiteral(".json"); }
+
+Errors CanvasStore::storeBlob(const QString &hash, const MaskPaint &tile) {
+    const QString path = blobPath(hash);
+    if (QFileInfo::exists(path))
+        return {};
+    const Result<QByteArray> png = tileToPng(tile);
+    if (!png)
+        return png.errors();
+    return replaceFile(path, png.value(), QStringLiteral("a canvas tile"));
+}
+
+Result<MaskPaint> CanvasStore::readBlob(const QString &hash, int width, int height, int channels) const {
+    QByteArray png;
+    if (!readFile(blobPath(hash), &png))
+        return corrupt(QStringLiteral("the tile %1 is missing").arg(hash));
+    Result<MaskPaint> tile = tileFromPng(png, channels);
+    if (!tile)
+        return corrupt(QStringLiteral("the tile %1 does not decode").arg(hash));
+    const QString actual = tileHash(tile->width(), tile->height(), tile->channels(), tileBytes(*tile, mask::IRect{0, 0, tile->width(), tile->height()}));
+    if (actual != hash || tile->width() != width || tile->height() != height)
+        return corrupt(QStringLiteral("the tile %1 does not hold the pixels it is named for").arg(hash));
+    return tile;
+}
+
+Result<QString> CanvasStore::storeTree(const PaintDocument &document) {
+    const Result<Tree> tree = treeOf(document, [this](const TileKey &, const QString &hash, const MaskPaint &tile) { return storeBlob(hash, tile); });
+    if (!tree)
+        return Result<QString>(tree.errors());
+    const QJsonObject json = treeToJson(tree.value());
+    const QString hash = canonicalHash(json);
+    if (hash.isEmpty())
+        return corrupt(QStringLiteral("a tree has no canonical form"));
+    const Errors written = writeOnce(treePath(hash), jsonBytes(json), QStringLiteral("a canvas tree"));
+    if (hasErrors(written))
+        return Result<QString>(written);
+    return hash;
+}
+
+Result<QString> CanvasStore::treeHashOf(const PaintDocument &document) {
+    const Result<Tree> tree = treeOf(document);
+    if (!tree)
+        return Result<QString>(tree.errors());
+    const QString hash = canonicalHash(treeToJson(tree.value()));
+    if (hash.isEmpty())
+        return corrupt(QStringLiteral("a tree has no canonical form"));
+    return hash;
+}
+
+Result<Tree> CanvasStore::tree(const QString &treeHash) const {
+    QByteArray bytes;
+    if (!isSha256(treeHash) || !readFile(treePath(treeHash), &bytes))
+        return notFound(QStringLiteral("stored tree %1").arg(treeHash));
+    const QJsonObject json = QJsonDocument::fromJson(bytes).object();
+    if (canonicalHash(json) != treeHash)
+        return corrupt(QStringLiteral("the tree %1 is not the content it is named for").arg(treeHash));
+    return treeFromJson(json);
+}
+
+Result<Revision> CanvasStore::addRevision(const QString &canvasId, const PaintDocument &document, const QString &parent, const QString &producer) {
+    if (!isCanvasId(canvasId) || !QFileInfo::exists(canvasDir(canvasId) + QStringLiteral("/canvas.json")))
+        return notFound(QStringLiteral("canvas %1").arg(canvasId));
+    if (!parent.isEmpty() && !revision(canvasId, parent))
+        return notFound(QStringLiteral("revision %1 in canvas %2").arg(parent, canvasId));
+    const Result<QString> treeHash = storeTree(document);
+    if (!treeHash)
+        return Result<Revision>(treeHash.errors());
+    Revision made;
+    made.tree = treeHash.value();
+    made.parent = parent;
+    made.producer = producer;
+    made.time = isoTime(utcNow(m_clock));
+    const QJsonObject record{{"format", storeFormat},
+                             {"tree", made.tree},
+                             {"parent", parent.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(parent)},
+                             {"producer", producer},
+                             {"time", made.time}};
+    made.id = canonicalHash(record);
+    const Errors written = writeOnce(canvasDir(canvasId) + QStringLiteral("/commits/") + hexOf(made.id) + QStringLiteral(".json"), jsonBytes(record),
+                                     QStringLiteral("a canvas revision"));
+    if (hasErrors(written))
+        return Result<Revision>(written);
+    return made;
+}
+
+Result<Revision> CanvasStore::revision(const QString &canvasId, const QString &revisionId) const {
+    QByteArray bytes;
+    if (!isCanvasId(canvasId) || !isSha256(revisionId) ||
+        !readFile(canvasDir(canvasId) + QStringLiteral("/commits/") + hexOf(revisionId) + QStringLiteral(".json"), &bytes))
+        return notFound(QStringLiteral("revision %1 in canvas %2").arg(revisionId, canvasId));
+    const QJsonObject json = QJsonDocument::fromJson(bytes).object();
+    if (canonicalHash(json) != revisionId || json.value("format").toInt() != storeFormat || !isSha256(json.value("tree").toString()) ||
+        !json.value("producer").isString() || !json.value("time").isString() || !(json.value("parent").isNull() || isSha256(json.value("parent").toString())))
+        return corrupt(QStringLiteral("the revision %1 is not the record it is named for").arg(revisionId));
+    Revision found;
+    found.id = revisionId;
+    found.tree = json.value("tree").toString();
+    found.parent = json.value("parent").toString();
+    found.producer = json.value("producer").toString();
+    found.time = json.value("time").toString();
+    return found;
+}
+
+Result<CanvasInfo> CanvasStore::info(const QString &canvasId) const {
+    QByteArray bytes;
+    if (!isCanvasId(canvasId) || !readFile(canvasDir(canvasId) + QStringLiteral("/canvas.json"), &bytes))
+        return notFound(QStringLiteral("canvas %1").arg(canvasId));
+    const QJsonObject json = QJsonDocument::fromJson(bytes).object();
+    if (json.value("id").toString() != canvasId)
+        return corrupt(QStringLiteral("canvas.json of %1 names another canvas").arg(canvasId));
+    CanvasInfo found;
+    found.id = canvasId;
+    found.name = json.value("name").toString();
+    found.created = json.value("created").toString();
+    QByteArray head;
+    if (readFile(canvasDir(canvasId) + QStringLiteral("/head"), &head))
+        found.head = QString::fromLatin1(head).trimmed();
+    return found;
+}
+
+Result<HeadMove> CanvasStore::moveHead(const QString &canvasId, const QString &expected, const QString &revisionId) {
+    const Result<CanvasInfo> canvas = info(canvasId);
+    if (!canvas)
+        return Result<HeadMove>(canvas.errors());
+    if (!revision(canvasId, revisionId))
+        return notFound(QStringLiteral("revision %1 in canvas %2").arg(revisionId, canvasId));
+    QLockFile lock(canvasDir(canvasId) + QStringLiteral("/head.lock"));
+    lock.setStaleLockTime(30000);
+    if (!lock.tryLock(10000))
+        return makeError(QStringLiteral("node_failed"), QStringLiteral("Another process holds the lock of canvas %1.").arg(canvasId));
+    QByteArray head; // read under the lock
+    readFile(canvasDir(canvasId) + QStringLiteral("/head"), &head);
+    const QString current = QString::fromLatin1(head).trimmed();
+    if (current != expected)
+        return HeadMove{false, current};
+    const Errors written = replaceFile(canvasDir(canvasId) + QStringLiteral("/head"), revisionId.toLatin1() + '\n', QStringLiteral("the canvas head"));
+    if (hasErrors(written))
+        return Result<HeadMove>(written);
+    return HeadMove{true, revisionId};
+}
+
+Result<Commit> CanvasStore::commit(const QString &canvasId, const PaintDocument &document, const QString &expectedHead, const QString &producer) {
+    const Result<Revision> added = addRevision(canvasId, document, expectedHead, producer);
+    if (!added)
+        return Result<Commit>(added.errors());
+    const Result<HeadMove> moved = moveHead(canvasId, expectedHead, added->id);
+    if (!moved)
+        return Result<Commit>(moved.errors());
+    return Commit{added.value(), moved.value()};
+}
+
+Result<CanvasInfo> CanvasStore::create(const QString &name, const PaintDocument &document, const QString &producer) {
+    const QString id = QStringLiteral("canvas-") + QUuid::createUuid().toString(QUuid::Id128).left(12);
+    const QString dir = canvasDir(id);
+    const Errors folder = makeFolder(dir + QStringLiteral("/commits"));
+    if (hasErrors(folder))
+        return Result<CanvasInfo>(folder);
+    const auto fail = [&dir](const Errors &errors) {
+        QDir(dir).removeRecursively(); // a canvas that was never complete: only this call knew it
+        return Result<CanvasInfo>(errors);
+    };
+    const QJsonObject record{{"format", storeFormat}, {"id", id}, {"name", name}, {"created", isoTime(utcNow(m_clock))}};
+    const Errors written = replaceFile(dir + QStringLiteral("/canvas.json"), jsonBytes(record), QStringLiteral("canvas.json"));
+    if (hasErrors(written))
+        return fail(written);
+    const Result<Commit> first = commit(id, document, QString(), producer);
+    if (!first || !first->move.moved)
+        return fail(first ? Errors{makeError(QStringLiteral("node_failed"), QStringLiteral("The new canvas's head could not be set."))} : first.errors());
+    return info(id);
+}
+
+Result<QString> CanvasStore::resolve(const QString &canvasId, const QString &ref) const {
+    const Result<CanvasInfo> canvas = info(canvasId);
+    if (!canvas)
+        return Result<QString>(canvas.errors());
+    if (ref.isEmpty() || ref == QLatin1String("head")) {
+        if (canvas->head.isEmpty())
+            return notFound(QStringLiteral("head: canvas %1 has no revision yet").arg(canvasId));
+        return canvas->head;
+    }
+    if (isSha256(ref))
+        return revision(canvasId, ref) ? Result<QString>(ref) : Result<QString>(notFound(QStringLiteral("revision %1 in canvas %2").arg(ref, canvasId)));
+    const QString prefix = ref.startsWith(QLatin1String("sha256:")) ? hexOf(ref) : ref;
+    static const QRegularExpression hex(QStringLiteral("^[0-9a-f]{8,63}$"));
+    if (!hex.match(prefix).hasMatch())
+        return notFound(QStringLiteral("revision %1: write \"head\", a full hash, or at least 8 hex digits of one").arg(ref));
+    QStringList found;
+    QDirIterator it(canvasDir(canvasId) + QStringLiteral("/commits"), {prefix + QLatin1Char('*') + QStringLiteral(".json")}, QDir::Files);
+    while (it.hasNext())
+        found << QFileInfo(it.next()).completeBaseName();
+    if (found.size() == 1)
+        return QStringLiteral("sha256:") + found.first();
+    return found.isEmpty() ? Result<QString>(notFound(QStringLiteral("revision starting %1 in canvas %2").arg(ref, canvasId)))
+                           : Result<QString>(makeError(QStringLiteral("canvas_ambiguous"), QStringLiteral("%1 starts more than one revision of canvas %2.").arg(ref, canvasId),
+                                                       QStringLiteral("Write more of the hash.")));
+}
+
+Result<std::vector<Revision>> CanvasStore::log(const QString &canvasId, const QString &from, int limit) const {
+    const Result<QString> start = resolve(canvasId, from);
+    if (!start)
+        return Result<std::vector<Revision>>(start.errors());
+    std::vector<Revision> entries;
+    QString at = start.value();
+    while (!at.isEmpty() && int(entries.size()) < limit) {
+        const Result<Revision> found = revision(canvasId, at);
+        if (!found)
+            return Result<std::vector<Revision>>(found.errors());
+        entries.push_back(found.value());
+        at = found->parent;
+    }
+    return entries;
+}
+
+Result<PaintDocument> CanvasStore::load(const QString &canvasId, const QString &revisionId) const {
+    const Result<Revision> found = revision(canvasId, revisionId);
+    if (!found)
+        return Result<PaintDocument>(found.errors());
+    const Result<Tree> stored = tree(found->tree);
+    if (!stored)
+        return Result<PaintDocument>(stored.errors());
+    PaintDocument document(stored->width, stored->height);
+    for (const LayerRecord &layer : stored->layers) {
+        if (layer.kind == LayerKind::Picture) {
+            document.loadLayer(layer.kind, layer.name, layer.visible, layer.opacity, MaskPaint(1, 1, 4));
+            continue;
+        }
+        const int width = stored->width, height = stored->height, channels = layer.channels();
+        const Result<MaskPaint> pixels = assembleLayer(width, height, channels, layer.tiles, [&](const TileKey &key, const QString &hash) {
+            const mask::IRect rect = tileRect(key, width, height);
+            return readBlob(hash, rect.width, rect.height, channels);
+        });
+        if (!pixels)
+            return Result<PaintDocument>(pixels.errors());
+        document.loadLayer(layer.kind, layer.name, layer.visible, layer.opacity, pixels.value());
+    }
+    document.forgetHistory();
+    return document;
+}
+
+} // namespace fugue::canvas
