@@ -44,6 +44,12 @@ class CanvasHistory : public QObject {
     Q_PROPERTY(QString kindB READ kindB NOTIFY compareChanged)
     // The last thing that failed, as a sentence with its hint; cleared by the next action.
     Q_PROPERTY(QString error READ error NOTIFY errorChanged)
+    // True when B has a parent to compare with (A is not B).
+    Q_PROPERTY(bool hasParent READ hasParent NOTIFY compareChanged)
+    // A file name for saving B's picture: "<canvas name>-<short hash>.png".
+    Q_PROPERTY(QString exportName READ exportName NOTIFY compareChanged)
+    // What the last export did, as a sentence ("Saved ... "); cleared by the next selection.
+    Q_PROPERTY(QString notice READ notice NOTIFY noticeChanged)
 
 public:
     explicit CanvasHistory(QObject *parent = nullptr) : QObject(parent) {}
@@ -64,6 +70,9 @@ public:
     QStringList summary() const { return m_summary; }
     QString kindB() const;
     QString error() const { return m_error; }
+    bool hasParent() const { return !m_b.isEmpty() && m_a != m_b; }
+    QString exportName() const;
+    QString notice() const { return m_notice; }
 
     // Reads the canvas again (after another process wrote to it).
     Q_INVOKABLE void reload();
@@ -72,6 +81,9 @@ public:
     // A revision as A, B unchanged (the head, or B itself, when B is not set).
     Q_INVOKABLE void setA(const QString &revision);
     Q_INVOKABLE void compare(const QString &a, const QString &b);
+    // Saves the picture of B (what the viewer shows) as a PNG at `target`, a path or a file URL; ".png" is
+    // added when the name ends in another extension. A file already there is never replaced. True when written.
+    Q_INVOKABLE bool exportPicture(const QString &target);
     // Accept a candidate into the head (see CanvasStore::accept); true when the head moved. The new head is selected.
     Q_INVOKABLE bool accept(const QString &revision);
     // Hide a candidate; true when done.
@@ -83,6 +95,7 @@ signals:
     void revisionsChanged();
     void compareChanged();
     void errorChanged();
+    void noticeChanged();
 
 private:
     canvas::CanvasStore store() const;
@@ -101,6 +114,7 @@ private:
     QSize m_sizeA, m_sizeB;
     QStringList m_summary;
     QString m_error;
+    QString m_notice;
     QTemporaryDir m_folder;
 };
 

@@ -129,6 +129,68 @@ private slots:
         QVERIFY(fugue({"canvas", "export", id, out}).exitCode != 0);
     }
 
+    void exportWritesAFlattenedPictureByTheExtension() {
+        const QString source = oraFile("in.ora"); // 300 x 200: a red square on a transparent paint layer
+        const Outcome imported = fugue({"canvas", "import", source, "--json"});
+        QVERIFY2(imported.exitCode == 0, imported.out + imported.err);
+        const QString id = imported.data().value("canvas").toString();
+        const QString head = imported.data().value("head").toString();
+
+        const Outcome png = fugue({"canvas", "export", id, path("work/flat.png"), "--json"});
+        QVERIFY2(png.exitCode == 0, png.out + png.err);
+        QCOMPARE(png.data().value("format").toString(), QString("png"));
+        // Decoded by the engine's own reader: RGBA bytes.
+        const auto decode = [&](const QString &name) {
+            const auto picture = fugue::mask::MaskPaint::fromPicture(readFile(path(name)));
+            return picture ? picture.value() : fugue::mask::MaskPaint(1, 1, 4);
+        };
+        const auto pixel = [](const fugue::mask::MaskPaint &picture, int x, int y) {
+            const auto p = picture.rgbaAt(x, y);
+            return QList<int>{p.r, p.g, p.b, p.a};
+        };
+        const auto flat = decode("work/flat.png");
+        QCOMPARE(flat.width(), 300);
+        QCOMPARE(flat.height(), 200);
+        QCOMPARE(pixel(flat, 50, 50), (QList<int>{200, 30, 30, 255}));
+        QCOMPARE(pixel(flat, 250, 150).at(3), 0);
+        // The same pixels the history window shows (document->flattenToPng()).
+        const auto document = fugue::canvas::CanvasStore(path("home/.local/share/fugue/canvases")).load(id, head);
+        QVERIFY(document);
+        QCOMPARE(readFile(path("work/flat.png")), document->flattenToPng().value());
+        // By revision, and the extension is not case sensitive.
+        QCOMPARE(fugue({"canvas", "export", id + "@head", path("work/again.PNG")}).exitCode, 0);
+
+        // JPEG has no alpha: it is flattened onto white, and the answer says so.
+        const Outcome jpg = fugue({"canvas", "export", id, path("work/flat.jpg"), "--json"});
+        QVERIFY2(jpg.exitCode == 0, jpg.out + jpg.err);
+        QCOMPARE(jpg.data().value("format").toString(), QString("jpg"));
+        QCOMPARE(jpg.data().value("background").toString(), QString("white"));
+        QVERIFY(!png.data().contains("background"));
+        const Outcome plain = fugue({"canvas", "export", id, path("work/plain.jpg")});
+        QVERIFY(plain.out.contains("white"));
+        const auto jpeg = decode("work/flat.jpg");
+        QCOMPARE(jpeg.width(), 300);
+        QVERIFY(pixel(jpeg, 250, 150).at(0) > 240 && pixel(jpeg, 250, 150).at(2) > 240);
+        QVERIFY(pixel(jpeg, 50, 50).at(0) > 150 && pixel(jpeg, 50, 50).at(1) < 90);
+        QCOMPARE(fugue({"canvas", "export", id, path("work/flat.jpeg")}).exitCode, 0);
+
+        const Outcome webp = fugue({"canvas", "export", id, path("work/flat.webp"), "--json"});
+        QVERIFY2(webp.exitCode == 0, webp.out + webp.err);
+        const auto web = decode("work/flat.webp");
+        QCOMPARE(web.height(), 200);
+        QCOMPARE(pixel(web, 50, 50), (QList<int>{200, 30, 30, 255}));
+        QCOMPARE(pixel(web, 250, 150).at(3), 0); // lossless keeps the alpha
+
+        // Never replaces a file, and an extension it does not write is said, not guessed.
+        const QByteArray before = readFile(path("work/flat.png"));
+        QVERIFY(fugue({"canvas", "export", id, path("work/flat.png")}).exitCode != 0);
+        QCOMPARE(readFile(path("work/flat.png")), before);
+        const Outcome odd = fugue({"canvas", "export", id, path("work/flat.gif"), "--json"});
+        QCOMPARE(odd.errorCode(), QString("usage"));
+        QVERIFY(!QFileInfo::exists(path("work/flat.gif")));
+        QCOMPARE(fugue({"canvas", "export", id, path("work/noext"), "--json"}).errorCode(), QString("usage"));
+    }
+
     void importTakesAPlainPictureAsAOneLayerCanvas() {
         fugue::mask::MaskPaint picture(64, 48, 4);
         picture.fill(fugue::mask::Rgba{5, 6, 7, 255});

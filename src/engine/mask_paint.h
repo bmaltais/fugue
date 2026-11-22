@@ -136,6 +136,9 @@ public:
     // `compression` is zlib's level 0 to 9 (6 by default; the canvas store's tiles use 1: about 3x faster for a
     // few percent more bytes). It changes the bytes, never the pixels.
     Result<QByteArray> toPng(int compression = 6) const;
+    // A color buffer as a picture file by its suffix: "png" (as toPng), "jpg" (quality 92, transparency flattened
+    // onto white: JPEG has no alpha) or "webp" (lossless, alpha kept). WebP is at most 16383 px a side.
+    Result<QByteArray> toPicture(const QString &suffix) const;
     // A PNG (or any picture libvips reads) as a mask: its first channel, 16-bit scaled to 8.
     static Result<MaskPaint> fromPng(const QByteArray &bytes);
     // Any picture libvips reads as a four-channel buffer (gray and RGB get an opaque alpha, 16-bit is

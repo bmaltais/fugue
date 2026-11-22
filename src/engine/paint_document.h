@@ -121,6 +121,8 @@ public:
     MaskPaint flattenArea(const IRect &area) const;
     MaskPaint flattenMaskArea(const IRect &area) const;
     Result<QByteArray> flattenToPng() const { return flatten().toPng(); }
+    // The same flattened picture as a "png", "jpg" (on white) or "webp" file (MaskPaint::toPicture).
+    Result<QByteArray> flattenToPicture(const QString &suffix) const { return flatten().toPicture(suffix); }
 
 private:
     struct Layer {

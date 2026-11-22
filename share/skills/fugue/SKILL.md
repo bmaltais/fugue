@@ -114,7 +114,7 @@ fail with `permission_denied`.
 | `fugue project inherits <name> <items>` | Set what it inherits (`models`, `packs`, `templates`, `prompts`, `preferences`, or `none`); all five words take effect now: inherited model folders, packs (with the Default's trust), templates and prompts are read-only and installs, downloads and saves go to the project's own |
 | `fugue canvas new` | Make a canvas (`--name`, `--size <w>x<h>`, default 1024x1024): one empty paint layer; prints the canvas id and its first revision |
 | `fugue canvas import <file>` | Make a canvas from an OpenRaster file or a PNG, JPEG or WebP picture (one layer) (`--name`) |
-| `fugue canvas export <id>[@<revision>] <file.ora>` | Write a revision (head by default) as an `.ora`; never replaces a file; the same revision gives the same bytes |
+| `fugue canvas export <id>[@<revision>] <file>` | Write a revision (head by default) by the file extension: `.ora` (layers; the same revision gives the same bytes) or a flattened `.png`, `.jpg` or `.webp` (JPEG has no transparency, so it is flattened onto white and the answer says so; WebP is lossless, at most 16383 px a side); never replaces a file |
 | `fugue canvas log <id>[@<revision>]` | Revisions newest first along their parents (`--limit`, default 20): revision, time, producer |
 | `fugue canvas show <id>[@<revision>]` | One revision: tree hash (pixels and layer properties only, same pixels same hash), parent, producer, time, layers. A revision is `head`, a full hash or 8+ hex digits of one |
 | `fugue canvas list` | The canvases of the store, newest first: id, created, name, head |
