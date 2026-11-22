@@ -78,6 +78,16 @@ QByteArray fixture(const QString &canvas) {
 })").arg(canvas).toUtf8();
 }
 
+QByteArray linkedFixture(const QString &canvas) {
+    return QStringLiteral(R"({
+  "fugue": 1,
+  "graph": {"nodes": {"n": {"type": "fugue/number", "version": "1.0.0", "inputs": {"value": 40}},
+                      "region": {"type": "fugue/canvas-region", "version": "1.0.0",
+                                 "inputs": {"canvas": "%1", "x": {"from": "n.value"}, "y": 60, "width": 160, "height": 96}}}},
+  "layout": {"nodes": {"n": {"pos": [20, 200]}, "region": {"pos": [20, 20]}}, "view": {"center": [200, 200], "zoom": 1}}
+})").arg(canvas).toUtf8();
+}
+
 } // namespace
 
 class TestCanvasViewWindow : public QObject {
@@ -250,7 +260,10 @@ private slots:
         QQuickItem *layer = find(app.window, "canvasViewRegion");
         QObject *viewer = view(app)->property("viewer").value<QObject *>();
         // The rectangle sits where the numbers say: x 100, y 60, 160 x 96 of the 512 px canvas.
-        const QRectF rectangle = layer->property("rectangle").toRectF();
+        QQuickItem *frame = find(app.window, "canvasViewFrame");
+        QVERIFY(frame);
+        const auto frameRect = [frame] { return QRectF(frame->property("fx").toReal(), frame->property("fy").toReal(), frame->property("fw").toReal(), frame->property("fh").toReal()); };
+        const QRectF rectangle = frameRect();
         const qreal k = viewer->property("imageScale").toReal();
         QVERIFY(k > 0);
         QVERIFY(qAbs(rectangle.width() - 160 * k) < 0.5);
@@ -266,7 +279,7 @@ private slots:
         // Zoom moves the rectangle with the picture.
         QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(find(app.window, "canvasViewViewer")));
         QTest::keyClick(app.window, Qt::Key_1);
-        QTRY_VERIFY(qAbs(find(app.window, "canvasViewRegion")->property("rectangle").toRectF().width() - 160) < 0.5);
+        QTRY_VERIFY(qAbs(frameRect().width() - 160) < 0.5);
         // A candidate: the button writes its revision, one undo step.
         click(app, "canvasViewChoice-" + shortOf(m_a));
         QTRY_VERIFY(find(app.window, "canvasViewUseRegion")->isEnabled());
@@ -279,6 +292,191 @@ private slots:
         app.model.undoStack()->undo();
         QTRY_VERIFY(find(app.window, "canvasViewUseRegion")->isEnabled());
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // ---- editing the region on the picture (#224): QTest mouse and key events on the offscreen window only ----
+
+    // Canvas pixel (px, py) as a point of the window, from where the picture is drawn now.
+    QPoint pixelAt(App &app, double px, double py) const {
+        QObject *viewer = view(app)->property("viewer").value<QObject *>();
+        const qreal k = viewer->property("imageScale").toReal();
+        return static_cast<QQuickItem *>(viewer)
+            ->mapToScene(QPointF(viewer->property("imageX").toReal() + px * k, viewer->property("imageY").toReal() + py * k))
+            .toPoint();
+    }
+    // A drag in small steps; `release` false leaves the button down (to look at the live numbers, or press Esc).
+    void drag(App &app, QPoint from, QPoint to, bool release = true, Qt::MouseButton button = Qt::LeftButton) {
+        QTest::mouseMove(app.window, from);
+        QTest::mousePress(app.window, button, {}, from);
+        for (int i = 1; i <= 4; ++i)
+            QTest::mouseMove(app.window, from + (to - from) * i / 4);
+        if (release)
+            QTest::mouseRelease(app.window, button, {}, to);
+    }
+    QVariantMap regionOf(App &app) const { return app.model.widgets()->regionState("region"); }
+    void openFollowing(App &app) {
+        QVERIFY(app.open());
+        app.model.select({"region"});
+        openDialog(app);
+        QTRY_COMPARE(model(app)->property("followNode").toString(), QString("region"));
+        QTRY_VERIFY(find(app.window, "canvasViewFrame"));
+        QTest::keyClick(app.window, Qt::Key_0); // Fit
+        QTRY_VERIFY(find(app.window, "canvasViewViewer")->width() > 100);
+        QTest::qWait(50);
+    }
+    static bool near(int a, int b, int tolerance = 2) { return qAbs(a - b) <= tolerance; }
+
+    void aHandleResizesTheRegionLiveAndTheReleaseIsOneUndoStep() {
+        App app(load(fixture(m_canvas)));
+        openFollowing(app);
+        QObject *viewer = view(app)->property("viewer").value<QObject *>();
+        const qreal k = viewer->property("imageScale").toReal();
+        // The bottom right corner: x 260, y 156 on the canvas, dragged by 60 x 40 px of the picture.
+        const QPoint corner = pixelAt(app, 260, 156);
+        const QPoint to = corner + QPoint(qRound(60 * k), qRound(40 * k));
+        drag(app, corner, to, false);
+        // Live: the numbers, the context box and the model size moved; the node did not.
+        QCOMPARE(app.model.undoStack()->count(), 0);
+        QCOMPARE(regionOf(app).value("width").toInt(), 160);
+        const QString note = find(app.window, "canvasViewRegionNote")->property("text").toString();
+        QVERIFY2(note.contains(QString::number(160 + 60)) || note.contains(QString::number(160 + 59)) || note.contains(QString::number(160 + 61)),
+                 qPrintable(note));
+        QVERIFY(find(app.window, "canvasViewRegionInfo")->property("text").toString().contains("The model gets"));
+        QTest::mouseRelease(app.window, Qt::LeftButton, {}, to);
+        QCOMPARE(app.model.undoStack()->count(), 1);
+        const QVariantMap now = regionOf(app);
+        QCOMPARE(now.value("x").toInt(), 100);
+        QCOMPARE(now.value("y").toInt(), 60);
+        QVERIFY(near(now.value("width").toInt(), 220));
+        QVERIFY(near(now.value("height").toInt(), 136));
+        // One undo puts all four back.
+        app.model.undoStack()->undo();
+        QCOMPARE(regionOf(app).value("width").toInt(), 160);
+        QCOMPARE(regionOf(app).value("height").toInt(), 96);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    void draggingInEmptySpaceDrawsANewRegion() {
+        App app(load(fixture(m_canvas)));
+        openFollowing(app);
+        drag(app, pixelAt(app, 300, 320), pixelAt(app, 420, 400));
+        QCOMPARE(app.model.undoStack()->count(), 1);
+        const QVariantMap now = regionOf(app);
+        QVERIFY(near(now.value("x").toInt(), 300));
+        QVERIFY(near(now.value("y").toInt(), 320));
+        QVERIFY(near(now.value("width").toInt(), 120));
+        QVERIFY(near(now.value("height").toInt(), 80));
+        // Up and to the left makes the same kind of box, not a flipped one.
+        drag(app, pixelAt(app, 200, 440), pixelAt(app, 150, 400));
+        QCOMPARE(app.model.undoStack()->count(), 2);
+        QVERIFY(near(regionOf(app).value("x").toInt(), 150));
+        QVERIFY(near(regionOf(app).value("width").toInt(), 50));
+        // A click on empty picture draws nothing.
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, pixelAt(app, 460, 60));
+        QCOMPARE(app.model.undoStack()->count(), 2);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    void escapeDuringADragLeavesTheNodeAsItWas() {
+        App app(load(fixture(m_canvas)));
+        openFollowing(app);
+        const QPoint from = pixelAt(app, 300, 320), to = pixelAt(app, 420, 400);
+        drag(app, from, to, false);
+        QVERIFY(find(app.window, "canvasViewFrame")->property("dragging").toBool());
+        QTest::keyClick(app.window, Qt::Key_Escape);
+        QVERIFY(!find(app.window, "canvasViewFrame")->property("dragging").toBool());
+        QTest::mouseRelease(app.window, Qt::LeftButton, {}, to);
+        QCOMPARE(app.model.undoStack()->count(), 0);
+        QCOMPARE(regionOf(app).value("x").toInt(), 100);
+        QCOMPARE(regionOf(app).value("width").toInt(), 160);
+        // The dialog stayed open: Escape was the drag's.
+        QVERIFY(dialog(app)->property("opened").toBool());
+        QVERIFY(find(app.window, "canvasViewRegionNote")->property("text").toString().contains("160"));
+    }
+
+    void zoomAndPanNeverMoveTheRectangle() {
+        App app(load(fixture(m_canvas)));
+        openFollowing(app);
+        QObject *viewer = view(app)->property("viewer").value<QObject *>();
+        QQuickItem *picture = find(app.window, "canvasViewViewer");
+        // The wheel zooms at the pointer, the region stays where the numbers say.
+        const QPointF mid(picture->width() / 2, picture->height() / 2);
+        QWheelEvent wheel(mid + picture->mapToScene(QPointF(0, 0)), mid, QPoint(), QPoint(0, 240), Qt::NoButton, {}, Qt::NoScrollPhase, false);
+        QCoreApplication::sendEvent(app.window, &wheel);
+        QTRY_VERIFY(viewer->property("zoom").toReal() > 1);
+        QCOMPARE(app.model.undoStack()->count(), 0);
+        // The middle button pans, even starting on the rectangle.
+        const qreal before = viewer->property("centerX").toReal();
+        const QPoint inside = pixelAt(app, 180, 108);
+        drag(app, inside, inside + QPoint(60, 0), true, Qt::MiddleButton);
+        QVERIFY(viewer->property("centerX").toReal() < before);
+        QCOMPARE(app.model.undoStack()->count(), 0);
+        // Space held, a left drag pans, also over the rectangle.
+        const qreal beforeSpace = viewer->property("centerX").toReal();
+        QTest::keyPress(app.window, Qt::Key_Space);
+        const QPoint again = pixelAt(app, 180, 108);
+        drag(app, again, again + QPoint(40, 0));
+        QTest::keyRelease(app.window, Qt::Key_Space);
+        QVERIFY(viewer->property("centerX").toReal() < beforeSpace);
+        QCOMPARE(app.model.undoStack()->count(), 0);
+        QCOMPARE(regionOf(app).value("x").toInt(), 100);
+        QCOMPARE(regionOf(app).value("width").toInt(), 160);
+        // Back to the left button alone: it edits again.
+        const QPoint place = pixelAt(app, 100, 60);
+        drag(app, place + QPoint(20, 20), place + QPoint(40, 20));
+        QCOMPARE(app.model.undoStack()->count(), 1);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    void aCandidateShownIsDrawnOnWithoutRepinningTheNode() {
+        App app(load(fixture(m_canvas)));
+        openFollowing(app);
+        click(app, "canvasViewChoice-" + shortOf(m_a));
+        QTRY_COMPARE(model(app)->property("revisionB").toString(), m_a);
+        QTRY_VERIFY(find(app.window, "canvasViewFrame"));
+        QTest::keyClick(app.window, Qt::Key_0);
+        QTest::qWait(50);
+        drag(app, pixelAt(app, 300, 320), pixelAt(app, 420, 400));
+        QCOMPARE(app.model.undoStack()->count(), 1);
+        QCOMPARE(regionOf(app).value("revision").toString(), QString("head")); // the choice of revision is its own button
+        QVERIFY(near(regionOf(app).value("width").toInt(), 120));
+    }
+
+    void snapPutsTheEdgesOnTheNodesMultipleLive() {
+        App app(load(fixture(m_canvas)));
+        openFollowing(app);
+        QCOMPARE(model(app)->property("region").toMap().value("multiple").toInt(), 16);
+        click(app, "canvasViewSnap");
+        drag(app, pixelAt(app, 301, 322), pixelAt(app, 421, 398));
+        QCOMPARE(app.model.undoStack()->count(), 1);
+        const QVariantMap now = regionOf(app);
+        for (const char *name : {"x", "y", "width", "height"})
+            QCOMPARE(now.value(name).toInt() % 16, 0);
+    }
+
+    void linkedNumbersKeepTheRegionReadOnlyWithANote() {
+        App app(load(linkedFixture(m_canvas)));
+        QVERIFY(app.open());
+        app.model.select({"region"});
+        openDialog(app);
+        QTRY_VERIFY(find(app.window, "canvasViewFrame"));
+        QTest::keyClick(app.window, Qt::Key_0);
+        QTest::qWait(50);
+        QVERIFY(find(app.window, "canvasViewRegionHint")->property("text").toString().contains("linked"));
+        QVERIFY(!find(app.window, "canvasViewFrame")->property("editable").toBool());
+        drag(app, pixelAt(app, 300, 320), pixelAt(app, 420, 400));
+        QCOMPARE(app.model.undoStack()->count(), 0);
+        QVERIFY(find(app.window, "canvasViewSnap")->isVisible() && !find(app.window, "canvasViewSnap")->isEnabled());
+    }
+
+    void withoutAFollowTargetTheViewSaysWhatToSelect() {
+        App app(load(fixture(m_canvas)));
+        QVERIFY(app.open());
+        openDialog(app);
+        QTRY_VERIFY(find(app.window, "canvasViewRegionHint"));
+        QCOMPARE(find(app.window, "canvasViewRegionHint")->property("text").toString(), QString("Select a Canvas Region node to pick its region"));
+        QVERIFY(!find(app.window, "canvasViewFrame"));
+        QVERIFY(!find(app.window, "canvasViewSnap"));
     }
 
     void aSelectionThatIsNoRegionFollowsNothing() {

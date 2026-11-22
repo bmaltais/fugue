@@ -17,7 +17,8 @@
 //  - auto-refresh: the store's folders are watched, so a head moved by a run, a candidate that arrived or a
 //    canvas made elsewhere shows within a moment; a view on the head moves along with it.
 // It makes no window. The `region` map is {valid, reason, x, y, width, height, context: {x, y, width, height}, reads,
-// readsId, readsShown, writable}.
+// readsId, readsShown, writable, editable, padding, scale, cap, multiple}: `editable` is false while X, Y, Width or Height
+// is linked to another node (the rectangle is then drawn but not edited).
 
 #include <QFileSystemWatcher>
 #include <QTimer>
@@ -70,6 +71,15 @@ public:
     // Writes the shown revision to the followed node's `revision` (the head as "head", so the node keeps reading the
     // head) as one undo step. False when nothing was written: no node, it reads this already, or the input is linked.
     Q_INVOKABLE bool useForRegion();
+    // Editing the followed region on the picture (#224). `snapRegion` is the rectangle with its edges on the node's
+    // Multiple of (`keepSize`: only the top left moves, as a ratio lock or a move needs); `previewRegion` the numbers a
+    // rectangle means for the node, on the shown picture: {x, y, width, height, context: {x, y, width, height},
+    // modelWidth, modelHeight, capped}, computed by the node's own functions. `setRegion` writes x, y, width and
+    // height as ONE undo step (WidgetEdit::setRegion), snapped when `snap`; false when nothing was written (no valid
+    // target, a number linked to another node, or the same numbers).
+    Q_INVOKABLE QVariantMap snapRegion(const QVariantMap &rect, bool keepSize = false) const;
+    Q_INVOKABLE QVariantMap previewRegion(const QVariantMap &rect) const;
+    Q_INVOKABLE bool setRegion(const QVariantMap &rect, bool snap = false);
     // Reads the store again now (the watch does this on its own; a test and a person's refresh ask).
     Q_INVOKABLE void refresh();
 

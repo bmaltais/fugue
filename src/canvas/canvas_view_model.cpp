@@ -186,13 +186,60 @@ void CanvasViewModel::updateRegion() {
                               {"reads", reads},
                               {"readsId", readsId},
                               {"readsShown", readsShown},
-                              {"writable", !state.value("revisionLinked").toBool()}};
+                              {"writable", !state.value("revisionLinked").toBool()},
+                              {"editable", state.value("editable").toBool()},
+                              {"padding", state.value("padding").toInt()},
+                              {"scale", state.value("scale").toDouble()},
+                              {"cap", state.value("cap").toDouble()},
+                              {"multiple", state.value("multiple").toInt()}};
         }
     }
     if (out != m_region) {
         m_region = out;
         emit regionChanged();
     }
+}
+
+namespace {
+crop::Rect rectOf(const QVariantMap &map) {
+    return {map.value("x").toInt(), map.value("y").toInt(), map.value("width").toInt(), map.value("height").toInt()};
+}
+QVariantMap mapOf(const crop::Rect &r) { return {{"x", r.x}, {"y", r.y}, {"width", r.width}, {"height", r.height}}; }
+} // namespace
+
+QVariantMap CanvasViewModel::snapRegion(const QVariantMap &rect, bool keepSize) const {
+    const QSize size = pictureSize();
+    if (!m_region.value("valid").toBool() || !size.isValid())
+        return rect;
+    return mapOf(region::snapped(rectOf(rect), m_region.value("multiple").toInt(), {size.width(), size.height()}, keepSize));
+}
+
+QVariantMap CanvasViewModel::previewRegion(const QVariantMap &rect) const {
+    const QSize size = pictureSize();
+    if (!m_region.value("valid").toBool() || !size.isValid())
+        return {};
+    const crop::Size canvas{size.width(), size.height()};
+    const crop::Rect r = rectOf(rect);
+    const region::Settings settings{m_region.value("padding").toInt(), m_region.value("scale").toDouble(), m_region.value("cap").toDouble(),
+                                    m_region.value("multiple").toInt()};
+    const crop::Rect context = region::context(r, settings.padding, canvas);
+    const crop::Size model = region::modelSize(r, settings, canvas);
+    QVariantMap out = mapOf(r);
+    out.insert("context", mapOf(context));
+    out.insert("modelWidth", model.width);
+    out.insert("modelHeight", model.height);
+    out.insert("capped", region::capped(r, settings, canvas));
+    return out;
+}
+
+bool CanvasViewModel::setRegion(const QVariantMap &rect, bool snap) {
+    if (!m_edits || m_follow.isEmpty() || !m_region.value("valid").toBool() || !m_region.value("editable").toBool())
+        return false;
+    const crop::Rect r = rectOf(snap ? snapRegion(rect) : rect);
+    const bool written = m_edits->setRegion(m_follow, r.x, r.y, r.width, r.height);
+    if (written)
+        updateRegion();
+    return written;
 }
 
 bool CanvasViewModel::useForRegion() {

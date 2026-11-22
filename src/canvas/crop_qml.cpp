@@ -44,6 +44,10 @@ QVariantMap CropGeometry::resized(const QVariantMap &rect, const QString &handle
     return mapOf(crop::resized(rectOf(rect), handleOf(handle), dx, dy, sizeOf(image), ratio, fromCenter));
 }
 
+QVariantMap CropGeometry::drawn(int ax, int ay, int bx, int by, const QSize &image, double ratio, bool fromCenter) const {
+    return mapOf(crop::drawn(ax, ay, bx, by, sizeOf(image), ratio, fromCenter));
+}
+
 QVariantMap CropGeometry::fitRatio(const QVariantMap &rect, double ratio, const QSize &image) const {
     return mapOf(crop::fitRatio(rectOf(rect), ratio, sizeOf(image)));
 }

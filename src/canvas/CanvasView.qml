@@ -13,7 +13,14 @@ import "widgets"
 //
 // Context: `canvasId` (empty: the newest canvas of the store, or the one a followed node reads), `storeRoot` (empty is
 // the session's), and a follow target: `edits` (the document's WidgetEdit) with `followNode`, a Canvas Region node whose
-// rectangle is then drawn on the picture (read-only here) and which `Region reads from this revision` writes to.
+// rectangle is then drawn on the picture, EDITED there (#224) and which `Region reads from this revision` writes to.
+//
+// The region on the picture is a live frame (CropFrame, the Crop window's and the region picker's): drag it to move it,
+// its eight handles to resize it, or drag in empty space to draw a new one. The numbers, the padded context box and the
+// size the model gets follow the pointer; the release writes x, y, width and height as ONE undo step (no Apply), Escape
+// during a drag leaves the node as it was. Wheel zoom and the middle button (or Space held) pan and never touch the
+// rectangle. It edits whichever revision is shown, a candidate included; with X, Y, Width or Height linked to another
+// node, or while comparing, it is drawn and not edited.
 // Everything it does is CanvasViewModel (canvas/canvas_view_model.h) over CanvasHistory.
 //
 // Simple by default: a canvas, the strip of revisions (Head, candidates, the latest few, Earlier…), the picture
@@ -35,6 +42,14 @@ Item {
     readonly property real u: look.unit
     property bool comparing: false
     property string compareMode: "slider"
+    // The rectangle a drag shows now (canvas pixels), null at rest; Snap puts its edges on the node's Multiple of.
+    property var liveRect: null
+    property bool snap: false
+    property bool panKey: false // Space held: a left drag pans, as the middle button does
+    readonly property bool regionValid: canvasData.region.valid === true
+    readonly property bool regionEditable: regionValid && canvasData.region.editable === true && !compareOn
+    // What the rectangle means for the node (the node's own functions): the drag's, or the committed one.
+    readonly property var preview: regionValid ? canvasData.previewRegion(liveRect ?? canvasData.region) : ({})
     readonly property bool compareOn: comparing && canvasData.hasParent
     readonly property bool canDecide: canvasData.kindB === "candidate" || canvasData.kindB === "dropped"
     readonly property string shownShort: canvasData.revisionB.slice(7, 15)
@@ -96,7 +111,23 @@ Item {
         return region.reads === "head" || region.reads === "" ? qsTr("head") : region.readsId !== "" ? region.readsId.slice(7, 15) : region.reads
     }
 
+    Keys.onReleased: event => {
+        if (event.key === Qt.Key_Space && !event.isAutoRepeat)
+            panKey = false
+    }
     Keys.onPressed: event => {
+        if (event.key === Qt.Key_Escape) {
+            const frame = regionFrame.item as CropFrame
+            if (!frame || !frame.cancel())
+                return // not ours: the dialog closes
+            event.accepted = true
+            return
+        }
+        if (event.key === Qt.Key_Space) {
+            panKey = true
+            event.accepted = true
+            return
+        }
         if (event.modifiers & (Qt.ControlModifier | Qt.AltModifier))
             return
         if (event.key === Qt.Key_0) fit()
@@ -209,6 +240,16 @@ Item {
                 }
             }
         }
+        ViewButton {
+            objectName: "canvasViewSnap"
+            look: root.look
+            visible: root.regionValid
+            enabled: root.regionEditable && canvasData.region.multiple > 1
+            text: qsTr("Snap to %1").arg(canvasData.region.multiple)
+            tip: qsTr("Put the region's edges on multiples of the node's Multiple of; with a ratio held only the corner moves")
+            current: root.snap
+            onTapped: root.snap = !root.snap
+        }
         Item { width: 2 * root.u; height: 1 }
         ViewButton {
             objectName: "canvasViewExport"
@@ -255,6 +296,7 @@ Item {
         anchors.bottomMargin: root.u
         width: parent.width
         visible: canvasData.canvasId !== "" && canvasData.revisionB !== ""
+        onActiveFocusChanged: if (!activeFocus) root.panKey = false
         mode: "single"
         showZoom: true
         // Alone, the picture is what the overlay says (a candidate over the head, the head, a revision); compared, A and B.
@@ -274,32 +316,37 @@ Item {
         visible: pictureView.visible && canvasData.region.valid === true && !pictureView.paired && pictureView.mode !== "difference"
         clip: true
         readonly property real k: pictureView.imageScale
-        readonly property var box: canvasData.region.valid ? canvasData.region : ({x: 0, y: 0, width: 0, height: 0, context: {x: 0, y: 0, width: 0, height: 0}})
-        // The rectangle and its padded context, in the picture's coordinates, which move with zoom and pan.
-        readonly property rect rectangle: Qt.rect(pictureView.imageX + box.x * k, pictureView.imageY + box.y * k, box.width * k, box.height * k)
-        readonly property rect context: Qt.rect(pictureView.imageX + box.context.x * k, pictureView.imageY + box.context.y * k, box.context.width * k, box.context.height * k)
+        // The padded context box, in the picture's coordinates, which move with zoom and pan; the drag's while there is one.
+        readonly property var box: root.regionValid ? root.preview.context : ({x: 0, y: 0, width: 0, height: 0})
+        readonly property rect context: Qt.rect(pictureView.imageX + box.x * k, pictureView.imageY + box.y * k, box.width * k, box.height * k)
+        // The rectangle: the Crop window's frame, with the picture left undimmed. It takes the left button on itself and
+        // on empty picture (to draw), never the middle button, the wheel or a Space-held drag, which are the viewer's.
+        Loader {
+            id: regionFrame
+            objectName: "canvasViewRegionFrame"
+            anchors.fill: parent
+            active: root.regionValid && canvasData.pictureSize.width > 0
+            sourceComponent: CropFrame {
+                objectName: "canvasViewFrame"
+                look: root.look
+                imageSize: canvasData.pictureSize
+                originX: pictureView.imageX
+                originY: pictureView.imageY
+                zoom: pictureView.imageScale
+                rect: canvasData.region
+                dimAlpha: 0
+                draw: true
+                editable: root.regionEditable
+                yieldPress: root.panKey
+                constrain: root.snap ? ((r, keepSize) => canvasData.snapRegion(r, keepSize)) : null
+                onPressed: pictureView.forceActiveFocus()
+                onChanging: r => root.liveRect = r
+                onDraggingChanged: if (!dragging) root.liveRect = null
+                onCommitted: r => canvasData.setRegion(r)
+            }
+        }
         Shape {
             anchors.fill: parent
-            ShapePath {
-                strokeColor: Qt.rgba(0, 0, 0, 0.6)
-                strokeWidth: 3.5
-                fillColor: "transparent"
-                startX: regionLayer.rectangle.left; startY: regionLayer.rectangle.top
-                PathLine { x: regionLayer.rectangle.right; y: regionLayer.rectangle.top }
-                PathLine { x: regionLayer.rectangle.right; y: regionLayer.rectangle.bottom }
-                PathLine { x: regionLayer.rectangle.left; y: regionLayer.rectangle.bottom }
-                PathLine { x: regionLayer.rectangle.left; y: regionLayer.rectangle.top }
-            }
-            ShapePath {
-                strokeColor: root.look.accent
-                strokeWidth: 2
-                fillColor: "transparent"
-                startX: regionLayer.rectangle.left; startY: regionLayer.rectangle.top
-                PathLine { x: regionLayer.rectangle.right; y: regionLayer.rectangle.top }
-                PathLine { x: regionLayer.rectangle.right; y: regionLayer.rectangle.bottom }
-                PathLine { x: regionLayer.rectangle.left; y: regionLayer.rectangle.bottom }
-                PathLine { x: regionLayer.rectangle.left; y: regionLayer.rectangle.top }
-            }
             ShapePath {
                 strokeColor: root.look.accent
                 strokeWidth: 1.5
@@ -357,7 +404,7 @@ Item {
                 color: canvasData.region.valid ? root.look.label : root.look.error
                 font.pixelSize: root.look.labelSize
                 text: canvasData.region.valid ? qsTr("Region %1 reads %2: %3 × %4 at %5, %6").arg(canvasData.followNode).arg(root.readsText(canvasData.region))
-                                                  .arg(canvasData.region.width).arg(canvasData.region.height).arg(canvasData.region.x).arg(canvasData.region.y)
+                                                  .arg(root.preview.width).arg(root.preview.height).arg(root.preview.x).arg(root.preview.y)
                                            : canvasData.region.reason
             }
             ViewButton {
@@ -372,6 +419,33 @@ Item {
                      : root.shownIsHead ? qsTr("Make the region read the head, whichever revision that is") : qsTr("Make the region read exactly this revision")
                 onTapped: canvasData.useForRegion()
             }
+        }
+        // The rest of what the rectangle means, live while it is dragged: the padded box (dashed) and the model's size.
+        Text {
+            objectName: "canvasViewRegionInfo"
+            width: parent.width
+            wrapMode: Text.Wrap
+            visible: root.regionValid
+            color: root.look.label
+            font.pixelSize: root.look.labelSize
+            font.features: { "tnum": 1 }
+            text: root.regionValid ? qsTr("Context %1 × %2 (dashed). The model gets %3 × %4%5.")
+                                       .arg(root.preview.context.width).arg(root.preview.context.height)
+                                       .arg(root.preview.modelWidth).arg(root.preview.modelHeight)
+                                       .arg(root.preview.capped ? qsTr(", at the %1 MP cap").arg(canvasData.region.cap) : "") : ""
+        }
+        // How to pick: what to select first, or what a drag does, or why it does nothing.
+        Text {
+            objectName: "canvasViewRegionHint"
+            width: parent.width
+            wrapMode: Text.Wrap
+            visible: pictureView.visible && (canvasData.followNode === "" || root.regionValid)
+            color: root.regionValid && !root.compareOn && !root.regionEditable ? root.look.error : root.look.label
+            font.pixelSize: root.look.labelSize
+            text: canvasData.followNode === "" ? qsTr("Select a Canvas Region node to pick its region")
+                  : root.regionEditable ? qsTr("Drag on the picture to pick the region; Esc cancels. Space-drag or the middle button pans.")
+                  : root.compareOn ? qsTr("Turn Compare off to pick the region on the picture.")
+                  : qsTr("X, Y, Width or Height is linked to another node: pick it there.")
         }
         Text {
             objectName: "canvasViewNotice"

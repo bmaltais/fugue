@@ -26,6 +26,8 @@ public:
     Q_INVOKABLE QVariantMap moved(const QVariantMap &rect, int dx, int dy, const QSize &image) const;
     Q_INVOKABLE QVariantMap resized(const QVariantMap &rect, const QString &handle, int dx, int dy, const QSize &image,
                                     double ratio = 0, bool fromCenter = false) const;
+    // A new rectangle dragged from the pixel edge (ax, ay) to (bx, by) in any direction (crop::drawn).
+    Q_INVOKABLE QVariantMap drawn(int ax, int ay, int bx, int by, const QSize &image, double ratio = 0, bool fromCenter = false) const;
     Q_INVOKABLE QVariantMap fitRatio(const QVariantMap &rect, double ratio, const QSize &image) const;
     // The ratio named "free", "source" or "w:h" as width / height (0 for free or a bad name).
     Q_INVOKABLE double ratioOf(const QString &name, const QSize &image) const;

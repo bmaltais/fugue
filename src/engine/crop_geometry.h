@@ -67,6 +67,12 @@ Rect moved(const Rect &start, int dx, int dy, const Size &image);
 Rect resized(const Rect &start, Handle handle, int dx, int dy, const Size &image, double ratio = 0,
              bool fromCenter = false);
 
+// A new rectangle drawn by dragging from one pixel edge (ax, ay) to another (bx, by), in any direction (it never
+// flips: it is the box between the two). Both are held inside the image, the size is at least 1 pixel. `ratio` is
+// width / height or 0 for free: the larger drag sets the size, held to the room the anchor leaves. `fromCenter`
+// makes the anchor the center (the drag counts on both sides, held to the nearest edge).
+Rect drawn(int ax, int ay, int bx, int by, const Size &image, double ratio = 0, bool fromCenter = false);
+
 // The largest rectangle of `ratio` that fits in `rect`, around its center; `rect` itself for a free
 // ratio. What a ratio picked on an existing frame does, as Photoshop's.
 Rect fitRatio(const Rect &rect, double ratio, const Size &image);

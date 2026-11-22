@@ -94,8 +94,15 @@ head alone, so you can flip between before and after. **Accept**, **Drop** and *
 (Drop only hides: a dropped candidate can still be accepted), and **Compare** opens the slider, side by side,
 flip and difference views against the head. Select a Canvas Region node in the graph before you open it and its
 rectangle (and the padded box the node cuts) is drawn on the picture; **Region reads from this revision** makes the
-node read the revision you are looking at (the head, if you are on the head), as one undo step. The view
-refreshes by itself when a run adds a candidate or moves the head.
+node read the revision you are looking at (the head, if you are on the head), as one undo step. That rectangle is
+the next work area, and you pick it on the picture: drag in empty space to draw a new one, drag inside it to move it
+or a handle to resize it (Shift keeps its shape, or makes a new one square; Alt works from the center). The numbers
+under the picture, the padded box and the size the model will get follow the pointer, and **Snap to 16** (the node's
+Multiple of) puts the edges on multiples of 16. Letting go writes X, Y, Width and Height in one undo step, with no
+Apply; Esc during a drag leaves the node as it was. The wheel zooms and the middle button (or Space held) pans, and
+neither moves the rectangle. It works on whichever revision you are looking at, a candidate included. With X, Y,
+Width or Height linked to another node, or while Compare is on, it is only drawn; with no Canvas Region selected the
+view says so. The view refreshes by itself when a run adds a candidate or moves the head.
 
 File > Canvas history… lists your canvases; open one to see its revisions and
 candidates, and click a revision to see it at full size (zoom and pan; the head is shown first). Press

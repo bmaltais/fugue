@@ -17,7 +17,13 @@ import Fugue
 // Keys while dragging: Shift keeps the frame's ratio (the lock, when there is one, always holds),
 //         Alt resizes from the center (Photoshop's).
 // A press outside the frame, or any press when not `editable`, is not taken: the viewer under it
-// pans.
+// pans. With `draw` a press outside the frame starts a NEW rectangle instead (dragged from that point in any
+// direction, CropGeometry.drawn; Shift makes it square, Alt draws from the center; a press that does not move
+// leaves the frame as it was), and `yieldPress` hands every press to the viewer (a Space-held pan). `constrain`,
+// when set, is a function (rect, keepSize) -> rect applied to every step of a drag (the region's snap to a
+// multiple): the frame, `changing` and `committed` all carry the constrained rectangle. `cancel()` ends a drag
+// without `committed` (Escape): the frame goes back to what it was. `dimAlpha` is the strength of the dimmed
+// outside (0: the picture shows whole).
 Item {
     id: frame
     required property CanvasLook look
@@ -28,6 +34,10 @@ Item {
     property var rect: ({x: 0, y: 0, width: 1, height: 1})
     property real ratio: 0
     property bool editable: true
+    property bool draw: false
+    property bool yieldPress: false
+    property var constrain: null
+    property real dimAlpha: 0.55
 
     signal committed(var rect)
     signal changing(var rect)
@@ -47,7 +57,9 @@ Item {
     readonly property real fh: shown.height * zoom
     readonly property real iw: imageSize.width * zoom
     readonly property real ih: imageSize.height * zoom
-    readonly property color dim: Qt.rgba(0, 0, 0, 0.55)
+    readonly property color dim: Qt.rgba(0, 0, 0, dimAlpha)
+    // Ends a drag with nothing written; true when there was one.
+    function cancel() { return pointer.cancel() }
 
     // The dimmed area: the four strips of the picture around the frame.
     Rectangle { objectName: "cropDimTop"; x: frame.originX; y: frame.originY; width: frame.iw; height: Math.max(0, frame.fy - frame.originY); color: frame.dim }
@@ -126,10 +138,11 @@ Item {
         id: pointer
         objectName: "cropMouse"
         anchors.fill: parent
-        enabled: frame.editable
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton
         cursorShape: cursorOf(pressed ? handle : hovered)
+        // The pointer, when it is the viewer's pan: nothing here takes the press.
+        enabled: frame.editable && !frame.yieldPress
 
         property bool dragging: false
         property var draft: frame.rect
@@ -146,7 +159,8 @@ Item {
             case "top": case "bottom": return Qt.SizeVerCursor
             case "left": case "right": return Qt.SizeHorCursor
             case "inside": return Qt.SizeAllCursor
-            default: return Qt.ArrowCursor
+            case "new": return Qt.CrossCursor
+            default: return frame.draw ? Qt.CrossCursor : Qt.ArrowCursor
             }
         }
         function under(x, y) {
@@ -156,16 +170,42 @@ Item {
         function offset(mouse) {
             return Qt.point(Math.round((mouse.x - start.x) / frame.zoom), Math.round((mouse.y - start.y) / frame.zoom))
         }
+        function pixelAt(x, y) {
+            return Qt.point(Math.round((x - frame.originX) / frame.zoom), Math.round((y - frame.originY) / frame.zoom))
+        }
+        function cancel() {
+            if (!dragging)
+                return false
+            dragging = false
+            draft = frame.rect
+            handle = "none"
+            return true
+        }
         function follow(mouse) {
             const d = offset(mouse)
             let r
-            if (handle === "inside") {
+            if (handle === "new") {
+                // A press that has not moved yet draws nothing: the frame stays as it was.
+                if (Math.abs(mouse.x - start.x) + Math.abs(mouse.y - start.y) < 4) {
+                    r = startRect
+                } else {
+                    const a = pixelAt(start.x, start.y), b = pixelAt(mouse.x, mouse.y)
+                    const ratio = frame.ratio > 0 ? frame.ratio : (mouse.modifiers & Qt.ShiftModifier) ? 1 : 0
+                    r = CropGeometry.drawn(a.x, a.y, b.x, b.y, frame.imageSize, ratio, !!(mouse.modifiers & Qt.AltModifier))
+                    if (frame.constrain)
+                        r = frame.constrain(r, ratio > 0)
+                }
+            } else if (handle === "inside") {
                 r = CropGeometry.moved(startRect, d.x, d.y, frame.imageSize)
+                if (frame.constrain)
+                    r = frame.constrain(r, true)
             } else {
                 // The lock holds always; Shift keeps the ratio the frame had when the drag began.
                 const ratio = frame.ratio > 0 ? frame.ratio
                               : (mouse.modifiers & Qt.ShiftModifier) ? startRect.width / startRect.height : 0
                 r = CropGeometry.resized(startRect, handle, d.x, d.y, frame.imageSize, ratio, !!(mouse.modifiers & Qt.AltModifier))
+                if (frame.constrain)
+                    r = frame.constrain(r, ratio > 0)
             }
             draft = r
             frame.changing(r)
@@ -173,7 +213,12 @@ Item {
         function same(a, b) { return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height }
 
         onPressed: mouse => {
-            const h = under(mouse.x, mouse.y)
+            let h = under(mouse.x, mouse.y)
+            if (h === "none" && frame.draw) {
+                const p = pixelAt(mouse.x, mouse.y) // only on the picture: outside it there is nothing to draw on
+                if (p.x >= 0 && p.y >= 0 && p.x <= frame.imageSize.width && p.y <= frame.imageSize.height)
+                    h = "new"
+            }
             if (h === "none") {
                 mouse.accepted = false // the viewer under it pans
                 return

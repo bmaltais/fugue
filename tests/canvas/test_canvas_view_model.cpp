@@ -238,6 +238,74 @@ private slots:
         QTRY_COMPARE(view.region().value("reads").toString(), m_c1);
     }
 
+    void theRegionIsEditedThroughTheModelInOneUndoStepWithTheNodesOwnNumbers() {
+        App app(load(fixture(m_canvas, R"(, "x": 100, "y": 60, "width": 160, "height": 96, "padding": 20, "multiple": 16, "revision": "head")")));
+        app.model.widgets()->canvasChoices()->setStoreRoot(m_dir.filePath("store"));
+        QVERIFY(app.open());
+        CanvasViewModel view;
+        view.setStoreRoot(m_dir.filePath("store"));
+        QVERIFY(!view.setRegion({{"x", 1}, {"y", 1}, {"width", 8}, {"height", 8}})); // nothing followed
+        view.setEdits(app.model.widgets());
+        view.setFollowNode("region");
+        QVERIFY(view.region().value("editable").toBool());
+        QCOMPARE(view.region().value("multiple").toInt(), 16);
+        // The preview is the node's: padded context kept inside the canvas, the model size on its multiple.
+        const QVariantMap p = view.previewRegion({{"x", 10}, {"y", 10}, {"width", 100}, {"height", 40}});
+        QCOMPARE(p.value("context").toMap().value("x").toInt(), 0); // 10 - 20, held at the edge
+        QVERIFY(p.value("context").toMap().value("width").toInt() >= 130); // the node's own rule (may round up to its multiple)
+        QCOMPARE(p.value("modelWidth").toInt() % 16, 0);
+        QCOMPARE(p.value("modelHeight").toInt() % 16, 0);
+        // Snap puts the edges on multiples; keepSize moves only the top left.
+        const QVariantMap snapped = view.snapRegion({{"x", 21}, {"y", 37}, {"width", 100}, {"height", 45}});
+        QCOMPARE(snapped.value("x").toInt() % 16, 0);
+        QCOMPARE(snapped.value("y").toInt() % 16, 0);
+        const QVariantMap kept = view.snapRegion({{"x", 21}, {"y", 37}, {"width", 100}, {"height", 45}}, true);
+        QCOMPARE(kept.value("width").toInt(), 100);
+        QCOMPARE(kept.value("height").toInt(), 45);
+        // Previewing and snapping are not edits.
+        QCOMPARE(app.model.undoStack()->count(), 0);
+        // Writing: the four numbers, one undo step, a candidate shown or not.
+        view.show(m_c1);
+        QVERIFY(view.setRegion({{"x", 200}, {"y", 150}, {"width", 64}, {"height", 48}}));
+        QCOMPARE(app.model.undoStack()->count(), 1);
+        const QVariantMap now = app.model.widgets()->regionState("region");
+        QCOMPARE(now.value("x").toInt(), 200);
+        QCOMPARE(now.value("y").toInt(), 150);
+        QCOMPARE(now.value("width").toInt(), 64);
+        QCOMPARE(now.value("height").toInt(), 48);
+        QCOMPARE(view.region().value("x").toInt(), 200); // the view follows at once
+        QCOMPARE(now.value("revision").toString(), QString("head")); // drawing on a candidate does not repin the node
+        QVERIFY(!view.setRegion({{"x", 200}, {"y", 150}, {"width", 64}, {"height", 48}})); // the same: nothing
+        QCOMPARE(app.model.undoStack()->count(), 1);
+        QVERIFY(view.setRegion({{"x", 201}, {"y", 150}, {"width", 64}, {"height", 48}}, true)); // snapped to 208
+        QCOMPARE(app.model.widgets()->regionState("region").value("x").toInt() % 16, 0);
+        app.model.undoStack()->undo();
+        QTRY_COMPARE(view.region().value("x").toInt(), 200);
+        app.model.undoStack()->undo();
+        QTRY_COMPARE(view.region().value("x").toInt(), 100);
+    }
+
+    void aLinkedNumberLeavesTheRegionReadOnly() {
+        const QString nodes = QStringLiteral(R"({
+  "fugue": 1,
+  "graph": {"nodes": {"src": {"type": "fugue/number", "version": "1.0.0", "inputs": {"value": 40}},
+                      "region": {"type": "fugue/canvas-region", "version": "1.0.0",
+                                 "inputs": {"canvas": "%1", "x": {"from": "src.value"}}}}},
+  "layout": {"nodes": {"src": {"pos": [0, 0]}, "region": {"pos": [200, 0]}}, "view": {"center": [200, 200], "zoom": 1}}
+})").arg(m_canvas);
+        App app(load(nodes.toUtf8()));
+        app.model.widgets()->canvasChoices()->setStoreRoot(m_dir.filePath("store"));
+        QVERIFY(app.open());
+        CanvasViewModel view;
+        view.setStoreRoot(m_dir.filePath("store"));
+        view.setEdits(app.model.widgets());
+        view.setFollowNode("region");
+        QVERIFY(view.region().value("valid").toBool());
+        QVERIFY(!view.region().value("editable").toBool());
+        QVERIFY(!view.setRegion({{"x", 10}, {"y", 10}, {"width", 64}, {"height", 48}}));
+        QCOMPARE(app.model.undoStack()->count(), 0);
+    }
+
     void aLinkedRevisionIsNotWritten() {
         const QString nodes = QStringLiteral(R"({
   "fugue": 1,

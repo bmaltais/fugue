@@ -200,6 +200,35 @@ private slots:
         QCOMPARE(fitted({0, 0}, 10, 10).scale, 1.0);
     }
 
+    // ---- drawing a new rectangle (the Canvas view's region) -------------------------------------
+
+    void drawnIsTheRectangleBetweenTheAnchorAndThePointerInAnyDirection() {
+        QCOMPARE(drawn(20, 10, 70, 40, image), (Rect{20, 10, 50, 30}));
+        QCOMPARE(drawn(70, 40, 20, 10, image), (Rect{20, 10, 50, 30})); // up and to the left: it never flips, it is the same box
+        QCOMPARE(drawn(20, 40, 70, 10, image), (Rect{20, 10, 50, 30}));
+        // Out past the image it stops at the edge; the anchor is held inside too.
+        QCOMPARE(drawn(150, 60, 900, 900, image), (Rect{150, 60, 50, 40}));
+        QCOMPARE(drawn(-30, -30, 40, 20, image), (Rect{0, 0, 40, 20}));
+        // At least one pixel each way, also with the pointer on the anchor or the anchor on the far edge.
+        QCOMPARE(drawn(20, 10, 20, 10, image), (Rect{20, 10, 1, 1}));
+        QCOMPARE(drawn(200, 100, 200, 100, image), (Rect{199, 99, 1, 1}));
+    }
+
+    void drawnFromTheCenterMirrorsTheDragAndStopsAtTheNearestEdge() {
+        QCOMPARE(drawn(100, 50, 120, 60, image, 0, true), (Rect{80, 40, 40, 20}));
+        // The anchor 10 px from the left edge: the half size is held to 10.
+        QCOMPARE(drawn(10, 50, 60, 60, image, 0, true), (Rect{0, 40, 20, 20}));
+    }
+
+    void drawnWithARatioFollowsTheLargerDragAndKeepsInside() {
+        QCOMPARE(drawn(20, 10, 60, 20, image, 2.0), (Rect{20, 10, 40, 20})); // the wider drag sets the width
+        QCOMPARE(drawn(20, 10, 30, 50, image, 2.0), (Rect{20, 10, 80, 40})); // the taller one sets the height
+        QCOMPARE(drawn(60, 20, 20, 10, image, 2.0), (Rect{20, 0, 40, 20})); // up and to the left, from the anchor
+        // Too big for the room under the anchor: the largest of that ratio that fits.
+        QCOMPARE(drawn(100, 50, 900, 900, image, 2.0), (Rect{100, 50, 100, 50}));
+        QCOMPARE(drawn(150, 50, 900, 900, image, 2.0), (Rect{150, 50, 50, 25}));
+    }
+
     // ---- a drag is a path of positions ----------------------------------------------------------
 
     void theResultOfADragDependsOnTheStartAndTheTotalOffsetOnly() {

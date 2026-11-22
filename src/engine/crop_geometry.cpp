@@ -162,6 +162,53 @@ Rect resized(const Rect &start, Handle handle, int dx, int dy, const Size &image
     return out;
 }
 
+Rect drawn(int ax, int ay, int bx, int by, const Size &image, double ratio, bool fromCenter) {
+    if (image.width <= 0 || image.height <= 0)
+        return {};
+    ax = clampInt(ax, 0, image.width);
+    ay = clampInt(ay, 0, image.height);
+    bx = clampInt(bx, 0, image.width);
+    by = clampInt(by, 0, image.height);
+    const int dx = std::abs(bx - ax), dy = std::abs(by - ay);
+    const bool right = bx >= ax, down = by >= ay;
+    // One axis of a free drag: the span from the anchor, mirrored about it from the center.
+    const auto span = [fromCenter](int a, int d, bool positive, int limit, int *start, int *length) {
+        if (fromCenter) {
+            const int half = std::max(0, std::min(d, std::min(a, limit - a)));
+            *start = a - half;
+            *length = 2 * half;
+        } else {
+            *start = positive ? a : a - d;
+            *length = d;
+        }
+        if (*length < 1) {
+            *length = 1;
+            *start = clampInt(*start, 0, limit - 1);
+        }
+    };
+    Rect out;
+    if (ratio <= 0) {
+        span(ax, dx, right, image.width, &out.x, &out.width);
+        span(ay, dy, down, image.height, &out.y, &out.height);
+        return out;
+    }
+    double w = dx / ratio >= dy ? dx : dy * ratio;
+    if (fromCenter)
+        w *= 2;
+    const double roomX = fromCenter ? 2.0 * std::min(ax, image.width - ax) : (right ? image.width - ax : ax);
+    const double roomY = fromCenter ? 2.0 * std::min(ay, image.height - ay) : (down ? image.height - ay : ay);
+    w = std::min(w, std::min(roomX, roomY * ratio));
+    const int wi = std::max(1, std::min(roundInt(w), image.width));
+    const int hi = std::max(1, std::min(roundInt(wi / ratio), image.height));
+    out.width = wi;
+    out.height = hi;
+    out.x = fromCenter ? roundInt(ax - wi / 2.0) : (right ? ax : ax - wi);
+    out.y = fromCenter ? roundInt(ay - hi / 2.0) : (down ? ay : ay - hi);
+    out.x = clampInt(out.x, 0, image.width - wi);
+    out.y = clampInt(out.y, 0, image.height - hi);
+    return out;
+}
+
 Rect fitRatio(const Rect &rect, double ratio, const Size &image) {
     const Rect r = clamped(rect, image);
     if (ratio <= 0)
