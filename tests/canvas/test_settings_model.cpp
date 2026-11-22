@@ -11,8 +11,10 @@
 #include <QtTest>
 
 #include "canvas/canvas_model.h"
+#include "engine/fugue_home.h"
 #include "engine/json.h"
 #include "engine/paths.h"
+#include "engine/project.h"
 #include "engine/providers.h"
 #include "engine/providers_file.h"
 #include "engine/registry.h"
@@ -127,6 +129,44 @@ private slots:
         QCOMPARE(model.set("language", ""), QString()); // follow Omarchy again
         QCOMPARE(translator.language(), QStringLiteral("en"));
         QVERIFY(model.languages().size() >= 2);
+    }
+
+    void followOmarchyInAProjectShadowsTheDefaultsLanguage() {
+        writeFile(baseConfigDir() + "/settings.json", R"({"language": "da"})");
+        ProjectManifest manifest;
+        manifest.name = "Acme";
+        manifest.inherits = {"preferences"};
+        const QString root = m_home.filePath("acme");
+        QVERIFY(QDir().mkpath(root));
+        QVERIFY(writeProject(root, manifest).isEmpty());
+        // Entering a project redirects the process's XDG variables: put the whole environment back after.
+        QHash<QByteArray, QByteArray> saved;
+        for (const char *variable : {"FUGUE_HOME", "FUGUE_BASE_XDG_CONFIG_HOME", "FUGUE_BASE_XDG_DATA_HOME", "FUGUE_BASE_XDG_STATE_HOME",
+                                     "FUGUE_BASE_XDG_CACHE_HOME", "FUGUE_BASE_XDG_RUNTIME_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
+                                     "XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR", "TMPDIR", "CUDA_CACHE_PATH",
+                                     "__GL_SHADER_DISK_CACHE_PATH", "PIPEWIRE_RUNTIME_DIR", "PULSE_RUNTIME_PATH"})
+            saved.insert(variable, qEnvironmentVariableIsSet(variable) ? qgetenv(variable) : QByteArray("\0unset", 6));
+        const auto leave = qScopeGuard([&saved] {
+            for (auto it = saved.begin(); it != saved.end(); ++it)
+                if (it.value() == QByteArray("\0unset", 6))
+                    qunsetenv(it.key().constData());
+                else
+                    qputenv(it.key().constData(), it.value());
+        });
+        QVERIFY(setFugueHome(root, nullptr));
+        QTemporaryDir omarchy;
+        Translator translator(omarchy.filePath("language"));
+        SettingsModel model;
+        model.attach(&translator, nullptr);
+        QCOMPARE(model.language(), QStringLiteral("da")); // the Default's
+        QCOMPARE(model.set("language", ""), QString()); // follow Omarchy, in this project
+        QCOMPARE(model.language(), QString());
+        QCOMPARE(translator.language(), QStringLiteral("en"));
+        QCOMPARE(model.origins().value("language").toString(), QStringLiteral("override")); // can be given up
+        SettingsModel again; // a window opened on the project later
+        QCOMPARE(again.language(), QString());
+        QCOMPARE(model.useDefault("language"), QString()); // giving it up shows the Default's again
+        QCOMPARE(model.language(), QStringLiteral("da"));
     }
 
     void newNodesStartAsTheRunSettingsSay() {

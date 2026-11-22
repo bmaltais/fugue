@@ -184,6 +184,12 @@ QJsonValue settingDefault(const QString &key) {
     return QJsonValue(QJsonValue::Undefined); // language and folders: absent
 }
 
+QJsonValue settingUnsetValue(const QString &key) {
+    if (key == QLatin1String("language"))
+        return QString();
+    return QJsonValue(QJsonValue::Undefined);
+}
+
 QString checkSetting(const QString &key, const QJsonValue &value) {
     if (key == QLatin1String("navigation"))
         return oneOf(value, {"legacy", "standard"}, key);
@@ -214,9 +220,9 @@ QString checkSetting(const QString &key, const QJsonValue &value) {
     }
     if (key == QLatin1String("language")) {
         static const QRegularExpression code(QStringLiteral("^[a-z]{2,3}(-[A-Za-z]{2})?$"));
-        if (value.isString() && code.match(value.toString()).hasMatch())
+        if (value.isString() && (value.toString().isEmpty() || code.match(value.toString()).hasMatch()))
             return {};
-        return QStringLiteral("language must be a language code such as da or pt-BR.");
+        return QStringLiteral("language must be a language code such as da or pt-BR, or empty to follow Omarchy.");
     }
     if (key == QLatin1String("output_folder") || key == QLatin1String("inputs_folder")
         || key == QLatin1String("download_folder"))
@@ -275,7 +281,9 @@ Errors changeSetting(const QString &path, const QString &key, const QJsonValue &
     }
     // The default is not written, except where the Default project's value would otherwise show through:
     // a project that sets a preference back to the built-in value must say so.
-    const bool isDefault = value.isUndefined() || (value == settingDefault(key) && !shadowsInherited(path, key, value));
+    // The unset sentinel ("" for language) is the same: written only over an inherited value.
+    const bool unsetValue = !value.isUndefined() && value == settingUnsetValue(key);
+    const bool isDefault = value.isUndefined() || ((value == settingDefault(key) || unsetValue) && !shadowsInherited(path, key, value));
     if (isDefault) {
         if (!document.contains(key))
             return {}; // already the default: nothing to write

@@ -261,6 +261,31 @@ private slots:
         QVERIFY(!readSettings(settingsPath()).document.contains("embed_workflow"));
     }
 
+    void aProjectCanSetTheLanguageBackToFollowOmarchyOverTheDefaults() {
+        writeDefault(defaultSettings(path("models"))); // language da
+        enterProject({"preferences"});
+        // Follow Omarchy is an absent key in the Default, but in a project it must shadow: it writes "".
+        QVERIFY(changeSetting(settingsPath(), "language", settingUnsetValue("language")).isEmpty());
+        QVERIFY(readSettings(settingsPath()).problems.isEmpty());
+        QCOMPARE(readSettings(settingsPath()).document.value("language"), QJsonValue(QString()));
+        QCOMPARE(effectiveSettings().settings.language, QString());
+        QCOMPARE(effectiveSettings().origins.value("language"), SettingOrigin::Own);
+        // Removing the key (undefined) is the way back to the Default's language.
+        QVERIFY(changeSetting(settingsPath(), "language", QJsonValue::Undefined).isEmpty());
+        QVERIFY(!readSettings(settingsPath()).document.contains("language"));
+        QCOMPARE(effectiveSettings().settings.language, QString("da"));
+    }
+
+    void followOmarchyIsNotWrittenWhenThereIsNothingToShadow() {
+        enterProject({"preferences"}); // the Default has no language
+        QVERIFY(changeSetting(settingsPath(), "language", settingUnsetValue("language")).isEmpty());
+        QVERIFY(!readSettings(settingsPath()).document.contains("language"));
+        writeDefault(defaultSettings(path("models")));
+        enterProject({}); // inherits nothing: the Default's language is not seen
+        QVERIFY(changeSetting(settingsPath(), "language", settingUnsetValue("language")).isEmpty());
+        QVERIFY(!readSettings(settingsPath()).document.contains("language"));
+    }
+
     // Models
 
     void inheritedModelRootsAreReadOnlyAndNeverADownloadTarget() {

@@ -10,7 +10,7 @@
 // | Key              | Value                                    | Default                  |
 // | ---------------- | ---------------------------------------- | ------------------------ |
 // | navigation       | "legacy" or "standard" (12.3)            | "legacy"                 |
-// | language         | a language code ("da", "pt-BR")          | absent: follow Omarchy   |
+// | language         | a language code ("da", "pt-BR"), or ""   | absent: follow Omarchy   |
 // | output_folder    | an absolute or ~ path                    | ~/Pictures/Fugue         |
 // | inputs_folder    | an absolute or ~ path                    | <output folder>/inputs   |
 // | model_paths      | extra model search paths (8.9)           | []                       |
@@ -104,6 +104,11 @@ QStringList settingKeys();
 
 // The default of a known key, as it would be written.
 QJsonValue settingDefault(const QString &key);
+
+// The value that means "unset" for a key whose built-in state is an absent key (language: "" follows
+// Omarchy); undefined for every other key. A project that inherits the Default's value writes it, not
+// nothing, so the unset state can shadow (changeSetting drops it when there is nothing to shadow).
+QJsonValue settingUnsetValue(const QString &key);
 
 // Reads a settings.json; a missing file is every default and no problem.
 SettingsFile readSettings(const QString &path);

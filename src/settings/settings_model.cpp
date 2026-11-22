@@ -243,10 +243,10 @@ QString SettingsModel::set(const QString &key, const QVariant &value) {
     if (key == QLatin1String("output_folder") || key == QLatin1String("inputs_folder")) {
         const QString typed = pathText(value).trimmed();
         json = typed.isEmpty() ? settingDefault(key) : QJsonValue(folderValue(typed));
-    } else if (key == QLatin1String("language")) {
+    } else if (key == QLatin1String("language") && !json.isUndefined()) { // undefined: give the key up
         const QString code = value.toString();
         if (code.isEmpty())
-            json = QJsonValue(QJsonValue::Undefined);
+            json = settingUnsetValue(key); // follow Omarchy, written over a Default's language
         else if (!Translator::catalogs().contains(code))
             return tr("Fugue has no %1 translation.").arg(code);
     }
