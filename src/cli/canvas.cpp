@@ -1,4 +1,4 @@
-// `fugue canvas new|import|export|log|show|list|candidates|accept|drop|diff` (spec 13.1, 14.5, epic #206): the canvas revision store
+// `fugue canvas new|import|export|log|show|list|candidates|accept|drop|diff|layer|undo|redo` (spec 13.1, 14.5, epic #206): the canvas revision store
 // from the command line. The work is engine/canvas_store.h's; this reads the arguments and prints.
 // A canvas lives in the session's store (a project's own under FUGUE_HOME); `<canvas>` is its id,
 // `<canvas>@<revision>` a revision of it (a full hash, the start of one, or `head`).
@@ -10,6 +10,7 @@
 #include "cli/commands.h"
 #include "engine/atomic_file.h"
 #include "engine/canvas_diff.h"
+#include "engine/canvas_layer_ops.h"
 #include "engine/canvas_store.h"
 #include "engine/paint_file.h"
 
@@ -48,6 +49,43 @@ QJsonObject canvasJson(const canvas::CanvasInfo &info) {
 }
 
 Error usageError(const QString &message, const QString &hint = {}) { return makeError(QStringLiteral("usage"), message, hint); }
+
+QString blendText(const QString &compositeOp) {
+    bool known = true;
+    const mask::Blend blend = mask::blendOfOp(compositeOp, &known);
+    return known ? mask::blendId(blend) : compositeOp;
+}
+
+// One layer as `show` and `layer list` give it (position 0 is the bottom).
+QJsonObject layerJson(const canvas::LayerRecord &layer, int position) {
+    QJsonObject out{{"position", position},
+                    {"name", layer.name},
+                    {"kind", kindText(layer.kind)},
+                    {"visible", layer.visible},
+                    {"opacity", layer.opacity},
+                    {"blend", blendText(layer.compositeOp)},
+                    {"tiles", int(layer.tiles.size())}};
+    if (layer.hasMask)
+        out.insert(QStringLiteral("mask"), QJsonObject{{"enabled", layer.maskEnabled}, {"tiles", int(layer.maskTiles.size())}});
+    if (!layer.producer.isEmpty())
+        out.insert(QStringLiteral("producer"), layer.producer);
+    if (!layer.created.isEmpty())
+        out.insert(QStringLiteral("created"), layer.created);
+    return out;
+}
+
+QString layerLine(const canvas::LayerRecord &layer, int position) {
+    QString line = QStringLiteral("%1 %2: %3%4, opacity %5, %6 tiles").arg(position).arg(layer.name, kindText(layer.kind),
+                                                                           layer.visible ? QString() : QStringLiteral(", hidden"))
+                       .arg(layer.opacity).arg(layer.tiles.size());
+    if (!layer.compositeOp.isEmpty())
+        line += QStringLiteral(", blend %1").arg(blendText(layer.compositeOp));
+    if (layer.hasMask)
+        line += layer.maskEnabled ? QStringLiteral(", layer mask") : QStringLiteral(", layer mask off");
+    if (!layer.producer.isEmpty())
+        line += QStringLiteral(", from %1%2").arg(layer.producer, layer.created.isEmpty() ? QString() : QStringLiteral(" at ") + layer.created);
+    return line;
+}
 
 // The first revision of a canvas just made, as the commands answer it.
 Reply madeReply(const canvas::CanvasInfo &info, const QString &verb, int width, int height) {
@@ -167,12 +205,8 @@ Reply canvasShow(const Command &command, Context &) {
                       QStringLiteral("  %1 x %2, tree %3").arg(tree->width).arg(tree->height).arg(revision->tree),
                       QStringLiteral("  parent %1, by %2 at %3").arg(revision->parent.isEmpty() ? QStringLiteral("none") : revision->parent, revision->producer, revision->time)};
     for (const canvas::LayerRecord &layer : tree->layers) {
-        layers.append(QJsonObject{{"name", layer.name},
-                                  {"kind", kindText(layer.kind)},
-                                  {"visible", layer.visible},
-                                  {"opacity", layer.opacity},
-                                  {"tiles", int(layer.tiles.size())}});
-        lines << QStringLiteral("  %1: %2%3, opacity %4, %5 tiles").arg(layer.name, kindText(layer.kind), layer.visible ? QString() : QStringLiteral(", hidden")).arg(layer.opacity).arg(layer.tiles.size());
+        layers.append(layerJson(layer, int(&layer - tree->layers.data())));
+        lines << QStringLiteral("  %1").arg(layerLine(layer, int(&layer - tree->layers.data())));
     }
     QJsonObject data = revisionJson(revision.value());
     data.insert(QStringLiteral("canvas"), info->id);
@@ -353,5 +387,199 @@ Reply canvasDiff(const Command &command, Context &) {
                                       {"layers", layers}},
                           lines.join('\n'));
 }
+
+namespace {
+
+// The layers named on the command line: positions (0 the bottom) or names (one layer each).
+Result<std::vector<int>> layerPositions(const canvas::Tree &tree, const QStringList &words) {
+    std::vector<int> out;
+    static const QRegularExpression digits(QStringLiteral("^[0-9]{1,4}$"));
+    for (const QString &word : words) {
+        if (digits.match(word).hasMatch()) {
+            out.push_back(word.toInt());
+            continue;
+        }
+        std::vector<int> found;
+        for (int i = 0; i < int(tree.layers.size()); ++i)
+            if (tree.layers[size_t(i)].name == word)
+                found.push_back(i);
+        if (found.size() != 1)
+            return Result<std::vector<int>>(usageError(found.empty() ? QStringLiteral("No layer is named \"%1\".").arg(word)
+                                                                     : QStringLiteral("%1 layers are named \"%2\"; give the one you mean by its position.").arg(found.size()).arg(word),
+                                                       QStringLiteral("`fugue canvas layer list <canvas>` lists the layers with their positions, 0 the bottom.")));
+        out.push_back(found.front());
+    }
+    return out;
+}
+
+Result<bool> onOff(const QString &option, const QString &text, const QString &on, const QString &off) {
+    if (text == on)
+        return true;
+    if (text == off)
+        return false;
+    return Result<bool>(usageError(QStringLiteral("--%1 is %2 or %3, not %4.").arg(option, on, off, text)));
+}
+
+Reply layerList(const CanvasStore &store, const Ref &ref) {
+    const Result<QString> id = store.resolve(ref.canvas, ref.revision);
+    if (!id)
+        return Reply::failure(id.errors());
+    const Result<canvas::Revision> revision = store.revision(ref.canvas, id.value());
+    if (!revision)
+        return Reply::failure(revision.errors());
+    const Result<canvas::Tree> tree = store.tree(revision->tree);
+    if (!tree)
+        return Reply::failure(tree.errors());
+    QJsonArray layers;
+    QStringList lines;
+    // Top first, as a layers panel lists them; each with its position.
+    for (int i = int(tree->layers.size()) - 1; i >= 0; --i) {
+        layers.append(layerJson(tree->layers[size_t(i)], i));
+        lines << layerLine(tree->layers[size_t(i)], i);
+    }
+    if (lines.isEmpty())
+        lines << QStringLiteral("Revision %1 has no layer.").arg(id.value().left(15));
+    return Reply::success(QJsonObject{{"canvas", ref.canvas}, {"revision", id.value()}, {"layers", layers}}, lines.join('\n'));
+}
+
+} // namespace
+
+// `fugue canvas layer <action> <canvas> ...`: list, or an edit of the head as one revision each (spec 14.5).
+Reply canvasLayer(const Command &command, Context &) {
+    const QString action = command.positionals.at(0);
+    const Ref ref = parseRef(command.positionals.at(1));
+    const QStringList rest = command.positionals.mid(2);
+    CanvasStore store = CanvasStore::forSession();
+    if (action == QLatin1String("list")) {
+        if (!rest.isEmpty())
+            return Reply::failure(usageError(QStringLiteral("layer list takes a canvas (and a revision) only.")));
+        return layerList(store, ref);
+    }
+    static const QStringList actions{"list", "set", "rename", "rm", "dup", "move"};
+    if (!actions.contains(action))
+        return Reply::failure(usageError(QStringLiteral("\"%1\" is not a layer action.").arg(action), QStringLiteral("Use list, set, rename, rm, dup or move.")));
+    if (ref.written && ref.revision != QLatin1String("head"))
+        return Reply::failure(usageError(QStringLiteral("Layers are edited on the head only: write the canvas id without @revision."),
+                                         QStringLiteral("To edit an older revision, accept it or undo back to it first.")));
+    const Result<canvas::CanvasInfo> info = store.info(ref.canvas);
+    if (!info)
+        return Reply::failure(info.errors());
+    if (info->head.isEmpty())
+        return Reply::failure(makeError(QStringLiteral("canvas_not_found"), QStringLiteral("Canvas %1 has no revision yet.").arg(ref.canvas)));
+    const Result<canvas::Revision> head = store.revision(ref.canvas, info->head);
+    if (!head)
+        return Reply::failure(head.errors());
+    const Result<canvas::Tree> tree = store.tree(head->tree);
+    if (!tree)
+        return Reply::failure(tree.errors());
+
+    // The edits the action asks for, in order (set may ask for several: each is its own revision).
+    std::vector<canvas::LayerEdit> edits;
+    QStringList layerWords = rest;
+    if (action == QLatin1String("rename")) {
+        if (rest.size() != 2)
+            return Reply::failure(usageError(QStringLiteral("layer rename takes a canvas, a layer and the new name.")));
+        layerWords = rest.mid(0, 1);
+    }
+    if (layerWords.isEmpty())
+        return Reply::failure(usageError(QStringLiteral("Name at least one layer, by its position (0 is the bottom) or its name.")));
+    const Result<std::vector<int>> positions = layerPositions(tree.value(), layerWords);
+    if (!positions)
+        return Reply::failure(positions.errors());
+    const auto add = [&](canvas::LayerOp op) -> canvas::LayerEdit & {
+        canvas::LayerEdit e;
+        e.op = op;
+        e.layers = positions.value();
+        edits.push_back(e);
+        return edits.back();
+    };
+    if (action == QLatin1String("set")) {
+        if (command.has("visible")) {
+            const Result<bool> v = onOff("visible", command.value("visible"), QStringLiteral("true"), QStringLiteral("false"));
+            if (!v)
+                return Reply::failure(v.errors());
+            add(canvas::LayerOp::Visible).flag = v.value();
+        }
+        if (command.has("opacity")) {
+            bool ok = false;
+            const double value = command.value("opacity").toDouble(&ok);
+            if (!ok)
+                return Reply::failure(usageError(QStringLiteral("--opacity is a number from 0 to 1."), command.value("opacity")));
+            add(canvas::LayerOp::Opacity).number = value;
+        }
+        if (command.has("blend"))
+            add(canvas::LayerOp::Blend).text = command.value("blend");
+        if (command.has("mask")) {
+            const QString mask = command.value("mask");
+            if (mask == QLatin1String("delete"))
+                add(canvas::LayerOp::RemoveMask);
+            else {
+                const Result<bool> v = onOff("mask", mask, QStringLiteral("on"), QStringLiteral("off"));
+                if (!v)
+                    return Reply::failure(usageError(QStringLiteral("--mask is on, off or delete, not %1.").arg(mask)));
+                add(canvas::LayerOp::MaskEnabled).flag = v.value();
+            }
+        }
+        if (edits.empty())
+            return Reply::failure(usageError(QStringLiteral("layer set needs --visible, --opacity, --blend or --mask.")));
+    } else if (action == QLatin1String("rename")) {
+        add(canvas::LayerOp::Rename).text = rest.at(1);
+    } else if (action == QLatin1String("rm")) {
+        add(canvas::LayerOp::Remove);
+    } else if (action == QLatin1String("dup")) {
+        add(canvas::LayerOp::Duplicate);
+    } else if (action == QLatin1String("move")) {
+        bool ok = false;
+        const int to = command.value("to").toInt(&ok);
+        if (!command.has("to") || !ok || to < 0)
+            return Reply::failure(usageError(QStringLiteral("layer move needs --to <position>, 0 for the bottom.")));
+        add(canvas::LayerOp::Move).to = to;
+    }
+
+    QString at = info->head;
+    QJsonArray made;
+    QStringList lines;
+    for (const canvas::LayerEdit &edit : edits) {
+        const Result<canvas::Commit> done = store.editLayers(ref.canvas, at, edit, QStringLiteral("canvas-cli:") + canvas::layerOpName(edit.op));
+        if (!done)
+            return Reply::failure(done.errors());
+        if (!done->move.moved && done->revision.id == at && done->move.head == at) {
+            lines << QStringLiteral("%1: nothing to change.").arg(canvas::layerOpName(edit.op));
+            continue;
+        }
+        if (!done->move.moved)
+            return Reply::failure(makeError(QStringLiteral("canvas_head_moved"), QStringLiteral("The head of %1 moved while this ran (it is %2 now); nothing was changed.").arg(ref.canvas, done->move.head),
+                                            QStringLiteral("Run it again.")));
+        at = done->revision.id;
+        made.append(revisionJson(done->revision));
+        lines << QStringLiteral("%1: new head %2.").arg(canvas::layerOpName(edit.op), at);
+    }
+    return Reply::success(QJsonObject{{"canvas", ref.canvas}, {"head", at}, {"revisions", made}}, lines.join('\n'));
+}
+
+namespace {
+
+Reply headStep(const Command &command, bool forward) {
+    const Ref ref = parseRef(command.positionals.at(0));
+    if (ref.written)
+        return Reply::failure(usageError(QStringLiteral("%1 takes a canvas id, not a revision.").arg(forward ? QStringLiteral("redo") : QStringLiteral("undo"))));
+    CanvasStore store = CanvasStore::forSession();
+    const Result<canvas::CanvasInfo> info = store.info(ref.canvas);
+    if (!info)
+        return Reply::failure(info.errors());
+    const Result<canvas::HeadMove> moved = forward ? store.redo(ref.canvas, info->head) : store.undo(ref.canvas, info->head);
+    if (!moved)
+        return Reply::failure(moved.errors());
+    if (!moved->moved)
+        return Reply::failure(makeError(QStringLiteral("canvas_head_moved"), QStringLiteral("The head of %1 moved while this ran (it is %2 now); nothing was changed.").arg(ref.canvas, moved->head),
+                                        QStringLiteral("Run it again.")));
+    return Reply::success(QJsonObject{{"canvas", ref.canvas}, {"head", moved->head}, {"from", info->head}},
+                          QStringLiteral("%1 %2: the head is %3.").arg(forward ? QStringLiteral("Redid") : QStringLiteral("Undid"), ref.canvas, moved->head));
+}
+
+} // namespace
+
+Reply canvasUndo(const Command &command, Context &) { return headStep(command, false); }
+Reply canvasRedo(const Command &command, Context &) { return headStep(command, true); }
 
 } // namespace fugue::cli

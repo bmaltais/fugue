@@ -18,6 +18,9 @@ fugue canvas candidates canvas-0123456789ab        # results waiting for your re
 fugue canvas diff canvas-0123456789ab@sha256:ab12cd34   # what a revision changed, against its parent
 fugue canvas accept canvas-0123456789ab            # the one candidate becomes the head
 fugue canvas drop canvas-0123456789ab@sha256:ab12cd34   # hide one (it is kept)
+fugue canvas layer list canvas-0123456789ab        # the layers, top first, with their positions
+fugue canvas layer set canvas-0123456789ab "Fill 1" --blend multiply   # one new revision
+fugue canvas undo canvas-0123456789ab              # back to the revision before; redo goes forward
 ```
 
 `<id>@<revision>` names a revision by `head`, its full hash, or the first 8 hex digits or more.
@@ -120,3 +123,35 @@ side of a comparison. **Export…** saves the revision you are looking at as a f
 `fugue canvas export <id>[@<revision>] <file>` writes the same flattened picture from the command line by
 the file extension: `.png`, `.jpg` or `.webp` (a JPEG has no transparency, so it is flattened onto white
 and the command says so; WebP is lossless); `.ora` keeps the layers. It never replaces a file.
+
+## Layers
+
+Every run that writes to a canvas lands as a layer, like a layer in Photoshop or Krita, and you can
+hide it, change its opacity or blend mode, rename, delete, duplicate or reorder it. None of that edits
+the canvas: each change is a new revision of the head (the pixels are not copied; the new revision
+shares them), so Undo goes back one change and the history keeps every step.
+
+From the command line, a layer is its position (0 is the bottom, `fugue canvas layer list` shows them)
+or its name:
+
+```
+fugue canvas layer list canvas-0123456789ab
+fugue canvas layer set canvas-0123456789ab 2 --visible false
+fugue canvas layer set canvas-0123456789ab "Fill 1" --opacity 0.6 --blend screen   # two revisions
+fugue canvas layer rename canvas-0123456789ab 2 Sky
+fugue canvas layer dup canvas-0123456789ab Sky          # "Sky copy", right above it
+fugue canvas layer move canvas-0123456789ab "Sky copy" --to 0   # to the bottom
+fugue canvas layer rm canvas-0123456789ab 3
+fugue canvas undo canvas-0123456789ab
+fugue canvas redo canvas-0123456789ab
+```
+
+The blend modes are Normal, Multiply, Screen, Overlay, Soft light, Darken, Lighten and Add, the same
+as Krita's and GIMP's: an `.ora` you export keeps them, and one you import from Krita or GIMP keeps
+its own (a mode Fugue does not draw yet, such as Color Dodge, is drawn as Normal and kept as it was).
+
+A layer can have a **layer mask**: white shows the layer, black hides it, grey in between. It is part
+of the layer (it moves and is deleted with it) and can be turned off to see the layer whole
+(`--mask off`, `--mask on`) or deleted (`--mask delete`). Other programs have no layer mask in an
+`.ora`, so an export gives them the layer as it looks with its mask applied, and keeps the mask for
+Fugue to read back.

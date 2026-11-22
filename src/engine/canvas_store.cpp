@@ -1,6 +1,8 @@
 #include "canvas_store.h"
 
 #include <algorithm>
+#include <optional>
+#include <set>
 
 #include <QDir>
 #include <QDirIterator>
@@ -14,6 +16,7 @@
 
 #include "engine/atomic_file.h"
 #include "engine/canonical.h"
+#include "engine/canvas_layer_ops.h"
 #include "engine/hash.h"
 #include "engine/paint_file.h"
 #include "engine/paths.h"
@@ -91,11 +94,19 @@ QJsonObject treeToJson(const Tree &tree) {
         QJsonObject tiles;
         for (const auto &[key, hash] : layer.tiles)
             tiles.insert(key.text(), hash);
-        layers.append(QJsonObject{{"name", layer.name},
-                                  {"kind", kindName(layer.kind)},
-                                  {"visible", layer.visible},
-                                  {"opacity", layer.opacity},
-                                  {"tiles", tiles}});
+        QJsonObject item{{"name", layer.name}, {"kind", kindName(layer.kind)}, {"visible", layer.visible}, {"opacity", layer.opacity}, {"tiles", tiles}};
+        // Only what differs from the default, so a tree from before these existed has the same hash.
+        if (!layer.compositeOp.isEmpty())
+            item.insert("blend", layer.compositeOp);
+        if (layer.hasMask) {
+            QJsonObject maskTiles;
+            for (const auto &[key, hash] : layer.maskTiles)
+                maskTiles.insert(key.text(), hash);
+            item.insert("mask", QJsonObject{{"enabled", layer.maskEnabled}, {"tiles", maskTiles}});
+        }
+        if (!layer.producer.isEmpty() || !layer.created.isEmpty())
+            item.insert("origin", QJsonObject{{"producer", layer.producer}, {"time", layer.created}});
+        layers.append(item);
     }
     return QJsonObject{{"format", storeFormat}, {"width", tree.width}, {"height", tree.height}, {"layers", layers}};
 }
@@ -120,11 +131,33 @@ Result<Tree> treeFromJson(const QJsonObject &object) {
         const QJsonObject tiles = item.value("tiles").toObject();
         if (layer.kind == LayerKind::Picture && !tiles.isEmpty())
             return corrupt(QStringLiteral("a picture layer has tiles"));
-        for (auto it = tiles.begin(); it != tiles.end(); ++it) {
-            TileKey key;
-            if (!TileKey::parse(it.key(), &key) || key.x >= tilesAcross(tree.width) || key.y >= tilesDown(tree.height) || !isSha256(it.value().toString()))
-                return corrupt(QStringLiteral("a tile of a tree is not well formed"));
-            layer.tiles.emplace(key, it.value().toString());
+        const auto readTiles = [&tree](const QJsonObject &from, TileMap *to) {
+            for (auto it = from.begin(); it != from.end(); ++it) {
+                TileKey key;
+                if (!TileKey::parse(it.key(), &key) || key.x >= tilesAcross(tree.width) || key.y >= tilesDown(tree.height) || !isSha256(it.value().toString()))
+                    return false;
+                to->emplace(key, it.value().toString());
+            }
+            return true;
+        };
+        if (!readTiles(tiles, &layer.tiles))
+            return corrupt(QStringLiteral("a tile of a tree is not well formed"));
+        if (item.contains("blend")) {
+            layer.compositeOp = item.value("blend").toString();
+            if (layer.compositeOp.isEmpty() || layer.compositeOp.size() > 64)
+                return corrupt(QStringLiteral("a layer's blend is not well formed"));
+        }
+        if (item.contains("mask")) {
+            const QJsonObject mask = item.value("mask").toObject();
+            if (layer.kind == LayerKind::Mask || !mask.value("enabled").isBool() || !readTiles(mask.value("tiles").toObject(), &layer.maskTiles))
+                return corrupt(QStringLiteral("a layer's mask is not well formed"));
+            layer.hasMask = true;
+            layer.maskEnabled = mask.value("enabled").toBool();
+        }
+        if (item.contains("origin")) {
+            const QJsonObject origin = item.value("origin").toObject();
+            layer.producer = origin.value("producer").toString();
+            layer.created = origin.value("time").toString();
         }
         tree.layers.push_back(std::move(layer));
     }
@@ -142,6 +175,17 @@ Result<Tree> treeOf(const PaintDocument &document, const TileSink &consume) {
         layer.kind = info.kind;
         layer.visible = info.visible;
         layer.opacity = info.opacity;
+        layer.compositeOp = info.compositeOp;
+        layer.producer = info.producer;
+        layer.created = info.created;
+        if (const MaskPaint *mask = document.maskPixels(info.id)) {
+            Result<TileMap> tiles = cutLayer(*mask, consume);
+            if (!tiles)
+                return Result<Tree>(tiles.errors());
+            layer.hasMask = true;
+            layer.maskEnabled = info.maskEnabled;
+            layer.maskTiles = std::move(tiles.value());
+        }
         if (info.kind != LayerKind::Picture) {
             const MaskPaint *pixels = document.pixels(info.id);
             if (!pixels)
@@ -194,14 +238,7 @@ Result<QString> CanvasStore::storeTree(const PaintDocument &document) {
     const Result<Tree> tree = treeOf(document, [this](const TileKey &, const QString &hash, const MaskPaint &tile) { return storeBlob(hash, tile); });
     if (!tree)
         return Result<QString>(tree.errors());
-    const QJsonObject json = treeToJson(tree.value());
-    const QString hash = canonicalHash(json);
-    if (hash.isEmpty())
-        return corrupt(QStringLiteral("a tree has no canonical form"));
-    const Errors written = writeOnce(treePath(hash), jsonBytes(json), QStringLiteral("a canvas tree"));
-    if (hasErrors(written))
-        return Result<QString>(written);
-    return hash;
+    return storeTreeRecord(tree.value());
 }
 
 Result<QString> CanvasStore::treeHashOf(const PaintDocument &document) {
@@ -232,8 +269,12 @@ Result<Revision> CanvasStore::addRevision(const QString &canvasId, const PaintDo
     const Result<QString> treeHash = storeTree(document);
     if (!treeHash)
         return Result<Revision>(treeHash.errors());
+    return addCommit(canvasId, treeHash.value(), parent, producer);
+}
+
+Result<Revision> CanvasStore::addCommit(const QString &canvasId, const QString &treeHash, const QString &parent, const QString &producer) {
     Revision made;
-    made.tree = treeHash.value();
+    made.tree = treeHash;
     made.parent = parent;
     made.producer = producer;
     made.time = isoTime(utcNow(m_clock));
@@ -248,6 +289,17 @@ Result<Revision> CanvasStore::addRevision(const QString &canvasId, const PaintDo
     if (hasErrors(written))
         return Result<Revision>(written);
     return made;
+}
+
+Result<QString> CanvasStore::storeTreeRecord(const Tree &tree) {
+    const QJsonObject json = treeToJson(tree);
+    const QString hash = canonicalHash(json);
+    if (hash.isEmpty())
+        return corrupt(QStringLiteral("a tree has no canonical form"));
+    const Errors written = writeOnce(treePath(hash), jsonBytes(json), QStringLiteral("a canvas tree"));
+    if (hasErrors(written))
+        return Result<QString>(written);
+    return hash;
 }
 
 Result<Revision> CanvasStore::revision(const QString &canvasId, const QString &revisionId) const {
@@ -431,7 +483,7 @@ Result<std::vector<Candidate>> CanvasStore::candidates(const QString &canvasId, 
         if (history->contains(id))
             continue;
         const QString state = resolution(canvasId, id);
-        if (state == QLatin1String("accepted") || (state == QLatin1String("dropped") && !withDropped))
+        if (state == QLatin1String("accepted") || state == QLatin1String("undone") || (state == QLatin1String("dropped") && !withDropped))
             continue;
         const Result<Revision> record = revision(canvasId, id);
         if (!record)
@@ -451,9 +503,7 @@ Error notCandidate(const QString &revisionId, const QString &why) {
                      QStringLiteral("`fugue canvas candidates <canvas>` lists the revisions that can be accepted or dropped."));
 }
 
-bool sameLayer(const LayerRecord &a, const LayerRecord &b) {
-    return a.name == b.name && a.kind == b.kind && a.visible == b.visible && a.opacity == b.opacity && a.tiles == b.tiles;
-}
+bool sameLayer(const LayerRecord &a, const LayerRecord &b) { return a == b; }
 
 } // namespace
 
@@ -510,7 +560,7 @@ Result<Accepted> CanvasStore::accept(const QString &canvasId, const QString &rev
             const MaskPaint *pixels = candidateDocument->pixels(layer.id);
             if (!pixels)
                 return Result<Accepted>(corrupt(QStringLiteral("a layer has no pixels")));
-            onHead->loadLayer(layer.kind, layer.name, layer.visible, layer.opacity, *pixels);
+            onHead->loadLayer(layer, *pixels, candidateDocument->maskPixels(layer.id));
         }
         const Result<Commit> made = commit(canvasId, onHead.value(), head, QStringLiteral("accept:") + revisionId.left(19));
         if (!made)
@@ -549,6 +599,114 @@ Result<Revision> CanvasStore::drop(const QString &canvasId, const QString &revis
     return candidate.value();
 }
 
+namespace {
+
+Error noStep(const QString &what) {
+    return makeError(QStringLiteral("canvas_no_step"), what,
+                     QStringLiteral("`fugue canvas log <canvas>` shows the revisions; `fugue canvas accept` or a revision hash names another."));
+}
+
+// Every tile a tree refers to, layer and mask, for checking that an edit added none.
+std::set<QString> tilesOf(const Tree &tree) {
+    std::set<QString> all;
+    for (const LayerRecord &layer : tree.layers) {
+        for (const auto &entry : layer.tiles)
+            all.insert(entry.second);
+        for (const auto &entry : layer.maskTiles)
+            all.insert(entry.second);
+    }
+    return all;
+}
+
+} // namespace
+
+Result<Commit> CanvasStore::editLayers(const QString &canvasId, const QString &base, const LayerEdit &edit, const QString &producer) {
+    const Result<CanvasInfo> canvas = info(canvasId);
+    if (!canvas)
+        return Result<Commit>(canvas.errors());
+    const Result<Revision> from = revision(canvasId, base);
+    if (!from)
+        return Result<Commit>(from.errors());
+    if (canvas->head != base)
+        return Commit{from.value(), HeadMove{false, canvas->head}};
+    const Result<Tree> before = tree(from->tree);
+    if (!before)
+        return Result<Commit>(before.errors());
+    const Result<Tree> after = applyLayerEdit(before.value(), edit);
+    if (!after)
+        return Result<Commit>(after.errors());
+    if (treeToJson(after.value()) == treeToJson(before.value()))
+        return Commit{from.value(), HeadMove{false, base}};
+    const std::set<QString> had = tilesOf(before.value()), has = tilesOf(after.value());
+    if (!std::includes(had.begin(), had.end(), has.begin(), has.end()))
+        return corrupt(QStringLiteral("a layer edit made tiles of its own")); // cannot be: an edit moves records, never pixels
+    const Result<QString> treeHash = storeTreeRecord(after.value());
+    if (!treeHash)
+        return Result<Commit>(treeHash.errors());
+    const Result<Revision> added = addCommit(canvasId, treeHash.value(), base, producer);
+    if (!added)
+        return Result<Commit>(added.errors());
+    const Result<HeadMove> moved = moveHead(canvasId, base, added->id);
+    if (!moved)
+        return Result<Commit>(moved.errors());
+    if (!moved->moved) // lost a race with a run: not a candidate for anyone to review, an edit that did not happen
+        (void)replaceFile(resolvedPath(canvasId, added->id), QByteArrayLiteral("undone\n"), QStringLiteral("a canvas resolution"));
+    return Commit{added.value(), moved.value()};
+}
+
+Result<HeadMove> CanvasStore::undo(const QString &canvasId, const QString &expected) {
+    const Result<CanvasInfo> canvas = info(canvasId);
+    if (!canvas)
+        return Result<HeadMove>(canvas.errors());
+    if (canvas->head != expected)
+        return HeadMove{false, canvas->head};
+    const Result<Revision> at = revision(canvasId, expected);
+    if (!at)
+        return Result<HeadMove>(at.errors());
+    if (at->parent.isEmpty())
+        return Result<HeadMove>(noStep(QStringLiteral("Revision %1 is the canvas's first: there is nothing to undo.").arg(expected.left(19))));
+    const Result<HeadMove> moved = moveHead(canvasId, expected, at->parent);
+    if (!moved || !moved->moved)
+        return moved;
+    const Errors marked = replaceFile(resolvedPath(canvasId, expected), QByteArrayLiteral("undone\n"), QStringLiteral("a canvas resolution"));
+    if (hasErrors(marked))
+        return Result<HeadMove>(marked);
+    return moved;
+}
+
+Result<QString> CanvasStore::redoTarget(const QString &canvasId) const {
+    const Result<CanvasInfo> canvas = info(canvasId);
+    if (!canvas)
+        return Result<QString>(canvas.errors());
+    Revision best;
+    QDirIterator it(canvasDir(canvasId) + QStringLiteral("/resolved"), QDir::Files);
+    while (it.hasNext()) {
+        const QString id = QStringLiteral("sha256:") + QFileInfo(it.next()).fileName();
+        if (resolution(canvasId, id) != QLatin1String("undone"))
+            continue;
+        const Result<Revision> found = revision(canvasId, id);
+        if (!found || found->parent != canvas->head || found->parent.isEmpty())
+            continue;
+        if (best.id.isEmpty() || found->time > best.time || (found->time == best.time && found->id > best.id))
+            best = found.value();
+    }
+    return best.id;
+}
+
+Result<HeadMove> CanvasStore::redo(const QString &canvasId, const QString &expected) {
+    const Result<QString> target = redoTarget(canvasId);
+    if (!target)
+        return Result<HeadMove>(target.errors());
+    const Result<CanvasInfo> canvas = info(canvasId);
+    if (!canvas)
+        return Result<HeadMove>(canvas.errors());
+    if (canvas->head != expected)
+        return HeadMove{false, canvas->head};
+    if (target->isEmpty())
+        return Result<HeadMove>(noStep(QStringLiteral("Nothing was undone from revision %1: there is nothing to redo.").arg(expected.left(19))));
+    return moveHead(canvasId, expected, target.value());
+}
+
 Result<PaintDocument> CanvasStore::load(const QString &canvasId, const QString &revisionId) const {
     const Result<Revision> found = revision(canvasId, revisionId);
     if (!found)
@@ -556,20 +714,43 @@ Result<PaintDocument> CanvasStore::load(const QString &canvasId, const QString &
     const Result<Tree> stored = tree(found->tree);
     if (!stored)
         return Result<PaintDocument>(stored.errors());
-    PaintDocument document(stored->width, stored->height);
-    for (const LayerRecord &layer : stored->layers) {
+    return documentOf(stored.value(), [this](const QString &hash, int width, int height, int channels) { return readBlob(hash, width, height, channels); });
+}
+
+Result<PaintDocument> documentOf(const Tree &stored, const std::function<Result<MaskPaint>(const QString &, int, int, int)> &read) {
+    PaintDocument document(stored.width, stored.height);
+    const int width = stored.width, height = stored.height;
+    const auto assemble = [&](int channels, const TileMap &tiles) {
+        return assembleLayer(width, height, channels, tiles, [&](const TileKey &key, const QString &hash) {
+            const mask::IRect rect = tileRect(key, width, height);
+            return read(hash, rect.width, rect.height, channels);
+        });
+    };
+    for (const LayerRecord &layer : stored.layers) {
+        mask::LayerInfo info;
+        info.name = layer.name;
+        info.kind = layer.kind;
+        info.visible = layer.visible;
+        info.opacity = layer.opacity;
+        info.compositeOp = layer.compositeOp;
+        info.maskEnabled = layer.maskEnabled;
+        info.producer = layer.producer;
+        info.created = layer.created;
+        std::optional<MaskPaint> mask;
+        if (layer.hasMask) {
+            Result<MaskPaint> read = assemble(1, layer.maskTiles);
+            if (!read)
+                return Result<PaintDocument>(read.errors());
+            mask = std::move(read.value());
+        }
         if (layer.kind == LayerKind::Picture) {
-            document.loadLayer(layer.kind, layer.name, layer.visible, layer.opacity, MaskPaint(1, 1, 4));
+            document.loadLayer(info, MaskPaint(1, 1, 4), mask ? &*mask : nullptr);
             continue;
         }
-        const int width = stored->width, height = stored->height, channels = layer.channels();
-        const Result<MaskPaint> pixels = assembleLayer(width, height, channels, layer.tiles, [&](const TileKey &key, const QString &hash) {
-            const mask::IRect rect = tileRect(key, width, height);
-            return readBlob(hash, rect.width, rect.height, channels);
-        });
+        const Result<MaskPaint> pixels = assemble(layer.channels(), layer.tiles);
         if (!pixels)
             return Result<PaintDocument>(pixels.errors());
-        document.loadLayer(layer.kind, layer.name, layer.visible, layer.opacity, pixels.value());
+        document.loadLayer(info, pixels.value(), mask ? &*mask : nullptr);
     }
     document.forgetHistory();
     return document;

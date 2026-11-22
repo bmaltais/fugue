@@ -23,7 +23,7 @@ struct LayerDiff {
     mask::IRect bounds;        // the pixels those tiles cover (whole tiles); empty (0 x 0) when none. tightenBounds narrows it to the pixels that differ.
     std::vector<TileKey> changedTiles; // the tiles counted in tilesChanged
     int indexA = -1, indexB = -1;      // the layer's place in a and in b (-1: not there)
-    QStringList properties;    // for a changed layer: "visible", "opacity", "kind"
+    QStringList properties;    // for a changed layer: "name" (a rename: same kind and pixels), "kind", "visible", "opacity", "blend", "mask"
 };
 
 struct TreeDiff {
@@ -45,7 +45,8 @@ void tightenBounds(TreeDiff *diff, const Tree &a, const Tree &b, const TilePixel
 
 QString changeName(LayerChange change); // "added", "removed", "changed"
 
-// Layers are paired by name, in order (the first "Fill" of a with the first "Fill" of b, and so on).
+// Layers are paired by name, in order (the first "Fill" of a with the first "Fill" of b, and so on); a layer
+// left over in b with the kind and pixels of one left over in a is that layer renamed.
 TreeDiff diffTrees(const Tree &a, const Tree &b);
 
 } // namespace fugue::canvas

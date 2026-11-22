@@ -1,4 +1,4 @@
-// `fugue canvas new|import|export|log|show` (spec 13.1, 14.5, epic #206). Seam: the `fugue` subprocess
+// `fugue canvas new|import|export|log|show|layer|undo|redo` (spec 13.1, 14.5, epic #206). Seam: the `fugue` subprocess
 // with an empty HOME, so the store is the test's own ~/.local/share/fugue/canvases, and under
 // `--home` the project's own. The store itself is tests/engine/test_canvas_store.cpp.
 
@@ -302,6 +302,63 @@ private slots:
         QVERIFY(placed.data().value("rebased").toBool());
         QCOMPARE(fugue({"canvas", "show", id, "--json"}).data().value("layers").toArray().size(), 3);
         QVERIFY(fugue({"canvas", "candidates", id}).out.contains("no candidate"));
+    }
+
+
+    // Layer edits from the command line (#226): each is one revision of the head, named by position or name.
+    void layersAreListedEditedAndUndone() {
+        const QString source = oraFile("in.ora"); // Paint (0), Mask (1)
+        const Outcome imported = fugue({"canvas", "import", source, "--json"});
+        QVERIFY2(imported.exitCode == 0, imported.out + imported.err);
+        const QString id = imported.data().value("canvas").toString();
+        const QString first = imported.data().value("head").toString();
+
+        const Outcome listed = fugue({"canvas", "layer", "list", id, "--json"});
+        QVERIFY2(listed.exitCode == 0, listed.out + listed.err);
+        const QJsonArray layers = listed.data().value("layers").toArray();
+        QCOMPARE(layers.size(), 2);
+        QCOMPARE(layers.at(0).toObject().value("name").toString(), QString("Mask")); // top first
+        QCOMPARE(layers.at(0).toObject().value("position").toInt(), 1);
+        QCOMPARE(layers.at(1).toObject().value("blend").toString(), QString("normal"));
+
+        const Outcome set = fugue({"canvas", "layer", "set", id, "Paint", "--blend", "multiply", "--opacity", "0.5", "--json"});
+        QVERIFY2(set.exitCode == 0, set.out + set.err);
+        QCOMPARE(set.data().value("revisions").toArray().size(), 2); // two properties, two revisions
+        const Outcome renamed = fugue({"canvas", "layer", "rename", id, "0", "Red", "--json"});
+        QVERIFY2(renamed.exitCode == 0, renamed.out + renamed.err);
+        const Outcome moved = fugue({"canvas", "layer", "move", id, "Red", "--to", "1", "--json"});
+        QVERIFY2(moved.exitCode == 0, moved.out + moved.err);
+        const Outcome dup = fugue({"canvas", "layer", "dup", id, "Red", "--json"});
+        QVERIFY2(dup.exitCode == 0, dup.out + dup.err);
+        const QJsonArray now = fugue({"canvas", "layer", "list", id, "--json"}).data().value("layers").toArray();
+        QCOMPARE(now.size(), 3);
+        QCOMPARE(now.at(0).toObject().value("name").toString(), QString("Red copy"));
+        QCOMPARE(now.at(0).toObject().value("blend").toString(), QString("multiply"));
+        QCOMPARE(now.at(0).toObject().value("opacity").toDouble(), 0.5);
+        QCOMPARE(fugue({"canvas", "layer", "rm", id, "2", "--json"}).exitCode, 0);
+        QCOMPARE(fugue({"canvas", "log", id, "--json"}).data().value("revisions").toArray().size(), 7);
+        QCOMPARE(fugue({"canvas", "log", id, "--json"}).data().value("revisions").toArray().at(0).toObject().value("producer").toString(),
+                 QString("canvas-cli:delete"));
+
+        // Undo walks back to the first revision; redo forward again.
+        for (int i = 0; i < 6; ++i)
+            QCOMPARE(fugue({"canvas", "undo", id}).exitCode, 0);
+        QCOMPARE(fugue({"canvas", "show", id, "--json"}).data().value("revision").toString(), first);
+        const Outcome nothing = fugue({"canvas", "undo", id, "--json"});
+        QVERIFY(nothing.exitCode != 0);
+        QCOMPARE(nothing.errorCode(), QString("canvas_no_step"));
+        QVERIFY(fugue({"canvas", "candidates", id, "--json"}).data().value("candidates").toArray().isEmpty());
+        QCOMPARE(fugue({"canvas", "redo", id}).exitCode, 0); // set applies its properties in a fixed order: opacity, then blend
+        QCOMPARE(fugue({"canvas", "layer", "list", id, "--json"}).data().value("layers").toArray().at(1).toObject().value("opacity").toDouble(), 0.5);
+        QCOMPARE(fugue({"canvas", "redo", id}).exitCode, 0);
+        QCOMPARE(fugue({"canvas", "layer", "list", id, "--json"}).data().value("layers").toArray().at(1).toObject().value("blend").toString(), QString("multiply"));
+
+        // Errors: a layer that is not there, an ambiguous action, a revision given to an edit.
+        QCOMPARE(fugue({"canvas", "layer", "rm", id, "9", "--json"}).errorCode(), QString("input_invalid"));
+        QCOMPARE(fugue({"canvas", "layer", "rm", id, "Nope", "--json"}).errorCode(), QString("usage"));
+        QCOMPARE(fugue({"canvas", "layer", "paint", id, "0", "--json"}).errorCode(), QString("usage"));
+        QCOMPARE(fugue({"canvas", "layer", "rm", id + "@" + first, "0", "--json"}).errorCode(), QString("usage"));
+        QCOMPARE(fugue({"canvas", "layer", "set", id, "0", "--blend", "dodge", "--json"}).errorCode(), QString("input_invalid"));
     }
 
     void errorsAreCodedAndHelpful() {

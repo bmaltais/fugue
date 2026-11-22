@@ -382,6 +382,141 @@ private slots:
         QCOMPARE(d.flattenArea({100, 100, 5, 5}).rgbaAt(0, 0).a, uint8_t(0));
     }
 
+
+    // ---- blend modes and layer masks (#226, spec 14.4) ------------------------------------------
+
+    // A gray backdrop of 0.4 (102) under a layer of 0.6 (153), both opaque: the W3C formulas give
+    // these bytes (spec 14.4 lists the same table).
+    void eachBlendModeGivesTheValueOfItsFormula() {
+        const struct { Blend blend; uint8_t expected; } rows[] = {
+            {Blend::Normal, 153},   {Blend::Multiply, 61}, {Blend::Screen, 194}, {Blend::Overlay, 122},
+            {Blend::SoftLight, 114}, {Blend::Darken, 102}, {Blend::Lighten, 153}, {Blend::Add, 255},
+        };
+        for (const auto &row : rows) {
+            PaintDocument d(2, 2);
+            d.loadLayer(LayerKind::Paint, "under", true, 1, solid(2, 2, {102, 102, 102, 255}));
+            const int top = d.loadLayer(LayerKind::Paint, "over", true, 1, solid(2, 2, {153, 153, 153, 255}));
+            QVERIFY(d.setBlend(top, row.blend));
+            QCOMPARE(d.layer(1).blend(), row.blend);
+            const Rgba got = d.flatten().rgbaAt(1, 1);
+            QVERIFY2(got.r == row.expected && got.g == row.expected && got.b == row.expected && got.a == 255,
+                     qPrintable(QStringLiteral("%1: %2, not %3").arg(blendId(row.blend)).arg(got.r).arg(row.expected)));
+        }
+    }
+
+    void theFormulasAtTheirBreakPoints() {
+        // Overlay switches on the backdrop at 0.5, soft light on the layer at 0.5 and its D at 0.25.
+        QCOMPARE(blendChannel(Blend::Overlay, 0.75, 0.5), 0.75);
+        QCOMPARE(blendChannel(Blend::Overlay, 0.25, 0.5), 0.25);
+        QCOMPARE(blendChannel(Blend::SoftLight, 0.2, 0.25), 0.2 - 0.5 * 0.2 * 0.8);
+        QCOMPARE(blendChannel(Blend::SoftLight, 0.2, 1.0), 0.2 + (((16 * 0.2 - 12) * 0.2 + 4) * 0.2 - 0.2));
+        QCOMPARE(blendChannel(Blend::Add, 0.7, 0.6), 1.0);
+    }
+
+    // Half the layer's opacity mixes the blended color half and half with the backdrop; over nothing,
+    // the blend has nothing to work on and the layer shows as it is.
+    void aBlendRespectsOpacityAndATransparentBackdrop() {
+        PaintDocument d(2, 2);
+        d.loadLayer(LayerKind::Paint, "under", true, 1, solid(2, 2, {102, 102, 102, 255}));
+        const int top = d.loadLayer(LayerKind::Paint, "over", true, 0.5, solid(2, 2, {153, 153, 153, 255}));
+        d.setBlend(top, Blend::Multiply);
+        QCOMPARE(d.flatten().rgbaAt(0, 0), (Rgba{82, 82, 82, 255})); // 0.5 * 0.24 + 0.5 * 0.4 = 0.32
+
+        PaintDocument alone(2, 2);
+        const int only = alone.loadLayer(LayerKind::Paint, "over", true, 1, solid(2, 2, {153, 10, 200, 128}));
+        alone.setBlend(only, Blend::Multiply);
+        QCOMPARE(alone.flatten().rgbaAt(0, 0), (Rgba{153, 10, 200, 128}));
+    }
+
+    void normalIsTheSameAsBefore() {
+        PaintDocument d(2, 2);
+        d.loadLayer(LayerKind::Paint, "under", true, 1, solid(2, 2, {10, 200, 30, 200}));
+        d.loadLayer(LayerKind::Paint, "over", true, 0.7, solid(2, 2, {250, 20, 90, 100}));
+        const Rgba before = d.flatten().rgbaAt(0, 0);
+        d.setBlend(d.layer(1).id, Blend::Multiply);
+        d.setBlend(d.layer(1).id, Blend::Normal);
+        QCOMPARE(d.layer(1).compositeOp, QString());
+        QCOMPARE(d.flatten().rgbaAt(0, 0), before);
+    }
+
+    // An op Fugue does not draw is kept as it is and composites as Normal.
+    void anUnknownCompositeOpIsKeptAndDrawnAsNormal() {
+        bool known = true;
+        QCOMPARE(blendOfOp(QStringLiteral("svg:color-dodge"), &known), Blend::Normal);
+        QVERIFY(!known);
+        QCOMPARE(blendOfOp(QStringLiteral("svg:plus")), Blend::Add);
+        QCOMPARE(opOfBlend(Blend::SoftLight), QStringLiteral("svg:soft-light"));
+        PaintDocument d(2, 2);
+        d.loadLayer(LayerKind::Paint, "under", true, 1, solid(2, 2, {102, 102, 102, 255}));
+        const int top = d.loadLayer(LayerKind::Paint, "over", true, 1, solid(2, 2, {153, 153, 153, 255}));
+        d.setCompositeOp(top, QStringLiteral("svg:color-dodge"));
+        QCOMPARE(d.layer(1).compositeOp, QStringLiteral("svg:color-dodge"));
+        QCOMPARE(d.flatten().rgbaAt(0, 0).r, uint8_t(153));
+        d.setCompositeOp(top, QStringLiteral("svg:src-over"));
+        QCOMPARE(d.layer(1).compositeOp, QString());
+    }
+
+    // White shows the layer, black hides it, grey is in between: the layer's alpha times the mask.
+    void aLayerMaskMultipliesTheLayersAlpha() {
+        PaintDocument d(3, 1);
+        d.loadLayer(LayerKind::Paint, "under", true, 1, solid(3, 1, {0, 0, 0, 255}));
+        const int top = d.loadLayer(LayerKind::Paint, "over", true, 1, solid(3, 1, {255, 255, 255, 255}));
+        QVERIFY(d.setLayerMask(top, MaskPaint(3, 1, std::vector<uint8_t>{255, 128, 0}, 1)));
+        QVERIFY(d.layer(1).hasMask);
+        const MaskPaint flat = d.flatten();
+        QCOMPARE(flat.rgbaAt(0, 0), (Rgba{255, 255, 255, 255}));
+        QCOMPARE(flat.rgbaAt(1, 0), (Rgba{128, 128, 128, 255}));
+        QCOMPARE(flat.rgbaAt(2, 0), (Rgba{0, 0, 0, 255}));
+        // Off, the layer shows whole and the mask is kept; removed, it is gone.
+        QVERIFY(d.setMaskEnabled(top, false));
+        QCOMPARE(d.flatten().rgbaAt(2, 0), (Rgba{255, 255, 255, 255}));
+        QVERIFY(d.maskPixels(top) != nullptr);
+        QVERIFY(d.removeLayerMask(top));
+        QVERIFY(!d.layer(1).hasMask);
+        QVERIFY(d.maskPixels(top) == nullptr);
+        // A mask layer cannot own one, and the mask output does not see a layer mask.
+        const int maskLayer = d.addLayer(LayerKind::Mask);
+        QVERIFY(!d.setLayerMask(maskLayer, MaskPaint(3, 1, 1)));
+    }
+
+    void aLayerMaskWithABlendModeAndOpacity() {
+        PaintDocument d(1, 1);
+        d.loadLayer(LayerKind::Paint, "under", true, 1, solid(1, 1, {102, 102, 102, 255}));
+        const int top = d.loadLayer(LayerKind::Paint, "over", true, 1, solid(1, 1, {153, 153, 153, 255}));
+        d.setBlend(top, Blend::Screen);
+        d.setLayerMask(top, MaskPaint(1, 1, std::vector<uint8_t>{255}, 1));
+        d.setOpacity(top, 0.5);
+        // 0.5 * 0.76 + 0.5 * 0.4 = 0.58
+        QCOMPARE(d.flatten().rgbaAt(0, 0).r, uint8_t(148));
+    }
+
+    void aLayersSettingsGoWithItWhenScaledRemovedAndUndone() {
+        PaintDocument d(4, 4);
+        LayerInfo info;
+        info.name = "Fill 1";
+        info.compositeOp = "svg:multiply";
+        info.producer = "canvas-write:write";
+        info.created = "2026-11-22T10:00:00.000Z";
+        info.maskEnabled = false;
+        info.hasMask = true;
+        const MaskPaint mask(4, 4, std::vector<uint8_t>(16, 200), 1);
+        const int id = d.loadLayer(info, solid(4, 4, {9, 9, 9, 255}), &mask);
+        const LayerInfo loaded = d.layer(0);
+        QCOMPARE(loaded.compositeOp, QStringLiteral("svg:multiply"));
+        QCOMPARE(loaded.producer, info.producer);
+        QCOMPARE(loaded.created, info.created);
+        QVERIFY(loaded.hasMask);
+        QVERIFY(!loaded.maskEnabled);
+        const PaintDocument bigger = d.scaledTo(8, 8);
+        QCOMPARE(bigger.layer(0).compositeOp, QStringLiteral("svg:multiply"));
+        QVERIFY(bigger.maskPixels(bigger.layer(0).id) != nullptr);
+        QCOMPARE(bigger.maskPixels(bigger.layer(0).id)->width(), 8);
+        QVERIFY(d.removeLayer(id));
+        d.undo();
+        QCOMPARE(d.layerCount(), 1);
+        QVERIFY(d.maskPixels(id) != nullptr);
+        QCOMPARE(d.maskPixels(id)->at(1, 1), uint8_t(200));
+    }
 };
 
 

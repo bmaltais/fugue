@@ -46,34 +46,57 @@ TreeDiff diffTrees(const Tree &a, const Tree &b) {
     diff.heightB = b.height;
     diff.sizeChanged = a.width != b.width || a.height != b.height;
 
-    // Pair by name, in order.
+    // Pair by name, in order; then a layer of b left over is a rename of a left-over layer of a with
+    // the same kind and the same pixels (a rename changes nothing else).
     std::map<QString, std::vector<int>> unpaired;
     for (int i = 0; i < int(a.layers.size()); ++i)
         unpaired[a.layers[i].name].push_back(i);
     std::vector<bool> used(a.layers.size(), false);
-    for (const LayerRecord &later : b.layers) {
+    std::vector<int> pairOf(b.layers.size(), -1);
+    for (int j = 0; j < int(b.layers.size()); ++j) {
+        auto found = unpaired.find(b.layers[j].name);
+        if (found == unpaired.end() || found->second.empty())
+            continue;
+        pairOf[j] = found->second.front();
+        found->second.erase(found->second.begin());
+        used[pairOf[j]] = true;
+    }
+    for (int j = 0; j < int(b.layers.size()); ++j) {
+        if (pairOf[j] >= 0)
+            continue;
+        for (int i = 0; i < int(a.layers.size()); ++i)
+            if (!used[i] && a.layers[i].kind == b.layers[j].kind && a.layers[i].tiles == b.layers[j].tiles &&
+                a.layers[i].maskTiles == b.layers[j].maskTiles) {
+                pairOf[j] = i;
+                used[i] = true;
+                break;
+            }
+    }
+    for (int j = 0; j < int(b.layers.size()); ++j) {
+        const LayerRecord &later = b.layers[j];
         LayerDiff entry;
         entry.name = later.name;
-        auto found = unpaired.find(later.name);
-        if (found == unpaired.end() || found->second.empty()) {
+        entry.indexB = j;
+        if (pairOf[j] < 0) {
             entry.change = LayerChange::Added;
-            entry.indexB = int(&later - b.layers.data());
             tileDifference({}, later.tiles, b.width, b.height, &entry);
             diff.layers.push_back(entry);
             continue;
         }
-        const int index = found->second.front();
-        found->second.erase(found->second.begin());
-        used[index] = true;
-        entry.indexA = index;
-        entry.indexB = int(&later - b.layers.data());
-        const LayerRecord &earlier = a.layers[index];
+        entry.indexA = pairOf[j];
+        const LayerRecord &earlier = a.layers[pairOf[j]];
+        if (earlier.name != later.name)
+            entry.properties << QStringLiteral("name");
         if (earlier.kind != later.kind)
             entry.properties << QStringLiteral("kind");
         if (earlier.visible != later.visible)
             entry.properties << QStringLiteral("visible");
         if (earlier.opacity != later.opacity)
             entry.properties << QStringLiteral("opacity");
+        if (earlier.compositeOp != later.compositeOp)
+            entry.properties << QStringLiteral("blend");
+        if (earlier.hasMask != later.hasMask || earlier.maskEnabled != later.maskEnabled || earlier.maskTiles != later.maskTiles)
+            entry.properties << QStringLiteral("mask");
         tileDifference(earlier.tiles, later.tiles, std::max(a.width, b.width), std::max(a.height, b.height), &entry);
         if (entry.tilesChanged > 0 || !entry.properties.isEmpty())
             diff.layers.push_back(entry);

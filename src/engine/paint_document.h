@@ -17,11 +17,20 @@
 // One history across all layers, so undo goes back through what was done in the order it was done:
 // a stroke or shape on any layer, adding a layer, removing it, moving it. The pixels of a step are
 // each layer's own tiles (MaskPaint's); a removed layer is kept whole by its step. Changing a layer's
-// visibility, opacity or name is not a step.
+// visibility, opacity, name, blend or layer mask is not a step.
 //
 // flatten() puts the visible paint and picture layers over each other, bottom up, in straight
-// RGBA; flattenMask() is the largest value of the visible mask layers (times their opacity). They are
-// two outputs because a mask is a separate port in Fugue (14.4), not a color.
+// RGBA, each through its blend mode (Blend, below: the separable modes of the W3C Compositing
+// spec, then source-over) and its layer mask; flattenMask() is the largest value of the visible
+// mask layers (times their opacity). They are two outputs because a mask is a separate port in
+// Fugue (14.4), not a color.
+//
+// A layer mask (#226) is not a layer of the stack: it is one channel (a MaskPaint, the buffer a mask
+// layer has, so the mask editor's brush can paint it later) owned by a paint or picture layer, so it
+// moves, is duplicated and is removed with its layer and never needs a place of its own. White shows
+// the layer, black hides it, grey in between: the layer's alpha is multiplied by it. It can be
+// turned off (the layer then shows whole) without being lost. A mask layer (LayerKind::Mask) is the
+// other thing: a selection-like mask the paint window paints, flattened to the mask output.
 
 #include <memory>
 #include <vector>
@@ -36,12 +45,36 @@ namespace fugue::mask {
 
 enum class LayerKind { Paint, Mask, Picture };
 
+// How a layer's color meets what is under it (spec 14.4, the W3C Compositing and Blending formulas):
+// B(Cb, Cs) per channel, then source-over. Each maps to the OpenRaster composite-op of the same name
+// (svg:src-over, svg:multiply, ...; Add is svg:plus, read as Krita's and GIMP's Addition).
+enum class Blend { Normal, Multiply, Screen, Overlay, SoftLight, Darken, Lighten, Add };
+
+// The blend an OpenRaster composite-op names; any other op (a mode Fugue does not draw, such as
+// svg:color-dodge) composites as Normal, and `known` says so.
+Blend blendOfOp(const QString &compositeOp, bool *known = nullptr);
+QString opOfBlend(Blend blend);         // "svg:src-over", "svg:multiply", ...
+QString blendId(Blend blend);           // "normal", "multiply", "screen", "overlay", "soft-light", "darken", "lighten", "add"
+bool blendFromId(const QString &id, Blend *blend);
+// The value of B(cb, cs) for one channel, 0 to 1 (the formulas of spec 14.4).
+double blendChannel(Blend blend, double cb, double cs);
+
 struct LayerInfo {
     int id = 0;
     QString name;
     LayerKind kind = LayerKind::Paint;
     bool visible = true;
     double opacity = 1; // 0 to 1
+    // The OpenRaster composite-op as it was read or set; empty is svg:src-over. An op Fugue does not
+    // draw is kept as it is (written back the same) and composites as Normal.
+    QString compositeOp;
+    bool hasMask = false;     // a layer mask (paint and picture layers only)
+    bool maskEnabled = true;  // off: the layer shows as if it had none
+    // Where the layer came from (a Canvas Write's "canvas-write:<node>", an edit's producer) and when
+    // (ISO 8601 UTC); empty when nobody said. Carried by moves, renames and duplicates.
+    QString producer;
+    QString created;
+    Blend blend() const { return blendOfOp(compositeOp); }
 };
 
 class PaintDocument {
@@ -63,6 +96,9 @@ public:
     // is, and not a history step. `pixels` is scaled to the canvas and given the channels of the kind
     // (one for a mask, four for the others). Returns the new id.
     int loadLayer(LayerKind kind, const QString &name, bool visible, double opacity, const MaskPaint &pixels);
+    // The same with every setting of `info` (its id is not used) and, when `mask` is given and the
+    // kind can have one, its layer mask (scaled to the canvas, one channel).
+    int loadLayer(const LayerInfo &info, const MaskPaint &pixels, const MaskPaint *mask = nullptr);
     // Puts a picture into a picture layer (scaled to the canvas); false for any other layer. Not a
     // history step: the picture is the caller's input, not something painted.
     bool setPicture(int id, const MaskPaint &picture);
@@ -87,7 +123,15 @@ public:
     bool setVisible(int id, bool visible);
     bool setOpacity(int id, double opacity);
     bool setName(int id, const QString &name);
-
+    bool setBlend(int id, Blend blend);
+    bool setCompositeOp(int id, const QString &compositeOp); // as read from a file; "svg:src-over" is stored as ""
+    bool setOrigin(int id, const QString &producer, const QString &created);
+    // The layer mask: given (scaled to the canvas; false for a mask layer), dropped, turned on or off.
+    bool setLayerMask(int id, const MaskPaint &mask);
+    bool removeLayerMask(int id);
+    bool setMaskEnabled(int id, bool enabled);
+    // The layer's mask, nullptr when it has none.
+    const MaskPaint *maskPixels(int id) const;
     // ---- painting on the active layer ---------------------------------------------------------
     Brush brush; // shared by every layer
     Mode mode = Mode::Paint;
@@ -128,6 +172,7 @@ private:
     struct Layer {
         LayerInfo info;
         std::shared_ptr<MaskPaint> pixels;
+        std::shared_ptr<MaskPaint> mask; // the layer mask, when info.hasMask
     };
     struct Step {
         enum class Kind { Pixels, Add, Remove, Move } kind = Kind::Pixels;
@@ -136,6 +181,7 @@ private:
         int to = 0;       // Move: where it went
         int active = 0;   // Remove and Add: the active layer before
         std::shared_ptr<MaskPaint> kept; // Remove: the layer, whole
+        std::shared_ptr<MaskPaint> keptMask; // Remove: its layer mask
         LayerInfo info;                  // Remove: its settings
     };
 

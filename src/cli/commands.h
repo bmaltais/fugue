@@ -103,6 +103,9 @@ Reply canvasCandidates(const Command &command, Context &context);
 Reply canvasAccept(const Command &command, Context &context);
 Reply canvasDrop(const Command &command, Context &context);
 Reply canvasDiff(const Command &command, Context &context);
+Reply canvasLayer(const Command &command, Context &context);
+Reply canvasUndo(const Command &command, Context &context);
+Reply canvasRedo(const Command &command, Context &context);
 
 // skill.cpp: `skill install` and `skill uninstall` (13.5).
 Reply skillInstall(const Command &command, Context &context);

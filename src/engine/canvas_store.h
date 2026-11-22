@@ -8,7 +8,9 @@
 //
 //   blobs/<aa>/<hex>.png          a tile's PNG, named by the hash of its raw pixels (shared by every canvas)
 //   trees/<hex>.json              a revision's content: size, and per layer its name, kind, visibility,
-//                                 opacity and tile hashes. Pixels and layer properties only.
+//                                 opacity, blend, layer mask, origin and tile hashes. Pixels and layer
+//                                 properties only; a property at its default is left out, so a tree
+//                                 written before it existed keeps its hash.
 //   canvases/<id>/canvas.json     {"format", "id", "name", "created"}
 //   canvases/<id>/commits/<hex>.json   the commit record: tree hash, parent, producer, time
 //   canvases/<id>/head            the head revision's hash, moved only through moveHead()
@@ -31,6 +33,13 @@
 // file `canvases/<id>/resolved/<hex>` ("accepted <revision>" or "dropped") that hides it from the
 // list; nothing is deleted, and a dropped one can still be accepted.
 //
+// Layer edits (#226; engine/canvas_layer_ops.h): editLayers() stores the tree an edit gives as a new
+// revision whose parent is the one edited, with the same tiles (nothing is re-encoded), and moves the
+// head to it by compare-and-swap; only the head is edited, so an edit never forks the history. Undo
+// moves the head back to its parent and marks the revision it left `undone` (resolved/<hex>), which
+// keeps it out of the candidates; redo moves the head forward to the newest undone revision whose
+// parent is the head. Any head can be undone this way, a Canvas Write's accepted layer included.
+//
 // Picture layers are placeholders, as in an .ora (engine/paint_file.h): the picture is a node's
 // input, never part of a revision.
 
@@ -39,6 +48,7 @@
 #include <QString>
 #include <QStringList>
 
+#include <functional>
 #include <vector>
 
 #include "engine/canvas_tiles.h"
@@ -57,7 +67,16 @@ struct LayerRecord {
     bool visible = true;
     double opacity = 1;
     TileMap tiles; // empty for a picture layer; absent tiles are 0
+    QString compositeOp; // "" is svg:src-over (mask::LayerInfo::compositeOp)
+    bool hasMask = false;  // a layer mask: one channel, its own tiles
+    bool maskEnabled = true;
+    TileMap maskTiles;
+    QString producer, created; // the layer's origin (mask::LayerInfo)
     int channels() const { return kind == mask::LayerKind::Mask ? 1 : 4; }
+    bool operator==(const LayerRecord &o) const {
+        return name == o.name && kind == o.kind && visible == o.visible && opacity == o.opacity && tiles == o.tiles && compositeOp == o.compositeOp &&
+               hasMask == o.hasMask && maskEnabled == o.maskEnabled && maskTiles == o.maskTiles && producer == o.producer && created == o.created;
+    }
 };
 
 struct Tree {
@@ -109,6 +128,8 @@ struct Accepted {
     QString current;   // the head when !moved
 };
 
+struct LayerEdit; // engine/canvas_layer_ops.h
+
 bool isCanvasId(const QString &text); // [a-z0-9][a-z0-9_-]{0,63}
 
 class CanvasStore {
@@ -156,6 +177,19 @@ public:
     // Dropping a dropped one is not an error. Returns the revision.
     Result<Revision> drop(const QString &canvasId, const QString &revisionId);
 
+    // ---- layer edits and undo (#226) ----
+    // Applies `edit` to the head, which must be `base` (the revision the caller shows): a new revision
+    // whose parent is `base` (producer `producer`), and the head moved to it. When the head is not
+    // `base` nothing is written and the answer is {moved: false, head: <the head>}. An edit that
+    // changes nothing writes nothing: the answer's revision is `base` and moved is false with head `base`.
+    Result<Commit> editLayers(const QString &canvasId, const QString &base, const LayerEdit &edit, const QString &producer);
+    // Moves the head from `expected` to its parent (canvas_no_step for the first revision); {moved: false} when it is not `expected`.
+    Result<HeadMove> undo(const QString &canvasId, const QString &expected);
+    // The revision redo would move the head to ("" when none): the newest undone one whose parent is the head.
+    Result<QString> redoTarget(const QString &canvasId) const;
+    // Moves the head from `expected` to redoTarget() (canvas_no_step when there is none).
+    Result<HeadMove> redo(const QString &canvasId, const QString &expected);
+
     // The revision as a document (no history). Picture layers come back as placeholders.
     Result<mask::PaintDocument> load(const QString &canvasId, const QString &revisionId) const;
 
@@ -174,6 +208,8 @@ private:
     QString resolution(const QString &canvasId, const QString &revisionId) const;
     Result<QStringList> historyOfHead(const QString &canvasId, QString *head) const;
     Result<QString> storeTree(const mask::PaintDocument &document);
+    Result<QString> storeTreeRecord(const Tree &tree);
+    Result<Revision> addCommit(const QString &canvasId, const QString &treeHash, const QString &parent, const QString &producer);
     Errors storeBlob(const QString &hash, const mask::MaskPaint &tile);
     Result<mask::MaskPaint> readBlob(const QString &hash, int width, int height, int channels) const;
 
@@ -186,5 +222,7 @@ QJsonObject treeToJson(const Tree &tree);
 Result<Tree> treeFromJson(const QJsonObject &object);
 // The tree of a document (hashes only, no files).
 Result<Tree> treeOf(const mask::PaintDocument &document, const TileSink &consume = {});
+// A tree as a document, its tiles read through `read` (CanvasStore::tilePixels): what load() does.
+Result<mask::PaintDocument> documentOf(const Tree &tree, const std::function<Result<mask::MaskPaint>(const QString &hash, int width, int height, int channels)> &read);
 
 } // namespace fugue::canvas

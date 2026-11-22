@@ -6,6 +6,7 @@
 // here with libarchive, in memory; nothing is written outside the test's own folder.
 
 #include <QDir>
+#include <QMap>
 #include <QFile>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -88,6 +89,28 @@ QByteArray pngClaiming(quint32 w, quint32 h) {
 
 QByteArray validZip() {
     return zipOf({{"mimetype", mime}, {"stack.xml", stack(4, 4, layerTag("data/layer-0.png"))}, {"data/layer-0.png", png(4, 4)}});
+}
+
+// Every entry of a zip, by name (the test's own reader, as another program would unpack it).
+QMap<QByteArray, QByteArray> entriesOf(const QByteArray &zip) {
+    QMap<QByteArray, QByteArray> out;
+    archive *a = archive_read_new();
+    archive_read_support_format_zip(a);
+    if (archive_read_open_memory(a, zip.constData(), size_t(zip.size())) != ARCHIVE_OK) {
+        archive_read_free(a);
+        return out;
+    }
+    archive_entry *entry = nullptr;
+    while (archive_read_next_header(a, &entry) == ARCHIVE_OK) {
+        QByteArray data;
+        char buffer[8192];
+        la_ssize_t got;
+        while ((got = archive_read_data(a, buffer, sizeof buffer)) > 0)
+            data.append(buffer, qsizetype(got));
+        out.insert(QByteArray(archive_entry_pathname(entry)), data);
+    }
+    archive_read_free(a);
+    return out;
 }
 
 void stroke(PaintDocument &d, double x, double y) {
@@ -393,6 +416,97 @@ private slots:
         QCOMPARE(big.pixels(big.layer(2).id)->channels(), 1);
         QVERIFY(!big.canUndo());
         QVERIFY(!big.flatten().isEmpty());
+    }
+
+    // ---- blend modes and layer masks (#226) ------------------------------------------------------
+
+    void blendModesAreTheCompositeOpAndAnUnknownOneIsKept() {
+        PaintDocument d(8, 8);
+        const int a = d.addLayer(LayerKind::Paint, "A");
+        const int b = d.addLayer(LayerKind::Paint, "B");
+        d.addLayer(LayerKind::Paint, "C");
+        d.setBlend(a, Blend::Multiply);
+        d.setCompositeOp(b, QStringLiteral("svg:color-dodge"));
+        const QByteArray bytes = paintToOra(d).value();
+        const QByteArray xml = entriesOf(bytes).value("stack.xml");
+        QVERIFY(xml.contains("composite-op=\"svg:multiply\""));
+        QVERIFY(xml.contains("composite-op=\"svg:color-dodge\""));
+        QVERIFY(xml.contains("composite-op=\"svg:src-over\""));
+        const Result<PaintDocument> back = paintFromOra(bytes);
+        QVERIFY2(back.ok(), qPrintable(back.error().message));
+        QCOMPARE(back->layer(0).blend(), Blend::Multiply);
+        QCOMPARE(back->layer(1).compositeOp, QStringLiteral("svg:color-dodge"));
+        QCOMPARE(back->layer(1).blend(), Blend::Normal);
+        QCOMPARE(back->layer(2).compositeOp, QString());
+        QCOMPARE(paintToOra(back.value()).value(), bytes); // the same bytes again
+    }
+
+    void aHandMadeFilesCompositeOpIsRead() {
+        const Result<PaintDocument> r = paintFromOra(zipOf({{"mimetype", mime},
+                                                            {"stack.xml", stack(4, 4, layerTag("data/layer-0.png", "composite-op=\"svg:screen\""))},
+                                                            {"data/layer-0.png", png(4, 4)}}));
+        QVERIFY2(r.ok(), qPrintable(r.error().message));
+        QCOMPARE(r->layer(0).blend(), Blend::Screen);
+        QVERIFY(failsWith(paintFromOra(zipOf({{"mimetype", mime},
+                                              {"stack.xml", stack(4, 4, layerTag("data/layer-0.png", "composite-op=\"svg:a b\""))},
+                                              {"data/layer-0.png", png(4, 4)}}))));
+    }
+
+    // Other programs see the layer as it looks (the mask baked into src); Fugue reads its own pixels
+    // and the mask back, and the file is the same bytes again.
+    void aLayerMaskRoundTripsAndOtherProgramsSeeItBaked() {
+        PaintDocument d(4, 1);
+        LayerInfo info;
+        info.name = "Fill 1";
+        info.producer = "canvas-write:write";
+        info.created = "2026-11-22T10:00:00.000Z";
+        const MaskPaint mask(4, 1, std::vector<uint8_t>{255, 128, 0, 64}, 1);
+        MaskPaint pixels(4, 1, 4);
+        pixels.fill(Rgba{200, 100, 50, 255});
+        const int id = d.loadLayer(info, pixels, &mask);
+        const QByteArray bytes = paintToOra(d).value();
+        const QMap<QByteArray, QByteArray> entries = entriesOf(bytes);
+        QVERIFY(entries.contains("data/layer-0-raw.png"));
+        QVERIFY(entries.contains("data/layer-0-mask.png"));
+        const MaskPaint seen = MaskPaint::fromPicture(entries.value("data/layer-0.png")).value();
+        QCOMPARE(seen.rgbaAt(0, 0).a, uint8_t(255));
+        QCOMPARE(seen.rgbaAt(1, 0).a, uint8_t(128));
+        QCOMPARE(seen.rgbaAt(2, 0).a, uint8_t(0));
+        QCOMPARE(seen.rgbaAt(3, 0).a, uint8_t(64));
+        QVERIFY(entries.value("stack.xml").contains("fugue:producer=\"canvas-write:write\""));
+
+        const Result<PaintDocument> back = paintFromOra(bytes);
+        QVERIFY2(back.ok(), qPrintable(back.error().message));
+        const LayerInfo got = back->layer(0);
+        QVERIFY(got.hasMask);
+        QVERIFY(got.maskEnabled);
+        QCOMPARE(got.producer, info.producer);
+        QCOMPARE(got.created, info.created);
+        QCOMPARE(back->pixels(got.id)->pixels(), d.pixels(id)->pixels());
+        QCOMPARE(back->maskPixels(got.id)->pixels(), mask.pixels());
+        QCOMPARE(back->flatten().pixels(), d.flatten().pixels());
+        QCOMPARE(paintToOra(back.value()).value(), bytes);
+
+        // Turned off, the mask is not baked: src is the layer's own pixels and there is no raw copy.
+        d.setMaskEnabled(id, false);
+        const QByteArray off = paintToOra(d).value();
+        const QMap<QByteArray, QByteArray> offEntries = entriesOf(off);
+        QVERIFY(!offEntries.contains("data/layer-0-raw.png"));
+        QVERIFY(offEntries.contains("data/layer-0-mask.png"));
+        QCOMPARE(MaskPaint::fromPicture(offEntries.value("data/layer-0.png")).value().rgbaAt(2, 0).a, uint8_t(255));
+        const Result<PaintDocument> offBack = paintFromOra(off);
+        QVERIFY(offBack.ok());
+        QVERIFY(offBack->layer(0).hasMask);
+        QVERIFY(!offBack->layer(0).maskEnabled);
+    }
+
+    void aMaskLayerWithALayerMaskOrAMaskThatIsNotThereIsRefused() {
+        QVERIFY(failsWith(paintFromOra(zipOf({{"mimetype", mime},
+                                              {"stack.xml", stack(4, 4, layerTag("data/layer-0.png", "xmlns:fugue=\"urn:fugue:ora\" fugue:mask=\"data/m.png\""))},
+                                              {"data/layer-0.png", png(4, 4)}}))));
+        QVERIFY(failsWith(paintFromOra(zipOf({{"mimetype", mime},
+                                              {"stack.xml", stack(4, 4, layerTag("data/layer-0.png", "xmlns:fugue=\"urn:fugue:ora\" fugue:kind=\"mask\" fugue:mask=\"data/m.png\""))},
+                                              {"data/layer-0.png", png(4, 4, 1)}, {"data/m.png", png(4, 4, 1)}}))));
     }
 };
 

@@ -35,7 +35,76 @@ MaskPaint asMask(const MaskPaint &in) {
     return MaskPaint(in.width(), in.height(), pixels, 1);
 }
 
+struct BlendName {
+    Blend blend;
+    const char *id;
+    const char *op;
+};
+
+constexpr BlendName kBlends[] = {
+    {Blend::Normal, "normal", "svg:src-over"},       {Blend::Multiply, "multiply", "svg:multiply"},
+    {Blend::Screen, "screen", "svg:screen"},         {Blend::Overlay, "overlay", "svg:overlay"},
+    {Blend::SoftLight, "soft-light", "svg:soft-light"}, {Blend::Darken, "darken", "svg:darken"},
+    {Blend::Lighten, "lighten", "svg:lighten"},      {Blend::Add, "add", "svg:plus"},
+};
+
 } // namespace
+
+Blend blendOfOp(const QString &compositeOp, bool *known) {
+    if (known)
+        *known = true;
+    if (compositeOp.isEmpty())
+        return Blend::Normal;
+    for (const BlendName &b : kBlends)
+        if (compositeOp == QLatin1String(b.op))
+            return b.blend;
+    if (known)
+        *known = false;
+    return Blend::Normal;
+}
+
+QString opOfBlend(Blend blend) {
+    for (const BlendName &b : kBlends)
+        if (b.blend == blend)
+            return QString::fromLatin1(b.op);
+    return QStringLiteral("svg:src-over");
+}
+
+QString blendId(Blend blend) {
+    for (const BlendName &b : kBlends)
+        if (b.blend == blend)
+            return QString::fromLatin1(b.id);
+    return QStringLiteral("normal");
+}
+
+bool blendFromId(const QString &id, Blend *blend) {
+    for (const BlendName &b : kBlends)
+        if (id == QLatin1String(b.id)) {
+            *blend = b.blend;
+            return true;
+        }
+    return false;
+}
+
+double blendChannel(Blend blend, double cb, double cs) {
+    switch (blend) {
+    case Blend::Normal: return cs;
+    case Blend::Multiply: return cb * cs;
+    case Blend::Screen: return cb + cs - cb * cs;
+    case Blend::Overlay: // hard light with the layers swapped
+        return cb <= 0.5 ? 2 * cb * cs : 1 - 2 * (1 - cb) * (1 - cs);
+    case Blend::SoftLight: {
+        if (cs <= 0.5)
+            return cb - (1 - 2 * cs) * cb * (1 - cb);
+        const double d = cb <= 0.25 ? ((16 * cb - 12) * cb + 4) * cb : std::sqrt(cb);
+        return cb + (2 * cs - 1) * (d - cb);
+    }
+    case Blend::Darken: return std::min(cb, cs);
+    case Blend::Lighten: return std::max(cb, cs);
+    case Blend::Add: return std::min(1.0, cb + cs);
+    }
+    return cs;
+}
 
 PaintDocument::PaintDocument(int width, int height) : m_width(std::max(1, width)), m_height(std::max(1, height)) {}
 
@@ -64,7 +133,12 @@ bool PaintDocument::canPaint() const {
 }
 
 LayerInfo PaintDocument::layer(int position) const {
-    return position >= 0 && position < layerCount() ? m_layers[size_t(position)].info : LayerInfo{0, QString(), LayerKind::Paint, false, 0};
+    if (position >= 0 && position < layerCount())
+        return m_layers[size_t(position)].info;
+    LayerInfo none;
+    none.visible = false;
+    none.opacity = 0;
+    return none;
 }
 
 int PaintDocument::positionOf(int id) const {
@@ -119,6 +193,7 @@ void PaintDocument::detach(Step &step) {
     if (at < 0)
         return;
     step.kept = m_layers[size_t(at)].pixels;
+    step.keptMask = m_layers[size_t(at)].mask;
     step.info = m_layers[size_t(at)].info;
     step.from = at;
     m_layers.erase(m_layers.begin() + at);
@@ -129,8 +204,9 @@ void PaintDocument::attach(Step &step) {
     if (!step.kept)
         return;
     const int at = std::clamp(step.from, 0, layerCount());
-    m_layers.insert(m_layers.begin() + at, Layer{step.info, step.kept});
+    m_layers.insert(m_layers.begin() + at, Layer{step.info, step.kept, step.keptMask});
     step.kept.reset();
+    step.keptMask.reset();
 }
 
 // Does a step either way; false when it was stale (its layer's buffer had dropped the step) and so did nothing.
@@ -218,6 +294,21 @@ int PaintDocument::loadLayer(LayerKind kind, const QString &name, bool visible, 
     return l.info.id;
 }
 
+int PaintDocument::loadLayer(const LayerInfo &info, const MaskPaint &pixels, const MaskPaint *mask) {
+    const int id = loadLayer(info.kind, info.name, info.visible, info.opacity, pixels);
+    if (id == 0)
+        return 0;
+    Layer *l = find(id);
+    setCompositeOp(id, info.compositeOp);
+    l->info.producer = info.producer;
+    l->info.created = info.created;
+    if (mask && info.kind != LayerKind::Mask) {
+        setLayerMask(id, *mask);
+        l->info.maskEnabled = info.maskEnabled;
+    }
+    return id;
+}
+
 bool PaintDocument::setPicture(int id, const MaskPaint &picture) {
     Layer *l = find(id);
     if (!l || l->info.kind != LayerKind::Picture)
@@ -230,7 +321,7 @@ bool PaintDocument::setPicture(int id, const MaskPaint &picture) {
 PaintDocument PaintDocument::scaledTo(int width, int height) const {
     PaintDocument out(width, height);
     for (const Layer &l : m_layers)
-        out.loadLayer(l.info.kind, l.info.name, l.info.visible, l.info.opacity, *l.pixels);
+        out.loadLayer(l.info, *l.pixels, l.mask.get());
     return out;
 }
 
@@ -306,6 +397,57 @@ bool PaintDocument::setName(int id, const QString &name) {
     if (l)
         l->info.name = name;
     return l;
+}
+
+bool PaintDocument::setBlend(int id, Blend blend) { return setCompositeOp(id, blend == Blend::Normal ? QString() : opOfBlend(blend)); }
+
+bool PaintDocument::setCompositeOp(int id, const QString &compositeOp) {
+    Layer *l = find(id);
+    if (l)
+        l->info.compositeOp = compositeOp == QLatin1String("svg:src-over") ? QString() : compositeOp;
+    return l;
+}
+
+bool PaintDocument::setOrigin(int id, const QString &producer, const QString &created) {
+    Layer *l = find(id);
+    if (l) {
+        l->info.producer = producer;
+        l->info.created = created;
+    }
+    return l;
+}
+
+bool PaintDocument::setLayerMask(int id, const MaskPaint &mask) {
+    Layer *l = find(id);
+    if (!l || l->info.kind == LayerKind::Mask)
+        return false;
+    l->mask = std::make_shared<MaskPaint>(asMask(mask).scaled(m_width, m_height));
+    l->mask->forgetHistory();
+    l->info.hasMask = true;
+    return true;
+}
+
+bool PaintDocument::removeLayerMask(int id) {
+    Layer *l = find(id);
+    if (!l || !l->info.hasMask)
+        return false;
+    l->mask.reset();
+    l->info.hasMask = false;
+    l->info.maskEnabled = true;
+    return true;
+}
+
+bool PaintDocument::setMaskEnabled(int id, bool enabled) {
+    Layer *l = find(id);
+    if (!l || !l->info.hasMask)
+        return false;
+    l->info.maskEnabled = enabled;
+    return true;
+}
+
+const MaskPaint *PaintDocument::maskPixels(int id) const {
+    const Layer *l = find(id);
+    return l && l->info.hasMask ? l->mask.get() : nullptr;
 }
 
 // ---- painting -----------------------------------------------------------------------------------
@@ -415,17 +557,31 @@ MaskPaint PaintDocument::flattenArea(const IRect &want) const {
         if (!l.info.visible || l.info.kind == LayerKind::Mask || l.info.opacity <= 0)
             continue;
         const std::vector<uint8_t> &src = l.pixels->pixels();
+        const std::vector<uint8_t> *mask = l.info.hasMask && l.info.maskEnabled && l.mask ? &l.mask->pixels() : nullptr;
+        const Blend blend = l.info.blend();
         for (int y = 0; y < h; ++y)
             for (int x = 0; x < w; ++x) {
                 const size_t i = size_t(y) * size_t(w) + size_t(x);
-                const size_t s = (size_t(y0 + y) * size_t(m_width) + size_t(x0 + x)) * 4;
-                const double a = src[s + 3] / 255.0 * l.info.opacity;
+                const size_t p = size_t(y0 + y) * size_t(m_width) + size_t(x0 + x);
+                const size_t s = p * 4;
+                double a = src[s + 3] / 255.0 * l.info.opacity;
+                if (mask)
+                    a *= (*mask)[p] / 255.0;
                 if (a <= 0)
                     continue;
                 double *d = &color[i * 4];
                 const double outA = a + d[3] * (1 - a);
-                for (int k = 0; k < 3; ++k)
-                    d[k] = (src[s + size_t(k)] / 255.0 * a + d[k] * d[3] * (1 - a)) / outA;
+                if (blend == Blend::Normal) {
+                    for (int k = 0; k < 3; ++k)
+                        d[k] = (src[s + size_t(k)] / 255.0 * a + d[k] * d[3] * (1 - a)) / outA;
+                } else {
+                    // W3C Compositing: Cs' = (1 - ab) Cs + ab B(Cb, Cs), then source-over with Cs'.
+                    for (int k = 0; k < 3; ++k) {
+                        const double cs = src[s + size_t(k)] / 255.0;
+                        const double mixed = (1 - d[3]) * cs + d[3] * blendChannel(blend, d[k], cs);
+                        d[k] = (mixed * a + d[k] * d[3] * (1 - a)) / outA;
+                    }
+                }
                 d[3] = outA;
             }
     }

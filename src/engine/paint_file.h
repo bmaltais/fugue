@@ -4,8 +4,19 @@
 // file a `paint` input names in the inputs folder (a text literal, as `mask` holds a gray PNG).
 //
 //   mimetype        "image/openraster", first and stored (the format's own rule)
-//   stack.xml       the canvas size and each layer: name, visibility, opacity, kind (fugue:kind)
+//   stack.xml       the canvas size and each layer: name, visibility, opacity, composite-op (its
+//                   blend mode, #226: svg:multiply etc., so Krita and GIMP show it the same), kind
+//                   (fugue:kind), and Fugue's own fugue: attributes below
 //   data/layer-N.png  one PNG per layer, MaskPaint::toPng (RGBA for paint, gray for mask)
+//
+// A layer mask (#226) has no OpenRaster form, so the file degrades to what other programs can show:
+// a masked layer's `src` is the layer as it looks (its alpha times the mask, the mask baked in), and
+// Fugue keeps the layer's own pixels in data/layer-N-raw.png (fugue:raw) and the mask, gray, in
+// data/layer-N-mask.png (fugue:mask, with fugue:mask-enabled). Krita, GIMP and MyPaint read the
+// baked layer and ignore the rest; a file they save again has the baked layer and no mask, which
+// still looks the same. A mask that is off is not baked (src is the layer's own pixels). A layer's
+// origin is fugue:producer and fugue:created. An unknown composite-op (svg:color-dodge, krita:...)
+// is read, drawn as Normal and written back unchanged.
 //
 // The same layers always give the same bytes: layers in one fixed order (bottom first by
 // position, N is the position), every entry stored (PNG is compressed already), every time and
@@ -17,8 +28,8 @@
 //
 // Reading is for hostile files: a size cap on the canvas, the layers, each entry and the whole,
 // the names checked, the PNG's own size read before it is decoded, and a file that is not exactly
-// what Fugue writes is refused with media_unreadable (no guessing at other programs' offsets,
-// groups or blend modes). Nothing is ever written to disk by reading.
+// what Fugue writes is refused with media_unreadable (no guessing at other programs' offsets or
+// groups). Nothing is ever written to disk by reading.
 
 #include <QByteArray>
 #include <QString>

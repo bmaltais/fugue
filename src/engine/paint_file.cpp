@@ -4,11 +4,13 @@
 #include <cstring>
 #include <map>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include <QFile>
 #include <QFileInfo>
 #include <QXmlStreamReader>
+#include <QRegularExpression>
 #include <QXmlStreamWriter>
 
 #include <archive.h>
@@ -39,6 +41,15 @@ QString kindName(LayerKind kind) {
 }
 
 QString numberText(double value) { return QString::number(value, 'g', QLocale::FloatingPointShortest); }
+
+// A color layer with its alpha multiplied by a one-channel mask of its size (rounded to the byte).
+MaskPaint maskedLayer(const MaskPaint &pixels, const MaskPaint &mask) {
+    std::vector<uint8_t> out = pixels.pixels();
+    const std::vector<uint8_t> &m = mask.pixels();
+    for (size_t i = 0; i < m.size() && i * 4 + 3 < out.size(); ++i)
+        out[i * 4 + 3] = uint8_t((int(out[i * 4 + 3]) * int(m[i]) + 127) / 255);
+    return MaskPaint(pixels.width(), pixels.height(), out, 4);
+}
 
 // ---- writing ---------------------------------------------------------------------------------
 
@@ -172,7 +183,19 @@ struct LayerSpec {
     LayerKind kind = LayerKind::Paint;
     bool visible = true;
     double opacity = 1;
+    QString compositeOp; // as written; "" for none or svg:src-over
+    QString raw;         // fugue:raw, the layer's own pixels when `src` has its mask baked in
+    QString mask;        // fugue:mask, the layer mask's gray PNG
+    bool maskEnabled = true;
+    QString producer, created;
 };
+
+// A composite-op Fugue keeps: an OpenRaster name such as svg:multiply, or another program's own
+// (krita:...), printable and short. Anything else is refused rather than carried.
+bool plausibleOp(const QString &op) {
+    static const QRegularExpression pattern(QStringLiteral("^[A-Za-z0-9][A-Za-z0-9:._-]{0,63}$"));
+    return pattern.match(op).hasMatch();
+}
 
 struct Stack {
     int width = 0;
@@ -239,6 +262,22 @@ Result<Stack> parseStack(const QByteArray &xml) {
                 return unreadable(QStringLiteral("a layer is offset, which Fugue does not read"));
             if (layer.kind != LayerKind::Picture && !knownName(layer.src))
                 return unreadable(QStringLiteral("a layer names a file that is not there"));
+            if (a.hasAttribute("composite-op")) {
+                layer.compositeOp = a.value("composite-op").toString();
+                if (!plausibleOp(layer.compositeOp))
+                    return unreadable(QStringLiteral("a layer's composite-op is not a name"));
+                if (layer.compositeOp == QLatin1String("svg:src-over"))
+                    layer.compositeOp.clear();
+            }
+            layer.raw = a.value(QLatin1String(fugueNamespace), "raw").toString();
+            layer.mask = a.value(QLatin1String(fugueNamespace), "mask").toString();
+            layer.maskEnabled = a.value(QLatin1String(fugueNamespace), "mask-enabled").toString() != QLatin1String("false");
+            layer.producer = a.value(QLatin1String(fugueNamespace), "producer").toString().left(kMaxName);
+            layer.created = a.value(QLatin1String(fugueNamespace), "created").toString().left(64);
+            if ((!layer.raw.isEmpty() && !knownName(layer.raw)) || (!layer.mask.isEmpty() && !knownName(layer.mask)))
+                return unreadable(QStringLiteral("a layer names a file that is not there"));
+            if (layer.kind == LayerKind::Mask && !layer.mask.isEmpty())
+                return unreadable(QStringLiteral("a mask layer has a layer mask"));
             stack.layers.insert(stack.layers.begin(), layer); // the stack lists the top first
         } else if (inStack) {
             return unreadable(QStringLiteral("stack.xml has <%1>, which Fugue does not read").arg(tag.left(20)));
@@ -275,33 +314,66 @@ Result<QByteArray> paintToOra(const PaintDocument &document) {
     writer.writeAttribute(QStringLiteral("w"), QString::number(document.width()));
     writer.writeAttribute(QStringLiteral("h"), QString::number(document.height()));
     writer.writeStartElement(QStringLiteral("stack"));
-    std::vector<std::pair<QByteArray, QByteArray>> files; // name -> bytes, bottom first
+    std::vector<std::pair<QByteArray, QByteArray>> files; // name -> bytes, bottom first: each layer's src, then its extras
+    std::vector<QByteArray> srcOf(size_t(document.layerCount())), rawOf(srcOf.size()), maskOf(srcOf.size());
     for (int position = 0; position < document.layerCount(); ++position) {
         const LayerInfo info = document.layer(position);
         const MaskPaint *pixels = document.pixels(info.id);
+        const MaskPaint *mask = document.maskPixels(info.id);
+        const QByteArray stem = QByteArrayLiteral("data/layer-") + QByteArray::number(position);
         QByteArray png;
         if (info.kind == LayerKind::Picture) {
             png = placeholder.value();
+        } else if (mask && info.maskEnabled) {
+            // Other programs have no layer mask: `src` is the layer as it looks (its alpha times the
+            // mask), and the layer's own pixels and the mask are Fugue's extras, which they ignore.
+            const Result<QByteArray> encoded = maskedLayer(*pixels, *mask).toPng();
+            const Result<QByteArray> raw = pixels->toPng();
+            if (!encoded || !raw)
+                return !encoded ? encoded.errors() : raw.errors();
+            png = encoded.value();
+            rawOf[size_t(position)] = stem + "-raw.png";
+            files.emplace_back(stem + ".png", png);
+            files.emplace_back(rawOf[size_t(position)], raw.value());
         } else {
             const Result<QByteArray> encoded = pixels->toPng();
             if (!encoded)
                 return encoded.errors();
             png = encoded.value();
         }
-        files.emplace_back(QByteArrayLiteral("data/layer-") + QByteArray::number(position) + ".png", png);
+        srcOf[size_t(position)] = stem + ".png";
+        if (rawOf[size_t(position)].isEmpty())
+            files.emplace_back(srcOf[size_t(position)], png);
+        if (mask) {
+            const Result<QByteArray> encoded = mask->toPng();
+            if (!encoded)
+                return encoded.errors();
+            maskOf[size_t(position)] = stem + "-mask.png";
+            files.emplace_back(maskOf[size_t(position)], encoded.value());
+        }
     }
     // The stack lists the top layer first.
     for (int position = document.layerCount() - 1; position >= 0; --position) {
         const LayerInfo info = document.layer(position);
         writer.writeStartElement(QStringLiteral("layer"));
         writer.writeAttribute(QStringLiteral("name"), info.name);
-        writer.writeAttribute(QStringLiteral("src"), QString::fromLatin1(files[size_t(position)].first));
+        writer.writeAttribute(QStringLiteral("src"), QString::fromLatin1(srcOf[size_t(position)]));
         writer.writeAttribute(QStringLiteral("x"), QStringLiteral("0"));
         writer.writeAttribute(QStringLiteral("y"), QStringLiteral("0"));
         writer.writeAttribute(QStringLiteral("opacity"), numberText(info.opacity));
         writer.writeAttribute(QStringLiteral("visibility"), info.visible ? QStringLiteral("visible") : QStringLiteral("hidden"));
-        writer.writeAttribute(QStringLiteral("composite-op"), QStringLiteral("svg:src-over"));
+        writer.writeAttribute(QStringLiteral("composite-op"), info.compositeOp.isEmpty() ? QStringLiteral("svg:src-over") : info.compositeOp);
         writer.writeAttribute(QString::fromLatin1(fugueNamespace), QStringLiteral("kind"), kindName(info.kind));
+        if (!rawOf[size_t(position)].isEmpty())
+            writer.writeAttribute(QString::fromLatin1(fugueNamespace), QStringLiteral("raw"), QString::fromLatin1(rawOf[size_t(position)]));
+        if (!maskOf[size_t(position)].isEmpty()) {
+            writer.writeAttribute(QString::fromLatin1(fugueNamespace), QStringLiteral("mask"), QString::fromLatin1(maskOf[size_t(position)]));
+            writer.writeAttribute(QString::fromLatin1(fugueNamespace), QStringLiteral("mask-enabled"), info.maskEnabled ? QStringLiteral("true") : QStringLiteral("false"));
+        }
+        if (!info.producer.isEmpty())
+            writer.writeAttribute(QString::fromLatin1(fugueNamespace), QStringLiteral("producer"), info.producer);
+        if (!info.created.isEmpty())
+            writer.writeAttribute(QString::fromLatin1(fugueNamespace), QStringLiteral("created"), info.created);
         writer.writeEndElement();
     }
     writer.writeEndElement(); // stack
@@ -332,28 +404,54 @@ Result<PaintDocument> paintFromOra(const QByteArray &bytes) {
         return stack.errors();
     qint64 budget = paintFileMaxLayerBytes;
     for (const LayerSpec &layer : stack->layers) {
-        if (layer.kind == LayerKind::Picture)
-            continue;
-        budget -= qint64(stack->width) * stack->height * (layer.kind == LayerKind::Mask ? 1 : 4);
+        const qint64 area = qint64(stack->width) * stack->height;
+        if (layer.kind != LayerKind::Picture)
+            budget -= area * (layer.kind == LayerKind::Mask ? 1 : 4);
+        if (!layer.mask.isEmpty())
+            budget -= area;
         if (budget < 0)
             return unreadable(QStringLiteral("its layers would take more than %1 MB").arg(paintFileMaxLayerBytes >> 20));
     }
-    PaintDocument document(stack->width, stack->height);
-    for (const LayerSpec &layer : stack->layers) {
-        if (layer.kind == LayerKind::Picture) {
-            document.loadLayer(layer.kind, layer.name, layer.visible, layer.opacity, MaskPaint(1, 1, 4));
-            continue;
-        }
-        const auto found = unpacked->pngs.find(layer.src);
+    // A PNG of the file at the canvas's size, decoded as a mask (one channel) or a color.
+    const auto decode = [&](const QString &name, bool asMask) -> Result<MaskPaint> {
+        const auto found = unpacked->pngs.find(name);
         if (found == unpacked->pngs.end())
             return unreadable(QStringLiteral("a layer's picture is not in the file"));
         qint64 width = 0, height = 0;
         if (!pngSize(found->second, &width, &height) || width != stack->width || height != stack->height)
             return unreadable(QStringLiteral("a layer's picture is not the size of the canvas"));
-        const Result<MaskPaint> pixels = layer.kind == LayerKind::Mask ? MaskPaint::fromPng(found->second) : MaskPaint::fromPicture(found->second);
+        Result<MaskPaint> pixels = asMask ? MaskPaint::fromPng(found->second) : MaskPaint::fromPicture(found->second);
         if (!pixels)
             return unreadable(QStringLiteral("a layer's picture does not decode"));
-        document.loadLayer(layer.kind, layer.name, layer.visible, layer.opacity, pixels.value());
+        return pixels;
+    };
+    PaintDocument document(stack->width, stack->height);
+    for (const LayerSpec &layer : stack->layers) {
+        LayerInfo info;
+        info.name = layer.name;
+        info.kind = layer.kind;
+        info.visible = layer.visible;
+        info.opacity = layer.opacity;
+        info.compositeOp = layer.compositeOp;
+        info.maskEnabled = layer.maskEnabled;
+        info.producer = layer.producer;
+        info.created = layer.created;
+        std::optional<MaskPaint> mask;
+        if (!layer.mask.isEmpty()) {
+            Result<MaskPaint> read = decode(layer.mask, true);
+            if (!read)
+                return read.errors();
+            mask = std::move(read.value());
+        }
+        if (layer.kind == LayerKind::Picture) {
+            document.loadLayer(info, MaskPaint(1, 1, 4), mask ? &*mask : nullptr);
+            continue;
+        }
+        // With its mask baked into `src` (what other programs see), the layer's own pixels are `raw`.
+        const Result<MaskPaint> pixels = decode(!layer.raw.isEmpty() && mask ? layer.raw : layer.src, layer.kind == LayerKind::Mask);
+        if (!pixels)
+            return pixels.errors();
+        document.loadLayer(info, pixels.value(), mask ? &*mask : nullptr);
     }
     document.forgetHistory();
     return document;
