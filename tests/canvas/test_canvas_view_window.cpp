@@ -251,12 +251,15 @@ private slots:
         QCOMPARE(model(app)->property("newResult").toString(), shown);
         QCOMPARE(model(app)->property("revisionA").toString(), m_head);
         QVERIFY(find(app.window, "canvasViewChoice-" + shortOf(shown)));
-        QVERIFY(find(app.window, "canvasViewNewResultText")->property("text").toString().contains("run1"));
+        const QString said = find(app.window, "canvasViewNewResultText")->property("text").toString();
+        QVERIFY2(said.startsWith("New candidate") && !said.contains("run1"), qPrintable(said)); // a node by its title, never its id
+        QVERIFY(!find(app.window, "canvasViewAccept")); // the bar's pair hides while the banner shows its own: one primary
+        QVERIFY(!find(app.window, "canvasViewDrop"));
         QVERIFY(find(app.window, "canvasViewNewResultHint")->property("text").toString().contains("Keep as candidate"));
         QObject *viewer = view(app)->property("viewer").value<QObject *>();
         QCOMPARE(viewer->property("sourceA").toUrl(), model(app)->property("sourceB").toUrl()); // the combined picture
-        // Keep looking at head: the head alone, the banner gone, the candidate still in the strip.
-        click(app, "canvasViewNewKeep");
+        // Back to Head: the Head alone, the banner gone, the candidate still in the strip.
+        click(app, "canvasViewNewBack");
         QTRY_COMPARE(model(app)->property("revisionB").toString(), m_head);
         QTRY_VERIFY(!find(app.window, "canvasViewNewResult"));
         QVERIFY(find(app.window, "canvasViewChoice-" + shortOf(shown)));
@@ -299,7 +302,7 @@ private slots:
         QVERIFY(!find(app.window, "canvasViewNewResult"));
         click(app, "canvasViewCompare"); // Compare off: now it shows
         QTRY_VERIFY(find(app.window, "canvasViewNewResult"));
-        click(app, "canvasViewNewKeep");
+        click(app, "canvasViewNewBack");
         QTRY_VERIFY(!find(app.window, "canvasViewNewResult"));
         // The setting off (Settings > General, live): no banner, the strip still lists it.
         QCOMPARE(app.settings.set("canvas_show_new_results", false), QString());
@@ -364,7 +367,7 @@ private slots:
         QQuickItem *use = find(app.window, "canvasViewUseRegion");
         QVERIFY(use);
         QVERIFY(!use->isEnabled());
-        QVERIFY(find(app.window, "canvasViewRegionNote")->property("text").toString().contains("head"));
+        QVERIFY(find(app.window, "canvasViewRegionNote")->property("text").toString().startsWith("Canvas Region reads Head")); // its title
         // Zoom moves the rectangle with the picture.
         QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(find(app.window, "canvasViewViewer")));
         QTest::keyClick(app.window, Qt::Key_1);
@@ -597,6 +600,133 @@ private slots:
         QVERIFY(!find(app.window, "canvasViewRegion"));
     }
 
+    // ---- the cohesion batch (#228, .ui-ergonomics/2026-11-22-canvas-areas-cohesion.md) ----
+
+    // L2: one bar. The frame's own bar is off; Fit, 100% and the close end the view's tools row, in that order.
+    void theDialogHasOneBarEndingInFitActualSizeAndClose() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        QTRY_VERIFY(find(app.window, "canvasViewClose"));
+        QVERIFY(!find(app.window, "canvasViewZoom-fit")); // the frame's own
+        QQuickItem *fit = find(app.window, "canvasViewFit"), *actual = find(app.window, "canvasViewActual"),
+                   *close = find(app.window, "canvasViewClose"), *layers = find(app.window, "canvasViewLayers");
+        QVERIFY(fit && actual && layers);
+        const auto x = [](QQuickItem *item) { return item->mapToScene(QPointF(0, 0)).x(); };
+        const auto y = [](QQuickItem *item) { return item->mapToScene(QPointF(0, 0)).y(); };
+        QTRY_VERIFY(x(layers) < x(fit) && x(fit) < x(actual) && x(actual) < x(close)); // once laid out
+        QCOMPARE(y(close), y(fit)); // one row
+        QCOMPARE(y(layers), y(fit));
+        click(app, "canvasViewClose");
+        QTRY_VERIFY(!dialog(app)->property("opened").toBool());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // D5: Home fits as in the Graph; Enter accepts the shown candidate (Accept is the primary).
+    void homeFitsAndEnterAcceptsTheShownCandidate() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        QObject *viewer = view(app)->property("viewer").value<QObject *>();
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(find(app.window, "canvasViewViewer")));
+        QTest::keyClick(app.window, Qt::Key_1);
+        QTRY_VERIFY(viewer->property("actual").toBool());
+        QTest::keyClick(app.window, Qt::Key_Home);
+        QTRY_VERIFY(!viewer->property("actual").toBool());
+        QTest::keyClick(app.window, Qt::Key_Return); // the Head: nothing to accept, nothing happens
+        QCOMPARE(model(app)->property("head").toString(), m_head);
+        QVERIFY(dialog(app)->property("opened").toBool());
+        click(app, "canvasViewChoice-" + shortOf(m_a));
+        QTRY_COMPARE(model(app)->property("revisionB").toString(), m_a);
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(find(app.window, "canvasViewViewer")));
+        QTest::keyClick(app.window, Qt::Key_Return);
+        QTRY_COMPARE(model(app)->property("head").toString(), m_a);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // L13 and D7: the five compare modes of Compare Images, the mode remembered; toggles and the strip in the quiet marking.
+    void theCompareModesAreCompareImagesFiveAndTogglesAreQuiet() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        click(app, "canvasViewChoice-" + shortOf(m_a));
+        QTRY_COMPARE(model(app)->property("revisionB").toString(), m_a);
+        click(app, "canvasViewCompare");
+        for (const char *mode : {"slider", "slider_horizontal", "side_by_side", "flip", "difference"})
+            QTRY_VERIFY2(find(app.window, QStringLiteral("canvasViewMode-") + mode), mode);
+        click(app, "canvasViewMode-slider_horizontal");
+        QObject *viewer = view(app)->property("viewer").value<QObject *>();
+        QTRY_COMPARE(viewer->property("mode").toString(), QString("slider_horizontal"));
+        // Only Accept wears the accent fill: Compare on, its mode and the shown chip are quiet.
+        for (const char *name : {"canvasViewCompare", "canvasViewMode-slider_horizontal"})
+            QVERIFY2(!find(app.window, name)->property("marked").toBool() && find(app.window, name)->property("current").toBool(), name);
+        QVERIFY(!find(app.window, "canvasViewChoice-" + shortOf(m_a))->property("marked").toBool());
+        QVERIFY(find(app.window, "canvasViewAccept")->property("marked").toBool());
+        QVERIFY(find(app.window, "canvasViewCompare")->property("checkable").toBool());
+        click(app, "canvasViewCompare");
+        QTRY_COMPARE(viewer->property("mode").toString(), QString("single"));
+        click(app, "canvasViewCompare"); // the mode last picked comes back
+        QTRY_COMPARE(viewer->property("mode").toString(), QString("slider_horizontal"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // L5: the view's canvas menu has the picker's rows: size and last change, the id, New canvas… and Import picture….
+    void theCanvasMenuHasThePickersRowsAndMakesACanvas() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        click(app, "canvasViewCanvas");
+        QObject *menu = nullptr;
+        QTRY_VERIFY((menu = app.window->findChild<QObject *>("widgetMenu")) && menu->property("opened").toBool());
+        const QVariantList entries = menu->property("entries").toList();
+        QStringList texts;
+        for (const QVariant &entry : entries)
+            texts << entry.toMap().value("text").toString();
+        QVERIFY2(texts.contains("Sketch") && texts.contains("New canvas…") && texts.contains("Import picture…"), qPrintable(texts.join(", ")));
+        const QVariantMap sketch = entries.at(int(texts.indexOf("Sketch"))).toMap();
+        QVERIFY(sketch.value("detail").toString().startsWith("512 × 512 · "));
+        QCOMPARE(sketch.value("note").toString(), m_canvas);
+        QVERIFY(QMetaObject::invokeMethod(menu, "picked", Q_ARG(QVariant, entries.at(int(texts.indexOf("New canvas…"))).toMap().value("value"))));
+        QVERIFY(QMetaObject::invokeMethod(menu, "close"));
+        QObject *ask = nullptr;
+        QTRY_VERIFY((ask = app.window->findChild<QObject *>("newCanvasAsk")) && ask->property("opened").toBool());
+        ask->findChild<QObject *>("newCanvasName")->setProperty("text", "Poster");
+        QVERIFY(QMetaObject::invokeMethod(ask, "create"));
+        QTRY_VERIFY(!app.window->findChild<QObject *>("newCanvasAsk"));
+        QTRY_COMPARE(view(app)->property("canvasId").toString() != m_canvas, true);
+        QCOMPARE(canvas::CanvasStore::forSession().info(view(app)->property("canvasId").toString())->name, QString("Poster"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // L18: right to left the bar mirrors (the close at its far end, the left) and the New canvas question's buttons with
+    // it; the picture does not.
+    void rightToLeftMirrorsTheBarAndTheQuestionButNotThePicture() {
+        struct Back { ~Back() { QGuiApplication::setLayoutDirection(Qt::LeftToRight); } } back;
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        QGuiApplication::setLayoutDirection(Qt::RightToLeft); // after open: the window's translator sets it from the language
+        openDialog(app);
+        QTRY_VERIFY(find(app.window, "canvasViewClose"));
+        const auto x = [](QQuickItem *item) { return item->mapToScene(QPointF(0, 0)).x(); };
+        QTRY_VERIFY(x(find(app.window, "canvasViewClose")) < x(find(app.window, "canvasViewFit"))); // once laid out
+        QTRY_VERIFY(x(find(app.window, "canvasViewCanvas")) > x(find(app.window, "canvasViewChoice-head")));
+        QQuickItem *picture = find(app.window, "canvasViewViewer");
+        QQuickItem *layers = find(app.window, "canvasLayersPanel");
+        QVERIFY(layers && x(layers) < x(picture)); // the panel at the reading end, the left
+        // The picture is drawn as it is: its first label stays at its left edge.
+        auto *label = picture->findChild<QQuickItem *>("labelA");
+        QVERIFY(label && label->x() < picture->width() / 2);
+        QVERIFY(QMetaObject::invokeMethod(view(app), "newCanvas"));
+        QObject *ask = nullptr;
+        QTRY_VERIFY((ask = app.window->findChild<QObject *>("newCanvasAsk")) && ask->property("opened").toBool());
+        QTest::qWait(50);
+        auto *ok = ask->findChild<QQuickItem *>("newCanvasOk");
+        auto *cancel = ask->findChild<QQuickItem *>("newCanvasCancel");
+        QVERIFY(ok && cancel);
+        QVERIFY(x(ok) < x(cancel)); // Create at the left end: the primary last in reading order
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     // Pictures: FUGUE_SHOT_DIR=<dir> test_canvas_view_window savesThePicturesOfTheWindow (nothing without the variable).
     void savesThePicturesOfTheWindow() {
         const QByteArray dir = qgetenv("FUGUE_SHOT_DIR");
@@ -620,7 +750,10 @@ private slots:
         QVERIFY(app.commands.trigger("file.canvas-view"));
         QTRY_VERIFY(dialog(app) && dialog(app)->property("opened").toBool());
         QTRY_VERIFY(find(app.window, "canvasViewEmpty"));
-        QVERIFY(find(app.window, "canvasViewEmpty")->property("text").toString().contains("No canvas yet"));
+        QCOMPARE(find(app.window, "canvasViewEmptyText")->property("text").toString(), QString("No canvases yet"));
+        // What to do in the app, not on the command line (#228): the canvas picker's two ways.
+        QVERIFY(find(app.window, "canvasViewEmptyNew"));
+        QVERIFY(find(app.window, "canvasViewEmptyImport"));
     }
 };
 

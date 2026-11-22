@@ -173,7 +173,7 @@ private slots:
         click(app, "canvasHistoryRevision-" + shortOf(m_b));
         QTRY_COMPARE(history->property("kindB").toString(), QString("candidate"));
         QCOMPARE(history->property("revisionA").toString(), m_a);
-        QCOMPARE(find(app.window, "canvasHistoryCompare")->property("tip").toString(), QString("Show this candidate against the head"));
+        QCOMPARE(find(app.window, "canvasHistoryCompare")->property("tip").toString(), QString("Show this candidate against the Head"));
         click(app, "canvasHistoryAccept");
         QTRY_VERIFY(!find(app.window, "canvasHistoryAccept"));
         const auto head = canvas::CanvasStore::forSession().info(m_canvas)->head;

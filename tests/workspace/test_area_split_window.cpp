@@ -236,7 +236,9 @@ private slots:
 
     // A run adds a candidate (as Canvas Write does) while a Canvas area is open on the head: the area shows it with its banner.
     void aCanvasAreaShowsANewResultOfARunAndTheBannerDecides() {
-        App app(load(blank));
+        // The Canvas Write that made it is in the open document: the banner names it by its title, never its id (#228).
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {"pot": {"type": "fugue/canvas-write", "version": "1.2.0", "inputs": {}}}},
+                         "layout": {"nodes": {"pot": {"pos": [20, 20]}}}})"));
         QVERIFY(app.open());
         QVERIFY(app.commands.trigger("area.split-row"));
         QQuickItem *area = nullptr;
@@ -258,7 +260,9 @@ private slots:
         const QString shown = backend->property("revisionB").toString();
         QVERIFY(shown != head);
         QCOMPARE(backend->property("newResult").toString(), shown);
-        QVERIFY(find(app.window, "canvasViewNewResultText")->property("text").toString().contains("pot"));
+        const QString said = find(app.window, "canvasViewNewResultText")->property("text").toString();
+        QVERIFY2(said.contains("New candidate") && said.contains("from Canvas Write") && !said.contains("pot"), qPrintable(said));
+        QVERIFY(!find(app.window, "canvasViewAccept")); // the bar's pair hides while the banner has it: one primary
         QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(find(app.window, "canvasViewNewAccept")));
         QTRY_COMPARE(backend->property("head").toString(), shown);
         QTRY_VERIFY(!find(app.window, "canvasViewNewResult"));
@@ -334,6 +338,76 @@ private slots:
             QVERIFY2(owners == 1, key);
             QCOMPARE(app.commands.keys(QString::fromLatin1(command)), QStringList({QString::fromLatin1(key)}));
         }
+    }
+
+    // #228 (docs/ui-ergonomics.md D5): a Canvas area with the focus keeps the Graph's keys from the Graph behind it, and
+    // the window's bare Q from quitting; Home, + and the rest are its picture's. Ctrl+Q still quits, Escape is the run's
+    // unless a rectangle drag is on, and the Graph has its keys back once it is pressed.
+    void aFocusedCanvasAreaKeepsTheGraphsKeysAndQ() {
+        App app(load(withRegion(m_canvas)));
+        QVERIFY(app.open());
+        app.commands.setUnsavedWork(true); // quit asks first: the question is the sign that the key reached it
+        QSignalSpy quits(&app.commands, &CommandRegistry::quitConfirmationRequested);
+        int cancels = 0;
+        QVERIFY(app.commands.setHandler("run.cancel", [&cancels] { ++cancels; }));
+        app.commands.setContextActive("run", true); // a run is going
+        QVERIFY(app.commands.trigger("area.split-row"));
+        QQuickItem *area = nullptr;
+        QTRY_VERIFY((area = find(app.window, "canvasArea")) != nullptr);
+        QObject *view = area->property("view").value<QObject *>();
+        auto *viewer = view->property("viewer").value<QQuickItem *>();
+        QTRY_VERIFY(viewer && viewer->isVisible() && viewer->width() > 50);
+        app.model.select({"region"});
+        QTRY_VERIFY(find(app.window, "canvasViewFrame"));
+        settle();
+        QVERIFY(app.commands.trigger("view.zoom-in")); // the Graph zoomed, so a fit of it would show
+        const qreal graphZoom = app.zoom();
+        // A press on the picture (clear of the border's 24px target): the area is active and its view has the keys.
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, viewer->mapToScene(QPointF(40, 40)).toPoint());
+        QTRY_COMPARE(app.workspace.active(), 2);
+        app.key(Qt::Key_1);
+        QTRY_VERIFY(viewer->property("actual").toBool());
+        app.key(Qt::Key_Home); // the picture fits, not the Graph
+        QTRY_VERIFY(!viewer->property("actual").toBool());
+        app.key(Qt::Key_Period);
+        app.key(Qt::Key_Plus);
+        QTRY_VERIFY(viewer->property("zoom").toReal() > 1);
+        app.key(Qt::Key_Delete);
+        app.key(Qt::Key_A, Qt::ControlModifier);
+        app.commands.setUnsavedWork(true);
+        app.key(Qt::Key_Q);
+        QTest::qWait(50);
+        QCOMPARE(app.zoom(), graphZoom);
+        QVERIFY(app.model.document().graph.nodes.contains("region"));
+        QCOMPARE(quits.count(), 0);
+        app.commands.setUnsavedWork(true);
+        app.key(Qt::Key_Q, Qt::ControlModifier);
+        QTRY_COMPARE(quits.count(), 1);
+        app.key(Qt::Key_Escape); // closes the quit question (unsaved work)
+        QTRY_VERIFY(!app.window->findChild<QObject *>("quitAsk") || !app.window->findChild<QObject *>("quitAsk")->property("visible").toBool());
+        QCOMPARE(cancels, 0);
+        // Escape: the run's, but the drag's while one is on.
+        app.key(Qt::Key_Escape);
+        QTRY_COMPARE(cancels, 1);
+        app.key(Qt::Key_0);
+        settle();
+        const QPoint from = viewer->mapToScene(QPointF(viewer->width() * 0.3, viewer->height() * 0.7)).toPoint();
+        QTest::mouseMove(app.window, from);
+        QTest::mousePress(app.window, Qt::LeftButton, {}, from);
+        for (int i = 1; i <= 4; ++i)
+            QTest::mouseMove(app.window, from + QPoint(10 * i, 6 * i));
+        QTRY_VERIFY(find(app.window, "canvasViewFrame")->property("dragging").toBool());
+        app.key(Qt::Key_Escape);
+        QVERIFY(!find(app.window, "canvasViewFrame")->property("dragging").toBool());
+        QTest::mouseRelease(app.window, Qt::LeftButton, {}, from + QPoint(40, 24));
+        QCOMPARE(cancels, 1);
+        // The Graph pressed: its keys are its own again.
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, app.canvas->mapToScene(QPointF(app.canvas->width() - 20, app.canvas->height() - 20)).toPoint());
+        QTRY_COMPARE(app.workspace.active(), 1);
+        app.key(Qt::Key_Period);
+        QTRY_VERIFY(app.zoom() != graphZoom);
+        app.commands.setContextActive("run", false);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
     // #226, last because it edits the shared canvas: over a Canvas area's layers panel the keys are the panel's (the

@@ -2,10 +2,12 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Fugue
 
-// File > Canvas… (#221, epic #216): the Canvas view (CanvasView.qml) in a large view, until the workspace's areas
-// can host it. The dialog only frames it and gives it its context: the canvas, and as the follow target the one
-// Canvas Region node selected in the graph (the selection drives the view). `openFor(id)` opens it on a canvas
-// (empty: the newest, or the selected region's); Escape closes.
+// File > Canvas… (#221, epic #216): the Canvas view (CanvasView.qml) in a large view, for the one-area window (D2). The
+// dialog only frames it and gives it its context: the canvas, and as the follow target the one Canvas Region node
+// selected in the graph (the selection drives the view). One bar (#228): the frame's own bar is off and its close sits
+// at the end of the view's tools, after the view's Fit and 100%, as the Mask editor's and the Crop window's bars end.
+// `openFor(id)` opens it on a canvas (empty: the newest, or the selected region's); Escape closes, Enter accepts a
+// shown candidate (the view's key).
 LargeViewDialog {
     id: root
     objectName: "canvasViewDialog"
@@ -18,6 +20,7 @@ LargeViewDialog {
     property var selection: App.canvasModel.selection
     readonly property string selectedRegion: edits && selection.length === 1 && edits.regionState(selection[0]).ok === true ? selection[0] : ""
     zoomable: content.viewer.visible ? content.viewer : null
+    showBar: false
 
     function openFor(canvasId) {
         if (canvasId !== "")
@@ -30,10 +33,16 @@ LargeViewDialog {
         id: content
         anchors.fill: parent
         look: root.look
-        zoomButtons: false
         ownShortcuts: true // a modal popup: the window's shortcuts sleep, so the layers panel binds its keys
         edits: root.edits
         followNode: root.selectedRegion
         focus: true
+        trailing: ViewButton {
+            objectName: "canvasViewClose"
+            look: root.look
+            glyph: "x" // the Lucide x of every other close (canvas-look 16)
+            tip: qsTr("Close (Esc)")
+            onTapped: root.close()
+        }
     }
 }

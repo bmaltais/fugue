@@ -6,10 +6,11 @@ import Fugue
 
 // The revisions of a canvas (#210, #214, epic #206, spec 14.5) in a large view: the list of what the canvas
 // went through and the candidates waiting for review on the left, and the picture of the selected revision on
-// the right at full size (zoom and pan), the head at first. Compare puts it against its parent (or any other
-// revision) in the same compareViewer as Compare Images; Export saves the shown revision as a PNG. A candidate
-// is accepted into the head or dropped from the bar. Without a canvas it lists the
-// canvases of the store to open one. `openFor(id)` opens it on a canvas (empty: the list); Escape closes.
+// the right at full size (zoom and pan), the Head at first. Compare puts a candidate against the Head and any other
+// revision against its parent (the Canvas view's meaning, D1) in the same compareViewer as Compare Images, with its
+// modes (CompareModeButtons.qml); Export saves the shown revision as a PNG. A candidate is accepted into the Head (the
+// bar's Accept, or Enter) or dropped. Without a canvas it lists the canvases of the store to open one, or, with none,
+// makes one (New canvas…, Import picture…). `openFor(id)` opens it on a canvas (empty: the list); Escape closes.
 //
 // Click a revision: show it (Compare on: against its parent). Ctrl+click: make it the A side of a comparison,
 // which turns Compare on.
@@ -27,9 +28,10 @@ LargeViewDialog {
     readonly property real u: look.unit
     // Compare is a toggle: off shows the revision alone (CompareView's single mode), on the compare modes.
     property bool comparing: false
-    property string compareMode: "slider"
     readonly property bool compareOn: comparing && backend.hasParent
     readonly property bool canDecide: backend.kindB === "candidate" || backend.kindB === "dropped"
+    readonly property var rowB: backend.revisions.find(row => row.id === backend.revisionB) ?? ({})
+    readonly property var rowA: backend.revisions.find(row => row.id === backend.revisionA) ?? ({})
     // The canvas the keys are on in the list of canvases (Up, Down, Enter), as the revision rows have.
     property int canvasIndex: 0
 
@@ -41,7 +43,30 @@ LargeViewDialog {
 
     CanvasHistory { id: backend }
 
-    onCompareOnChanged: compareViewer.setView({mode: compareOn ? compareMode : "single"})
+    onCompareOnChanged: compareViewer.setView({mode: compareOn ? modeButtons.remembered() : "single"})
+    // Enter: Accept, when a candidate is shown (its Accept is the bar's one primary).
+    onConfirm: if (canDecide) backend.accept(backend.revisionB)
+
+    // New canvas… and Import picture… (#228, C7), when the store has none yet: the canvas is made and opened.
+    Component {
+        id: newCanvasAsk
+        NewCanvasQuestion {
+            make: (name, width, height, picture) => picture !== "" ? backend.importPicture(picture, name) : backend.newCanvas(name, width, height)
+            sizeOf: url => backend.pictureSize(url)
+        }
+    }
+    Component {
+        id: pictureDialog
+        FileDialog {
+            id: d
+            objectName: "canvasHistoryImportDialog"
+            title: qsTr("Import a picture as a canvas")
+            fileMode: FileDialog.OpenFile
+            nameFilters: [qsTr("Pictures and canvases (*.png *.jpg *.jpeg *.webp *.ora)"), qsTr("All files (*)")]
+            onAccepted: { backend.importPicture(d.selectedFile, ""); d.destroy() }
+            onRejected: d.destroy()
+        }
+    }
 
     // The picture is saved by the file dialog, as Save Image does: the backend writes it and never replaces a file.
     FileDialog {
@@ -93,29 +118,22 @@ LargeViewDialog {
             enabled: backend.hasParent
             text: qsTr("Compare")
             tip: !backend.hasParent ? qsTr("The first revision has no parent to compare with")
-                 : root.canDecide ? qsTr("Show this candidate against the head") : qsTr("Show this revision against its parent")
+                 : root.canDecide ? qsTr("Show this candidate against the Head") : qsTr("Show this revision against its parent")
             // On is the quiet marking: Accept is the one accent fill of this window (docs/ui-ergonomics.md, D7).
             accented: false
             checkable: true
             current: root.compareOn
             onTapped: root.comparing = !root.comparing
         }
-        Repeater {
-            model: backend.canvasId === "" || !root.compareOn ? [] : [{id: "slider", text: qsTr("Slider")}, {id: "side_by_side", text: qsTr("Side by side")},
-                                                   {id: "flip", text: qsTr("Flip")}, {id: "difference", text: qsTr("Difference")}]
-            delegate: ViewButton {
-                required property var modelData
-                objectName: "canvasHistoryMode-" + modelData.id
-                look: root.look
-                text: modelData.text
-                accented: false
-                current: compareViewer.mode === modelData.id
-                enabled: modelData.id !== "difference" || backend.sourceDifference.toString() !== ""
-                onTapped: {
-                    root.compareMode = modelData.id
-                    compareViewer.setView({mode: modelData.id})
-                }
-            }
+        CompareModeButtons {
+            id: modeButtons
+            visible: backend.canvasId !== "" && root.compareOn
+            look: root.look
+            prefix: "canvasHistoryMode-"
+            accented: false // the quiet marking: Accept is the one accent fill of this window (D7)
+            mode: compareViewer.mode
+            hasDifference: backend.sourceDifference.toString() !== ""
+            onPicked: picked => compareViewer.setView({mode: picked})
         }
         Item { width: 2 * root.u; height: 1; visible: backend.canvasId !== "" }
         ViewButton {
@@ -138,7 +156,7 @@ LargeViewDialog {
             visible: root.canDecide
             primary: true
             text: qsTr("Accept")
-            tip: qsTr("Make this candidate the head of the canvas")
+            tip: qsTr("Make this candidate the Head of the canvas (Enter)")
             onTapped: backend.accept(backend.revisionB)
         }
         Item { width: 4 * root.u; height: 1; visible: backend.kindB === "candidate" } // the destructive chunk: twice the gap inside the others
@@ -161,13 +179,37 @@ LargeViewDialog {
         visible: backend.canvasId === ""
         clip: true
         model: backend.canvases
-        header: Text {
+        // What to do: choose one, or, with none yet, make one in the app (the canvas picker's two ways).
+        header: Column {
             width: canvasList.width
-            height: 8 * root.u
-            verticalAlignment: Text.AlignVCenter
-            color: root.look.label
-            font.pixelSize: root.look.labelSize
-            text: canvasList.count === 0 ? qsTr("No canvas yet: fugue canvas new, or fugue canvas import, makes one.") : qsTr("Choose a canvas")
+            bottomPadding: root.u
+            Text {
+                objectName: "canvasHistoryEmpty"
+                width: parent.width
+                height: 8 * root.u
+                verticalAlignment: Text.AlignVCenter
+                color: root.look.label
+                font.pixelSize: root.look.labelSize
+                text: canvasList.count === 0 ? qsTr("No canvases yet") : qsTr("Choose a canvas")
+            }
+            Row {
+                visible: canvasList.count === 0
+                spacing: root.u
+                ViewButton {
+                    objectName: "canvasHistoryNew"
+                    look: root.look
+                    text: qsTr("New canvas…")
+                    tip: qsTr("Make a blank canvas, or one from a picture")
+                    onTapped: (newCanvasAsk.createObject(root) as Question).open()
+                }
+                ViewButton {
+                    objectName: "canvasHistoryImport"
+                    look: root.look
+                    text: qsTr("Import picture…")
+                    tip: qsTr("Make a canvas from a picture file")
+                    onTapped: (pictureDialog.createObject(root) as FileDialog).open()
+                }
+            }
         }
         delegate: Rectangle {
             id: canvasRow
@@ -246,8 +288,8 @@ LargeViewDialog {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.right: parent.right
                     anchors.rightMargin: 2 * root.u
-                    visible: row.modelData.kind !== "backend"
-                    text: row.modelData.kind === "head" ? qsTr("Head") : row.modelData.kind === "dropped" ? qsTr("Dropped") : qsTr("Candidate")
+                    visible: row.modelData.tag !== ""
+                    text: row.modelData.tag // CanvasHistory's one word for it (Head, Candidate, Dropped)
                     color: row.modelData.kind === "candidate" ? root.look.accent : root.look.label
                     font.pixelSize: root.look.captionSize
                     font.weight: Font.DemiBold
@@ -266,7 +308,7 @@ LargeViewDialog {
                     }
                 }
                 Accessible.role: Accessible.ListItem
-                Accessible.name: row.modelData.short + ", " + row.modelData.producer + ", " + row.modelData.kind
+                Accessible.name: row.modelData.name + ", " + row.modelData.producer
             }
         }
 
@@ -288,8 +330,9 @@ LargeViewDialog {
                 sourceDifference: backend.sourceDifference
                 sizeA: root.compareOn ? backend.sizeA : backend.sizeB
                 sizeB: backend.sizeB
-                labelA: root.compareOn ? qsTr("A") : qsTr("B")
-                labelB: qsTr("B")
+                // Each side named as CanvasHistory names it (the strip's and the Canvas view's words).
+                labelA: (root.compareOn ? root.rowA.name : root.rowB.name) ?? ""
+                labelB: root.rowB.name ?? ""
             }
             Column {
                 id: notes

@@ -234,7 +234,7 @@ Rectangle {
                     return onEye || onMask
                 }
                 ToolTip.visible: rowHover.hovered && modelData.from !== "" && !drag.active && root.renaming !== position
-                ToolTip.delay: 600
+                ToolTip.delay: root.look.tooltipDelay
                 ToolTip.text: modelData.created !== "" ? qsTr("From %1, %2").arg(modelData.from).arg(modelData.created) : qsTr("From %1").arg(modelData.from)
 
                 TapHandler {
@@ -347,12 +347,11 @@ Rectangle {
                             fillMode: Image.PreserveAspectFit
                             asynchronous: true
                         }
-                        Text {
+                        Glyph {
                             anchors.centerIn: parent
                             visible: !row.modelData.maskEnabled
-                            text: root.look.glyph("x")
-                            font.family: root.look.iconFont
-                            font.pixelSize: 16
+                            look: root.look
+                            name: "x"
                             color: root.look.error
                         }
                         TapHandler {
@@ -360,7 +359,7 @@ Rectangle {
                             onTapped: if (root.editable) root.model.setMaskEnabled([row.position], !row.modelData.maskEnabled)
                         }
                         ToolTip.visible: maskHover.hovered
-                        ToolTip.delay: 600
+                        ToolTip.delay: root.look.tooltipDelay
                         ToolTip.text: row.modelData.maskEnabled ? qsTr("Layer mask: white shows the layer, black hides it. Shift+click turns it off.")
                                                                 : qsTr("Layer mask, off: the layer shows whole. Shift+click turns it on.")
                         HoverHandler { id: maskHover }
@@ -402,18 +401,21 @@ Rectangle {
                     onActiveFocusChanged: if (!activeFocus && root.renaming === row.position) root.renaming = -1
                 }
                 // The eye, at the right as an outliner's toggles are. A hidden layer's is flat and dim (the font has no
-                // crossed eye); a solo layer's is lit.
+                // crossed eye). While one layer is shown alone its eye alone is on and the others' are flat and dim, as
+                // the picture is: the quiet marking, never the accent fill, which is the view's Accept's (D7).
                 ViewButton {
                     id: eye
                     objectName: "canvasLayerEye-" + row.position
+                    readonly property bool shown: root.model.solo >= 0 ? root.model.solo === row.position : row.modelData.visible
                     anchors.right: parent.right
                     anchors.rightMargin: root.u / 2
                     anchors.verticalCenter: parent.verticalCenter
                     look: root.look
                     glyph: "eye"
-                    accented: root.model.solo === row.position
-                    current: row.modelData.visible || root.model.solo === row.position
-                    opacity: row.modelData.visible ? 1 : 0.55
+                    accented: false
+                    checkable: true
+                    current: eye.shown
+                    opacity: eye.shown ? 1 : 0.55
                     tip: root.model.solo === row.position ? qsTr("Shown alone; Alt+click shows every layer again")
                          : row.modelData.visible ? qsTr("Hide the layer (H); Alt+click shows it alone") : qsTr("Show the layer (H); Alt+click shows it alone")
                     altAction: true
@@ -448,35 +450,39 @@ Rectangle {
                 wrapMode: Text.Wrap
                 color: root.look.label
                 font.pixelSize: root.look.captionSize
-                text: qsTr("Layers are changed on the head: go to Head to change them.")
+                text: qsTr("Layers are changed on the Head: go to Head to change them.")
             }
-            Rectangle {
+            // A notice with its action, in the window's one notice look (Banner.qml), not an accent tint.
+            Banner {
                 objectName: "canvasLayersSolo"
                 visible: root.model.solo >= 0
                 width: parent.width
-                height: 7 * root.u
-                radius: root.look.smallCorner
-                color: Qt.alpha(root.look.accent, 0.14)
-                Text {
-                    anchors.left: parent.left
-                    anchors.leftMargin: root.u
-                    anchors.right: soloEnd.left
-                    anchors.verticalCenter: parent.verticalCenter
-                    elide: Text.ElideRight
-                    color: root.look.text
-                    font.pixelSize: root.look.captionSize
-                    text: qsTr("Showing %1 alone").arg(root.rows.find(r => r.position === root.model.solo)?.name ?? "")
-                }
-                ViewButton {
-                    id: soloEnd
-                    objectName: "canvasLayersSoloEnd"
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    look: root.look
-                    glyph: "x"
-                    accented: false
-                    tip: qsTr("Show every layer")
-                    onTapped: root.model.solo = -1
+                look: root.look
+                Item {
+                    width: parent.width
+                    height: soloEnd.height
+                    Text {
+                        anchors.left: parent.left
+                        anchors.right: soloEnd.left
+                        anchors.rightMargin: root.u
+                        anchors.verticalCenter: parent.verticalCenter
+                        elide: Text.ElideRight
+                        color: root.look.text
+                        font.pixelSize: root.look.captionSize
+                        text: qsTr("Showing %1 alone").arg(root.rows.find(r => r.position === root.model.solo)?.name ?? "")
+                    }
+                    ViewButton {
+                        id: soloEnd
+                        objectName: "canvasLayersSoloEnd"
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        look: root.look
+                        glyph: "x"
+                        flat: true
+                        compact: true
+                        tip: qsTr("Show every layer")
+                        onTapped: root.model.solo = -1
+                    }
                 }
             }
             DragNumberField {
@@ -502,7 +508,8 @@ Rectangle {
                 look: root.look
                 accented: false
                 enabled: root.editable && root.current !== null
-                text: qsTr("Blend: %1").arg(root.current ? root.blendLabel(root.current.blend) : qsTr("Normal")) + " ▾"
+                text: qsTr("Blend: %1").arg(root.current ? root.blendLabel(root.current.blend) : qsTr("Normal"))
+                trailingGlyph: "chevron-down"
                 tip: qsTr("How the layer mixes with the layers under it")
                 onTapped: {
                     const now = root.current ? root.current.blend : "normal"
@@ -520,6 +527,7 @@ Rectangle {
                     accented: false
                     enabled: root.editable
                     text: root.current && root.current.maskEnabled ? qsTr("Mask on") : qsTr("Mask off")
+                    checkable: true
                     current: root.current !== null && root.current.maskEnabled === true
                     tip: qsTr("Turn the layer mask off to see the whole layer, or on again (Shift+click the mask)")
                     onTapped: root.model.setMaskEnabled(root.chosen, !(root.current && root.current.maskEnabled))
