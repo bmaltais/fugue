@@ -61,3 +61,7 @@ waypoints e547
 hand e1d7
 zoom-in e1b6
 circle-dashed e4b5
+sparkles e417
+wand-sparkles e35b
+history e1f5
+download e0b6

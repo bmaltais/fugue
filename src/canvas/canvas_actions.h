@@ -109,6 +109,8 @@ public:
     // The Quick Mask selection kept by content in the session's canvas store (CanvasStore::storeSelection): {ok, hash,
     // x, y, width, height (its bounds)} or {ok: false, reason}.
     Q_INVOKABLE QVariantMap storeSelection(fugue::MaskLayer *selection) const;
+    // The bounds of what is painted in the selection, {x, y, width, height}; {} when nothing is (the bar is placed by it).
+    Q_INVOKABLE QVariantMap selectionBounds(fugue::MaskLayer *selection) const;
     // Fetches the action's missing models through the window's download line (a template's Download).
     Q_INVOKABLE void download(const QString &action);
     // Reads the actions and their models again.

@@ -466,10 +466,9 @@ void CanvasActions::clearHistory() {
     emit historyChanged();
 }
 
-QVariantMap CanvasActions::storeSelection(MaskLayer *selection) const {
-    const auto no = [](const QString &why) { return QVariantMap{{"ok", false}, {"reason", why}}; };
-    if (!selection)
-        return no(tr("Nothing is selected."));
+QVariantMap CanvasActions::selectionBounds(MaskLayer *selection) const {
+    if (!selection || selection->isEmpty())
+        return {};
     const mask::MaskPaint &painted = selection->paint();
     int left = painted.width(), top = painted.height(), right = -1, bottom = -1;
     for (int y = 0; y < painted.height(); ++y)
@@ -481,11 +480,23 @@ QVariantMap CanvasActions::storeSelection(MaskLayer *selection) const {
                 bottom = std::max(bottom, y);
             }
     if (right < 0)
+        return {};
+    return {{"x", left}, {"y", top}, {"width", right - left + 1}, {"height", bottom - top + 1}};
+}
+
+QVariantMap CanvasActions::storeSelection(MaskLayer *selection) const {
+    const auto no = [](const QString &why) { return QVariantMap{{"ok", false}, {"reason", why}}; };
+    if (!selection)
+        return no(tr("Nothing is selected."));
+    QVariantMap bounds = selectionBounds(selection);
+    if (bounds.isEmpty())
         return no(tr("The selection is empty. Draw one, then Generate."));
-    const Result<QString> hash = canvas::CanvasStore::forSession().storeSelection(painted);
+    const Result<QString> hash = canvas::CanvasStore::forSession().storeSelection(selection->paint());
     if (!hash)
         return no(hash.error().message);
-    return {{"ok", true}, {"hash", hash.value()}, {"x", left}, {"y", top}, {"width", right - left + 1}, {"height", bottom - top + 1}};
+    bounds.insert("ok", true);
+    bounds.insert("hash", hash.value());
+    return bounds;
 }
 
 void CanvasActions::download(const QString &action) {

@@ -432,7 +432,7 @@ Item {
     Keys.onShortcutOverride: event => {
         const bare = !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))
         if (event.key === Qt.Key_Escape) {
-            event.accepted = root.dragging
+            event.accepted = root.dragging || taskBar.busy // a drag's, or the task bar's Cancel
             return
         }
         const owner = App.commands.ownerOfPress(event.key, event.modifiers)
@@ -442,7 +442,7 @@ Item {
     Keys.onPressed: event => {
         if (event.key === Qt.Key_Escape) {
             const frame = regionFrame.item as CropFrame
-            if (!frame || !frame.cancel())
+            if ((!frame || !frame.cancel()) && !taskBar.cancelIfBusy())
                 return // not ours: the dialog closes
             event.accepted = true
             return
@@ -1321,6 +1321,26 @@ Item {
                 onTapped: canvasData.clearHeadNotice()
             }
         }
+    }
+
+    // The task bar (#231, CanvasTaskBar.qml): under the selection, Generate into it on the latest version.
+    CanvasTaskBar {
+        id: taskBar
+        anchors.fill: pictureView
+        look: root.look
+        visible: shown && pictureView.visible && !root.compareOn
+        canvasId: canvasData.canvasId
+        revision: canvasData.revisionB
+        onHead: root.shownIsHead && !canvasData.showsCandidate
+        rect: root.regionValid ? canvasData.region : root.freeRect
+        quickMask: root.quickMask ? selectionLayer : null
+        originX: pictureView.imageX
+        originY: pictureView.imageY
+        zoom: pictureView.imageScale
+        roomX: -pictureView.x
+        roomWidth: root.width
+        decisionElsewhere: root.newResultShown
+        onBackToLatest: canvasData.show(canvasData.head)
     }
 
     // What the picture area says when there is nothing to show, and what to do about it in the app.
