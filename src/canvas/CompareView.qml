@@ -45,6 +45,7 @@ Item {
     property bool hoverWipe: true  // the divider follows the pointer, as well as being dragged
     property bool chrome: true     // the labels and the size notice
     property bool showZoom: false  // the zoom in percent after the size notice
+    property bool showSize: true   // the size notice when the sizes agree (the Canvas view says it in its status line); a mismatch is always said
     property int wheelModifiers: Qt.NoModifier // held to zoom with the wheel (the node's face asks for Alt)
     property color background: look.well
 
@@ -274,7 +275,7 @@ Item {
         objectName: "sizeNotice"
         x: view.look.unit
         y: view.height - height - view.look.unit
-        text: view.sizeNotice
+        text: view.showSize || view.differs ? view.sizeNotice : ""
         color: view.differs ? Qt.rgba(0.55, 0.3, 0, 0.85) : Qt.rgba(0, 0, 0, 0.6)
     }
 

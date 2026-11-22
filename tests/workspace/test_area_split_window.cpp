@@ -231,7 +231,7 @@ private slots:
         QTRY_COMPARE(backend->property("followNode").toString(), QString("region"));
         QTRY_VERIFY(find(app.window, "canvasViewRegion"));
         // The region was followed before the picture was read: the preview is computed again once it arrives.
-        QTRY_VERIFY(find(app.window, "canvasViewRegionInfo")->property("text").toString().contains("Context"));
+        QTRY_VERIFY(find(app.window, "canvasViewContextLabel")->property("text").toString().contains("Context"));
         app.model.select({});
         QTest::qWait(50);
         QCOMPARE(backend->property("followNode").toString(), QString("region"));

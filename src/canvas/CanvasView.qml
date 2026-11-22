@@ -121,6 +121,18 @@ Item {
     readonly property var preview: regionValid && canvasData.pictureSize.width > 0 && canvasData.pictureSize.height > 0
                                    ? canvasData.previewRegion(liveRect ?? canvasData.region) : ({})
     readonly property bool previewReady: preview.context !== undefined
+    // The Canvas Region reads a step that is not the latest version (a pinned Revision input: rare): the one case its
+    // note and Use for region are worth the room (#234).
+    readonly property bool pinnedElsewhere: {
+        const reads = canvasData.region.reads ?? ""
+        if (reads === "" || reads === "head")
+            return false
+        const latest = canvasData.revisions.find(r => r.latest)
+        return !latest || canvasData.region.readsId !== latest.id
+    }
+    // The selection the status line says: the drag's, the node's rectangle, or a drawn one.
+    readonly property var selectionRect: liveRect ?? (regionValid ? canvasData.region : hasFreeRect ? freeRect : null)
+    property bool advancedDetails: false
     readonly property bool compareOn: comparing && canvasData.hasParent
     readonly property bool canDecide: canvasData.kindB === "candidate" || canvasData.kindB === "dropped"
     readonly property bool shownIsHead: canvasData.revisionB !== "" && canvasData.revisionB === canvasData.head
@@ -415,6 +427,19 @@ Item {
         const node = canvasData.edits ? canvasData.edits.addRegionNode(canvasData.canvasId, freeRect) : ""
         if (node !== "")
             chosenRegion = node
+    }
+    // The pro's numbers (Advanced details): the context and the model's size, what is shown, what changed in it.
+    readonly property string detailsText: {
+        const parts = []
+        if (previewReady) {
+            parts.push(qsTr("Context %1 × %2").arg(preview.context.width).arg(preview.context.height))
+            parts.push(qsTr("Model %1 × %2%3").arg(preview.modelWidth).arg(preview.modelHeight)
+                       .arg(preview.capped ? qsTr(" (at the %1 MP cap)").arg(canvasData.region.cap) : ""))
+        }
+        if (regionValid)
+            parts.push(qsTr("Reads %1").arg(readsText(canvasData.region)))
+        parts.push(qsTr("Showing %1").arg(labelOf(rowB)))
+        return parts.concat(canvasData.summary).join(" · ")
     }
     function readsText(region) {
         return region.reads === "head" || region.reads === "" ? qsTr("the latest version")
@@ -927,6 +952,7 @@ Item {
         onActiveFocusChanged: if (!activeFocus) root.panKey = false
         mode: "single"
         showZoom: true
+        showSize: false // the status line under the picture says the size and the zoom
         // Alone, the picture is what the overlay says (a candidate over the Head, the Head, a revision); compared, A and B.
         // Each named as CanvasHistory names it.
         sourceA: root.compareOn ? canvasData.sourceA : canvasData.pictureSource
@@ -1156,6 +1182,44 @@ Item {
             look: root.look
             box: regionLayer.context
         }
+        // Its size, small, at the box's top corner (above it when there is room, else inside); the model's size is in the
+        // tooltip of the frame and under Advanced details (#234).
+        Rectangle {
+            id: contextLabel
+            objectName: "canvasViewContextLabel"
+            readonly property string text: root.previewReady ? qsTr("Context %1 × %2").arg(root.preview.context.width).arg(root.preview.context.height) : ""
+            visible: root.regionValid && text !== "" && regionLayer.context.width > contextText.implicitWidth + 4 * root.u
+            x: regionLayer.context.x
+            y: regionLayer.context.y >= height ? regionLayer.context.y - height : regionLayer.context.y
+            width: contextText.implicitWidth + root.u
+            height: contextText.implicitHeight + root.u / 2
+            radius: root.look.smallCorner
+            color: Qt.rgba(0, 0, 0, 0.6)
+            Text {
+                id: contextText
+                anchors.centerIn: parent
+                text: contextLabel.text
+                color: "white"
+                font.pixelSize: root.look.captionSize
+                font.features: { "tnum": 1 }
+            }
+        }
+        // The frame's tooltip: the context and the size the model gets (hover only; it never takes the pointer).
+        HoverHandler {
+            id: frameHover
+            objectName: "canvasViewFrameHover"
+            readonly property var frame: regionFrame.item as CropFrame
+            readonly property bool over: hovered && frame !== null && point.position.x >= frame.fx && point.position.x <= frame.fx + frame.fw
+                                         && point.position.y >= frame.fy && point.position.y <= frame.fy + frame.fh
+            readonly property string text: root.previewReady
+                ? qsTr("Context %1 × %2 (dashed). The model gets %3 × %4%5.")
+                      .arg(root.preview.context.width).arg(root.preview.context.height)
+                      .arg(root.preview.modelWidth).arg(root.preview.modelHeight)
+                      .arg(root.preview.capped ? qsTr(", at the %1 MP cap").arg(canvasData.region.cap) : "") : ""
+        }
+        ToolTip.visible: frameHover.over && frameHover.text !== "" && root.liveRect === null
+        ToolTip.delay: root.look.tooltipDelay
+        ToolTip.text: frameHover.text
     }
 
 
@@ -1393,18 +1457,9 @@ Item {
 
     Column {
         id: notes
-        anchors.bottom: parent.bottom
+        anchors.bottom: statusLine.top
         width: parent.width
         spacing: root.u
-        Text {
-            objectName: "canvasViewSummary"
-            width: parent.width
-            wrapMode: Text.Wrap
-            visible: text !== ""
-            color: root.look.text
-            font.pixelSize: root.look.labelSize
-            text: canvasData.summary.join("\n")
-        }
         // The followed Canvas Region reads another canvas, or a linked one: said plainly, with what can be done about it
         // (never a dead end in the error color).
         Banner {
@@ -1452,6 +1507,7 @@ Item {
             width: parent.width
             spacing: 2 * root.u
             visible: canvasData.followNode !== "" && canvasData.region.problem !== "otherCanvas" && canvasData.region.problem !== "linked"
+                     && (root.pinnedElsewhere || canvasData.region.valid !== true)
             Text {
                 objectName: "canvasViewRegionNote"
                 readonly property var shown: root.previewReady ? root.preview : canvasData.region // the saved numbers until the picture is read
@@ -1476,35 +1532,23 @@ Item {
                 onTapped: canvasData.useForRegion()
             }
         }
-        // The rest of what the rectangle means, live while it is dragged: the padded box (dashed) and the model's size.
-        Text {
-            objectName: "canvasViewRegionInfo"
-            width: parent.width
-            wrapMode: Text.Wrap
-            visible: root.previewReady
-            color: root.look.label
-            font.pixelSize: root.look.labelSize
-            font.features: { "tnum": 1 }
-            text: root.previewReady ? qsTr("Context %1 × %2 (dashed). The model gets %3 × %4%5.")
-                                       .arg(root.preview.context.width).arg(root.preview.context.height)
-                                       .arg(root.preview.modelWidth).arg(root.preview.modelHeight)
-                                       .arg(root.preview.capped ? qsTr(", at the %1 MP cap").arg(canvasData.region.cap) : "") : ""
-        }
-        // How to pick: what a drag does, or why it does nothing; with no node followed, what to do with the rectangle.
+        // Only what a person must act on: why a drag does nothing (linked, Compare), or what to do with a drawn rectangle.
+        // How to pick is the tool strip's tooltips (#234).
         Text {
             objectName: "canvasViewRegionHint"
             width: parent.width
             wrapMode: Text.Wrap
-            visible: pictureView.visible && (root.freeMode || root.regionValid)
+            visible: pictureView.visible && text !== "" && (root.freeMode || root.regionValid)
             color: root.regionValid && !root.compareOn && !root.regionEditable ? root.look.error : root.look.label
             font.pixelSize: root.look.labelSize
             text: root.freeMode ? (root.compareOn ? qsTr("Turn Compare off to draw a region on the picture.")
                                    : root.hasFreeRect ? (root.regionsHere.length > 1 ? qsTr("This rectangle is not a node's yet: choose its Canvas Region.")
+                                                         // With the task bar (#231) the rectangle is used as it is: nothing to say.
+                                                         : App.canvasActions !== null ? ""
                                                          : qsTr("This rectangle is not saved: no Canvas Region node reads this canvas. Add one to use it."))
-                                   : root.regionsHere.length > 1 ? qsTr("Drag on the picture to draw a region, then choose its Canvas Region node.")
-                                   : qsTr("Drag on the picture to draw a region; a Canvas Region node can then use it."))
+                                   : "")
                   : root.regionEditable && canvasData.region.adopts === true ? qsTr("Drag on the picture to pick the region: this Canvas Region has no canvas yet and takes this one.")
-                  : root.regionEditable ? qsTr("Drag on the picture to pick the region; Esc cancels. Space-drag or the middle button pans.")
+                  : root.regionEditable ? ""   // how to pick is taught by the tool strip's tooltips (#234)
                   : root.compareOn ? qsTr("Turn Compare off to pick the region on the picture.")
                   : qsTr("X, Y, Width or Height is linked to another node: pick it there.")
         }
@@ -1549,6 +1593,71 @@ Item {
             color: root.look.error
             font.pixelSize: root.look.labelSize
             text: canvasData.error !== "" ? canvasData.error : root.makeProblem
+        }
+    }
+
+    // Photoshop's status line: one thin row under the picture. Zoom and the canvas size at the start, the selection's size
+    // and position (live while dragging) next to it, and Advanced details at the end for the numbers a film team wants
+    // (#234). Nothing else is written under the picture unless a person must act on it.
+    Column {
+        id: statusLine
+        objectName: "canvasViewStatusLine"
+        anchors.bottom: parent.bottom
+        width: parent.width
+        visible: pictureView.visible
+        height: visible ? implicitHeight : 0
+        spacing: 0
+        Text {
+            objectName: "canvasViewStatusDetails"
+            width: parent.width
+            visible: root.advancedDetails
+            wrapMode: Text.Wrap
+            color: root.look.label
+            font.pixelSize: root.look.captionSize
+            font.features: { "tnum": 1 }
+            text: root.detailsText
+        }
+        Item {
+            width: parent.width
+            height: statusRow.implicitHeight + root.u
+            Row {
+                id: statusRow
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.left: parent.left
+                anchors.leftMargin: root.u
+                spacing: 3 * root.u
+                Text {
+                    objectName: "canvasViewStatusZoom"
+                    color: root.look.label
+                    font.pixelSize: root.look.captionSize
+                    font.features: { "tnum": 1 }
+                    text: qsTr("%1 · %2 × %3").arg(pictureView.zoomText).arg(canvasData.pictureSize.width).arg(canvasData.pictureSize.height)
+                }
+                Text {
+                    objectName: "canvasViewStatusSelection"
+                    visible: root.selectionRect !== null && root.selectionRect.width > 0
+                    color: root.look.text
+                    font.pixelSize: root.look.captionSize
+                    font.features: { "tnum": 1 }
+                    text: root.selectionRect ? qsTr("%1 × %2 at %3, %4").arg(Math.round(root.selectionRect.width)).arg(Math.round(root.selectionRect.height))
+                                                .arg(Math.round(root.selectionRect.x)).arg(Math.round(root.selectionRect.y)) : ""
+                }
+            }
+            ViewButton {
+                objectName: "canvasViewAdvancedDetails"
+                anchors.right: parent.right
+                anchors.rightMargin: root.u
+                anchors.verticalCenter: parent.verticalCenter
+                look: root.look
+                text: qsTr("Advanced details")
+                flat: true
+                compact: true
+                accented: false
+                checkable: true
+                current: root.advancedDetails
+                tip: qsTr("The context and model size, the revision and what changed in it")
+                onTapped: root.advancedDetails = !root.advancedDetails
+            }
         }
     }
 }

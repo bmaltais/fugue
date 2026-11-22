@@ -397,24 +397,29 @@ private slots:
         QVERIFY(qAbs(rectangle.x() - (viewer->property("imageX").toReal() + 100 * k)) < 0.5);
         const QRectF context = layer->property("context").toRectF();
         QVERIFY(qAbs(context.width() - 200 * k) < 0.5);
-        // It reads the head, and the head is shown: nothing to write.
-        QQuickItem *use = find(app.window, "canvasViewUseRegion");
-        QVERIFY(use);
-        QVERIFY(!use->isEnabled());
-        QVERIFY(find(app.window, "canvasViewRegionNote")->property("text").toString().startsWith("Canvas Region reads the latest version")); // its title
+        // It reads the latest version (the normal case): no note and no button under the picture (#234).
+        QVERIFY(!find(app.window, "canvasViewUseRegion"));
+        QVERIFY(!find(app.window, "canvasViewRegionNote"));
         // Zoom moves the rectangle with the picture.
         QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(find(app.window, "canvasViewViewer")));
         QTest::keyClick(app.window, Qt::Key_1);
         QTRY_VERIFY(qAbs(frameRect().width() - 160) < 0.5);
-        // A candidate: the button writes its revision, one undo step.
+        // Pinned to a step (a rare choice, written here as the old button did): the note and Use for region come back.
         showRevision(app, m_a);
-        QTRY_VERIFY(find(app.window, "canvasViewUseRegion")->isEnabled());
-        QCOMPARE(app.model.undoStack()->count(), 0); // looking is no edit
-        click(app, "canvasViewUseRegion");
-        QTRY_VERIFY(!find(app.window, "canvasViewUseRegion")->isEnabled());
+        QVERIFY(QMetaObject::invokeMethod(model(app), "useForRegion"));
         QCOMPARE(app.model.undoStack()->count(), 1);
         QCOMPARE(app.model.widgets()->regionState("region").value("revision").toString(), m_a);
-        QVERIFY(find(app.window, "canvasViewRegionNote")->property("text").toString().contains("“Layer added: Fill A”")); // the step in words, no hash
+        QTRY_VERIFY(find(app.window, "canvasViewRegionNote"));
+        QVERIFY(find(app.window, "canvasViewRegionNote")->property("text").toString().startsWith("Canvas Region reads “Layer added: Fill A”")); // the step in words, no hash
+        QVERIFY(!find(app.window, "canvasViewUseRegion")->isEnabled()); // this step is the one it reads
+        // Looking at the latest version: the button points the region back at it, one undo step.
+        showRevision(app, m_head);
+        QTRY_VERIFY(find(app.window, "canvasViewUseRegion")->isEnabled());
+        QCOMPARE(app.model.undoStack()->count(), 1); // looking is no edit
+        click(app, "canvasViewUseRegion");
+        QCOMPARE(app.model.undoStack()->count(), 2);
+        QCOMPARE(app.model.widgets()->regionState("region").value("revision").toString(), QString("head"));
+        QTRY_VERIFY(!find(app.window, "canvasViewUseRegion")); // reads the latest again: the row is gone
         app.model.undoStack()->undo();
         QTRY_VERIFY(find(app.window, "canvasViewUseRegion")->isEnabled());
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
@@ -464,10 +469,11 @@ private slots:
         // Live: the numbers, the context box and the model size moved; the node did not.
         QCOMPARE(app.model.undoStack()->count(), 0);
         QCOMPARE(regionOf(app).value("width").toInt(), 160);
-        const QString note = find(app.window, "canvasViewRegionNote")->property("text").toString();
+        const QString note = find(app.window, "canvasViewStatusSelection")->property("text").toString();
         QVERIFY2(note.contains(QString::number(160 + 60)) || note.contains(QString::number(160 + 59)) || note.contains(QString::number(160 + 61)),
                  qPrintable(note));
-        QVERIFY(find(app.window, "canvasViewRegionInfo")->property("text").toString().contains("The model gets"));
+        QVERIFY(!find(app.window, "canvasViewRegionInfo")); // the paragraph is gone: a small label and the frame's tooltip
+        QVERIFY(find(app.window, "canvasViewContextLabel")->property("text").toString().startsWith("Context "));
         QTest::mouseRelease(app.window, Qt::LeftButton, {}, to);
         QCOMPARE(app.model.undoStack()->count(), 1);
         const QVariantMap now = regionOf(app);
@@ -522,6 +528,52 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // #234: one thin status line like Photoshop's, and nothing else of internal text under the picture.
+    void oneStatusLineSaysZoomSizeAndTheSelection() {
+        App app(load(fixture(m_canvas)));
+        openFollowing(app);
+        QQuickItem *zoom = find(app.window, "canvasViewStatusZoom");
+        QVERIFY(zoom);
+        const QString text = zoom->property("text").toString();
+        QVERIFY2(QRegularExpression(R"(^\d+% · 512 × 512$)").match(text).hasMatch(), qPrintable(text));
+        QCOMPARE(find(app.window, "canvasViewStatusSelection")->property("text").toString(), QString("160 × 96 at 100, 60"));
+        QTest::keyClick(app.window, Qt::Key_1);
+        QTRY_COMPARE(find(app.window, "canvasViewStatusZoom")->property("text").toString(), QString("100% · 512 × 512"));
+        // The removed lines: the store diff, the context paragraph, the how-to, the note while it reads the latest version.
+        QVERIFY(!find(app.window, "canvasViewSummary"));
+        QVERIFY(!find(app.window, "canvasViewRegionInfo"));
+        QVERIFY(!find(app.window, "canvasViewRegionHint"));
+        QVERIFY(!find(app.window, "canvasViewRegionNote"));
+        QVERIFY(!find(app.window, "sizeNotice")); // the size is the status line's now
+        // The pro's numbers sit behind Advanced details.
+        QVERIFY(!find(app.window, "canvasViewStatusDetails"));
+        click(app, "canvasViewAdvancedDetails");
+        QTRY_VERIFY(find(app.window, "canvasViewStatusDetails"));
+        const QString details = find(app.window, "canvasViewStatusDetails")->property("text").toString();
+        QVERIFY2(details.contains("Context "), qPrintable(details));
+        QVERIFY2(details.contains("Model ") && details.contains("Reads the latest version"), qPrintable(details));
+        click(app, "canvasViewAdvancedDetails");
+        QTRY_VERIFY(!find(app.window, "canvasViewStatusDetails"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    void theSelectionInTheStatusLineFollowsTheDragAndTheContextLabelIsSmall() {
+        App app(load(fixture(m_canvas)));
+        openFollowing(app);
+        QObject *viewer = view(app)->property("viewer").value<QObject *>();
+        const qreal k = viewer->property("imageScale").toReal();
+        const QPoint corner = pixelAt(app, 260, 156);
+        drag(app, corner, corner + QPoint(qRound(40 * k), qRound(20 * k)), false);
+        const QString live = find(app.window, "canvasViewStatusSelection")->property("text").toString();
+        QVERIFY2(live.startsWith("200 × 116") || live.startsWith("199 × ") || live.startsWith("201 × "), qPrintable(live));
+        QTest::mouseRelease(app.window, Qt::LeftButton, {}, corner + QPoint(qRound(40 * k), qRound(20 * k)));
+        QQuickItem *label = find(app.window, "canvasViewContextLabel");
+        QVERIFY(label);
+        QVERIFY(label->height() < 30);
+        QVERIFY(label->property("text").toString().startsWith("Context "));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void escapeDuringADragLeavesTheNodeAsItWas() {
         App app(load(fixture(m_canvas)));
         openFollowing(app);
@@ -536,7 +588,7 @@ private slots:
         QCOMPARE(regionOf(app).value("width").toInt(), 160);
         // The dialog stayed open: Escape was the drag's.
         QVERIFY(dialog(app)->property("opened").toBool());
-        QVERIFY(find(app.window, "canvasViewRegionNote")->property("text").toString().contains("160"));
+        QVERIFY(find(app.window, "canvasViewStatusSelection")->property("text").toString().startsWith("160 × 96 at 100, 60"));
     }
 
     void zoomAndPanNeverMoveTheRectangle() {
@@ -646,7 +698,7 @@ private slots:
         openDialog(app);
         QTRY_VERIFY(find(app.window, "canvasViewFrame")); // the free selection's
         QCOMPARE(model(app)->property("followNode").toString(), QString());
-        QVERIFY(find(app.window, "canvasViewRegionHint")->property("text").toString().contains("choose its Canvas Region"));
+        QVERIFY(!find(app.window, "canvasViewRegionHint")); // nothing drawn yet: the tool strip teaches the drag (#234)
         QTest::keyClick(app.window, Qt::Key_0);
         QTest::qWait(50);
         drag(app, pixelAt(app, 300, 320), pixelAt(app, 420, 400));
@@ -676,7 +728,7 @@ private slots:
         QVERIFY(app.open());
         openDialog(app);
         QTRY_VERIFY(find(app.window, "canvasViewFrame"));
-        QVERIFY(find(app.window, "canvasViewRegionHint")->property("text").toString().startsWith("Drag on the picture to draw a region"));
+        QVERIFY(!find(app.window, "canvasViewRegionHint")); // how to draw is taught by the tool strip's tooltips (#234)
         QVERIFY(!find(app.window, "canvasViewAddRegion"));
         QTest::keyClick(app.window, Qt::Key_0);
         QTest::qWait(50);
@@ -955,6 +1007,11 @@ private slots:
             showRevision(app, m_a);
             QTRY_VERIFY(find(app.window, "canvasViewRegion"));
             save(app, "candidate");
+            QTest::keyClick(app.window, Qt::Key_0);
+            click(app, "canvasViewAdvancedDetails");
+            QTRY_VERIFY(find(app.window, "canvasViewStatusDetails"));
+            save(app, "status-line");
+            click(app, "canvasViewAdvancedDetails");
             click(app, "canvasViewHistory");
             QTRY_VERIFY(find(app.window, "canvasHistoryPanel"));
             save(app, "history");
