@@ -92,6 +92,9 @@ class WidgetEdit : public QObject {
     Q_PROPERTY(int hashRevision READ hashRevision NOTIFY hashingChanged)
     // Bumped whenever the root's canvases may have changed, so the `canvas` inputs re-read canvases().
     Q_PROPERTY(int canvasesRevision READ canvasesRevision NOTIFY canvasesChanged)
+    // Bumped whenever the document may have changed (an edit, an undo, another document), so a Canvas view re-reads
+    // regionNodes().
+    Q_PROPERTY(int graphRevision READ graphRevision NOTIFY graphChanged)
 
 public:
     WidgetEdit(const fugue::Registry *registry, CanvasModel *canvas, QObject *parent = nullptr);
@@ -247,16 +250,25 @@ public:
     Q_INVOKABLE QVariantMap regionState(const QString &node) const;
     // The node as user text names it (CanvasModel::nodeName): its title, the id only to tell two of one title apart.
     Q_INVOKABLE QString nodeName(const QString &node) const;
+    // The Canvas Region nodes of the level shown, [{id, name, canvas}] in title order: the nodes a Canvas view can follow
+    // without a hunt in the graph (#228).
+    Q_INVOKABLE QVariantList regionNodes() const;
+    // Adds a Canvas Region node that reads `canvas`, with `rect` ({x, y, width, height}) as its rectangle, at the middle
+    // of the graph's view, as ONE undo step ("Add a Canvas Region"): what a rectangle drawn on a canvas with no Region
+    // node becomes. Its id, or "" when it could not be made.
+    Q_INVOKABLE QString addRegionNode(const QString &canvas, const QVariantMap &rect);
     // Sets x, y, width and height of the node as ONE undo step; false when nothing changed or one is linked.
     Q_INVOKABLE bool setRegion(const QString &node, int x, int y, int width, int height);
     // The document's undo stack: a view that shows a node's values (the Canvas view's region) re-reads on its index.
     QUndoStack *undoStack() const;
     int canvasesRevision() const { return m_canvases.revision(); }
+    int graphRevision() const { return m_graphRevision; }
     // The list's source (tests set the store's folder).
     fugue::CanvasChoices *canvasChoices() { return &m_canvases; }
 
 signals:
     void canvasesChanged();
+    void graphChanged();
     void modelsChanged();
     void hashingChanged();
     // A session ended without finish() or cancel(): another edit began, or the document was
@@ -304,6 +316,7 @@ private:
     };
     void downloadsFinished();
     fugue::CanvasChoices m_canvases;
+    int m_graphRevision = 0;
     // Whether `input` has the canvas widget, and its target; empty Target otherwise.
     Target canvasTarget(const QString &node, const QString &input) const;
     fugue::ModelCatalog m_catalog;

@@ -12,8 +12,13 @@ import "canvasMenu.js" as CanvasMenu
 // its context (below), so the same item sits in the File > Canvas… dialog and in an area of the workspace.
 //
 // Context: `canvasId` (empty: the newest canvas of the store, or the one a followed node reads), `storeRoot` (empty is
-// the session's), and a follow target: `edits` (the document's WidgetEdit) with `followNode`, a Canvas Region node whose
-// rectangle is then drawn on the picture, EDITED there (#224) and which **Use for region** writes to.
+// the session's), `edits` (the document's WidgetEdit) and `selection` (the Graph's). The follow target, `followNode`, is
+// a Canvas Region node whose rectangle is then drawn on the picture, EDITED there (#224) and which **Use for region**
+// writes to; the view finds it without a hunt in the graph (#228): the selected Region node; else the one last followed
+// or chosen, while it reads the shown canvas; else the only Region node that reads it. With none of these a drag on the
+// picture still draws a rectangle (the "free" selection, view-only): with several Region nodes on this canvas it asks
+// which one it is for (a menu by their titles, remembered), with none it offers **Add a Canvas Region node** (one undo
+// step: the node, reading this canvas, with the rectangle); until then nothing keeps it.
 //
 // The region on the picture is a live frame (CropFrame, the Crop window's and the region picker's): drag it to move it,
 // its eight handles to resize it, or drag in empty space to draw a new one. The numbers, the padded context box and the
@@ -46,7 +51,25 @@ Item {
     property alias storeRoot: canvasData.storeRoot
     property alias canvasId: canvasData.canvasId
     property alias edits: canvasData.edits
-    property alias followNode: canvasData.followNode
+    // The Graph's selection (node ids): a Canvas Region among it is the follow target.
+    property var selection: []
+    readonly property string followNode: canvasData.followNode
+    // The Region node last followed or chosen for a drawn rectangle: it stays the target while it reads this canvas.
+    property string chosenRegion: ""
+    // The document's Canvas Region nodes [{id, name, canvas}], and those that read the shown canvas.
+    readonly property var regionNodes: canvasData.edits && canvasData.edits.graphRevision >= 0 ? canvasData.edits.regionNodes() : []
+    // A node with no canvas yet counts as this canvas's: it takes it at the first edit.
+    readonly property var regionsHere: regionNodes.filter(node => node.canvas === canvasData.canvasId || node.canvas === "")
+    readonly property string selectedRegion: selection.length === 1 && regionNodes.some(node => node.id === selection[0]) ? selection[0] : ""
+    onSelectedRegionChanged: if (selectedRegion !== "") chosenRegion = selectedRegion
+    readonly property string followTarget: selectedRegion !== "" ? selectedRegion
+                                         : regionsHere.some(node => node.id === chosenRegion) ? chosenRegion
+                                         : regionsHere.length === 1 ? regionsHere[0].id : ""
+    // A rectangle drawn while no node is followed ({width: 0}: none yet); view-only until a node takes it.
+    readonly property var noRect: ({x: 0, y: 0, width: 0, height: 0})
+    property var freeRect: noRect
+    readonly property bool freeMode: canvasData.followNode === "" && pictureView.visible && canvasData.pictureSize.width > 0
+    readonly property bool hasFreeRect: freeMode && freeRect.width > 0
     // The Fit and 100% buttons at the end of the tools; a host can turn them off.
     property bool zoomButtons: true
     // The host's items at the very end of the tools row: the dialog's close (one bar, as the Mask editor's).
@@ -110,10 +133,19 @@ Item {
 
     CanvasViewModel {
         id: canvasData
+        onCanvasChanged: root.freeRect = root.noRect
+        onFollowChanged: root.freeRect = root.noRect
         // A run's new candidate is shown at once (settings.json's canvas_show_new_results, live), unless the view is busy:
         // Compare on, or a rectangle being dragged. Then it waits, and shows when that ends (if still on the Head).
         showNewResults: App.settings ? App.settings.canvasShowNewResults : true
         viewLocked: root.compareOn || root.dragging
+    }
+    // Delayed: following a node moves the view to its canvas, which changes the nodes that read the canvas shown.
+    Binding {
+        target: canvasData
+        property: "followNode"
+        value: root.followTarget
+        delayed: true
     }
     readonly property bool dragging: (regionFrame.item as CropFrame)?.dragging ?? false
     // The banner of a candidate the view moved to by itself: only while that candidate is the one shown and open.
@@ -199,6 +231,37 @@ Item {
         openMenu(earlierButton, canvasData.earlier.map(row => ({text: row.name, value: row.id, detail: root.producerText(row.producer),
                                                                 checked: row.id === canvasData.revisionB})),
                  value => canvasData.show(value))
+    }
+    // A rectangle drawn with no node followed: kept, and with several Region nodes on this canvas, which one is it for?
+    function placeFree(r) {
+        freeRect = r
+        if (regionsHere.length > 1)
+            chooseRegion()
+    }
+    function chooseRegion() {
+        const frame = regionFrame.item as CropFrame
+        const anchor = frame ?? regionLayer
+        const x = frame ? frame.fx : 0, y = frame ? frame.fy + frame.fh : 0
+        const at = anchor.mapToItem(Overlay.overlay, x, y)
+        const menu = menuComponent.createObject(root, {wantX: at.x, wantY: at.y + u, width: 56 * u, anchorHeight: 0,
+                                                       entries: [{heading: true, enabled: false, text: qsTr("Which Canvas Region is it for?")}]
+                                                                .concat(regionsHere.map(node => ({text: node.name, value: node.id})))}) as WidgetMenu
+        menu.objectName = "canvasViewRegionChooser"
+        menu.picked.connect(id => root.assignFree(id))
+        menu.open()
+    }
+    // The drawn rectangle becomes the node's (one undo step) and the node is the target from now on.
+    function assignFree(node) {
+        const r = freeRect
+        chosenRegion = node
+        canvasData.followNode = node // at once, not when the delayed binding catches up
+        if (root.regionEditable)
+            canvasData.setRegion(r)
+    }
+    function addRegionNode() {
+        const node = canvasData.edits ? canvasData.edits.addRegionNode(canvasData.canvasId, freeRect) : ""
+        if (node !== "")
+            chosenRegion = node
     }
     function readsText(region) {
         return region.reads === "head" || region.reads === "" ? qsTr("Head") : region.readsId !== "" ? region.readsId.slice(7, 15) : region.reads
@@ -481,6 +544,7 @@ Item {
         look: root.look
         model: canvasData
         ownShortcuts: root.ownShortcuts
+        decisionElsewhere: root.newResultShown
     }
     Item {
         id: regionLayer
@@ -488,7 +552,7 @@ Item {
         anchors.fill: pictureView
         LayoutMirroring.enabled: false
         LayoutMirroring.childrenInherit: true
-        visible: pictureView.visible && canvasData.region.valid === true && !pictureView.paired && pictureView.mode !== "difference"
+        visible: pictureView.visible && (canvasData.region.valid === true || root.freeMode) && !pictureView.paired && pictureView.mode !== "difference"
         clip: true
         readonly property real k: pictureView.imageScale
         // The padded context box, in the picture's coordinates, which move with zoom and pan; the drag's while there is one.
@@ -500,7 +564,7 @@ Item {
             id: regionFrame
             objectName: "canvasViewRegionFrame"
             anchors.fill: parent
-            active: root.regionValid && canvasData.pictureSize.width > 0
+            active: (root.regionValid || root.freeMode) && canvasData.pictureSize.width > 0
             sourceComponent: CropFrame {
                 objectName: "canvasViewFrame"
                 look: root.look
@@ -508,21 +572,22 @@ Item {
                 originX: pictureView.imageX
                 originY: pictureView.imageY
                 zoom: pictureView.imageScale
-                rect: canvasData.region
+                rect: root.regionValid ? canvasData.region : root.freeRect
                 dimAlpha: 0
                 draw: true
-                editable: root.regionEditable
+                editable: root.regionValid ? root.regionEditable : !root.compareOn
                 yieldPress: root.panKey
-                constrain: root.snap ? ((r, keepSize) => canvasData.snapRegion(r, keepSize)) : null
+                constrain: root.snap && root.regionValid ? ((r, keepSize) => canvasData.snapRegion(r, keepSize)) : null
                 onPressed: pictureView.forceActiveFocus()
                 onChanging: r => root.liveRect = r
                 onDraggingChanged: if (!dragging) root.liveRect = null
-                onCommitted: r => canvasData.setRegion(r)
+                onCommitted: r => root.regionValid ? canvasData.setRegion(r) : root.placeFree(r)
             }
         }
         // The padded box: the region picker's, dashes on a dark halo (ContextBox.qml).
         ContextBox {
             objectName: "canvasViewContext"
+            visible: root.regionValid
             anchors.fill: parent
             look: root.look
             box: regionLayer.context
@@ -660,13 +725,53 @@ Item {
             font.pixelSize: root.look.labelSize
             text: canvasData.summary.join("\n")
         }
+        // The followed Canvas Region reads another canvas, or a linked one: said plainly, with what can be done about it
+        // (never a dead end in the error color).
+        Banner {
+            objectName: "canvasViewCanvasMismatch"
+            width: parent.width
+            visible: canvasData.followNode !== "" && (canvasData.region.problem === "otherCanvas" || canvasData.region.problem === "linked")
+            look: root.look
+            Column {
+                width: parent.width
+                spacing: root.u
+                Text {
+                    objectName: "canvasViewCanvasMismatchText"
+                    width: parent.width
+                    wrapMode: Text.Wrap
+                    color: root.look.text
+                    font.pixelSize: root.look.labelSize
+                    text: canvasData.region.reason ?? ""
+                }
+                Flow {
+                    width: parent.width
+                    spacing: root.u
+                    visible: canvasData.region.problem === "otherCanvas"
+                    ViewButton {
+                        objectName: "canvasViewShowNodeCanvas"
+                        look: root.look
+                        visible: canvasData.region.known === true
+                        text: qsTr("Show %1").arg(canvasData.region.nodeCanvasName ?? "")
+                        tip: qsTr("Look at the canvas this node reads")
+                        onTapped: canvasData.showNodeCanvas()
+                    }
+                    ViewButton {
+                        objectName: "canvasViewUseCanvasForNode"
+                        look: root.look
+                        text: qsTr("Use %1 for this node").arg(canvasButton.text)
+                        tip: qsTr("Make %1 read the canvas shown (one undo step)").arg(root.followName)
+                        onTapped: canvasData.useCanvasForNode()
+                    }
+                }
+            }
+        }
         // The followed Canvas Region: what it reads, and the one action on it.
         Flow {
             id: regionRow
             objectName: "canvasViewRegionRow"
             width: parent.width
             spacing: 2 * root.u
-            visible: canvasData.followNode !== ""
+            visible: canvasData.followNode !== "" && canvasData.region.problem !== "otherCanvas" && canvasData.region.problem !== "linked"
             Text {
                 objectName: "canvasViewRegionNote"
                 readonly property var shown: root.previewReady ? root.preview : canvasData.region // the saved numbers until the picture is read
@@ -705,18 +810,47 @@ Item {
                                        .arg(root.preview.modelWidth).arg(root.preview.modelHeight)
                                        .arg(root.preview.capped ? qsTr(", at the %1 MP cap").arg(canvasData.region.cap) : "") : ""
         }
-        // How to pick: what to select first, or what a drag does, or why it does nothing.
+        // How to pick: what a drag does, or why it does nothing; with no node followed, what to do with the rectangle.
         Text {
             objectName: "canvasViewRegionHint"
             width: parent.width
             wrapMode: Text.Wrap
-            visible: pictureView.visible && (canvasData.followNode === "" || root.regionValid)
+            visible: pictureView.visible && (root.freeMode || root.regionValid)
             color: root.regionValid && !root.compareOn && !root.regionEditable ? root.look.error : root.look.label
             font.pixelSize: root.look.labelSize
-            text: canvasData.followNode === "" ? qsTr("Select a Canvas Region node to pick its region")
+            text: root.freeMode ? (root.compareOn ? qsTr("Turn Compare off to draw a region on the picture.")
+                                   : root.hasFreeRect ? (root.regionsHere.length > 1 ? qsTr("This rectangle is not a node's yet: choose its Canvas Region.")
+                                                         : qsTr("This rectangle is not saved: no Canvas Region node reads this canvas. Add one to use it."))
+                                   : root.regionsHere.length > 1 ? qsTr("Drag on the picture to draw a region, then choose its Canvas Region node.")
+                                   : qsTr("Drag on the picture to draw a region; a Canvas Region node can then use it."))
+                  : root.regionEditable && canvasData.region.adopts === true ? qsTr("Drag on the picture to pick the region: this Canvas Region has no canvas yet and takes this one.")
                   : root.regionEditable ? qsTr("Drag on the picture to pick the region; Esc cancels. Space-drag or the middle button pans.")
                   : root.compareOn ? qsTr("Turn Compare off to pick the region on the picture.")
                   : qsTr("X, Y, Width or Height is linked to another node: pick it there.")
+        }
+        // What a drawn rectangle can become: a node's, or a new node.
+        Flow {
+            objectName: "canvasViewFreeRow"
+            width: parent.width
+            spacing: root.u
+            visible: root.hasFreeRect && !root.compareOn
+            ViewButton {
+                objectName: "canvasViewAddRegion"
+                look: root.look
+                visible: root.regionsHere.length === 0
+                enabled: canvasData.edits !== null
+                text: qsTr("Add a Canvas Region node")
+                tip: qsTr("Add a Canvas Region node that reads this canvas, with this rectangle (one undo step)")
+                onTapped: root.addRegionNode()
+            }
+            ViewButton {
+                objectName: "canvasViewChooseRegion"
+                look: root.look
+                visible: root.regionsHere.length > 1
+                text: qsTr("Choose its node…")
+                tip: qsTr("Which Canvas Region node this rectangle is for")
+                onTapped: root.chooseRegion()
+            }
         }
         Text {
             objectName: "canvasViewNotice"

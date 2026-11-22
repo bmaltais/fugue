@@ -1,4 +1,5 @@
 #include "canvas/widget_edit.h"
+
 #include "workflow/image_inputs.h"
 #include "workflow/model_downloads.h"
 
@@ -16,6 +17,7 @@
 #include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QTimer>
+#include <QUndoStack>
 #include <QUrl>
 
 #include <algorithm>
@@ -91,6 +93,12 @@ WidgetEdit::WidgetEdit(const Registry *registry, CanvasModel *canvas, QObject *p
     // One file at a time: two models read at once from one disk each take twice as long.
     m_hashPool.setMaxThreadCount(1);
     connect(&m_canvases, &CanvasChoices::changed, this, &WidgetEdit::canvasesChanged);
+    const auto bump = [this] {
+        ++m_graphRevision;
+        emit graphChanged();
+    };
+    connect(canvas, &CanvasModel::documentReset, this, bump);
+    connect(canvas, &CanvasModel::undoChanged, this, bump);
     connect(canvas, &CanvasModel::documentReplaced, this, [this] {
         if (m_picks.isEmpty())
             return;
@@ -207,6 +215,39 @@ QUndoStack *WidgetEdit::undoStack() const { return m_canvas->undoStack(); }
 QString WidgetEdit::pictureSize(const QString &path) const { return m_canvases.pictureSize(path); }
 
 QString WidgetEdit::nodeName(const QString &node) const { return m_canvas ? m_canvas->nodeName(node) : QString(); }
+
+QVariantList WidgetEdit::regionNodes() const {
+    QVariantList out;
+    if (!m_canvas)
+        return out;
+    for (const QString &id : m_canvas->m_document.graph.nodes.keys()) {
+        const QVariantMap state = regionState(id);
+        if (state.value("ok").toBool()) {
+            const QString name = nodeName(id);
+            out.append(QVariantMap{{"id", id}, {"name", name.isEmpty() ? id : name}, {"canvas", state.value("canvas")}});
+        }
+    }
+    std::stable_sort(out.begin(), out.end(), [](const QVariant &a, const QVariant &b) {
+        return a.toMap().value("name").toString().localeAwareCompare(b.toMap().value("name").toString()) < 0;
+    });
+    return out;
+}
+
+QString WidgetEdit::addRegionNode(const QString &canvas, const QVariantMap &rect) {
+    if (!m_canvas || canvas.isEmpty())
+        return {};
+    const QVariantList center = m_canvas->view().value("center").toList();
+    const qreal x = center.size() == 2 ? center.at(0).toReal() : 0, y = center.size() == 2 ? center.at(1).toReal() : 0;
+    QUndoStack *stack = m_canvas->undoStack();
+    stack->beginMacro(tr("Add a Canvas Region"));
+    const QString id = m_canvas->addNode(QStringLiteral("fugue/canvas-region"), x, y);
+    if (!id.isEmpty()) {
+        setText(id, QStringLiteral("canvas"), canvas);
+        setRegion(id, rect.value("x").toInt(), rect.value("y").toInt(), rect.value("width").toInt(), rect.value("height").toInt());
+    }
+    stack->endMacro();
+    return id;
+}
 
 QVariantMap WidgetEdit::spec(const QString &node, const QString &input) const {
     const Target t = target(node, input);

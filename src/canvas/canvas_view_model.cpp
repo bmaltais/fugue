@@ -208,13 +208,15 @@ void CanvasViewModel::setFollowNode(const QString &node) {
     m_follow = node;
     if (!same)
         emit followChanged();
-    // The view goes to the node's canvas.
-    if (m_edits && !m_follow.isEmpty()) {
+    // The view goes to the node's canvas, when the node changes (the same one set again leaves a canvas the person chose).
+    if (!same && m_edits && !m_follow.isEmpty()) {
         const QVariantMap state = m_edits->regionState(m_follow);
         if (!state.isEmpty() && !state.value("canvasLinked").toBool() && !state.value("canvas").toString().isEmpty()) {
             if (!state.value("storeRoot").toString().isEmpty() && state.value("storeRoot").toString() != storeRoot())
                 setStoreRoot(state.value("storeRoot").toString());
-            setCanvasId(state.value("canvas").toString());
+            // Only to a canvas this root has: an unknown id is said in plain words over the canvas shown (#228).
+            if (store().info(state.value("canvas").toString()))
+                setCanvasId(state.value("canvas").toString());
         }
     }
     updateRegion();
@@ -259,12 +261,24 @@ void CanvasViewModel::updateRegion() {
     if (m_edits && !m_follow.isEmpty()) {
         const QVariantMap state = m_edits->regionState(m_follow);
         const QSize size = pictureSize();
-        if (state.isEmpty())
+        // The node's canvas: empty is none yet, and the canvas shown is adopted at the first edit (#228); another canvas
+        // is said in plain words with what to do (the view offers both answers); a link is changed where it comes from.
+        const QString nodeCanvas = state.value("canvas").toString();
+        if (state.isEmpty()) {
             out.insert("reason", tr("The selected node is not a Canvas Region."));
-        else if (state.value("canvasLinked").toBool())
-            out.insert("reason", tr("This region's canvas comes from another node."));
-        else if (state.value("canvas").toString() != canvasId())
-            out.insert("reason", tr("This region reads another canvas."));
+            out.insert("problem", QStringLiteral("notRegion"));
+        } else if (state.value("canvasLinked").toBool()) {
+            out.insert("reason", tr("This Canvas Region's canvas comes from a linked node: change it there."));
+            out.insert("problem", QStringLiteral("linked"));
+        } else if (!nodeCanvas.isEmpty() && nodeCanvas != canvasId()) {
+            const Result<canvas::CanvasInfo> info = store().info(nodeCanvas);
+            out.insert("problem", QStringLiteral("otherCanvas"));
+            out.insert("nodeCanvas", nodeCanvas);
+            out.insert("known", bool(info));
+            out.insert("nodeCanvasName", info ? info->name : QString());
+            out.insert("reason", info ? tr("This Canvas Region reads %1, not the canvas shown.").arg(info->name)
+                                      : tr("This Canvas Region reads a canvas this root does not have (%1).").arg(nodeCanvas));
+        }
         else if (!size.isValid())
             out.insert("reason", tr("There is no picture to draw the region on."));
         else {
@@ -280,6 +294,7 @@ void CanvasViewModel::updateRegion() {
             const bool readsShown = shownIsHead ? reads == QLatin1String("head") : (!readsId.isEmpty() && readsId == revisionB());
             out = QVariantMap{{"valid", true},
                               {"reason", QString()},
+                              {"adopts", nodeCanvas.isEmpty()},
                               {"x", rect.x},
                               {"y", rect.y},
                               {"width", rect.width},
@@ -338,10 +353,36 @@ bool CanvasViewModel::setRegion(const QVariantMap &rect, bool snap) {
     if (!m_edits || m_follow.isEmpty() || !m_region.value("valid").toBool() || !m_region.value("editable").toBool())
         return false;
     const crop::Rect r = rectOf(snap ? snapRegion(rect) : rect);
-    const bool written = m_edits->setRegion(m_follow, r.x, r.y, r.width, r.height);
+    // A node with no canvas yet takes the one shown, in the same undo step as the rectangle.
+    const bool adopts = m_region.value("adopts").toBool();
+    QUndoStack *stack = m_edits->undoStack();
+    if (adopts) {
+        stack->beginMacro(tr("Pick region"));
+        m_edits->setText(m_follow, QStringLiteral("canvas"), canvasId());
+    }
+    const bool written = m_edits->setRegion(m_follow, r.x, r.y, r.width, r.height) || adopts;
+    if (adopts)
+        stack->endMacro();
     if (written)
         updateRegion();
     return written;
+}
+
+bool CanvasViewModel::useCanvasForNode() {
+    if (!m_edits || m_follow.isEmpty() || canvasId().isEmpty() || m_region.value("problem").toString() != QLatin1String("otherCanvas"))
+        return false;
+    const QString problem = m_edits->setText(m_follow, QStringLiteral("canvas"), canvasId());
+    if (!problem.isEmpty()) {
+        fail({makeError(QStringLiteral("region_canvas"), problem)});
+        return false;
+    }
+    updateRegion();
+    return true;
+}
+
+void CanvasViewModel::showNodeCanvas() {
+    if (m_region.value("problem").toString() == QLatin1String("otherCanvas") && m_region.value("known").toBool())
+        setCanvasId(m_region.value("nodeCanvas").toString());
 }
 
 bool CanvasViewModel::useForRegion() {
@@ -349,7 +390,15 @@ bool CanvasViewModel::useForRegion() {
         || m_region.value("readsShown").toBool())
         return false;
     const QString wanted = revisionB() == m_head ? QStringLiteral("head") : revisionB();
+    const bool adopts = m_region.value("adopts").toBool(); // the canvas too, in the same undo step
+    QUndoStack *stack = m_edits->undoStack();
+    if (adopts) {
+        stack->beginMacro(tr("Use for region"));
+        m_edits->setText(m_follow, QStringLiteral("canvas"), canvasId());
+    }
     const QString problem = m_edits->setText(m_follow, QStringLiteral("revision"), wanted);
+    if (adopts)
+        stack->endMacro();
     if (!problem.isEmpty()) {
         fail({makeError(QStringLiteral("region_revision"), problem)});
         return false;

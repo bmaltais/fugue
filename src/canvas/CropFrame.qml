@@ -23,7 +23,8 @@ import Fugue
 // when set, is a function (rect, keepSize) -> rect applied to every step of a drag (the region's snap to a
 // multiple): the frame, `changing` and `committed` all carry the constrained rectangle. `cancel()` ends a drag
 // without `committed` (Escape): the frame goes back to what it was. `dimAlpha` is the strength of the dimmed
-// outside (0: the picture shows whole).
+// outside (0: the picture shows whole). A `rect` of no size is no frame yet: nothing is drawn, and with `draw` a drag
+// makes the first one (the Canvas view's selection before any node holds it, #228).
 Item {
     id: frame
     required property CanvasLook look
@@ -47,6 +48,7 @@ Item {
     readonly property bool dragging: pointer.dragging
     // The frame drawn: the drag's, while there is one.
     readonly property var shown: pointer.dragging ? pointer.draft : rect
+    readonly property bool hasFrame: shown.width > 0 && shown.height > 0
     readonly property real grab: 12 // screen px: a 24px press target on every handle (the floor)
     readonly property real handleSize: 8
     clip: true
@@ -62,14 +64,15 @@ Item {
     function cancel() { return pointer.cancel() }
 
     // The dimmed area: the four strips of the picture around the frame.
-    Rectangle { objectName: "cropDimTop"; x: frame.originX; y: frame.originY; width: frame.iw; height: Math.max(0, frame.fy - frame.originY); color: frame.dim }
-    Rectangle { objectName: "cropDimBottom"; x: frame.originX; y: frame.fy + frame.fh; width: frame.iw; height: Math.max(0, frame.originY + frame.ih - frame.fy - frame.fh); color: frame.dim }
-    Rectangle { objectName: "cropDimLeft"; x: frame.originX; y: frame.fy; width: Math.max(0, frame.fx - frame.originX); height: frame.fh; color: frame.dim }
-    Rectangle { objectName: "cropDimRight"; x: frame.fx + frame.fw; y: frame.fy; width: Math.max(0, frame.originX + frame.iw - frame.fx - frame.fw); height: frame.fh; color: frame.dim }
+    Rectangle { objectName: "cropDimTop"; visible: frame.hasFrame; x: frame.originX; y: frame.originY; width: frame.iw; height: Math.max(0, frame.fy - frame.originY); color: frame.dim }
+    Rectangle { objectName: "cropDimBottom"; visible: frame.hasFrame; x: frame.originX; y: frame.fy + frame.fh; width: frame.iw; height: Math.max(0, frame.originY + frame.ih - frame.fy - frame.fh); color: frame.dim }
+    Rectangle { objectName: "cropDimLeft"; visible: frame.hasFrame; x: frame.originX; y: frame.fy; width: Math.max(0, frame.fx - frame.originX); height: frame.fh; color: frame.dim }
+    Rectangle { objectName: "cropDimRight"; visible: frame.hasFrame; x: frame.fx + frame.fw; y: frame.fy; width: Math.max(0, frame.originX + frame.iw - frame.fx - frame.fw); height: frame.fh; color: frame.dim }
 
     // The frame: a white line on a dark one, so it reads on any picture.
     Rectangle {
         objectName: "cropFrame"
+        visible: frame.hasFrame
         x: frame.fx - 1
         y: frame.fy - 1
         width: frame.fw + 2
@@ -97,7 +100,7 @@ Item {
     }
     // The handles: corners always, edge midpoints when the side is long enough to hold two.
     Repeater {
-        model: frame.editable ? [{h: "top-left", u: 0, v: 0}, {h: "top-right", u: 1, v: 0}, {h: "bottom-left", u: 0, v: 1},
+        model: frame.editable && frame.hasFrame ? [{h: "top-left", u: 0, v: 0}, {h: "top-right", u: 1, v: 0}, {h: "bottom-left", u: 0, v: 1},
                                  {h: "bottom-right", u: 1, v: 1}, {h: "top", u: 0.5, v: 0}, {h: "bottom", u: 0.5, v: 1},
                                  {h: "left", u: 0, v: 0.5}, {h: "right", u: 1, v: 0.5}] : []
         delegate: Rectangle {
@@ -164,6 +167,8 @@ Item {
             }
         }
         function under(x, y) {
+            if (!(frame.rect.width > 0 && frame.rect.height > 0))
+                return "none" // no frame yet: every press is outside it
             return CropGeometry.handleAt(frame.rect, (x - frame.originX) / frame.zoom, (y - frame.originY) / frame.zoom,
                                          frame.grab / frame.zoom)
         }

@@ -11,6 +11,7 @@
 #include <QQuickStyle>
 #include <QRegularExpression>
 #include <QTemporaryDir>
+#include <QUndoStack>
 #include <QtTest>
 
 #include <thread>
@@ -224,14 +225,40 @@ private slots:
         QObject *backend = area->property("view").value<QObject *>()->property("backend").value<QObject *>();
         QTRY_COMPARE(backend->property("canvasId").toString(), m_canvas); // the newest
         QTRY_COMPARE(app.workspace.areaState(2).value("canvasId").toString(), m_canvas);
-        QCOMPARE(backend->property("followNode").toString(), QString());
+        // The only Region node of this canvas is followed with nothing selected (#228), and stays followed.
+        QTRY_COMPARE(backend->property("followNode").toString(), QString("region"));
         app.model.select({"region"});
         QTRY_COMPARE(backend->property("followNode").toString(), QString("region"));
         QTRY_VERIFY(find(app.window, "canvasViewRegion"));
         // The region was followed before the picture was read: the preview is computed again once it arrives.
         QTRY_VERIFY(find(app.window, "canvasViewRegionInfo")->property("text").toString().contains("Context"));
         app.model.select({});
-        QTRY_COMPARE(backend->property("followNode").toString(), QString());
+        QTest::qWait(50);
+        QCOMPARE(backend->property("followNode").toString(), QString("region"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // The owner's report (#228): with no Region node a drag on a Canvas area's picture draws (the press reaches the frame
+    // in the area host), and Add a Canvas Region node keeps it.
+    void aCanvasAreaDrawsAFreeRectangleWithNoRegionNode() {
+        App app(load(blank));
+        QVERIFY(app.open());
+        QVERIFY(app.commands.trigger("area.split-row"));
+        QQuickItem *area = nullptr;
+        QTRY_VERIFY((area = find(app.window, "canvasArea")) != nullptr);
+        QObject *view = area->property("view").value<QObject *>();
+        auto *viewer = view->property("viewer").value<QQuickItem *>();
+        QTRY_VERIFY(viewer && viewer->isVisible() && viewer->width() > 50);
+        QTRY_VERIFY(find(app.window, "canvasViewFrame"));
+        settle();
+        const QPoint from = viewer->mapToScene(QPointF(viewer->width() * 0.3, viewer->height() * 0.4)).toPoint();
+        app.drag(Qt::LeftButton, from, from + QPoint(60, 40));
+        QTRY_VERIFY(view->property("hasFreeRect").toBool());
+        QTRY_VERIFY(find(app.window, "canvasViewAddRegion"));
+        // The button's own call: at the foot of a short area the run toolbar floats over it (noted in the audit).
+        QVERIFY(QMetaObject::invokeMethod(view, "addRegionNode"));
+        QTRY_COMPARE(app.model.undoStack()->count(), 1);
+        QTRY_VERIFY(!view->property("followNode").toString().isEmpty());
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 

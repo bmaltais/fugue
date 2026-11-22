@@ -32,8 +32,11 @@
 //    and redo() move the head along its parents (CanvasStore::undo, redo). `solo` shows one layer alone: a view-only
 //    state, never a revision, dropped when the shown revision changes.
 // It makes no window. The `region` map is {valid, reason, x, y, width, height, context: {x, y, width, height}, reads,
-// readsId, readsShown, writable, editable, padding, scale, cap, multiple}: `editable` is false while X, Y, Width or Height
-// is linked to another node (the rectangle is then drawn but not edited).
+// readsId, readsShown, writable, editable, adopts, padding, scale, cap, multiple}: `editable` is false while X, Y, Width or
+// Height is linked to another node (the rectangle is then drawn but not edited); `adopts` is true for a node with no
+// canvas yet, drawn on the canvas shown, which setRegion and useForRegion write to its `canvas` input in the same undo
+// step (#228). Not valid, `reason` says why in plain words and `problem` names it: "notRegion", "linked" (the canvas
+// input is linked), "otherCanvas" (with `nodeCanvas`, `known`, `nodeCanvasName`: useCanvasForNode, showNodeCanvas).
 
 #include <QFileSystemWatcher>
 #include <QTimer>
@@ -153,6 +156,10 @@ public:
     Q_INVOKABLE QVariantMap snapRegion(const QVariantMap &rect, bool keepSize = false) const;
     Q_INVOKABLE QVariantMap previewRegion(const QVariantMap &rect) const;
     Q_INVOKABLE bool setRegion(const QVariantMap &rect, bool snap = false);
+    // When the followed node reads another canvas (`region.problem` "otherCanvas"): its `canvas` input becomes the one
+    // shown (one undo step), or the view goes to the node's canvas (when this root has it).
+    Q_INVOKABLE bool useCanvasForNode();
+    Q_INVOKABLE void showNodeCanvas();
     // Reads the store again now (the watch does this on its own; a test and a person's refresh ask).
     Q_INVOKABLE void refresh();
 

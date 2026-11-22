@@ -326,14 +326,14 @@ private slots:
         QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(picture)); // focus the view
         QTest::keyClick(app.window, Qt::Key_1);
         QTRY_VERIFY(viewer->property("actual").toBool());
-        // Panned by a drag at 100%.
+        // Panned by a middle-button drag at 100% (a left drag draws a selection, #228).
         const qreal before = viewer->property("centerX").toReal();
         const QPoint from = centerOf(picture);
         QTest::mouseMove(app.window, from);
-        QTest::mousePress(app.window, Qt::LeftButton, {}, from);
+        QTest::mousePress(app.window, Qt::MiddleButton, {}, from);
         QTest::mouseMove(app.window, from + QPoint(40, 0));
         QTest::mouseMove(app.window, from + QPoint(80, 0));
-        QTest::mouseRelease(app.window, Qt::LeftButton, {}, from + QPoint(80, 0));
+        QTest::mouseRelease(app.window, Qt::MiddleButton, {}, from + QPoint(80, 0));
         QVERIFY(viewer->property("centerX").toReal() < before);
         QTest::keyClick(app.window, Qt::Key_0);
         QTRY_VERIFY(!viewer->property("actual").toBool());
@@ -580,24 +580,162 @@ private slots:
         QVERIFY(find(app.window, "canvasViewSnap")->isVisible() && !find(app.window, "canvasViewSnap")->isEnabled());
     }
 
-    void withoutAFollowTargetTheViewSaysWhatToSelect() {
+    // ---- a selection without a hunt (#228, the owner's report: a drag on the picture did nothing without a selected
+    // Canvas Region node) ----
+
+    // The only Region node of this canvas is followed with nothing selected, and still while another node is selected.
+    void theOnlyRegionNodeIsFollowedWithoutASelection() {
         App app(load(fixture(m_canvas)));
         QVERIFY(app.open());
         openDialog(app);
-        QTRY_VERIFY(find(app.window, "canvasViewRegionHint"));
-        QCOMPARE(find(app.window, "canvasViewRegionHint")->property("text").toString(), QString("Select a Canvas Region node to pick its region"));
-        QVERIFY(!find(app.window, "canvasViewFrame"));
-        QVERIFY(!find(app.window, "canvasViewSnap"));
+        QTRY_COMPARE(model(app)->property("followNode").toString(), QString("region"));
+        QTRY_VERIFY(find(app.window, "canvasViewFrame"));
+        QTest::keyClick(app.window, Qt::Key_0);
+        QTest::qWait(50);
+        drag(app, pixelAt(app, 300, 320), pixelAt(app, 420, 400));
+        QCOMPARE(app.model.undoStack()->count(), 1);
+        QVERIFY(near(regionOf(app).value("width").toInt(), 120));
+        app.model.select({"text"});
+        QTest::qWait(50);
+        QCOMPARE(model(app)->property("followNode").toString(), QString("region"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
-    void aSelectionThatIsNoRegionFollowsNothing() {
-        App app(load(fixture(m_canvas)));
+    // Several Region nodes on this canvas and none selected: a drag draws, then asks which node (by title) it is for; the
+    // choice is written as one undo step and remembered.
+    void withSeveralRegionNodesADrawnRectangleAsksWhichNode() {
+        App app(load(QStringLiteral(R"({"fugue": 1, "graph": {"nodes": {
+            "r1": {"type": "fugue/canvas-region", "version": "1.0.0", "inputs": {"canvas": "%1", "x": 0, "y": 0, "width": 64, "height": 64}},
+            "r2": {"type": "fugue/canvas-region", "version": "1.0.0", "inputs": {"canvas": "%1", "x": 0, "y": 0, "width": 64, "height": 64}}}},
+          "layout": {"nodes": {"r1": {"pos": [20, 20]}, "r2": {"pos": [20, 400]}}}})").arg(m_canvas).toUtf8()));
         QVERIFY(app.open());
-        app.model.select({"text"});
         openDialog(app);
+        QTRY_VERIFY(find(app.window, "canvasViewFrame")); // the free selection's
         QCOMPARE(model(app)->property("followNode").toString(), QString());
-        QVERIFY(!find(app.window, "canvasViewRegionRow"));
-        QVERIFY(!find(app.window, "canvasViewRegion"));
+        QVERIFY(find(app.window, "canvasViewRegionHint")->property("text").toString().contains("choose its Canvas Region"));
+        QTest::keyClick(app.window, Qt::Key_0);
+        QTest::qWait(50);
+        drag(app, pixelAt(app, 300, 320), pixelAt(app, 420, 400));
+        QCOMPARE(app.model.undoStack()->count(), 0); // nothing written yet
+        QObject *menu = nullptr;
+        QTRY_VERIFY((menu = app.window->findChild<QObject *>("canvasViewRegionChooser")) && menu->property("opened").toBool());
+        QStringList texts;
+        for (const QVariant &entry : menu->property("entries").toList())
+            texts << entry.toMap().value("text").toString();
+        QCOMPARE(texts, (QStringList{"Which Canvas Region is it for?", "Canvas Region (r1)", "Canvas Region (r2)"})); // titles
+        QVERIFY(QMetaObject::invokeMethod(menu, "choose", Q_ARG(QVariant, 2)));
+        QTRY_COMPARE(model(app)->property("followNode").toString(), QString("r2"));
+        QTRY_COMPARE(app.model.undoStack()->count(), 1);
+        const QVariantMap r2 = app.model.widgets()->regionState("r2");
+        QVERIFY(near(r2.value("x").toInt(), 300) && near(r2.value("width").toInt(), 120));
+        QCOMPARE(app.model.widgets()->regionState("r1").value("width").toInt(), 64);
+        // Remembered: the next drag edits r2 at once.
+        drag(app, pixelAt(app, 100, 100), pixelAt(app, 160, 140));
+        QCOMPARE(app.model.undoStack()->count(), 2);
+        QVERIFY(near(app.model.widgets()->regionState("r2").value("width").toInt(), 60, 6));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // No Region node: a drag draws the rectangle (view-only) and offers to add the node, as one undo step.
+    void withNoRegionNodeADrawnRectangleOffersToAddOne() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        QTRY_VERIFY(find(app.window, "canvasViewFrame"));
+        QVERIFY(find(app.window, "canvasViewRegionHint")->property("text").toString().startsWith("Drag on the picture to draw a region"));
+        QVERIFY(!find(app.window, "canvasViewAddRegion"));
+        QTest::keyClick(app.window, Qt::Key_0);
+        QTest::qWait(50);
+        drag(app, pixelAt(app, 300, 320), pixelAt(app, 420, 400));
+        QTRY_VERIFY(find(app.window, "canvasViewAddRegion"));
+        QVERIFY(find(app.window, "canvasViewRegionHint")->property("text").toString().contains("not saved"));
+        QCOMPARE(app.model.undoStack()->count(), 0);
+        click(app, "canvasViewAddRegion");
+        QTRY_COMPARE(app.model.undoStack()->count(), 1); // the node, its canvas and its rectangle: one step
+        QString added;
+        for (auto it = app.model.document().graph.nodes.cbegin(); it != app.model.document().graph.nodes.cend(); ++it)
+            if (it.value().type == QLatin1String("fugue/canvas-region"))
+                added = it.key();
+        QVERIFY(!added.isEmpty());
+        const QVariantMap state = app.model.widgets()->regionState(added);
+        QCOMPARE(state.value("canvas").toString(), m_canvas);
+        QVERIFY(near(state.value("x").toInt(), 300) && near(state.value("width").toInt(), 120) && near(state.value("height").toInt(), 80));
+        QTRY_COMPARE(model(app)->property("followNode").toString(), added);
+        app.model.undoStack()->undo();
+        QVERIFY(!app.model.document().graph.nodes.contains(added));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // ---- the node's canvas and the canvas shown (#228, the owner's second report: "This region reads another canvas" in
+    // red for a Region node with no canvas yet, and no way out) ----
+
+    QByteArray regionReading(const QString &canvas) const {
+        return QStringLiteral(R"({"fugue": 1, "graph": {"nodes": {"region": {"type": "fugue/canvas-region", "version": "1.0.0",
+            "inputs": {"canvas": "%1", "x": 10, "y": 10, "width": 64, "height": 64}}}},
+          "layout": {"nodes": {"region": {"pos": [20, 20]}}}})").arg(canvas).toUtf8();
+    }
+
+    // A Region node with no canvas takes the one shown at the first drawn rectangle, in the same undo step.
+    void aRegionNodeWithNoCanvasTakesTheShownOneAtTheFirstDraw() {
+        App app(load(regionReading("")));
+        QVERIFY(app.open());
+        app.model.select({"region"});
+        openDialog(app);
+        QTRY_COMPARE(model(app)->property("followNode").toString(), QString("region"));
+        QTRY_VERIFY(model(app)->property("region").toMap().value("valid").toBool());
+        QVERIFY(!find(app.window, "canvasViewCanvasMismatch"));
+        QVERIFY(find(app.window, "canvasViewRegionHint")->property("text").toString().contains("takes this one"));
+        QTest::keyClick(app.window, Qt::Key_0);
+        QTest::qWait(50);
+        drag(app, pixelAt(app, 300, 320), pixelAt(app, 420, 400));
+        QCOMPARE(app.model.undoStack()->count(), 1);
+        QCOMPARE(regionOf(app).value("canvas").toString(), m_canvas);
+        QVERIFY(near(regionOf(app).value("width").toInt(), 120));
+        app.model.undoStack()->undo(); // one step: the canvas and the rectangle
+        QCOMPARE(regionOf(app).value("canvas").toString(), QString());
+        QCOMPARE(regionOf(app).value("width").toInt(), 64);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // Another canvas picked in the view while the node reads its own: plain words and both answers, never a red dead end.
+    void aNodeOnAnotherCanvasOffersBothAnswers() {
+        PaintDocument other(128, 96);
+        other.addLayer(LayerKind::Paint, "Base");
+        const QString otherId = canvas::CanvasStore::forSession().create("Poster", other, "new")->id;
+        App app(load(regionReading(m_canvas)));
+        QVERIFY(app.open());
+        app.model.select({"region"});
+        openDialog(app);
+        QTRY_COMPARE(view(app)->property("canvasId").toString(), m_canvas); // the node's canvas, selected
+        view(app)->setProperty("canvasId", otherId); // the person picks another one
+        QTRY_VERIFY(find(app.window, "canvasViewCanvasMismatch"));
+        QCOMPARE(find(app.window, "canvasViewCanvasMismatchText")->property("text").toString(), QString("This Canvas Region reads Sketch, not the canvas shown."));
+        QVERIFY(!find(app.window, "canvasViewRegionRow")); // no red line
+        QCOMPARE(find(app.window, "canvasViewUseCanvasForNode")->property("text").toString(), QString("Use Poster for this node"));
+        click(app, "canvasViewShowNodeCanvas");
+        QTRY_COMPARE(view(app)->property("canvasId").toString(), m_canvas);
+        QTRY_VERIFY(!find(app.window, "canvasViewCanvasMismatch"));
+        view(app)->setProperty("canvasId", otherId);
+        click(app, "canvasViewUseCanvasForNode");
+        QTRY_COMPARE(regionOf(app).value("canvas").toString(), otherId);
+        QCOMPARE(app.model.undoStack()->count(), 1);
+        QTRY_VERIFY(!find(app.window, "canvasViewCanvasMismatch"));
+        QTRY_VERIFY(model(app)->property("region").toMap().value("valid").toBool());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // An id this root has none of: said so, and the shown canvas can be used instead (there is nothing to show).
+    void aNodeOnAnUnknownCanvasSaysSoAndCanUseTheShownOne() {
+        App app(load(regionReading("canvas-0123456789ab")));
+        QVERIFY(app.open());
+        app.model.select({"region"});
+        openDialog(app);
+        QTRY_VERIFY(find(app.window, "canvasViewCanvasMismatch"));
+        QVERIFY(find(app.window, "canvasViewCanvasMismatchText")->property("text").toString().contains("this root does not have"));
+        QVERIFY(!find(app.window, "canvasViewShowNodeCanvas"));
+        click(app, "canvasViewUseCanvasForNode");
+        QTRY_COMPARE(regionOf(app).value("canvas").toString(), view(app)->property("canvasId").toString());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
     // ---- the cohesion batch (#228, .ui-ergonomics/2026-11-22-canvas-areas-cohesion.md) ----

@@ -4,16 +4,15 @@ import Fugue
 import "../canvas"
 
 // The Canvas view in an area (#217 slice 1, spec 12.16): CanvasView.qml with the context the File > Canvas… dialog
-// gives it (CanvasViewDialog.qml): the session's store, and as the follow target the one Canvas Region node selected
-// in the Graph, which also moves the view to that node's canvas. The canvas it shows is the area's state
-// ({"canvasId"}), kept with the layout, so a window opens on the canvas each area last showed.
+// gives it (CanvasViewDialog.qml): the session's store, the document and the Graph's selection (the view follows the
+// selected Canvas Region node, which also moves it to that node's canvas, or finds one itself). The canvas it shows is
+// the area's state ({"canvasId"}), kept with the layout, so a window opens on the canvas each area last showed.
 AreaView {
     id: root
     objectName: "canvasArea"
     readonly property alias view: content
     property var edits: App.canvasModel.widgets
     property var selection: App.canvasModel.selection
-    readonly property string selectedRegion: edits && selection.length === 1 && edits.regionState(selection[0]).ok === true ? selection[0] : ""
 
     // The area's own ground, the File > Canvas… dialog's surface color (nothing else draws behind an area), and the
     // dialog's 2u inset, so the view reads the same in both hosts.
@@ -28,7 +27,7 @@ AreaView {
         look: App.theme.look
         canvasId: root.areaState?.canvasId ?? ""
         edits: root.edits
-        followNode: root.selectedRegion
+        selection: root.selection
         focus: true
     }
     Component.onCompleted: {
