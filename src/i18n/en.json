@@ -55,6 +55,10 @@
   "%1: \"%2\" must be a list; ignored": "%1: \"%2\" must be a list; ignored",
   "%1: %2; skipped": "%1: %2; skipped",
   "%1: unknown entry \"%2\" ignored": "%1: unknown entry \"%2\" ignored",
+  "%n tabs of the last session were not reopened, their files are gone or unreadable: %1": {
+    "one": "%n tab of the last session was not reopened, its file is gone or unreadable: %1",
+    "other": "%n tabs of the last session were not reopened, their files are gone or unreadable: %1"
+  },
   "%n tiles in %1": {
     "one": "%n tile in %1",
     "other": "%n tiles in %1"
@@ -805,6 +809,8 @@
   "Play": "Play",
   "Position": "Position",
   "Magnify small nodes on hover": "Magnify small nodes on hover",
+  "Reopen tabs at start": "Reopen tabs at start",
+  "Start with the saved workflows that were open when this session ended, on the tab you were on. Each project and the Default session remember their own. A new workflow that was never saved does not come back (its unsaved changes are offered as a recovery copy after a crash). Starting Fugue with a file opens only that file.": "Start with the saved workflows that were open when this session ended, on the tab you were on. Each project and the Default session remember their own. A new workflow that was never saved does not come back (its unsaved changes are offered as a recovery copy after a crash). Starting Fugue with a file opens only that file.",
   "Zoomed far out, a short hover over a node shows it at full size over itself, so a wire can start there. Off by default.": "Zoomed far out, a short hover over a node shows it at full size over itself, so a wire can start there. Off by default.",
   "On": "On",
   "Off": "Off",
@@ -905,7 +911,7 @@
   "A project keeps its own settings, packs, models, outputs and keys apart from the others. Switching opens a new Fugue window in the project you pick.": "A project keeps its own settings, packs, models, outputs and keys apart from the others. Switching opens a new Fugue window in the project you pick.",
   "Back": "Back",
   "Cannot be used: %1": "Cannot be used: %1",
-  "Canvas navigation, language, corner radius, hover magnifier, new seeds, embedded workflow and your keys.": "Canvas navigation, language, corner radius, hover magnifier, new seeds, embedded workflow and your keys.",
+  "Canvas navigation, language, corner radius, hover magnifier, new seeds, embedded workflow, reopening tabs and your keys.": "Canvas navigation, language, corner radius, hover magnifier, new seeds, embedded workflow, reopening tabs and your keys.",
   "Choose the folder of the project.": "Choose the folder of the project.",
   "Create": "Create",
   "Create and open": "Create and open",

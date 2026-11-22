@@ -189,6 +189,18 @@ private slots:
         QCOMPARE(canvas.document().graph.nodes.value(id).inputs.value("embed").literal(), QJsonValue("no-prompts"));
     }
 
+    // Reopen tabs at start (#212): on by default; off is written (the default is on), on again takes the key out.
+    void restoreTabsIsOnByDefaultAndPersists() {
+        SettingsModel model;
+        QVERIFY(model.restoreTabs());
+        QCOMPARE(model.set("restore_tabs", false), QString());
+        QVERIFY(!model.restoreTabs());
+        QVERIFY(!SettingsModel().restoreTabs());
+        QVERIFY(!model.set("restore_tabs", "no").isEmpty());
+        QCOMPARE(model.set("restore_tabs", true), QString());
+        QVERIFY(!readJsonObject(settingsFile()).value().contains("restore_tabs"));
+    }
+
     // The hover magnifier (#123): off by default, on when set, and back to off takes the key out.
     void theHoverMagnifierIsOffByDefaultAndPersists() {
         SettingsModel model;

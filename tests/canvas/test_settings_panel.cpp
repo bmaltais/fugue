@@ -246,6 +246,21 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // General > Reopen tabs at start (#212): on by default; the switch turns it off and on and the file keeps it.
+    void theRestoreTabsSwitchPersists() {
+        App app(load(emptyDoc));
+        QVERIFY(app.open());
+        app.commands.trigger("app.settings");
+        QTRY_VERIFY(panelOpen(app.window));
+        QQuickItem *toggle = NEED("restoreTabs");
+        QVERIFY(toggle->property("on").toBool());
+        click(app, toggle);
+        QTRY_VERIFY(!fugue::SettingsModel(app.settings.path()).restoreTabs());
+        click(app, toggle);
+        QTRY_VERIFY(fugue::SettingsModel(app.settings.path()).restoreTabs());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     // General > Corner radius (#63): fixed at 8 px by default, a step at a time from 0 to 16, or
     // Omarchy's rounding (none here: square); the canvas redraws at once and the file keeps it.
     void theCornerRadiusChangesLiveAndPersists() {

@@ -240,6 +240,20 @@ Popup {
                     }
                     SettingsParts.Setting {
                         visible: panel.page === 0
+                        title: qsTr("Reopen tabs at start")
+                        key: "restore_tabs"
+                        origin: panel.model.origins["restore_tabs"] ?? ""
+                        onUseDefaultRequested: panel.apply(panel.model.useDefault("restore_tabs"))
+                        note: qsTr("Start with the saved workflows that were open when this session ended, on the tab you were on. Each project and the Default session remember their own. A new workflow that was never saved does not come back (its unsaved changes are offered as a recovery copy after a crash). Starting Fugue with a file opens only that file.")
+                        SettingsParts.Toggle {
+                            objectName: "restoreTabs"
+                            text: on ? qsTr("On") : qsTr("Off")
+                            on: panel.model.restoreTabs
+                            onToggled: value => panel.apply(panel.model.set("restore_tabs", value))
+                        }
+                    }
+                    SettingsParts.Setting {
+                        visible: panel.page === 0
                         title: qsTr("Language")
                         key: "language"
                         origin: panel.model.origins["language"] ?? ""

@@ -462,3 +462,11 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - New: the cell shows the frame (taken 0.5 s in) or waveform once it is made; the glyph and name stay while a file cannot be read (broken file, no ffmpeg) and the cell shows only its well while the picture is loading, so no glyph flashes under a thumbnail.
 - Why: recognition over recall (a frame tells clips apart where a file name cannot); the mark keeps a video from being taken for a still.
 - Rule: Floor (unchanged: the mark is not a target, the cell is). Primary, Destructive, Gaps, Posture: unchanged.
+
+### 2026-11-22 reopen tabs at start (#212)
+
+- Control: Settings > General, `src/settings/SettingsPanel.qml` "Reopen tabs at start" (`restoreTabs`), a `SettingsParts.Toggle`, after Magnify small nodes on hover, before Language. Writes `restore_tabs` in settings.json. The window itself gains no control: the tabs come back on their own.
+- Old: every start opened one blank workflow.
+- New: the saved workflows open again in their order with the same one shown; the switch turns it off and applies at once. A banner line names tabs whose files are gone.
+- Why: work resumes where it stopped (recognition over recall, no steps to repeat); a choice made once, so it is a setting and not a prompt at each start.
+- Rule: Floor (the toggle is the existing 28px one). Primary (the toggle only). Destructive (none; nothing is deleted, a gone file is skipped). Gaps (unchanged). Posture: pointer, once.

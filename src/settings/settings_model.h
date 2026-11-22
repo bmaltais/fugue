@@ -59,6 +59,8 @@ class SettingsModel : public QObject {
     Q_PROPERTY(int maxCornerRadius READ maxCornerRadius CONSTANT)
     // The hover magnifier (#74, #123): off unless turned on; the canvas binds it.
     Q_PROPERTY(bool hoverMagnifier READ hoverMagnifier NOTIFY changed)
+    // Reopen the last session's saved tabs at start (#212): on unless turned off; the window follows it live.
+    Q_PROPERTY(bool restoreTabs READ restoreTabs NOTIFY changed)
     // The cache limits (#141): GB of results and of previews (0: no limit), runs kept past a week.
     Q_PROPERTY(double cacheResultsGb READ cacheResultsGb NOTIFY changed)
     Q_PROPERTY(double cacheThumbnailsGb READ cacheThumbnailsGb NOTIFY changed)
@@ -119,6 +121,7 @@ public:
     QString embedWorkflow() const { return m_effective.settings.embedWorkflow; }
     int cornerRadius() const { return m_effective.settings.cornerRadius; }
     bool hoverMagnifier() const { return m_effective.settings.hoverMagnifier; }
+    bool restoreTabs() const { return m_effective.settings.restoreTabs; }
     QVariantMap origins() const;
     QStringList inheritedModelPaths() const;
     QStringList inheritedPackPaths() const;

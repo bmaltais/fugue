@@ -1,4 +1,6 @@
 #include "workflow/workflows.h"
+
+#include "workflow/tab_session.h"
 #include "canvas/widget_edit.h"
 
 #include "cli/process.h"
@@ -143,7 +145,7 @@ Workflows::Workflows(CanvasModel *canvas, const Registry *registry, CommandRegis
     : QObject(parent), m_canvas(canvas), m_registry(registry), m_commands(commands),
       m_templateRoots(locations.templateRoots), m_recovery(locations.recoveryDir), m_trust(locations.trustPath),
       m_registerProviders(locations.registerProviders ? locations.registerProviders : cli::registerProviders),
-      m_tabColorsPath(locations.tabColorsPath) {
+      m_tabColorsPath(locations.tabColorsPath), m_sessionPath(locations.sessionPath) {
     if (QFile file(m_tabColorsPath); file.open(QIODevice::ReadOnly)) {
         const QJsonObject stored = QJsonDocument::fromJson(file.readAll()).object();
         for (auto it = stored.begin(); it != stored.end(); ++it)
@@ -177,6 +179,11 @@ Workflows::Workflows(CanvasModel *canvas, const Registry *registry, CommandRegis
     m_timer.setInterval(locations.recoveryIntervalMs);
     connect(&m_timer, &QTimer::timeout, this, &Workflows::writeRecoveryCopies);
     m_timer.start();
+    m_sessionTimer.setSingleShot(true);
+    m_sessionTimer.setInterval(locations.sessionDelayMs);
+    connect(&m_sessionTimer, &QTimer::timeout, this, &Workflows::flushSession);
+    connect(this, &Workflows::tabsChanged, this, &Workflows::scheduleSession);
+    connect(this, &Workflows::currentChanged, this, &Workflows::scheduleSession);
     if (m_commands)
         connect(m_commands, &CommandRegistry::closeWorkflowRequested, this, &Workflows::closeCurrent);
     for (const RecoveryEntry &entry : m_recovery.list())
@@ -738,6 +745,69 @@ bool Workflows::openClipboard() {
 void Workflows::openStartup(const QStringList &paths) {
     for (const QString &path : paths)
         openPath(path);
+}
+
+// --- the last session's tabs ---
+
+void Workflows::setSessionEnabled(bool enabled) {
+    if (enabled == m_sessionEnabled)
+        return;
+    m_sessionEnabled = enabled;
+    if (!enabled) {
+        m_sessionTimer.stop();
+        QFile::remove(m_sessionPath);
+    } else {
+        scheduleSession();
+    }
+}
+
+void Workflows::scheduleSession() {
+    if (m_sessionEnabled && m_sessionLive)
+        m_sessionTimer.start();
+}
+
+void Workflows::flushSession() {
+    m_sessionTimer.stop();
+    if (!m_sessionEnabled || !m_sessionLive)
+        return;
+    TabSession session;
+    for (int i = 0; i < count(); ++i)
+        if (!m_tabs[size_t(i)].path.isEmpty())
+            session.paths << m_tabs[size_t(i)].path;
+    if (m_current >= 0)
+        session.active = m_tabs[size_t(m_current)].path;
+    const Errors errors = saveTabSession(m_sessionPath, session);
+    if (!errors.isEmpty() && !m_sessionWarned) {
+        m_sessionWarned = true;
+        qWarning("Fugue: the open tabs are not kept: %s", qPrintable(errors.first().message));
+    }
+}
+
+void Workflows::restoreSession() {
+    m_sessionLive = true; // a setting turned on later keeps the tabs from then
+    if (!m_sessionEnabled)
+        return;
+    const TabSession last = loadTabSession(m_sessionPath);
+    TabRestore plan = planRestore(last);
+    QStringList opened;
+    for (const QString &path : plan.paths) {
+        if (openPath(path))
+            opened << path;
+        else
+            plan.skipped << path;
+    }
+    for (int i = 0; i < count(); ++i)
+        if (m_tabs[size_t(i)].path == plan.active && opened.contains(plan.active))
+            setCurrent(i);
+    flushSession();
+    if (!plan.skipped.isEmpty()) {
+        QStringList names;
+        for (const QString &path : plan.skipped)
+            names << QFileInfo(path).fileName();
+        setNotice(tr("%n tabs of the last session were not reopened, their files are gone or unreadable: %1",
+                     nullptr, int(plan.skipped.size()))
+                      .arg(names.join(QStringLiteral(", "))));
+    }
 }
 
 QVariantMap Workflows::carriedPackOffer(const Document &document) const {

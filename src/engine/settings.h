@@ -25,6 +25,9 @@
 // | corner_radius    | 0 to 16 px, or "omarchy" (#63)           | 8                        |
 // | hover_magnifier  | true or false: far out, a short hover    | false                    |
 // |                  | shows a node at zoom 1 (12.6, #74, #123)  |                          |
+// | restore_tabs     | true or false: start with the saved       | true                     |
+// |                  | workflows that were open when the session |                          |
+// |                  | ended (12.10, #212)                        |                          |
 // | cache_results_gb | size limit of the result cache in GB;    | 10                       |
 // |                  | 0: none (10.5, #141)                     |                          |
 // | cache_thumbnails_gb | size limit of the picture previews in | 1                        |
@@ -58,6 +61,7 @@ struct Settings {
     static constexpr int maxCornerRadius = 16;
     int cornerRadius = 8;
     bool hoverMagnifier = false; // the hover magnifier (#74), off unless set (#123)
+    bool restoreTabs = true;     // reopen the last session's saved tabs at start (#212)
     // The cache limits (#141); the cache manager turns them into bytes. 0 is no limit.
     static constexpr double maxCacheGb = 100000;
     static constexpr int maxRunsKept = 100000;

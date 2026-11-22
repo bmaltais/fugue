@@ -20,6 +20,7 @@
 #include "commands/command_registry.h"
 #include "engine/document.h"
 #include "engine/model_offers.h"
+#include "engine/paths.h"
 #include "engine/registry.h"
 #include "engine/templates.h"
 #include "workflow/image_inputs.h"
@@ -50,6 +51,10 @@ struct WorkflowLocations {
     QString tabColorsPath = TrustStore::defaultPath().section('/', 0, -2) + "/tab-colors.json";
     // Where the templates are (11.10): the person's own folder, then the bundled one.
     QList<TemplateRoot> templateRoots = TemplateLibrary::standardRoots();
+    // Where the open tabs are kept for the next start (workflow/tab_session.h): the root's own state folder.
+    QString sessionPath = stateDir() + QStringLiteral("/tabs.json");
+    // How long a change of tabs waits before it is written, so a burst of them is one write.
+    int sessionDelayMs = 400;
     // How File > Export compiled puts the provider instances into the registry it compiles with,
     // as a run does (RunSetup::registerProviders). Default: cli::registerProviders (providers.json).
     std::function<Errors(Registry &)> registerProviders = nullptr;
@@ -170,6 +175,20 @@ public:
     Q_INVOKABLE bool openClipboard();
     // What the command line gave.
     void openStartup(const QStringList &paths);
+
+    // --- the last session's tabs (#212, workflow/tab_session.h) ---
+
+    // Whether the tabs are kept and reopened: settings.json's restore_tabs. Off removes the kept file,
+    // so turning it on again later never brings back an old session. Nothing is kept until
+    // restoreSession() has run (on, it also keeps the tabs of a session that started with it off).
+    void setSessionEnabled(bool enabled);
+    // At start, when no file was named: opens the saved workflows the last session had open, in
+    // order, and shows the one that was shown. A file that is gone is skipped, and one banner line
+    // says how many. From here on the open tabs are kept, after each change and at quit. A start with
+    // a file named never calls it, so it neither reads nor replaces the kept session.
+    void restoreSession();
+    // Writes the kept session now (at quit).
+    void flushSession();
 
     // --- saving and closing ---
 
@@ -329,6 +348,12 @@ private:
     QVariantList m_pendingTrust;
     QString m_notice;
     QString m_projectName;
+    QString m_sessionPath;
+    bool m_sessionEnabled = false;
+    bool m_sessionLive = false; // restoreSession() has run
+    QTimer m_sessionTimer;
+    bool m_sessionWarned = false;
+    void scheduleSession();
     // The last missing-nodes line, to tell it from the banner's other lines on a reload.
     QString m_missingNotice;
     DownloadOffer m_offer; // what goes with m_missingNotice

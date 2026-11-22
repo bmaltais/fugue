@@ -194,7 +194,16 @@ int main(int argc, char *argv[]) {
     QCommandLineParser parser;
     parser.addPositionalArgument("file", "A workflow to open.", "[file...]");
     parser.parse(app.arguments());
-    workflows.openStartup(parser.positionalArguments());
+    // A file named opens just that file and leaves the kept session alone; with none, the tabs the
+    // last session had open come back (settings.json's restore_tabs, live), and are kept from here on.
+    workflows.setSessionEnabled(appSettings.restoreTabs());
+    QObject::connect(&appSettings, &fugue::SettingsModel::changed, &workflows,
+                     [&workflows, &appSettings] { workflows.setSessionEnabled(appSettings.restoreTabs()); });
+    QObject::connect(&app, &QCoreApplication::aboutToQuit, &workflows, &fugue::Workflows::flushSession);
+    if (parser.positionalArguments().isEmpty())
+        workflows.restoreSession();
+    else
+        workflows.openStartup(parser.positionalArguments());
 
     // `omarchy agent look app` runs the app offscreen with these set, to see
     // the window without a display: size it to OMARCHY_LOOK_SIZE when given,
