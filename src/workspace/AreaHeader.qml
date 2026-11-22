@@ -62,11 +62,10 @@ Rectangle {
         }
     }
 
-    // A square 6u (24px) button of the bar: a glyph, or a small drawn picture of the split it makes.
+    // A square 6u (24px) button of the bar with a Lucide glyph (canvas-look 16): columns-2 and rows-2 for the splits.
     component BarButton: Rectangle {
         id: button
         property string glyph
-        property string split: "" // "row" or "column": draws the split instead of a glyph
         property string tip
         property bool danger: false
         signal tapped
@@ -84,28 +83,11 @@ Rectangle {
         Accessible.name: tip
         readonly property color ink: hover.hovered || activeFocus ? header.look.text : header.look.label
         Glyph {
-            visible: button.split === ""
             anchors.centerIn: parent
             look: header.look
             name: button.glyph
-            color: button.danger && hover.hovered ? header.look.error : button.ink
-        }
-        // The split as a box with its new border.
-        Rectangle {
-            visible: button.split !== ""
-            anchors.centerIn: parent
-            width: 14
-            height: 12
-            radius: 2
-            color: "transparent"
-            border.width: 1.5
-            border.color: button.ink
-            Rectangle {
-                anchors.centerIn: parent
-                width: button.split === "row" ? 1.5 : parent.width
-                height: button.split === "row" ? parent.height : 1.5
-                color: button.ink
-            }
+            // Red on hover or keyboard focus, as the menu bar's close (MenuBar.qml).
+            color: button.danger && (hover.hovered || button.activeFocus) ? header.look.error : button.ink
         }
         TapHandler {
             id: tap
@@ -185,7 +167,7 @@ Rectangle {
         spacing: 0
         BarButton {
             objectName: "areaSplitRow-" + header.areaId
-            split: "row"
+            glyph: "columns-2"
             tip: header.tipOf(qsTr("Split side by side"), "area.split-row")
             // Read again when the layout or the window's size changes.
             enabled: App.workspace !== null && App.workspace.count > 0 && App.workspace.bodySize.width >= 0
@@ -194,7 +176,7 @@ Rectangle {
         }
         BarButton {
             objectName: "areaSplitColumn-" + header.areaId
-            split: "column"
+            glyph: "rows-2"
             tip: header.tipOf(qsTr("Split top and bottom"), "area.split-column")
             enabled: App.workspace !== null && App.workspace.count > 0 && App.workspace.bodySize.height >= 0
                      && App.workspace.canSplit(header.areaId, "column")

@@ -10,7 +10,7 @@ const QString ViewRegistry::kCanvas = QStringLiteral("canvas");
 ViewRegistry::ViewRegistry(QObject *parent) : QObject(parent) {
     // The node graph: today's whole window body. The window declares it itself (Main.qml), so its area
     // adopts that item and never makes one from the component; one per window (see the header).
-    add({kGraph, QT_TRANSLATE_NOOP("View", "Graph"), QStringLiteral("workflow"), QUrl(QStringLiteral("qrc:/canvas/FugueCanvas.qml")),
+    add({kGraph, QT_TRANSLATE_NOOP("View", "Graph"), QStringLiteral("waypoints"), QUrl(QStringLiteral("qrc:/canvas/FugueCanvas.qml")),
          QSizeF(160, 120), Multiplicity::OnePerWindow});
     // The picture of a canvas (#221): CanvasView.qml in an area (CanvasArea.qml), following the Graph's selected
     // Canvas Region, its canvas kept in the area's state. Wide enough for its bar's first chips and a picture.

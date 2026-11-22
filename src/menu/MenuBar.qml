@@ -293,11 +293,12 @@ Rectangle {
         ToolTip.text: key !== "" ? qsTr("Close Fugue (%1)").arg(key) : qsTr("Close Fugue")
         background: Rectangle {
             color: closeButton.pressed ? bar.look.dangerHover : closeButton.hovered ? bar.look.dangerFill : "transparent"
+            // The 2px accent ring inside it, as every other button's focus (ViewButton, canvas-look 11).
             Rectangle {
                 anchors { fill: parent; margins: 1 }
                 visible: closeButton.visualFocus
                 color: "transparent"
-                border { width: 1; color: bar.look.accent }
+                border { width: 2; color: bar.look.accent }
                 radius: bar.look.smallCorner
             }
         }

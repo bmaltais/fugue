@@ -55,3 +55,6 @@ layout-template e207
 monitor e121
 server e157
 settings e158
+columns-2 e09c
+rows-2 e43e
+waypoints e547

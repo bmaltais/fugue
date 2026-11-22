@@ -371,7 +371,7 @@ private slots:
         QCOMPARE(views.minimumSize("graph"), QSizeF(160, 120));
         QCOMPARE(views.multiplicity("graph"), QString("one-per-window"));
         QCOMPARE(views.component("graph"), QUrl("qrc:/canvas/FugueCanvas.qml"));
-        QCOMPARE(views.glyph("graph"), QString("workflow"));
+        QCOMPARE(views.glyph("graph"), QString("waypoints")); // apart from the Workflows tab's workflow (#228)
         QVERIFY(views.contains(ViewRegistry::kCanvas));
         QCOMPARE(views.name("canvas"), QString("Canvas"));
         QCOMPARE(views.minimumSize("canvas"), QSizeF(240, 180));

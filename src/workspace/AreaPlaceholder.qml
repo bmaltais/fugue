@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls
 import Fugue
 
 // What an area shows for a view type this build does not register (a newer Fugue's, kept in a saved layout:
@@ -13,12 +12,13 @@ Rectangle {
     border.color: App.theme.look.hairline
     Accessible.role: Accessible.StaticText
     Accessible.name: message.text
-    Label {
+    Text {
         id: message
         anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; margins: 4 * App.theme.look.unit }
         horizontalAlignment: Text.AlignHCenter
         wrapMode: Text.Wrap
         color: App.theme.look.label
+        font.pixelSize: App.theme.look.labelSize
         text: qsTr("This area shows a view this version of Fugue does not have (%1).").arg(placeholder.viewType)
     }
 }
