@@ -65,11 +65,11 @@ code (`pt`, not `pt-BR`; Fugue already trims).
    post a multipart to /synth. A model that cannot do the task (a future one) fails with the server's own message.
    [medium-high] A single "Edit Song" node with a mode input was rejected: its inputs would differ per mode.
 3. **Lyrics** are written by any text model through Enhance Prompt's new `lyrics` style (family `audio`), not by the
-   ace LM's `inspire` mode: Enhance Prompt already picks the model, shows the answer in a Preview and can be edited
+   ace LM's `inspire` mode (compared on the gx10 and confirmed, see "Write Lyrics with the ace LM (#261)"): Enhance Prompt already picks the model, shows the answer in a Preview and can be edited
    before it is sung. `inspire` stays a later option. [medium]
 4. **Song for a picture** is Describe Image's new `song-prompt` style into Generate Song. [high]
 5. Later work is filed as issues, not stubbed in the UI: Describe Song #254, Extend Song #255, stems #256 (base model),
-   variations #257, lossless output #258, reference audio #259, adapters #260, Write Lyrics with the ace LM #261.
+   variations #257, lossless output #258, reference audio #259, adapters #260, Write Lyrics with the ace LM #261 (compared, not built).
 
 ## Templates (fugue-workflows, category `audio`)
 
@@ -176,3 +176,32 @@ to its 25 Hz latent frames), 12 s after gave 28.0 s. The source is kept: its sam
 run is about 3 s. Templates (fugue-workflows, branch ace-batch-b-templates): **Extend a song** and **Song from a song**
 (Describe Song, a Text and Text Concat that add a new style to the heard description, then Remix Song with the heard
 lyrics shown in a Preview); the previews are waveforms drawn from the real outputs.
+
+## Write Lyrics with the ace LM (#261): compared, not built
+
+The issue asked for a comparison before building [U]. Source: `pipeline-lm.cpp` (`LM_INSPIRE_INSTRUCTION` = "Expand the
+user's input into a more detailed musical description", the query goes in `caption`; `skip_codes` stops after the text).
+Note the server already runs this same inspire instruction inside a normal Generate Song job whenever the lyrics are
+empty (`need_lyrics`), so a song written with no lyrics gets the LM's lyrics, bpm, key and caption today.
+
+Method (gx10, 2026-11-22): the same four ideas, once through `POST /lm` with `lm_mode: inspire` (4B LM, seed 7, direct
+to the paired server) and once through Fugue's Enhance Prompt with the `lyrics` style on the Qwen3.8 27B text model
+(seed 7). The ace LM twice: as the node would send it (nothing but the idea), and with `vocal_language` set.
+
+| Idea | ace LM, language left to it | ace LM, language set | Chat model (Enhance Prompt lyrics) |
+|---|---|---|---|
+| a love song about a lighthouse keeper and the sea, folk ballad | Chinese lyrics about the moon, tagged `zh` | English, generic "sunlit roads", "sky so blue": no lighthouse, no sea | on topic: keeper, lamp, glass, tides, tea and bread |
+| an energetic pop punk anthem about quitting a boring job | nonsense syllables ("Mei reu mek meh meh"), tagged `pt` | English, an upbeat "chase your dreams" song: not about a job | on topic: office, stapler, punch the card, "quit the grind" |
+| chanson douce en francais sur un matin de pluie a Montreal | French, rain-free (ghosts and memory) | French, **a squirrel in the forest** | French, rain, tramways, Montreal |
+| melancholic electronic song about leaving a city at night | French, repeating "snow, white, all is calm": no city, no leaving | English with willows, a teapot and a thousand cranes | neon, streetlights, "ghost of the city" |
+
+Time: the ace LM 10 to 23 s a call (it loads and runs the 4B model; it queues behind a render), the chat model 7 to
+10 s. Both write section tags the model reads. What the ace LM adds is the **caption, bpm, key, time signature and
+duration**, each plausible for the idea (bpm 81 to 88, "C# major"/"E minor", a coherent paragraph).
+
+Finding: the ace 4B LM writes lyrics that follow the genre, not the idea (it was trained to expand a query into a
+musical description first and lyrics second); the chat model follows the idea in all four. The metadata is the only
+thing a chat model cannot give, and Generate Song's own `/lm` step already fills it and uses it. **Decision [high]: no
+Write Lyrics node.** Enhance Prompt `lyrics` stays the way to write words. If a node that shows the LM's caption, tempo
+and key before rendering is wanted, it is a variant of Generate Song's first job (stop after `/lm`), and its value is
+judged on what people edit; not filed. #261 closed as not needed, with this table.
