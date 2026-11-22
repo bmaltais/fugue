@@ -21,6 +21,8 @@
 
 #include <functional>
 
+#include "media/media_items.h"
+
 namespace fugue {
 
 class MediaLibrary : public QObject {
@@ -36,6 +38,8 @@ public:
     void setOpenUrl(std::function<void(const QUrl &)> openUrl) { m_openUrl = std::move(openUrl); }
 
     Q_INVOKABLE QVariantList resultsOf(const QString &workflow) const;
+    // The results of one run alone (the queue's finished rows open the browser on it).
+    Q_INVOKABLE QVariantList resultsOfRun(const QString &run) const;
     Q_INVOKABLE QVariantList detailsOf(const QString &path, const QString &run, const QString &node) const;
     Q_INVOKABLE void openFile(const QString &path) const;
     Q_INVOKABLE void openFolder(const QString &path) const;
@@ -43,13 +47,15 @@ public:
 
     // The image:// source of a thumbnail of `path` that fits `box` pixels; the provider reads the
     // same table. A token stands for the path, so no file name is ever parsed out of a URL.
-    QString thumbSource(const QString &path, int box = 256) const;
+    Q_INVOKABLE QString thumbSource(const QString &path, int box = 256) const;
     QString pathOfToken(const QString &token) const;
     QQuickImageProvider *makeProvider() const;
 
     static constexpr const char *providerName = "fuguemedia";
 
 private:
+    QVariantList rowsOf(const QList<MediaItem> &items) const;
+
     QString m_runsRoot;
     QString m_thumbDir;
     std::function<void(const QUrl &)> m_openUrl;

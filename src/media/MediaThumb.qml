@@ -12,6 +12,9 @@ Item {
     property var item: null
     property bool current: false
     property bool focused: false
+    // False in a list row of something else (the queue's finished runs): no name under the glyph and
+    // no pointer handling, so the row's own click is the only one.
+    property bool compact: false
     signal tapped
     signal activated
 
@@ -41,9 +44,10 @@ Item {
             look: cell.look
             name: cell.item?.kind === "video" ? "play" : cell.item?.kind === "audio" ? "volume-2" : "image"
             color: cell.look.label
-            font.pixelSize: 20
+            font.pixelSize: cell.compact ? 14 : 20
         }
         Text {
+            visible: !cell.compact
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             text: cell.item?.title ?? ""
@@ -63,8 +67,9 @@ Item {
         border.color: cell.current ? (cell.focused ? cell.look.accent : cell.look.label)
                                    : (cell.look.light ? Qt.rgba(0, 0, 0, 0.1) : Qt.rgba(1, 1, 1, 0.1))
     }
-    HoverHandler { cursorShape: Qt.PointingHandCursor }
+    HoverHandler { enabled: !cell.compact; cursorShape: Qt.PointingHandCursor }
     TapHandler {
+        enabled: !cell.compact
         onTapped: cell.tapped()
         onDoubleTapped: cell.activated()
     }

@@ -164,8 +164,15 @@ void RunQueue::refresh() {
             const QString workflow = state.value("workflow").toObject().value("path").toString();
             const qint64 begun = millisOf(state.value("started").toString());
             const qint64 ended = millisOf(state.value("ended").toString());
+            // What the run made does not change once it ended: looked up once.
+            if (!m_identities.contains(id))
+                m_identities.insert(id, runIdentityOf(m_paths.runsRoot, id));
+            const RunIdentity &identity = m_identities[id];
             history.append(QVariantMap{{"run", id},
                                        {"name", nameOf(workflow)},
+                                       {"label", identity.label},
+                                       {"lead", identity.leadPath},
+                                       {"leadKind", identity.leadKind},
                                        {"workflow", workflow},
                                        {"status", runStatusName(status)},
                                        {"seconds", begun > 0 && ended >= begun ? (ended - begun) / 1000.0 : -1.0},

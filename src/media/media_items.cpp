@@ -56,6 +56,19 @@ QSet<QString> sinksOf(const QJsonObject &workflow) {
 
 QString textOf(const QJsonValue &value) { return value.isString() ? value.toString() : QString(); }
 
+// The text of the first Text node of a graph's `nodes` (the prompt), or "".
+QString promptOf(const QJsonObject &nodes) {
+    for (auto it = nodes.begin(); it != nodes.end(); ++it) {
+        const QJsonObject node = it.value().toObject();
+        if (node.value("type").toString() == QLatin1String("fugue/text")) {
+            const QString text = textOf(node.value("inputs").toObject().value("text"));
+            if (!text.isEmpty())
+                return text;
+        }
+    }
+    return {};
+}
+
 } // namespace
 
 QDateTime runStartOf(const QString &runId) {
@@ -92,6 +105,7 @@ QList<MediaItem> mediaOfRun(const QString &runsRoot, const QString &runId) {
             continue;
         QList<QPair<QString, QString>> found;
         collectMedia(node.value("outputs"), found);
+        collectMedia(node.value("shown"), found); // what a Preview or a Compare shows (it has no outputs)
         for (const auto &[kind, path] : std::as_const(found)) {
             if (seen.contains(path) || !QFileInfo(path).isFile())
                 continue;
@@ -126,6 +140,29 @@ QList<MediaItem> mediaOfWorkflow(const QString &runsRoot, const QString &workflo
     return items;
 }
 
+RunIdentity runIdentityOf(const QString &runsRoot, const QString &runId) {
+    const QList<MediaItem> items = mediaOfRun(runsRoot, runId);
+    RunIdentity identity;
+    const MediaItem *lead = nullptr;
+    for (const MediaItem &item : items)
+        if (item.kind == QLatin1String("image")) {
+            lead = &item;
+            break;
+        }
+    if (!lead && !items.isEmpty())
+        lead = &items.first();
+    if (lead) {
+        identity.leadPath = lead->path;
+        identity.leadKind = lead->kind;
+    }
+    const Result<RunFolder> folder = RunFolder::open(runsRoot, runId);
+    const QString prompt = folder ? promptOf(folder->workflow().value("graph").toObject().value("nodes").toObject()) : QString();
+    identity.label = prompt.simplified();
+    if (identity.label.isEmpty() && lead)
+        identity.label = lead->name;
+    return identity;
+}
+
 QList<MediaGroup> groupByRun(const QList<MediaItem> &items) {
     QList<MediaGroup> groups;
     for (const MediaItem &item : items) {
@@ -146,16 +183,9 @@ QJsonObject embeddedSummary(const QString &path) {
     const QJsonObject document = read.value();
     const QJsonObject nodes = document.value("graph").toObject().value("nodes").toObject();
     QJsonObject out{{"embedded", true}, {"nodes", nodes.size()}};
-    for (auto it = nodes.begin(); it != nodes.end(); ++it) {
-        const QJsonObject node = it.value().toObject();
-        if (node.value("type").toString() == QLatin1String("fugue/text")) {
-            const QString text = textOf(node.value("inputs").toObject().value("text"));
-            if (!text.isEmpty()) {
-                out.insert("prompt", text);
-                break;
-            }
-        }
-    }
+    const QString prompt = promptOf(nodes);
+    if (!prompt.isEmpty())
+        out.insert("prompt", prompt);
     const QJsonObject used = document.value("run").toObject().value("nodes").toObject();
     for (auto it = used.begin(); it != used.end(); ++it) {
         const QJsonObject entry = it.value().toObject();

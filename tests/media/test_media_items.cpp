@@ -66,6 +66,12 @@ class TestMediaItems : public QObject {
             QVERIFY(folder.writeWorkflow(graph()).isEmpty());
     }
 
+    // The later tests list every run of the folder: a test that made its own runs takes them away.
+    void forget(const QStringList &ids) {
+        for (const QString &id : ids)
+            QVERIFY(QDir(root() + "/" + id).removeRecursively());
+    }
+
 private slots:
     void initTestCase() { QVERIFY(dir.isValid()); }
 
@@ -92,6 +98,16 @@ private slots:
         QCOMPARE(items[0].workflow, QString("/w/a.fugue"));
     }
 
+    void whatAPreviewShowsCountsAsAResult() {
+        // A Preview node keeps what it shows under "shown", not "outputs".
+        const QString shown = makePng(dir.filePath("shown.png"));
+        const RunFolder folder = RunFolder::create(root(), "20261121-090000-000-pppp").value();
+        QVERIFY(folder.writeState({{"workflow", QJsonObject{{"path", "/w/p.fugue"}}},
+                                   {"nodes", QJsonObject{{"save", QJsonObject{{"state", "cached"}, {"shown", QJsonObject{{"value", image(shown)}}}}}}}}));
+        QCOMPARE(mediaOfRun(root(), "20261121-090000-000-pppp").size(), 1);
+        forget({"20261121-090000-000-pppp"});
+    }
+
     void aBatchAndAllThreeKindsComeOut() {
         const QString a = makePng(dir.filePath("b1.png"));
         const QString b = makePng(dir.filePath("b2.png"));
@@ -116,6 +132,62 @@ private slots:
             kinds << item.kind;
         kinds.sort();
         QCOMPARE(kinds, QStringList({"audio", "video"}));
+    }
+
+    void aRunIsNamedByItsFirstImageAndItsPrompt() {
+        const QString first = makePng(dir.filePath("id1.png"));
+        const QString second = makePng(dir.filePath("id2.png"));
+        QFile clip(dir.filePath("id.mp4"));
+        QVERIFY(clip.open(QIODevice::WriteOnly));
+        clip.write("x");
+        clip.close();
+        // The lead is the first image even when a video comes first; the label is the prompt.
+        makeRun("20261121-140000-000-ffff", "/w/f.fugue",
+                {{"save", {{"a", image(dir.filePath("id.mp4"), "video")}, {"b", image(first)}, {"c", image(second)}}}});
+        const RunIdentity picture = runIdentityOf(root(), "20261121-140000-000-ffff");
+        QCOMPARE(picture.leadPath, first);
+        QCOMPARE(picture.leadKind, QString("image"));
+        QCOMPARE(picture.label, QString("a red fox"));
+        forget({"20261121-140000-000-ffff"});
+    }
+
+    void withNoPictureAndNoPromptTheLeadIsTheVideoAndTheLabelItsFileName() {
+        // A workflow with no Text node: the label falls back to the first output's file name.
+        const RunFolder folder = RunFolder::create(root(), "20261121-141000-000-gggg").value();
+        QVERIFY(folder.writeState({{"workflow", QJsonObject{{"path", "/w/g.fugue"}}},
+                                   {"nodes", QJsonObject{{"save", QJsonObject{{"state", "done"}, {"outputs", QJsonObject{{"v", image(dir.filePath("id.mp4"), "video")}}}}}}}}));
+        const RunIdentity video = runIdentityOf(root(), "20261121-141000-000-gggg");
+        QCOMPARE(video.leadKind, QString("video"));
+        QCOMPARE(video.label, QString("id.mp4"));
+        // A run that made nothing, or that is not there, has no identity: the caller keeps the name.
+        const RunIdentity none = runIdentityOf(root(), "20261121-141001-000-gggg");
+        QVERIFY(none.leadPath.isEmpty() && none.leadKind.isEmpty() && none.label.isEmpty());
+        forget({"20261121-141000-000-gggg"});
+    }
+
+    void aLongPromptIsOneLine() {
+        const RunFolder folder = RunFolder::create(root(), "20261121-142000-000-hhhh").value();
+        QVERIFY(folder.writeState({{"workflow", QJsonObject{{"path", "/w/h.fugue"}}}, {"nodes", QJsonObject()}}));
+        QJsonObject document = graph();
+        QJsonObject nodes = document.value("graph").toObject().value("nodes").toObject();
+        nodes.insert("prompt", QJsonObject{{"type", "fugue/text"}, {"inputs", QJsonObject{{"text", "a red\n\nfox   at dawn"}}}});
+        document.insert("graph", QJsonObject{{"nodes", nodes}});
+        QVERIFY(folder.writeWorkflow(document).isEmpty());
+        QCOMPARE(runIdentityOf(root(), "20261121-142000-000-hhhh").label, QString("a red fox at dawn"));
+        forget({"20261121-142000-000-hhhh"});
+    }
+
+    void theResultsOfOneRunAloneAreListedForTheBrowser() {
+        const QString only = makePng(dir.filePath("alone.png"));
+        makeRun("20261121-143000-000-iiii", "/w/i.fugue", {{"save", {{"a", image(only)}}}});
+        makeRun("20261121-143001-000-iiii", "/w/i.fugue", {{"save", {{"a", image(only)}}}});
+        MediaLibrary library(root(), dir.filePath("thumbs"));
+        const QVariantList rows = library.resultsOfRun("20261121-143000-000-iiii");
+        QCOMPARE(rows.size(), 1);
+        QCOMPARE(rows[0].toMap().value("run").toString(), QString("20261121-143000-000-iiii"));
+        QVERIFY(rows[0].toMap().value("thumb").toString().startsWith("image://fuguemedia/"));
+        QVERIFY(library.resultsOfRun("nonsense").isEmpty());
+        forget({"20261121-143000-000-iiii", "20261121-143001-000-iiii"});
     }
 
     void withoutTheWorkflowFileEveryNodeCounts() {

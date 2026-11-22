@@ -63,9 +63,13 @@ QString MediaLibrary::pathOfToken(const QString &token) const {
 
 QQuickImageProvider *MediaLibrary::makeProvider() const { return new Provider(this, m_thumbDir); }
 
-QVariantList MediaLibrary::resultsOf(const QString &workflow) const {
+QVariantList MediaLibrary::resultsOf(const QString &workflow) const { return rowsOf(mediaOfWorkflow(m_runsRoot, workflow)); }
+
+QVariantList MediaLibrary::resultsOfRun(const QString &run) const { return rowsOf(mediaOfRun(m_runsRoot, run)); }
+
+QVariantList MediaLibrary::rowsOf(const QList<MediaItem> &items) const {
     QVariantList rows;
-    for (const MediaItem &item : mediaOfWorkflow(m_runsRoot, workflow)) {
+    for (const MediaItem &item : items) {
         rows.append(QVariantMap{{"path", item.path},
                                 {"url", QUrl::fromLocalFile(item.path)},
                                 {"kind", item.kind},

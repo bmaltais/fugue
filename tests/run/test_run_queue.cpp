@@ -127,6 +127,28 @@ private slots:
         QCOMPARE(RunFolder::open(m_dir.filePath("runs"), "run-a")->status(), RunStatus::Failed);
     }
 
+    void aFinishedRowCarriesWhatTheRunMade() {
+        QTemporaryDir place;
+        QImage image(8, 8, QImage::Format_RGB32);
+        const QString file = place.filePath("fox.png");
+        QVERIFY(image.save(file));
+        ended("20261121-110000-000-cccc", RunStatus::Ok, "/w/c.fugue");
+        const RunFolder folder = RunFolder::open(m_dir.filePath("runs"), "20261121-110000-000-cccc").value();
+        QJsonObject state = folder.state();
+        state.insert("nodes", QJsonObject{{"save", QJsonObject{{"state", "done"}, {"outputs", QJsonObject{{"i", QJsonObject{{"type", "image"}, {"path", file}}}}}}}});
+        QVERIFY(folder.writeState(state));
+        ended("20261121-110001-000-cccc", RunStatus::Ok, "/w/c.fugue"); // made nothing
+        RunQueue list(paths());
+        list.setWatching(true);
+        const QVariantMap made = list.history().at(1).toMap();
+        QCOMPARE(made.value("lead").toString(), file);
+        QCOMPARE(made.value("leadKind").toString(), QStringLiteral("image"));
+        QCOMPARE(made.value("label").toString(), QStringLiteral("fox.png"));
+        const QVariantMap nothing = list.history().at(0).toMap();
+        QVERIFY(nothing.value("lead").toString().isEmpty());
+        QVERIFY(nothing.value("label").toString().isEmpty());
+    }
+
     void theHistoryIsTheLastEightEndedRunsNewestFirstAndOnlyWhileWatching() {
         for (int i = 1; i <= 10; ++i)
             ended(QStringLiteral("20261121-1000%1-000-aaaa").arg(i, 2, 10, QLatin1Char('0')),

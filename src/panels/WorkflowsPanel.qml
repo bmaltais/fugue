@@ -29,6 +29,9 @@ Item {
     property var results: []
     property var resultDetails: []
     property string resultsMode: "grid"
+    // A run id: the results of that one run alone (the run queue's finished rows open the view on
+    // one run), "" for every run of the current workflow. A change of workflow clears it.
+    property string resultsRun: ""
     // For SidePanel.focusTarget.
     readonly property Item focusTarget: view === "results" && resultsLoader.item ? (resultsLoader.item as Item) : list
     // The current workflow's file and name; "" for one never saved.
@@ -47,8 +50,21 @@ Item {
     property alias rowList: list
     readonly property real switchHeight: 7 * u
 
+    // Shows the results of one run (#133): the view opens on it, whatever it showed before.
+    function showRun(run) {
+        resultsRun = run
+        if (view !== "results")
+            view = "results"
+        else
+            resultsRequested()
+    }
+    onResultsRunChanged: if (view === "results") resultsRequested()
     onViewChanged: if (view === "results") resultsRequested()
-    onWorkflowPathChanged: if (view === "results") resultsRequested()
+    onWorkflowPathChanged: {
+        resultsRun = ""
+        if (view === "results")
+            resultsRequested()
+    }
 
     // The rows: a heading, then its entries, for each of the two lists. A heading is never current.
     readonly property var rows: {
@@ -113,6 +129,14 @@ Item {
             visible: root.view === "results"
             onTapped: root.resultsRequested()
         }
+        ViewButton {
+            objectName: "workflowsResultsAllRuns"
+            look: root.look
+            text: qsTr("All runs")
+            tip: qsTr("Showing one run: show every run of this workflow")
+            visible: root.view === "results" && root.resultsRun !== ""
+            onTapped: root.resultsRun = ""
+        }
     }
     // Made only while the results are shown (the item budget).
     Loader {
@@ -127,7 +151,8 @@ Item {
             mode: root.resultsMode
             actions: [{id: "open", label: qsTr("Open")}, {id: "folder", label: qsTr("Show folder")},
                       {id: "copy", label: qsTr("Copy path")}]
-            emptyText: root.workflowPath === "" ? qsTr("Save the workflow, then run it: its results show here.")
+            emptyText: root.resultsRun !== "" ? qsTr("This run made no images, videos or sounds.")
+                     : root.workflowPath === "" ? qsTr("Save the workflow, then run it: its results show here.")
                                                 : qsTr("Run this workflow: its images, videos and sounds show here.")
             onModeChanged: root.resultsMode = mode
             onCurrentItemChanged: if (currentItem) root.resultChosen(currentItem)
