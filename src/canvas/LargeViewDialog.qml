@@ -78,6 +78,7 @@ Popup {
                 visible: !!root.zoomable
                 look: root.look
                 text: qsTr("Fit")
+                tip: qsTr("Fit (0)")
                 accented: false
                 current: root.zoomable && !root.zoomable.actual && root.zoomable.zoom === 1
                 onTapped: root.zoomable.fit()
@@ -87,6 +88,7 @@ Popup {
                 visible: !!root.zoomable
                 look: root.look
                 text: qsTr("100%")
+                tip: qsTr("Actual size (1)")
                 accented: false
                 current: root.zoomable && root.zoomable.actual
                 onTapped: root.zoomable.actualSize()
@@ -95,7 +97,8 @@ Popup {
             ViewButton {
                 objectName: root.name + "Close"
                 look: root.look
-                text: "×"
+                glyph: "x" // the Lucide x of every other close (canvas-look 16)
+                tip: qsTr("Close (Esc)")
                 onTapped: root.close()
             }
         }

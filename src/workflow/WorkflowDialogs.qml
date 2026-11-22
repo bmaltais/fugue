@@ -157,7 +157,8 @@ Item {
                     }
                 }
                 ToolButton {
-                    text: "×"
+                    // The Lucide x every other close and dismiss draws (canvas-look 16), not a text "×".
+                    contentItem: Glyph { look: App.theme.look; name: "x"; color: App.theme.look.label; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                     focusPolicy: Qt.NoFocus
                     Accessible.name: qsTr("Dismiss")
                     onClicked: App.workflows.dismissNotice()

@@ -88,7 +88,8 @@ Item {
                 text: qsTr("Your keymap file has problems; the default keys apply where it could not be used. Press ? to see them.")
             }
             ToolButton {
-                text: "×"
+                // The Lucide x every other close and dismiss draws (canvas-look 16), not a text "×".
+                contentItem: Glyph { look: App.theme.look; name: "x"; color: App.theme.look.label; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                 focusPolicy: Qt.NoFocus
                 Accessible.name: qsTr("Dismiss")
                 onClicked: notice.dismissed = true

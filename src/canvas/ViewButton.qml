@@ -20,6 +20,8 @@ Rectangle {
     property bool primary: false
     // A cancel or a delete: a red tint while it can act (docs/canvas-look.md 11); disabled it is as calm as any button.
     property bool danger: false
+    // A toggle (Compare, Snap, Show candidate): assistive tools hear it as on or off, `current` being on.
+    property bool checkable: false
     signal tapped
     // An Alt+click of its own (#226: a layer's eye shows that layer alone); with it, a plain click is a click with no
     // modifier.
@@ -43,6 +45,8 @@ Rectangle {
     opacity: enabled ? 1 : 0.4
     Accessible.role: Accessible.Button
     Accessible.name: text !== "" ? text : tip
+    Accessible.checkable: checkable
+    Accessible.checked: checkable && current
     Row {
         id: content
         anchors.centerIn: parent
