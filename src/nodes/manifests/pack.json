@@ -15,6 +15,7 @@
     "compare-images",
     "composite-masked",
     "crop",
+    "crop-to-mask",
     "edit-image",
     "empty-latent",
     "empty-video-latent",
@@ -28,6 +29,7 @@
     "grow-mask",
     "image-size",
     "image-to-mask",
+    "inpaint-crop-stitch",
     "invert",
     "invert-mask",
     "load-audio",
@@ -39,6 +41,7 @@
     "number-math",
     "overlay-mask",
     "pad",
+    "paint-mask",
     "preview",
     "resize",
     "resize-megapixels",
@@ -49,6 +52,7 @@
     "save-video",
     "sharpen",
     "solid-mask",
+    "stitch",
     "text",
     "text-concat",
     "text-encode",
@@ -169,6 +173,12 @@
       "version": 1,
       "kind": "data",
       "name": "Conditioning"
+    },
+    {
+      "id": "fugue/stitch",
+      "version": 1,
+      "kind": "data",
+      "name": "Stitch"
     }
   ]
 }

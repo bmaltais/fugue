@@ -1,19 +1,22 @@
 {
   "manifest": 1,
   "id": "fugue/load-image",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "Load Image",
-  "description": "Reads an image file from disk.",
+  "description": "Reads an image file from disk. Paint a mask on it, or take the transparent part of the file as one.",
   "category": "Basic",
-  "keywords": ["open", "file", "input", "png", "jpeg", "webp"],
+  "keywords": ["open", "file", "input", "png", "jpeg", "webp", "mask", "inpaint", "paint"],
   "runtime": {"kind": "builtin"},
   "needs": {"files": true},
   "inputs": [
-    {"name": "file", "type": "text", "label": "File", "widget": "file"}
+    {"name": "file", "type": "text", "label": "File", "widget": "file"},
+    {"name": "mask", "type": "text", "label": "Paint mask", "widget": "mask", "optional": true,
+     "description": "A mask painted over the picture. White is the part to change. Without one, the mask is the transparent part of the file, else empty."}
   ],
   "outputs": [
     {"name": "image", "type": "image", "label": "Image"},
     {"name": "width", "type": "number", "label": "Width"},
-    {"name": "height", "type": "number", "label": "Height"}
+    {"name": "height", "type": "number", "label": "Height"},
+    {"name": "mask", "type": "image", "role": "mask", "label": "Mask"}
   ]
 }

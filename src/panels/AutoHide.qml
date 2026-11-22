@@ -2,7 +2,6 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import Fugue
-import "../canvas"
 
 // The auto-hide container for a bar along the top edge (#160, spec 12.15): the one component any
 // bar uses to slide out of the way instead of disappearing. Put the bar inside it (it takes the

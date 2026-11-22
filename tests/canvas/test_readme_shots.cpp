@@ -4,6 +4,7 @@
 // the test's own, the templates are the bundled ones. FUGUE_SHOT_TEMPLATE names another template
 // for hero.png.
 
+#include <QDir>
 #include <QFile>
 #include <QImage>
 #include <QPainter>
@@ -35,8 +36,17 @@ void prepare(App &app, const QSize &size = {1600, 1000}) {
     QTest::qWait(800);
 }
 
-bool saveGraph(App &app, const QString &name) {
-    return readme_shot::graphOnly(app.window, app.canvas).save(shotDir() + "/" + name);
+// A template's workflow with its sample files as absolute paths, so the window shows the pictures (the
+// test's document has no folder of its own to resolve "inputs/..." against).
+QByteArray templateWithPictures(const QString &name) {
+    QByteArray json = template_(name);
+    const QString inputs = QDir(QFINDTESTDATA("../../templates/" + name)).absoluteFilePath("inputs/");
+    json.replace("\"inputs/", ("\"" + inputs).toUtf8());
+    return json;
+}
+
+bool saveGraph(App &app, const QString &name, int skipTop = 0) {
+    return readme_shot::graphOnly(app.window, app.canvas, 28, skipTop).save(shotDir() + "/" + name);
 }
 
 } // namespace
@@ -114,6 +124,51 @@ private slots:
         app.model.requestFit();
         QTest::qWait(800);
         QVERIFY(saveGraph(app, "group.png"));
+    }
+
+    // The two masking templates (#177): each one's graph, with the sample picture and its painted
+    // mask on the Load Image node.
+    void maskTemplates_data() {
+        QTest::addColumn<QString>("name");
+        QTest::addColumn<QString>("file");
+        QTest::newRow("inpaint") << "inpaint-region" << "inpaint-graph.png";
+        QTest::newRow("outpaint") << "outpaint" << "outpaint-graph.png";
+    }
+    void maskTemplates() {
+        QFETCH(QString, name);
+        QFETCH(QString, file);
+        App app(load(templateWithPictures(name)), {}, Look{{}, 8});
+        QVERIFY(app.open());
+        prepare(app, {2400, 900}); // wide enough that the nodes keep their text at the fitted zoom
+        QVERIFY(saveGraph(app, file));
+    }
+
+    // Paint Mask wired after Load Image: the mask ports are hollow squares, the picture ports filled.
+    void paintMaskNode() {
+        const QString inputs = QDir(QFINDTESTDATA("../../templates/inpaint-region")).absoluteFilePath("inputs/");
+        const QString mask = QDir(inputs).entryList({"reading-nook-mask-*.png"}).value(0);
+        const QByteArray json = QStringLiteral(R"({"fugue": 1, "graph": {"nodes": {
+            "load": {"type": "fugue/load-image", "version": "1.1.0", "inputs": {"file": "%1reading-nook.jpg"}},
+            "paint": {"type": "fugue/paint-mask", "version": "1.0.0", "inputs": {"image": {"from": "load.image"}, "mask": "%1%2"}},
+            "feather": {"type": "fugue/feather-mask", "version": "1.0.0", "inputs": {"mask": {"from": "paint.mask"}}}}},
+            "layout": {"nodes": {"load": {"pos": [0, 0]}, "paint": {"pos": [340, 0]}, "feather": {"pos": [680, 0]}}}})")
+                                    .arg(inputs, mask).toUtf8();
+        App app(load(json), {}, Look{{}, 8});
+        QVERIFY(app.open());
+        prepare(app);
+        QVERIFY(saveGraph(app, "mask-paint-node.png"));
+    }
+
+    // Inside the group Inpaint (crop and stitch): its six nodes.
+    void maskGroup() {
+        App app(load(templateWithPictures("inpaint-region")), {}, Look{{}, 8});
+        QVERIFY(app.open());
+        prepare(app);
+        QVERIFY(app.model.enterGroup("inpaint"));
+        app.model.select({});
+        app.model.requestFit();
+        QTest::qWait(1000);
+        QVERIFY(saveGraph(app, "mask-group.png", 70));
     }
 };
 

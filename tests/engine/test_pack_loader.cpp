@@ -199,6 +199,33 @@ private slots:
         QVERIFY(!registry.nodeType(id + "/other"));
     }
 
+    // A pack's node can use the mask widget (#174): a text input with `over` naming an image input.
+    void aPacksMaskWidgetNamesTheImageItIsPaintedOver() {
+        QTemporaryDir root;
+        const QString id = "io.github.alice.tools";
+        QJsonObject good = nodeJson(id + "/good");
+        good["inputs"] = QJsonArray{QJsonObject{{"name", "image"}, {"type", "image"}},
+                                    QJsonObject{{"name", "region"}, {"type", "text"}, {"widget", "mask"}, {"over", "image"}, {"optional", true}}};
+        QJsonObject nowhere = nodeJson(id + "/nowhere"); // over an input that is not there
+        nowhere["inputs"] = QJsonArray{QJsonObject{{"name", "region"}, {"type", "text"}, {"widget", "mask"}, {"over", "image"}}};
+        QJsonObject notAWidget = nodeJson(id + "/plain"); // `over` without the mask widget
+        notAWidget["inputs"] = QJsonArray{QJsonObject{{"name", "image"}, {"type", "image"}},
+                                          QJsonObject{{"name", "region"}, {"type", "text"}, {"over", "image"}}};
+        QJsonObject onImage = nodeJson(id + "/onimage"); // the mask widget on an image input
+        onImage["inputs"] = QJsonArray{QJsonObject{{"name", "region"}, {"type", "image"}, {"widget", "mask"}}};
+        const QString dir = makePack(root.path(), id, packJson(id, {"good", "nowhere", "plain", "onimage"}),
+                                     {{"good", good}, {"nowhere", nowhere}, {"plain", notAWidget}, {"onimage", onImage}});
+        Registry registry;
+        const LoadedPack loaded = loadPack(registry, dir);
+        const NodeType *type = registry.nodeType(id + "/good");
+        QVERIFY2(type, qPrintable(reasonOf(loaded, "good")));
+        QCOMPARE(type->input("region")->over, QString("image"));
+        QVERIFY(type->input("region")->holdsInputFile());
+        QCOMPARE(NodeType::fromJson(type->toJson()).value().input("region")->over, QString("image"));
+        for (const char *name : {"nowhere", "plain", "onimage"})
+            QVERIFY2(!reasonOf(loaded, name).isEmpty(), name);
+    }
+
     void aBadNodeDisablesOnlyThatNode() {
         QTemporaryDir root;
         const QString id = "io.github.alice.tools";

@@ -309,7 +309,7 @@ void CanvasRuns::show(const QString &tab, const QString &node) {
         return;
     // A Crop shows its input's picture: it follows the node that feeds it (a DAG, so this ends).
     for (auto it = m_nodeInfo.cbegin(); it != m_nodeInfo.cend(); ++it)
-        if (it->crops && it->cropFrom == node)
+        if (it->followsInput() && it->cropFrom == node)
             show(tab, it.key());
     // `node` is a path id; only the nodes of the level shown have a card.
     const QString row = rowFor(node);
@@ -336,9 +336,10 @@ void CanvasRuns::show(const QString &tab, const QString &node) {
     // One slot (docs/canvas-look.md 4.5, 4.6): the last result, else the input file's image
     // (Load Image before it runs), else a dimmed placeholder on a node made to show one.
     const NodeInfo info = m_nodeInfo.value(node);
-    const Picture cropped = info.crops ? cropSource(tab, node) : Picture{};
-    if (info.crops) {
+    const Picture cropped = info.followsInput() ? cropSource(tab, node) : Picture{};
+    if (info.followsInput()) {
         // A Crop shows what arrives at its input, never its own result: the frame is drawn over it.
+        // So does a node that paints a mask over an input (Paint Mask), the mask drawn over it.
         if (cropped.width > 0 && cropped.height > 0)
             image(cropped.thumbnail, cropped.width, cropped.height, {});
         else
@@ -831,6 +832,13 @@ void CanvasRuns::readNodes() {
         if (const NodeType *type = m_registry->nodeTypeFor(it->type, it->version.major)) {
             for (const InputSpec &input : type->inputs) {
                 const InputValue value = it->inputs.value(input.name);
+                // A mask painted over an image input: the slot shows that input's picture (Paint Mask).
+                if (input.widget() == QLatin1String("mask") && !input.over.isEmpty() && info.paintsOver.isEmpty()) {
+                    info.paintsOver = input.over;
+                    const InputValue over = it->inputs.value(input.over);
+                    if (over.kind() == InputValue::Kind::Link)
+                        info.cropFrom = keyFor(over.from().node);
+                }
                 if (input.widget() == QLatin1String("file") && value.kind() == InputValue::Kind::Literal
                     && value.literal().isString() && isImagePath(value.literal().toString())) {
                     // As the run will read it: a relative path is the workflow folder's.
@@ -841,12 +849,12 @@ void CanvasRuns::readNodes() {
                 }
             }
         }
-        if (info.showsResult || info.crops || !info.imageFile.isEmpty())
+        if (info.showsResult || info.followsInput() || !info.imageFile.isEmpty())
             m_nodeInfo.insert(keyFor(it.key()), info);
     }
     TabRuns &runs = m_tabs[m_shownTab];
     for (auto it = m_nodeInfo.cbegin(); it != m_nodeInfo.cend(); ++it)
-        if ((it->showsResult || it->crops) && !runs.nodes.contains(it.key()))
+        if ((it->showsResult || it->followsInput()) && !runs.nodes.contains(it.key()))
             runs.nodes.insert(it.key(), NodeView{});
 }
 
@@ -907,13 +915,20 @@ QString CanvasRuns::imageFile(const QString &row) const {
     const QString node = keyFor(row);
     const NodeView view = m_tabs.value(m_shownTab).nodes.value(node);
     QString path;
-    if (m_nodeInfo.value(node).crops)
+    if (m_nodeInfo.value(node).followsInput())
         path = cropSource(m_shownTab, node).path;
     else if (!view.thumbnail.isEmpty() && !view.imagePath.isEmpty())
         path = view.imagePath;
     else if (view.text.isEmpty())
         path = expandHome(m_nodeInfo.value(node).imageFile);
     return QDir::isAbsolutePath(path) && QFileInfo(path).isFile() ? path : QString();
+}
+
+QString CanvasRuns::inputFile(const QString &literal) const {
+    if (literal.trimmed().isEmpty())
+        return {};
+    const Result<QString> located = inputFilePath(literal, m_workflows->pathOf(m_workflows->current()), QStringLiteral("mask"));
+    return located && QFileInfo(located.value()).isFile() ? located.value() : QString();
 }
 
 QUrl CanvasRuns::imageUrl(const QString &row) const {

@@ -19,7 +19,7 @@ struct Context {
 
 Kind kindOfSpec(const InputSpec &spec) {
     const QString widget = spec.widget();
-    if (widget == QLatin1String("file") || widget == QLatin1String("folder"))
+    if (spec.holdsInputFile() || widget == QLatin1String("folder"))
         return Kind::Path;
     if (spec.type.type.id == QLatin1String("text") && widget == QLatin1String("multiline"))
         return Kind::Prompt;

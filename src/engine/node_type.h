@@ -47,6 +47,12 @@ struct InputSpec {
     QString section;
     bool advanced = false;
     QString role; // "mask" on an image input that takes a mask (6.1, 14.4); empty for none
+    QString over; // widget `mask` only: the image input the mask is painted over; empty: the node's own `file` input
+
+    // True for an input whose text literal names a file that travels with the workflow (spec 11.2,
+    // 11.5, 11.10, 14.4): a `file` input's picture, or a `mask` input's painted mask. The one
+    // predicate that saving, sharing, taking a template in and running read, so they cannot disagree.
+    bool holdsInputFile() const;
 
     // Required unless it has a default or is optional (3.2).
     bool required() const;

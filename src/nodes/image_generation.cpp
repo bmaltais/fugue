@@ -5,6 +5,8 @@
 #include "nodes/image_cover.h"
 #include "nodes/image_size.h"
 #include "nodes/kernels.h"
+#include "nodes/mask_ops.h"
+#include "nodes/pixel_io.h"
 
 #include <QDir>
 #include <QJsonArray>
@@ -67,6 +69,26 @@ Result<QString> prepared(const MediaHandle &image, QSize size, const QString &pa
     return coverToFile(image, size, path);
 }
 
+// What a mask holds: nothing painted, or all of it (the checks of 14.4).
+struct MaskRange {
+    bool empty = false;
+    bool full = false;
+};
+MaskRange rangeOf(const Pixels &mask) {
+    float least = 1.0f;
+    float most = 0.0f;
+    for (const float v : mask.data) {
+        least = std::min(least, v);
+        most = std::max(most, v);
+    }
+    return MaskRange{most <= 0.0f, least >= 0.999f};
+}
+
+// Whether the model's `inputs` property lists the mask (8.1).
+bool takesMask(const Selection &selection) {
+    return selection.model.properties.value(QStringLiteral("inputs")).toArray().contains(QStringLiteral("mask"));
+}
+
 class ImageKernel : public ProviderKernel {
 public:
     explicit ImageKernel(QString capability) : m_capability(std::move(capability)) {}
@@ -77,6 +99,10 @@ public:
         Requirement requirement;
         requirement.capability = m_capability;
         requirement.model = inputs.value(QStringLiteral("model")).json().toObject();
+        // A mask is a preference, not a need: with "any ready model" one that takes a mask wins, and
+        // a model that cannot is refused in request() with mask_unsupported, naming the others.
+        if (!editing() && inputs.value(QStringLiteral("mask")).isMedia())
+            requirement.preferred = QJsonObject{{"inputs", QJsonArray{"mask"}}};
         return requirement;
     }
 
@@ -109,6 +135,11 @@ public:
         }
         if (!size)
             return size.errors();
+        if (!editing()) {
+            const Result<Nothing> masked = maskInput(context, selection, *size, request);
+            if (!masked)
+                return masked.errors();
+        }
         if (*size) {
             params.insert(QStringLiteral("width"), (*size)->width());
             params.insert(QStringLiteral("height"), (*size)->height());
@@ -149,11 +180,22 @@ public:
             return value.isDouble() ? Value(value) : otherwise;
         };
         const QJsonObject model = used.value(QStringLiteral("model")).toObject();
-        return Values{{QStringLiteral("image"), Value(image.value())},
+        // With a mask the picture is put back everywhere the mask is not (14.4): the model redraws the
+        // blocks of its latent that the mask touches, and every pixel passes through its VAE.
+        Value drawn(image.value());
+        Errors warnings;
+        if (!editing() && context.input(QStringLiteral("mask")).isMedia() && context.input(QStringLiteral("image")).isMedia()) {
+            const Result<Value> composited = putBack(context, image.value(), warnings);
+            if (!composited)
+                return composited.errors();
+            drawn = composited.value();
+        }
+        const Values values{{QStringLiteral("image"), drawn},
                       {QStringLiteral("seed"), number(QStringLiteral("seed"), context.input(QStringLiteral("seed")))},
                       {QStringLiteral("width"), number(QStringLiteral("width"), Value(image->width()))},
                       {QStringLiteral("height"), number(QStringLiteral("height"), Value(image->height()))},
                       {QStringLiteral("model"), Value(model.isEmpty() ? selection.model.handle : model)}};
+        return warnings.isEmpty() ? Result<Values>(values) : Result<Values>(values, warnings);
     }
 
 private:
@@ -209,6 +251,111 @@ private:
         request.inputs.insert(QStringLiteral("image"), QJsonObject{{"path", path.value()}});
         request.params.insert(QStringLiteral("strength"), context.input(QStringLiteral("strength")).number());
         return std::optional<QSize>(size);
+    }
+
+    // Generate Image's mask (14.4), into request.inputs beside the start image: refused unless the
+    // model takes one, or when nothing is painted, and cut to the start image's size the way the image
+    // is. `size` is the start image's size, unset without one.
+    Result<Nothing> maskInput(const NodeContext &context, const Selection &selection, const std::optional<QSize> &size,
+                              JobRequest &request) const {
+        const Value mask = context.input(QStringLiteral("mask"));
+        if (!mask.isMedia())
+            return Nothing{};
+        if (!size)
+            return makeInputError(QStringLiteral("missing_input"), QStringLiteral("image"),
+                                  QStringLiteral("A mask needs a start image to redraw."),
+                                  QStringLiteral("Connect the picture the mask was made on to Start image."));
+        if (!takesMask(selection)) {
+            Error error = makeInputError(
+                QStringLiteral("mask_unsupported"), QStringLiteral("mask"),
+                QStringLiteral("%1 on %2 cannot take a mask; it would redraw the whole picture.")
+                    .arg(modelName(selection), selection.instance),
+                selection.preferredOffers.isEmpty()
+                    ? QStringLiteral("No provider here has a model that takes a mask. Use an Omarchy model whose "
+                                     "sd-server lists mask_image, or redraw the part with VAE Encode (mask) and a "
+                                     "Sampler on the Fugue helper.")
+                    : QStringLiteral("Pick a model that takes one: %1.").arg(selection.preferredOffers.join(QStringLiteral(", "))));
+            for (const QString &offer : selection.preferredOffers)
+                error.valid.append(offer);
+            return error;
+        }
+        const MediaHandle image = context.input(QStringLiteral("image")).media();
+        if (mask.media().width() != image.width() || mask.media().height() != image.height())
+            return makeInputError(QStringLiteral("node_failed"), QStringLiteral("mask"),
+                                  QStringLiteral("The mask is not the size of the start image (%1 x %2).")
+                                      .arg(image.width())
+                                      .arg(image.height()),
+                                  QStringLiteral("Paint or make the mask on the start image."));
+        try {
+            const Result<Pixels> pixels = maskOf(mask, QStringLiteral("mask"));
+            if (!pixels)
+                return pixels.errors();
+            if (rangeOf(pixels.value()).empty)
+                return makeInputError(QStringLiteral("mask_empty"), QStringLiteral("mask"),
+                                      QStringLiteral("Nothing is painted in the mask."),
+                                      QStringLiteral("Paint the part to change, or leave the mask unwired."));
+            const Result<QString> path =
+                coverMaskToFile(mask.media(), *size, QDir(context.workDir).filePath(QStringLiteral("mask.png")));
+            if (!path)
+                return path.errors();
+            request.inputs.insert(QStringLiteral("mask"), QJsonObject{{"path", path.value()}});
+        } catch (const vips::VError &error) {
+            Error unreadable = vipsError(error, QStringLiteral("media_unreadable"));
+            unreadable.message = QStringLiteral("Cannot prepare the mask: %1").arg(unreadable.message);
+            return unreadable;
+        }
+        return Nothing{};
+    }
+
+    // The model's picture put back over the start image through the mask (Composite Masked's
+    // kernel): out = start x (1 - m) + drawn x m, the start image and the mask cut as they went to the
+    // model, so what is outside the mask is the start image's, to the pixel. A mask that reaches the
+    // whole picture is a warning (plain image to image).
+    Result<Value> putBack(const NodeContext &context, const MediaHandle &drawn, Errors &warnings) const {
+        if (!initVips())
+            return vipsUnavailable();
+        const QSize size(drawn.width(), drawn.height());
+        try {
+            const Result<QString> start =
+                prepared(context.input(QStringLiteral("image")).media(), size, QDir(context.workDir).filePath(QStringLiteral("start.png")));
+            if (!start)
+                return start.errors();
+            const Result<QString> cut = coverMaskToFile(context.input(QStringLiteral("mask")).media(), size,
+                                                        QDir(context.workDir).filePath(QStringLiteral("mask-put-back.png")));
+            if (!cut)
+                return cut.errors();
+            const Result<MediaHandle> startHandle = MediaHandle::probe(MediaType::Image, start.value(), *context.hashes);
+            const Result<MediaHandle> maskHandle = MediaHandle::probe(MediaType::Image, cut.value(), *context.hashes);
+            if (!startHandle)
+                return startHandle.errors();
+            if (!maskHandle)
+                return maskHandle.errors();
+            const Result<Pixels> original = pixelsOf(Value(startHandle.value()), QStringLiteral("image"));
+            const Result<Pixels> through = maskOf(Value(maskHandle.value()), QStringLiteral("mask"));
+            const Result<Pixels> redrawn = pixelsOf(Value(drawn), QStringLiteral("image"));
+            if (!original)
+                return original.errors();
+            if (!through)
+                return through.errors();
+            if (!redrawn)
+                return redrawn.errors();
+            if (rangeOf(through.value()).full) {
+                Error full = makeInputError(QStringLiteral("mask_full"), QStringLiteral("mask"),
+                                            QStringLiteral("Everything is masked: this redraws the whole picture, as plain image to image."),
+                                            QStringLiteral("Paint only the part to change."));
+                full.severity = Error::Severity::Warning;
+                warnings << full;
+            }
+            const Result<Values> made =
+                imageOutput(compositeMasked(original.value(), redrawn.value(), &through.value(), 0, 0));
+            if (!made)
+                return made.errors();
+            return made->value(QStringLiteral("image"));
+        } catch (const vips::VError &error) {
+            Error unreadable = vipsError(error, QStringLiteral("media_unreadable"));
+            unreadable.message = QStringLiteral("Cannot put the picture back through the mask: %1").arg(unreadable.message);
+            return unreadable;
+        }
     }
 
     // The size against the model's limits (8.1), blamed on the input that set it.

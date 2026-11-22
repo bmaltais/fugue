@@ -69,7 +69,7 @@ bool clipboardHasImage(const QMimeData &data);
 QStringList clipboardFiles(const QMimeData &data);
 
 // Makes a workflow saved from `from` (its file until now, empty when unsaved) to `to` portable
-// (Appendix A): every `file` input literal that names a file inside the inputs folder (paths.h
+// (Appendix A): every input-file literal (a `file` input's picture, a `mask` input's painted mask: InputSpec::holdsInputFile) that names a file inside the inputs folder (paths.h
 // inputsDir), or inside the `inputs` folder beside `from`, is copied into the `inputs` folder
 // beside `to` under the same name and the literal becomes `inputs/<name>`, relative to the
 // workflow's folder; a full path into that folder becomes relative too. Any other relative
@@ -78,12 +78,12 @@ QStringList clipboardFiles(const QMimeData &data);
 // when every copy worked.
 Errors relocateInputs(Document &document, const Registry &registry, const QString &from, const QString &to);
 
-// Makes every relative `file` input literal the full path it names from `from`'s folder (a
+// Makes every relative input-file literal the full path it names from `from`'s folder (a
 // workflow file), so the document names the same files from any folder. Nothing when `from`
 // is empty: a relative path in an unsaved workflow names nothing.
 void makeInputsAbsolute(Document &document, const Registry &registry, const QString &from);
 
-// Takes into the inputs folder (storeImageFile) every image a `file` input literal names, by
+// Takes into the inputs folder (storeImageFile) every image an input-file literal names, by
 // its full path, inside `folder` (a template's), and points the literal at the stored copy, so
 // the document no longer leans on that folder. The document is changed only when every image
 // was stored.

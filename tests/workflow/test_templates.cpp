@@ -769,7 +769,8 @@ private slots:
             QVERIFY2(categories.contains(t.category),
                      qPrintable(QStringLiteral("%1 is in the category \"%2\", which categories.json lacks").arg(t.id, t.category)));
         }
-        for (const char *wanted : {"text-to-video", "image-to-video", "image-chain-to-video", "image-upscale", "video-upscale"})
+        for (const char *wanted : {"text-to-video", "image-to-video", "image-chain-to-video", "image-upscale", "video-upscale",
+                                   "inpaint-region", "outpaint"})
             QVERIFY2(found.contains(QLatin1String(wanted)),
                      qPrintable(QStringLiteral("the template %1 is not here").arg(wanted) + fix));
         // The two categories hold what they are for.
@@ -778,6 +779,40 @@ private slots:
         QCOMPARE(library.find("video-upscale")->category, QStringLiteral("upscale"));
         QCOMPARE(library.find("image-upscale")->categoryTitle, QStringLiteral("Upscaling"));
         QCOMPARE(library.find("text-to-video")->categoryTitle, QStringLiteral("Video"));
+    }
+
+    // The two masking templates (#177, spec 14.4): in Image editing, with the painted sample mask
+    // beside the picture (an input file, as a picture is), and the settings that a group or a node
+    // leaves without a default set for Klein: 4 steps, guidance 1.
+    void theMaskTemplatesCarryTheirMaskAndSetStepsAndGuidance() {
+        const QString root = QStringLiteral(FUGUE_SOURCE_DIR "/templates");
+        QVERIFY2(bundledProblem(root).isEmpty(), qPrintable(bundledProblem(root)));
+        Fixture f;
+        const TemplateLibrary library({{root, false}}, &f.registry);
+        for (const char *id : {"inpaint-region", "outpaint"}) {
+            const auto found = library.find(id);
+            QVERIFY2(found.has_value(), id);
+            const Template *t = &*found;
+            QCOMPARE(t->category, QStringLiteral("edit"));
+            const Document document = Document::loadFile(t->workflow).value();
+            QVERIFY2(!hasErrors(compile(document, f.registry).problems()), id);
+            for (const QString &node : {QStringLiteral("inpaint"), QStringLiteral("sample")}) {
+                if (!document.graph.nodes.contains(node))
+                    continue;
+                const auto &inputs = document.graph.nodes.value(node).inputs;
+                QCOMPARE(inputs.value("steps").literal().toInt(), 4);
+                QCOMPARE(inputs.value("guidance").literal().toDouble(), 1.0);
+            }
+        }
+        const Document inpaint = Document::loadFile(library.find("inpaint-region")->workflow).value();
+        const QString mask = inpaint.graph.nodes.value("load").inputs.value("mask").literal().toString();
+        QVERIFY(mask.startsWith("inputs/"));
+        QVERIFY2(QFileInfo::exists(QFileInfo(library.find("inpaint-region")->workflow).dir().filePath(mask)), qPrintable(mask));
+        QVERIFY(inpaint.groups.contains("fugue/inpaint-crop-stitch"));
+        // Outpaint's Pad: 256 px each side, and the padded picture is about a megapixel.
+        const Document outpaint = Document::loadFile(library.find("outpaint")->workflow).value();
+        QCOMPARE(outpaint.graph.nodes.value("pad").inputs.value("left").literal().toInt(), 256);
+        QCOMPARE(outpaint.graph.nodes.value("pad").inputs.value("right").literal().toInt(), 256);
     }
 };
 

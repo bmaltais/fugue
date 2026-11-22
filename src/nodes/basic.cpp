@@ -9,6 +9,8 @@
 #include "engine/file_hashes.h"
 #include "engine/media.h"
 #include "nodes/kernels.h"
+#include "nodes/mask_input.h"
+#include "nodes/pixel_io.h"
 #include "nodes/save_files.h"
 
 namespace fugue::nodes {
@@ -54,7 +56,7 @@ public:
         case MediaType::Image:
             values.insert("width", Value(media->width()));
             values.insert("height", Value(media->height()));
-            break;
+            return withMask(context, media.value(), std::move(values));
         case MediaType::Video:
             values.insert("width", Value(media->width()));
             values.insert("height", Value(media->height()));
@@ -70,6 +72,19 @@ public:
     }
 
 private:
+    // Load Image 1.1's `mask` output (14.4), beside its image: a painted mask, else 1 - alpha, else 0.
+    static Result<Values> withMask(const NodeContext &context, const MediaHandle &picture, Values values) {
+        Errors warnings;
+        Result<Pixels> mask = loadImageMask(context, picture, warnings);
+        if (!mask.ok())
+            return Result<Values>(mask.errors());
+        const Result<Values> made = namedOutput(std::move(mask.value()), "mask");
+        if (!made.ok())
+            return made;
+        values.insert("mask", made.value().value("mask"));
+        return Result<Values>(values, warnings);
+    }
+
     const MediaType m_type;
 };
 
@@ -154,6 +169,7 @@ void addBasicKernels(Kernels &kernels) {
     kernels.add("fugue/load-audio", std::make_shared<LoadMediaKernel>(MediaType::Audio));
     kernels.add("fugue/save-image", std::make_shared<SaveImageKernel>());
     kernels.add("fugue/preview", std::make_shared<PreviewKernel>());
+    addMaskInputKernels(kernels);
 }
 
 } // namespace fugue::nodes

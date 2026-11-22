@@ -655,6 +655,8 @@ FocusScope {
                 canvas.model.endMove()
                 if (canvas.model.isCrop(hit))
                     canvas.openCrop(hit)
+                else if (canvas.model.maskState(hit).over)
+                    canvas.openMask(hit) // Paint Mask: its picture is the editor's; Load Image's is the large view
                 else
                     canvas.openImage(hit)
                 return
@@ -717,6 +719,36 @@ FocusScope {
     Component {
         id: mediaDialogComponent
         MediaDialog {}
+    }
+    // The mask editor of a node with a mask input (#174, spec 14.4), made on the first use: the picture
+    // is the node's slot (Load Image's, or the one arriving at Paint Mask's image), the mask the one
+    // stored; OK sets the input as one undo step. Nothing opens without a picture: a notice says why.
+    function openMask(node) {
+        const state = model.maskState(node)
+        if (state.input === undefined || state.editable === false)
+            return
+        const source = App.runs ? App.runs.imageUrl(node) : ""
+        const size = model.previewSize(node)
+        if (String(source) === "" || size.width <= 0) {
+            App.workflows.notify(state.over ? qsTr("Run the node above first: there is no picture to paint on yet.")
+                                            : qsTr("Pick an image first: there is no picture to paint on yet."))
+            return
+        }
+        if (!maskDialog)
+            maskDialog = maskDialogComponent.createObject(canvas, {look: App.theme.look})
+        maskDialog.nodeId = node
+        maskDialog.imageSource = source
+        maskDialog.imageSize = Qt.size(size.width, size.height)
+        maskDialog.maskPath = App.runs.inputFile(state.path)
+        maskDialog.open()
+    }
+    property var maskDialog: null
+    Component {
+        id: maskDialogComponent
+        MaskEditor {
+            property string nodeId
+            onSaved: path => canvas.model.setMaskPath(nodeId, path)
+        }
     }
     function openCrop(node) {
         if (!cropDialog)
@@ -1122,7 +1154,7 @@ FocusScope {
             id: targetRing
             readonly property string shape: canvas.hoverPort.shape || "circle"
             readonly property bool round: shape === "circle" || shape === "ring"
-            readonly property int mark: canvas.hoverPort.wired && shape !== "ring" ? 14 : 10
+            readonly property int mark: canvas.hoverPort.wired && shape !== "ring" && canvas.hoverPort.role !== "mask" ? 14 : 10
             visible: canvas.dragging && canvas.hoverPort.node !== undefined && canvas.hoverProblem === ""
             x: (canvas.hoverPort.x || 0) - width / 2
             y: (canvas.hoverPort.y || 0) - height / 2

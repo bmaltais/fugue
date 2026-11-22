@@ -22,7 +22,7 @@ Rectangle {
     required property string nodeId
     required property var port  // CanvasModel::portMap
     required property CanvasLook look  // App.theme.look (look.h)
-    property Item canvasView    // takes the focus back when an edit ends
+    property var canvasView     // the FugueCanvas: takes the focus back when an edit ends, opens the mask editor
     property Item nodeItem      // its rows, for Tab
     property Item row           // raised while the multiline editor covers the rows below
 
@@ -80,7 +80,8 @@ Rectangle {
         : kind === "choice" || kind === "model" ? "chevron-down"
         : kind === "seed" ? "dices"
         : kind === "folder" ? "folder"
-        : kind === "file" ? "file" : ""
+        : kind === "file" ? "file"
+        : kind === "mask" ? "brush" : ""
     // A 6.2 color (#rrggbb, #rrggbbaa) as QML reads one (#aarrggbb), or `otherwise`.
     function colorOf(text, otherwise) {
         if (!/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(text))
@@ -257,6 +258,8 @@ Rectangle {
             return openEditor()
         case "toggle":
             return edits.setValue(nodeId, name, !on)
+        case "mask": // the whole row is the Paint mask button (spec 14.4): the editor opens on the node's picture
+            return canvasView ? canvasView.openMask(nodeId) : undefined
         case "choice":
             return openMenu(choiceEntries())
         case "seed":

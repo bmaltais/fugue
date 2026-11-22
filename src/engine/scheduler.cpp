@@ -776,13 +776,13 @@ private:
                     return resolved;
                 }
             }
-            const bool pathLiteral = (spec.widget() == QLatin1String("file") || spec.widget() == QLatin1String("folder")) &&
+            const bool pathLiteral = (spec.holdsInputFile() || spec.widget() == QLatin1String("folder")) &&
                                      value.kind() == Value::Kind::Json && value.json().isString();
             // Trimmed and "~" expanded here, once: the node reads, the key names and the share
             // copy judges (share_copy.h) the same path. A relative file is the workflow folder's
             // (file_roots.h inputFilePath); a relative folder is the node's to place (Save Image's
             // is under the output folder).
-            if (pathLiteral && spec.widget() == QLatin1String("file")) {
+            if (pathLiteral && spec.holdsInputFile()) {
                 const Result<QString> located = inputFilePath(value.text(), m_options.workflow, spec.name);
                 if (!located) {
                     resolved.problem = located.error();
@@ -795,7 +795,7 @@ private:
             n.inputs.insert(spec.name, value);
             // A file read by path is keyed by its content, not its path (10.1). Hashing reads
             // it, so the read roots (13.6) are checked first, cached result or not.
-            if (pathLiteral && spec.widget() == QLatin1String("file") && m_options.roots) {
+            if (pathLiteral && spec.holdsInputFile() && m_options.roots) {
                 const Result<QString> readable = m_options.roots->checkRead(value.text(), spec.name);
                 if (!readable) {
                     resolved.problem = readable.error();
@@ -805,7 +805,7 @@ private:
                 value = Value(readable.value());
                 n.inputs.insert(spec.name, value);
             }
-            if (pathLiteral && spec.widget() == QLatin1String("file")) {
+            if (pathLiteral && spec.holdsInputFile()) {
                 const QString hash = m_env.hashes->hash(value.text());
                 if (!hash.isEmpty()) {
                     resolved.keyInputs.insert(spec.name, QJsonObject{{"file", hash}});

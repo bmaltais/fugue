@@ -314,7 +314,7 @@ Errors relocateInputs(Document &document, const Registry &registry, const QStrin
                 continue;
             for (auto in = it->inputs.begin(); in != it->inputs.end(); ++in) {
                 const InputSpec *spec = type->input(in.key());
-                if (!spec || spec->widget() != QLatin1String("file") || in->kind() != InputValue::Kind::Literal
+                if (!spec || !spec->holdsInputFile() || in->kind() != InputValue::Kind::Literal
                     || !in->literal().isString())
                     continue;
                 const QString text = in->literal().toString();

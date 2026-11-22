@@ -253,7 +253,8 @@ latent the model, which VAE Decode decodes with; an Empty Latent's is only the s
 (`"empty": true`), the Sampler starting from noise. A video latent (#105) is the same file kind
 with `frames` and `fps` in its `meta` too; the tensor has the time axis, tens of MB for a few
 seconds, and travels to a paired host like any latent. Wan's 4 n + 1 frames: the model rounds
-another count to one. `fugue/controlnet` and
+another count to one. `fugue/stitch` (#176, 14.4) is a data type too: a descriptor alone, where a crop came from.
+`fugue/controlnet` and
 `fugue/upscale-model` come with their nodes.
 
 ---
@@ -1117,7 +1118,8 @@ A node asks for a capability, never a server.
 Capability ids are open: a provider module can advertise a new one and a node pack can ask for it.
 
 A provider advertises, per capability: the models it can serve (as resource handles), properties
-used for routing (model family, edit support, accepted input kinds), limits (maximum reference
+used for routing (model family, edit support, accepted input kinds; `inputs`, a list of the optional
+inputs of the capability that not every provider takes, so far `"mask"` for `image.generate`), limits (maximum reference
 images, minimum and maximum size, size multiple), defaults (steps, guidance, size) and status.
 
 Standard parameters for the two M1 capabilities. A provider ignores an optional parameter it
@@ -1177,6 +1179,10 @@ A provider instance is a configured use of a provider module, stored in
 
 - A node's provider is `auto` by default: the first enabled, ready instance, in the user's
   order, that offers the capability with the required properties and the requested model.
+- A node may also state a preference (`Requirement::preferred`, the same shape as the properties): with
+  no model chosen, a ready model that has them wins over an earlier one that has not, and none having
+  them fails nothing. The selection lists the ready models that have them (`preferredOffers`), so the
+  node can name them when the one it got cannot (Generate Image's mask, [14.4](#144-masking-and-inpainting-167)).
 - A node can pin an instance by name, and a workflow can pin one for all its nodes (`provider`
   and `graph.provider` in [4.2](#42-graph)). `fugue run --provider <name>` pins one for a single
   run. A pin is a name only; a pinned name that is not configured is the error `unknown_provider`.
@@ -1311,6 +1317,16 @@ omarchy-local-ai at commit 703ae0c when the provider was built):
   previews are requested for images.
 - Video jobs must send every LoRA the server lists in its capabilities; the server does not
   apply them on its own.
+- A mask (#175, [14.4](#144-masking-and-inpainting-167)): a model's `image.generate` offer has the
+  property `inputs: ["mask"]` when its server's capabilities say it takes one, that is
+  `features_by_mode.img_gen.mask_image` is true (else the deprecated top-level `features.mask_image`
+  when there is no mode-aware object; a features list that names it counts too). Read at stable-diffusion.cpp
+  532d2c15's api.md: `mask_image` is one of `features_by_mode.img_gen`'s flags and on by default
+  (`mask_image` is a default-enabled recipe feature), a one-channel image of the start image's size. The provider
+  sends the job input `mask` as `mask_image` (base64 of the 8-bit gray PNG, white redrawn) beside
+  `init_image` and `strength`, and only then: a job that has a mask for a model without the property is
+  `mask_unsupported` before anything is posted, never sent without it (the server would redraw the whole
+  picture). Not run against a live server (no sd-server here); the tests use a fake one.
 - Video (#28): each `kind: video` row is a `fugue/video-model` of `video.generate`, probed with
   `GET /sdcpp/v1/capabilities` (defaults from `defaults_by_mode.vid_gen`: size, steps, guidance, `fps`).
   A job is `POST /sdcpp/v1/vid_gen` and the same job API as images; it asks for WebM with the VAE
@@ -2583,7 +2599,7 @@ merged, its `node.json` is the source of truth.
 | `fugue/load-image` | `file` (file picker) | `image`, `width`, `height` | Keyed by the file's content hash. The image is upright: an EXIF orientation is applied, and `width`, `height` are the size it is seen at. |
 | `fugue/save-image` | `image`, `name`, `format` (png, webp), `embed` (full, no-prompts, none), `folder` (optional) | `file` | Sink. Writes to the output folder. Never overwrites a file: `<name>.png`, else `<name>-2.png`, `-3`, and so on, also when several Save nodes write one name at once. [11.7](#117-embedding-in-outputs). |
 | `fugue/preview` | `value` (any) | none | Sink. Shows the value on the node; from the CLI it is in the run result. |
-| `fugue/generate-image` | `prompt`, `negative_prompt`, `model` (optional), `width` (optional), `height` (optional), `steps` (optional), `guidance` (optional), `seed`, `image` (optional start image), `strength` | `image`, `seed`, `width`, `height`, `model` | Capability `image.generate`. Unset optional inputs use the model's defaults; an unset size is the start image's, else the model's default; a default of 0 (sd-server's "the model's own") is no default, so the server picks. |
+| `fugue/generate-image` | `prompt`, `negative_prompt`, `model` (optional), `width` (optional), `height` (optional), `steps` (optional), `guidance` (optional), `seed`, `image` (optional start image), `strength`, `mask` (optional, 1.1.0: [14.4](#144-masking-and-inpainting-167)) | `image`, `seed`, `width`, `height`, `model` | Capability `image.generate`. Unset optional inputs use the model's defaults; an unset size is the start image's, else the model's default; a default of 0 (sd-server's "the model's own") is no default, so the server picks. |
 | `fugue/edit-image` | `instruction`, `images` (list, 1 to the model's limit, else 4), `model` (optional), `steps` (optional), `seed` | `image`, `seed`, `width`, `height`, `model` | Capability `image.edit`; `instruction` is sent as its `prompt`. |
 | `fugue/resize` | `image`, `width`, `height`, `fit` (stretch, contain, cover), `method` (nearest, bilinear, bicubic, lanczos, area) | `image` | ComfyUI's resampling. `contain` fits inside the box without padding, so the result can be smaller than the box on one side. |
 | `fugue/resize-megapixels` | `image`, `megapixels` (default 1), `multiple` (advanced, default 16), `method` (as Resize, default lanczos) | `image`, `width`, `height` | ComfyUI's ImageScaleToTotalPixels: each side is `round(side * sqrt(megapixels * 1024 * 1024 / (W * H)) / multiple) * multiple`, rounded half to even, then stretched with Resize's resampling. No crop, so the shape can drift by the rounding. A side that rounds to 0 becomes `multiple`. `width` and `height` can feed an Empty Latent. |
@@ -2711,8 +2727,8 @@ FLUX.1 Fill staged picture differs from the single run's.
 
 ### 14.4 Masking and inpainting (#167)
 
-Designed; the staged path in the helper and the nodes is built (#173) and the nodes of #171 and the mask editor (#172) are built; the parts are the issues at the end of this section, and each part says here what has
-shipped. The research and each choice with its confidence are in Appendix A (the rows marked
+Built: everything in #167 is built. The pieces are the issues at the end of this section, and each says here what shipped
+(#171 to #177). The research and each choice with its confidence are in Appendix A (the rows marked
 #167); the person's guide is [masking.md](masking.md).
 
 **Shipped (#171):** the `role` manifest field (6.1; `src/engine/node_type.*`) and the nodes Composite
@@ -2720,9 +2736,41 @@ Masked, Feather Mask, Threshold Mask, Combine Masks, Fill Masked and Overlay Mas
 for the kernels, `src/nodes/mask_ops.*` for the arithmetic, plain functions on float buffers that
 Stitch and Generate Image call as well; `pixel_io.*` is the reading and writing of buffers that
 `pixel.cpp` and `mask.cpp` share). The rows of the table below that are not marked as shipped are
-still to come. Parity tests against ComfyUI's own outputs cover Composite Masked, Threshold Mask and
+still to come, except those marked shipped below. Parity tests against ComfyUI's own outputs cover Composite Masked, Threshold Mask and
 Combine Masks (`tests/nodes/golden/make_mask.py`, `mask.json`); Feather Mask and Fill Masked have
 property tests (`tests/nodes/test_mask_nodes.cpp`).
+
+**Shipped (#176):** Crop to Mask and Stitch (`src/nodes/crop_stitch.cpp` for the nodes,
+`src/nodes/crop_stitch_ops.*` for the arithmetic: plain functions on float buffers), the declared
+type `fugue/stitch`, and the group `fugue/inpaint-crop-stitch`. Tests: `tests/nodes/test_crop_stitch.cpp`
+(the box rule, the sizes, crop then stitch, the handle's hash, the errors, the group on the fake
+helper). No ComfyUI golden: the size rule is Resize to Megapixels' (checked in #72's tests), the
+resampling and the feathering are the shared kernels, and the community Inpaint Crop and Stitch node
+is GPL, so its behaviour was taken from its README only; what is new is the box and the stitch,
+which the tests state as properties (an untouched crop gives the original back, outside the box is
+byte for byte the original's).
+
+**Shipped (#177):** the two templates `inpaint-region` and `outpaint` in fugue-workflows (category `edit`,
+"Image editing"; the `templates` submodule), and the finished [masking.md](masking.md) with its pictures
+(`docs/images/mask-*.png`, `inpaint-*.png`, `outpaint-graph.png`, made by the offscreen tests of
+`test_readme_shots`). Both were run through `fugue run` on an RTX 3090 with FLUX.2 Klein 9B Q8_0 by the
+staged path, from a helper built on the patched pin. `inpaint-region`: the 1024 px sample (a reading
+nook made with Fugue, shared with the `flux2-klein-9b-edit-2-refs` template) with an armchair painted
+over (`inputs/reading-nook-mask-<hash>.png`), the group with prompt, seed random, Steps 4, Guidance 1,
+Denoise 1, Padding 64, Megapixels 1, Blend 16; Save Image and Preview. The armchair became a yellow
+velvet one with its legs, in the lamp's light, and the result equals the original at every pixel more than 20 px
+from the mask (the 16 px Blend is the only mixing; 0.4 of 255 at 16 px); about 25 s a run after the first (the models load once).
+`outpaint`: Load Image (the cat of the edit templates, 768 px square, so the padded one is 1280 x 768,
+0.98 megapixel), Pad 256 left and right with feathering 40, Text Encode, VAE Encode (padded, Pad's
+mask), Sampler (euler, 4 steps, guidance 1, denoise 1), VAE Decode, Composite Masked (padded, result,
+Pad's mask), Save Image and Preview; about 18 s a run after the first. Both borders are drawn from the
+prompt, with no visible seam (checked at 2x). Text Encode does not take the padded picture as a
+reference here: with it Klein at 4 steps reproduced Pad's gray border (the old content kept, Appendix A);
+the inpaint group keeps its reference, where the same test without it gave a chair with no legs, off the
+old one's place. Decision: reference on for the crop, off for the padded picture. Load Image 1.1's
+Paint mask row made its node 28 px taller, which put it over the prompt in the layouts of `image-to-video`
+and `wan22-i2v` after a run (`test_template_overlap`); their prompts moved down 40 px. `scripts/check_doc_links.py`
+checks the links and headings of the README and docs.
 
 **The mask.** A mask stays an `image` with one channel (2.1), values 0 to 1, where 1 is the part
 to change and 0 the part to keep: the polarity of Pad, of ComfyUI's inpaint nodes, of
@@ -2767,12 +2815,21 @@ so a pack's node gets it too:
 - Saving: OK writes the buffer as an 8-bit gray PNG with `storeImage` (the inputs folder, named
   `<picture stem>-mask-<10 hex>.png`; the same bytes are one file) and the input's literal
   becomes its path. A mask of all 0 empties the literal: no mask.
-- Face: the picture slot shows the picture with the mask over it, and a Paint mask button
-  (`ViewButton`, 28 px) under it. On Paint Mask a double click on the picture opens the editor,
-  as Crop's opens the crop window; on Load Image a double click keeps opening the large view.
+- Face (shipped, #174): the picture slot shows the picture with the mask over it (`MaskNodeView.qml`,
+  made at full detail for a node whose mask is painted; the mask is read at no more than 1024 px a
+  side), and the `mask` input's own row is the Paint mask button: the full 24 px row, the label
+  "Paint mask", the state ("Painted" or "None") and a brush glyph at its right, a click opens the
+  editor on the node's picture. A row, not a 28 px button under the picture, so the node's layout and
+  height rules stay as they are. Without a picture (Load Image with no file, Paint Mask whose input
+  has not run) it says so in a notice. On Paint Mask a double click on the picture opens the editor,
+  as Crop's opens the crop window; on Load Image a double click keeps opening the large view. A
+  node with a `mask` input over an image input shows that input's picture, as Crop does.
 - Workflow files: the file a `mask` input names is an input file, as a `file` input's is. Saving
   copies it into `inputs/` (`relocateInputs`), a package carries it (11.5) and a template's is
-  taken in (11.10). One predicate says which inputs hold such files, for all three.
+  taken in (11.10). One predicate says which inputs hold such files, for all three
+  (`InputSpec::holdsInputFile`, shipped #174: widget `file` or `mask`; `forEachFileLiteral`, the
+  scheduler's path resolution, read-root check and content hash, and the share copy's path kind use
+  it too, so a mask is keyed by its bytes like a picture).
 - Widget field: an input of widget `mask` names, in `over`, the image input it is painted over
   (6.1); Load Image's paints over its own file.
 
@@ -2782,27 +2839,31 @@ or copied). Mask outputs carry the role.
 
 | Type id | Inputs | Outputs | Notes |
 | --- | --- | --- | --- |
-| `fugue/load-image` 1.1.0 | adds `mask` (widget `mask`, optional) | adds `mask` | The painted mask; else 1 − alpha when the file has alpha (ComfyUI's Load Image); else all 0. A mask painted on another size is scaled to the picture (bilinear) with `mask_resized`. |
-| `fugue/paint-mask` | `image`, `mask` (widget `mask`, over `image`) | `mask` | A mask painted over any picture, a generated one too. Unpainted: all 0. |
+| `fugue/load-image` 1.1.0 (shipped, #174) | adds `mask` (widget `mask`, optional) | adds `mask` | The painted mask; else 1 − alpha when the file has alpha (ComfyUI's Load Image); else all 0. A mask painted on another size is scaled to the picture (bilinear) with `mask_resized`. |
+| `fugue/paint-mask` 1.0.0 (shipped, #174) | `image`, `mask` (widget `mask`, over `image`, optional) | `mask` | A mask painted over any picture, a generated one too. Unpainted: all 0. |
 | `fugue/composite-masked` 1.0.0 (shipped) | `destination`, `source`, `mask` (optional), `x`, `y`, `resize_source` (advanced) | `image` | ComfyUI's ImageCompositeMasked: the source at x, y over the destination, out = d × (1 − m) + s × m; no mask is all of the source; `resize_source` stretches the source to the destination first; the mask is resized to the source (bilinear). Shipped: `x` and `y` run 0 to 16384, ComfyUI's range (its nodes fail on a negative one, so there is no parity case for it); the arithmetic function also takes a negative offset, cutting what lies before the edge, and a source wholly outside leaves the destination as it is. A source with an alpha channel onto a destination without drops it; without one onto a destination with it gives alpha 1. |
 | `fugue/feather-mask` 1.0.0 (shipped) | `mask`, `radius` (0 to 512 px, default 16), `direction` (outward, inward, centered; default outward) | `mask` | A soft edge `radius` wide: b = the mask blurred (three box passes, close to a Gaussian of sigma radius / 2); outward max(m, b), inward min(m, b), centered b. Outward keeps all that is painted and fades into the rest; inward never reaches a pixel outside the paint. Not ComfyUI's FeatherMask, which fades from the picture's borders. Shipped: each of the three box passes has the variance radius^2 / 12, so together they are a Gaussian of sigma radius / 2, and the box's width is continuous in the radius (the two pixels beyond its ends count by a fraction, so a radius of 1 still softens). The picture's edge repeats beyond it, so a mask that reaches the edge stays full there. Time grows with the pixels, not the radius: 512 px on 4 MP takes about 40 ms. |
 | `fugue/threshold-mask` 1.0.0 (shipped) | `mask`, `value` (default 0.5) | `mask` | ComfyUI's ThresholdMask: 1 where m > value, else 0. Shipped. |
 | `fugue/combine-masks` 1.0.0 (shipped) | `destination`, `source`, `operation` (multiply, add, subtract, and, or, xor), `x`, `y` | `mask` | ComfyUI's MaskComposite. Shipped: `x` and `y` run 0 to 16384; the result is held to 0 to 1; and, or and xor round half to even first, so 0.5 counts as off. |
 | `fugue/fill-masked` 1.0.0 (shipped) | `image`, `mask`, `mode` (gray, blur; default blur) | `image` | What lies under the mask before a redraw below denoise 1 (A1111's masked content "fill", Krita's pre-fill): gray is 0.5; blur spreads the colors around the mask into it (push-pull: averages of the kept pixels, coarse to fine). Where m = 0 nothing changes. Property tests, no parity (no permissive reference). Shipped: a mask of another size is stretched to the picture (bilinear). The blur weights each pixel by 1 - m, so a half-masked pixel counts half, and a fill is a convex mix of kept colors; with nothing kept it is gray. Where 0 < m < 1 the result is image x (1 - m) + fill x m. Gray gives alpha 1 on a picture with alpha; 4 MP takes about 130 ms. |
 | `fugue/overlay-mask` 1.0.0 (shipped) | `image`, `mask`, `color` (default `#ff3b30`), `opacity` (default 0.5) | `image` | The mask drawn over the picture, to check or save what is masked. A mask alone already shows as a gray picture in Preview. Shipped: out = image x (1 - a) + color x a with a = m x opacity; `color` is `#rrggbb`, `#rgb` or `#rrggbbaa` (the alpha multiplies the opacity); the picture's alpha channel is left alone. |
-| `fugue/crop-to-mask` | `image`, `mask`, `padding` (px, default 64), `megapixels` (default 1; 0 keeps the size), `multiple` (advanced, default 16) | `image`, `mask`, `stitch`, `width`, `height` | The box around every pixel with m > 0, grown by `padding` on each side, moved inside the picture where it sticks out and cut where the picture is smaller; then resized to Resize to Megapixels' size for the box (lanczos for the picture, bilinear for the mask), so a small region is redrawn at the model's resolution and a large one is not drawn above it. |
-| `fugue/stitch` | `stitch`, `image`, `blend` (px, default 16), `mask` (optional) | `image` | The redrawn crop put back: resized to the box (lanczos) and blended through the handle's mask (or `mask`, at the picture's size) feathered outward by `blend` (Feather Mask's kernel), cut at the box. Outside the box the original's pixels are kept byte for byte. |
+| `fugue/crop-to-mask` | `image`, `mask`, `padding` (px, default 64), `megapixels` (default 1; 0 keeps the size), `multiple` (advanced, default 16) | `image`, `mask`, `stitch`, `width`, `height` | The box around every pixel with m > 0, grown by `padding` on each side, moved inside the picture where it sticks out and cut where the picture is smaller; then resized to Resize to Megapixels' size for the box (lanczos for the picture, bilinear for the mask), so a small region is redrawn at the model's resolution and a large one is not drawn above it. Shipped (`fugue/crop-to-mask` 1.0.0): padding 0 to 4096, megapixels 0 to 16, `multiple` 1 to 256. The box is the bounds of the pixels above 0 (a faint stroke counts); grown by the padding it is moved inside the picture, and cut when the grown box is wider or taller than the picture, so a mask over half the picture, or a 1 px mask in a corner, still gives a box inside it. Its size is `sizeForMegapixels` of the box's aspect, no side above 4096 (a 1 x 4000 box at 1 MP would be 16 x 65536); with megapixels 0 it is the box's own size and nothing is resampled. A mask of another size than the picture is stretched to it (bilinear) with the warning `mask_resized`; an empty one is `mask_empty`. The crop keeps the picture's channels; the mask output is one channel in 0 to 1. |
+| `fugue/stitch` | `stitch`, `image`, `blend` (px, default 16), `mask` (optional) | `image` | The redrawn crop put back: resized to the box (lanczos) and blended through the handle's mask (or `mask`, at the picture's size) feathered outward by `blend` (Feather Mask's kernel), cut at the box. Outside the box the original's pixels are kept byte for byte. Shipped (`fugue/stitch` 1.0.0): blend 0 to 512. The mask is feathered over the whole picture and then cut at the box, so a mask that reaches the box's edge fades as it does anywhere; where the feathered mask is 0 the original is returned exactly (out = d x (1 - m) + s x m with m = 0), and a crop that was not resized and not changed gives the original back within float rounding. A mask of another size than the original is stretched to it. The redrawn picture must have the crop's shape to within 2% of its aspect ratio, any size: another size is resized to the box (an edit model may return a larger picture). A handle whose original or mask file has changed since Crop to Mask read it is `file_not_found` on `stitch`; a value that is not a stitch handle is `input_invalid`. |
 
 **The stitch handle.** A declared data type `fugue/stitch` (a diamond port, 2.2), a descriptor
-alone as an Empty Latent is (2.6): `{"data": "fugue/stitch", "hash", "meta": {"image": <the
+alone as an Empty Latent is (2.6; shipped: the file is `stitch.json` in Crop to Mask's folder and holds the `meta` as compact canonical JSON and nothing else, so what the scheduler hashes is the meta; the media handles it names are the inputs' own files, a mask of another size included, and Stitch checks their hashes): `{"data": "fugue/stitch", "hash", "meta": {"image": <the
 original's media handle>, "mask": <the mask's, at the original's size>, "box": {"x", "y",
 "width", "height"}, "size": {"width", "height"}}}`, the hash that of the canonical `meta`. So a
 Stitch cannot be fed a picture by mistake, and it needs no second wire from the original.
 
 **The group.** `fugue/inpaint-crop-stitch`, "Inpaint (crop and stitch)", shipped by the `fugue`
-pack as a group (6.1 `runtime.kind: "group"`; in the template's own definition until the
-built-in pack can carry one): Crop to Mask, Text Encode (the crop as its reference), VAE Encode
-(the crop and its mask), Sampler, VAE Decode, Stitch. Exposed: `model`, `image`, `mask`,
+pack as a group (6.1 `runtime.kind: "group"`). The built-in pack can carry one: `pack.json` lists
+the folder, whose `node.json` has `runtime: {"kind": "group", "definition": "group.fugue"}` and whose
+`group.fugue` (a document with an empty graph and the definition in `groups`, as the library writes
+it, 5.3) is compiled in as a resource beside it (CMakeLists.txt globs `group.fugue`);
+`loadLibraryGroup` and `embedGroupTypes` read it through the resource path as they read a file, so
+the template (#177) adds the group like any other and the workflow embeds the definition. Its nodes: Crop to Mask, Text Encode (the crop as its reference), VAE Encode
+(the crop and its mask), Sampler, VAE Decode, Stitch (inner ids `crop`, `encode`, `vae_encode`, `sample`, `decode`, `stitch`). Exposed: `model`, `image`, `mask`,
 `prompt`, `seed`, `steps`, `guidance`, `denoise` (default 1), `padding`, `megapixels`, `blend`;
 out: `image`.
 
@@ -2851,13 +2912,35 @@ out: `image`.
   request's seed, so SDXL from a VAE Encode (which has no seed) can differ from one `generate`
   run; image-to-image from a latent always could, so this is not a mask matter.
 
-**Generate Image** 1.1.0 takes an optional `mask` (only with `image`): the standard parameter
-`mask` of `image.generate` (8.1), an input, an 8-bit gray PNG of the start image's size, white
-redrawn. A provider says it takes one with `"mask"` in its `inputs` property; the `omarchy`
-provider does when the server's capabilities list `mask_image` (sd-server's native API: one
-channel) and sends it as `mask_image`. A provider that does not is `mask_unsupported` on `mask`
-before the job starts, never a silent full redraw. The result is put back over the start image
-through the mask (Composite Masked's kernel), so what is outside the mask is the start image's.
+**Generate Image** 1.1.0 (shipped, #175) takes an optional `mask` (role `mask`, only with `image`): the
+standard parameter `mask` of `image.generate` (8.1), an input, an 8-bit gray PNG of the start image's
+size, white redrawn. A provider says it takes one with `"mask"` in its `inputs` property (8.1); a provider
+that does not is `mask_unsupported` on `mask` before the job starts, never a silent full redraw.
+
+- Which providers. The `omarchy` provider does when the model's server lists `mask_image` in its
+  capabilities (8.7): sd-server's native API, one channel, sent as `mask_image`. The `fugue-helper`
+  provider does not offer `image.generate` at all (8.7): its way to a masked redraw is the staged path
+  above (VAE Encode with a mask, a Sampler), and `mask_unsupported` says so. The `http` module and
+  third-party provider modules declare `inputs: ["mask"]` in their `describe` (8.8) when they take one.
+  The message names the providers and models that can (the selection's `preferredOffers`) and, when
+  there are none, what to do (an Omarchy model whose sd-server lists `mask_image`, or the staged nodes).
+- Routing. With a mask and no model chosen, a ready model that takes one wins over an earlier one that
+  does not (8.3, `Requirement::preferred`), so a graph with a mask runs on the machine that can. A model
+  named on the node, or a pinned provider, is that one, and fails with `mask_unsupported`.
+- The mask is read as one channel and must be the start image's own size (else `node_failed` on `mask`,
+  as VAE Encode's); it is cut the way the start image is (scaled to cover the size the node sends, cut
+  from the middle, `image_cover`), so the two line up, and written as `mask.png` (8-bit gray) in the
+  node's folder. A mask that is already that size goes as it is. A mask with nothing painted is
+  `mask_empty`; one that covers everything is the warning `mask_full` (plain image to image). A mask without a start image is
+  `missing_input` on `image`.
+- Put back. The result is composited over the start image as it went to the model through the same
+  mask, with Composite Masked's kernel (`compositeMasked`, `mask_ops.h`): out = start x (1 - m) + drawn
+  x m, so what is outside the mask is the start image's, to the pixel, and the part that the model
+  redraws in whole latent blocks beyond the mask is put back too. The mask is used as given: a soft
+  edge is the person's Feather Mask in front of it (the library rounds the mask to 0 or 1 for the redraw
+  itself, so only the blend is soft). When the provider returns another size than asked, the start image
+  is cut to that size the same way. With no mask the node's request and result are what they were.
+- Cache: the mask is an input, so it is in the key.
 
 **Templates** (fugue-workflows, 11.10), both on the FLUX.2 Klein 9B files of the edit templates
 (Q8_0, Qwen3-8B, flux2-vae: the same hashes and sources), 4 steps, guidance 1, denoise 1, each
@@ -2867,7 +2950,7 @@ checked on an RTX 3090 before it ships, with a preview and its sample picture:
   sample mask), the group "Inpaint (crop and stitch)", Save Image and Preview. The prompt says
   what should be there.
 - `outpaint`, "Outpaint: extend a picture": Load Image, Pad (256 px left and right, feathering
-  40), Text Encode (the padded picture as its reference), VAE Encode (the padded picture and the
+  40), Text Encode (the prompt alone: the padded picture as a reference made Klein keep the gray border, Appendix A), VAE Encode (the padded picture and the
   pad's mask), Sampler, VAE Decode, Composite Masked (the padded picture, the result, Pad's
   feathered mask), Save Image. The sample picture is sized so the padded one is about 1 megapixel,
   the size the edit templates give Klein.
@@ -3136,6 +3219,7 @@ Building M2 made these further choices.
 | An optional number, slider or seed input with no value and no default shows "auto", dimmed, in its well (the run decides); a missing type's linked input takes the shape and color of the type it is linked to | 6.2, 3.6 | medium-high |
 | Images in (#53), research. ComfyUI (ComfyUI_frontend `usePaste.ts`, `app.ts` drop handler and `handleFile`, `useNodeImageUpload.ts`, read at main on 2026-11-19): a paste event looks at the clipboard items in order and takes the first `image/*` before any workflow text; with a Load Image selected it replaces that node's image, else a Load Image is created; a dropped file goes to the node under the pointer if that node handles it, else a workflow found in the file (PNG/WebP/JSON) wins and opens, else an image makes a Load Image node (several images: one node each, joined by a Batch Images node). The image is uploaded to the server's `input/` folder (`POST /upload/image`, the server renames a clash to `name (1).png` and skips an identical file), the widget holds the name, and a failed upload is a toast. There is no paste button; the combo's list shows the folder's files by name with a preview of the selected one, no thumbnails of the others. We match: image paste and drop create or replace a Load Image, a workflow in a dropped file opens as a workflow, one node per image. We improve: the original bytes are kept (a drop is copied byte for byte, a clipboard image keeps its best encoded type; only bare pixels become a lossless PNG), the file is named from the source name with a content hash so the same image is one file whatever it was called, a Paste button sits on the node, the picker lists recent inputs with thumbnails, a file manager's copy (`text/uri-list`) pastes like a drop, one undo step per paste, and a saved workflow carries its images with it | 14.1, 12.4 | medium-high |
 | Images in (#53), the rule. Order of the paste command: workflow data (`application/x-fugue`, or workflow JSON as text) first, then an image. An image is, in order: the encoded bytes of the first offered of `image/png`, `image/webp`, `image/avif`, `image/tiff`, `image/jpeg`, `image/gif`, `image/bmp` whose bytes really are an image (a wrong label is ignored), else the files of a `text/uri-list`, else a decoded `QImage` written as lossless PNG (never JPEG). The format and extension come from the bytes (PNG, JPEG `jpg`, WebP, GIF, TIFF `tif`, BMP, AVIF), checked again by libvips reading the header; a file that is not one of them, a damaged one, one over 256 MB or over 256 megapixels is refused with a message in the window banner and nothing changes. With exactly one Load Image selected the image replaces its `file`; otherwise a Load Image is made at the pointer (the view's center when the pointer is outside), selected, and the paste is one undo step. A dropped file is copied byte for byte (EXIF orientation, profile and an embedded workflow stay); it must be a regular file. Several images make one node each, 320 units apart, one undo step. A drop on a Load Image replaces its image even when the picture holds a workflow; elsewhere a picture with an embedded workflow opens as a workflow, and any other image is taken as an image | 14.1, 11.4 | medium-high |
+| The mask widget and its files (#174, #167). A `mask` input is `text` holding the path of an 8-bit gray PNG in the inputs folder; `over` names the image input it is painted over (none: the node's own `file`, as Load Image). The picture's file and hash never change: painting only sets the literal, as one undo step (`CanvasModel::setMaskPath`). One predicate, `InputSpec::holdsInputFile` (widget `file` or `mask`), says which inputs hold a file that travels with the workflow, and `forEachFileLiteral`, `relocateInputs`, `makeInputsAbsolute`, `takeInputsFrom`, the share package, the scheduler (relative path, read roots, content hash) and the share copy all use it. Load Image 1.1.0 gives `mask`: the painted mask, else 1 minus alpha when the file has alpha, else all 0 at the picture's size; a painted mask of another size is scaled bilinear with the warning `mask_resized`; a mask file that is gone is `file_not_found` on `mask`. Paint Mask has the `image` and the mask and gives it, all 0 unpainted. Decided: the Paint mask button is the `mask` input's row, not a 28 px `ViewButton` under the picture (a row keeps the face's layout and height rules and is already a full-width 24 px target; the spec text said button under the picture); a mask port is a hollow square with a 3 px frame, wired or not (the ring on the square), because the type color and shape already say image; the face overlays the mask at no more than 1024 px a side so a big picture does not cost a big texture; a node with a `mask` input over an image input shows that input's picture as Crop does, so any pack node can use the widget | 14.4, 6.1, 6.2, 11.2, 11.5, 11.10, 12.6 | medium-high |
 | Images in (#53), where they live. One folder for every workflow: `inputs` under the output folder (`~/Pictures/Fugue/inputs`, from the same lookup as Save nodes, so `XDG_PICTURES_DIR` and a localized folder are honored), chosen by the owner so the images are visible. A file is `<stem>-<first 10 hex of the SHA-256>.<real extension>`; the stem is the dropped file's name (last path component, extension cut, anything but letters, digits, `-`, `_`, `.` made `_`, leading dots dropped, at most 48 characters, `image` if nothing is left) or `pasted-YYYYMMDD-HHMMSS` for the clipboard (the clipboard names no source). A file already in the folder is reused whatever it was called, so the same image is one file, but only a regular file (never a symbolic link) with the same hash part and extension whose whole content is the same bytes: a name and a size prove nothing, since a run's Save Image may write into the folder. A file under the chosen name with other bytes is never replaced; the name takes `-2`, `-3` before the extension. Written atomically (`PartialFile`), the final path checked inside the folder with the file roots. Fugue never deletes from it. Cache keys stay the content hash of the file | 1.4, 14.1, 13.6 | medium-high |
 | Images in (#53), file roots. The inputs folder is under the output folder, so the default write roots cover it; it is also a default read root (the pictures folder may be set outside the home), and `fugue run` adds the `inputs` folder beside the workflow file it runs as a read root. Storing an image checks the write against roots of just the inputs folder, never wider. A dropped file the user chose is read without a roots check (an explicit gesture, as the file picker is) but must be a regular file | 13.6 | medium |
 | Images in (#53), saving. Save and Save As copy every file the workflow's `file` inputs name under the inputs folder into `inputs` beside the .fugue (same names), repoint those inputs and write, as one step: always, with no question (a question per save would be noise, and a portable file is what a saved workflow should be; the cost is a duplicate file, never a loss). The original stays. If a copy fails the save fails with the reason and nothing is rewritten. The repoint is an undo step ("Move images"). The repointed input holds `inputs/<name>`, relative to the workflow's folder, so the folder can be moved or shared whole; a full path into that `inputs` folder (written by an older save) becomes relative too. Save As to another folder copies the files of the old `inputs` folder along the same way (a different file already there under the name gets `-2`, `-3`), and any other relative path becomes the full path it led to, since it would lead nowhere from the new folder. A shared copy (11.5) keeps a relative path and replaces an absolute one by the bare file name, which then resolves beside the file | 11.2, 11.5, 14.1 | medium |
@@ -3306,9 +3390,11 @@ Building M4 made these further choices.
 | The mask enters the staged graph at VAE Encode (the latent carries it, as ComfyUI's Set Latent Noise Mask does), not at Text Encode or the Sampler: one place for every model. An inpaint model's masked picture lives in the conditioning in stable-diffusion.cpp, so one patch hook sets `c_concat` from the sample's own latents when it reads a conditioning, as a single run does; the alternative, giving Text Encode the picture and mask as well, would ask for the same wire twice | 8.10, 14.4 | medium-high |
 | The helper, not Fugue, decides how an image model uses a mask, by the library's version name (inpaint models: the picture; others: the start latent): it owns stable-diffusion.cpp's behaviour, and the names are checked when the pin moves. Fugue's `model_shape` only learns the inpaint models' wider input so it stops calling them mismatched | 8.10, 14.4 | medium |
 | Staged masks as built (#173, 2026-11-21): the Sampler sends the picture as VAE Encode did (the library scales both the same way) rather than pre-scaling it, and the mask pre-scaled by the nearest pixel, which the helper checks against the request's size; a mask of another size than the picture is `node_failed` on `mask`, not scaled; `mask_empty` is an error at VAE Encode and `mask_full` a warning there, not flags on the latent; an inpaint model ignores the start latent it is sent (its sample re-encodes the picture, so the VAE's noise draw is the one a single run makes); the hook sets `c_concat` only where a single run would (the unconditional and image-unconditional when the conditioning has them). Staged equals one `generate`, byte for byte, on an RTX 3090 for FLUX.2 Klein 4B, FLUX.1 Fill (fp8) and SDXL Inpaint; the FLUX.1 Fill staged picture without the hook differs, which is what the hook is for. The diffusers SDXL Inpaint UNet is read for its 9 channels from `conv_in.weight` only when it has 9 and `down_blocks.` (a VAE and a 4-channel UNet are not) | 8.10, 14.3, 14.4 | high |
+| Generate Image's mask as built (#175, 2026-11-21): the capability is a model property `inputs: ["mask"]` (not a new capability: the same models serve `image.generate` with or without a mask); the node checks it in `request()` from the selection and does not make it a hard routing requirement, because a hard one answers a named model that cannot with `model_missing` and gives no list of the ones that can, while a preference (`Requirement::preferred`, `Selection::preferredOffers`) picks a capable ready model for "any model" and lets the node say `mask_unsupported` with the names. The omarchy provider reads `features_by_mode.img_gen.mask_image` (the mirror `features` when there is no mode-aware object); it refuses a mask for a model without it rather than drop it. The mask must be the start image's size, as VAE Encode's (no `mask_resized` scaling here: a mask of another shape cut by cover would not line up with the picture). The put-back is over the picture as it went to the model, at the result's size. Not checked on a live sd-server (none on this machine) and not on a GPU (the helper has no `image.generate`) | 8.1, 8.3, 8.7, 14.4 | medium |
 | Composite back is a node in staged graphs (Composite Masked, Stitch), and built into Generate Image, the coarse node whose promise is that the outside is unchanged. Soft edges come from Feather Mask and Stitch's blend, in pixels, because the library rounds the mask in the latent | 14.4 | medium |
+| Crop and stitch as built (#176): the group ships from the built-in pack (a `group.fugue` resource beside its `node.json`; the loader, `loadLibraryGroup` and `embedGroupTypes` took it with no change), so #177's template only adds it. Choices made while building: the handle's `meta` names the picture and mask as the inputs' own media handles, so the cache and the hash follow them, and a mask of another size is kept as given and stretched in Stitch (a resized mask written to the node's folder would move into the cache's store and leave a stale path); the shape check compares the picture with the handle's own `size`, not with the box, so the rounding to a multiple of 16 never causes `stitch_mismatch`; no side of a crop passes 4096 (a sliver box would otherwise be 16 x 65536 at 1 MP); a crop that is not resized takes no resampling, so megapixels 0 with blend 0 returns the original byte for byte; the mask is feathered over the whole picture and cut at the box, not feathered inside the box, so the edge fades alike at the box's border; the box is the bounds of the pixels above 0, so a faint stroke counts and an 8-bit mask's 1/255 is not ignored; no ComfyUI golden (the formulas are the shared resize and feather kernels; the GPL Inpaint Crop and Stitch node was not read beyond its README); `mask_full` is not a warning of Crop to Mask (the box is the picture) | 14.4 | medium-high |
 | Names and defaults the owner may change: Feather Mask (`fugue/feather-mask`, a blur of the mask outward by default; ComfyUI's FeatherMask, which fades from the picture's borders, would convert to another node), Combine Masks for MaskComposite, Crop to Mask's padding 64 px and 1 megapixel, Stitch's blend 16 px, the overlay in the accent at 50% | 14.4 | medium |
-| Both templates run FLUX.2 Klein 9B, the files the edit templates already use, by masked sampling with the picture as a reference: the owner has the files and they are checked staged; Klein 4B (Apache-2.0) is the alternative with a licence for commercial use, FLUX.1 Fill the dedicated model once its file is at hand. Whether the reference helps or makes Klein keep the old content is checked on the 3090 when the template is built | 11.10, 14.4 | medium |
+| Both templates run FLUX.2 Klein 9B, the files the edit templates already use, by masked sampling with the picture as a reference: the owner has the files and they are checked staged; Klein 4B (Apache-2.0) is the alternative with a licence for commercial use, FLUX.1 Fill the dedicated model once its file is at hand. Whether the reference helps or makes Klein keep the old content was checked on the 3090 (#177, same seed, both ways): for the inpaint crop the reference helps (without it the chair lost its legs and its place), so the group keeps it; for the outpaint it makes Klein keep Pad's gray border, so the template gives Text Encode no reference | 11.10, 14.4 | high |
 | No differential diffusion now: the library rounds the mask, and thresholding it per step is a change to sampling code, which the patch's rule excludes (8.10). It waits for the owner: carry it in the patch, or propose it upstream (17) | 8.10, 14.4, 17 | high |
 | Automatic masks are optional packs of command nodes, not built in: each brings a model and a runtime (ONNX Runtime or Python) that Fugue's binary should not link, and their weights' licences vary (BRIA's are non-commercial) | 14.4 | medium-high |
 

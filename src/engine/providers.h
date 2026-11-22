@@ -81,6 +81,10 @@ struct Requirement {
     QString capability;
     // Each must hold for the model: equal values, or for an array every item present.
     QJsonObject properties;
+    // Like `properties`, but only a preference: with no model chosen, a ready model that has them
+    // wins over one that has not, and none having them fails nothing. The node checks what it needs
+    // in request() and says what else would do (Selection::preferredOffers). Generate Image: a mask.
+    QJsonObject preferred;
     // The node's model input; empty means any ready model (8.4).
     QJsonObject model;
     // Pins are names only. The node's own pin wins over the workflow's (graph.provider);
@@ -96,6 +100,9 @@ struct Selection {
     // Whether the provider reads this machine's files (Description::sharesFilesystem): when not,
     // a stage sends model handles, not paths, and leaves the checks of the files to the host.
     bool sharesFilesystem = true;
+    // "instance: model" of each ready model that has Requirement::preferred, for the node's message
+    // when the one chosen does not (8.1, 14.4). Empty when nothing was preferred.
+    QStringList preferredOffers;
 };
 
 // Chooses per 8.3: a pin when there is one, else the first enabled ready instance in the

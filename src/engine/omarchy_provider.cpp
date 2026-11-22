@@ -62,6 +62,19 @@ int httpStatus(QNetworkReply *reply) {
     return reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
 }
 
+// Whether the server's img_gen takes a mask: `features_by_mode.img_gen.mask_image`, else the
+// deprecated `features` mirror (api.md "GET /sdcpp/v1/capabilities"), a flag that is true. A list of
+// feature names that holds "mask_image" counts too (the recipes' `features`, api.md "Recipes").
+bool maskImageOf(const QJsonObject &capabilities) {
+    const auto lists = [](const QJsonValue &features) {
+        if (features.isObject())
+            return features.toObject().value("mask_image").toBool(false);
+        return features.isArray() && features.toArray().contains(QStringLiteral("mask_image"));
+    };
+    const QJsonValue byMode = capabilities.value("features_by_mode").toObject().value("img_gen");
+    return byMode.isUndefined() ? lists(capabilities.value("features")) : lists(byMode);
+}
+
 // Defaults (8.1 names) from sd-server's capabilities: defaults_by_mode.<mode> (img_gen or
 // vid_gen), or the deprecated `defaults` mirror (api.md "GET /sdcpp/v1/capabilities").
 QJsonObject defaultsOf(const QJsonObject &capabilities, const char *modeName = "img_gen") {
@@ -240,6 +253,10 @@ QJsonObject imgGenBody(const JobRequest &request, Errors *errors) {
             body.insert("init_image", encoded);
         if (params.contains("strength"))
             body.insert("strength", params.value("strength"));
+        // One channel, white redrawn (api.md "Channel expectations"). The caller has checked that the
+        // server lists the feature (maskImageOf); a request that has none sends no key at all.
+        if (request.inputs.contains("mask") && encodeInput(request.inputs.value("mask"), &encoded, errors))
+            body.insert("mask_image", encoded);
     }
     return body;
 }
@@ -583,6 +600,9 @@ void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> do
                 if (!text && !music) {
                     model.defaults = defaultsOf(body, video ? "vid_gen" : "img_gen");
                     model.limits = limitsOf(body);
+                    // `inputs` (8.1): what the model takes beyond the prompt that not every provider does.
+                    if (!video && maskImageOf(body))
+                        model.properties.insert("inputs", QJsonArray{"mask"});
                 }
                 if (video)
                     pending->discovery.servers[recipe].loras = body.value("loras").toArray();
@@ -694,6 +714,14 @@ void OmarchyProvider::submit(const JobRequest &request, Reply<QString> reply) {
         const bool video = request.capability == kVideoGenerate;
         const QJsonObject model = chosen->model.handle;
         const Server server = found->servers.value(model.value("name").toString());
+        // A mask goes only to a server that lists mask_image: otherwise it would be dropped and the
+        // whole picture redrawn (14.4). The node checks this before the job; so does the provider.
+        if (!video && request.inputs.contains("mask") &&
+            !chosen->model.properties.value("inputs").toArray().contains(QStringLiteral("mask")))
+            return reply(Result<QString>(makeError(
+                QStringLiteral("mask_unsupported"),
+                QStringLiteral("%1 does not take a mask: its server does not list mask_image.").arg(server.recipe),
+                QStringLiteral("Use a model whose server lists mask_image, or redraw the part staged with the Fugue helper."))));
         Errors errors;
         const QJsonObject body = video ? vidGenBody(request, server.loras, &errors) : imgGenBody(request, &errors);
         if (hasErrors(errors))

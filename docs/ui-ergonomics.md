@@ -34,13 +34,6 @@ Done when every added or moved control has a **Decisions** row that names the ru
 - Rule: canvas-look §4 and spec Appendix A. A port inside the corner square starts a wire.
 - Acceptance: at zoom 1, a left press at a port center that lies inside the corner square starts a link and does not call `beginResize`. A press in that square with no port still resizes.
 
-### Paint mask button on a node's face (#167, #174; the editor itself is built, see Decisions)
-
-- Files to come: `src/canvas/MaskNodeView.qml` (the face), `src/canvas/PortDot.qml` (the hollow mask port).
-- Planned: a Paint mask `ViewButton` (28px) under the picture; a double click on Paint Mask's picture opens the editor (`MaskEditor`, Components), Load Image's double click keeps the large view.
-- Rules to meet: Floor (28px), Learned place (Load Image's double click), Posture (the face keeps the canvas's density).
-- Acceptance: the change that builds the face moves this row to **Decisions**.
-
 ## Not scheduled
 
 Drafts from the 2026-11-20 pass that the rules above already answered. A window change leaves these as they are until the owner moves the row to **Open**.
@@ -56,6 +49,14 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 | Selection toolbar | one row of glyphs | canvas-look §11, the ComfyUI toolbox |
 
 ## Decisions
+
+### 2026-11-21 Paint mask row and hollow mask port (#174)
+
+- Control: the `mask` widget row in `src/canvas/widgets/InputWidget.qml` (kind `mask`), `src/canvas/MaskNodeView.qml` (the picture with the mask over it), the hollow port in `src/canvas/PortDot.qml`, `FugueCanvas.openMask`.
+- Old: the Open row planned a 28px `ViewButton` under the picture.
+- New: the input's own row (the full 24px well across the node, label "Paint mask" at the left, "Painted" or "None" and a brush glyph at the right) is the button; a click opens the editor on the node's picture. A double click on Paint Mask's picture opens it too; Load Image's double click keeps the large view. No picture yet: a banner notice says what to do. The mask port is a hollow square with a 3px frame.
+- Why: a row is the face's density and does not change the node's layout or the height rules; the whole well is a target far over the floor in width and meets it in height.
+- Rules met: Floor (24px row, the full node width), Learned place (Load Image's double click untouched), Posture (the canvas keeps its density; the editor, a transient dialog, is #172's), Gaps (no new gap), Primary (no new primary). Screenshots: `FUGUE_SHOT_DIR=... test_canvas_mask_node`.
 
 ### 2026-11-21 auto-hide menu bar (#160)
 

@@ -1,0 +1,57 @@
+{
+  "manifest": 1,
+  "id": "fugue/stitch",
+  "version": "1.0.0",
+  "name": "Stitch",
+  "description": "Put a redrawn crop back into the picture it was cut from (Crop to Mask). The crop is resized to its box and blended in through the mask, softened outward by Blend pixels, so no seam shows. Everything outside the box keeps the original's pixels exactly.",
+  "category": "Image/Mask",
+  "keywords": [
+    "inpaint",
+    "paste back",
+    "composite",
+    "crop",
+    "seam"
+  ],
+  "runtime": {
+    "kind": "builtin"
+  },
+  "inputs": [
+    {
+      "name": "stitch",
+      "type": "fugue/stitch",
+      "label": "Stitch"
+    },
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image",
+      "description": "The redrawn crop. It must have the crop's shape, to within 2%."
+    },
+    {
+      "name": "blend",
+      "type": "number",
+      "label": "Blend",
+      "description": "How far the edge of the mask fades outward, in pixels of the picture.",
+      "default": 16,
+      "min": 0,
+      "max": 512,
+      "step": 1,
+      "integer": true
+    },
+    {
+      "name": "mask",
+      "type": "image",
+      "role": "mask",
+      "label": "Mask",
+      "optional": true,
+      "description": "The mask to blend through, at the picture's size. Without one, the mask Crop to Mask was given."
+    }
+  ],
+  "outputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    }
+  ]
+}

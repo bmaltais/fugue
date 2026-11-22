@@ -1,0 +1,18 @@
+{
+  "manifest": 1,
+  "id": "fugue/paint-mask",
+  "version": "1.0.0",
+  "name": "Paint Mask",
+  "description": "Paint a mask over any picture, a generated one too. White is the part to change.",
+  "category": "Image/Mask",
+  "keywords": ["inpaint", "brush", "draw", "select", "region", "outpaint"],
+  "runtime": {"kind": "builtin"},
+  "inputs": [
+    {"name": "image", "type": "image", "label": "Image"},
+    {"name": "mask", "type": "text", "label": "Paint mask", "widget": "mask", "over": "image", "optional": true,
+     "description": "The painted mask, saved beside your pictures. Nothing painted gives an empty mask."}
+  ],
+  "outputs": [
+    {"name": "mask", "type": "image", "role": "mask", "label": "Mask"}
+  ]
+}

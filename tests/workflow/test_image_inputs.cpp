@@ -230,6 +230,76 @@ private slots:
         QVERIFY(QFileInfo(place.filePath("inputs/" + name)).isSymLink());
     }
 
+    // A painted mask is an input file as a picture is (#174): saving the workflow to another folder
+    // copies it into `inputs/` beside the file and the `mask` input names it there, relative.
+    void aPaintedMaskIsCarriedIntoTheInputsFolderOnSave() {
+        Pictures p;
+        QTemporaryDir place;
+        QImage gray(12, 8, QImage::Format_Grayscale8);
+        gray.fill(255);
+        const QByteArray png = encoded(picture(), "PNG");
+        const QByteArray maskPng = encoded(gray, "PNG");
+        const Result<QString> photo = storeImage(png, p.inputs(), FileRoots::forInputs(), "cat.png");
+        const Result<QString> mask = storeImage(maskPng, p.inputs(), FileRoots::forInputs(), "cat-mask");
+        QVERIFY(photo.ok() && mask.ok());
+        Registry registry;
+        nodes::addBuiltinNodeTypes(registry);
+        Document document = Document::load(QStringLiteral(R"({"fugue": 1, "graph": {"nodes": {
+            "src": {"type": "fugue/load-image", "version": "1.1.0", "inputs": {"file": "%1", "mask": "%2"}},
+            "paint": {"type": "fugue/paint-mask", "version": "1.0.0", "inputs": {"image": {"from": "src.image"}, "mask": "%2"}}}}})")
+                                               .arg(photo.value(), mask.value()).toUtf8()).value();
+        const Errors errors = relocateInputs(document, registry, {}, place.filePath("flow.fugue"));
+        QVERIFY2(!hasErrors(errors), qPrintable(errors.isEmpty() ? QString() : errors.first().message));
+        const QString name = QFileInfo(mask.value()).fileName();
+        QCOMPARE(document.graph.nodes.value("src").inputs.value("mask").literal().toString(), "inputs/" + name);
+        QCOMPARE(document.graph.nodes.value("paint").inputs.value("mask").literal().toString(), "inputs/" + name);
+        QCOMPARE(read(place.filePath("inputs/" + name)), maskPng);
+        // The picture's file is untouched: the same bytes under the same name.
+        QCOMPARE(read(photo.value()), png);
+        QCOMPARE(read(place.filePath("inputs/" + QFileInfo(photo.value()).fileName())), png);
+    }
+
+    // Relative paths become full ones so a copy of the workflow elsewhere names the same files, the
+    // mask's too.
+    void aRelativeMaskPathBecomesFullWhenMadeAbsolute() {
+        QTemporaryDir place;
+        QVERIFY(QDir().mkpath(place.filePath("inputs")));
+        const QString where = QDir(place.path()).canonicalPath();
+        QVERIFY(write(where + "/inputs/m.png", encoded(picture(), "PNG")));
+        Registry registry;
+        nodes::addBuiltinNodeTypes(registry);
+        Document document = Document::load(QByteArray(R"({"fugue": 1, "graph": {"nodes": {
+            "paint": {"type": "fugue/paint-mask", "version": "1.0.0", "inputs": {"mask": "inputs/m.png"}}}}})")).value();
+        makeInputsAbsolute(document, registry, where + "/flow.fugue");
+        QCOMPARE(document.graph.nodes.value("paint").inputs.value("mask").literal().toString(), where + "/inputs/m.png");
+    }
+
+    // A template's painted mask is taken into the inputs folder with its picture, so the opened workflow
+    // no longer leans on the template's folder.
+    void aTemplatesMaskIsTakenIn() {
+        Pictures p;
+        QTemporaryDir folder;
+        QVERIFY(QDir().mkpath(folder.filePath("inputs")));
+        const QString root = QDir(folder.path()).canonicalPath();
+        QImage gray(12, 8, QImage::Format_Grayscale8);
+        gray.fill(255);
+        const QByteArray maskPng = encoded(gray, "PNG");
+        QVERIFY(write(root + "/inputs/shot.png", encoded(picture(), "PNG")));
+        QVERIFY(write(root + "/inputs/shot-mask.png", maskPng));
+        Registry registry;
+        nodes::addBuiltinNodeTypes(registry);
+        Document document = Document::load(QStringLiteral(R"({"fugue": 1, "graph": {"nodes": {
+            "src": {"type": "fugue/load-image", "version": "1.1.0",
+                    "inputs": {"file": "%1/inputs/shot.png", "mask": "%1/inputs/shot-mask.png"}}}}})")
+                                               .arg(root).toUtf8()).value();
+        const Errors errors = takeInputsFrom(document, registry, folder.path());
+        QVERIFY2(!hasErrors(errors), qPrintable(errors.isEmpty() ? QString() : errors.first().message));
+        const QString mask = document.graph.nodes.value("src").inputs.value("mask").literal().toString();
+        QVERIFY2(mask.startsWith(p.inputs() + "/") && mask.endsWith(".png"), qPrintable(mask));
+        QCOMPARE(read(mask), maskPng);
+        QVERIFY(document.graph.nodes.value("src").inputs.value("file").literal().toString().startsWith(p.inputs() + "/"));
+    }
+
     // A template that ships a video (or a song) keeps it where it is: only pictures are taken in.
     void aTemplatesVideoIsNotTakenInAsAnImage() {
         Pictures p;

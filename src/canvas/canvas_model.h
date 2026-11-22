@@ -532,6 +532,15 @@ public:
     // Writes the four numbers as one undo step (named "Crop"), only those that changed; false when
     // nothing changed, the node is no Crop or one of the four is linked.
     Q_INVOKABLE bool setCropRect(const QString &node, const QVariantMap &rect);
+    // The painted mask of a node (spec 14.4, #174): the node's first input of widget `mask`, empty for
+    // a node with none. `maskState` is {input, over, path, editable}: the input's name, the image
+    // input it is painted over ("" for the node's own file, as Load Image), the stored literal as it
+    // is (empty for none) and whether it can be changed (not linked). Empty without such an input.
+    Q_INVOKABLE QString maskInput(const QString &node) const;
+    Q_INVOKABLE QVariantMap maskState(const QString &node) const;
+    // Sets the mask input to the file `path` (empty: no mask) as one undo step; the problem as text, or
+    // empty. The mask editor's `saved(path)` goes here.
+    Q_INVOKABLE QString setMaskPath(const QString &node, const QString &path);
     // The world point (x, y) lies on the node's picture (a result or a file's image), not on a text
     // standing in its place: where a double click opens the large view.
     Q_INVOKABLE bool pictureAt(const QString &node, qreal x, qreal y) const;
@@ -735,6 +744,8 @@ private:
         fugue::PortKind kind = fugue::PortKind::Unknown;
         bool widget = false; // a value input: its row shows its widget when unlinked
         QString widgetType;  // its 6.2 widget, or "model" for a resource input (2.5)
+        QString role;        // "mask" on a mask port (6.1, 14.4): drawn as a hollow square
+        QString over;        // widget `mask`: the image input it is painted over (6.1)
         bool required = false;
         QJsonValue defaultValue = QJsonValue::Undefined;
         std::optional<double> min, max;
