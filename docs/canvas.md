@@ -56,10 +56,12 @@ picture.
 `head` is looked up once, when the workflow is compiled, and the revision's hash is what the run
 uses and what `compiled.json` records. So running the same compiled workflow again is a cache hit and
 writes nothing a second time, and a run can be replayed exactly. Canvas Write never edits a canvas: it
-makes a new revision from the one Region read and moves the head to it only if nothing else moved the
-head meanwhile. If something did, the new revision is kept as a candidate, the node says so with the
-warning `canvas_head_moved`, and the head stays as the other change left it. The next run reads the
-head as it has become. To keep reading one revision (to try several fills of the same picture), give
+makes a new revision from the one Region read and moves the head to it: the fill is a layer on the
+canvas at once, to hide, edit or delete (Undo removes it too). If something else moved the head
+meanwhile, the layer is added onto the head as it is now, as a new revision. Only if that is
+impossible (the canvas changed size) is the new revision
+kept as a candidate, with the warning `canvas_head_moved`, and the head stays as the other change
+left it. The next run reads the head as it has become. To keep reading one revision (to try several fills of the same picture), give
 Region that revision's hash, or freeze it.
 
 Region's picture keeps the canvas's transparency. A stitch from Region also goes to Stitch. Region
@@ -79,18 +81,17 @@ and the list is there to pick the right one. The list follows `fugue canvas new`
 
 ## Review a fill
 
-A fill does not have to change the canvas at once. Canvas Write with **Keep as candidate** on leaves
-the head where it is and stores the new layer as a **candidate**: a revision made from the one Region
+A fill lands on the canvas at once; you do not have to review it. When you do want a review step,
+turn Canvas Write's advanced **Keep as candidate** on: it leaves the head where it is and stores the new layer as a **candidate**: a revision made from the one Region
 read, waiting for you. The `generative-fill` template (File > Browse templates, or
 `fugue workflow new fill.fugue --template generative-fill`) is Canvas Region, a FLUX.2 Klein redraw
-and Canvas Write with that on. Put your canvas's id and the rectangle in Canvas Region and run it.
+and Canvas Write, with that off. Turn it on for the review below. Put your canvas's id and the rectangle in Canvas Region and run it.
 
 When a run leaves a candidate, a Canvas view that is looking at the head (File > Canvas…, or a Canvas
 area) shows it at once over the head, with a banner: **Accept**, **Drop** or **Keep looking at head**.
 Several results at once: the newest is shown and the others are counted. A view on another revision,
 with Compare on, or while you drag the region is never moved (a result that came during a drag shows
-when you let go). Turn it off in Settings > General, **Show new candidates**. To skip the review
-altogether, turn Canvas Write's **Keep as candidate** off: the head then moves to the result by itself.
+when you let go). Turn it off in Settings > General, **Show new candidates**. With Keep as candidate off (the default), nothing waits: the head moves to the result by itself.
 
 - `fugue canvas candidates <id>` lists what waits, newest first; run the template again for another
   candidate to compare (they are all made from the head you started at).
@@ -101,7 +102,7 @@ altogether, turn Canvas Write's **Keep as candidate** off: the head then moves t
   revision; if the candidate changed more than that, `canvas_conflict` says so and you run the fill
   again. `fugue canvas drop <id>@<candidate>` hides it. Neither deletes anything: a dropped one can
   still be accepted, and every revision stays in `fugue canvas log` or `candidates --all`.
-- A Write that lost the race for the head (`canvas_head_moved`) is a candidate too.
+- A Write that lost the race for the head is placed on the new head; only one that cannot be placed (`canvas_head_moved`) is a candidate.
 
 In the window, File > Canvas… is the picture of one canvas (the newest at first): the strip above it says what
 you are looking at (Head, the candidates waiting for you, the latest revisions, Earlier…), and the picture

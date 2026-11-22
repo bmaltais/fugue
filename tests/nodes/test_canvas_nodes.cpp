@@ -431,7 +431,8 @@ private slots:
         QCOMPARE(pixel(id, before, 100, 80, 0), 200);
     }
 
-    void aWriteLosingTheRaceKeepsACandidateAndSaysSo() {
+    // #229: a run lands on a head that moved meanwhile, as a new revision with the layer on top of the other change.
+    void aWriteLosingTheRaceLandsItsLayerOnTheMovedHead() {
         Bench bench;
         const QString id = makeCanvas();
         const QString base = headOf(id);
@@ -440,6 +441,40 @@ private slots:
         auto doc = CanvasStore::forSession().load(id, base);
         doc->loadLayer(LayerKind::Paint, "Theirs", true, 1, mask::MaskPaint(kW, kH, std::vector<uint8_t>(size_t(kW) * kH * 4, 128), 4));
         const auto theirs = CanvasStore::forSession().commit(id, doc.value(), base, "someone");
+        QVERIFY(theirs && theirs->move.moved);
+
+        const Result<Values> w = writeGreen(bench, r, {{"name", Value("Green")}});
+        QVERIFY2(w.ok(), qPrintable(codeOf(w)));
+        QVERIFY(w.problems().isEmpty());
+        QVERIFY(w->value("accepted").json().toBool());
+        const QString now = headOf(id);
+        QVERIFY(now != theirs->revision.id && now != base);
+        QCOMPARE(w->value("head").text(), now);
+        const auto handle = canvas::canvasHandleFrom(w->value("canvas").json());
+        QCOMPARE(handle->revision, now);
+        // Their change is kept, and the run's layer sits on top of it.
+        QCOMPARE(CanvasStore::forSession().revision(id, now)->parent, theirs->revision.id);
+        auto landed = CanvasStore::forSession().load(id, now);
+        QCOMPARE(landed->layerCount(), 3);
+        QCOMPARE(landed->layer(1).name, QString("Theirs"));
+        QCOMPARE(landed->layer(2).name, QString("Green"));
+        QCOMPARE(pixel(id, now, 100, 80, 1), 255);
+        QVERIFY(CanvasStore::forSession().candidates(id).value().empty());
+        // Undo takes the run's layer away and leaves theirs.
+        QVERIFY(CanvasStore::forSession().undo(id, now)->moved);
+        QCOMPARE(headOf(id), theirs->revision.id);
+        QCOMPARE(CanvasStore::forSession().load(id, headOf(id))->layerCount(), 2);
+    }
+
+    // A head move the run cannot be placed on (the canvas has another size now) keeps a candidate and warns, as before.
+    void aWriteThatCannotBePlacedStaysACandidateAndSaysSo() {
+        Bench bench;
+        const QString id = makeCanvas();
+        const QString base = headOf(id);
+        const Result<Values> r = bench.region(id, {{"x", Value(60)}, {"y", Value(50)}, {"width", Value(100)}, {"height", Value(80)}});
+        mask::PaintDocument smaller(kW / 2, kH / 2); // the canvas has another size now
+        smaller.loadLayer(LayerKind::Paint, "Background", true, 1, mask::MaskPaint(kW / 2, kH / 2, std::vector<uint8_t>(size_t(kW / 2) * (kH / 2) * 4, 255), 4));
+        const auto theirs = CanvasStore::forSession().commit(id, smaller, base, "someone");
         QVERIFY(theirs && theirs->move.moved);
 
         const Result<Values> w = writeGreen(bench, r);
@@ -454,6 +489,20 @@ private slots:
         QVERIFY(candidate && candidate->revision != theirs->revision.id);
         QCOMPARE(CanvasStore::forSession().revision(id, candidate->revision)->parent, base);
         QCOMPARE(pixel(id, candidate->revision, 100, 80, 1), 255);
+    }
+
+    // The default is off: nothing is asked for review unless the workflow says so.
+    void theCandidateInputIsOffByDefaultAndAdvanced() {
+        Registry registry;
+        nodes::addBuiltinNodeTypes(registry);
+        const NodeType &type = *registry.nodeType("fugue/canvas-write");
+        for (const InputSpec &spec : type.inputs)
+            if (spec.name == "candidate") {
+                QVERIFY(!spec.defaultValue.toBool());
+                QVERIFY(spec.advanced);
+                return;
+            }
+        QFAIL("no candidate input");
     }
 
     // Keep as candidate (#210): the head stays, nothing is warned, and the revision is a candidate.
@@ -666,11 +715,22 @@ private slots:
         QCOMPARE(headOf(id), moved);
         QCOMPARE(CanvasStore::forSession().log(id)->size(), size_t(2));
 
+        // The head moves elsewhere (#229): the same compiled graph is still a cache hit and adds no second layer.
+        {
+            auto other = CanvasStore::forSession().load(id, moved);
+            other->loadLayer(LayerKind::Paint, "Elsewhere", true, 1, mask::MaskPaint(kW, kH, std::vector<uint8_t>(size_t(kW) * kH * 4, 128), 4));
+            QVERIFY(CanvasStore::forSession().commit(id, other.value(), moved, "someone")->move.moved);
+            const RunOutcome cached = runOnce();
+            QVERIFY(cached.ran.isEmpty());
+            QCOMPARE(CanvasStore::forSession().log(id)->size(), size_t(3));
+        }
+        const QString elsewhere = headOf(id);
+
         // A new compile names the head as it has become: a different key, so Region runs again.
         Registry again;
         nodes::addBuiltinNodeTypes(again);
         const Compilation recompiled = compileForRun(document, again, {}, setup);
-        QCOMPARE(recompiled->nodes.value("r").inputs.value("revision").literal().toString(), moved);
+        QCOMPARE(recompiled->nodes.value("r").inputs.value("revision").literal().toString(), elsewhere);
         const auto folder = RunFolder::create(dir.filePath("runs"));
         RunEnvironment environment;
         environment.registry = &registry;
@@ -680,7 +740,7 @@ private slots:
         const RunOutcome third = runGraph(*recompiled, *folder, environment, {});
         QVERIFY(third.ran.contains("r"));
         QVERIFY(third.keys.value("r") != first.keys.value("r"));
-        QCOMPARE(CanvasStore::forSession().log(id)->size(), size_t(3));
+        QCOMPARE(CanvasStore::forSession().log(id)->size(), size_t(4));
     }
 };
 

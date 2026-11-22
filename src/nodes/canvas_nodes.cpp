@@ -339,16 +339,35 @@ public:
                 return Result<Values>(now.errors());
             moved = canvas::HeadMove{false, now->head};
         }
-        const Result<QJsonObject> handle = canvas::writeCanvasHandle(context.workDir, {base->canvas, added->id});
+        // The head moved while this ran (the compare-and-swap lost): the layer goes onto the head as it is now, as a new
+        // revision, the same placement accept does (layers only add, 14.5). Only when that is impossible does the revision
+        // stay a candidate, with a warning. A later write racing this one is retried against the newer head.
+        QString landed = added->id;
+        Errors warnings;
+        if (!keep && !moved->moved) {
+            bool impossible = false;
+            for (int attempt = 0; attempt < 4 && !moved->moved && !impossible; ++attempt) {
+                const Result<canvas::Accepted> placed = store.accept(base->canvas, added->id);
+                if (placed) {
+                    moved = canvas::HeadMove{placed->moved, placed->moved ? placed->head.id : placed->current};
+                    if (placed->moved)
+                        landed = placed->head.id;
+                } else if (!placed.errors().isEmpty() && placed.errors().first().code == QLatin1String("canvas_conflict")) {
+                    impossible = true;
+                } else {
+                    return Result<Values>(placed.errors());
+                }
+            }
+            if (!moved->moved)
+                warnings << warning(makeError(QStringLiteral("canvas_head_moved"),
+                                              QStringLiteral("The canvas changed while this ran (its head is now %1) and the new layer could not be placed on it, so it was kept as a candidate revision, %2, and the head was not moved.")
+                                                  .arg(moved->head.left(19), added->id.left(19)),
+                                              QStringLiteral("Run again from the canvas as it is now, or keep both.")));
+        }
+        const Result<QJsonObject> handle = canvas::writeCanvasHandle(context.workDir, {base->canvas, landed});
         if (!handle)
             return Result<Values>(handle.errors());
 
-        Errors warnings;
-        if (!moved->moved && !keep)
-            warnings << warning(makeError(QStringLiteral("canvas_head_moved"),
-                                          QStringLiteral("The canvas changed while this ran (its head is now %1), so the new layer was kept as a candidate revision, %2, and the head was not moved.")
-                                              .arg(moved->head.left(19), added->id.left(19)),
-                                          QStringLiteral("Run again from the canvas as it is now, or keep both.")));
         Values out;
         out.insert(QStringLiteral("canvas"), Value(handle.value()));
         out.insert(QStringLiteral("accepted"), Value(moved->moved));
