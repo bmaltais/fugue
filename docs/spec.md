@@ -876,7 +876,7 @@ holding that node's `node.json`.
 | `license`, `source`, `description` | no | |
 | `nodes` | yes | Subfolder names, each with a `node.json`. |
 | `types` | no | Declared port types ([2.2](#22-declared-types)): `id`, `version`, `kind` (`resource` or `data`), `name`, and for resources `extensions` (file extensions found in the models folder; default ComfyUI's list plus `.gguf`), `folders` (the folder names under each models root, such as `["upscaler", "upscale_models"]`; default the last part of the id, [8.9](#89-models-on-disk)) and `files` (what its files are by their headers, so a model folder of one kind is told: `diffusion-model`, `text-encoder`, `vae`, `lora` or `checkpoint`). |
-| `setup` | no | A command that prepares the pack's private environment ([6.8](#68-per-pack-environments)). |
+| `setup` | no | `{"command": ["uv", "sync"], "description": "…"}`: a command, run in the pack's folder, that prepares the pack's private environment ([6.8](#68-per-pack-environments)). A pack may also hold `catalog/*.json`: models to download for its resource types ([8.9](#89-models-on-disk)). |
 | `converters` | no | Import and export converters ([11.9](#119-converters)). |
 
 ### 6.5 Where packs live and how they load
@@ -1505,8 +1505,10 @@ it as a module folder and run it with no code of its own in Fugue.
   resumed; Cancel deletes the part. Free space is checked once the size is known. Files come one
   after another. Any https source is safe to take, since a wrong file is never kept.
 - Catalog (#134): Fugue ships lists of models a person can fetch, for any resource type
-  (`src/catalog/*.json`, compiled in; the person's own, and updates, are files in
-  `~/.local/share/fugue/catalog/*.json`, read after Fugue's, an entry of the same `id` replacing it).
+  (`src/catalog/*.json`, compiled in; then the catalogs of installed packs, `<pack folder>/catalog/*.json` under the pack
+  search paths (#178), so a pack that declares a resource type brings the downloads for it with their licences; then the
+  person's own, and updates, files in `~/.local/share/fugue/catalog/*.json`; each read after the one before, an entry
+  of the same `id` replacing it).
   An entry has the file `name`, an https `url` (http only to this machine), `size`, `sha256`,
   and what a person reads before deciding: `title`, `description`, `scale`, `architecture`,
   `license` (an SPDX id), `license_url`, `commercial` (false when the license forbids it),
@@ -3035,6 +3037,15 @@ MobileSAM on a CPU), and text to mask (GroundingDINO: Apache-2.0 code, the weigh
 stated; CLIPSeg: MIT code, the weights' licence stated two ways). Not BRIA's RMBG (CC BY-NC).
 Appendix A has the sources.
 
+Built (#178, first pack): **Remove Background**, `examples/packs/io.github.bmaltais.fugue-remove-background`
+(guide: [masking.md](masking.md#remove-a-background)). One persistent command node, `remove-background` 1.0.0, in
+`Image/Mask`: inputs `image`, `model` (optional; the pack's resource type `.../birefnet-model`, folder `birefnet`),
+`invert`, and the advanced `threshold` (0 keeps BiRefNet's soft edge) and `device` (`auto`, `cpu`, `cuda`); output `mask`,
+an 8-bit gray PNG of the picture's size with `role: mask`. Its Python environment is made by the pack's `setup`
+(`uv sync --no-dev --extra cpu`: ONNX Runtime, NumPy, Pillow); `--extra cuda` swaps in `onnxruntime-gpu`. The models come
+from the pack's own catalog (`catalog/birefnet.json`, 8.9), so the picker offers them under "Download" with the licence
+question. The segment-by-points and text-to-mask nodes are not built.
+
 **Not in this design:** a paint canvas with layers and colors, its own issue. Soft masks (differential
 diffusion, #179) are built as an opt-in hunk of the patch (8.10).
 
@@ -3049,7 +3060,7 @@ diffusion, #179) are built as an opt-in hunk of the patch (8.10).
 | #175 | Generate Image's mask and the `omarchy` provider's `mask_image` | #171, #173 | #174 |
 | #176 | Crop to Mask, Stitch, `fugue/stitch`, the group | #171, #173 | |
 | #177 | The two templates, masking.md, the screenshots | #174, #175, #176 | |
-| #178 | Later: automatic masks as packs | #174 | |
+| #178 | Later: automatic masks as packs (first pack, Remove Background, built; the other two not) | #174 | |
 | #179 | Soft masks (differential diffusion): the `fugue.soft_mask` patch hunk and the Sampler's Soft mask | #173 | |
 | #180 | Color Match (shipped; the Outpaint template does not use it yet, see the row below) | #171 | |
 | #181 | Later: a paint canvas | #174 | |
@@ -3462,6 +3473,13 @@ Building M4 made these further choices.
 | Color Match as built (#180, 2026-11-21): one node, not a group (nothing in it splits further; Feather Mask and Composite Masked stay the nodes that decide the seam). Statistics are weighted by 1 - m rather than cut at a threshold, so a half-masked pixel counts half, as Fill Masked does. The mask describes the picture; the reference shares its weights only at the same size, because for an outpaint the reference (the original, smaller) and the redraw do not line up, and measuring a different-sized reference whole needs no offset input. The pictures go to linear light before the paper's LMS matrix (the paper leaves the RGB unspecified; sRGB values are not light). Strength mixes in l-alpha-beta, which equals mixing the mean and the scale. A mask of all 1 measures the whole picture with a warning rather than failing. `mask_full` and `mask_resized` are reused, so there is no new error code. The Outpaint template is unchanged: whether the node visibly helps on the 3090 is for the owner to check (before and after on #180), then it goes before Composite Masked | 14.4 | medium-high |
 | Differential diffusion (#179, owner decision 2026-11-22: option a): carried in `helper/sdcpp.patch` behind `fugue.soft_mask`, not proposed first, so it ships with the next build; the hunks leave upstream byte-identical when off and are listed in helper/README.md and checked at each pin move, which is why 8.10's rule allows opt-in hunks. Written from the paper (its repository has no licence). The control is the Sampler's `soft_mask` input, not a VAE Encode option: the Sampler is the node that sends the mask to the helper and already owns the other per-run options, and the latent still carries the mask as before. An inpaint model's mask stays rounded (it is a conditioning channel). The threshold is applied to the denoised prediction at each step as the library's own replacement is, with k the steps the schedule runs (so Denoise below 1 counts its shorter run) | 8.10, 14.4, 17 | medium-high |
 | Automatic masks are optional packs of command nodes, not built in: each brings a model and a runtime (ONNX Runtime or Python) that Fugue's binary should not link, and their weights' licences vary (BRIA's are non-commercial) | 14.4 | medium-high |
+| Remove Background (#178, #167, 2026-11-22): BiRefNet through ONNX Runtime in the pack `io.github.bmaltais.fugue-remove-background`. **Licences, checked 2026-11-22**: BiRefNet's code is MIT (GitHub licence file, "Copyright (c) 2024 ZhengPeng"); its weights are MIT too (the Hugging Face model cards of `ZhengPeng7/BiRefNet` and `BiRefNet_lite` say `license: mit`, the repository's README shows the MIT badge, and the author's ONNX files are assets of the repository's release `v1`, converted from his `.pth` files); ONNX Runtime is MIT; NumPy is BSD-3-Clause and Pillow is MIT-CMU (HPND). The model cards do not speak for the training sets (DIS5K, DUTS and others), whose own terms are research-oriented: not verified, so the catalog says "MIT" and links the licence, not "for any use". The pack's `pack.json` says it in `description` (an unknown field would only warn) and `license` is the pack's own code, MIT; each catalog entry carries `license`, `license_url`, `commercial` and `attribution` | 14.4, 6.4, 8.9 | high (code), medium-high (weights) |
+| The first pack lives in `examples/packs/`, not a repository of its own (#178; the owner's question): it is the only place packs live today, it is tested and documented with Fugue, and the folder is self-contained (its own `pyproject.toml`, `uv.lock`, tests and catalog), so `git subtree split` makes a repository of it with no change. A pack that is its own repository is the way for the other two (heavier dependencies, their own release pace). To confirm | 14.4, 6.6 | medium |
+| The weights are not bundled and not fetched by the node. The pack's catalog (`catalog/birefnet.json`, read by `ModelCatalog::load` from every pack folder, #178) lists two author-released ONNX files from the release `v1`, with the sha256 the checks need (computed here from the downloaded files, the release publishes none): **general Swin-T** (224 MB, default, about 10 s for 1 megapixel on a 12-thread CPU) and **general Swin-L** (973 MB, about 16 s). The same download line as every model (8.9) shows the licence, the size and the host and asks first. Other BiRefNet variants (portrait, matting, HR, lite 2K, fp16) work if their `.onnx` is put in the `birefnet` folder, since the node reads the input size from the model; they are not listed because each would need to be checked | 8.9, 6.7 | high |
+| A pack brings its own catalog: `<pack folder>/catalog/*.json` is read after Fugue's own and before the person's (#178). Without it the model picker of a pack's resource type could offer files on disk only, and the licence question (8.9) would not exist for packs. Data only; reading it fetches nothing | 8.9, 6.4 | high |
+| The environment is made by `uv sync --no-dev --extra cpu` and `--extra cuda` swaps the wheel (#178): the CPU and GPU builds of ONNX Runtime share one module name, so they are two mutually exclusive extras (uv `conflicts`), and the default setup installs the CPU one, about 27 MB, so the trust prompt stays honest and the install works everywhere. `device: auto` takes CUDA when that provider is there, else the CPU; `cuda` with no provider is the error `gpu_unavailable` that says what to run. Not declared: `needs.gpu` (a CPU install uses none, so declaring it would make the scheduler hold the node for a GPU it does not use); the cost is that a CUDA install's VRAM is not scheduled against the helper. Persistent with `idle_timeout_s` 60 so it frees memory soon. `needs.memory_mb` 8000 is measured (6.7 GB peak for Swin-T, 7.7 GB for Swin-L at 1024 px, ONNX Runtime's arena and pattern off: with them on, a second run grew Swin-T to 12 GB). To confirm | 6.8, 6.7, 8.10 | medium |
+| The mask is BiRefNet's output as it is: sigmoid of the logits, resized bilinear to the picture's size, white the subject, soft at the edge; `threshold` above 0 makes it hard and `invert` gives the background. The picture's alpha is composited on white first (what the model sees is what it was trained on). No refinement, guided filter or matting: a Grow Mask or Feather Mask node after it does that, as with every other mask | 14.4 | medium-high |
+| A node test cannot give a resource, so `fugue node test` of the pack names a model by the environment variable `FUGUE_BIREFNET_MODEL`, which the node also takes when its `model` input is empty; the tests use a 176-byte stand-in ONNX with the same interface (`tests/fixtures`, made by `tests/make_fixture.py`) because the real model is 224 MB to 1 GB. Fugue's ctest does not run the pack's Python tests (they need the pack's environment and the network to make it); `uv run --extra cpu pytest` in the pack folder does | 6.11, 14.4 | medium-high |
 
 ## Appendix B: issue to section map
 

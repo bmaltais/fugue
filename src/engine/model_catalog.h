@@ -9,7 +9,8 @@
 //
 // Catalog files are JSON, {"catalog": 1, "models": [{...}]}; see src/catalog/upscale-models.json.
 // Fugue's own are compiled in (`:/fugue/catalog/*.json`); the person's, in dataDir()/catalog/*.json,
-// are read after them, and an entry there with the id of an earlier one replaces it, so a catalog
+// are read after them (and after those of installed packs: <pack folder>/catalog/*.json under the
+// pack search paths, engine/pack_loader.h), and an entry there with the id of an earlier one replaces it, so a catalog
 // is updated by dropping a newer file in (no code or release needed). An entry that is not valid
 // (no https URL, a sha256 that is not 64 hex digits, a name that is not a relative file name, no
 // size, a repeated id) is left out and said in problems(): a model whose hash was not checked has
@@ -60,7 +61,9 @@ class ModelCatalog {
 public:
     // Fugue's own catalogs, then the files of `userFolder` (default dataDir()/catalog); both are
     // read each time, so a file dropped in shows at once.
-    static ModelCatalog load(const QString &userFolder = {});
+    // With no `userFolder` the packs of packSearchPaths() are read; with one (tests), the folders of
+    // `packPaths`, none by default.
+    static ModelCatalog load(const QString &userFolder = {}, const QStringList &packPaths = {});
     // One catalog's text, as a file holds it (tests, and load()); what it says wrong goes to problems().
     static ModelCatalog parse(const QByteArray &json, const QString &what);
 

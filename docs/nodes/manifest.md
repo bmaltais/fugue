@@ -21,9 +21,10 @@ what you need to write one.
 - `manifest`, `id`, `version`, `name`, `nodes` are required. The id is lowercase reverse-DNS, and
   the folder holding the pack is named after it (`io.github.alice.tools/`).
 - `nodes` lists subfolder names, each holding a `node.json`.
-- `types` declares port types ([types](types.md)); `setup` is a command that prepares the pack's
-  own environment (for example `["uv", "sync"]`): it runs only after the person has seen the exact
-  command and said yes.
+- `types` declares port types ([types](types.md)); `setup` is `{"command": ["uv", "sync"], "description": "…"}`, a command that prepares the pack's
+  own environment: it runs in the pack's folder, only after the person has seen the exact
+  command and said yes. `catalog/*.json` in the pack lists models to download for its resource
+  types, each with its licence shown first ([types](types.md#resource-types-models)).
 
 ## `node.json`
 

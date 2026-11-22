@@ -129,6 +129,29 @@ transitions with no seam, where a hard mask plus Feather Mask puts a softened pi
 latent from VAE Encode with a mask, and it does nothing for an inpaint model (FLUX.1 Fill, SDXL Inpaint),
 which reads its mask as white or black. Off, gray is rounded to white or black as before.
 
+## Remove a background
+
+The pack **Remove Background** makes the mask for you: it finds the subject of a picture and gives it as a
+mask (white is the subject, soft at its edge). Wire its `mask` to the Inpaint group, Crop to Mask or Composite
+Masked like any other mask; **Invert** gives the background instead, to redraw everything but the subject.
+The node is in the node menu under Image > Mask.
+
+It is an optional pack (Fugue's own program links no machine-learning code). Install it from
+Settings > Packs or with `fugue pack add examples/packs/io.github.bmaltais.fugue-remove-background`. The setup
+command it shows, `uv sync --no-dev --extra cpu`, makes a Python environment in the pack's folder with ONNX
+Runtime (needs [uv](https://docs.astral.sh/uv/) and the network). For an NVIDIA GPU run
+`uv sync --no-dev --extra cuda` in that folder instead and keep Device on Auto (it needs CUDA and cuDNN installed).
+
+The model is not part of the pack. Open the node's Model picker: under Download it lists
+**BiRefNet general, Swin-T** (224 MB, about 10 s for a 1 megapixel picture on a CPU) and **Swin-L** (973 MB, finer
+edges, about 16 s). Picking one asks first, naming the licence (MIT, credit to the authors, commercial use
+allowed), the size, the host (github.com) and the folder, and downloads only when you say so. A BiRefNet
+`.onnx` file of your own goes in the `birefnet` models folder.
+
+It needs about 8 GB of memory while it runs and frees it a minute after the last run. Threshold (advanced)
+makes the edge hard: 0 keeps the soft edge, 0.5 cuts at half. For a cleaner seam, follow it with Grow Mask or
+Feather Mask. The pack's folder has its own README with the tests.
+
 ## From the command line
 
 `fugue workflow new my.fugue --template inpaint-region` writes the template with its picture and
@@ -138,5 +161,4 @@ mask beside it; `fugue run my.fugue --wait` runs it. Change the prompt with
 
 ## Not yet
 
-Automatic masks (remove the background, pick an object by clicking it, or describe it in words)
-will come as optional packs. Color matching for outpaints, and a paint canvas with layers are later issues.
+Picking an object by clicking it, or describing it in words, will come as optional packs, like Remove Background. Color matching for outpaints, and a paint canvas with layers are later issues.

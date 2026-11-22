@@ -140,6 +140,35 @@ private slots:
         QVERIFY(catalog.problems().isEmpty());
     }
 
+    void aPacksCatalogFolderIsReadAfterFuguesOwnAndBeforeTheUsers() {
+        QTemporaryDir packs, user;
+        QJsonObject packEntry = entry("frompack", "p.onnx");
+        QJsonObject userEntry = entry("frompack", "u.onnx"); // the user's replaces it
+        writeFile(packs.filePath("io.example.tools/catalog/models.json"), catalogOf({packEntry, entry("only", "o.onnx")}));
+        writeFile(packs.filePath("io.example.tools/catalog/notes.txt"), "not a catalog");
+        writeFile(packs.filePath("io.example.nocatalog/pack.json"), "{}");
+        writeFile(user.filePath("mine.json"), catalogOf({userEntry}));
+        const ModelCatalog catalog = ModelCatalog::load(user.path(), {packs.path()});
+        QVERIFY2(catalog.problems().isEmpty(), qPrintable(catalog.problems().join("\n")));
+        QVERIFY(catalog.find("only"));
+        QCOMPARE(catalog.find("frompack")->file, QString("u.onnx"));
+        QVERIFY(catalog.find("realesrgan-x4plus")); // Fugue's own still there
+        QVERIFY(!ModelCatalog::load(user.path()).find("only")); // no pack paths: none read
+    }
+
+    void theExampleRemoveBackgroundPacksCatalogIsValidAndNamesItsLicence() {
+        QTemporaryDir empty;
+        const ModelCatalog catalog = ModelCatalog::load(empty.path(), {QStringLiteral(FUGUE_SOURCE_DIR "/examples/packs")});
+        QVERIFY2(catalog.problems().isEmpty(), qPrintable(catalog.problems().join("\n")));
+        const QString type = QStringLiteral("io.github.bmaltais.fugue-remove-background/birefnet-model");
+        QVERIFY(catalog.forType(type).size() >= 2);
+        for (const CatalogModel &model : catalog.forType(type)) {
+            QCOMPARE(model.license, QString("MIT"));
+            QVERIFY2(!model.licenseUrl.isEmpty() && !model.source.isEmpty() && model.commercial, qPrintable(model.id));
+            QVERIFY2(model.file.endsWith(".onnx"), qPrintable(model.id));
+        }
+    }
+
     void missingListsWhatIsNotOnDiskByNameOrKnownHash() {
         QTemporaryDir dir;
         Registry registry;

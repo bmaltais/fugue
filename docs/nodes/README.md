@@ -15,6 +15,9 @@ stdout. The pages, in the order to read them:
 
 A working pack to read and copy is [examples/packs/io.github.bmaltais.fugue-example](../../examples/packs/io.github.bmaltais.fugue-example):
 `shout` is one-shot, `counter` is persistent. The tests run both.
+A pack with a Python environment, a model and a download catalog:
+[examples/packs/io.github.bmaltais.fugue-remove-background](../../examples/packs/io.github.bmaltais.fugue-remove-background)
+(BiRefNet through ONNX Runtime; [masking](../masking.md#remove-a-background)).
 
 The exact rules are in the [spec](../spec.md) (sections 6 and 7); these pages are the short way in.
 The native plugin guide waits until the C interface is frozen (spec 6.9).

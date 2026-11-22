@@ -49,6 +49,13 @@ input of a resource type shows a model picker. The built-in types are `fugue/dif
 `fugue/text-encoder`, `fugue/vae`, `fugue/lora`, `fugue/model`, plus `fugue/controlnet` and
 `fugue/upscale-model`.
 
+A pack that declares a resource type can also list models to download for it, in `catalog/*.json`
+in the pack folder (`{"catalog": 1, "models": [...]}`, the format of Fugue's own `src/catalog/`): for each
+model its `file` name, https `url`, `size`, `sha256` and what a person reads first (`license`,
+`license_url`, `commercial`, `author`, `source`). The type's model picker lists those not on disk under
+Download, and asks (licence, size, host) before it fetches anything; a file whose sha256 does not match
+is never kept. Give a model a sha256 you computed from the file you checked.
+
 ## Data types
 
 `"kind": "data"` types are files a node produced, such as a latent. The value is a handle with a

@@ -60,6 +60,6 @@ prompt; they are not enforced. Declare them honestly, and read other people's pa
 
 ## Setup commands
 
-`pack.json` may name a `setup` command, such as `["uv", "sync"]`, which prepares a virtual
-environment inside the pack folder. Fugue shows the exact command and runs it only after a yes.
+`pack.json` may name a `setup` command, such as `{"command": ["uv", "sync"]}`, which prepares a virtual
+environment inside the pack folder (it runs there, and the pack's entry script starts `.venv/bin/python`). Fugue shows the exact command and runs it only after a yes.
 There is no shared environment, so packs cannot conflict with one another.

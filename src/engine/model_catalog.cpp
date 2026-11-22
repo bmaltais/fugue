@@ -13,6 +13,7 @@
 #include "engine/file_hashes.h"
 #include "engine/model_download.h"
 #include "engine/model_library.h"
+#include "engine/pack_loader.h"
 #include "engine/paths.h"
 
 namespace fugue {
@@ -117,7 +118,7 @@ ModelCatalog ModelCatalog::parse(const QByteArray &json, const QString &what) {
     return catalog;
 }
 
-ModelCatalog ModelCatalog::load(const QString &userFolder) {
+ModelCatalog ModelCatalog::load(const QString &userFolder, const QStringList &packPaths) {
     ModelCatalog catalog;
     const auto add = [&](const QString &path) {
         QFile file(path);
@@ -129,6 +130,14 @@ ModelCatalog ModelCatalog::load(const QString &userFolder) {
     };
     for (const QString &name : QDir(QStringLiteral(":/fugue/catalog")).entryList({QStringLiteral("*.json")}, QDir::Files, QDir::Name))
         add(QStringLiteral(":/fugue/catalog/") + name);
+    // A pack's own models: <pack folder>/catalog/*.json, so a pack that brings a resource type brings the
+    // models to download for it, with their licences. Data only, and nothing is fetched by reading it.
+    for (const QString &root : userFolder.isEmpty() ? packSearchPaths() : packPaths)
+        for (const QString &pack : QDir(root).entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
+            const QDir folder(root + QLatin1Char('/') + pack + QStringLiteral("/catalog"));
+            for (const QString &name : folder.entryList({QStringLiteral("*.json")}, QDir::Files, QDir::Name))
+                add(folder.filePath(name));
+        }
     const QDir user(userFolder.isEmpty() ? dataDir() + QStringLiteral("/catalog") : userFolder);
     for (const QString &name : user.entryList({QStringLiteral("*.json")}, QDir::Files, QDir::Name))
         add(user.filePath(name));
