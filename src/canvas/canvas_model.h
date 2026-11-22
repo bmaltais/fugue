@@ -826,6 +826,7 @@ private:
     std::vector<NodeRow> m_rows;
     QHash<QString, int> m_rowOf;
     std::vector<LinkRow> m_links;
+    void reindexLinks(); // m_linksOf from m_links
     QHash<QString, QList<int>> m_linksOf; // node id -> link rows touching it
     QSet<QString> m_selected;
     QVariantMap m_view;

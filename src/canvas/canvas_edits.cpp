@@ -346,6 +346,16 @@ void CanvasModel::restore(const Snapshot &target, bool selectAdded) {
         emit selectionChanged();
 }
 
+void CanvasModel::reindexLinks() {
+    m_linksOf.clear();
+    for (int i = 0; i < int(m_links.size()); ++i) {
+        const LinkRow &link = m_links[size_t(i)];
+        m_linksOf[link.from.node].append(i);
+        if (link.toNode != link.from.node)
+            m_linksOf[link.toNode].append(i);
+    }
+}
+
 // Remakes the link rows into and out of these nodes; ports at either end show their new state.
 void CanvasModel::relink(const QSet<QString> &nodes) {
     if (nodes.isEmpty())
@@ -367,16 +377,11 @@ void CanvasModel::relink(const QSet<QString> &nodes) {
         }
         m_linkList->beginRemoveRows({}, first, i);
         m_links.erase(m_links.begin() + first, m_links.begin() + i + 1);
+        reindexLinks(); // before the signal: a listener may look a link up by node (isWired)
         m_linkList->endRemoveRows();
         i = first;
     }
-    m_linksOf.clear();
-    for (int i = 0; i < int(m_links.size()); ++i) {
-        const LinkRow &link = m_links[size_t(i)];
-        m_linksOf[link.from.node].append(i);
-        if (link.toNode != link.from.node)
-            m_linksOf[link.toNode].append(i);
-    }
+    reindexLinks();
     // The new rows go in with one insertion at the end.
     std::vector<LinkRow> fresh;
     for (auto it = m_document.graph.nodes.cbegin(); it != m_document.graph.nodes.cend(); ++it) {
