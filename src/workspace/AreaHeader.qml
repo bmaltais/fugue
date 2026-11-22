@@ -63,45 +63,11 @@ Rectangle {
     }
 
     // A square 6u (24px) button of the bar with a Lucide glyph (canvas-look 16): columns-2 and rows-2 for the splits.
-    component BarButton: Rectangle {
-        id: button
-        property string glyph
-        property string tip
-        property bool danger: false
-        signal tapped
-        width: 6 * header.u
-        height: 6 * header.u
-        radius: header.look.smallCorner
-        color: !enabled ? "transparent"
-             : danger && (hover.hovered || tap.pressed) ? header.look.dangerHover
-             : tap.pressed ? header.look.selectedRow : hover.hovered ? header.look.menuRow : "transparent"
-        border.width: activeFocus ? 2 : 0
-        border.color: danger ? header.look.error : header.look.accent
-        opacity: enabled ? 1 : 0.4
-        activeFocusOnTab: enabled
-        Accessible.role: Accessible.Button
-        Accessible.name: tip
-        readonly property color ink: hover.hovered || activeFocus ? header.look.text : header.look.label
-        Glyph {
-            anchors.centerIn: parent
-            look: header.look
-            name: button.glyph
-            // Red on hover or keyboard focus, as the menu bar's close (MenuBar.qml).
-            color: button.danger && (hover.hovered || button.activeFocus) ? header.look.error : button.ink
-        }
-        TapHandler {
-            id: tap
-            onTapped: button.tapped()
-        }
-        HoverHandler {
-            id: hover
-            cursorShape: button.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-        }
-        ToolTip.visible: hover.hovered && button.tip !== ""
-        ToolTip.delay: header.look.tooltipDelay
-        ToolTip.text: button.tip
-        Keys.onReturnPressed: button.tapped()
-        Keys.onSpacePressed: button.tapped()
+    // The window's one button (ViewButton, D4) in its flat and compact variants; a thin alias.
+    component BarButton: ViewButton {
+        look: header.look
+        flat: true
+        compact: true
     }
 
     // The view-type menu.

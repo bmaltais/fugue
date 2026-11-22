@@ -2,24 +2,38 @@ import QtQuick
 import QtQuick.Controls
 import Fugue
 
-// A button of a large view's bar and footer (#62, #73) and of the run toolbar and queue panel (#60):
-// 7u = 28px tall, above the 24px floor, a label on the well color; `current` marks the choice that
-// holds (the accent, or the quiet marking for a zoom), `primary` is the surface's one highlighted
-// action (OK, Run). `glyph` (a Lucide name, docs/canvas-look.md 16) puts an icon before the label, or
-// alone; a button without a label names itself through `tip`, which is also its tooltip. It takes
-// Tab focus, shown by a ring in the accent; Enter and Space press it. It knows nothing of what it
-// does: `tapped` says it was pressed.
+// The window's one button (docs/ui-ergonomics.md D4): a large view's bar and footer (#62, #73), the run toolbar and
+// queue panel (#60), the Canvas view, and through thin aliases the settings' SmallButton (SettingsParts.qml) and the
+// area header's buttons (AreaHeader.qml). 7u = 28px tall, above the 24px floor, a label on the well color.
+//
+// Variants, which combine:
+//  - `primary`: the surface's one highlighted action (OK, Run, Accept), the accent fill. One per surface.
+//  - `current`: a choice that holds or a toggle that is on. `accented` (the default) fills it with the accent, for a
+//    surface with no primary; `accented: false` is the quiet marking (the selection color), which a toggle on a surface
+//    with a primary always uses (D7). `checkable` tells assistive tools it is a toggle and whether it is on.
+//  - `danger`: a cancel or a removal, the red tint while it can act (docs/canvas-look.md 11).
+//  - `bordered`: the forms' look (settings, Projects), a hairline edge.
+//  - `flat`: chrome (an area header, a panel's title): transparent until hovered, the label color at rest.
+//  - `compact`: 6u = 24px, for a bar that is itself 7u tall.
+// `glyph` (a Lucide name, docs/canvas-look.md 16) puts an icon before the label, or alone; `trailingGlyph` one after it
+// (`chevron-down` for a button that opens a menu). A button without a label names itself through `tip`, which is also
+// its tooltip. States as every button draws them: hover (an edge, or the menu-row fill when flat), pressed, the 2px
+// accent focus ring (the error color on a danger button), disabled at 40%. It takes Tab focus; Enter and Space press it.
+// It knows nothing of what it does: `tapped` says it was pressed.
 Rectangle {
     id: button
     required property CanvasLook look
     property string text
     property string glyph
+    property string trailingGlyph
     property string tip
     property bool current: false
     property bool accented: true  // `current` shows in the accent; false in the quiet selection color
     property bool primary: false
-    // A cancel or a delete: a red tint while it can act (docs/canvas-look.md 11); disabled it is as calm as any button.
     property bool danger: false
+    property bool bordered: false
+    property bool flat: false
+    property bool compact: false
     // A toggle (Compare, Snap, Show candidate): assistive tools hear it as on or off, `current` being on.
     property bool checkable: false
     signal tapped
@@ -28,19 +42,26 @@ Rectangle {
     property bool altAction: false
     signal altTapped
 
+    readonly property bool hovered: hover.hovered
+    readonly property bool pressed: tap.pressed
     readonly property bool marked: primary || (current && accented)
     readonly property bool alarmed: danger && enabled && !marked
-    readonly property color ink: marked ? look.accentForeground : look.text
-    implicitWidth: Math.max(content.implicitWidth + 4 * look.unit, implicitHeight)
-    implicitHeight: 7 * look.unit
+    readonly property color ink: marked ? look.accentForeground
+                                : flat && !current && !hovered && !activeFocus ? look.label : look.text
+    implicitWidth: Math.max(content.implicitWidth + (bordered ? 6 : 4) * look.unit, implicitHeight)
+    implicitHeight: (compact ? 6 : 7) * look.unit
     width: implicitWidth
     height: implicitHeight
     radius: look.smallCorner
     color: marked ? look.accent
-         : alarmed ? (hover.hovered || tap.pressed ? look.dangerHover : look.dangerFill)
-         : current ? look.selectedRow : look.well
-    border.width: activeFocus ? 2 : 0
-    border.color: alarmed ? look.error : look.accent
+         : alarmed ? (hovered || pressed ? look.dangerHover : look.dangerFill)
+         : pressed ? look.menuRow
+         : current ? look.selectedRow
+         : flat ? (hovered ? look.menuRow : "transparent")
+         : bordered && hovered ? look.selectedRow : look.well
+    // The edge: the focus ring first, then a form button's hairline, then a plain well button's hover edge.
+    border.width: activeFocus ? 2 : bordered || (hovered && !flat && !marked && !alarmed && enabled) ? 1 : 0
+    border.color: activeFocus ? (alarmed ? look.error : look.accent) : look.hairlineStrong
     activeFocusOnTab: enabled
     opacity: enabled ? 1 : 0.4
     Accessible.role: Accessible.Button
@@ -51,13 +72,13 @@ Rectangle {
         id: content
         anchors.centerIn: parent
         spacing: 1.5 * button.look.unit
-        Text {
+        Glyph {
             visible: button.glyph !== ""
             anchors.verticalCenter: parent.verticalCenter
-            text: button.glyph !== "" ? button.look.glyph(button.glyph) : ""
-            font.family: button.look.iconFont
-            font.pixelSize: 14
-            color: button.ink
+            look: button.look
+            name: button.glyph
+            // A flat danger button (an area's close) turns its glyph red on hover or focus, as the menu bar's close.
+            color: button.flat && button.danger && (button.hovered || button.activeFocus) ? button.look.error : button.ink
         }
         Text {
             id: label
@@ -66,6 +87,13 @@ Rectangle {
             text: button.text
             color: button.ink
             font.pixelSize: button.look.labelSize
+        }
+        Glyph {
+            visible: button.trailingGlyph !== ""
+            anchors.verticalCenter: parent.verticalCenter
+            look: button.look
+            name: button.trailingGlyph
+            color: button.marked ? button.ink : button.look.label
         }
     }
     TapHandler {
@@ -83,8 +111,9 @@ Rectangle {
         cursorShape: button.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
     }
     ToolTip.visible: hover.hovered && button.tip !== "" && button.enabled
-    ToolTip.delay: App.theme.look.tooltipDelay
+    ToolTip.delay: button.look.tooltipDelay
     ToolTip.text: button.tip
     Keys.onReturnPressed: button.tapped()
+    Keys.onEnterPressed: button.tapped()
     Keys.onSpacePressed: button.tapped()
 }
