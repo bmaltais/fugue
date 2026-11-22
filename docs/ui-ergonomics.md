@@ -35,6 +35,26 @@ Blender and Photoshop are the usability references for the creative surfaces (ow
 
 Done when every added or moved control has a **Decisions** row that names the rule it meets, any **Open** row for a control this change touches has moved to **Decisions**, and every **Not scheduled** row is unchanged.
 
+## Cohesion checklist
+
+Before a new surface or control is done, find the long-standing surface that does the same job and check each line against it. The audit these lines come from, with the reference table and the open findings: [.ui-ergonomics/2026-11-22-canvas-areas-cohesion.md](../.ui-ergonomics/2026-11-22-canvas-areas-cohesion.md).
+
+- [ ] **Components.** An existing component is reused: `ViewButton`, `SettingsParts` (`SmallButton`, `Toggle`, `Setting`), `Question`, `LargeViewDialog`, `WidgetMenu`, `CropFrame`, `CompareView`, `ValueSlider`, `Glyph`, `FugueScrollBar`. A private copy (a button, a mode list, a file dialog, a menu's rows) is a finding; extend the component instead.
+- [ ] **Tokens.** No color, font size or radius typed as a literal: colors from `look.*`, sizes in `u`, corners from `look.smallCorner` or `look.popupCorner`, edges 1px `look.hairline`, glyphs 14px. A literal over a picture (white, a dark halo) is the same one `CropFrame` uses.
+- [ ] **One primary.** Only the primary is filled with the accent. A toggle or a current choice on that surface uses the quiet marking (`accented: false`). Never two primaries on screen at once, even in two parts of one surface.
+- [ ] **Destructive.** `danger` tint, its own chunk, last in its row, the gap before it at least twice the row's gap. A reversible removal is tinted too.
+- [ ] **Order.** Cancel or Back first, the primary last at the right, as the Crop window and the questions.
+- [ ] **Words.** The same action has the same verb everywhere (Accept, Drop, Export…, OK for a commit that closes); a button is a verb; an ellipsis only when a dialog or file picker follows; sentence case; status chips capitalized; a node by its title, never its id; "Canvas" is the picture, "Graph" the node view; the spec's term (candidate, revision, head) in every surface and the CLI.
+- [ ] **Glyphs.** Lucide from the subset (`share/fonts/lucide-fugue.txt`), never a text "×", "▾" or "‹"; a glyph means one thing in the whole window.
+- [ ] **States.** Hover, pressed, focus (the 2px accent ring), disabled (dimmed, with a tip saying why) and error (`look.error`) as `ViewButton` draws them; a toggle tells assistive tools it is on.
+- [ ] **Keys.** The picture keys (0, 1, +, -, Escape, Enter) or the graph keys, as the surface is; a new key is checked against the registry and the References, and a tooltip names it.
+- [ ] **Keyboard.** Every control and list row is reached by Tab or the arrows, in reading order.
+- [ ] **Right-to-left.** A popup sets `LayoutMirroring` on its content (it is outside the window's mirrored root); a picture is never mirrored.
+- [ ] **Empty and error.** An empty state says what to do in the app (a button), not on the command line; the same state has the same words everywhere.
+- [ ] **Pictures.** A `FUGUE_SHOT_DIR` picture of the surface, light and dark, looked at beside the reference surface's; narrow width too for anything an area can host.
+
+Some lines state a recommendation the owner has not settled yet (the audit's **Decide** list: D3 words and case, D4 button families, D5 keys, D7 the accent, D9 order); when the owner decides otherwise, change the line here.
+
 ## Open
 
 ### Port loses to the resize corner
