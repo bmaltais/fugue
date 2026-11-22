@@ -161,3 +161,24 @@ of the layer (it moves and is deleted with it) and can be turned off to see the 
 (`--mask off`, `--mask on`) or deleted (`--mask delete`). Other programs have no layer mask in an
 `.ora`, so an export gives them the layer as it looks with its mask applied, and keeps the mask for
 Fugue to read back.
+
+In the window, the Canvas view (File > Canvas…, or a Canvas area) has a **Layers** panel at the right
+of the picture, top layer first, with a small picture of each layer (and of its mask), its name and
+an eye:
+
+- Click the eye to hide or show a layer; **Alt+click** it to look at that layer alone (only a view:
+  nothing changes, and the strip "Showing … alone" ends it).
+- Click a layer to select it, Ctrl+click to add one, Shift+click for a range. Under the list,
+  **Opacity** is a field you drag left or right (Shift for fine steps, Ctrl for steps of 10%), click
+  to type a value, or double-click for 100%; **Blend** picks the blend mode; a layer with a mask has
+  **Mask on/off** and **Delete mask**, and Shift+click on its mask picture does the same.
+- Double-click a name (or F2) to rename it; drag a layer up or down to reorder; **Duplicate**, the
+  arrows and **Delete** are under the list, and a right click on a layer opens the same with their
+  keys.
+- While the pointer is over the panel: H hides or shows, X or Delete deletes, Ctrl+D duplicates,
+  `]` and `[` move up and down, F2 renames, Ctrl+Z and Ctrl+Shift+Z undo and redo. Elsewhere those
+  keys keep their meaning in the graph.
+- Each change is a new revision of the head and shows at once; **Undo** and **Redo** at the top of
+  the panel go back and forward. Layers are changed on the head only: on an older revision or a
+  candidate the list is there to look at.
+- Hover a layer to see where it came from (the Canvas Write that made it, and when).

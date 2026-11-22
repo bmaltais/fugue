@@ -26,8 +26,9 @@ struct CommandSpec {
     QString label;       // the menu's shorter name ("Quit"); empty: the description
     QStringList keys;    // default key bindings, as QKeySequence portable text ("Ctrl+S")
     QStringList gestures; // bindings that are not keys, shown but not rebindable ("Alt+drag")
-    // Where the keys apply: app (everywhere), canvas, group-selected, group (inside one) or
-    // run (a run is in progress). The more specific context owns a key (12.4).
+    // Where the keys apply: app (everywhere), canvas, group-selected, compare, group (inside one),
+    // run (a run is in progress) or canvas-layers (over a Canvas view's layers panel, #226). The
+    // more specific context owns a key (12.4).
     QString context = QStringLiteral("app");
     // How it compares to ComfyUI (12.4): "same", or what differs ("added", "Omarchy").
     QString versus = QStringLiteral("same");
@@ -107,8 +108,9 @@ public:
     // Runs the owner of the key. False when nothing owns it.
     Q_INVOKABLE bool triggerKey(const QString &key);
 
-    // `app` is always active. A ticket that owns a context turns it on and off.
-    void setContextActive(const QString &context, bool active);
+    // `app` is always active. A ticket that owns a context turns it on and off (QML too: the Canvas view's layers
+    // panel turns `canvas-layers` on while the pointer is over it, #226).
+    Q_INVOKABLE void setContextActive(const QString &context, bool active);
     bool contextActive(const QString &context) const;
     static QStringList contexts();
 

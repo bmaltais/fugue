@@ -31,6 +31,7 @@ LargeViewDialog {
         anchors.fill: parent
         look: root.look
         zoomButtons: false
+        ownShortcuts: true // a modal popup: the window's shortcuts sleep, so the layers panel binds its keys
         edits: root.edits
         followNode: root.selectedRegion
         focus: true

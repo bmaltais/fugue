@@ -63,6 +63,16 @@ QList<Row> defaultRows() {
         {"panel.nodes", QT_TRANSLATE_NOOP("Command", "Toggle the node library"), {"N"}, {}, "canvas", same},
         {"panel.workflows", QT_TRANSLATE_NOOP("Command", "Toggle the workflows panel"), {"W"}, {}, "canvas", same},
         {"panel.queue", QT_TRANSLATE_NOOP("Command", "Toggle the run queue"), {"Alt+Q"}, {}, "canvas", "added"},
+        // The Canvas view's layers panel (#226): its keys while the pointer is over it (Blender's hover rule).
+        {"canvas-layers.visible", QT_TRANSLATE_NOOP("Command", "Hide or show the selected layers"), {"H"}, {"Click the eye", "Alt+click the eye: that layer alone"}, "canvas-layers", "added"},
+        {"canvas-layers.rename", QT_TRANSLATE_NOOP("Command", "Rename the layer"), {"F2"}, {"Double-click its name"}, "canvas-layers", "added"},
+        {"canvas-layers.duplicate", QT_TRANSLATE_NOOP("Command", "Duplicate the selected layers"), {"Ctrl+D"}, {}, "canvas-layers", "added"},
+        {"canvas-layers.raise", QT_TRANSLATE_NOOP("Command", "Move the selected layers up"), {"]"}, {"Drag a layer"}, "canvas-layers", "added"},
+        {"canvas-layers.lower", QT_TRANSLATE_NOOP("Command", "Move the selected layers down"), {"["}, {"Drag a layer"}, "canvas-layers", "added"},
+        {"canvas-layers.delete", QT_TRANSLATE_NOOP("Command", "Delete the selected layers"), {"X", "Delete"}, {}, "canvas-layers", "added"},
+        {"canvas-layers.mask", QT_TRANSLATE_NOOP("Command", "Turn the layer mask off or on"), {}, {"Shift+click the mask"}, "canvas-layers", "added"},
+        {"canvas-layers.undo", QT_TRANSLATE_NOOP("Command", "Undo the last canvas change"), {"Ctrl+Z"}, {}, "canvas-layers", "added"},
+        {"canvas-layers.redo", QT_TRANSLATE_NOOP("Command", "Redo the canvas change"), {"Ctrl+Shift+Z", "Ctrl+Y"}, {}, "canvas-layers", "added"},
     };
 }
 
@@ -84,6 +94,10 @@ void registerDefaultCommands(CommandRegistry &registry) {
     registry.setHandler("app.quit", [&registry] { registry.requestQuit(); });
     registry.setHandler("file.close", [&registry] { registry.requestClose(); });
     registry.setHandler("app.shortcuts", [&registry] { emit registry.shortcutsToggleRequested(); });
+    // The layers panel under the pointer does the work (CanvasView.qml listens for these ids).
+    for (const QString &id : registry.ids())
+        if (id.startsWith(QLatin1String("canvas-layers.")))
+            registry.setHandler(id, [&registry, id] { emit registry.windowRequested(id); });
 }
 
 } // namespace fugue

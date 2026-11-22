@@ -335,6 +335,37 @@ private slots:
             QCOMPARE(app.commands.keys(QString::fromLatin1(command)), QStringList({QString::fromLatin1(key)}));
         }
     }
+
+    // #226, last because it edits the shared canvas: over a Canvas area's layers panel the keys are the panel's (the
+    // window's own shortcuts, the `canvas-layers` context), so Delete deletes the layer and not the selected node.
+    void theLayersPanelOwnsTheKeysUnderThePointer() {
+        App app(load(withRegion(m_canvas)));
+        QVERIFY(app.open());
+        QVERIFY(app.commands.trigger("area.split-row"));
+        QQuickItem *area = nullptr;
+        QTRY_VERIFY((area = find(app.window, "canvasArea")) != nullptr);
+        QObject *backend = area->property("view").value<QObject *>()->property("backend").value<QObject *>();
+        QTRY_VERIFY(!backend->property("layers").toList().isEmpty());
+        const int count = backend->property("layers").toList().size(); // the earlier tests' layers; the top one is current
+        app.model.select({"region"});
+        QTRY_VERIFY(find(app.window, "canvasLayerList"));
+        settle();
+        QTest::mouseMove(app.window, centerOf(find(app.window, "canvasLayerList")));
+        QTRY_VERIFY(app.commands.contextActive("canvas-layers"));
+        QCOMPARE(app.commands.ownerOf("Del"), QString("canvas-layers.delete"));
+        QTest::keyClick(app.window, Qt::Key_H);
+        QTRY_VERIFY(!backend->property("layers").toList().at(0).toMap().value("visible").toBool());
+        QTest::keyClick(app.window, Qt::Key_Delete);
+        QTRY_COMPARE(backend->property("layers").toList().size(), count - 1);
+        QVERIFY(app.model.document().graph.nodes.contains("region")); // the node is not the one deleted
+        QTest::keyClick(app.window, Qt::Key_Z, Qt::ControlModifier);
+        QTRY_COMPARE(backend->property("layers").toList().size(), count);
+        // Away from the panel the Graph has its keys back.
+        QTest::mouseMove(app.window, centerOf(app.canvas));
+        QTRY_VERIFY(!app.commands.contextActive("canvas-layers"));
+        QCOMPARE(app.commands.ownerOf("Del"), QString("edit.delete"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
 };
 
 QTEST_MAIN(TestAreaSplitWindow)

@@ -21,6 +21,10 @@ Rectangle {
     // A cancel or a delete: a red tint while it can act (docs/canvas-look.md 11); disabled it is as calm as any button.
     property bool danger: false
     signal tapped
+    // An Alt+click of its own (#226: a layer's eye shows that layer alone); with it, a plain click is a click with no
+    // modifier.
+    property bool altAction: false
+    signal altTapped
 
     readonly property bool marked: primary || (current && accented)
     readonly property bool alarmed: danger && enabled && !marked
@@ -62,7 +66,13 @@ Rectangle {
     }
     TapHandler {
         id: tap
+        acceptedModifiers: button.altAction ? Qt.NoModifier : Qt.KeyboardModifierMask
         onTapped: button.tapped()
+    }
+    TapHandler {
+        enabled: button.altAction
+        acceptedModifiers: Qt.AltModifier
+        onTapped: button.altTapped()
     }
     HoverHandler {
         id: hover

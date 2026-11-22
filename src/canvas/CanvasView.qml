@@ -23,6 +23,10 @@ import "widgets"
 // node, or while comparing, it is drawn and not edited.
 // Everything it does is CanvasViewModel (canvas/canvas_view_model.h) over CanvasHistory.
 //
+// The layers panel (#226, CanvasLayersPanel.qml) is at the right of the picture: the shown revision's layers, each edit one
+// revision of the head, Undo and Redo of the canvas; **Layers** in the tools shows or hides it. `ownShortcuts` is for a
+// host that is a modal popup (the dialog): the panel then binds its keys itself.
+//
 // Simple by default: a canvas, the strip of revisions (Head, candidates, the latest few, Earlier…), the picture
 // (wheel zoom, drag to pan, Fit, 100%), and for a candidate Accept, Drop and Export. A candidate shows over the head;
 // Show candidate switches it off to see the head alone. Compare (against the head for a candidate, else the parent) opens
@@ -37,6 +41,10 @@ Item {
     property alias followNode: canvasData.followNode
     // The Fit and 100% buttons of the bar: a host with a bar of its own for them (LargeViewDialog) turns them off.
     property bool zoomButtons: true
+    // The layers panel at the right (#226), and whether it binds its own keys (a modal host's window shortcuts sleep).
+    property bool showLayers: true
+    property bool ownShortcuts: false
+    readonly property alias layersPanel: layersPanel
     readonly property alias backend: canvasData
     readonly property alias viewer: pictureView
     readonly property real u: look.unit
@@ -219,6 +227,17 @@ Item {
         }
         Item { width: root.u; height: 1; visible: root.zoomButtons }
         ViewButton {
+            objectName: "canvasViewLayers"
+            look: root.look
+            visible: canvasData.canvasId !== ""
+            glyph: "layers"
+            text: qsTr("Layers")
+            tip: root.showLayers ? qsTr("Hide the layers panel") : qsTr("Show the layers panel")
+            accented: false
+            current: root.showLayers
+            onTapped: root.showLayers = !root.showLayers
+        }
+        ViewButton {
             objectName: "canvasViewOverlay"
             look: root.look
             visible: canvasData.showsCandidate && !root.compareOn
@@ -377,7 +396,7 @@ Item {
         anchors.topMargin: root.u
         anchors.bottom: notes.top
         anchors.bottomMargin: root.u
-        width: parent.width
+        width: parent.width - (layersPanel.visible ? layersPanel.width + 2 * root.u : 0)
         visible: canvasData.canvasId !== "" && canvasData.revisionB !== ""
         onActiveFocusChanged: if (!activeFocus) root.panKey = false
         mode: "single"
@@ -391,6 +410,17 @@ Item {
         labelA: root.compareOn ? qsTr("A") : canvasData.showsCandidate && canvasData.overlay ? qsTr("Candidate %1").arg(root.shownShort)
                                            : root.shownIsHead || canvasData.showsCandidate ? qsTr("Head") : root.shownShort
         labelB: canvasData.showsCandidate ? qsTr("Candidate %1").arg(root.shownShort) : qsTr("B")
+    }
+    // The layers of the shown revision, at the right of the picture, 2u from it.
+    CanvasLayersPanel {
+        id: layersPanel
+        anchors.top: pictureView.top
+        anchors.bottom: pictureView.bottom
+        anchors.right: parent.right
+        visible: root.showLayers && pictureView.visible && !root.compareOn
+        look: root.look
+        model: canvasData
+        ownShortcuts: root.ownShortcuts
     }
     Item {
         id: regionLayer

@@ -22,6 +22,15 @@
 //    showed itself) moves, and not while `viewLocked` (Compare on, a rectangle drag: the host says) or with
 //    `showNewResults` off (settings.json's canvas_show_new_results); a result that came meanwhile is shown when the
 //    lock lifts, if the view is still on the head. The banner's Accept and Drop are accept() and drop().
+//  - layers (#226): `layers` are the shown revision's layers, top first, as {position (0 is the bottom), name, kind,
+//    visible, opacity, blend (an id of blendModes, or "" for an op Fugue does not draw), compositeOp, hasMask, maskEnabled,
+//    producer, from (the producer as a person reads it), created, depth (0: groups are later), thumbnail, maskThumbnail
+//    (small PNGs of the layer's own pixels and of its mask)}. `selection` is a list of positions (ctrl/shift add, as an
+//    outliner does), kept across an edit. Every edit (setVisible, setOpacity, setBlend, rename, removeLayers, duplicate,
+//    moveLayers, raise/lower, setMaskEnabled, removeMask) is CanvasStore::editLayers on the shown revision when it is
+//    the head (`layersEditable`): ONE new revision each, producer `canvas-view:<op>`, the view moving on to it. undo()
+//    and redo() move the head along its parents (CanvasStore::undo, redo). `solo` shows one layer alone: a view-only
+//    state, never a revision, dropped when the shown revision changes.
 // It makes no window. The `region` map is {valid, reason, x, y, width, height, context: {x, y, width, height}, reads,
 // readsId, readsShown, writable, editable, padding, scale, cap, multiple}: `editable` is false while X, Y, Width or Height
 // is linked to another node (the rectangle is then drawn but not edited).
@@ -31,6 +40,7 @@
 #include <QtQmlIntegration/qqmlintegration.h>
 
 #include "canvas/canvas_history.h"
+#include "engine/canvas_layer_ops.h"
 #include "canvas/widget_edit.h"
 
 namespace fugue {
@@ -59,6 +69,15 @@ class CanvasViewModel : public CanvasHistory {
     Q_PROPERTY(QString newResult READ newResult NOTIFY newResultChanged)
     Q_PROPERTY(int newResultOthers READ newResultOthers NOTIFY newResultChanged)
     Q_PROPERTY(QString newResultFrom READ newResultFrom NOTIFY newResultChanged)
+    // The layers panel (#226): see the header.
+    Q_PROPERTY(QVariantList layers READ layers NOTIFY layersChanged)
+    Q_PROPERTY(QVariantList selection READ selection NOTIFY layersChanged)
+    Q_PROPERTY(bool layersEditable READ layersEditable NOTIFY layersChanged)
+    Q_PROPERTY(bool canUndo READ canUndo NOTIFY layersChanged)
+    Q_PROPERTY(bool canRedo READ canRedo NOTIFY layersChanged)
+    Q_PROPERTY(int solo READ solo WRITE setSolo NOTIFY layersChanged)
+    // [{id, label}] of the blend modes, Normal first.
+    Q_PROPERTY(QVariantList blendModes READ blendModes CONSTANT)
 
 public:
     explicit CanvasViewModel(QObject *parent = nullptr);
@@ -87,6 +106,38 @@ public:
     QString newResult() const { return m_newResult; }
     int newResultOthers() const { return m_newOthers; }
     QString newResultFrom() const;
+    QVariantList layers() const { return m_layers; }
+    QVariantList selection() const;
+    bool layersEditable() const;
+    bool canUndo() const { return m_canUndo && layersEditable(); }
+    bool canRedo() const { return m_canRedo && layersEditable(); }
+    int solo() const { return m_solo; }
+    void setSolo(int position);
+    static QVariantList blendModes();
+
+    // ---- the layers panel (#226); positions are bottom first, as the store has them ----
+    // `mode` "only" selects one, "toggle" adds or takes it away (Ctrl), "range" from the last one picked (Shift).
+    Q_INVOKABLE void selectLayer(int position, const QString &mode = QStringLiteral("only"));
+    Q_INVOKABLE void selectNone();
+    // Each is one revision of the head (false when nothing changed or it could not be done; `error` says why).
+    Q_INVOKABLE bool setVisible(const QVariantList &positions, bool visible);
+    // Hides them all when any is shown, else shows them all (the H key).
+    Q_INVOKABLE bool toggleVisible(const QVariantList &positions);
+    Q_INVOKABLE bool setOpacity(const QVariantList &positions, double opacity);
+    Q_INVOKABLE bool setBlend(const QVariantList &positions, const QString &blend);
+    Q_INVOKABLE bool rename(int position, const QString &name);
+    Q_INVOKABLE bool removeLayers(const QVariantList &positions);
+    Q_INVOKABLE bool duplicate(const QVariantList &positions);
+    // `to` is where the lowest of them ends among the others (bottom first); raise and lower move them one place.
+    Q_INVOKABLE bool moveLayers(const QVariantList &positions, int to);
+    Q_INVOKABLE bool raise(const QVariantList &positions);
+    Q_INVOKABLE bool lower(const QVariantList &positions);
+    // The drop of a drag in the top-first list: the line above row `gap` (0 is above the top row, the count below the last).
+    Q_INVOKABLE bool dropAt(const QVariantList &positions, int gap);
+    Q_INVOKABLE bool setMaskEnabled(const QVariantList &positions, bool enabled);
+    Q_INVOKABLE bool removeMask(const QVariantList &positions);
+    Q_INVOKABLE bool undo();
+    Q_INVOKABLE bool redo();
 
     // Looks at a revision: the head, a candidate (against the head) or any other (against its parent).
     Q_INVOKABLE void show(const QString &revision);
@@ -111,8 +162,14 @@ signals:
     void pictureChanged();
     void regionChanged();
     void newResultChanged();
+    void layersChanged();
 
 private:
+    // Stores the edit on the shown head and moves the view to it, with `select` as the selection there.
+    bool applyEdit(const canvas::LayerEdit &edit, const QList<int> &select);
+    void rebuildLayers();
+    void updateSoloPicture();
+    QList<int> positionsOf(const QVariantList &list) const;
     void showArrivals();
     void clearNewResult();
 
@@ -138,6 +195,17 @@ private:
     QString m_newResult;
     int m_newOthers = 0;
     int m_retries = 0;
+    QVariantList m_layers;
+    QList<int> m_selected;   // positions, in the order picked
+    int m_anchor = -1;       // the last one picked, for a range
+    QString m_layersOf;      // the revision m_layers is of
+    QString m_layersCanvas;  // and its canvas
+    QList<int> m_keepSelection; // what an edit selects in the revision it makes
+    bool m_editing = false;
+    bool m_canUndo = false;
+    bool m_canRedo = false;
+    int m_solo = -1;
+    QUrl m_soloSource;
 };
 
 } // namespace fugue
