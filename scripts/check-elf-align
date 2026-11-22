@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Usage: scripts/check-elf-align PACKAGE.pkg.tar.zst...
+# Fails if an executable ELF file in the package (usr/bin, usr/lib) has a LOAD segment aligned to less
+# than 0x4000. Asahi Linux (Apple Silicon) runs a 16 KB-page kernel and cannot map such a binary.
+set -euo pipefail
+(( $# > 0 )) || { echo "usage: $0 package..." >&2; exit 2; }
+root=$(mktemp -d)
+trap 'rm -rf "$root"' EXIT
+for pkg in "$@"; do bsdtar -xf "$pkg" -C "$root"; done
+fail=0 checked=0
+while IFS= read -r -d '' f; do
+  [[ $(head -c4 "$f") == $'\x7fELF' ]] || continue
+  checked=$((checked + 1))
+  aligns=$(readelf -lW "$f" | awk '$1 == "LOAD" {print $NF}' | sort -u | tr '\n' ' ')
+  echo "${f#"$root"}: LOAD p_align $aligns"
+  for a in $aligns; do
+    (( a >= 0x4000 )) || { echo "  too small: $a < 0x4000"; fail=1; }
+  done
+done < <(find "$root/usr/bin" "$root/usr/lib" -type f -perm -u+x -print0 2>/dev/null)
+(( checked > 0 )) || { echo "no ELF binary found"; exit 1; }
+exit $fail

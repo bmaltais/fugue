@@ -4,6 +4,8 @@
 #include <QPointer>
 #include <QThread>
 
+#include <algorithm>
+
 #include "engine/model_download.h"
 
 namespace fugue {
@@ -33,6 +35,13 @@ QString lostBy(CacheKind kind) {
                            "and any run that is going or waiting are kept.");
     }
     return {};
+}
+
+// What clearing everything loses: the three kinds' losses in one sentence.
+QString lostByAll() {
+    return QObject::tr("Every node that was run will run again the next time, so what took minutes takes minutes again. "
+                       "Pictures on the canvas show again after the next run, and the history of past runs is gone. "
+                       "Frozen results, your saved pictures and any run that is going or waiting are kept.");
 }
 
 QString day(const QDateTime &time) { return time.toLocalTime().toString(QStringLiteral("yyyy-MM-dd")); }
@@ -123,24 +132,32 @@ void CacheModel::refresh() {
                                          {"canClear", usage.items > usage.protectedItems}});
              m_kinds = list;
              m_total = sizeText(status.totalBytes());
+             m_canClearAll = std::any_of(status.kinds.begin(), status.kinds.end(),
+                                         [](const KindUsage &u) { return u.items > u.protectedItems; });
              emit changed();
              if (!m_question.isEmpty()) { // asked before the sizes were known
-                 for (const QVariant &entry : std::as_const(m_kinds))
-                     if (entry.toMap().value("kind") == m_question.value("kind"))
-                         m_question.insert("size", entry.toMap().value("size"));
+                 if (m_question.value("kind").toString() == QLatin1String("all"))
+                     m_question.insert("size", m_total);
+                 else
+                     for (const QVariant &entry : std::as_const(m_kinds))
+                         if (entry.toMap().value("kind") == m_question.value("kind"))
+                             m_question.insert("size", entry.toMap().value("size"));
                  emit questionChanged();
              }
          });
 }
 
 void CacheModel::ask(const QString &kind) {
+    const bool all = kind == QLatin1String("all");
     const std::optional<CacheKind> parsed = parseCacheKind(kind);
-    if (!parsed)
+    if (!parsed && !all)
         return;
-    QVariantMap question{{"kind", kind}, {"title", titleOf(*parsed)}, {"what", lostBy(*parsed)}, {"size", QString()}};
-    for (const QVariant &entry : std::as_const(m_kinds))
-        if (entry.toMap().value("kind").toString() == kind)
-            question.insert("size", entry.toMap().value("size"));
+    QVariantMap question = all ? QVariantMap{{"kind", kind}, {"title", tr("Everything cached")}, {"what", lostByAll()}, {"size", m_total}}
+                               : QVariantMap{{"kind", kind}, {"title", titleOf(*parsed)}, {"what", lostBy(*parsed)}, {"size", QString()}};
+    if (!all)
+        for (const QVariant &entry : std::as_const(m_kinds))
+            if (entry.toMap().value("kind").toString() == kind)
+                question.insert("size", entry.toMap().value("size"));
     m_question = question;
     emit questionChanged();
     if (m_kinds.isEmpty())
@@ -151,16 +168,27 @@ void CacheModel::answer(bool yes) {
     const QString kind = m_question.value("kind").toString();
     m_question.clear();
     emit questionChanged();
+    const bool all = kind == QLatin1String("all");
     const std::optional<CacheKind> parsed = parseCacheKind(kind);
-    if (!yes || !parsed)
+    if (!yes || (!parsed && !all))
         return;
-    ClearRequest request;
-    request.kinds = {*parsed};
+    ClearRequest request; // "all" is what `fugue cache clear --kind all` asks for
+    request.kinds = all ? allCacheKinds() : QList<CacheKind>{*parsed};
     const CacheFolders folders = m_folders;
     work([folders, request] { return CacheManager(folders).clear(request); },
-         [this, kind, parsed](const Result<ClearReport> &report) {
+         [this, kind, parsed, all](const Result<ClearReport> &report) {
              if (!report) {
                  setMessage(report.errors().first().message);
+             } else if (all) {
+                 QStringList left;
+                 for (const KindOutcome &outcome : report.value().kinds)
+                     if (!outcome.skipped.isEmpty())
+                         left << titleOf(outcome.kind).toLower();
+                 const QString freed = sizeText(report.value().bytes());
+                 setMessage(left.isEmpty() ? tr("Cleared %1 of everything cached.").arg(freed)
+                                           : tr("Cleared %1. %2 left alone because a run is going; try again when it has ended.")
+                                                 .arg(freed, left.join(QStringLiteral(", "))));
+                 emit cleared(kind, report.value().bytes());
              } else {
                  const KindOutcome &outcome = report.value().kinds.value(0);
                  if (!outcome.skipped.isEmpty())

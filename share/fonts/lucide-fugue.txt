@@ -54,3 +54,4 @@ eye e0be
 layout-template e207
 monitor e121
 server e157
+settings e158

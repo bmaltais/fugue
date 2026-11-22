@@ -173,13 +173,13 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 - Why: the library is found by recall and by scanning (Hick), so the search field has the focus first and takes the keys: Down goes to the list, Enter adds the best match, Escape empties the field and then closes the panel. A click is the shortest add (Fitts: the row is the target); the drag is for the place. The grip is on the edge the pointer already reaches the canvas by.
 - Rule: Floor (rows, fields and buttons are 28 to 32px; the exception is the width grip, 8px wide: it is an edge that runs the panel's whole height, so it is hit along its length, it grows a 3px mark under the pointer, a 24px circle on it would overlap the canvas it borders, and the keys do the same through Tab focus). Primary: none; the surface's one action is the search and Enter. Gaps (1u between the title bar's buttons, 1u between rows). Destructive: the close button of an open workflow in the workflows panel is at the row's far end and asks nothing more than the tab's own x does (an unsaved workflow raises the same save question); a drop on the panel adds nothing. Learned place: N and W are ComfyUI's; the View menu rows keep their order. Posture: docked, not floating, so the canvas keeps its density and a panel never covers it; the library's list scrolls by the wheel and its scroll bar, because a drag on a row takes the node out.
 
-### 2026-11-21 side tab strip: Templates action tab (#192)
+### 2026-11-21 side tab strip: Templates action tab (#192), Settings at the lower end
 
-- Control: `SideTabStrip.qml` `sideTab-templates` (registry row of kind `action` in `side_panels.cpp`), 44px square, 24px `layout-template` glyph, at the strip's lower end under a 1px inset rule (`sideTabActionsRule`) and half a unit of gap, 1u from the bottom. Click, Enter or Space runs `file.templates` (File > Browse templates); tooltip "Templates (<key>)" from the command's key when it has one.
-- Old: the templates browser was reachable only from the File menu or its key.
-- New: one tab that launches the dialog. It is never marked open or checked (the screen reader hears a plain button, not a toggle), because it launches rather than toggles; it shows no state while the dialog is up (the modal scrim already says it).
-- Why: recognition over recall (Hick); the lower end and the rule keep a launcher apart from the toggles above it, so a press is not mistaken for opening a panel (Gestalt: proximity, separation).
-- Rule: Floor (44px, same as the panel tabs). Gaps (rule and half a unit between the panel tabs and the action). Learned place: the File menu row and its key are unchanged. Posture: part of the frame, hidden in focus mode with the strip; in a short window it stays at the bottom and the strip's panel tabs keep their order.
+- Control: `SideTabStrip.qml` `sideTab-templates` and `sideTab-settings` (registry rows of kind `action` in `side_panels.cpp`, each with an `edge`), 44px square, 24px `layout-template` and `settings` (gear) glyphs. Templates is the third tab of the top group, touching Workflows. Settings is alone at the strip's lower end under a 1px inset rule (`sideTabActionsRule`) and half a unit of gap, 1u from the bottom. Click, Enter or Space runs `file.templates` (File > Browse templates) or `app.settings` (Ctrl+,); the tooltip is "Templates (<key>)" / "Settings (Ctrl+,)" from the command's key when it has one.
+- Old: Templates sat at the lower end past the rule; Settings was reachable only from the File menu or its key. (First version of #192 put Templates at the lower end.)
+- New: Templates directly under Workflows (the owner's request: the file-like destinations stay together at the top), Settings at the lower end. Neither is ever marked open or checked (the screen reader hears a plain button, not a toggle), because they launch rather than toggle; neither shows state while its dialog is up (the modal scrim already says it).
+- Why: recognition over recall (Hick); Templates is a place you start work from, like the workflows list, so it belongs with them (Gestalt: proximity); the settings gear at the end of a rail is the learned place (VS Code, ComfyUI), and the rule keeps the rarely used one away from the toggles so a press is not mistaken for opening a panel.
+- Rule: Floor (44px, same as the panel tabs). Gaps (the top tabs touch, as the panel tabs do; the rule and half a unit above the bottom group). Learned place: gear at the bottom of a rail; the File menu rows and their keys are unchanged. Posture: part of the frame, hidden in focus mode with the strip; in a short window the bottom group stays at the bottom and the top tabs keep their order.
 
 ### 2026-11-21 side tab strip (#159)
 
@@ -353,6 +353,14 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - New: a template folder with `packs/<id>/` is offered from that folder, first, with a line saying it carries the pack and that nothing is trusted until allowed; the click goes to Settings > Packs, which asks to install and, later, to trust (the same questions as any pack).
 - Why: it is the control that already exists for a missing pack, so no new place to learn; the question stays on the Packs page, never in the banner (spec 6.6, 6.7: nothing silent).
 - Rule: Floor, Primary, Destructive, Gaps, Learned place and Posture: unchanged, the button and the card keep their size, place and order; only the text differs.
+
+### 2026-11-21 Cache page: Clear all…
+
+- Control: `cacheClearAll`, a `SmallButton` "Clear all…" (28px tall) in the Cache page's header row, right of the "N in all" total (`CachePage.qml`). It opens the same `cacheQuestion` (`cacheYes` highlighted, `cacheNo`) with the total size and all three losses in words.
+- Old: only the three per-kind "Clear…" buttons.
+- New: as above; off while measuring or clearing and when nothing can be cleared.
+- Why: the page's big action sits with the number it acts on, at the top-left, away from the per-kind Clear… at the right edge of the rows (Destructive: not next to a frequent control, and not in line with the others, so it is not hit for a row's); it never acts on the first click (asks first).
+- Rule: Floor (28px). Primary (the question's Clear is the one highlighted button; Clear all… is plain). Destructive (a second click, the question). Gaps (4u from the total). Learned place (the per-kind Clear… and the question are unchanged).
 
 ### 2026-11-21 Cache page and Clear image preview cache (#141)
 

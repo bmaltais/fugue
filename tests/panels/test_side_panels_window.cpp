@@ -142,7 +142,7 @@ private slots:
         QCOMPARE(strip->x(), 0.0);
         QCOMPARE(app.canvas->x(), strip->width()); // the canvas starts at the strip's edge
         const QVariantList panels = app.sidePanels.panels();
-        QCOMPARE(panels.size(), 3); // two panels and the Templates action (#192)
+        QCOMPARE(panels.size(), 4); // two panels, Templates (#192) and Settings
         for (const QVariant &panel : panels) {
             QQuickItem *tab = named(app, "sideTab-" + panel.toMap().value("tab").toString());
             QVERIFY(tab);
@@ -207,7 +207,7 @@ private slots:
         QCOMPARE(tab->property("tip").toString(), QString("Workflows (W)"));
     }
 
-    // The Templates action tab (#192): at the lower end past the panel tabs, it runs its command and
+    // The Templates action tab (#192): directly under the Workflows tab, it runs its command and
     // is never a checked panel; a click, Enter and Space all open the dialog.
     void theTemplatesActionTabOpensTheDialogAndIsNeverChecked() {
         App app(load(small));
@@ -218,14 +218,14 @@ private slots:
         QVERIFY(tab->isVisible());
         QVERIFY(tab->width() >= 36 && tab->height() >= 36);
         QVERIFY(tab->activeFocusOnTab());
-        // Below the panel tabs, with room between, and inside the strip.
+        // Directly under the Workflows tab (touching, as the panel tabs do), above the strip's rule.
         const qreal templatesTop = tab->mapToItem(strip, QPointF(0, 0)).y();
         const QQuickItem *workflows = named(app, "sideTab-workflows");
-        QVERIFY(templatesTop >= workflows->mapToItem(strip, QPointF(0, 0)).y() + workflows->height());
-        QVERIFY(templatesTop + tab->height() <= strip->height());
+        QCOMPARE(templatesTop, workflows->mapToItem(strip, QPointF(0, 0)).y() + workflows->height());
+        QVERIFY(templatesTop + tab->height() <= named(app, "sideTabActionsRule")->mapToItem(strip, QPointF(0, 0)).y());
         // The panel registry still gives one panel tab per panel, and the action is not one.
         const QVariantList list = app.sidePanels.panels();
-        QCOMPARE(list.size(), 3);
+        QCOMPARE(list.size(), 4);
         QCOMPARE(list.at(2).toMap().value("kind").toString(), QString("action"));
         QCOMPARE(list.at(2).toMap().value("command").toString(), QString("file.templates"));
         QCOMPARE(list.at(0).toMap().value("kind").toString(), QString("panel"));
@@ -263,6 +263,37 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // The Settings action tab: the lower end of the strip past the hairline, running app.settings
+    // (Ctrl+,); never open or checked; the tooltip shows the key.
+    void theSettingsActionTabOpensSettingsAtTheLowerEnd() {
+        App app(load(small));
+        QVERIFY(app.open());
+        QQuickItem *strip = named(app, "sideTabStrip");
+        QQuickItem *tab = named(app, "sideTab-settings");
+        QQuickItem *rule = named(app, "sideTabActionsRule");
+        QVERIFY(strip && tab && rule);
+        QVERIFY(tab->width() >= 36 && tab->height() >= 36);
+        QVERIFY(tab->activeFocusOnTab());
+        QVERIFY(tab->property("isAction").toBool());
+        QVERIFY(!tab->property("open").toBool());
+        // The rule is only there for the bottom group: past the top tabs, above Settings, which ends the strip.
+        QVERIFY(rule->isVisible());
+        const QQuickItem *templates = named(app, "sideTab-templates");
+        const qreal ruleY = rule->mapToItem(strip, QPointF(0, 0)).y();
+        const qreal tabY = tab->mapToItem(strip, QPointF(0, 0)).y();
+        QVERIFY(ruleY >= templates->mapToItem(strip, QPointF(0, 0)).y() + templates->height());
+        QVERIFY(tabY > ruleY);
+        QVERIFY(tabY + tab->height() <= strip->height());
+        QCOMPARE(tab->property("tip").toString(), QString("Settings (Ctrl+,)"));
+        const auto panel = [&app]() { return app.window->findChild<QObject *>("settingsPanel"); };
+        const auto isOpen = [&]() { return panel() && panel()->property("opened").toBool(); };
+        click(app, tab);
+        QTRY_VERIFY(isOpen());
+        QVERIFY(!tab->property("open").toBool());
+        QCOMPARE(app.sidePanels.tab(), QString());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void theStripSurvivesANarrowWindowAndFocusModeHidesIt() {
         App app(load(small));
         app.sidePanels.setTab("nodes");
@@ -274,13 +305,16 @@ private slots:
         QVERIFY(strip);
         QTRY_VERIFY(app.canvas->width() >= 160 - 1); // the canvas is never squeezed out by the panel
         QVERIFY(named(app, "sideTab-nodes")->height() >= 36);
-        // The action tab stays inside a short strip, below the panel tabs.
+        // The action tabs stay inside a short strip: Templates under Workflows, Settings at the bottom.
         app.window->resize(420, 300);
         QTRY_COMPARE(app.window->height(), 300);
         QQuickItem *templates = named(app, "sideTab-templates");
         QVERIFY(templates->height() >= 36);
         QTRY_VERIFY(templates->mapToItem(strip, QPointF(0, 0)).y() + templates->height() <= strip->height());
         QTRY_VERIFY(templates->mapToItem(strip, QPointF(0, 0)).y() >= named(app, "sideTab-workflows")->mapToItem(strip, QPointF(0, 0)).y() + 36);
+        QQuickItem *settings = named(app, "sideTab-settings");
+        QTRY_VERIFY(settings->mapToItem(strip, QPointF(0, 0)).y() + settings->height() <= strip->height());
+        QTRY_VERIFY(settings->mapToItem(strip, QPointF(0, 0)).y() >= templates->mapToItem(strip, QPointF(0, 0)).y() + 36);
         app.commands.run("view.focus-mode");
         QTRY_VERIFY(!named(app, "sideTabStrip"));
         QTRY_COMPARE(app.canvas->x(), 0.0);
