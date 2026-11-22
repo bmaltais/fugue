@@ -1,7 +1,7 @@
 {
   "manifest": 1,
   "id": "fugue/generate-song",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "name": "Generate Song",
   "description": "Makes a song from a description and, optionally, lyrics on a music model. The tempo, key and time signature are for you to set or for the model to choose.",
   "category": "Generate",
@@ -134,6 +134,19 @@
       "min": 0,
       "max": 9007199254740991,
       "widget": "seed"
+    },
+    {
+      "name": "quality",
+      "type": "text",
+      "label": "Quality",
+      "default": "mp3",
+      "choices": [
+        "mp3",
+        "mp3-320",
+        "lossless"
+      ],
+      "advanced": true,
+      "description": "The file the model makes: mp3 (128 kb/s), mp3-320 (320 kb/s) or lossless (a 24-bit WAV, nothing lost to compression)."
     }
   ],
   "outputs": [

@@ -1,7 +1,7 @@
 {
   "manifest": 1,
   "id": "fugue/remix-song",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "Remix Song",
   "description": "Plays a song again in another style: the same song as a cover, a remix or a different genre, on a music model.",
   "category": "Generate",
@@ -83,6 +83,19 @@
       "min": 0,
       "max": 9007199254740991,
       "widget": "seed"
+    },
+    {
+      "name": "quality",
+      "type": "text",
+      "label": "Quality",
+      "default": "mp3",
+      "choices": [
+        "mp3",
+        "mp3-320",
+        "lossless"
+      ],
+      "advanced": true,
+      "description": "The file the model makes: mp3 (128 kb/s), mp3-320 (320 kb/s) or lossless (a 24-bit WAV, nothing lost to compression)."
     }
   ],
   "outputs": [

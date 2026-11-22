@@ -1448,6 +1448,80 @@ private slots:
         QCOMPARE(result->used.value("seed").toInt(), 5);
     }
 
+    // Quality (#258): lossless asks for a 24-bit WAV and saves audio.wav, mp3-320 asks for the mp3 at 320 kb/s; the
+    // default sends no bitrate (the server's own 128) and still saves audio.mp3.
+    void aSongIsSavedInTheQualityAskedFor_data() {
+        QTest::addColumn<QString>("quality");
+        QTest::addColumn<QString>("format");
+        QTest::addColumn<int>("bitrate");
+        QTest::addColumn<QString>("extension");
+        QTest::newRow("default") << QString() << "mp3" << 0 << "mp3";
+        QTest::newRow("mp3") << "mp3" << "mp3" << 0 << "mp3";
+        QTest::newRow("high mp3") << "mp3-320" << "mp3" << 320 << "mp3";
+        QTest::newRow("lossless") << "lossless" << "wav24" << 0 << "wav";
+    }
+
+    void aSongIsSavedInTheQualityAskedFor() {
+        QFETCH(QString, quality);
+        QFETCH(QString, format);
+        QFETCH(int, bitrate);
+        QFETCH(QString, extension);
+        Fixture fixture;
+        fixture.server.on("GET", "/health", [](const HttpRequest &) { return HttpResponse{200, "{}"}; });
+        fixture.server.on("POST", "/lm", [](const HttpRequest &) { return HttpResponse{200, "{\"id\":\"1\"}"}; });
+        fixture.server.on("GET", "/job?id=1", [](const HttpRequest &) { return HttpResponse{200, "{\"status\":\"done\"}"}; });
+        fixture.server.on("GET", "/job?id=1&result=1", [](const HttpRequest &) {
+            return HttpResponse{200, "[{\"caption\":\"x\",\"lyrics\":\"\"}]"};
+        });
+        fixture.server.on("POST", "/synth", [](const HttpRequest &) { return HttpResponse{200, "{\"id\":\"2\"}"}; });
+        fixture.server.on("GET", "/job?id=2", [](const HttpRequest &) { return HttpResponse{200, "{\"status\":\"done\"}"}; });
+        const QByteArray audio = "RIFF pretend wav";
+        fixture.server.on("GET", "/job?id=2&result=1", [audio](const HttpRequest &) {
+            return HttpResponse{200, "--B7\r\nContent-Type: audio/wav\r\n\r\n" + audio + "\r\n--B7--\r\n", "multipart/mixed; boundary=B7"};
+        });
+        fixture.writeStatus(QJsonObject{{kMusicModel, row(kMusicModel, "music", "active", fixture.endpoint())}});
+        auto provider = fixture.provider();
+        QJsonObject params{{"prompt", "x"}, {"lyrics", ""}, {"duration", 30}};
+        if (!quality.isEmpty())
+            params.insert("quality", quality);
+        const QString id = await<QString>([&](auto reply) { provider->submit(fixture.request("audio.generate", params), reply); }).value();
+        JobStatus status;
+        QTRY_VERIFY((status = await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value()).isTerminal());
+        QCOMPARE(status.state, QStringLiteral("done"));
+        const QJsonObject sent = QJsonDocument::fromJson(fixture.server.requestsTo("POST", "/synth").first().body).object();
+        QCOMPARE(sent.value("output_format").toString(), format);
+        QCOMPARE(sent.value("mp3_bitrate").toInt(0), bitrate);
+        const auto result = await<JobResult>([&](auto reply) { provider->result(id, reply); });
+        QVERIFY(result.ok());
+        const QJsonObject file = result->outputs.value("audio").toObject();
+        QVERIFY2(file.value("path").toString().endsWith("audio." + extension), qPrintable(file.value("path").toString()));
+        QCOMPARE(file.value("format").toString(), extension);
+        QCOMPARE(readAll(file.value("path").toString()), audio);
+    }
+
+    // The same choice on Remix Song and Repaint Song, whose /synth job is a multipart form.
+    void aRemixedSongIsSavedInTheQualityAskedFor() {
+        Fixture fixture;
+        fixture.server.on("GET", "/health", [](const HttpRequest &) { return HttpResponse{200, "{}"}; });
+        fixture.server.on("POST", "/synth", [](const HttpRequest &) { return HttpResponse{200, "{\"id\":\"7\"}"}; });
+        fixture.server.on("GET", "/job?id=7", [](const HttpRequest &) { return HttpResponse{200, "{\"status\":\"done\"}"}; });
+        fixture.server.on("GET", "/job?id=7&result=1", [](const HttpRequest &) {
+            return HttpResponse{200, "--B9\r\nContent-Type: audio/wav\r\n\r\nWAVBYTES\r\n--B9--\r\n", "multipart/mixed; boundary=B9"};
+        });
+        fixture.writeStatus(QJsonObject{{kMusicModel, row(kMusicModel, "music", "active", fixture.endpoint())}});
+        const QString source = fixture.writeInput("source.mp3", "SOURCE");
+        auto provider = fixture.provider();
+        auto request = fixture.request("audio.generate", {{"prompt", "jazz"}, {"lyrics", ""}, {"task", "cover"}, {"quality", "lossless"}},
+                                       QJsonObject{{"audio", QJsonObject{{"path", source}}}});
+        const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value();
+        JobStatus status;
+        QTRY_VERIFY((status = await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value()).isTerminal());
+        QVERIFY(fixture.server.requestsTo("POST", "/synth").first().body.contains("\"output_format\":\"wav24\""));
+        const auto result = await<JobResult>([&](auto reply) { provider->result(id, reply); });
+        QVERIFY(result.ok());
+        QVERIFY(result->outputs.value("audio").toObject().value("path").toString().endsWith("audio.wav"));
+    }
+
     // The song's tempo, key, time signature, creativity and "keep my description" reach /lm as ace-server's
     // own fields (use_cot_caption is the opposite of keeping the description).
     void aSongsOwnSettingsReachTheModelThatWritesIt() {

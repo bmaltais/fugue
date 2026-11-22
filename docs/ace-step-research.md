@@ -45,7 +45,7 @@ empty lyrics has no words to sing, so Remix and Repaint send the lyrics given, `
 | audio_cover_strength, cover_noise_strength | cover | no | Remix Song's Strength (noise strength later) |
 | repainting_start / end | repaint | no | Repaint Song's From / To |
 | synth_batch_size (up to 9), lm_batch_size | variations | no | issue (a Count input once a node can return a list of songs) |
-| output_format `mp3`, `wav16/24/32`, mp3_bitrate | | mp3, default bitrate | issue (lossless output) |
+| output_format `mp3`, `wav16/24/32`, mp3_bitrate | | mp3, default bitrate | **Quality** (advanced: mp3, mp3-320, lossless = wav24; #258) |
 | ref_audio | timbre / style reference | no | issue |
 | adapter, adapter_scale (LoRA) | `--adapters` dir | no | issue |
 | lm_cfg_scale, top_p, top_k, negative prompt | LM sampling | no | not exposed |
@@ -87,3 +87,13 @@ Each: Generate Song or Remix/Repaint, a Preview of the lyrics where there are so
   VAE round trip adds is lined up; the region itself changes.
 - Observed [U, not understood]: with lyrics and `duration` 20 the song came back 40.2 s long (without lyrics, 20.0 s).
   The node reports the length it got (`duration` output). To look at when the length matters (issue to file if it repeats).
+
+## Lossless output and mp3 bitrate (#258)
+
+Source: acestep.cpp docs/ARCHITECTURE.md (output_format: mp3, wav16, wav24, wav32; mp3_bitrate default 128). One
+advanced input, **Quality**, on all three song nodes: `mp3` (the default, nothing sent: workflows keep their cache
+entries), `mp3-320`, and `lossless`. Decision [medium-high]: lossless is **wav24**. wav16 is CD depth and drops what
+the VAE's float output holds; wav32 is float WAV, which some players and editors refuse; 24 bits is what a studio
+file carries and what FLAC keeps. One input with three values rather than a format and a bitrate pair, since the
+bitrate means nothing for a WAV. The provider saves `audio.wav` or `audio.mp3` (the file's extension follows the
+server's answer for the format asked) and Save Audio re-encodes as it does for any audio.

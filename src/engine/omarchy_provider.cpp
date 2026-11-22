@@ -322,14 +322,38 @@ QJsonObject aceBody(const JobRequest &request) {
     return body;
 }
 
+// How a song is saved: `quality` of the node is mp3 (the server's own 128 kb/s, nothing sent), mp3-320, or
+// lossless, a 24-bit WAV (ace-server's output_format wav24: the DiT's float output kept to 24 bits; wav16
+// throws away what a studio file keeps, wav32 is float that some players cannot read).
+struct SongFile {
+    QString extension;  // the file's extension, and its format's name
+    QJsonObject fields; // output_format and, for a high mp3, mp3_bitrate
+};
+
+SongFile songFile(const QJsonObject &params) {
+    const QString quality = params.value("quality").toString();
+    if (quality == QLatin1String("lossless"))
+        return {QStringLiteral("wav"), QJsonObject{{"output_format", "wav24"}}};
+    if (quality == QLatin1String("mp3-320"))
+        return {QStringLiteral("mp3"), QJsonObject{{"output_format", "mp3"}, {"mp3_bitrate", 320}}};
+    return {QStringLiteral("mp3"), QJsonObject{{"output_format", "mp3"}}};
+}
+
+// What a /synth request takes from the node whichever way it is made (a written song, or a cover or a repaint).
+void addSynthOptions(QJsonObject &body, const QJsonObject &params) {
+    const QJsonObject file = songFile(params).fields;
+    for (auto it = file.begin(); it != file.end(); ++it)
+        body.insert(it.key(), it.value());
+}
+
 // The /synth body of Remix Song and Repaint Song: the LM is skipped, caption and lyrics reach the DiT as
 // they are (docs/ARCHITECTURE.md, "Generation modes"). `task` is cover, cover-nofsq or repaint.
 QJsonObject aceEditBody(const JobRequest &request) {
     const QJsonObject &params = request.params;
     QJsonObject body{{"task_type", params.value("task")},
                      {"caption", params.value("prompt").toString()},
-                     {"lyrics", params.value("lyrics").toString()},
-                     {"output_format", "mp3"}};
+                     {"lyrics", params.value("lyrics").toString()}};
+    addSynthOptions(body, params);
     for (const auto &[from, to] : {std::pair{"seed", "seed"}, {"strength", "audio_cover_strength"},
                                    {"start", "repainting_start"}, {"end", "repainting_end"}, {"steps", "inference_steps"}})
         if (params.contains(QLatin1String(from)))
@@ -1282,12 +1306,12 @@ void OmarchyProvider::fetchSong(const QString &id) {
             return fail(QStringLiteral("%1 gave no result (HTTP %2).").arg(job->server.recipe).arg(code));
         const QByteArray body = reply->readAll();
         if (!job->rendering) {
-            // The song written out: it goes back to be rendered as it is, as an mp3.
+            // The song written out: it goes back to be rendered as it is, in the file format asked for.
             QJsonObject song = QJsonDocument::fromJson(body).array().first().toObject();
             if (song.isEmpty())
                 return fail(QStringLiteral("%1 wrote no song.").arg(job->server.recipe));
             job->song = song;
-            song.insert("output_format", "mp3");
+            addSynthOptions(song, job->request.params);
             QNetworkReply *posted = send(job->server, "POST", QStringLiteral("/synth"),
                                          QJsonDocument(song).toJson(QJsonDocument::Compact));
             job->asking = true;
@@ -1314,12 +1338,13 @@ void OmarchyProvider::fetchSong(const QString &id) {
             });
             return;
         }
-        const QByteArray mp3 = firstPart(body);
-        if (mp3.isEmpty())
+        const QByteArray song = firstPart(body);
+        if (song.isEmpty())
             return fail(QStringLiteral("%1 finished without a song.").arg(job->server.recipe));
-        const QString path = QDir(job->request.outputDir).absoluteFilePath(QStringLiteral("audio.mp3"));
+        const QString format = songFile(job->request.params).extension;
+        const QString path = QDir(job->request.outputDir).absoluteFilePath(QStringLiteral("audio.") + format);
         QFile file(path);
-        if (!file.open(QIODevice::WriteOnly) || file.write(mp3) != mp3.size()) {
+        if (!file.open(QIODevice::WriteOnly) || file.write(song) != song.size()) {
             JobStatus failed;
             failed.state = QStringLiteral("error");
             failed.error = makeError(QStringLiteral("internal"), QStringLiteral("Cannot write %1.").arg(path));
@@ -1333,7 +1358,7 @@ void OmarchyProvider::fetchSong(const QString &id) {
             used.insert("seed", seed);
         else if (job->request.params.contains("seed"))
             used.insert("seed", job->request.params.value("seed"));
-        job->result = JobResult{QJsonObject{{"audio", QJsonObject{{"path", path}, {"format", "mp3"}}},
+        job->result = JobResult{QJsonObject{{"audio", QJsonObject{{"path", path}, {"format", format}}},
                                             {"lyrics", job->song.value("lyrics").toString()}},
                                 used};
         JobStatus done;

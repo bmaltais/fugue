@@ -448,6 +448,25 @@ private slots:
         QVERIFY(set->params.value("keep_description").toBool());
     }
 
+    // Quality (#258) goes along only when it is not the default mp3, on all three song nodes.
+    void aSongNodeSendsItsQualityOnlyWhenItIsNotThePlainMp3() {
+        Bench bench;
+        const Value song = bench.media(MediaType::Audio, makeAudio(bench.file("q.mp3"), 3));
+        for (const QString &node : {kSongNode, kRemixNode, kRepaintNode}) {
+            const auto make = [&](const QString &quality) {
+                Values given{{"prompt", "x"}, {"quality", quality}};
+                if (node != kSongNode)
+                    given.insert(QStringLiteral("audio"), song);
+                return bench.request(node, given, musicModel());
+            };
+            const Result<JobRequest> plain = make("mp3");
+            QVERIFY2(plain.ok(), qPrintable(plain.ok() ? QString() : plain.error().message));
+            QVERIFY(!plain->params.contains("quality"));
+            QCOMPARE(make("lossless")->params.value("quality").toString(), QStringLiteral("lossless"));
+            QCOMPARE(make("mp3-320")->params.value("quality").toString(), QStringLiteral("mp3-320"));
+        }
+    }
+
     // --- Remix Song and Repaint Song ---
 
     void aRemixSendsTheSongAsACoverOrAStayCloseCover() {

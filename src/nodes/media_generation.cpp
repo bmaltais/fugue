@@ -181,6 +181,15 @@ public:
     }
 };
 
+// What every song node can ask of the renderer, one place for the three (Generate, Remix, Repaint Song).
+// Each goes only when it is set, so a song that uses none of them is the request it always was (and keeps its
+// cache entry). `quality` is the file it is saved as: mp3, mp3-320 or lossless.
+void addSongOptions(const NodeContext &context, JobRequest &request) {
+    const QString quality = context.input(QStringLiteral("quality")).text().trimmed();
+    if (!quality.isEmpty() && quality != QLatin1String("mp3"))
+        request.params.insert(QStringLiteral("quality"), quality);
+}
+
 class SongKernel : public ProviderKernel {
 public:
     Requirement requirement(const NodeType &, const Values &inputs) const override {
@@ -234,6 +243,7 @@ public:
             params.insert(QStringLiteral("creativity"), creativity.number());
         if (context.input(QStringLiteral("keep_description")).json().toBool())
             params.insert(QStringLiteral("keep_description"), true);
+        addSongOptions(context, request);
         return request;
     }
 
@@ -299,6 +309,7 @@ public:
             params.insert(QStringLiteral("strength"), context.input(QStringLiteral("strength")).number());
         }
         request.inputs.insert(QStringLiteral("audio"), QJsonObject{{"path", source.path()}});
+        addSongOptions(context, request);
         return request;
     }
 
