@@ -15,6 +15,19 @@ language.
 Fugue is at v0.1, a test release. The design is in [docs/spec.md](docs/spec.md) and the
 vocabulary in [docs/GLOSSARY.md](docs/GLOSSARY.md).
 
+## Install
+
+On Arch Linux or Omarchy (x86_64 or aarch64), one command installs the latest release, or upgrades to it:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/bmaltais/fugue/main/install.sh | bash
+```
+
+It checks your system, picks the right packages (adding the CUDA helper on an NVIDIA machine), verifies them
+against the release's `SHA256SUMS` and installs them with `sudo pacman -U`, so it asks for your password.
+Read it first at [install.sh](install.sh); `bash -s -- --dry-run` shows what it would do and changes nothing,
+`--version TAG` pins a release, `--no-cuda` skips the helper. Other ways to install are [below](#install-by-hand).
+
 ## A short tour
 
 - **Canvas.** Place nodes, wire their ports, search for a node, undo, work in tabs and save.
@@ -73,10 +86,10 @@ vocabulary in [docs/GLOSSARY.md](docs/GLOSSARY.md).
   the guide is in [docs/nodes](docs/nodes/README.md). Fugue enforces no sandbox: install packs
   you would run in a terminal.
 
-## Install
+## Install by hand
 
 Fugue is packaged for Arch and Omarchy. Download the packages from the
-[v0.1.0-test1 release](https://github.com/bmaltais/fugue/releases/tag/v0.1.0-test1) and install:
+[latest release](https://github.com/bmaltais/fugue/releases) and install:
 
 ```sh
 sudo pacman -U fugue-*.pkg.tar.zst
