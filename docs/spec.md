@@ -1867,7 +1867,7 @@ validation warns and the node runs normally.
 
 - A size limit, default 10 GB (`cache_results_gb`, 0 for none), configurable. Over the limit, the least recently used entries
   are evicted, when a run ends and when the cache is cleaned ([10.6](#106-cache-management)). Frozen entries are never evicted.
-- Clear all, per workflow or per node (`fugue cache clear`, and Settings > Cache).
+- Clear all, per workflow or per node (`fugue cache clear`, and Settings > Cache, whose Clear all clears every kind, [10.6](#106-cache-management)).
 - Garbage is collected after a grace period of 7 days: run folders whose run has ended, blobs no
   key record refers to, and key records whose blobs are gone. A cached result is otherwise kept
   until it is evicted for size or cleared; it does not expire with age.
@@ -1904,7 +1904,12 @@ kept within a limit (#141):
 - **By hand:** `fugue cache status|clear` ([13.1](#131-commands)) and Settings > Cache: the size of
   each kind with a Clear button that first says what is lost (results: the nodes run again, so
   what took minutes takes minutes; previews: pictures on the canvas show again after the next
-  run; runs: the history), and the limits. File menu > Clear image preview cache opens that
+  run; runs: the history), and the limits. One **Clear all…** beside the total "N in all" does
+  what `--kind all` does (all three kinds in one go; frozen results, saved outputs and a run
+  going or queued stay; while a run is going results and previews are left alone and the page
+  says so, as `cache_busy`). It asks first with the same Clear and Cancel, saying in words what
+  is lost (nodes run again, previews return on the next run, the run history) and the total
+  size, and it is off while measuring or clearing and when nothing can be cleared. File menu > Clear image preview cache opens that
   question for previews.
 
 ---

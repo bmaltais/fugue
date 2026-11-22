@@ -29,6 +29,8 @@ class CacheModel : public QObject {
     // the limit, the oldest), items, protectedItems, canClear.
     Q_PROPERTY(QVariantList kinds READ kinds NOTIFY changed)
     Q_PROPERTY(QString total READ total NOTIFY changed)
+    // Something is there to clear in some kind (frozen results and runs going do not count).
+    Q_PROPERTY(bool canClearAll READ canClearAll NOTIFY changed)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged) // measuring or clearing
     // The question waiting for a yes: kind, title, what (what is lost), size; empty when none.
     Q_PROPERTY(QVariantMap question READ question NOTIFY questionChanged)
@@ -43,13 +45,14 @@ public:
 
     QVariantList kinds() const { return m_kinds; }
     QString total() const { return m_total; }
+    bool canClearAll() const { return m_canClearAll; }
     bool busy() const { return m_working > 0; }
     QVariantMap question() const { return m_question; }
     QString message() const { return m_message; }
 
     // Measures again, off the UI thread.
     Q_INVOKABLE void refresh();
-    // Asks what clearing `kind` ("results", "thumbnails", "runs") would lose; nothing is cleared yet.
+    // Asks what clearing `kind` ("results", "thumbnails", "runs", or "all" for every kind) would lose; nothing is cleared yet.
     Q_INVOKABLE void ask(const QString &kind);
     // The person's answer to the question.
     Q_INVOKABLE void answer(bool yes);
@@ -76,6 +79,7 @@ private:
     CacheFolders m_folders;
     QVariantList m_kinds;
     QString m_total;
+    bool m_canClearAll = false;
     QVariantMap m_question;
     QString m_message;
     std::atomic<int> m_working{0};

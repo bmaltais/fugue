@@ -354,6 +354,14 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Why: it is the control that already exists for a missing pack, so no new place to learn; the question stays on the Packs page, never in the banner (spec 6.6, 6.7: nothing silent).
 - Rule: Floor, Primary, Destructive, Gaps, Learned place and Posture: unchanged, the button and the card keep their size, place and order; only the text differs.
 
+### 2026-11-21 Cache page: Clear all…
+
+- Control: `cacheClearAll`, a `SmallButton` "Clear all…" (28px tall) in the Cache page's header row, right of the "N in all" total (`CachePage.qml`). It opens the same `cacheQuestion` (`cacheYes` highlighted, `cacheNo`) with the total size and all three losses in words.
+- Old: only the three per-kind "Clear…" buttons.
+- New: as above; off while measuring or clearing and when nothing can be cleared.
+- Why: the page's big action sits with the number it acts on, at the top-left, away from the per-kind Clear… at the right edge of the rows (Destructive: not next to a frequent control, and not in line with the others, so it is not hit for a row's); it never acts on the first click (asks first).
+- Rule: Floor (28px). Primary (the question's Clear is the one highlighted button; Clear all… is plain). Destructive (a second click, the question). Gaps (4u from the total). Learned place (the per-kind Clear… and the question are unchanged).
+
 ### 2026-11-21 Cache page and Clear image preview cache (#141)
 
 - Control: Settings > Cache, the eighth page (`src/settings/CachePage.qml`, made only when first shown): a list of the three kinds (`SizedList.qml`: title, a line, the size, a share bar, `cache-action-<n>` "Clear…"), the question (`cacheQuestion`: what is lost, `cacheYes` highlighted, `cacheNo`), `cacheMessage`, then the limits as choices (`cacheResults-*`, `cacheThumbnails-*`, `runsKept-*`). Command `cache.clear-previews` ("Clear image preview cache…", no key) in the Edit menu, between `edit.clear` and Settings, each in its own chunk: it opens the page on the question for the previews.
