@@ -415,6 +415,7 @@ ApplicationWindow {
             look: App.theme.look
             panels: App.sidePanels.panels
             onTabRequested: tab => App.sidePanels.toggle(tab)
+            onActionRequested: command => App.commands.trigger(command)
         }
         onLoaded: (item as Item).height = Qt.binding(() => stripLoader.height)
     }

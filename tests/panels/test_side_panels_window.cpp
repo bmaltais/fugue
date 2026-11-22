@@ -142,7 +142,7 @@ private slots:
         QCOMPARE(strip->x(), 0.0);
         QCOMPARE(app.canvas->x(), strip->width()); // the canvas starts at the strip's edge
         const QVariantList panels = app.sidePanels.panels();
-        QCOMPARE(panels.size(), 2);
+        QCOMPARE(panels.size(), 3); // two panels and the Templates action (#192)
         for (const QVariant &panel : panels) {
             QQuickItem *tab = named(app, "sideTab-" + panel.toMap().value("tab").toString());
             QVERIFY(tab);
@@ -207,6 +207,62 @@ private slots:
         QCOMPARE(tab->property("tip").toString(), QString("Workflows (W)"));
     }
 
+    // The Templates action tab (#192): at the lower end past the panel tabs, it runs its command and
+    // is never a checked panel; a click, Enter and Space all open the dialog.
+    void theTemplatesActionTabOpensTheDialogAndIsNeverChecked() {
+        App app(load(small));
+        QVERIFY(app.open());
+        QQuickItem *strip = named(app, "sideTabStrip");
+        QQuickItem *tab = named(app, "sideTab-templates");
+        QVERIFY(strip && tab);
+        QVERIFY(tab->isVisible());
+        QVERIFY(tab->width() >= 36 && tab->height() >= 36);
+        QVERIFY(tab->activeFocusOnTab());
+        // Below the panel tabs, with room between, and inside the strip.
+        const qreal templatesTop = tab->mapToItem(strip, QPointF(0, 0)).y();
+        const QQuickItem *workflows = named(app, "sideTab-workflows");
+        QVERIFY(templatesTop >= workflows->mapToItem(strip, QPointF(0, 0)).y() + workflows->height());
+        QVERIFY(templatesTop + tab->height() <= strip->height());
+        // The panel registry still gives one panel tab per panel, and the action is not one.
+        const QVariantList list = app.sidePanels.panels();
+        QCOMPARE(list.size(), 3);
+        QCOMPARE(list.at(2).toMap().value("kind").toString(), QString("action"));
+        QCOMPARE(list.at(2).toMap().value("command").toString(), QString("file.templates"));
+        QCOMPARE(list.at(0).toMap().value("kind").toString(), QString("panel"));
+        QVERIFY(!tab->property("open").toBool());
+        QVERIFY(tab->property("isAction").toBool());
+        // The tooltip names the command's key, when it has one, as the other tabs do.
+        const QStringList keys = app.commands.entry("file.templates").value("keys").toStringList();
+        const QString name = list.at(2).toMap().value("name").toString();
+        QCOMPARE(tab->property("tip").toString(), keys.isEmpty() ? name : QString("%1 (%2)").arg(name, keys.first()));
+        QCOMPARE(name, QString("Templates"));
+
+        const auto dialog = [&app]() { return app.window->findChild<QObject *>("templatesDialog"); };
+        const auto isOpen = [&]() { return dialog() && dialog()->property("opened").toBool(); };
+        const auto close = [&]() {
+            QMetaObject::invokeMethod(dialog(), "close");
+            QTRY_VERIFY(!isOpen());
+        };
+        click(app, tab);
+        QTRY_VERIFY(isOpen());
+        QVERIFY(!tab->property("open").toBool());
+        QCOMPARE(app.sidePanels.tab(), QString()); // no panel opened
+        close();
+        tab->forceActiveFocus(Qt::TabFocusReason);
+        QVERIFY(tab->hasActiveFocus());
+        app.key(Qt::Key_Return);
+        QTRY_VERIFY(isOpen());
+        close();
+        tab->forceActiveFocus(Qt::TabFocusReason);
+        app.key(Qt::Key_Space);
+        QTRY_VERIFY(isOpen());
+        close();
+        // The menu command opens the same dialog.
+        QVERIFY(app.commands.trigger("file.templates"));
+        QTRY_VERIFY(isOpen());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void theStripSurvivesANarrowWindowAndFocusModeHidesIt() {
         App app(load(small));
         app.sidePanels.setTab("nodes");
@@ -218,6 +274,13 @@ private slots:
         QVERIFY(strip);
         QTRY_VERIFY(app.canvas->width() >= 160 - 1); // the canvas is never squeezed out by the panel
         QVERIFY(named(app, "sideTab-nodes")->height() >= 36);
+        // The action tab stays inside a short strip, below the panel tabs.
+        app.window->resize(420, 300);
+        QTRY_COMPARE(app.window->height(), 300);
+        QQuickItem *templates = named(app, "sideTab-templates");
+        QVERIFY(templates->height() >= 36);
+        QTRY_VERIFY(templates->mapToItem(strip, QPointF(0, 0)).y() + templates->height() <= strip->height());
+        QTRY_VERIFY(templates->mapToItem(strip, QPointF(0, 0)).y() >= named(app, "sideTab-workflows")->mapToItem(strip, QPointF(0, 0)).y() + 36);
         app.commands.run("view.focus-mode");
         QTRY_VERIFY(!named(app, "sideTabStrip"));
         QTRY_COMPARE(app.canvas->x(), 0.0);
@@ -803,6 +866,12 @@ private slots:
         QTest::mouseMove(app.window, QPoint(700, 500));
         QTest::qWait(300);
         test_support::grab(app.window).save(QString::fromLocal8Bit(dir) + "/" + name + "-open.png");
+        // The Templates tab pressed: the dialog is up over the strip, whose action tab is not marked.
+        click(app, named(app, "sideTab-templates"));
+        QTRY_VERIFY(app.window->findChild<QObject *>("templatesDialog")
+                    && app.window->findChild<QObject *>("templatesDialog")->property("opened").toBool());
+        QTest::qWait(300);
+        test_support::grab(app.window).save(QString::fromLocal8Bit(dir) + "/" + name + "-templates.png");
     }
 
     // Not a check: with FUGUE_SHOT_DIR set, saves the panel with a library group and the question.

@@ -12,9 +12,14 @@ namespace fugue {
 
 namespace {
 
-// The registered panels, in the strip's order. A panel is one row: add it here, give its command
-// a handler (registerCommands does it for every row), and the strip shows its tab.
+// The registered tabs, in the strip's order. A `panel` row is a docked panel: add it here, give its
+// command a handler (registerCommands does it for every panel row), and the strip shows its tab.
+// An `action` row (#192) is a tab that launches a command someone else owns (the Templates dialog):
+// it has no panel, no registry id, no handler and no checked state here, and the strip draws it
+// below the panel tabs.
+enum class Kind { Panel, Action };
 struct Panel {
+    Kind kind;
     const char *tab;
     const char *chromeId;
     const char *command;
@@ -22,13 +27,15 @@ struct Panel {
     const char *name;
 };
 constexpr Panel panelTable[] = {
-    {"nodes", "node-library", "panel.nodes", "boxes", QT_TRANSLATE_NOOP("Panel", "Node library")},
-    {"workflows", "workflows-panel", "panel.workflows", "workflow", QT_TRANSLATE_NOOP("Panel", "Workflows")},
+    {Kind::Panel, "nodes", "node-library", "panel.nodes", "boxes", QT_TRANSLATE_NOOP("Panel", "Node library")},
+    {Kind::Panel, "workflows", "workflows-panel", "panel.workflows", "workflow", QT_TRANSLATE_NOOP("Panel", "Workflows")},
+    {Kind::Action, "templates", "", "file.templates", "layout-template", QT_TRANSLATE_NOOP("Panel", "Templates")},
 };
 
+// The panel row for `tab`; an action row is not one.
 const Panel *panelFor(const QString &tab) {
     for (const Panel &panel : panelTable)
-        if (tab == QLatin1String(panel.tab))
+        if (panel.kind == Kind::Panel && tab == QLatin1String(panel.tab))
             return &panel;
     return nullptr;
 }
@@ -43,6 +50,8 @@ SidePanels::SidePanels(QString path, ChromeVisibility *chrome)
     : m_path(std::move(path)), m_chrome(chrome ? chrome : new ChromeVisibility({}, this)) {
     QStringList ids;
     for (const Panel &panel : panelTable) {
+        if (panel.kind != Kind::Panel)
+            continue;
         m_chrome->add(QString::fromLatin1(panel.chromeId), false);
         ids << QString::fromLatin1(panel.chromeId);
     }
@@ -68,7 +77,7 @@ SidePanels::SidePanels(QString path, ChromeVisibility *chrome)
 
 QString SidePanels::tab() const {
     for (const Panel &panel : panelTable)
-        if (m_chrome->isVisible(QString::fromLatin1(panel.chromeId)))
+        if (panel.kind == Kind::Panel && m_chrome->isVisible(QString::fromLatin1(panel.chromeId)))
             return QString::fromLatin1(panel.tab);
     return {};
 }
@@ -80,11 +89,12 @@ QVariantList SidePanels::panels() const {
         const QString command = QString::fromLatin1(panel.command);
         list << QVariantMap{
             {"tab", QString::fromLatin1(panel.tab)},
+            {"kind", QString::fromLatin1(panel.kind == Kind::Action ? "action" : "panel")},
             {"name", QCoreApplication::translate("Panel", panel.name)},
             {"glyph", QString::fromLatin1(panel.glyph)},
             {"command", command},
             {"keys", m_commands ? m_commands->entry(command).value("keys") : QVariant(QStringList())},
-            {"open", open == QLatin1String(panel.tab)},
+            {"open", panel.kind == Kind::Panel && open == QLatin1String(panel.tab)},
         };
     }
     return list;
@@ -96,7 +106,8 @@ void SidePanels::setTab(const QString &tab) {
         return;
     }
     for (const Panel &panel : panelTable)
-        m_chrome->setVisible(QString::fromLatin1(panel.chromeId), false);
+        if (panel.kind == Kind::Panel)
+            m_chrome->setVisible(QString::fromLatin1(panel.chromeId), false);
 }
 
 void SidePanels::setDock(const QString &dock) {
@@ -132,6 +143,8 @@ void SidePanels::save() const {
 void SidePanels::registerCommands(CommandRegistry &commands) {
     m_commands = &commands;
     for (const Panel &panel : panelTable) {
+        if (panel.kind != Kind::Panel)
+            continue;
         const QString tab = QString::fromLatin1(panel.tab);
         const QString command = QString::fromLatin1(panel.command);
         commands.setHandler(command, [this, tab] { toggle(tab); });
