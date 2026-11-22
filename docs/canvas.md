@@ -134,18 +134,20 @@ candidate can still be accepted), and **Compare** opens the views of Compare Ima
 by side, flip and difference) against the latest version; the view you pick last comes back next time. The view follows the Canvas
 Region node you select in the graph, or by itself the only one that reads this canvas (a new one with no canvas yet
 takes this canvas at your first change): its rectangle (and the padded box the node cuts) is drawn on the picture;
-**Use for region** makes the node read the step you are looking at (the latest version, if you are on it), as one
+A node reads the latest version unless you pinned it to a step; only then a line under the picture says which step and **Use for region** points it at the step you are looking at (the latest version, if you are on it), as one
 undo step. With no node followed a drag still draws a rectangle: with several Region nodes the view asks which one it
 is for, with none it offers **Add a Canvas Region node** (one undo step); until then the rectangle is not kept. A node
 that reads another canvas says so, with **Show** its canvas and **Use** this canvas **for this node**. That rectangle is
 the next work area, and you pick it on the picture: drag in empty space to draw a new one, drag inside it to move it
-or a handle to resize it (Shift keeps its shape, or makes a new one square; Alt works from the center). The numbers
-under the picture, the padded box and the size the model will get follow the pointer, and **Snap to 16** (the node's
+or a handle to resize it (Shift keeps its shape, or makes a new one square; Alt works from the center). The size
+and position in the status line, the padded box and its small label (the model's size is in the tooltip of the frame) follow the pointer, and **Snap to 16** (the node's
 Multiple of) puts the edges on multiples of 16. Letting go writes X, Y, Width and Height in one undo step, with no
 Apply; Esc during a drag leaves the node as it was. The wheel zooms and the middle button (or Space held) pans, and
 neither moves the rectangle. It works on whichever revision you are looking at, a candidate included. With X, Y,
 Width or Height linked to another node, or while Compare is on, it is only drawn; with no Canvas Region selected the
 view says so. The view refreshes by itself when a run adds a candidate or moves the head.
+
+Under the picture there is one thin **status line**, as Photoshop's: the zoom and the canvas size ("32% · 2000 × 2000") and, while you drag or when a rectangle is set, its size and place ("456 × 777 at 0, 253"). **Advanced details** at its end opens, for those who want the numbers, the context and the size the model gets, what the node reads, the revision shown and what changed in it. Nothing else of that kind is written under the picture; only what you must act on is (a linked input, Compare on, an error).
 
 File > Canvas history… lists your canvases (or, with none yet, offers New canvas… and Import picture…); open one to
 see its revisions and candidates, and click a revision to see it at full size (zoom and pan; the head is shown

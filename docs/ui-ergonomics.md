@@ -51,6 +51,7 @@ Before a new surface or control is done, find the long-standing surface that doe
 - [ ] **Keyboard.** Every control and list row is reached by Tab or the arrows, in reading order.
 - [ ] **Right-to-left.** A popup sets `LayoutMirroring` on its content (it is outside the window's mirrored root); a picture is never mirrored.
 - [ ] **Empty and error.** An empty state says what to do in the app (a button), not on the command line; the same state has the same words everywhere.
+- [ ] **No technical text around the work.** No internal text over or under the work area unless the person needs it to act on: sizes, zoom and positions go in one thin status line (Photoshop's); how-to lines are tooltips; the details a pro wants sit behind an Advanced toggle or a tooltip, never a paragraph (#234).
 - [ ] **Pictures.** A `FUGUE_SHOT_DIR` picture of the surface, light and dark, looked at beside the reference surface's; narrow width too for anything an area can host.
 
 The D numbers are the audit's decisions of 2026-11-22. D4 (one button: `ViewButton` with its `bordered`, `flat`, `compact`, `primary`, `danger`, `checkable` variants; `SmallButton` and the area header's `BarButton` are thin aliases) and D5 (one keymap: Home or 0 fits a picture and the Graph, `+` and `-` zoom both, Enter takes the primary; a focused Canvas view keeps the Graph's keys from the Graph) are built (second batch, below); a new button or key extends them, never a copy.
@@ -78,6 +79,15 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 | Selection toolbar | one row of glyphs | canvas-look §11, the ComfyUI toolbox |
 
 ## Decisions
+
+### 2026-11-22 Canvas view: one status line, the rest in tooltips and Advanced details (#234)
+
+- Control: `src/canvas/CanvasView.qml`: the status line `canvasViewStatusLine` (`canvasViewStatusZoom`, `canvasViewStatusSelection`, `canvasViewAdvancedDetails`, `canvasViewStatusDetails`), the context box's label `canvasViewContextLabel` and the frame's tooltip (`canvasViewFrameHover`); removed: `canvasViewSummary`, `canvasViewRegionInfo`, the how-to text of `canvasViewRegionHint`, and `canvasViewRegionNote` with `canvasViewUseRegion` except for a pinned node. `CompareView.qml` (`showSize`).
+- Old: four lines of internal text under the picture (the store diff of the shown step, what the node reads with Use for region, the context paragraph, the how-to), and a size and zoom chip over the picture.
+- New: Photoshop's one status line at the foot: "32% · 2000 × 2000", then the dragged or set rectangle's "456 × 777 at 0, 253" (live), and **Advanced details** (flat toggle, at the end) for the context and model size, what the node reads, the revision and the diff. "Context 456 × 777" is a small label at the dashed box's corner; the model's size is in the frame's tooltip. "Canvas Region reads …" and **Use for region** appear only when the node is pinned to a step other than the latest version. The how-to is gone: the tool strip's tooltips teach the drag (no first-use hint kept). The "Layer <name> added" notice with Undo stays.
+- Why: the owner ("Not sure this is needed either"). Hobbyists see the picture and one quiet line; film teams open Advanced details. Only what a person must act on (linked inputs, Compare on, an unsaved rectangle, errors) stays as a line.
+- Rules met: Floor (the toggle is a 28px-high compact `ViewButton`; the line is a readout, not a target), Primary (none), Destructive (none), Gaps (3u between readouts), Learned place (status at the foot, as Photoshop), Right-to-left (the line mirrors, the picture does not), No technical text around the work (the new checklist line).
+- Deviations: the line is a readout (caption size), so it is not a 28px row; the toggle is the one control in it.
 
 ### 2026-11-22 Question dialogs: one button, one answer row (#235)
 
