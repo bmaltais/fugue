@@ -89,6 +89,7 @@ Rectangle {
                     tip: row.modelData.visible ? qsTr("Hide the layer") : qsTr("Show the layer")
                     current: row.modelData.visible
                     accented: false
+                    checkable: true
                     opacity: row.modelData.visible ? 1 : 0.55
                     onTapped: root.painting.setLayerVisible(row.modelData.id, !row.modelData.visible)
                 }

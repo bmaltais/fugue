@@ -158,10 +158,11 @@ LargeViewDialog {
 
     tools: Row {
         spacing: root.look.unit
-        // A one-key tool of the bar.
+        // A one-key tool of the bar. The current tool is the quiet marking: OK is the one accent fill (D7).
         component ToolButton: ViewButton {
             required property string toolName
             look: root.look
+            accented: false
             current: root.tool === toolName
             onTapped: root.tool = toolName
         }
@@ -270,6 +271,8 @@ LargeViewDialog {
             look: root.look
             glyph: "eye"
             tip: root.layers ? qsTr("Show the mask layers alone (H)") : qsTr("Show the mask alone (H)")
+            accented: false // on is the quiet marking (D7)
+            checkable: true
             current: root.maskOnly
             onTapped: root.toggleMaskOnly()
         }
