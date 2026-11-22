@@ -75,12 +75,20 @@ private slots:
         QTest::addColumn<QString>("file");
         const QDir root(QFINDTESTDATA("../../templates"));
         const QStringList names = root.entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+        int rows = 0;
         for (const QString &name : names)
-            if (QFile::exists(root.filePath(name + "/workflow.fugue")))
+            if (QFile::exists(root.filePath(name + "/workflow.fugue"))) {
                 QTest::newRow(qPrintable(name)) << root.filePath(name + "/workflow.fugue");
+                ++rows;
+            }
+        // An empty submodule gives no rows, and QFETCH with no rows aborts the test binary: one row
+        // that fails with the fix instead.
+        if (rows == 0)
+            QTest::newRow("no templates") << QString();
     }
     void shippedTemplatesDoNotOverlapAfterARun() {
         QFETCH(QString, file);
+        QVERIFY2(!file.isEmpty(), "the templates submodule is empty; run: git submodule update --init templates");
         QFile source(file);
         QVERIFY(source.open(QIODevice::ReadOnly));
         const QByteArray bytes = source.readAll();
