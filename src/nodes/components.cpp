@@ -33,12 +33,14 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QSize>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <optional>
 
 #include <vips/vips8>
@@ -769,11 +771,6 @@ public:
             return files.errors();
         const Value latent = context.input(QStringLiteral("latent"));
         const LatentMeta from = LatentMeta::of(latent);
-        // A video starts from noise: nothing makes a sampled video latent a start yet.
-        if (from.isVideo() && !from.empty)
-            return makeInputError(QStringLiteral("node_failed"), QStringLiteral("latent"),
-                                  QStringLiteral("A video cannot be redrawn from a sampled video yet."),
-                                  QStringLiteral("Start from an Empty Video Latent."));
         QJsonObject params{{"width", from.width},
                            {"height", from.height},
                            {"seed", context.input(QStringLiteral("seed")).json().toInteger()},
@@ -984,6 +981,123 @@ private:
 
 };
 
+// The size, rate and length of a YUV4MPEG2 file (4:2:0), from its header and its size: the file the
+// helper reads for a clip is the one ffmpeg made, so this is what the latent will say.
+struct ClipFile {
+    int width = 0;
+    int height = 0;
+    int fps = 0;
+    int frames = 0;
+};
+
+std::optional<ClipFile> clipFileOf(const QString &path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return std::nullopt;
+    const QByteArray header = file.readLine(1024);
+    if (!header.startsWith("YUV4MPEG2"))
+        return std::nullopt;
+    ClipFile clip;
+    int num = 0;
+    int den = 1;
+    for (const QByteArray &field : header.trimmed().split(' ')) {
+        if (field.startsWith('W'))
+            clip.width = field.mid(1).toInt();
+        else if (field.startsWith('H'))
+            clip.height = field.mid(1).toInt();
+        else if (field.startsWith('F'))
+            std::sscanf(field.constData() + 1, "%d:%d", &num, &den);
+    }
+    if (clip.width <= 0 || clip.height <= 0 || den <= 0)
+        return std::nullopt;
+    clip.fps = std::max(1, int(std::lround(double(num) / den)));
+    const qint64 frame = 6 + qint64(clip.width) * clip.height + 2 * qint64((clip.width + 1) / 2) * ((clip.height + 1) / 2);
+    clip.frames = int((file.size() - header.size()) / frame);
+    return clip;
+}
+
+// VAE Encode Video: a clip into the latent a Sampler redraws from (video to video, #130). The
+// helper reads a YUV4MPEG2 file of the size, length and rate the model will make, so ffmpeg fits
+// the video to the node's inputs first: its pending trim and crop are applied, the rate is
+// resampled, the picture is scaled to cover the size and cut from the middle (as the first frame
+// is), and the length is the frames asked for, cut to Wan's 4 n + 1.
+class VaeEncodeVideoKernel : public StageKernel {
+public:
+    VaeEncodeVideoKernel() : StageKernel(QStringLiteral("latent.encode")) {}
+
+    Result<JobRequest> request(const NodeContext &context, const Selection &selection) override {
+        const Result<ModelFiles> files = modelInput(context, selection);
+        if (!files)
+            return files.errors();
+        const Result<MediaHandle> source =
+            context.input(QStringLiteral("video")).media().plainFile(context.workDir, QStringLiteral("source"), *context.hashes);
+        if (!source)
+            return source.errors();
+        if (!QFileInfo(source->path()).isFile())
+            return makeInputError(QStringLiteral("file_not_found"), QStringLiteral("video"),
+                                  QStringLiteral("The video file is gone: %1.").arg(source->path()),
+                                  QStringLiteral("Run the node that makes it again."));
+        const auto step = [](int side) { return std::max(4, int(std::lround(double(side) / kSizeStep))) * kSizeStep; };
+        const Value wide = context.input(QStringLiteral("width"));
+        const Value high = context.input(QStringLiteral("height"));
+        const int width = step(wide.isEmpty() ? source->width() : int(wide.number()));
+        const int height = step(high.isEmpty() ? source->height() : int(high.number()));
+        const int fps = int(context.input(QStringLiteral("fps")).number());
+        const QString out = QDir(context.workDir).filePath(QStringLiteral("clip.y4m"));
+        // The rounded length is not known until the video is cut: a video shorter than asked is cut
+        // at its end, then again to 4 n + 1.
+        int frames = int(context.input(QStringLiteral("frames")).number());
+        for (int attempt = 0; attempt < 2; ++attempt) {
+            const Result<int> made = cut(context, source->path(), width, height, fps, frames, out);
+            if (!made)
+                return made.errors();
+            const int fit = (made.value() - 1) / 4 * 4 + 1;
+            if (fit < 5)
+                return makeInputError(QStringLiteral("node_failed"), QStringLiteral("video"),
+                                      QStringLiteral("The video has %1 frames at %2 a second; the model needs at least 5.").arg(made.value()).arg(fps),
+                                      QStringLiteral("Use a longer video or a higher rate."));
+            if (made.value() == fit)
+                break;
+            frames = fit;
+        }
+        JobRequest request = job(*files, QJsonObject{{"width", width}, {"height", height}});
+        request.inputs.insert(QStringLiteral("video"), QJsonObject{{"path", out}});
+        return request;
+    }
+
+    Result<Values> outputs(const NodeContext &context, const Selection &, const JobResult &result) override {
+        const std::optional<ClipFile> clip = clipFileOf(QDir(context.workDir).filePath(QStringLiteral("clip.y4m")));
+        if (!clip)
+            return makeError(QStringLiteral("node_failed"), QStringLiteral("The clip made for the helper cannot be read back."));
+        LatentMeta meta;
+        meta.width = clip->width;
+        meta.height = clip->height;
+        meta.frames = clip->frames;
+        meta.fps = clip->fps;
+        return latentOutput(result, meta, context.input(QStringLiteral("model")).json());
+    }
+
+private:
+    // `source` as the helper's clip; returns the frames in it.
+    static Result<int> cut(const NodeContext &context, const QString &source, int width, int height, int fps, int frames,
+                           const QString &out) {
+        // Full-range BT.601 4:2:0, the layout the helper writes and reads a clip in.
+        const QString filter =
+            QStringLiteral("fps=%1,scale=%2:%3:flags=lanczos:force_original_aspect_ratio=increase:out_color_matrix=bt601:out_range=full,"
+                           "crop=%2:%3,format=yuvj420p")
+                .arg(fps).arg(width).arg(height);
+        const QStringList args{"-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", source, "-map", "0:v:0", "-an",
+                               "-vf", filter, "-frames:v", QString::number(frames), "-f", "yuv4mpegpipe", out};
+        const Result<QByteArray> done = ffmpeg::runWatched(args, QStringLiteral("node_failed"), {}, context.cancelled);
+        if (!done)
+            return done.errors();
+        const std::optional<ClipFile> clip = clipFileOf(out);
+        if (!clip || clip->frames <= 0)
+            return makeError(QStringLiteral("node_failed"), QStringLiteral("ffmpeg made no frames from the video."));
+        return clip->frames;
+    }
+};
+
 } // namespace
 
 void addComponentKernels(Kernels &kernels) {
@@ -996,6 +1110,7 @@ void addComponentKernels(Kernels &kernels) {
     kernels.add(QStringLiteral("fugue/vae-decode"), std::make_shared<VaeDecodeKernel>());
     kernels.add(QStringLiteral("fugue/vae-decode-video"), std::make_shared<VaeDecodeKernel>(true));
     kernels.add(QStringLiteral("fugue/vae-encode"), std::make_shared<VaeEncodeKernel>());
+    kernels.add(QStringLiteral("fugue/vae-encode-video"), std::make_shared<VaeEncodeVideoKernel>());
 }
 
 } // namespace fugue::nodes

@@ -1,8 +1,8 @@
 diff --git i/src/api/options.cpp w/src/api/options.cpp
-index 591cce3..a6314ab 100644
+index 591cce3..5f4dc36 100644
 --- i/src/api/options.cpp
 +++ w/src/api/options.cpp
-@@ -502,6 +502,20 @@ static void add_hires_specs(std::vector<ParamSpec>& specs) {
+@@ -502,6 +502,21 @@ static void add_hires_specs(std::vector<ParamSpec>& specs) {
      hires.choice("hires.upscaler", &sd::HiresConfig::upscaler, parse_hires_upscaler, SD_HIRES_UPSCALER_COUNT);
  }
  
@@ -17,13 +17,14 @@ index 591cce3..a6314ab 100644
 +    fugue.string("fugue.latent_in", &sd::FugueStageConfig::latent_in);
 +    fugue.string("fugue.latent_out", &sd::FugueStageConfig::latent_out);
 +    fugue.string("fugue.stop_after", &sd::FugueStageConfig::stop_after);
++    fugue.string("fugue.init_video", &sd::FugueStageConfig::init_video);
 +    fugue.boolean("fugue.soft_mask", &sd::FugueStageConfig::soft_mask);
 +}
 +
  static void add_tiling_specs(std::vector<ParamSpec>& specs) {
      using namespace sd::api;
      ParamGroup tiling(specs, Image | Video | ADetail, [](sd::OptConfig& config) { return std::tie(config.image.vae_tiling_params, config.video.vae_tiling_params); });
-@@ -547,6 +561,7 @@ static std::vector<ParamSpec> make_specs() {
+@@ -547,6 +562,7 @@ static std::vector<ParamSpec> make_specs() {
      add_sampling_specs(specs);
      add_cache_specs(specs);
      add_hires_specs(specs);
@@ -32,16 +33,16 @@ index 591cce3..a6314ab 100644
      add_postprocess_specs(specs);
      return specs;
 diff --git i/src/config.h w/src/config.h
-index 7331ccc..6e030bc 100644
+index 7331ccc..e609702 100644
 --- i/src/config.h
 +++ w/src/config.h
-@@ -172,6 +172,22 @@ namespace sd {
+@@ -172,6 +172,25 @@ namespace sd {
          ContextConfig();
      };
  
 +    // Fugue's stage split (pipeline/fugue_stages.h): files generate_image and generate_video read in
 +    // place of a stage or write after one, and the stage they stop after ("init", "cond" or
-+    // "sample"; a video has no "init").
++    // "sample"; a video's "init" is the encode of init_video).
 +    struct FugueStageConfig {
 +        const char* init_latent_in{};
 +        const char* init_latent_out{};
@@ -50,6 +51,9 @@ index 7331ccc..6e030bc 100644
 +        const char* latent_in{};
 +        const char* latent_out{};
 +        const char* stop_after{};
++        // A video to redraw (video-to-video): a YUV4MPEG2 file of the request's size and length,
++        // which generate_video encodes with the VAE. Off: upstream.
++        const char* init_video{};
 +        // Differential diffusion (arXiv 2306.00950): an image mask keeps its values between 0 and 1
 +        // and sets how late each latent cell is released from the start latent. Off: upstream.
 +        bool soft_mask{};
@@ -58,7 +62,7 @@ index 7331ccc..6e030bc 100644
      struct ImageConfig {
          const sd_lora_t* loras{};
          uint32_t lora_count{};
-@@ -203,6 +219,7 @@ namespace sd {
+@@ -203,6 +222,7 @@ namespace sd {
          bool circular_y{};
          sd::ImagePreprocessConfig image_preprocess{};
          enum sd_control_type_t control_type {};
@@ -66,7 +70,7 @@ index 7331ccc..6e030bc 100644
  
          ImageConfig();
      };
-@@ -240,6 +257,7 @@ namespace sd {
+@@ -240,6 +260,7 @@ namespace sd {
          bool circular_y{};
          sd::ImagePreprocessConfig image_preprocess{};
          const char* ref_image_args{};
@@ -240,16 +244,18 @@ index ae05dc9..9a081e0 100644
  
 diff --git i/src/pipeline/fugue_stage_io.h w/src/pipeline/fugue_stage_io.h
 new file mode 100644
-index 0000000..a4b149e
+index 0000000..75fbb74
 --- /dev/null
 +++ w/src/pipeline/fugue_stage_io.h
-@@ -0,0 +1,107 @@
+@@ -0,0 +1,177 @@
 +// Fugue's stage split, shared by generate_image and generate_video (spec 8.10): the conditioning
 +// and latent files a stage writes after it ran or reads in place of running it. The file layout is
 +// fugue_stages.h.
 +#ifndef __SD_PIPELINE_FUGUE_STAGE_IO_H__
 +#define __SD_PIPELINE_FUGUE_STAGE_IO_H__
 +
++#include <algorithm>
++#include <cstdio>
 +#include <string>
 +#include <vector>
 +
@@ -346,6 +352,74 @@ index 0000000..a4b149e
 +        }
 +        ok = ok && (!latents.empty() || f.fail("no latent"));
 +        return ok || fugue_fail(f, "cannot read latent", path);
++    }
++
++    // A clip to redraw (video-to-video): a YUV4MPEG2 file (4:2:0, the layout the helper writes a
++    // decoded video in) as the VAE's input, [W, H, frames, 3, 1] in 0..1 with the full-range BT.601
++    // matrix the helper writes it with. Its size and length must be the request's.
++    inline sd::Tensor<float> fugue_read_y4m(const char* path, int width, int height, int frames) {
++        FILE* in = std::fopen(path, "rb");
++        if (in == nullptr) {
++            LOG_ERROR("fugue: cannot read video '%s'", path);
++            return {};
++        }
++        const auto close = [&]() { std::fclose(in); };
++        char line[512];
++        int w = 0, h = 0;
++        if (std::fgets(line, sizeof line, in) == nullptr || std::string(line).rfind("YUV4MPEG2", 0) != 0) {
++            LOG_ERROR("fugue: '%s' is not a YUV4MPEG2 file", path);
++            close();
++            return {};
++        }
++        bool is420 = true;
++        for (const char* p = line; *p != '\0'; ++p) {
++            if (*p != ' ')
++                continue;
++            if (p[1] == 'W')
++                w = std::atoi(p + 2);
++            else if (p[1] == 'H')
++                h = std::atoi(p + 2);
++            else if (p[1] == 'C')
++                is420 = std::string(p + 2).rfind("420", 0) == 0;
++        }
++        if (!is420 || w != width || h != height) {
++            LOG_ERROR("fugue: the video '%s' must be 4:2:0 and %dx%d, not %dx%d", path, width, height, w, h);
++            close();
++            return {};
++        }
++        const int64_t cw = (w + 1) / 2, ch = (h + 1) / 2;
++        std::vector<unsigned char> y(static_cast<size_t>(w) * h), u(static_cast<size_t>(cw * ch)), v(static_cast<size_t>(cw * ch));
++        sd::Tensor<float> video({width, height, frames, 3, 1});
++        float* out         = video.data();
++        const int64_t plane = static_cast<int64_t>(width) * height;
++        for (int f = 0; f < frames; ++f) {
++            if (std::fgets(line, sizeof line, in) == nullptr || std::string(line).rfind("FRAME", 0) != 0 ||
++                std::fread(y.data(), 1, y.size(), in) != y.size() || std::fread(u.data(), 1, u.size(), in) != u.size() ||
++                std::fread(v.data(), 1, v.size(), in) != v.size()) {
++                LOG_ERROR("fugue: the video '%s' has fewer than the %d frames the request says", path, frames);
++                close();
++                return {};
++            }
++            for (int j = 0; j < height; ++j)
++                for (int i = 0; i < width; ++i) {
++                    const float Y = y[static_cast<size_t>(j) * w + i];
++                    const float U = u[static_cast<size_t>(j / 2) * cw + i / 2] - 128.f;
++                    const float V = v[static_cast<size_t>(j / 2) * cw + i / 2] - 128.f;
++                    const float r = Y + 1.402f * V, g = Y - 0.344136f * U - 0.714136f * V, b = Y + 1.772f * U;
++                    const int64_t at = static_cast<int64_t>(j) * width + i;
++                    out[(0 * frames + f) * plane + at] = std::clamp(r, 0.f, 255.f) / 255.f;
++                    out[(1 * frames + f) * plane + at] = std::clamp(g, 0.f, 255.f) / 255.f;
++                    out[(2 * frames + f) * plane + at] = std::clamp(b, 0.f, 255.f) / 255.f;
++                }
++        }
++        // More frames than the request's would be cut silently: say so.
++        if (std::fgets(line, sizeof line, in) != nullptr && std::string(line).rfind("FRAME", 0) == 0) {
++            LOG_ERROR("fugue: the video '%s' has more than the %d frames the request says", path, frames);
++            close();
++            return {};
++        }
++        close();
++        return video;
 +    }
 +
 +}  // namespace sd::pipeline
@@ -856,7 +930,7 @@ index f2cdcea..a240848 100644
          int num_images = 0;
          auto result    = decode_image_outputs(sd, request, final_latents, &num_images);
 diff --git i/src/pipeline/video.cpp w/src/pipeline/video.cpp
-index 529bbb6..1791351 100644
+index 529bbb6..c1ac521 100644
 --- i/src/pipeline/video.cpp
 +++ w/src/pipeline/video.cpp
 @@ -1,3 +1,4 @@
@@ -872,7 +946,7 @@ index 529bbb6..1791351 100644
  #include "model/diffusion/minimax_h3.hpp"
  #include "model/upscaler/h3_latent_upscaler.hpp"
  #include "model/upscaler/ltx_latent_upscaler.hpp"
-@@ -1902,6 +1904,52 @@ namespace sd::pipeline {
+@@ -1902,6 +1904,85 @@ namespace sd::pipeline {
              return false;
          sd->reset_generation_extensions();
  
@@ -881,16 +955,21 @@ index 529bbb6..1791351 100644
 +        const sd::FugueStageConfig& fugue = sd_vid_gen_params->fugue;
 +        const std::string stop_after      = SAFE_STR(fugue.stop_after);
 +        const bool staged                 = fugue.cond_in != nullptr || fugue.cond_out != nullptr || fugue.latent_in != nullptr ||
-+                            fugue.latent_out != nullptr || !stop_after.empty();
-+        if (!stop_after.empty() && stop_after != "cond" && stop_after != "sample") {
-+            LOG_ERROR("fugue: unknown stage '%s' to stop after for a video; use cond or sample", stop_after.c_str());
++                            fugue.latent_out != nullptr || fugue.init_latent_in != nullptr || fugue.init_latent_out != nullptr ||
++                            !stop_after.empty();
++        if (!stop_after.empty() && stop_after != "init" && stop_after != "cond" && stop_after != "sample") {
++            LOG_ERROR("fugue: unknown stage '%s' to stop after for a video; use init, cond or sample", stop_after.c_str());
 +            return false;
 +        }
-+        if (fugue.init_latent_in != nullptr || fugue.init_latent_out != nullptr) {
-+            LOG_ERROR("fugue: a video has no init latent stage");
++        if (fugue.init_latent_out != nullptr && fugue.init_video == nullptr) {
++            LOG_ERROR("fugue: a video's init latent is made from init_video");
 +            return false;
 +        }
-+        if (staged && (latent_upscale_enabled || sd_version_is_ltxav(sd->version) || sd_version_is_minimax_h3(sd->version) ||
++        if (fugue.init_latent_in != nullptr && fugue.init_video != nullptr) {
++            LOG_ERROR("fugue: init_video and init_latent_in both start the clip");
++            return false;
++        }
++        if ((staged || fugue.init_video != nullptr) && (latent_upscale_enabled || sd_version_is_ltxav(sd->version) || sd_version_is_minimax_h3(sd->version) ||
 +                       sd->version == VERSION_WAN2_2_S2V)) {
 +            LOG_ERROR("fugue: %s cannot run in stages (latent upscale or audio)", sd_version_name(sd->version));
 +            return false;
@@ -922,12 +1001,61 @@ index 529bbb6..1791351 100644
 +            return true;
 +        }
 +
++        // Video to video: the clip to redraw is encoded here (the init stage, or `generate`), or
++        // read from the latent that stage wrote. Off: nothing below runs.
++        sd::Tensor<float> start_latent;
++        if (fugue.init_video != nullptr) {
++            auto clip = fugue_read_y4m(fugue.init_video, request.width, request.height, request.frames);
++            if (clip.empty())
++                return false;
++            start_latent = sd->encode_first_stage(clip);
++            if (start_latent.empty()) {
++                LOG_ERROR("fugue: failed to encode the video '%s'", fugue.init_video);
++                return false;
++            }
++            if (fugue.init_latent_out != nullptr &&
++                !fugue_save_latents(sd, {start_latent}, request, fugue.init_latent_out, request.frames, request.fps))
++                return false;
++            if (stop_after == "init")
++                return stage_done();
++        } else if (fugue.init_latent_in != nullptr) {
++            std::vector<sd::Tensor<float>> loaded;
++            if (!fugue_load_latents(sd, loaded, fugue.init_latent_in))
++                return false;
++            if (loaded.size() != 1) {
++                LOG_ERROR("fugue: the init latent '%s' holds %zu latents, not one", fugue.init_latent_in, loaded.size());
++                return false;
++            }
++            start_latent = std::move(loaded[0]);
++        }
++
          SamplePlan plan(sd, sd_vid_gen_params, request);
          sd->generation_progress.report("preparing", "inputs");
          auto latent_inputs_opt = prepare_video_generation_latents(sd, sd_vid_gen_params, &request, ref_image_params);
-@@ -1910,15 +1958,28 @@ namespace sd::pipeline {
+@@ -1909,16 +1990,49 @@ namespace sd::pipeline {
+             return false;
          }
          ImageGenerationLatents latents = std::move(*latent_inputs_opt);
++        if (!start_latent.empty()) {
++            if (start_latent.shape() != latents.init_latent.shape()) {
++                LOG_ERROR("fugue: the start video does not fit a %dx%d clip of %d frames for %s",
++                          request.width, request.height, request.frames, sd_version_name(sd->version));
++                return false;
++            }
++            latents.init_latent = std::move(start_latent);
++            // Redraw by `strength` as image to image does: sampling starts part way down the
++            // schedule, so the first sigmas (the high-noise pass first) are dropped.
++            if (request.strength < 1.f) {
++                const int steps  = plan.high_noise_sample_steps + plan.sample_steps;
++                int t_enc        = static_cast<int>(steps * request.strength);
++                t_enc            = std::min(t_enc, steps - 1);
++                const int drop   = steps - t_enc;
++                plan.sigmas.erase(plan.sigmas.begin(), plan.sigmas.begin() + drop);
++                plan.high_noise_sample_steps = std::max(0, plan.high_noise_sample_steps - drop);
++                plan.sample_steps            = static_cast<int>(plan.sigmas.size()) - 1 - plan.high_noise_sample_steps;
++                LOG_INFO("fugue: video to video, %d of %d steps", t_enc, steps);
++            }
++        }
  
 -        auto embeds_opt = prepare_video_generation_embeds(sd,
 -                                                          sd_vid_gen_params,
@@ -962,7 +1090,7 @@ index 529bbb6..1791351 100644
          if (latent_upscale_enabled) {
              LOG_INFO("generate_video %dx%dx%d -> video latent spatial upscale",
                       request.width,
-@@ -2027,6 +2088,14 @@ namespace sd::pipeline {
+@@ -2027,6 +2141,14 @@ namespace sd::pipeline {
          }
          LOG_INFO("sampling completed, taking %.2fs", (sampling_end - sampling_start) * 1.0f / 1000);
  

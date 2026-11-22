@@ -6,7 +6,7 @@ run as separate calls ([spec 8.10](../docs/spec.md#810-gpu-memory-and-the-helper
 | File | What it is |
 | --- | --- |
 | `CMakeLists.txt` | The pin: stable-diffusion.cpp, ggml and CUTLASS commits with their SHA-256 |
-| `sdcpp.patch` | The stage patch: `fugue.*` image and video options, the stage file format (`src/pipeline/fugue_stages.h`) and its reading and writing (`fugue_stage_io.h`), hooks in `generate_image` and `generate_video` (for an inpaint model, `generate_image` also refreshes `c_concat` when a sample reads its conditioning) |
+| `sdcpp.patch` | The stage patch: `fugue.*` image and video options, the stage file format (`src/pipeline/fugue_stages.h`) and its reading and writing (`fugue_stage_io.h`, with the reader of a clip's YUV4MPEG2), hooks in `generate_image` and `generate_video` (video to video: `fugue.init_video`, the start latent and the shortened schedule; for an inpaint model, `generate_image` also refreshes `c_concat` when a sample reads its conditioning) |
 | `src/main.cpp` | `fugue-helper <request.json>` (one operation, then exit) `fugue-helper --serve` (the provider protocol over stdio, for Fugue's `fugue-helper` provider) and `fugue-helper --serve-http` (the same over HTTP, for a paired host); the formats are at its top |
 | `smoke-http.sh` | `curl` checks of `--serve-http` that need no model |
 | `fugue-helper.service` | A systemd user unit for a paired host |
@@ -114,13 +114,32 @@ fugue-helper-cuda dec.json   # {"op": "decode", "latent": "l.bin", "video": "out
 with `"context": {"diffusion_model_path": "…LowNoise….gguf", "high_noise_diffusion_model_path": "…HighNoise….gguf",
 "t5xxl_path": "umt5_xxl….safetensors", "vae_path": "wan_2.1_vae.safetensors"}` and `"params"`
 `{"prompt", "negative_prompt", "width", "height", "video_frames", "fps", "seed", "sample.steps",
-"sample.guidance.txt_cfg", "sample.flow_shift"}`, the same in all three. A video has no `vae_encode`
-and cannot start from a latent; the helper answers `input_invalid`.
+"sample.guidance.txt_cfg", "sample.flow_shift"}`, the same in all three. Starting from a clip is
+video to video (below); a video model cannot start from an image latent.
 
 An image-to-video model (Wan 2.2 I2V, TI2V) takes its first frame as `"image": "start.png"` in the
 `encode` and the `sample` request (job input `image` through `--serve`; data over HTTP), the same
 picture in both, with the clip's `width`, `height` and `video_frames` in `params`: the encode makes the model's extra input
 from it. An image model given an `image` and no mask answers `input_invalid` (with a mask, see Masks).
+
+### Video to video
+
+`vae_encode` of a video model takes `"video": "in.y4m"` (job input `video` through `--serve`; data with format `y4m`
+over HTTP) instead of an `image`, and writes the clip's latent: a YUV4MPEG2 file in the layout `decode`
+writes, 4:2:0, full range BT.601, a size that is a multiple of 16 and 4 n + 1 frames. The size, rate and
+length are the file's and replace `width`, `height`, `fps` and `video_frames` of the request (the other stages of
+the generation must be given the same values; Fugue's latent descriptor carries them). A `sample` takes that
+latent as `"init_latent"` with `params.strength` (0 to 1: the part of the sampling schedule that is run, as for
+an image; Wan 2.2's high-noise pass is skipped when `strength` leaves only the low-noise steps), and a
+`generate` takes the clip as `"init_video"`; the staged run and the `generate` run give the same pixels. A
+latent or clip of another size or length than the request's is `input_invalid`; so is `init_video` for an image
+model, and a model that does audio (LTX, MiniMax H3, S2V) or a latent upscale.
+
+```sh
+fugue-helper-cuda vae.json   # {"op": "vae_encode", "video": "src.y4m", "latent": "init.bin", "context": {...}, "params": {...}}
+fugue-helper-cuda smp.json   # {"op": "sample", "conditioning": "c.bin", "init_latent": "init.bin", "latent": "l.bin",
+                             #  "context": {...}, "params": {..., "strength": 0.6}}
+```
 
 ## Masks (inpainting)
 
@@ -184,6 +203,7 @@ and checked at every pin move.
 | Option | What it does | Hunks | Upstream PR |
 | --- | --- | --- | --- |
 | `fugue.soft_mask` (bool, image) | Differential diffusion ([arXiv 2306.00950](https://arxiv.org/abs/2306.00950), written from the paper: its repository has no licence). A mask's gray is a change strength: a latent cell with value `m` is redrawn from step `i` of `k` when `m > (k - 1 - i) / k` and held to the start latent before | `config.h`, `api/options.cpp` (the option); `pipeline/image.cpp` (no rounding of the mask when on, still rounded for an inpaint model); `pipeline/diffusion_engine.cpp` (`blend_start_latent`, called where the start latent is put back; one more defaulted parameter of `sample`) | not sent yet: [the description](../docs/differential-diffusion-upstream.md) is ready for the owner (#179) |
+| `fugue.init_video` (string, video; with `fugue.init_latent_in` / `_out` for a video) | Video to video: a YUV4MPEG2 clip is encoded with the VAE (or its latent is read) and replaces the start latent, and `strength` below 1 drops the first sigmas of the schedule (the high-noise pass of Wan 2.2 first), as image to image does. Not for LTX, MiniMax H3, S2V or a latent upscale | `config.h`, `api/options.cpp` (the option); `pipeline/fugue_stage_io.h` (`fugue_read_y4m`); `pipeline/video.cpp` (the block before `SamplePlan`, and after the latents are prepared) | not sent yet; library `strength` for a video is read by LTX only upstream |
 
 When an upstream PR is merged and the pin reaches it, drop the hunks from the patch.
 
@@ -214,7 +234,11 @@ The pin moves only on purpose (spec 8.10).
    - Wan (T2V) staged: encode, sample and decode as separate processes, and one `generate`
      run of the same request: the frames must be the same;
    - Wan 2.2 I2V the same way, with `"image"` in the encode and the sample and `params.init_image`
-     (`{"image": PATH}`) in the `generate` run.
+     (`{"image": PATH}`) in the `generate` run;
+   - Wan video to video: `vae_encode` of a clip (`"video"`), `encode`, `sample` with `"init_latent"` and
+     `strength` 0.6, `decode`, against one `generate` with `"init_video"` and the same `strength`: the
+     frames must be the same, and differ from the clip (the `init_video` hunks in `video.cpp`:
+     `generate_video` reads the clip, encodes it, replaces the start latent and drops the first sigmas);
 
    - an inpaint model staged equals one `generate` run: `encode`, `vae_encode` (not used by an inpaint
      model, but the stage runs), `sample` with `"mask"`, `"image"` and `"init_latent"`, `decode`,

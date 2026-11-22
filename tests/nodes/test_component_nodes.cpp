@@ -17,6 +17,7 @@
 
 #include <vips/vips8>
 
+#include "engine/ffmpeg.h"
 #include "engine/file_hashes.h"
 #include "engine/hash.h"
 #include "engine/media.h"
@@ -43,6 +44,7 @@ const QString kVaeDecode = QStringLiteral("fugue/vae-decode");
 const QString kEmptyVideoLatent = QStringLiteral("fugue/empty-video-latent");
 const QString kVaeDecodeVideo = QStringLiteral("fugue/vae-decode-video");
 const QString kVaeEncode = QStringLiteral("fugue/vae-encode");
+const QString kVaeEncodeVideo = QStringLiteral("fugue/vae-encode-video");
 
 void writeFile(const QString &path, const QByteArray &bytes) {
     QDir().mkpath(QFileInfo(path).absolutePath());
@@ -183,6 +185,24 @@ MediaHandle picture(Bench &bench, const QString &name, int width, int height, in
     if (!image)
         qFatal("cannot probe %s", qPrintable(path));
     return image.value();
+}
+
+// A test video of this size, length and rate (ffmpeg's test pattern, H.264 in Matroska), probed as a
+// Load Video does.
+MediaHandle testVideo(Bench &bench, const QString &name, int width, int height, int frames, int fps) {
+    const QString path = bench.dir.filePath(name);
+    const Result<QByteArray> made = ffmpeg::run(
+        QStringLiteral("ffmpeg"),
+        {"-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+         QStringLiteral("testsrc2=size=%1x%2:rate=%3:duration=%4").arg(width).arg(height).arg(fps).arg(double(frames) / fps, 0, 'f', 4),
+         "-frames:v", QString::number(frames), "-c:v", "libx264", "-pix_fmt", "yuv420p", "-f", "matroska", path},
+        QStringLiteral("node_failed"));
+    if (!made)
+        qFatal("ffmpeg: %s", qPrintable(made.error().message));
+    const Result<MediaHandle> video = MediaHandle::probe(MediaType::Video, path, bench.hashes);
+    if (!video)
+        qFatal("cannot probe %s", qPrintable(path));
+    return video.value();
 }
 
 // A one-channel mask of this size with the rectangle `painted` white (255), probed as a picture.
@@ -662,18 +682,84 @@ private slots:
                  (QJsonObject{{"width", 832}, {"height", 480}, {"frames", 49}, {"fps", 24}, {"model", model}}));
     }
 
-    void aSampledVideoCannotBeRedrawnYet() {
+    // Video to video (#130): a sampled or encoded clip is a start like a picture is.
+    void theSamplerRedrawsFromAVideoLatentAsFarAsDenoiseSays() {
         Bench bench;
         const QJsonObject model = bench.loaded(bench.wan());
         const QJsonObject latent{{"data", "fugue/latent"},
-                                 {"path", "/runs/r/nodes/sample/latent.bin"},
-                                 {"meta", QJsonObject{{"width", 832}, {"height", 480}, {"frames", 33}, {"fps", 16}, {"model", model}}}};
+                                 {"path", "/runs/r/nodes/encode/latent.bin"},
+                                 {"meta", QJsonObject{{"width", 320}, {"height", 192}, {"frames", 33}, {"fps", 16}, {"model", model}}}};
         const Result<JobRequest> request =
             bench.request(kSampler, {{"model", Value(model)},
                                      {"conditioning", Value(QJsonObject{{"data", "fugue/conditioning"}, {"path", "/c.bin"}})},
-                                     {"latent", Value(latent)}});
+                                     {"latent", Value(latent)},
+                                     {"denoise", Value(0.6)}});
+        QVERIFY2(request, request ? "" : qPrintable(request.error().message));
+        QCOMPARE(request->capability, QStringLiteral("latent.sample"));
+        QCOMPARE(request->inputs.value("init_latent").toObject(), (QJsonObject{{"path", "/runs/r/nodes/encode/latent.bin"}}));
+        QCOMPARE(request->params.value("strength").toDouble(), 0.6);
+        QCOMPARE(request->params.value("video_frames").toInt(), 33);
+        QCOMPARE(request->params.value("fps").toInt(), 16);
+        QCOMPARE(request->params.value("width").toInt(), 320);
+    }
+
+    void vaeEncodeVideoFitsTheClipToTheModelsLengthRateAndSize() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.wan());
+        // 50 frames at 25 a second, 2 seconds: at 16 a second about 32 frames, cut to 4 n + 1 (29 to 33).
+        const MediaHandle video = testVideo(bench, "in.mkv", 200, 100, 50, 25);
+        const Values inputs{{"model", Value(model)}, {"video", Value(video)}, {"frames", Value(81)}};
+        const Result<JobRequest> request = bench.request(kVaeEncodeVideo, inputs);
+        QVERIFY2(request, request ? "" : qPrintable(request.error().message));
+        QCOMPARE(request->capability, QStringLiteral("latent.encode"));
+        // The video's own size in steps of 16.
+        QCOMPARE(request->params.value("width").toInt(), 208);
+        QCOMPARE(request->params.value("height").toInt(), 96);
+        const QString clip = bench.workDir() + "/clip.y4m";
+        QCOMPARE(request->inputs, (QJsonObject{{"video", QJsonObject{{"path", clip}}}}));
+        QVERIFY(request->params.value("context").toObject().contains("high_noise_diffusion_model_path"));
+        const QByteArray y4m = readFile(clip);
+        QVERIFY(y4m.startsWith("YUV4MPEG2 W208 H96 F16:1"));
+        QVERIFY(y4m.contains("C420jpeg"));
+        const int made = int(y4m.count("FRAME\n"));
+        QVERIFY2(made >= 29 && made <= 33 && (made - 1) % 4 == 0, qPrintable(QString::number(made)));
+        const Result<Values> out = bench.outputs(kVaeEncodeVideo, inputs,
+                                                 JobResult{QJsonObject{{"latent", QJsonObject{{"path", bench.workDir() + "/latent.bin"}}}}, {}});
+        QVERIFY(out);
+        QCOMPARE(out->value("latent").json().toObject().value("meta").toObject(),
+                 (QJsonObject{{"width", 208}, {"height", 96}, {"frames", made}, {"fps", 16}, {"model", model}}));
+    }
+
+    void vaeEncodeVideoTakesTheFramesAskedAndTheSizeGiven() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.wan());
+        const MediaHandle video = testVideo(bench, "in.mkv", 160, 160, 64, 16);
+        const Values inputs{{"model", Value(model)}, {"video", Value(video)}, {"frames", Value(17)}, {"width", Value(96)}, {"height", Value(64)}};
+        const Result<JobRequest> request = bench.request(kVaeEncodeVideo, inputs);
+        QVERIFY2(request, request ? "" : qPrintable(request.error().message));
+        QCOMPARE(request->params.value("width").toInt(), 96);
+        QCOMPARE(request->params.value("height").toInt(), 64);
+        const QByteArray y4m = readFile(bench.workDir() + "/clip.y4m");
+        QVERIFY(y4m.startsWith("YUV4MPEG2 W96 H64 F16:1"));
+        QCOMPARE(y4m.count("FRAME\n"), 17);
+    }
+
+    void vaeEncodeVideoRefusesAVideoTooShortForTheModel() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.wan());
+        const MediaHandle video = testVideo(bench, "short.mkv", 64, 64, 3, 16);
+        const Result<JobRequest> request = bench.request(kVaeEncodeVideo, {{"model", Value(model)}, {"video", Value(video)}});
         QVERIFY(!request);
-        QCOMPARE(request.error().input, QStringLiteral("latent"));
+        QCOMPARE(request.error().input, QStringLiteral("video"));
+    }
+
+    void aPairedHostGetsTheClipAsAY4mFile() {
+        Bench bench;
+        const QJsonObject model = bench.loaded(bench.wan());
+        const MediaHandle video = testVideo(bench, "in.mkv", 64, 64, 9, 16);
+        const Result<JobRequest> request = bench.remoteRequest(kVaeEncodeVideo, {{"model", Value(model)}, {"video", Value(video)}, {"frames", Value(9)}});
+        QVERIFY2(request, request ? "" : qPrintable(request.error().message));
+        QVERIFY(request->inputs.value("video").toObject().value("path").toString().endsWith(".y4m"));
     }
 
     void vaeDecodeVideoSendsTheSameOptionsAsTheOtherStages() {

@@ -1,0 +1,26 @@
+{
+  "manifest": 1,
+  "id": "fugue/vae-encode-video",
+  "version": "1.0.0",
+  "name": "VAE Encode Video",
+  "description": "Turns a video into a latent with the model's VAE, for a Sampler to redraw from (video to video). The video is fitted to the clip the model will make: the rate is resampled, the picture is scaled to cover the size and cut from the middle, and the length is cut to 4 n + 1 frames from the start. Trim the video first to pick the part.",
+  "category": "Diffusion",
+  "keywords": ["encode", "video to latent", "vid2vid", "video to video", "restyle", "wan", "vae"],
+  "runtime": {"kind": "builtin"},
+  "capabilities": ["latent.encode"],
+  "inputs": [
+    {"name": "model", "type": "fugue/model", "label": "Model"},
+    {"name": "video", "type": "video", "label": "Video"},
+    {"name": "frames", "type": "number", "label": "Frames", "default": 33, "integer": true, "min": 5, "max": 241, "step": 4,
+     "description": "How many frames to take from the start; fewer if the video is shorter. Wan makes 4 n + 1 frames (33, 81), so another count is cut to one."},
+    {"name": "fps", "type": "number", "label": "Frames per second", "default": 16, "integer": true, "min": 1, "max": 60,
+     "description": "The rate the clip is resampled to. Wan 2.1 and 2.2 14B are made for 16, Wan 2.2 5B for 24."},
+    {"name": "width", "type": "number", "label": "Width", "optional": true, "integer": true, "min": 64, "max": 4096, "step": 16,
+     "description": "Unset: the video's width in steps of 16."},
+    {"name": "height", "type": "number", "label": "Height", "optional": true, "integer": true, "min": 64, "max": 4096, "step": 16,
+     "description": "Unset: the video's height in steps of 16."}
+  ],
+  "outputs": [
+    {"name": "latent", "type": "fugue/latent", "label": "Latent"}
+  ]
+}

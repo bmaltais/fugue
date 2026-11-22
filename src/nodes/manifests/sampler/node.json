@@ -1,9 +1,9 @@
 {
   "manifest": 1,
   "id": "fugue/sampler",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "name": "Sampler",
-  "description": "Denoises a latent with the model, following the conditioning: from noise for an Empty Latent or an Empty Video Latent (a clip), else from the latent given, by the amount Denoise sets. A latent from VAE Encode with a mask is redrawn only where the mask is white; with Soft mask, gray in the mask is a strength.",
+  "description": "Denoises a latent with the model, following the conditioning: from noise for an Empty Latent or an Empty Video Latent (a clip), else from the latent given (a picture from VAE Encode, a clip from VAE Encode Video, or a sampled one), by the amount Denoise sets. A latent from VAE Encode with a mask is redrawn only where the mask is white; with Soft mask, gray in the mask is a strength.",
   "category": "Diffusion",
   "keywords": ["ksampler", "sample", "denoise", "steps", "cfg", "seed", "diffusion"],
   "runtime": {"kind": "builtin"},
@@ -28,7 +28,7 @@
      "description": "Unset: the model's own."},
     {"name": "denoise", "type": "number", "label": "Denoise", "default": 1, "min": 0, "max": 1, "step": 0.05,
      "widget": "slider",
-     "description": "For a latent from VAE Encode or another Sampler: how far to move from it, 0 keeps it, 1 ignores it. An Empty Latent always starts from noise."},
+     "description": "For a latent from VAE Encode, VAE Encode Video or another Sampler: how far to move from it, 0 keeps it, 1 ignores it. An Empty Latent always starts from noise."},
     {"name": "soft_mask", "type": "boolean", "label": "Soft mask", "default": false, "advanced": true,
      "description": "For a latent from VAE Encode with a mask: read the mask's gray as how much to change (differential diffusion): white is redrawn from the start, gray is held until later in the run, black is kept. Off: the mask is white or not. Not for an inpaint model, which has its own mask input. Needs this build's helper."}
   ],

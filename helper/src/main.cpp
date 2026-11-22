@@ -16,7 +16,8 @@
 //                        "mask": IN (optional)}                frame), or with a mask (below)
 //   {"op": "decode",     "latent": IN, "image": OUT,           latent -> PNG; for a video model
 //                        "video": OUT}                         "video" is written instead (below)
-//   {"op": "vae_encode", "image": IN, "latent": OUT}           PNG -> latent
+//   {"op": "vae_encode", "image": IN, "latent": OUT}           PNG -> latent; for a video model
+//                        "video": IN (a YUV4MPEG2 clip)        the clip -> its latent (below)
 //   {"op": "generate",   "image": OUT, "video": OUT,           all stages in one call; with a
 //                        "mask": IN (optional)}                mask, params.init_image is the picture
 //   {"op": "upscale",    "image": IN, "output": OUT}           PNG -> PNG through an upscale model;
@@ -27,7 +28,11 @@
 // A context of a video model (Wan) makes the same operations on video: the library's video
 // options (video_frames, fps, high_noise_*) and sd_generate_video; the latent is the clip's, and
 // decode writes the "video" file, YUV4MPEG2 (4:2:0, which every ffmpeg reads; the helper links no
-// codec), not an image. vae_encode and a start latent are refused for a video.
+// codec), not an image. Video to video: vae_encode of a "video" (a YUV4MPEG2 file in the layout
+// decode writes: 4:2:0, 4n+1 frames, sides a multiple of 16) makes the clip's latent; its size, length
+// and rate are the file's and replace the params'. A sample takes it as "init_latent" with
+// params.strength (the part redrawn, as for an image), and a generate takes the clip itself as
+// "init_video": the pixels are the same as the staged run.
 //
 // A "mask" (sample, generate; image models only, else input_invalid) is a PNG read with one channel
 // at the request's width and height (white is redrawn), checked before any model loads. The library
@@ -96,6 +101,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -243,6 +249,45 @@ void saveVideo(const sd_video_t &video, const std::string &path) {
     ok = (std::fclose(out) == 0) && ok;
     if (!ok)
         fail("helper_failed", "cannot write " + path);
+}
+
+// The size, rate and frame count of a YUV4MPEG2 file (4:2:0), from its header and its length.
+struct Y4m {
+    int width = 0, height = 0, fps = 0, frames = 0;
+};
+
+Y4m readY4mHeader(const std::string &path) {
+    std::ifstream in(path, std::ios::binary);
+    std::string line;
+    if (!in || !std::getline(in, line) || line.rfind("YUV4MPEG2", 0) != 0)
+        fail("input_invalid", path + " is not a YUV4MPEG2 video");
+    Y4m clip;
+    int num = 0, den = 1;
+    bool is420 = true;
+    std::istringstream fields(line);
+    std::string field;
+    fields >> field;
+    while (fields >> field) {
+        if (field[0] == 'W')
+            clip.width = std::atoi(field.c_str() + 1);
+        else if (field[0] == 'H')
+            clip.height = std::atoi(field.c_str() + 1);
+        else if (field[0] == 'F')
+            std::sscanf(field.c_str() + 1, "%d:%d", &num, &den);
+        else if (field[0] == 'C')
+            is420 = field.compare(1, 3, "420") == 0;
+    }
+    if (!is420 || clip.width <= 0 || clip.height <= 0)
+        fail("input_invalid", "a video must be YUV4MPEG2 4:2:0 with a size: " + path);
+    clip.fps = std::max(1, den > 0 ? static_cast<int>(std::lround(double(num) / den)) : 16);
+    std::error_code ignored;
+    const auto total = static_cast<long long>(std::filesystem::file_size(path, ignored));
+    const long long chroma = static_cast<long long>((clip.width + 1) / 2) * ((clip.height + 1) / 2);
+    const long long frame = 6 + static_cast<long long>(clip.width) * clip.height + 2 * chroma; // "FRAME\n" and the planes
+    clip.frames = static_cast<int>((total - static_cast<long long>(line.size()) - 1) / frame);
+    if (clip.frames <= 0)
+        fail("input_invalid", "the video has no frames: " + path);
+    return clip;
 }
 
 bool isImage(const json &v) { return v.is_object() && v.contains("image") && v["image"].is_string(); }
@@ -549,13 +594,25 @@ json run(const json &request, Contexts &contexts, const Hooks &hooks = {}) {
     // The context first: whether it makes video (Wan, ...) says which options and which call.
     sd_ctx_t *ctx = contexts.get(request.value("context", json::object()));
     const bool video = sd_ctx_supports_video_generation(ctx);
-    if (video && op == "vae_encode")
-        fail("input_invalid", "a video model has no VAE encode stage here: a video starts from noise");
+    if (op == "vae_encode" && video != request.contains("video"))
+        fail("input_invalid", video ? "a video model's VAE encode takes a clip: \"video\" (an image model's takes \"image\")"
+                                    : "an image model's VAE encode takes \"image\"; \"video\" is for a video model");
+    if (request.contains("init_video") && (!video || op != "generate"))
+        fail("input_invalid", "\"init_video\" is the clip a video model's generate redraws");
     Opt options(video ? sd_vid_gen_opt_create() : sd_img_gen_opt_create());
     if (!options)
         fail("out_of_memory", "cannot create the options");
     for (const auto &[key, value] : params.items())
         setOption(options.get(), key, value);
+    // Video to video: the clip's own size, rate and length are the request's.
+    const std::string clipFile = op == "vae_encode" && video ? required(request, "video") : request.value("init_video", "");
+    if (!clipFile.empty()) {
+        const Y4m clip = readY4mHeader(clipFile);
+        check(sd_opt_set_int(options.get(), "width", clip.width), "width");
+        check(sd_opt_set_int(options.get(), "height", clip.height), "height");
+        check(sd_opt_set_int(options.get(), "video_frames", clip.frames), "video_frames");
+        check(sd_opt_set_int(options.get(), "fps", clip.fps), "fps");
+    }
 
     // A mask: the start picture, or the start latent, by the model (see the header).
     const bool inpaint = mask && isInpaintVersion(sd_get_model_version_name(ctx));
@@ -590,8 +647,6 @@ json run(const json &request, Contexts &contexts, const Hooks &hooks = {}) {
         const std::string latent = required(request, "latent");
         setPath("fugue.cond_in", required(request, "conditioning"));
         if (request.contains("init_latent")) {
-            if (video)
-                fail("input_invalid", "a video cannot start from a latent here: it starts from noise");
             // An inpaint model starts from the picture (its masked picture is built from it).
             if (!inpaint)
                 setPath("fugue.init_latent_in", required(request, "init_latent"));
@@ -606,11 +661,16 @@ json run(const json &request, Contexts &contexts, const Hooks &hooks = {}) {
         (video ? videoOut : imageOut) = required(request, video ? "video" : "image");
     } else if (op == "vae_encode") {
         const std::string latent = required(request, "latent");
-        check(sd_opt_set_tensor(options.get(), "init_image", loadImage(required(request, "image")).get()), "init_image");
+        if (video)
+            setPath("fugue.init_video", clipFile);
+        else
+            check(sd_opt_set_tensor(options.get(), "init_image", loadImage(required(request, "image")).get()), "init_image");
         setPath("fugue.init_latent_out", latent);
         setPath("fugue.stop_after", "init");
         outputs.push_back({{"latent", latent}});
     } else {
+        if (!clipFile.empty())
+            setPath("fugue.init_video", clipFile);
         (video ? videoOut : imageOut) = required(request, video ? "video" : "image");
     }
 
@@ -1485,7 +1545,7 @@ private:
         params.erase("context");
         request["params"] = params;
         const json inputs = message.value("inputs", json::object());
-        for (const char *name : {"conditioning", "latent", "init_latent", "image", "mask", "frames"})
+        for (const char *name : {"conditioning", "latent", "init_latent", "image", "mask", "frames", "video"})
             if (inputs.contains(name) && inputs[name].is_object() && inputs[name].contains("path"))
                 request[name] = inputs[name]["path"];
         const std::filesystem::path dir = message.value("output_dir", "");
