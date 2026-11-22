@@ -14,7 +14,9 @@
 
 #include "engine/hash.h"
 #include "engine/json.h"
+#include "engine/model_library.h"
 #include "engine/paths.h"
+#include "engine/settings.h"
 
 namespace fugue {
 
@@ -44,8 +46,56 @@ QString key(const QString &path) {
 
 } // namespace
 
-FileHashes::FileHashes(QString storePath) : m_storePath(std::move(storePath)) {
+FileHashes::FileHashes(QString storePath) : FileHashes(storePath, storePath == defaultPath() ? inheritedFromDefault() : Inherited()) {}
+
+FileHashes::FileHashes(QString storePath, Inherited inherited) : m_storePath(std::move(storePath)) {
     m_entries = read(m_storePath, &m_stamp);
+    for (const QString &root : inherited.roots) {
+        const QString clean = key(root);
+        if (!clean.isEmpty() && clean != QLatin1String("/") && !m_inheritedRoots.contains(clean))
+            m_inheritedRoots << clean;
+    }
+    // Never the project's own store (a project at the Default's place would read itself).
+    if (!m_inheritedRoots.isEmpty() && key(inherited.storePath) != key(m_storePath)) {
+        m_inheritedPath = inherited.storePath;
+        m_inherited = read(m_inheritedPath, &m_inheritedStamp);
+    } else {
+        m_inheritedRoots.clear();
+    }
+}
+
+FileHashes::Inherited FileHashes::inheritedFromDefault() {
+    const Settings settings = currentSettings();
+    if (!settings.inheritsModels)
+        return {};
+    Inherited out;
+    out.storePath = baseStateDir() + QStringLiteral("/hashes.json");
+    for (const SearchPath &root : ModelLibrary::taggedRoots(settings))
+        if (root.inherited)
+            out.roots << root.path;
+    return out;
+}
+
+const FileHashes::Entry *FileHashes::inheritedLookup(const QString &key, qint64 size, qint64 mtimeNs) {
+    if (m_inheritedRoots.isEmpty())
+        return nullptr;
+    bool under = false;
+    for (const QString &root : std::as_const(m_inheritedRoots))
+        if (key.startsWith(root + QLatin1Char('/'))) {
+            under = true;
+            break;
+        }
+    if (!under)
+        return nullptr;
+    const auto matches = [&](const Entry &entry) { return entry.size == size && entry.mtimeNs == mtimeNs; };
+    if (const auto it = m_inherited.constFind(key); it != m_inherited.constEnd() && matches(*it))
+        return &*it;
+    // The Default saved since (the window outlives a Default session's run): read it again.
+    if (stampOf(m_inheritedPath) == m_inheritedStamp)
+        return nullptr;
+    m_inherited = read(m_inheritedPath, &m_inheritedStamp);
+    const auto it = m_inherited.constFind(key);
+    return it != m_inherited.constEnd() && matches(*it) ? &*it : nullptr;
 }
 
 FileHashes::StoreStamp FileHashes::stampOf(const QString &storePath) {
@@ -77,7 +127,7 @@ const FileHashes::Entry *FileHashes::lookup(const QString &key, qint64 size, qin
     if (const auto it = m_entries.constFind(key); it != m_entries.constEnd() && matches(*it))
         return &*it;
     if (stampOf(m_storePath) == m_stamp)
-        return nullptr;
+        return inheritedLookup(key, size, mtimeNs);
     // Another process saved since: take what it knows that this one does not.
     const QHash<QString, Entry> stored = read(m_storePath, &m_stamp);
     for (auto it = stored.constBegin(); it != stored.constEnd(); ++it) {
@@ -86,7 +136,9 @@ const FileHashes::Entry *FileHashes::lookup(const QString &key, qint64 size, qin
             m_entries.insert(it.key(), it.value());
     }
     const auto it = m_entries.constFind(key);
-    return it != m_entries.constEnd() && matches(*it) ? &*it : nullptr;
+    if (it != m_entries.constEnd() && matches(*it))
+        return &*it;
+    return inheritedLookup(key, size, mtimeNs);
 }
 
 QString FileHashes::defaultPath() {

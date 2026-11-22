@@ -16,7 +16,9 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "engine/file_hashes.h"
 #include "engine/fugue_home.h"
+#include "engine/hash.h"
 #include "engine/json.h"
 #include "engine/model_catalog.h"
 #include "engine/model_library.h"
@@ -361,6 +363,77 @@ private slots:
         QFile::remove(configDir() + "/keybindings.json");
         enterProject({"models"}, "p/other");
         QCOMPARE(effectiveKeymapPath(), configDir() + "/keybindings.json"); // preferences not inherited
+    }
+
+    // Remembered hashes of inherited model files (slice 7)
+
+    // The Default session remembers the hash of a model file, as its state folder holds it.
+    QString defaultRemembers(const QString &file, const QString &hash) {
+        FileHashes defaults(path("base/state/fugue/hashes.json"));
+        defaults.remember(file, hash);
+        return defaults.save() ? QString() : QStringLiteral("save failed");
+    }
+
+    void aProjectReusesTheDefaultsHashesOfInheritedModelFiles() {
+        const QString planted = QStringLiteral("sha256:0000000000000000000000000000000000000000000000000000000000000000");
+        writeDefault(defaultSettings(path("models")));
+        write(baseData() + "/models/checkpoints/a.safetensors", "aaa");
+        write(path("models/shared/b.safetensors"), "bbb");
+        write(path("models/mine/c.safetensors"), "ccc");
+        QVERIFY(defaultRemembers(baseData() + "/models/checkpoints/a.safetensors", planted).isEmpty());
+        QVERIFY(defaultRemembers(path("models/shared/b.safetensors"), planted).isEmpty());
+        QVERIFY(defaultRemembers(path("models/mine/c.safetensors"), planted).isEmpty());
+        enterProject({"models"});
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{path("models/mine")}).isEmpty());
+        FileHashes hashes(FileHashes::defaultPath());
+        QCOMPARE(hashes.known(baseData() + "/models/checkpoints/a.safetensors"), planted); // the Default's models folder
+        QCOMPARE(hashes.known(path("models/shared/b.safetensors")), planted);              // the Default's model_paths
+        QCOMPARE(hashes.known(path("models/mine/c.safetensors")), QString());              // the project's own root
+    }
+
+    void aProjectThatDoesNotInheritModelsSeesNoneOfTheDefaultsHashes() {
+        const QString planted = QStringLiteral("sha256:0000000000000000000000000000000000000000000000000000000000000000");
+        writeDefault(defaultSettings(path("models")));
+        write(baseData() + "/models/checkpoints/a.safetensors", "aaa");
+        QVERIFY(defaultRemembers(baseData() + "/models/checkpoints/a.safetensors", planted).isEmpty());
+        for (const QStringList &items : {QStringList{"packs", "preferences"}, QStringList{}}) {
+            enterProject(items);
+            FileHashes hashes(FileHashes::defaultPath());
+            QCOMPARE(hashes.known(baseData() + "/models/checkpoints/a.safetensors"), QString());
+            QCOMPARE(hashes.hash(baseData() + "/models/checkpoints/a.safetensors"), sha256("aaa"));
+        }
+    }
+
+    void aProjectsOwnHashesGoToItsOwnStoreAndTheDefaultsIsUntouched() {
+        const QString planted = QStringLiteral("sha256:0000000000000000000000000000000000000000000000000000000000000000");
+        write(baseData() + "/models/checkpoints/a.safetensors", "aaa");
+        QVERIFY(defaultRemembers(baseData() + "/models/checkpoints/a.safetensors", planted).isEmpty());
+        write(path("models/mine/c.safetensors"), "ccc");
+        const QStringList before = snapshot(path("base"));
+        enterProject({"models"});
+        QVERIFY(changeSetting(settingsPath(), "model_paths", QJsonArray{path("models/mine")}).isEmpty());
+        {
+            FileHashes hashes(FileHashes::defaultPath());
+            QCOMPARE(hashes.hash(path("models/mine/c.safetensors")), sha256("ccc"));
+            QCOMPARE(hashes.hash(baseData() + "/models/checkpoints/a.safetensors"), planted);
+            QVERIFY(hashes.save());
+        }
+        QCOMPARE(snapshot(path("base")), before);
+        QVERIFY(QFileInfo::exists(stateDir() + "/hashes.json"));
+        QVERIFY(stateDir().startsWith(path("p/acme")));
+        // The project's file holds its own hash and not a copy of the Default's.
+        QCOMPARE(FileHashes(stateDir() + "/hashes.json", FileHashes::Inherited()).known(path("models/mine/c.safetensors")), sha256("ccc"));
+        QCOMPARE(FileHashes(stateDir() + "/hashes.json", FileHashes::Inherited()).known(baseData() + "/models/checkpoints/a.safetensors"), QString());
+    }
+
+    void aHashTheDefaultMadeStaleIsNotTrustedByAProject() {
+        const QString planted = QStringLiteral("sha256:0000000000000000000000000000000000000000000000000000000000000000");
+        const QString file = baseData() + "/models/checkpoints/a.safetensors";
+        write(file, "aaa");
+        QVERIFY(defaultRemembers(file, planted).isEmpty());
+        write(file, "aaaa");
+        enterProject({"models"});
+        QCOMPARE(FileHashes(FileHashes::defaultPath()).hash(file), sha256("aaaa"));
     }
 
     // The Default is never changed

@@ -130,7 +130,7 @@ Redirect column: **XDG** = fixed by setting XDG_CONFIG/DATA/STATE/CACHE_HOME (+X
 - Persistent-mode pack processes and the long-lived helper keep their start-up env; a profile switch needs restart.
 - Crash or SIGKILL leaves `/tmp/fugue-helper-*` and ffmpeg logs (rows 30, 32): with TMPDIR in the vault they are in the vault, which is the point; an ephemeral vault wipes them.
 - Portals, clipboard managers, file managers' thumbnails, swap, journal output, window titles seen by the compositor: not redirectable; must be documented in the UI.
-- `hashes.json` and the result cache keys: sharing them with an ordinary session would reveal "this input was seen"; they must not be inherited (the epic says so).
+- `hashes.json` and the result cache keys: sharing them with an ordinary session would reveal "this input was seen"; they must not be inherited (the epic says so). Exception (slice 7, decided 2026-11-22): a project that inherits `models` reads the Default's `hashes.json` read-only for files under the inherited model roots only (model files, not inputs), so only "this model file was hashed" is shared, never what was run on.
 - Packs without a sandbox can still write anywhere; cooperative env redirection is a hope, not a guarantee, until step 5.
 - gocryptfs/FUSE and inotify/strace under `unshare`: not relevant to the env design, but the vault root must be on a filesystem that supports hard links (the result cache uses hard links, run_folder spec 9.7) [U: gocryptfs supports hard links; not checked here].
 
