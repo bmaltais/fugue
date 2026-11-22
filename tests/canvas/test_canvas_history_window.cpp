@@ -10,6 +10,7 @@
 #include <QtTest>
 
 #include "canvas_app.h"
+#include "../window_grab.h"
 #include "engine/canvas_store.h"
 
 using namespace canvas_test;
@@ -308,6 +309,56 @@ private slots:
         history->setProperty("canvasId", "canvas-nope");
         QVERIFY(history->property("error").toString().contains("canvas-nope"));
         QVERIFY(history->property("revisions").toList().isEmpty());
+    }
+
+    // An empty store says what to do in the app (#228, the cohesion audit's L6): New canvas… makes one and opens it.
+    void anEmptyStoreOffersToMakeACanvas() {
+        QDir(m_dir.filePath("home")).removeRecursively();
+        QDir(m_dir.filePath("data")).removeRecursively();
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        QVERIFY(app.commands.trigger("file.canvas-history"));
+        QTRY_VERIFY(find(app.window, "canvasHistoryNew"));
+        QCOMPARE(find(app.window, "canvasHistoryEmpty")->property("text").toString(), QString("No canvases yet"));
+        QVERIFY(find(app.window, "canvasHistoryImport"));
+        click(app, "canvasHistoryNew");
+        QObject *ask = nullptr;
+        QTRY_VERIFY((ask = app.window->findChild<QObject *>("newCanvasAsk")) && ask->property("opened").toBool());
+        QVERIFY(QMetaObject::invokeMethod(ask, "create"));
+        QObject *history = app.window->findChild<QObject *>("canvasHistoryDialog")->property("history").value<QObject *>();
+        QTRY_VERIFY(!history->property("canvasId").toString().isEmpty());
+        QCOMPARE(canvas::CanvasStore::forSession().info(history->property("canvasId").toString())->name, QString("Untitled"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // Pictures: FUGUE_SHOT_DIR=<dir> test_canvas_history_window savesThePictures (nothing without it), dark and light: the
+    // list of canvases, and a candidate compared with the Head.
+    void savesThePictures_data() {
+        QTest::addColumn<QString>("theme");
+        QTest::addColumn<QString>("name");
+        QTest::newRow("dark") << "tokyo-night" << "dark";
+        QTest::newRow("light") << "catppuccin-latte" << "light";
+    }
+    void savesThePictures() {
+        const QByteArray dir = qgetenv("FUGUE_SHOT_DIR");
+        if (dir.isEmpty())
+            QSKIP("FUGUE_SHOT_DIR is not set");
+        QFETCH(QString, theme);
+        QFETCH(QString, name);
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"), {}, Look{theme, 8});
+        QVERIFY(app.open());
+        QVERIFY(app.commands.trigger("file.canvas-history"));
+        QTRY_VERIFY(find(app.window, "canvasHistoryCanvas-" + m_canvas));
+        const auto save = [&](const QString &what) {
+            QTest::qWait(400);
+            QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/canvas-history-%2-%3.png").arg(QString::fromLocal8Bit(dir), name, what)));
+        };
+        save("canvases");
+        click(app, "canvasHistoryCanvas-" + m_canvas);
+        click(app, "canvasHistoryRevision-" + shortOf(m_a));
+        click(app, "canvasHistoryCompare");
+        QTRY_VERIFY(find(app.window, "canvasHistoryMode-slider"));
+        save("compare");
     }
 };
 

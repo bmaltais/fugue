@@ -727,19 +727,60 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
-    // Pictures: FUGUE_SHOT_DIR=<dir> test_canvas_view_window savesThePicturesOfTheWindow (nothing without the variable).
+    // Pictures: FUGUE_SHOT_DIR=<dir> test_canvas_view_window savesThePicturesOfTheWindow (nothing without the variable),
+    // dark and light: a candidate with a region followed, a run's new candidate under its banner, the canvas menu, the
+    // New canvas question, and the empty store.
+    void savesThePicturesOfTheWindow_data() {
+        QTest::addColumn<QString>("theme");
+        QTest::addColumn<QString>("name");
+        QTest::newRow("dark") << "tokyo-night" << "dark";
+        QTest::newRow("light") << "catppuccin-latte" << "light";
+    }
     void savesThePicturesOfTheWindow() {
         const QByteArray dir = qgetenv("FUGUE_SHOT_DIR");
         if (dir.isEmpty())
             QSKIP("FUGUE_SHOT_DIR is not set");
-        App app(load(fixture(m_canvas)));
-        QVERIFY(app.open());
-        app.model.select({"region"});
-        openDialog(app);
-        click(app, "canvasViewChoice-" + shortOf(m_a));
-        QTRY_VERIFY(find(app.window, "canvasViewRegion"));
-        QTest::qWait(400);
-        QVERIFY(test_support::grab(app.window).save(QString::fromLocal8Bit(dir) + "/canvas-view-candidate.png"));
+        QFETCH(QString, theme);
+        QFETCH(QString, name);
+        const auto save = [&](App &app, const QString &what) {
+            QTest::qWait(400);
+            QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/canvas-view-%2-%3.png").arg(QString::fromLocal8Bit(dir), name, what)));
+        };
+        {
+            App app(load(fixture(m_canvas)), {}, Look{theme, 8});
+            QVERIFY(app.open());
+            app.model.select({"region"});
+            openDialog(app);
+            click(app, "canvasViewChoice-" + shortOf(m_a));
+            QTRY_VERIFY(find(app.window, "canvasViewRegion"));
+            save(app, "candidate");
+            click(app, "canvasViewChoice-head");
+            QTRY_COMPARE(model(app)->property("revisionB").toString(), m_head);
+            std::thread run = arrivesLater(m_canvas, m_head, "write", 260);
+            QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "canvasViewNewResult"), 5000);
+            run.join();
+            save(app, "banner");
+            click(app, "canvasViewCanvas");
+            QTRY_VERIFY(app.window->findChild<QObject *>("widgetMenu"));
+            save(app, "menu");
+        }
+        {
+            App app(load(fixture(m_canvas)), {}, Look{theme, 8});
+            QVERIFY(app.open());
+            openDialog(app);
+            QVERIFY(QMetaObject::invokeMethod(view(app), "newCanvas"));
+            QTRY_VERIFY(app.window->findChild<QObject *>("newCanvasAsk"));
+            save(app, "new-canvas");
+        }
+        QDir(m_dir.filePath("home")).removeRecursively();
+        QDir(m_dir.filePath("data")).removeRecursively();
+        {
+            App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"), {}, Look{theme, 8});
+            QVERIFY(app.open());
+            QVERIFY(app.commands.trigger("file.canvas-view"));
+            QTRY_VERIFY(find(app.window, "canvasViewEmptyNew"));
+            save(app, "empty");
+        }
     }
 
     void aStoreWithNoCanvasSaysSo() {

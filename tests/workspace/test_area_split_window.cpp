@@ -16,6 +16,7 @@
 #include <thread>
 
 #include "../canvas/canvas_app.h"
+#include "../window_grab.h"
 #include "engine/canvas_store.h"
 #include "window_items.h"
 
@@ -408,6 +409,36 @@ private slots:
         QTRY_VERIFY(app.zoom() != graphZoom);
         app.commands.setContextActive("run", false);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // Pictures: FUGUE_SHOT_DIR=<dir> test_area_split_window savesThePictures (nothing without it), dark and light: two
+    // areas with their headers and border, a Canvas area following a region, and the view-type menu open.
+    void savesThePictures_data() {
+        QTest::addColumn<QString>("theme");
+        QTest::addColumn<QString>("name");
+        QTest::newRow("dark") << "tokyo-night" << "dark";
+        QTest::newRow("light") << "catppuccin-latte" << "light";
+    }
+    void savesThePictures() {
+        const QByteArray dir = qgetenv("FUGUE_SHOT_DIR");
+        if (dir.isEmpty())
+            QSKIP("FUGUE_SHOT_DIR is not set");
+        QFETCH(QString, theme);
+        QFETCH(QString, name);
+        App app(load(withRegion(m_canvas)), {}, Look{theme, 8});
+        QVERIFY(app.open());
+        QVERIFY(app.commands.trigger("area.split-row"));
+        QTRY_VERIFY(find(app.window, "canvasArea"));
+        app.model.select({"region"});
+        QTRY_VERIFY(find(app.window, "canvasViewFrame"));
+        const auto save = [&](const QString &what) {
+            QTest::qWait(400);
+            QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/areas-%2-%3.png").arg(QString::fromLocal8Bit(dir), name, what)));
+        };
+        save("canvas");
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(find(app.window, "areaType-2")));
+        QTRY_VERIFY(app.window->findChild<QObject *>("areaViewMenu"));
+        save("type-menu");
     }
 
     // #226, last because it edits the shared canvas: over a Canvas area's layers panel the keys are the panel's (the

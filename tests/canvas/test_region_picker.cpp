@@ -16,6 +16,7 @@
 #include "canvas/region_pick.h"
 #include "canvas/widget_edit.h"
 #include "canvas_app.h"
+#include "../window_grab.h"
 #include "engine/canvas_store.h"
 #include "engine/paint_file.h"
 #include "nodes/canvas_region_ops.h"
@@ -54,7 +55,7 @@ struct RegionApp {
 
     // A canvas of width x height with a red block in it, and a node whose inputs are `inputs` (JSON members after canvas).
     explicit RegionApp(int width = 400, int height = 300, const QString &inputs = R"(, "x": 100, "y": 60, "width": 160, "height": 96, "padding": 20)",
-                       bool withCanvas = true) {
+                       bool withCanvas = true, const canvas_test::Look &look = {}) {
         if (withCanvas) {
             mask::PaintDocument doc(width, height);
             doc.addLayer(mask::LayerKind::Paint, "L");
@@ -65,7 +66,7 @@ struct RegionApp {
             canvasId = made->id;
             head = made->head;
         }
-        app = std::make_unique<App>(load(fixture(canvasId, inputs)));
+        app = std::make_unique<App>(load(fixture(canvasId, inputs)), std::function<void(fugue::Registry &)>{}, look);
         app->model.widgets()->canvasChoices()->setStoreRoot(store.filePath("store"));
     }
     canvas::CanvasStore writer() const { return canvas::CanvasStore(store.filePath("store")); }
@@ -353,6 +354,27 @@ private slots:
         // The same numbers as stored: no step.
         QVERIFY(!r.app->model.widgets()->setRegion("region", 100, 60, 160, 96));
         QCOMPARE(r.steps(), 0);
+    }
+
+    // Pictures: FUGUE_SHOT_DIR=<dir> test_region_picker savesThePictures (nothing without it), dark and light.
+    void savesThePictures_data() {
+        QTest::addColumn<QString>("theme");
+        QTest::addColumn<QString>("name");
+        QTest::newRow("dark") << "tokyo-night" << "dark";
+        QTest::newRow("light") << "catppuccin-latte" << "light";
+    }
+    void savesThePictures() {
+        const QByteArray dir = qgetenv("FUGUE_SHOT_DIR");
+        if (dir.isEmpty())
+            QSKIP("FUGUE_SHOT_DIR is not set");
+        QFETCH(QString, theme);
+        QFETCH(QString, name);
+        RegionApp r(400, 300, R"(, "x": 100, "y": 60, "width": 160, "height": 96, "padding": 20)", true, canvas_test::Look{theme, 8});
+        QVERIFY(r.app->open());
+        r.openDialog();
+        QTRY_VERIFY(r.dialogOpen() && r.frame().width() > 0);
+        QTest::qWait(400);
+        QVERIFY(test_support::grab(r.app->window).save(QStringLiteral("%1/region-%2.png").arg(QString::fromLocal8Bit(dir), name)));
     }
 };
 
