@@ -156,16 +156,21 @@ private slots:
         QVERIFY(!ModelCatalog::load(user.path()).find("only")); // no pack paths: none read
     }
 
-    void theExampleRemoveBackgroundPacksCatalogIsValidAndNamesItsLicence() {
+    void theExamplePacksCatalogsAreValidAndNameTheirLicences() {
         QTemporaryDir empty;
         const ModelCatalog catalog = ModelCatalog::load(empty.path(), {QStringLiteral(FUGUE_SOURCE_DIR "/examples/packs")});
         QVERIFY2(catalog.problems().isEmpty(), qPrintable(catalog.problems().join("\n")));
-        const QString type = QStringLiteral("io.github.bmaltais.fugue-remove-background/birefnet-model");
-        QVERIFY(catalog.forType(type).size() >= 2);
-        for (const CatalogModel &model : catalog.forType(type)) {
-            QCOMPARE(model.license, QString("MIT"));
-            QVERIFY2(!model.licenseUrl.isEmpty() && !model.source.isEmpty() && model.commercial, qPrintable(model.id));
-            QVERIFY2(model.file.endsWith(".onnx"), qPrintable(model.id));
+        struct Expected { const char *type, *license, *extension; };
+        // Remove Background (BiRefNet, MIT) and Segment by Points or Box (SAM 2.1 bundles, Apache-2.0)
+        for (const Expected &want : {Expected{"io.github.bmaltais.fugue-remove-background/birefnet-model", "MIT", ".onnx"},
+                                     Expected{"io.github.bmaltais.fugue-segment/sam2-model", "Apache-2.0", ".zip"}}) {
+            const QString type = QString::fromLatin1(want.type);
+            QVERIFY2(catalog.forType(type).size() >= 2, want.type);
+            for (const CatalogModel &model : catalog.forType(type)) {
+                QCOMPARE(model.license, QString::fromLatin1(want.license));
+                QVERIFY2(!model.licenseUrl.isEmpty() && !model.source.isEmpty() && model.commercial, qPrintable(model.id));
+                QVERIFY2(model.file.endsWith(QString::fromLatin1(want.extension)), qPrintable(model.id));
+            }
         }
     }
 

@@ -17,7 +17,9 @@ A working pack to read and copy is [examples/packs/io.github.bmaltais.fugue-exam
 `shout` is one-shot, `counter` is persistent. The tests run both.
 A pack with a Python environment, a model and a download catalog:
 [examples/packs/io.github.bmaltais.fugue-remove-background](../../examples/packs/io.github.bmaltais.fugue-remove-background)
-(BiRefNet through ONNX Runtime; [masking](../masking.md#remove-a-background)).
+(BiRefNet through ONNX Runtime; [masking](../masking.md#remove-a-background)); its sibling
+[examples/packs/io.github.bmaltais.fugue-segment](../../examples/packs/io.github.bmaltais.fugue-segment) (SAM 2.1 from points or a box;
+[masking](../masking.md#select-an-object-by-points-or-a-box)) shows a model that is a zip of two files, and a persistent node that keeps what it computed between runs.
 
 The exact rules are in the [spec](../spec.md) (sections 6 and 7); these pages are the short way in.
 The native plugin guide waits until the C interface is frozen (spec 6.9).

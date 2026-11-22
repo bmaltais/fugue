@@ -152,6 +152,37 @@ It needs about 8 GB of memory while it runs and frees it a minute after the last
 makes the edge hard: 0 keeps the soft edge, 0.5 cuts at half. For a cleaner seam, follow it with Grow Mask or
 Feather Mask. The pack's folder has its own README with the tests.
 
+## Select an object by points or a box
+
+The pack **Segment by Points or Box** cuts one object out of a picture and gives it as a mask (white is the object,
+with a clean edge). It is SAM 2.1, an optional pack like Remove Background: install it from Settings > Packs or with
+`fugue pack add examples/packs/io.github.bmaltais.fugue-segment`; the setup command, `uv sync --no-dev --extra cpu`,
+makes its own Python environment (`--extra cuda` for an NVIDIA GPU). The node is in the node menu under Image > Mask.
+
+Say which object with the node's three text inputs, in **pixels from the picture's top left** (x goes right, y goes down;
+the picture's size is on its node):
+
+| Input | What goes in it |
+| --- | --- |
+| Include points | One point per line, `x y`, inside the object. Add one on each part the first mask missed. |
+| Exclude points | One point per line, `x y`, on what must stay out (the shadow, the object next to it). |
+| Box | `x1 y1 x2 y2`: two opposite corners of a box around the object. With a box the points are optional. |
+
+You need a Box or at least one Include point. A box and points together refine each other. The text inputs can also be
+wired from other nodes, so a script or another node can give the points. There is no picker on the node's face yet (click the
+picture to add a point is a later slice, since a pack cannot ship interface code); read the pixel position from the
+picture's large view.
+
+The model is not part of the pack. Open the node's Model picker: under Download it lists **SAM 2.1 tiny** (117 MB) and **SAM 2.1
+base+** (272 MB, finer edges). Picking one asks first, naming the licence (Apache-2.0, credit to Meta and the exporter,
+commercial use allowed), the size, the host (huggingface.co) and the folder, and downloads only when you say so. A
+bundle of your own (`.zip` with an encoder and a decoder, as in the same repository) goes in the `sam2` models folder.
+
+On a CPU the tiny model looks at a picture in about a second (base+ about 2.5 s); the node keeps what it saw, so changing the
+points or the box and running again takes a twentieth of a second. It needs a few GB of memory while it runs and frees it a minute
+after the last run. Invert gives everything but the object. Soft edge (advanced) gives the model's confidence instead of a hard
+edge. For a cleaner seam, follow it with Grow Mask or Feather Mask. The pack's folder has its own README with the tests.
+
 ## From the command line
 
 `fugue workflow new my.fugue --template inpaint-region` writes the template with its picture and
@@ -161,4 +192,4 @@ mask beside it; `fugue run my.fugue --wait` runs it. Change the prompt with
 
 ## Not yet
 
-Picking an object by clicking it, or describing it in words, will come as optional packs, like Remove Background. Color matching for outpaints, and a paint canvas with layers are later issues.
+Clicking the picture to place the points, and describing an object in words, are later slices (the second needs another pack). Color matching for outpaints, and a paint canvas with layers are later issues.

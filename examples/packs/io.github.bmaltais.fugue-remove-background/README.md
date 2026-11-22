@@ -31,3 +31,6 @@ page in `catalog/birefnet.json`) and point the variable at it.
 
 GPU: `uv sync --no-dev --extra cuda` swaps in `onnxruntime-gpu` (CUDA and cuDNN must be installed); Device `auto` then uses it.
 The node does not declare `needs.gpu`, so Fugue does not schedule its GPU memory against the helper's.
+
+`remove-background/onnx_node.py` (the command protocol, execution providers, the picture as a tensor) is the same file as in
+`io.github.bmaltais.fugue-segment`; change both together.

@@ -1,0 +1,15 @@
+{
+  "manifest": 1,
+  "id": "io.github.bmaltais.fugue-segment",
+  "version": "1.0.0",
+  "name": "Segment by Points or Box",
+  "description": "Cuts one object out of a picture as a mask, from points to include or leave out and/or a box. SAM 2.1 (code and checkpoints Apache-2.0, github.com/facebookresearch/sam2; the ONNX export is by vietanhdev, Apache-2.0) through ONNX Runtime (MIT), on the CPU or an NVIDIA GPU, in the pack's own Python environment. Nothing is bundled: the model is downloaded from the model picker after a question that names its licence.",
+  "license": "MIT",
+  "nodes": ["segment"],
+  "types": [
+    {"id": "io.github.bmaltais.fugue-segment/sam2-model", "version": 1, "kind": "resource",
+     "name": "SAM 2.1 model", "extensions": [".zip"], "folders": ["sam2"]}
+  ],
+  "setup": {"command": ["uv", "sync", "--no-dev", "--extra", "cpu"],
+            "description": "Create the pack's Python environment (ONNX Runtime for the CPU, NumPy, Pillow) in its folder; needs uv and the network."}
+}
