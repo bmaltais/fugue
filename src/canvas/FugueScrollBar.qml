@@ -37,9 +37,19 @@ ScrollBar {
     // The wheel over the whole view, not only the bar. A notch moves the view 60px; a touchpad,
     // told by its scroll phase alone, moves it by its own pixels. The view's own wheel handling
     // never sees the event (this handler takes it), so a view does not scroll twice.
+    // Only a view that can scroll takes the wheel: one whose content fits lets the event through to
+    // what is behind it (the canvas zooms under a field that does not overflow).
+    readonly property bool wheelScrolls: {
+        const view = bar.parent as Flickable
+        if (!view)
+            return false
+        return bar.vertical ? view.contentHeight > view.height - view.topMargin - view.bottomMargin
+                            : view.contentWidth > view.width - view.leftMargin - view.rightMargin
+    }
     WheelHandler {
         parent: bar.parent
         acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+        blocking: bar.wheelScrolls
         onWheel: event => {
             const view = bar.parent as Flickable
             if (!view)
