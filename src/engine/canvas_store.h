@@ -159,6 +159,9 @@ public:
     // The revision as a document (no history). Picture layers come back as placeholders.
     Result<mask::PaintDocument> load(const QString &canvasId, const QString &revisionId) const;
 
+    // The pixels of one stored tile (`width` x `height`, `channels` as the layer's kind says); canvas_corrupt when missing or not what it is named for.
+    Result<mask::MaskPaint> tilePixels(const QString &hash, int width, int height, int channels) const { return readBlob(hash, width, height, channels); }
+
     // The tree hash a document would have, with nothing written.
     static Result<QString> treeHashOf(const mask::PaintDocument &document);
 

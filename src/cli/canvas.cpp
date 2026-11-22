@@ -82,7 +82,7 @@ Reply canvasNew(const Command &command, Context &) {
 
 Reply canvasImport(const Command &command, Context &) {
     const QString file = command.positionals.at(0);
-    const Result<mask::PaintDocument> document = mask::readPaintFile(file);
+    const Result<mask::PaintDocument> document = mask::readCanvasFile(file);
     if (!document)
         return Reply::failure(document.errors());
     CanvasStore store = CanvasStore::forSession();
@@ -312,7 +312,8 @@ Reply canvasDiff(const Command &command, Context &) {
     const Result<canvas::Tree> before = store.tree(base->tree), after = store.tree(next->tree);
     if (!before || !after)
         return Reply::failure(!before ? before.errors() : after.errors());
-    const canvas::TreeDiff diff = canvas::diffTrees(before.value(), after.value());
+    canvas::TreeDiff diff = canvas::diffTrees(before.value(), after.value());
+    canvas::tightenBounds(&diff, before.value(), after.value(), [&](const QString &h, int w, int ht, int c) { return store.tilePixels(h, w, ht, c); });
     QJsonArray layers;
     QStringList lines{QStringLiteral("%1 -> %2").arg(base->id.left(15), next->id.left(15))};
     for (const canvas::LayerDiff &layer : diff.layers) {

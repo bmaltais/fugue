@@ -1,6 +1,7 @@
 #include "paint_file.h"
 
 #include <algorithm>
+#include <cstring>
 #include <map>
 #include <memory>
 #include <vector>
@@ -127,6 +128,10 @@ Result<Unpacked> unpack(const QByteArray &bytes) {
             return unreadable(QStringLiteral("an entry is named %1").arg(name.left(40)));
         if (count == 1 && name != QLatin1String("mimetype"))
             return unreadable(QStringLiteral("the first entry is not the mimetype"));
+        // A folder entry (data/, Thumbnails/) that other programs add is only a name: nothing is
+        // unpacked to disk, so it has no effect and is skipped. Anything else that is not a plain file is refused.
+        if (archive_entry_filetype(entry) == AE_IFDIR && (name == QLatin1String("data/") || name == QLatin1String("Thumbnails/")))
+            continue;
         if (!knownName(name) || archive_entry_filetype(entry) != AE_IFREG)
             return unreadable(QStringLiteral("it holds %1, which a paint file does not").arg(name.left(40)));
         const qint64 limit = name == QLatin1String("mimetype") ? 64 : name == QLatin1String("stack.xml") ? kMaxXml : kMaxEntry;
@@ -370,6 +375,52 @@ Errors writePaintFile(const PaintDocument &document, const QString &path) {
     if (!bytes)
         return bytes.errors();
     return replaceFile(path, bytes.value(), QStringLiteral("the paint file"));
+}
+
+namespace {
+
+bool startsWith(const QByteArray &bytes, const char *magic, int size) { return bytes.size() >= size && std::memcmp(bytes.constData(), magic, size_t(size)) == 0; }
+
+} // namespace
+
+bool looksLikePicture(QByteArrayView bytes) {
+    const QByteArray head = bytes.left(12).toByteArray();
+    return startsWith(head, "\x89PNG\r\n\x1a\n", 8) || startsWith(head, "\xff\xd8\xff", 3) || (startsWith(head, "RIFF", 4) && head.mid(8, 4) == "WEBP");
+}
+
+Result<PaintDocument> paintFromPicture(const QByteArray &bytes, const QString &layerName) {
+    if (bytes.size() > paintFileMaxBytes)
+        return unreadable(QStringLiteral("it is over %1 MB").arg(paintFileMaxBytes >> 20));
+    Result<MaskPaint> picture = MaskPaint::fromPicture(bytes);
+    if (!picture)
+        return picture.errors();
+    if (picture->width() > paintFileMaxSide || picture->height() > paintFileMaxSide || qint64(picture->width()) * picture->height() > paintFileMaxPixels)
+        return makeError(QStringLiteral("value_out_of_range"),
+                         QStringLiteral("The picture is %1 x %2; a canvas is at most %3 x %3 pixels in %4 million.")
+                             .arg(picture->width()).arg(picture->height()).arg(paintFileMaxSide).arg(paintFileMaxPixels / 1000000));
+    PaintDocument document(picture->width(), picture->height());
+    document.loadLayer(LayerKind::Paint, layerName, true, 1.0, std::move(picture.value()));
+    document.forgetHistory();
+    return document;
+}
+
+Result<PaintDocument> readCanvasFile(const QString &path) {
+    const QFileInfo info(path);
+    if (!info.isFile())
+        return makeError(QStringLiteral("file_not_found"), QStringLiteral("The file %1 is not there.").arg(info.fileName()));
+    if (info.size() > paintFileMaxBytes)
+        return unreadable(QStringLiteral("it is over %1 MB").arg(paintFileMaxBytes >> 20));
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return makeError(QStringLiteral("permission_denied"), QStringLiteral("%1 cannot be read: %2.").arg(info.fileName(), file.errorString()));
+    const QByteArray bytes = file.read(paintFileMaxBytes + 1);
+    if (looksLikeOra(bytes) || bytes.startsWith("PK\x03\x04")) // any zip: paintFromOra says what is wrong with it
+        return paintFromOra(bytes);
+    if (looksLikePicture(bytes))
+        return paintFromPicture(bytes, info.completeBaseName().isEmpty() ? QStringLiteral("Layer 1") : info.completeBaseName().left(64));
+    return makeError(QStringLiteral("media_unreadable"),
+                     QStringLiteral("%1 is not a file a canvas can be made from: Fugue reads an OpenRaster (.ora) file or a PNG, JPEG or WebP picture.").arg(info.fileName()),
+                     QStringLiteral("Convert the picture to PNG, JPEG or WebP, or export an .ora."));
 }
 
 Result<PaintDocument> readPaintFile(const QString &path) {

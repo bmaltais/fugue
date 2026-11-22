@@ -143,8 +143,15 @@ Result<Command> parseArguments(const QStringList &rawArgs) {
     const auto entry = table().constFind(group);
     if (entry == table().constEnd())
         return usage(QStringLiteral("Unknown command %1.").arg(quoted(group)), {}, table().keys());
+    command.topic = group;
 
     QString sub;
+    // `fugue canvas --help`: the group's usage, with no subcommand to name.
+    if (!entry->contains("") && !args.isEmpty() && (args.first() == "--help" || args.first() == "-h")) {
+        command.help = true;
+        command.name = group;
+        return command;
+    }
     if (!entry->contains("")) {
         if (args.isEmpty() || args.first().startsWith('-'))
             return usage(QStringLiteral("%1 needs a subcommand.").arg(quoted(group)), {}, entry->keys());
@@ -169,6 +176,10 @@ Result<Command> parseArguments(const QStringList &rawArgs) {
         }
         if (arg == "--") {
             optionsDone = true;
+            continue;
+        }
+        if (arg == "--help" || arg == "-h") {
+            command.help = true;
             continue;
         }
         if (!arg.startsWith("--"))
@@ -201,6 +212,8 @@ Result<Command> parseArguments(const QStringList &rawArgs) {
         }
     }
 
+    if (command.help)
+        return command; // nothing runs, so the arguments need not be complete
     if (command.positionals.size() < spec.minPositionals
         || (spec.maxPositionals >= 0 && command.positionals.size() > spec.maxPositionals))
         return usage(QStringLiteral("`fugue %1` takes %2 argument(s); got %3.")

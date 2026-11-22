@@ -68,7 +68,7 @@ const char *helpText =
     "  settings list\n"
     "  project list | project show [name|path] | project new <name> [--in <dir>] [--inherits a,b] | project add <dir>\n"
     "  project remove <name|path> | project inherits <name|path> <items|none>\n"
-    "  canvas new [--name <text>] [--size <w>x<h>] | canvas import <file.ora> [--name <text>] | canvas export <id[@rev]> <file.ora>\n"
+    "  canvas new [--name <text>] [--size <w>x<h>] | canvas import <file.ora|png|jpg|webp> [--name <text>] | canvas export <id[@rev]> <file.ora>\n"
     "  canvas log <id[@rev]> [--limit <n>] | canvas show <id[@rev]>   (the canvas revision store, spec 14.5)\n"
     "  canvas list | canvas candidates <id> [--all] | canvas accept|drop <id[@rev]> | canvas diff <id@rev> [<id@rev>]\n"
     "  skill install|uninstall [--target agents|claude|all] [--dry-run] [--force]\n"
@@ -78,6 +78,36 @@ const char *helpText =
     "With no command, fugue opens the window.\n"
     "  --home <dir> (anywhere), or FUGUE_HOME: keep everything fugue writes in one folder (spec 1.4.1)\n"
     "  --project <name|path> (anywhere), or FUGUE_PROJECT: work in a project (spec 1.4.2); not with --home\n";
+
+// The usage lines of one command word: each line of helpText whose alternatives (split at " | ") begin
+// with it, and the indented lines that continue it. Everything when the word is on no line.
+QByteArray usageFor(const QString &topic) {
+    const QStringList lines = QString::fromUtf8(helpText).split('\n');
+    QStringList shown;
+    bool inBlock = false;
+    for (int i = 1; i < lines.size(); ++i) { // line 0 is the general usage
+        const QString &line = lines.at(i);
+        if (line.startsWith("      ")) { // a continuation of the line before it
+            if (inBlock)
+                shown << line;
+            continue;
+        }
+        inBlock = false;
+        if (!line.startsWith("  ") || line.size() < 3 || line.at(2) == ' ')
+            continue;
+        for (const QString &part : line.trimmed().split(QStringLiteral(" | "))) {
+            if (part == topic || part.startsWith(topic + ' ')) {
+                inBlock = true;
+                break;
+            }
+        }
+        if (inBlock)
+            shown << line;
+    }
+    if (shown.isEmpty())
+        return QByteArray(helpText);
+    return (QStringLiteral("usage: fugue %1 ... [--json]\n").arg(topic) + shown.join('\n') + QStringLiteral("\n  (fugue --help lists every command)\n")).toUtf8();
+}
 
 } // namespace
 
@@ -110,6 +140,11 @@ int run(int argc, char **argv, const Hooks &hooks) {
     const Result<Command> command = parseArguments(args);
     if (!command)
         return fail(command.errors());
+
+    if (command->help) {
+        writeOut(usageFor(command->topic));
+        return 0;
+    }
 
     Context context;
     context.runsRoot = RunFolder::defaultRoot();

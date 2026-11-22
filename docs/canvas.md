@@ -8,7 +8,7 @@ are in [spec 14.5](spec.md#145-the-canvas-revision-store-206-208).
 
 ```
 fugue canvas new --name Sketch --size 1024x768     # prints the canvas id, canvas-0123456789ab
-fugue canvas import photo.ora                      # a canvas from an OpenRaster file of Fugue's
+fugue canvas import photo.png                      # a canvas from a PNG, JPEG or WebP (one layer) or an .ora
 fugue canvas log canvas-0123456789ab               # the revisions, newest first
 fugue canvas show canvas-0123456789ab@sha256:ab12cd34   # one revision: tree hash, layers, tiles
 fugue canvas export canvas-0123456789ab out.ora    # the head as an .ora (never replaces a file)

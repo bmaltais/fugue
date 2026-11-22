@@ -437,6 +437,49 @@ private slots:
         QVERIFY(diffTrees(s.tree(a.tree).value(), s.tree(a.tree).value()).identical());
     }
 
+    void tightenBoundsNarrowsWholeTilesToThePaintedPixels() {
+        // A canvas-sized layer holding a box that crosses tile edges (what a rectangle Generative fill
+        // writes): the tiles it touches are counted whole, the bounds are the box itself.
+        CanvasStore s = store();
+        const PaintDocument base = sample();
+        const CanvasInfo made = s.create("fill", base, "test").value();
+        const Fixture f{made.id, made.head, base};
+        PaintDocument doc = sample();
+        doc.addLayer(LayerKind::Paint, "Fill");
+        doc.brush.color = Rgba{9, 9, 9, 255};
+        doc.fillRect(236, 236, 552, 552);
+        const Tree before = treeOf(f.base).value(), after = treeOf(doc).value();
+        TreeDiff diff = diffTrees(before, after);
+        const TilePixels read = [&](const QString &h, int w, int ht, int c) { return s.tilePixels(h, w, ht, c); };
+        // Storing the revision writes the tiles the read needs.
+        QVERIFY(s.addRevision(f.id, doc, f.head, "write"));
+        QCOMPARE(diff.layers.size(), size_t(1));
+        QCOMPARE(diff.layers[0].tilesChanged, 16);
+        QCOMPARE(diff.layers[0].bounds, (mask::IRect{0, 0, 1024, 1024}));
+        tightenBounds(&diff, before, after, read);
+        QCOMPARE(diff.layers[0].tilesChanged, 16); // the count is of tiles, and stays
+        QCOMPARE(diff.layers[0].bounds, (mask::IRect{236, 236, 552, 552}));
+        QCOMPARE(diff.bounds(), (mask::IRect{236, 236, 552, 552}));
+
+        // A changed layer: only the pixels that differ. A removed layer: its painted extent.
+        PaintDocument edited = doc;
+        edited.setActiveLayer(edited.layer(2).id);
+        edited.brush.color = Rgba{200, 0, 0, 255};
+        edited.fillRect(300, 300, 10, 10);
+        QVERIFY(s.addRevision(f.id, edited, f.head, "write"));
+        TreeDiff changed = diffTrees(after, treeOf(edited).value());
+        tightenBounds(&changed, after, treeOf(edited).value(), read);
+        QCOMPARE(changed.layers[0].bounds, (mask::IRect{300, 300, 10, 10}));
+        TreeDiff removed = diffTrees(after, before);
+        tightenBounds(&removed, after, before, read);
+        QCOMPARE(removed.layers[0].bounds, (mask::IRect{236, 236, 552, 552}));
+
+        // A tile that cannot be read keeps the whole-tile bounds.
+        TreeDiff blind = diffTrees(before, after);
+        tightenBounds(&blind, before, after, [](const QString &, int, int, int) { return Result<MaskPaint>(Error{}); });
+        QCOMPARE(blind.layers[0].bounds, (mask::IRect{0, 0, 1024, 1024}));
+    }
+
     void diffSeesAnEditedLayerAndAChangedPropertyAndASizeChange() {
         CanvasStore s = store();
         const Fixture f = canvasWithBase(s);

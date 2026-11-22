@@ -47,9 +47,10 @@ QByteArray zipOf(const QList<Entry> &entries, bool deflate = false) {
     for (const Entry &entry : entries) {
         archive_entry *e = archive_entry_new();
         archive_entry_set_pathname(e, entry.name.constData());
-        archive_entry_set_filetype(e, AE_IFREG);
-        archive_entry_set_perm(e, 0644);
-        archive_entry_set_size(e, entry.bytes.size());
+        const bool folder = entry.name.endsWith('/'); // a folder entry has no bytes
+        archive_entry_set_filetype(e, folder ? AE_IFDIR : AE_IFREG);
+        archive_entry_set_perm(e, folder ? 0755 : 0644);
+        archive_entry_set_size(e, folder ? 0 : entry.bytes.size());
         archive_write_header(a, e);
         archive_write_data(a, entry.bytes.constData(), size_t(entry.bytes.size()));
         archive_entry_free(e);
@@ -223,6 +224,54 @@ private slots:
         const Result<PaintDocument> r = paintFromOra(validZip());
         QVERIFY2(r.ok(), qPrintable(r.error().message));
         QCOMPARE(r->layerCount(), 1);
+    }
+
+    void folderEntriesOfAKnownNameAreSkippedAndOthersRefused() {
+        // Zip tools add `data/`; it unpacks nothing, so a file with it reads.
+        const QByteArray withFolder = zipOf({{"mimetype", mime}, {"data/", {}}, {"stack.xml", stack(4, 4, layerTag("data/layer-0.png"))}, {"data/layer-0.png", png(4, 4)}});
+        const Result<PaintDocument> r = paintFromOra(withFolder);
+        QVERIFY2(r.ok(), qPrintable(r.error().message));
+        QCOMPARE(r->layerCount(), 1);
+        // A folder of any other name, or one that climbs, is still refused.
+        for (const char *name : {"other/", "data/sub/", "../", "/abs/"}) {
+            QVERIFY2(failsWith(paintFromOra(zipOf({{"mimetype", mime}, {name, {}}, {"stack.xml", stack(4, 4, layerTag("data/layer-0.png"))}, {"data/layer-0.png", png(4, 4)}}))), name);
+        }
+        // A folder entry first is not the mimetype.
+        QVERIFY(failsWith(paintFromOra(zipOf({{"data/", {}}, {"mimetype", mime}, {"stack.xml", stack(4, 4, layerTag("data/layer-0.png"))}, {"data/layer-0.png", png(4, 4)}}))));
+    }
+
+    void aPlainPictureIsAOneLayerCanvas() {
+        MaskPaint m(30, 20, 4);
+        m.fill(Rgba{10, 20, 30, 255});
+        const QByteArray bytes = m.toPng().value();
+        QVERIFY(looksLikePicture(bytes));
+        QVERIFY(!looksLikePicture("PK\x03\x04 text"));
+        const Result<PaintDocument> r = paintFromPicture(bytes, "photo");
+        QVERIFY2(r.ok(), qPrintable(r.error().message));
+        QCOMPARE(r->width(), 30);
+        QCOMPARE(r->height(), 20);
+        QCOMPARE(r->layerCount(), 1);
+        QCOMPARE(r->layer(0).name, QString("photo"));
+        QCOMPARE(r->layer(0).kind, LayerKind::Paint);
+        QCOMPARE(r->pixels(r->layer(0).id)->rgbaAt(3, 3).g, uint8_t(20));
+    }
+
+    void readCanvasFileTakesAnOraOrAPictureAndNamesTheKindsOtherwise() {
+        QTemporaryDir dir;
+        auto write = [&](const QString &name, const QByteArray &bytes) {
+            QFile f(dir.filePath(name));
+            [&] { QVERIFY(f.open(QIODevice::WriteOnly)); }();
+            f.write(bytes);
+            return dir.filePath(name);
+        };
+        QVERIFY(readCanvasFile(write("a.png", png(8, 6))).ok());
+        QCOMPARE(readCanvasFile(write("a.png", png(8, 6)))->layer(0).name, QString("a"));
+        QVERIFY(readCanvasFile(write("b.ora", validZip())).ok());
+        const Result<PaintDocument> text = readCanvasFile(write("c.txt", "hello"));
+        QVERIFY(failsWith(text));
+        QVERIFY(text.error().message.contains("PNG, JPEG or WebP"));
+        QVERIFY(failsWith(readCanvasFile(write("d.png", "\x89PNG\r\n\x1a\n broken"))));
+        QCOMPARE(readCanvasFile(dir.filePath("missing.png")).error().code, QString("file_not_found"));
     }
 
     void notAZipOrEmptyOrCut() {

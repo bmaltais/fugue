@@ -216,7 +216,8 @@ void CanvasHistory::compare(const QString &a, const QString &b) {
                 m_difference = QUrl::fromLocalFile(path);
         }
     }
-    const canvas::TreeDiff diff = canvas::diffTrees(ta.value(), tb.value());
+    canvas::TreeDiff diff = canvas::diffTrees(ta.value(), tb.value());
+    canvas::tightenBounds(&diff, ta.value(), tb.value(), [&](const QString &h, int w, int ht, int c) { return s.tilePixels(h, w, ht, c); });
     m_summary.clear();
     for (const canvas::LayerDiff &layer : diff.layers)
         m_summary << describe(layer);

@@ -129,6 +129,47 @@ private slots:
         QVERIFY(fugue({"canvas", "export", id, out}).exitCode != 0);
     }
 
+    void importTakesAPlainPictureAsAOneLayerCanvas() {
+        fugue::mask::MaskPaint picture(64, 48, 4);
+        picture.fill(fugue::mask::Rgba{5, 6, 7, 255});
+        QFile png(path("work/photo.png"));
+        QVERIFY(png.open(QIODevice::WriteOnly));
+        png.write(picture.toPng().value());
+        png.close();
+        const Outcome imported = fugue({"canvas", "import", path("work/photo.png"), "--json"});
+        QVERIFY2(imported.exitCode == 0, imported.out + imported.err);
+        QCOMPARE(imported.data().value("name").toString(), QString("photo"));
+        QCOMPARE(imported.data().value("width").toInt(), 64);
+        const QJsonArray layers = fugue({"canvas", "show", imported.data().value("canvas").toString(), "--json"}).data().value("layers").toArray();
+        QCOMPARE(layers.size(), 1);
+        QCOMPARE(layers.at(0).toObject().value("name").toString(), QString("photo"));
+        // Anything else says what is supported.
+        QFile text(path("work/notes.txt"));
+        QVERIFY(text.open(QIODevice::WriteOnly));
+        text.write("hello");
+        text.close();
+        const Outcome refused = fugue({"canvas", "import", path("work/notes.txt")});
+        QCOMPARE(refused.exitCode, 1);
+        QVERIFY(refused.err.contains("PNG, JPEG or WebP"));
+    }
+
+    void everyCommandPrintsItsOwnUsageForHelp() {
+        for (const QStringList &args : {QStringList{"run", "--help"}, {"run", "-h"}, {"run", "x.fugue", "--help"}, {"canvas", "diff", "--help"}, {"canvas", "--help"},
+                                        {"node", "list", "-h"}, {"cache", "clear", "--help"}, {"validate", "--help"}}) {
+            const Outcome out = fugue(args);
+            QVERIFY2(out.exitCode == 0, qPrintable(args.join(' ') + ": " + out.err));
+            QVERIFY2(out.out.startsWith("usage: fugue " + args.first().toUtf8()), qPrintable(args.join(' ')));
+        }
+        const Outcome run = fugue({"run", "--help"});
+        QVERIFY(run.out.contains("--wait"));
+        QVERIFY(!run.out.contains("canvas"));
+        const Outcome canvas = fugue({"canvas", "--help"});
+        QVERIFY(canvas.out.contains("canvas diff") && canvas.out.contains("canvas new") && !canvas.out.contains("cache"));
+        QVERIFY(fugue({"cache", "--help"}).out.contains("--older-than")); // the continuation line comes along
+        // A value that looks like the flag is a value.
+        QVERIFY(fugue({"canvas", "new", "--name", "--help", "--json"}).exitCode == 0);
+    }
+
     void theSamePixelsHaveTheSameTreeInTwoCanvases() {
         const QString source = oraFile("in.ora");
         const QString a = fugue({"canvas", "import", source, "--json"}).data().value("canvas").toString();

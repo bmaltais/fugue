@@ -7,6 +7,7 @@
 
 #include <QString>
 
+#include <functional>
 #include <vector>
 
 #include "engine/canvas_store.h"
@@ -19,7 +20,9 @@ struct LayerDiff {
     LayerChange change = LayerChange::Changed;
     QString name;
     int tilesChanged = 0;      // tiles that differ (for an added or removed layer, all of its tiles)
-    mask::IRect bounds;        // the pixels those tiles cover; empty (0 x 0) when none
+    mask::IRect bounds;        // the pixels those tiles cover (whole tiles); empty (0 x 0) when none. tightenBounds narrows it to the pixels that differ.
+    std::vector<TileKey> changedTiles; // the tiles counted in tilesChanged
+    int indexA = -1, indexB = -1;      // the layer's place in a and in b (-1: not there)
     QStringList properties;    // for a changed layer: "visible", "opacity", "kind"
 };
 
@@ -30,6 +33,15 @@ struct TreeDiff {
     bool identical() const { return !sizeChanged && layers.empty(); }
     mask::IRect bounds() const;        // the union of every layer's bounds
 };
+
+// The pixels of a stored tile, as CanvasStore::tilePixels gives them.
+using TilePixels = std::function<Result<mask::MaskPaint>(const QString &hash, int width, int height, int channels)>;
+
+// A diff counts tiles (a tile is the unit of storage, so a rectangle painted across a tile edge touches
+// whole tiles). This narrows each layer's bounds, and the diff's, to the pixels that really differ,
+// reading only the changed tiles. A layer whose tiles cannot be read, or whose canvas changed size,
+// keeps its whole-tile bounds. Counts and the trees are untouched.
+void tightenBounds(TreeDiff *diff, const Tree &a, const Tree &b, const TilePixels &read);
 
 QString changeName(LayerChange change); // "added", "removed", "changed"
 

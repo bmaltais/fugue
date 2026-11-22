@@ -44,6 +44,14 @@ Result<PaintDocument> paintFromOra(const QByteArray &bytes);
 // test for the share package and templates, which then read the whole with paintFromOra.
 bool looksLikeOra(QByteArrayView bytes);
 
+// A PNG, JPEG or WebP picture as a one-layer document (a paint layer named `layerName`, the picture's
+// size, no history), or media_unreadable / value_out_of_range.
+bool looksLikePicture(QByteArrayView bytes);
+Result<PaintDocument> paintFromPicture(const QByteArray &bytes, const QString &layerName);
+// A file a canvas can be made from: an .ora (paintFromOra) or a picture (paintFromPicture, named after
+// the file). Anything else is media_unreadable and names the supported kinds.
+Result<PaintDocument> readCanvasFile(const QString &path);
+
 // Writes the document to `path` (replacing a file there, in one step) and reads one back.
 Errors writePaintFile(const PaintDocument &document, const QString &path);
 Result<PaintDocument> readPaintFile(const QString &path);

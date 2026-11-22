@@ -113,7 +113,7 @@ fail with `permission_denied`.
 | `fugue project remove <name>` | Take it off the list; its files stay |
 | `fugue project inherits <name> <items>` | Set what it inherits (`models`, `packs`, `templates`, `prompts`, `preferences`, or `none`); all five words take effect now: inherited model folders, packs (with the Default's trust), templates and prompts are read-only and installs, downloads and saves go to the project's own |
 | `fugue canvas new` | Make a canvas (`--name`, `--size <w>x<h>`, default 1024x1024): one empty paint layer; prints the canvas id and its first revision |
-| `fugue canvas import <file.ora>` | Make a canvas from an OpenRaster file Fugue wrote (`--name`) |
+| `fugue canvas import <file>` | Make a canvas from an OpenRaster file or a PNG, JPEG or WebP picture (one layer) (`--name`) |
 | `fugue canvas export <id>[@<revision>] <file.ora>` | Write a revision (head by default) as an `.ora`; never replaces a file; the same revision gives the same bytes |
 | `fugue canvas log <id>[@<revision>]` | Revisions newest first along their parents (`--limit`, default 20): revision, time, producer |
 | `fugue canvas show <id>[@<revision>]` | One revision: tree hash (pixels and layer properties only, same pixels same hash), parent, producer, time, layers. A revision is `head`, a full hash or 8+ hex digits of one |
@@ -121,7 +121,7 @@ fail with `permission_denied`.
 | `fugue canvas candidates <id>` | Revisions nobody points at that are not accepted or dropped (`--all` adds dropped), newest first; Canvas Write with `candidate` on leaves its result as one |
 | `fugue canvas accept <id>[@<revision>]` | Accept a candidate into the head (its added layers are placed on the head when it was made from an older revision); with no `@revision`, the only open candidate |
 | `fugue canvas drop <id>[@<revision>]` | Hide a candidate (nothing is deleted) |
-| `fugue canvas diff <id>[@<revision>] [@<revision>]` | Layers added, removed or changed, tiles that differ and their rectangle; one revision is compared with its parent |
+| `fugue canvas diff <id>[@<revision>] [@<revision>]` | Layers added, removed or changed, tiles that differ and the rectangle of the pixels that differ; one revision is compared with its parent |
 | `fugue settings list` | Every setting in effect, with where each value comes from (`own`, `inherited from Default`, `built-in`) |
 | `fugue skill install` | Install or update this skill (`--target`, `--dry-run`, `--force`) |
 | `fugue skill uninstall` | Remove it (`--target`, `--dry-run`, `--force`) |

@@ -29,6 +29,10 @@ struct Command {
     // Option values by name without dashes; a flag has one empty entry.
     QMap<QString, QStringList> options;
     bool json = false;
+    // `--help` or `-h` was given: nothing runs, the command's usage is printed. `topic` is the first
+    // command word (canonical, "" when none), the group whose usage lines are shown.
+    bool help = false;
+    QString topic;
     // From the table. Null for a command that belongs to a later milestone: it
     // parses, but there is nothing to run yet.
     Handler handler = nullptr;
