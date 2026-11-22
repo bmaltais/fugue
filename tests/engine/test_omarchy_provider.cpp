@@ -1596,6 +1596,106 @@ private slots:
         QVERIFY(fixture.server.requestsTo("POST", "/synth").isEmpty());
     }
 
+    // Adapters (#260): ace-server lists the files of its adapters folder in GET /props. They are offered as models of
+    // their own capability (a picker lists them; a job never takes one as its music model). A server with no /props, or
+    // no adapters, offers none.
+    void aMusicServersAdaptersAreOfferedAsAnAdapterCapability() {
+        Fixture fixture;
+        fixture.server.on("GET", "/health", [](const HttpRequest &) { return HttpResponse{200, "{}"}; });
+        fixture.server.on("GET", "/props", [](const HttpRequest &) {
+            return HttpResponse{200, json(QJsonObject{{"version", "973517b"},
+                                                      {"adapters", QJsonArray{"singer-v2.safetensors", QJsonObject{{"name", "folk"}}, ""}}})};
+        });
+        fixture.writeStatus(QJsonObject{{kMusicModel, row(kMusicModel, "music", "active", fixture.endpoint())}});
+        auto provider = fixture.provider();
+        const auto described = await<Description>([&](auto reply) { provider->describe(reply); });
+        QVERIFY(described.ok());
+        const CapabilityOffer *offer = described->offer("audio.adapter");
+        QVERIFY(offer);
+        QCOMPARE(offer->models.size(), qsizetype(2));
+        const OfferedModel *singer = findModel(described.value(), "audio.adapter", "singer-v2.safetensors");
+        QVERIFY(singer);
+        QCOMPARE(singer->handle.value("resource").toString(), QStringLiteral("fugue/music-adapter"));
+        QCOMPARE(singer->status, ModelStatus::Ready);
+        QVERIFY(findModel(described.value(), "audio.adapter", "folk"));
+        // The music model stays the only model of audio.generate.
+        QCOMPARE(described->offer("audio.generate")->models.size(), qsizetype(1));
+
+        Fixture plain; // no /props: a server of an older build
+        plain.server.on("GET", "/health", [](const HttpRequest &) { return HttpResponse{200, "{}"}; });
+        plain.writeStatus(QJsonObject{{kMusicModel, row(kMusicModel, "music", "active", plain.endpoint())}});
+        auto older = plain.provider();
+        const auto olderDescribed = await<Description>([&](auto reply) { older->describe(reply); });
+        QVERIFY(olderDescribed.ok());
+        QVERIFY(!olderDescribed->offer("audio.adapter"));
+        QVERIFY(olderDescribed->offer("audio.generate"));
+
+        Fixture empty; // ace-server with an adapters folder with nothing in it
+        empty.server.on("GET", "/health", [](const HttpRequest &) { return HttpResponse{200, "{}"}; });
+        empty.server.on("GET", "/props", [](const HttpRequest &) { return HttpResponse{200, "{\"adapters\":[]}"}; });
+        empty.writeStatus(QJsonObject{{kMusicModel, row(kMusicModel, "music", "active", empty.endpoint())}});
+        auto none = empty.provider();
+        const auto noneDescribed = await<Description>([&](auto reply) { none->describe(reply); });
+        QVERIFY(noneDescribed.ok() && !noneDescribed->offer("audio.adapter"));
+    }
+
+    // The adapter and its strength go to /synth (where the DiT is loaded), for a new song and for a remix; the LM
+    // job is not told. One the server does not list is refused before anything is sent.
+    void anAdapterGoesToSynthAndAnUnlistedOneIsRefused() {
+        Fixture fixture;
+        fixture.server.on("GET", "/health", [](const HttpRequest &) { return HttpResponse{200, "{}"}; });
+        fixture.server.on("GET", "/props", [](const HttpRequest &) { return HttpResponse{200, "{\"adapters\":[\"singer-v2.safetensors\"]}"}; });
+        fixture.server.on("POST", "/lm", [](const HttpRequest &) { return HttpResponse{200, "{\"id\":\"1\"}"}; });
+        fixture.server.on("GET", "/job?id=1", [](const HttpRequest &) { return HttpResponse{200, "{\"status\":\"done\"}"}; });
+        fixture.server.on("GET", "/job?id=1&result=1", [](const HttpRequest &) { return HttpResponse{200, "[{\"caption\":\"x\",\"lyrics\":\"\"}]"}; });
+        fixture.server.on("POST", "/synth", [](const HttpRequest &) { return HttpResponse{200, "{\"id\":\"2\"}"}; });
+        fixture.server.on("GET", "/job?id=2", [](const HttpRequest &) { return HttpResponse{200, "{\"status\":\"done\"}"}; });
+        fixture.server.on("GET", "/job?id=2&result=1", [](const HttpRequest &) {
+            return HttpResponse{200, "--B1\r\nContent-Type: audio/mpeg\r\n\r\nSONG\r\n--B1--\r\n", "multipart/mixed; boundary=B1"};
+        });
+        fixture.writeStatus(QJsonObject{{kMusicModel, row(kMusicModel, "music", "active", fixture.endpoint())}});
+        auto provider = fixture.provider();
+
+        const auto refused = await<QString>([&](auto reply) {
+            provider->submit(fixture.request("audio.generate", {{"prompt", "x"}, {"lyrics", ""}, {"duration", 30}, {"adapter", "other.safetensors"}, {"adapter_scale", 1.0}}), reply);
+        });
+        QVERIFY(!refused.ok());
+        QCOMPARE(refused.error().code, QStringLiteral("model_missing"));
+        QVERIFY(refused.error().message.contains("other.safetensors"));
+        QCOMPARE(refused.error().valid, QJsonArray{"singer-v2.safetensors"});
+        QVERIFY(fixture.server.requestsTo("POST", "/lm").isEmpty());
+
+        const QString id = await<QString>([&](auto reply) {
+            provider->submit(fixture.request("audio.generate", {{"prompt", "x"}, {"lyrics", ""}, {"duration", 30}, {"adapter", "singer-v2.safetensors"}, {"adapter_scale", 0.6}}), reply);
+        }).value();
+        JobStatus status;
+        QTRY_VERIFY((status = await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value()).isTerminal());
+        QCOMPARE(status.state, QStringLiteral("done"));
+        QVERIFY(!fixture.server.requestsTo("POST", "/lm").first().body.contains("adapter"));
+        const QJsonObject synth = QJsonDocument::fromJson(fixture.server.requestsTo("POST", "/synth").first().body).object();
+        QCOMPARE(synth.value("adapter").toString(), QStringLiteral("singer-v2.safetensors"));
+        QCOMPARE(synth.value("adapter_scale").toDouble(), 0.6);
+
+        // No adapter: the request has none of the two fields (the server's own defaults).
+        const QString plainId = await<QString>([&](auto reply) {
+            provider->submit(fixture.request("audio.generate", {{"prompt", "x"}, {"lyrics", ""}, {"duration", 30}}), reply);
+        }).value();
+        QTRY_VERIFY((status = await<JobStatus>([&](auto reply) { provider->status(plainId, reply); }).value()).isTerminal());
+        const QJsonObject plain = QJsonDocument::fromJson(fixture.server.requestsTo("POST", "/synth").last().body).object();
+        QVERIFY(!plain.contains("adapter") && !plain.contains("adapter_scale"));
+
+        // A remix: the fields are in the form's request part.
+        const QString source = fixture.writeInput("source.mp3", "SOURCE");
+        const QString remixId = await<QString>([&](auto reply) {
+            provider->submit(fixture.request("audio.generate", {{"prompt", "x"}, {"lyrics", ""}, {"task", "cover"}, {"adapter", "singer-v2.safetensors"}, {"adapter_scale", 1.0}},
+                                             QJsonObject{{"audio", QJsonObject{{"path", source}}}}), reply);
+        }).value();
+        QTRY_VERIFY((status = await<JobStatus>([&](auto reply) { provider->status(remixId, reply); }).value()).isTerminal());
+        const HttpRequest form = fixture.server.requestsTo("POST", "/synth").last();
+        QVERIFY(form.body.contains("\"adapter\":\"singer-v2.safetensors\""));
+        QVERIFY(form.body.contains("\"adapter_scale\":1"));
+    }
+
     // The song's tempo, key, time signature, creativity and "keep my description" reach /lm as ace-server's
     // own fields (use_cot_caption is the opposite of keeping the description).
     void aSongsOwnSettingsReachTheModelThatWritesIt() {

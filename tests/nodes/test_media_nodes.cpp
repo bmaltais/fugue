@@ -490,6 +490,32 @@ private slots:
         }
     }
 
+    // An adapter (#260) is a music-adapter handle and its strength, sent together and only when one is picked; the nodes
+    // declare audio.adapter so that the model picker lists the adapters.
+    void aSongNodeSendsAnAdapterWithItsStrengthOnlyWhenOneIsPicked() {
+        Bench bench;
+        const Value song = bench.media(MediaType::Audio, makeAudio(bench.file("a.mp3"), 3));
+        const Value adapter(QJsonObject{{"resource", "fugue/music-adapter"}, {"name", "singer-v2.safetensors"}});
+        for (const QString &node : {kSongNode, kRemixNode, kRepaintNode}) {
+            QVERIFY2(bench.type(node).capabilities.toArray().contains(QStringLiteral("audio.adapter")), qPrintable(node));
+            const auto make = [&](const Value &picked) {
+                Values given{{"prompt", "x"}, {"adapter_scale", 0.7}};
+                if (node != kSongNode)
+                    given.insert(QStringLiteral("audio"), song);
+                if (!picked.isEmpty())
+                    given.insert(QStringLiteral("adapter"), picked);
+                return bench.request(node, given, musicModel());
+            };
+            const Result<JobRequest> without = make(Value());
+            QVERIFY2(without.ok(), qPrintable(without.ok() ? QString() : without.error().message));
+            QVERIFY(!without->params.contains("adapter") && !without->params.contains("adapter_scale"));
+            const Result<JobRequest> with = make(adapter);
+            QVERIFY2(with.ok(), qPrintable(with.ok() ? QString() : with.error().message));
+            QCOMPARE(with->params.value("adapter").toString(), QStringLiteral("singer-v2.safetensors"));
+            QCOMPARE(with->params.value("adapter_scale").toDouble(), 0.7);
+        }
+    }
+
     // --- Remix Song and Repaint Song ---
 
     void aRemixSendsTheSongAsACoverOrAStayCloseCover() {

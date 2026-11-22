@@ -29,7 +29,8 @@
 // served over its OpenAI-compatible API (POST /v1/chat/completions, streamed). Each row of kind
 // video becomes a model of video.generate (a fugue/video-model), served by sd-server's
 // POST /sdcpp/v1/vid_gen through the same job API as images; each row of kind music a model of
-// audio.generate (a fugue/music-model), served by ace-server in two jobs (POST /lm, then
+// audio.generate (a fugue/music-model), whose adapters (GET /props) are models of audio.adapter
+// (a fugue/music-adapter), served by ace-server in two jobs (POST /lm, then
 // POST /synth; GET /job?id=N). ace-server: acestep.cpp 973517be, docs/ARCHITECTURE.md and
 // tools/ace-server.cpp. A served model is named by
 // its recipe, with no content hash; its row's
@@ -85,6 +86,7 @@ private:
         QByteArray key;
         QString runtime; // the row's runtime (gufo, tensorfold-x86): a text job's engine
         QJsonArray loras; // a video server's capabilities.loras: sent with every job (8.7)
+        QStringList adapters; // a music server's GET /props adapters: what a job may name
     };
     struct Discovery {
         Description description;

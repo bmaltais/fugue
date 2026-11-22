@@ -47,7 +47,7 @@ empty lyrics has no words to sing, so Remix and Repaint send the lyrics given, `
 | synth_batch_size (up to 9), lm_batch_size | variations | no | issue (a Count input once a node can return a list of songs) |
 | output_format `mp3`, `wav16/24/32`, mp3_bitrate | | mp3, default bitrate | **Quality** (advanced: mp3, mp3-320, lossless = wav24; #258) |
 | ref_audio | timbre / style reference | no | **Style reference** (an optional audio input, all three nodes; #259) |
-| adapter, adapter_scale (LoRA) | `--adapters` dir | no | issue |
+| adapter, adapter_scale (LoRA) | `--adapters` dir | no | **Adapter**, **Adapter strength** (advanced; #260) |
 | lm_cfg_scale, top_p, top_k, negative prompt | LM sampling | no | not exposed |
 | /understand | audio to caption, lyrics, metadata | no | issue (Describe Song) |
 
@@ -117,3 +117,24 @@ reference: with an industrial synth-bass reference the result moved much closer 
 a fingerpicked-guitar one it moved closer on seed 21 (8.5 to 6.1) and not on seed 7 (6.4 to 6.4), and the synth-bass
 reference did nothing on seed 21 (13.6 to 13.6). So: accepted and used, how strongly depends on the song. Not a
 listening test; [U] for "gives the voice of a singer" stays open (no sung reference tried).
+
+## Adapters, LoRA (#260)
+
+Source: ARCHITECTURE.md ("adapter", "adapter_scale", `--adapters`, GET /props). `adapter` is a file name (or a PEFT
+directory name) from the `--adapters` folder; empty means none; the LoRA delta is merged into the DiT weights when the
+DiT loads, so a changed adapter reloads the DiT (a pause, then full speed). `adapter_scale` defaults to 1.
+
+Fugue: the server's `GET /props` `adapters` become models of a capability of their own, `audio.adapter`, with the
+resource type `fugue/music-adapter`. Decision [medium-high]: reuse the model picker rather than a new "choice from
+the server" widget: it already lists, shows status and says where a model is, and the three song nodes list
+`audio.adapter` in their `capabilities`, which is all the picker filters on. Offering them under `audio.generate`
+instead would have let a job pick an adapter as its music model. The nodes get an advanced optional **Adapter** and
+**Adapter strength** (0 to 2); both go to `/synth` only when an adapter is picked. A name the chosen server does not
+list is `model_missing` (with the names it has) before the song is written. The picker lists every music server's
+adapters, so with two servers an adapter can be picked that only the other has: the refusal above says so.
+
+Live check (gx10, 2026-11-22): `/props` answered through the omarchy pairing with `"adapters": []` (no adapter files
+on that server), so no adapter is offered, `fugue model list --type fugue/music-adapter` is empty, and a job naming an
+adapter is refused with the hint that the server lists none. **Unverified live: that an adapter file actually loads
+and changes a song**, and the exact shape of an entry of `adapters` in /props (the docs show `[]`; strings and
+`{name}` objects are both read).

@@ -37,6 +37,10 @@ const QString kMusicResource = QStringLiteral("fugue/music-model");
 const QString kTextGenerate = QStringLiteral("text.generate");
 const QString kVideoGenerate = QStringLiteral("video.generate");
 const QString kAudioGenerate = QStringLiteral("audio.generate");
+// A music server's adapters (LoRA files of its --adapters folder, listed by GET /props) are offered as
+// models of a capability of their own, so a picker lists them and a job never takes one as its music model.
+const QString kAudioAdapter = QStringLiteral("audio.adapter");
+const QString kAdapterResource = QStringLiteral("fugue/music-adapter");
 // Engine ids of a row that names no runtime.
 const QString kMusicEngine = QStringLiteral("acestep");
 
@@ -339,11 +343,17 @@ SongFile songFile(const QJsonObject &params) {
     return {QStringLiteral("mp3"), QJsonObject{{"output_format", "mp3"}}};
 }
 
-// What a /synth request takes from the node whichever way it is made (a written song, or a cover or a repaint).
+// What a /synth request takes from the node whichever way it is made (a written song, or a cover or a repaint):
+// the file's format, and an adapter with its strength. An adapter is merged into the DiT when it loads, so the
+// first song with a new one makes the server reload the DiT; none leaves the server's own defaults (no adapter).
 void addSynthOptions(QJsonObject &body, const QJsonObject &params) {
     const QJsonObject file = songFile(params).fields;
     for (auto it = file.begin(); it != file.end(); ++it)
         body.insert(it.key(), it.value());
+    if (params.contains("adapter")) {
+        body.insert("adapter", params.value("adapter"));
+        body.insert("adapter_scale", params.value("adapter_scale").toDouble(1.0));
+    }
 }
 
 // The /synth body of Remix Song and Repaint Song: the LM is skipped, caption and lyrics reach the DiT as
@@ -559,6 +569,7 @@ void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> do
         QList<OfferedModel> extraImages;
         QList<bool> extraImageEdits;
         QList<OfferedModel> extraVideos;
+        QList<OfferedModel> adapters; // the music servers' (GET /props), a capability of their own
         int waiting = 0;
         std::function<void(const Result<Discovery> &)> done;
     };
@@ -592,7 +603,8 @@ void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> do
                 edit.models.append(pending->extraImages.at(i));
         }
         video.models.append(pending->extraVideos);
-        for (const CapabilityOffer &offer : {generate, edit, text, video, music})
+        const CapabilityOffer adapters{kAudioAdapter, pending->adapters};
+        for (const CapabilityOffer &offer : {generate, edit, text, video, music, adapters})
             if (!offer.models.isEmpty())
                 description.capabilities.append(offer);
         pending->done(Result<Discovery>(pending->discovery));
@@ -693,6 +705,30 @@ void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> do
                 }
                 if (video)
                     pending->discovery.servers[recipe].loras = body.value("loras").toArray();
+                if (music) {
+                    // ace-server lists the files of its --adapters folder in /props (a server of an older
+                    // build has no such call: no adapters). Asked before this row counts as probed.
+                    ++pending->waiting;
+                    QNetworkReply *props = send(server, "GET", QStringLiteral("/props"));
+                    connect(props, &QNetworkReply::finished, this, [pending, props, recipe, assemble] {
+                        props->deleteLater();
+                        if (httpStatus(props) == 200)
+                            for (const QJsonValue &entry : jsonBody(props).value("adapters").toArray()) {
+                                const QString name = entry.isObject() ? entry.toObject().value("name").toString() : entry.toString();
+                                if (name.isEmpty())
+                                    continue;
+                                pending->discovery.servers[recipe].adapters.append(name);
+                                OfferedModel adapter;
+                                adapter.handle = QJsonObject{{"resource", kAdapterResource}, {"name", name}};
+                                adapter.title = name;
+                                adapter.status = ModelStatus::Ready;
+                                adapter.properties = QJsonObject{{"model", recipe}};
+                                pending->adapters.append(adapter);
+                            }
+                        if (--pending->waiting == 0)
+                            assemble();
+                    });
+                }
                 if (!text && !music) {
                     // A model is offered for every mode its server says it serves, not only the
                     // one its row's kind names. Absent supported_modes, the kind decides alone.
@@ -1186,6 +1222,17 @@ void OmarchyProvider::finishVideo(const QString &id, const QJsonObject &result) 
 // progress counter or preview, so progress is the half each job is.
 void OmarchyProvider::submitSong(const Server &server, const JobRequest &request, const QJsonObject &model,
                                  Reply<QString> reply) {
+    // An adapter the server does not list would fail after the song was written, or be ignored: say so first.
+    const QString adapter = request.params.value("adapter").toString();
+    if (!adapter.isEmpty() && !server.adapters.contains(adapter)) {
+        Error missing = makeError(QStringLiteral("model_missing"),
+                                  QStringLiteral("%1 does not have the adapter %2.").arg(server.recipe, adapter),
+                                  server.adapters.isEmpty()
+                                      ? QStringLiteral("%1 lists no adapters: put the file in its adapters folder and restart it.").arg(server.recipe)
+                                      : QStringLiteral("Pick one of: %1.").arg(server.adapters.join(QStringLiteral(", "))));
+        missing.valid = QJsonArray::fromStringList(server.adapters);
+        return reply(Result<QString>(missing));
+    }
     // A file the job cannot send is refused before the song is written, not after.
     for (const auto &file : kSynthFiles) {
         const QString path = request.inputs.value(QLatin1String(file[0])).toObject().value("path").toString();

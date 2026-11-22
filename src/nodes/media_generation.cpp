@@ -184,7 +184,8 @@ public:
 // What every song node can ask of the renderer, one place for the three (Generate, Remix, Repaint Song).
 // Each goes only when it is set, so a song that uses none of them is the request it always was (and keeps its
 // cache entry). `quality` is the file it is saved as: mp3, mp3-320 or lossless; `reference` is a recording whose
-// voice and timbre the song takes (ace-server's ref_audio).
+// voice and timbre the song takes (ace-server's ref_audio); `adapter` is a singer or style adapter (LoRA) of the music
+// server, with its `adapter_scale`.
 Result<bool> addSongOptions(const NodeContext &context, JobRequest &request) {
     const QString quality = context.input(QStringLiteral("quality")).text().trimmed();
     if (!quality.isEmpty() && quality != QLatin1String("mp3"))
@@ -196,6 +197,11 @@ Result<bool> addSongOptions(const NodeContext &context, JobRequest &request) {
             return makeInputError(QStringLiteral("media_unreadable"), QStringLiteral("reference"),
                                   QStringLiteral("The style reference cannot be read."));
         request.inputs.insert(QStringLiteral("ref_audio"), QJsonObject{{"path", audio.path()}});
+    }
+    const QString adapter = context.input(QStringLiteral("adapter")).json().toObject().value(QStringLiteral("name")).toString();
+    if (!adapter.isEmpty()) {
+        request.params.insert(QStringLiteral("adapter"), adapter);
+        request.params.insert(QStringLiteral("adapter_scale"), context.input(QStringLiteral("adapter_scale")).number());
     }
     return true;
 }
