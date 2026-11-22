@@ -16,7 +16,8 @@
 //
 // What is watched: each pack search path (the nearest folder above it when it is not there
 // yet), each pack folder and its pack.json, each node folder and its node.json, and the entry
-// file of each command node (its seal covers it), and the trust file when one is set. The
+// file of each command node (its seal covers it), and the trust file when one is set; in a project also its project.json (what it
+// inherits is read again on a change) and, when it inherits packs, the Default's trust.json. The
 // watch is made again after every fill, as a file replaced by a rename is a new file.
 
 #include <QFileSystemWatcher>
@@ -38,7 +39,7 @@ public:
 
     // `fill` puts every node type into an empty registry (built-ins, then the packs), as at
     // startup; `registry` is already filled. `folders` gives the pack search paths to watch, asked
-    // again at each fill (default packSearchPaths()).
+    // again at each fill (default: packSearchPaths(), then inheritedPackPaths()).
     RegistryReloader(Registry *registry, Fill fill, std::function<QStringList()> folders = {},
                      QObject *parent = nullptr);
 
@@ -62,6 +63,7 @@ private:
     void onFile(const QString &path);
     // The trust file changed since it was last seen: a reload, after the settle time.
     void trustTouched();
+    void trustChangedElsewhere();
     QString trustStamp() const;
 
     Registry *m_registry;

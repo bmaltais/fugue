@@ -109,14 +109,24 @@ QJsonObject addedJson(const PackAdded &added) {
 
 Reply packList(const Command &, Context &) {
     Registry scratch;
-    const PackReport report = loadPacks(scratch, packSearchPaths());
+    const PackReport report = loadPacks(scratch, packSearchPaths(), inheritedPackPaths());
     const TrustStore trust;
     QJsonArray packs;
     QStringList lines;
+    bool anyInherited = false;
     for (const LoadedPack &pack : report.packs) {
         QJsonObject object{{"id", pack.id}, {"version", pack.version}, {"name", pack.name}, {"path", pack.path}, {"enabled", pack.enabled},
                            {"trusted", pack.enabled && trust.isTrusted(pack.id, pack.version)},
+                           {"origin", pack.inherited ? QStringLiteral("inherited from Default") : QStringLiteral("own")},
+                           {"inherited", pack.inherited},
                            {"nodes", QJsonArray::fromStringList(pack.nodes)}};
+        if (pack.inherited) {
+            object.insert("hidden", pack.hidden);
+            if (!pack.hidden) {
+                object.insert("warning", inheritedPackWarning());
+                anyInherited = true;
+            }
+        }
         const PackSource source = readPackSource(pack.path);
         if (!source.location.isEmpty()) {
             object.insert("source", source.location);
@@ -131,12 +141,21 @@ Reply packList(const Command &, Context &) {
         if (!disabled.isEmpty())
             object.insert("disabled_nodes", disabled);
         packs.append(object);
+        const QString origin = pack.hidden ? QStringLiteral("  [inherited from Default, hidden by this project's own pack]")
+                                           : pack.inherited ? QStringLiteral("  [inherited from Default]") : QString();
+        if (pack.hidden) {
+            lines << QStringLiteral("%1 %2%3").arg(pack.id, pack.version, origin);
+            continue;
+        }
         lines << (pack.enabled ? QStringLiteral("%1 %2  %3  %4 node(s)")
                                      .arg(pack.id, pack.version, trust.isTrusted(pack.id, pack.version) ? QStringLiteral("trusted") : QStringLiteral("untrusted"))
                                      .arg(pack.nodes.size())
                                : QStringLiteral("%1  disabled: %2").arg(pack.id.isEmpty() ? pack.path : pack.id,
-                                                                         pack.errors.isEmpty() ? QStringLiteral("it did not load") : pack.errors.first().message));
+                                                                         pack.errors.isEmpty() ? QStringLiteral("it did not load") : pack.errors.first().message))
+              + origin;
     }
+    if (anyInherited)
+        lines << QString() << QStringLiteral("Warning: ") + inheritedPackWarning();
     Reply reply = Reply::success(QJsonObject{{"packs", packs}}, lines.isEmpty() ? QStringLiteral("No packs installed.") : lines.join('\n'));
     return reply;
 }

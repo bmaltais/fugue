@@ -5,6 +5,7 @@
 #include "engine/json.h"
 #include "engine/pack_manager.h"
 #include "engine/paths.h"
+#include "engine/project.h"
 #include "engine/settings.h"
 #include "engine/trust_store.h"
 #include "engine/version.h"
@@ -352,9 +353,95 @@ QStringList packSearchPaths() {
     return searchPaths(packsDir(), currentSettings().packPaths);
 }
 
+QStringList inheritedPackPaths() {
+    if (!sessionInherits().contains(QStringLiteral("packs")))
+        return {};
+    return searchPaths(baseDataDir() + QStringLiteral("/packs"), readSettings(baseSettingsPath()).settings.packPaths);
+}
+
+namespace {
+
+struct PackIdentity {
+    QString id;
+    QString version;
+    int major = -1;
+};
+
+// The id, version and major of the pack.json in `folder`, or an empty id.
+PackIdentity identityOf(const QString &folder) {
+    PackIdentity identity;
+    const Result<QJsonObject> read = readJsonObject(folder + QStringLiteral("/pack.json"));
+    if (!read)
+        return identity;
+    const std::optional<Version> version = Version::parse(read->value("version").toString());
+    if (!version || read->value("id").toString().isEmpty())
+        return identity;
+    identity.id = read->value("id").toString();
+    identity.version = read->value("version").toString();
+    identity.major = version->major;
+    return identity;
+}
+
+// The id and major of every pack in the folders of `paths`.
+QSet<QString> packKeysIn(const QStringList &paths) {
+    QSet<QString> keys;
+    for (const QString &path : paths)
+        for (const QFileInfo &entry : QDir(path).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name))
+            if (!entry.fileName().startsWith(QLatin1Char('.')))
+                if (const PackIdentity identity = identityOf(entry.filePath()); !identity.id.isEmpty())
+                    keys.insert(QStringLiteral("%1@%2").arg(identity.id).arg(identity.major));
+    return keys;
+}
+
+} // namespace
+
+QList<InheritedPack> inheritedPacks() {
+    QList<InheritedPack> found;
+    const QStringList paths = inheritedPackPaths();
+    if (paths.isEmpty())
+        return found;
+    const QSet<QString> own = packKeysIn(packSearchPaths());
+    QSet<QString> seen;
+    for (const QString &path : paths)
+        for (const QFileInfo &entry : QDir(path).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
+            if (entry.fileName().startsWith(QLatin1Char('.')) || entry.fileName() == QLatin1String("local"))
+                continue;
+            const PackIdentity identity = identityOf(entry.filePath());
+            const QString key = QStringLiteral("%1@%2").arg(identity.id).arg(identity.major);
+            if (identity.id.isEmpty() || TrustStore::isBuiltIn(identity.id) || own.contains(key) || seen.contains(key))
+                continue;
+            seen.insert(key);
+            found.append({identity.id, identity.version, entry.filePath(), identity.major});
+        }
+    return found;
+}
+
+bool isInheritedPack(const QString &id, const QString &version) {
+    for (const InheritedPack &pack : inheritedPacks())
+        if (pack.id == id && pack.version == version)
+            return true;
+    return false;
+}
+
+QString inheritedPackFolder(const QString &folderName) {
+    const PackRef ref = parsePackRef(folderName);
+    for (const InheritedPack &pack : inheritedPacks())
+        if (pack.id == ref.id && (ref.major < 0 || pack.major == ref.major) && QFileInfo(pack.folder).fileName() == folderName)
+            return pack.folder;
+    return {};
+}
+
+QString inheritedPackWarning() {
+    return QStringLiteral("Inherited from Default: this pack runs from the Default project's folder, so anything it writes (its setup "
+                          "environment, caches, downloads, state) lands in the Default project's folders, not this project's. "
+                          "Fugue cannot stop that.");
+}
+
 bool PackReport::hasProblems() const {
     for (const LoadedPack &pack : packs)
-        if (!pack.enabled || !pack.disabled.isEmpty() || hasErrors(pack.errors))
+        if (pack.hidden)
+            continue;
+        else if (!pack.enabled || !pack.disabled.isEmpty() || hasErrors(pack.errors))
             return true;
     return false;
 }
@@ -425,17 +512,43 @@ LoadedPack loadPack(Registry &registry, const QString &folder, PackOrigin origin
     return loaded;
 }
 
-PackReport loadPacks(Registry &registry, const QStringList &searchPaths) {
+PackReport loadPacks(Registry &registry, const QStringList &searchPaths) { return loadPacks(registry, searchPaths, {}); }
+
+PackReport loadPacks(Registry &registry, const QStringList &searchPaths, const QStringList &inherited) {
     PackReport report;
     QSet<QString> seen;
-    for (qsizetype i = 0; i < searchPaths.size(); ++i) {
-        const QDir dir(searchPaths[i]);
+    const qsizetype own = searchPaths.size();
+    const QStringList all = searchPaths + inherited;
+    for (qsizetype i = 0; i < all.size(); ++i) {
+        const QDir dir(all[i]);
         if (!dir.exists() || seen.contains(dir.canonicalPath()))
             continue;
         seen.insert(dir.canonicalPath());
+        const bool fromDefault = i >= own;
         for (const QFileInfo &entry : dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
             if (entry.fileName().startsWith(QLatin1Char('.')))
                 continue;
+            if (fromDefault) {
+                // The Default's group library is not shared, and an own pack of the same id and major hides the
+                // Default's quietly: the project's copy is the one it chose.
+                if (entry.fileName() == QLatin1String("local"))
+                    continue;
+                const PackIdentity identity = identityOf(entry.filePath());
+                if (!identity.id.isEmpty() && registry.hasPackMajor(identity.id, identity.major)) {
+                    LoadedPack hidden;
+                    hidden.path = entry.filePath();
+                    hidden.id = identity.id;
+                    hidden.version = identity.version;
+                    hidden.inherited = true;
+                    hidden.hidden = true;
+                    report.packs << hidden;
+                    continue;
+                }
+                LoadedPack loaded = loadPack(registry, entry.filePath(), PackOrigin::Disk);
+                loaded.inherited = true;
+                report.packs << loaded;
+                continue;
+            }
             const bool library = i == 0 && entry.fileName() == QLatin1String("local") && !entry.isSymLink();
             if (library)
                 healLibrary(entry.filePath());
@@ -446,8 +559,10 @@ PackReport loadPacks(Registry &registry, const QStringList &searchPaths) {
 }
 
 PackReport loadInstalledPacks(Registry &registry) {
-    const PackReport report = loadPacks(registry, packSearchPaths());
+    const PackReport report = loadPacks(registry, packSearchPaths(), inheritedPackPaths());
     for (const LoadedPack &pack : report.packs) {
+        if (pack.hidden)
+            continue;
         for (const Error &error : pack.errors)
             std::fprintf(stderr, "pack %s: %s: %s\n", qPrintable(pack.path), qPrintable(error.code), qPrintable(error.message));
         for (const PackProblem &node : pack.disabled)

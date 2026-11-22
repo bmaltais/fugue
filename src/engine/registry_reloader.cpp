@@ -4,16 +4,27 @@
 #include <QDir>
 #include <QFileInfo>
 
+#include "engine/fugue_home.h"
 #include "engine/pack_loader.h"
+#include "engine/paths.h"
+#include "engine/project.h"
+#include "engine/trust_store.h"
 #include "engine/registry.h"
 
 #include <utility>
 
 namespace fugue {
 
+namespace {
+
+// The packs this session sees: its own folders, then the Default project's when it inherits `packs`.
+QStringList allPackSearchPaths() { return packSearchPaths() + inheritedPackPaths(); }
+
+} // namespace
+
 RegistryReloader::RegistryReloader(Registry *registry, Fill fill, std::function<QStringList()> folders, QObject *parent)
     : QObject(parent), m_registry(registry), m_fill(std::move(fill)),
-      m_folders(folders ? std::move(folders) : std::function<QStringList()>(packSearchPaths)) {
+      m_folders(folders ? std::move(folders) : std::function<QStringList()>(allPackSearchPaths)) {
     m_settle.setSingleShot(true);
     m_settle.setInterval(500);
     connect(&m_settle, &QTimer::timeout, this, [this] { load(false); });
@@ -47,6 +58,8 @@ void RegistryReloader::onDirectory(const QString &path) {
 void RegistryReloader::onFile(const QString &path) {
     if (path == m_trustFile)
         trustTouched();
+    else if ((path == TrustStore::defaultProjectPath() && !m_trustFile.isEmpty()) || (!fugueHome().isEmpty() && path == projectManifestPath(fugueHome())))
+        trustChangedElsewhere();
     else
         reloadSoon();
 }
@@ -56,6 +69,13 @@ void RegistryReloader::trustTouched() {
     if (stamp == m_trustStamp)
         return;
     m_trustStamp = stamp;
+    m_trustChanged = true;
+    reloadSoon();
+}
+
+// The Default project's trust.json or this project's project.json changed: what the project inherits (and so which
+// trust counts) may differ, so a reload says so whatever the types.
+void RegistryReloader::trustChangedElsewhere() {
     m_trustChanged = true;
     reloadSoon();
 }
@@ -111,6 +131,12 @@ void RegistryReloader::watch() {
     }
     if (!m_trustFile.isEmpty())
         paths << m_trustFile << QFileInfo(m_trustFile).absolutePath(); // the folder sees it made
+    // The project's own project.json (what it inherits can change under a running window: `fugue project inherits`,
+    // a hand edit) and, when it inherits packs, the Default's trust file: each is read again by the next fill.
+    if (!fugueHome().isEmpty())
+        paths << projectManifestPath(fugueHome());
+    if (!m_trustFile.isEmpty() && sessionInherits().contains(QStringLiteral("packs")))
+        paths << TrustStore::defaultProjectPath();
     paths.removeDuplicates();
     QStringList present;
     for (const QString &path : std::as_const(paths))

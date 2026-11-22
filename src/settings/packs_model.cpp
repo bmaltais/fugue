@@ -51,10 +51,12 @@ void PacksModel::refresh() {
     QStringList paths = packSearchPaths();
     if (!paths.contains(m_packsFolder))
         paths.prepend(m_packsFolder);
-    const PackReport report = loadPacks(scratch, paths);
+    const PackReport report = loadPacks(scratch, paths, inheritedPackPaths());
     const TrustStore trust(m_trustFile);
     QVariantList list;
     for (const LoadedPack &pack : report.packs) {
+        if (pack.hidden)
+            continue;
         QStringList problems;
         for (const Error &error : pack.errors)
             problems << error.message;
@@ -67,7 +69,8 @@ void PacksModel::refresh() {
             {"removable", QFileInfo(pack.path).absolutePath() == QFileInfo(m_packsFolder).absoluteFilePath()},
             {"nodes", int(pack.nodes.size())}, {"source", source.location}, {"problems", problems},
             {"active", m_registry && pack.enabled && m_registry->hasPackVersion(pack.id, pack.version)},
-            {"folder", QFileInfo(pack.path).fileName()}};
+            {"folder", QFileInfo(pack.path).fileName()}, {"inherited", pack.inherited},
+            {"warning", pack.inherited ? inheritedPackWarning() : QString()}};
     }
     m_packs = list;
     m_library.clear();

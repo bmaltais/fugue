@@ -244,6 +244,24 @@ private slots:
         QVERIFY(first.tryAcquire());
     }
 
+    // The holder can tell that another root's run waits (so its helper gives the GPU's memory back), and a
+    // waiter that stopped waiting, or got its turn, no longer counts.
+    void aWaitingRootLeavesAStampTheHolderCanSee() {
+        QTemporaryDir dir;
+        const QString shared = dir.filePath("run/gpu.lock");
+        Lock first(dir.filePath("a/engine.lock"), shared);
+        Lock second(dir.filePath("b/engine.lock"), shared);
+        QVERIFY(first.tryAcquire());
+        QVERIFY(!Lock::otherRootWaiting(shared)); // nobody waits yet
+        QVERIFY(!Lock::otherRootWaiting({}));
+        QVERIFY(!second.tryAcquire());
+        QVERIFY(Lock::otherRootWaiting(shared));
+        QVERIFY(!Lock::otherRootWaiting(shared, -1)); // older than the freshness asked for: not counted
+        first.release();
+        QVERIFY(second.tryAcquire()); // its turn: its own stamp goes
+        QVERIFY(!Lock::otherRootWaiting(shared));
+    }
+
     void aLockWithoutACrossRootFileIsPerRootAsBefore() {
         QTemporaryDir dir;
         Lock first(dir.filePath("a/engine.lock"));

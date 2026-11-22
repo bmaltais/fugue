@@ -2,7 +2,9 @@
 
 #include "engine/atomic_file.h"
 #include "engine/json.h"
+#include "engine/pack_loader.h"
 #include "engine/paths.h"
+#include "engine/project.h"
 
 #include <QFile>
 #include <QFileInfo>
@@ -18,6 +20,8 @@
 namespace fugue {
 
 QString TrustStore::defaultPath() { return stateDir() + "/trust.json"; }
+
+QString TrustStore::defaultProjectPath() { return baseStateDir() + "/trust.json"; }
 
 QString TrustStore::packOf(const QString &typeId) {
     const int slash = typeId.lastIndexOf('/');
@@ -48,14 +52,39 @@ QJsonObject readPacks(const QString &path) {
 
 } // namespace
 
+bool TrustStore::layered() const {
+    return m_path == defaultPath() && defaultProjectPath() != m_path && sessionInherits().contains(QStringLiteral("packs"));
+}
+
+bool TrustStore::isTrustedByDefault(const QString &packId, const QString &version) const {
+    if (isBuiltIn(packId) || !layered())
+        return false;
+    for (const QJsonValue &value : readPacks(defaultProjectPath()).value(packId).toArray())
+        if (value.toString() == version)
+            return isInheritedPack(packId, version);
+    return false;
+}
+
 bool TrustStore::isTrusted(const QString &packId, const QString &version) const {
     if (isBuiltIn(packId))
         return true;
     for (const QJsonValue &value : readPacks(m_path).value(packId).toArray())
         if (value.toString() == version)
             return true;
-    return false;
+    return isTrustedByDefault(packId, version);
 }
+
+namespace {
+
+Error defaultsTrust(const QString &packId, const QString &version) {
+    return makeError(QStringLiteral("usage"),
+                     QStringLiteral("The trust of %1 %2 is the Default project's: this project inherits that pack and honours the Default's "
+                                    "decision, read-only.").arg(packId, version),
+                     QStringLiteral("Change it in the Default project (start fugue without --project), or install your own copy of the pack "
+                                    "here, which hides the inherited one."));
+}
+
+} // namespace
 
 Errors TrustStore::trust(const QString &packId, const QString &version) {
     QMutexLocker lock(&fileLock());
@@ -96,6 +125,14 @@ Errors TrustStore::forget(const QString &packId) {
         return {};
     packs.remove(packId);
     return replaceFile(m_path, writeJson(QJsonObject{{"packs", packs}}), QFileInfo(m_path).fileName(), FileMode::OwnerOnly);
+}
+
+Errors TrustStore::revoke(const QString &packId, const QString &version) {
+    if (layered())
+        for (const InheritedPack &pack : inheritedPacks())
+            if (pack.id == packId && (version.isEmpty() || pack.version == version) && isTrustedByDefault(packId, pack.version))
+                return {defaultsTrust(packId, pack.version)};
+    return version.isEmpty() ? forget(packId) : forget(packId, version);
 }
 
 QList<PackUse> TrustStore::packsUsed(const Document &document, const Registry &registry) {

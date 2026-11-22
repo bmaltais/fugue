@@ -14,6 +14,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include <atomic>
 #include <csignal>
 #include <optional>
 
@@ -176,6 +177,43 @@ private slots:
         QCOMPARE(run(*helper, encode()).state, QStringLiteral("done"));
         QVERIFY(helper->pid() != pid);
         QCOMPARE(logLines(m_log).filter("start").size(), 2);
+    }
+
+    // 1.4.2: the cross-root lock orders runs, so the helper of the root that finished must give the GPU's memory
+    // back when a run of another root waits, instead of staying warm for the idle timeout.
+    void aHelperIsStoppedAtOnceWhenAnotherRootWaitsForTheGpu() {
+        auto helper = provider(60);
+        std::atomic<bool> waiting{false};
+        helper->setYieldProbe([&waiting] { return waiting.load(); });
+        QCOMPARE(run(*helper, encode()).state, QStringLiteral("done"));
+        const qint64 pid = helper->pid();
+        QVERIFY(alive(pid)); // nobody waits: it stays warm, as before
+        QTest::qWait(700);
+        QCOMPARE(helper->pid(), pid);
+        waiting = true;
+        QTRY_COMPARE_WITH_TIMEOUT(helper->pid(), qint64(0), 3000);
+        QTRY_VERIFY_WITH_TIMEOUT(!alive(pid), 3000);
+        QVERIFY(logLines(m_log).contains("shutdown"));
+        waiting = false;
+        QCOMPARE(run(*helper, encode()).state, QStringLiteral("done")); // it starts again for the next job
+        QVERIFY(helper->pid() != pid);
+    }
+
+    void aHelperThatFinishesAJobWhileAnotherRootWaitsIsStoppedWithoutWaitingForATick() {
+        auto helper = provider(60);
+        std::atomic<bool> waiting{true};
+        helper->setYieldProbe([&waiting] { return waiting.load(); });
+        QCOMPARE(run(*helper, encode()).state, QStringLiteral("done"));
+        QTRY_COMPARE_WITH_TIMEOUT(helper->pid(), qint64(0), 400); // gone as the job ended, well before a 500 ms tick would matter
+    }
+
+    void aHelperWithoutAProbeOrWithOneThatSaysNoIsUnchanged() {
+        auto helper = provider(60);
+        helper->setYieldProbe([] { return false; });
+        QCOMPARE(run(*helper, encode()).state, QStringLiteral("done"));
+        const qint64 pid = helper->pid();
+        QTest::qWait(1200);
+        QCOMPARE(helper->pid(), pid);
     }
 
     void theIdleTimeoutMayBeTextAsTheSettingsPageStoresIt() {

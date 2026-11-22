@@ -468,6 +468,16 @@ QString targetFolder(const QString &id, int major, const QString &packsDir) {
     return QFileInfo::exists(plain) ? packsDir + QLatin1Char('/') + packFolderName(id, major) : plain;
 }
 
+// A pack this project inherits from the Default project is read-only here (1.4.2): the message names where to
+// change it.
+Error inheritedRefusal(const QString &folderName, const QString &inheritedFolder, const QString &what) {
+    return fail(QStringLiteral("usage"),
+                QStringLiteral("%1 is a pack this project inherits from the Default project (%2); it cannot be %3 here.")
+                    .arg(folderName, inheritedFolder, what),
+                QStringLiteral("Change it in the Default project (start fugue without --project), or install your own copy here with "
+                               "`fugue pack add`, which hides the inherited one."));
+}
+
 } // namespace
 
 Result<PackAdded> addPack(const QString &location, const QString &ref, const QString &packsDir, TrustStore &trust,
@@ -527,8 +537,11 @@ Result<QList<PackAdded>> updatePacks(const QString &id, const QString &ref, cons
         return fail(QStringLiteral("usage"), QStringLiteral("--ref needs the id of one pack."));
     QStringList ids;
     if (!id.isEmpty()) {
-        if (!validPackId(id) || !QFileInfo(packsDir + QLatin1Char('/') + id).isDir())
+        if (!validPackId(id) || !QFileInfo(packsDir + QLatin1Char('/') + id).isDir()) {
+            if (const QString inherited = validPackId(id) ? inheritedPackFolder(id) : QString(); !inherited.isEmpty())
+                return inheritedRefusal(id, inherited, QStringLiteral("updated"));
             return fail(QStringLiteral("unknown_pack"), QStringLiteral("No pack %1 is installed in %2.").arg(id, packsDir));
+        }
         ids << id;
     } else {
         for (const QFileInfo &entry : QDir(packsDir).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name))
@@ -633,9 +646,12 @@ Result<QList<PackAdded>> updatePacks(const QString &id, const QString &ref, cons
 
 Result<PackSummary> removePack(const QString &id, const QString &packsDir, TrustStore &trust, const PackPrompts &prompts) {
     const QString folder = packsDir + QLatin1Char('/') + id;
-    if (!validPackId(id) || !QFileInfo(folder).isDir() || QFileInfo(folder).isSymLink())
+    if (!validPackId(id) || !QFileInfo(folder).isDir() || QFileInfo(folder).isSymLink()) {
+        if (const QString inherited = validPackId(id) ? inheritedPackFolder(id) : QString(); !inherited.isEmpty())
+            return inheritedRefusal(id, inherited, QStringLiteral("removed"));
         return fail(QStringLiteral("unknown_pack"), QStringLiteral("No pack %1 is installed in %2.").arg(id, packsDir),
                     QStringLiteral("Only packs in that folder are removed; packs found through settings are the user's own folders."));
+    }
     PackSummary summary;
     const Result<PackSummary> read = summarizePack(folder);
     if (read) {
@@ -673,6 +689,9 @@ Result<PackSummary> trustPack(const QString &id, const QString &packsDir, TrustS
             folder = place + QLatin1Char('/') + id;
             break;
         }
+    QString inheritedFolder;
+    if (folder.isEmpty() && validPackId(id))
+        inheritedFolder = folder = inheritedPackFolder(id);
     if (folder.isEmpty())
         return fail(QStringLiteral("unknown_pack"), QStringLiteral("No pack %1 is installed in %2.").arg(id, packsDir));
     const Result<PackSummary> summary = summarizePack(folder);
@@ -680,6 +699,8 @@ Result<PackSummary> trustPack(const QString &id, const QString &packsDir, TrustS
         return summary.errors();
     if (trust.isTrusted(summary->id, summary->version))
         return *summary;
+    if (!inheritedFolder.isEmpty())
+        return inheritedRefusal(id, inheritedFolder, QStringLiteral("trusted (the Default project has not trusted this version)"));
     const Result<bool> yes = ask(prompts.trust, *summary, QStringLiteral("Trusting a pack"));
     if (!yes)
         return yes.error();

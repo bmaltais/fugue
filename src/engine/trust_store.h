@@ -6,6 +6,12 @@
 // run; a group is only a graph, so the packs of the nodes inside it count, not the group's id.
 //
 //   {"packs": {"io.github.alice.tools": ["1.2.0"]}}
+//
+// A project that inherits `packs` (spec 1.4.2) also honours the Default project's trust.json, read-only, for
+// the packs it inherits: the exact id and version of an inherited pack the Default trusts is trusted here too.
+// It never applies to a pack of the project's own, whatever the Default says of that id and version, and
+// nothing here ever writes the Default's file. The layer applies to the session's own trust file
+// (defaultPath()); a TrustStore on another path (a test's) has none.
 
 #include "engine/document.h"
 #include "engine/registry.h"
@@ -35,12 +41,22 @@ public:
 
     explicit TrustStore(QString path = defaultPath());
 
+    // Trusted in this session's own file, or, for an inherited pack, in the Default's.
     bool isTrusted(const QString &packId, const QString &version) const;
+    // Trusted only because the Default trusts that inherited pack: the file here does not say so.
+    bool isTrustedByDefault(const QString &packId, const QString &version) const;
+    // The Default project's trust.json (read-only here).
+    static QString defaultProjectPath();
     Errors trust(const QString &packId, const QString &version);
-    // Drops every version of a pack (it was removed). No effect for a pack that was never trusted.
+    // Drops every version of a pack (it was removed). No effect for a pack that was never trusted. Only this
+    // session's own file is changed.
     Errors forget(const QString &packId);
     // Drops one version of a pack: another major of it stays installed and trusted (6.6).
     Errors forget(const QString &packId, const QString &version);
+    // A person taking trust back: forget(), except that trust an inherited pack has only from the Default's
+    // file is refused (usage, naming the Default project as the place to change it). An empty `version` means
+    // every version.
+    Errors revoke(const QString &packId, const QString &version = {});
 
     // Every pack the document's nodes (groups' inner nodes included) come from, built-ins left out.
     // The version of a pack is the INSTALLED one (Registry::packVersion), as the compiler asks
@@ -51,6 +67,7 @@ public:
     QList<PackUse> untrusted(const Document &document, const Registry &registry) const;
 
 private:
+    bool layered() const;
     QString m_path;
 };
 

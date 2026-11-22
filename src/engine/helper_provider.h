@@ -78,7 +78,7 @@ class HelperProvider : public Provider {
 public:
     // `program` is the helper to start; empty when none is installed, which makes every
     // operation fail with provider_unreachable. The instance's `idle_timeout_s` setting (seconds,
-    // a number or its text; default 600; 0 never stops it for idling) is how long it stays warm.
+    // a number or its text; default 600, as 8.8 and 8.10 say; 0 never stops it for idling) is how long it stays warm.
     HelperProvider(const ProviderInstance &instance, QString program, int graceMs = 5000,
                    QObject *parent = nullptr);
     HelperProvider(const ProviderInstance &instance, StdioLaunch launch, int graceMs = 5000, QObject *parent = nullptr);
@@ -95,6 +95,12 @@ public:
 
     // The helper's process id while it runs, else 0.
     qint64 pid() const;
+
+    // Gives the GPU's memory back for another root (spec 1.4.2): while the helper has no job, `probe` is asked
+    // every half second and when a job ends; when it says true (a run of another root waits for the GPU) the
+    // helper is stopped at once instead of staying warm until the idle timeout. Without a probe, or while it
+    // says false, nothing changes. The probe is called on this provider's thread and must be quick.
+    void setYieldProbe(std::function<bool()> probe);
 
 private:
     // A reply of the helper's, or why there is none (its error, or it stopped).
@@ -147,6 +153,8 @@ private:
     QHash<QString, Job> m_jobs;       // by our job id
     QHash<QString, QString> m_byHelperJob; // the running helper's job id -> ours, while not over
     QTimer m_idle;
+    QTimer m_yield; // asks m_yieldProbe while the helper idles
+    std::function<bool()> m_yieldProbe;
 };
 
 } // namespace fugue

@@ -3,6 +3,7 @@
 #include "engine/helper_provider.h"
 #include "engine/json.h"
 #include "engine/paths.h"
+#include "engine/queue.h"
 #include "engine/remote_helper_provider.h"
 #include "omarchy_provider.h"
 #include "engine/provider_module.h"
@@ -324,6 +325,11 @@ Result<std::shared_ptr<Provider>> createProvider(const ProviderInstance &instanc
 
 namespace {
 
+// What a local helper asks while it idles (spec 1.4.2): does a run of another root wait for the GPU?
+std::function<bool()> yieldsToAnotherRoot() {
+    return [] { return Lock::otherRootWaiting(gpuLockPath()); };
+}
+
 // The provider of an installed module (8.8): the instance's own address wins over the module's
 // default; a module Fugue starts is started by its first describe or submit.
 std::shared_ptr<Provider> moduleProvider(const ProviderInstance &given, const ProviderModule &module) {
@@ -339,7 +345,9 @@ std::shared_ptr<Provider> moduleProvider(const ProviderInstance &given, const Pr
         launch.hint = QStringLiteral("Check the files of the provider in %1.").arg(module.folder);
         launch.describeOverProtocol = true;
         launch.engine = module.id;
-        return std::make_shared<HelperProvider>(instance, launch);
+        auto provider = std::make_shared<HelperProvider>(instance, launch);
+        provider->setYieldProbe(yieldsToAnotherRoot());
+        return provider;
     }
     RemoteProviderOptions options;
     options.where = module.name;
@@ -365,9 +373,11 @@ Result<std::shared_ptr<Provider>> createProvider(const ProviderInstance &instanc
             std::make_shared<OmarchyProvider>(instance, OmarchyPaths::standard()));
     if (instance.type == QLatin1String("fugue-helper") && !instance.address.isEmpty())
         return Result<std::shared_ptr<Provider>>(std::make_shared<RemoteHelperProvider>(instance));
-    if (instance.type == QLatin1String("fugue-helper"))
-        return Result<std::shared_ptr<Provider>>(
-            std::make_shared<HelperProvider>(instance, helperProgram(hasNvidiaGpu())));
+    if (instance.type == QLatin1String("fugue-helper")) {
+        auto helper = std::make_shared<HelperProvider>(instance, helperProgram(hasNvidiaGpu()));
+        helper->setYieldProbe(yieldsToAnotherRoot());
+        return Result<std::shared_ptr<Provider>>(helper);
+    }
     const Result<QList<ProviderModule>> modules = providerModules(modulesRoot);
     QStringList names;
     for (const ProviderModule &module : modules.value()) {

@@ -52,6 +52,8 @@ Reply templateList(const Command &, Context &context) {
                                   {"category", t.category},
                                   {"tags", QJsonArray::fromStringList(t.tags)},
                                   {"own", t.own},
+                                  {"inherited", t.inherited},
+                                  {"origin", t.inherited ? QStringLiteral("inherited from Default") : t.own ? QStringLiteral("own") : QStringLiteral("bundled")},
                                   {"folder", t.folder},
                                   {"workflow", t.workflow},
                                   {"preview", t.preview},
@@ -59,6 +61,8 @@ Reply templateList(const Command &, Context &context) {
                                   {"needed_packs", QJsonArray::fromStringList(t.neededPacks)},
                                   {"carried_packs", carriedAsJson(t)}});
         QString line = QStringLiteral("%1  %2").arg(t.id, t.title);
+        if (t.inherited)
+            line += QStringLiteral("  [inherited from Default]");
         if (missing)
             line += QStringLiteral("  (%1 of %2 models missing)").arg(missing).arg(t.models.size());
         if (!t.neededPacks.isEmpty())

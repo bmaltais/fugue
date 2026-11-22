@@ -10,6 +10,7 @@
 #include <algorithm>
 
 #include "engine/paths.h"
+#include "engine/project.h"
 
 namespace fugue {
 
@@ -87,7 +88,7 @@ PromptTemplates PromptTemplates::parse(const QByteArray &json, const QString &wh
     return templates;
 }
 
-PromptTemplates PromptTemplates::load(const QString &userFolder) {
+PromptTemplates PromptTemplates::load(const QString &userFolder, const QString &inheritedFolder) {
     PromptTemplates templates;
     const auto add = [&](const QString &path) {
         QFile file(path);
@@ -99,6 +100,23 @@ PromptTemplates PromptTemplates::load(const QString &userFolder) {
     };
     for (const QString &name : QDir(QStringLiteral(":/fugue/prompts")).entryList({QStringLiteral("*.json")}, QDir::Files, QDir::Name))
         add(QStringLiteral(":/fugue/prompts/") + name);
+    QString fromDefault = inheritedFolder;
+    if (userFolder.isEmpty() && sessionInherits().contains(QStringLiteral("prompts")))
+        fromDefault = baseDataDir() + QStringLiteral("/prompts");
+    if (!fromDefault.isEmpty() && QDir::cleanPath(fromDefault) != QDir::cleanPath(userFolder.isEmpty() ? dataDir() + QStringLiteral("/prompts") : userFolder)) {
+        const QDir inherited(fromDefault);
+        for (const QString &name : inherited.entryList({QStringLiteral("*.json")}, QDir::Files, QDir::Name)) {
+            QFile file(inherited.filePath(name));
+            if (!file.open(QIODevice::ReadOnly)) {
+                templates.m_problems << QStringLiteral("%1 cannot be read.").arg(file.fileName());
+                continue;
+            }
+            PromptTemplates theirs = parse(file.readAll(), file.fileName());
+            for (PromptTemplate &prompt : theirs.m_templates)
+                prompt.inherited = true;
+            templates.merge(theirs);
+        }
+    }
     const QDir user(userFolder.isEmpty() ? dataDir() + QStringLiteral("/prompts") : userFolder);
     for (const QString &name : user.entryList({QStringLiteral("*.json")}, QDir::Files, QDir::Name))
         add(user.filePath(name));

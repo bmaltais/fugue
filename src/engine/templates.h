@@ -42,6 +42,9 @@ class Registry;
 struct TemplateRoot {
     QString path;
     bool own = false; // the person's own templates (listed first, under "Your templates")
+    // The Default project's own templates, which a project that inherits `templates` lists read-only (1.4.2),
+    // after its own. `own` is set too: they are a person's, not Fugue's.
+    bool inherited = false;
 };
 
 // A pack a template folder carries (`packs/<id>/`): its id and version as its pack.json says.
@@ -62,6 +65,7 @@ struct Template {
     QString categoryTitle; // as the root's categories.json names it, else the id
     QStringList tags;
     bool own = false;
+    bool inherited = false;    // the Default project's own template, read-only here (1.4.2); `own` is set too
     QJsonArray models;         // Document::models(): resource, hash, name, source
     QStringList neededPacks;   // namespaces of its packs not installed, or installed at another version
     QList<CarriedPack> carriedPacks; // the packs the folder holds, whether or not installed here
@@ -79,8 +83,11 @@ public:
     // The person's own folder, then the bundled one: $FUGUE_TEMPLATES when set; else
     // <prefix>/share/fugue/templates beside the running binary's bin/, else templates/ beside
     // the binary (the build folder links the source tree's there).
+    // A project that inherits `templates` (1.4.2) has the Default's own folder between them, tagged inherited.
     static QList<TemplateRoot> standardRoots();
-    static QString ownFolder(); // ~/Documents/Fugue/templates
+    static QString ownFolder(); // ~/Documents/Fugue/templates; a project's: <root>/documents/templates
+    // The Default project's own folder (the ordinary session's ~/Documents/Fugue/templates), from inside a project too.
+    static QString defaultOwnFolder();
 
     // Every template this Fugue can open: the person's own first, then by category in the
     // order categories.json gives (unnamed ones after, by id), then by title.
@@ -98,6 +105,13 @@ public:
     // A different file already at such a name stays: the sample takes `-2`, `-3`... and the
     // workflow names that instead. On a failure nothing it wrote is left.
     Errors copyTo(const Template &chosen, const QString &path) const;
+
+    // Saves `workflow` (a workflow file's bytes; empty: the template's own) as this session's own template
+    // `chosen.id`. Over one of the session's own, the file is replaced in place. Over a bundled one or one
+    // inherited from the Default project (read-only), a copy is made in ownFolder(): its template.json,
+    // preview, sample inputs and carried packs, and the new workflow; the copy hides the original (an own
+    // template wins a clash, 11.10) and the original is never touched.
+    Errors saveOwn(const Template &chosen, const QByteArray &workflow) const;
 
 private:
     void scan(QList<Template> *out, Errors *problems) const;

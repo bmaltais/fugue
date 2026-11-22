@@ -40,6 +40,7 @@ struct PromptTemplate {
     QString durationNote; // with {seconds}; empty: this template does not use a length
     QString languageNote; // with {language}; empty: the general sentence
     QList<PromptExample> examples;
+    bool inherited = false; // the Default project's file, read-only here (1.4.2); a template of the same id in the session's own folder replaces it
 };
 
 // What a node's other inputs add to a template's instructions. Empty or zero: nothing is added.
@@ -53,7 +54,10 @@ class PromptTemplates {
 public:
     // Fugue's own templates, then the files of `userFolder` (default dataDir()/prompts); read each
     // time, so a file dropped in is there at once.
-    static PromptTemplates load(const QString &userFolder = {});
+    // A project that inherits `prompts` (spec 1.4.2) also reads the Default's folder, between Fugue's own and its
+    // own: its templates are tagged `inherited` and an own file with the same id hides them. `inheritedFolder`
+    // (tests) names that folder; with an empty `userFolder` the session's real ones are used.
+    static PromptTemplates load(const QString &userFolder = {}, const QString &inheritedFolder = {});
     // One file's text; what it says wrong goes to problems().
     static PromptTemplates parse(const QByteArray &json, const QString &what);
 

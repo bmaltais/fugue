@@ -12,6 +12,7 @@
 #include <ctime>
 #include <fcntl.h>
 #include <sys/file.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 
@@ -277,6 +278,7 @@ Lock::Lock(const QString &path, const QString &crossRoot) {
     QDir().mkpath(QFileInfo(path).path());
     m_fd = ::open(QFile::encodeName(path).constData(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
     if (!crossRoot.isEmpty()) {
+        m_crossPath = crossRoot;
         QDir().mkpath(QFileInfo(crossRoot).path());
         m_crossFd = ::open(QFile::encodeName(crossRoot).constData(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
     }
@@ -298,8 +300,31 @@ bool Lock::tryAcquire() {
     if (m_held && m_crossFd >= 0 && ::flock(m_crossFd, LOCK_EX | LOCK_NB) != 0) {
         ::flock(m_fd, LOCK_UN); // another root's run has the GPU: wait for it, hold nothing
         m_held = false;
+        // Say so, so that its helper can give the memory back (spec 1.4.2): a time stamp, never a lock, so a
+        // waiter that dies leaves nothing behind that blocks anyone.
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        if (now - m_lastWaitMark >= 500) {
+            m_lastWaitMark = now;
+            const int mark = ::open(QFile::encodeName(m_crossPath + QStringLiteral(".wait")).constData(), O_WRONLY | O_CREAT | O_CLOEXEC, 0600);
+            if (mark >= 0) {
+                ::futimens(mark, nullptr);
+                ::close(mark);
+            }
+        }
+    }
+    if (m_held && m_lastWaitMark != 0) {
+        // Its turn came: its own stamp must not make its own helper give the memory back.
+        ::unlink(QFile::encodeName(m_crossPath + QStringLiteral(".wait")).constData());
+        m_lastWaitMark = 0;
     }
     return m_held;
+}
+
+bool Lock::otherRootWaiting(const QString &crossRoot, int freshMs) {
+    if (crossRoot.isEmpty())
+        return false;
+    const QFileInfo mark(crossRoot + QStringLiteral(".wait"));
+    return mark.exists() && mark.lastModified().msecsTo(QDateTime::currentDateTime()) <= freshMs;
 }
 
 void Lock::release() {

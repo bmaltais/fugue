@@ -109,9 +109,16 @@ public:
     bool held() const { return m_held; }
     void release();
 
+    // Whether a run of another root has been waiting for the cross-root lock `crossRoot` lately (a failed try
+    // there leaves a time stamp in `<crossRoot>.wait`, at most every half second, so a waiter that is gone
+    // stops counting after `freshMs`). The holder asks it to give the GPU's memory back for the one that waits.
+    static bool otherRootWaiting(const QString &crossRoot, int freshMs = 3000);
+
 private:
     int m_fd = -1;
     int m_crossFd = -1;
+    QString m_crossPath;
+    qint64 m_lastWaitMark = 0;
     bool m_held = false;
 };
 

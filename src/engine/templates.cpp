@@ -2,6 +2,7 @@
 
 #include "engine/fugue_home.h"
 #include "engine/paths.h"
+#include "engine/project.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -169,15 +170,37 @@ QString TemplateLibrary::ownFolder() {
     return QDir::cleanPath((documents.isEmpty() ? QDir::homePath() : documents) + QStringLiteral("/Fugue/templates"));
 }
 
+QString TemplateLibrary::defaultOwnFolder() {
+    if (fugueHome().isEmpty())
+        return ownFolder();
+    // The ordinary session's Documents folder: user-dirs.dirs of the base config folder (Qt reads the redirected
+    // one inside a root), else ~/Documents.
+    QString documents;
+    QFile dirs(QFileInfo(baseConfigDir()).absolutePath() + QStringLiteral("/user-dirs.dirs"));
+    if (dirs.open(QIODevice::ReadOnly))
+        for (const QByteArray &line : dirs.readAll().split('\n')) {
+            const QByteArray text = line.trimmed();
+            if (text.startsWith("XDG_DOCUMENTS_DIR=")) {
+                documents = QString::fromUtf8(text.mid(18)).remove(QLatin1Char('"'));
+                documents.replace(QStringLiteral("$HOME"), QDir::homePath());
+            }
+        }
+    if (documents.isEmpty() || !QDir::isAbsolutePath(documents))
+        documents = QDir::homePath() + QStringLiteral("/Documents");
+    return QDir::cleanPath(documents + QStringLiteral("/Fugue/templates"));
+}
+
 QList<TemplateRoot> TemplateLibrary::standardRoots() {
-    QList<TemplateRoot> roots{{ownFolder(), true}};
+    QList<TemplateRoot> roots{{ownFolder(), true, false}};
+    if (sessionInherits().contains(QStringLiteral("templates")))
+        roots << TemplateRoot{defaultOwnFolder(), true, true};
     const QString given = qEnvironmentVariable("FUGUE_TEMPLATES");
     if (!given.isEmpty())
-        return roots << TemplateRoot{QDir::cleanPath(given), false};
+        return roots << TemplateRoot{QDir::cleanPath(given), false, false};
     const QString app = QCoreApplication::applicationDirPath();
     for (const QString &candidate : {app + QStringLiteral("/../share/fugue/templates"), app + QStringLiteral("/templates")})
         if (QFileInfo(candidate).isDir())
-            return roots << TemplateRoot{QDir::cleanPath(candidate), false};
+            return roots << TemplateRoot{QDir::cleanPath(candidate), false, false};
     return roots;
 }
 
@@ -206,6 +229,7 @@ void TemplateLibrary::scan(QList<Template> *out, Errors *problems) const {
         for (const QFileInfo &entry : dir.entryInfoList(QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot, QDir::Name)) {
             Template t;
             t.own = root.own;
+            t.inherited = root.inherited;
             QJsonObject about;
             if (entry.isDir()) {
                 const QDir folder(entry.absoluteFilePath());
@@ -282,6 +306,8 @@ void TemplateLibrary::scan(QList<Template> *out, Errors *problems) const {
     std::stable_sort(found.begin(), found.end(), [](const auto &a, const auto &b) {
         if (a.first.own != b.first.own)
             return a.first.own;
+        if (a.first.inherited != b.first.inherited)
+            return b.first.inherited; // the session's own before the Default's
         if (a.second != b.second)
             return a.second < b.second;
         if (a.first.category != b.first.category)
@@ -315,6 +341,68 @@ std::optional<Template> TemplateLibrary::find(const QString &id) const {
         if (t.id == id)
             return t;
     return std::nullopt;
+}
+
+namespace {
+
+Error saveFailed(const QString &what, const QString &why) {
+    return makeError(QStringLiteral("permission_denied"), QStringLiteral("%1: %2.").arg(what, why));
+}
+
+// Copies the files and folders under `from` into `to`, never replacing a file.
+Errors copyTree(const QString &from, const QString &to) {
+    if (Errors made = makeFolder(to); !made.isEmpty())
+        return made;
+    for (const QFileInfo &entry : QDir(from).entryInfoList(QDir::Dirs | QDir::Files | QDir::NoDotAndDotDot | QDir::Hidden, QDir::Name)) {
+        const QString target = QDir(to).filePath(entry.fileName());
+        if (entry.isSymLink())
+            continue; // a link could point outside the template
+        if (entry.isDir()) {
+            if (Errors failed = copyTree(entry.absoluteFilePath(), target); !failed.isEmpty())
+                return failed;
+        } else if (!QFile::copy(entry.absoluteFilePath(), target)) {
+            return {saveFailed(QStringLiteral("Cannot copy %1").arg(entry.absoluteFilePath()), QStringLiteral("it was not written to %1").arg(target))};
+        }
+    }
+    return {};
+}
+
+} // namespace
+
+Errors TemplateLibrary::saveOwn(const Template &chosen, const QByteArray &workflow) const {
+    if (chosen.own && !chosen.inherited) {
+        if (workflow.isEmpty())
+            return {};
+        return replaceFile(chosen.workflow, workflow, QFileInfo(chosen.workflow).fileName());
+    }
+    const QString target = QDir(ownFolder()).filePath(chosen.id);
+    if (QFileInfo::exists(target))
+        return {makeError(QStringLiteral("usage"), QStringLiteral("%1 already exists.").arg(target),
+                          QStringLiteral("An own template of the same id would hide this one already; save over that."))};
+    QByteArray bytes = workflow;
+    if (bytes.isEmpty()) {
+        QFile source(chosen.workflow);
+        if (!source.open(QIODevice::ReadOnly))
+            return {saveFailed(QStringLiteral("Cannot read %1").arg(chosen.workflow), source.errorString())};
+        bytes = source.readAll();
+    }
+    const auto undo = [&target](Errors errors) {
+        QDir(target).removeRecursively();
+        return errors;
+    };
+    if (QFileInfo(chosen.workflow).fileName() == kWorkflow) {
+        if (Errors failed = copyTree(chosen.folder, target); !failed.isEmpty())
+            return undo(failed);
+    } else { // a loose .fugue file of the Default's folder: a folder with a title of its own
+        if (Errors made = makeFolder(target); !made.isEmpty())
+            return undo(made);
+        const QByteArray about = QJsonDocument(QJsonObject{{"title", chosen.title}}).toJson(QJsonDocument::Compact);
+        if (Errors failed = replaceFile(QDir(target).filePath(kAbout), about, kAbout); !failed.isEmpty())
+            return undo(failed);
+    }
+    if (Errors failed = replaceFile(QDir(target).filePath(kWorkflow), bytes, kWorkflow); !failed.isEmpty())
+        return undo(failed);
+    return {};
 }
 
 Errors TemplateLibrary::copyTo(const Template &chosen, const QString &path) const {

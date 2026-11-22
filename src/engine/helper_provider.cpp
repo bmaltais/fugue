@@ -113,6 +113,11 @@ HelperProvider::HelperProvider(const ProviderInstance &instance, StdioLaunch lau
     m_idleMs = idle > 0 ? int(std::min(idle, kMaxIdleSeconds) * 1000) : 0;
     m_idle.setSingleShot(true);
     connect(&m_idle, &QTimer::timeout, this, [this] { stop(); });
+    m_yield.setInterval(500);
+    connect(&m_yield, &QTimer::timeout, this, [this] {
+        if (m_yieldProbe && m_yieldProbe())
+            stop();
+    });
 }
 
 HelperProvider::~HelperProvider() {
@@ -303,6 +308,7 @@ void HelperProvider::send(QJsonObject message, Answer answer) {
     message.insert("id", id);
     m_waiting.insert(id, std::move(answer));
     m_idle.stop();
+    m_yield.stop();
     m_process->write(QJsonDocument(message).toJson(QJsonDocument::Compact) + '\n');
 }
 
@@ -381,6 +387,7 @@ void HelperProvider::finished() {
 
 void HelperProvider::abandon(const Error &why) {
     m_idle.stop();
+    m_yield.stop();
     const QHash<QString, Answer> waiting = std::exchange(m_waiting, {});
     for (const Answer &answer : waiting)
         answer(Result<QJsonObject>(why));
@@ -423,17 +430,38 @@ QProcess *HelperProvider::stop() {
     return process;
 }
 
+void HelperProvider::setYieldProbe(std::function<bool()> probe) {
+    m_yieldProbe = std::move(probe);
+    updateIdle();
+}
+
 void HelperProvider::updateIdle() {
-    if (!m_process || m_idleMs <= 0 || !m_waiting.isEmpty()) {
+    const auto busy = [this] {
+        if (!m_process || !m_waiting.isEmpty())
+            return true;
+        for (const Job &job : std::as_const(m_jobs))
+            if (job.generation == m_generation && !job.status.isTerminal())
+                return true;
+        return false;
+    };
+    if (busy()) {
         m_idle.stop();
+        m_yield.stop();
         return;
     }
-    for (const Job &job : std::as_const(m_jobs))
-        if (job.generation == m_generation && !job.status.isTerminal()) {
-            m_idle.stop();
+    // No job: a run of another root that waits for the GPU gets the memory now, not at the idle timeout.
+    if (m_yieldProbe) {
+        if (m_yieldProbe()) {
+            m_yield.stop();
+            stop();
             return;
         }
-    m_idle.start(m_idleMs);
+        m_yield.start();
+    }
+    if (m_idleMs <= 0)
+        m_idle.stop();
+    else
+        m_idle.start(m_idleMs);
 }
 
 } // namespace fugue
