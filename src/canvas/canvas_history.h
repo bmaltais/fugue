@@ -28,7 +28,7 @@ class CanvasHistory : public QObject {
     // The folder of the store; empty is the session's (`<data>/canvases`). A test sets its own.
     Q_PROPERTY(QString storeRoot READ storeRoot WRITE setStoreRoot NOTIFY storeChanged)
     Q_PROPERTY(QString canvasId READ canvasId WRITE setCanvasId NOTIFY canvasChanged)
-    // [{id, name, head, created}], newest first.
+    // [{id, name, head, created, width, height, size, changed, changedText}], newest first (canvas/canvas_choices.h).
     Q_PROPERTY(QVariantList canvases READ canvases NOTIFY storeChanged)
     Q_PROPERTY(QVariantList revisions READ revisions NOTIFY revisionsChanged)
     Q_PROPERTY(QString revisionA READ revisionA NOTIFY compareChanged)

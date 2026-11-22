@@ -152,7 +152,7 @@ bool widgetFits(const QString &widget, const InputSpec &input) {
     if (widget == "spin" || widget == "slider" || widget == "seed")
         return type == "number";
     if (widget == "line" || widget == "multiline" || widget == "file" || widget == "folder" ||
-        widget == "color" || widget == "mask" || widget == "paint")
+        widget == "color" || widget == "mask" || widget == "paint" || widget == "canvas")
         return type == "text";
     if (widget == "toggle")
         return type == "boolean";

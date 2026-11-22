@@ -30,7 +30,8 @@ Two canvases with the same pixels and layer settings have the same **tree hash**
 
 ## In a workflow
 
-Two nodes in the `Image/Canvas` category use a canvas by its id:
+Two nodes in the `Image/Canvas` category use a canvas by its id (Canvas Region's Canvas is a drop-down in
+the window, see below):
 
 - **Canvas Region** takes a rectangle (X, Y, Width, Height; 0 runs to the edge) or a mask you connect,
   adds Padding around it, and gives you that part of the canvas as a picture, the mask of the part to
@@ -54,6 +55,15 @@ head as it has become. To keep reading one revision (to try several fills of the
 Region that revision's hash, or freeze it.
 
 Region's picture keeps the canvas's transparency. A stitch from Region also goes to Stitch.
+
+In the window, Canvas Region's **Canvas** is a drop-down of the canvases of the folder you are working in
+(the Default's, or the project's own: a canvas belongs to the one it was made in). Each row has the name,
+the size, the time of the last change and the id. **New canvas…** asks for a name and a size
+(1024 × 1024 to start; at most 16384 a side and 64 megapixels), or makes one from a picture file with
+**From a picture…**; **Import picture…** makes a canvas straight from a PNG, JPEG, WebP or `.ora`. The
+canvas is put in the input. The input still holds the id (a workflow file is the same as before). An id this
+folder has no canvas by, such as one copied from the Default into a project, shows as `canvas-… (missing)`
+and the list is there to pick the right one. The list follows `fugue canvas new` and runs as they happen.
 
 ## Review a fill
 

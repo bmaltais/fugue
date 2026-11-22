@@ -64,9 +64,19 @@ Rectangle {
     // A model file picked and still being hashed (WidgetEdit::setDiskModel): {progress, name},
     // {error} when it could not be read, or empty.
     readonly property var hashing: kind === "model" && edits.hashRevision >= 0 ? edits.hashState(nodeId, name) : ({})
+    // A canvas input (#211): the id stored, the canvas's row in this root's list (empty when this
+    // root has none by that id: it was made in another root, or is gone), re-read when the list changes.
+    readonly property string canvasId: kind === "canvas" && port.value !== undefined ? String(port.value) : ""
+    readonly property var canvasRow: kind === "canvas" && canvasId !== "" && edits.canvasesRevision >= 0
+                                     ? edits.canvasRow(canvasId) : ({})
+    readonly property bool canvasMissing: kind === "canvas" && canvasId !== "" && !linked && canvasRow.id === undefined
     readonly property string valueText: {
         if (linked)
             return edits.source(nodeId, name)
+        if (kind === "canvas" && canvasId === "")
+            return qsTr("Choose a canvas")
+        if (kind === "canvas")
+            return canvasRow.id !== undefined ? canvasRow.name : qsTr("%1 (missing)").arg(canvasId)
         if (hashing.error !== undefined)
             return hashing.error
         if (hashing.progress !== undefined)
@@ -77,7 +87,7 @@ Rectangle {
     }
     // The glyph after the value (a Lucide name): what a click at the right end opens.
     readonly property string glyph: !editable ? ""
-        : kind === "choice" || kind === "model" ? "chevron-down"
+        : kind === "choice" || kind === "model" || kind === "canvas" ? "chevron-down"
         : kind === "seed" ? "dices"
         : kind === "folder" ? "folder"
         : kind === "file" ? "file"
@@ -123,8 +133,9 @@ Rectangle {
         lineHeight: root.tall ? 16 : 1
         elide: root.kind === "file" || root.kind === "folder" ? Text.ElideMiddle : Text.ElideRight
         textFormat: Text.PlainText
-        color: root.hashing.error !== undefined ? root.look.error
+        color: root.hashing.error !== undefined || root.canvasMissing ? root.look.error
                : root.linked || root.isDefault || root.kind === "model" && root.literal === undefined
+                 || root.kind === "canvas" && root.canvasId === ""
                ? root.look.label : root.look.text
         font.pixelSize: root.look.labelSize
         font.weight: root.tall ? Font.Normal : Font.Medium
@@ -264,6 +275,8 @@ Rectangle {
             return canvasView ? canvasView.openPaint(nodeId) : undefined
         case "choice":
             return openMenu(choiceEntries())
+        case "canvas":
+            return openMenu(canvasEntries(), "canvases")
         case "seed":
             return atEnd ? openMenu(seedEntries()) : openEditor()
         case "model":
@@ -331,6 +344,26 @@ Rectangle {
         const spec = edits.spec(nodeId, name)
         const current = typeof literal === "string" ? literal : spec["default"]
         return (spec.choices || []).map(c => ({ text: c, value: c, checked: c === current }))
+    }
+    // The canvas picker (#211): this root's canvases (name; size and the time of the last change),
+    // then the two ways to make one. A stored id this root has none of heads the list, checked and
+    // dimmed, and says so: the list is still there to replace it.
+    function canvasEntries() {
+        const entries = []
+        const rows = edits.canvases()
+        if (canvasMissing)
+            entries.push({ text: canvasId, detail: qsTr("not in this root"), checked: true, dim: true,
+                           note: qsTr("A canvas belongs to the Default or the project it was made in."),
+                           value: { id: canvasId } })
+        for (const row of rows)
+            entries.push({ text: row.name, value: { id: row.id }, checked: row.id === canvasId,
+                           detail: row.size === "" ? row.changedText : qsTr("%1 · %2").arg(row.size).arg(row.changedText),
+                           note: row.id, keywords: row.id })
+        if (rows.length === 0)
+            entries.push({ text: qsTr("No canvases yet"), enabled: false, note: "" })
+        entries.push({ text: qsTr("New canvas…"), value: { action: "new" }, keep: true })
+        entries.push({ text: qsTr("Import picture…"), value: { action: "import" }, keep: true })
+        return entries
     }
     function seedEntries() {
         const mode = edits.seedMode(nodeId, name)
@@ -427,6 +460,12 @@ Rectangle {
             return edits.useInput(nodeId, value.recent)
         }
         switch (kind) {
+        case "canvas":
+            if (value.action === "new")
+                return picker().askNewCanvas()
+            if (value.action === "import")
+                return picker().askPicture(false)
+            return edits.setValue(nodeId, name, value.id)
         case "choice":
             return edits.setValue(nodeId, name, value)
         case "seed":
@@ -452,7 +491,8 @@ Rectangle {
             pickers = Qt.createComponent("WidgetPicker.qml").createObject(root, { host: root })
         return pickers
     }
-    // `entries` null: the model list, kept current while models arrive.
-    function openMenu(entries) { picker().openMenu(entries) }
+    // `entries` null: the model list, kept current while models arrive. `follow` names what else
+    // keeps the open menu current: "canvases".
+    function openMenu(entries, follow) { picker().openMenu(entries, follow || "") }
     function openDialog() { picker().openDialog() }
 }

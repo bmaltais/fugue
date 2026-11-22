@@ -90,6 +90,7 @@ WidgetEdit::WidgetEdit(const Registry *registry, CanvasModel *canvas, QObject *p
     : QObject(parent), m_registry(registry), m_canvas(canvas) {
     // One file at a time: two models read at once from one disk each take twice as long.
     m_hashPool.setMaxThreadCount(1);
+    connect(&m_canvases, &CanvasChoices::changed, this, &WidgetEdit::canvasesChanged);
     connect(canvas, &CanvasModel::documentReplaced, this, [this] {
         if (m_picks.isEmpty())
             return;
@@ -122,6 +123,35 @@ WidgetEdit::Target WidgetEdit::target(const QString &node, const QString &input)
     target.spec = spec;
     return target;
 }
+
+WidgetEdit::Target WidgetEdit::canvasTarget(const QString &node, const QString &input) const {
+    const Target t = target(node, input);
+    return t.widget == QLatin1String("canvas") ? t : Target{};
+}
+
+QVariantList WidgetEdit::canvases() { return m_canvases.rows(); }
+
+QVariantMap WidgetEdit::canvasRow(const QString &id) { return id.isEmpty() ? QVariantMap() : m_canvases.row(id); }
+
+QString WidgetEdit::newCanvas(const QString &node, const QString &input, const QString &name, int width, int height) {
+    if (!canvasTarget(node, input).spec)
+        return tr("%1 is not a canvas input.").arg(input);
+    QString id;
+    if (const QString why = m_canvases.makeBlank(name, width, height, &id); !why.isEmpty())
+        return why;
+    return setText(node, input, id);
+}
+
+QString WidgetEdit::importCanvas(const QString &node, const QString &input, const QString &path, const QString &name) {
+    if (!canvasTarget(node, input).spec)
+        return tr("%1 is not a canvas input.").arg(input);
+    QString id;
+    if (const QString why = m_canvases.makeFromFile(path, name, &id); !why.isEmpty())
+        return why;
+    return setText(node, input, id);
+}
+
+QString WidgetEdit::pictureSize(const QString &path) const { return m_canvases.pictureSize(path); }
 
 QVariantMap WidgetEdit::spec(const QString &node, const QString &input) const {
     const Target t = target(node, input);

@@ -8,8 +8,8 @@
   "keywords": ["canvas", "region", "select", "inpaint", "outpaint", "generative fill", "layer", "crop"],
   "runtime": {"kind": "builtin"},
   "inputs": [
-    {"name": "canvas", "type": "text", "label": "Canvas", "widget": "line",
-     "description": "The canvas's id, as `fugue canvas new` prints it (canvas-0123456789ab)."},
+    {"name": "canvas", "type": "text", "label": "Canvas", "widget": "canvas",
+     "description": "The canvas's id, as `fugue canvas new` prints it (canvas-0123456789ab). The window picks it from this folder's canvases, or makes one (New canvas, Import picture); a canvas belongs to the Default or the project it was made in."},
     {"name": "revision", "type": "text", "label": "Revision", "default": "head", "widget": "line", "advanced": true,
      "description": "head, or a revision's hash (or its first 8 digits or more). head is replaced by the revision it is at when the workflow is compiled."},
     {"name": "mask", "type": "image", "role": "mask", "label": "Mask", "optional": true,

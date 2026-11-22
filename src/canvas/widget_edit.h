@@ -60,6 +60,7 @@
 #include <QVariantMap>
 #include <QtQmlIntegration/qqmlintegration.h>
 
+#include "canvas/canvas_choices.h"
 #include "engine/model_catalog.h"
 #include "engine/model_offers.h"
 #include "engine/model_shape.h"
@@ -88,6 +89,8 @@ class WidgetEdit : public QObject {
     Q_PROPERTY(int modelsRevision READ modelsRevision NOTIFY modelsChanged)
     // Bumped whenever a picked file's hashing moves on or ends, so the inputs re-read hashState().
     Q_PROPERTY(int hashRevision READ hashRevision NOTIFY hashingChanged)
+    // Bumped whenever the root's canvases may have changed, so the `canvas` inputs re-read canvases().
+    Q_PROPERTY(int canvasesRevision READ canvasesRevision NOTIFY canvasesChanged)
 
 public:
     WidgetEdit(const fugue::Registry *registry, CanvasModel *canvas, QObject *parent = nullptr);
@@ -219,7 +222,27 @@ public:
     // file arrives its handle is put in the input (one undo step), if the node still has it.
     Q_INVOKABLE QString downloadCatalogModel(const QString &node, const QString &input, const QString &id);
 
+    // --- the canvas picker (#211, spec 6.2 `canvas`, 14.5) ---
+    // An input with the `canvas` widget holds a canvas id, as a line does, so a workflow stays
+    // portable; the picker lists this root's canvases (the session's store, a project's own).
+    // The rows: [{id, name, width, height, size, changed, changedText, head}], newest first.
+    Q_INVOKABLE QVariantList canvases();
+    // The row of one canvas of this root; empty when there is none by that id (the input then
+    // shows it as missing, with the list still available).
+    Q_INVOKABLE QVariantMap canvasRow(const QString &id);
+    // Makes a blank canvas (one empty paint layer) or one from a picture or .ora file, in this
+    // root's store, and sets the input to its id as one undo step. Returns why not, or empty. The
+    // canvas itself is not undone with the step: nothing is ever deleted (spec 14.5).
+    Q_INVOKABLE QString newCanvas(const QString &node, const QString &input, const QString &name, int width, int height);
+    Q_INVOKABLE QString importCanvas(const QString &node, const QString &input, const QString &path, const QString &name);
+    // "1920 × 1080" for a picture file the dialog is about to make a canvas from; empty when unreadable.
+    Q_INVOKABLE QString pictureSize(const QString &path) const;
+    int canvasesRevision() const { return m_canvases.revision(); }
+    // The list's source (tests set the store's folder).
+    fugue::CanvasChoices *canvasChoices() { return &m_canvases; }
+
 signals:
+    void canvasesChanged();
     void modelsChanged();
     void hashingChanged();
     // A session ended without finish() or cancel(): another edit began, or the document was
@@ -266,6 +289,9 @@ private:
         QString scope, node, input, path, resource, name, hash;
     };
     void downloadsFinished();
+    fugue::CanvasChoices m_canvases;
+    // Whether `input` has the canvas widget, and its target; empty Target otherwise.
+    Target canvasTarget(const QString &node, const QString &input) const;
     fugue::ModelCatalog m_catalog;
     bool m_catalogSet = false;
     QHash<QString, QList<fugue::CatalogModel>> m_catalogMissing; // by modelsKey()

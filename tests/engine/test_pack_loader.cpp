@@ -252,6 +252,24 @@ private slots:
             QVERIFY2(!reasonOf(loaded, name).isEmpty(), name);
     }
 
+    // The canvas widget (#211) holds a canvas id: text, and not an input file (a canvas is not copied with a workflow).
+    void aPacksCanvasWidgetIsATextInputThatHoldsNoFile() {
+        QTemporaryDir root;
+        const QString id = "io.github.alice.tools";
+        QJsonObject good = nodeJson(id + "/good");
+        good["inputs"] = QJsonArray{QJsonObject{{"name", "canvas"}, {"type", "text"}, {"widget", "canvas"}}};
+        QJsonObject onNumber = nodeJson(id + "/onnumber");
+        onNumber["inputs"] = QJsonArray{QJsonObject{{"name", "canvas"}, {"type", "number"}, {"widget", "canvas"}}};
+        const QString dir = makePack(root.path(), id, packJson(id, {"good", "onnumber"}), {{"good", good}, {"onnumber", onNumber}});
+        Registry registry;
+        const LoadedPack loaded = loadPack(registry, dir);
+        const NodeType *type = registry.nodeType(id + "/good");
+        QVERIFY2(type, qPrintable(reasonOf(loaded, "good")));
+        QCOMPARE(type->input("canvas")->widget(), QString("canvas"));
+        QVERIFY(!type->input("canvas")->holdsInputFile());
+        QVERIFY(!reasonOf(loaded, "onnumber").isEmpty());
+    }
+
     void aBadNodeDisablesOnlyThatNode() {
         QTemporaryDir root;
         const QString id = "io.github.alice.tools";

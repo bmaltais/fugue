@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "canvas/canvas_choices.h"
 #include "engine/canvas_diff.h"
 
 namespace fugue {
@@ -52,12 +53,7 @@ void CanvasHistory::setCanvasId(const QString &id) {
     reload();
 }
 
-QVariantList CanvasHistory::canvases() const {
-    QVariantList rows;
-    for (const canvas::CanvasInfo &info : store().list())
-        rows.append(QVariantMap{{"id", info.id}, {"name", info.name}, {"head", info.head}, {"created", info.created}});
-    return rows;
-}
+QVariantList CanvasHistory::canvases() const { return canvasRows(store()); }
 
 QString CanvasHistory::kindB() const {
     for (const QVariant &row : m_revisions)
