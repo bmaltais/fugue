@@ -69,7 +69,7 @@ QVariantMap barsMenu() {
 QVariantList bar() {
     return {
         submenu(QT_TRANSLATE_NOOP("Menu", "&File"),
-                {command("file.new"), command("file.open"), command("file.open-clipboard"), command("file.templates"), separator(),
+                {command("file.new"), command("file.open"), command("file.open-clipboard"), command("file.templates"), command("file.projects"), separator(),
                  command("file.save"), command("file.save-as"), command("file.rename"), command("file.duplicate"),
                  command("file.export-share"), command("file.export-compiled"), separator(), command("file.close"),
                  command("file.close-others"), command("app.quit")}),

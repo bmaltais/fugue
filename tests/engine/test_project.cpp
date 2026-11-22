@@ -24,7 +24,7 @@ using namespace fugue;
 namespace {
 
 const char *const kVariables[] = {"FUGUE_HOME",       "FUGUE_PROJECT",   "FUGUE_BASE_XDG_CONFIG_HOME", "FUGUE_BASE_XDG_DATA_HOME",
-                                  "FUGUE_BASE_XDG_STATE_HOME", "FUGUE_BASE_XDG_RUNTIME_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME",     "XDG_STATE_HOME",
+                                  "FUGUE_BASE_XDG_STATE_HOME", "FUGUE_BASE_XDG_CACHE_HOME", "FUGUE_BASE_XDG_RUNTIME_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME",     "XDG_STATE_HOME",
                                   "XDG_CACHE_HOME",   "XDG_RUNTIME_DIR", "TMPDIR",                     "WAYLAND_DISPLAY",
                                   "DBUS_SESSION_BUS_ADDRESS", "CUDA_CACHE_PATH", "__GL_SHADER_DISK_CACHE_PATH",
                                   "PIPEWIRE_RUNTIME_DIR", "PULSE_RUNTIME_PATH"};

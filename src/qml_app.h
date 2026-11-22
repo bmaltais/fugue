@@ -24,6 +24,7 @@
 #include "run/run_bar.h"
 #include "run/run_queue.h"
 #include "search/node_library.h"
+#include "settings/project_model.h"
 #include "settings/settings_model.h"
 #include "theme.h"
 #include "translator.h"
@@ -52,6 +53,7 @@ struct AppObjects {
     RecentFiles *recentFiles = nullptr;   // optional, with sidePanels
     ChromeVisibility *chrome = nullptr;   // optional: which bars and panels are shown (#129)
     MediaLibrary *mediaLibrary = nullptr; // optional: the media browser's results and thumbnails (#133)
+    ProjectModel *projects = nullptr;     // optional: the projects dialog and the project chip (spec 1.4.2)
 };
 
 class QmlApp : public QObject {
@@ -76,6 +78,7 @@ class QmlApp : public QObject {
     Q_PROPERTY(fugue::RecentFiles *recentFiles READ recentFiles CONSTANT)
     Q_PROPERTY(fugue::ChromeVisibility *chrome READ chrome CONSTANT)
     Q_PROPERTY(fugue::MediaLibrary *mediaLibrary READ mediaLibrary CONSTANT)
+    Q_PROPERTY(fugue::ProjectModel *projects READ projects CONSTANT)
 
 public:
     explicit QmlApp(const AppObjects &objects, QObject *parent = nullptr) : QObject(parent), m_objects(objects) {}
@@ -97,6 +100,7 @@ public:
     RecentFiles *recentFiles() const { return m_objects.recentFiles; }
     ChromeVisibility *chrome() const { return m_objects.chrome; }
     MediaLibrary *mediaLibrary() const { return m_objects.mediaLibrary; }
+    ProjectModel *projects() const { return m_objects.projects; }
 
 private:
     AppObjects m_objects;

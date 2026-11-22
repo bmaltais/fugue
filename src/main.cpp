@@ -165,10 +165,17 @@ int main(int argc, char *argv[]) {
     recentFiles.follow(&workflows);
     fugue::MediaLibrary mediaLibrary;
 
+    // Projects (spec 1.4.2): the dialog's model; the window title and the chip follow it, and a switch starts
+    // another process and closes this window through the quit command (which asks about unsaved work).
+    fugue::ProjectModel projects;
+    projects.setWindow([&commands] { return commands.unsavedWork(); }, [&commands] { commands.requestQuit(); });
+    projects.registerCommands(commands);
+    projects.bindTitle(workflows);
+
     const fugue::AppObjects objects{&translator, &theme,   &commands, &canvasModel,  &workflows,
                                     &appSettings, &runs, &imageActions, &colorHistory, &layoutColors,
                                     &runBar,      &runQueue,    &sidePanels,   &nodeLibrary,  &recentFiles,  &chrome,
-                                    &mediaLibrary};
+                                    &mediaLibrary, &projects};
     // The registry is filled again when the packs or the trust change, so what is installed is
     // usable with no restart (#70). Made after what it refreshes, so it goes first.
     fugue::RegistryReloader reloader(&registry, addNodeTypes);

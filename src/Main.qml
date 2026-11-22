@@ -236,6 +236,14 @@ ApplicationWindow {
                 win.templatesDialog.open()
                 return
             }
+            if (id === "file.projects") {
+                if (App.projects === null)
+                    return
+                if (!win.projectsDialog)
+                    win.projectsDialog = projectsComponent.createObject(win.contentItem)
+                win.projectsDialog.open()
+                return
+            }
             if ((id !== "app.settings" && id !== "cache.clear-previews") || !win.appSettingsModel)
                 return
             if (!win.settingsPanel)
@@ -269,6 +277,12 @@ ApplicationWindow {
     Component {
         id: templatesComponent
         TemplatesDialog {}
+    }
+    // The Projects dialog (spec 1.4.2), made the first time file.projects (or the project chip) asks for it.
+    property var projectsDialog: null
+    Component {
+        id: projectsComponent
+        ProjectsDialog { model: App.projects }
     }
     Component {
         id: settingsComponent

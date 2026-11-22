@@ -10,9 +10,11 @@ import Fugue
 SettingsParts.Setting {
     id: paths
     required property var host
-    property string key
     property var value: []
     property bool kinds: false
+    // The folders of the Default project this project reads: shown after its own, read-only, with the origin
+    // tag; the remove button answers with the refusal (spec 1.4.2).
+    property var inherited: []
     ColumnLayout {
         Layout.fillWidth: true
         spacing: App.theme.look.unit
@@ -55,6 +57,49 @@ SettingsParts.Setting {
                     visible: paths.kinds && (paths.host.model.modelFolderKindsSet[pathRow.modelData] ?? "") === ""
                     Layout.fillWidth: true
                     text: paths.host.model.modelFolderFound(pathRow.modelData)
+                    color: App.theme.look.label
+                    font.pixelSize: App.theme.look.labelSize
+                }
+            }
+        }
+        Repeater {
+            model: paths.inherited
+            delegate: ColumnLayout {
+                id: inheritedRow
+                required property string modelData
+                required property int index
+                objectName: paths.key + "-inherited-" + index
+                Layout.fillWidth: true
+                spacing: App.theme.look.unit
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 2 * App.theme.look.unit
+                    Text {
+                        Layout.fillWidth: true
+                        text: inheritedRow.modelData
+                        elide: Text.ElideMiddle
+                        color: App.theme.look.label
+                        font.pixelSize: App.theme.look.textSize
+                    }
+                    Text {
+                        objectName: paths.key + "-inherited-tag-" + inheritedRow.index
+                        text: qsTr("Inherited from Default")
+                        color: App.theme.look.accent
+                        font.pixelSize: App.theme.look.captionSize
+                    }
+                    SettingsParts.SmallButton {
+                        objectName: paths.key + "-inherited-remove-" + inheritedRow.index
+                        glyph: "x"
+                        Accessible.name: qsTr("Remove %1").arg(inheritedRow.modelData)
+                        onClicked: paths.host.apply(paths.host.model.removeInheritedPath(paths.key, inheritedRow.modelData))
+                    }
+                }
+                // What the Default says it holds, when it says (read-only: it is the Default's to change).
+                Text {
+                    readonly property string kind: paths.host.model.modelFolderKindsSet[inheritedRow.modelData] ?? ""
+                    visible: paths.kinds && kind !== ""
+                    Layout.fillWidth: true
+                    text: qsTr("Holds: %1").arg(paths.host.model.modelFolderKinds().find(k => k.value === kind)?.text ?? kind)
                     color: App.theme.look.label
                     font.pixelSize: App.theme.look.labelSize
                 }

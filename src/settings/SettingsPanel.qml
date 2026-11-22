@@ -158,6 +158,9 @@ Popup {
                     SettingsParts.Setting {
                         visible: panel.page === 0
                         title: qsTr("Canvas navigation")
+                        key: "navigation"
+                        origin: panel.model.origins["navigation"] ?? ""
+                        onUseDefaultRequested: panel.apply(panel.model.useDefault("navigation"))
                         note: panel.model.navigation === "legacy"
                               ? qsTr("Left-drag on empty canvas pans and the wheel zooms; Ctrl+drag selects. ComfyUI's default.")
                               : qsTr("Left-drag on empty canvas selects and the wheel pans; Ctrl+wheel zooms.")
@@ -174,6 +177,9 @@ Popup {
                         readonly property int radius: panel.model.cornerRadius // -1: follow Omarchy
                         visible: panel.page === 0
                         title: qsTr("Corner radius")
+                        key: "corner_radius"
+                        origin: panel.model.origins["corner_radius"] ?? ""
+                        onUseDefaultRequested: panel.apply(panel.model.useDefault("corner_radius"))
                         note: radius < 0 ? qsTr("Nodes, menus and popups follow Omarchy's window rounding.")
                                          : qsTr("Nodes, menus and popups are rounded by this much.")
                         Flow {
@@ -221,6 +227,9 @@ Popup {
                     SettingsParts.Setting {
                         visible: panel.page === 0
                         title: qsTr("Magnify small nodes on hover")
+                        key: "hover_magnifier"
+                        origin: panel.model.origins["hover_magnifier"] ?? ""
+                        onUseDefaultRequested: panel.apply(panel.model.useDefault("hover_magnifier"))
                         note: qsTr("Zoomed far out, a short hover over a node shows it at full size over itself, so a wire can start there. Off by default.")
                         SettingsParts.Toggle {
                             objectName: "hoverMagnifier"
@@ -232,6 +241,9 @@ Popup {
                     SettingsParts.Setting {
                         visible: panel.page === 0
                         title: qsTr("Language")
+                        key: "language"
+                        origin: panel.model.origins["language"] ?? ""
+                        onUseDefaultRequested: panel.apply(panel.model.useDefault("language"))
                         note: qsTr("Follows Omarchy's language unless you pick one here.")
                         Choices {
                             Layout.fillWidth: true
@@ -269,6 +281,7 @@ Popup {
                         host: panel
                         key: "model_paths"
                         value: panel.model.modelPaths
+                        inherited: panel.model.inheritedModelPaths
                         kinds: true
                     }
                     PathsSetting {
@@ -278,12 +291,16 @@ Popup {
                         host: panel
                         key: "pack_paths"
                         value: panel.model.packPaths
+                        inherited: panel.model.inheritedPackPaths
                     }
 
                     // Run
                     SettingsParts.Setting {
                         visible: panel.page === 2
                         title: qsTr("Seeds of new nodes")
+                        key: "new_seed"
+                        origin: panel.model.origins["new_seed"] ?? ""
+                        onUseDefaultRequested: panel.apply(panel.model.useDefault("new_seed"))
                         note: qsTr("Randomize makes a new picture each run; fixed starts on a random number that stays.")
                         Choices {
                             Layout.fillWidth: true
@@ -296,6 +313,9 @@ Popup {
                     SettingsParts.Setting {
                         visible: panel.page === 2
                         title: qsTr("Embed the workflow in new Save Image nodes")
+                        key: "embed_workflow"
+                        origin: panel.model.origins["embed_workflow"] ?? ""
+                        onUseDefaultRequested: panel.apply(panel.model.useDefault("embed_workflow"))
                         note: qsTr("Dropping an image back onto Fugue reloads its workflow. Local file paths are never embedded.")
                         Choices {
                             Layout.fillWidth: true

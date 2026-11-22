@@ -219,10 +219,18 @@ QString Workflows::pathOf(int index) const {
 }
 
 QString Workflows::windowTitle() const {
+    const QString project = m_projectName.isEmpty() ? QString() : QStringLiteral(" — ") + m_projectName;
     if (m_current < 0)
         return QStringLiteral("Fugue");
-    return QStringLiteral("%1%2 — Fugue").arg(unsaved(m_current) ? QStringLiteral("• ") : QString(),
-                                              m_tabs[size_t(m_current)].title);
+    return QStringLiteral("%1%2%3 — Fugue").arg(unsaved(m_current) ? QStringLiteral("• ") : QString(),
+                                                m_tabs[size_t(m_current)].title, project);
+}
+
+void Workflows::setProjectName(const QString &name) {
+    if (m_projectName == name)
+        return;
+    m_projectName = name;
+    emit tabsChanged();
 }
 
 QUrl Workflows::suggestedFolder() const {

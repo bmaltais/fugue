@@ -96,7 +96,10 @@ public:
     int count() const { return int(m_tabs.size()); }
     bool unsaved() const;
     bool unsaved(int index) const;
+    // `<workflow> — <project> — Fugue`; the project part is left out for the Default project (spec 1.4.2).
     QString windowTitle() const;
+    // The name of the project the window runs in, empty for the Default project; the title follows.
+    void setProjectName(const QString &name);
     QVariantList recoverable() const { return m_recoverable; }
     QVariantList pendingTrust() const { return m_pendingTrust; }
     QString notice() const { return m_notice; }
@@ -325,6 +328,7 @@ private:
     QVariantList m_recoverable;
     QVariantList m_pendingTrust;
     QString m_notice;
+    QString m_projectName;
     // The last missing-nodes line, to tell it from the banner's other lines on a reload.
     QString m_missingNotice;
     DownloadOffer m_offer; // what goes with m_missingNotice

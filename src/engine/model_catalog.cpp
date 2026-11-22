@@ -133,12 +133,19 @@ ModelCatalog ModelCatalog::load(const QString &userFolder, const QStringList &pa
         add(QStringLiteral(":/fugue/catalog/") + name);
     // A pack's own models: <pack folder>/catalog/*.json, so a pack that brings a resource type brings the
     // models to download for it, with their licences. Data only, and nothing is fetched by reading it.
-    for (const QString &root : userFolder.isEmpty() ? packSearchPaths() : packPaths)
-        for (const QString &pack : QDir(root).entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
-            const QDir folder(root + QLatin1Char('/') + pack + QStringLiteral("/catalog"));
-            for (const QString &name : folder.entryList({QStringLiteral("*.json")}, QDir::Files, QDir::Name))
-                add(folder.filePath(name));
-        }
+    // A project that inherits `packs` (1.4.2) reads the Default's packs' catalogs first, so its own packs'
+    // and its own catalog entries win by id.
+    const auto addPackCatalogs = [&](const QStringList &roots) {
+        for (const QString &root : roots)
+            for (const QString &pack : QDir(root).entryList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name)) {
+                const QDir folder(root + QLatin1Char('/') + pack + QStringLiteral("/catalog"));
+                for (const QString &name : folder.entryList({QStringLiteral("*.json")}, QDir::Files, QDir::Name))
+                    add(folder.filePath(name));
+            }
+    };
+    if (userFolder.isEmpty())
+        addPackCatalogs(inheritedPackPaths());
+    addPackCatalogs(userFolder.isEmpty() ? packSearchPaths() : packPaths);
     // A project that inherits `models` (1.4.2) has the Default's own catalog entries too, under its own.
     if (userFolder.isEmpty() && sessionInherits().contains(QStringLiteral("models"))) {
         const QDir inherited(baseDataDir() + QStringLiteral("/catalog"));

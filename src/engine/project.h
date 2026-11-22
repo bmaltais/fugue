@@ -8,6 +8,7 @@
 // only recorded here: the layering itself is a later step.
 
 #include <QJsonObject>
+#include <QProcessEnvironment>
 #include <QList>
 #include <QString>
 #include <QStringList>
@@ -96,6 +97,9 @@ Result<ProjectEntry> removeProject(const QString &nameOrPath);
 // Replaces the project's `inherits` (unknown and never-inheritable words are reported as warnings and not recorded).
 Result<ProjectEntry> setProjectInherits(const QString &nameOrPath, const QStringList &items);
 
+// Gives the project another name (the same rules and the uniqueness of createProject). The folder does not move.
+Result<ProjectEntry> renameProject(const QString &nameOrPath, const QString &newName);
+
 // What the session's own root inherits: the `inherits` of the project.json at fugueHome(); empty for the
 // Default project, a root with no project.json (anonymous) and a project.json that cannot be used.
 QStringList sessionInherits();
@@ -106,5 +110,13 @@ QString lastUsedProjectRoot();
 // forgets it when the session is Default. Only when there is a registry to update or a project to remember;
 // a failure to write is not worth stopping the window for.
 void recordLastUsedProject();
+
+// The environment a new window of another project (or of the Default) starts with: the ordinary session's
+// XDG folders back in XDG_CONFIG_HOME, XDG_DATA_HOME, XDG_STATE_HOME, XDG_CACHE_HOME and XDG_RUNTIME_DIR (from
+// the FUGUE_BASE_XDG_* copies setFugueHome saved), the variables it redirected into the root (TMPDIR and the
+// GPU caches) taken away, and FUGUE_HOME, FUGUE_PROJECT and the FUGUE_BASE_XDG_* copies removed, so the new
+// process selects its root only from its arguments and saves the base afresh. `current` comes back as it is
+// when it names no root (the Default session).
+QProcessEnvironment baseEnvironment(const QProcessEnvironment &current);
 
 } // namespace fugue

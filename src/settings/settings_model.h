@@ -63,6 +63,15 @@ class SettingsModel : public QObject {
     Q_PROPERTY(double cacheResultsGb READ cacheResultsGb NOTIFY changed)
     Q_PROPERTY(double cacheThumbnailsGb READ cacheThumbnailsGb NOTIFY changed)
     Q_PROPERTY(int runsKept READ runsKept NOTIFY changed)
+    // Where each setting's value comes from (spec 1.4.2), by key: "inherited" (the Default project's, shown
+    // with the tag "Inherited from Default"), "override" (this project's own value over one the Default has:
+    // useDefault() takes it back), "own" or "built-in". Only a project that inherits the key's class has
+    // "inherited" or "override".
+    Q_PROPERTY(QVariantMap origins READ origins NOTIFY changed)
+    // The folders of the Default project this project reads and never writes: its models folder and
+    // model_paths (when `models` is inherited), its packs folder and pack_paths (when `packs` is); ~ for home.
+    Q_PROPERTY(QStringList inheritedModelPaths READ inheritedModelPaths NOTIFY changed)
+    Q_PROPERTY(QStringList inheritedPackPaths READ inheritedPackPaths NOTIFY changed)
     // What is wrong with settings.json, one line each, and whether the panel may write it.
     Q_PROPERTY(QStringList problems READ problems NOTIFY changed)
     Q_PROPERTY(bool writable READ writable NOTIFY changed)
@@ -96,8 +105,9 @@ public:
     void registerCommands(CommandRegistry &registry, std::function<void(const QUrl &)> openUrl);
 
     QString path() const { return m_path; }
-    QString navigation() const { return m_file.settings.navigation; }
-    QString language() const { return m_file.settings.language; }
+    // The settings that can be inherited read as the session sees them (the project's, else the Default's).
+    QString navigation() const { return m_effective.settings.navigation; }
+    QString language() const { return m_effective.settings.language; }
     QVariantList languages() const;
     QString outputFolder() const;
     bool outputFolderIsDefault() const { return m_file.settings.outputFolder.isEmpty(); }
@@ -105,15 +115,18 @@ public:
     bool inputsFolderIsDefault() const { return m_file.settings.inputsFolder.isEmpty(); }
     QStringList modelPaths() const { return m_file.settings.modelPaths; }
     QStringList packPaths() const { return m_file.settings.packPaths; }
-    QString newSeed() const { return m_file.settings.newSeed; }
-    QString embedWorkflow() const { return m_file.settings.embedWorkflow; }
-    int cornerRadius() const { return m_file.settings.cornerRadius; }
-    bool hoverMagnifier() const { return m_file.settings.hoverMagnifier; }
+    QString newSeed() const { return m_effective.settings.newSeed; }
+    QString embedWorkflow() const { return m_effective.settings.embedWorkflow; }
+    int cornerRadius() const { return m_effective.settings.cornerRadius; }
+    bool hoverMagnifier() const { return m_effective.settings.hoverMagnifier; }
+    QVariantMap origins() const;
+    QStringList inheritedModelPaths() const;
+    QStringList inheritedPackPaths() const;
     double cacheResultsGb() const { return m_file.settings.cacheResultsGb; }
     double cacheThumbnailsGb() const { return m_file.settings.cacheThumbnailsGb; }
     int runsKept() const { return m_file.settings.runsKept; }
     static int maxCornerRadius() { return Settings::maxCornerRadius; }
-    QStringList problems() const { return m_file.problems; }
+    QStringList problems() const { return m_effective.problems; }
     bool writable() const { return m_file.writable; }
 
     QString providersPath() const { return m_providersPath; }
@@ -130,6 +143,11 @@ public:
     // Adds a folder to, or removes one from, model_paths or pack_paths.
     Q_INVOKABLE QString addPath(const QString &key, const QVariant &path);
     Q_INVOKABLE QString removePath(const QString &key, int index);
+    // What the panel says when asked to remove a folder this project inherits from the Default: the refusal,
+    // naming the Default as the place to change it. Nothing is written.
+    Q_INVOKABLE QString removeInheritedPath(const QString &key, const QString &path);
+    // Takes this project's own value of a setting away, so the Default's shows through again.
+    Q_INVOKABLE QString useDefault(const QString &key);
     // What an extra model folder holds (#86): "" (found by its files), "layout" or a model type
     // id, as model_folder_kinds says; setting "" takes the folder's entry out.
     Q_INVOKABLE QString modelFolderKind(const QString &path) const;
@@ -171,6 +189,8 @@ private:
     QString m_path;
     QString m_providersPath;
     SettingsFile m_file;
+    SettingsFile m_base;            // the Default project's file, read only when the project inherits a class
+    EffectiveSettings m_effective;  // m_file layered over m_base (spec 1.4.2)
     QList<ProviderInstance> m_instances;
     bool m_providersSaved = false;
     // What m_instances was read from (providersSnapshot()), to tell an edit made outside

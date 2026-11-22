@@ -21,6 +21,7 @@
 #include "engine/document.h"
 #include "engine/fugue_home.h"
 #include "engine/json.h"
+#include "engine/model_catalog.h"
 #include "engine/pack_loader.h"
 #include "engine/pack_manager.h"
 #include "engine/paths.h"
@@ -40,7 +41,7 @@ using pack_fixture::writeSayPack;
 namespace {
 
 const char *const kVariables[] = {"FUGUE_HOME", "FUGUE_PROJECT", "FUGUE_BASE_XDG_CONFIG_HOME", "FUGUE_BASE_XDG_DATA_HOME",
-                                  "FUGUE_BASE_XDG_STATE_HOME", "FUGUE_BASE_XDG_RUNTIME_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
+                                  "FUGUE_BASE_XDG_STATE_HOME", "FUGUE_BASE_XDG_CACHE_HOME", "FUGUE_BASE_XDG_RUNTIME_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME",
                                   "XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR", "TMPDIR", "WAYLAND_DISPLAY",
                                   "DBUS_SESSION_BUS_ADDRESS", "CUDA_CACHE_PATH", "__GL_SHADER_DISK_CACHE_PATH",
                                   "PIPEWIRE_RUNTIME_DIR", "PULSE_RUNTIME_PATH", "HOME", "FUGUE_TEMPLATES"};
@@ -163,6 +164,29 @@ private slots:
         QCOMPARE(inheritedPackPaths(), (QStringList{path("base/data/fugue/packs"), path("elsewhere")}));
         QVERIFY(isInheritedPack(kSay, "1.0.0"));
         QVERIFY(packSearchPaths().size() == 1); // the project's own pack_paths are not the Default's
+    }
+
+    void aProjectReadsTheCatalogsOfTheInheritedPacksAndItsOwnWinById() {
+        const auto catalog = [](const QString &id, const QString &title) {
+            return QJsonDocument(QJsonObject{{"catalog", 1},
+                                             {"models", QJsonArray{QJsonObject{{"id", id}, {"resource", "fugue/upscale-model"}, {"title", title},
+                                                                              {"file", "a.safetensors"}, {"url", "https://example.org/a"},
+                                                                              {"size", 1}, {"sha256", QString(64, 'a')}, {"scale", 4},
+                                                                              {"architecture", "ESRGAN"}, {"license", "MIT"}}}}})
+                .toJson();
+        };
+        QVERIFY(writeSayPack(basePacks(), "default"));
+        QVERIFY(writeFile(basePacks() + "/io.example.tools/catalog/m.json", catalog("shared", "From Default pack")));
+        QVERIFY(writeFile(basePacks() + "/io.example.tools/catalog/n.json", catalog("only-default-pack", "Only")));
+        enterProject({"packs"});
+        QVERIFY(writeFile(ownPacks() + "/io.example.other/pack.json", "{}"));
+        QVERIFY(writeFile(ownPacks() + "/io.example.other/catalog/o.json", catalog("shared", "From own pack")));
+        const ModelCatalog layered = ModelCatalog::load({}, {});
+        QVERIFY(layered.find("only-default-pack") != nullptr);
+        QCOMPARE(layered.find("shared")->title, QString("From own pack"));
+        // Without `packs` the Default's packs' catalogs stay out.
+        enterProject({}, "p/closed");
+        QVERIFY(ModelCatalog::load({}, {}).find("only-default-pack") == nullptr);
     }
 
     void aProjectWithoutInheritsSeesNoPacksOfTheDefault() {

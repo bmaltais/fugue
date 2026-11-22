@@ -75,7 +75,8 @@ bool setFugueHome(const QString &given, QString *error) {
     };
     for (const Base &base : {Base{"FUGUE_BASE_XDG_CONFIG_HOME", QStandardPaths::GenericConfigLocation},
                              Base{"FUGUE_BASE_XDG_DATA_HOME", QStandardPaths::GenericDataLocation},
-                             Base{"FUGUE_BASE_XDG_STATE_HOME", QStandardPaths::GenericStateLocation}})
+                             Base{"FUGUE_BASE_XDG_STATE_HOME", QStandardPaths::GenericStateLocation},
+                             Base{"FUGUE_BASE_XDG_CACHE_HOME", QStandardPaths::GenericCacheLocation}})
         if (qEnvironmentVariable(base.variable).isEmpty())
             qputenv(base.variable, QStandardPaths::writableLocation(base.location).toLocal8Bit());
     const QByteArray realRuntime = qgetenv("XDG_RUNTIME_DIR");

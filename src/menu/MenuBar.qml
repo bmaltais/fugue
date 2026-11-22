@@ -227,6 +227,46 @@ Rectangle {
         }
     }
 
+    // The project chip (spec 1.4.2): which project this window is in, at the bar's far end; a press opens the
+    // Projects dialog. Made only when there is something to tell (a project, or projects to mix up).
+    Loader {
+        id: chipLoader
+        objectName: "projectChipLoader"
+        active: App.projects !== null && App.projects.indicatorShown
+        anchors.right: parent.right
+        anchors.rightMargin: 1.5 * bar.u
+        anchors.verticalCenter: parent.verticalCenter
+        sourceComponent: AbstractButton {
+            id: chip
+            objectName: "projectChip"
+            readonly property bool inProject: !App.projects.currentIsDefault
+            text: App.projects.indicator
+            focusPolicy: Qt.NoFocus
+            hoverEnabled: true
+            height: 6 * bar.u
+            width: Math.min(implicitWidth, 30 * bar.u)
+            leftPadding: 2.5 * bar.u
+            rightPadding: 2.5 * bar.u
+            onClicked: App.commands.trigger("file.projects")
+            Accessible.role: Accessible.Button
+            Accessible.name: qsTr("Project: %1").arg(text)
+            background: Rectangle {
+                radius: bar.look.smallCorner
+                color: chip.hovered ? Qt.tint(bar.look.well, Qt.alpha(bar.look.text, 0.05)) : "transparent"
+                border.width: 1
+                border.color: chip.inProject ? bar.look.accent : bar.look.hairlineStrong
+            }
+            contentItem: Text {
+                text: chip.text
+                elide: Text.ElideRight
+                font.pixelSize: bar.look.labelSize
+                font.weight: chip.inProject ? Font.DemiBold : Font.Normal
+                color: chip.inProject ? bar.look.accent : bar.look.label
+                verticalAlignment: Text.AlignVCenter
+            }
+        }
+    }
+
     // Help > About Fugue: the name, version and what it is; Esc or a click outside closes it.
     property var about: null
     Component {

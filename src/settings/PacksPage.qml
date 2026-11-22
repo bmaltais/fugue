@@ -127,6 +127,13 @@ ColumnLayout {
                         font.weight: Font.DemiBold
                     }
                     Text {
+                        objectName: "packInherited-" + card.modelData.id
+                        visible: card.modelData.inherited
+                        text: qsTr("Inherited from Default")
+                        color: page.look.accent
+                        font.pixelSize: page.look.captionSize
+                    }
+                    Text {
                         objectName: "packState-" + card.modelData.id
                         text: !card.modelData.enabled ? qsTr("disabled")
                               : card.modelData.trusted ? qsTr("trusted") : qsTr("not trusted")
@@ -149,7 +156,7 @@ ColumnLayout {
                     }
                     SettingsParts.SmallButton {
                         objectName: "packRemove-" + card.modelData.id
-                        visible: card.modelData.removable
+                        visible: card.modelData.removable || card.modelData.inherited
                         enabled: !page.model.busy
                         text: qsTr("Remove…")
                         onClicked: page.model.remove(card.modelData.folder)
@@ -161,6 +168,16 @@ ColumnLayout {
                     text: qsTr("%1 · %n nodes", "", card.modelData.nodes).arg(card.modelData.path)
                     color: page.look.label
                     font.pixelSize: page.look.captionSize
+                }
+                // An inherited pack runs from the Default project's folder: what that means, once (PacksModel).
+                Text {
+                    objectName: "packWarning-" + card.modelData.id
+                    visible: card.modelData.warning !== ""
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    text: card.modelData.warning
+                    color: page.look.label
+                    font.pixelSize: page.look.labelSize
                 }
                 Repeater {
                     model: card.modelData.problems

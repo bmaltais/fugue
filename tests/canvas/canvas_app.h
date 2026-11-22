@@ -101,12 +101,15 @@ struct App {
     fugue::CommandRegistry commands;
     fugue::Workflows workflows{&model, &registry, &commands, {dir.path() + "/recovery", dir.path() + "/trust.json"}};
     // settings.json and providers.json in the test's own folder, never the owner's.
-    fugue::SettingsModel settings{dir.path() + "/config/fugue/settings.json", dir.path() + "/config/fugue/providers.json"};
+    // In a project root (FUGUE_HOME set, test_projects_window) the files are the project's own.
+    fugue::SettingsModel settings{qEnvironmentVariableIsSet("FUGUE_HOME") ? QString() : dir.path() + "/config/fugue/settings.json",
+                                  qEnvironmentVariableIsSet("FUGUE_HOME") ? QString() : dir.path() + "/config/fugue/providers.json"};
     // A test's own runs (test_canvas_run), set before open(); the window runs without them.
     fugue::CanvasRuns *runs = nullptr;
     fugue::RunBar *runBar = nullptr;     // the run toolbar's (test_canvas_run), likewise
     fugue::RunQueue *runQueue = nullptr;
     fugue::ImageActions *imageActions = nullptr; // likewise (test_canvas_image_actions)
+    fugue::ProjectModel *projects = nullptr;     // the projects dialog's and the chip's (test_projects_window), likewise
     // The side panels (#56), with their state in the test's own folder.
     fugue::ChromeVisibility chrome{dir.path() + "/chrome.json"};
     fugue::SidePanels sidePanels{dir.path() + "/side-panels.json", &chrome};
@@ -165,7 +168,7 @@ struct App {
     bool open() {
         // As main() does: the English catalog gives counted strings their plural forms.
         QCoreApplication::installTranslator(&translator);
-        const fugue::AppObjects objects{&translator, &theme, &commands, &model, &workflows, &settings, runs, imageActions, &colorHistory, &layoutColors, runBar, runQueue, &sidePanels, &nodeLibrary, &recentFiles, &chrome, &mediaLibrary};
+        const fugue::AppObjects objects{&translator, &theme, &commands, &model, &workflows, &settings, runs, imageActions, &colorHistory, &layoutColors, runBar, runQueue, &sidePanels, &nodeLibrary, &recentFiles, &chrome, &mediaLibrary, projects};
         fugue::followNodeTypeReloads(*reloader, objects);
         fugue::exposeToQml(engine, objects);
         engine.load(QUrl("qrc:/Main.qml"));

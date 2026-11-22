@@ -8,17 +8,41 @@ import "../canvas"
 // user did; the panel and its pages call the model.
 QtObject {
     // A titled setting: the name and what it does on the left, its control under them.
+    // With `key` and `origin` ("inherited" or "override", from SettingsModel.origins) it also says where the value
+    // comes from (spec 1.4.2): "Inherited from Default", or, for the project's own value over the Default's, a
+    // button that gives it up (useDefaultRequested).
     component Setting: ColumnLayout {
         id: setting
         property string title
         property string note
+        property string key
+        property string origin
+        signal useDefaultRequested()
         Layout.fillWidth: true
         spacing: App.theme.look.unit
-        Text {
-            text: setting.title
-            color: App.theme.look.text
-            font.pixelSize: App.theme.look.textSize
-            font.weight: Font.DemiBold
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 2 * App.theme.look.unit
+            Text {
+                text: setting.title
+                color: App.theme.look.text
+                font.pixelSize: App.theme.look.textSize
+                font.weight: Font.DemiBold
+            }
+            Text {
+                objectName: "origin-" + setting.key
+                visible: setting.origin === "inherited"
+                text: qsTr("Inherited from Default")
+                color: App.theme.look.accent
+                font.pixelSize: App.theme.look.captionSize
+            }
+            SmallButton {
+                objectName: "useDefault-" + setting.key
+                visible: setting.origin === "override"
+                text: qsTr("Use Default's value")
+                onClicked: setting.useDefaultRequested()
+            }
+            Item { Layout.fillWidth: true }
         }
         Text {
             visible: text !== ""
@@ -89,6 +113,7 @@ QtObject {
         color: highlighted ? App.theme.look.accent : hover.hovered ? App.theme.look.selectedRow : App.theme.look.well
         border.width: 1
         border.color: activeFocus ? App.theme.look.accent : App.theme.look.hairlineStrong
+        opacity: enabled ? 1 : 0.5
         activeFocusOnTab: true
         Accessible.role: Accessible.Button
         Accessible.name: text
@@ -176,7 +201,6 @@ QtObject {
     component FolderSetting: Setting {
         id: folder
         required property var host // the panel: its model and pickers
-        property string key
         property string value
         property bool isDefault
         RowLayout {

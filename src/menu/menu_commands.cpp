@@ -40,6 +40,8 @@ QList<Row> menuRows() {
          QT_TRANSLATE_NOOP("Command", "Open from clipboard"), {}, "app", "added"},
         // Also registered by registerFileCommands (workflows.h) when this has not run (#83).
         {"file.templates", QT_TRANSLATE_NOOP("Command", "Browse templates"), nullptr, {}, "app", "same"},
+        // The projects dialog (spec 1.4.2): the window opens it; ProjectModel sets the handler.
+        {"file.projects", QT_TRANSLATE_NOOP("Command", "Projects: switch, make or add one"), QT_TRANSLATE_NOOP("Command", "Projects…"), {}, "app", "added"},
         {"file.export-share", QT_TRANSLATE_NOOP("Command", "Export for sharing: a .fuguepack with its images, local paths removed"),
          QT_TRANSLATE_NOOP("Command", "Export for sharing…"), {}, "app", "same"},
         {"file.export-compiled", QT_TRANSLATE_NOOP("Command", "Export the compiled graph, for the CLI"),

@@ -16,7 +16,9 @@
 #include "engine/atomic_file.h"
 #include "engine/json.h"
 #include "engine/model_library.h"
+#include "engine/pack_loader.h"
 #include "engine/paths.h"
+#include "engine/project.h"
 #include "engine/providers_file.h"
 #include "theme.h"
 #include "translator.h"
@@ -108,7 +110,63 @@ void SettingsModel::registerCommands(CommandRegistry &registry, std::function<vo
                         [&registry] { emit registry.windowRequested(QStringLiteral("cache.clear-previews")); });
 }
 
-void SettingsModel::loadSettings() { m_file = readSettings(m_path); }
+void SettingsModel::loadSettings() {
+    m_file = readSettings(m_path);
+    const QStringList inherits = sessionInherits();
+    const bool layered = inherits.contains(settingClassName(SettingClass::Models))
+                         || inherits.contains(settingClassName(SettingClass::Preferences));
+    m_base = layered ? readSettings(baseSettingsPath()) : SettingsFile();
+    m_effective = layerSettings(m_file, m_base, inherits, baseDataDir() + QStringLiteral("/models"));
+}
+
+QVariantMap SettingsModel::origins() const {
+    const QStringList inherits = sessionInherits();
+    QVariantMap map;
+    for (const QString &key : settingKeys()) {
+        const SettingOrigin origin = m_effective.origins.value(key, SettingOrigin::BuiltIn);
+        QString name = origin == SettingOrigin::Default ? QStringLiteral("inherited")
+                       : origin == SettingOrigin::Own   ? QStringLiteral("own")
+                                                        : QStringLiteral("built-in");
+        // An own value of a key the Default also sets, in a class this project inherits: it can be given up.
+        const QString kind = settingClassName(settingClass(key));
+        if (origin == SettingOrigin::Own && !kind.isEmpty() && inherits.contains(kind) && m_base.document.contains(key)
+            && checkSetting(key, m_base.document.value(key)).isEmpty() && key != QLatin1String("model_paths")
+            && key != QLatin1String("model_folder_kinds"))
+            name = QStringLiteral("override");
+        map.insert(key, name);
+    }
+    return map;
+}
+
+QStringList SettingsModel::inheritedModelPaths() const {
+    QStringList list;
+    if (m_effective.settings.inheritsModels)
+        list << tilde(baseDataDir() + QStringLiteral("/models"));
+    for (const QString &path : m_effective.settings.inheritedModelPaths)
+        list << path;
+    return list;
+}
+
+QStringList SettingsModel::inheritedPackPaths() const {
+    QStringList list;
+    for (const QString &path : fugue::inheritedPackPaths())
+        list << tilde(path);
+    return list;
+}
+
+QString SettingsModel::removeInheritedPath(const QString &key, const QString &path) {
+    if (key != QLatin1String("model_paths") && key != QLatin1String("pack_paths"))
+        return tr("%1 is not a list of folders.").arg(key);
+    return tr("%1 is a folder this project inherits from the Default project, and is read-only here. Change it in the Default project "
+              "(start Fugue without a project), or turn off inheriting %2 in Project settings.")
+        .arg(path, key == QLatin1String("model_paths") ? tr("models") : tr("packs"));
+}
+
+QString SettingsModel::useDefault(const QString &key) {
+    if (origins().value(key).toString() != QLatin1String("override"))
+        return tr("%1 has no value of its own to give up.").arg(key);
+    return set(key, QJsonValue(QJsonValue::Undefined));
+}
 
 // providers.json as it is now, or (without one) the defaults it stands for, which follow
 // Omarchy's paired hosts.
@@ -139,11 +197,11 @@ void SettingsModel::loadProviders() {
 
 void SettingsModel::pushLive() {
     if (m_translator)
-        m_translator->setLanguageOverride(m_file.settings.language);
+        m_translator->setLanguageOverride(m_effective.settings.language);
     if (m_canvas)
-        m_canvas->setNewNodeOptions(m_file.settings.newSeed, m_file.settings.embedWorkflow);
+        m_canvas->setNewNodeOptions(m_effective.settings.newSeed, m_effective.settings.embedWorkflow);
     if (m_theme)
-        m_theme->setCornerRadius(m_file.settings.cornerRadius);
+        m_theme->setCornerRadius(m_effective.settings.cornerRadius);
 }
 
 void SettingsModel::reload() {
@@ -237,11 +295,11 @@ QList<std::pair<QString, QString>> folderKinds() {
 }
 } // namespace
 
-QString SettingsModel::modelFolderKind(const QString &path) const { return m_file.settings.modelFolderKinds.value(path); }
+QString SettingsModel::modelFolderKind(const QString &path) const { return m_effective.settings.modelFolderKinds.value(path); }
 
 QVariantMap SettingsModel::modelFolderKindsSet() const {
     QVariantMap map;
-    for (auto it = m_file.settings.modelFolderKinds.begin(); it != m_file.settings.modelFolderKinds.end(); ++it)
+    for (auto it = m_effective.settings.modelFolderKinds.begin(); it != m_effective.settings.modelFolderKinds.end(); ++it)
         map.insert(it.key(), it.value());
     return map;
 }
@@ -256,7 +314,7 @@ QString SettingsModel::setModelFolderKind(const QString &path, const QString &ki
 }
 
 QString SettingsModel::modelFolderFound(const QString &path) const {
-    const ModelLibrary library(ModelLibrary::roots(m_file.settings), m_types);
+    const ModelLibrary library(ModelLibrary::roots(m_effective.settings), m_types);
     const QString kind = library.kindOf(QDir::cleanPath(expandHome(path)));
     if (kind.isEmpty())
         return tr("Nothing Fugue can tell: set what it holds");

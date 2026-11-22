@@ -418,6 +418,48 @@ Result<ProjectEntry> setProjectInherits(const QString &nameOrPath, const QString
     return Result<ProjectEntry>(entry, warnings);
 }
 
+Result<ProjectEntry> renameProject(const QString &nameOrPath, const QString &newName) {
+    Result<ProjectEntry> found = findProject(nameOrPath);
+    if (!found)
+        return found.errors();
+    if (found->state == ProjectState::Missing)
+        return makeError("file_not_found", QStringLiteral("The project \"%1\" is missing: %2 has no project.json.").arg(found->name(), found->root));
+    if (found->state == ProjectState::Invalid)
+        return found->problems;
+    if (const QString problem = projectNameProblem(newName); !problem.isEmpty())
+        return makeError("project_invalid", QStringLiteral("\"%1\" is not a name for a project: %2.").arg(newName, problem));
+    const Result<std::optional<QString>> taken = nameTakenBy(newName, found->root);
+    if (!taken)
+        return taken.errors();
+    if (*taken)
+        return nameTaken(newName, **taken);
+    ProjectManifest manifest = found->manifest;
+    manifest.name = newName;
+    if (const Errors written = writeProject(found->root, manifest); hasErrors(written))
+        return written;
+    ProjectEntry entry = inspectProject(found->root);
+    entry.registered = found->registered;
+    return entry;
+}
+
+QProcessEnvironment baseEnvironment(const QProcessEnvironment &current) {
+    QProcessEnvironment env = current;
+    const bool inRoot = env.contains(QStringLiteral("FUGUE_HOME"));
+    for (const char *name : {"CONFIG_HOME", "DATA_HOME", "STATE_HOME", "CACHE_HOME", "RUNTIME_DIR"}) {
+        const QString base = QStringLiteral("FUGUE_BASE_XDG_") + QLatin1String(name);
+        const QString redirected = QStringLiteral("XDG_") + QLatin1String(name);
+        if (env.contains(base))
+            env.insert(redirected, env.value(base));
+        env.remove(base);
+    }
+    if (inRoot)
+        for (const char *name : {"TMPDIR", "CUDA_CACHE_PATH", "__GL_SHADER_DISK_CACHE_PATH"})
+            env.remove(QString::fromLatin1(name));
+    env.remove(QStringLiteral("FUGUE_HOME"));
+    env.remove(QStringLiteral("FUGUE_PROJECT"));
+    return env;
+}
+
 QStringList sessionInherits() {
     const QString root = fugueHome();
     if (root.isEmpty() || !QFileInfo::exists(projectManifestPath(root)))
