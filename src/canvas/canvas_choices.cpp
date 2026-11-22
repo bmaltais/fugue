@@ -3,11 +3,14 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
-#include <QImageReader>
 #include <QLocale>
+#include <QSet>
 #include <QUrl>
 #include <QVariantMap>
 
+#include <cstring>
+
+#include "engine/new_canvas.h"
 #include "engine/paint_file.h"
 
 namespace fugue {
@@ -127,22 +130,48 @@ QVariantMap CanvasChoices::row(const QString &id) {
     return {};
 }
 
-QString CanvasChoices::makeBlank(const QString &name, int width, int height, QString *id) {
-    if (width < 1 || height < 1 || width > mask::paintFileMaxSide || height > mask::paintFileMaxSide
-        || qint64(width) * height > mask::paintFileMaxPixels)
-        return tr("A canvas is at most %1 px a side and %2 megapixels.")
-            .arg(mask::paintFileMaxSide)
-            .arg(mask::paintFileMaxPixels / 1000000);
-    mask::PaintDocument document(width, height);
-    document.addLayer(mask::LayerKind::Paint, QStringLiteral("Layer 1"));
+QString CanvasChoices::make(const QString &name, const Result<mask::PaintDocument> &document, const QString &producer, QString *id) {
+    if (!document)
+        return sentence(document.errors());
     CanvasStore s = store();
-    const Result<canvas::CanvasInfo> made =
-        s.create(name.trimmed().isEmpty() ? QStringLiteral("Untitled") : name.trimmed().left(120), document, QStringLiteral("new"));
+    const Result<canvas::CanvasInfo> made = s.create(name.trimmed().isEmpty() ? QStringLiteral("Untitled") : name.trimmed().left(120), document.value(), producer);
     if (!made)
         return sentence(made.errors());
     *id = made->id;
     touched();
     return {};
+}
+
+QString CanvasChoices::makeBlank(const QString &name, int width, int height, QString *id) {
+    return make(name, mask::blankCanvas(width, height, {}), QStringLiteral("new"), id);
+}
+
+QString CanvasChoices::makeBlank(const QString &name, int width, int height, const QString &background, QString *id) {
+    const Result<mask::CanvasBackground> fill = mask::parseBackground(background);
+    if (!fill)
+        return sentence(fill.errors());
+    return make(name, mask::blankCanvas(width, height, fill.value()), QStringLiteral("new"), id);
+}
+
+QString CanvasChoices::makeFromImage(const QString &name, const QImage &image, QString *id) {
+    if (image.isNull())
+        return tr("There is no picture to make a canvas from.");
+    if (const QString why = mask::canvasSizeProblem(image.width(), image.height()); !why.isEmpty())
+        return tr("The picture is %1 × %2. %3").arg(image.width()).arg(image.height()).arg(why);
+    const QImage straight = image.convertedTo(QImage::Format_RGBA8888); // straight (not premultiplied) bytes, as a layer holds them
+    std::vector<uint8_t> pixels(size_t(straight.width()) * size_t(straight.height()) * 4);
+    for (int y = 0; y < straight.height(); ++y)
+        std::memcpy(pixels.data() + size_t(y) * size_t(straight.width()) * 4, straight.constScanLine(y), size_t(straight.width()) * 4);
+    return make(name, mask::canvasFromPixels(straight.width(), straight.height(), pixels, QStringLiteral("Layer 1")), QStringLiteral("import"), id);
+}
+
+QString CanvasChoices::freeName(const QString &base) {
+    QSet<QString> taken;
+    for (const QVariant &row : rows())
+        taken.insert(row.toMap().value("name").toString());
+    for (int n = 1;; ++n)
+        if (const QString name = QStringLiteral("%1 %2").arg(base).arg(n); !taken.contains(name))
+            return name;
 }
 
 QString CanvasChoices::makeFromFile(const QString &path, const QString &name, QString *id) {
@@ -158,12 +187,6 @@ QString CanvasChoices::makeFromFile(const QString &path, const QString &name, QS
     *id = made->id;
     touched();
     return {};
-}
-
-QString CanvasChoices::pictureSize(const QString &path) const {
-    QImageReader reader(localPath(path));
-    const QSize size = reader.size();
-    return size.isValid() ? QStringLiteral("%1 × %2").arg(size.width()).arg(size.height()) : QString();
 }
 
 } // namespace fugue

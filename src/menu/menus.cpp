@@ -77,7 +77,7 @@ QVariantMap areasMenu() {
 QVariantList bar() {
     return {
         submenu(QT_TRANSLATE_NOOP("Menu", "&File"),
-                {command("file.new"), command("file.open"), command("file.open-clipboard"), command("file.templates"), command("file.projects"), command("file.canvas-view"), command("file.canvas-history"), separator(),
+                {command("file.new"), command("file.open"), command("file.open-clipboard"), command("file.templates"), command("file.projects"), command("canvas.new"), command("canvas.paste-new"), command("file.canvas-view"), command("file.canvas-history"), separator(),
                  command("file.save"), command("file.save-as"), command("file.rename"), command("file.duplicate"),
                  command("file.export-share"), command("file.export-compiled"), separator(), command("file.close"),
                  command("file.close-others"), command("app.quit")}),

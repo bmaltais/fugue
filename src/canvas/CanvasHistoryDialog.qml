@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtCore
 import QtQuick
+import QtQuick.Controls
 import QtQuick.Dialogs
 import Fugue
 
@@ -47,13 +48,20 @@ LargeViewDialog {
     // Enter: Accept, when a candidate is shown (its Accept is the bar's one primary).
     onConfirm: if (canDecide) backend.accept(backend.revisionB)
 
-    // New canvas… and Import picture… (#228, C7), when the store has none yet: the canvas is made and opened.
+    // New canvas… (the New canvas dialog, #232) and Import picture… (#228, C7), when the store has none yet: the canvas is made and opened.
     Component {
-        id: newCanvasAsk
-        NewCanvasQuestion {
-            make: (name, width, height, picture) => picture !== "" ? backend.importPicture(picture, name) : backend.newCanvas(name, width, height)
-            sizeOf: url => backend.pictureSize(url)
+        id: newCanvasComponent
+        NewCanvasDialog {
+            parent: Overlay.overlay
+            storeRoot: backend.storeRoot
+            onCreated: id => backend.useCanvas(id)
         }
+    }
+    property var newCanvasDialog: null
+    function newCanvas() {
+        if (!newCanvasDialog)
+            newCanvasDialog = newCanvasComponent.createObject(root)
+        newCanvasDialog.openNew("")
     }
     Component {
         id: pictureDialog
@@ -200,7 +208,7 @@ LargeViewDialog {
                     look: root.look
                     text: qsTr("New canvas…")
                     tip: qsTr("Make a blank canvas, or one from a picture")
-                    onTapped: (newCanvasAsk.createObject(root) as Question).open()
+                    onTapped: root.newCanvas()
                 }
                 ViewButton {
                     objectName: "canvasHistoryImport"

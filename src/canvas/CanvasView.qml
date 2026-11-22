@@ -182,19 +182,24 @@ Item {
     Component.onDestruction: exportDialog.close()
 
     // New canvas… and Import picture… (#228, C7), as the canvas picker has them: the canvas is made in this store and shown.
+    // The New canvas dialog (#232), made the first time: the canvas is made in this view's store and shown at once.
+    property var newCanvasDialog: null
     function newCanvas() {
-        (newCanvasAsk.createObject(root) as Question).open()
+        if (!newCanvasDialog)
+            newCanvasDialog = newCanvasComponent.createObject(root, { storeRoot: canvasData.storeRoot })
+        newCanvasDialog.openNew("")
     }
     function importPicture() {
         (pictureDialog.createObject(root) as FileDialog).open()
     }
     Component {
-        id: newCanvasAsk
-        NewCanvasQuestion {
-            make: (name, width, height, picture) => picture !== "" ? canvasData.importPicture(picture, name)
-                                                                  : canvasData.newCanvas(name, width, height)
-            sizeOf: url => canvasData.pictureSize(url)
-            onClosed: root.makeProblem = ""
+        id: newCanvasComponent
+        NewCanvasDialog {
+            parent: Overlay.overlay
+            onCreated: id => {
+                root.makeProblem = ""
+                canvasData.useCanvas(id)
+            }
         }
     }
     Component {

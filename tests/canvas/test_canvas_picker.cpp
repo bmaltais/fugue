@@ -2,19 +2,18 @@
 // a Canvas Region's canvas input is a drop-down of this root's canvases (name, size, last change) with
 // New canvas… and Import picture…; the value stays the canvas id; an id this root has none of shows as
 // missing with the list still there; the open list follows the store. The store is the test's own folder;
-// no file dialog is opened (the picture is handed to the New canvas dialog as the dialog would), no real
-// window is launched and no real pointer is moved.
+// no file dialog is opened, no real window is launched and no real pointer is moved. New canvas… opens the
+// New canvas dialog (#232); the dialog's own behavior is tested in test_new_canvas_window.
 
-#include <QImage>
 #include <QQuickStyle>
 #include <QTemporaryDir>
 #include <QUndoStack>
-#include <QUrl>
 
 #include "canvas/widget_edit.h"
 #include "canvas_app.h"
 #include "engine/canvas_store.h"
 #include "engine/paint_file.h"
+#include "engine/paths.h"
 
 using namespace fugue;
 using canvas_test::App;
@@ -32,6 +31,7 @@ struct PickerApp : App {
     QTemporaryDir store;
     PickerApp(const QString &savedId = {}) : App(load(savedId.isEmpty() ? QByteArray(fixture) : withCanvas(savedId))) {
         model.widgets()->canvasChoices()->setStoreRoot(store.filePath("store"));
+        QFile::remove(stateDir() + "/new-canvas.json"); // the New canvas dialog's remembered settings: each test starts on the defaults
     }
     static QByteArray withCanvas(const QString &id) {
         QByteArray text = fixture;
@@ -90,10 +90,14 @@ struct PickerApp : App {
     QJsonValue stored() const { return model.document().graph.nodes.value("region").inputs.value("canvas").toJson(); }
     int steps() const { return model.undoStack()->count(); }
     QQuickItem *ask(const QString &name) const { return canvas_test::item(window->contentItem(), name); }
+    // What a person does: click the field, select its text, type over it.
     void fill(const QString &field, const QString &text) {
         QQuickItem *f = ask(field);
         QVERIFY2(f, qPrintable(field));
-        f->setProperty("text", text);
+        QTest::mouseClick(window, Qt::LeftButton, {}, f->mapToScene(QPointF(f->width() / 2, f->height() / 2)).toPoint());
+        QTest::keyClick(window, Qt::Key_A, Qt::ControlModifier);
+        for (const QChar c : text)
+            QTest::keyClick(window, c.toLatin1());
     }
     void press(const QString &button) {
         QQuickItem *b = ask(button);
@@ -174,86 +178,47 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
-    void newCanvasAsksANameAndASizeAndPutsTheNewIdInTheInput() {
+    // #232: New canvas… is the New canvas dialog (NewCanvasDialog.qml; its own tests are test_new_canvas_window).
+    void newCanvasOpensTheDialogAndPutsTheNewIdInTheInput() {
         PickerApp app;
         QVERIFY(app.open());
         app.openList();
         QTRY_VERIFY(app.listOpen());
         app.choose("New canvas…");
-        QTRY_VERIFY(app.popup("newCanvasAsk"));
-        // The defaults: Untitled, 1024 × 1024.
-        QCOMPARE(app.ask("newCanvasName")->property("text").toString(), QString("Untitled"));
+        QTRY_VERIFY(app.popup("newCanvasDialog"));
+        QTRY_VERIFY(app.popup("newCanvasDialog")->property("opened").toBool());
+        // The defaults: Untitled 1, 1024 × 1024.
+        QCOMPARE(app.ask("newCanvasName")->property("text").toString(), QString("Untitled 1"));
         QCOMPARE(app.ask("newCanvasWidth")->property("text").toString(), QString("1024"));
         QCOMPARE(app.ask("newCanvasHeight")->property("text").toString(), QString("1024"));
         app.fill("newCanvasName", "Poster");
-        app.fill("newCanvasWidth", "640");
-        app.fill("newCanvasHeight", "480");
+        app.press("newCanvasPreset-landscape");
         app.press("newCanvasOk");
-        QTRY_VERIFY(!app.popup("newCanvasAsk"));
+        QTRY_VERIFY(!app.popup("newCanvasDialog")->property("opened").toBool());
         const std::vector<canvas::CanvasInfo> made = app.writer().list();
         QCOMPARE(int(made.size()), 1);
         QCOMPARE(made[0].name, QString("Poster"));
         QCOMPARE(app.stored(), QJsonValue(made[0].id));
         QCOMPARE(app.steps(), 1);
         QTRY_COMPARE(app.face(), QString("Poster"));
-        QCOMPARE(app.writer().load(made[0].id, made[0].head)->width(), 640);
+        QCOMPARE(app.writer().load(made[0].id, made[0].head)->width(), 1024);
+        QCOMPARE(app.writer().load(made[0].id, made[0].head)->height(), 768);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
-    void aSizeOutsideTheLimitsIsRefusedInTheDialogAndNothingIsMade() {
+    void cancelLeavesTheInputAndTheStoreAlone() {
         PickerApp app;
         QVERIFY(app.open());
         app.openList();
         QTRY_VERIFY(app.listOpen());
         app.choose("New canvas…");
-        QTRY_VERIFY(app.popup("newCanvasAsk"));
-        app.fill("newCanvasWidth", "20000");
-        app.press("newCanvasOk");
-        QTRY_VERIFY(app.ask("newCanvasProblem") && app.ask("newCanvasProblem")->isVisible());
-        QVERIFY(app.ask("newCanvasProblem")->property("text").toString().contains("at most 16384 px a side"));
-        QVERIFY(app.popup("newCanvasAsk")); // still open, to correct it
-        QVERIFY(app.writer().list().empty());
-        QCOMPARE(app.steps(), 0);
-        app.fill("newCanvasWidth", "");
-        app.press("newCanvasOk"); // not a number
-        QTRY_VERIFY(app.ask("newCanvasProblem")->isVisible());
-        QVERIFY(app.writer().list().empty());
+        QTRY_VERIFY(app.popup("newCanvasDialog"));
+        QTRY_VERIFY(app.popup("newCanvasDialog")->property("opened").toBool());
         app.press("newCanvasCancel");
-        QTRY_VERIFY(!app.popup("newCanvasAsk"));
+        QTRY_VERIFY(!app.popup("newCanvasDialog")->property("opened").toBool());
+        QVERIFY(app.writer().list().empty());
         QCOMPARE(app.stored(), QJsonValue(QJsonValue::Undefined));
-        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
-    }
-
-    void newCanvasFromAPictureTakesItsSizeAndNameAndCanGoBackToBlank() {
-        PickerApp app;
-        QTemporaryDir files;
-        QImage image(300, 120, QImage::Format_RGBA8888);
-        image.fill(Qt::green);
-        QVERIFY(image.save(files.filePath("harbour.png")));
-        QVERIFY(app.open());
-        app.openList();
-        QTRY_VERIFY(app.listOpen());
-        app.choose("New canvas…");
-        QTRY_VERIFY(app.popup("newCanvasAsk"));
-        // What the file dialog does on Open: the dialog is handed the picture.
-        QObject *ask = app.popup("newCanvasAsk");
-        QVERIFY(ask);
-        ask->setProperty("picture", QUrl::fromLocalFile(files.filePath("harbour.png")));
-        QTRY_COMPARE(app.ask("newCanvasPictureLine")->property("text").toString(), QString("harbour.png · 300 × 120"));
-        QTRY_COMPARE(app.ask("newCanvasName")->property("text").toString(), QString("harbour"));
-        QVERIFY(!app.ask("newCanvasWidth")->isVisible());
-        app.press("newCanvasFromPicture"); // Blank canvas instead
-        QTRY_VERIFY(app.ask("newCanvasWidth")->isVisible());
-        ask->setProperty("picture", QUrl::fromLocalFile(files.filePath("harbour.png")));
-        QTRY_VERIFY(!app.ask("newCanvasWidth")->isVisible());
-        app.press("newCanvasOk");
-        QTRY_VERIFY(!app.popup("newCanvasAsk"));
-        const std::vector<canvas::CanvasInfo> made = app.writer().list();
-        QCOMPARE(int(made.size()), 1);
-        QCOMPARE(made[0].name, QString("harbour"));
-        QCOMPARE(app.writer().load(made[0].id, made[0].head)->height(), 120);
-        QCOMPARE(app.stored(), QJsonValue(made[0].id));
-        QCOMPARE(app.steps(), 1);
+        QCOMPARE(app.steps(), 0);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 

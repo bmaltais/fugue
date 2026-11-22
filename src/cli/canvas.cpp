@@ -12,6 +12,7 @@
 #include "engine/canvas_diff.h"
 #include "engine/canvas_layer_ops.h"
 #include "engine/canvas_store.h"
+#include "engine/new_canvas.h"
 #include "engine/paint_file.h"
 
 namespace fugue::cli {
@@ -106,13 +107,17 @@ Reply canvasNew(const Command &command, Context &) {
             return Reply::failure(usageError(QStringLiteral("--size is <width>x<height>, such as 1024x768."), command.value("size")));
         width = match.captured(1).toInt();
         height = match.captured(2).toInt();
-        if (width < 1 || height < 1 || width > mask::paintFileMaxSide || height > mask::paintFileMaxSide || qint64(width) * height > mask::paintFileMaxPixels)
-            return Reply::failure(makeError(QStringLiteral("input_invalid"), QStringLiteral("A canvas is at most %1 px a side and %2 megapixels.").arg(mask::paintFileMaxSide).arg(mask::paintFileMaxPixels / 1000000)));
+        if (const QString why = mask::canvasSizeProblem(width, height); !why.isEmpty())
+            return Reply::failure(makeError(QStringLiteral("input_invalid"), why));
     }
-    mask::PaintDocument document(width, height);
-    document.addLayer(LayerKind::Paint, QStringLiteral("Layer 1"));
+    const Result<mask::CanvasBackground> background = mask::parseBackground(command.has("background") ? command.value("background") : QString());
+    if (!background)
+        return Reply::failure(background.errors());
+    const Result<mask::PaintDocument> document = mask::blankCanvas(width, height, background.value());
+    if (!document)
+        return Reply::failure(document.errors());
     CanvasStore store = CanvasStore::forSession();
-    const Result<canvas::CanvasInfo> made = store.create(command.has("name") ? command.value("name") : QStringLiteral("Untitled"), document, QStringLiteral("new"));
+    const Result<canvas::CanvasInfo> made = store.create(command.has("name") ? command.value("name") : QStringLiteral("Untitled"), document.value(), QStringLiteral("new"));
     if (!made)
         return Reply::failure(made.errors());
     return madeReply(made.value(), QStringLiteral("Made"), width, height);

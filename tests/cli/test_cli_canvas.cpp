@@ -111,6 +111,22 @@ private slots:
         QCOMPARE(log.data().value("revisions").toArray().at(0).toObject().value("producer").toString(), QString("new"));
     }
 
+    // #232: a background fills the first layer, as the New canvas dialog's does.
+    void newTakesABackground() {
+        const Outcome white = fugue({"canvas", "new", "--size", "64x64", "--background", "white", "--json"});
+        QVERIFY2(white.exitCode == 0, white.out + white.err);
+        const Outcome shown = fugue({"canvas", "show", white.data().value("canvas").toString(), "--json"});
+        const QJsonObject layer = shown.data().value("layers").toArray().at(0).toObject();
+        QCOMPARE(layer.value("name").toString(), QString("Background"));
+        QVERIFY(layer.value("tiles").toInt() > 0);
+        const Outcome clear = fugue({"canvas", "new", "--size", "64x64", "--background", "transparent", "--json"});
+        const QJsonObject empty = fugue({"canvas", "show", clear.data().value("canvas").toString(), "--json"}).data().value("layers").toArray().at(0).toObject();
+        QCOMPARE(empty.value("name").toString(), QString("Layer 1"));
+        QCOMPARE(empty.value("tiles").toInt(), 0);
+        QCOMPARE(fugue({"canvas", "new", "--background", "#336699", "--json"}).exitCode, 0);
+        QCOMPARE(fugue({"canvas", "new", "--background", "teal-ish", "--json"}).errorCode(), QString("input_invalid"));
+    }
+
     void importThenExportGivesTheSameFile() {
         const QString source = oraFile("in.ora");
         QVERIFY(!source.isEmpty());

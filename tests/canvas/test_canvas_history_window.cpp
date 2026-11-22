@@ -323,11 +323,11 @@ private slots:
         QVERIFY(find(app.window, "canvasHistoryImport"));
         click(app, "canvasHistoryNew");
         QObject *ask = nullptr;
-        QTRY_VERIFY((ask = app.window->findChild<QObject *>("newCanvasAsk")) && ask->property("opened").toBool());
+        QTRY_VERIFY((ask = app.window->findChild<QObject *>("newCanvasDialog")) && ask->property("opened").toBool());
         QVERIFY(QMetaObject::invokeMethod(ask, "create"));
         QObject *history = app.window->findChild<QObject *>("canvasHistoryDialog")->property("history").value<QObject *>();
         QTRY_VERIFY(!history->property("canvasId").toString().isEmpty());
-        QCOMPARE(canvas::CanvasStore::forSession().info(history->property("canvasId").toString())->name, QString("Untitled"));
+        QCOMPARE(canvas::CanvasStore::forSession().info(history->property("canvasId").toString())->name, QString("Untitled 1"));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 

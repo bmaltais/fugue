@@ -27,6 +27,7 @@
 #include "run/run_bar.h"
 #include "run/run_queue.h"
 #include "search/node_library.h"
+#include "canvas/new_canvas_model.h" // a QML type (NewCanvasModel, the New canvas dialog's): the module registers it from here
 #include "settings/project_model.h"
 #include "settings/settings_model.h"
 #include "theme.h"

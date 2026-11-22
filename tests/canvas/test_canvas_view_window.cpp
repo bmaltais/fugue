@@ -890,10 +890,10 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(menu, "picked", Q_ARG(QVariant, entries.at(int(texts.indexOf("New canvas…"))).toMap().value("value"))));
         QVERIFY(QMetaObject::invokeMethod(menu, "close"));
         QObject *ask = nullptr;
-        QTRY_VERIFY((ask = app.window->findChild<QObject *>("newCanvasAsk")) && ask->property("opened").toBool());
-        ask->findChild<QObject *>("newCanvasName")->setProperty("text", "Poster");
+        QTRY_VERIFY((ask = app.window->findChild<QObject *>("newCanvasDialog")) && ask->property("opened").toBool());
+        ask->property("model").value<QObject *>()->setProperty("name", "Poster");
         QVERIFY(QMetaObject::invokeMethod(ask, "create"));
-        QTRY_VERIFY(!app.window->findChild<QObject *>("newCanvasAsk"));
+        QTRY_VERIFY(!ask->property("opened").toBool());
         QTRY_COMPARE(view(app)->property("canvasId").toString() != m_canvas, true);
         QCOMPARE(canvas::CanvasStore::forSession().info(view(app)->property("canvasId").toString())->name, QString("Poster"));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
@@ -919,7 +919,7 @@ private slots:
         QVERIFY(label && label->x() < picture->width() / 2);
         QVERIFY(QMetaObject::invokeMethod(view(app), "newCanvas"));
         QObject *ask = nullptr;
-        QTRY_VERIFY((ask = app.window->findChild<QObject *>("newCanvasAsk")) && ask->property("opened").toBool());
+        QTRY_VERIFY((ask = app.window->findChild<QObject *>("newCanvasDialog")) && ask->property("opened").toBool());
         QTest::qWait(50);
         auto *ok = ask->findChild<QQuickItem *>("newCanvasOk");
         auto *cancel = ask->findChild<QQuickItem *>("newCanvasCancel");
@@ -974,7 +974,7 @@ private slots:
             QVERIFY(app.open());
             openDialog(app);
             QVERIFY(QMetaObject::invokeMethod(view(app), "newCanvas"));
-            QTRY_VERIFY(app.window->findChild<QObject *>("newCanvasAsk"));
+            QTRY_VERIFY(app.window->findChild<QObject *>("newCanvasDialog"));
             save(app, "new-canvas");
         }
         QDir(m_dir.filePath("home")).removeRecursively();

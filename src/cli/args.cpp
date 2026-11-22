@@ -68,7 +68,7 @@ const QMap<QString, QMap<QString, Spec>> &table() {
           {"remove", {1, 1, {}, {}, projectRemove}},
           {"inherits", {2, 2, {}, {}, projectInherits}}}},
         {"canvas",
-         {{"new", {0, 0, {"name", "size"}, {}, canvasNew}},
+         {{"new", {0, 0, {"name", "size", "background"}, {}, canvasNew}},
           {"import", {1, 1, {"name"}, {}, canvasImport}},
           {"export", {2, 2, {}, {}, canvasExport}},
           {"log", {1, 1, {"limit"}, {}, canvasLog}},

@@ -141,12 +141,9 @@ QVariantList WidgetEdit::canvases() { return m_canvases.rows(); }
 
 QVariantMap WidgetEdit::canvasRow(const QString &id) { return id.isEmpty() ? QVariantMap() : m_canvases.row(id); }
 
-QString WidgetEdit::newCanvas(const QString &node, const QString &input, const QString &name, int width, int height) {
+QString WidgetEdit::useCanvas(const QString &node, const QString &input, const QString &id) {
     if (!canvasTarget(node, input).spec)
         return tr("%1 is not a canvas input.").arg(input);
-    QString id;
-    if (const QString why = m_canvases.makeBlank(name, width, height, &id); !why.isEmpty())
-        return why;
     return setText(node, input, id);
 }
 
@@ -212,7 +209,6 @@ bool WidgetEdit::setRegion(const QString &node, int x, int y, int width, int hei
 
 QUndoStack *WidgetEdit::undoStack() const { return m_canvas->undoStack(); }
 
-QString WidgetEdit::pictureSize(const QString &path) const { return m_canvases.pictureSize(path); }
 
 QString WidgetEdit::nodeName(const QString &node) const { return m_canvas ? m_canvas->nodeName(node) : QString(); }
 

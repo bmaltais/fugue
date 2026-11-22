@@ -90,13 +90,11 @@ public:
     Q_INVOKABLE bool accept(const QString &revision);
     // Hide a candidate; true when done.
     Q_INVOKABLE bool drop(const QString &revision);
-    // Makes a canvas in this store and opens it (#228, the cohesion audit's C7: the empty states and the Canvas view's
-    // menu make one in the app, as the canvas picker does): a blank one of a size, or one from a picture file (a path or
-    // a file: URL; a blank name is the file's). Returns why not, or empty; the new canvas is then `canvasId`.
-    Q_INVOKABLE QString newCanvas(const QString &name, int width, int height);
+    // Shows a canvas just made elsewhere (the New canvas dialog, #232): the list is read again and it is the one shown.
+    Q_INVOKABLE void useCanvas(const QString &id);
+    // Makes a canvas from a picture file in this store and opens it (#228; Import picture…): a path or a file: URL; a
+    // blank name is the file's. Returns why not, or empty; the new canvas is then `canvasId`.
     Q_INVOKABLE QString importPicture(const QString &path, const QString &name = QString());
-    // The size a picture file would give ("1920 × 1080"), "" when it cannot be read: the New canvas question's line.
-    Q_INVOKABLE QString pictureSize(const QString &path) const;
 
 signals:
     void storeChanged();

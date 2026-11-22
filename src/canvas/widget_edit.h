@@ -234,13 +234,14 @@ public:
     // The row of one canvas of this root; empty when there is none by that id (the input then
     // shows it as missing, with the list still available).
     Q_INVOKABLE QVariantMap canvasRow(const QString &id);
-    // Makes a blank canvas (one empty paint layer) or one from a picture or .ora file, in this
-    // root's store, and sets the input to its id as one undo step. Returns why not, or empty. The
-    // canvas itself is not undone with the step: nothing is ever deleted (spec 14.5).
-    Q_INVOKABLE QString newCanvas(const QString &node, const QString &input, const QString &name, int width, int height);
+    // Makes a canvas from a picture or .ora file (Import picture…), in this root's store, and sets the input to
+    // its id as one undo step. Returns why not, or empty. The canvas itself is not undone with the step: nothing is
+    // ever deleted (spec 14.5). A blank canvas, or one from the clipboard, comes from the New canvas dialog.
     Q_INVOKABLE QString importCanvas(const QString &node, const QString &input, const QString &path, const QString &name);
-    // "1920 × 1080" for a picture file the dialog is about to make a canvas from; empty when unreadable.
-    Q_INVOKABLE QString pictureSize(const QString &path) const;
+    // Sets the input to a canvas the New canvas dialog just made (#232), as one undo step; why not, or empty.
+    Q_INVOKABLE QString useCanvas(const QString &node, const QString &input, const QString &id);
+    // The folder of this root's canvas store, empty for the session's: where the dialog makes its canvas.
+    Q_INVOKABLE QString canvasStoreRoot() const { return m_canvases.storeRoot(); }
     // --- the region picker (#213) ---
     // What the picker window needs of a node with a canvas and a rectangle (Canvas Region): {ok: true,
     // canvas, revision, storeRoot ("" is the session's), x, y, width, height, padding, scale, cap, multiple, canvasLinked, maskLinked, revisionLinked,

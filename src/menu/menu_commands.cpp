@@ -45,6 +45,12 @@ QList<Row> menuRows() {
         {"file.projects", QT_TRANSLATE_NOOP("Command", "Projects: switch, make or add one"), QT_TRANSLATE_NOOP("Command", "Projects…"), {}, "app", "added"},
         // The canvas revisions and candidates (#210); the window opens the dialog (Main.qml).
         {"file.canvas-history", QT_TRANSLATE_NOOP("Command", "Canvas history: revisions, candidates, compare"), QT_TRANSLATE_NOOP("Command", "Canvas history…"), {}, "app", "added"},
+        // The New canvas dialog (#232): a blank canvas of a size, the clipboard's picture or a file; the window opens it (CommandUi.qml).
+        {"canvas.new", QT_TRANSLATE_NOOP("Command", "New canvas: a size and a background, the clipboard's picture or a file"),
+         QT_TRANSLATE_NOOP("Command", "New canvas…"), {"Ctrl+Alt+N"}, "app", "added"},
+        // The clipboard's picture as a canvas at once, no dialog (#232); on only while the clipboard holds a picture.
+        {"canvas.paste-new", QT_TRANSLATE_NOOP("Command", "Paste the clipboard's picture as a new canvas"),
+         QT_TRANSLATE_NOOP("Command", "Paste as new canvas"), {}, "app", "added"},
         // The Canvas view (#221): the picture of a canvas, its revisions and candidates; the window opens the dialog (CommandUi.qml).
         {"file.canvas-view", QT_TRANSLATE_NOOP("Command", "Canvas view: the picture, revisions, candidates, region"), QT_TRANSLATE_NOOP("Command", "Canvas…"), {}, "app", "added"},
         {"file.export-share", QT_TRANSLATE_NOOP("Command", "Export for sharing: a .fuguepack with its images, local paths removed"),
@@ -169,8 +175,13 @@ void registerMenuCommands(CommandRegistry &registry) {
     }
     for (const auto &[id, label] : menuLabels())
         registry.setLabel(QString::fromLatin1(id), QString::fromUtf8(label));
-    for (const char *id : {"app.menu-bar", "app.context-menu", "help.about", "file.canvas-history", "file.canvas-view"})
+    for (const char *id : {"app.menu-bar", "app.context-menu", "help.about", "file.canvas-history", "file.canvas-view", "canvas.new", "canvas.paste-new"})
         registry.setHandler(QString::fromLatin1(id), [&registry, id] { emit registry.windowRequested(QString::fromLatin1(id)); });
+    // Only a picture itself makes a canvas (a copied file's path is not one): the same test the dialog's Clipboard choice uses.
+    registry.setEnabledWhen("canvas.paste-new", [] {
+        const QMimeData *data = QGuiApplication::clipboard()->mimeData();
+        return data && data->hasImage();
+    });
 }
 
 void bindMenuCommands(CommandRegistry &registry, CanvasModel &canvas, std::function<void(const QUrl &)> openUrl) {

@@ -8,6 +8,7 @@ are in [spec 14.5](spec.md#145-the-canvas-revision-store-206-208).
 
 ```
 fugue canvas new --name Sketch --size 1024x768     # prints the canvas id, canvas-0123456789ab
+fugue canvas new --size 1920x1080 --background white   # filled: transparent (default), white, black or #rrggbb
 fugue canvas import photo.png                      # a canvas from a PNG, JPEG or WebP (one layer) or an .ora
 fugue canvas log canvas-0123456789ab               # the revisions, newest first
 fugue canvas show canvas-0123456789ab@sha256:ab12cd34   # one revision: tree hash, layers, tiles
@@ -70,12 +71,20 @@ reads the canvas as it looks (the visible layers, with their opacity, blend mode
 
 In the window, Canvas Region's **Canvas** is a drop-down of the canvases of the folder you are working in
 (the Default's, or the project's own: a canvas belongs to the one it was made in). Each row has the name,
-the size, the time of the last change and the id. **New canvas…** asks for a name and a size
-(1024 × 1024 to start; at most 16384 a side and 64 megapixels), or makes one from a picture file with
-**From a picture…**; **Import picture…** makes a canvas straight from a PNG, JPEG, WebP or `.ora`. The
+the size, the time of the last change and the id. **New canvas…** opens the New canvas dialog (below); **Import picture…** makes a canvas straight from a PNG, JPEG, WebP or `.ora`. The
 canvas is put in the input. The input still holds the id (a workflow file is the same as before). An id this
 folder has no canvas by, such as one copied from the Default into a project, shows as `canvas-… (missing)`
 and the list is there to pick the right one. The list follows `fugue canvas new` and runs as they happen.
+
+### New canvas
+
+**File > New canvas…** (Ctrl+Alt+N) opens Photoshop's New Document dialog, from anywhere in the window; Canvas Region's **New canvas…** opens the same one. Give a name (Untitled 1, Untitled 2, … never one this folder already has) and say where the canvas starts:
+
+- **Blank**: pick a preset (Square 1024 × 1024, Landscape 4:3, Wide 16:9, Portrait 3:4, HD, 4K) or type a width and a height, then a background: Transparent, White, Black or a Color. A canvas is at most 16384 px a side and 67 megapixels; the line under the fields shows the size in megapixels and says when it is too much. A transparent canvas is one empty layer, any other background one filled layer called Background.
+- **Clipboard**: when you have copied a picture, the dialog opens on it with its size filled in, and Create makes the canvas from it (a screenshot, a picture copied from a browser). **File > Paste as new canvas** skips the dialog: it makes the canvas at once, named Pasted 1, Pasted 2, ….
+- **A file…**: a PNG, JPEG, WebP or `.ora` file, as Import picture… does, named after the file.
+
+The size, background and color of the last canvas you made are there the next time. A canvas made from the File menu opens in the Canvas view (in the active Canvas area when there is one).
 
 **Pick region…**, the last entry of that list, opens the canvas at the node's revision (`head` is read as it is now) in a large view with a rectangle on it, so the region is dragged out instead of typed. Drag inside the rectangle to move it, drag a handle to resize it (Shift keeps its shape, Alt resizes from the center), or type X, Y, Width and Height under the picture; Free, Original, 1:1, 4:3, 3:2, 16:9 and Turn lock its shape, and **Snap to 16** (the node's Multiple of) puts its edges on multiples of 16. The dashed outer box is what the node will cut (the rectangle and its Padding), and the line under the picture says the size the model will get (Scale, Cap and Multiple of applied, as the node does). Zoom and pan work as in every large view; a large canvas is drawn from a smaller copy, the numbers stay in the canvas's pixels. **Apply** writes X, Y, Width and Height in one step (Undo takes all four back); Cancel or Escape change nothing. With a mask connected the node uses the mask's bounds and the window says so; with X, Y, Width or Height linked to another node there is nothing to apply.
 

@@ -13,6 +13,7 @@
 // process's change shows within a moment).
 
 #include <QFileSystemWatcher>
+#include <QImage>
 #include <QObject>
 #include <QString>
 #include <QTimer>
@@ -48,16 +49,22 @@ public:
     // A blank canvas of one empty paint layer. Returns why not, or empty, and the new id in `id`.
     // `width` and `height` are within CanvasStore's limits (the same as `fugue canvas new`).
     QString makeBlank(const QString &name, int width, int height, QString *id);
+    // The same filled as `background` says ("transparent", "white", "black" or "#rrggbb"; engine/new_canvas.h).
+    QString makeBlank(const QString &name, int width, int height, const QString &background, QString *id);
+    // A canvas of one paint layer from a picture in memory (the clipboard's), named `name`.
+    QString makeFromImage(const QString &name, const QImage &image, QString *id);
+    // "Untitled 1", "Untitled 2", ...: the first of `base` and a number that no canvas of this root has as its name.
+    QString freeName(const QString &base);
     // A canvas from a PNG, JPEG, WebP or .ora file (a path or a file: URL). A blank name is the file's.
     QString makeFromFile(const QString &path, const QString &name, QString *id);
-    // The size a picture file would give, "" when it cannot be read: for the dialog's line "1920 x 1080".
-    QString pictureSize(const QString &path) const;
 
 signals:
     void changed();
 
 private:
     canvas::CanvasStore store() const;
+    // Stores `document` as a new canvas named `name` (blank: Untitled) made by `producer`; why not, or empty.
+    QString make(const QString &name, const Result<mask::PaintDocument> &document, const QString &producer, QString *id);
     // Watches the store's folder and each canvas's, so a head moved by another process is seen.
     void watch();
     void touched();

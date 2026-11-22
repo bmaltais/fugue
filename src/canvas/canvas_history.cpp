@@ -325,15 +325,9 @@ bool CanvasHistory::drop(const QString &revision) {
     return true;
 }
 
-QString CanvasHistory::newCanvas(const QString &name, int width, int height) {
-    CanvasChoices choices;
-    choices.setStoreRoot(m_root);
-    QString id;
-    if (const QString why = choices.makeBlank(name, width, height, &id); !why.isEmpty())
-        return why;
+void CanvasHistory::useCanvas(const QString &id) {
     emit storeChanged();
     setCanvasId(id);
-    return {};
 }
 
 QString CanvasHistory::importPicture(const QString &path, const QString &name) {
@@ -347,6 +341,5 @@ QString CanvasHistory::importPicture(const QString &path, const QString &name) {
     return {};
 }
 
-QString CanvasHistory::pictureSize(const QString &path) const { return CanvasChoices().pictureSize(path); }
 
 } // namespace fugue

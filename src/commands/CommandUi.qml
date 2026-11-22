@@ -53,18 +53,58 @@ Item {
         function onShortcutsToggleRequested() { help.opened ? help.close() : help.open() }
         function onQuitConfirmationRequested() { quitAsk.open() }
         // File > Canvas… (#221): the Canvas view in a large view, made the first time it is asked for.
+        // File > New canvas… and Paste as new canvas (#232): the New canvas dialog, made the first time too.
         function onWindowRequested(id) {
+            if (id === "canvas.new") {
+                root.newCanvasMade().openNew("")
+                return
+            }
+            if (id === "canvas.paste-new") {
+                const dialog = root.newCanvasMade()
+                const why = dialog.model.pasteAsNew()
+                if (why !== "")
+                    dialog.openNew(why)
+                return
+            }
             if (id !== "file.canvas-view")
                 return
-            if (!root.canvasViewDialog)
-                root.canvasViewDialog = canvasViewComponent.createObject(root)
-            root.canvasViewDialog.openFor("")
+            root.openCanvasView("")
         }
     }
     property var canvasViewDialog: null
     Component {
         id: canvasViewComponent
         CanvasViewDialog {}
+    }
+    function openCanvasView(canvasId) {
+        if (!root.canvasViewDialog)
+            root.canvasViewDialog = canvasViewComponent.createObject(root)
+        root.canvasViewDialog.openFor(canvasId)
+    }
+
+    // The New canvas dialog (canvas.new, canvas.paste-new): the session's store, as the Canvas view's dialog. A canvas
+    // it makes is shown where a canvas is shown: the active area when that is a Canvas area, else the Canvas view's
+    // large view, on it, as Photoshop opens the document it made.
+    property var newCanvasDialog: null
+    function newCanvasMade() {
+        if (!root.newCanvasDialog)
+            root.newCanvasDialog = newCanvasComponent.createObject(root)
+        return root.newCanvasDialog
+    }
+    Component {
+        id: newCanvasComponent
+        NewCanvasDialog {
+            objectName: "newCanvasDialog"
+            parent: Overlay.overlay
+            onCreated: id => root.showCanvas(id)
+        }
+    }
+    function showCanvas(id) {
+        const areas = App.workspace
+        if (areas && areas.viewOf(areas.active) === "canvas")
+            areas.setAreaState(areas.active, { canvasId: id })
+        else
+            root.openCanvasView(id)
     }
 
     // The keymap file could not be used (or holds mistakes): the defaults still work.

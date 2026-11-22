@@ -71,8 +71,6 @@ private slots:
         QVERIFY(image.save(picture));
         CanvasChoices choices;
         choices.setStoreRoot(dir.filePath("store"));
-        QCOMPARE(choices.pictureSize(picture), QString("320 × 200"));
-        QCOMPARE(choices.pictureSize(dir.filePath("nope.png")), QString());
         QString id;
         QCOMPARE(choices.makeFromFile(QUrl::fromLocalFile(picture).toString(), "", &id), QString());
         QCOMPARE(choices.row(id).value("name").toString(), QString("holiday"));

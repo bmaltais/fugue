@@ -142,22 +142,22 @@ Item {
         }
     }
 
-    // New canvas… (#211): a name and a size, or a picture file to make it from (NewCanvasQuestion.qml, shared with the
-    // Canvas view's empty state and menu). The canvas is made in this root's store and its id put in the input as one
-    // undo step, or the reason is shown in the question.
+    // New canvas… (#211, #232): the New canvas dialog (NewCanvasDialog.qml), made the first time it is asked for. The canvas
+    // is made in this root's store and its id put in the input as one undo step, or the reason is shown in the dialog.
+    property var newCanvasDialog: null
     function askNewCanvas() {
-        (newCanvasAsk.createObject(picker) as Question).open()
+        if (!newCanvasDialog)
+            newCanvasDialog = newCanvasComponent.createObject(picker, { storeRoot: host.edits.canvasStoreRoot() })
+        newCanvasDialog.openNew("")
     }
     Component {
-        id: newCanvasAsk
-        NewCanvasQuestion {
-            make: (name, width, height, picture) => picture !== ""
-                  ? picker.host.edits.importCanvas(picker.host.nodeId, picker.host.name, picture, name)
-                  : picker.host.edits.newCanvas(picker.host.nodeId, picker.host.name, name, width, height)
-            sizeOf: url => picker.host.edits.pictureSize(url)
+        id: newCanvasComponent
+        NewCanvasDialog {
+            parent: Overlay.overlay
+            onCreated: id => picker.host.error = picker.host.edits.useCanvas(picker.host.nodeId, picker.host.name, id)
         }
     }
-    // Import picture…: the file dialog, then a canvas named after the file at once.
+    // Import picture…: the file dialog, then a canvas named after the file, at once.
     function askPicture() {
         (pictureDialog.createObject(picker) as FileDialog).open()
     }
