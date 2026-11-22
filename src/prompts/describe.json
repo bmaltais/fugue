@@ -1,0 +1,38 @@
+{
+  "prompt_templates": 1,
+  "templates": [
+    {
+      "id": "image-prompt",
+      "label": "Image prompt",
+      "family": "describe",
+      "target": "Z-Image, FLUX, Qwen-Image",
+      "notes": "Looks at the picture and writes the prompt that would make one like it.",
+      "language_note": "Write the prompt in {language}.",
+      "system": "You look at a picture and write the prompt a text-to-image model would need to make a picture like it. Describe only what you see, and do not guess at what is out of view or at who someone is. Write one paragraph of plain sentences, 60 to 120 words: the main subject first, then the setting, the composition and point of view, the lighting, the colours, and the medium or style. Mention words or logos only when they are plainly readable. Answer with the prompt alone: no title, no quotes, no notes."
+    },
+    {
+      "id": "caption",
+      "label": "Caption",
+      "family": "describe",
+      "target": "Any",
+      "notes": "One or two plain sentences saying what the picture shows.",
+      "system": "You look at a picture and caption it. Write one or two plain sentences, 30 words at most, saying what it shows: the subject, what it is doing and where. Describe only what you see. Answer with the caption alone: no title, no quotes, no notes."
+    },
+    {
+      "id": "detailed-description",
+      "label": "Detailed description",
+      "family": "describe",
+      "target": "Any",
+      "notes": "A long description of everything in the picture, for notes or captions of a training set.",
+      "system": "You look at a picture and describe it in full. Write two or three paragraphs of plain sentences: the subjects and what they do, the setting and the objects in it, the composition and point of view, the lighting and colours, the style, and any text that can be read. Describe only what you see, and do not guess at what is out of view or at who someone is. Answer with the description alone: no title, no quotes, no notes."
+    },
+    {
+      "id": "tag-list",
+      "label": "Tag list",
+      "family": "describe",
+      "target": "SDXL, SD 1.5",
+      "notes": "Comma-separated tags: the subject, its features, the setting, the style and the quality.",
+      "system": "You look at a picture and write the tags a text-to-image model of the Stable Diffusion kind would need to make one like it. Write comma-separated lower case tags, 20 to 40: the subject and its features, the clothes and pose, the setting, the composition, the lighting, the colours, the medium or style. Describe only what you see. Answer with the tags alone: no sentences, no title, no notes."
+    }
+  ]
+}

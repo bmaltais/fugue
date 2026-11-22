@@ -15,12 +15,16 @@ void addBuiltinNodeTypes(Registry &registry) {
         std::fprintf(stderr, "fugue pack: %s: %s\n", qPrintable(error.code), qPrintable(error.message));
     for (const PackProblem &node : pack.disabled)
         std::fprintf(stderr, "fugue pack: %s: %s\n", qPrintable(node.node), qPrintable(node.reason));
-    // Enhance Prompt's Style is the prompt templates: Fugue's and the person's (#140).
+    // Enhance Prompt's and Describe Image's Style are the prompt templates: Fugue's and the person's (#140).
     const PromptTemplates templates = PromptTemplates::load();
     for (const QString &problem : templates.problems())
         std::fprintf(stderr, "fugue prompts: %s\n", qPrintable(problem));
-    registry.setInputChoices(QStringLiteral("fugue/enhance-prompt"), QStringLiteral("style"), templates.ids(),
-                             QStringLiteral("What the prompt is for:\n") + styleSummary(templates));
+    registry.setInputChoices(QStringLiteral("fugue/enhance-prompt"), QStringLiteral("style"), templates.ids(promptFamilies()),
+                             QStringLiteral("What the prompt is for:\n") + styleSummary(templates, promptFamilies()));
+    // Describe Image's Style is the templates of the family "describe".
+    const QStringList describe{QStringLiteral("describe")};
+    registry.setInputChoices(QStringLiteral("fugue/describe-image"), QStringLiteral("style"), templates.ids(describe),
+                             QStringLiteral("What to write about the picture:\n") + styleSummary(templates, describe));
 }
 
 void addBuiltinKernels(Kernels &kernels) {

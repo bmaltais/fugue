@@ -35,6 +35,7 @@ namespace {
 
 const QString kTextGenerate = QStringLiteral("fugue/text-generate");
 const QString kEnhance = QStringLiteral("fugue/enhance-prompt");
+const QString kDescribe = QStringLiteral("fugue/describe-image");
 
 QJsonObject handle(const QString &name) { return QJsonObject{{"resource", "fugue/text-model"}, {"name", name}}; }
 
@@ -387,6 +388,60 @@ private slots:
         Bench bench;
         const Result<JobRequest> job = bench.request(kEnhance, {{"prompt", "a fox"}, {"instructions", "Make it night."}});
         QVERIFY(job->params.value("system").toString().endsWith("Make it night."));
+    }
+
+    // --- Describe Image (#194): a picture and a fixed question over a describe template ---
+
+    void describeImageSendsThePictureWithItsStylesInstructions() {
+        Bench bench;
+        const Value picture = bench.image(writePng(bench.file("d.png"), 64, 48));
+        const Result<JobRequest> job = bench.request(kDescribe, {{"image", picture}});
+        QVERIFY2(job.ok(), job.ok() ? "" : qPrintable(job.errors().first().message));
+        QCOMPARE(job->capability, QStringLiteral("text.generate"));
+        QVERIFY(job->inputs.contains("image"));
+        QVERIFY(!job->params.value("prompt").toString().isEmpty());
+        QVERIFY(job->params.value("system").toString().contains("text-to-image"));
+        QCOMPARE(job->params.value("thinking"), QJsonValue(false));
+        const QString caption = bench.request(kDescribe, {{"image", picture}, {"style", "caption"}, {"instructions", "Name the colours."}})
+                                    ->params.value("system").toString();
+        QVERIFY(caption.contains("caption"));
+        QVERIFY(caption.endsWith("Also: Name the colours."));
+        QVERIFY(bench.request(kDescribe, {{"image", picture}, {"language", "French"}})->params.value("system").toString().contains("French"));
+    }
+
+    void describeImageRefusesAModelThatDoesNotTakeImages() {
+        Bench bench;
+        const Result<JobRequest> job = bench.request(kDescribe, {{"image", bench.image(writePng(bench.file("e.png"), 8, 8))}},
+                                                    selection({{"input", QJsonArray{"text"}}}));
+        QVERIFY(!job.ok());
+        QCOMPARE(job.errors().first().code, QStringLiteral("capability_unavailable"));
+    }
+
+    void describeAndEnhanceStylesDoNotMix() {
+        Bench bench;
+        const auto choices = [&](const QString &id) {
+            for (const InputSpec &input : bench.type(id).inputs)
+                if (input.name == "style" && input.choices)
+                    return *input.choices;
+            return QStringList{};
+        };
+        QVERIFY(choices(kDescribe).contains("image-prompt"));
+        QVERIFY(choices(kDescribe).contains("caption"));
+        QVERIFY(!choices(kDescribe).contains("detailed"));
+        QVERIFY(choices(kEnhance).contains("detailed"));
+        QVERIFY(!choices(kEnhance).contains("caption"));
+        const Value picture = bench.image(writePng(bench.file("f.png"), 8, 8));
+        const Result<JobRequest> wrong = bench.request(kDescribe, {{"image", picture}, {"style", "detailed"}});
+        QVERIFY(!wrong.ok());
+        QCOMPARE(wrong.errors().first().code, QStringLiteral("value_not_in_choices"));
+        QVERIFY(!bench.request(kEnhance, {{"prompt", "a fox"}, {"style", "caption"}}).ok());
+        QVERIFY(bench.kernel(kDescribe)->keyExtra({{"style", Value(QStringLiteral("video"))}}).isEmpty());
+        QVERIFY(!bench.kernel(kDescribe)->keyExtra({{"style", Value(QStringLiteral("caption"))}}).isEmpty());
+    }
+
+    void describeImageAnswerIsBareLikeAnEnhancedPrompt() {
+        Bench bench;
+        QCOMPARE(bench.outputs(kDescribe, "Prompt: \"A red fox in snow.\"")->value("text").text(), QStringLiteral("A red fox in snow."));
     }
 
     void anImageGoesAlongFittedWithinThe1024Square() {

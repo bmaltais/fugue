@@ -1,4 +1,4 @@
-// Text Generate and Enhance Prompt (spec 14.2): the text nodes, served by a provider's
+// Text Generate, Enhance Prompt and Describe Image (spec 14.2): the text nodes, served by a provider's
 // text.generate (8.1). The kernels only translate (node_kernel.h): inputs to a JobRequest,
 // and the JobResult's answer, cleaned, to outputs with the values actually used (3.3).
 
@@ -63,9 +63,21 @@ QString barePrompt(QString text) {
     return text;
 }
 
+// Which node a TextKernel serves. Enhance Prompt and Describe Image share everything but the
+// templates they read (a family each) and where the words come from: the person's idea, or the
+// picture with a fixed question.
+enum class TextMode { Generate, Enhance, Describe };
+
+// What Describe Image asks about the picture; the template (its system prompt) says how to answer.
+const QString kDescribeQuestion = QStringLiteral("Describe this picture.");
+
+QStringList familiesOf(TextMode mode) {
+    return mode == TextMode::Describe ? QStringList{QStringLiteral("describe")} : promptFamilies();
+}
+
 class TextKernel : public ProviderKernel {
 public:
-    explicit TextKernel(bool enhance) : m_enhance(enhance) {}
+    explicit TextKernel(TextMode mode) : m_mode(mode), m_enhance(mode != TextMode::Generate) {}
 
     // No properties: whether the model takes an image is checked in request(), because a model
     // of this machine does not say (omarchy provider) and must still be asked.
@@ -84,7 +96,7 @@ public:
         const QString style = inputs.value(QStringLiteral("style")).text();
         const PromptTemplates templates = PromptTemplates::load();
         const PromptTemplate *chosen = templates.find(style);
-        if (!chosen)
+        if (!chosen || !familiesOf(m_mode).contains(chosen->family))
             return {};
         return QString::fromLatin1(QCryptographicHash::hash(systemPrompt(*chosen, {}).toUtf8(), QCryptographicHash::Sha256).toHex());
     }
@@ -94,7 +106,8 @@ public:
         request.capability = kTextGenerate;
         request.model = selection.model.handle;
         QJsonObject &params = request.params;
-        params.insert(QStringLiteral("prompt"), context.input(QStringLiteral("prompt")).text());
+        params.insert(QStringLiteral("prompt"),
+                      m_mode == TextMode::Describe ? kDescribeQuestion : context.input(QStringLiteral("prompt")).text());
         QString system;
         if (m_enhance) {
             const Result<QString> made = enhanceSystem(context);
@@ -124,7 +137,7 @@ public:
                                       .arg(params.value(QStringLiteral("max_tokens")).toInt()),
                                   QStringLiteral("Ask for a shorter answer, or leave it unset."));
 
-        if (!m_enhance && context.inputs.contains(QStringLiteral("image"))) {
+        if (m_mode != TextMode::Enhance && context.inputs.contains(QStringLiteral("image"))) {
             const QJsonValue accepted = selection.model.properties.value(QStringLiteral("input"));
             if (accepted.isArray() && !accepted.toArray().contains(QStringLiteral("image")))
                 return makeInputError(QStringLiteral("capability_unavailable"), QStringLiteral("image"),
@@ -165,14 +178,14 @@ private:
     // The instructions of the chosen template (data: engine/prompt_templates.h, src/prompts) and
     // the options. ComfyUI's enhancer nodes report a chatty answer ("Here is your prompt: ..."), so
     // every template asks for the prompt alone, and outputs() strips what slips through.
-    static Result<QString> enhanceSystem(const NodeContext &context) {
+    Result<QString> enhanceSystem(const NodeContext &context) const {
         const QString style = context.input(QStringLiteral("style")).text();
         const PromptTemplates templates = PromptTemplates::load();
         const PromptTemplate *chosen = templates.find(style);
-        if (!chosen)
+        if (!chosen || !familiesOf(m_mode).contains(chosen->family))
             return makeInputError(QStringLiteral("value_not_in_choices"), QStringLiteral("style"),
                                   QStringLiteral("There is no prompt style \"%1\".").arg(style),
-                                  QStringLiteral("Choose among: %1.").arg(templates.ids().join(QStringLiteral(", "))));
+                                  QStringLiteral("Choose among: %1.").arg(templates.ids(familiesOf(m_mode)).join(QStringLiteral(", "))));
         PromptOptions options;
         options.language = context.input(QStringLiteral("language")).text();
         options.durationSeconds = context.input(QStringLiteral("duration")).json().toInt();
@@ -212,14 +225,16 @@ private:
 
     static QString modelName(const Selection &selection) { return selection.model.handle.value("name").toString(); }
 
-    const bool m_enhance;
+    const TextMode m_mode;
+    const bool m_enhance; // reads a prompt template (Enhance Prompt, Describe Image)
 };
 
 } // namespace
 
 void addTextGenerationKernels(Kernels &kernels) {
-    kernels.add(QStringLiteral("fugue/text-generate"), std::make_shared<TextKernel>(false));
-    kernels.add(QStringLiteral("fugue/enhance-prompt"), std::make_shared<TextKernel>(true));
+    kernels.add(QStringLiteral("fugue/text-generate"), std::make_shared<TextKernel>(TextMode::Generate));
+    kernels.add(QStringLiteral("fugue/enhance-prompt"), std::make_shared<TextKernel>(TextMode::Enhance));
+    kernels.add(QStringLiteral("fugue/describe-image"), std::make_shared<TextKernel>(TextMode::Describe));
 }
 
 } // namespace fugue::nodes

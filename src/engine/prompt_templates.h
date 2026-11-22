@@ -9,11 +9,11 @@
 // are read after them, and a template there with the id of an earlier one replaces it, as for the
 // model catalog (engine/model_catalog.h). A template that is not valid (no id, label or system
 // prompt, an id that is not lower case with hyphens, an unknown family, a repeated id) is left
-// out and said in problems(). The list is in the order image, video, audio, and within a family
+// out and said in problems(). The list is in the order image, video, audio, describe, and within a family
 // as the files list it.
 //
 // A template holds what to ask (`system`, one string or a list of lines joined with a newline),
-// what it is for (`family` image, video or audio; `target`, the models it suits), what a person
+// what it is for (`family` image, video or audio for Enhance Prompt, describe for Describe Image; `target`, the models it suits), what a person
 // should read (`notes`), and optionally worked `examples` ({idea, prompt}), which are shown to the
 // language model after the system prompt. `duration_note` and `language_note` are what the
 // node's Length and Language options add to the instructions, with {seconds} and {language} in
@@ -33,7 +33,7 @@ struct PromptExample {
 struct PromptTemplate {
     QString id;           // lower case letters, digits and hyphens: what the node's Style holds
     QString label;        // "MiniMax video"
-    QString family;       // "image", "video" or "audio"
+    QString family;       // "image", "video", "audio" or "describe"
     QString target;       // the models it suits: "MiniMax H3, Hailuo"
     QString system;       // the instructions
     QString notes;        // a line or two for a person: when to use it, where it comes from
@@ -60,6 +60,8 @@ public:
     const QList<PromptTemplate> &all() const { return m_templates; }
     const PromptTemplate *find(const QString &id) const;
     QStringList ids() const;
+    // The ids of the templates of these families, in the same order.
+    QStringList ids(const QStringList &families) const;
     // What was left out, one sentence each, naming the file and the template.
     const QStringList &problems() const { return m_problems; }
 
@@ -75,7 +77,11 @@ private:
 // the length and language sentences, then the person's own words ("Also: ...").
 QString systemPrompt(const PromptTemplate &prompt, const PromptOptions &options);
 
-// "id: label, for target" lines: what the Style input says in its description.
-QString styleSummary(const PromptTemplates &templates);
+// The families Enhance Prompt offers: what a prompt is for. Describe Image reads family "describe".
+QStringList promptFamilies();
+
+// "id: label, for target" lines: what the Style input says in its description. With `families`,
+// only those templates.
+QString styleSummary(const PromptTemplates &templates, const QStringList &families = {});
 
 } // namespace fugue
