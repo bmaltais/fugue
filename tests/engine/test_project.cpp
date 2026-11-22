@@ -13,6 +13,8 @@
 
 #include <vector>
 
+#include <unistd.h>
+
 #include "engine/fugue_home.h"
 #include "engine/paths.h"
 #include "engine/project.h"
@@ -22,7 +24,7 @@ using namespace fugue;
 namespace {
 
 const char *const kVariables[] = {"FUGUE_HOME",       "FUGUE_PROJECT",   "FUGUE_BASE_XDG_CONFIG_HOME", "FUGUE_BASE_XDG_DATA_HOME",
-                                  "FUGUE_BASE_XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME",     "XDG_STATE_HOME",
+                                  "FUGUE_BASE_XDG_STATE_HOME", "FUGUE_BASE_XDG_RUNTIME_DIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME",     "XDG_STATE_HOME",
                                   "XDG_CACHE_HOME",   "XDG_RUNTIME_DIR", "TMPDIR",                     "WAYLAND_DISPLAY",
                                   "DBUS_SESSION_BUS_ADDRESS", "CUDA_CACHE_PATH", "__GL_SHADER_DISK_CACHE_PATH",
                                   "PIPEWIRE_RUNTIME_DIR", "PULSE_RUNTIME_PATH"};
@@ -188,6 +190,17 @@ private slots:
         QCOMPARE(baseConfigDir(), config);
         QCOMPARE(baseDataDir(), data);
         QCOMPARE(baseStateDir(), state);
+    }
+
+    void theBaseRuntimeFolderIsSavedForTheCrossRootGpuLock() {
+        qputenv("XDG_RUNTIME_DIR", path("base").toLocal8Bit()); // a folder that exists
+        QCOMPARE(baseRuntimeDir(), path("base"));
+        QVERIFY(setFugueHome(path("p/one"), nullptr));
+        QCOMPARE(runtimeDir(), path("p/one/run")); // the root's own
+        QCOMPARE(baseRuntimeDir(), path("base"));
+        QCOMPARE(gpuLockPath(), path("base") + QStringLiteral("/fugue-gpu-%1.lock").arg(::getuid()));
+        QVERIFY(setFugueHome(path("p/two"), nullptr));
+        QCOMPARE(gpuLockPath(), path("base") + QStringLiteral("/fugue-gpu-%1.lock").arg(::getuid())); // the same in every root
     }
 
     void aFailedSetFugueHomeSavesNothing() {

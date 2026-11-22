@@ -80,6 +80,9 @@ Reply packTrust(const Command &command, Context &context);
 Reply cacheStatus(const Command &command, Context &context);
 Reply cacheClear(const Command &command, Context &context);
 
+// settings.cpp: `settings list`, each setting in effect with where its value comes from (1.4.2).
+Reply settingsList(const Command &command, Context &context);
+
 // project.cpp: the `project` commands (1.4.2, 13.1). None needs a person: they only change the registry
 // and project.json files, never delete a project's files.
 Reply projectList(const Command &command, Context &context);

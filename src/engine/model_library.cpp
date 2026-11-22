@@ -71,17 +71,57 @@ ModelLibrary::ModelLibrary(QStringList roots, const Registry *registry, QHash<QS
 ModelLibrary ModelLibrary::current(const Registry *registry) {
     const Settings settings = currentSettings();
     ModelLibrary library(roots(settings), registry, rootKinds(settings));
+    QStringList inherited;
+    for (const SearchPath &root : taggedRoots(settings))
+        if (root.inherited)
+            inherited << root.path;
+    library.setInheritedRoots(inherited);
     if (!settings.downloadFolder.isEmpty())
         library.setDownloadRoot(QDir::cleanPath(expandHome(settings.downloadFolder)));
     return library;
 }
 
 QString ModelLibrary::downloadRoot() const {
-    return m_roots.contains(m_downloadRoot) ? m_downloadRoot : m_roots.value(0);
+    // Downloads always go to an own root: the first one when the one set is not here or is inherited.
+    return m_roots.contains(m_downloadRoot) && !isInherited(m_downloadRoot) ? m_downloadRoot : m_roots.value(0);
+}
+
+QList<SearchPath> ModelLibrary::taggedRoots(const Settings &settings) {
+    QStringList own;
+    for (const QString &path : settings.modelPaths)
+        if (!settings.inheritedModelPaths.contains(path))
+            own << path;
+    QStringList inherited;
+    if (settings.inheritsModels)
+        inherited << baseDataDir() + QStringLiteral("/models");
+    inherited << settings.inheritedModelPaths;
+    return taggedSearchPaths(dataDir() + QStringLiteral("/models"), own, inherited);
 }
 
 QStringList ModelLibrary::roots(const Settings &settings) {
-    return searchPaths(dataDir() + QStringLiteral("/models"), settings.modelPaths);
+    QStringList paths;
+    for (const SearchPath &root : taggedRoots(settings))
+        paths << root.path;
+    return paths;
+}
+
+QString ModelLibrary::rootOf(const QString &path) const {
+    const QString clean = QDir::cleanPath(path);
+    QString best;
+    for (const QString &root : m_roots)
+        if ((clean == root || clean.startsWith(root + QLatin1Char('/'))) && root.size() > best.size())
+            best = root;
+    return best;
+}
+
+std::optional<Error> ModelLibrary::writeRefusal(const QString &path) const {
+    const QString root = rootOf(path);
+    if (root.isEmpty() || !isInherited(root))
+        return std::nullopt;
+    return makeError(QStringLiteral("usage"),
+                     QStringLiteral("%1 is in a model folder this project inherits from the Default project (%2), and is read-only here.")
+                         .arg(path, root),
+                     QStringLiteral("Change it in the Default project (start fugue without --project), or copy the file into a folder of this project."));
 }
 
 QHash<QString, QString> ModelLibrary::rootKinds(const Settings &settings) {
@@ -233,6 +273,8 @@ QString ModelLibrary::downloadFolder(const PortType &type) const {
 QStringList ModelLibrary::downloadRoots(const QList<PortType> &types) const {
     QStringList out;
     for (const QString &root : m_roots) {
+        if (isInherited(root))
+            continue;
         const QString kind = kindOf(root);
         bool takes = kind == kLayout;
         if (!takes && !kind.isEmpty() && !types.isEmpty()) {

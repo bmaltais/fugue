@@ -83,6 +83,9 @@ private:
 
 QString Queue::defaultDir() { return stateDir() + QStringLiteral("/queue"); }
 QString Queue::defaultLockPath() { return stateDir() + QStringLiteral("/engine.lock"); }
+QString Queue::crossRootLockFor(const QString &engineLockPath) {
+    return engineLockPath == defaultLockPath() ? gpuLockPath() : QString();
+}
 
 // The on-disk form of 4.6, replaced atomically so a reader never sees half an entry.
 bool Queue::write(const QString &file, const QJsonObject &content) const {
@@ -270,14 +273,20 @@ bool signalRunWorker(qint64 pid, const QString &run, int signal) {
     return sent;
 }
 
-Lock::Lock(const QString &path) {
+Lock::Lock(const QString &path, const QString &crossRoot) {
     QDir().mkpath(QFileInfo(path).path());
     m_fd = ::open(QFile::encodeName(path).constData(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+    if (!crossRoot.isEmpty()) {
+        QDir().mkpath(QFileInfo(crossRoot).path());
+        m_crossFd = ::open(QFile::encodeName(crossRoot).constData(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+    }
 }
 
 Lock::~Lock() {
     if (m_fd >= 0)
         ::close(m_fd); // releases the lock
+    if (m_crossFd >= 0)
+        ::close(m_crossFd);
 }
 
 bool Lock::tryAcquire() {
@@ -286,12 +295,19 @@ bool Lock::tryAcquire() {
     if (m_held)
         return true;
     m_held = ::flock(m_fd, LOCK_EX | LOCK_NB) == 0;
+    if (m_held && m_crossFd >= 0 && ::flock(m_crossFd, LOCK_EX | LOCK_NB) != 0) {
+        ::flock(m_fd, LOCK_UN); // another root's run has the GPU: wait for it, hold nothing
+        m_held = false;
+    }
     return m_held;
 }
 
 void Lock::release() {
-    if (m_held)
+    if (m_held) {
+        if (m_crossFd >= 0)
+            ::flock(m_crossFd, LOCK_UN);
         ::flock(m_fd, LOCK_UN);
+    }
     m_held = false;
 }
 

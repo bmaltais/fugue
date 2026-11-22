@@ -281,7 +281,7 @@ int work(const QString &runId, Context &context) {
     sigaction(SIGINT, &action, nullptr);
 
     const Queue queue(context.queueDir);
-    Lock lock(context.lockPath);
+    Lock lock(context.lockPath, Queue::crossRootLockFor(context.lockPath));
     queue.setPid(runId, qint64(::getpid()));
 
     // Wait for my turn: my entry first in the queue, and the lock.

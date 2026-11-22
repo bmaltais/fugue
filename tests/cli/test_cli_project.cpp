@@ -50,7 +50,7 @@ class TestCliProject : public QObject {
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
         for (const char *variable : {"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR", "TMPDIR",
                                      "FUGUE_HOME", "FUGUE_PROJECT", "FUGUE_BASE_XDG_CONFIG_HOME", "FUGUE_BASE_XDG_DATA_HOME",
-                                     "FUGUE_BASE_XDG_STATE_HOME", "QT_QPA_PLATFORM", "DISPLAY", "WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS"})
+                                     "FUGUE_BASE_XDG_STATE_HOME", "FUGUE_BASE_XDG_RUNTIME_DIR", "QT_QPA_PLATFORM", "DISPLAY", "WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS"})
             env.remove(QString::fromLatin1(variable));
         env.insert("HOME", path("home"));
         env.insert("FUGUE_HELPER", "");

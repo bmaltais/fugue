@@ -9,8 +9,10 @@
 #include <cmath>
 
 #include "engine/atomic_file.h"
+#include "engine/fugue_home.h"
 #include "engine/json.h"
 #include "engine/paths.h"
+#include "engine/project.h"
 
 namespace fugue {
 
@@ -99,7 +101,60 @@ void apply(Settings &settings, const QString &key, const QJsonValue &value) {
         settings.runsKept = value.toInt();
 }
 
+// The Default project's valid value of `key`, undefined when it has none or the class is not inherited.
+QJsonValue inheritedValue(const QString &key) {
+    if (settingClass(key) == SettingClass::Own)
+        return QJsonValue(QJsonValue::Undefined);
+    if (!sessionInherits().contains(settingClassName(settingClass(key))))
+        return QJsonValue(QJsonValue::Undefined);
+    const SettingsFile base = readSettings(baseSettingsPath());
+    const QJsonValue value = base.document.value(key);
+    return !value.isUndefined() && checkSetting(key, value).isEmpty() ? value : QJsonValue(QJsonValue::Undefined);
+}
+
+// True when writing the built-in value of `key` into the session's own file must be kept: the Default's
+// value for it is another one (lists and maps only add, so they never shadow).
+bool shadowsInherited(const QString &path, const QString &key, const QJsonValue &value) {
+    if (path != settingsPath() || fugueHome().isEmpty() || value.isArray() || value.isObject())
+        return false;
+    const QJsonValue inherited = inheritedValue(key);
+    return !inherited.isUndefined() && inherited != value;
+}
+
 } // namespace
+
+QString settingOriginName(SettingOrigin origin) {
+    switch (origin) {
+    case SettingOrigin::BuiltIn:
+        return QStringLiteral("built-in");
+    case SettingOrigin::Own:
+        return QStringLiteral("own");
+    case SettingOrigin::Default:
+        return QStringLiteral("inherited from Default");
+    }
+    return {};
+}
+
+SettingClass settingClass(const QString &key) {
+    static const QStringList preferences{"navigation", "language", "corner_radius", "hover_magnifier", "new_seed", "embed_workflow"};
+    if (preferences.contains(key))
+        return SettingClass::Preferences;
+    if (key == QLatin1String("model_paths") || key == QLatin1String("model_folder_kinds"))
+        return SettingClass::Models;
+    return SettingClass::Own;
+}
+
+QString settingClassName(SettingClass settingClass) {
+    switch (settingClass) {
+    case SettingClass::Preferences:
+        return QStringLiteral("preferences");
+    case SettingClass::Models:
+        return QStringLiteral("models");
+    case SettingClass::Own:
+        break;
+    }
+    return {};
+}
 
 QString settingsPath() { return configDir() + QStringLiteral("/settings.json"); }
 
@@ -218,20 +273,131 @@ Errors changeSetting(const QString &path, const QString &key, const QJsonValue &
             return read.errors();
         document = read.value();
     }
-    if (value.isUndefined() || value == settingDefault(key)) {
+    // The default is not written, except where the Default project's value would otherwise show through:
+    // a project that sets a preference back to the built-in value must say so.
+    const bool isDefault = value.isUndefined() || (value == settingDefault(key) && !shadowsInherited(path, key, value));
+    if (isDefault) {
         if (!document.contains(key))
             return {}; // already the default: nothing to write
         document.remove(key);
     } else if (document.value(key) == value) {
         return {};
     }
-    if (value.isUndefined() || value == settingDefault(key))
+    if (isDefault)
         document.remove(key);
     else
         document.insert(key, value);
     return replaceFile(path, writeJson(document), path);
 }
 
-Settings currentSettings() { return readSettings(settingsPath()).settings; }
+QString baseSettingsPath() { return baseConfigDir() + QStringLiteral("/settings.json"); }
+
+EffectiveSettings layerSettings(const SettingsFile &own, const SettingsFile &base, const QStringList &inherits,
+                                const QString &defaultModelsDir) {
+    EffectiveSettings out;
+    out.settings = own.settings;
+    out.problems = own.problems;
+    const bool models = inherits.contains(settingClassName(SettingClass::Models));
+    const bool preferences = inherits.contains(settingClassName(SettingClass::Preferences));
+    if (models || preferences)
+        for (const QString &problem : base.problems)
+            out.problems << QStringLiteral("Default project: %1").arg(problem);
+    out.settings.inheritsModels = models && !defaultModelsDir.isEmpty();
+    for (const QString &key : kKeys) {
+        const SettingClass kind = settingClass(key);
+        const bool inheritable = (kind == SettingClass::Preferences && preferences) || (kind == SettingClass::Models && models);
+        const bool ownHas = own.document.contains(key);
+        out.origins.insert(key, ownHas ? SettingOrigin::Own : SettingOrigin::BuiltIn);
+        if (!inheritable)
+            continue;
+        const QJsonValue value = base.document.value(key);
+        if (value.isUndefined() || !checkSetting(key, value).isEmpty())
+            continue;
+        if (key == QLatin1String("model_paths")) {
+            QSet<QString> seen;
+            for (const QString &path : out.settings.modelPaths)
+                seen.insert(QDir::cleanPath(expandHome(path)));
+            for (const QString &path : strings(value))
+                if (!seen.contains(QDir::cleanPath(expandHome(path)))) {
+                    seen.insert(QDir::cleanPath(expandHome(path)));
+                    out.settings.modelPaths << path;
+                    out.settings.inheritedModelPaths << path;
+                }
+            if (!out.settings.inheritedModelPaths.isEmpty() && !ownHas)
+                out.origins[key] = SettingOrigin::Default;
+        } else if (key == QLatin1String("model_folder_kinds")) {
+            const QJsonObject kinds = value.toObject();
+            bool added = false;
+            for (auto it = kinds.begin(); it != kinds.end(); ++it)
+                if (!out.settings.modelFolderKinds.contains(it.key())) {
+                    out.settings.modelFolderKinds.insert(it.key(), it.value().toString());
+                    added = true;
+                }
+            if (added && !ownHas)
+                out.origins[key] = SettingOrigin::Default;
+        } else if (!ownHas) {
+            apply(out.settings, key, value);
+            out.origins[key] = SettingOrigin::Default;
+        }
+    }
+    return out;
+}
+
+EffectiveSettings effectiveSettings() {
+    const SettingsFile own = readSettings(settingsPath());
+    const QStringList inherits = sessionInherits();
+    const bool layered = inherits.contains(settingClassName(SettingClass::Models))
+                         || inherits.contains(settingClassName(SettingClass::Preferences));
+    return layerSettings(own, layered ? readSettings(baseSettingsPath()) : SettingsFile(), inherits,
+                         baseDataDir() + QStringLiteral("/models"));
+}
+
+QJsonValue settingValue(const Settings &settings, const QString &key) {
+    if (key == QLatin1String("navigation"))
+        return settings.navigation;
+    if (key == QLatin1String("language"))
+        return settings.language.isEmpty() ? QJsonValue(QJsonValue::Undefined) : QJsonValue(settings.language);
+    if (key == QLatin1String("output_folder"))
+        return settings.outputFolder.isEmpty() ? QJsonValue(QJsonValue::Undefined) : QJsonValue(settings.outputFolder);
+    if (key == QLatin1String("inputs_folder"))
+        return settings.inputsFolder.isEmpty() ? QJsonValue(QJsonValue::Undefined) : QJsonValue(settings.inputsFolder);
+    if (key == QLatin1String("model_paths"))
+        return QJsonArray::fromStringList(settings.modelPaths);
+    if (key == QLatin1String("model_folder_kinds")) {
+        QJsonObject kinds;
+        for (auto it = settings.modelFolderKinds.begin(); it != settings.modelFolderKinds.end(); ++it)
+            kinds.insert(it.key(), it.value());
+        return kinds;
+    }
+    if (key == QLatin1String("download_folder"))
+        return settings.downloadFolder.isEmpty() ? QJsonValue(QJsonValue::Undefined) : QJsonValue(settings.downloadFolder);
+    if (key == QLatin1String("pack_paths"))
+        return QJsonArray::fromStringList(settings.packPaths);
+    if (key == QLatin1String("new_seed"))
+        return settings.newSeed;
+    if (key == QLatin1String("embed_workflow"))
+        return settings.embedWorkflow;
+    if (key == QLatin1String("corner_radius"))
+        return settings.cornerRadius == Settings::followOmarchy ? QJsonValue(QStringLiteral("omarchy")) : QJsonValue(settings.cornerRadius);
+    if (key == QLatin1String("hover_magnifier"))
+        return settings.hoverMagnifier;
+    if (key == QLatin1String("cache_results_gb"))
+        return settings.cacheResultsGb;
+    if (key == QLatin1String("cache_thumbnails_gb"))
+        return settings.cacheThumbnailsGb;
+    if (key == QLatin1String("runs_kept"))
+        return settings.runsKept;
+    return QJsonValue(QJsonValue::Undefined);
+}
+
+Settings currentSettings() { return effectiveSettings().settings; }
+
+QString effectiveKeymapPath() {
+    const QString own = configDir() + QStringLiteral("/keybindings.json");
+    if (QFileInfo::exists(own) || !sessionInherits().contains(settingClassName(SettingClass::Preferences)))
+        return own;
+    const QString base = baseConfigDir() + QStringLiteral("/keybindings.json");
+    return QFileInfo::exists(base) ? base : own;
+}
 
 } // namespace fugue

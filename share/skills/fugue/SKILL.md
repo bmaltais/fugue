@@ -101,7 +101,7 @@ fail with `permission_denied`.
 | `fugue pack update [id]` | Update packs (a person confirms; `--ref`) |
 | `fugue pack remove <id>` | Remove a pack (a person confirms) |
 | `fugue pack trust <id>` | Trust a pack (a person confirms) |
-| `fugue model list` | Models on disk and offered by providers (`--type`, `--hash`) |
+| `fugue model list` | Models on disk and offered by providers (`--type`, `--hash`); each file and each searched folder says whether it is the project's own or inherited from Default |
 | `fugue model get <file or template id>` | Download the missing models a workflow or template names (`--into`) |
 | `fugue template list` | Templates, with the models and packs each needs |
 | `fugue cache status` | What the caches hold (results, thumbnails, runs): bytes, files, oldest, and the results per workflow and node |
@@ -111,7 +111,8 @@ fail with `permission_denied`.
 | `fugue project new <name>` | Make and register a project (`--in <dir>`, `--inherits models,packs,preferences`) |
 | `fugue project add <dir>` | Register the project in a folder |
 | `fugue project remove <name>` | Take it off the list; its files stay |
-| `fugue project inherits <name> <items>` | Set what it inherits (`models`, `packs`, `templates`, `prompts`, `preferences`, or `none`) |
+| `fugue project inherits <name> <items>` | Set what it inherits (`models`, `packs`, `templates`, `prompts`, `preferences`, or `none`); `models` and `preferences` take effect now: inherited model folders are read-only and downloads go to the project's own |
+| `fugue settings list` | Every setting in effect, with where each value comes from (`own`, `inherited from Default`, `built-in`) |
 | `fugue skill install` | Install or update this skill (`--target`, `--dry-run`, `--force`) |
 | `fugue skill uninstall` | Remove it (`--target`, `--dry-run`, `--force`) |
 

@@ -40,6 +40,7 @@
 #include "workflow/recent_files.h"
 #include "run/run_queue.h"
 #include "run/run_service.h"
+#include "engine/settings.h"
 #include "settings/settings_model.h"
 #include "theme.h"
 #include "workflow/workflows.h"
@@ -104,7 +105,7 @@ int main(int argc, char *argv[]) {
     fugue::CommandRegistry commands;
     fugue::registerDefaultCommands(commands);
     fugue::registerMenuCommands(commands);
-    commands.loadKeymap(fugue::CommandRegistry::keymapPath());
+    commands.loadKeymap(fugue::effectiveKeymapPath());
 
     // The canvas reads node types from the same registry the CLI fills (the built-ins, then the
     // packs) and starts on an empty workflow. The run thread fills its own the same way.

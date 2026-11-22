@@ -423,7 +423,7 @@ void SettingsModel::openKeymap() {
 
 void SettingsModel::reloadKeymap() {
     if (m_registry)
-        m_registry->loadKeymap(CommandRegistry::keymapPath());
+        m_registry->loadKeymap(effectiveKeymapPath());
 }
 
 } // namespace fugue

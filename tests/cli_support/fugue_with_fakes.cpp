@@ -24,6 +24,7 @@
 
 #include "cli/args.h"
 #include "cli/cli.h"
+#include "engine/fugue_home.h"
 #include "engine/json.h"
 
 using namespace fugue;
@@ -73,6 +74,11 @@ void addManifestFolder(Registry &registry, const QString &folder) {
 } // namespace
 
 int main(int argc, char **argv) {
+    // FUGUE_HOME, as the real main() reads it: the tests of projects run it in a root.
+    if (QString homeError; !applyFugueHome(argc, argv, &homeError)) {
+        std::fprintf(stderr, "fugue: %s\n", qPrintable(homeError));
+        return 2;
+    }
     cli::Hooks hooks;
     hooks.addNodeTypes = [](Registry &registry) {
         registry.add(DeclaredPortType{*PortType::parse("fugue/test-lora"), PortKind::Resource, "Test LoRA", {}, {"loras"}, {}});

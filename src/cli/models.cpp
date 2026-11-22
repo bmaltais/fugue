@@ -24,6 +24,7 @@
 #include "engine/model_offers.h"
 #include "engine/paths.h"
 #include "engine/registry.h"
+#include "engine/settings.h"
 #include "engine/templates.h"
 
 namespace fugue::cli {
@@ -97,10 +98,12 @@ Reply modelList(const Command &command, Context &context) {
                 }
             }
             const bool hashed = model.handle.contains("hash");
+            const bool fromDefault = library.isInherited(library.rootOf(model.path));
             QJsonObject entry{{"source", "disk"},          {"type", declared->type.toString()},
                               {"name", model.name},        {"path", model.path},
                               {"folder", model.folder},    {"size", model.size},
-                              {"hashed", hashed}};
+                              {"hashed", hashed},
+                              {"origin", fromDefault ? settingOriginName(SettingOrigin::Default) : settingOriginName(SettingOrigin::Own)}};
             if (hashed)
                 entry.insert("handle", model.handle);
             models.append(entry);
@@ -108,7 +111,7 @@ Reply modelList(const Command &command, Context &context) {
                          .arg(declared->type.toString(), model.name,
                               hashed ? model.handle.value("hash").toString().left(19) + QStringLiteral("…")
                                      : QStringLiteral("(not hashed: --hash)"),
-                              model.path);
+                              model.path + (fromDefault ? QStringLiteral("  [inherited from Default]") : QString()));
         }
     }
 
@@ -126,7 +129,12 @@ Reply modelList(const Command &command, Context &context) {
         lines << QStringLiteral("%1  %2  %3  %4")
                      .arg(model.handle.value("resource").toString(), model.name, model.status, model.provider);
     }
-    Reply reply = Reply::success(QJsonObject{{"models", models}}, lines.join('\n'));
+    // Where the models are searched, and which of those folders are the Default project's (1.4.2).
+    QJsonArray roots;
+    for (const QString &root : library.roots())
+        roots.append(QJsonObject{{"path", root},
+                                 {"origin", settingOriginName(library.isInherited(root) ? SettingOrigin::Default : SettingOrigin::Own)}});
+    Reply reply = Reply::success(QJsonObject{{"models", models}, {"roots", roots}}, lines.join('\n'));
     reply.errors = warnings; // 13.2: a success with warnings
     return reply;
 }
@@ -161,6 +169,16 @@ Reply modelGet(const Command &command, Context &context) {
                                     "Use Fugue's own models folder or one of the extra model folders in Settings.");
             for (const QString &each : library.roots())
                 error.valid.append(each);
+            return Reply::failure(error);
+        }
+        if (library.isInherited(root)) {
+            Error error = makeError("usage",
+                                    QStringLiteral("%1 is a model folder this project inherits from the Default project and is read-only here.")
+                                        .arg(command.value("into")),
+                                    "Download in the Default project, or into one of this project's own model folders.");
+            for (const QString &each : library.roots())
+                if (!library.isInherited(each))
+                    error.valid.append(each);
             return Reply::failure(error);
         }
         library.setDownloadRoot(root);

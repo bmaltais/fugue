@@ -48,6 +48,10 @@ public:
     // $XDG_STATE_HOME/fugue/queue (~/.local/state/fugue/queue), and the lock beside it.
     static QString defaultDir();
     static QString defaultLockPath();
+    // The lock a run takes besides the engine lock, across roots (spec 1.4.2): one file in the real
+    // runtime folder, the same for every project, so two roots never run on the GPU at once. Empty for
+    // any engine lock but the default one (a test's own folder has no business with the machine's).
+    static QString crossRootLockFor(const QString &engineLockPath);
 
     // Adds an entry for `run`. `first` sorts it ahead of the waiting runs.
     bool enqueue(const QString &run, const QString &workflow, bool first) const;
@@ -94,7 +98,9 @@ private:
 // it if the process dies.
 class Lock {
 public:
-    explicit Lock(const QString &path);
+    // `crossRoot`, when not empty, is a second file locked and released together with the first, in
+    // that order; a try that gets the first but not the second lets the first go again.
+    explicit Lock(const QString &path, const QString &crossRoot = {});
     ~Lock();
     Lock(const Lock &) = delete;
     Lock &operator=(const Lock &) = delete;
@@ -105,6 +111,7 @@ public:
 
 private:
     int m_fd = -1;
+    int m_crossFd = -1;
     bool m_held = false;
 };
 

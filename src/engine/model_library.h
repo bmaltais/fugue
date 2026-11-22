@@ -32,6 +32,9 @@
 #include <QString>
 #include <QStringList>
 
+#include <optional>
+
+#include "engine/paths.h"
 #include "engine/port_type.h"
 #include "engine/result.h"
 
@@ -79,13 +82,25 @@ public:
     static ModelLibrary current(const Registry *registry);
 
     // dataDir()/models, then each model path of `settings` with "~" expanded; a relative path is
-    // left out (as pack paths are), and a folder named twice counts once.
+    // left out (as pack paths are), and a folder named twice counts once. A project that inherits
+    // `models` (1.4.2) has the Default's models folder and model paths after its own, read-only.
     static QStringList roots(const Settings &settings);
+    // The same with where each comes from.
+    static QList<SearchPath> taggedRoots(const Settings &settings);
     // The settings' model_folder_kinds, by the paths roots() gives.
     static QHash<QString, QString> rootKinds(const Settings &settings);
 
     QStringList roots() const { return m_roots; }
 
+    // The roots that belong to the Default project (spec 1.4.2): searched like any other, never written
+    // in, never a download target. `current()` sets them from the settings.
+    void setInheritedRoots(QStringList roots) { m_inherited = std::move(roots); }
+    bool isInherited(const QString &root) const { return m_inherited.contains(root); }
+    // The root that holds `path` (the longest of roots() that is a parent of it), empty when none does.
+    QString rootOf(const QString &path) const;
+    // Why `path` may not be deleted, moved or written: it is under an inherited root. The message names
+    // where to change it. Nothing when it can.
+    std::optional<Error> writeRefusal(const QString &path) const;
     // Where downloads go (#89): one of roots(), the settings' download_folder when it is one
     // of them, else Fugue's own folder (the first root).
     QString downloadRoot() const;
@@ -141,6 +156,7 @@ private:
     const DeclaredPortType *resourceType(const PortType &type) const;
 
     QStringList m_roots;
+    QStringList m_inherited;
     const Registry *m_registry = nullptr;
     QHash<QString, QString> m_kinds; // set in the settings, by root
     QString m_downloadRoot;          // empty: the first root

@@ -418,6 +418,14 @@ Result<ProjectEntry> setProjectInherits(const QString &nameOrPath, const QString
     return Result<ProjectEntry>(entry, warnings);
 }
 
+QStringList sessionInherits() {
+    const QString root = fugueHome();
+    if (root.isEmpty() || !QFileInfo::exists(projectManifestPath(root)))
+        return {};
+    const Result<ProjectManifest> manifest = readProject(root);
+    return manifest ? manifest->inherits : QStringList();
+}
+
 QString lastUsedProjectRoot() {
     const Result<ProjectRegistry> registry = readProjectRegistry();
     if (!registry || registry->last.isEmpty())

@@ -67,6 +67,7 @@ const QMap<QString, QMap<QString, Spec>> &table() {
           {"add", {1, 1, {}, {}, projectAdd}},
           {"remove", {1, 1, {}, {}, projectRemove}},
           {"inherits", {2, 2, {}, {}, projectInherits}}}},
+        {"settings", {{"list", {0, 0, {}, {}, settingsList}}}},
         {"command", {{"list", {0, 0, {}, {}, nullptr}}}},
         {"skill",
          {{"install", {0, 0, {"target"}, {"dry-run", "force"}, skillInstall}},

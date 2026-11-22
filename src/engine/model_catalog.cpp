@@ -15,6 +15,7 @@
 #include "engine/model_library.h"
 #include "engine/pack_loader.h"
 #include "engine/paths.h"
+#include "engine/project.h"
 
 namespace fugue {
 
@@ -138,6 +139,12 @@ ModelCatalog ModelCatalog::load(const QString &userFolder, const QStringList &pa
             for (const QString &name : folder.entryList({QStringLiteral("*.json")}, QDir::Files, QDir::Name))
                 add(folder.filePath(name));
         }
+    // A project that inherits `models` (1.4.2) has the Default's own catalog entries too, under its own.
+    if (userFolder.isEmpty() && sessionInherits().contains(QStringLiteral("models"))) {
+        const QDir inherited(baseDataDir() + QStringLiteral("/catalog"));
+        for (const QString &name : inherited.entryList({QStringLiteral("*.json")}, QDir::Files, QDir::Name))
+            add(inherited.filePath(name));
+    }
     const QDir user(userFolder.isEmpty() ? dataDir() + QStringLiteral("/catalog") : userFolder);
     for (const QString &name : user.entryList({QStringLiteral("*.json")}, QDir::Files, QDir::Name))
         add(user.filePath(name));

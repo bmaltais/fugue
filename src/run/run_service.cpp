@@ -137,7 +137,7 @@ public:
             m_setup.hashesPath.isEmpty() ? FileHashes::defaultPath() : m_setup.hashesPath);
         m_process->environment.models = &m_models;
         m_thumbnails = m_setup.thumbnailDir.isEmpty() ? thumbnailsDir() : m_setup.thumbnailDir;
-        m_lock = std::make_unique<Lock>(m_context.lockPath);
+        m_lock = std::make_unique<Lock>(m_context.lockPath, Queue::crossRootLockFor(m_context.lockPath));
         m_poll = new QTimer(this);
         m_poll->setInterval(50);
         connect(m_poll, &QTimer::timeout, this, &RunThread::poll);

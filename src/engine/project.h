@@ -96,6 +96,10 @@ Result<ProjectEntry> removeProject(const QString &nameOrPath);
 // Replaces the project's `inherits` (unknown and never-inheritable words are reported as warnings and not recorded).
 Result<ProjectEntry> setProjectInherits(const QString &nameOrPath, const QStringList &items);
 
+// What the session's own root inherits: the `inherits` of the project.json at fugueHome(); empty for the
+// Default project, a root with no project.json (anonymous) and a project.json that cannot be used.
+QStringList sessionInherits();
+
 // The root the window last ran in, when it is still a usable project; else empty.
 QString lastUsedProjectRoot();
 // The window start's: remembers the current root (fugueHome()) as the last used if it is a project, or

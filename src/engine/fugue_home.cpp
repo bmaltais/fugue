@@ -79,6 +79,14 @@ bool setFugueHome(const QString &given, QString *error) {
         if (qEnvironmentVariable(base.variable).isEmpty())
             qputenv(base.variable, QStandardPaths::writableLocation(base.location).toLocal8Bit());
     const QByteArray realRuntime = qgetenv("XDG_RUNTIME_DIR");
+    // The runtime folder too (the cross-root GPU lock lives in it), once, as the ordinary session had it.
+    if (qEnvironmentVariable("FUGUE_BASE_XDG_RUNTIME_DIR").isEmpty()) {
+        const QString real = QString::fromLocal8Bit(realRuntime);
+        qputenv("FUGUE_BASE_XDG_RUNTIME_DIR",
+                (!real.isEmpty() && QFileInfo(real).isDir() ? real
+                                                            : QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation))
+                    .toLocal8Bit());
+    }
     for (const Redirect &redirect : kRedirects)
         qputenv(redirect.variable, (root + QLatin1Char('/') + QLatin1String(redirect.folder)).toLocal8Bit());
     keepDesktopSockets(realRuntime);

@@ -13,9 +13,12 @@
 #include <QtTest>
 
 #include <csignal>
+#include <sys/wait.h>
+#include <unistd.h>
 #include <ctime>
 
 #include "engine/json.h"
+#include "engine/paths.h"
 #include "engine/queue.h"
 
 using namespace fugue;
@@ -218,6 +221,72 @@ private slots:
         one.release();
         QVERIFY(!one.held());
         QVERIFY(other.tryAcquire());
+    }
+
+    // 1.4.2: two roots have two queues and two engine locks, and one GPU: the cross-root lock is the one
+    // thing they share, taken after the engine lock.
+    void aSecondRootWaitsForTheCrossRootLock() {
+        QTemporaryDir dir;
+        const QString shared = dir.filePath("run/gpu.lock");
+        Lock first(dir.filePath("a/engine.lock"), shared);
+        Lock second(dir.filePath("b/engine.lock"), shared);
+        QVERIFY(first.tryAcquire());
+        QVERIFY(!second.tryAcquire()); // its own engine lock is free, the GPU is not
+        QVERIFY(!second.held());
+        // Failing it did not keep root b's engine lock: a plain Lock on it takes it at once.
+        Lock plain(dir.filePath("b/engine.lock"));
+        QVERIFY(plain.tryAcquire());
+        plain.release();
+        first.release();
+        QVERIFY(second.tryAcquire());
+        QVERIFY(!first.tryAcquire()); // and now the first waits
+        second.release();
+        QVERIFY(first.tryAcquire());
+    }
+
+    void aLockWithoutACrossRootFileIsPerRootAsBefore() {
+        QTemporaryDir dir;
+        Lock first(dir.filePath("a/engine.lock"));
+        Lock second(dir.filePath("b/engine.lock"));
+        QVERIFY(first.tryAcquire());
+        QVERIFY(second.tryAcquire());
+    }
+
+    void onlyTheDefaultEngineLockTakesTheCrossRootOne() {
+        QVERIFY(Queue::crossRootLockFor("/tmp/some-test/engine.lock").isEmpty());
+        QCOMPARE(Queue::crossRootLockFor(Queue::defaultLockPath()), gpuLockPath());
+        QVERIFY(gpuLockPath().contains("/fugue-gpu-"));
+    }
+
+    void aCrossRootLockLeftByADeadHolderDoesNotBlock() {
+        QTemporaryDir dir;
+        const QString shared = dir.filePath("run/gpu.lock");
+        // The holder is a process of its own, killed hard: the system lets its lock go.
+        int ready[2];
+        QVERIFY(::pipe(ready) == 0);
+        const pid_t child = ::fork();
+        QVERIFY(child >= 0);
+        if (child == 0) {
+            Lock held(dir.filePath("a/engine.lock"), shared);
+            if (!held.tryAcquire())
+                ::_exit(3);
+            const char byte = 'x';
+            if (::write(ready[1], &byte, 1) != 1)
+                ::_exit(4);
+            for (;;)
+                ::pause();
+        }
+        char byte = 0;
+        QCOMPARE(::read(ready[0], &byte, 1), ssize_t(1)); // the child holds both locks
+        ::close(ready[0]);
+        ::close(ready[1]);
+        Lock waiter(dir.filePath("b/engine.lock"), shared);
+        QVERIFY(!waiter.tryAcquire());
+        ::kill(child, SIGKILL);
+        int status = 0;
+        ::waitpid(child, &status, 0);
+        QVERIFY(waiter.tryAcquire()); // the file is still there, with no holder
+        QVERIFY(QFile::exists(shared));
     }
 
     // 9.8: "An entry whose process is gone is discarded."

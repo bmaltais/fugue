@@ -4,6 +4,8 @@
 #include <QFileInfo>
 #include <QStandardPaths>
 
+#include <unistd.h>
+
 #include "engine/fugue_home.h"
 #include "engine/settings.h"
 
@@ -47,6 +49,18 @@ QString runtimeDir() {
     if (const QString env = qEnvironmentVariable("XDG_RUNTIME_DIR"); !env.isEmpty() && QFileInfo(env).isDir())
         return env;
     return QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
+}
+
+QString baseRuntimeDir() {
+    if (const QString saved = qEnvironmentVariable("FUGUE_BASE_XDG_RUNTIME_DIR"); !saved.isEmpty())
+        return QDir::cleanPath(saved);
+    return runtimeDir();
+}
+
+QString gpuLockPath() {
+    const QString base = baseRuntimeDir();
+    // No runtime folder at all (no session): a per-user file in the temp folder, so users do not share it.
+    return (base.isEmpty() ? QDir::tempPath() : base) + QStringLiteral("/fugue-gpu-%1.lock").arg(::getuid());
 }
 
 QString providersFilePath() {
@@ -94,6 +108,24 @@ QStringList searchPaths(const QString &own, const QStringList &extra) {
     for (const QString &entry : extra)
         if (const QString path = QDir::cleanPath(expandHome(entry)); QDir::isAbsolutePath(path) && !paths.contains(path))
             paths << path;
+    return paths;
+}
+
+QList<SearchPath> taggedSearchPaths(const QString &own, const QStringList &extra, const QStringList &inherited) {
+    QList<SearchPath> paths;
+    QStringList seen;
+    const auto add = [&](const QString &entry, bool fromDefault) {
+        const QString path = QDir::cleanPath(expandHome(entry));
+        if (QDir::isAbsolutePath(path) && !seen.contains(path)) {
+            seen << path;
+            paths.append({path, fromDefault});
+        }
+    };
+    add(own, false);
+    for (const QString &entry : extra)
+        add(entry, false);
+    for (const QString &entry : inherited)
+        add(entry, true);
     return paths;
 }
 

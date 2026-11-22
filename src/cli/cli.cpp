@@ -65,6 +65,7 @@ const char *helpText =
     "  pack list | pack add <folder|git-url> [--ref <tag|commit>] | pack update [id] [--ref ...] | pack remove|trust <id>\n"
     "  model list [--type <resource type>] [--hash]\n"
     "  template list\n"
+    "  settings list\n"
     "  project list | project show [name|path] | project new <name> [--in <dir>] [--inherits a,b] | project add <dir>\n"
     "  project remove <name|path> | project inherits <name|path> <items|none>\n"
     "  skill install|uninstall [--target agents|claude|all] [--dry-run] [--force]\n"

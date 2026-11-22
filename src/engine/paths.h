@@ -29,6 +29,12 @@ QString documentsDir();
 // The folder of private per-session files (copies for an external viewer): $XDG_RUNTIME_DIR, else the desktop's
 // runtime folder; <FUGUE_HOME>/run under a root. Empty when there is none.
 QString runtimeDir();
+
+// The ordinary session's runtime folder, even from inside a project root (whose runtimeDir() is its own
+// `run/`): setFugueHome saves it as FUGUE_BASE_XDG_RUNTIME_DIR. The one place every root can meet.
+QString baseRuntimeDir();
+// The cross-root GPU lock file (spec 1.4.2), in baseRuntimeDir(); content-free.
+QString gpuLockPath();
 // providers.json as the messages name it: "~/.config/fugue/providers.json", or its real path under FUGUE_HOME.
 QString providersFilePath();
 // The default output folder of Save nodes: Fugue under the user's pictures folder
@@ -56,5 +62,16 @@ QString expandHome(const QString &path);
 // relative entry is left out: it would mean a different folder to the window and the CLI. A
 // folder named twice counts once. Pack and model search paths are made this way.
 QStringList searchPaths(const QString &own, const QStringList &extra);
+
+// A search path and where it comes from (spec 1.4.2): `inherited` ones belong to the Default project and are
+// read-only here.
+struct SearchPath {
+    QString path;
+    bool inherited = false;
+};
+// searchPaths() with the Default's paths after the others, tagged: `own` and `extra` are the session's
+// (inherited false), `inherited` come last (inherited true). Each folder once, the first naming wins, so
+// a folder the project names itself is its own whatever the Default says.
+QList<SearchPath> taggedSearchPaths(const QString &own, const QStringList &extra, const QStringList &inherited);
 
 } // namespace fugue

@@ -64,7 +64,29 @@ struct Settings {
     double cacheResultsGb = 10;
     double cacheThumbnailsGb = 1;
     int runsKept = 20;
+    // Layering (spec 1.4.2). When the session is in a project that inherits `models`, modelPaths holds the
+    // project's own entries and then Default's, and these say which of them came from Default and that
+    // Default's own models folder is a root too. All read-only roots: Fugue never writes in them.
+    QStringList inheritedModelPaths;
+    bool inheritsModels = false;
 };
+
+// Where a setting's value comes from (spec 1.4.2).
+enum class SettingOrigin {
+    BuiltIn, // the default, nothing is set
+    Own,     // this session's settings.json
+    Default, // inherited from the Default project's settings.json
+};
+// "built-in", "own", "inherited from Default".
+QString settingOriginName(SettingOrigin origin);
+
+// Which layer a key belongs to: `preferences` and `models` can be inherited (project.json's `inherits`),
+// every other key is `own`: a project never sees the Default's output folder, caches, pack paths or
+// download folder.
+enum class SettingClass { Preferences, Models, Own };
+SettingClass settingClass(const QString &key);
+// The word of project.json's `inherits` for a class: "preferences", "models"; empty for Own.
+QString settingClassName(SettingClass settingClass);
 
 // What a settings.json holds.
 struct SettingsFile {
@@ -96,8 +118,35 @@ QString checkSetting(const QString &key, const QJsonValue &value);
 // (never overwritten), or the write's error.
 Errors changeSetting(const QString &path, const QString &key, const QJsonValue &value);
 
-// The settings in effect now: settingsPath() read afresh, so a change reaches the next run
+// The settings of the Default project (the base config folder's settings.json); settingsPath() when the
+// session is the Default project.
+QString baseSettingsPath();
+
+// What the layering of 1.4.2 makes of a session's own file and the Default's, for a project that
+// inherits `inherits` (words of project.json). A scalar is the project's key, else the Default's, else the
+// built-in; model_paths is the project's entries, then the Default's not already there; model_folder_kinds
+// takes the Default's entries for paths the project does not name. A key whose class is not in `inherits`
+// is only ever read from the project's file. `defaultModelsDir` is the Default's models folder.
+struct EffectiveSettings {
+    Settings settings;
+    QMap<QString, SettingOrigin> origins; // for every known key
+    QStringList problems;                 // the project's file's, then the Default's (prefixed)
+};
+EffectiveSettings layerSettings(const SettingsFile &own, const SettingsFile &base, const QStringList &inherits,
+                                const QString &defaultModelsDir);
+
+// layerSettings() of this session: its own file, and the Default's when project.json inherits a class.
+EffectiveSettings effectiveSettings();
+
+// The value of a known key in a Settings, as it would be written in the file.
+QJsonValue settingValue(const Settings &settings, const QString &key);
+
+// The settings in effect now: effectiveSettings() read afresh, so a change reaches the next run
 // and the CLI with no restart.
 Settings currentSettings();
+
+// keybindings.json is one value: the project's file, else the Default's when `preferences` is inherited
+// (a project's own file replaces it whole, the two do not merge). Empty when neither exists.
+QString effectiveKeymapPath();
 
 } // namespace fugue
