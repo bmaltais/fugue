@@ -271,7 +271,7 @@ private slots:
         QTest::mouseDClick(app.window, Qt::LeftButton, {}, app.screen(300, 600));
         QTRY_VERIFY(app.fieldFocused());
         typeText(app.window, "blend");
-        QTRY_COMPARE(app.search()->count(), 1);
+        QTRY_VERIFY(app.search()->count() >= 1); // Stitch and its group have a Blend input too
         QTRY_VERIFY(app.inResults("searchResult"));
         auto *row = app.inResults("searchResult");
         const int before = app.model.nodes()->rowCount();
