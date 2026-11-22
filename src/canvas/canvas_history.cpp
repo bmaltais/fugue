@@ -1,12 +1,16 @@
 #include "canvas/canvas_history.h"
 
 #include <QFile>
+#include <QFileInfo>
 #include <QImage>
+#include <QRegularExpression>
+#include <QUrl>
 #include <QVariantMap>
 
 #include <algorithm>
 
 #include "canvas/canvas_choices.h"
+#include "engine/atomic_file.h"
 #include "engine/canvas_diff.h"
 
 namespace fugue {
@@ -60,6 +64,48 @@ QString CanvasHistory::kindB() const {
         if (row.toMap().value("id").toString() == m_b)
             return row.toMap().value("kind").toString();
     return {};
+}
+
+QString CanvasHistory::exportName() const {
+    if (m_b.isEmpty())
+        return {};
+    const Result<canvas::CanvasInfo> info = store().info(m_canvas);
+    const QString name = info ? info->name.trimmed() : QString();
+    QString safe = name;
+    safe.replace(QRegularExpression(QStringLiteral("[/\\\\:*?\"<>|]")), QStringLiteral("_"));
+    return (safe.isEmpty() ? m_canvas : safe) + QLatin1Char('-') + shortOf(m_b) + QStringLiteral(".png");
+}
+
+bool CanvasHistory::exportPicture(const QString &target) {
+    if (m_b.isEmpty())
+        return false;
+    QString path = target.startsWith(QStringLiteral("file:")) ? QUrl(target).toLocalFile() : target;
+    if (path.isEmpty())
+        return false;
+    if (QFileInfo(path).suffix().toLower() != QLatin1String("png"))
+        path += QStringLiteral(".png");
+    if (!m_error.isEmpty()) {
+        m_error.clear();
+        emit errorChanged();
+    }
+    const Result<mask::PaintDocument> document = store().load(m_canvas, m_b);
+    if (!document) {
+        fail(document.errors());
+        return false;
+    }
+    const Result<QByteArray> png = document->flattenToPng(); // the same flatten the viewer's picture is made with
+    if (!png) {
+        fail(png.errors());
+        return false;
+    }
+    const Errors written = createFile(path, png.value(), tr("the picture of revision %1").arg(shortOf(m_b)));
+    if (hasErrors(written)) {
+        fail(written);
+        return false;
+    }
+    m_notice = tr("Saved %1").arg(QFileInfo(path).fileName());
+    emit noticeChanged();
+    return true;
 }
 
 void CanvasHistory::fail(const Errors &errors) {
@@ -193,6 +239,10 @@ void CanvasHistory::compare(const QString &a, const QString &b) {
     m_sizeA = sizeA;
     m_sizeB = sizeB;
     m_difference = QUrl();
+    if (!m_notice.isEmpty()) {
+        m_notice.clear();
+        emit noticeChanged();
+    }
     // |A - B| as a picture of its own, when they are the same size (CompareView's difference mode).
     if (sizeA == sizeB && a != b) {
         QImage first(urlA.toLocalFile()), second(urlB.toLocalFile());

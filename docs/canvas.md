@@ -12,6 +12,7 @@ fugue canvas import photo.png                      # a canvas from a PNG, JPEG o
 fugue canvas log canvas-0123456789ab               # the revisions, newest first
 fugue canvas show canvas-0123456789ab@sha256:ab12cd34   # one revision: tree hash, layers, tiles
 fugue canvas export canvas-0123456789ab out.ora    # the head as an .ora (never replaces a file)
+fugue canvas export canvas-0123456789ab@head out.png  # flattened: .png, .jpg (on white) or .webp
 fugue canvas list                                  # the canvases, newest first
 fugue canvas candidates canvas-0123456789ab        # results waiting for your review
 fugue canvas diff canvas-0123456789ab@sha256:ab12cd34   # what a revision changed, against its parent
@@ -85,6 +86,11 @@ and Canvas Write with that on. Put your canvas's id and the rectangle in Canvas 
 - A Write that lost the race for the head (`canvas_head_moved`) is a candidate too.
 
 In the window, File > Canvas history… lists your canvases; open one to see its revisions and
-candidates, click a revision to see it against the one before it (the same slider, side by side, flip
-and difference views as Compare Images), and press **Accept** or **Drop** on a candidate. Ctrl+click
-a revision to use it as the left side of the comparison.
+candidates, and click a revision to see it at full size (zoom and pan; the head is shown first). Press
+**Compare** to see it against the one before it (the same slider, side by side, flip and difference views
+as Compare Images), and **Accept** or **Drop** on a candidate. Ctrl+click a revision to use it as the left
+side of a comparison. **Export…** saves the revision you are looking at as a flattened PNG.
+
+`fugue canvas export <id>[@<revision>] <file>` writes the same flattened picture from the command line by
+the file extension: `.png`, `.jpg` or `.webp` (a JPEG has no transparency, so it is flattened onto white
+and the command says so; WebP is lossless); `.ora` keeps the layers. It never replaces a file.

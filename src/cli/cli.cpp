@@ -68,7 +68,7 @@ const char *helpText =
     "  settings list\n"
     "  project list | project show [name|path] | project new <name> [--in <dir>] [--inherits a,b] | project add <dir>\n"
     "  project remove <name|path> | project inherits <name|path> <items|none>\n"
-    "  canvas new [--name <text>] [--size <w>x<h>] | canvas import <file.ora|png|jpg|webp> [--name <text>] | canvas export <id[@rev]> <file.ora>\n"
+    "  canvas new [--name <text>] [--size <w>x<h>] | canvas import <file.ora|png|jpg|webp> [--name <text>] | canvas export <id[@rev]> <file.ora|png|jpg|webp>\n"
     "  canvas log <id[@rev]> [--limit <n>] | canvas show <id[@rev]>   (the canvas revision store, spec 14.5)\n"
     "  canvas list | canvas candidates <id> [--all] | canvas accept|drop <id[@rev]> | canvas diff <id@rev> [<id@rev>]\n"
     "  skill install|uninstall [--target agents|claude|all] [--dry-run] [--force]\n"

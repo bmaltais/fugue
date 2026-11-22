@@ -459,6 +459,36 @@ Result<QByteArray> MaskPaint::toPng(int compression) const {
     }
 }
 
+Result<QByteArray> MaskPaint::toPicture(const QString &suffix) const {
+    const QString kind = suffix.toLower();
+    if (kind == QLatin1String("png"))
+        return toPng();
+    if (kind != QLatin1String("jpg") && kind != QLatin1String("webp"))
+        return makeError(QStringLiteral("usage"), QStringLiteral("A picture is written as png, jpg or webp, not %1.").arg(suffix));
+    if (kind == QLatin1String("webp") && (m_width > 16383 || m_height > 16383))
+        return makeError(QStringLiteral("input_invalid"), QStringLiteral("WebP holds at most 16383 px a side; this is %1 x %2.").arg(m_width).arg(m_height),
+                         QStringLiteral("Export a .png instead."));
+    if (!initVips())
+        return vipsUnavailable();
+    try {
+        vips::VImage image = vips::VImage::new_from_memory(m_pixels.data(), m_pixels.size(), m_width, m_height, m_channels, VIPS_FORMAT_UCHAR);
+        void *buffer = nullptr;
+        size_t size = 0;
+        if (kind == QLatin1String("jpg")) {
+            if (m_channels == 4)
+                image = image.flatten(vips::VImage::option()->set("background", std::vector<double>{255, 255, 255}));
+            image.write_to_buffer(".jpg", &buffer, &size, vips::VImage::option()->set("Q", 92)->set("keep", VIPS_FOREIGN_KEEP_NONE));
+        } else {
+            image.write_to_buffer(".webp", &buffer, &size, vips::VImage::option()->set("lossless", true)->set("keep", VIPS_FOREIGN_KEEP_NONE));
+        }
+        QByteArray bytes(static_cast<const char *>(buffer), qsizetype(size));
+        g_free(buffer);
+        return bytes;
+    } catch (const vips::VError &error) {
+        return vipsError(error);
+    }
+}
+
 Result<MaskPaint> MaskPaint::fromPng(const QByteArray &bytes) {
     if (!initVips())
         return vipsUnavailable();

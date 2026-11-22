@@ -181,6 +181,96 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    void aRevisionIsShownAloneAtFullSizeAndCompareIsAToggle() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        app.commands.trigger("file.canvas-history");
+        click(app, "canvasHistoryCanvas-" + m_canvas);
+        QObject *dialog = app.window->findChild<QObject *>("canvasHistoryDialog");
+        QObject *history = dialog->property("history").value<QObject *>();
+        QObject *viewer = dialog->property("viewer").value<QObject *>();
+        // The head is shown at first, alone: the viewer is in its single mode on the head's picture.
+        QTRY_COMPARE(history->property("revisionB").toString(), m_head);
+        QCOMPARE(viewer->property("mode").toString(), QString("single"));
+        QCOMPARE(viewer->property("sourceA").toUrl(), history->property("sourceB").toUrl());
+        QCOMPARE(viewer->property("sizeA").toSize(), QSize(512, 512));
+        QVERIFY(!find(app.window, "canvasHistoryMode-slider"));
+        // The first revision has no parent: nothing to compare with, so the toggle is off.
+        QQuickItem *toggle = find(app.window, "canvasHistoryCompare");
+        QVERIFY(toggle);
+        QVERIFY(!toggle->isEnabled());
+        QVERIFY(find(app.window, "canvasHistoryExport"));
+
+        // A candidate is shown alone too; Compare puts it against its parent in the Compare modes.
+        click(app, "canvasHistoryRevision-" + shortOf(m_a));
+        QTRY_COMPARE(history->property("revisionB").toString(), m_a);
+        QCOMPARE(viewer->property("mode").toString(), QString("single"));
+        QCOMPARE(viewer->property("sourceA").toUrl(), history->property("sourceB").toUrl());
+        QVERIFY(viewer->property("sourceA").toUrl() != history->property("sourceA").toUrl());
+        click(app, "canvasHistoryCompare");
+        QTRY_COMPARE(viewer->property("mode").toString(), QString("slider"));
+        QCOMPARE(viewer->property("sourceA").toUrl(), history->property("sourceA").toUrl());
+        QCOMPARE(viewer->property("sourceB").toUrl(), history->property("sourceB").toUrl());
+        QVERIFY(find(app.window, "canvasHistoryMode-side_by_side"));
+        // Another revision keeps the comparison; the toggle again goes back to the one picture.
+        click(app, "canvasHistoryMode-side_by_side");
+        QTRY_COMPARE(viewer->property("mode").toString(), QString("side_by_side"));
+        click(app, "canvasHistoryCompare");
+        QTRY_COMPARE(viewer->property("mode").toString(), QString("single"));
+        QVERIFY(!find(app.window, "canvasHistoryMode-slider"));
+        // Compare again comes back in the mode last used.
+        click(app, "canvasHistoryCompare");
+        QTRY_COMPARE(viewer->property("mode").toString(), QString("side_by_side"));
+        // Ctrl+click on a row (the A side) is a comparison, so it turns Compare on.
+        click(app, "canvasHistoryCompare");
+        QTRY_COMPARE(viewer->property("mode").toString(), QString("single"));
+        click(app, "canvasHistoryRevision-" + shortOf(m_b), Qt::ControlModifier);
+        QTRY_COMPARE(viewer->property("mode").toString(), QString("side_by_side"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    void exportSavesTheShownRevisionAsAFlattenedPngAndNeverReplaces() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        app.commands.trigger("file.canvas-history");
+        click(app, "canvasHistoryCanvas-" + m_canvas);
+        click(app, "canvasHistoryRevision-" + shortOf(m_a));
+        QObject *dialog = app.window->findChild<QObject *>("canvasHistoryDialog");
+        QObject *history = dialog->property("history").value<QObject *>();
+        QTRY_COMPARE(history->property("revisionB").toString(), m_a);
+        QVERIFY(history->property("exportName").toString().startsWith("Sketch-" + shortOf(m_a)));
+        QVERIFY(history->property("exportName").toString().endsWith(".png"));
+
+        // The save dialog is the window's FileDialog; its accepted signal is what writes (no dialog is shown).
+        QObject *picker = app.window->findChild<QObject *>("canvasHistoryExportDialog");
+        QVERIFY(picker);
+        const QString target = m_dir.filePath("out/shown.png");
+        QVERIFY(QDir().mkpath(m_dir.filePath("out")));
+        picker->setProperty("selectedFile", QUrl::fromLocalFile(target));
+        QMetaObject::invokeMethod(picker, "accepted");
+        QTRY_VERIFY(QFile::exists(target));
+        const auto document = canvas::CanvasStore::forSession().load(m_canvas, m_a);
+        QFile written(target);
+        QVERIFY(written.open(QIODevice::ReadOnly));
+        QCOMPARE(written.readAll(), document->flattenToPng().value());
+        QVERIFY(history->property("notice").toString().contains("shown.png"));
+        QVERIFY(history->property("error").toString().isEmpty());
+
+        // A second save to the same name changes nothing and says why.
+        written.close();
+        const qint64 size = QFileInfo(target).size();
+        bool ok = true;
+        QMetaObject::invokeMethod(history, "exportPicture", Q_RETURN_ARG(bool, ok), Q_ARG(QString, target));
+        QVERIFY(!ok);
+        QVERIFY(!history->property("error").toString().isEmpty());
+        QCOMPARE(QFileInfo(target).size(), size);
+        // Another extension gets .png added, and a file URL works as well as a path.
+        QMetaObject::invokeMethod(history, "exportPicture", Q_RETURN_ARG(bool, ok), Q_ARG(QString, QUrl::fromLocalFile(m_dir.filePath("out/other.jpg")).toString()));
+        QVERIFY(ok);
+        QVERIFY(QFile::exists(m_dir.filePath("out/other.jpg.png")));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void aWindowOnAMissingCanvasSaysSoInsteadOfCrashing() {
         App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
         QVERIFY(app.open());

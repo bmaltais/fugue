@@ -95,6 +95,12 @@ Reply canvasImport(const Command &command, Context &) {
 
 Reply canvasExport(const Command &command, Context &) {
     const Ref ref = parseRef(command.positionals.at(0));
+    const QString out = command.positionals.at(1);
+    // By the extension: .ora is the layered file, a picture is the flattened canvas.
+    const QString suffix = QFileInfo(out).suffix().toLower();
+    const QString picture = suffix == QLatin1String("jpeg") ? QStringLiteral("jpg") : suffix;
+    if (suffix != QLatin1String("ora") && picture != QLatin1String("png") && picture != QLatin1String("jpg") && picture != QLatin1String("webp"))
+        return Reply::failure(usageError(QStringLiteral("The file name ends in .%1; export writes .ora (layers), .png, .jpg or .webp (flattened).").arg(suffix), out));
     const CanvasStore store = CanvasStore::forSession();
     const Result<QString> revision = store.resolve(ref.canvas, ref.revision);
     if (!revision)
@@ -102,15 +108,21 @@ Reply canvasExport(const Command &command, Context &) {
     const Result<mask::PaintDocument> document = store.load(ref.canvas, revision.value());
     if (!document)
         return Reply::failure(document.errors());
-    const Result<QByteArray> bytes = mask::paintToOra(document.value());
+    const Result<QByteArray> bytes = suffix == QLatin1String("ora") ? mask::paintToOra(document.value()) : document->flattenToPicture(picture);
     if (!bytes)
         return Reply::failure(bytes.errors());
-    const QString out = command.positionals.at(1);
     const Errors written = createFile(out, bytes.value(), QStringLiteral("the exported canvas"));
     if (hasErrors(written))
         return Reply::failure(written);
-    return Reply::success(QJsonObject{{"canvas", ref.canvas}, {"revision", revision.value()}, {"path", QFileInfo(out).absoluteFilePath()}},
-                          QStringLiteral("Exported %1 revision %2 to %3.").arg(ref.canvas, revision.value(), out));
+    QJsonObject data{{"canvas", ref.canvas}, {"revision", revision.value()}, {"path", QFileInfo(out).absoluteFilePath()}};
+    QString text = QStringLiteral("Exported %1 revision %2 to %3.").arg(ref.canvas, revision.value(), out);
+    if (suffix != QLatin1String("ora"))
+        data.insert(QStringLiteral("format"), picture);
+    if (picture == QLatin1String("jpg")) {
+        data.insert(QStringLiteral("background"), QStringLiteral("white"));
+        text += QStringLiteral(" JPEG has no transparency: the canvas was flattened onto white.");
+    }
+    return Reply::success(data, text);
 }
 
 Reply canvasLog(const Command &command, Context &) {

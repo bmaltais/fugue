@@ -1,14 +1,18 @@
 pragma ComponentBehavior: Bound
+import QtCore
 import QtQuick
+import QtQuick.Dialogs
 import Fugue
 
-// The revisions of a canvas (#210, epic #206, spec 14.5) in a large view: the list of what the canvas
-// went through and the candidates waiting for review on the left, and the picture of the selected
-// revision against its parent (or any other revision) on the right, in the same compareViewer as Compare
-// Images. A candidate is accepted into the head or dropped from the bar. Without a canvas it lists the
+// The revisions of a canvas (#210, #214, epic #206, spec 14.5) in a large view: the list of what the canvas
+// went through and the candidates waiting for review on the left, and the picture of the selected revision on
+// the right at full size (zoom and pan), the head at first. Compare puts it against its parent (or any other
+// revision) in the same compareViewer as Compare Images; Export saves the shown revision as a PNG. A candidate
+// is accepted into the head or dropped from the bar. Without a canvas it lists the
 // canvases of the store to open one. `openFor(id)` opens it on a canvas (empty: the list); Escape closes.
 //
-// Click a revision: compare it with its parent. Ctrl+click: make it the A side of the comparison.
+// Click a revision: show it (Compare on: against its parent). Ctrl+click: make it the A side of a comparison,
+// which turns Compare on.
 // Up and Down move the selection. The work is CanvasHistory (canvas/canvas_history.h).
 LargeViewDialog {
     id: root
@@ -21,6 +25,10 @@ LargeViewDialog {
     property alias storeRoot: backend.storeRoot
     zoomable: backend.canvasId !== "" ? compareViewer : null
     readonly property real u: look.unit
+    // Compare is a toggle: off shows the revision alone (CompareView's single mode), on the compare modes.
+    property bool comparing: false
+    property string compareMode: "slider"
+    readonly property bool compareOn: comparing && backend.hasParent
     readonly property bool canDecide: backend.kindB === "candidate" || backend.kindB === "dropped"
 
     function openFor(canvasId) {
@@ -30,6 +38,20 @@ LargeViewDialog {
     }
 
     CanvasHistory { id: backend }
+
+    onCompareOnChanged: compareViewer.setView({mode: compareOn ? compareMode : "single"})
+
+    // The picture is saved by the file dialog, as Save Image does: the backend writes it and never replaces a file.
+    FileDialog {
+        id: exportDialog
+        objectName: "canvasHistoryExportDialog"
+        title: qsTr("Save the revision as a picture")
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "png"
+        nameFilters: [qsTr("PNG images (*.png)")]
+        onAccepted: backend.exportPicture(selectedFile.toString())
+    }
+    Component.onDestruction: exportDialog.close()
 
     onKeyPressed: event => {
         const rows = backend.revisions
@@ -51,8 +73,18 @@ LargeViewDialog {
             onTapped: backend.canvasId = ""
         }
         Item { width: 2 * root.u; height: 1; visible: backend.canvasId !== "" }
+        ViewButton {
+            objectName: "canvasHistoryCompare"
+            look: root.look
+            visible: backend.canvasId !== ""
+            enabled: backend.hasParent
+            text: qsTr("Compare")
+            tip: backend.hasParent ? qsTr("Show this revision against its parent") : qsTr("The first revision has no parent to compare with")
+            current: root.compareOn
+            onTapped: root.comparing = !root.comparing
+        }
         Repeater {
-            model: backend.canvasId === "" ? [] : [{id: "slider", text: qsTr("Slider")}, {id: "side_by_side", text: qsTr("Side by side")},
+            model: backend.canvasId === "" || !root.compareOn ? [] : [{id: "slider", text: qsTr("Slider")}, {id: "side_by_side", text: qsTr("Side by side")},
                                                    {id: "flip", text: qsTr("Flip")}, {id: "difference", text: qsTr("Difference")}]
             delegate: ViewButton {
                 required property var modelData
@@ -61,7 +93,24 @@ LargeViewDialog {
                 text: modelData.text
                 current: compareViewer.mode === modelData.id
                 enabled: modelData.id !== "difference" || backend.sourceDifference.toString() !== ""
-                onTapped: compareViewer.setView({mode: modelData.id})
+                onTapped: {
+                    root.compareMode = modelData.id
+                    compareViewer.setView({mode: modelData.id})
+                }
+            }
+        }
+        Item { width: 2 * root.u; height: 1; visible: backend.canvasId !== "" }
+        ViewButton {
+            objectName: "canvasHistoryExport"
+            look: root.look
+            visible: backend.canvasId !== ""
+            enabled: backend.revisionB !== ""
+            text: qsTr("Export…")
+            tip: qsTr("Save this revision as a flattened PNG")
+            onTapped: {
+                exportDialog.currentFolder = StandardPaths.writableLocation(StandardPaths.PicturesLocation)
+                exportDialog.selectedFile = StandardPaths.writableLocation(StandardPaths.PicturesLocation) + "/" + backend.exportName
+                exportDialog.open()
             }
         }
         Item { width: 2 * root.u; height: 1; visible: root.canDecide }
@@ -191,7 +240,10 @@ LargeViewDialog {
                 }
                 TapHandler {
                     acceptedModifiers: Qt.ControlModifier
-                    onTapped: backend.setA(row.modelData.id)
+                    onTapped: {
+                        backend.setA(row.modelData.id)
+                        root.comparing = true
+                    }
                 }
                 Accessible.role: Accessible.ListItem
                 Accessible.name: row.modelData.short + ", " + row.modelData.producer + ", " + row.modelData.kind
@@ -208,12 +260,15 @@ LargeViewDialog {
                 look: root.look
                 width: parent.width
                 height: parent.height - notes.height - parent.spacing
-                sourceA: backend.sourceA
+                mode: "single"
+                showZoom: true
+                // Alone, the picture is B (the selected revision) in A's slot; compared, A and B are the two sides.
+                sourceA: root.compareOn ? backend.sourceA : backend.sourceB
                 sourceB: backend.sourceB
                 sourceDifference: backend.sourceDifference
-                sizeA: backend.sizeA
+                sizeA: root.compareOn ? backend.sizeA : backend.sizeB
                 sizeB: backend.sizeB
-                labelA: qsTr("A")
+                labelA: root.compareOn ? qsTr("A") : qsTr("B")
                 labelB: qsTr("B")
             }
             Column {
@@ -226,6 +281,15 @@ LargeViewDialog {
                     color: root.look.text
                     font.pixelSize: root.look.labelSize
                     text: backend.summary.join("\n")
+                }
+                Text {
+                    objectName: "canvasHistoryNotice"
+                    width: parent.width
+                    wrapMode: Text.Wrap
+                    visible: backend.notice !== ""
+                    color: root.look.label
+                    font.pixelSize: root.look.labelSize
+                    text: backend.notice
                 }
                 Text {
                     objectName: "canvasHistoryError"
