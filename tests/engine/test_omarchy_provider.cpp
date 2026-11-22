@@ -1448,6 +1448,36 @@ private slots:
         QCOMPARE(result->used.value("seed").toInt(), 5);
     }
 
+    // Extend Song (#255) is a repaint whose region lies outside the song: a negative start (before) or an end beyond
+    // its length (after) go to /synth as the server's own repainting_start and repainting_end.
+    void anExtendSendsARegionOutsideTheSong() {
+        Fixture fixture;
+        fixture.server.on("GET", "/health", [](const HttpRequest &) { return HttpResponse{200, "{\"status\":\"ok\"}"}; });
+        fixture.server.on("POST", "/synth", [](const HttpRequest &) { return HttpResponse{200, "{\"id\":\"7\"}"}; });
+        fixture.server.on("GET", "/job?id=7", [](const HttpRequest &) { return HttpResponse{200, "{\"status\":\"done\"}"}; });
+        fixture.server.on("GET", "/job?id=7&result=1", [](const HttpRequest &) {
+            return HttpResponse{200, "--B9\r\nContent-Type: audio/mpeg\r\n\r\nID3 longer\r\n--B9--\r\n", "multipart/mixed; boundary=B9"};
+        });
+        fixture.writeStatus(QJsonObject{{kMusicModel, row(kMusicModel, "music", "active", fixture.endpoint())}});
+        const QString source = fixture.writeInput("source.mp3", "SOURCE-AUDIO-BYTES");
+        auto provider = fixture.provider();
+        for (const auto &[start, end] : {std::pair{-6.0, 0.0}, std::pair{30.0, 42.5}}) {
+            auto request = fixture.request("audio.generate", {{"prompt", "outro"}, {"lyrics", "[Instrumental]"}, {"task", "repaint"},
+                                                              {"start", start}, {"end", end}},
+                                             QJsonObject{{"audio", QJsonObject{{"path", source}}}});
+            const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value();
+            JobStatus status;
+            QTRY_VERIFY((status = await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value()).isTerminal());
+            QCOMPARE(status.state, QStringLiteral("done"));
+        }
+        const QList<HttpRequest> sent = fixture.server.requestsTo("POST", "/synth");
+        QCOMPARE(sent.size(), 2);
+        QVERIFY(sent.at(0).body.contains("\"repainting_start\":-6"));
+        QVERIFY(sent.at(0).body.contains("\"repainting_end\":0"));
+        QVERIFY(sent.at(1).body.contains("\"repainting_start\":30"));
+        QVERIFY(sent.at(1).body.contains("\"repainting_end\":42.5"));
+    }
+
     // Describe Song (#254): one /understand job (multipart with the song as `audio`), no /lm and no /synth; the answer
     // is the first part, a JSON array of one request, read into caption, lyrics, tempo, key, time signature, language.
     void aSongIsUnderstoodWithOneJobAndAnswersInText() {

@@ -36,6 +36,7 @@ const QString kVideoNode = QStringLiteral("fugue/generate-video");
 const QString kSongNode = QStringLiteral("fugue/generate-song");
 const QString kRemixNode = QStringLiteral("fugue/remix-song");
 const QString kRepaintNode = QStringLiteral("fugue/repaint-song");
+const QString kExtendNode = QStringLiteral("fugue/extend-song");
 const QString kDescribeSongNode = QStringLiteral("fugue/describe-song");
 
 bool ffmpeg(const QStringList &args) {
@@ -546,6 +547,31 @@ private slots:
         const Result<JobRequest> backwards = bench.request(kRepaintNode, {{"audio", song}, {"prompt", "x"}, {"start", 3.0}, {"end", 2.0}}, musicModel());
         QVERIFY(!backwards.ok());
         QCOMPARE(backwards.error().input, QStringLiteral("end"));
+    }
+
+    // Extend Song (#255): ace-server's repaint with a start before the song (the region runs up to its start) or an end
+    // beyond it (the region starts where the song ends). One side at a time: both would redraw the song itself.
+    void anExtendAddsSecondsBeforeOrAfterTheSong() {
+        Bench bench;
+        const Value song = bench.media(MediaType::Audio, makeAudio(bench.file("in.mp3"), 4));
+        const double length = song.media().duration();
+        const Result<JobRequest> after = bench.request(kExtendNode, {{"audio", song}, {"prompt", "outro"}, {"after", 12.5}}, musicModel());
+        QVERIFY2(after.ok(), qPrintable(after.ok() ? QString() : after.error().message));
+        QCOMPARE(after->capability, QStringLiteral("audio.generate"));
+        QCOMPARE(after->params.value("task").toString(), QStringLiteral("repaint"));
+        QCOMPARE(after->params.value("start").toDouble(), length);
+        QCOMPARE(after->params.value("end").toDouble(), length + 12.5);
+        QCOMPARE(after->inputs.value("audio").toObject().value("path").toString(), song.media().path());
+        const Result<JobRequest> before = bench.request(kExtendNode, {{"audio", song}, {"prompt", "intro"}, {"before", 6.0}, {"after", 0.0}}, musicModel());
+        QVERIFY2(before.ok(), qPrintable(before.ok() ? QString() : before.error().message));
+        QCOMPARE(before->params.value("start").toDouble(), -6.0);
+        QCOMPARE(before->params.value("end").toDouble(), 0.0);
+        const Result<JobRequest> both = bench.request(kExtendNode, {{"audio", song}, {"prompt", "x"}, {"before", 2.0}, {"after", 3.0}}, musicModel());
+        QVERIFY(!both.ok());
+        QVERIFY(!both.error().hint.isEmpty());
+        const Result<JobRequest> neither = bench.request(kExtendNode, {{"audio", song}, {"prompt", "x"}, {"before", 0.0}, {"after", 0.0}}, musicModel());
+        QVERIFY(!neither.ok());
+        QCOMPARE(neither.error().code, QStringLiteral("value_out_of_range"));
     }
 
     // Describe Song (#254): the song goes to the music model as an understand job; the answer is text.

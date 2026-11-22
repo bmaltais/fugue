@@ -283,7 +283,9 @@ public:
 // tune and timing), Repaint redraws one stretch of the song and keeps the rest.
 class SongEditKernel : public ProviderKernel {
 public:
-    enum class Mode { Remix, Repaint };
+    // Extend Song is Repaint's code path (ace-server's repaint with a start before the song, or an end beyond it),
+    // a node of its own so that "seconds before and after" is what the person sees.
+    enum class Mode { Remix, Repaint, Extend };
     explicit SongEditKernel(Mode mode) : m_mode(mode) {}
 
     Requirement requirement(const NodeType &, const Values &inputs) const override {
@@ -309,7 +311,26 @@ public:
         const Value seed = context.input(QStringLiteral("seed"));
         if (!seed.isEmpty())
             params.insert(QStringLiteral("seed"), seed.json().toInteger());
-        if (m_mode == Mode::Repaint) {
+        if (m_mode == Mode::Extend) {
+            const double before = context.input(QStringLiteral("before")).number();
+            const double after = context.input(QStringLiteral("after")).number();
+            if (before < 0 || after < 0)
+                return makeInputError(QStringLiteral("value_out_of_range"), before < 0 ? QStringLiteral("before") : QStringLiteral("after"),
+                                      QStringLiteral("The seconds to add cannot be negative."));
+            if (before <= 0 && after <= 0)
+                return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("after"),
+                                      QStringLiteral("Say how many seconds to add before or after the song."));
+            // The server redraws one region and keeps the rest of the song, so both sides at once would redraw the
+            // song too (the region would run from before the start to past the end).
+            if (before > 0 && after > 0)
+                return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("after"),
+                                      QStringLiteral("The model adds to one side at a time."),
+                                      QStringLiteral("Set one of Seconds before and Seconds after to 0, and chain a second Extend Song for the other side."));
+            params.insert(QStringLiteral("task"), QStringLiteral("repaint"));
+            // Before: from -before up to the song's start. After: from the song's end to `after` seconds beyond it.
+            params.insert(QStringLiteral("start"), before > 0 ? -before : source.duration());
+            params.insert(QStringLiteral("end"), before > 0 ? 0.0 : source.duration() + after);
+        } else if (m_mode == Mode::Repaint) {
             const double start = context.input(QStringLiteral("start")).number();
             // 0 for the end is the end of the song.
             const double end = context.input(QStringLiteral("end")).number();
@@ -390,6 +411,7 @@ void addMediaGenerationKernels(Kernels &kernels) {
     kernels.add(QStringLiteral("fugue/generate-song"), std::make_shared<SongKernel>());
     kernels.add(QStringLiteral("fugue/remix-song"), std::make_shared<SongEditKernel>(SongEditKernel::Mode::Remix));
     kernels.add(QStringLiteral("fugue/repaint-song"), std::make_shared<SongEditKernel>(SongEditKernel::Mode::Repaint));
+    kernels.add(QStringLiteral("fugue/extend-song"), std::make_shared<SongEditKernel>(SongEditKernel::Mode::Extend));
     kernels.add(QStringLiteral("fugue/describe-song"), std::make_shared<DescribeSongKernel>());
 }
 

@@ -27,7 +27,7 @@ API (all jobs are async: POST returns `{"id"}`, then `GET /job?id=N`, `GET /job?
 | text2music | caption (+ lyrics) | yes | **Generate Song** (before) |
 | cover | source audio, `audio_cover_strength` | yes, LM skipped | **Remix Song** (now) |
 | cover-nofsq | source audio, keeps tune and timing | yes | Remix Song's "Stay close" (now) |
-| repaint | source audio, `repainting_start/end` (negative start or end beyond the song = outpaint) | yes | **Repaint Song** (now; outpaint later) |
+| repaint | source audio, `repainting_start/end` (negative start or end beyond the song = outpaint) | yes | **Repaint Song**; outpaint is **Extend Song** (#255) |
 | lego, extract, complete | source audio, `track` (vocals, drums, bass, guitar, keyboard...) | **no, base DiT only** | issue; needs the base model in a recipe |
 
 For cover, repaint and the other source tasks the LM is skipped: caption and lyrics reach the DiT verbatim. A cover with
@@ -155,3 +155,24 @@ the node ran through `fugue run`. Caption: a good paragraph (indie-folk, lone ac
 bpm 86, key G major, time signature 4 plausible. **Lyrics and language are not trustworthy**: the model wrote Ukrainian
 verses with a repeated line and named the language `ru`, while its own caption says Spanish. So: use the caption and
 the metadata freely; treat the lyrics as a draft to read before they are sung (Preview, then edit).
+
+## Extend Song (#255)
+
+Source: ARCHITECTURE.md ("Repaint") and `pipeline-synth.cpp` (`outpaint_pad`, `adjust_region_coords`). The server pads the
+source with silence on the left by `-repainting_start` when the start is negative, and on the right up to `repainting_end`
+when that lies beyond the song, then repaints the padded region and splices the source back (the output is the padded
+length). The region is ONE interval: with a start before and an end beyond, it would cover the song itself, so the server
+cannot extend both sides in one job. Fugue: a node **Extend Song** with `before` and `after` seconds (Repaint Song's code
+path and provider branch, no new provider code; its own node because "seconds before" and "seconds after" is the whole
+interface, and Repaint's From and To would be the wrong words). Before: start = -before, end = 0. After: start = the song's
+length, end = length + after. Both set, or neither, is refused up front with a hint to chain two Extend Songs (each
+run is a few seconds on the GB10). Defaults 0 before, 10 after. Not a mode of Repaint Song: its inputs differ.
+The song's length comes from the file's probe, which can differ from the decoded length by a few ms (mp3 padding); the
+server clamps the region itself.
+
+Live check (gx10, 2026-11-22, a 16 s sample): after 8 s gave 24.0 s, before 6 s gave 22.08 s (the server rounds the pad
+to its 25 Hz latent frames), 12 s after gave 28.0 s. The source is kept: its samples match the output at a correlation of
+1.000 once the 47 ms the VAE round trip adds is lined up (at the start for an extension after, at 6 s for one before). A
+run is about 3 s. Templates (fugue-workflows, branch ace-batch-b-templates): **Extend a song** and **Song from a song**
+(Describe Song, a Text and Text Concat that add a new style to the heard description, then Remix Song with the heard
+lyrics shown in a Preview); the previews are waveforms drawn from the real outputs.
