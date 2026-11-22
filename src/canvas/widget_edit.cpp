@@ -177,6 +177,7 @@ QVariantMap WidgetEdit::regionState(const QString &node) const {
                       {"storeRoot", m_canvases.storeRoot()},
                       {"canvasLinked", linked("canvas")},
                       {"maskLinked", linked("mask")},
+                      {"revisionLinked", linked("revision")},
                       {"editable", !(linked("x") || linked("y") || linked("width") || linked("height"))}};
     for (const char *name : kRegionNumbers)
         state.insert(QLatin1String(name) == QLatin1String("max_megapixels") ? QStringLiteral("cap") : QLatin1String(name), number(name));
@@ -200,6 +201,8 @@ bool WidgetEdit::setRegion(const QString &node, int x, int y, int width, int hei
     m_canvas->endEdit(tr("Pick region"));
     return true;
 }
+
+QUndoStack *WidgetEdit::undoStack() const { return m_canvas->undoStack(); }
 
 QString WidgetEdit::pictureSize(const QString &path) const { return m_canvases.pictureSize(path); }
 

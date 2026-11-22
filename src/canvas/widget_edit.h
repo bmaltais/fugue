@@ -73,6 +73,7 @@
 #include <optional>
 
 class CanvasModel;
+class QUndoStack;
 
 namespace fugue {
 class FileHashes;
@@ -239,13 +240,15 @@ public:
     Q_INVOKABLE QString pictureSize(const QString &path) const;
     // --- the region picker (#213) ---
     // What the picker window needs of a node with a canvas and a rectangle (Canvas Region): {ok: true,
-    // canvas, revision, storeRoot ("" is the session's), x, y, width, height, padding, scale, cap, multiple, canvasLinked, maskLinked,
+    // canvas, revision, storeRoot ("" is the session's), x, y, width, height, padding, scale, cap, multiple, canvasLinked, maskLinked, revisionLinked,
     // editable}. The numbers are the stored ones or the defaults; a linked input's value is not known
     // before a run, so its default stands (padding and the rest) and `editable` is false when any of
     // x, y, width, height is linked. Empty for another node.
     Q_INVOKABLE QVariantMap regionState(const QString &node) const;
     // Sets x, y, width and height of the node as ONE undo step; false when nothing changed or one is linked.
     Q_INVOKABLE bool setRegion(const QString &node, int x, int y, int width, int height);
+    // The document's undo stack: a view that shows a node's values (the Canvas view's region) re-reads on its index.
+    QUndoStack *undoStack() const;
     int canvasesRevision() const { return m_canvases.revision(); }
     // The list's source (tests set the store's folder).
     fugue::CanvasChoices *canvasChoices() { return &m_canvases; }

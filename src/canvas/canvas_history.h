@@ -97,7 +97,9 @@ signals:
     void errorChanged();
     void noticeChanged();
 
-private:
+protected:
+    // Kept protected so CanvasViewModel (canvas/canvas_view_model.h), the same model with a head picture, an overlay and
+    // a region, shares all of it.
     canvas::CanvasStore store() const;
     void fail(const Errors &errors);
     void clearCompare();

@@ -87,7 +87,17 @@ and Canvas Write with that on. Put your canvas's id and the rectangle in Canvas 
   still be accepted, and every revision stays in `fugue canvas log` or `candidates --all`.
 - A Write that lost the race for the head (`canvas_head_moved`) is a candidate too.
 
-In the window, File > Canvas history… lists your canvases; open one to see its revisions and
+In the window, File > Canvas… is the picture of one canvas (the newest at first): the strip above it says what
+you are looking at (Head, the candidates waiting for you, the latest revisions, Earlier…), and the picture
+zooms with the wheel and pans with a drag. A candidate shows over the head; **Show candidate** off shows the
+head alone, so you can flip between before and after. **Accept**, **Drop** and **Export…** are in the bar
+(Drop only hides: a dropped candidate can still be accepted), and **Compare** opens the slider, side by side,
+flip and difference views against the head. Select a Canvas Region node in the graph before you open it and its
+rectangle (and the padded box the node cuts) is drawn on the picture; **Region reads from this revision** makes the
+node read the revision you are looking at (the head, if you are on the head), as one undo step. The view
+refreshes by itself when a run adds a candidate or moves the head.
+
+File > Canvas history… lists your canvases; open one to see its revisions and
 candidates, and click a revision to see it at full size (zoom and pan; the head is shown first). Press
 **Compare** to see it against the one before it (the same slider, side by side, flip and difference views
 as Compare Images), and **Accept** or **Drop** on a candidate. Ctrl+click a revision to use it as the left

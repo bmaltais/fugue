@@ -44,6 +44,8 @@ QList<Row> menuRows() {
         {"file.projects", QT_TRANSLATE_NOOP("Command", "Projects: switch, make or add one"), QT_TRANSLATE_NOOP("Command", "Projects…"), {}, "app", "added"},
         // The canvas revisions and candidates (#210); the window opens the dialog (Main.qml).
         {"file.canvas-history", QT_TRANSLATE_NOOP("Command", "Canvas history: revisions, candidates, compare"), QT_TRANSLATE_NOOP("Command", "Canvas history…"), {}, "app", "added"},
+        // The Canvas view (#221): the picture of a canvas, its revisions and candidates; the window opens the dialog (CommandUi.qml).
+        {"file.canvas-view", QT_TRANSLATE_NOOP("Command", "Canvas view: the picture, revisions, candidates, region"), QT_TRANSLATE_NOOP("Command", "Canvas…"), {}, "app", "added"},
         {"file.export-share", QT_TRANSLATE_NOOP("Command", "Export for sharing: a .fuguepack with its images, local paths removed"),
          QT_TRANSLATE_NOOP("Command", "Export for sharing…"), {}, "app", "same"},
         {"file.export-compiled", QT_TRANSLATE_NOOP("Command", "Export the compiled graph, for the CLI"),
@@ -165,7 +167,7 @@ void registerMenuCommands(CommandRegistry &registry) {
     }
     for (const auto &[id, label] : menuLabels())
         registry.setLabel(QString::fromLatin1(id), QString::fromUtf8(label));
-    for (const char *id : {"app.menu-bar", "app.context-menu", "help.about", "file.canvas-history"})
+    for (const char *id : {"app.menu-bar", "app.context-menu", "help.about", "file.canvas-history", "file.canvas-view"})
         registry.setHandler(QString::fromLatin1(id), [&registry, id] { emit registry.windowRequested(QString::fromLatin1(id)); });
 }
 

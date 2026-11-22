@@ -52,6 +52,19 @@ Item {
         target: App.commands
         function onShortcutsToggleRequested() { help.opened ? help.close() : help.open() }
         function onQuitConfirmationRequested() { quitAsk.open() }
+        // File > Canvas… (#221): the Canvas view in a large view, made the first time it is asked for.
+        function onWindowRequested(id) {
+            if (id !== "file.canvas-view")
+                return
+            if (!root.canvasViewDialog)
+                root.canvasViewDialog = canvasViewComponent.createObject(root)
+            root.canvasViewDialog.openFor("")
+        }
+    }
+    property var canvasViewDialog: null
+    Component {
+        id: canvasViewComponent
+        CanvasViewDialog {}
     }
 
     // The keymap file could not be used (or holds mistakes): the defaults still work.

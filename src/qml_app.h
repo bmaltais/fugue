@@ -9,6 +9,7 @@
 #include <QtQmlIntegration/qqmlintegration.h>
 
 #include "canvas/canvas_history.h" // a QML type (CanvasHistory): the module registers it from here
+#include "canvas/canvas_view_model.h" // a QML type (CanvasViewModel): the module registers it from here
 #include "canvas/canvas_model.h"
 #include "canvas/crop_qml.h" // a QML singleton (CropGeometry): the module registers it from here
 #include "canvas/region_picker.h" // a QML type (RegionPicker): the module registers it from here
