@@ -375,7 +375,7 @@ Item {
                         focusPolicy: Qt.StrongFocus
                         hoverEnabled: true
                         ToolTip.visible: hovered
-                        ToolTip.delay: 600
+                        ToolTip.delay: App.theme.look.tooltipDelay
                         ToolTip.text: qsTr("Go back to %1").arg(root.original)
                         Accessible.name: qsTr("Current color %1, click to go back to it").arg(root.original)
                         onClicked: root.setColor(root.original)

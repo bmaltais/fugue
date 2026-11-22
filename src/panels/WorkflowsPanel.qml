@@ -148,6 +148,7 @@ Item {
         boundsBehavior: Flickable.StopAtBounds
         activeFocusOnTab: true
         ScrollBar.vertical: FugueScrollBar { look: root.look }
+        TipGate { id: tipGate; view: list }
         Accessible.role: Accessible.List
         Accessible.name: qsTr("Workflows")
         onActiveFocusChanged: if (activeFocus && currentIndex < 0) root.step(1)
@@ -289,9 +290,9 @@ Item {
                     onTapped: root.tabCloseRequested(row.modelData.index)
                 }
             }
-            ToolTip.visible: hover.hovered && row.pressable && row.modelData.path !== ""
+            ToolTip.visible: hover.hovered && tipGate.open && row.pressable && row.modelData.path !== ""
+            ToolTip.delay: App.theme.look.tooltipDelay
             ToolTip.text: row.modelData.path ?? ""
-            ToolTip.delay: 600
             Accessible.role: Accessible.ListItem
             Accessible.name: row.modelData.title ?? ""
         }

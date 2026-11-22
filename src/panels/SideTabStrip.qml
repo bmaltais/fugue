@@ -88,8 +88,8 @@ Rectangle {
                     cursorShape: Qt.PointingHandCursor
                 }
                 ToolTip.visible: hover.hovered
+                ToolTip.delay: App.theme.look.tooltipDelay
                 ToolTip.text: tip
-                ToolTip.delay: 600
                 Keys.onReturnPressed: strip.tabRequested(tab.info.tab)
                 Keys.onSpacePressed: strip.tabRequested(tab.info.tab)
             }

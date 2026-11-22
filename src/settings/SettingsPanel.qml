@@ -412,6 +412,7 @@ Popup {
                                         border.color: panel.look.hairline
                                         Accessible.name: modelData
                                         ToolTip.visible: swatchHover.hovered
+                                        ToolTip.delay: App.theme.look.tooltipDelay
                                         ToolTip.text: modelData
                                         HoverHandler { id: swatchHover }
                                     }

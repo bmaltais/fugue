@@ -34,6 +34,8 @@ ApplicationWindow {
     readonly property SettingsModel appSettingsModel: App.settings
 
     HelperNotice { id: helperNotice }
+    // The width, place and delay of every tooltip in the window (canvas/ToolTipStyle.qml).
+    ToolTipStyle { look: App.theme.look; windowWidth: win.width }
 
     // Which bars and panels are shown (#129, panels/chrome_visibility.h). A window without the
     // registry (a test window) shows them all.

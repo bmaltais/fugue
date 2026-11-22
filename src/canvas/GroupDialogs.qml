@@ -91,6 +91,7 @@ Item {
         Accessible.name: label
         ToolTip.text: label
         ToolTip.visible: hovered
+        ToolTip.delay: App.theme.look.tooltipDelay
         contentItem: Glyph {
             look: root.look
             name: glyphButton.glyph

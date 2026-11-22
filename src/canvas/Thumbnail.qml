@@ -110,6 +110,7 @@ Item {
         }
         HoverHandler { id: chipHover }
         ToolTip.visible: chipHover.hovered && thumb.file !== ""
+        ToolTip.delay: App.theme.look.tooltipDelay
         ToolTip.text: thumb.file
     }
 }
