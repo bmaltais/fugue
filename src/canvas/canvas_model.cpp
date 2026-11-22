@@ -162,7 +162,7 @@ QHash<int, QByteArray> LinkList::roleNames() const {
 CanvasModel::CanvasModel(const Registry *registry, QObject *parent)
     : QObject(parent), m_registry(registry), m_nodeList(new NodeList(this)), m_linkList(new LinkList(this)),
       m_search(new NodeSearch(registry, this, this)), m_widgets(new WidgetEdit(registry, this, this)),
-      m_groups(new GroupEdit(registry, this, this)),
+      m_groups(new GroupEdit(registry, this, this)), m_gesture(new CanvasGesture(this, this)),
       m_undo(makeUndoStack()) {
     watchUndoStack();
     m_lensNodes = new QSortFilterProxyModel(this);

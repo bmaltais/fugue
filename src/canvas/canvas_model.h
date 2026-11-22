@@ -61,6 +61,7 @@
 //   edits below; canvas_commands.h registers them.
 // - Text size: FugueCanvas binds textSize to the theme's; rows and titles follow it.
 
+#include "canvas/canvas_gesture.h"
 #include "canvas/group_edit.h"
 #include "canvas/widget_edit.h"
 #include "engine/document.h"
@@ -203,6 +204,8 @@ class CanvasModel : public QObject {
     // Group scope and interface editing (canvas/group_edit.h): enter and leave a group, Make
     // group, the exposed inputs and outputs, the library.
     Q_PROPERTY(GroupEdit *groups READ groups CONSTANT)
+    // What a press, a drag and a release on the canvas do (canvas/canvas_gesture.h).
+    Q_PROPERTY(CanvasGesture *gesture READ gesture CONSTANT)
     // The base text size in px (theme.textSize); a node's title and rows are sized from it.
     Q_PROPERTY(int textSize READ textSize WRITE setTextSize NOTIFY metricsChanged)
     Q_PROPERTY(qreal headerHeight READ headerHeight NOTIFY metricsChanged)
@@ -235,6 +238,7 @@ public:
     fugue::NodeSearch *search() const { return m_search; }
     WidgetEdit *widgets() const { return m_widgets; }
     GroupEdit *groups() const { return m_groups; }
+    CanvasGesture *gesture() const { return m_gesture; }
     // Pasting and dropping images (workflow/image_inputs.h): set by Workflows; the paste command
     // and the Paste button of Load Image go through it. Null without one.
     fugue::ImageInputs *images() const { return m_images; }
@@ -803,6 +807,7 @@ private:
     fugue::NodeSearch *m_search;
     WidgetEdit *m_widgets;
     GroupEdit *m_groups;
+    CanvasGesture *m_gesture;
     fugue::ImageInputs *m_images = nullptr;
     std::vector<NodeRow> m_rows;
     QHash<QString, int> m_rowOf;
