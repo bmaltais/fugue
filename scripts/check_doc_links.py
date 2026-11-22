@@ -23,7 +23,7 @@ def anchors(path):
             in_code = not in_code
         m = None if in_code else re.match(r"^#{1,6}\s+(.*?)\s*#*\s*$", line)
         if m:
-            text = re.sub(r"[`*_]|\[([^\]]*)\]\([^)]*\)", lambda x: x.group(1) or "", m.group(1))
+            text = re.sub(r"[`*]|(?<!\w)_|_(?!\w)|\[([^\]]*)\]\([^)]*\)", lambda x: x.group(1) or "", m.group(1))
             slug = re.sub(r"[^\w\- ]", "", text.lower()).replace(" ", "-")
             n = seen.get(slug, 0)
             seen[slug] = n + 1
