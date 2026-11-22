@@ -1,6 +1,5 @@
 pragma ComponentBehavior: Bound
 import QtQuick
-import QtQuick.Shapes
 import Fugue
 
 // The region picker of a Canvas Region node (#213, epic #206, spec 14.5): the canvas at the node's
@@ -119,7 +118,7 @@ LargeViewDialog {
             objectName: "regionSnap"
             look: root.look
             text: qsTr("Snap to %1").arg(backend.multiple)
-            tip: qsTr("Put the edges on multiples of the node's Multiple of; with a ratio lock only the corner moves")
+            tip: qsTr("Put the region's edges on multiples of the node's Multiple of; with a ratio held only the corner moves")
             accented: false // on is the quiet marking: OK is the one accent fill (docs/ui-ergonomics.md, D7)
             checkable: true
             current: root.snap
@@ -146,39 +145,16 @@ LargeViewDialog {
             onChanging: r => root.live = root.snap ? root.picker.snapped(r, root.ratio > 0) : r
         }
         // The padded area the node cuts: a dashed outer box over the picture, never taking the pointer.
-        Shape {
+        ContextBox {
             id: outer
             objectName: "regionContext"
             anchors.fill: parent
             visible: root.ready
             clip: true
+            look: root.look
             readonly property real k: picture.viewer.imageScale
-            readonly property real boxLeft: picture.viewer.imageX + root.context.x * k
-            readonly property real boxTop: picture.viewer.imageY + root.context.y * k
-            readonly property real boxRight: boxLeft + root.context.width * k
-            readonly property real boxBottom: boxTop + root.context.height * k
-            ShapePath {
-                strokeColor: Qt.rgba(0, 0, 0, 0.6)
-                strokeWidth: 3
-                fillColor: "transparent"
-                startX: outer.boxLeft; startY: outer.boxTop
-                PathLine { x: outer.boxRight; y: outer.boxTop }
-                PathLine { x: outer.boxRight; y: outer.boxBottom }
-                PathLine { x: outer.boxLeft; y: outer.boxBottom }
-                PathLine { x: outer.boxLeft; y: outer.boxTop }
-            }
-            ShapePath {
-                strokeColor: root.look.accent
-                strokeWidth: 1.5
-                strokeStyle: ShapePath.DashLine
-                dashPattern: [4, 3]
-                fillColor: "transparent"
-                startX: outer.boxLeft; startY: outer.boxTop
-                PathLine { x: outer.boxRight; y: outer.boxTop }
-                PathLine { x: outer.boxRight; y: outer.boxBottom }
-                PathLine { x: outer.boxLeft; y: outer.boxBottom }
-                PathLine { x: outer.boxLeft; y: outer.boxTop }
-            }
+            box: Qt.rect(picture.viewer.imageX + root.context.x * k, picture.viewer.imageY + root.context.y * k,
+                         root.context.width * k, root.context.height * k)
         }
         Text {
             objectName: "regionError"

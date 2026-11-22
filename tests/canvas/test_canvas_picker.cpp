@@ -167,7 +167,7 @@ private slots:
         const QVariantMap gone = app.entries().at(0).toMap();
         QVERIFY(gone.value("dim").toBool());
         QVERIFY(gone.value("checked").toBool());
-        QCOMPARE(gone.value("detail").toString(), QString("not in this root"));
+        QCOMPARE(gone.value("detail").toString(), QString("Not in this root"));
         app.choose("Mine");
         QTRY_COMPARE(app.stored(), QJsonValue(mine));
         QTRY_COMPARE(app.face(), QString("Mine"));

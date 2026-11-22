@@ -92,8 +92,8 @@ struct RegionApp {
         QQuickItem *s = find("regionContext");
         if (!s)
             return {};
-        return QRectF(s->mapToScene(QPointF(s->property("boxLeft").toReal(), s->property("boxTop").toReal())),
-                      s->mapToScene(QPointF(s->property("boxRight").toReal(), s->property("boxBottom").toReal())));
+        const QRectF box = s->property("box").toRectF(); // ContextBox: in the item's own coordinates
+        return QRectF(s->mapToScene(box.topLeft()), s->mapToScene(box.bottomRight()));
     }
     // A drag with the pointer first moved onto the start, as a person's is (the popup sees it arrive).
     void drag(QPoint from, QPoint to) {

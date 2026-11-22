@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Fugue
 import ".."
+import "../canvasMenu.js" as CanvasMenu
 
 // One value input on a node's face, as a widget (spec 6.2, 3.2, 2.5; canvas-look 4.4): a
 // recessed well across the row with the value at its right; the row itself (CanvasNode.qml)
@@ -345,27 +346,11 @@ Rectangle {
         const current = typeof literal === "string" ? literal : spec["default"]
         return (spec.choices || []).map(c => ({ text: c, value: c, checked: c === current }))
     }
-    // The canvas picker (#211): this root's canvases (name; size and the time of the last change),
-    // then the two ways to make one. A stored id this root has none of heads the list, checked and
-    // dimmed, and says so: the list is still there to replace it.
+    // The canvas picker (#211): this root's canvases and the two ways to make one, the rows every canvas menu has
+    // (canvasMenu.js); a stored id this root has none of heads the list, checked and dimmed, and says so: the list is
+    // still there to replace it. A Canvas Region can also drag its rectangle out on the canvas (#213).
     function canvasEntries() {
-        const entries = []
-        const rows = edits.canvases()
-        if (canvasMissing)
-            entries.push({ text: canvasId, detail: qsTr("not in this root"), checked: true, dim: true,
-                           note: qsTr("A canvas belongs to the Default or the project it was made in."),
-                           value: { id: canvasId } })
-        for (const row of rows)
-            entries.push({ text: row.name, value: { id: row.id }, checked: row.id === canvasId,
-                           detail: row.size === "" ? row.changedText : qsTr("%1 · %2").arg(row.size).arg(row.changedText),
-                           note: row.id, keywords: row.id })
-        if (rows.length === 0)
-            entries.push({ text: qsTr("No canvases yet"), enabled: false, note: "" })
-        // The actions are a chunk of their own (docs/ui-ergonomics.md, Gaps), under a hairline.
-        entries.push({ separator: true, enabled: false })
-        entries.push({ text: qsTr("New canvas…"), value: { action: "new" }, keep: true })
-        entries.push({ text: qsTr("Import picture…"), value: { action: "import" }, keep: true })
-        // A node with a rectangle too (Canvas Region): drag it out on the canvas (#213).
+        const entries = CanvasMenu.entries(edits.canvases(), canvasId, canvasMissing ? canvasId : "")
         if (edits.regionState(nodeId).ok === true)
             entries.push({ text: qsTr("Pick region…"), value: { action: "region" }, keep: true,
                            enabled: canvasId !== "" && !canvasMissing,
@@ -471,7 +456,7 @@ Rectangle {
             if (value.action === "new")
                 return picker().askNewCanvas()
             if (value.action === "import")
-                return picker().askPicture(false)
+                return picker().askPicture()
             if (value.action === "region")
                 return canvasView ? canvasView.openRegion(nodeId) : undefined
             return edits.setValue(nodeId, name, value.id)

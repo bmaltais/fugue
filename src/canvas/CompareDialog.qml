@@ -33,18 +33,11 @@ LargeViewDialog {
         function onPreviewSizeChanged(node) { if (node === root.nodeId) root.refresh() }
     }
 
-    tools: Repeater {
-        model: [{id: "slider", text: qsTr("Slider")}, {id: "slider_horizontal", text: qsTr("Slider, horizontal")},
-                {id: "side_by_side", text: qsTr("Side by side")}, {id: "flip", text: qsTr("Flip")},
-                {id: "difference", text: qsTr("Difference")}]
-        delegate: ViewButton {
-            required property var modelData
-            objectName: "compareMode-" + modelData.id
-            look: root.look
-            text: modelData.text
-            current: compareViewer.mode === modelData.id
-            onTapped: compareViewer.setView({mode: modelData.id})
-        }
+    tools: CompareModeButtons {
+        look: root.look
+        prefix: "compareMode-"
+        mode: compareViewer.mode
+        onPicked: picked => compareViewer.setView({mode: picked})
     }
     CompareNodeView {
         id: compareViewer

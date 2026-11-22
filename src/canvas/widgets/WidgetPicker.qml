@@ -142,17 +142,23 @@ Item {
         }
     }
 
-    // New canvas… (#211): a name and a size, or a picture file to make it from. The canvas is made in
-    // this root's store and its id put in the input as one undo step, or the reason is shown in the
-    // dialog. The Question is made on each use.
+    // New canvas… (#211): a name and a size, or a picture file to make it from (NewCanvasQuestion.qml, shared with the
+    // Canvas view's empty state and menu). The canvas is made in this root's store and its id put in the input as one
+    // undo step, or the reason is shown in the question.
     function askNewCanvas() {
         (newCanvasAsk.createObject(picker) as Question).open()
     }
-    // Import picture…: the file dialog, then a canvas named after the file. From the New canvas
-    // dialog (`inAsk` true) the picked file goes back to it instead.
-    property var pictureTarget: null
-    function askPicture(inAsk, ask) {
-        pictureTarget = inAsk ? ask : null
+    Component {
+        id: newCanvasAsk
+        NewCanvasQuestion {
+            make: (name, width, height, picture) => picture !== ""
+                  ? picker.host.edits.importCanvas(picker.host.nodeId, picker.host.name, picture, name)
+                  : picker.host.edits.newCanvas(picker.host.nodeId, picker.host.name, name, width, height)
+            sizeOf: url => picker.host.edits.pictureSize(url)
+        }
+    }
+    // Import picture…: the file dialog, then a canvas named after the file at once.
+    function askPicture() {
         (pictureDialog.createObject(picker) as FileDialog).open()
     }
     Component {
@@ -163,114 +169,8 @@ Item {
             title: qsTr("Import a picture as a canvas") // the menu's Import picture…, the CLI's fugue canvas import
             fileMode: FileDialog.OpenFile
             nameFilters: [qsTr("Pictures and canvases (*.png *.jpg *.jpeg *.webp *.ora)"), qsTr("All files (*)")]
-            onAccepted: { picker.pictureChosen(d.selectedFile); d.destroy() }
+            onAccepted: { picker.host.error = picker.host.edits.importCanvas(picker.host.nodeId, picker.host.name, d.selectedFile, ""); d.destroy() }
             onRejected: d.destroy()
-        }
-    }
-    // A picture chosen: a canvas at once, or the New canvas dialog takes it.
-    function pictureChosen(url) {
-        if (pictureTarget) {
-            pictureTarget.picture = url
-            return
-        }
-        host.error = host.edits.importCanvas(host.nodeId, host.name, url, "")
-    }
-    Component {
-        id: newCanvasAsk
-        Question {
-            id: ask
-            objectName: "newCanvasAsk"
-            // A picture file URL when the canvas is made from one, else empty (a blank canvas).
-            property string picture: ""
-            property string problem: ""
-            readonly property string pictureName: picture === "" ? "" : decodeURIComponent(picture.toString().split("/").pop())
-            readonly property string pictureSize: picture === "" ? "" : picker.host.edits.pictureSize(picture)
-            parent: Overlay.overlay
-            onClosed: ask.destroy()
-            onOpened: { nameField.forceActiveFocus(); nameField.selectAll() }
-            function create() {
-                problem = picture !== ""
-                    ? picker.host.edits.importCanvas(picker.host.nodeId, picker.host.name, picture, nameField.text)
-                    : picker.host.edits.newCanvas(picker.host.nodeId, picker.host.name, nameField.text,
-                                                  parseInt(widthField.text), parseInt(heightField.text))
-                if (problem === "")
-                    ask.close()
-            }
-            ColumnLayout {
-                anchors.fill: parent
-                spacing: 3 * ask.look.unit
-                Label { text: qsTr("New canvas"); font.bold: true; Layout.fillWidth: true }
-                GridLayout {
-                    Layout.fillWidth: true
-                    columns: 2
-                    columnSpacing: 3 * ask.look.unit
-                    rowSpacing: ask.look.unit
-                    Label { text: qsTr("Name"); color: ask.look.label }
-                    ThemedTextField {
-                        id: nameField
-                        objectName: "newCanvasName"
-                        Layout.fillWidth: true
-                        text: ask.pictureName === "" ? qsTr("Untitled") : ask.pictureName.replace(/\.[^.]*$/, "")
-                        onAccepted: ask.create()
-                    }
-                    Label { text: qsTr("Size"); color: ask.look.label; visible: ask.picture === "" }
-                    RowLayout {
-                        visible: ask.picture === ""
-                        Layout.fillWidth: true
-                        ThemedTextField {
-                            id: widthField
-                            objectName: "newCanvasWidth"
-                            Layout.preferredWidth: 22 * ask.look.unit // 88px at the default text size, and it follows it
-                            text: "1024"
-                            inputMethodHints: Qt.ImhDigitsOnly
-                            onAccepted: ask.create()
-                        }
-                        Label { text: "×"; color: ask.look.label }
-                        ThemedTextField {
-                            id: heightField
-                            objectName: "newCanvasHeight"
-                            Layout.preferredWidth: 22 * ask.look.unit // 88px at the default text size, and it follows it
-                            text: "1024"
-                            inputMethodHints: Qt.ImhDigitsOnly
-                            onAccepted: ask.create()
-                        }
-                        Label { text: qsTr("px"); color: ask.look.label }
-                    }
-                    Label { text: qsTr("Picture"); color: ask.look.label; visible: ask.picture !== "" }
-                    Label {
-                        objectName: "newCanvasPictureLine"
-                        visible: ask.picture !== ""
-                        Layout.fillWidth: true
-                        text: ask.pictureSize === "" ? ask.pictureName : qsTr("%1 · %2").arg(ask.pictureName).arg(ask.pictureSize)
-                        elide: Text.ElideMiddle
-                    }
-                }
-                ThemedButton {
-                    objectName: "newCanvasFromPicture"
-                    flat: true
-                    text: ask.picture === "" ? qsTr("From a picture…") : qsTr("Blank canvas instead")
-                    onClicked: ask.picture === "" ? picker.askPicture(true, ask) : ask.picture = ""
-                }
-                Label {
-                    objectName: "newCanvasProblem"
-                    Layout.fillWidth: true
-                    visible: ask.problem !== ""
-                    text: ask.problem
-                    color: ask.look.error
-                    wrapMode: Text.Wrap
-                }
-                RowLayout {
-                    Layout.alignment: Qt.AlignRight
-                    spacing: 2 * ask.look.unit
-                    ThemedButton { objectName: "newCanvasCancel"; text: qsTr("Cancel"); onClicked: ask.close() }
-                    ThemedButton {
-                        objectName: "newCanvasOk"
-                        text: qsTr("Create")
-                        highlighted: true
-                        onClicked: ask.create()
-                    }
-                }
-            }
         }
     }
 
