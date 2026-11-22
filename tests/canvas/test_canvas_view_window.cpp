@@ -11,6 +11,8 @@
 #include <QUndoStack>
 #include <QtTest>
 
+#include <thread>
+
 #include "canvas_app.h"
 #include "../window_grab.h"
 #include "engine/canvas_store.h"
@@ -126,6 +128,7 @@ private slots:
     void init() {
         QDir(m_dir.filePath("home")).removeRecursively();
         QDir(m_dir.filePath("data")).removeRecursively();
+        QDir(m_dir.filePath("config")).removeRecursively(); // a test's setting does not reach the next
         canvas::CanvasStore store = canvas::CanvasStore::forSession();
         PaintDocument base(512, 512);
         base.addLayer(LayerKind::Paint, "Base");
@@ -222,6 +225,92 @@ private slots:
                               .value()
                               .id;
         QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "canvasViewChoice-" + shortOf(c)), 4000);
+    }
+
+    // A running workflow adds a candidate the way Canvas Write does (addRevision from the head, the head left where it is),
+    // from another thread a moment later; the view sees it through the folder watch alone.
+    static std::thread arrivesLater(const QString &canvas, const QString &head, const QString &name, int x) {
+        return std::thread([=] {
+            QThread::msleep(300);
+            PaintDocument base(512, 512);
+            base.addLayer(LayerKind::Paint, "Base");
+            canvas::CanvasStore::forSession().addRevision(canvas, withFill(base, name, x), head, "canvas-write:" + name);
+        });
+    }
+
+    void aResultOfARunWhileOpenIsShownOverTheHeadWithItsBanner() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        QTRY_VERIFY(find(app.window, "canvasViewChoice-head"));
+        QVERIFY(!find(app.window, "canvasViewNewResult"));
+        std::thread run = arrivesLater(m_canvas, m_head, "run1", 200);
+        QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "canvasViewNewResult"), 5000); // the strip refreshed and the view moved
+        run.join();
+        const QString shown = model(app)->property("revisionB").toString();
+        QCOMPARE(model(app)->property("newResult").toString(), shown);
+        QCOMPARE(model(app)->property("revisionA").toString(), m_head);
+        QVERIFY(find(app.window, "canvasViewChoice-" + shortOf(shown)));
+        QVERIFY(find(app.window, "canvasViewNewResultText")->property("text").toString().contains("run1"));
+        QVERIFY(find(app.window, "canvasViewNewResultHint")->property("text").toString().contains("Keep as candidate"));
+        QObject *viewer = view(app)->property("viewer").value<QObject *>();
+        QCOMPARE(viewer->property("sourceA").toUrl(), model(app)->property("sourceB").toUrl()); // the combined picture
+        // Keep looking at head: the head alone, the banner gone, the candidate still in the strip.
+        click(app, "canvasViewNewKeep");
+        QTRY_COMPARE(model(app)->property("revisionB").toString(), m_head);
+        QTRY_VERIFY(!find(app.window, "canvasViewNewResult"));
+        QVERIFY(find(app.window, "canvasViewChoice-" + shortOf(shown)));
+        // Another run: Accept from the banner moves the head to it.
+        std::thread again = arrivesLater(m_canvas, m_head, "run2", 300);
+        QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "canvasViewNewResult"), 5000);
+        again.join();
+        const QString second = model(app)->property("revisionB").toString();
+        click(app, "canvasViewNewAccept");
+        QTRY_COMPARE(model(app)->property("head").toString(), second);
+        QTRY_VERIFY(!find(app.window, "canvasViewNewResult"));
+        // And Drop from the banner hides the next one.
+        std::thread third = arrivesLater(m_canvas, second, "run3", 100);
+        QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "canvasViewNewResult"), 5000);
+        third.join();
+        const QString last = model(app)->property("revisionB").toString();
+        click(app, "canvasViewNewDrop");
+        QTRY_VERIFY(!find(app.window, "canvasViewNewResult"));
+        QTRY_VERIFY(!find(app.window, "canvasViewChoice-" + shortOf(last)));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    void aResultIsNotShownWithCompareOnOrTheSettingOffAndShowsWhenCompareEnds() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        QTRY_VERIFY(find(app.window, "canvasViewChoice-head"));
+        // A head with a parent, so Compare is possible.
+        QVERIFY(canvas::CanvasStore::forSession().accept(m_canvas, m_a));
+        QTRY_COMPARE_WITH_TIMEOUT(model(app)->property("head").toString(), m_a, 4000);
+        QTRY_COMPARE(model(app)->property("revisionB").toString(), m_a);
+        // Compare on (the head against its parent): the new result waits in the strip.
+        click(app, "canvasViewCompare");
+        QTRY_VERIFY(find(app.window, "canvasViewMode-slider"));
+        std::thread run = arrivesLater(m_canvas, m_a, "run1", 200);
+        QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "canvasViewChoice-run1") || model(app)->property("choices").toList().size() > 3, 5000);
+        run.join();
+        QTest::qWait(300);
+        QCOMPARE(model(app)->property("revisionB").toString(), m_a);
+        QVERIFY(!find(app.window, "canvasViewNewResult"));
+        click(app, "canvasViewCompare"); // Compare off: now it shows
+        QTRY_VERIFY(find(app.window, "canvasViewNewResult"));
+        click(app, "canvasViewNewKeep");
+        QTRY_VERIFY(!find(app.window, "canvasViewNewResult"));
+        // The setting off (Settings > General, live): no banner, the strip still lists it.
+        QCOMPARE(app.settings.set("canvas_show_new_results", false), QString());
+        QTRY_VERIFY(!model(app)->property("showNewResults").toBool());
+        std::thread off = arrivesLater(m_canvas, m_a, "run2", 300);
+        QTRY_VERIFY_WITH_TIMEOUT(model(app)->property("choices").toList().size() > 4, 5000);
+        off.join();
+        QTest::qWait(300);
+        QCOMPARE(model(app)->property("revisionB").toString(), m_a);
+        QVERIFY(!find(app.window, "canvasViewNewResult"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
     void theKeysZoomAndTheDragPans() {
@@ -374,6 +463,25 @@ private slots:
         // A click on empty picture draws nothing.
         QTest::mouseClick(app.window, Qt::LeftButton, {}, pixelAt(app, 460, 60));
         QCOMPARE(app.model.undoStack()->count(), 2);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    void aResultThatArrivesMidDragWaitsForTheReleaseAndTheDragIsKept() {
+        App app(load(fixture(m_canvas)));
+        openFollowing(app);
+        const QPoint from = pixelAt(app, 300, 320), to = pixelAt(app, 420, 400);
+        drag(app, from, to, false);
+        QVERIFY(find(app.window, "canvasViewFrame")->property("dragging").toBool());
+        std::thread run = arrivesLater(m_canvas, m_head, "run1", 200);
+        QTRY_VERIFY_WITH_TIMEOUT(model(app)->property("choices").toList().size() > 3, 5000); // the strip has it
+        run.join();
+        QTest::qWait(300);
+        QCOMPARE(model(app)->property("revisionB").toString(), m_head); // the picture under the pointer did not change
+        QVERIFY(!find(app.window, "canvasViewNewResult"));
+        QVERIFY(find(app.window, "canvasViewFrame")->property("dragging").toBool());
+        QTest::mouseRelease(app.window, Qt::LeftButton, {}, to);
+        QCOMPARE(app.model.undoStack()->count(), 1); // the drag was committed
+        QTRY_VERIFY(find(app.window, "canvasViewNewResult")); // and then the result shows
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 

@@ -65,7 +65,16 @@ Item {
     // Reads the store again now (a host shows it again after it was away).
     function refresh() { canvasData.refresh() }
 
-    CanvasViewModel { id: canvasData }
+    CanvasViewModel {
+        id: canvasData
+        // A run's new candidate is shown at once (settings.json's canvas_show_new_results, live), unless the view is busy:
+        // Compare on, or a rectangle being dragged. Then it waits, and shows when that ends (if still on the head).
+        showNewResults: App.settings ? App.settings.canvasShowNewResults : true
+        viewLocked: root.compareOn || root.dragging
+    }
+    readonly property bool dragging: (regionFrame.item as CropFrame)?.dragging ?? false
+    // The banner of a result the view moved to by itself: only while that result is the one shown and open.
+    readonly property bool newResultShown: canvasData.newResult !== "" && canvasData.revisionB === canvasData.newResult && canvasData.kindB === "candidate"
 
     Component.onCompleted: {
         // One canvas by default: with none chosen, the newest.
@@ -290,12 +299,81 @@ Item {
         }
     }
 
+    // A run made a new result and the view moved to it (it shows over the head): what to do with it, in one place.
+    Rectangle {
+        id: banner
+        objectName: "canvasViewNewResult"
+        anchors.top: tools.bottom
+        anchors.topMargin: root.newResultShown ? root.u : 0
+        width: parent.width
+        height: root.newResultShown ? bannerColumn.implicitHeight + root.u : 0
+        visible: root.newResultShown
+        radius: root.look.smallCorner
+        color: Qt.alpha(root.look.accent, 0.14)
+        border.color: root.look.accent
+        Column {
+            id: bannerColumn
+            x: root.u / 2
+            y: root.u / 2
+            width: parent.width - root.u
+            spacing: root.u / 2
+            Text {
+                objectName: "canvasViewNewResultText"
+                width: parent.width
+                wrapMode: Text.Wrap
+                color: root.look.text
+                font.pixelSize: root.look.labelSize
+                text: (canvasData.newResultFrom !== "" ? qsTr("New result %1 from %2: it is shown over the head.").arg(root.shownShort).arg(canvasData.newResultFrom)
+                                                         : qsTr("New result %1: it is shown over the head.").arg(root.shownShort))
+                      + (canvasData.newResultOthers > 0 ? " " + qsTr("%n more new results wait in the strip.", "", canvasData.newResultOthers) : "")
+            }
+            Flow {
+                width: parent.width
+                spacing: root.u
+                ViewButton {
+                    objectName: "canvasViewNewAccept"
+                    look: root.look
+                    primary: true
+                    text: qsTr("Accept")
+                    tip: qsTr("Make this result the head of the canvas")
+                    onTapped: canvasData.accept(canvasData.revisionB)
+                }
+                Item { width: 2 * root.u; height: 1 }
+                ViewButton {
+                    objectName: "canvasViewNewDrop"
+                    look: root.look
+                    danger: true
+                    text: qsTr("Drop")
+                    tip: qsTr("Hide this result (it is kept, and Accept still takes it)")
+                    onTapped: canvasData.drop(canvasData.revisionB)
+                }
+                Item { width: 2 * root.u; height: 1 }
+                ViewButton {
+                    objectName: "canvasViewNewKeep"
+                    look: root.look
+                    accented: false
+                    text: qsTr("Keep looking at head")
+                    tip: qsTr("Go back to the head; the result stays in the strip")
+                    onTapped: canvasData.show(canvasData.head)
+                }
+            }
+            Text {
+                objectName: "canvasViewNewResultHint"
+                width: parent.width
+                wrapMode: Text.Wrap
+                color: root.look.label
+                font.pixelSize: root.look.labelSize
+                text: qsTr("Canvas Write can skip this review: with Keep as candidate off, the head moves to its result by itself.")
+            }
+        }
+    }
+
     // The picture, and over it the region of the followed node.
     CompareView {
         id: pictureView
         objectName: "canvasViewViewer"
         look: root.look
-        anchors.top: tools.bottom
+        anchors.top: banner.bottom
         anchors.topMargin: root.u
         anchors.bottom: notes.top
         anchors.bottomMargin: root.u

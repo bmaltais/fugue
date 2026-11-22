@@ -189,6 +189,18 @@ private slots:
         QCOMPARE(canvas.document().graph.nodes.value(id).inputs.value("embed").literal(), QJsonValue("no-prompts"));
     }
 
+    // Show new canvas results (#225): on by default, a preferences key; written like the others.
+    void canvasShowNewResultsIsOnByDefaultAndPersists() {
+        SettingsModel model(settingsFile());
+        QVERIFY(model.canvasShowNewResults());
+        QCOMPARE(model.set("canvas_show_new_results", false), QString());
+        QVERIFY(!model.canvasShowNewResults());
+        QVERIFY(!SettingsModel(settingsFile()).canvasShowNewResults());
+        QVERIFY(!model.set("canvas_show_new_results", "no").isEmpty());
+        QCOMPARE(model.set("canvas_show_new_results", true), QString());
+        QVERIFY(model.canvasShowNewResults());
+    }
+
     // Reopen tabs at start (#212): on by default; off is written (the default is on), on again takes the key out.
     void restoreTabsIsOnByDefaultAndPersists() {
         SettingsModel model;

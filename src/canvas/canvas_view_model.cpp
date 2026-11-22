@@ -28,6 +28,9 @@ CanvasViewModel::CanvasViewModel(QObject *parent) : CanvasHistory(parent) {
     connect(this, &CanvasHistory::compareChanged, this, [this] {
         emit pictureChanged();
         updateRegion();
+        // Looking at anything else than the result shown by itself (or it, once decided) ends its banner.
+        if (!m_newResult.isEmpty() && (revisionB() != m_newResult || kindB() != QLatin1String("candidate")))
+            clearNewResult();
     });
 }
 
@@ -65,10 +68,98 @@ void CanvasViewModel::refresh() {
         select(m_head); // a view on the head goes on to the new one
     watch();
     emit storeChanged(); // the canvas list too
+    showArrivals();
+    // A read that failed (a run is writing, a slow disk) is tried again a few times before it is left to the person.
+    if (!error().isEmpty() && !canvasId().isEmpty() && m_retries < 3) {
+        ++m_retries;
+        m_settle.start(400);
+    } else if (error().isEmpty()) {
+        m_retries = 0;
+    }
+}
+
+QString CanvasViewModel::newResultFrom() const {
+    for (const QVariant &row : revisions())
+        if (row.toMap().value("id").toString() == m_newResult) {
+            QString producer = row.toMap().value("producer").toString();
+            if (producer.startsWith(QLatin1String("canvas-write:")))
+                producer = producer.mid(13);
+            return producer;
+        }
+    return {};
+}
+
+void CanvasViewModel::clearNewResult() {
+    if (m_newResult.isEmpty() && m_newOthers == 0)
+        return;
+    m_newResult.clear();
+    m_newOthers = 0;
+    emit newResultChanged();
+}
+
+void CanvasViewModel::setShowNewResults(bool on) {
+    if (m_showNew == on)
+        return;
+    m_showNew = on;
+    if (!on)
+        m_arrived.clear();
+    emit newResultChanged();
+}
+
+void CanvasViewModel::setViewLocked(bool locked) {
+    if (m_locked == locked)
+        return;
+    m_locked = locked;
+    emit newResultChanged();
+    if (!locked)
+        showArrivals();
+}
+
+// Moves the view to the newest candidate that arrived, when that takes nothing from the person (see the header).
+void CanvasViewModel::showArrivals() {
+    if (m_arrived.isEmpty() || m_locked || !m_showNew)
+        return;
+    const bool onHead = !m_head.isEmpty() && revisionB() == m_head;
+    const bool onOwn = !m_newResult.isEmpty() && revisionB() == m_newResult;
+    if (!onHead && !onOwn) {
+        m_arrived.clear(); // looking at something the person chose: the strip lists the new one, nothing more
+        return;
+    }
+    const QString newest = m_arrived.first();
+    const int others = m_arrived.size() - 1 + (onOwn ? m_newOthers + 1 : 0);
+    m_arrived.clear();
+    show(newest); // ends the banner of an earlier result (compareChanged), the new one starts below
+    if (revisionB() != newest)
+        return;
+    m_newResult = newest;
+    m_newOthers = others;
+    emit newResultChanged();
 }
 
 void CanvasViewModel::rebuild() {
     watch();
+    // The candidates that were not here at the last read are the arrivals; a canvas read for the first time has none.
+    QStringList open;
+    for (const QVariant &value : revisions())
+        if (value.toMap().value("kind").toString() == QLatin1String("candidate"))
+            open << value.toMap().value("id").toString();
+    if (m_knownCanvas != canvasId()) {
+        m_knownCanvas = canvasId();
+        m_arrived.clear();
+        m_known = open;
+        clearNewResult();
+    } else if (error().isEmpty()) { // a failed read lists nothing: it says nothing about what arrived
+        QStringList fresh;
+        for (const QString &id : std::as_const(open))
+            if (!m_known.contains(id))
+                fresh << id;
+        if (!fresh.isEmpty()) {
+            fresh << m_arrived;
+            m_arrived = fresh; // newest first, as the rows are
+        }
+        m_known = open;
+        m_arrived.removeIf([&open](const QString &id) { return !open.contains(id); }); // resolved before it was shown
+    }
     m_choices.clear();
     m_earlier.clear();
     int recent = 0;

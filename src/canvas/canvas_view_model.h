@@ -16,6 +16,12 @@
 //    moves the view to the node's canvas.
 //  - auto-refresh: the store's folders are watched, so a head moved by a run, a candidate that arrived or a
 //    canvas made elsewhere shows within a moment; a view on the head moves along with it.
+//  - new results (#225): a candidate that arrives while the view is on the head is shown over it at once (`newResult`
+//    names it, `newResultOthers` counts the ones that came with it or after it, `newResultFrom` says who made it), so a
+//    run's output is seen without a click. Never taken from the person: only a view on the head (or on the result it
+//    showed itself) moves, and not while `viewLocked` (Compare on, a rectangle drag: the host says) or with
+//    `showNewResults` off (settings.json's canvas_show_new_results); a result that came meanwhile is shown when the
+//    lock lifts, if the view is still on the head. The banner's Accept and Drop are accept() and drop().
 // It makes no window. The `region` map is {valid, reason, x, y, width, height, context: {x, y, width, height}, reads,
 // readsId, readsShown, writable, editable, padding, scale, cap, multiple}: `editable` is false while X, Y, Width or Height
 // is linked to another node (the rectangle is then drawn but not edited).
@@ -44,6 +50,15 @@ class CanvasViewModel : public CanvasHistory {
     Q_PROPERTY(QSize pictureSize READ pictureSize NOTIFY pictureChanged)
     Q_PROPERTY(QString head READ head NOTIFY choicesChanged)
     Q_PROPERTY(QVariantMap region READ region NOTIFY regionChanged)
+    // Show a candidate that a run produced as soon as it arrives (the setting; the host binds it). On by default.
+    Q_PROPERTY(bool showNewResults READ showNewResults WRITE setShowNewResults NOTIFY newResultChanged)
+    // True while the view must not move on its own: Compare is on or a rectangle is being dragged. The host binds it.
+    Q_PROPERTY(bool viewLocked READ viewLocked WRITE setViewLocked NOTIFY newResultChanged)
+    // The candidate the view moved to by itself and still shows ("" otherwise), how many more arrived with it, and who
+    // made it (the node of a Canvas Write, else the producer as it is stored).
+    Q_PROPERTY(QString newResult READ newResult NOTIFY newResultChanged)
+    Q_PROPERTY(int newResultOthers READ newResultOthers NOTIFY newResultChanged)
+    Q_PROPERTY(QString newResultFrom READ newResultFrom NOTIFY newResultChanged)
 
 public:
     explicit CanvasViewModel(QObject *parent = nullptr);
@@ -65,6 +80,13 @@ public:
     QSize pictureSize() const;
     QString head() const { return m_head; }
     QVariantMap region() const { return m_region; }
+    bool showNewResults() const { return m_showNew; }
+    void setShowNewResults(bool on);
+    bool viewLocked() const { return m_locked; }
+    void setViewLocked(bool locked);
+    QString newResult() const { return m_newResult; }
+    int newResultOthers() const { return m_newOthers; }
+    QString newResultFrom() const;
 
     // Looks at a revision: the head, a candidate (against the head) or any other (against its parent).
     Q_INVOKABLE void show(const QString &revision);
@@ -88,8 +110,12 @@ signals:
     void choicesChanged();
     void pictureChanged();
     void regionChanged();
+    void newResultChanged();
 
 private:
+    void showArrivals();
+    void clearNewResult();
+
     void rebuild();
     void updateRegion();
     void watch();
@@ -104,6 +130,14 @@ private:
     QFileSystemWatcher m_watcher;
     QTimer m_settle;
     QMetaObject::Connection m_undoLink;
+    bool m_showNew = true;
+    bool m_locked = false;
+    QStringList m_known;         // the open candidates seen so far on this canvas
+    QString m_knownCanvas;       // the canvas m_known belongs to ("" before the first read)
+    QStringList m_arrived;       // candidates that came and were not shown yet, newest first
+    QString m_newResult;
+    int m_newOthers = 0;
+    int m_retries = 0;
 };
 
 } // namespace fugue

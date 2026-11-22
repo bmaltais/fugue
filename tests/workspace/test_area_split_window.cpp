@@ -13,6 +13,8 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include <thread>
+
 #include "../canvas/canvas_app.h"
 #include "engine/canvas_store.h"
 #include "window_items.h"
@@ -229,6 +231,37 @@ private slots:
         QTRY_VERIFY(find(app.window, "canvasViewRegionInfo")->property("text").toString().contains("Context"));
         app.model.select({});
         QTRY_COMPARE(backend->property("followNode").toString(), QString());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // A run adds a candidate (as Canvas Write does) while a Canvas area is open on the head: the area shows it with its banner.
+    void aCanvasAreaShowsANewResultOfARunAndTheBannerDecides() {
+        App app(load(blank));
+        QVERIFY(app.open());
+        QVERIFY(app.commands.trigger("area.split-row"));
+        QQuickItem *area = nullptr;
+        QTRY_VERIFY((area = find(app.window, "canvasArea")) != nullptr);
+        QObject *backend = area->property("view").value<QObject *>()->property("backend").value<QObject *>();
+        QTRY_COMPARE(backend->property("canvasId").toString(), m_canvas);
+        const QString head = backend->property("head").toString();
+        QTRY_VERIFY(!head.isEmpty());
+        QVERIFY(!find(app.window, "canvasViewNewResult"));
+        std::thread run([=] {
+            QThread::msleep(300);
+            PaintDocument base(256, 256);
+            base.addLayer(LayerKind::Paint, "Base");
+            base.addLayer(LayerKind::Paint, "Flower pot");
+            canvas::CanvasStore::forSession().addRevision(m_canvas, base, head, "canvas-write:pot");
+        });
+        QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "canvasViewNewResult"), 5000);
+        run.join();
+        const QString shown = backend->property("revisionB").toString();
+        QVERIFY(shown != head);
+        QCOMPARE(backend->property("newResult").toString(), shown);
+        QVERIFY(find(app.window, "canvasViewNewResultText")->property("text").toString().contains("pot"));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(find(app.window, "canvasViewNewAccept")));
+        QTRY_COMPARE(backend->property("head").toString(), shown);
+        QTRY_VERIFY(!find(app.window, "canvasViewNewResult"));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 

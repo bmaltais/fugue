@@ -76,6 +76,13 @@ read, waiting for you. The `generative-fill` template (File > Browse templates, 
 `fugue workflow new fill.fugue --template generative-fill`) is Canvas Region, a FLUX.2 Klein redraw
 and Canvas Write with that on. Put your canvas's id and the rectangle in Canvas Region and run it.
 
+When a run leaves a candidate, a Canvas view that is looking at the head (File > Canvas…, or a Canvas
+area) shows it at once over the head, with a banner: **Accept**, **Drop** or **Keep looking at head**.
+Several results at once: the newest is shown and the others are counted. A view on another revision,
+with Compare on, or while you drag the region is never moved (a result that came during a drag shows
+when you let go). Turn it off in Settings > General, **Show new canvas results**. To skip the review
+altogether, turn Canvas Write's **Keep as candidate** off: the head then moves to the result by itself.
+
 - `fugue canvas candidates <id>` lists what waits, newest first; run the template again for another
   candidate to compare (they are all made from the head you started at).
 - `fugue canvas diff <id>@<candidate>` says what a candidate adds: the layer, how many tiles, and

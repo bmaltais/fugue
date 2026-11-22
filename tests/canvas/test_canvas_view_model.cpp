@@ -153,6 +153,7 @@ private slots:
 
     void aStoreChangeShowsWithinAMoment() {
         CanvasViewModel view;
+        view.setShowNewResults(false); // this one is about the strip and a moved head; the new result's view is tested below
         view.setStoreRoot(m_dir.filePath("store"));
         view.setCanvasId(m_canvas);
         QCOMPARE(view.choices().size(), 3);
@@ -172,6 +173,108 @@ private slots:
         const int before = view.canvases().size();
         QVERIFY(store().create("Second", m_base, "new"));
         QTRY_COMPARE_WITH_TIMEOUT(view.canvases().size(), before + 1, 3000);
+    }
+
+    // A candidate a run adds is added the way Canvas Write adds it (addRevision from the head, no head move).
+    QString arrive(const QString &name, int x) {
+        return store().addRevision(m_canvas, withFill(m_base, name, x), m_head, "canvas-write:" + name).value().id;
+    }
+
+    void aNewCandidateIsShownOverTheHeadAtOnceAndTheBannerNamesIt() {
+        CanvasViewModel view;
+        view.setStoreRoot(m_dir.filePath("store"));
+        view.setCanvasId(m_canvas);
+        QVERIFY(view.showNewResults());
+        QCOMPARE(view.newResult(), QString()); // what was there before is not new
+        QCOMPARE(view.revisionB(), m_head);
+        const QString c3 = arrive("c3", 200);
+        QTRY_COMPARE_WITH_TIMEOUT(view.revisionB(), c3, 3000);
+        QCOMPARE(view.newResult(), c3);
+        QCOMPARE(view.newResultOthers(), 0);
+        QCOMPARE(view.newResultFrom(), QString("c3"));
+        QCOMPARE(view.revisionA(), m_head); // against the head
+        QVERIFY(view.showsCandidate() && view.overlay());
+        QCOMPARE(view.pictureSource(), view.sourceB()); // the combined picture
+        // Keep looking at the head: the banner ends, the candidate stays in the strip.
+        view.show(m_head);
+        QCOMPARE(view.newResult(), QString());
+        QVERIFY(ids(view.choices()).contains(c3));
+    }
+
+    void severalArrivalsShowTheNewestAndCountTheOthers() {
+        CanvasViewModel view;
+        view.setStoreRoot(m_dir.filePath("store"));
+        view.setCanvasId(m_canvas);
+        const QString c3 = arrive("c3", 200);
+        const QString c4 = arrive("c4", 220);
+        // Both land in one refresh: the newest of the rows is shown, one other is counted.
+        QTRY_VERIFY_WITH_TIMEOUT(!view.newResult().isEmpty(), 3000);
+        QCOMPARE(view.revisionB(), view.newResult());
+        QVERIFY(view.newResult() == c3 || view.newResult() == c4);
+        const QStringList rows = ids(view.revisions());
+        QCOMPARE(view.newResult(), rows.at(qMin(rows.indexOf(c3), rows.indexOf(c4)))); // the first of the rows is the newest
+        QTRY_COMPARE_WITH_TIMEOUT(view.newResultOthers(), 1, 3000);
+        // One more while still looking at the result it showed: it is shown, and the count grows.
+        QTest::qWait(300);
+        const QString c5 = arrive("c5", 240);
+        QTRY_COMPARE_WITH_TIMEOUT(view.revisionB(), view.newResult(), 3000);
+        QTRY_COMPARE_WITH_TIMEOUT(view.newResultOthers(), 2, 3000);
+        QVERIFY(ids(view.choices()).contains(c5));
+    }
+
+    void aViewOnAnotherRevisionOrLockedOrSwitchedOffIsNeverMoved() {
+        CanvasViewModel view;
+        view.setStoreRoot(m_dir.filePath("store"));
+        view.setCanvasId(m_canvas);
+        // The person chose a candidate: a new one only joins the strip.
+        view.show(m_c1);
+        const QString c3 = arrive("c3", 200);
+        QTRY_VERIFY_WITH_TIMEOUT(ids(view.choices()).contains(c3), 3000);
+        QTest::qWait(300);
+        QCOMPARE(view.revisionB(), m_c1);
+        QCOMPARE(view.newResult(), QString());
+        // On the head but locked (Compare on, a drag): nothing moves until the lock lifts, then the result shows.
+        view.show(m_head);
+        view.setViewLocked(true);
+        const QString c4 = arrive("c4", 220);
+        QTRY_VERIFY_WITH_TIMEOUT(ids(view.choices()).contains(c4), 3000);
+        QTest::qWait(300);
+        QCOMPARE(view.revisionB(), m_head);
+        view.setViewLocked(false);
+        QCOMPARE(view.revisionB(), c4);
+        QCOMPARE(view.newResult(), c4);
+        // Locked and then the person went elsewhere: the late result is not shown.
+        view.show(m_head);
+        view.setViewLocked(true);
+        const QString c5 = arrive("c5", 240);
+        QTRY_VERIFY_WITH_TIMEOUT(ids(view.choices()).contains(c5), 3000);
+        view.show(m_c2);
+        view.setViewLocked(false);
+        QCOMPARE(view.revisionB(), m_c2);
+        // Switched off: it joins the strip and the view stays on the head.
+        view.show(m_head);
+        view.setShowNewResults(false);
+        const QString c6 = arrive("c6", 260);
+        QTRY_VERIFY_WITH_TIMEOUT(ids(view.choices()).contains(c6), 3000);
+        QTest::qWait(300);
+        QCOMPARE(view.revisionB(), m_head);
+        QCOMPARE(view.newResult(), QString());
+    }
+
+    void acceptAndDropOfTheNewResultEndItsBanner() {
+        CanvasViewModel view;
+        view.setStoreRoot(m_dir.filePath("store"));
+        view.setCanvasId(m_canvas);
+        const QString c3 = arrive("c3", 200);
+        QTRY_COMPARE_WITH_TIMEOUT(view.newResult(), c3, 3000);
+        QVERIFY(view.accept(c3));
+        QCOMPARE(view.newResult(), QString());
+        QTRY_COMPARE_WITH_TIMEOUT(view.head(), c3, 3000);
+        // The next one arrives on the new head (a candidate of the old head waits, as it did).
+        const QString c4 = store().addRevision(m_canvas, withFill(m_base, "c4", 220), c3, "canvas-write:c4").value().id;
+        QTRY_COMPARE_WITH_TIMEOUT(view.newResult(), c4, 3000);
+        QVERIFY(view.drop(c4));
+        QCOMPARE(view.newResult(), QString());
     }
 
     void aFollowedRegionIsDrawnInCanvasPixelsAndMovesTheViewToItsCanvas() {
