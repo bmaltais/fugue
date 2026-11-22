@@ -121,8 +121,7 @@ Item {
                 text: qsTr("A group never writes files or shows previews from inside. Leave %1 outside the group, wired to its output?")
                           .arg(sinksAsk.sinks.join(", "))
             }
-            RowLayout {
-                Layout.alignment: Qt.AlignRight
+            QuestionAnswers {
                 ThemedButton { text: qsTr("Cancel"); onClicked: sinksAsk.close() }
                 ThemedButton {
                     objectName: "groupSinksInside"
@@ -179,8 +178,7 @@ Item {
                       ? qsTr("The node keeps its values and links, and runs on the new version. Inputs and outputs that go are flagged where they no longer fit; undo moves it back.")
                       : qsTr("Every instance of the group in this workflow moves to the new version; values and links of inputs and outputs that go are dropped.")
             }
-            RowLayout {
-                Layout.alignment: Qt.AlignRight
+            QuestionAnswers {
                 ThemedButton { text: qsTr("Cancel"); onClicked: updateAsk.close() }
                 ThemedButton {
                     objectName: "groupUpdateOk"
@@ -215,8 +213,7 @@ Item {
                 wrapMode: Text.Wrap
                 text: qsTr("%1 is in the library. Rename it there too, as \u201c%2\u201d?").arg(libraryAsk.libraryId, libraryAsk.name)
             }
-            RowLayout {
-                Layout.alignment: Qt.AlignRight
+            QuestionAnswers {
                 ThemedButton { text: qsTr("Only here"); onClicked: libraryAsk.close() }
                 ThemedButton {
                     objectName: "libraryRenameYes"
@@ -264,8 +261,7 @@ Item {
                 Layout.fillWidth: true
                 onAccepted: renameOk.clicked()
             }
-            RowLayout {
-                Layout.alignment: Qt.AlignRight
+            QuestionAnswers {
                 ThemedButton { text: qsTr("Cancel"); onClicked: renameAsk.close() }
                 ThemedButton {
                     id: renameOk
@@ -523,8 +519,7 @@ Item {
                 }
             }
 
-            RowLayout {
-                Layout.alignment: Qt.AlignRight
+            QuestionAnswers {
                 ThemedButton {
                     objectName: "groupInterfaceClose"
                     text: qsTr("Done")

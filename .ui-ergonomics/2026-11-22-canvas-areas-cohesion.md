@@ -384,3 +384,5 @@ Run offscreen (`QT_QPA_PLATFORM=offscreen`, `FUGUE_SHOT_DIR=<dir>`) from a build
 ## Coverage
 
 9 surfaces, from source on `eb3e7e73`, against 8 reference surfaces; 5 picture tests run and looked at (dark Canvas view only for the new surfaces). Findings: 15 fix now, 18 after the layers panel, 11 for the owner.
+
+2026-11-22, #235 (the owner's report that the quit question looks different): `ThemedButton` was the last Material button family. It is now a `ViewButton` alias; the quit question is a `Question` with the safe answer highlighted and focused; `QuestionAnswers` is the one answer row; Discard in the close-tab and recover questions is tinted. The Decisions row "Question dialogs" lists the files; pictures from `test_question_dialogs`.

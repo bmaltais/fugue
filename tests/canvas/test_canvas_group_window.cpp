@@ -267,12 +267,10 @@ private slots:
                                   Q_ARG(bool, true));
         QQuickItem *ok = nullptr;
         QTRY_VERIFY((ok = item(app.window->contentItem(), "renameOk")) && ok->isVisible());
-        // Its label is the theme's accent foreground, made to read on the accent the window gives
-        // Material for a highlighted button's fill (Main.qml: Material.accent).
-        auto *label = ok->property("contentItem").value<QQuickItem *>();
-        QVERIFY(label);
+        // Its label is the theme's accent foreground (a ViewButton's `ink` on a primary), made to read on the accent fill.
+        QVERIFY(ok->property("primary").toBool());
         const CanvasLook *look = app.theme.look();
-        QCOMPARE(label->property("color").value<QColor>(), look->property("accentForeground").value<QColor>());
+        QCOMPARE(ok->property("ink").value<QColor>(), look->property("accentForeground").value<QColor>());
         QVERIFY(fugue::look::contrast(look->property("accentForeground").value<QColor>(),
                                       look->property("accent").value<QColor>()) >= 4.5);
         app.key(Qt::Key_Escape);

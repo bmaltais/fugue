@@ -391,17 +391,12 @@ Popup {
                                     Layout.leftMargin: statusRow.downloading ? dialog.u : 0
                                     visible: statusRow.downloading || (cell.modelData.download !== "" && !statusRow.downloads.busy)
                                     flat: true
-                                    implicitHeight: 7 * dialog.u
-                                    topInset: 0
-                                    bottomInset: 0
-                                    font.pixelSize: dialog.look.captionSize
+                                    danger: statusRow.downloading
                                     text: statusRow.downloading ? qsTr("Cancel")
                                           : cell.modelData.downloadSize !== "" ? qsTr("Download %1").arg(cell.modelData.downloadSize)
                                           : qsTr("Download")
                                     Accessible.name: statusRow.downloading ? qsTr("Cancel the download") : cell.modelData.download
-                                    ToolTip.visible: hovered && !statusRow.downloading
-                                    ToolTip.delay: App.theme.look.tooltipDelay
-                                    ToolTip.text: cell.modelData.download
+                                    tip: statusRow.downloading ? "" : cell.modelData.download
                                     onClicked: statusRow.downloading ? statusRow.downloads.cancel()
                                                                      : App.workflows.downloadTemplate(cell.modelData.id)
                                 }

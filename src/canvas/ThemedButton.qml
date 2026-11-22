@@ -1,18 +1,16 @@
 import QtQuick
-import QtQuick.Controls
 import Fugue
 
-// A Button whose label reads on its fill (#74): Material draws a highlighted button's label in
-// white whatever the accent, unreadable on a pale one; here it is the accent's own foreground.
-Button {
-    id: control
-    contentItem: Text {
-        text: control.text
-        font: control.font
-        elide: Text.ElideRight
-        horizontalAlignment: Text.AlignHCenter
-        verticalAlignment: Text.AlignVCenter
-        color: !control.enabled ? App.theme.look.label
-             : control.highlighted ? App.theme.look.accentForeground : App.theme.foreground
-    }
+// A question's answer, the window's one button (docs/ui-ergonomics.md D4, #235): a thin alias of ViewButton that keeps the
+// names the dialogs use (`highlighted`, `clicked`), as the settings' SmallButton does. It is a Material Button no longer: that
+// one drew its own 48px, fill-less look and a label in a size of its own. `highlighted` is the question's primary (the accent
+// fill, one per question; in a destructive question it is the SAFE answer, D8); `danger` tints a destructive answer; `flat`
+// is a link-like answer with no edge. Enter and Space press it, with the 2px focus ring.
+ViewButton {
+    property bool highlighted: false
+    signal clicked()
+    look: App.theme.look
+    bordered: !flat
+    primary: highlighted
+    onTapped: clicked()
 }

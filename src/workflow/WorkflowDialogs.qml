@@ -204,9 +204,10 @@ Item {
         objectName: "closeAsk"
         property int index: -1
         property string title: ""
+        onOpened: closeSave.forceActiveFocus() // Enter takes the primary
         ColumnLayout {
             anchors.fill: parent
-            spacing: 16
+            spacing: 4 * root.look.unit
             LayoutMirroring.enabled: root.rightToLeft
             LayoutMirroring.childrenInherit: true
             Label {
@@ -214,15 +215,19 @@ Item {
                 wrapMode: Text.Wrap
                 text: qsTr("Save the changes to %1 before closing?").arg(closeAsk.title)
             }
-            RowLayout {
-                Layout.alignment: Qt.AlignRight
-                ThemedButton { text: qsTr("Cancel"); onClicked: closeAsk.close() }
+            // Discard loses the changes: the danger tint, alone at the far side; Cancel, then Save (the primary) at the right.
+            QuestionAnswers {
+                leadingSpacer: false
                 ThemedButton {
                     objectName: "closeDiscard"
                     text: qsTr("Discard")
+                    danger: true
                     onClicked: { closeAsk.close(); App.workflows.discardAndClose(closeAsk.index) }
                 }
+                Item { Layout.fillWidth: true }
+                ThemedButton { objectName: "closeCancel"; text: qsTr("Cancel"); onClicked: closeAsk.close() }
                 ThemedButton {
+                    id: closeSave
                     objectName: "closeSave"
                     text: qsTr("Save")
                     highlighted: true
@@ -239,7 +244,7 @@ Item {
         closePolicy: Popup.NoAutoClose
         ColumnLayout {
             anchors.fill: parent
-            spacing: 12
+            spacing: 3 * root.look.unit
             LayoutMirroring.enabled: root.rightToLeft
             LayoutMirroring.childrenInherit: true
             Label {
@@ -264,8 +269,7 @@ Item {
                           + "\n" + modelData.types.join(", ")
                 }
             }
-            RowLayout {
-                Layout.alignment: Qt.AlignRight
+            QuestionAnswers {
                 ThemedButton {
                     objectName: "trustLater"
                     text: qsTr("Not now")
@@ -288,7 +292,7 @@ Item {
         closePolicy: Popup.NoAutoClose
         ColumnLayout {
             anchors.fill: parent
-            spacing: 12
+            spacing: 3 * root.look.unit
             LayoutMirroring.enabled: root.rightToLeft
             LayoutMirroring.childrenInherit: true
             Label {
@@ -306,11 +310,12 @@ Item {
                     text: modelData.title + (modelData.path ? "  " + modelData.path : "")
                 }
             }
-            RowLayout {
-                Layout.alignment: Qt.AlignRight
+            QuestionAnswers {
+                spacing: 4 * root.look.unit // Discard is the destructive one: twice the row's gap before Recover
                 ThemedButton {
                     objectName: "recoverDiscard"
                     text: qsTr("Discard")
+                    danger: true
                     onClicked: App.workflows.discardRecovery()
                 }
                 ThemedButton {

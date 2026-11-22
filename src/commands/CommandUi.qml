@@ -137,31 +137,35 @@ Item {
         }
     }
 
-    Popup {
+    // The quit question (#235): a Question like the others, its answers the window's one button. Keep working, the safe
+    // answer, is the highlighted one and holds the focus (Enter and Escape keep working); Quit is the danger tint, last.
+    Question {
         id: quitAsk
         objectName: "quitAsk"
-        anchors.centerIn: Overlay.overlay
-        modal: true
-        focus: true
-        padding: 6 * root.u
-        Overlay.modal: Rectangle { color: root.look.scrim }
-        background: PopupSurface { look: root.look }
+        onOpened: quitKeep.forceActiveFocus()
         ColumnLayout {
+            anchors.fill: parent
             spacing: 4 * root.u
             KeyShortcuts { awake: quitAsk.opened; only: ["app.quit"] }
-            LayoutMirroring.enabled: root.rightToLeft
-            LayoutMirroring.childrenInherit: true
             Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
                 text: qsTr("There is unsaved work. Quit anyway?")
                 color: root.look.text
             }
-            RowLayout {
-                Layout.alignment: Qt.AlignRight
-                ThemedButton { text: qsTr("Keep working"); flat: true; onClicked: quitAsk.close() }
+            QuestionAnswers {
+                spacing: 4 * root.u
+                ThemedButton {
+                    id: quitKeep
+                    objectName: "quitKeep"
+                    text: qsTr("Keep working")
+                    highlighted: true
+                    onClicked: quitAsk.close()
+                }
                 ThemedButton {
                     objectName: "quitAnyway"
                     text: qsTr("Quit")
-                    highlighted: true
+                    danger: true
                     onClicked: App.commands.quitNow()
                 }
             }

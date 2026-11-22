@@ -99,6 +99,8 @@ Rectangle {
     }
     TapHandler {
         id: tap
+        // The press is the button's own (#235): a card or row under it that also takes taps does not get this one.
+        gesturePolicy: TapHandler.WithinBounds
         acceptedModifiers: button.altAction ? Qt.NoModifier : Qt.KeyboardModifierMask
         onTapped: button.tapped()
     }

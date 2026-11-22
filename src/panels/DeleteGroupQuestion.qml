@@ -60,8 +60,7 @@ Question {
             text: qsTr("Only the copy in your library is deleted. Workflows that already use it keep their own copy and still open and run. This cannot be undone.")
         }
         // Delete is the destructive one: after Cancel, with the dialog's own gap before it.
-        RowLayout {
-            Layout.alignment: Qt.AlignRight
+        QuestionAnswers {
             Layout.topMargin: 2 * root.look.unit
             spacing: 4 * root.look.unit
             ThemedButton {
@@ -71,18 +70,15 @@ Question {
                 highlighted: true
                 focus: true
                 onClicked: root.close()
-                Keys.onReturnPressed: clicked()
-                Keys.onEnterPressed: clicked()
             }
             ThemedButton {
                 objectName: "deleteGroupConfirm"
                 text: qsTr("Delete")
+                danger: true
                 onClicked: {
                     root.close()
                     root.confirmed(root.groupId, root.groupName)
                 }
-                Keys.onReturnPressed: clicked()
-                Keys.onEnterPressed: clicked()
             }
         }
     }
