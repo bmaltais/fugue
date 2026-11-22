@@ -45,14 +45,29 @@ double dabCoverage(double distance, double radius, double hardness) {
     return t * t * (3 - 2 * t);
 }
 
-MaskPaint::MaskPaint(int width, int height)
-    : m_width(std::max(1, width)), m_height(std::max(1, height)), m_pixels(size_t(m_width) * size_t(m_height), 0) {}
+MaskPaint::MaskPaint(int width, int height, int channels)
+    : m_width(std::max(1, width)), m_height(std::max(1, height)), m_channels(channels == 4 ? 4 : 1),
+      m_pixels(size_t(m_width) * size_t(m_height) * size_t(m_channels), 0) {}
 
-MaskPaint::MaskPaint(int width, int height, const std::vector<uint8_t> &pixels) : MaskPaint(width, height) {
+MaskPaint::MaskPaint(int width, int height, const std::vector<uint8_t> &pixels, int channels)
+    : MaskPaint(width, height, channels) {
     std::copy_n(pixels.begin(), std::min(pixels.size(), m_pixels.size()), m_pixels.begin());
 }
 
+Rgba MaskPaint::rgbaAt(int x, int y) const {
+    const size_t i = offset(x, y);
+    if (m_channels == 1)
+        return {m_pixels[i], m_pixels[i], m_pixels[i], 255};
+    return {m_pixels[i], m_pixels[i + 1], m_pixels[i + 2], m_pixels[i + 3]};
+}
+
 bool MaskPaint::isEmpty() const {
+    if (m_channels == 4) { // no paint: alpha 0 everywhere
+        for (size_t i = 3; i < m_pixels.size(); i += 4)
+            if (m_pixels[i] != 0)
+                return false;
+        return true;
+    }
     return std::all_of(m_pixels.begin(), m_pixels.end(), [](uint8_t v) { return v == 0; });
 }
 
@@ -82,10 +97,10 @@ void MaskPaint::touch(const IRect &area) {
             if (m_pending.tiles.count(index))
                 continue;
             const IRect r = tileRect(index);
-            std::vector<uint8_t> copy(size_t(r.width) * size_t(r.height));
+            const size_t rowBytes = size_t(r.width) * size_t(m_channels);
+            std::vector<uint8_t> copy(rowBytes * size_t(r.height));
             for (int row = 0; row < r.height; ++row)
-                std::copy_n(&m_pixels[size_t(r.y + row) * size_t(m_width) + size_t(r.x)], r.width,
-                            &copy[size_t(row) * size_t(r.width)]);
+                std::copy_n(&m_pixels[offset(r.x, r.y + row)], rowBytes, &copy[size_t(row) * rowBytes]);
             m_pending.tiles.emplace(index, std::move(copy));
         }
 }
@@ -105,16 +120,16 @@ void MaskPaint::commitStep() {
     for (auto it = m_pending.tiles.begin(); it != m_pending.tiles.end();) {
         const IRect r = tileRect(it->first);
         bool same = true;
+        const size_t rowBytes = size_t(r.width) * size_t(m_channels);
         for (int row = 0; row < r.height && same; ++row)
-            same = std::equal(it->second.begin() + size_t(row) * size_t(r.width),
-                              it->second.begin() + size_t(row + 1) * size_t(r.width),
-                              m_pixels.begin() + size_t(r.y + row) * size_t(m_width) + size_t(r.x));
+            same = std::equal(it->second.begin() + size_t(row) * rowBytes, it->second.begin() + size_t(row + 1) * rowBytes,
+                              m_pixels.begin() + offset(r.x, r.y + row));
         it = same ? m_pending.tiles.erase(it) : std::next(it);
     }
     if (m_pending.tiles.empty())
         return;
-    m_redo.clear();
-    m_redoBytes = 0;
+    forgetRedo();
+    ++m_revision;
     m_undoBytes += bytesOf(m_pending);
     m_undo.push_back(std::move(m_pending));
     m_pending = Step();
@@ -132,10 +147,10 @@ void MaskPaint::trim() {
 void MaskPaint::swapStep(Step &step) {
     for (auto &entry : step.tiles) {
         const IRect r = tileRect(entry.first);
+        const size_t rowBytes = size_t(r.width) * size_t(m_channels);
         for (int row = 0; row < r.height; ++row)
-            std::swap_ranges(entry.second.begin() + size_t(row) * size_t(r.width),
-                             entry.second.begin() + size_t(row + 1) * size_t(r.width),
-                             m_pixels.begin() + size_t(r.y + row) * size_t(m_width) + size_t(r.x));
+            std::swap_ranges(entry.second.begin() + size_t(row) * rowBytes, entry.second.begin() + size_t(row + 1) * rowBytes,
+                             m_pixels.begin() + offset(r.x, r.y + row));
         note(r);
     }
 }
@@ -165,6 +180,11 @@ void MaskPaint::redo() {
     trim();
 }
 
+void MaskPaint::forgetRedo() {
+    m_redo.clear();
+    m_redoBytes = 0;
+}
+
 void MaskPaint::forgetHistory() {
     m_undo.clear();
     m_redo.clear();
@@ -181,12 +201,48 @@ IRect MaskPaint::takeDirty() {
 
 // ---- painting ---------------------------------------------------------------------------------
 
-void MaskPaint::apply(int x, int y, double coverage, Mode mode, double opacity) {
+void MaskPaint::apply(int x, int y, double coverage, Mode mode, double opacity, const Rgba &color) {
     const uint8_t c = byteOf(coverage * clamp01(opacity));
     if (c == 0)
         return;
-    uint8_t &m = m_pixels[size_t(y) * size_t(m_width) + size_t(x)];
+    if (m_channels == 4) {
+        applyColor(x, y, c, mode, color);
+        return;
+    }
+    uint8_t &m = m_pixels[offset(x, y)];
     m = mode == Mode::Paint ? std::max(m, c) : std::min(m, uint8_t(255 - c));
+}
+
+// A color buffer's pixel: the pixel as the step began, with the color put over it (or its alpha taken
+// away) by the most coverage this stroke gave it, so a stroke never builds up over itself, as a mask's
+// does not (a mask's max does it by itself; here the start of the step is the other operand).
+void MaskPaint::applyColor(int x, int y, uint8_t cover, Mode mode, const Rgba &color) {
+    if (m_stroking) {
+        uint8_t &seen = m_strokeCover[size_t(y) * size_t(m_width) + size_t(x)];
+        seen = std::max(seen, cover);
+        cover = seen;
+    }
+    const int tile = (y / tileSize) * tilesAcross() + (x / tileSize);
+    const IRect r = tileRect(tile);
+    const std::vector<uint8_t> &kept = m_pending.tiles.at(tile);
+    const size_t at = (size_t(y - r.y) * size_t(r.width) + size_t(x - r.x)) * 4;
+    const double oa = kept[at + 3] / 255.0;
+    uint8_t *out = &m_pixels[offset(x, y)];
+    if (mode == Mode::Erase) {
+        std::copy_n(&kept[at], 3, out);
+        out[3] = byteOf(oa * (1 - cover / 255.0));
+        return;
+    }
+    const double a = cover / 255.0 * color.a / 255.0;
+    const double outA = a + oa * (1 - a);
+    if (outA <= 0) {
+        std::copy_n(&kept[at], 4, out);
+        return;
+    }
+    const double src[3] = {double(color.r), double(color.g), double(color.b)};
+    for (int k = 0; k < 3; ++k)
+        out[k] = byteOf((src[k] * a + kept[at + size_t(k)] * oa * (1 - a)) / outA / 255.0);
+    out[3] = byteOf(outA);
 }
 
 void MaskPaint::dab(Point center, double pressure) {
@@ -200,7 +256,7 @@ void MaskPaint::dab(Point center, double pressure) {
     for (int y = y0; y <= y1; ++y)
         for (int x = x0; x <= x1; ++x)
             apply(x, y, dabCoverage(std::hypot(x + 0.5 - center.x, y + 0.5 - center.y), radius, m_brush.hardness), m_mode,
-                  m_brush.opacity);
+                  m_brush.opacity, m_brush.color);
     note(area);
 }
 
@@ -209,6 +265,8 @@ void MaskPaint::beginStroke(Mode mode, const Brush &brush) {
         endStroke();
     beginStep();
     m_stroking = true;
+    if (m_channels == 4)
+        m_strokeCover.assign(size_t(m_width) * size_t(m_height), 0);
     m_mode = mode;
     m_brush = brush;
     m_brush.size = std::max(1.0, brush.size);
@@ -247,10 +305,12 @@ void MaskPaint::endStroke() {
     if (!m_stroking)
         return;
     m_stroking = false;
+    m_strokeCover.clear();
+    m_strokeCover.shrink_to_fit();
     commitStep();
 }
 
-void MaskPaint::fillPolygon(const std::vector<Point> &outline, Mode mode, double opacity) {
+void MaskPaint::fillPolygon(const std::vector<Point> &outline, Mode mode, double opacity, Rgba color) {
     if (outline.size() < 3 || m_stroking)
         return;
     double minX = outline[0].x, maxX = outline[0].x, minY = outline[0].y, maxY = outline[0].y;
@@ -300,13 +360,13 @@ void MaskPaint::fillPolygon(const std::vector<Point> &outline, Mode mode, double
             }
         }
         for (int x = x0; x <= x1; ++x)
-            apply(x, y, cover[size_t(x - x0)], mode, opacity);
+            apply(x, y, cover[size_t(x - x0)], mode, opacity, color);
     }
     note(area);
     commitStep();
 }
 
-void MaskPaint::fillRect(double x, double y, double width, double height, Mode mode, double opacity) {
+void MaskPaint::fillRect(double x, double y, double width, double height, Mode mode, double opacity, Rgba color) {
     if (m_stroking)
         return;
     if (width < 0) {
@@ -330,7 +390,7 @@ void MaskPaint::fillRect(double x, double y, double width, double height, Mode m
     for (int py = y0; py <= y1; ++py) {
         const double oy = overlap(y, height, py);
         for (int px = x0; px <= x1; ++px)
-            apply(px, py, overlap(x, width, px) * oy, mode, opacity);
+            apply(px, py, overlap(x, width, px) * oy, mode, opacity, color);
     }
     note(area);
     commitStep();
@@ -341,8 +401,9 @@ void MaskPaint::invert() {
         return;
     beginStep();
     touch({0, 0, m_width, m_height});
-    for (uint8_t &v : m_pixels)
-        v = uint8_t(255 - v);
+    for (size_t i = 0; i < m_pixels.size(); ++i)
+        if (m_channels == 1 || i % 4 != 3)
+            m_pixels[i] = uint8_t(255 - m_pixels[i]);
     note({0, 0, m_width, m_height});
     commitStep();
 }
@@ -357,12 +418,23 @@ void MaskPaint::clear() {
     commitStep();
 }
 
-void MaskPaint::fill() {
+void MaskPaint::fill() { fill(Rgba{0, 0, 0, 255}); }
+
+void MaskPaint::fill(Rgba color) {
     if (m_stroking)
         return;
     beginStep();
     touch({0, 0, m_width, m_height});
-    std::fill(m_pixels.begin(), m_pixels.end(), uint8_t(255));
+    if (m_channels == 1) {
+        std::fill(m_pixels.begin(), m_pixels.end(), uint8_t(255));
+    } else {
+        for (size_t i = 0; i < m_pixels.size(); i += 4) {
+            m_pixels[i] = color.r;
+            m_pixels[i + 1] = color.g;
+            m_pixels[i + 2] = color.b;
+            m_pixels[i + 3] = color.a;
+        }
+    }
     note({0, 0, m_width, m_height});
     commitStep();
 }
@@ -373,7 +445,7 @@ Result<QByteArray> MaskPaint::toPng() const {
     if (!initVips())
         return vipsUnavailable();
     try {
-        vips::VImage image = vips::VImage::new_from_memory(m_pixels.data(), m_pixels.size(), m_width, m_height, 1, VIPS_FORMAT_UCHAR);
+        vips::VImage image = vips::VImage::new_from_memory(m_pixels.data(), m_pixels.size(), m_width, m_height, m_channels, VIPS_FORMAT_UCHAR);
         void *buffer = nullptr;
         size_t size = 0;
         // No metadata and a fixed compression: the same mask is the same bytes.
@@ -409,8 +481,38 @@ Result<MaskPaint> MaskPaint::fromPng(const QByteArray &bytes) {
     }
 }
 
+Result<MaskPaint> MaskPaint::fromPicture(const QByteArray &bytes) {
+    if (!initVips())
+        return vipsUnavailable();
+    try {
+        vips::VImage image = vips::VImage::new_from_buffer(bytes.constData(), size_t(bytes.size()), "");
+        if (image.width() < 1 || image.height() < 1 || double(image.width()) * image.height() > 268435456.0)
+            return makeError(QStringLiteral("media_unreadable"), QStringLiteral("This picture is empty or too large."));
+        if (image.format() == VIPS_FORMAT_USHORT)
+            image = image.linear(1.0 / 257.0, 0.5);
+        image = image.cast(VIPS_FORMAT_UCHAR);
+        if (image.bands() == 1 || image.bands() == 2) { // gray (and alpha): to RGB
+            vips::VImage gray = image.extract_band(0);
+            vips::VImage alpha = image.bands() == 2 ? image.extract_band(1) : gray.new_from_image(255);
+            image = gray.bandjoin(gray).bandjoin(gray).bandjoin(alpha);
+        } else if (image.bands() == 3) {
+            image = image.bandjoin(image.extract_band(0).new_from_image(255));
+        } else if (image.bands() > 4) {
+            image = image.extract_band(0, vips::VImage::option()->set("n", 4));
+        }
+        image = image.copy(vips::VImage::option()->set("interpretation", VIPS_INTERPRETATION_sRGB));
+        size_t size = 0;
+        void *memory = image.write_to_memory(&size);
+        std::vector<uint8_t> pixels(static_cast<const uint8_t *>(memory), static_cast<const uint8_t *>(memory) + size);
+        g_free(memory);
+        return MaskPaint(image.width(), image.height(), pixels, 4);
+    } catch (const vips::VError &error) {
+        return vipsError(error, QStringLiteral("media_unreadable"));
+    }
+}
+
 MaskPaint MaskPaint::scaled(int width, int height) const {
-    MaskPaint out(width, height);
+    MaskPaint out(width, height, m_channels);
     if (width == m_width && height == m_height) {
         out.m_pixels = m_pixels;
         return out;
@@ -424,9 +526,12 @@ MaskPaint MaskPaint::scaled(int width, int height) const {
             const double sx = std::clamp((x + 0.5) * fx - 0.5, 0.0, double(m_width - 1));
             const int x0 = int(sx), x1 = std::min(x0 + 1, m_width - 1);
             const double tx = sx - x0;
-            const double top = at(x0, y0) * (1 - tx) + at(x1, y0) * tx;
-            const double bottom = at(x0, y1) * (1 - tx) + at(x1, y1) * tx;
-            out.m_pixels[size_t(y) * size_t(out.m_width) + size_t(x)] = uint8_t(std::lround(top * (1 - ty) + bottom * ty));
+            for (int k = 0; k < m_channels; ++k) {
+                const auto v = [&](int px, int py) { return double(m_pixels[offset(px, py) + size_t(k)]); };
+                const double top = v(x0, y0) * (1 - tx) + v(x1, y0) * tx;
+                const double bottom = v(x0, y1) * (1 - tx) + v(x1, y1) * tx;
+                out.m_pixels[out.offset(x, y) + size_t(k)] = uint8_t(std::lround(top * (1 - ty) + bottom * ty));
+            }
         }
     }
     return out;

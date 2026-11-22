@@ -5,6 +5,10 @@
 // 64 px tiles a step changed. It knows nothing of Qt Quick, so a stroke is the same numbers whether
 // a window draws it or a test does. 255 is the part to change and 0 the part to keep (14.4).
 //
+// The same buffer, brush, tiles and undo also hold straight RGBA color with `channels` = 4 (the paint
+// canvas's layers, #181, engine/paint_document.h): a brush paints its `color` over the pixel, an erase
+// takes alpha. A one-channel buffer behaves exactly as above.
+//
 // Sizes are in picture pixels; a point is where in the picture (pixel centers at +0.5), so zooming
 // the view never changes what a stroke covers.
 //
@@ -45,10 +49,20 @@ struct Point {
     double y = 0;
 };
 
+// A straight (not premultiplied) 8-bit color, what a four-channel buffer holds and a brush paints.
+struct Rgba {
+    uint8_t r = 0;
+    uint8_t g = 0;
+    uint8_t b = 0;
+    uint8_t a = 255;
+    bool operator==(const Rgba &o) const { return r == o.r && g == o.g && b == o.b && a == o.a; }
+};
+
 struct Brush {
     double size = 64;      // diameter in picture pixels
     double hardness = 0.8; // 0 to 1
     double opacity = 1;    // 0 to 1
+    Rgba color;            // four-channel buffers only: the paint (its alpha multiplies `opacity`)
 };
 
 enum class Mode { Paint, Erase };
@@ -63,16 +77,20 @@ public:
     static constexpr size_t maximumSteps = 300;
     static constexpr size_t byteLimit = size_t(256) << 20;
 
-    // An all-0 mask of this size (at least 1 x 1).
-    MaskPaint(int width, int height);
-    // From 8-bit pixels, row after row (a short or long buffer is cut or padded with 0).
-    MaskPaint(int width, int height, const std::vector<uint8_t> &pixels);
+    // An all-0 buffer of this size (at least 1 x 1). `channels` is 1 (a mask: the default) or 4 (straight
+    // RGBA color, #181: a paint canvas layer); anything else is 1.
+    MaskPaint(int width, int height, int channels = 1);
+    // From 8-bit pixels, row after row, `channels` bytes each (a short or long buffer is cut or padded with 0).
+    MaskPaint(int width, int height, const std::vector<uint8_t> &pixels, int channels = 1);
 
     int width() const { return m_width; }
     int height() const { return m_height; }
     const std::vector<uint8_t> &pixels() const { return m_pixels; }
-    uint8_t at(int x, int y) const { return m_pixels[size_t(y) * size_t(m_width) + size_t(x)]; }
-    bool isEmpty() const; // every pixel 0: no mask
+    int channels() const { return m_channels; }
+    // The first channel at a pixel: the mask's value, a color buffer's red.
+    uint8_t at(int x, int y) const { return m_pixels[offset(x, y)]; }
+    Rgba rgbaAt(int x, int y) const; // a four-channel buffer's pixel (a mask's value as gray, opaque)
+    bool isEmpty() const; // every byte 0: no mask, or a color buffer with no paint (alpha 0 everywhere)
 
     // A stroke: dabs along the points given until endStroke, which makes it one undo step. The first
     // strokeTo puts a dab on the spot. `pressure` (0 to 1, a tablet's) scales the size.
@@ -83,12 +101,16 @@ public:
 
     // A shape filled with antialiased edges: a polygon (closed by its last edge; non-zero winding, so
     // a self-crossing outline fills every loop) or a rectangle. One undo step each.
-    void fillPolygon(const std::vector<Point> &outline, Mode mode = Mode::Paint, double opacity = 1);
-    void fillRect(double x, double y, double width, double height, Mode mode = Mode::Paint, double opacity = 1);
+    void fillPolygon(const std::vector<Point> &outline, Mode mode = Mode::Paint, double opacity = 1, Rgba color = Rgba());
+    void fillRect(double x, double y, double width, double height, Mode mode = Mode::Paint, double opacity = 1,
+                  Rgba color = Rgba());
 
+    // Whole-buffer operations, one step each. A mask: invert is 255 - v, clear 0, fill 255. A color buffer:
+    // invert flips the colors and keeps the alpha, clear makes it transparent, fill covers it with `color`.
     void invert();
     void clear();
     void fill();
+    void fill(Rgba color);
 
     bool canUndo() const { return !m_undo.empty() && !m_stroking; }
     bool canRedo() const { return !m_redo.empty() && !m_stroking; }
@@ -100,20 +122,31 @@ public:
     size_t redoBytes() const { return m_redoBytes; }
     void forgetHistory();
 
+    // Counts the steps ever committed (an undo or redo does not count): a layer list that orders steps of
+    // several buffers (paint_document.h) sees by it that a new one began.
+    uint64_t revision() const { return m_revision; }
+    // Drops the redo steps (a step made in another buffer ends them).
+    void forgetRedo();
+
     // The rectangle changed since the last call (empty when none): what a view re-uploads.
     IRect takeDirty();
 
-    // The mask as an 8-bit gray PNG with no metadata: the same pixels are the same bytes.
+    // The buffer as an 8-bit PNG with no metadata (gray for a mask, RGBA for color): the same pixels are
+    // the same bytes.
     Result<QByteArray> toPng() const;
     // A PNG (or any picture libvips reads) as a mask: its first channel, 16-bit scaled to 8.
     static Result<MaskPaint> fromPng(const QByteArray &bytes);
-    // The mask at another size, bilinear (pixel centers).
+    // Any picture libvips reads as a four-channel buffer (gray and RGB get an opaque alpha, 16-bit is
+    // scaled to 8).
+    static Result<MaskPaint> fromPicture(const QByteArray &bytes);
+    // The buffer at another size, bilinear (pixel centers; a color buffer's channels are not premultiplied).
     MaskPaint scaled(int width, int height) const;
 
 private:
     struct Step {
         std::map<int, std::vector<uint8_t>> tiles; // tile index -> its pixels (the other state)
     };
+    size_t offset(int x, int y) const { return (size_t(y) * size_t(m_width) + size_t(x)) * size_t(m_channels); }
     int tilesAcross() const { return (m_width + tileSize - 1) / tileSize; }
     IRect tileRect(int index) const;
     void beginStep();
@@ -122,13 +155,16 @@ private:
     void swapStep(Step &step);
     void trim();
     void dab(Point center, double pressure);
-    void apply(int x, int y, double coverage, Mode mode, double opacity);
+    void apply(int x, int y, double coverage, Mode mode, double opacity, const Rgba &color);
+    void applyColor(int x, int y, uint8_t cover, Mode mode, const Rgba &color);
     void note(const IRect &area);
     static size_t bytesOf(const Step &step);
 
     int m_width;
     int m_height;
+    int m_channels;
     std::vector<uint8_t> m_pixels;
+    std::vector<uint8_t> m_strokeCover; // color buffers: the most coverage each pixel got in this stroke
     std::vector<Step> m_undo;
     std::vector<Step> m_redo;
     size_t m_undoBytes = 0;
@@ -138,6 +174,7 @@ private:
     bool m_stroking = false;
     Mode m_mode = Mode::Paint;
     Brush m_brush;
+    uint64_t m_revision = 0;
     bool m_haveLast = false;
     Point m_last;
     double m_lastPressure = 1;
