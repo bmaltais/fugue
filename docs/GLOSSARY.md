@@ -52,6 +52,13 @@ _Avoid_: selection, alpha (a picture's transparency only becomes a mask through 
 Redraw the masked part of a picture and keep the rest. Outpaint is inpainting a border Pad added. An inpaint model takes the mask itself; any other model is held to the rest of the picture at every step (masked sampling).
 _Avoid_: fill (Fill Masked is the pre-fill under a mask), repaint
 
+**Outpaint**:
+Extend a picture past its edges: Pad adds the border and a mask over it, the model draws only the border, and the original is put back over the result through the mask. The Outpaint template does this.
+_Avoid_: expand, uncrop
+
+**Crop and stitch**:
+Inpainting a small region at the model's full detail: Crop to Mask cuts a box around the mask, the model redraws the box at about a megapixel, and Stitch puts it back through a soft edge. The group Inpaint (crop and stitch), and the Inpaint template, are this.
+
 **Stitch handle**:
 The value Crop to Mask gives Stitch: the original picture, its mask, the box that was cut out and the size it was redrawn at. A data type, `fugue/stitch`.
 _Avoid_: stitcher, crop info

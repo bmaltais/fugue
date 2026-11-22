@@ -11,8 +11,9 @@
 namespace readme_shot {
 
 // The part of the window the canvas shows its nodes in, trimmed to what is drawn on it plus
-// `margin` pixels: no menu bar, no zoom badge, no empty canvas around the graph.
-inline QImage graphOnly(QQuickWindow *window, QQuickItem *canvas, int margin = 28) {
+// `margin` pixels: no menu bar, no zoom badge, no empty canvas around the graph. `skipTop` leaves out
+// that many pixels at the top of the canvas (the breadcrumb of an entered group).
+inline QImage graphOnly(QQuickWindow *window, QQuickItem *canvas, int margin = 28, int skipTop = 0) {
     const QImage shot = test_support::grab(window).convertToFormat(QImage::Format_ARGB32);
     const QRect area = QRectF(canvas->mapToScene(QPointF(0, 0)), QSizeF(canvas->width(), canvas->height())).toRect()
                            .intersected(shot.rect());
@@ -25,6 +26,8 @@ inline QImage graphOnly(QQuickWindow *window, QQuickItem *canvas, int margin = 2
     for (int y = area.top(); y <= area.bottom(); ++y)
         for (int x = area.left(); x <= area.right(); ++x) {
             if (x < area.left() + 110 && y > area.bottom() - 90) // the zoom badge
+                continue;
+            if (y < area.top() + skipTop) // the breadcrumb inside a group
                 continue;
             if (differs(shot.pixel(x, y)))
                 box = box.isNull() ? QRect(x, y, 1, 1) : box.united(QRect(x, y, 1, 1));

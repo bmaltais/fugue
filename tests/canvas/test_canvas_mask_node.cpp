@@ -284,6 +284,36 @@ private slots:
         QTest::qWait(300);
         r.shot("load-and-paint-mask");
     }
+
+    // mask-editor.png of masking.md: the editor open on the Inpaint template's own picture and mask.
+    void saveTheEditorOnTheTemplatesPicture() {
+        if (qgetenv("FUGUE_SHOT_DIR").isEmpty())
+            QSKIP("set FUGUE_SHOT_DIR to save the editor's picture");
+        const QDir inputs(QFINDTESTDATA("../../templates/inpaint-region/inputs"));
+        const QString mask = inputs.absoluteFilePath(inputs.entryList({"reading-nook-mask-*.png"}).value(0));
+        QVERIFY(QFileInfo::exists(mask));
+        MaskApp r(graphOf(inputs.absoluteFilePath("reading-nook.jpg"), mask), Look{{}, 8});
+        QVERIFY(r.app.open());
+        r.app.window->resize(1600, 1000);
+        r.run();
+        QTRY_VERIFY(r.role("load", NodeList::Thumbnail).toString().startsWith("file://"));
+        QQuickItem *face = r.byName("node-load");
+        QVERIFY(face);
+        QQuickItem *row = nullptr;
+        std::function<void(QQuickItem *)> find = [&](QQuickItem *from) {
+            for (auto *child : from->childItems()) {
+                if (child->objectName() == QLatin1String("inputWidget") && child->property("kind").toString() == QLatin1String("mask"))
+                    row = child;
+                find(child);
+            }
+        };
+        QTRY_VERIFY((find(face), row != nullptr));
+        QTest::mouseClick(r.app.window, Qt::LeftButton, {}, row->mapToScene(QPointF(row->width() / 2, row->height() / 2)).toPoint());
+        QObject *editor = nullptr;
+        QTRY_VERIFY((editor = r.dialog("maskEditor")) && editor->property("visible").toBool());
+        QTest::qWait(1500); // the picture and the mask are read, and the layer draws
+        r.shot("mask-editor");
+    }
 };
 
 QTEST_MAIN(TestCanvasMaskNode)

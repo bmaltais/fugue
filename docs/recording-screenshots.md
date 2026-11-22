@@ -9,7 +9,8 @@ settings and templates folder are the test's own, and the templates are the bund
 ```sh
 bin/build test_readme_shots test_canvas_run
 export FUGUE_SHOT_DIR=$PWD/docs/images QT_QPA_PLATFORM=offscreen
-build/test_readme_shots                                   # the five below
+build/test_readme_shots                                   # the ones below
+build/test_canvas_mask_node saveTheEditorOnTheTemplatesPicture   # mask-editor.png
 build/test_canvas_run savesFinishedWorkflowsWhenAsked     # results.png, results-light.png
 ```
 
@@ -20,6 +21,11 @@ build/test_canvas_run savesFinishedWorkflowsWhenAsked     # results.png, results
 | `node-library.png` | `test_readme_shots nodeLibrary` |
 | `group.png` | `test_readme_shots group` |
 | `results.png`, `results-light.png` | `test_canvas_run savesFinishedWorkflowsWhenAsked` |
+| `inpaint-graph.png`, `outpaint-graph.png` | `test_readme_shots maskTemplates` |
+| `mask-editor.png` | `test_canvas_mask_node saveTheEditorOnTheTemplatesPicture` (the editor open on the Inpaint template's Load Image; the window, not trimmed) |
+| `mask-paint-node.png` | `test_readme_shots paintMaskNode` |
+| `mask-group.png` | `test_readme_shots maskGroup` (inside Inpaint (crop and stitch)) |
+| `inpaint-result.png` | not a test: the sample, a real result of the template and their difference side by side, from a `fugue run` on the 3090 (ImageMagick) |
 | `menubar-out.png`, `menubar-handle-hover.png`, `menubar-in.png`, `menubar-in-menu.png` | `test_chrome_window picturesOfTheBarOutAndIn` (top-left crops for reading, not committed) |
 
 The graph shots are trimmed to the nodes in the test (`tests/readme_shot.h`). The results come

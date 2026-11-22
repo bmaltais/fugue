@@ -2727,8 +2727,8 @@ FLUX.1 Fill staged picture differs from the single run's.
 
 ### 14.4 Masking and inpainting (#167)
 
-Designed; the staged path in the helper and the nodes is built (#173) and the nodes of #171, the mask editor (#172) and Crop to Mask, Stitch and the group (#176) are built; the parts are the issues at the end of this section, and each part says here what has
-shipped. The research and each choice with its confidence are in Appendix A (the rows marked
+Built: everything in #167 is built. The pieces are the issues at the end of this section, and each says here what shipped
+(#171 to #177). The research and each choice with its confidence are in Appendix A (the rows marked
 #167); the person's guide is [masking.md](masking.md).
 
 **Shipped (#171):** the `role` manifest field (6.1; `src/engine/node_type.*`) and the nodes Composite
@@ -2749,6 +2749,28 @@ resampling and the feathering are the shared kernels, and the community Inpaint 
 is GPL, so its behaviour was taken from its README only; what is new is the box and the stitch,
 which the tests state as properties (an untouched crop gives the original back, outside the box is
 byte for byte the original's).
+
+**Shipped (#177):** the two templates `inpaint-region` and `outpaint` in fugue-workflows (category `edit`,
+"Image editing"; the `templates` submodule), and the finished [masking.md](masking.md) with its pictures
+(`docs/images/mask-*.png`, `inpaint-*.png`, `outpaint-graph.png`, made by the offscreen tests of
+`test_readme_shots`). Both were run through `fugue run` on an RTX 3090 with FLUX.2 Klein 9B Q8_0 by the
+staged path, from a helper built on the patched pin. `inpaint-region`: the 1024 px sample (a reading
+nook made with Fugue, shared with the `flux2-klein-9b-edit-2-refs` template) with an armchair painted
+over (`inputs/reading-nook-mask-<hash>.png`), the group with prompt, seed random, Steps 4, Guidance 1,
+Denoise 1, Padding 64, Megapixels 1, Blend 16; Save Image and Preview. The armchair became a yellow
+velvet one with its legs, in the lamp's light, and the result equals the original at every pixel more than 20 px
+from the mask (the 16 px Blend is the only mixing; 0.4 of 255 at 16 px); about 25 s a run after the first (the models load once).
+`outpaint`: Load Image (the cat of the edit templates, 768 px square, so the padded one is 1280 x 768,
+0.98 megapixel), Pad 256 left and right with feathering 40, Text Encode, VAE Encode (padded, Pad's
+mask), Sampler (euler, 4 steps, guidance 1, denoise 1), VAE Decode, Composite Masked (padded, result,
+Pad's mask), Save Image and Preview; about 18 s a run after the first. Both borders are drawn from the
+prompt, with no visible seam (checked at 2x). Text Encode does not take the padded picture as a
+reference here: with it Klein at 4 steps reproduced Pad's gray border (the old content kept, Appendix A);
+the inpaint group keeps its reference, where the same test without it gave a chair with no legs, off the
+old one's place. Decision: reference on for the crop, off for the padded picture. Load Image 1.1's
+Paint mask row made its node 28 px taller, which put it over the prompt in the layouts of `image-to-video`
+and `wan22-i2v` after a run (`test_template_overlap`); their prompts moved down 40 px. `scripts/check_doc_links.py`
+checks the links and headings of the README and docs.
 
 **The mask.** A mask stays an `image` with one channel (2.1), values 0 to 1, where 1 is the part
 to change and 0 the part to keep: the polarity of Pad, of ComfyUI's inpaint nodes, of
@@ -2928,7 +2950,7 @@ checked on an RTX 3090 before it ships, with a preview and its sample picture:
   sample mask), the group "Inpaint (crop and stitch)", Save Image and Preview. The prompt says
   what should be there.
 - `outpaint`, "Outpaint: extend a picture": Load Image, Pad (256 px left and right, feathering
-  40), Text Encode (the padded picture as its reference), VAE Encode (the padded picture and the
+  40), Text Encode (the prompt alone: the padded picture as a reference made Klein keep the gray border, Appendix A), VAE Encode (the padded picture and the
   pad's mask), Sampler, VAE Decode, Composite Masked (the padded picture, the result, Pad's
   feathered mask), Save Image. The sample picture is sized so the padded one is about 1 megapixel,
   the size the edit templates give Klein.
@@ -3372,7 +3394,7 @@ Building M4 made these further choices.
 | Composite back is a node in staged graphs (Composite Masked, Stitch), and built into Generate Image, the coarse node whose promise is that the outside is unchanged. Soft edges come from Feather Mask and Stitch's blend, in pixels, because the library rounds the mask in the latent | 14.4 | medium |
 | Crop and stitch as built (#176): the group ships from the built-in pack (a `group.fugue` resource beside its `node.json`; the loader, `loadLibraryGroup` and `embedGroupTypes` took it with no change), so #177's template only adds it. Choices made while building: the handle's `meta` names the picture and mask as the inputs' own media handles, so the cache and the hash follow them, and a mask of another size is kept as given and stretched in Stitch (a resized mask written to the node's folder would move into the cache's store and leave a stale path); the shape check compares the picture with the handle's own `size`, not with the box, so the rounding to a multiple of 16 never causes `stitch_mismatch`; no side of a crop passes 4096 (a sliver box would otherwise be 16 x 65536 at 1 MP); a crop that is not resized takes no resampling, so megapixels 0 with blend 0 returns the original byte for byte; the mask is feathered over the whole picture and cut at the box, not feathered inside the box, so the edge fades alike at the box's border; the box is the bounds of the pixels above 0, so a faint stroke counts and an 8-bit mask's 1/255 is not ignored; no ComfyUI golden (the formulas are the shared resize and feather kernels; the GPL Inpaint Crop and Stitch node was not read beyond its README); `mask_full` is not a warning of Crop to Mask (the box is the picture) | 14.4 | medium-high |
 | Names and defaults the owner may change: Feather Mask (`fugue/feather-mask`, a blur of the mask outward by default; ComfyUI's FeatherMask, which fades from the picture's borders, would convert to another node), Combine Masks for MaskComposite, Crop to Mask's padding 64 px and 1 megapixel, Stitch's blend 16 px, the overlay in the accent at 50% | 14.4 | medium |
-| Both templates run FLUX.2 Klein 9B, the files the edit templates already use, by masked sampling with the picture as a reference: the owner has the files and they are checked staged; Klein 4B (Apache-2.0) is the alternative with a licence for commercial use, FLUX.1 Fill the dedicated model once its file is at hand. Whether the reference helps or makes Klein keep the old content is checked on the 3090 when the template is built | 11.10, 14.4 | medium |
+| Both templates run FLUX.2 Klein 9B, the files the edit templates already use, by masked sampling with the picture as a reference: the owner has the files and they are checked staged; Klein 4B (Apache-2.0) is the alternative with a licence for commercial use, FLUX.1 Fill the dedicated model once its file is at hand. Whether the reference helps or makes Klein keep the old content was checked on the 3090 (#177, same seed, both ways): for the inpaint crop the reference helps (without it the chair lost its legs and its place), so the group keeps it; for the outpaint it makes Klein keep Pad's gray border, so the template gives Text Encode no reference | 11.10, 14.4 | high |
 | No differential diffusion now: the library rounds the mask, and thresholding it per step is a change to sampling code, which the patch's rule excludes (8.10). It waits for the owner: carry it in the patch, or propose it upstream (17) | 8.10, 14.4, 17 | high |
 | Automatic masks are optional packs of command nodes, not built in: each brings a model and a runtime (ONNX Runtime or Python) that Fugue's binary should not link, and their weights' licences vary (BRIA's are non-commercial) | 14.4 | medium-high |
 

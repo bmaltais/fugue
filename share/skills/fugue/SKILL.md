@@ -22,7 +22,9 @@ before guessing a fix.
    `fugue node describe <type id>` for the exact manifest: inputs with type, default, range,
    choices, outputs, and whether it is a sink. Never guess an input name or a type; describe it.
 2. Write the `.fugue` file (format below), or start from `fugue workflow new <file>` or
-   `fugue template list` and `fugue workflow new <file> --template <id>`.
+   `fugue template list` and `fugue workflow new <file> --template <id>`. To redraw part of a
+   picture start from `inpaint-region` (a painted mask file in `inputs/`, white is redrawn), and
+   to extend one from `outpaint`; docs/masking.md has the rest.
 3. `fugue validate <file> --json`. Nothing runs. Fix every error it names, then re-validate.
    `fugue workflow describe <file>` summarizes nodes, links and sinks.
 4. `fugue run <file> --wait` streams events (JSON lines) and ends with `run.done`; without `--wait`

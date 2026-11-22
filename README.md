@@ -47,6 +47,14 @@ vocabulary in [docs/GLOSSARY.md](docs/GLOSSARY.md).
 
 <p align="center"><img src="docs/images/node-library.png" alt="The node library panel beside a workflow" width="720"></p>
 
+- **Masks and inpainting.** Paint over a picture (Paint mask on Load Image or the Paint Mask node) and
+  redraw only that part, or extend a picture past its edges: the templates Inpaint: change a region
+  and Outpaint: extend a picture run FLUX.2 Klein 9B, and the group Inpaint (crop and stitch) gives a
+  small region the model's full detail with no seam. The mask editor is built in. See
+  [docs/masking.md](docs/masking.md).
+
+<p align="center"><img src="docs/images/inpaint-result.png" alt="Inpaint: the picture with an armchair painted over, the result and the difference" width="720"></p>
+
 - **Providers as modules.** A provider is a folder with a `provider.json` in `~/.local/share/fugue/providers/<id>/`, speaking a small JSON protocol over HTTP or stdio (spec 8.8); no change to Fugue is needed to add one.
 - **Local and paired-host runs.** The `omarchy` provider serves models from this machine and
   from every host paired through omarchy-local-ai, so one graph can use a model on another
