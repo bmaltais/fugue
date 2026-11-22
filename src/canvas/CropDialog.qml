@@ -67,6 +67,7 @@ LargeViewDialog {
                 objectName: "cropRatio-" + modelData.id
                 look: root.look
                 text: modelData.text
+                accented: false // the chosen ratio is the quiet marking: OK is the one accent fill (D7)
                 current: root.ratioName === modelData.id
                 onTapped: root.pickRatio(modelData.id)
             }

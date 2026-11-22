@@ -8,7 +8,7 @@ import Fugue
 // out or resize by its handles. X, Y, Width and Height stay as numbers under it, in step with the rectangle.
 // The padded area the node will cut is the dashed outer box, and under the picture a line says the size the
 // model will get. A ratio lock (as the Crop window's) and Snap (edges on the node's Multiple of) are in the bar.
-// Apply writes x, y, width and height to the node as ONE undo step; Cancel, the close button and Escape leave
+// OK (or Enter) writes x, y, width and height to the node as ONE undo step; Cancel, the close button and Escape leave
 // the node as it was. `openFor(node)` opens it; the work is RegionPicker (region_picker.h) and the numbers
 // canvas/region_pick.h, which call the node's own functions, so the box and size are what the node computes.
 LargeViewDialog {
@@ -55,7 +55,7 @@ LargeViewDialog {
         }
         open()
     }
-    // Apply: the four numbers go to the node, one undo step.
+    // OK: the four numbers go to the node, one undo step.
     function apply() {
         if (!ready || !info.editable)
             return
@@ -101,6 +101,7 @@ LargeViewDialog {
                 objectName: "regionRatio-" + modelData.id
                 look: root.look
                 text: modelData.text
+                accented: false // the chosen ratio is the quiet marking: OK is the one accent fill (D7)
                 current: root.ratioName === modelData.id
                 enabled: root.ready
                 onTapped: root.pickRatio(modelData.id)
@@ -119,6 +120,8 @@ LargeViewDialog {
             look: root.look
             text: qsTr("Snap to %1").arg(backend.multiple)
             tip: qsTr("Put the edges on multiples of the node's Multiple of; with a ratio lock only the corner moves")
+            accented: false // on is the quiet marking: OK is the one accent fill (docs/ui-ergonomics.md, D7)
+            checkable: true
             current: root.snap
             enabled: root.ready && backend.multiple > 1
             onTapped: {
@@ -263,7 +266,7 @@ LargeViewDialog {
             ViewButton {
                 objectName: "regionApply"
                 look: root.look
-                text: qsTr("Apply")
+                text: qsTr("OK") // as the Crop window's and the mask editor's: it writes and closes
                 primary: true
                 enabled: root.ready && root.info.editable === true
                 onTapped: root.apply()

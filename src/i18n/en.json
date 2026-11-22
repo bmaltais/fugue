@@ -74,7 +74,6 @@
   "A canvas is at most %1 px a side and %2 megapixels.": "A canvas is at most %1 px a side and %2 megapixels.",
   "A mask is connected, so the node uses the mask's bounds and not this rectangle.": "A mask is connected, so the node uses the mask's bounds and not this rectangle.",
   "Accept": "Accept",
-  "Apply": "Apply",
   "Arrow keys move it; Enter shares the space equally": "Arrow keys move it; Enter shares the space equally",
   "B": "B",
   "Blank canvas instead": "Blank canvas instead",

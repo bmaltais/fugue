@@ -162,7 +162,8 @@ private slots:
         QVERIFY(qAbs(r.draft().value("height").toInt() - 126) <= 2);
         QCOMPARE(r.draft().value("x").toInt(), movedX); // the far corner moved, not the origin
         const int width = r.draft().value("width").toInt(), height = r.draft().value("height").toInt();
-        // Nothing is written until Apply.
+        // Nothing is written until OK (named as the Crop window's and the mask editor's commit, the cohesion audit's N7).
+        QCOMPARE(r.find("regionApply")->property("text").toString(), QString("OK"));
         QCOMPARE(r.steps(), 0);
         QCOMPARE(r.stored("x"), QJsonValue(100));
         // The numbers show the rectangle.
