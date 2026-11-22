@@ -98,6 +98,7 @@ Reply canvasImport(const Command &command, Context &context);
 Reply canvasExport(const Command &command, Context &context);
 Reply canvasLog(const Command &command, Context &context);
 Reply canvasShow(const Command &command, Context &context);
+Reply canvasList(const Command &command, Context &context);
 Reply canvasCandidates(const Command &command, Context &context);
 Reply canvasAccept(const Command &command, Context &context);
 Reply canvasDrop(const Command &command, Context &context);

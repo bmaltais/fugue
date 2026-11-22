@@ -398,6 +398,19 @@ private slots:
         QVERIFY(s.candidates(f.id, true)->empty());
     }
 
+    void theStoreListsItsCanvasesNewestFirst() {
+        CanvasStore s = store();
+        QVERIFY(s.list().empty());
+        const QString first = s.create("one", sample(256), "test")->id;
+        const QString second = s.create("two", sample(256), "test")->id;
+        const auto all = s.list();
+        QCOMPARE(all.size(), size_t(2));
+        QCOMPARE(all[0].id, second); // the clock ticks per call
+        QCOMPARE(all[1].id, first);
+        QCOMPARE(all[0].name, QString("two"));
+        QVERIFY(!all[0].head.isEmpty());
+    }
+
     void aCanvasWithoutThatRevisionIsCanvasNotFound() {
         CanvasStore s = store();
         const Fixture f = canvasWithBase(s);

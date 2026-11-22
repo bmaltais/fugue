@@ -42,6 +42,8 @@ QList<Row> menuRows() {
         {"file.templates", QT_TRANSLATE_NOOP("Command", "Browse templates"), nullptr, {}, "app", "same"},
         // The projects dialog (spec 1.4.2): the window opens it; ProjectModel sets the handler.
         {"file.projects", QT_TRANSLATE_NOOP("Command", "Projects: switch, make or add one"), QT_TRANSLATE_NOOP("Command", "Projects…"), {}, "app", "added"},
+        // The canvas revisions and candidates (#210); the window opens the dialog (Main.qml).
+        {"file.canvas-history", QT_TRANSLATE_NOOP("Command", "Canvas history: revisions, candidates, compare"), QT_TRANSLATE_NOOP("Command", "Canvas history…"), {}, "app", "added"},
         {"file.export-share", QT_TRANSLATE_NOOP("Command", "Export for sharing: a .fuguepack with its images, local paths removed"),
          QT_TRANSLATE_NOOP("Command", "Export for sharing…"), {}, "app", "same"},
         {"file.export-compiled", QT_TRANSLATE_NOOP("Command", "Export the compiled graph, for the CLI"),
@@ -163,7 +165,7 @@ void registerMenuCommands(CommandRegistry &registry) {
     }
     for (const auto &[id, label] : menuLabels())
         registry.setLabel(QString::fromLatin1(id), QString::fromUtf8(label));
-    for (const char *id : {"app.menu-bar", "app.context-menu", "help.about"})
+    for (const char *id : {"app.menu-bar", "app.context-menu", "help.about", "file.canvas-history"})
         registry.setHandler(QString::fromLatin1(id), [&registry, id] { emit registry.windowRequested(QString::fromLatin1(id)); });
 }
 

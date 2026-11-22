@@ -73,6 +73,7 @@ const QMap<QString, QMap<QString, Spec>> &table() {
           {"export", {2, 2, {}, {}, canvasExport}},
           {"log", {1, 1, {"limit"}, {}, canvasLog}},
           {"show", {1, 1, {}, {}, canvasShow}},
+          {"list", {0, 0, {}, {}, canvasList}},
           {"candidates", {1, 1, {}, {"all"}, canvasCandidates}},
           {"accept", {1, 1, {}, {}, canvasAccept}},
           {"drop", {1, 1, {}, {}, canvasDrop}},

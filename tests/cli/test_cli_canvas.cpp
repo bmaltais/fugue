@@ -97,6 +97,9 @@ private slots:
         QVERIFY(id.startsWith("canvas-"));
         QCOMPARE(made.data().value("width").toInt(), 640);
         QVERIFY(QFileInfo(path("home/.local/share/fugue/canvases/canvases/" + id + "/head")).isFile());
+        const Outcome all = fugue({"canvas", "list", "--json"});
+        QCOMPARE(all.data().value("canvases").toArray().size(), 1);
+        QCOMPARE(all.data().value("canvases").toArray().at(0).toObject().value("canvas").toString(), id);
         const Outcome shown = fugue({"canvas", "show", id, "--json"});
         QVERIFY2(shown.exitCode == 0, shown.out + shown.err);
         QCOMPARE(shown.data().value("name").toString(), QString("Sketch"));

@@ -8,6 +8,7 @@
 #include <QObject>
 #include <QtQmlIntegration/qqmlintegration.h>
 
+#include "canvas/canvas_history.h" // a QML type (CanvasHistory): the module registers it from here
 #include "canvas/canvas_model.h"
 #include "canvas/crop_qml.h" // a QML singleton (CropGeometry): the module registers it from here
 #include "canvas/mask_layer.h" // a QML item (MaskLayer): the module registers it from here

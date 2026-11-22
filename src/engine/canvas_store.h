@@ -125,6 +125,8 @@ public:
     // Makes a canvas whose first revision is `document` (producer `producer`), head on it.
     Result<CanvasInfo> create(const QString &name, const mask::PaintDocument &document, const QString &producer);
     Result<CanvasInfo> info(const QString &canvasId) const;
+    // Every canvas of the store, newest first (by creation time, then id); one that cannot be read is left out.
+    std::vector<CanvasInfo> list() const;
 
     // ---- revisions ----
     // Stores `document` as a revision of the canvas with this parent (empty for none) and does not

@@ -12,6 +12,7 @@ fugue canvas import photo.ora                      # a canvas from an OpenRaster
 fugue canvas log canvas-0123456789ab               # the revisions, newest first
 fugue canvas show canvas-0123456789ab@sha256:ab12cd34   # one revision: tree hash, layers, tiles
 fugue canvas export canvas-0123456789ab out.ora    # the head as an .ora (never replaces a file)
+fugue canvas list                                  # the canvases, newest first
 fugue canvas candidates canvas-0123456789ab        # results waiting for your review
 fugue canvas diff canvas-0123456789ab@sha256:ab12cd34   # what a revision changed, against its parent
 fugue canvas accept canvas-0123456789ab            # the one candidate becomes the head
@@ -72,3 +73,8 @@ and Canvas Write with that on. Put your canvas's id and the rectangle in Canvas 
   again. `fugue canvas drop <id>@<candidate>` hides it. Neither deletes anything: a dropped one can
   still be accepted, and every revision stays in `fugue canvas log` or `candidates --all`.
 - A Write that lost the race for the head (`canvas_head_moved`) is a candidate too.
+
+In the window, File > Canvas history… lists your canvases; open one to see its revisions and
+candidates, click a revision to see it against the one before it (the same slider, side by side, flip
+and difference views as Compare Images), and press **Accept** or **Drop** on a candidate. Ctrl+click
+a revision to use it as the left side of the comparison.

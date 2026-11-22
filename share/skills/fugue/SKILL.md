@@ -117,6 +117,7 @@ fail with `permission_denied`.
 | `fugue canvas export <id>[@<revision>] <file.ora>` | Write a revision (head by default) as an `.ora`; never replaces a file; the same revision gives the same bytes |
 | `fugue canvas log <id>[@<revision>]` | Revisions newest first along their parents (`--limit`, default 20): revision, time, producer |
 | `fugue canvas show <id>[@<revision>]` | One revision: tree hash (pixels and layer properties only, same pixels same hash), parent, producer, time, layers. A revision is `head`, a full hash or 8+ hex digits of one |
+| `fugue canvas list` | The canvases of the store, newest first: id, created, name, head |
 | `fugue canvas candidates <id>` | Revisions nobody points at that are not accepted or dropped (`--all` adds dropped), newest first; Canvas Write with `candidate` on leaves its result as one |
 | `fugue canvas accept <id>[@<revision>]` | Accept a candidate into the head (its added layers are placed on the head when it was made from an older revision); with no `@revision`, the only open candidate |
 | `fugue canvas drop <id>[@<revision>]` | Hide a candidate (nothing is deleted) |

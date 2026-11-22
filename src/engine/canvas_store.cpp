@@ -285,6 +285,18 @@ Result<CanvasInfo> CanvasStore::info(const QString &canvasId) const {
     return found;
 }
 
+std::vector<CanvasInfo> CanvasStore::list() const {
+    std::vector<CanvasInfo> found;
+    const QDir folder(m_root + QStringLiteral("/canvases"));
+    for (const QString &name : folder.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        const Result<CanvasInfo> canvas = info(name);
+        if (canvas)
+            found.push_back(canvas.value());
+    }
+    std::sort(found.begin(), found.end(), [](const CanvasInfo &a, const CanvasInfo &b) { return a.created != b.created ? a.created > b.created : a.id < b.id; });
+    return found;
+}
+
 Result<HeadMove> CanvasStore::moveHead(const QString &canvasId, const QString &expected, const QString &revisionId) {
     const Result<CanvasInfo> canvas = info(canvasId);
     if (!canvas)

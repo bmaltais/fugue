@@ -1,4 +1,4 @@
-// `fugue canvas new|import|export|log|show|candidates|accept|drop|diff` (spec 13.1, 14.5, epic #206): the canvas revision store
+// `fugue canvas new|import|export|log|show|list|candidates|accept|drop|diff` (spec 13.1, 14.5, epic #206): the canvas revision store
 // from the command line. The work is engine/canvas_store.h's; this reads the arguments and prints.
 // A canvas lives in the session's store (a project's own under FUGUE_HOME); `<canvas>` is its id,
 // `<canvas>@<revision>` a revision of it (a full hash, the start of one, or `head`).
@@ -203,6 +203,19 @@ Result<QString> candidateRef(const CanvasStore &store, const Ref &ref) {
 }
 
 } // namespace
+
+Reply canvasList(const Command &, Context &) {
+    const CanvasStore store = CanvasStore::forSession();
+    QJsonArray listed;
+    QStringList lines;
+    for (const canvas::CanvasInfo &info : store.list()) {
+        listed.append(canvasJson(info));
+        lines << QStringLiteral("%1  %2  %3").arg(info.id, info.created, info.name);
+    }
+    if (lines.isEmpty())
+        lines << QStringLiteral("No canvas yet: `fugue canvas new` or `fugue canvas import` makes one.");
+    return Reply::success(QJsonObject{{"canvases", listed}}, lines.join('\n'));
+}
 
 Reply canvasCandidates(const Command &command, Context &) {
     const Ref ref = parseRef(command.positionals.at(0));
