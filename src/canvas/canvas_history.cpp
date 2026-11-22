@@ -211,6 +211,17 @@ void CanvasHistory::select(const QString &revision) {
         fail(found.errors());
         return;
     }
+    // A candidate (or a dropped one) is compared with the head it would change, as the Canvas view does; any other
+    // revision with its parent. One meaning of Compare in every window (the cohesion audit's D1).
+    for (const QVariant &row : m_revisions) {
+        const QVariantMap map = row.toMap();
+        const QString kind = map.value(QStringLiteral("kind")).toString();
+        if (map.value(QStringLiteral("id")).toString() == revision && !m_head.isEmpty() && revision != m_head
+            && (kind == QLatin1String("candidate") || kind == QLatin1String("dropped"))) {
+            compare(m_head, revision);
+            return;
+        }
+    }
     compare(found->parent.isEmpty() ? revision : found->parent, revision);
 }
 

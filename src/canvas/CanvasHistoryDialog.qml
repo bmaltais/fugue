@@ -30,6 +30,8 @@ LargeViewDialog {
     property string compareMode: "slider"
     readonly property bool compareOn: comparing && backend.hasParent
     readonly property bool canDecide: backend.kindB === "candidate" || backend.kindB === "dropped"
+    // The canvas the keys are on in the list of canvases (Up, Down, Enter), as the revision rows have.
+    property int canvasIndex: 0
 
     function openFor(canvasId) {
         backend.canvasId = canvasId
@@ -54,6 +56,16 @@ LargeViewDialog {
     Component.onDestruction: exportDialog.close()
 
     onKeyPressed: event => {
+        if (backend.canvasId === "") {
+            // No viewer yet, so the dialog passes Enter on too (LargeViewDialog's `confirm` needs a `zoomable`).
+            const rows = backend.canvases
+            if (event.key === Qt.Key_Down && canvasIndex < rows.length - 1) canvasIndex++
+            else if (event.key === Qt.Key_Up && canvasIndex > 0) canvasIndex--
+            else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && canvasIndex < rows.length) backend.canvasId = rows[canvasIndex].id
+            else return
+            event.accepted = true
+            return
+        }
         const rows = backend.revisions
         const at = rows.findIndex(row => row.id === backend.revisionB)
         if (event.key === Qt.Key_Down && at < rows.length - 1) backend.select(rows[at + 1].id)
@@ -68,7 +80,8 @@ LargeViewDialog {
             objectName: "canvasHistoryCanvases"
             look: root.look
             visible: backend.canvasId !== ""
-            text: qsTr("‹ Canvases")
+            glyph: "chevron-left"
+            text: qsTr("Canvases")
             accented: false
             onTapped: backend.canvasId = ""
         }
@@ -79,7 +92,11 @@ LargeViewDialog {
             visible: backend.canvasId !== ""
             enabled: backend.hasParent
             text: qsTr("Compare")
-            tip: backend.hasParent ? qsTr("Show this revision against its parent") : qsTr("The first revision has no parent to compare with")
+            tip: !backend.hasParent ? qsTr("The first revision has no parent to compare with")
+                 : root.canDecide ? qsTr("Show this candidate against the head") : qsTr("Show this revision against its parent")
+            // On is the quiet marking: Accept is the one accent fill of this window (docs/ui-ergonomics.md, D7).
+            accented: false
+            checkable: true
             current: root.compareOn
             onTapped: root.comparing = !root.comparing
         }
@@ -91,6 +108,7 @@ LargeViewDialog {
                 objectName: "canvasHistoryMode-" + modelData.id
                 look: root.look
                 text: modelData.text
+                accented: false
                 current: compareViewer.mode === modelData.id
                 enabled: modelData.id !== "difference" || backend.sourceDifference.toString() !== ""
                 onTapped: {
@@ -154,10 +172,12 @@ LargeViewDialog {
         delegate: Rectangle {
             id: canvasRow
             required property var modelData
+            required property int index
             objectName: "canvasHistoryCanvas-" + modelData.id
             width: canvasList.width
             height: 8 * root.u
-            color: tap.pressed || hover.hovered ? root.look.selectedRow : "transparent"
+            readonly property bool isCurrent: index === root.canvasIndex
+            color: tap.pressed ? root.look.selectedRow : hover.hovered || isCurrent ? root.look.menuRow : "transparent"
             Row {
                 anchors.verticalCenter: parent.verticalCenter
                 x: 2 * root.u
@@ -227,7 +247,7 @@ LargeViewDialog {
                     anchors.right: parent.right
                     anchors.rightMargin: 2 * root.u
                     visible: row.modelData.kind !== "backend"
-                    text: row.modelData.kind === "head" ? qsTr("head") : row.modelData.kind === "dropped" ? qsTr("dropped") : qsTr("candidate")
+                    text: row.modelData.kind === "head" ? qsTr("Head") : row.modelData.kind === "dropped" ? qsTr("Dropped") : qsTr("Candidate")
                     color: row.modelData.kind === "candidate" ? root.look.accent : root.look.label
                     font.pixelSize: root.look.captionSize
                     font.weight: Font.DemiBold

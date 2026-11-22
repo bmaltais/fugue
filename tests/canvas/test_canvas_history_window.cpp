@@ -120,7 +120,28 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
-    void aCandidateIsComparedWithItsParentThenAccepted() {
+    void theListOfCanvasesWorksFromTheKeyboard() {
+        // Up and Down move the current canvas, Enter opens it, as the revision rows do (the cohesion audit's N6).
+        canvas::CanvasStore store = canvas::CanvasStore::forSession();
+        PaintDocument other(64, 64);
+        other.addLayer(LayerKind::Paint, "Base");
+        QVERIFY(store.create("Other", other, "new"));
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        app.commands.trigger("file.canvas-history");
+        QObject *dialog = app.window->findChild<QObject *>("canvasHistoryDialog");
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QObject *history = dialog->property("history").value<QObject *>();
+        const QVariantList rows = history->property("canvases").toList();
+        QVERIFY(rows.size() >= 2);
+        QTRY_VERIFY(find(app.window, "canvasHistoryCanvas-" + m_canvas));
+        QTest::keyClick(app.window, Qt::Key_Down);
+        QTest::keyClick(app.window, Qt::Key_Return);
+        QTRY_COMPARE(history->property("canvasId").toString(), rows.at(1).toMap().value("id").toString());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    void aCandidateIsComparedWithTheHeadThenAccepted() {
         App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
         QVERIFY(app.open());
         app.commands.trigger("file.canvas-history");
@@ -148,8 +169,11 @@ private slots:
         QCOMPARE(canvas::CanvasStore::forSession().info(m_canvas)->head, m_a);
         QCOMPARE(history->property("kindB").toString(), QString("head"));
         // The other candidate was made from the old head: still listed, and it can still be accepted (placed on the head).
+        // It is compared with the head it would change, not with its parent (one meaning of Compare, as the Canvas view's).
         click(app, "canvasHistoryRevision-" + shortOf(m_b));
         QTRY_COMPARE(history->property("kindB").toString(), QString("candidate"));
+        QCOMPARE(history->property("revisionA").toString(), m_a);
+        QCOMPARE(find(app.window, "canvasHistoryCompare")->property("tip").toString(), QString("Show this candidate against the head"));
         click(app, "canvasHistoryAccept");
         QTRY_VERIFY(!find(app.window, "canvasHistoryAccept"));
         const auto head = canvas::CanvasStore::forSession().info(m_canvas)->head;
@@ -199,6 +223,9 @@ private slots:
         QQuickItem *toggle = find(app.window, "canvasHistoryCompare");
         QVERIFY(toggle);
         QVERIFY(!toggle->isEnabled());
+        // A toggle that is on never takes the accent fill: Accept is this window's one primary (the cohesion audit's D7).
+        QVERIFY(!toggle->property("accented").toBool());
+        QVERIFY(toggle->property("checkable").toBool());
         QVERIFY(find(app.window, "canvasHistoryExport"));
 
         // A candidate is shown alone too; Compare puts it against its parent in the Compare modes.
