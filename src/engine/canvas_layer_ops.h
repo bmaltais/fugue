@@ -21,7 +21,9 @@
 
 namespace fugue::canvas {
 
-enum class LayerOp { Visible, Opacity, Blend, Rename, Remove, Move, Duplicate, MaskEnabled, RemoveMask };
+// SetMask (#230) gives one layer a layer mask, or a new one: the tiles of `maskTiles`, which the caller stored first
+// (CanvasStore::setLayerMask cuts a painted mask and keeps its new tiles); the mask is on.
+enum class LayerOp { Visible, Opacity, Blend, Rename, Remove, Move, Duplicate, MaskEnabled, RemoveMask, SetMask };
 
 struct LayerEdit {
     LayerOp op = LayerOp::Visible;
@@ -30,17 +32,18 @@ struct LayerEdit {
     double number = 1;       // Opacity: 0 to 1
     QString text;            // Rename: the new name; Blend: a blend id (mask::blendId: "normal", "multiply", ...)
     int to = 0;              // Move: the position the lowest of the moved layers ends at (the others stay above it, in order)
+    TileMap maskTiles;       // SetMask: the mask's one-channel tiles (absent tiles are 0, black: hidden)
 };
 
 // The producer's suffix of an edit: "visible", "opacity", "blend", "rename", "delete", "move",
-// "duplicate", "mask-enabled", "mask-delete" (the window writes `canvas-view:<name>`).
+// "duplicate", "mask-enabled", "mask-delete", "mask-set" (the window writes `canvas-view:<name>`).
 QString layerOpName(LayerOp op);
 // The op a name names (the command line's words, above); false for another.
 bool layerOpFromName(const QString &name, LayerOp *op);
 
 // The tree after the edit; input_invalid for a position that is not there, a name that is empty or
 // too long, an opacity outside 0 to 1, a blend that is not one, a rename of more than one layer, or
-// a mask edit of a layer that has no mask. An edit that changes nothing gives the same tree.
+// a mask edit of a layer that has no mask, or a SetMask of more than one layer or of a mask layer. An edit that changes nothing gives the same tree.
 Result<Tree> applyLayerEdit(const Tree &tree, const LayerEdit &edit);
 
 // The name a duplicate of `name` gets: "<name> copy", then "<name> copy 2", ... not taken in `tree`.

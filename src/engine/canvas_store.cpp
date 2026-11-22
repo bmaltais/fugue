@@ -621,6 +621,10 @@ std::set<QString> tilesOf(const Tree &tree) {
 } // namespace
 
 Result<Commit> CanvasStore::editLayers(const QString &canvasId, const QString &base, const LayerEdit &edit, const QString &producer) {
+    return commitEdit(canvasId, base, edit, producer, false);
+}
+
+Result<Commit> CanvasStore::commitEdit(const QString &canvasId, const QString &base, const LayerEdit &edit, const QString &producer, bool newTiles) {
     const Result<CanvasInfo> canvas = info(canvasId);
     if (!canvas)
         return Result<Commit>(canvas.errors());
@@ -638,7 +642,7 @@ Result<Commit> CanvasStore::editLayers(const QString &canvasId, const QString &b
     if (treeToJson(after.value()) == treeToJson(before.value()))
         return Commit{from.value(), HeadMove{false, base}};
     const std::set<QString> had = tilesOf(before.value()), has = tilesOf(after.value());
-    if (!std::includes(had.begin(), had.end(), has.begin(), has.end()))
+    if (!newTiles && !std::includes(had.begin(), had.end(), has.begin(), has.end()))
         return corrupt(QStringLiteral("a layer edit made tiles of its own")); // cannot be: an edit moves records, never pixels
     const Result<QString> treeHash = storeTreeRecord(after.value());
     if (!treeHash)
@@ -652,6 +656,71 @@ Result<Commit> CanvasStore::editLayers(const QString &canvasId, const QString &b
     if (!moved->moved) // lost a race with a run: not a candidate for anyone to review, an edit that did not happen
         (void)replaceFile(resolvedPath(canvasId, added->id), QByteArrayLiteral("undone\n"), QStringLiteral("a canvas resolution"));
     return Commit{added.value(), moved.value()};
+}
+
+Result<Commit> CanvasStore::setLayerMask(const QString &canvasId, const QString &base, int position, const MaskPaint &mask, const QString &producer) {
+    const Result<Revision> from = revision(canvasId, base);
+    if (!from)
+        return Result<Commit>(from.errors());
+    const Result<Tree> before = tree(from->tree);
+    if (!before)
+        return Result<Commit>(before.errors());
+    if (mask.channels() != 1 || mask.width() != before->width || mask.height() != before->height)
+        return Result<Commit>(makeError(QStringLiteral("input_invalid"),
+                                        QStringLiteral("The mask is %1 x %2 and the canvas %3 x %4.").arg(mask.width()).arg(mask.height()).arg(before->width).arg(before->height)));
+    Result<TileMap> tiles = cutLayer(mask, [this](const TileKey &, const QString &hash, const MaskPaint &tile) { return storeBlob(hash, tile); });
+    if (!tiles)
+        return Result<Commit>(tiles.errors());
+    LayerEdit edit;
+    edit.op = LayerOp::SetMask;
+    edit.layers = {position};
+    edit.maskTiles = std::move(tiles.value());
+    return commitEdit(canvasId, base, edit, producer, true);
+}
+
+QString CanvasStore::selectionPath(const QString &hash) const { return m_root + QStringLiteral("/selections/") + hexOf(hash) + QStringLiteral(".json"); }
+
+Result<QString> CanvasStore::storeSelection(const MaskPaint &selection) {
+    if (selection.channels() != 1)
+        return Result<QString>(makeError(QStringLiteral("input_invalid"), QStringLiteral("A selection is one channel.")));
+    const Result<TileMap> tiles = cutLayer(selection, [this](const TileKey &, const QString &hash, const MaskPaint &tile) { return storeBlob(hash, tile); });
+    if (!tiles)
+        return Result<QString>(tiles.errors());
+    QJsonObject map;
+    for (const auto &[key, hash] : tiles.value())
+        map.insert(key.text(), hash);
+    const QJsonObject json{{"format", storeFormat}, {"width", selection.width()}, {"height", selection.height()}, {"tiles", map}};
+    const QString hash = canonicalHash(json);
+    if (hash.isEmpty())
+        return corrupt(QStringLiteral("a selection has no canonical form"));
+    const Errors written = writeOnce(selectionPath(hash), jsonBytes(json), QStringLiteral("a canvas selection"));
+    if (hasErrors(written))
+        return Result<QString>(written);
+    return hash;
+}
+
+Result<MaskPaint> CanvasStore::selection(const QString &hash) const {
+    QByteArray bytes;
+    if (!isSha256(hash) || !readFile(selectionPath(hash), &bytes))
+        return notFound(QStringLiteral("stored selection %1").arg(hash));
+    const QJsonObject json = QJsonDocument::fromJson(bytes).object();
+    if (canonicalHash(json) != hash || json.value("format").toInt() != storeFormat)
+        return corrupt(QStringLiteral("the selection %1 is not the content it is named for").arg(hash));
+    const int width = json.value("width").toInt(), height = json.value("height").toInt();
+    if (width < 1 || height < 1 || qint64(width) * height > mask::paintFileMaxPixels)
+        return corrupt(QStringLiteral("the selection %1 has a size that cannot be").arg(hash));
+    TileMap tiles;
+    const QJsonObject map = json.value("tiles").toObject();
+    for (auto it = map.begin(); it != map.end(); ++it) {
+        TileKey key;
+        if (!TileKey::parse(it.key(), &key) || key.x >= tilesAcross(width) || key.y >= tilesDown(height) || !isSha256(it.value().toString()))
+            return corrupt(QStringLiteral("a tile of the selection %1 is not well formed").arg(hash));
+        tiles.emplace(key, it.value().toString());
+    }
+    return assembleLayer(width, height, 1, tiles, [&](const TileKey &key, const QString &tileHash) {
+        const mask::IRect rect = tileRect(key, width, height);
+        return readBlob(tileHash, rect.width, rect.height, 1);
+    });
 }
 
 Result<HeadMove> CanvasStore::undo(const QString &canvasId, const QString &expected) {

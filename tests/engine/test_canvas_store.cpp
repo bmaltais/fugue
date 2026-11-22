@@ -12,6 +12,7 @@
 #include <thread>
 
 #include "engine/canvas_diff.h"
+#include "engine/canvas_layer_ops.h"
 #include "engine/canvas_store.h"
 #include "engine/hash.h"
 #include "engine/paint_file.h"
@@ -505,6 +506,95 @@ private slots:
         s.create("x", sample(256), "test");
         QDirIterator it(m_dir.path(), {"*.part", ".*.part"}, QDir::Files | QDir::Hidden, QDirIterator::Subdirectories);
         QVERIFY(!it.hasNext());
+    }
+
+    // Add mask and painting a layer mask (#230): ONE revision each, its parent the head, the mask's new tiles stored and
+    // the rest shared; a mask equal to the one there writes nothing; Undo goes back one step.
+    void aLayerMaskIsOneRevisionThatSharesItsUnchangedTiles() {
+        CanvasStore s = store();
+        const Fixture f = canvasWithBase(s);
+        const int before = blobCount(m_dir.path());
+        MaskPaint full(512, 512);
+        full.fill();
+        const Result<Commit> added = s.setLayerMask(f.id, f.head, 1, full, "canvas-view:mask-add");
+        QVERIFY2(added.ok(), qPrintable(added.ok() ? QString() : added.error().message));
+        QVERIFY(added->move.moved);
+        QCOMPARE(added->revision.parent, f.head);
+        QCOMPARE(added->revision.producer, QString("canvas-view:mask-add"));
+        const Tree t1 = s.tree(added->revision.tree).value();
+        QVERIFY(t1.layers[1].hasMask && t1.layers[1].maskEnabled);
+        QCOMPARE(int(t1.layers[1].maskTiles.size()), 4); // 512 px: four tiles of 256, all white
+        QCOMPARE(blobCount(m_dir.path()), before + 1);  // one blob: the four white tiles are the same pixels
+        QCOMPARE(t1.layers[0].tiles, s.tree(s.revision(f.id, f.head)->tree)->layers[0].tiles);
+
+        // A stroke in one corner: one more revision, one new tile, the other three shared.
+        MaskPaint painted = full;
+        painted.beginStroke(Mode::Erase, Brush{40, 1, 1, {}});
+        painted.strokeTo({20, 20});
+        painted.strokeTo({60, 30});
+        painted.endStroke();
+        const Result<Commit> stroke = s.setLayerMask(f.id, added->revision.id, 1, painted, "canvas-view:mask-paint");
+        QVERIFY(stroke.ok() && stroke->move.moved);
+        const Tree t2 = s.tree(stroke->revision.tree).value();
+        int shared = 0;
+        for (const auto &[key, hash] : t2.layers[1].maskTiles)
+            shared += t1.layers[1].maskTiles.at(key) == hash ? 1 : 0;
+        QCOMPARE(shared, 3);
+        QCOMPARE(blobCount(m_dir.path()), before + 2);
+        QCOMPARE(s.load(f.id, stroke->revision.id)->maskPixels(s.load(f.id, stroke->revision.id)->layer(1).id)->at(30, 22), uint8_t(0));
+
+        // The same mask again: nothing written, the head stays.
+        const Result<Commit> same = s.setLayerMask(f.id, stroke->revision.id, 1, painted, "canvas-view:mask-paint");
+        QVERIFY(same.ok() && !same->move.moved);
+        QCOMPARE(same->move.head, stroke->revision.id);
+        // Undo goes back one step: to the full mask.
+        QVERIFY(s.undo(f.id, stroke->revision.id)->moved);
+        QCOMPARE(s.info(f.id)->head, added->revision.id);
+        // Another size, or an old base: refused, nothing moves.
+        QVERIFY(!s.setLayerMask(f.id, added->revision.id, 1, MaskPaint(100, 100), "x").ok());
+        const Result<Commit> stale = s.setLayerMask(f.id, f.head, 1, painted, "x");
+        QVERIFY(stale.ok() && !stale->move.moved);
+    }
+
+    void aMaskLayerTakesNoLayerMask() {
+        Tree tree;
+        tree.width = tree.height = 64;
+        LayerRecord layer;
+        layer.kind = LayerKind::Mask;
+        tree.layers.push_back(layer);
+        LayerEdit edit;
+        edit.op = LayerOp::SetMask;
+        edit.layers = {0};
+        QVERIFY(!applyLayerEdit(tree, edit).ok());
+        tree.layers[0].kind = LayerKind::Paint;
+        edit.layers = {0, 0};
+        QVERIFY(!applyLayerEdit(tree, edit).ok());
+        edit.layers = {0};
+        const Result<Tree> done = applyLayerEdit(tree, edit);
+        QVERIFY(done.ok() && done->layers[0].hasMask && done->layers[0].maskTiles.empty()); // all black: no tiles
+        QCOMPARE(layerOpName(LayerOp::SetMask), QString("mask-set"));
+    }
+
+    // A selection (#230, Quick Mask) is stored by content: the same pixels give the same hash and one file, and it reads
+    // back exactly; an unknown hash is canvas_not_found.
+    void aSelectionIsStoredByContentAndReadBack() {
+        CanvasStore s = store();
+        MaskPaint selection(300, 200);
+        selection.fillRect(10, 20, 50, 40);
+        const Result<QString> hash = s.storeSelection(selection);
+        QVERIFY(hash.ok() && isSha256(hash.value()));
+        QCOMPARE(s.storeSelection(selection).value(), hash.value());
+        QCOMPARE(QDir(m_dir.filePath("selections")).entryList(QDir::Files).size(), 1);
+        const Result<MaskPaint> back = s.selection(hash.value());
+        QVERIFY(back.ok());
+        QCOMPARE(back->pixels(), selection.pixels());
+        MaskPaint other = selection;
+        other.invert();
+        QVERIFY(s.storeSelection(other).value() != hash.value());
+        const Result<MaskPaint> missing = s.selection("sha256:" + QString(64, 'a'));
+        QVERIFY(!missing.ok());
+        QCOMPARE(missing.error().code, QString("canvas_not_found"));
+        QVERIFY(!s.storeSelection(MaskPaint(8, 8, 4)).ok());
     }
 };
 

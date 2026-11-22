@@ -20,6 +20,7 @@ constexpr OpName kOps[] = {
     {LayerOp::Visible, "visible"},   {LayerOp::Opacity, "opacity"},        {LayerOp::Blend, "blend"},
     {LayerOp::Rename, "rename"},     {LayerOp::Remove, "delete"},          {LayerOp::Move, "move"},
     {LayerOp::Duplicate, "duplicate"}, {LayerOp::MaskEnabled, "mask-enabled"}, {LayerOp::RemoveMask, "mask-delete"},
+    {LayerOp::SetMask, "mask-set"},
 };
 
 Error invalid(const QString &message, const QString &hint = {}) { return makeError(QStringLiteral("input_invalid"), message, hint); }
@@ -130,6 +131,20 @@ Result<Tree> applyLayerEdit(const Tree &tree, const LayerEdit &edit) {
             }
         }
         break;
+    case LayerOp::SetMask: {
+        if (chosen.size() != 1)
+            return invalid(QStringLiteral("A layer mask is set on one layer at a time."));
+        LayerRecord &layer = out.layers[size_t(*chosen.begin())];
+        if (layer.kind == mask::LayerKind::Mask)
+            return invalid(QStringLiteral("Layer %1 (%2) is a mask layer: it has no layer mask.").arg(*chosen.begin()).arg(layer.name));
+        for (const auto &entry : edit.maskTiles)
+            if (entry.first.x >= tilesAcross(tree.width) || entry.first.y >= tilesDown(tree.height) || entry.second.isEmpty())
+                return invalid(QStringLiteral("A tile of the mask lies outside the canvas."));
+        layer.hasMask = true;
+        layer.maskEnabled = true;
+        layer.maskTiles = edit.maskTiles;
+        break;
+    }
     }
     return out;
 }

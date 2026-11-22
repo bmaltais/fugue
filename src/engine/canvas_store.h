@@ -183,6 +183,22 @@ public:
     // `base` nothing is written and the answer is {moved: false, head: <the head>}. An edit that
     // changes nothing writes nothing: the answer's revision is `base` and moved is false with head `base`.
     Result<Commit> editLayers(const QString &canvasId, const QString &base, const LayerEdit &edit, const QString &producer);
+    // A layer mask painted or added (#230): the layer at `position` of `base` (the head, as editLayers) gets `mask` (one
+    // channel, the canvas's size) as its layer mask, turned on. Only the mask's tiles that are not stored yet are
+    // written, so a stroke that touched one corner of a large mask adds the tiles of that corner and shares the rest.
+    // ONE new revision, producer `producer` (`canvas-view:mask-add`, `canvas-view:mask-paint`); a mask equal to the one
+    // the layer has writes nothing (as editLayers). input_invalid for a mask of another size or channels.
+    Result<Commit> setLayerMask(const QString &canvasId, const QString &base, int position, const mask::MaskPaint &mask, const QString &producer);
+
+    // ---- selections (#230, docs/canvas-actions-design.md 3) ----
+    // A selection painted in a Canvas view (Quick Mask) kept by content: its one-channel tiles in blobs/ and
+    // `selections/<hex>.json` ({format, width, height, tiles}), named by the canonical hash of that record, so an equal
+    // selection is stored once and a Canvas Region's `selection` input (that hash) is a literal a cache key and a replay
+    // hold. 255 is selected (the part to change), 0 not.
+    Result<QString> storeSelection(const mask::MaskPaint &selection);
+    // The stored selection (canvas_not_found for a hash the store has none of, canvas_corrupt for one that is not what it is named for).
+    Result<mask::MaskPaint> selection(const QString &hash) const;
+
     // Moves the head from `expected` to its parent (canvas_no_step for the first revision); {moved: false} when it is not `expected`.
     Result<HeadMove> undo(const QString &canvasId, const QString &expected);
     // The revision redo would move the head to ("" when none): the newest undone one whose parent is the head.
@@ -210,6 +226,9 @@ private:
     Result<QString> storeTree(const mask::PaintDocument &document);
     Result<QString> storeTreeRecord(const Tree &tree);
     Result<Revision> addCommit(const QString &canvasId, const QString &treeHash, const QString &parent, const QString &producer);
+    // editLayers' body: `edit` on the head `base`, one revision; `newTiles` lets the edit name tiles the base has not (SetMask).
+    Result<Commit> commitEdit(const QString &canvasId, const QString &base, const LayerEdit &edit, const QString &producer, bool newTiles);
+    QString selectionPath(const QString &hash) const;
     Errors storeBlob(const QString &hash, const mask::MaskPaint &tile);
     Result<mask::MaskPaint> readBlob(const QString &hash, int width, int height, int channels) const;
 
