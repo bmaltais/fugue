@@ -160,7 +160,7 @@ Item {
         FileDialog {
             id: d
             objectName: "canvasPictureDialog"
-            title: qsTr("Make a canvas from a picture")
+            title: qsTr("Import a picture as a canvas") // the menu's Import picture…, the CLI's fugue canvas import
             fileMode: FileDialog.OpenFile
             nameFilters: [qsTr("Pictures and canvases (*.png *.jpg *.jpeg *.webp *.ora)"), qsTr("All files (*)")]
             onAccepted: { picker.pictureChosen(d.selectedFile); d.destroy() }
@@ -220,7 +220,7 @@ Item {
                         ThemedTextField {
                             id: widthField
                             objectName: "newCanvasWidth"
-                            Layout.preferredWidth: 90
+                            Layout.preferredWidth: 22 * ask.look.unit // 88px at the default text size, and it follows it
                             text: "1024"
                             inputMethodHints: Qt.ImhDigitsOnly
                             onAccepted: ask.create()
@@ -229,7 +229,7 @@ Item {
                         ThemedTextField {
                             id: heightField
                             objectName: "newCanvasHeight"
-                            Layout.preferredWidth: 90
+                            Layout.preferredWidth: 22 * ask.look.unit // 88px at the default text size, and it follows it
                             text: "1024"
                             inputMethodHints: Qt.ImhDigitsOnly
                             onAccepted: ask.create()

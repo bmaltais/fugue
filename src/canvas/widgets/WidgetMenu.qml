@@ -6,7 +6,8 @@ import ".."
 import "../../menu/placement.js" as Placement
 
 // The list a choice, seed or model widget opens: entries of {text, value, detail, note,
-// checked, enabled, heading, keep, dim, keywords, place, placeHost}. A `heading` names the group of entries below it; a
+// checked, enabled, heading, separator, keep, dim, keywords, place, placeHost}. A `heading` names the group of entries below it, a
+// `separator` (with `enabled: false`) is a hairline between two chunks that need no name (the Gaps rule); a
 // `note` is a second, smaller line; a `dim` entry can be chosen but reads as one the list
 // advises against. Modal, so the window's keys sleep while it is open; Up and Down move
 // between the entries that can be chosen, Enter chooses, Escape or a press outside closes it.
@@ -155,12 +156,22 @@ Popup {
             width: ListView.view.width
             readonly property bool hasThumbnail: modelData.thumbnail !== undefined
             readonly property bool heading: modelData.heading === true
+            readonly property bool separator: modelData.separator === true
             readonly property string note: modelData.note !== undefined ? modelData.note : ""
-            height: hasThumbnail ? menu.thumbHeight
+            height: separator ? 2 * menu.look.unit
+                  : hasThumbnail ? menu.thumbHeight
                   : note !== "" ? menu.rowHeight + noteText.implicitHeight
                   : menu.rowHeight
             radius: Math.max(0, menu.look.popupCorner - 2)
             color: ListView.isCurrentItem && usable ? menu.look.menuRow : "transparent"
+            Rectangle {
+                visible: entry.separator
+                x: 8
+                width: parent.width - 16 - list.edge
+                anchors.verticalCenter: parent.verticalCenter
+                height: 1
+                color: menu.look.hairline
+            }
             Glyph {
                 id: check
                 x: 8
@@ -185,6 +196,7 @@ Popup {
                 fillMode: Image.PreserveAspectCrop
             }
             Text {
+                visible: !entry.separator
                 x: entry.hasThumbnail ? parent.height + 4 : entry.heading ? 8 : 8 + 12 + 6
                 width: parent.width - x - 8 - detail.width - list.edge - (placeBadge.visible ? placeBadge.width + 4 : 0)
                 height: entry.hasThumbnail ? parent.height : menu.rowHeight
@@ -192,7 +204,7 @@ Popup {
                 bottomPadding: entry.heading ? 2 : 0
                 elide: Text.ElideRight
                 textFormat: Text.PlainText
-                text: entry.modelData.text
+                text: entry.modelData.text ?? "" // a separator has none
                 color: entry.usable && entry.modelData.dim !== true ? menu.look.text : menu.look.label
                 // Fainter still: the label color alone reads close to the text's in a dark theme.
                 opacity: entry.modelData.dim === true ? 0.55 : 1
@@ -265,6 +277,8 @@ Popup {
                 headingShown = false
                 continue
             }
+            if (e.separator === true)
+                continue // a search result is one list
             const said = [e.text, e.detail, heading ? heading.text : "", e.keywords].join(" ").toLowerCase()
             const fits = e.keep !== true && e.value !== undefined && words.every(w => said.includes(w))
             if (!fits && e.keep !== true)

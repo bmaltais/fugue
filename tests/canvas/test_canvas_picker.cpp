@@ -73,7 +73,8 @@ struct PickerApp : App {
     QStringList texts() const {
         QStringList out;
         for (const QVariant &e : entries())
-            out << e.toMap().value("text").toString();
+            if (!e.toMap().value("separator").toBool())
+                out << e.toMap().value("text").toString();
         return out;
     }
     // Chooses the entry with this text, as a click on its row does.
@@ -132,6 +133,9 @@ private slots:
         app.openList();
         QTRY_VERIFY2(app.listOpen(), qPrintable(app.warnings.join('\n')));
         QCOMPARE(app.texts(), (QStringList{"Photo", "Sketch", "New canvas…", "Import picture…", "Pick region…"}));
+        // The actions are a chunk of their own: a hairline between the canvases and New canvas… (the cohesion audit's N10).
+        QVERIFY(app.entries().at(2).toMap().value("separator").toBool());
+        QCOMPARE(app.entries().at(3).toMap().value("text").toString(), QString("New canvas…"));
         const QVariantMap photo = app.entries().at(0).toMap();
         QVERIFY2(photo.value("detail").toString().startsWith("320 × 200 · "), qPrintable(photo.value("detail").toString()));
         QCOMPARE(photo.value("note").toString(), second); // the id, so two canvases of one name can be told apart

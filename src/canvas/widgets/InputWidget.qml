@@ -361,6 +361,8 @@ Rectangle {
                            note: row.id, keywords: row.id })
         if (rows.length === 0)
             entries.push({ text: qsTr("No canvases yet"), enabled: false, note: "" })
+        // The actions are a chunk of their own (docs/ui-ergonomics.md, Gaps), under a hairline.
+        entries.push({ separator: true, enabled: false })
         entries.push({ text: qsTr("New canvas…"), value: { action: "new" }, keep: true })
         entries.push({ text: qsTr("Import picture…"), value: { action: "import" }, keep: true })
         // A node with a rectangle too (Canvas Region): drag it out on the canvas (#213).
