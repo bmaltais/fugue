@@ -46,7 +46,7 @@ empty lyrics has no words to sing, so Remix and Repaint send the lyrics given, `
 | repainting_start / end | repaint | no | Repaint Song's From / To |
 | synth_batch_size (up to 9), lm_batch_size | variations | no | issue (a Count input once a node can return a list of songs) |
 | output_format `mp3`, `wav16/24/32`, mp3_bitrate | | mp3, default bitrate | **Quality** (advanced: mp3, mp3-320, lossless = wav24; #258) |
-| ref_audio | timbre / style reference | no | issue |
+| ref_audio | timbre / style reference | no | **Style reference** (an optional audio input, all three nodes; #259) |
 | adapter, adapter_scale (LoRA) | `--adapters` dir | no | issue |
 | lm_cfg_scale, top_p, top_k, negative prompt | LM sampling | no | not exposed |
 | /understand | audio to caption, lyrics, metadata | no | issue (Describe Song) |
@@ -97,3 +97,23 @@ the VAE's float output holds; wav32 is float WAV, which some players and editors
 file carries and what FLAC keeps. One input with three values rather than a format and a bitrate pair, since the
 bitrate means nothing for a WAV. The provider saves `audio.wav` or `audio.mp3` (the file's extension follows the
 server's answer for the format asked) and Save Audio re-encodes as it does for any audio.
+
+## Style reference (#259)
+
+`POST /synth` multipart takes `ref_audio` (WAV or MP3): the audio is VAE-encoded and goes through the DiT's timbre
+encoder (4 layers, pooled to one vector); without it the encoder gets one silent frame (ARCHITECTURE.md, "ref-audio"
+section). Fugue: an optional **Style reference** `audio` input on Generate, Remix and Repaint Song, sent as the part
+`ref_audio`. For a new song the LM job (`/lm`) is not told of it, only the render. The multipart building is shared
+with the cover/repaint form (`synthForm`), so a job is JSON when it has no file and a form when it has any.
+
+Not done, on purpose [medium]: ARCHITECTURE.md says "Pass ref_audio = src_audio for best results" for cover-nofsq. Remix's
+Stay close could send its own song as the reference when none is given. It would change what an existing workflow
+makes, so it is left for a decision (an advanced "Keep the voice" would be the honest name).
+
+Live check on the GB10 (2026-11-22, `ace-step-1.5-turbo-acestep-cuda`, 12 s instrumental, same seed, lossless):
+the server accepts `ref_audio` on the turbo model and the output changes with it (three references or none give three
+different files). Long-term average spectrum (24 log bands, 60 Hz to 15 kHz, centered) of the result against the
+reference: with an industrial synth-bass reference the result moved much closer to it (distance 14.1 to 4.3, seed 7), with
+a fingerpicked-guitar one it moved closer on seed 21 (8.5 to 6.1) and not on seed 7 (6.4 to 6.4), and the synth-bass
+reference did nothing on seed 21 (13.6 to 13.6). So: accepted and used, how strongly depends on the song. Not a
+listening test; [U] for "gives the voice of a singer" stays open (no sung reference tried).

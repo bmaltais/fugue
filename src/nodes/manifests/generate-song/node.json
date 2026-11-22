@@ -1,7 +1,7 @@
 {
   "manifest": 1,
   "id": "fugue/generate-song",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "name": "Generate Song",
   "description": "Makes a song from a description and, optionally, lyrics on a music model. The tempo, key and time signature are for you to set or for the model to choose.",
   "category": "Generate",
@@ -45,6 +45,13 @@
       "label": "Instrumental",
       "default": false,
       "description": "No singing. The lyrics are ignored."
+    },
+    {
+      "name": "reference",
+      "type": "audio",
+      "label": "Style reference",
+      "optional": true,
+      "description": "A recording whose voice and timbre the song takes. Optional."
     },
     {
       "name": "model",

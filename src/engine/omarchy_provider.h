@@ -107,6 +107,8 @@ private:
     void submitSong(const Server &server, const JobRequest &request, const QJsonObject &model, Reply<QString> reply);
     // Remix and Repaint Song: no LM pass, the source audio goes with the request straight to /synth.
     void submitSongEdit(const Server &server, const JobRequest &request, const QJsonObject &model, Reply<QString> reply);
+    // POST /synth: JSON, or a multipart form with the job's files (`audio`, `ref_audio`).
+    QNetworkReply *sendSynth(const Server &server, const QJsonObject &body, const QJsonObject &inputs, Error *error);
     void pollSong(const QString &id);
     void fetchSong(const QString &id);
     void change(const QString &id, const JobStatus &status);

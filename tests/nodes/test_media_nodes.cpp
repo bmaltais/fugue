@@ -467,6 +467,29 @@ private slots:
         }
     }
 
+    // A style reference (#259) is the song's `ref_audio` input when one is wired, on all three song nodes; none, no input.
+    void aSongNodePassesItsStyleReferenceOn() {
+        Bench bench;
+        const Value song = bench.media(MediaType::Audio, makeAudio(bench.file("s.mp3"), 3));
+        const Value voice = bench.media(MediaType::Audio, makeAudio(bench.file("voice.mp3"), 2));
+        for (const QString &node : {kSongNode, kRemixNode, kRepaintNode}) {
+            const auto make = [&](const Value &reference) {
+                Values given{{"prompt", "x"}};
+                if (node != kSongNode)
+                    given.insert(QStringLiteral("audio"), song);
+                if (!reference.isEmpty())
+                    given.insert(QStringLiteral("reference"), reference);
+                return bench.request(node, given, musicModel());
+            };
+            const Result<JobRequest> without = make(Value());
+            QVERIFY2(without.ok(), qPrintable(without.ok() ? QString() : without.error().message));
+            QVERIFY(!without->inputs.contains("ref_audio"));
+            const Result<JobRequest> with = make(voice);
+            QVERIFY2(with.ok(), qPrintable(with.ok() ? QString() : with.error().message));
+            QCOMPARE(with->inputs.value("ref_audio").toObject().value("path").toString(), voice.media().path());
+        }
+    }
+
     // --- Remix Song and Repaint Song ---
 
     void aRemixSendsTheSongAsACoverOrAStayCloseCover() {

@@ -361,6 +361,36 @@ QJsonObject aceEditBody(const JobRequest &request) {
     return body;
 }
 
+// The files a /synth job may carry beside its request: the song to work on (`audio`) and a recording to take
+// the voice and timbre from (`ref_audio`), named as ace-server's multipart form names them (docs/ARCHITECTURE.md,
+// "Endpoints": request + audio|src_latents + ref_audio|ref_latents).
+const char *const kSynthFiles[][2] = {{"audio", "source audio"}, {"ref_audio", "style reference"}};
+
+// The files of the job that /synth takes, as the multipart form's parts: the request as JSON, then each file with
+// its own name (every part is sent with a file name, as the server reads them). False, and `error`, when one cannot
+// be read.
+bool synthForm(const QJsonObject &body, const QJsonObject &inputs, QByteArray *form, QByteArray *boundary, Error *error) {
+    *boundary = "----fugue" + QUuid::createUuid().toByteArray(QUuid::Id128);
+    const auto part = [&](const QByteArray &name, const QByteArray &file, const QByteArray &type, const QByteArray &data) {
+        return "--" + *boundary + "\r\nContent-Disposition: form-data; name=\"" + name + "\"; filename=\"" + file +
+               "\"\r\nContent-Type: " + type + "\r\n\r\n" + data + "\r\n";
+    };
+    *form = part("request", "request.json", "application/json", QJsonDocument(body).toJson(QJsonDocument::Compact));
+    for (const auto &file : kSynthFiles) {
+        if (!inputs.contains(QLatin1String(file[0])))
+            continue;
+        const QString path = inputs.value(QLatin1String(file[0])).toObject().value("path").toString();
+        QFile source(path);
+        if (!source.open(QIODevice::ReadOnly)) {
+            *error = makeError(QStringLiteral("file_not_found"), QStringLiteral("Cannot read the %1 %2.").arg(QLatin1String(file[1]), path));
+            return false;
+        }
+        *form += part(file[0], QFileInfo(path).fileName().toUtf8(), "application/octet-stream", source.readAll());
+    }
+    *form += "--" + *boundary + "--\r\n";
+    return true;
+}
+
 // The audio of a /synth result: multipart/mixed, whose first part is the song (the others are
 // latents). The boundary is the first line; parts are bodies between its lines.
 QByteArray firstPart(const QByteArray &body) {
@@ -1156,6 +1186,13 @@ void OmarchyProvider::finishVideo(const QString &id, const QJsonObject &result) 
 // progress counter or preview, so progress is the half each job is.
 void OmarchyProvider::submitSong(const Server &server, const JobRequest &request, const QJsonObject &model,
                                  Reply<QString> reply) {
+    // A file the job cannot send is refused before the song is written, not after.
+    for (const auto &file : kSynthFiles) {
+        const QString path = request.inputs.value(QLatin1String(file[0])).toObject().value("path").toString();
+        if (request.inputs.contains(QLatin1String(file[0])) && !QFileInfo(path).isReadable())
+            return reply(Result<QString>(makeError(QStringLiteral("file_not_found"),
+                                                   QStringLiteral("Cannot read the %1 %2.").arg(QLatin1String(file[1]), path))));
+    }
     if (request.params.contains("task"))
         return submitSongEdit(server, request, model, std::move(reply));
     QNetworkReply *posted = send(server, "POST", QStringLiteral("/lm"),
@@ -1185,27 +1222,27 @@ void OmarchyProvider::submitSong(const Server &server, const JobRequest &request
     });
 }
 
+// POST /synth: JSON, or a multipart form when the job carries files. Null (and `error`) when a file cannot be read.
+QNetworkReply *OmarchyProvider::sendSynth(const Server &server, const QJsonObject &body, const QJsonObject &inputs, Error *error) {
+    const bool form = std::any_of(std::begin(kSynthFiles), std::end(kSynthFiles),
+                                  [&](const auto &file) { return inputs.contains(QLatin1String(file[0])); });
+    if (!form)
+        return send(server, "POST", QStringLiteral("/synth"), QJsonDocument(body).toJson(QJsonDocument::Compact));
+    QByteArray data, boundary;
+    if (!synthForm(body, inputs, &data, &boundary, error))
+        return nullptr;
+    return send(server, "POST", QStringLiteral("/synth"), data, 0, "multipart/form-data; boundary=" + boundary);
+}
+
 // Remix Song and Repaint Song: one /synth job with the request and the source audio as a multipart
 // form (the parts `request` and `audio`, ace-server's own). There is no first job, so the job starts
 // at rendering and the song's lyrics are the ones that were sent.
 void OmarchyProvider::submitSongEdit(const Server &server, const JobRequest &request, const QJsonObject &model,
                                      Reply<QString> reply) {
-    const QString path = request.inputs.value("audio").toObject().value("path").toString();
-    QFile source(path);
-    if (!source.open(QIODevice::ReadOnly))
-        return reply(Result<QString>(makeError(QStringLiteral("file_not_found"),
-                                               QStringLiteral("Cannot read the source audio %1.").arg(path))));
-    const QByteArray boundary = "----fugue" + QUuid::createUuid().toByteArray(QUuid::Id128);
-    const auto part = [&](const QByteArray &name, const QByteArray &file, const QByteArray &type, const QByteArray &data) {
-        return "--" + boundary + "\r\nContent-Disposition: form-data; name=\"" + name + "\"; filename=\"" + file +
-               "\"\r\nContent-Type: " + type + "\r\n\r\n" + data + "\r\n";
-    };
-    const QByteArray body = part("request", "request.json", "application/json",
-                                 QJsonDocument(aceEditBody(request)).toJson(QJsonDocument::Compact)) +
-                            part("audio", QFileInfo(path).fileName().toUtf8(), "application/octet-stream", source.readAll()) +
-                            "--" + boundary + "--\r\n";
-    QNetworkReply *posted = send(server, "POST", QStringLiteral("/synth"), body, 0,
-                                 "multipart/form-data; boundary=" + boundary);
+    Error problem;
+    QNetworkReply *posted = sendSynth(server, aceEditBody(request), request.inputs, &problem);
+    if (!posted)
+        return reply(Result<QString>(problem));
     connect(posted, &QNetworkReply::finished, this, [this, posted, server, request, model, reply] {
         posted->deleteLater();
         const int code = httpStatus(posted);
@@ -1312,8 +1349,10 @@ void OmarchyProvider::fetchSong(const QString &id) {
                 return fail(QStringLiteral("%1 wrote no song.").arg(job->server.recipe));
             job->song = song;
             addSynthOptions(song, job->request.params);
-            QNetworkReply *posted = send(job->server, "POST", QStringLiteral("/synth"),
-                                         QJsonDocument(song).toJson(QJsonDocument::Compact));
+            Error problem;
+            QNetworkReply *posted = sendSynth(job->server, song, job->request.inputs, &problem);
+            if (!posted)
+                return fail(problem.message);
             job->asking = true;
             connect(posted, &QNetworkReply::finished, this, [this, posted, id, job] {
                 posted->deleteLater();

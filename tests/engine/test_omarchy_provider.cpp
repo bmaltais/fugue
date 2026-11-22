@@ -1522,6 +1522,80 @@ private slots:
         QVERIFY(result->outputs.value("audio").toObject().value("path").toString().endsWith("audio.wav"));
     }
 
+    // A style reference (#259): the recording goes to /synth as the multipart part `ref_audio`, beside the request, for a
+    // new song (after /lm wrote it) and for a remix (beside the source `audio`). With none, a new song's /synth stays JSON.
+    void aStyleReferenceGoesToSynthAsARefAudioPart() {
+        Fixture fixture;
+        fixture.server.on("GET", "/health", [](const HttpRequest &) { return HttpResponse{200, "{}"}; });
+        fixture.server.on("POST", "/lm", [](const HttpRequest &) { return HttpResponse{200, "{\"id\":\"1\"}"}; });
+        fixture.server.on("GET", "/job?id=1", [](const HttpRequest &) { return HttpResponse{200, "{\"status\":\"done\"}"}; });
+        fixture.server.on("GET", "/job?id=1&result=1", [](const HttpRequest &) {
+            return HttpResponse{200, "[{\"caption\":\"x\",\"lyrics\":\"la\",\"bpm\":90}]"};
+        });
+        fixture.server.on("POST", "/synth", [](const HttpRequest &) { return HttpResponse{200, "{\"id\":\"2\"}"}; });
+        fixture.server.on("GET", "/job?id=2", [](const HttpRequest &) { return HttpResponse{200, "{\"status\":\"done\"}"}; });
+        fixture.server.on("GET", "/job?id=2&result=1", [](const HttpRequest &) {
+            return HttpResponse{200, "--B1\r\nContent-Type: audio/mpeg\r\n\r\nSONG\r\n--B1--\r\n", "multipart/mixed; boundary=B1"};
+        });
+        fixture.writeStatus(QJsonObject{{kMusicModel, row(kMusicModel, "music", "active", fixture.endpoint())}});
+        const QString reference = fixture.writeInput("voice.wav", "VOICE-BYTES");
+        auto provider = fixture.provider();
+        auto request = fixture.request("audio.generate", {{"prompt", "x"}, {"lyrics", ""}, {"duration", 30}},
+                                       QJsonObject{{"ref_audio", QJsonObject{{"path", reference}}}});
+        const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value();
+        JobStatus status;
+        QTRY_VERIFY((status = await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value()).isTerminal());
+        QCOMPARE(status.state, QStringLiteral("done"));
+        // The LM job is told nothing of the reference: it writes the song; the renderer takes the voice.
+        QVERIFY(!fixture.server.requestsTo("POST", "/lm").first().body.contains("ref_audio"));
+        const HttpRequest sent = fixture.server.requestsTo("POST", "/synth").first();
+        QVERIFY(sent.headers.value("content-type").startsWith("multipart/form-data; boundary="));
+        QVERIFY(sent.body.contains("name=\"request\""));
+        QVERIFY(sent.body.contains("\"bpm\":90"));
+        QVERIFY(sent.body.contains("name=\"ref_audio\"; filename=\"voice.wav\""));
+        QVERIFY(sent.body.contains("VOICE-BYTES"));
+        QVERIFY(!sent.body.contains("name=\"audio\""));
+
+        // A remix carries both: the song to work on and the voice to give it.
+        fixture.server.on("POST", "/synth", [](const HttpRequest &) { return HttpResponse{200, "{\"id\":\"7\"}"}; });
+        fixture.server.on("GET", "/job?id=7", [](const HttpRequest &) { return HttpResponse{200, "{\"status\":\"done\"}"}; });
+        fixture.server.on("GET", "/job?id=7&result=1", [](const HttpRequest &) {
+            return HttpResponse{200, "--B2\r\nContent-Type: audio/mpeg\r\n\r\nREMIX\r\n--B2--\r\n", "multipart/mixed; boundary=B2"};
+        });
+        const QString source = fixture.writeInput("source.mp3", "SOURCE-BYTES");
+        auto remix = fixture.request("audio.generate", {{"prompt", "jazz"}, {"lyrics", ""}, {"task", "cover"}},
+                                     QJsonObject{{"audio", QJsonObject{{"path", source}}}, {"ref_audio", QJsonObject{{"path", reference}}}});
+        const QString remixId = await<QString>([&](auto reply) { provider->submit(remix, reply); }).value();
+        QTRY_VERIFY((status = await<JobStatus>([&](auto reply) { provider->status(remixId, reply); }).value()).isTerminal());
+        const HttpRequest second = fixture.server.requestsTo("POST", "/synth").last();
+        QVERIFY(second.body.contains("name=\"audio\"; filename=\"source.mp3\""));
+        QVERIFY(second.body.contains("SOURCE-BYTES"));
+        QVERIFY(second.body.contains("name=\"ref_audio\""));
+        QVERIFY(second.body.contains("VOICE-BYTES"));
+    }
+
+    void aStyleReferenceThatCannotBeReadIsRefusedBeforeAnythingIsSent() {
+        Fixture fixture;
+        fixture.server.on("GET", "/health", [](const HttpRequest &) { return HttpResponse{200, "{}"}; });
+        fixture.writeStatus(QJsonObject{{kMusicModel, row(kMusicModel, "music", "active", fixture.endpoint())}});
+        auto provider = fixture.provider();
+        const QString source = fixture.writeInput("source.mp3", "SOURCE");
+        for (const bool edit : {false, true}) {
+            QJsonObject inputs{{"ref_audio", QJsonObject{{"path", fixture.home.filePath("gone.wav")}}}};
+            QJsonObject params{{"prompt", "x"}, {"lyrics", ""}, {"duration", 30}};
+            if (edit) {
+                inputs.insert("audio", QJsonObject{{"path", source}});
+                params.insert("task", "cover");
+            }
+            const auto refused = await<QString>([&](auto reply) { provider->submit(fixture.request("audio.generate", params, inputs), reply); });
+            QVERIFY(!refused.ok());
+            QCOMPARE(refused.error().code, QStringLiteral("file_not_found"));
+            QVERIFY(refused.error().message.contains("style reference"));
+        }
+        QVERIFY(fixture.server.requestsTo("POST", "/lm").isEmpty());
+        QVERIFY(fixture.server.requestsTo("POST", "/synth").isEmpty());
+    }
+
     // The song's tempo, key, time signature, creativity and "keep my description" reach /lm as ace-server's
     // own fields (use_cot_caption is the opposite of keeping the description).
     void aSongsOwnSettingsReachTheModelThatWritesIt() {

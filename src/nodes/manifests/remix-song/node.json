@@ -1,7 +1,7 @@
 {
   "manifest": 1,
   "id": "fugue/remix-song",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "name": "Remix Song",
   "description": "Plays a song again in another style: the same song as a cover, a remix or a different genre, on a music model.",
   "category": "Generate",
@@ -49,6 +49,13 @@
       "label": "Instrumental",
       "default": false,
       "description": "No singing. The lyrics are ignored."
+    },
+    {
+      "name": "reference",
+      "type": "audio",
+      "label": "Style reference",
+      "optional": true,
+      "description": "A recording whose voice and timbre the song takes. Optional."
     },
     {
       "name": "model",

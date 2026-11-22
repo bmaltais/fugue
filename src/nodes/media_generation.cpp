@@ -183,11 +183,21 @@ public:
 
 // What every song node can ask of the renderer, one place for the three (Generate, Remix, Repaint Song).
 // Each goes only when it is set, so a song that uses none of them is the request it always was (and keeps its
-// cache entry). `quality` is the file it is saved as: mp3, mp3-320 or lossless.
-void addSongOptions(const NodeContext &context, JobRequest &request) {
+// cache entry). `quality` is the file it is saved as: mp3, mp3-320 or lossless; `reference` is a recording whose
+// voice and timbre the song takes (ace-server's ref_audio).
+Result<bool> addSongOptions(const NodeContext &context, JobRequest &request) {
     const QString quality = context.input(QStringLiteral("quality")).text().trimmed();
     if (!quality.isEmpty() && quality != QLatin1String("mp3"))
         request.params.insert(QStringLiteral("quality"), quality);
+    const Value reference = context.input(QStringLiteral("reference"));
+    if (!reference.isEmpty()) {
+        const MediaHandle audio = reference.media();
+        if (audio.path().isEmpty() || audio.duration() <= 0)
+            return makeInputError(QStringLiteral("media_unreadable"), QStringLiteral("reference"),
+                                  QStringLiteral("The style reference cannot be read."));
+        request.inputs.insert(QStringLiteral("ref_audio"), QJsonObject{{"path", audio.path()}});
+    }
+    return true;
 }
 
 class SongKernel : public ProviderKernel {
@@ -243,7 +253,8 @@ public:
             params.insert(QStringLiteral("creativity"), creativity.number());
         if (context.input(QStringLiteral("keep_description")).json().toBool())
             params.insert(QStringLiteral("keep_description"), true);
-        addSongOptions(context, request);
+        if (const Result<bool> options = addSongOptions(context, request); !options)
+            return options.errors();
         return request;
     }
 
@@ -309,7 +320,8 @@ public:
             params.insert(QStringLiteral("strength"), context.input(QStringLiteral("strength")).number());
         }
         request.inputs.insert(QStringLiteral("audio"), QJsonObject{{"path", source.path()}});
-        addSongOptions(context, request);
+        if (const Result<bool> options = addSongOptions(context, request); !options)
+            return options.errors();
         return request;
     }
 
