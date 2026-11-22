@@ -254,6 +254,8 @@ private slots:
         QCOMPARE(made->root, path("p/acme"));
         QVERIFY(made->registered);
         QVERIFY(QFileInfo(path("p/acme/project.json")).isFile());
+        QVERIFY(QFileInfo(path("p/acme/documents")).isDir());
+        QVERIFY(QFileInfo(path("p/acme/outputs")).isDir());
         const auto listed = listProjects();
         QCOMPARE(listed->size(), 1);
         QCOMPARE(listed->at(0).name(), QString("Acme"));

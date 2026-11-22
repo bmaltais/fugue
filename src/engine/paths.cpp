@@ -43,6 +43,17 @@ QString documentsDir() {
     return QDir::homePath() + QStringLiteral("/Documents/Fugue");
 }
 
+QString nearestExistingFolder(const QString &path) {
+    QString current = QDir::cleanPath(path);
+    while (!current.isEmpty() && !QFileInfo(current).isDir()) {
+        const QString parent = QFileInfo(current).path();
+        if (parent == current)
+            break;
+        current = parent;
+    }
+    return !current.isEmpty() && QFileInfo(current).isDir() ? current : QDir::homePath();
+}
+
 QString runtimeDir() {
     if (const QString inRoot = fugueHomeDir(QStringLiteral("run")); !inRoot.isEmpty())
         return inRoot;

@@ -345,6 +345,8 @@ Result<ProjectEntry> createProject(const QString &name, const QString &inDir, co
     if (const Errors made = makeFolder(root); hasErrors(made))
         return made;
     QFile::setPermissions(root, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+    if (QString failed; !makeRootFolders(root, &failed))
+        return makeError("project_invalid", failed + QStringLiteral("."));
     ProjectManifest manifest;
     manifest.name = name;
     Errors warnings;

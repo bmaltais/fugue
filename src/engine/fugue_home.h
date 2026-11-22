@@ -26,6 +26,11 @@ bool applyFugueHome(int &argc, char **argv, QString *error);
 // ran in (the registry's `last`), if it is still a project. A gone or broken one means Default, silently.
 bool applyLastUsedProject(QString *error);
 
+// Makes the root's own folders that are not XDG ones (`documents/`, `outputs/`): the suggested place for
+// workflows and the default output folder must exist before anything is saved or a dialog opens there.
+// Called by setFugueHome (so every session heals a root made before this) and by `project new`.
+bool makeRootFolders(const QString &root, QString *error);
+
 // The same with the root given (the unit tests'): an absolute folder.
 bool setFugueHome(const QString &root, QString *error);
 

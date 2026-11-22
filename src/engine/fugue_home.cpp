@@ -50,6 +50,18 @@ void keepDesktopSockets(const QByteArray &realRuntime) {
 
 } // namespace
 
+bool makeRootFolders(const QString &root, QString *error) {
+    for (const char *name : {"documents", "outputs"}) {
+        const QString path = root + QLatin1Char('/') + QLatin1String(name);
+        if (!QDir().mkpath(path)) {
+            if (error)
+                *error = QStringLiteral("cannot make the folder %1").arg(path);
+            return false;
+        }
+    }
+    return true;
+}
+
 bool setFugueHome(const QString &given, QString *error) {
     if (given.isEmpty() || !QDir::isAbsolutePath(given)) {
         if (error)
@@ -67,6 +79,8 @@ bool setFugueHome(const QString &given, QString *error) {
     for (const Redirect &redirect : kRedirects)
         if (!makePrivateFolder(root + QLatin1Char('/') + QLatin1String(redirect.folder), error))
             return false;
+    if (!makeRootFolders(root, error))
+        return false;
     // The ordinary session's folders, once: a project inside a project (or a child process) must not
     // take the redirected ones for the base.
     struct Base {

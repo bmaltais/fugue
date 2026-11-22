@@ -15,6 +15,7 @@
 #include <QQuickWindow>
 #include <QSignalSpy>
 #include <QStandardPaths>
+#include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -268,6 +269,28 @@ private slots:
         QVERIFY(!f.workflows->saveAs(f.file("no-such-folder/x.fugue")));
         QVERIFY(f.workflows->unsaved());
         QVERIFY(f.workflows->notice().contains("Could not save"));
+    }
+
+    // A project's documents/ may not exist (made before it was created with the project): saving there
+    // works, and the dialog never starts on a missing folder.
+    void savingIntoAMissingDocumentsFolderMakesItAndTheDialogStartsOnAFolder() {
+        Fixture f;
+        const QString root = f.file("proj");
+        QVERIFY(QDir().mkpath(root));
+        const QByteArray saved = qgetenv("FUGUE_HOME");
+        qputenv("FUGUE_HOME", root.toLocal8Bit());
+        const auto restore = qScopeGuard([&] {
+            if (saved.isNull())
+                qunsetenv("FUGUE_HOME");
+            else
+                qputenv("FUGUE_HOME", saved);
+        });
+        QVERIFY(!QFileInfo(root + "/documents").exists());
+        QCOMPARE(f.workflows->suggestedFolder().toLocalFile(), root);
+        f.canvas.addNode("fugue/text", 0, 0);
+        QVERIFY(f.workflows->saveAs(root + "/documents/w.fugue"));
+        QVERIFY(QFileInfo(root + "/documents/w.fugue").isFile());
+        QCOMPARE(f.workflows->suggestedFolder().toLocalFile(), root + "/documents");
     }
 
     // Open and drop read only regular files, and only what a workflow needs: a pipe is never

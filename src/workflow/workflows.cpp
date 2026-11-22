@@ -242,7 +242,7 @@ void Workflows::setProjectName(const QString &name) {
 
 QUrl Workflows::suggestedFolder() const {
     if (!fugueHome().isEmpty())
-        return QUrl::fromLocalFile(documentsDir());
+        return QUrl::fromLocalFile(nearestExistingFolder(documentsDir()));
     const QString documents = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
     const QString fugue = documents + "/Fugue";
     return QUrl::fromLocalFile(QFileInfo(fugue).isDir() ? fugue : (documents.isEmpty() ? QDir::homePath() : documents));
@@ -1001,6 +1001,10 @@ bool Workflows::saveTab(int index, const QString &path, bool replace) {
     if (index == m_current && !from.isEmpty()
         && canonicalPath(QFileInfo(from).absolutePath()) != canonicalPath(QFileInfo(path).absolutePath()))
         m_canvas->rewriteDocuments([this, from](Document &document) { makeInputsAbsolute(document, *m_registry, from); });
+    // Fugue's own documents folder may not exist yet (a project made before it was created, a folder removed
+    // since): make it. Any other missing folder is the user's typo and stays an error.
+    if (const QString folder = QFileInfo(path).absolutePath(); folder == QDir::cleanPath(documentsDir()))
+        QDir().mkpath(folder);
     Document document = documentOf(index);
     // A saved workflow stays portable: the images it takes from Fugue's inputs folder are copied
     // into an `inputs` folder beside it, and its nodes point there (Appendix A, always, no question).

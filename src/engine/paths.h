@@ -26,6 +26,10 @@ QString mediaThumbnailsDir();
 // The folder Fugue may write documents into besides the output folder (workflows, templates): ~/Documents/Fugue,
 // or <FUGUE_HOME>/documents.
 QString documentsDir();
+
+// `path` if it is a folder, else its nearest parent that is one, else the home folder: where a file dialog
+// may start without meeting "item not found".
+QString nearestExistingFolder(const QString &path);
 // The folder of private per-session files (copies for an external viewer): $XDG_RUNTIME_DIR, else the desktop's
 // runtime folder; <FUGUE_HOME>/run under a root. Empty when there is none.
 QString runtimeDir();

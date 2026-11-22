@@ -122,6 +122,23 @@ private slots:
         QVERIFY(!roots.write.contains(QDir::homePath() + "/Documents/Fugue"));
     }
 
+    void aRootMakesDocumentsAndOutputsAndHealsAnOlderOne() {
+        QTemporaryDir dir;
+        const QString root = dir.filePath("root");
+        QVERIFY(setFugueHome(root, nullptr));
+        QVERIFY(QFileInfo(root + "/documents").isDir());
+        QVERIFY(QFileInfo(root + "/outputs").isDir());
+        QVERIFY(QDir(root + "/documents").removeRecursively());
+        QVERIFY(setFugueHome(root, nullptr)); // the next session heals it
+        QVERIFY(QFileInfo(root + "/documents").isDir());
+    }
+
+    void nearestExistingFolderWalksUp() {
+        QTemporaryDir dir;
+        QCOMPARE(nearestExistingFolder(dir.filePath("a/b/c")), dir.path());
+        QCOMPARE(nearestExistingFolder(dir.path()), dir.path());
+    }
+
     void theDesktopSocketsStayReachable() {
         QTemporaryDir dir;
         qputenv("XDG_RUNTIME_DIR", dir.path().toLocal8Bit());
