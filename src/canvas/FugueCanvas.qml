@@ -870,10 +870,14 @@ FocusScope {
                 delegate: Item {
                     id: dot
                     required property var modelData
+                    // The wire's own, live path (a node that moves or grows under a run bends it); the snapshot
+                    // is only the first look, before the wire's item exists.
+                    readonly property var wire: wires.itemAt(dot.modelData.row)
+                    readonly property string wirePath: wire ? wire.path : dot.modelData.path
                     PathInterpolator {
                         id: along
                         path: Path {
-                            PathSvg { path: dot.modelData.path }
+                            PathSvg { path: dot.wirePath }
                         }
                         NumberAnimation on progress {
                             from: 0

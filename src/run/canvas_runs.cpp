@@ -102,6 +102,10 @@ CanvasRuns::CanvasRuns(CanvasModel *canvas, Workflows *workflows, RunService *se
         scheduleCheck(true);
         refreshInputs();
     });
+    // A wire added or removed shifts the rows the running dots point at: they are made again.
+    for (auto signal : {&QAbstractItemModel::rowsInserted, &QAbstractItemModel::rowsRemoved})
+        connect(m_canvas->links(), signal, this, [this] { if (!m_running.isEmpty()) emit runningNodesChanged(); });
+    connect(m_canvas->links(), &QAbstractItemModel::modelReset, this, [this] { if (!m_running.isEmpty()) emit runningNodesChanged(); });
     connect(m_canvas, &CanvasModel::documentReset, this, &CanvasRuns::showTab);
     connect(m_workflows, &Workflows::currentChanged, this, &CanvasRuns::showTab);
     showTab();
@@ -790,7 +794,9 @@ QVariantList CanvasRuns::runningWires() const {
     for (const int row : m_canvas->linkRows(running)) {
         const QModelIndex index = links->index(row);
         if (running.contains(links->data(index, LinkList::ToNode).toString()))
-            wires << QVariantMap{{"path", links->data(index, LinkList::Path)}, {"color", links->data(index, LinkList::Color)}};
+            // The row, not the path: the dot reads the wire's live path, so it follows a node that moves or grows
+            // under a run (a thumbnail does) and never travels along where the wire used to be.
+            wires << QVariantMap{{"row", row}, {"path", links->data(index, LinkList::Path)}, {"color", links->data(index, LinkList::Color)}};
     }
     return wires;
 }

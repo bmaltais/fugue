@@ -644,3 +644,11 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Why: recognition over recall (one place lists everything the view can do, with its key beside it: Hick); the pointer's frequent controls stay a click away (Fitts); a greyed row says what is coming and where it is tracked, so a person is not left looking for it.
 - Rule: Floor (titles are 6u = 24px compact buttons inside a 6u bar, rows are 7u = 28px as the window's menus). Primary (none: a menu is not a primary; Accept stays the one). Destructive (Delete canvas… and Clear canvas… ask first with Keep highlighted and focused, the destructive answer last in the danger tint after the wider gap; the Delete row is in the error color). Gaps (the bar 1u over the tools row). Posture: pointer first, keys for the frequent ones; no Alt+letter (the window's own bar owns those letters). Deviations, each to confirm: a view's keys that it handles by hand (Home, 0, 1, + and -) are shown in the menu as text and are not registered twice; Undo and Redo stay enabled outside Quick Mask (they act on the document's undo stack, not only the canvas's).
 
+
+### 2026-11-22 volume in the media player (Save Audio, Save Video, Preview)
+
+- Control: `mediaVolume` in `MediaView.qml`, a 4px rail with the accent fill between the seek track and the mute button; hidden in a bar narrower than 70u (a node's face), where the mute button's wheel and Up and Down still work.
+- Old: mute was the only control; a loud song could not be turned down.
+- New: click or drag the rail, the wheel over it or over the mute button (5%), Up and Down once the player has the focus (10%); any volume above zero unmutes; the mute tooltip says the percent. It is per player and not kept (no settings store for it yet).
+- Why: the person who plays a result next to others needs it lower (Fitts: the rail is as high as the 28px bar; recognition: the fill shows the level).
+- Rule: Floor (the rail's hit area is the 28px bar's height). Primary (none). Destructive (none). Gaps (unchanged). Posture: pointer, and keys.

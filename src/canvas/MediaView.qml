@@ -7,17 +7,18 @@ import Fugue
 // A player for one video or one sound (#116). It knows nothing of the canvas, a node or a run: give
 // it a `source` and the `kind` of what it is, and it plays it; the node's face and the large view
 // each make one, and the same bar serves both. The bar is the one place a person acts: play and
-// pause, the seek track, the time, mute and, when the caller allows it, a button that asks for the
+// pause, the seek track, the time, the volume (a small slider; the wheel over it and Up and Down also
+// change it), mute and, when the caller allows it, a button that asks for the
 // large view. The picture itself is for looking at: a double click on it is `activated`, a press
 // on it is `pressed` (the node's face selects the node).
 //
 // Input:  source (a file URL), kind ("video" or "audio"), label (what stands where the picture
 //         would be for a sound, and over a video that cannot play), look, expandable (the bar's
 //         large-view button), autoPlay.
-// Output: playing, position and duration (milliseconds), muted, failed (the file could not be
+// Output: playing, position and duration (milliseconds), muted, volume (0 to 1), failed (the file could not be
 //         played); pressed, activated and expandRequested.
 // Keys (once it has the focus, which a press on it gives): Space plays and pauses, Left and Right
-//         seek 5 seconds, M mutes.
+//         seek 5 seconds, Up and Down change the volume by 10%, M mutes.
 // Cost:   a video shows its first frame by being paused at the start, so it holds a decoder from
 //         the moment its source is set; a caller that does not want that leaves `source` empty
 //         until the player is in view.
@@ -30,6 +31,13 @@ Item {
     property bool expandable: false
     property bool autoPlay: false
     property bool muted: false
+    // 0 to 1; a change of it unmutes.
+    property real volume: 1
+    function setVolume(value) {
+        view.volume = Math.max(0, Math.min(1, Math.round(value * 100) / 100))
+        if (view.volume > 0)
+            view.muted = false
+    }
 
     readonly property bool playing: player.playbackState === MediaPlayer.PlayingState
     readonly property real position: player.position
@@ -59,6 +67,8 @@ Item {
     Keys.onSpacePressed: view.toggle()
     Keys.onLeftPressed: view.seek(player.position - 5000)
     Keys.onRightPressed: view.seek(player.position + 5000)
+    Keys.onUpPressed: view.setVolume(view.volume + 0.1)
+    Keys.onDownPressed: view.setVolume(view.volume - 0.1)
     Keys.onPressed: event => {
         if (event.key === Qt.Key_M && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) {
             view.muted = !view.muted
@@ -69,7 +79,7 @@ Item {
     MediaPlayer {
         id: player
         source: view.source
-        audioOutput: AudioOutput { muted: view.muted }
+        audioOutput: AudioOutput { muted: view.muted; volume: view.volume }
         videoOutput: videoLoader.item
         // A video shows its first frame once loaded, by pausing at the start.
         onMediaStatusChanged: {
@@ -200,7 +210,7 @@ Item {
             readonly property real scrubAt: view.duration > 0 ? Math.max(0, Math.min(1, seekPointer.mouseX / width)) * view.duration : 0
             anchors.left: time.right
             anchors.leftMargin: view.look.unit
-            anchors.right: muteButton.left
+            anchors.right: volumeTrack.left
             anchors.rightMargin: view.look.unit
             height: parent.height
             visible: width >= 3 * view.look.unit
@@ -229,13 +239,49 @@ Item {
                 onReleased: view.seek(seekTrack.scrubAt)
             }
         }
+        Item {
+            id: volumeTrack
+            objectName: "mediaVolume"
+            readonly property real shown: view.muted ? 0 : view.volume
+            anchors.right: muteButton.left
+            width: visible ? 14 * view.look.unit : 0
+            height: parent.height
+            // Only where there is room: a narrow node face keeps the mute button, and the wheel and
+            // Up and Down still change the volume.
+            visible: bar.width >= 70 * view.look.unit
+            Accessible.role: Accessible.Slider
+            Accessible.name: qsTr("Volume")
+            Accessible.description: qsTr("%1%").arg(Math.round(shown * 100))
+            Rectangle {
+                anchors.verticalCenter: parent.verticalCenter
+                width: parent.width
+                height: 4
+                radius: 2
+                color: Qt.rgba(1, 1, 1, 0.3)
+                Rectangle {
+                    width: parent.width * volumeTrack.shown
+                    height: parent.height
+                    radius: 2
+                    color: view.look.accent
+                }
+            }
+            MouseArea {
+                id: volumePointer
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onPressed: mouse => { view.forceActiveFocus(); view.setVolume(mouse.x / width) }
+                onPositionChanged: mouse => { if (pressed) view.setVolume(mouse.x / width) }
+                onWheel: wheel => view.setVolume(view.volume + (wheel.angleDelta.y > 0 ? 0.05 : -0.05))
+            }
+        }
         BarButton {
             id: muteButton
             objectName: "mediaMute"
             anchors.right: expandButton.left
             glyph: view.muted ? "volume-x" : "volume-2"
-            tip: view.muted ? qsTr("Unmute") : qsTr("Mute")
+            tip: view.muted ? qsTr("Unmute") : qsTr("Mute (%1%; the wheel changes the volume)").arg(Math.round(view.volume * 100))
             onTapped: view.muted = !view.muted
+            WheelHandler { onWheel: event => view.setVolume(view.volume + (event.angleDelta.y > 0 ? 0.05 : -0.05)) }
         }
         BarButton {
             id: expandButton

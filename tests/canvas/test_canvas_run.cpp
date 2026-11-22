@@ -513,6 +513,14 @@ private slots:
         r.app.key(Qt::Key_Space);
         QTRY_VERIFY(!player->property("playing").toBool());
         QCOMPARE(item(player, "mediaTime")->property("text").toString(), QStringLiteral("0:00 / 0:02"));
+        // Volume: Down and Up change it by a tenth, setting it above zero unmutes.
+        QCOMPARE(player->property("volume").toReal(), 1.0);
+        r.app.key(Qt::Key_Down);
+        QTRY_COMPARE(player->property("volume").toReal(), 0.9);
+        player->setProperty("muted", true);
+        r.app.key(Qt::Key_Up);
+        QTRY_COMPARE(player->property("volume").toReal(), 1.0);
+        QVERIFY(!player->property("muted").toBool());
         QVERIFY(item(player, "mediaExpand")->isVisible());
         QQuickItem *songPlayer = item(item(r.app.window->contentItem(), "node-save-song"), "mediaPlayer");
         QVERIFY(songPlayer);
@@ -588,6 +596,33 @@ private slots:
         QQuickItem *dots = item(r.app.window->contentItem(), "runningDots");
         QVERIFY(dots);
         QCOMPARE(dots->property("count").toInt(), 1);
+        // The dot travels: its place changes between two looks and stays on the wire's box.
+        {
+            const auto dotAt = [&] {
+                QQuickItem *delegate = nullptr;
+                QMetaObject::invokeMethod(dots, "itemAt", Q_RETURN_ARG(QQuickItem *, delegate), Q_ARG(int, 0));
+                QQuickItem *ball = delegate && !delegate->childItems().isEmpty() ? delegate->childItems().last() : nullptr;
+                return ball ? ball->mapToScene(QPointF(0, 0)) : QPointF();
+            };
+            QPointF first;
+            QTRY_VERIFY((first = dotAt()) != QPointF());
+            QTRY_VERIFY2(dotAt() != first, "the running dot does not move along its wire");
+            // It follows the wire when a node moves under the run (a thumbnail also grows nodes): its path is the
+            // wire's live one, not the one it started on.
+            QQuickItem *delegate = nullptr;
+            QMetaObject::invokeMethod(dots, "itemAt", Q_RETURN_ARG(QQuickItem *, delegate), Q_ARG(int, 0));
+            QVERIFY(delegate);
+            const int row = r.runs->runningWires().first().toMap().value("row").toInt();
+            const auto livePath = [&] { return r.app.model.links()->data(r.app.model.links()->index(row), LinkList::Path).toString(); };
+            QCOMPARE(delegate->property("wirePath").toString(), livePath());
+            const QString before = livePath();
+            r.app.model.beginMove(QStringLiteral("words"));
+            r.app.model.moveBy(180, 120);
+            QTRY_VERIFY(livePath() != before);
+            QTRY_COMPARE(delegate->property("wirePath").toString(), livePath());
+            r.app.model.moveBy(0, 0); // back where it was: no edit is left to stale the run
+            r.app.model.endMove();
+        }
 
         r.onFake([&](FakeProvider &f) { f.finish(first, {{"image.png", png(640, 480)}}); });
         QTRY_COMPARE(r.state("gen"), QStringLiteral("cached"));
