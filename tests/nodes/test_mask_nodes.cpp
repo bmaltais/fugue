@@ -361,7 +361,12 @@ private slots:
         QCOMPARE(out.width, 2048);
         QVERIFY(out.at(1100, 1000, 0) == 1.0f);
         QVERIFY(out.at(2000, 1000, 0) > 0.0f); // the edge reaches far
-        QVERIFY2(ms < 1000, qPrintable(QString("took %1 ms").arg(ms)));
+#ifdef NDEBUG
+        constexpr qint64 limitMs = 1000;
+#else
+        constexpr qint64 limitMs = 10000; // a Debug build on a busy machine; the bound still catches a quadratic kernel
+#endif
+        QVERIFY2(ms < limitMs, qPrintable(QString("took %1 ms (limit %2)").arg(ms).arg(limitMs)));
         qInfo("feather 512 px on 4 MP: %lld ms", ms);
     }
 
