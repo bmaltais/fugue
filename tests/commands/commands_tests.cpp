@@ -252,6 +252,32 @@ private slots:
         QCOMPARE(registry.ownerOf("Escape"), QString("group.leave"));
     }
 
+    // One keymap for a picture and the Graph (#228, docs/ui-ergonomics.md D5): + and - zoom the Graph too, and a key
+    // press is told its owner, so a focused Canvas view keeps the Graph's keys (and only those) from the Graph.
+    void aPressIsToldItsOwnerAndWhetherItActsOnTheGraph() {
+        CommandRegistry registry;
+        fugue::registerDefaultCommands(registry);
+        for (const char *id : {"view.fit", "view.zoom-in", "view.zoom-out", "edit.delete", "edit.undo", "app.quit", "panel.nodes", "group.leave"})
+            QVERIFY(registry.setHandler(id, [] {}));
+        registry.setContextActive("canvas", true);
+        QCOMPARE(registry.keys("view.zoom-in"), (QStringList{"Alt+=", "Ctrl+=", "+"}));
+        QCOMPARE(registry.keys("view.zoom-out"), (QStringList{"Alt+-", "Ctrl+-", "-"}));
+        QCOMPARE(registry.ownerOfPress(Qt::Key_Plus, Qt::NoModifier), QString("view.zoom-in"));
+        QCOMPARE(registry.ownerOfPress(Qt::Key_Plus, Qt::ShiftModifier), QString("view.zoom-in")); // + typed as Shift+=
+        QCOMPARE(registry.ownerOfPress(Qt::Key_Minus, Qt::NoModifier), QString("view.zoom-out"));
+        QCOMPARE(registry.ownerOfPress(Qt::Key_Home, Qt::NoModifier), QString("view.fit"));
+        QCOMPARE(registry.ownerOfPress(Qt::Key_Period, Qt::NoModifier), QString("view.fit"));
+        QCOMPARE(registry.ownerOfPress(Qt::Key_Z, Qt::ControlModifier), QString("edit.undo"));
+        QCOMPARE(registry.ownerOfPress(Qt::Key_Q, Qt::NoModifier), QString("app.quit"));
+        QVERIFY(registry.ownerOfPress(Qt::Key_0, Qt::NoModifier).isEmpty());
+        // The Graph's: its view, its edits, its groups. Not the window's: quit, the document's undo (the region's too),
+        // the panels.
+        for (const char *id : {"view.fit", "view.zoom-in", "edit.delete", "group.leave"})
+            QVERIFY2(registry.actsOnGraph(id), id);
+        for (const char *id : {"app.quit", "edit.undo", "edit.redo", "panel.nodes", "view.focus-mode", "run.cancel", "nothing.here"})
+            QVERIFY2(!registry.actsOnGraph(id), id);
+    }
+
     void textFieldsOwnBareAndShiftKeys() {
         for (const char *key : {"Q", "?", "N", "Shift+A", "Shift+Return", "Backspace", "Delete", "Tab", "Ctrl+A",
                                 "Ctrl+C", "Ctrl+V", "Ctrl+X", "Ctrl+Z", "Ctrl+Y", "Ctrl+Shift+Z", "Shift+Z"})

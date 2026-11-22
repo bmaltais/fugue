@@ -107,6 +107,15 @@ public:
     Q_INVOKABLE QString ownerOf(const QString &key) const;
     // Runs the owner of the key. False when nothing owns it.
     Q_INVOKABLE bool triggerKey(const QString &key);
+    // The owner of a key press, from a key event's key and modifiers (Shift tried away too, as a shortcut matches "+"
+    // typed as Shift+=): what a view that has the focus asks before the window's shortcuts take the key (#228).
+    Q_INVOKABLE QString ownerOfPress(int key, int modifiers) const;
+    // True for a command that acts on the Graph (its document, selection or view): the commands of the `canvas`, group
+    // and compare contexts but the window's panels and bars, which share `canvas` (panel.*, the view.* bars and focus
+    // mode). Never one of `app` (quit, save, the document's undo, which is the region's too), `run` or `canvas-layers`.
+    // A Canvas view with the focus keeps these keys from the Graph behind it (Blender's rule: the keys are the focused
+    // editor's).
+    Q_INVOKABLE bool actsOnGraph(const QString &id) const;
 
     // `app` is always active. A ticket that owns a context turns it on and off (QML too: the Canvas view's layers
     // panel turns `canvas-layers` on while the pointer is over it, #226).

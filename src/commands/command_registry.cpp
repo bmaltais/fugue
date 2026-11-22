@@ -201,6 +201,32 @@ bool CommandRegistry::triggerKey(const QString &key) {
     return !owner.isEmpty() && run(owner);
 }
 
+QString CommandRegistry::ownerOfPress(int key, int modifiers) const {
+    const Qt::KeyboardModifiers mods = Qt::KeyboardModifiers(modifiers) & ~Qt::KeypadModifier;
+    const auto owner = [this, key](Qt::KeyboardModifiers m) {
+        return ownerOf(QKeySequence(QKeyCombination(m, Qt::Key(key))).toString(QKeySequence::PortableText));
+    };
+    const QString exact = owner(mods);
+    return exact.isEmpty() && (mods & Qt::ShiftModifier) ? owner(mods & ~Qt::ShiftModifier) : exact;
+}
+
+bool CommandRegistry::actsOnGraph(const QString &id) const {
+    const auto it = m_index.constFind(id);
+    if (it == m_index.constEnd())
+        return false;
+    // The window's own contexts are not the Graph's: `app` (quit, undo, save: the document's undo is the region's too),
+    // `run` and the layers panel's.
+    const QString &context = m_entries[*it].spec.context;
+    if (context == QLatin1String("app") || context == QLatin1String("run") || context == QLatin1String("canvas-layers"))
+        return false;
+    // The panels and bars share the `canvas` context and act on the window.
+    static const QStringList graphViews = {QStringLiteral("view.fit"), QStringLiteral("view.zoom-in"), QStringLiteral("view.zoom-out"),
+                                           QStringLiteral("view.toggle-links")};
+    if (id.startsWith(QLatin1String("panel.")) || (id.startsWith(QLatin1String("view.")) && !graphViews.contains(id)))
+        return false;
+    return true;
+}
+
 void CommandRegistry::setContextActive(const QString &context, bool active) {
     if (!kContexts.contains(context) || context == kContexts.first() || m_activeContexts.contains(context) == active)
         return;

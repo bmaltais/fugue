@@ -57,8 +57,9 @@ QList<Row> defaultRows() {
         {"group.enter", QT_TRANSLATE_NOOP("Command", "Enter the selected group"), {"Tab"}, {"Double-click the group's body"}, "group-selected", "Tab added"},
         {"group.leave", QT_TRANSLATE_NOOP("Command", "Leave the group"), {"Escape"}, {"The breadcrumb"}, "group", same},
         {"view.fit", QT_TRANSLATE_NOOP("Command", "Fit the view"), {".", "Home"}, {}, "canvas", "Home added"},
-        {"view.zoom-in", QT_TRANSLATE_NOOP("Command", "Zoom in"), {"Alt+=", "Ctrl+="}, {}, "canvas", "Ctrl added"},
-        {"view.zoom-out", QT_TRANSLATE_NOOP("Command", "Zoom out"), {"Alt+-", "Ctrl+-"}, {}, "canvas", "Ctrl added"},
+        // + and - as in every picture view (#228, docs/ui-ergonomics.md D5: one keymap), free in the registry.
+        {"view.zoom-in", QT_TRANSLATE_NOOP("Command", "Zoom in"), {"Alt+=", "Ctrl+=", "+"}, {}, "canvas", "Ctrl, + added"},
+        {"view.zoom-out", QT_TRANSLATE_NOOP("Command", "Zoom out"), {"Alt+-", "Ctrl+-", "-"}, {}, "canvas", "Ctrl, - added"},
         {"view.toggle-links", QT_TRANSLATE_NOOP("Command", "Hide or show links"), {"L"}, {}, "canvas", same},
         {"panel.nodes", QT_TRANSLATE_NOOP("Command", "Toggle the node library"), {"N"}, {}, "canvas", same},
         {"panel.workflows", QT_TRANSLATE_NOOP("Command", "Toggle the workflows panel"), {"W"}, {}, "canvas", same},

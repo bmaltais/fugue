@@ -279,7 +279,8 @@ Item {
     }
 
     // The arrow keys move the divider, 1% a press and 10% with Shift (img-comparison-slider's
-    // keyboard); Home and End put it at the ends.
+    // keyboard). Home is not the divider's: it fits the picture, as in every picture view and the
+    // Graph (docs/ui-ergonomics.md D5), so End is not either.
     activeFocusOnTab: interactive
     Keys.onPressed: event => {
         const step = (event.modifiers & Qt.ShiftModifier) ? 0.1 : 0.01
@@ -289,8 +290,6 @@ Item {
         const forward = mode === "slider" ? Qt.Key_Right : Qt.Key_Down
         if (event.key === back) setView({position: position - step})
         else if (event.key === forward) setView({position: position + step})
-        else if (event.key === Qt.Key_Home) setView({position: 0})
-        else if (event.key === Qt.Key_End) setView({position: 1})
         else return
         event.accepted = true
     }
