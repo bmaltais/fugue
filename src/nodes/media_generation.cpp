@@ -283,7 +283,8 @@ public:
 // tune and timing), Repaint redraws one stretch of the song and keeps the rest.
 class SongEditKernel : public ProviderKernel {
 public:
-    explicit SongEditKernel(bool repaint) : m_repaint(repaint) {}
+    enum class Mode { Remix, Repaint };
+    explicit SongEditKernel(Mode mode) : m_mode(mode) {}
 
     Requirement requirement(const NodeType &, const Values &inputs) const override {
         Requirement requirement;
@@ -308,7 +309,7 @@ public:
         const Value seed = context.input(QStringLiteral("seed"));
         if (!seed.isEmpty())
             params.insert(QStringLiteral("seed"), seed.json().toInteger());
-        if (m_repaint) {
+        if (m_mode == Mode::Repaint) {
             const double start = context.input(QStringLiteral("start")).number();
             // 0 for the end is the end of the song.
             const double end = context.input(QStringLiteral("end")).number();
@@ -342,7 +343,44 @@ public:
     }
 
 private:
-    bool m_repaint;
+    Mode m_mode;
+};
+
+// Describe Song: what the model hears in a song (ace-server's /understand): the description, the words, the tempo,
+// the key. Served by the music models, like the song nodes; the provider sends the song with one job and the answer is
+// text, so it feeds Remix Song (Song from a song), Enhance Prompt or Preview.
+class DescribeSongKernel : public ProviderKernel {
+public:
+    Requirement requirement(const NodeType &, const Values &inputs) const override {
+        Requirement requirement;
+        requirement.capability = kAudio;
+        requirement.model = inputs.value(QStringLiteral("model")).json().toObject();
+        return requirement;
+    }
+
+    Result<JobRequest> request(const NodeContext &context, const Selection &selection) override {
+        JobRequest request;
+        request.capability = kAudio;
+        request.model = selection.model.handle;
+        const MediaHandle source = context.input(QStringLiteral("audio")).media();
+        if (source.path().isEmpty() || source.duration() <= 0)
+            return makeInputError(QStringLiteral("media_unreadable"), QStringLiteral("audio"),
+                                  QStringLiteral("The song cannot be read."));
+        request.params.insert(QStringLiteral("task"), QStringLiteral("understand"));
+        request.inputs.insert(QStringLiteral("audio"), QJsonObject{{"path", source.path()}});
+        return request;
+    }
+
+    Result<Values> outputs(const NodeContext &, const Selection &selection, const JobResult &result) override {
+        const QJsonObject &heard = result.outputs;
+        return Values{{QStringLiteral("caption"), Value(heard.value(QStringLiteral("caption")).toString())},
+                      {QStringLiteral("lyrics"), Value(heard.value(QStringLiteral("lyrics")).toString())},
+                      {QStringLiteral("bpm"), Value(heard.value(QStringLiteral("bpm")).toDouble())},
+                      {QStringLiteral("key"), Value(heard.value(QStringLiteral("key")).toString())},
+                      {QStringLiteral("time_signature"), Value(heard.value(QStringLiteral("time_signature")).toString())},
+                      {QStringLiteral("language"), Value(heard.value(QStringLiteral("language")).toString())},
+                      {QStringLiteral("model"), usedModel(result.used, selection)}};
+    }
 };
 
 } // namespace
@@ -350,8 +388,9 @@ private:
 void addMediaGenerationKernels(Kernels &kernels) {
     kernels.add(QStringLiteral("fugue/generate-video"), std::make_shared<VideoKernel>());
     kernels.add(QStringLiteral("fugue/generate-song"), std::make_shared<SongKernel>());
-    kernels.add(QStringLiteral("fugue/remix-song"), std::make_shared<SongEditKernel>(false));
-    kernels.add(QStringLiteral("fugue/repaint-song"), std::make_shared<SongEditKernel>(true));
+    kernels.add(QStringLiteral("fugue/remix-song"), std::make_shared<SongEditKernel>(SongEditKernel::Mode::Remix));
+    kernels.add(QStringLiteral("fugue/repaint-song"), std::make_shared<SongEditKernel>(SongEditKernel::Mode::Repaint));
+    kernels.add(QStringLiteral("fugue/describe-song"), std::make_shared<DescribeSongKernel>());
 }
 
 } // namespace fugue::nodes

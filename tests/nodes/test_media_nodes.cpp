@@ -36,6 +36,7 @@ const QString kVideoNode = QStringLiteral("fugue/generate-video");
 const QString kSongNode = QStringLiteral("fugue/generate-song");
 const QString kRemixNode = QStringLiteral("fugue/remix-song");
 const QString kRepaintNode = QStringLiteral("fugue/repaint-song");
+const QString kDescribeSongNode = QStringLiteral("fugue/describe-song");
 
 bool ffmpeg(const QStringList &args) {
     QProcess process;
@@ -545,6 +546,28 @@ private slots:
         const Result<JobRequest> backwards = bench.request(kRepaintNode, {{"audio", song}, {"prompt", "x"}, {"start", 3.0}, {"end", 2.0}}, musicModel());
         QVERIFY(!backwards.ok());
         QCOMPARE(backwards.error().input, QStringLiteral("end"));
+    }
+
+    // Describe Song (#254): the song goes to the music model as an understand job; the answer is text.
+    void aDescribeSongAsksToUnderstandAndReturnsWhatWasHeard() {
+        Bench bench;
+        const Value song = bench.media(MediaType::Audio, makeAudio(bench.file("d.mp3"), 3));
+        const Result<JobRequest> job = bench.request(kDescribeSongNode, {{"audio", song}}, musicModel());
+        QVERIFY2(job.ok(), qPrintable(job.ok() ? QString() : job.error().message));
+        QCOMPARE(job->capability, QStringLiteral("audio.generate"));
+        QCOMPARE(job->params.value("task").toString(), QStringLiteral("understand"));
+        QCOMPARE(job->inputs.value("audio").toObject().value("path").toString(), song.media().path());
+        const Result<Values> out = bench.outputs(kDescribeSongNode, {}, musicModel(),
+                                                 JobResult{QJsonObject{{"caption", "a calm piano"}, {"lyrics", "[Verse]\nla"}, {"bpm", 84},
+                                                                       {"key", "C major"}, {"time_signature", "4"}, {"language", "en"}},
+                                                           QJsonObject{}});
+        QVERIFY2(out.ok(), qPrintable(out.ok() ? QString() : out.error().message));
+        QCOMPARE(out->value("caption").text(), QStringLiteral("a calm piano"));
+        QCOMPARE(out->value("lyrics").text(), QStringLiteral("[Verse]\nla"));
+        QCOMPARE(out->value("bpm").number(), 84.0);
+        QCOMPARE(out->value("key").text(), QStringLiteral("C major"));
+        QCOMPARE(out->value("time_signature").text(), QStringLiteral("4"));
+        QCOMPARE(out->value("language").text(), QStringLiteral("en"));
     }
 
     void aRemixComesBackAsAFileWithTheSeedUsed() {

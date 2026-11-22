@@ -20,6 +20,7 @@
     "crop",
     "crop-to-mask",
     "describe-image",
+    "describe-song",
     "edit-image",
     "empty-latent",
     "empty-video-latent",

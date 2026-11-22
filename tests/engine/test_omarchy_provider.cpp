@@ -1448,6 +1448,45 @@ private slots:
         QCOMPARE(result->used.value("seed").toInt(), 5);
     }
 
+    // Describe Song (#254): one /understand job (multipart with the song as `audio`), no /lm and no /synth; the answer
+    // is the first part, a JSON array of one request, read into caption, lyrics, tempo, key, time signature, language.
+    void aSongIsUnderstoodWithOneJobAndAnswersInText() {
+        Fixture fixture;
+        fixture.server.on("GET", "/health", [](const HttpRequest &) { return HttpResponse{200, "{\"status\":\"ok\"}"}; });
+        fixture.server.on("POST", "/understand", [](const HttpRequest &) { return HttpResponse{200, "{\"id\":\"5\"}"}; });
+        fixture.server.on("GET", "/job?id=5", [](const HttpRequest &) { return HttpResponse{200, "{\"status\":\"done\"}"}; });
+        const QJsonObject heard{{"caption", "a calm piano piece"}, {"lyrics", "[Verse]\nla la"}, {"bpm", 84}, {"keyscale", "C major"},
+                                {"timesignature", "4"}, {"vocal_language", "en"}, {"task_type", "text2music"}};
+        fixture.server.on("GET", "/job?id=5&result=1", [heard](const HttpRequest &) {
+            return HttpResponse{200,
+                                "--B3\r\nContent-Type: application/json\r\n\r\n" + QJsonDocument(QJsonArray{heard}).toJson(QJsonDocument::Compact) +
+                                    "\r\n--B3\r\nContent-Type: application/octet-stream\r\n\r\nLATENT\r\n--B3--\r\n",
+                                "multipart/mixed; boundary=B3"};
+        });
+        fixture.writeStatus(QJsonObject{{kMusicModel, row(kMusicModel, "music", "active", fixture.endpoint())}});
+        const QString source = fixture.writeInput("heard.mp3", "SOURCE-AUDIO-BYTES");
+        auto provider = fixture.provider();
+        auto request = fixture.request("audio.generate", {{"task", "understand"}}, QJsonObject{{"audio", QJsonObject{{"path", source}}}});
+        const QString id = await<QString>([&](auto reply) { provider->submit(request, reply); }).value();
+        JobStatus status;
+        QTRY_VERIFY((status = await<JobStatus>([&](auto reply) { provider->status(id, reply); }).value()).isTerminal());
+        QCOMPARE(status.state, QStringLiteral("done"));
+        QVERIFY(fixture.server.requestsTo("POST", "/lm").isEmpty());
+        QVERIFY(fixture.server.requestsTo("POST", "/synth").isEmpty());
+        const HttpRequest sent = fixture.server.requestsTo("POST", "/understand").first();
+        QVERIFY(sent.headers.value("content-type").startsWith("multipart/form-data; boundary="));
+        QVERIFY(sent.body.contains("name=\"audio\""));
+        QVERIFY(sent.body.contains("SOURCE-AUDIO-BYTES"));
+        const auto result = await<JobResult>([&](auto reply) { provider->result(id, reply); });
+        QVERIFY(result.ok());
+        QCOMPARE(result->outputs.value("caption").toString(), QStringLiteral("a calm piano piece"));
+        QCOMPARE(result->outputs.value("lyrics").toString(), QStringLiteral("[Verse]\nla la"));
+        QCOMPARE(result->outputs.value("bpm").toInt(), 84);
+        QCOMPARE(result->outputs.value("key").toString(), QStringLiteral("C major"));
+        QCOMPARE(result->outputs.value("time_signature").toString(), QStringLiteral("4"));
+        QCOMPARE(result->outputs.value("language").toString(), QStringLiteral("en"));
+    }
+
     // Quality (#258): lossless asks for a 24-bit WAV and saves audio.wav, mp3-320 asks for the mp3 at 320 kb/s; the
     // default sends no bitrate (the server's own 128) and still saves audio.mp3.
     void aSongIsSavedInTheQualityAskedFor_data() {

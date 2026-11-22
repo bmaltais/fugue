@@ -49,7 +49,7 @@ empty lyrics has no words to sing, so Remix and Repaint send the lyrics given, `
 | ref_audio | timbre / style reference | no | **Style reference** (an optional audio input, all three nodes; #259) |
 | adapter, adapter_scale (LoRA) | `--adapters` dir | no | **Adapter**, **Adapter strength** (advanced; #260) |
 | lm_cfg_scale, top_p, top_k, negative prompt | LM sampling | no | not exposed |
-| /understand | audio to caption, lyrics, metadata | no | issue (Describe Song) |
+| /understand | audio to caption, lyrics, metadata | no | **Describe Song** (#254) |
 
 Limits worth knowing: duration 10 to 600 s (the FSM clamps the LM's choice; 0 falls to 120 s); KV cache `--max-seq 8192`
 tokens bounds caption plus lyrics; `[Instrumental]` is the exact string the DiT was trained with for "no vocals"; lyric
@@ -138,3 +138,20 @@ on that server), so no adapter is offered, `fugue model list --type fugue/music-
 adapter is refused with the hint that the server lists none. **Unverified live: that an adapter file actually loads
 and changes a song**, and the exact shape of an entry of `adapters` in /props (the docs show `[]`; strings and
 `{name}` objects are both read).
+
+## Describe Song (#254)
+
+Source: ace-server.cpp `handle_understand` (multipart `request`, optional; `audio` or `src_latents`; the answer is
+multipart/mixed: a JSON array of one AceRequest, then the source's latents) and ARCHITECTURE.md ("ace-understand": VAE
+encode, FSQ tokenize, the LM reads the codes and answers with metadata and lyrics; temperature 0.3, no nucleus).
+Fugue: a node **Describe Song** (category Text, next to Describe Image) on `audio.generate` with `task` understand: the
+provider posts one form to `/understand` (the shared multipart builder, the part `audio`) and reads the first part into
+`caption`, `lyrics`, `bpm`, `key`, `time_signature`, `language`. No new capability (the same music rows serve it), and
+no seed input (the server picks the LM seed; the answer is cached by the song). A server without the LM, DiT and VAE
+answers 501, which the provider shows as its own message.
+
+Live check (gx10, 2026-11-22, `ace-step-1.5-turbo-acestep-cuda`, the 16 s sample of the Repaint template, 13 s in all):
+the node ran through `fugue run`. Caption: a good paragraph (indie-folk, lone acoustic guitar, breathy female vocal);
+bpm 86, key G major, time signature 4 plausible. **Lyrics and language are not trustworthy**: the model wrote Ukrainian
+verses with a repeated line and named the language `ru`, while its own caption says Spanish. So: use the caption and
+the metadata freely; treat the lyrics as a draft to read before they are sung (Preview, then edit).
