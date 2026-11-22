@@ -33,6 +33,8 @@
 #include "translator.h"
 #include "workflow/recent_files.h"
 #include "workflow/workflows.h"
+#include "workspace/area_layout_qml.h" // a QML singleton (AreaLayout): the module registers it from here
+#include "workspace/view_registry.h" // a QML type (ViewRegistry): likewise
 
 class QQmlEngine;
 

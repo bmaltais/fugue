@@ -50,6 +50,15 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 
 ## Decisions
 
+### 2026-11-22 the window's one area (#220, slice 0 of epic #217)
+
+- Control: none added or moved. The window's body is now an area tree of one area showing the Graph (`src/workspace/AreaNode.qml`, `objectName: "areas"`, not an item); the canvas (`canvas`) is that area's view, declared where it was. `src/workspace/AreaPlaceholder.qml` (`areaPlaceholder`, a line naming a view type this build does not have) is drawn only in a split tree, which the window cannot show yet.
+- Old: the canvas fills the window's body.
+- New: the same, item for item (`tests/workspace/data/default-window.txt`). No header, handle or menu.
+- Why: the container for areas and views comes first and changes nothing a person sees; the default window stays the simple one (epic #217: hobbyists and film teams, power on request).
+- Recorded for slice 1 (spec 12.16): a split's border handle is a press target of at least 24px across the border, drawn as a 1px hairline (Floor); the area header with the view menu is hidden while the window has one area (Posture: the canvas stays sovereign).
+- Rules met: none apply (no control). Floor is set ahead for the slice 1 handle.
+
 ### 2026-11-22 region picker (#213, epic #206)
 
 - Control: the **Pick region…** entry of the `canvas` widget's menu (`InputWidget.qml`, `canvasEntries`; Canvas Region only) and its large view `src/canvas/RegionDialog.qml` (`regionDialog`; the viewer `regionView` with the Crop window's `cropFrame` and handles, `regionContext` (the dashed outer box), `regionRatio-<id>`, `regionRatioTurn`, `regionSnap`, `regionInfo`, `regionNote`, `regionError`, `regionField-<x|y|width|height>`, `regionCancel`, `regionApply`).

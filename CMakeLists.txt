@@ -46,7 +46,7 @@ qt_add_resources(fugue_engine fugue_prompts PREFIX /fugue/prompts FILES ${fugue_
 file(GLOB fugue_sources CONFIGURE_DEPENDS src/*.cpp src/*.h src/canvas/*.cpp src/canvas/*.h
      src/commands/*.cpp src/commands/*.h src/menu/*.cpp src/menu/*.h src/search/*.cpp src/search/*.h
      src/workflow/*.cpp src/workflow/*.h src/run/*.cpp src/run/*.h src/settings/*.cpp src/settings/*.h
-     src/panels/*.cpp src/panels/*.h src/media/*.cpp src/media/*.h)
+     src/panels/*.cpp src/panels/*.h src/media/*.cpp src/media/*.h src/workspace/*.cpp src/workspace/*.h)
 list(REMOVE_ITEM fugue_sources ${CMAKE_SOURCE_DIR}/src/main.cpp)
 add_library(fugue_core STATIC ${fugue_sources})
 target_include_directories(fugue_core PUBLIC src)
@@ -102,6 +102,8 @@ fugue_add_qml(fugue_run_qml src/run /run)
 fugue_add_qml(fugue_panels_qml src/panels /panels)
 # The media browser (#133): a standalone viewer of a list of images, videos and sounds.
 fugue_add_qml(fugue_media_qml src/media /media)
+# The window's areas and their views (#217): the area tree drawn (AreaNode.qml).
+fugue_add_qml(fugue_workspace_qml src/workspace /workspace)
 
 # The command line (spec 13): the same `fugue` binary, but it needs nothing
 # beyond the engine, so it is its own library with no Gui, Quick or QML. main.cpp
@@ -243,6 +245,17 @@ foreach(test_source ${fugue_panels_tests})
   get_filename_component(test_name ${test_source} NAME_WE)
   add_executable(${test_name} ${test_source} tests/test_environment.cpp src/resources.qrc)
   target_link_libraries(${test_name} PRIVATE fugue_core fugue_nodes Qt6::Test)
+  add_test(NAME ${test_name} COMMAND ${test_name})
+  set_tests_properties(${test_name} PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+endforeach()
+
+# Workspace tests: the area tree and view registry alone, the area tree drawn, and the window's one area (#217).
+file(GLOB fugue_workspace_tests CONFIGURE_DEPENDS tests/workspace/*.cpp)
+foreach(test_source ${fugue_workspace_tests})
+  get_filename_component(test_name ${test_source} NAME_WE)
+  add_executable(${test_name} ${test_source} tests/test_environment.cpp src/resources.qrc)
+  target_link_libraries(${test_name} PRIVATE fugue_core fugue_nodes Qt6::Test)
+  target_compile_definitions(${test_name} PRIVATE FUGUE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
   add_test(NAME ${test_name} COMMAND ${test_name})
   set_tests_properties(${test_name} PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
 endforeach()

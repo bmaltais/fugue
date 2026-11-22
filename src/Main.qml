@@ -11,6 +11,7 @@ import "run"
 import "search"
 import "settings"
 import "workflow"
+import "workspace"
 
 ApplicationWindow {
     id: win
@@ -225,6 +226,17 @@ ApplicationWindow {
 
     // The command registry's shortcuts, the `?` overlay and the quit question.
     CommandUi { anchors.fill: parent }
+
+    // The window's body is an area tree (#217, spec 12.16) of one area, id 1, showing the Graph: the canvas
+    // above, declared in the column as before and adopted as the area's view. An AreaNode is not an item and,
+    // with no host, makes and moves nothing, so the window has exactly the items it had (test_area_window). A
+    // split tree gets a host for the body from slice 1.
+    AreaNode {
+        id: areas
+        objectName: "areas"
+        node: AreaLayout.defaultTree().root
+        views: ({"1": fugueCanvas})
+    }
 
     // The settings panel (#51), made the first time app.settings (Ctrl+,) asks for it.
     Connections {

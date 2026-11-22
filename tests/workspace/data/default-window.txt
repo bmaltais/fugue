@@ -1,0 +1,57 @@
+# The default window (a blank workflow, as tests/canvas/canvas_app.h makes the window), measured on main at
+# 1ba1e815 before areas (#220): its item count, then each item name and how many items carry it.
+# tests/workspace/test_area_window.cpp compares the window with this. Changing it means the default window
+# changed: say why in the commit (epic #217: the default window stays as simple as it is).
+items 193
+ApplicationWindow 1
+ApplicationWindowContentControl 1
+autoHide 1
+autoHideBar 1
+autoHideEdge 1
+autoHideHandle 1
+breadcrumb 1
+canvas 1
+canvasInput 1
+closeTab-0 1
+commandUi 1
+contextMenu 1
+crumb0 1
+cutHandle 1
+draggedLink 1
+dropChooser 1
+groupNotice 1
+keymapNotice 1
+label 2
+lens 1
+lensWorld 1
+linkProblem 1
+menuBar 1
+menuButton 1
+menuTitle-0 1
+menuTitle-1 1
+menuTitle-2 1
+menuTitle-3 1
+menuTitle-4 1
+menuTitle-5 1
+newTab 1
+nodes 1
+projectChipLoader 1
+runPill 1
+runningDots 1
+shadows 1
+sideTab-nodes 1
+sideTab-settings 1
+sideTab-templates 1
+sideTab-workflows 1
+sideTabActionsRule 1
+sideTabStrip 1
+tab-0 1
+tabColorBar 1
+tabTitle 1
+warningsTip 1
+windowDropArea 1
+wires 1
+workflowNotice 1
+workflowTabs 1
+world 1
+zoomPill 1
