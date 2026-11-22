@@ -702,7 +702,8 @@ Result<QString> CanvasStore::storeSelection(const MaskPaint &selection) {
 Result<MaskPaint> CanvasStore::selection(const QString &hash) const {
     QByteArray bytes;
     if (!isSha256(hash) || !readFile(selectionPath(hash), &bytes))
-        return notFound(QStringLiteral("stored selection %1").arg(hash));
+        return makeError(QStringLiteral("canvas_not_found"), QStringLiteral("There is no stored selection %1.").arg(hash.left(19)),
+                         QStringLiteral("A selection belongs to the project (or the Default) it was made in: paint it again with Quick Mask in the Canvas view and press Use selection, or leave Selection empty."));
     const QJsonObject json = QJsonDocument::fromJson(bytes).object();
     if (canonicalHash(json) != hash || json.value("format").toInt() != storeFormat)
         return corrupt(QStringLiteral("the selection %1 is not the content it is named for").arg(hash));

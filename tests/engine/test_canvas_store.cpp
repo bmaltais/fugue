@@ -594,6 +594,9 @@ private slots:
         const Result<MaskPaint> missing = s.selection("sha256:" + QString(64, 'a'));
         QVERIFY(!missing.ok());
         QCOMPARE(missing.error().code, QString("canvas_not_found"));
+        // The hint is about selections, not canvases: where it was made, and what to do instead.
+        QVERIFY2(missing.error().hint.contains("Quick Mask"), qPrintable(missing.error().hint));
+        QVERIFY(!missing.error().hint.contains("fugue canvas new"));
         QVERIFY(!s.storeSelection(MaskPaint(8, 8, 4)).ok());
     }
 };
