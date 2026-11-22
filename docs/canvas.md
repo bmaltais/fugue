@@ -42,8 +42,12 @@ the window, see below):
   change, and a stitch. Scale and Cap set the size it is redrawn at (a small region is drawn larger,
   up to the megapixel cap); Feather softens the mask's edge outward. Its Revision is `head` unless you
   give a hash.
-- **Canvas Write** puts a picture on the canvas as a new layer, blended in through the mask (Blend
-  pixels soften the seam). Wire Region's canvas, stitch and your generated picture into it.
+- **Canvas Write** puts a picture on the canvas as a new layer, blended in through a layer mask
+  (Blend pixels soften the seam): the layer holds the whole redrawn picture and the mask decides how
+  much of it shows, so you can turn the mask off later to see all of it. **Bake the blend into the
+  layer** (an advanced input) puts the blend into the layer itself instead, with no mask. The layer is
+  named after the prompt that made it (or Fill 1, Fill 2, ... when there is none), unless you give
+  it a name. Wire Region's canvas, stitch and your generated picture into it.
 
 A fill is Canvas Region, then a node that redraws the picture (Generate Image or Edit Image, fed the
 region's picture and mask), then Canvas Write, which takes Region's canvas and stitch and the redrawn
@@ -58,7 +62,9 @@ warning `canvas_head_moved`, and the head stays as the other change left it. The
 head as it has become. To keep reading one revision (to try several fills of the same picture), give
 Region that revision's hash, or freeze it.
 
-Region's picture keeps the canvas's transparency. A stitch from Region also goes to Stitch.
+Region's picture keeps the canvas's transparency. A stitch from Region also goes to Stitch. Region
+reads the canvas as it looks (the visible layers, with their opacity, blend modes and masks); its
+**Layer** input (advanced) reads one layer by name instead, its own pixels.
 
 In the window, Canvas Region's **Canvas** is a drop-down of the canvases of the folder you are working in
 (the Default's, or the project's own: a canvas belongs to the one it was made in). Each row has the name,

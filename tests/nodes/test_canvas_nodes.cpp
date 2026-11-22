@@ -7,6 +7,7 @@
 // cache hit which writes nothing twice, and that a Write moves the head by compare-and-swap.
 
 #include <QDir>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -102,8 +103,10 @@ public:
         c.registry = &registry;
         return c;
     }
-    Result<Values> run(const QString &id, const Values &inputs, const QString &work) {
-        return kernels.node(id)->run(context(id, inputs, work));
+    Result<Values> run(const QString &id, const Values &inputs, const QString &work, const QJsonObject &document = {}) {
+        NodeContext c = context(id, inputs, work);
+        c.document = document;
+        return kernels.node(id)->run(c);
     }
     // Canvas Region on the head of `id`, the revision named in full as a compile does.
     Result<Values> region(const QString &id, Values inputs = {}, const QString &work = "region") {
@@ -210,6 +213,28 @@ private slots:
         const Pixels layer = placedLayer(4, 4, {0, 0, 4, 4}, redrawn, Pixels(4, 4, 1, 1.0f), 0);
         QCOMPARE(layer.at(1, 0, 3), 0.5f);
         QCOMPARE(layer.at(1, 1, 3), 1.0f);
+    }
+
+
+    // The layer and its mask kept apart (#226) composite to the baked layer, within rounding.
+    void aLayerWithItsMaskCompositesToTheBakedLayer() {
+        const CropBox box{10, 10, 20, 10};
+        Pixels mask(40, 30, 1);
+        for (int y = 13; y < 17; ++y)
+            for (int x = 15; x < 25; ++x)
+                mask.at(x, y, 0) = 1;
+        Pixels redrawn(20, 10, 4, 0.6f);
+        for (int x = 0; x < 20; ++x)
+            redrawn.at(x, 2, 3) = 0.5f;
+        const Pixels baked = placedLayer(40, 30, box, redrawn, mask, 3);
+        const PlacedLayer apart = placedLayerWithMask(40, 30, box, redrawn, mask, 3);
+        QCOMPARE(apart.mask.channels, 1);
+        QCOMPARE(apart.layer.at(10, 10, 3), 0.6f);   // the picture whole, where the mask hides it
+        QCOMPARE(apart.mask.at(10, 10, 0), 0.0f);
+        QCOMPARE(apart.layer.at(5, 5, 3), 0.0f);     // nothing outside the box
+        for (int y = 0; y < 30; ++y)
+            for (int x = 0; x < 40; ++x)
+                QVERIFY(std::abs(apart.layer.at(x, y, 3) * apart.mask.at(x, y, 0) - baked.at(x, y, 3)) < 0.5f / 255.0f + 1e-6f); // the baked one drops alpha under half a byte
     }
 
     // ---- Canvas Region ----
@@ -484,6 +509,95 @@ private slots:
         QVERIFY2(edge > 30 && edge < 255, qPrintable(QString::number(edge))); // soft, outward of the mask
         QCOMPARE(pixel(id, head, 70, 60, 1), 30);   // far from the mask the red block shows: the stitch's own mask is not used
         QCOMPARE(pixel(id, head, 70, 60, 0), 200);
+    }
+
+
+    // #226: the run's layer arrives with its blend as a layer mask; Bake gives the old layer, the same picture.
+    void aWritesLayerHasTheBlendAsItsMaskAndBakeIsTheSamePicture() {
+        Bench bench;
+        const QString id = makeCanvas();
+        const QString base = headOf(id);
+        const Result<Values> r = bench.region(id, {{"x", Value(60)}, {"y", Value(50)}, {"width", Value(100)}, {"height", Value(80)}, {"padding", Value(30)}});
+        const Result<Values> masked = writeGreen(bench, r, {{"blend", Value(12)}, {"candidate", Value(true)}}, "masked");
+        const Result<Values> baked = writeGreen(bench, r, {{"blend", Value(12)}, {"candidate", Value(true)}, {"bake", Value(true)}}, "baked");
+        QVERIFY2(masked.ok() && baked.ok(), qPrintable(codeOf(masked) + codeOf(baked)));
+        const QString a = canvas::canvasHandleFrom(masked->value("canvas").json())->revision;
+        const QString b = canvas::canvasHandleFrom(baked->value("canvas").json())->revision;
+        const PaintDocument withMask = CanvasStore::forSession().load(id, a).value();
+        const PaintDocument withBake = CanvasStore::forSession().load(id, b).value();
+        const mask::LayerInfo top = withMask.layer(1);
+        QVERIFY(top.hasMask && top.maskEnabled);
+        QVERIFY(!withBake.layer(1).hasMask);
+        // The layer holds the whole redrawn picture (padding included); the mask hides the padding.
+        QCOMPARE(int(withMask.pixels(top.id)->rgbaAt(35, 25).a), 255);
+        QCOMPARE(int(withMask.maskPixels(top.id)->at(35, 25)), 0);
+        const std::vector<uint8_t> p = withMask.flatten().pixels(), q = withBake.flatten().pixels();
+        int worst = 0;
+        for (size_t i = 0; i < p.size(); ++i)
+            worst = std::max(worst, std::abs(int(p[i]) - int(q[i])));
+        QVERIFY2(worst <= 1, qPrintable(QString::number(worst)));
+        // With its mask off, the layer shows whole: the redrawn picture over the padding too.
+        PaintDocument off = withMask.scaledTo(kW, kH);
+        off.setMaskEnabled(off.layer(1).id, false);
+        QCOMPARE(int(off.flatten().rgbaAt(35, 25).g), 255);
+        QCOMPARE(CanvasStore::forSession().revision(id, a)->parent, base);
+    }
+
+    // #226: Fill (the default) names the layer from the prompt upstream, else Fill 1, Fill 2; its origin is kept.
+    void aWritesLayerIsNamedFromThePromptOrNumberedAndKnowsWhereItCameFrom() {
+        Bench bench;
+        const QString id = makeCanvas();
+        const Result<Values> r = bench.region(id, {{"x", Value(60)}, {"y", Value(50)}, {"width", Value(100)}, {"height", Value(80)}});
+        QVERIFY(writeGreen(bench, r, {}, "first").ok());
+        QCOMPARE(CanvasStore::forSession().load(id, headOf(id))->layer(1).name, QString("Fill 1"));
+        const Result<Values> again = bench.region(id, {{"x", Value(60)}, {"y", Value(50)}, {"width", Value(100)}, {"height", Value(80)}}, "region2");
+        QVERIFY(writeGreen(bench, again, {}, "second").ok());
+        const PaintDocument two = CanvasStore::forSession().load(id, headOf(id)).value();
+        QCOMPARE(two.layer(2).name, QString("Fill 2"));
+        QCOMPARE(two.layer(2).producer, QString("canvas-write:second"));
+        QVERIFY(QDateTime::fromString(two.layer(2).created, Qt::ISODateWithMs).isValid());
+
+        // The workflow as run: write <- decode <- sampler <- encode (prompt).
+        const QJsonObject document{{"graph", QJsonObject{{"nodes", QJsonObject{
+            {"encode", QJsonObject{{"type", "fugue/text-encode"}, {"inputs", QJsonObject{{"prompt", "  A potted   fern on the floor, in the same warm light of the evening  "}}}}},
+            {"sampler", QJsonObject{{"type", "x"}, {"inputs", QJsonObject{{"conditioning", QJsonObject{{"from", "encode.conditioning"}}}}}}},
+            {"decode", QJsonObject{{"type", "x"}, {"inputs", QJsonObject{{"samples", QJsonArray{QJsonObject{{"from", "sampler.latent"}}}}}}}},
+            {"third", QJsonObject{{"type", "fugue/canvas-write"}, {"inputs", QJsonObject{{"image", QJsonObject{{"from", "decode.image"}}}}}}}}}}}};
+        const Result<Values> third = bench.region(id, {{"x", Value(60)}, {"y", Value(50)}, {"width", Value(100)}, {"height", Value(80)}}, "region3");
+        Result<Values> green = imageOutput(solid(third->value("width").number(), third->value("height").number(), 0, 1, 0));
+        const Result<Values> w = bench.run("fugue/canvas-write", {{"canvas", third->value("canvas")}, {"image", green->value("image")}, {"stitch", third->value("stitch")}},
+                                           "third", document);
+        QVERIFY2(w.ok(), qPrintable(codeOf(w)));
+        QCOMPARE(CanvasStore::forSession().load(id, headOf(id))->layer(3).name, QString("A potted fern on the floor, in the same…"));
+        // A name given is kept as it is.
+        const Result<Values> fourth = bench.region(id, {}, "region4");
+        QVERIFY(writeGreen(bench, fourth, {{"name", Value("Sky")}}, "fourth").ok());
+        QCOMPARE(CanvasStore::forSession().load(id, headOf(id))->layer(4).name, QString("Sky"));
+    }
+
+    // #226: Region reads the composite (visible layers) by default, or one layer by name.
+    void aRegionReadsTheCompositeOrOneNamedLayer() {
+        Bench bench;
+        const QString id = makeCanvas();
+        auto doc = CanvasStore::forSession().load(id, headOf(id)).value();
+        mask::MaskPaint green(kW, kH, 4);
+        green.fill(Rgba{0, 255, 0, 255});
+        doc.loadLayer(LayerKind::Paint, "Hidden green", false, 1, green);
+        QVERIFY(CanvasStore::forSession().commit(id, doc, headOf(id), "test")->move.moved);
+        const Values box{{"x", Value(60)}, {"y", Value(50)}, {"width", Value(16)}, {"height", Value(16)}, {"padding", Value(0)}, {"multiple", Value(1)}};
+        const Result<Values> composite = bench.region(id, box, "composite");
+        QVERIFY2(composite.ok(), qPrintable(codeOf(composite)));
+        QCOMPARE(pixelsOf(composite->value("image"), "image")->at(4, 4, 0), 200.0f / 255.0f); // the red block: the hidden layer is not read
+        Values named = box;
+        named.insert("layer", Value("Hidden green"));
+        const Result<Values> layer = bench.region(id, named, "named");
+        QVERIFY2(layer.ok(), qPrintable(codeOf(layer)));
+        QCOMPARE(pixelsOf(layer->value("image"), "image")->at(4, 4, 1), 1.0f);
+        QCOMPARE(pixelsOf(layer->value("image"), "image")->at(4, 4, 0), 0.0f);
+        named.insert("layer", Value("Nope"));
+        const Result<Values> missing = bench.region(id, named, "missing");
+        QCOMPARE(codeOf(missing), QString("input_invalid"));
+        QVERIFY(missing.errors().first().hint.contains("Hidden green"));
     }
 
     void aPictureOfAnotherShapeIsRefusedAndNothingIsWritten() {

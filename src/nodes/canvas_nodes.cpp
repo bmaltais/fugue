@@ -1,6 +1,8 @@
 #include "nodes/canvas_nodes.h"
 
+#include <QJsonArray>
 #include <QJsonObject>
+#include <QRegularExpression>
 
 #include <algorithm>
 #include <cmath>
@@ -8,6 +10,7 @@
 
 #include "engine/canvas_handle.h"
 #include "engine/canvas_store.h"
+#include "engine/clock.h"
 #include "engine/hash.h"
 #include "nodes/canvas_region_ops.h"
 #include "nodes/kernels.h"
@@ -40,6 +43,79 @@ Result<int> intInput(const NodeContext &context, const char *name, int lowest, i
         return makeInputError(QStringLiteral("value_out_of_range"), input,
                               QStringLiteral("%1 is outside %2 to %3.").arg(value).arg(lowest).arg(highest));
     return value;
+}
+
+// ---- the name of a Write's layer (#226) ----------------------------------------------------------
+
+// The nodes map of the graph a node's path id lives in ("a/b": inside group a), or empty.
+QJsonObject graphOf(const QJsonObject &document, const QString &path, QString *own) {
+    QJsonObject nodes = document.value("graph").toObject().value("nodes").toObject();
+    const QStringList parts = path.split(QLatin1Char('/'));
+    for (int i = 0; i + 1 < parts.size(); ++i)
+        nodes = nodes.value(parts[i]).toObject().value("graph").toObject().value("nodes").toObject();
+    *own = parts.last();
+    return nodes;
+}
+
+// The nodes a value links from ({"from": "node.port"}, or a list of them).
+void linkedNodes(const QJsonValue &value, QStringList *out) {
+    if (value.isArray()) {
+        for (const QJsonValue &item : value.toArray())
+            linkedNodes(item, out);
+        return;
+    }
+    const QString from = value.toObject().value("from").toString();
+    if (!from.isEmpty())
+        *out << from.section(QLatin1Char('.'), 0, 0);
+}
+
+// The prompt nearest upstream of the node: the first `prompt` text met walking its links back
+// (the Text Encode that made the picture), simplified to one line. Empty when there is none.
+QString upstreamPrompt(const QJsonObject &document, const QString &node) {
+    QString own;
+    const QJsonObject nodes = graphOf(document, node, &own);
+    QStringList queue{own}, seen{own};
+    while (!queue.isEmpty()) {
+        const QJsonObject inputs = nodes.value(queue.takeFirst()).toObject().value("inputs").toObject();
+        const QJsonValue prompt = inputs.value("prompt");
+        if (prompt.isString() && !prompt.toString().trimmed().isEmpty())
+            return prompt.toString().simplified();
+        QStringList next;
+        for (auto it = inputs.begin(); it != inputs.end(); ++it)
+            linkedNodes(it.value(), &next);
+        for (const QString &id : std::as_const(next))
+            if (!seen.contains(id)) {
+                seen << id;
+                queue << id;
+            }
+    }
+    return {};
+}
+
+// A prompt cut to a layer name: at most 40 characters, at a word when it can, with an ellipsis.
+QString promptName(const QString &prompt) {
+    constexpr int most = 40;
+    if (prompt.size() <= most)
+        return prompt;
+    QString cut = prompt.left(most);
+    const qsizetype space = cut.lastIndexOf(QLatin1Char(' '));
+    if (space >= most / 2)
+        cut = cut.left(space);
+    while (!cut.isEmpty() && QStringLiteral(" ,.;:").contains(cut.back()))
+        cut.chop(1);
+    return cut + QChar(0x2026);
+}
+
+// "Fill n": one more than the largest n of a layer named "Fill n" ("Fill" alone is 1).
+QString nextFillName(const PaintDocument &document) {
+    static const QRegularExpression pattern(QStringLiteral("^Fill(?: ([0-9]{1,6}))?$"));
+    int highest = 0;
+    for (int i = 0; i < document.layerCount(); ++i) {
+        const QRegularExpressionMatch match = pattern.match(document.layer(i).name);
+        if (match.hasMatch())
+            highest = std::max(highest, match.captured(1).isEmpty() ? 1 : match.captured(1).toInt());
+    }
+    return QStringLiteral("Fill %1").arg(highest + 1);
 }
 
 Result<PaintDocument> openRevision(const CanvasHandle &handle) {
@@ -85,7 +161,30 @@ public:
         Result<PaintDocument> opened = openRevision(source.value());
         if (!opened)
             return Result<Values>(opened.errors());
-        const Pixels composite = layerToPixels(opened->flatten());
+        // The composite (the visible layers, as the Canvas view shows them), or one layer's own pixels.
+        const QString layerName = context.input(QStringLiteral("layer")).text().trimmed();
+        Pixels composite;
+        if (layerName.isEmpty()) {
+            composite = layerToPixels(opened->flatten());
+        } else {
+            const mask::MaskPaint *found = nullptr;
+            QStringList names;
+            for (int i = opened->layerCount() - 1; i >= 0 && !found; --i) { // the top one of that name
+                const mask::LayerInfo info = opened->layer(i);
+                names << info.name;
+                if (info.name == layerName && info.kind != LayerKind::Picture)
+                    found = opened->pixels(info.id);
+            }
+            if (!found)
+                return makeInputError(QStringLiteral("input_invalid"), QStringLiteral("layer"),
+                                      QStringLiteral("The canvas has no layer named \"%1\" at this revision.").arg(layerName.left(60)),
+                                      names.isEmpty() ? QStringLiteral("Leave Layer empty to read the composite.")
+                                                      : QStringLiteral("Its layers are: %1. Leave Layer empty to read the composite.").arg(names.join(QStringLiteral(", ")).left(300)));
+            if (found->channels() != 4) // a mask layer is not a picture
+                return makeInputError(QStringLiteral("input_invalid"), QStringLiteral("layer"),
+                                      QStringLiteral("\"%1\" is a mask layer, not a picture.").arg(layerName.left(60)));
+            composite = layerToPixels(*found);
+        }
 
         Errors warnings;
         std::optional<CropBox> bounds;
@@ -162,9 +261,11 @@ public:
         const Result<Pixels> redrawn = pixelsOf(context.input(QStringLiteral("image")), QStringLiteral("image"));
         if (!redrawn)
             return Result<Values>(redrawn.errors());
+        // "Fill" (the default) or nothing: named from the prompt upstream, else "Fill n" (below).
         QString name = context.input(QStringLiteral("name")).text().trimmed();
-        if (name.isEmpty())
-            name = QStringLiteral("Fill");
+        const bool autoName = name.isEmpty() || name == QLatin1String("Fill");
+        if (autoName)
+            name = promptName(upstreamPrompt(context.document, context.node));
 
         Result<PaintDocument> opened = openRevision(base.value());
         if (!opened)
@@ -201,8 +302,24 @@ public:
                                       .arg(redrawn->width).arg(redrawn->height).arg(shape->width).arg(shape->height),
                                   QStringLiteral("Keep the Sampler on the region's latent, so the picture keeps its shape."));
 
-        const Pixels layer = placedLayer(width, height, box, redrawn.value(), mask, blend.value());
-        document.loadLayer(LayerKind::Paint, name, true, 1, pixelsToLayer(layer));
+        if (name.isEmpty())
+            name = nextFillName(document);
+        mask::LayerInfo info;
+        info.name = name;
+        info.producer = QStringLiteral("canvas-write:") + context.node;
+        info.created = isoTime(utcNow());
+        // The redrawn picture whole, with the blend as its layer mask (#226), or baked into its alpha as before.
+        if (context.input(QStringLiteral("bake")).json().toBool()) {
+            document.loadLayer(info, pixelsToLayer(placedLayer(width, height, box, redrawn.value(), mask, blend.value())));
+        } else {
+            const PlacedLayer placed = placedLayerWithMask(width, height, box, redrawn.value(), mask, blend.value());
+            std::vector<uint8_t> gray(placed.mask.data.size());
+            for (size_t i = 0; i < gray.size(); ++i)
+                gray[i] = uint8_t(std::lround(std::clamp(placed.mask.data[i], 0.0f, 1.0f) * 255.0f));
+            const mask::MaskPaint layerMask(width, height, gray, 1);
+            info.hasMask = true;
+            document.loadLayer(info, pixelsToLayer(placed.layer), &layerMask);
+        }
 
         // A candidate revision first, then the head, by compare-and-swap from the revision this
         // work started at (the store's rule, 14.5). Losing the race is a result, not a failure.

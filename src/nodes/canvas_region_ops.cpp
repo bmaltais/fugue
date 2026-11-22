@@ -70,4 +70,19 @@ Pixels placedLayer(int canvasWidth, int canvasHeight, const CropBox &box, const 
     return layer;
 }
 
+PlacedLayer placedLayerWithMask(int canvasWidth, int canvasHeight, const CropBox &box, const Pixels &redrawn, const Pixels &mask, int blend) {
+    const bool same = redrawn.width == box.width && redrawn.height == box.height;
+    const Pixels fitted = same ? redrawn : resample(redrawn, box.width, box.height, ResizeMethod::Lanczos);
+    const Pixels feathered = featherMask(mask, std::max(0, blend), FeatherDirection::Outward);
+    PlacedLayer out{Pixels(canvasWidth, canvasHeight, 4), Pixels(canvasWidth, canvasHeight, 1)};
+    for (int y = 0; y < box.height; ++y)
+        for (int x = 0; x < box.width; ++x) {
+            for (int c = 0; c < 3; ++c)
+                out.layer.at(box.x + x, box.y + y, c) = fitted.at(x, y, std::min(c, fitted.channels - 1));
+            out.layer.at(box.x + x, box.y + y, 3) = fitted.channels == 4 ? std::clamp(fitted.at(x, y, 3), 0.0f, 1.0f) : 1.0f;
+            out.mask.at(box.x + x, box.y + y, 0) = std::clamp(feathered.at(box.x + x, box.y + y, 0), 0.0f, 1.0f);
+        }
+    return out;
+}
+
 } // namespace fugue::nodes

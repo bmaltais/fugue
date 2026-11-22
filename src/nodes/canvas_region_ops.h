@@ -30,4 +30,15 @@ CropSize regionSize(const CropBox &box, double scale, double capMegapixels, int 
 // 0 too, so an untouched tile costs nothing in the store.
 Pixels placedLayer(int canvasWidth, int canvasHeight, const CropBox &box, const Pixels &redrawn, const Pixels &mask, int blend);
 
+// The same placement kept apart as a layer and its layer mask (#226, Photoshop's Generative Fill):
+// `layer` is the redrawn picture resized to the box with its own alpha (1 without one), whole, empty
+// outside the box; `mask` is one channel, the picture's size, `mask` feathered outward by `blend`
+// inside the box and 0 outside it. Their composite (alpha times mask) is placedLayer's within
+// rounding, and the mask can later be turned off or painted to show more of the redrawn picture.
+struct PlacedLayer {
+    Pixels layer; // RGBA
+    Pixels mask;  // one channel
+};
+PlacedLayer placedLayerWithMask(int canvasWidth, int canvasHeight, const CropBox &box, const Pixels &redrawn, const Pixels &mask, int blend);
+
 } // namespace fugue::nodes

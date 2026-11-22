@@ -1,7 +1,7 @@
 {
   "manifest": 1,
   "id": "fugue/canvas-region",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "Canvas Region",
   "description": "Take a region of a canvas to work on: the picture there with room around it, the mask of the part to change, and a stitch that remembers where it came from. The region is a rectangle, or the bounds of a mask you connect, grown by Padding, and redrawn at the Scale you give within the megapixel cap. The canvas is read at one revision: head is named once when the workflow is compiled, so a run is repeatable and a re-run of the same revision is a cache hit. Give the stitch to Canvas Write to put the result back as a new layer, or to Stitch.",
   "category": "Image/Canvas",
@@ -12,6 +12,8 @@
      "description": "The canvas's id, as `fugue canvas new` prints it (canvas-0123456789ab). The window picks it from this folder's canvases, or makes one (New canvas, Import picture); a canvas belongs to the Default or the project it was made in."},
     {"name": "revision", "type": "text", "label": "Revision", "default": "head", "widget": "line", "advanced": true,
      "description": "head, or a revision's hash (or its first 8 digits or more). head is replaced by the revision it is at when the workflow is compiled."},
+    {"name": "layer", "type": "text", "label": "Layer", "default": "", "widget": "line", "advanced": true,
+     "description": "Empty reads the canvas as it looks: the visible layers with their opacity, blend modes and layer masks. A layer's name reads that layer alone, its own pixels (the top one of that name; not its opacity, blend or mask)."},
     {"name": "mask", "type": "image", "role": "mask", "label": "Mask", "optional": true,
      "description": "The part to change, at the canvas's size or stretched to it. Without one, the rectangle below."},
     {"name": "x", "type": "number", "label": "X", "default": 0, "min": 0, "max": 16384, "step": 1, "integer": true,
