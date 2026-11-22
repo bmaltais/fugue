@@ -112,6 +112,7 @@ This is a test release and the packages are unsigned.
 - [docs/nodes](docs/nodes/README.md): writing nodes and packs.
 - [docs/GLOSSARY.md](docs/GLOSSARY.md): the vocabulary.
 - [docs/ui-ergonomics.md](docs/ui-ergonomics.md): rules window UI follows.
+- Research notes behind the big epics: [mesh](docs/mesh-research.md), [private mode](docs/private-mode-research.md), [canvas](docs/canvas-research.md), [workspaces](docs/workspaces-research.md).
 - [docs/recording-screenshots.md](docs/recording-screenshots.md): how the pictures above are made again.
 - Work is tracked in the [issues](https://github.com/bmaltais/fugue/issues) by milestone.
 
