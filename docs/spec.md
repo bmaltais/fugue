@@ -2055,7 +2055,7 @@ list`, and copied out by opening one or by `fugue workflow new <file> --template
   server on this machine serves) and `server`, "Shared by <host>" (a model a paired host serves
   through the omarchy provider, [8.7](#87-shipped-providers)); a template whose models are in
   both places shows both. A model in neither place is the existing "Models missing" line and
-  Download offer ([11.9](#119-missing-models-and-downloads)). A host that lists a model but is not answering is shown
+  Download offer (#85, #89). A host that lists a model but is not answering is shown
   dimmed with "Host offline: <host>", and is not a place: it never makes a template ready. A
   **Ready to run** chip filters to the templates whose every model is somewhere (a template with
   no model files is ready), and within a category the ready ones come first. Availability is what
