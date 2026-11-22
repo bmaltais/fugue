@@ -1,0 +1,82 @@
+{
+  "manifest": 1,
+  "id": "fugue/describe-song",
+  "version": "1.0.0",
+  "name": "Describe Song",
+  "description": "Listens to a song and writes what the music model hears: a description, the lyrics, the tempo, the key.",
+  "category": "Text",
+  "keywords": [
+    "music",
+    "describe",
+    "caption",
+    "lyrics",
+    "transcribe",
+    "bpm",
+    "key",
+    "tempo",
+    "audio",
+    "ace-step",
+    "song",
+    "understand"
+  ],
+  "runtime": {
+    "kind": "builtin"
+  },
+  "capabilities": [
+    "audio.generate"
+  ],
+  "inputs": [
+    {
+      "name": "audio",
+      "type": "audio",
+      "label": "Song",
+      "description": "The song to listen to."
+    },
+    {
+      "name": "model",
+      "type": "fugue/music-model",
+      "label": "Model",
+      "optional": true,
+      "description": "Unset: any ready music model."
+    }
+  ],
+  "outputs": [
+    {
+      "name": "caption",
+      "type": "text",
+      "label": "Description",
+      "description": "Genre, mood, instruments and voice, as a prompt a song node can take."
+    },
+    {
+      "name": "lyrics",
+      "type": "text",
+      "label": "Lyrics",
+      "description": "The words the model hears, with [verse] and [chorus] lines. Empty or a guess for an instrumental."
+    },
+    {
+      "name": "bpm",
+      "type": "number",
+      "label": "Tempo (bpm)"
+    },
+    {
+      "name": "key",
+      "type": "text",
+      "label": "Key"
+    },
+    {
+      "name": "time_signature",
+      "type": "text",
+      "label": "Time signature"
+    },
+    {
+      "name": "language",
+      "type": "text",
+      "label": "Language"
+    },
+    {
+      "name": "model",
+      "type": "fugue/music-model",
+      "label": "Model used"
+    }
+  ]
+}

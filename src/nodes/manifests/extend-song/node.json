@@ -1,0 +1,155 @@
+{
+  "manifest": 1,
+  "id": "fugue/extend-song",
+  "version": "1.0.0",
+  "name": "Extend Song",
+  "description": "Makes a song longer: new music before it or after it, in the same style, with the song itself kept as it was.",
+  "category": "Generate",
+  "keywords": [
+    "music",
+    "extend",
+    "outpaint",
+    "longer",
+    "intro",
+    "outro",
+    "continue",
+    "audio",
+    "ace-step",
+    "song"
+  ],
+  "runtime": {
+    "kind": "builtin"
+  },
+  "capabilities": [
+    "audio.generate",
+    "audio.adapter"
+  ],
+  "inputs": [
+    {
+      "name": "audio",
+      "type": "audio",
+      "label": "Song",
+      "description": "The song to start from."
+    },
+    {
+      "name": "prompt",
+      "type": "text",
+      "label": "Description",
+      "widget": "multiline",
+      "description": "What the new music should be: genre, mood, instruments, voice. Usually the song's own description."
+    },
+    {
+      "name": "lyrics",
+      "type": "text",
+      "label": "Lyrics",
+      "default": "",
+      "widget": "multiline",
+      "description": "Sung in the new music, with [verse] and [chorus] lines to part it. Empty: no words are given to the model, so the new part may be sung or not."
+    },
+    {
+      "name": "instrumental",
+      "type": "boolean",
+      "label": "Instrumental",
+      "default": false,
+      "description": "No singing. The lyrics are ignored."
+    },
+    {
+      "name": "reference",
+      "type": "audio",
+      "label": "Style reference",
+      "optional": true,
+      "description": "A recording whose voice and timbre the song takes. Optional."
+    },
+    {
+      "name": "model",
+      "type": "fugue/music-model",
+      "label": "Model",
+      "optional": true,
+      "description": "Unset: any ready music model."
+    },
+    {
+      "name": "before",
+      "type": "number",
+      "label": "Seconds before",
+      "default": 0,
+      "min": 0,
+      "max": 300,
+      "step": 0.5,
+      "description": "New music added in front of the song, such as an intro. 0: none. One side at a time: set this or Seconds after."
+    },
+    {
+      "name": "after",
+      "type": "number",
+      "label": "Seconds after",
+      "default": 10,
+      "min": 0,
+      "max": 300,
+      "step": 0.5,
+      "description": "New music added after the song, such as a longer ending. 0: none."
+    },
+    {
+      "name": "seed",
+      "type": "number",
+      "label": "Seed",
+      "default": 0,
+      "integer": true,
+      "min": 0,
+      "max": 9007199254740991,
+      "widget": "seed"
+    },
+    {
+      "name": "quality",
+      "type": "text",
+      "label": "Quality",
+      "default": "mp3",
+      "choices": [
+        "mp3",
+        "mp3-320",
+        "lossless"
+      ],
+      "advanced": true,
+      "description": "The file the model makes: mp3 (128 kb/s), mp3-320 (320 kb/s) or lossless (a 24-bit WAV, nothing lost to compression)."
+    },
+    {
+      "name": "adapter",
+      "type": "fugue/music-adapter",
+      "label": "Adapter",
+      "optional": true,
+      "advanced": true,
+      "description": "A singer or style adapter (LoRA) from the music server's adapters folder. Unset: none. Changing it makes the server reload the model, which takes a moment."
+    },
+    {
+      "name": "adapter_scale",
+      "type": "number",
+      "label": "Adapter strength",
+      "default": 1,
+      "min": 0,
+      "max": 2,
+      "step": 0.05,
+      "advanced": true,
+      "description": "How strongly the adapter is applied. 1 is as it was trained; lower is subtler."
+    }
+  ],
+  "outputs": [
+    {
+      "name": "audio",
+      "type": "audio",
+      "label": "Audio"
+    },
+    {
+      "name": "seed",
+      "type": "number",
+      "label": "Seed used"
+    },
+    {
+      "name": "duration",
+      "type": "number",
+      "label": "Length (seconds) made"
+    },
+    {
+      "name": "model",
+      "type": "fugue/music-model",
+      "label": "Model used"
+    }
+  ]
+}

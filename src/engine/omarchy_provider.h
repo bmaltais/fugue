@@ -29,7 +29,8 @@
 // served over its OpenAI-compatible API (POST /v1/chat/completions, streamed). Each row of kind
 // video becomes a model of video.generate (a fugue/video-model), served by sd-server's
 // POST /sdcpp/v1/vid_gen through the same job API as images; each row of kind music a model of
-// audio.generate (a fugue/music-model), served by ace-server in two jobs (POST /lm, then
+// audio.generate (a fugue/music-model), whose adapters (GET /props) are models of audio.adapter
+// (a fugue/music-adapter), served by ace-server in two jobs (POST /lm, then
 // POST /synth; GET /job?id=N). ace-server: acestep.cpp 973517be, docs/ARCHITECTURE.md and
 // tools/ace-server.cpp. A served model is named by
 // its recipe, with no content hash; its row's
@@ -85,6 +86,7 @@ private:
         QByteArray key;
         QString runtime; // the row's runtime (gufo, tensorfold-x86): a text job's engine
         QJsonArray loras; // a video server's capabilities.loras: sent with every job (8.7)
+        QStringList adapters; // a music server's GET /props adapters: what a job may name
     };
     struct Discovery {
         Description description;
@@ -107,6 +109,11 @@ private:
     void submitSong(const Server &server, const JobRequest &request, const QJsonObject &model, Reply<QString> reply);
     // Remix and Repaint Song: no LM pass, the source audio goes with the request straight to /synth.
     void submitSongEdit(const Server &server, const JobRequest &request, const QJsonObject &model, Reply<QString> reply);
+    // POST /synth: JSON, or a multipart form with the job's files (`audio`, `ref_audio`).
+    QNetworkReply *sendSynth(const Server &server, const QJsonObject &body, const QJsonObject &inputs, Error *error);
+    QNetworkReply *sendForm(const Server &server, const QString &endpoint, const QJsonObject &body, const QJsonObject &inputs, Error *error);
+    // Describe Song: one /understand job (the song in, its caption, lyrics, tempo and key out).
+    void submitUnderstand(const Server &server, const JobRequest &request, const QJsonObject &model, Reply<QString> reply);
     void pollSong(const QString &id);
     void fetchSong(const QString &id);
     void change(const QString &id, const JobStatus &status);

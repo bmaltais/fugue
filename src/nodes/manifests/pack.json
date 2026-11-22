@@ -20,10 +20,12 @@
     "crop",
     "crop-to-mask",
     "describe-image",
+    "describe-song",
     "edit-image",
     "empty-latent",
     "empty-video-latent",
     "enhance-prompt",
+    "extend-song",
     "feather-mask",
     "fill-masked",
     "flip",
@@ -98,6 +100,12 @@
       "version": 1,
       "kind": "resource",
       "name": "Music model"
+    },
+    {
+      "id": "fugue/music-adapter",
+      "version": 1,
+      "kind": "resource",
+      "name": "Music adapter"
     },
     {
       "id": "fugue/model",

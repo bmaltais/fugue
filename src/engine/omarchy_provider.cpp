@@ -37,6 +37,10 @@ const QString kMusicResource = QStringLiteral("fugue/music-model");
 const QString kTextGenerate = QStringLiteral("text.generate");
 const QString kVideoGenerate = QStringLiteral("video.generate");
 const QString kAudioGenerate = QStringLiteral("audio.generate");
+// A music server's adapters (LoRA files of its --adapters folder, listed by GET /props) are offered as
+// models of a capability of their own, so a picker lists them and a job never takes one as its music model.
+const QString kAudioAdapter = QStringLiteral("audio.adapter");
+const QString kAdapterResource = QStringLiteral("fugue/music-adapter");
 // Engine ids of a row that names no runtime.
 const QString kMusicEngine = QStringLiteral("acestep");
 
@@ -135,6 +139,7 @@ struct OmarchyProvider::Job {
     // rendered (/synth). `serverId` is the one in flight.
     bool music = false;
     bool rendering = false; // the second job is the one in flight
+    bool understanding = false; // a Describe Song job: one /understand job, whose answer is text, not audio
     QJsonObject song;       // the written song (an AceRequest), sent to /synth as it is
 };
 
@@ -322,19 +327,79 @@ QJsonObject aceBody(const JobRequest &request) {
     return body;
 }
 
+// How a song is saved: `quality` of the node is mp3 (the server's own 128 kb/s, nothing sent), mp3-320, or
+// lossless, a 24-bit WAV (ace-server's output_format wav24: the DiT's float output kept to 24 bits; wav16
+// throws away what a studio file keeps, wav32 is float that some players cannot read).
+struct SongFile {
+    QString extension;  // the file's extension, and its format's name
+    QJsonObject fields; // output_format and, for a high mp3, mp3_bitrate
+};
+
+SongFile songFile(const QJsonObject &params) {
+    const QString quality = params.value("quality").toString();
+    if (quality == QLatin1String("lossless"))
+        return {QStringLiteral("wav"), QJsonObject{{"output_format", "wav24"}}};
+    if (quality == QLatin1String("mp3-320"))
+        return {QStringLiteral("mp3"), QJsonObject{{"output_format", "mp3"}, {"mp3_bitrate", 320}}};
+    return {QStringLiteral("mp3"), QJsonObject{{"output_format", "mp3"}}};
+}
+
+// What a /synth request takes from the node whichever way it is made (a written song, or a cover or a repaint):
+// the file's format, and an adapter with its strength. An adapter is merged into the DiT when it loads, so the
+// first song with a new one makes the server reload the DiT; none leaves the server's own defaults (no adapter).
+void addSynthOptions(QJsonObject &body, const QJsonObject &params) {
+    const QJsonObject file = songFile(params).fields;
+    for (auto it = file.begin(); it != file.end(); ++it)
+        body.insert(it.key(), it.value());
+    if (params.contains("adapter")) {
+        body.insert("adapter", params.value("adapter"));
+        body.insert("adapter_scale", params.value("adapter_scale").toDouble(1.0));
+    }
+}
+
 // The /synth body of Remix Song and Repaint Song: the LM is skipped, caption and lyrics reach the DiT as
 // they are (docs/ARCHITECTURE.md, "Generation modes"). `task` is cover, cover-nofsq or repaint.
 QJsonObject aceEditBody(const JobRequest &request) {
     const QJsonObject &params = request.params;
     QJsonObject body{{"task_type", params.value("task")},
                      {"caption", params.value("prompt").toString()},
-                     {"lyrics", params.value("lyrics").toString()},
-                     {"output_format", "mp3"}};
+                     {"lyrics", params.value("lyrics").toString()}};
+    addSynthOptions(body, params);
     for (const auto &[from, to] : {std::pair{"seed", "seed"}, {"strength", "audio_cover_strength"},
                                    {"start", "repainting_start"}, {"end", "repainting_end"}, {"steps", "inference_steps"}})
         if (params.contains(QLatin1String(from)))
             body.insert(QLatin1String(to), params.value(QLatin1String(from)));
     return body;
+}
+
+// The files a /synth job may carry beside its request: the song to work on (`audio`) and a recording to take
+// the voice and timbre from (`ref_audio`), named as ace-server's multipart form names them (docs/ARCHITECTURE.md,
+// "Endpoints": request + audio|src_latents + ref_audio|ref_latents).
+const char *const kSynthFiles[][2] = {{"audio", "source audio"}, {"ref_audio", "style reference"}};
+
+// The files of the job that /synth takes, as the multipart form's parts: the request as JSON, then each file with
+// its own name (every part is sent with a file name, as the server reads them). False, and `error`, when one cannot
+// be read.
+bool synthForm(const QJsonObject &body, const QJsonObject &inputs, QByteArray *form, QByteArray *boundary, Error *error) {
+    *boundary = "----fugue" + QUuid::createUuid().toByteArray(QUuid::Id128);
+    const auto part = [&](const QByteArray &name, const QByteArray &file, const QByteArray &type, const QByteArray &data) {
+        return "--" + *boundary + "\r\nContent-Disposition: form-data; name=\"" + name + "\"; filename=\"" + file +
+               "\"\r\nContent-Type: " + type + "\r\n\r\n" + data + "\r\n";
+    };
+    *form = part("request", "request.json", "application/json", QJsonDocument(body).toJson(QJsonDocument::Compact));
+    for (const auto &file : kSynthFiles) {
+        if (!inputs.contains(QLatin1String(file[0])))
+            continue;
+        const QString path = inputs.value(QLatin1String(file[0])).toObject().value("path").toString();
+        QFile source(path);
+        if (!source.open(QIODevice::ReadOnly)) {
+            *error = makeError(QStringLiteral("file_not_found"), QStringLiteral("Cannot read the %1 %2.").arg(QLatin1String(file[1]), path));
+            return false;
+        }
+        *form += part(file[0], QFileInfo(path).fileName().toUtf8(), "application/octet-stream", source.readAll());
+    }
+    *form += "--" + *boundary + "--\r\n";
+    return true;
 }
 
 // The audio of a /synth result: multipart/mixed, whose first part is the song (the others are
@@ -505,6 +570,7 @@ void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> do
         QList<OfferedModel> extraImages;
         QList<bool> extraImageEdits;
         QList<OfferedModel> extraVideos;
+        QList<OfferedModel> adapters; // the music servers' (GET /props), a capability of their own
         int waiting = 0;
         std::function<void(const Result<Discovery> &)> done;
     };
@@ -538,7 +604,8 @@ void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> do
                 edit.models.append(pending->extraImages.at(i));
         }
         video.models.append(pending->extraVideos);
-        for (const CapabilityOffer &offer : {generate, edit, text, video, music})
+        const CapabilityOffer adapters{kAudioAdapter, pending->adapters};
+        for (const CapabilityOffer &offer : {generate, edit, text, video, music, adapters})
             if (!offer.models.isEmpty())
                 description.capabilities.append(offer);
         pending->done(Result<Discovery>(pending->discovery));
@@ -554,7 +621,7 @@ void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> do
         const QString recipe = row.value("recipe").toString();
         const QString unit = row.value("unit").toString();
         const Server server{recipe, baseOf(row.value("endpoint").toString()), key,
-                            row.value("runtime").toString(), {}};
+                            row.value("runtime").toString(), {}, {}};
         pending->discovery.servers.insert(recipe, server);
 
         OfferedModel model;
@@ -639,6 +706,30 @@ void OmarchyProvider::discover(std::function<void(const Result<Discovery> &)> do
                 }
                 if (video)
                     pending->discovery.servers[recipe].loras = body.value("loras").toArray();
+                if (music) {
+                    // ace-server lists the files of its --adapters folder in /props (a server of an older
+                    // build has no such call: no adapters). Asked before this row counts as probed.
+                    ++pending->waiting;
+                    QNetworkReply *props = send(server, "GET", QStringLiteral("/props"));
+                    connect(props, &QNetworkReply::finished, this, [pending, props, recipe, assemble] {
+                        props->deleteLater();
+                        if (httpStatus(props) == 200)
+                            for (const QJsonValue &entry : jsonBody(props).value("adapters").toArray()) {
+                                const QString name = entry.isObject() ? entry.toObject().value("name").toString() : entry.toString();
+                                if (name.isEmpty())
+                                    continue;
+                                pending->discovery.servers[recipe].adapters.append(name);
+                                OfferedModel adapter;
+                                adapter.handle = QJsonObject{{"resource", kAdapterResource}, {"name", name}};
+                                adapter.title = name;
+                                adapter.status = ModelStatus::Ready;
+                                adapter.properties = QJsonObject{{"model", recipe}};
+                                pending->adapters.append(adapter);
+                            }
+                        if (--pending->waiting == 0)
+                            assemble();
+                    });
+                }
                 if (!text && !music) {
                     // A model is offered for every mode its server says it serves, not only the
                     // one its row's kind names. Absent supported_modes, the kind decides alone.
@@ -1132,6 +1223,26 @@ void OmarchyProvider::finishVideo(const QString &id, const QJsonObject &result) 
 // progress counter or preview, so progress is the half each job is.
 void OmarchyProvider::submitSong(const Server &server, const JobRequest &request, const QJsonObject &model,
                                  Reply<QString> reply) {
+    // An adapter the server does not list would fail after the song was written, or be ignored: say so first.
+    const QString adapter = request.params.value("adapter").toString();
+    if (!adapter.isEmpty() && !server.adapters.contains(adapter)) {
+        Error missing = makeError(QStringLiteral("model_missing"),
+                                  QStringLiteral("%1 does not have the adapter %2.").arg(server.recipe, adapter),
+                                  server.adapters.isEmpty()
+                                      ? QStringLiteral("%1 lists no adapters: put the file in its adapters folder and restart it.").arg(server.recipe)
+                                      : QStringLiteral("Pick one of: %1.").arg(server.adapters.join(QStringLiteral(", "))));
+        missing.valid = QJsonArray::fromStringList(server.adapters);
+        return reply(Result<QString>(missing));
+    }
+    // A file the job cannot send is refused before the song is written, not after.
+    for (const auto &file : kSynthFiles) {
+        const QString path = request.inputs.value(QLatin1String(file[0])).toObject().value("path").toString();
+        if (request.inputs.contains(QLatin1String(file[0])) && !QFileInfo(path).isReadable())
+            return reply(Result<QString>(makeError(QStringLiteral("file_not_found"),
+                                                   QStringLiteral("Cannot read the %1 %2.").arg(QLatin1String(file[1]), path))));
+    }
+    if (request.params.value("task").toString() == QLatin1String("understand"))
+        return submitUnderstand(server, request, model, std::move(reply));
     if (request.params.contains("task"))
         return submitSongEdit(server, request, model, std::move(reply));
     QNetworkReply *posted = send(server, "POST", QStringLiteral("/lm"),
@@ -1161,27 +1272,69 @@ void OmarchyProvider::submitSong(const Server &server, const JobRequest &request
     });
 }
 
+// POST /synth: JSON, or a multipart form when the job carries files. Null (and `error`) when a file cannot be read.
+QNetworkReply *OmarchyProvider::sendSynth(const Server &server, const QJsonObject &body, const QJsonObject &inputs, Error *error) {
+    const bool form = std::any_of(std::begin(kSynthFiles), std::end(kSynthFiles),
+                                  [&](const auto &file) { return inputs.contains(QLatin1String(file[0])); });
+    if (!form)
+        return send(server, "POST", QStringLiteral("/synth"), QJsonDocument(body).toJson(QJsonDocument::Compact));
+    return sendForm(server, QStringLiteral("/synth"), body, inputs, error);
+}
+
+// A multipart form to a job endpoint (/synth, /understand): the request as JSON and the job's files.
+QNetworkReply *OmarchyProvider::sendForm(const Server &server, const QString &endpoint, const QJsonObject &body,
+                                         const QJsonObject &inputs, Error *error) {
+    QByteArray data, boundary;
+    if (!synthForm(body, inputs, &data, &boundary, error))
+        return nullptr;
+    return send(server, "POST", endpoint, data, 0, "multipart/form-data; boundary=" + boundary);
+}
+
+// Describe Song: one /understand job with the song as the multipart part `audio` (ace-server: the LM reads the
+// song's FSQ codes and answers with its caption, lyrics, tempo and key). No second job: the answer is text.
+void OmarchyProvider::submitUnderstand(const Server &server, const JobRequest &request, const QJsonObject &model,
+                                       Reply<QString> reply) {
+    Error problem;
+    QNetworkReply *posted = sendForm(server, QStringLiteral("/understand"), QJsonObject(), request.inputs, &problem);
+    if (!posted)
+        return reply(Result<QString>(problem));
+    connect(posted, &QNetworkReply::finished, this, [this, posted, server, request, model, reply] {
+        posted->deleteLater();
+        const int code = httpStatus(posted);
+        const QJsonObject answer = jsonBody(posted);
+        const QString serverId = answer.value("id").toString();
+        if (code != 200 && code != 202)
+            return reply(Result<QString>(refusal(server.recipe, server.base, code, answer, false)));
+        if (serverId.isEmpty())
+            return reply(Result<QString>(jobError(QStringLiteral("%1 took the job but gave no id.").arg(server.recipe))));
+        auto job = std::make_shared<Job>();
+        job->music = true;
+        job->rendering = true;
+        job->understanding = true;
+        job->server = server;
+        job->serverId = serverId;
+        job->request = request;
+        job->model = model;
+        job->status.state = QStringLiteral("running");
+        job->status.stage = QStringLiteral("listening");
+        job->status.progress = 0.5;
+        const QString id = QStringLiteral("%1/song-%2").arg(server.recipe).arg(++m_chats);
+        m_jobs.insert(id, job);
+        if (!m_poll.isActive())
+            m_poll.start();
+        reply(Result<QString>(id));
+    });
+}
+
 // Remix Song and Repaint Song: one /synth job with the request and the source audio as a multipart
 // form (the parts `request` and `audio`, ace-server's own). There is no first job, so the job starts
 // at rendering and the song's lyrics are the ones that were sent.
 void OmarchyProvider::submitSongEdit(const Server &server, const JobRequest &request, const QJsonObject &model,
                                      Reply<QString> reply) {
-    const QString path = request.inputs.value("audio").toObject().value("path").toString();
-    QFile source(path);
-    if (!source.open(QIODevice::ReadOnly))
-        return reply(Result<QString>(makeError(QStringLiteral("file_not_found"),
-                                               QStringLiteral("Cannot read the source audio %1.").arg(path))));
-    const QByteArray boundary = "----fugue" + QUuid::createUuid().toByteArray(QUuid::Id128);
-    const auto part = [&](const QByteArray &name, const QByteArray &file, const QByteArray &type, const QByteArray &data) {
-        return "--" + boundary + "\r\nContent-Disposition: form-data; name=\"" + name + "\"; filename=\"" + file +
-               "\"\r\nContent-Type: " + type + "\r\n\r\n" + data + "\r\n";
-    };
-    const QByteArray body = part("request", "request.json", "application/json",
-                                 QJsonDocument(aceEditBody(request)).toJson(QJsonDocument::Compact)) +
-                            part("audio", QFileInfo(path).fileName().toUtf8(), "application/octet-stream", source.readAll()) +
-                            "--" + boundary + "--\r\n";
-    QNetworkReply *posted = send(server, "POST", QStringLiteral("/synth"), body, 0,
-                                 "multipart/form-data; boundary=" + boundary);
+    Error problem;
+    QNetworkReply *posted = sendSynth(server, aceEditBody(request), request.inputs, &problem);
+    if (!posted)
+        return reply(Result<QString>(problem));
     connect(posted, &QNetworkReply::finished, this, [this, posted, server, request, model, reply] {
         posted->deleteLater();
         const int code = httpStatus(posted);
@@ -1256,7 +1409,9 @@ void OmarchyProvider::pollSong(const QString &id) {
             status.state = QStringLiteral("cancelled");
         } else {
             status.state = QStringLiteral("running");
-            status.stage = job->rendering ? QStringLiteral("rendering") : QStringLiteral("writing");
+            status.stage = job->understanding ? QStringLiteral("listening")
+                           : job->rendering   ? QStringLiteral("rendering")
+                                              : QStringLiteral("writing");
             status.progress = job->rendering ? 0.5 : 0.0;
         }
         change(id, status);
@@ -1282,14 +1437,16 @@ void OmarchyProvider::fetchSong(const QString &id) {
             return fail(QStringLiteral("%1 gave no result (HTTP %2).").arg(job->server.recipe).arg(code));
         const QByteArray body = reply->readAll();
         if (!job->rendering) {
-            // The song written out: it goes back to be rendered as it is, as an mp3.
+            // The song written out: it goes back to be rendered as it is, in the file format asked for.
             QJsonObject song = QJsonDocument::fromJson(body).array().first().toObject();
             if (song.isEmpty())
                 return fail(QStringLiteral("%1 wrote no song.").arg(job->server.recipe));
             job->song = song;
-            song.insert("output_format", "mp3");
-            QNetworkReply *posted = send(job->server, "POST", QStringLiteral("/synth"),
-                                         QJsonDocument(song).toJson(QJsonDocument::Compact));
+            addSynthOptions(song, job->request.params);
+            Error problem;
+            QNetworkReply *posted = sendSynth(job->server, song, job->request.inputs, &problem);
+            if (!posted)
+                return fail(problem.message);
             job->asking = true;
             connect(posted, &QNetworkReply::finished, this, [this, posted, id, job] {
                 posted->deleteLater();
@@ -1314,12 +1471,32 @@ void OmarchyProvider::fetchSong(const QString &id) {
             });
             return;
         }
-        const QByteArray mp3 = firstPart(body);
-        if (mp3.isEmpty())
+        const QByteArray song = firstPart(body);
+        if (job->understanding) {
+            // The answer is a JSON array of one AceRequest (the song as the model hears it), first part of a multipart.
+            const QJsonDocument parsed = QJsonDocument::fromJson(song);
+            const QJsonObject heard = parsed.isArray() ? parsed.array().first().toObject() : parsed.object();
+            if (heard.isEmpty())
+                return fail(QStringLiteral("%1 could not tell what the song is.").arg(job->server.recipe));
+            job->result = JobResult{QJsonObject{{"caption", heard.value("caption").toString()},
+                                                {"lyrics", heard.value("lyrics").toString()},
+                                                {"bpm", heard.value("bpm").toDouble(0)},
+                                                {"key", heard.value("keyscale").toString()},
+                                                {"time_signature", heard.value("timesignature").toString()},
+                                                {"language", heard.value("vocal_language").toString()}},
+                                    QJsonObject{{"model", job->model},
+                                                {"engine", job->server.runtime.isEmpty() ? kMusicEngine : job->server.runtime}}};
+            JobStatus done;
+            done.state = QStringLiteral("done");
+            done.progress = 1;
+            return change(id, done);
+        }
+        if (song.isEmpty())
             return fail(QStringLiteral("%1 finished without a song.").arg(job->server.recipe));
-        const QString path = QDir(job->request.outputDir).absoluteFilePath(QStringLiteral("audio.mp3"));
+        const QString format = songFile(job->request.params).extension;
+        const QString path = QDir(job->request.outputDir).absoluteFilePath(QStringLiteral("audio.") + format);
         QFile file(path);
-        if (!file.open(QIODevice::WriteOnly) || file.write(mp3) != mp3.size()) {
+        if (!file.open(QIODevice::WriteOnly) || file.write(song) != song.size()) {
             JobStatus failed;
             failed.state = QStringLiteral("error");
             failed.error = makeError(QStringLiteral("internal"), QStringLiteral("Cannot write %1.").arg(path));
@@ -1333,7 +1510,7 @@ void OmarchyProvider::fetchSong(const QString &id) {
             used.insert("seed", seed);
         else if (job->request.params.contains("seed"))
             used.insert("seed", job->request.params.value("seed"));
-        job->result = JobResult{QJsonObject{{"audio", QJsonObject{{"path", path}, {"format", "mp3"}}},
+        job->result = JobResult{QJsonObject{{"audio", QJsonObject{{"path", path}, {"format", format}}},
                                             {"lyrics", job->song.value("lyrics").toString()}},
                                 used};
         JobStatus done;

@@ -181,6 +181,31 @@ public:
     }
 };
 
+// What every song node can ask of the renderer, one place for the three (Generate, Remix, Repaint Song).
+// Each goes only when it is set, so a song that uses none of them is the request it always was (and keeps its
+// cache entry). `quality` is the file it is saved as: mp3, mp3-320 or lossless; `reference` is a recording whose
+// voice and timbre the song takes (ace-server's ref_audio); `adapter` is a singer or style adapter (LoRA) of the music
+// server, with its `adapter_scale`.
+Result<bool> addSongOptions(const NodeContext &context, JobRequest &request) {
+    const QString quality = context.input(QStringLiteral("quality")).text().trimmed();
+    if (!quality.isEmpty() && quality != QLatin1String("mp3"))
+        request.params.insert(QStringLiteral("quality"), quality);
+    const Value reference = context.input(QStringLiteral("reference"));
+    if (!reference.isEmpty()) {
+        const MediaHandle audio = reference.media();
+        if (audio.path().isEmpty() || audio.duration() <= 0)
+            return makeInputError(QStringLiteral("media_unreadable"), QStringLiteral("reference"),
+                                  QStringLiteral("The style reference cannot be read."));
+        request.inputs.insert(QStringLiteral("ref_audio"), QJsonObject{{"path", audio.path()}});
+    }
+    const QString adapter = context.input(QStringLiteral("adapter")).json().toObject().value(QStringLiteral("name")).toString();
+    if (!adapter.isEmpty()) {
+        request.params.insert(QStringLiteral("adapter"), adapter);
+        request.params.insert(QStringLiteral("adapter_scale"), context.input(QStringLiteral("adapter_scale")).number());
+    }
+    return true;
+}
+
 class SongKernel : public ProviderKernel {
 public:
     Requirement requirement(const NodeType &, const Values &inputs) const override {
@@ -234,6 +259,8 @@ public:
             params.insert(QStringLiteral("creativity"), creativity.number());
         if (context.input(QStringLiteral("keep_description")).json().toBool())
             params.insert(QStringLiteral("keep_description"), true);
+        if (const Result<bool> options = addSongOptions(context, request); !options)
+            return options.errors();
         return request;
     }
 
@@ -256,7 +283,10 @@ public:
 // tune and timing), Repaint redraws one stretch of the song and keeps the rest.
 class SongEditKernel : public ProviderKernel {
 public:
-    explicit SongEditKernel(bool repaint) : m_repaint(repaint) {}
+    // Extend Song is Repaint's code path (ace-server's repaint with a start before the song, or an end beyond it),
+    // a node of its own so that "seconds before and after" is what the person sees.
+    enum class Mode { Remix, Repaint, Extend };
+    explicit SongEditKernel(Mode mode) : m_mode(mode) {}
 
     Requirement requirement(const NodeType &, const Values &inputs) const override {
         Requirement requirement;
@@ -281,7 +311,26 @@ public:
         const Value seed = context.input(QStringLiteral("seed"));
         if (!seed.isEmpty())
             params.insert(QStringLiteral("seed"), seed.json().toInteger());
-        if (m_repaint) {
+        if (m_mode == Mode::Extend) {
+            const double before = context.input(QStringLiteral("before")).number();
+            const double after = context.input(QStringLiteral("after")).number();
+            if (before < 0 || after < 0)
+                return makeInputError(QStringLiteral("value_out_of_range"), before < 0 ? QStringLiteral("before") : QStringLiteral("after"),
+                                      QStringLiteral("The seconds to add cannot be negative."));
+            if (before <= 0 && after <= 0)
+                return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("after"),
+                                      QStringLiteral("Say how many seconds to add before or after the song."));
+            // The server redraws one region and keeps the rest of the song, so both sides at once would redraw the
+            // song too (the region would run from before the start to past the end).
+            if (before > 0 && after > 0)
+                return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("after"),
+                                      QStringLiteral("The model adds to one side at a time."),
+                                      QStringLiteral("Set one of Seconds before and Seconds after to 0, and chain a second Extend Song for the other side."));
+            params.insert(QStringLiteral("task"), QStringLiteral("repaint"));
+            // Before: from -before up to the song's start. After: from the song's end to `after` seconds beyond it.
+            params.insert(QStringLiteral("start"), before > 0 ? -before : source.duration());
+            params.insert(QStringLiteral("end"), before > 0 ? 0.0 : source.duration() + after);
+        } else if (m_mode == Mode::Repaint) {
             const double start = context.input(QStringLiteral("start")).number();
             // 0 for the end is the end of the song.
             const double end = context.input(QStringLiteral("end")).number();
@@ -299,6 +348,8 @@ public:
             params.insert(QStringLiteral("strength"), context.input(QStringLiteral("strength")).number());
         }
         request.inputs.insert(QStringLiteral("audio"), QJsonObject{{"path", source.path()}});
+        if (const Result<bool> options = addSongOptions(context, request); !options)
+            return options.errors();
         return request;
     }
 
@@ -313,7 +364,44 @@ public:
     }
 
 private:
-    bool m_repaint;
+    Mode m_mode;
+};
+
+// Describe Song: what the model hears in a song (ace-server's /understand): the description, the words, the tempo,
+// the key. Served by the music models, like the song nodes; the provider sends the song with one job and the answer is
+// text, so it feeds Remix Song (Song from a song), Enhance Prompt or Preview.
+class DescribeSongKernel : public ProviderKernel {
+public:
+    Requirement requirement(const NodeType &, const Values &inputs) const override {
+        Requirement requirement;
+        requirement.capability = kAudio;
+        requirement.model = inputs.value(QStringLiteral("model")).json().toObject();
+        return requirement;
+    }
+
+    Result<JobRequest> request(const NodeContext &context, const Selection &selection) override {
+        JobRequest request;
+        request.capability = kAudio;
+        request.model = selection.model.handle;
+        const MediaHandle source = context.input(QStringLiteral("audio")).media();
+        if (source.path().isEmpty() || source.duration() <= 0)
+            return makeInputError(QStringLiteral("media_unreadable"), QStringLiteral("audio"),
+                                  QStringLiteral("The song cannot be read."));
+        request.params.insert(QStringLiteral("task"), QStringLiteral("understand"));
+        request.inputs.insert(QStringLiteral("audio"), QJsonObject{{"path", source.path()}});
+        return request;
+    }
+
+    Result<Values> outputs(const NodeContext &, const Selection &selection, const JobResult &result) override {
+        const QJsonObject &heard = result.outputs;
+        return Values{{QStringLiteral("caption"), Value(heard.value(QStringLiteral("caption")).toString())},
+                      {QStringLiteral("lyrics"), Value(heard.value(QStringLiteral("lyrics")).toString())},
+                      {QStringLiteral("bpm"), Value(heard.value(QStringLiteral("bpm")).toDouble())},
+                      {QStringLiteral("key"), Value(heard.value(QStringLiteral("key")).toString())},
+                      {QStringLiteral("time_signature"), Value(heard.value(QStringLiteral("time_signature")).toString())},
+                      {QStringLiteral("language"), Value(heard.value(QStringLiteral("language")).toString())},
+                      {QStringLiteral("model"), usedModel(result.used, selection)}};
+    }
 };
 
 } // namespace
@@ -321,8 +409,10 @@ private:
 void addMediaGenerationKernels(Kernels &kernels) {
     kernels.add(QStringLiteral("fugue/generate-video"), std::make_shared<VideoKernel>());
     kernels.add(QStringLiteral("fugue/generate-song"), std::make_shared<SongKernel>());
-    kernels.add(QStringLiteral("fugue/remix-song"), std::make_shared<SongEditKernel>(false));
-    kernels.add(QStringLiteral("fugue/repaint-song"), std::make_shared<SongEditKernel>(true));
+    kernels.add(QStringLiteral("fugue/remix-song"), std::make_shared<SongEditKernel>(SongEditKernel::Mode::Remix));
+    kernels.add(QStringLiteral("fugue/repaint-song"), std::make_shared<SongEditKernel>(SongEditKernel::Mode::Repaint));
+    kernels.add(QStringLiteral("fugue/extend-song"), std::make_shared<SongEditKernel>(SongEditKernel::Mode::Extend));
+    kernels.add(QStringLiteral("fugue/describe-song"), std::make_shared<DescribeSongKernel>());
 }
 
 } // namespace fugue::nodes

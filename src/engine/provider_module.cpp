@@ -94,7 +94,7 @@ QList<ProviderModule> builtinProviderModules() {
     omarchy.transport = QStringLiteral("builtin");
     omarchy.when = QStringLiteral("never");
     omarchy.capabilities = {QStringLiteral("image.generate"), QStringLiteral("image.edit"),
-                            QStringLiteral("video.generate"), QStringLiteral("audio.generate"),
+                            QStringLiteral("video.generate"), QStringLiteral("audio.generate"), QStringLiteral("audio.adapter"),
                             QStringLiteral("text.generate")};
     ProviderModule helper;
     helper.id = QStringLiteral("fugue-helper");
