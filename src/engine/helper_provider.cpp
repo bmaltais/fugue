@@ -30,6 +30,17 @@ Error helperError(const QJsonObject &error) {
     return makeError(QStringLiteral("node_failed"), message);
 }
 
+// The helper's log ends with the library's own line when a device allocation failed: stable-diffusion.cpp
+// then asserts and aborts the process instead of returning an error (the second helper of one GPU, or
+// another program, holds the memory; a CUDA `cudaMalloc failed: out of memory`, a Vulkan out-of-device-memory).
+bool endsOutOfMemory(const QStringList &log) {
+    for (const QString &line : log)
+        if (line.contains(QLatin1String("out of memory"), Qt::CaseInsensitive) ||
+            line.contains(QLatin1String("ErrorOutOfDeviceMemory")))
+            return true;
+    return false;
+}
+
 bool executable(const QString &path) {
     const QFileInfo info(path);
     return info.isFile() && info.isExecutable();
@@ -382,7 +393,11 @@ void HelperProvider::finished() {
                               : m_launch.label + QStringLiteral(" stopped while running this node; it starts again on the next run.");
     if (!m_log.isEmpty())
         why += QStringLiteral(" Its log ends:\n") + lastLog();
-    abandon(startFailed ? unreachable(why) : stopped(why));
+    // A helper that died of a failed allocation is out of memory, as one that said so (8.10): the scheduler
+    // frees a resident model and tries again, and names who holds the memory when nothing is left to free.
+    abandon(startFailed ? unreachable(why)
+            : endsOutOfMemory(m_log) ? makeError(QStringLiteral("out_of_memory"), why)
+                                     : stopped(why));
 }
 
 void HelperProvider::abandon(const Error &why) {
@@ -400,7 +415,7 @@ void HelperProvider::abandon(const Error &why) {
             status.state = QStringLiteral("cancelled");
         } else {
             status.state = QStringLiteral("error");
-            status.error = stopped(why.message);
+            status.error = why.code == QLatin1String("out_of_memory") ? why : stopped(why.message);
         }
         it->status = status;
         emit statusChanged(it.key(), status);

@@ -63,6 +63,10 @@ Every request carries `Authorization: Bearer <key>`, else 401. JSON bodies up to
 `{"error": {"code", "message"}}`, HTTP 400 (`input_invalid`, `model_missing`), 401, 404 (no such job
 or file) or 500 (`out_of_memory`, `helper_failed`).
 
+A failed device allocation inside stable-diffusion.cpp (`cudaMalloc failed: out of memory`) is not returned as an
+error: the library asserts and the helper aborts (seen with two helpers on one 24 GB card, #130). Fugue types a helper
+that died with such a line last in its log as `out_of_memory` (`HelperProvider::finished`); the helper itself cannot.
+
 | Request | Reply |
 | --- | --- |
 | `POST /fugue/v1/describe` `{}` | `{"protocol": 1, "engine": "sdcpp", "shares_filesystem": false, "backend", "capabilities", "free_memory_bytes", "host"}`; free memory is `MemAvailable` |

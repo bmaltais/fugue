@@ -149,6 +149,14 @@ private:
             job->state = QStringLiteral("running");
             log("job " + job->request.value("capability").toString().toUtf8());
         }
+        if (fake.value("crash_oom").toBool()) { // what stable-diffusion.cpp does when a device allocation fails
+            std::fputs("ggml: ggml_backend_cuda_buffer_type_alloc_buffer: allocating 2003.00 MiB on device 0: "
+                       "cudaMalloc failed: out of memory\n"
+                       "conditioner.hpp:1600: GGML_ASSERT(!chunk_hidden_states.empty()) failed\n",
+                       stderr);
+            std::fflush(stderr);
+            ::_exit(134);
+        }
         if (fake.value("crash").toBool()) {
             std::fputs("fake helper: crashing as asked\n", stderr);
             std::fflush(stderr);

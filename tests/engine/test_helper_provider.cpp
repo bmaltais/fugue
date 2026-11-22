@@ -240,6 +240,17 @@ private slots:
         QVERIFY(other.error.message.contains("the fake failed as asked"));
     }
 
+    // The library asserts and aborts when a device allocation fails (the GPU's other helper holds the
+    // memory): the job is out_of_memory, not an unexplained node_failed, and the next job starts a new helper.
+    void aHelperThatDiesOfAFailedAllocationIsOutOfMemory() {
+        auto helper = provider();
+        const JobStatus crashed = run(*helper, encode({{"crash_oom", true}}));
+        QCOMPARE(crashed.state, QStringLiteral("error"));
+        QCOMPARE(crashed.error.code, QStringLiteral("out_of_memory"));
+        QVERIFY2(crashed.error.message.contains("cudaMalloc failed"), qPrintable(crashed.error.message));
+        QCOMPARE(run(*helper, encode({{"steps", 1}})).state, QStringLiteral("done"));
+    }
+
     void aCrashFailsItsJobAndTheNextJobStartsANewHelper() {
         auto helper = provider();
         const JobStatus crashed = run(*helper, encode({{"crash", true}}));

@@ -1627,7 +1627,14 @@ it as a module folder and run it with no code of its own in Fugue.
   every component is there, so every stage job names all of them, even the ones it does not run:
   one `fugue/model` gives the same context to every stage, and the helper keeps that one loaded
   for the whole graph.
-- Out of memory is a typed error on the node (`out_of_memory`). A helper crash kills only the helper.
+- Out of memory is a typed error on the node (`out_of_memory`). A helper crash kills only the helper. When another process holds the GPU's memory (a second helper: the two clips of two roots, an
+  idle helper of another window), stable-diffusion.cpp does not return an error for a failed device allocation: it asserts
+  and aborts the helper (seen on the RTX 3090 with two helpers, #130: `cudaMalloc failed: out of memory`, then
+  `GGML_ASSERT(!chunk_hidden_states.empty())`, SIGABRT, in the text encode; a decode allocates its VAE buffer on top of the
+  resident weights and fails the same way). A helper that dies with such a line at the end of its log is `out_of_memory`
+  like one that said so (the library's wording: `out of memory`, `ErrorOutOfDeviceMemory`), so the scheduler frees a
+  resident model and tries again and, with nothing left to free, names the processes holding the memory (above); the
+  next job starts a new helper.
 - The component-level helper is based on stable-diffusion.cpp with separate encode, sample and
   decode steps, C++ only. The M0 spike showed the split works
   ([spikes/02](spikes/02-sdcpp-split.md)).
