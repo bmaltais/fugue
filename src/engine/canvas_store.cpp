@@ -33,7 +33,7 @@ Error corrupt(const QString &what) {
 
 Error notFound(const QString &what) {
     return makeError(QStringLiteral("canvas_not_found"), QStringLiteral("There is no %1.").arg(what),
-                     QStringLiteral("`fugue canvas new` or `fugue canvas import` makes a canvas and prints its id."));
+                     QStringLiteral("A canvas belongs to the project (or the Default) it was made in: open that one, or make one here with `fugue canvas new` or `fugue canvas import` (add `--project <name>` to put it in a project), which prints its id."));
 }
 
 QString kindName(LayerKind kind) {
