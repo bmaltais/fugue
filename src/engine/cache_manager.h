@@ -4,8 +4,8 @@
 // (spec 10.6, #141). Three kinds, each a copy of something that can be made again:
 //
 //   results     the result cache (10): a missing result is a node that runs again
-//   thumbnails  the 512 px pictures the canvas shows (12.7): a missing one is made again when
-//               its result is shown
+//   thumbnails  the 512 px pictures the canvas shows (12.7) and the media browser's (#133, a
+//               second folder): a missing one is made again when its result is shown
 //   runs        the run folders (9.7): the history `fugue runs` reads
 //
 // Never touched: the output folder, the inputs folder, frozen results, and a run that is
@@ -42,11 +42,12 @@ QList<CacheKind> allCacheKinds();
 struct CacheFolders {
     QString results;
     QString thumbnails;
+    QString mediaThumbnails; // the media browser's (#133), a second folder of the thumbnails kind
     QString runs;
     QString queue; // the run queue folder (queue.h): runs in it are queued or going
     QString lock;  // the engine lock
 
-    // The standard places: $XDG_CACHE_HOME/fugue/{results,thumbnails,runs} and the queue and
+    // The standard places: $XDG_CACHE_HOME/fugue/{results,thumbnails,thumbs,runs} and the queue and
     // lock in the state folder.
     static CacheFolders standard();
 };

@@ -1917,7 +1917,7 @@ kept within a limit (#141):
 | Kind | Folder | Holds | If it is gone |
 | --- | --- | --- | --- |
 | `results` | `results/` | The result cache ([10.2](#102-store)). | The node runs again. |
-| `thumbnails` | `thumbnails/` | The 512 px pictures nodes show ([12.7](#127-inspection)), one per image by content hash. | Made again when the result is shown (a cached node shows its result at once on the next run). |
+| `thumbnails` | `thumbnails/` and `thumbs/` | The 512 px pictures nodes show ([12.7](#127-inspection)), one per image by content hash, and the media browser's 256 px ones ([12.14](#1214-side-panels)), one per file, size and time. The two folders are one kind: one size, one limit, one Clear. | Made again when the result is shown (a cached node shows its result at once on the next run) or the browser shows the file. |
 | `runs` | `runs/` | Run folders ([9.7](#97-run-folder)): events, the compiled graph, working files. | The run's history (`fugue runs status|events|result`) is gone; its results are not. |
 
 - **Never removed:** the output folder and the inputs folder (they are not under the cache),
@@ -1930,7 +1930,7 @@ kept within a limit (#141):
   clear` leaves results and previews alone and says so (`cache_busy`); run folders are always
   safe to clear.
 - **Limits** (settings.json, [1.4](#14-files-and-folders)): `cache_results_gb` (default 10; 0 is no limit),
-  `cache_thumbnails_gb` (default 1; 0 for none) and `runs_kept` (default 20). Results over the
+  `cache_thumbnails_gb` (default 1; 0 for none, for both thumbnail folders together) and `runs_kept` (default 20). Results over the
   limit lose the least recently used first, frozen ones excepted, a result being used again
   counts as used now. Previews over the limit lose the oldest first (a preview is touched each
   time its picture is shown), and any not shown for 7 days go. An ended run goes 7 days after it
@@ -2515,7 +2515,7 @@ Each command works with no display, never opens a dialog, and takes `--json`. Fo
 | `fugue template list` | The templates, each with the models it names (`here` or not, and the folder a missing one goes in) and the packs it lacks; what is wrong with one is a warning. |
 | `fugue model get <file\|template id> [--into <model folder>]` | Download the models a workflow or template names that are not here and have a `source` (8.9, #89), into the model folder downloads go in (`--into` names another, for this call); progress on stderr. Each failure is an error; what arrived stays. |
 | `fugue model list [--type <resource type>] [--hash]` | Models found on disk and offered by providers. A file on disk has a `handle` only once its hash is known (listing reads no model file); `--hash` hashes the others, once each, so every file gets a full handle; a file it cannot read is a `media_unreadable` warning. |
-| `fugue cache status` | What Fugue keeps under `~/.cache/fugue` ([10.6](#106-cache-management), #141): per kind (results, thumbnails, runs) the bytes, files, oldest and limit, and the results per workflow and per node. |
+| `fugue cache status` | What Fugue keeps under `~/.cache/fugue` ([10.6](#106-cache-management), #141): per kind (results, thumbnails including the media browser's, runs) the bytes, files, oldest and limit, and the results per workflow and per node. |
 | `fugue cache clear [--kind results\|thumbnails\|runs\|all] [--workflow <file>] [--node <id>] [--older-than <age>] [--dry-run]` | Clear one kind (results unless `--kind` says), narrowed by workflow (results and runs), node (results) and age (`30d`, `12h`, `2w`); `--dry-run` says what would go and changes nothing. Frozen results, saved outputs and a run going or queued are never removed; while a run is going its results and previews are left alone (the `cache_busy` warning). |
 | `fugue command list` | The command registry and current key bindings. |
 | `fugue skill install [--target agents\|claude\|all] [--dry-run] [--force]`, `fugue skill uninstall` (same options) | Install, update or remove the bundled agent skill ([13.5](#135-agent-skill)). |

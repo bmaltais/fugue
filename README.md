@@ -119,7 +119,7 @@ clone with `--recurse-submodules`, or run `git submodule update --init` once.
 
 ```sh
 bin/build        # the app and the tests
-bin/test         # builds, then runs every test (arguments go to ctest)
+bin/test         # builds, then runs every test (arguments go to ctest); a test running over 300 s fails
 bin/build fugue  # only the app; any CMake target works, e.g. bin/build test_menus
 ```
 

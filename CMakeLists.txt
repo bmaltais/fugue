@@ -305,7 +305,12 @@ endforeach()
 # and never the portal's picker on the owner's screen, and no session bus (the GUI tests also
 # set these themselves, tests/test_environment.cpp, for runs outside ctest).
 get_property(fugue_all_tests DIRECTORY PROPERTY TESTS)
+# A hang fails a test in minutes instead of idling for hours (#205). The slowest passing test takes
+# about 10 s with the suite running in parallel, so 300 s leaves a slow CI runner room; the waits
+# inside a test (a fake server, a spawned `fugue`) have deadlines of their own, well under this.
+set(fugue_test_timeout_seconds 300)
 foreach(test_name ${fugue_all_tests})
+  set_tests_properties(${test_name} PROPERTIES TIMEOUT ${fugue_test_timeout_seconds})
   set(test_home ${CMAKE_BINARY_DIR}/test-home/${test_name})
   file(MAKE_DIRECTORY ${test_home})
   set_property(TEST ${test_name} APPEND PROPERTY ENVIRONMENT

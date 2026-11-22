@@ -489,6 +489,8 @@ private:
         m_pruned.start();
         CacheFolders folders;
         folders.thumbnails = m_thumbnails;
+        if (m_setup.thumbnailDir.isEmpty())
+            folders.mediaThumbnails = mediaThumbnailsDir(); // one limit for both (the run's turn holds the lock)
         CacheManager(folders).cleanupLocked(CachePolicy::current());
     }
 

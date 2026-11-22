@@ -74,6 +74,18 @@ QList<PictureFile> pictureFiles(const QString &folder) {
     return files;
 }
 
+// The previews of both thumbnail folders, oldest first.
+QList<PictureFile> thumbnailFiles(const CacheFolders &folders) {
+    QList<PictureFile> files = pictureFiles(folders.thumbnails);
+    files.append(pictureFiles(folders.mediaThumbnails));
+    std::sort(files.begin(), files.end(), [](const PictureFile &a, const PictureFile &b) {
+        return a.changed != b.changed ? a.changed < b.changed : a.path < b.path;
+    });
+    return files;
+}
+
+bool hasThumbnails(const CacheFolders &folders) { return !folders.thumbnails.isEmpty() || !folders.mediaThumbnails.isEmpty(); }
+
 struct RunInfo {
     QString id;
     QString path;
@@ -145,6 +157,7 @@ CacheFolders CacheFolders::standard() {
     CacheFolders folders;
     folders.results = ResultCache::defaultRoot();
     folders.thumbnails = thumbnailsDir();
+    folders.mediaThumbnails = mediaThumbnailsDir();
     folders.runs = RunFolder::defaultRoot();
     folders.queue = Queue::defaultDir();
     folders.lock = Queue::defaultLockPath();
@@ -289,11 +302,11 @@ CacheStatus CacheManager::status(const CachePolicy &policy) const {
         });
         status.kinds.append(usage);
     }
-    if (!m_folders.thumbnails.isEmpty()) {
+    if (hasThumbnails(m_folders)) {
         KindUsage usage;
         usage.kind = CacheKind::Thumbnails;
         usage.limit = policy.thumbnailsBytes;
-        for (const PictureFile &file : pictureFiles(m_folders.thumbnails)) {
+        for (const PictureFile &file : thumbnailFiles(m_folders)) {
             usage.bytes += file.bytes;
             ++usage.files;
             ++usage.items;
@@ -354,7 +367,7 @@ KindOutcome CacheManager::clearThumbnails(const ClearRequest &request) const {
     KindOutcome outcome;
     outcome.kind = CacheKind::Thumbnails;
     const QDateTime cutoff = request.olderThanSeconds > 0 ? now().addSecs(-request.olderThanSeconds) : QDateTime();
-    for (const PictureFile &file : pictureFiles(m_folders.thumbnails)) {
+    for (const PictureFile &file : thumbnailFiles(m_folders)) {
         if (cutoff.isValid() && !(file.changed < cutoff))
             continue;
         if (request.dryRun || QFile::remove(file.path)) {
@@ -408,7 +421,7 @@ Result<ClearReport> CacheManager::clear(const ClearRequest &request) const {
                 report.kinds.append(clearResults(request));
             break;
         case CacheKind::Thumbnails:
-            if (!m_folders.thumbnails.isEmpty())
+            if (hasThumbnails(m_folders))
                 report.kinds.append(clearThumbnails(request));
             break;
         case CacheKind::Runs:
@@ -433,11 +446,11 @@ ClearReport CacheManager::cleanupLocked(const CachePolicy &policy) const {
         outcome.bytes = before - cache.size();
         report.kinds.append(outcome);
     }
-    if (!m_folders.thumbnails.isEmpty()) {
+    if (hasThumbnails(m_folders)) {
         KindOutcome outcome;
         outcome.kind = CacheKind::Thumbnails;
         const QDateTime cutoff = now().addDays(-CachePolicy::thumbnailDays);
-        QList<PictureFile> files = pictureFiles(m_folders.thumbnails);
+        QList<PictureFile> files = thumbnailFiles(m_folders);
         qint64 total = 0;
         for (const PictureFile &file : files)
             total += file.bytes;
@@ -492,7 +505,7 @@ ClearReport CacheManager::cleanup(const CachePolicy &policy) const {
         ClearReport report = CacheManager(runsOnly, m_clock).cleanupLocked(policy);
         int at = 0;
         for (const CacheKind kind : {CacheKind::Results, CacheKind::Thumbnails}) {
-            if ((kind == CacheKind::Results ? m_folders.results : m_folders.thumbnails).isEmpty())
+            if (kind == CacheKind::Results ? m_folders.results.isEmpty() : !hasThumbnails(m_folders))
                 continue;
             KindOutcome busy;
             busy.kind = kind;

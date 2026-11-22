@@ -202,8 +202,9 @@ public:
         while (process.state() != QProcess::NotRunning && clock.elapsed() < 60000)
             QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
         if (process.state() != QProcess::NotRunning) {
+            qWarning("fugue %s: still running after 60 s, killed", qPrintable(args.join(' ')));
             process.kill();
-            process.waitForFinished();
+            process.waitForFinished(10000); // a deadline, never forever
             return -1;
         }
         const int code = process.exitStatus() == QProcess::NormalExit ? process.exitCode() : -2;

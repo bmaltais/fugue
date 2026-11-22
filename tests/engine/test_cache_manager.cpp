@@ -43,6 +43,7 @@ class TestCacheManager : public QObject {
         const QString base = m_dir.filePath(QString::number(++m_count));
         w.folders.results = base + "/results";
         w.folders.thumbnails = base + "/thumbnails";
+        w.folders.mediaThumbnails = base + "/thumbs";
         w.folders.runs = base + "/runs";
         w.folders.queue = base + "/queue";
         w.folders.lock = base + "/engine.lock";
@@ -73,6 +74,15 @@ class TestCacheManager : public QObject {
     void thumbnail(const World &w, const QString &name, int bytes, const QDateTime &changed) {
         QDir().mkpath(w.folders.thumbnails);
         QFile file(w.folders.thumbnails + "/" + name);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(QByteArray(bytes, 'x'));
+        file.flush();
+        file.setFileTime(changed, QFileDevice::FileModificationTime);
+    }
+
+    void mediaThumbnail(const World &w, const QString &name, int bytes, const QDateTime &changed) {
+        QDir().mkpath(w.folders.mediaThumbnails);
+        QFile file(w.folders.mediaThumbnails + "/" + name);
         QVERIFY(file.open(QIODevice::WriteOnly));
         file.write(QByteArray(bytes, 'x'));
         file.flush();
@@ -170,6 +180,44 @@ private slots:
         request.olderThanSeconds = 0;
         QCOMPARE(outcome(w.manager->clear(request).value(), CacheKind::Thumbnails).removed, 1);
         QVERIFY(QFile::exists(w.folders.thumbnails + "/z-512.png.part"));
+    }
+
+    // The media browser's pictures (#133, <cache>/thumbs) are thumbnails too: counted with them,
+    // cleared with them, and kept within the same size limit, oldest first across both folders.
+    void theMediaBrowsersThumbnailsAreThumbnailsToo() {
+        World w = world();
+        thumbnail(w, "canvas-512.png", 300, m_now.addDays(-2));
+        mediaThumbnail(w, "browser-a.png", 200, m_now.addDays(-3));
+        mediaThumbnail(w, "browser-b.png", 100, m_now.addDays(-1));
+        mediaThumbnail(w, "half.png.part", 50, m_now);
+
+        const CacheStatus status = w.manager->status();
+        const KindUsage *usage = status.usage(CacheKind::Thumbnails);
+        QVERIFY(usage);
+        QCOMPARE(usage->bytes, qint64(600));
+        QCOMPARE(usage->files, 3);
+        QCOMPARE(usage->oldest, m_now.addDays(-3));
+
+        CachePolicy policy;
+        policy.thumbnailsBytes = 350; // the oldest across both folders goes first
+        const ClearReport report = w.manager->cleanup(policy);
+        QCOMPARE(outcome(report, CacheKind::Thumbnails).removed, 2);
+        QVERIFY(!QFile::exists(w.folders.mediaThumbnails + "/browser-a.png"));
+        QVERIFY(!QFile::exists(w.folders.thumbnails + "/canvas-512.png"));
+        QVERIFY(QFile::exists(w.folders.mediaThumbnails + "/browser-b.png"));
+
+        ClearRequest request;
+        request.kinds = {CacheKind::Thumbnails};
+        QCOMPARE(outcome(w.manager->clear(request).value(), CacheKind::Thumbnails).removed, 1);
+        QVERIFY(!QFile::exists(w.folders.mediaThumbnails + "/browser-b.png"));
+        QVERIFY(QFile::exists(w.folders.mediaThumbnails + "/half.png.part"));
+    }
+
+    void onlyTheMediaThumbnailFolderStillMakesAThumbnailsKind() {
+        CacheFolders folders;
+        folders.mediaThumbnails = m_dir.path() + "/only-thumbs";
+        CacheManager manager(folders, [this] { return m_now; });
+        QVERIFY(manager.status().usage(CacheKind::Thumbnails));
     }
 
     void clearingResultsFollowsWorkflowNodeAndAgeAndSparesFrozenOnes() {
