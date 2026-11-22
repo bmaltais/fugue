@@ -49,7 +49,12 @@ Item {
     readonly property bool regionValid: canvasData.region.valid === true
     readonly property bool regionEditable: regionValid && canvasData.region.editable === true && !compareOn
     // What the rectangle means for the node (the node's own functions): the drag's, or the committed one.
-    readonly property var preview: regionValid ? canvasData.previewRegion(liveRect ?? canvasData.region) : ({})
+    // The preview needs the picture's size (previewRegion answers nothing before it is read); reading pictureSize here
+    // makes the binding run again when the picture arrives, whichever came first: the region or the picture. `previewReady`
+    // is derived from the preview itself, so no binding can see "ready" before the data (QML runs bindings in no fixed order).
+    readonly property var preview: regionValid && canvasData.pictureSize.width > 0 && canvasData.pictureSize.height > 0
+                                   ? canvasData.previewRegion(liveRect ?? canvasData.region) : ({})
+    readonly property bool previewReady: preview.context !== undefined
     readonly property bool compareOn: comparing && canvasData.hasParent
     readonly property bool canDecide: canvasData.kindB === "candidate" || canvasData.kindB === "dropped"
     readonly property string shownShort: canvasData.revisionB.slice(7, 15)
@@ -317,7 +322,7 @@ Item {
         clip: true
         readonly property real k: pictureView.imageScale
         // The padded context box, in the picture's coordinates, which move with zoom and pan; the drag's while there is one.
-        readonly property var box: root.regionValid ? root.preview.context : ({x: 0, y: 0, width: 0, height: 0})
+        readonly property var box: root.previewReady ? root.preview.context : ({x: 0, y: 0, width: 0, height: 0})
         readonly property rect context: Qt.rect(pictureView.imageX + box.x * k, pictureView.imageY + box.y * k, box.width * k, box.height * k)
         // The rectangle: the Crop window's frame, with the picture left undimmed. It takes the left button on itself and
         // on empty picture (to draw), never the middle button, the wheel or a Space-held drag, which are the viewer's.
@@ -399,12 +404,13 @@ Item {
             visible: canvasData.followNode !== ""
             Text {
                 objectName: "canvasViewRegionNote"
+                readonly property var shown: root.previewReady ? root.preview : canvasData.region // the saved numbers until the picture is read
                 height: useButton.height
                 verticalAlignment: Text.AlignVCenter
                 color: canvasData.region.valid ? root.look.label : root.look.error
                 font.pixelSize: root.look.labelSize
                 text: canvasData.region.valid ? qsTr("Region %1 reads %2: %3 × %4 at %5, %6").arg(canvasData.followNode).arg(root.readsText(canvasData.region))
-                                                  .arg(root.preview.width).arg(root.preview.height).arg(root.preview.x).arg(root.preview.y)
+                                                  .arg(shown.width).arg(shown.height).arg(shown.x).arg(shown.y)
                                            : canvasData.region.reason
             }
             ViewButton {
@@ -425,11 +431,11 @@ Item {
             objectName: "canvasViewRegionInfo"
             width: parent.width
             wrapMode: Text.Wrap
-            visible: root.regionValid
+            visible: root.previewReady
             color: root.look.label
             font.pixelSize: root.look.labelSize
             font.features: { "tnum": 1 }
-            text: root.regionValid ? qsTr("Context %1 × %2 (dashed). The model gets %3 × %4%5.")
+            text: root.previewReady ? qsTr("Context %1 × %2 (dashed). The model gets %3 × %4%5.")
                                        .arg(root.preview.context.width).arg(root.preview.context.height)
                                        .arg(root.preview.modelWidth).arg(root.preview.modelHeight)
                                        .arg(root.preview.capped ? qsTr(", at the %1 MP cap").arg(canvasData.region.cap) : "") : ""
