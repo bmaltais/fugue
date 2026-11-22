@@ -180,7 +180,8 @@ jobs:
           docker exec arch chown builder dist
           if [[ $GITHUB_REF_TYPE == tag ]]; then ref="tag=$GITHUB_REF_NAME"; else
             docker exec arch git branch -f ci-build HEAD; ref="branch=ci-build"; fi
-          docker exec arch su builder -c "cd packaging && FUGUE_SKIP_CUDA=1 FUGUE_SRC='$GITHUB_WORKSPACE' FUGUE_REF='$ref' \
+          # Arch Linux ARM's makepkg.conf makes .pkg.tar.xz; the release and the x86 package use zstd.
+          docker exec arch su builder -c "cd packaging && PKGEXT=.pkg.tar.zst FUGUE_SKIP_CUDA=1 FUGUE_SRC='$GITHUB_WORKSPACE' FUGUE_REF='$ref' \
             PKGDEST='$GITHUB_WORKSPACE/dist' CCACHE_DIR='$CCACHE_DIR' makepkg --noconfirm --nocheck --nodeps -f"
 
       - name: Checksums and what is inside
