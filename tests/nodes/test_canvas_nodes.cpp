@@ -294,6 +294,27 @@ private slots:
         QCOMPARE(r->value("height").number(), 60.0);
     }
 
+    // Region 1.2 (#230): a selection painted in the Canvas view, stored by its hash, is the part to change; the mask and
+    // the rectangle are not used, and the hash is a literal (the same selection is a cache hit). Empty, unknown or not a
+    // hash: said plainly.
+    void aStoredSelectionGivesTheRegionItsBounds() {
+        Bench bench;
+        const QString id = makeCanvas();
+        mask::MaskPaint painted(kW, kH);
+        painted.fillRect(100, 60, 40, 30);
+        const QString hash = CanvasStore::forSession().storeSelection(painted).value();
+        const Result<Values> r = bench.region(id, {{"selection", Value(hash)}, {"padding", Value(10)}, {"max_megapixels", Value(0)}, {"multiple", Value(1)},
+                                                   {"x", Value(0)}, {"width", Value(5)}});
+        QVERIFY2(r.ok(), qPrintable(codeOf(r)));
+        QCOMPARE(r->value("width").number(), 60.0); // 40 + 2 x 10
+        QCOMPARE(r->value("height").number(), 50.0);
+        QCOMPARE(codeOf(bench.region(id, {{"selection", Value(CanvasStore::forSession().storeSelection(mask::MaskPaint(kW, kH)).value())}})), QString("mask_empty"));
+        QCOMPARE(codeOf(bench.region(id, {{"selection", Value("sha256:" + QString(64, '0'))}})), QString("canvas_not_found"));
+        QCOMPARE(codeOf(bench.region(id, {{"selection", Value("not a hash")}})), QString("input_invalid"));
+        const NodeType &type = *bench.registry.nodeType("fugue/canvas-region");
+        QCOMPARE(type.version.toString(), QString("1.2.0"));
+    }
+
     void anEmptyMaskOrARectangleOffTheCanvasIsRefused() {
         Bench bench;
         const QString id = makeCanvas();

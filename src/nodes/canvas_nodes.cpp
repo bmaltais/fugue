@@ -118,6 +118,14 @@ QString nextFillName(const PaintDocument &document) {
     return QStringLiteral("Fill %1").arg(highest + 1);
 }
 
+// The errors, each naming `input` when it names none.
+Errors withInput(Errors errors, const QString &input) {
+    for (Error &error : errors)
+        if (error.input.isEmpty())
+            error.input = input;
+    return errors;
+}
+
 Result<PaintDocument> openRevision(const CanvasHandle &handle) {
     return CanvasStore::forSession().load(handle.canvas, handle.revision);
 }
@@ -189,7 +197,28 @@ public:
         Errors warnings;
         std::optional<CropBox> bounds;
         Pixels mask;
-        if (const Value given = context.input(QStringLiteral("mask")); given.isMedia()) {
+        const QString selection = context.input(QStringLiteral("selection")).text().trimmed();
+        if (!selection.isEmpty()) {
+            // A selection the Canvas view stored (#230): read from the canvas folder by its hash, as a mask would be.
+            if (!isSha256(selection))
+                return makeInputError(QStringLiteral("input_invalid"), QStringLiteral("selection"),
+                                      QStringLiteral("\"%1\" is not a selection's hash.").arg(selection.left(80)),
+                                      QStringLiteral("Paint the selection with Quick Mask in the Canvas view and press Use selection, or leave Selection empty."));
+            const Result<mask::MaskPaint> stored = CanvasStore::forSession().selection(selection);
+            if (!stored)
+                return Result<Values>(withInput(stored.errors(), QStringLiteral("selection")));
+            mask = layerToPixels(*stored);
+            if (mask.width != composite.width || mask.height != composite.height) {
+                warnings << warning(makeInputError(QStringLiteral("mask_resized"), QStringLiteral("selection"),
+                                                   QStringLiteral("The selection is %1 x %2 and the canvas %3 x %4; the selection was scaled to the canvas.")
+                                                       .arg(mask.width).arg(mask.height).arg(composite.width).arg(composite.height)));
+                mask = maskResized(mask, composite.width, composite.height);
+            }
+            bounds = maskBounds(mask);
+            if (!bounds)
+                return makeInputError(QStringLiteral("mask_empty"), QStringLiteral("selection"), QStringLiteral("Nothing is selected."),
+                                      QStringLiteral("Paint the part to change with Quick Mask in the Canvas view."));
+        } else if (const Value given = context.input(QStringLiteral("mask")); given.isMedia()) {
             Result<Pixels> read = maskOf(given, QStringLiteral("mask"));
             if (!read)
                 return Result<Values>(read.errors());
@@ -373,14 +402,6 @@ public:
         out.insert(QStringLiteral("accepted"), Value(moved->moved));
         out.insert(QStringLiteral("head"), Value(moved->head));
         return Result<Values>(out, warnings);
-    }
-
-private:
-    static Errors withInput(Errors errors, const QString &input) {
-        for (Error &error : errors)
-            if (error.input.isEmpty())
-                error.input = input;
-        return errors;
     }
 };
 
