@@ -675,6 +675,8 @@ QVariantList WidgetEdit::models(const QString &node, const QString &input) const
                           {"handle", model.handle.toVariantMap()},
                           {"status", model.status},
                           {"provider", model.provider},
+                          {"host", model.host},
+                          {"hostOffline", model.hostOffline()},
                           {"note", model.note}};
         if (model.onDisk()) {
             entry.insert("path", model.path);

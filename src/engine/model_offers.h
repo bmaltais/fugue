@@ -23,6 +23,9 @@ struct ListedModel {
     QJsonObject handle; // what is stored when it is picked (2.5)
     QString status;     // "ready", "loading" or "unavailable" (a file on disk is "ready")
     QString provider;   // the instance's name; empty for a file on disk
+    // The paired host that serves it (#164): the instance's name when the instance has an
+    // address, else empty (a file on disk, or a server on this machine).
+    QString host;
     QString title;      // the name people know it by; empty: the name
     QString note;       // for a model that is not ready: why, and how to make it ready
     // A file on disk: where it is, the type folder it was found in, and its size. Its handle
@@ -33,6 +36,9 @@ struct ListedModel {
     qint64 size = 0;
 
     bool onDisk() const { return !path.isEmpty(); }
+    // Served by a paired host that does not answer for it (not ready): its models are listed
+    // dimmed, "host offline", never hidden (#164).
+    bool hostOffline() const { return !host.isEmpty() && status == QLatin1String("unavailable"); }
 };
 
 // Asks each enabled provider instance (providers.json, else spec 8.2's default) to describe

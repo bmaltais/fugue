@@ -2050,6 +2050,22 @@ list`, and copied out by opening one or by `fugue workflow new <file> --template
   whose name is taken by another file takes `-2`, `-3`..., and the workflow names that. A sample
   must be a file inside its template's folder; one that leads out, by `..` or a link, is not read.
   The person's own template wins over a bundled one of the same id, even when it is broken.
+- **Where its models are (#164).** A card says, with a small badge and a tooltip, where each of
+  its models can be had: `monitor`, "On this machine" (a file in the model folders, or a model a
+  server on this machine serves) and `server`, "Shared by <host>" (a model a paired host serves
+  through the omarchy provider, [8.7](#87-shipped-providers)); a template whose models are in
+  both places shows both. A model in neither place is the existing "Models missing" line and
+  Download offer ([11.9](#119-missing-models-and-downloads)). A host that lists a model but is not answering is shown
+  dimmed with "Host offline: <host>", and is not a place: it never makes a template ready. A
+  **Ready to run** chip filters to the templates whose every model is somewhere (a template with
+  no model files is ready), and within a category the ready ones come first. Availability is what
+  the disk and the providers report, never guessed: a model is the same model by hash, else by
+  resource type and name (`sameModel`, [8.3](#83-selection)), so a host's model counts
+  for a template's only when it reports that hash. One pure mapping, `engine/model_places.h`
+  (`placesOf`, `summarizePlaces`, `placeGlyphs`), serves the cards and the model pickers
+  ([2.5](#25-resource-handles)); the hosts' models are read when the dialog opens
+  (`Workflows::loadHostModels`, then `templatesChanged`), so the cards of a slow host fill in
+  after the dialog shows.
 
 ---
 
@@ -3202,6 +3218,7 @@ Building M2 made these further choices.
 | The model picker lists, when it opens, the models every enabled provider instance offers of the input's resource type (for the node type's capabilities, 8.4), with their state; then the input type's files on disk (8.9), by folder (#76). A typed name is stored as a handle served by that name; an optional model input can go back to "Any ready model" (unset, 8.4) | 2.5, 8.4 | medium |
 | A linked value input shows its source ("Prompt · Text") in place of the widget. List inputs keep a read-only row (`[n]`); a placeholder's inputs show their value read-only | 3.2, 3.6 | medium-high |
 | File and folder widgets store the path the portal returns as it is, or the path typed; the canvas checks no file roots (see the #19 row on canvas runs and roots) | 6.2, 13.6 | medium |
+| Where a model lives, for templates and model pickers (#164). Research: today a card's "Models missing" comes from `ModelLibrary::missing` over the template's `requires.models` handles (name and hash, headers never read, 11.9, #85, #89); the picker lists `listOfferedModels` (providers, by instance) and `listDiskModels`. The omarchy provider names a served model by its recipe, without a hash (`OfferedModel::handle`, 8.7), and a paired host is its own provider instance with an `address` (`defaultProviderInstances`); an offline paired host is kept, its models `unavailable`. omarchy-local-ai says nothing more about files. Other tools: LM Studio marks local and "downloadable" models, Ollama tags `:cloud` models, Jan separates local and remote engines, Stability Matrix and ComfyUI Manager badge installed against not installed; none shows a paired host's models next to local ones, so this is Fugue's own. Decided: the badge is the glyph plus a tooltip, never color alone (informational: no press, so no 28 px floor, 16 px glyph); `monitor` for this machine and `server` for a host (Lucide, added to the subset); a model on a host counts for a template only by the same hash (else resource and name, as provider selection does), so a recipe-named host model (no hash) does not mark a template whose file models carry hashes; the host's models are read when the dialog opens and the cards update when they arrive; a template with no model files is "ready" with no badge; ready-first is a stable partition inside each category, not a new sort key | 11.10, 8.7, 2.5 | medium (the matching is the doubtful part: a host that reports component hashes would light the badges; recipes alone do not) |
 | Text-field focus (12.4): widget fields are text inputs, so while one has focus its keys are the field's; a press on the canvas or on another widget takes the focus from the field first, ending its edit. Menus are modal, so the window's keys sleep while one is open | 12.4 | high |
 | Widgets are made with a node's rows (in view at a readable zoom); at rest a widget is a well, a text and a mouse area, and editors, menus and pickers are made on first use | 12.1 | high |
 | Canvas runs (#19) run in the window's process (9.8: no daemon) on a thread of their own that owns everything a run touches: its own registry (node types, and providers.json read again at each run's turn, as a worker does), the kernels, the result cache and the Run objects. The UI thread hands over a copy of the document and gets the events back, so compiling, hashing, moving outputs and waiting for providers or the queue never block it. A run goes through `fugue run`'s steps and code: compile (run to here is the compiler's target), run folder, an entry in the shared queue, its turn, the scheduler. A run that does not compile gets no folder, as with `fugue run` | 9.8, 12.1 | high |
@@ -3451,3 +3468,4 @@ Building M4 made these further choices.
 | #141 cache management | 10.5, 10.6, 13.1, 12.7, Appendix A |
 | #134 upscaling: Upscale Image and Video, Upscale with Model, the model catalog and picker downloads | 8.1, 8.9, 14.1, Appendix A |
 | #138 Upscale Video with Model: frames streamed through the helper's upscaler | 8.1, 9.2, 14.1, Appendix A |
+| #164 template and model picker icons for models on this machine and on paired hosts, Ready to run | 11.10, 8.7, 2.5, Appendix A |

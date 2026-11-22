@@ -23,6 +23,8 @@ Popup {
     property var templates: []
     // "" is every template, "own" the person's own, else a category id.
     property string category: ""
+    // Only the templates whose models are all here or on a paired host (#164).
+    property bool readyOnly: false
 
     parent: Overlay.overlay
     anchors.centerIn: Overlay.overlay
@@ -41,6 +43,8 @@ Popup {
         NumberAnimation { property: "opacity"; to: 0; duration: 90; easing.type: Easing.OutCubic }
     }
     onAboutToShow: {
+        // The paired hosts' models arrive later (templatesChanged), or at once when already known.
+        App.workflows.loadHostModels()
         templates = App.workflows.templates()
         search.text = ""
         if (category !== "" && !categories.some(c => c.id === category))
@@ -52,6 +56,12 @@ Popup {
         target: App.workflows.downloads
         enabled: dialog.visible
         function onFinished() { dialog.templates = App.workflows.templates() }
+    }
+    // The paired hosts answered: which templates they can run.
+    Connections {
+        target: App.workflows
+        enabled: dialog.visible
+        function onTemplatesChanged() { dialog.templates = App.workflows.templates() }
     }
 
     // The tabs on the left: All, the person's own when there are any, then each category in
@@ -71,15 +81,30 @@ Popup {
     }
 
     // The templates of the tab, narrowed by every word typed (title, description, tags,
-    // category); in list() order.
+    // category) and by Ready to run; in list() order, except that within a category the ones
+    // ready to run come first (#164).
     readonly property var shown: {
         const words = search.text.toLowerCase().split(/\s+/).filter(w => w.length > 0)
-        return templates.filter(t => {
+        const found = templates.filter(t => {
             if (category === "own" ? !t.own : category !== "" && (t.own || t.category !== category))
+                return false
+            if (readyOnly && !t.ready)
                 return false
             const text = [t.title, t.description, t.categoryTitle].concat(t.tags).join(" ").toLowerCase()
             return words.every(w => text.indexOf(w) >= 0)
         })
+        // A stable partition inside each run of one category: the list comes grouped by it.
+        const out = []
+        let from = 0
+        while (from < found.length) {
+            let to = from
+            while (to < found.length && found[to].category === found[from].category && found[to].own === found[from].own)
+                ++to
+            const run = found.slice(from, to)
+            out.push(...run.filter(t => t.ready), ...run.filter(t => !t.ready))
+            from = to
+        }
+        return out
     }
 
     function openTemplate(id) {
@@ -161,6 +186,9 @@ Popup {
             Layout.margins: 4 * dialog.u
             spacing: 4 * dialog.u
 
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 2 * dialog.u
             ThemedTextField {
                 id: search
                 objectName: "templatesSearch"
@@ -171,6 +199,48 @@ Popup {
                 Keys.onDownPressed: { grid.currentIndex = 0; grid.forceActiveFocus() }
                 Keys.onReturnPressed: if (dialog.shown.length > 0) dialog.openTemplate(dialog.shown[0].id)
                 Keys.onEnterPressed: if (dialog.shown.length > 0) dialog.openTemplate(dialog.shown[0].id)
+            }
+            // The filter chip: a toggle, its state said by the check and the accent edge as well as the fill.
+            Rectangle {
+                id: readyChip
+                objectName: "templatesReadyOnly"
+                implicitWidth: chipRow.implicitWidth + 4 * dialog.u
+                implicitHeight: 7 * dialog.u
+                radius: height / 2
+                color: dialog.readyOnly ? dialog.look.selectedRow : chipHover.hovered ? dialog.look.well : "transparent"
+                border.width: 1
+                border.color: dialog.readyOnly || activeFocus ? dialog.look.accent : dialog.look.hairlineStrong
+                activeFocusOnTab: true
+                Accessible.role: Accessible.CheckBox
+                Accessible.name: qsTr("Ready to run")
+                Accessible.checked: dialog.readyOnly
+                Keys.onSpacePressed: dialog.readyOnly = !dialog.readyOnly
+                Keys.onReturnPressed: dialog.readyOnly = !dialog.readyOnly
+                HoverHandler { id: chipHover; cursorShape: Qt.PointingHandCursor }
+                TapHandler { onTapped: dialog.readyOnly = !dialog.readyOnly }
+                ToolTip.visible: chipHover.hovered
+                ToolTip.delay: App.theme.look.tooltipDelay
+                ToolTip.text: qsTr("Only templates whose models are on this machine or on a paired host")
+                Row {
+                    id: chipRow
+                    anchors.centerIn: parent
+                    spacing: dialog.u
+                    Glyph {
+                        visible: dialog.readyOnly
+                        anchors.verticalCenter: parent.verticalCenter
+                        look: dialog.look
+                        name: "check"
+                        color: dialog.look.accent
+                        font.pixelSize: 12
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: qsTr("Ready to run")
+                        color: dialog.look.text
+                        font.pixelSize: dialog.look.textSize
+                    }
+                }
+            }
             }
 
             GridView {
@@ -233,6 +303,40 @@ Popup {
                                     fillMode: Image.PreserveAspectCrop
                                     asynchronous: true
                                     sourceSize.width: 512
+                                }
+                                // Where its models are (#164): the same badges as the model pickers, on a
+                                // pill over the preview's corner so the card keeps its height.
+                                Rectangle {
+                                    id: places
+                                    objectName: "templatePlaces-" + cell.modelData.id
+                                    anchors { left: parent.left; bottom: parent.bottom; margins: dialog.u }
+                                    visible: cell.modelData.local || cell.modelData.hosts.length > 0
+                                             || cell.modelData.offlineHosts.length > 0
+                                    width: placeRow.width + 2 * dialog.u
+                                    height: 16 + dialog.u
+                                    radius: height / 2
+                                    color: dialog.look.body
+                                    border.width: 1
+                                    border.color: dialog.look.hairlineStrong
+                                    Row {
+                                        id: placeRow
+                                        anchors.centerIn: parent
+                                        spacing: dialog.u
+                                        PlaceBadge {
+                                            objectName: "templatePlaceLocal-" + cell.modelData.id
+                                            visible: cell.modelData.local
+                                            look: dialog.look
+                                            kind: "local"
+                                        }
+                                        PlaceBadge {
+                                            objectName: "templatePlaceHost-" + cell.modelData.id
+                                            visible: cell.modelData.hosts.length > 0 || cell.modelData.offlineHosts.length > 0
+                                            look: dialog.look
+                                            kind: "host"
+                                            hosts: cell.modelData.hosts.length > 0 ? cell.modelData.hosts : cell.modelData.offlineHosts
+                                            offline: cell.modelData.hosts.length === 0
+                                        }
+                                    }
                                 }
                             }
                             Text {

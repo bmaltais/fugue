@@ -495,6 +495,50 @@ private slots:
         QCOMPARE(app.steps(), 3);
     }
 
+    // #164: each model row says where the model lives: a glyph for this machine (a file, a
+    // server here) or a paired host, its tooltip naming the host; a host that does not answer
+    // keeps its models, dimmed, "host offline".
+    void theModelPickerRowsSayWhereTheModelsLive() {
+        QTemporaryDir models;
+        QVERIFY(test::writeFixtureFile(models.filePath("image-model/turbo.safetensors"), QByteArray(2000, 'm')));
+        WidgetApp app;
+        app.model.widgets()->setModelRoots({models.path()});
+        const auto handle = [](const QString &name) { return QJsonObject{{"resource", "fugue/image-model"}, {"name", name}}; };
+        app.model.widgets()->setModelSource([&](const QString &, const QStringList &,
+                                                std::function<void(QList<WidgetEdit::Model>)> done) {
+            done({widget_test::served("here", handle("here"), "ready", "This machine"),
+                  widget_test::served("shared", handle("shared"), "ready", "gx10", "", "", "gx10"),
+                  widget_test::served("dark", handle("dark"), "unavailable", "spark", "", "spark is not answering.", "spark")});
+        });
+        QVERIFY(app.open());
+        app.click(app.in("all", "model"));
+        QTRY_VERIFY2(app.menuOpen(), qPrintable(app.warnings.join('\n')));
+        QMap<QString, QVariantMap> rows;
+        for (const QVariant &entry : app.popup("widgetMenu")->property("entries").toList())
+            rows.insert(entry.toMap().value("text").toString(), entry.toMap());
+        QCOMPARE(rows.value("here").value("place").toString(), QString("local"));
+        QCOMPARE(rows.value("turbo.safetensors").value("place").toString(), QString("local"));
+        QCOMPARE(rows.value("shared").value("place").toString(), QString("host"));
+        QCOMPARE(rows.value("shared").value("placeHost").toString(), QString("gx10"));
+        QVERIFY(!rows.value("shared").value("dim").toBool());
+        QCOMPARE(rows.value("dark").value("place").toString(), QString("host"));
+        QVERIFY(rows.value("dark").value("dim").toBool());
+        QCOMPARE(rows.value("dark").value("detail").toString(), QString("host offline"));
+        // The badges are drawn, and say it in words.
+        QStringList tips;
+        std::function<void(QQuickItem *)> collect = [&](QQuickItem *from) {
+            for (QQuickItem *child : from->childItems()) {
+                if (child->objectName() == "widgetMenuPlace" && child->isVisible())
+                    tips << child->property("tip").toString();
+                collect(child);
+            }
+        };
+        collect(app.window->contentItem());
+        tips.sort();
+        QCOMPARE(tips, (QStringList{"Host offline: spark", "On this machine", "On this machine", "Shared by gx10"}));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void aModelFileOnDiskIsPickedFromItsFolderAndStoredByHash() {
         // A ComfyUI models folder under Extra model folders (8.9), and no provider model.
         QTemporaryDir models;
@@ -895,7 +939,7 @@ private slots:
             rows << (e.value("heading").toBool() ? "# " : "") + e.value("text").toString()
                         + (e.value("detail").toString().isEmpty() ? QString() : " | " + e.value("detail").toString());
         }
-        QCOMPARE(rows, (QStringList{"Any ready model", "# lab", "Z-Image Turbo | not running", "# studio",
+        QCOMPARE(rows, (QStringList{"Any ready model", "# lab", "Z-Image Turbo | host offline", "# studio",
                                     "FLUX.2 Klein 4B", "Z-Image Turbo", "Type a name…"}));
         // What a model that is not ready needs, under its name.
         QVERIFY(menu->property("entries").toList().at(2).toMap().value("note").toString().contains("Turn on lab"));

@@ -19,6 +19,7 @@
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
 #include "engine/document.h"
+#include "engine/model_offers.h"
 #include "engine/registry.h"
 #include "engine/templates.h"
 #include "workflow/image_inputs.h"
@@ -35,6 +36,7 @@
 #include <QVariantList>
 #include <QtQmlIntegration/qqmlintegration.h>
 
+#include <functional>
 #include <memory>
 
 namespace fugue {
@@ -131,7 +133,17 @@ public:
     // own, missingModels (name, source, folder each), neededPacks (not installed, or at another version), and status, one line: what
     // it lacks on this machine, or empty when it is ready; download, the button's text for its
     // missing models that have a source (as downloadOffer), else empty. A check: no model file is read.
+    // Each also says where its models are (#164, engine/model_places.h): `ready` (every model
+    // is on this machine or answering from a paired host; true with no models), `local`, `hosts`
+    // and `offlineHosts` (host names). A host's models are those the last loadHostModels() found.
     Q_INVOKABLE QVariantList templates() const;
+    // Where models come from, for the paired hosts' side of templates(): the providers
+    // (listOfferedModels) unless a test sets another.
+    using ModelSource = std::function<void(const QString &resourceType, const QStringList &capabilities,
+                                           std::function<void(QList<ListedModel>)> done)>;
+    void setModelSource(ModelSource source) { m_source = std::move(source); }
+    // Asks the providers for their models, then templatesChanged() so the dialog reads again.
+    Q_INVOKABLE void loadHostModels();
     // Opens the template with this id (openTemplate); false when there is none.
     Q_INVOKABLE bool openTemplateById(const QString &id);
     // The person's own templates folder, as the dialog names it.
@@ -218,6 +230,8 @@ public:
     Q_INVOKABLE void notify(const QString &text) { setNotice(text); }
 
 signals:
+    // What templates() says changed: the paired hosts' models arrived.
+    void templatesChanged();
     void tabsChanged();
     void currentChanged(int from, int to);
     void tabClosed(const QString &id);
@@ -312,6 +326,8 @@ private:
     DownloadOffer m_offer; // what goes with m_missingNotice
     Errors m_refused;      // models of the downloads under way that could not be planned
     ModelDownloads *m_downloads;
+    ModelSource m_source; // empty: listOfferedModels
+    QList<ListedModel> m_served; // what the providers offered at the last loadHostModels()
     // "<pack id> <version>" the person answered "not now" for: a reload does not ask again.
     QSet<QString> m_trustDismissed;
 };

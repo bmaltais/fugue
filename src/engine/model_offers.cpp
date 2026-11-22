@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <tuple>
 #include <vector>
 
 #include "engine/file_hashes.h"
@@ -25,7 +26,7 @@ void listOfferedModels(const QString &type, const QStringList &capabilities,
     };
     auto pending = std::make_shared<Pending>();
     pending->done = std::move(done);
-    QList<std::pair<std::shared_ptr<Provider>, QString>> asked;
+    QList<std::tuple<std::shared_ptr<Provider>, QString, QString>> asked; // provider, name, host
     for (const ProviderInstance &instance : instances.value()) {
         if (!instance.enabled)
             continue;
@@ -33,15 +34,15 @@ void listOfferedModels(const QString &type, const QStringList &capabilities,
         if (!made.ok())
             continue;
         pending->providers.push_back(made.value());
-        asked.append({made.value(), instance.name});
+        asked.append({made.value(), instance.name, instance.address.isEmpty() ? QString() : instance.name});
     }
     pending->left = int(asked.size());
     pending->byInstance.resize(asked.size());
     if (asked.isEmpty())
         return pending->done({});
     for (qsizetype index = 0; index < asked.size(); ++index) {
-        const auto &[provider, name] = asked.at(index);
-        provider->describe([pending, type, capabilities, index, name = name](const Result<Description> &description) {
+        const auto &[provider, name, host] = asked.at(index);
+        provider->describe([pending, type, capabilities, index, name = name, host = host](const Result<Description> &description) {
             QList<ListedModel> &models = pending->byInstance[index];
             if (description.ok()) {
                 for (const CapabilityOffer &offer : description->capabilities) {
@@ -62,6 +63,7 @@ void listOfferedModels(const QString &type, const QStringList &capabilities,
                         entry.handle = model.handle;
                         entry.status = modelStatusName(model.status);
                         entry.provider = name;
+                        entry.host = host;
                         entry.title = model.title;
                         if (model.status != ModelStatus::Ready)
                             entry.note = (model.reason + QLatin1Char(' ') + model.hint).trimmed();
