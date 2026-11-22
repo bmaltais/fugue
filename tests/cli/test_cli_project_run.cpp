@@ -132,7 +132,11 @@ class TestCliProjectRun : public QObject {
             QFile file("/proc/" + pid + "/cmdline");
             if (!pid.at(0).isDigit() || !file.open(QIODevice::ReadOnly))
                 continue;
-            if (file.readAll().split('\0').contains("__worker")) // an argument of its own, not part of some text
+            if (!file.readAll().split('\0').contains("__worker")) // an argument of its own, not part of some text
+                continue;
+            // Only this test's own workers: another run on the machine (an agent's, a second suite) is not ours.
+            QFile environ("/proc/" + pid + "/environ");
+            if (environ.open(QIODevice::ReadOnly) && environ.readAll().contains(m_dir->path().toUtf8()))
                 return true;
         }
         return false;
