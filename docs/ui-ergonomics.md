@@ -16,6 +16,15 @@ Apply these to every control this change adds or moves. The procedure for a cont
 - **Posture.** The canvas is sovereign: keep its density, and raise a frequent target or anything under the floor. A dialog or a popover is transient: fewer decisions, and its primary target may be larger.
 - **Same surface.** The steps of Run stay on this window.
 
+## References
+
+Blender and Photoshop are the usability references for the creative surfaces (owner decision, 2026-11-22): their conventions have years of refinement, and people arrive knowing them. A new creative surface (the Canvas view, its tool strip, layers, masks, areas and workspaces) starts from what they do, and the **Decisions** row names the convention it follows and any place it differs and why.
+
+- **Take:** the interaction patterns and keys (a left tool strip, a properties area beside the work, layers with an eye, opacity, blend mode and a mask thumbnail, hover and F2 rename, drag-number fields, area headers with an editor-type menu, workspaces as saved layouts, Q for a quick mask, Space to pan, alt-click the eye to solo).
+- **Do better where they are rough:** Blender's learning curve and Photoshop's density. The default stays the simple one-area window (hobbyists); the depth sits behind opt-in workspaces and advanced settings (film teams). Fugue's own rules above still win when they conflict (floor, primary, destructive, gaps).
+- **Never copy assets or code:** no icons, artwork, names used as branding, or source. Blender's code is GPL, so only its manual and developer documentation are read; Photoshop is read from Adobe's public documentation.
+- **Keys:** adopt their key where the command registry has no owner for it; a collision is settled in the Decisions row, never by silently taking the key.
+
 ## On a change or a new surface
 
 1. Read **Rules**, **Open**, and **Not scheduled**, and the canvas-look or spec section for each control you add or move.
