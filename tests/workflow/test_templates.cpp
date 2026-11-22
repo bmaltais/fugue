@@ -955,7 +955,7 @@ private slots:
                      qPrintable(QStringLiteral("%1 is in the category \"%2\", which categories.json lacks").arg(t.id, t.category)));
         }
         for (const char *wanted : {"text-to-video", "image-to-video", "image-chain-to-video", "image-upscale", "video-upscale",
-                                   "inpaint-region", "outpaint"})
+                                   "video-to-video", "inpaint-region", "outpaint"})
             QVERIFY2(found.contains(QLatin1String(wanted)),
                      qPrintable(QStringLiteral("the template %1 is not here").arg(wanted) + fix));
         // The two categories hold what they are for.
@@ -986,6 +986,29 @@ private slots:
         QCOMPARE(nodes.value("sample").inputs.value("steps").literal().toInt(), 4);
         QCOMPARE(nodes.value("sample").inputs.value("guidance").literal().toDouble(), 1.0);
         QVERIFY(document.groups.isEmpty());
+    }
+
+    // The video to video template (#130): VAE Encode Video makes the start latent of a clip that
+    // ships beside the template, and the Sampler 1.2.0 redraws it by Denoise, in plain nodes.
+    void theVideoToVideoTemplateRedrawsAClipByDenoise() {
+        const QString root = QStringLiteral(FUGUE_SOURCE_DIR "/templates");
+        QVERIFY2(bundledProblem(root).isEmpty(), qPrintable(bundledProblem(root)));
+        Fixture f;
+        const TemplateLibrary library({{root, false}}, &f.registry);
+        const auto found = library.find("video-to-video");
+        QVERIFY2(found.has_value(), "the template video-to-video is not here; the templates submodule is stale");
+        QCOMPARE(found->category, QStringLiteral("video"));
+        const Document document = Document::loadFile(found->workflow).value();
+        QVERIFY(!hasErrors(compile(document, f.registry).problems()));
+        const auto &nodes = document.graph.nodes;
+        QCOMPARE(nodes.value("clip").type, QStringLiteral("fugue/vae-encode-video"));
+        QCOMPARE(nodes.value("sample").type, QStringLiteral("fugue/sampler"));
+        QCOMPARE(nodes.value("sample").version.toString(), QStringLiteral("1.2.0"));
+        const double denoise = nodes.value("sample").inputs.value("denoise").literal().toDouble();
+        QVERIFY(denoise > 0.0 && denoise < 1.0);
+        QVERIFY(nodes.value("clip").inputs.value("frames").literal().toInt() > 0);
+        QVERIFY(document.groups.isEmpty());
+        QVERIFY(QFileInfo::exists(QFileInfo(found->workflow).absolutePath() + "/inputs/fox.mp4"));
     }
 
     // The two masking templates (#177, spec 14.4): in Image editing, with the painted sample mask
