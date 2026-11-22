@@ -14,7 +14,7 @@ using namespace fugue::mask;
 
 namespace {
 
-Brush brush(double size, double hardness = 0.8, double opacity = 1) { return {size, hardness, opacity}; }
+Brush brush(double size, double hardness = 0.8, double opacity = 1) { return {size, hardness, opacity, {}}; }
 
 int sum(const MaskPaint &m) {
     int total = 0;
