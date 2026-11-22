@@ -24,6 +24,13 @@
 // rebases or keeps both; the store does neither). A revision that was added but whose move lost stays
 // stored, a candidate nobody points at.
 //
+// A *candidate* is a stored revision that is not in the head's history and that nobody has resolved:
+// a Canvas Write that was asked to keep its result for review, or that lost the head's race (#210).
+// It is accepted into the head (accept(): the head moves to it when it was made from the head, else
+// its added layers are placed on the head as a new revision) or dropped (drop()). Both leave a small
+// file `canvases/<id>/resolved/<hex>` ("accepted <revision>" or "dropped") that hides it from the
+// list; nothing is deleted, and a dropped one can still be accepted.
+//
 // Picture layers are placeholders, as in an .ora (engine/paint_file.h): the picture is a node's
 // input, never part of a revision.
 
@@ -87,6 +94,21 @@ struct Commit {
     HeadMove move;
 };
 
+// A candidate and whether the head is the revision it was made from (so accepting moves the head to it).
+struct Candidate {
+    Revision revision;
+    bool onHead = false;
+    bool dropped = false; // dropped candidates are listed only when asked for
+};
+
+// The answer of accept.
+struct Accepted {
+    Revision head;     // the revision the head is on after the call (the candidate itself, or the new revision that placed its layers)
+    bool rebased = false;
+    bool moved = false; // false: the head moved meanwhile and nothing was changed; ask again
+    QString current;   // the head when !moved
+};
+
 bool isCanvasId(const QString &text); // [a-z0-9][a-z0-9_-]{0,63}
 
 class CanvasStore {
@@ -120,6 +142,18 @@ public:
     Result<Tree> tree(const QString &treeHash) const;
     // The revisions from `from` (default: the head) back along the parents, newest first, at most `limit`.
     Result<std::vector<Revision>> log(const QString &canvasId, const QString &from = {}, int limit = 100) const;
+    // ---- candidates (#210) ----
+    // The unresolved candidates of the canvas, newest first (and the dropped ones too when `withDropped`).
+    Result<std::vector<Candidate>> candidates(const QString &canvasId, bool withDropped = false) const;
+    // Accepts a candidate. Made from the head: the head moves to it. Made from an older revision: when
+    // it only added layers on top of that revision, a new revision of the head with those layers is
+    // made and becomes the head (canvas_conflict when it changed anything else). A revision that is in
+    // the head's history or already accepted is canvas_not_candidate.
+    Result<Accepted> accept(const QString &canvasId, const QString &revisionId);
+    // Hides a candidate (canvas_not_candidate for a revision in the head's history or an accepted one).
+    // Dropping a dropped one is not an error. Returns the revision.
+    Result<Revision> drop(const QString &canvasId, const QString &revisionId);
+
     // The revision as a document (no history). Picture layers come back as placeholders.
     Result<mask::PaintDocument> load(const QString &canvasId, const QString &revisionId) const;
 
@@ -130,6 +164,10 @@ private:
     QString canvasDir(const QString &canvasId) const;
     QString blobPath(const QString &hash) const;
     QString treePath(const QString &hash) const;
+    QString resolvedPath(const QString &canvasId, const QString &revisionId) const;
+    // "" for an open one, else "accepted" or "dropped".
+    QString resolution(const QString &canvasId, const QString &revisionId) const;
+    Result<QStringList> historyOfHead(const QString &canvasId, QString *head) const;
     Result<QString> storeTree(const mask::PaintDocument &document);
     Errors storeBlob(const QString &hash, const mask::MaskPaint &tile);
     Result<mask::MaskPaint> readBlob(const QString &hash, int width, int height, int channels) const;

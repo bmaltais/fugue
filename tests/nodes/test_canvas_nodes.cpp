@@ -431,6 +431,28 @@ private slots:
         QCOMPARE(pixel(id, candidate->revision, 100, 80, 1), 255);
     }
 
+    // Keep as candidate (#210): the head stays, nothing is warned, and the revision is a candidate.
+    void aWriteKeptAsACandidateLeavesTheHeadAndListsTheRevision() {
+        Bench bench;
+        const QString id = makeCanvas();
+        const QString before = headOf(id);
+        const Result<Values> r = bench.region(id, {{"x", Value(60)}, {"y", Value(50)}, {"width", Value(100)}, {"height", Value(80)}});
+        const Result<Values> w = writeGreen(bench, r, {{"candidate", Value(true)}});
+        QVERIFY2(w.ok(), qPrintable(codeOf(w)));
+        QVERIFY(w.problems().isEmpty());
+        QVERIFY(!w->value("accepted").json().toBool());
+        QCOMPARE(headOf(id), before);
+        QCOMPARE(w->value("head").text(), before);
+        const auto handle = canvas::canvasHandleFrom(w->value("canvas").json());
+        QVERIFY(handle);
+        const auto open = CanvasStore::forSession().candidates(id).value();
+        QCOMPARE(open.size(), size_t(1));
+        QCOMPARE(open[0].revision.id, handle->revision);
+        QVERIFY(open[0].onHead);
+        QVERIFY(CanvasStore::forSession().accept(id, handle->revision)->moved);
+        QCOMPARE(pixel(id, headOf(id), 100, 80, 1), 255);
+    }
+
     void withoutAStitchTheImageCoversTheWholeCanvas() {
         Bench bench;
         const QString id = makeCanvas();

@@ -208,15 +208,23 @@ public:
             store.addRevision(base->canvas, document, base->revision, QStringLiteral("canvas-write:") + context.node);
         if (!added)
             return Result<Values>(added.errors());
-        const Result<canvas::HeadMove> moved = store.moveHead(base->canvas, base->revision, added->id);
+        const bool keep = context.input(QStringLiteral("candidate")).json().toBool();
+        // Kept for review: the head stays where it is and the revision waits as a candidate (accepted off, no warning).
+        Result<canvas::HeadMove> moved = keep ? Result<canvas::HeadMove>(canvas::HeadMove{false, QString()}) : store.moveHead(base->canvas, base->revision, added->id);
         if (!moved)
             return Result<Values>(moved.errors());
+        if (keep) {
+            const Result<canvas::CanvasInfo> now = store.info(base->canvas);
+            if (!now)
+                return Result<Values>(now.errors());
+            moved = canvas::HeadMove{false, now->head};
+        }
         const Result<QJsonObject> handle = canvas::writeCanvasHandle(context.workDir, {base->canvas, added->id});
         if (!handle)
             return Result<Values>(handle.errors());
 
         Errors warnings;
-        if (!moved->moved)
+        if (!moved->moved && !keep)
             warnings << warning(makeError(QStringLiteral("canvas_head_moved"),
                                           QStringLiteral("The canvas changed while this ran (its head is now %1), so the new layer was kept as a candidate revision, %2, and the head was not moved.")
                                               .arg(moved->head.left(19), added->id.left(19)),

@@ -1,9 +1,9 @@
 {
   "manifest": 1,
   "id": "fugue/canvas-write",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "Canvas Write",
-  "description": "Put a result on a canvas as a new layer. The canvas is not edited: a new revision is made from the one Canvas Region read, and the head moves to it only when nothing else moved it meanwhile. When something did, the new revision stays as a candidate and the node reports it (accepted is off, a warning is shown), and nothing is lost: the head is the other change. The picture is resized to the stitch's box and blended in through the mask, softened outward by Blend pixels, as Stitch does; the layer holds only that part.",
+  "description": "Put a result on a canvas as a new layer. The canvas is not edited: a new revision is made from the one Canvas Region read, and the head moves to it only when nothing else moved it meanwhile. When something did, the new revision stays as a candidate and the node reports it (accepted is off, a warning is shown), and nothing is lost: the head is the other change. With Keep as candidate on, the head never moves: the result waits as a candidate for you to compare and accept or drop (fugue canvas candidates, diff, accept, drop). The picture is resized to the stitch's box and blended in through the mask, softened outward by Blend pixels, as Stitch does; the layer holds only that part.",
   "category": "Image/Canvas",
   "keywords": ["canvas", "write", "layer", "revision", "generative fill", "accept", "place"],
   "sink": true,
@@ -19,6 +19,8 @@
      "description": "The mask to blend through, at the canvas's size. Without one, the stitch's, and without a stitch the whole picture."},
     {"name": "blend", "type": "number", "label": "Blend", "default": 16, "min": 0, "max": 512, "step": 1, "integer": true,
      "description": "How far the edge of the mask fades outward, in canvas pixels."},
+    {"name": "candidate", "type": "boolean", "label": "Keep as candidate", "default": false,
+     "description": "Keep the result for review: the head does not move, and the new revision waits as a candidate to accept into the head or drop."},
     {"name": "name", "type": "text", "label": "Layer name", "default": "Fill", "widget": "line",
      "description": "The new layer's name."}
   ],

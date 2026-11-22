@@ -12,6 +12,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "engine/canvas_store.h"
 #include "engine/paint_document.h"
 #include "engine/paint_file.h"
 
@@ -144,11 +145,66 @@ private slots:
         QDir(path("proj")).removeRecursively();
     }
 
+    // A canvas and two candidates made with the library (what Canvas Write makes), listed, compared,
+    // accepted and dropped through the command line.
+    void candidatesAreListedComparedAcceptedAndDropped() {
+        const Outcome made = fugue({"canvas", "new", "--size", "512x512", "--json"});
+        const QString id = made.data().value("canvas").toString();
+        const QString head = made.data().value("head").toString();
+        fugue::canvas::CanvasStore store(path("home/.local/share/fugue/canvases"));
+        const auto candidate = [&](const QString &layer, int x) {
+            fugue::mask::PaintDocument doc = store.load(id, head).value();
+            doc.addLayer(fugue::mask::LayerKind::Paint, layer);
+            doc.brush.color = fugue::mask::Rgba{10, 200, 10, 255};
+            doc.fillRect(x, 40, 50, 50);
+            return store.addRevision(id, doc, head, "canvas-write:fill").value().id;
+        };
+        const QString a = candidate("A", 10), b = candidate("B", 300);
+
+        const Outcome listed = fugue({"canvas", "candidates", id, "--json"});
+        QVERIFY2(listed.exitCode == 0, listed.out + listed.err);
+        QCOMPARE(listed.data().value("candidates").toArray().size(), 2);
+        QVERIFY(listed.data().value("candidates").toArray().at(0).toObject().value("on_head").toBool());
+        QVERIFY(fugue({"canvas", "candidates", id}).out.contains(a.left(15).toUtf8()));
+
+        const Outcome diff = fugue({"canvas", "diff", id + "@" + a, "--json"}); // against its parent
+        QVERIFY2(diff.exitCode == 0, diff.out + diff.err);
+        QCOMPARE(diff.data().value("from").toString(), head);
+        const QJsonObject layer = diff.data().value("layers").toArray().at(0).toObject();
+        QCOMPARE(layer.value("name").toString(), QString("A"));
+        QCOMPARE(layer.value("change").toString(), QString("added"));
+        QCOMPARE(layer.value("tiles").toInt(), 1);
+        const Outcome both = fugue({"canvas", "diff", id + "@" + a, "@" + b, "--json"});
+        QCOMPARE(both.data().value("layers").toArray().size(), 2); // A removed, B added
+        QVERIFY(fugue({"canvas", "diff", id + "@" + head, "--json"}).errorCode() == "usage"); // the first has no parent
+
+        // Two candidates: a bare id is ambiguous. Drop one, then the bare id means the other.
+        QCOMPARE(fugue({"canvas", "accept", id, "--json"}).errorCode(), QString("usage"));
+        QCOMPARE(fugue({"canvas", "drop", id + "@" + b, "--json"}).exitCode, 0);
+        QCOMPARE(fugue({"canvas", "candidates", id, "--json"}).data().value("candidates").toArray().size(), 1);
+        QCOMPARE(fugue({"canvas", "candidates", id, "--all", "--json"}).data().value("candidates").toArray().size(), 2);
+        const Outcome accepted = fugue({"canvas", "accept", id, "--json"});
+        QVERIFY2(accepted.exitCode == 0, accepted.out + accepted.err);
+        QCOMPARE(accepted.data().value("revision").toString(), a);
+        QVERIFY(!accepted.data().value("rebased").toBool());
+        QCOMPARE(fugue({"canvas", "show", id, "--json"}).data().value("revision").toString(), a);
+        QCOMPARE(fugue({"canvas", "accept", id + "@" + a, "--json"}).errorCode(), QString("canvas_not_candidate"));
+        QCOMPARE(fugue({"canvas", "accept", id, "--json"}).errorCode(), QString("usage")); // none left but a dropped one
+        // The dropped one was made from the old head: accepting it places its layer.
+        const Outcome placed = fugue({"canvas", "accept", id + "@" + b, "--json"});
+        QVERIFY2(placed.exitCode == 0, placed.out + placed.err);
+        QVERIFY(placed.data().value("rebased").toBool());
+        QCOMPARE(fugue({"canvas", "show", id, "--json"}).data().value("layers").toArray().size(), 3);
+        QVERIFY(fugue({"canvas", "candidates", id}).out.contains("no candidate"));
+    }
+
     void errorsAreCodedAndHelpful() {
         QCOMPARE(fugue({"canvas", "show", "canvas-nope", "--json"}).errorCode(), QString("canvas_not_found"));
         QCOMPARE(fugue({"canvas", "new", "--size", "big", "--json"}).errorCode(), QString("usage"));
         QCOMPARE(fugue({"canvas", "new", "--size", "99999x10", "--json"}).errorCode(), QString("input_invalid"));
         QCOMPARE(fugue({"canvas", "log", "canvas-nope", "--json"}).errorCode(), QString("canvas_not_found"));
+        QCOMPARE(fugue({"canvas", "candidates", "canvas-nope", "--json"}).errorCode(), QString("canvas_not_found"));
+        QCOMPARE(fugue({"canvas", "diff", "canvas-nope", "--json"}).errorCode(), QString("canvas_not_found"));
         QFile bad(path("work/bad.ora"));
         QVERIFY(bad.open(QIODevice::WriteOnly));
         bad.write("nope");

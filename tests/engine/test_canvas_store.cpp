@@ -11,6 +11,7 @@
 #include <atomic>
 #include <thread>
 
+#include "engine/canvas_diff.h"
 #include "engine/canvas_store.h"
 #include "engine/hash.h"
 #include "engine/paint_file.h"
@@ -59,6 +60,26 @@ class TestCanvasStore : public QObject {
     int m_tick = 0;
     Clock clock() { return [this] { return QDateTime(QDate(2026, 11, 22), QTime(12, 0, 0), QTimeZone::utc()).addSecs(m_tick++); }; }
     CanvasStore store() { return CanvasStore(m_dir.path(), clock()); }
+
+    // A canvas with a head and a document that adds one layer on top of it.
+    struct Fixture {
+        QString id;
+        QString head;
+        PaintDocument base;
+    };
+    Fixture canvasWithBase(CanvasStore &s) {
+        Fixture f{{}, {}, sample(512)};
+        const Result<CanvasInfo> made = s.create("fill", f.base, "test");
+        f.id = made->id;
+        f.head = made->head;
+        return f;
+    }
+    static PaintDocument withFill(PaintDocument doc, const QString &name, int x) {
+        doc.addLayer(LayerKind::Paint, name);
+        doc.brush.color = Rgba{200, 10, 10, 255};
+        doc.fillRect(x, 100, 60, 60);
+        return doc;
+    }
 
 private slots:
     void init() {
@@ -286,6 +307,141 @@ private slots:
         f.write(text);
         f.close();
         QCOMPARE(s.revision(made->id, made->head).error().code, QString("canvas_corrupt"));
+    }
+
+    // ---- candidates: accept, drop, diff (#210) ----
+
+    void aRevisionNobodyPointsAtIsACandidateUntilResolved() {
+        CanvasStore s = store();
+        const Fixture f = canvasWithBase(s);
+        QVERIFY(s.candidates(f.id)->empty()); // the head's own history is not a candidate
+        const Revision a = s.addRevision(f.id, withFill(f.base, "A", 100), f.head, "write").value();
+        const Revision b = s.addRevision(f.id, withFill(f.base, "B", 300), f.head, "write").value();
+        const auto listed = s.candidates(f.id).value();
+        QCOMPARE(listed.size(), size_t(2));
+        QCOMPARE(listed[0].revision.id, b.id); // newest first
+        QVERIFY(listed[0].onHead && listed[1].onHead);
+        QCOMPARE(s.drop(f.id, a.id).value().id, a.id);
+        QCOMPARE(s.candidates(f.id)->size(), size_t(1));
+        QCOMPARE(s.candidates(f.id, true)->size(), size_t(2));
+        QVERIFY(s.candidates(f.id, true).value()[1].dropped);
+        QVERIFY(s.drop(f.id, a.id)); // dropping twice is fine
+        // Nothing is deleted: a dropped revision still loads.
+        QVERIFY(s.load(f.id, a.id));
+    }
+
+    void acceptingACandidateMadeFromTheHeadMovesTheHead() {
+        CanvasStore s = store();
+        const Fixture f = canvasWithBase(s);
+        const Revision a = s.addRevision(f.id, withFill(f.base, "A", 100), f.head, "write").value();
+        const Result<Accepted> done = s.accept(f.id, a.id);
+        QVERIFY(done);
+        QVERIFY(done->moved);
+        QVERIFY(!done->rebased);
+        QCOMPARE(done->head.id, a.id);
+        QCOMPARE(s.info(f.id)->head, a.id);
+        QVERIFY(s.candidates(f.id)->empty());
+        // It is history now: not a candidate again, so neither accepted nor dropped.
+        QCOMPARE(s.accept(f.id, a.id).error().code, QString("canvas_not_candidate"));
+        QCOMPARE(s.drop(f.id, a.id).error().code, QString("canvas_not_candidate"));
+        QCOMPARE(s.drop(f.id, f.head).error().code, QString("canvas_not_candidate"));
+    }
+
+    void aCandidateMadeFromAnOlderRevisionIsPlacedOnTheHead() {
+        CanvasStore s = store();
+        const Fixture f = canvasWithBase(s);
+        const Revision a = s.addRevision(f.id, withFill(f.base, "A", 100), f.head, "write").value();
+        const Revision b = s.addRevision(f.id, withFill(f.base, "B", 300), f.head, "write").value();
+        QVERIFY(s.accept(f.id, a.id)->moved); // the head is on a; b was made from the base
+        QVERIFY(!s.candidates(f.id)->at(0).onHead);
+        const Result<Accepted> done = s.accept(f.id, b.id);
+        QVERIFY(done);
+        QVERIFY(done->moved && done->rebased);
+        QCOMPARE(s.info(f.id)->head, done->head.id);
+        QCOMPARE(done->head.parent, a.id);
+        const PaintDocument now = s.load(f.id, done->head.id).value();
+        QCOMPARE(now.layerCount(), 4); // Base, Top, A, B
+        QCOMPARE(now.layer(2).name, QString("A"));
+        QCOMPARE(now.layer(3).name, QString("B"));
+        QVERIFY(s.candidates(f.id)->empty()); // b is resolved though it is not in the history
+        QCOMPARE(s.accept(f.id, b.id).error().code, QString("canvas_not_candidate"));
+        // The placed layer has b's pixels.
+        const PaintDocument original = s.load(f.id, b.id).value();
+        QCOMPARE(now.pixels(now.layer(3).id)->pixels(), original.pixels(original.layer(2).id)->pixels());
+    }
+
+    void aCandidateThatChangedAnExistingLayerCannotBePlacedOnAMovedHead() {
+        CanvasStore s = store();
+        const Fixture f = canvasWithBase(s);
+        PaintDocument edited = sample(512); // not a copy of f.base: a copy shares its pixels
+        edited.setActiveLayer(edited.layer(0).id);
+        edited.brush.color = Rgba{1, 2, 3, 255};
+        edited.fillRect(0, 0, 40, 40);
+        const Revision edit = s.addRevision(f.id, edited, f.head, "edit").value();
+        const Revision a = s.addRevision(f.id, withFill(f.base, "A", 100), f.head, "write").value();
+        QVERIFY(s.accept(f.id, a.id)->moved);
+        const Result<Accepted> refused = s.accept(f.id, edit.id);
+        QVERIFY(!refused);
+        QCOMPARE(refused.error().code, QString("canvas_conflict"));
+        QCOMPARE(s.info(f.id)->head, a.id); // nothing changed
+        QCOMPARE(s.candidates(f.id)->size(), size_t(1));
+        QVERIFY(s.drop(f.id, edit.id));
+    }
+
+    void aDroppedCandidateCanStillBeAccepted() {
+        CanvasStore s = store();
+        const Fixture f = canvasWithBase(s);
+        const Revision a = s.addRevision(f.id, withFill(f.base, "A", 100), f.head, "write").value();
+        QVERIFY(s.drop(f.id, a.id));
+        QVERIFY(s.accept(f.id, a.id)->moved);
+        QCOMPARE(s.info(f.id)->head, a.id);
+        QVERIFY(s.candidates(f.id, true)->empty());
+    }
+
+    void aCanvasWithoutThatRevisionIsCanvasNotFound() {
+        CanvasStore s = store();
+        const Fixture f = canvasWithBase(s);
+        const QString none = "sha256:" + QString(64, 'e');
+        QCOMPARE(s.accept(f.id, none).error().code, QString("canvas_not_found"));
+        QCOMPARE(s.drop(f.id, none).error().code, QString("canvas_not_found"));
+        QCOMPARE(s.candidates("canvas-nope").error().code, QString("canvas_not_found"));
+    }
+
+    void diffNamesTheLayersAndTilesThatDiffer() {
+        CanvasStore s = store();
+        const Fixture f = canvasWithBase(s);
+        const Revision a = s.addRevision(f.id, withFill(f.base, "A", 100), f.head, "write").value();
+        const TreeDiff diff = diffTrees(s.tree(s.revision(f.id, f.head)->tree).value(), s.tree(a.tree).value());
+        QVERIFY(!diff.identical());
+        QCOMPARE(diff.layers.size(), size_t(1));
+        QCOMPARE(diff.layers[0].name, QString("A"));
+        QCOMPARE(diff.layers[0].change, LayerChange::Added);
+        QCOMPARE(diff.layers[0].tilesChanged, 1);
+        QCOMPARE(diff.bounds(), (mask::IRect{0, 0, 256, 256}));
+        // The same two ways round: removed. Identical trees: nothing.
+        const TreeDiff back = diffTrees(s.tree(a.tree).value(), s.tree(s.revision(f.id, f.head)->tree).value());
+        QCOMPARE(back.layers[0].change, LayerChange::Removed);
+        QVERIFY(diffTrees(s.tree(a.tree).value(), s.tree(a.tree).value()).identical());
+    }
+
+    void diffSeesAnEditedLayerAndAChangedPropertyAndASizeChange() {
+        CanvasStore s = store();
+        const Fixture f = canvasWithBase(s);
+        PaintDocument edited = sample(512); // not a copy of f.base: a copy shares its pixels
+        edited.setActiveLayer(edited.layer(0).id);
+        edited.brush.color = Rgba{1, 2, 3, 255};
+        edited.fillRect(256, 256, 10, 10);
+        edited.setOpacity(edited.layer(1).id, 0.5);
+        const Tree a = treeOf(f.base).value(), b = treeOf(edited).value();
+        const TreeDiff diff = diffTrees(a, b);
+        QCOMPARE(diff.layers.size(), size_t(2));
+        QCOMPARE(diff.layers[0].name, QString("Base"));
+        QCOMPARE(diff.layers[0].tilesChanged, 1);
+        QCOMPARE(diff.layers[0].bounds, (mask::IRect{256, 256, 256, 256}));
+        QCOMPARE(diff.layers[1].properties, QStringList{"opacity"});
+        QCOMPARE(diff.layers[1].tilesChanged, 0);
+        QVERIFY(!diff.sizeChanged);
+        QVERIFY(diffTrees(a, treeOf(sample(256)).value()).sizeChanged);
     }
 
     void objectsAreWrittenOnceAndNothingIsLeftHalfWritten() {

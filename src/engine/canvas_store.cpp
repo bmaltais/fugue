@@ -1,5 +1,7 @@
 #include "canvas_store.h"
 
+#include <algorithm>
+
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
@@ -374,6 +376,165 @@ Result<std::vector<Revision>> CanvasStore::log(const QString &canvasId, const QS
         at = found->parent;
     }
     return entries;
+}
+
+QString CanvasStore::resolvedPath(const QString &canvasId, const QString &revisionId) const {
+    return canvasDir(canvasId) + QStringLiteral("/resolved/") + hexOf(revisionId);
+}
+
+QString CanvasStore::resolution(const QString &canvasId, const QString &revisionId) const {
+    QByteArray bytes;
+    if (!readFile(resolvedPath(canvasId, revisionId), &bytes))
+        return {};
+    return QString::fromLatin1(bytes).split(QLatin1Char(' ')).value(0).trimmed();
+}
+
+// Every revision hash in the head's history (the head itself too), and the head.
+Result<QStringList> CanvasStore::historyOfHead(const QString &canvasId, QString *head) const {
+    const Result<CanvasInfo> canvas = info(canvasId);
+    if (!canvas)
+        return Result<QStringList>(canvas.errors());
+    *head = canvas->head;
+    QStringList seen;
+    QString at = canvas->head;
+    while (!at.isEmpty()) {
+        const Result<Revision> found = revision(canvasId, at);
+        if (!found)
+            return Result<QStringList>(found.errors());
+        seen << at;
+        at = found->parent;
+    }
+    return seen;
+}
+
+Result<std::vector<Candidate>> CanvasStore::candidates(const QString &canvasId, bool withDropped) const {
+    QString head;
+    const Result<QStringList> history = historyOfHead(canvasId, &head);
+    if (!history)
+        return Result<std::vector<Candidate>>(history.errors());
+    std::vector<Candidate> found;
+    QDirIterator it(canvasDir(canvasId) + QStringLiteral("/commits"), {QStringLiteral("*.json")}, QDir::Files);
+    while (it.hasNext()) {
+        const QString id = QStringLiteral("sha256:") + QFileInfo(it.next()).completeBaseName();
+        if (history->contains(id))
+            continue;
+        const QString state = resolution(canvasId, id);
+        if (state == QLatin1String("accepted") || (state == QLatin1String("dropped") && !withDropped))
+            continue;
+        const Result<Revision> record = revision(canvasId, id);
+        if (!record)
+            return Result<std::vector<Candidate>>(record.errors());
+        found.push_back({record.value(), record->parent == head, state == QLatin1String("dropped")});
+    }
+    std::sort(found.begin(), found.end(), [](const Candidate &a, const Candidate &b) {
+        return a.revision.time != b.revision.time ? a.revision.time > b.revision.time : a.revision.id < b.revision.id;
+    });
+    return found;
+}
+
+namespace {
+
+Error notCandidate(const QString &revisionId, const QString &why) {
+    return makeError(QStringLiteral("canvas_not_candidate"), QStringLiteral("Revision %1 is %2, so it is not a candidate.").arg(revisionId.left(19), why),
+                     QStringLiteral("`fugue canvas candidates <canvas>` lists the revisions that can be accepted or dropped."));
+}
+
+bool sameLayer(const LayerRecord &a, const LayerRecord &b) {
+    return a.name == b.name && a.kind == b.kind && a.visible == b.visible && a.opacity == b.opacity && a.tiles == b.tiles;
+}
+
+} // namespace
+
+Result<Accepted> CanvasStore::accept(const QString &canvasId, const QString &revisionId) {
+    const Result<Revision> candidate = revision(canvasId, revisionId);
+    if (!candidate)
+        return Result<Accepted>(candidate.errors());
+    QString head;
+    const Result<QStringList> history = historyOfHead(canvasId, &head);
+    if (!history)
+        return Result<Accepted>(history.errors());
+    if (history->contains(revisionId))
+        return Result<Accepted>(notCandidate(revisionId, QStringLiteral("already in the canvas's history")));
+    if (resolution(canvasId, revisionId) == QLatin1String("accepted"))
+        return Result<Accepted>(notCandidate(revisionId, QStringLiteral("already accepted")));
+
+    Accepted done;
+    if (candidate->parent == head) {
+        const Result<HeadMove> moved = moveHead(canvasId, head, revisionId);
+        if (!moved)
+            return Result<Accepted>(moved.errors());
+        done.moved = moved->moved;
+        done.current = moved->head;
+        done.head = candidate.value();
+    } else {
+        // Made from an older revision: place the layers it added on the head, when that is all it did.
+        const Result<Revision> parent = candidate->parent.isEmpty() ? Result<Revision>(notFound(QStringLiteral("parent of revision %1").arg(revisionId.left(19))))
+                                                                    : revision(canvasId, candidate->parent);
+        const Result<Revision> current = head.isEmpty() ? Result<Revision>(notFound(QStringLiteral("head of canvas %1").arg(canvasId))) : revision(canvasId, head);
+        if (!parent || !current)
+            return Result<Accepted>(!parent ? parent.errors() : current.errors());
+        const Result<Tree> before = tree(parent->tree), after = tree(candidate->tree), now = tree(current->tree);
+        for (const Errors &errors : {before.errors(), after.errors(), now.errors()})
+            if (hasErrors(errors))
+                return Result<Accepted>(errors);
+        const auto conflict = [&](const QString &why) {
+            return Result<Accepted>(makeError(QStringLiteral("canvas_conflict"),
+                                              QStringLiteral("Revision %1 was made from an older revision than the head and %2, so it cannot be placed on the head.").arg(revisionId.left(19), why),
+                                              QStringLiteral("Drop it and run the fill again from the canvas as it is now.")));
+        };
+        if (before->width != now->width || before->height != now->height || after->width != now->width || after->height != now->height)
+            return conflict(QStringLiteral("the canvas has another size now"));
+        if (after->layers.size() <= before->layers.size())
+            return conflict(QStringLiteral("it added no layer"));
+        for (size_t i = 0; i < before->layers.size(); ++i)
+            if (!sameLayer(before->layers[i], after->layers[i]))
+                return conflict(QStringLiteral("it changed the layer %1").arg(before->layers[i].name));
+        const Result<PaintDocument> candidateDocument = load(canvasId, revisionId);
+        Result<PaintDocument> onHead = load(canvasId, head);
+        if (!candidateDocument || !onHead)
+            return Result<Accepted>(!candidateDocument ? candidateDocument.errors() : onHead.errors());
+        for (int i = int(before->layers.size()); i < candidateDocument->layerCount(); ++i) {
+            const mask::LayerInfo layer = candidateDocument->layer(i);
+            const MaskPaint *pixels = candidateDocument->pixels(layer.id);
+            if (!pixels)
+                return Result<Accepted>(corrupt(QStringLiteral("a layer has no pixels")));
+            onHead->loadLayer(layer.kind, layer.name, layer.visible, layer.opacity, *pixels);
+        }
+        const Result<Commit> made = commit(canvasId, onHead.value(), head, QStringLiteral("accept:") + revisionId.left(19));
+        if (!made)
+            return Result<Accepted>(made.errors());
+        done.rebased = true;
+        done.moved = made->move.moved;
+        done.current = made->move.head;
+        done.head = made->revision;
+    }
+    if (done.moved) {
+        const Errors marked = replaceFile(resolvedPath(canvasId, revisionId), QStringLiteral("accepted %1\n").arg(done.head.id).toLatin1(), QStringLiteral("a canvas resolution"));
+        if (hasErrors(marked))
+            return Result<Accepted>(marked);
+    }
+    return done;
+}
+
+Result<Revision> CanvasStore::drop(const QString &canvasId, const QString &revisionId) {
+    const Result<Revision> candidate = revision(canvasId, revisionId);
+    if (!candidate)
+        return Result<Revision>(candidate.errors());
+    QString head;
+    const Result<QStringList> history = historyOfHead(canvasId, &head);
+    if (!history)
+        return Result<Revision>(history.errors());
+    if (history->contains(revisionId))
+        return Result<Revision>(notCandidate(revisionId, QStringLiteral("in the canvas's history")));
+    const QString state = resolution(canvasId, revisionId);
+    if (state == QLatin1String("accepted"))
+        return Result<Revision>(notCandidate(revisionId, QStringLiteral("already accepted")));
+    if (state != QLatin1String("dropped")) {
+        const Errors marked = replaceFile(resolvedPath(canvasId, revisionId), QByteArrayLiteral("dropped\n"), QStringLiteral("a canvas resolution"));
+        if (hasErrors(marked))
+            return Result<Revision>(marked);
+    }
+    return candidate.value();
 }
 
 Result<PaintDocument> CanvasStore::load(const QString &canvasId, const QString &revisionId) const {
