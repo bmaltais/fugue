@@ -1089,7 +1089,6 @@
     "other": "%n more new candidates wait in the strip."
   },
   "Back to Head": "Back to Head",
-  "Canvas Write can skip this review: with Keep as candidate off, the Head moves to its result by itself.": "Canvas Write can skip this review: with Keep as candidate off, the Head moves to its result by itself.",
   "Choose the canvas to look at, or make one": "Choose the canvas to look at, or make one",
   "Dropped %1": "Dropped %1",
   "Fit (Home)": "Fit (Home)",
@@ -1131,5 +1130,10 @@
   "Which Canvas Region node this rectangle is for": "Which Canvas Region node this rectangle is for",
   "You are looking at a dropped candidate. Accept it, or go to Head, to change layers.": "You are looking at a dropped candidate. Accept it, or go to Head, to change layers.",
   "You are looking at a new candidate. Accept or Drop it, or go to Head, to change layers.": "You are looking at a new candidate. Accept or Drop it, or go to Head, to change layers.",
-  "You are looking at an earlier revision. Go to Head to change layers.": "You are looking at an earlier revision. Go to Head to change layers."
+  "You are looking at an earlier revision. Go to Head to change layers.": "You are looking at an earlier revision. Go to Head to change layers.",
+  "%n layers added": {
+    "one": "%n layer added",
+    "other": "%n layers added"
+  },
+  "Take the Head back one step (%1)": "Take the Head back one step (%1)"
 }

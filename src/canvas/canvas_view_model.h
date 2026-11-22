@@ -72,6 +72,10 @@ class CanvasViewModel : public CanvasHistory {
     Q_PROPERTY(QString newResult READ newResult NOTIFY newResultChanged)
     Q_PROPERTY(int newResultOthers READ newResultOthers NOTIFY newResultChanged)
     Q_PROPERTY(QString newResultFrom READ newResultFrom NOTIFY newResultChanged)
+    // The Head moved by itself to a run's result while the view was on the Head (a Canvas Write that lands on the Head,
+    // the normal flow since #228): the view went along, and this says what came ("Layer Fill 1 added"), for a short
+    // notice with Undo; "" otherwise. It ends when anything else is shown (an undo included) or clearHeadNotice().
+    Q_PROPERTY(QString headNotice READ headNotice NOTIFY headNoticeChanged)
     // The layers panel (#226): see the header.
     Q_PROPERTY(QVariantList layers READ layers NOTIFY layersChanged)
     Q_PROPERTY(QVariantList selection READ selection NOTIFY layersChanged)
@@ -109,6 +113,8 @@ public:
     QString newResult() const { return m_newResult; }
     int newResultOthers() const { return m_newOthers; }
     QString newResultFrom() const;
+    QString headNotice() const { return m_headNotice; }
+    Q_INVOKABLE void clearHeadNotice();
     QVariantList layers() const { return m_layers; }
     QVariantList selection() const;
     bool layersEditable() const;
@@ -169,6 +175,7 @@ signals:
     void pictureChanged();
     void regionChanged();
     void newResultChanged();
+    void headNoticeChanged();
     void layersChanged();
 
 private:
@@ -200,6 +207,8 @@ private:
     QString m_knownCanvas;       // the canvas m_known belongs to ("" before the first read)
     QStringList m_arrived;       // candidates that came and were not shown yet, newest first
     QString m_newResult;
+    QString m_headNotice;
+    QString m_noticeHead; // the Head the notice is about
     int m_newOthers = 0;
     int m_retries = 0;
     QVariantList m_layers;

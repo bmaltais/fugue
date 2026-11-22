@@ -37,8 +37,10 @@ import "canvasMenu.js" as CanvasMenu
 // Show candidate switches it off to see the Head alone. Compare (against the Head for a candidate, else the parent) opens
 // the compare modes of Compare Images (CompareModeButtons.qml). One bar (#228): the canvas and the strip, then the tools
 // in chunks (the view, the look, the region, Export, the decision, Drop, Fit and 100%) and the host's `trailing` items
-// last (the dialog's close). A run's new candidate shows at once under a banner over the picture's foot (it never moves
-// the picture): Back to Head, Accept and Drop; the bar's own Accept and Drop hide meanwhile, so one primary is on screen.
+// last (the dialog's close). A run's layer that lands on the Head is followed, with a short notice "Layer <name> added"
+// and Undo. A real candidate (a Canvas Write with Keep as candidate on, or one that could not land on a moved Head) shows
+// at once under a banner over the picture's foot (it never moves the picture): Back to Head, Accept and Drop; the bar's
+// own Accept and Drop hide meanwhile, so one primary is on screen.
 // Keys (docs/ui-ergonomics.md D5, one keymap with the Graph): Home or 0 Fit, 1 100%, + and - zoom, Enter accepts the
 // shown candidate (when the focus is in no field and no button), Escape ends a drag, Space held pans. While it has the
 // focus the window's bare Q (quit) does not fire here: it is kept for a quick mask (docs/ui-ergonomics.md References);
@@ -652,13 +654,64 @@ Item {
                     }
                 }
             }
+        }
+    }
+
+    // A run's layer landed on the Head while the view was on it (the normal flow, #228): the view went along; a short
+    // notice says what came, with Undo (the layers panel's: the Head back one step) and a close. No decision to take.
+    Banner {
+        id: headToast
+        objectName: "canvasViewHeadToast"
+        anchors.left: pictureView.left
+        anchors.right: pictureView.right
+        anchors.bottom: pictureView.bottom
+        anchors.margins: 2 * root.u
+        anchors.bottomMargin: 8 * root.u
+        visible: canvasData.headNotice !== "" && !root.newResultShown && pictureView.visible
+        look: root.look
+        Timer {
+            running: headToast.visible
+            interval: 10000
+            onTriggered: canvasData.clearHeadNotice()
+        }
+        Item {
+            width: parent.width
+            height: toastUndo.height
             Text {
-                objectName: "canvasViewNewResultHint"
-                width: parent.width
-                wrapMode: Text.Wrap
-                color: root.look.label
-                font.pixelSize: root.look.captionSize
-                text: qsTr("Canvas Write can skip this review: with Keep as candidate off, the Head moves to its result by itself.")
+                objectName: "canvasViewHeadToastText"
+                anchors.left: parent.left
+                anchors.right: toastUndo.left
+                anchors.rightMargin: 2 * root.u
+                anchors.verticalCenter: parent.verticalCenter
+                elide: Text.ElideRight
+                color: root.look.text
+                font.pixelSize: root.look.labelSize
+                text: canvasData.headNotice
+            }
+            ViewButton {
+                id: toastUndo
+                objectName: "canvasViewHeadToastUndo"
+                anchors.right: toastClose.left
+                anchors.rightMargin: root.u
+                anchors.verticalCenter: parent.verticalCenter
+                look: root.look
+                glyph: "undo-2"
+                text: qsTr("Undo")
+                enabled: canvasData.canUndo
+                tip: qsTr("Take the Head back one step (%1)").arg((App.commands.entry("canvas-layers.undo").keys ?? []).join(", "))
+                onTapped: canvasData.undo()
+            }
+            ViewButton {
+                id: toastClose
+                objectName: "canvasViewHeadToastClose"
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                look: root.look
+                glyph: "x"
+                flat: true
+                compact: true
+                tip: qsTr("Close")
+                onTapped: canvasData.clearHeadNotice()
             }
         }
     }

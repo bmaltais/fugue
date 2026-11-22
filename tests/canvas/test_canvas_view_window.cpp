@@ -255,7 +255,6 @@ private slots:
         QVERIFY2(said.startsWith("New candidate") && !said.contains("run1"), qPrintable(said)); // a node by its title, never its id
         QVERIFY(!find(app.window, "canvasViewAccept")); // the bar's pair hides while the banner shows its own: one primary
         QVERIFY(!find(app.window, "canvasViewDrop"));
-        QVERIFY(find(app.window, "canvasViewNewResultHint")->property("text").toString().contains("Keep as candidate"));
         QObject *viewer = view(app)->property("viewer").value<QObject *>();
         QCOMPARE(viewer->property("sourceA").toUrl(), model(app)->property("sourceB").toUrl()); // the combined picture
         // Back to Head: the Head alone, the banner gone, the candidate still in the strip.
@@ -279,6 +278,33 @@ private slots:
         click(app, "canvasViewNewDrop");
         QTRY_VERIFY(!find(app.window, "canvasViewNewResult"));
         QTRY_VERIFY(!find(app.window, "canvasViewChoice-" + shortOf(last)));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // The normal flow since #228 (the owner's decision): a run's layer lands on the Head. A view on the Head follows it and
+    // says so in a short notice with Undo; no banner, no Accept or Drop.
+    void aLayerThatLandsOnTheHeadIsFollowedWithANoticeAndUndo() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        QTRY_VERIFY(find(app.window, "canvasViewChoice-head"));
+        const QString canvas = m_canvas, head = m_head;
+        std::thread run([canvas, head] {
+            QThread::msleep(300);
+            PaintDocument base(512, 512);
+            base.addLayer(LayerKind::Paint, "Base");
+            canvas::CanvasStore::forSession().commit(canvas, withFill(base, "Fill 9", 200), head, "canvas-write:w");
+        });
+        QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "canvasViewHeadToast"), 5000);
+        run.join();
+        QVERIFY(model(app)->property("head").toString() != m_head);
+        QCOMPARE(model(app)->property("revisionB").toString(), model(app)->property("head").toString());
+        QCOMPARE(find(app.window, "canvasViewHeadToastText")->property("text").toString(), QString("Layer Fill 9 added"));
+        QVERIFY(!find(app.window, "canvasViewNewResult"));
+        QVERIFY(!find(app.window, "canvasViewAccept"));
+        click(app, "canvasViewHeadToastUndo");
+        QTRY_COMPARE(model(app)->property("head").toString(), m_head);
+        QTRY_VERIFY(!find(app.window, "canvasViewHeadToast"));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 

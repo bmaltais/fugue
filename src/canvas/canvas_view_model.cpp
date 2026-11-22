@@ -36,6 +36,9 @@ CanvasViewModel::CanvasViewModel(QObject *parent) : CanvasHistory(parent) {
         // Looking at anything else than the result shown by itself (or it, once decided) ends its banner.
         if (!m_newResult.isEmpty() && (revisionB() != m_newResult || kindB() != QLatin1String("candidate")))
             clearNewResult();
+        // Anything else shown (an undo of the layer included) ends the Head's notice.
+        if (!m_headNotice.isEmpty() && revisionB() != m_noticeHead)
+            clearHeadNotice();
     });
 }
 
@@ -68,9 +71,26 @@ void CanvasViewModel::watch() {
 
 void CanvasViewModel::refresh() {
     const bool onHead = !m_head.isEmpty() && revisionB() == m_head;
+    const QString headBefore = m_head;
+    QStringList namesBefore;
+    if (onHead)
+        for (const QVariant &row : std::as_const(m_layers))
+            namesBefore << row.toMap().value("name").toString();
     reload();
     if (onHead && !m_head.isEmpty() && revisionB() != m_head)
         select(m_head); // a view on the head goes on to the new one
+    // Moved by something else (this view's own accept, edits, undo and redo reload at once, so the watch finds no move):
+    // say which layers came, as a notice with Undo.
+    if (onHead && !headBefore.isEmpty() && m_head != headBefore && revisionB() == m_head) {
+        QStringList added;
+        for (const QVariant &row : std::as_const(m_layers))
+            if (const QString name = row.toMap().value("name").toString(); !namesBefore.removeOne(name))
+                added << name;
+        m_noticeHead = m_head;
+        m_headNotice = added.size() == 1 ? tr("Layer %1 added").arg(added.first())
+                     : added.size() > 1 ? tr("%n layers added", nullptr, int(added.size())) : QString();
+        emit headNoticeChanged();
+    }
     watch();
     emit storeChanged(); // the canvas list too
     showArrivals();
@@ -81,6 +101,13 @@ void CanvasViewModel::refresh() {
     } else if (error().isEmpty()) {
         m_retries = 0;
     }
+}
+
+void CanvasViewModel::clearHeadNotice() {
+    if (m_headNotice.isEmpty())
+        return;
+    m_headNotice.clear();
+    emit headNoticeChanged();
 }
 
 QString CanvasViewModel::newResultFrom() const {
