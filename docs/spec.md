@@ -1570,7 +1570,9 @@ it as a module folder and run it with no code of its own in Fugue.
   ([spikes/02](spikes/02-sdcpp-split.md)).
 - Fugue carries the split as its own patch against a pinned stable-diffusion.cpp commit; it does
   not depend on upstream adopting it. To keep that cheap: the patch stays small: hooks at the
-  existing stage seams and the stage file format, no change to sampling or model code; the pin moves only on
+  existing stage seams and the stage file format, no change to sampling or model code, except opt-in hunks that leave
+  upstream behaviour byte-identical when off, each listed in helper/README.md with its upstream PR and checked at every
+  pin move (today: `fugue.soft_mask`, #179); the pin moves only on
   purpose; and every move of the pin is checked where the patch can break, not model by model
   (stable-diffusion.cpp tests its families): staged runs of Z-Image (LLM conditioning), of SDXL
   with a negative prompt (CLIP conditioning, two sets) and of image-to-image from a latent, the
@@ -2924,7 +2926,8 @@ out: `image`.
   the latent's size) and `image` (the picture, which the library scales to the request's size as
   it does at the encode), with `denoise` as the strength. Text Encode does not change. The mask
   must be the size of the picture (else `node_failed` on `mask`); a latent the Sampler makes carries
-  no mask.
+  no mask. The Sampler's advanced `soft_mask` (boolean, default off, Sampler 1.1.0) adds the helper option
+  `fugue.soft_mask: true` for such a latent (#179, 8.10); the mask file keeps its gray either way.
 - Helper (8.10): `sample` and `generate` take `"mask": IN` (job input `mask`), read as one channel
   at the request's size; the three-channel reader used for pictures would break FLUX.1 Fill's
   packing of the mask, and stable-diffusion.cpp's own CLI reads it as one channel. An image
@@ -2938,6 +2941,18 @@ out: `image`.
   this call's latents, as a single run sets them (`prepare_image_generation_embeds`), because the
   encode had no picture and mask: stable-diffusion.cpp puts an inpaint model's masked picture in
   the conditioning, not the latent. No change to sampling code.
+- Patch, opt-in: `fugue.soft_mask` (a boolean image option, off by default), differential diffusion
+  (arXiv 2306.00950, written from the paper, Algorithm 1). On: `src/pipeline/image.cpp` does not round
+  the mask to 0 or 1 (still rounded for an inpaint model, which reads it as a channel it was trained on),
+  and the blend that puts the start latent back (`denoised x m + init x (1 - m)`, `diffusion_engine.cpp`)
+  uses a mask of 0 or 1 made for each step: a latent cell (scaled by "nearest max" as before) is redrawn
+  at step i of k when `m > (k - 1 - i) / k`, held to the start latent before. The paper's map `mu` is 1
+  for no change and keeps the cell from the model when `mu < (k - t) / k`; with `m = 1 - mu` that is this
+  inequality (strict, `t = k - 1 - i`). So 1 is redrawn from the first step, 0 never, 0.25 for the last
+  quarter of the steps. A hard mask gives the same result on or off. Off, the one changed expression is
+  the same code as before, so the output is byte-identical to upstream. The Sampler's `soft_mask` input
+  sets it (a latent with a mask only). Not an option of the library's API: the owner proposes it upstream
+  (the description is in [differential-diffusion-upstream.md](differential-diffusion-upstream.md)).
 - What the library does with a mask, read at the pin (532d2c1, `src/pipeline/image.cpp` and
   `diffusion_engine.cpp`): rounds it to 0 or 1, so a soft mask is hard in the latent; scales it
   to the latent by "nearest max", so a latent cell is redrawn when any of its pixels is masked
@@ -2948,8 +2963,9 @@ out: `image`.
 - Models at the pin. With a mask input of their own: FLUX.1 Fill dev, SDXL Inpaint, SD 1.5 and
   2 Inpaint, Flex.2. By the per-step replacement (any other image model): FLUX.2 Klein 4B and 9B
   (with the picture as a reference, as the edit templates do), Qwen-Image Edit, FLUX.1 Kontext,
-  FLUX.1 dev, Z-Image, SDXL, SD 1.5. Not: video models; soft masks (differential diffusion) on
-  any model.
+  FLUX.1 dev, Z-Image, SDXL, SD 1.5. Soft masks (differential diffusion, #179: `fugue.soft_mask`, the Sampler's
+  Soft mask) on the models of the per-step replacement; an inpaint model reads its mask as a channel and
+  gets it rounded. Not: video models.
 - `model_shape.cpp` must read an inpaint model's input as it reads Wan's 36 channels: SDXL
   Inpaint's 9 input channels and FLUX.1 Fill's 384 (96 per patch) do not match their VAEs' 4 and
   16, so today Fugue calls them `model_mismatch` and a stage refuses them.
@@ -3019,8 +3035,8 @@ MobileSAM on a CPU), and text to mask (GroundingDINO: Apache-2.0 code, the weigh
 stated; CLIPSeg: MIT code, the weights' licence stated two ways). Not BRIA's RMBG (CC BY-NC).
 Appendix A has the sources.
 
-**Not in this design:** soft masks in the sampler (differential diffusion: a change to sampling
-code, which the patch does not make, 8.10), and a paint canvas with layers and colors. Each is its own issue.
+**Not in this design:** a paint canvas with layers and colors, its own issue. Soft masks (differential
+diffusion, #179) are built as an opt-in hunk of the patch (8.10).
 
 **Build** (sonnet issues, in order; parallel only where the files are disjoint):
 
@@ -3034,7 +3050,7 @@ code, which the patch does not make, 8.10), and a paint canvas with layers and c
 | #176 | Crop to Mask, Stitch, `fugue/stitch`, the group | #171, #173 | |
 | #177 | The two templates, masking.md, the screenshots | #174, #175, #176 | |
 | #178 | Later: automatic masks as packs | #174 | |
-| #179 | Later: soft masks (differential diffusion) | #173 | |
+| #179 | Soft masks (differential diffusion): the `fugue.soft_mask` patch hunk and the Sampler's Soft mask | #173 | |
 | #180 | Color Match (shipped; the Outpaint template does not use it yet, see the row below) | #171 | |
 | #181 | Later: a paint canvas | #174 | |
 
@@ -3092,7 +3108,7 @@ To measure or confirm before the part that depends on each is built. None blocks
 | ~~Whether Omarchy's engine runs on a discrete NVIDIA card~~ Answered: no. At omarchy-local-ai 703ae0c the engine detects no discrete NVIDIA card and has no sd-server runtime for one; the `omarchy` provider reports `capability_unavailable` with how to fix it. Local use on such machines waits for the helper | local use on such machines | #11, #32 |
 | The exact WebP container field for the embedded workflow | [11.7](#117-embedding-in-outputs) | with #13 |
 | Whether Alt shortcuts clash with the window manager's bindings | [12.4](#124-default-keymap) | with #17 |
-| Soft masks in the sampler (differential diffusion): a change to sampling code, which the patch's rule excludes (8.10); carry it in the patch anyway, or propose it to stable-diffusion.cpp upstream | soft inpainting, [14.4](#144-masking-and-inpainting-167) | owner decision, #179 |
+| ~~Soft masks in the sampler (differential diffusion)~~ Decided (#179): carried in the patch as the opt-in `fugue.soft_mask`, byte-identical when off ([8.10](#810-gpu-memory-and-the-helper)); the upstream PR to stable-diffusion.cpp is the owner's | soft inpainting, [14.4](#144-masking-and-inpainting-167) | #179 |
 | ~~An existing package named `fugue`~~ None: the AUR has no package named `fugue` (checked 2026-11-19) | packaging | #34 |
 
 ---
@@ -3444,7 +3460,7 @@ Building M4 made these further choices.
 | Names and defaults the owner may change: Feather Mask (`fugue/feather-mask`, a blur of the mask outward by default; ComfyUI's FeatherMask, which fades from the picture's borders, would convert to another node), Combine Masks for MaskComposite, Crop to Mask's padding 64 px and 1 megapixel, Stitch's blend 16 px, the overlay in the accent at 50% | 14.4 | medium |
 | Both templates run FLUX.2 Klein 9B, the files the edit templates already use, by masked sampling with the picture as a reference: the owner has the files and they are checked staged; Klein 4B (Apache-2.0) is the alternative with a licence for commercial use, FLUX.1 Fill the dedicated model once its file is at hand. Whether the reference helps or makes Klein keep the old content was checked on the 3090 (#177, same seed, both ways): for the inpaint crop the reference helps (without it the chair lost its legs and its place), so the group keeps it; for the outpaint it makes Klein keep Pad's gray border, so the template gives Text Encode no reference | 11.10, 14.4 | high |
 | Color Match as built (#180, 2026-11-21): one node, not a group (nothing in it splits further; Feather Mask and Composite Masked stay the nodes that decide the seam). Statistics are weighted by 1 - m rather than cut at a threshold, so a half-masked pixel counts half, as Fill Masked does. The mask describes the picture; the reference shares its weights only at the same size, because for an outpaint the reference (the original, smaller) and the redraw do not line up, and measuring a different-sized reference whole needs no offset input. The pictures go to linear light before the paper's LMS matrix (the paper leaves the RGB unspecified; sRGB values are not light). Strength mixes in l-alpha-beta, which equals mixing the mean and the scale. A mask of all 1 measures the whole picture with a warning rather than failing. `mask_full` and `mask_resized` are reused, so there is no new error code. The Outpaint template is unchanged: whether the node visibly helps on the 3090 is for the owner to check (before and after on #180), then it goes before Composite Masked | 14.4 | medium-high |
-| No differential diffusion now: the library rounds the mask, and thresholding it per step is a change to sampling code, which the patch's rule excludes (8.10). It waits for the owner: carry it in the patch, or propose it upstream (17) | 8.10, 14.4, 17 | high |
+| Differential diffusion (#179, owner decision 2026-11-22: option a): carried in `helper/sdcpp.patch` behind `fugue.soft_mask`, not proposed first, so it ships with the next build; the hunks leave upstream byte-identical when off and are listed in helper/README.md and checked at each pin move, which is why 8.10's rule allows opt-in hunks. Written from the paper (its repository has no licence). The control is the Sampler's `soft_mask` input, not a VAE Encode option: the Sampler is the node that sends the mask to the helper and already owns the other per-run options, and the latent still carries the mask as before. An inpaint model's mask stays rounded (it is a conditioning channel). The threshold is applied to the denoised prediction at each step as the library's own replacement is, with k the steps the schedule runs (so Denoise below 1 counts its shorter run) | 8.10, 14.4, 17 | medium-high |
 | Automatic masks are optional packs of command nodes, not built in: each brings a model and a runtime (ONNX Runtime or Python) that Fugue's binary should not link, and their weights' licences vary (BRIA's are non-commercial) | 14.4 | medium-high |
 
 ## Appendix B: issue to section map

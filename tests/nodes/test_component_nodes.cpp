@@ -186,12 +186,12 @@ MediaHandle picture(Bench &bench, const QString &name, int width, int height, in
 }
 
 // A one-channel mask of this size with the rectangle `painted` white (255), probed as a picture.
-MediaHandle maskPicture(Bench &bench, const QString &name, int width, int height, const QRect &painted) {
+MediaHandle maskPicture(Bench &bench, const QString &name, int width, int height, const QRect &painted, double gray = 255.0) {
     initVips();
     const QString path = bench.dir.filePath(name);
     vips::VImage mask = vips::VImage::black(width, height).copy_memory();
     if (!painted.isEmpty())
-        mask.draw_rect(std::vector<double>{255.0}, painted.left(), painted.top(), painted.width(), painted.height(),
+        mask.draw_rect(std::vector<double>{gray}, painted.left(), painted.top(), painted.width(), painted.height(),
                        vips::VImage::option()->set("fill", true));
     mask.write_to_file(path.toUtf8().constData());
     const Result<MediaHandle> image = MediaHandle::probe(MediaType::Image, path, bench.hashes);
@@ -942,6 +942,42 @@ private slots:
         const Result<JobRequest> changed = bench.request(kSampler, sampling);
         QVERIFY(!changed);
         QCOMPARE(changed.error().code, QStringLiteral("file_not_found"));
+    }
+
+    // Soft mask (#179, spec 14.4): the option goes to the helper only for a latent with a mask, and the
+    // mask's gray reaches it as it is (the helper reads it as a strength).
+    void theSamplerSendsTheSoftMaskOptionAndKeepsTheGray() {
+        Bench bench;
+        const MediaHandle image = picture(bench, "start.png", 64, 64);
+        const MediaHandle mask = maskPicture(bench, "mask.png", 64, 64, QRect(0, 0, 32, 64), 128.0);
+        const QJsonObject model = bench.loaded(bench.zImage());
+        const Result<Values> encoded = bench.outputs(
+            kVaeEncode, {{"model", Value(model)}, {"image", Value(image)}, {"mask", Value(mask)}},
+            JobResult{QJsonObject{{"latent", QJsonObject{{"path", bench.workDir() + "/latent.bin"}}}}, {}});
+        QVERIFY(encoded);
+        Values sampling{{"model", Value(model)},
+                        {"conditioning", Value(QJsonObject{{"data", "fugue/conditioning"}, {"path", "/c.bin"}})},
+                        {"latent", encoded->value("latent")}};
+        const Result<JobRequest> off = bench.request(kSampler, sampling);
+        QVERIFY(off);
+        QVERIFY(!off->params.contains("fugue.soft_mask"));
+        sampling.insert("soft_mask", Value(true));
+        const Result<JobRequest> on = bench.request(kSampler, sampling);
+        QVERIFY2(on, on ? "" : qPrintable(on.error().message));
+        QCOMPARE(on->params.value("fugue.soft_mask").toBool(), true);
+        const vips::VImage gray = vips::VImage::new_from_file(on->inputs.value("mask").toObject().value("path").toString().toUtf8().constData());
+        QCOMPARE(gray(10, 10)[0], 128.0);
+        QCOMPARE(gray(50, 10)[0], 0.0);
+
+        // No mask on the latent: nothing to read softly, nothing sent.
+        const Result<Values> plain = bench.outputs(
+            kVaeEncode, {{"model", Value(model)}, {"image", Value(image)}},
+            JobResult{QJsonObject{{"latent", QJsonObject{{"path", "/runs/r/latent.bin"}}}}, {}});
+        QVERIFY(plain);
+        sampling.insert("latent", plain->value("latent"));
+        const Result<JobRequest> unmasked = bench.request(kSampler, sampling);
+        QVERIFY(unmasked);
+        QVERIFY(!unmasked->params.contains("fugue.soft_mask"));
     }
 
     // Without a mask the Sampler sends what it sent before (the regression guard of #173).
