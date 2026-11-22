@@ -146,6 +146,19 @@ public:
     // Makes a canvas whose first revision is `document` (producer `producer`), head on it.
     Result<CanvasInfo> create(const QString &name, const mask::PaintDocument &document, const QString &producer);
     Result<CanvasInfo> info(const QString &canvasId) const;
+    // ---- the canvas as a whole (the Canvas view's File menu, #232) ----
+    // Renames the canvas (input_invalid for a blank name, canvas_not_found for an id this store lacks). Its id, history and
+    // head do not change.
+    Result<CanvasInfo> rename(const QString &canvasId, const QString &name);
+    // A copy of the canvas with its whole history, head and resolutions, under a new id and `name` (a blank name is "<name> copy").
+    // The tiles are shared (the blobs are the store's, by content).
+    Result<CanvasInfo> duplicate(const QString &canvasId, const QString &name);
+    // Deletes the canvas for good: its revisions, head and candidates. The tiles in blobs/ stay (nothing in the store is
+    // deleted by content yet). canvas_not_found for an id this store lacks.
+    Result<QString> remove(const QString &canvasId);
+    // Empties the canvas: ONE new revision of the head, which must be `expected`, that has the same size and one empty
+    // transparent layer; Undo takes it back. {moved: false, head: <the head>} when the head is not `expected`.
+    Result<Commit> clear(const QString &canvasId, const QString &expected, const QString &producer);
     // Every canvas of the store, newest first (by creation time, then id); one that cannot be read is left out.
     std::vector<CanvasInfo> list() const;
 

@@ -12,6 +12,7 @@
 #include "canvas/canvas_choices.h"
 #include "engine/atomic_file.h"
 #include "engine/canvas_diff.h"
+#include "engine/paint_file.h"
 
 namespace fugue {
 
@@ -96,8 +97,14 @@ bool CanvasHistory::exportPicture(const QString &target) {
     QString path = target.startsWith(QStringLiteral("file:")) ? QUrl(target).toLocalFile() : target;
     if (path.isEmpty())
         return false;
-    if (QFileInfo(path).suffix().toLower() != QLatin1String("png"))
+    // By the extension, as `fugue canvas export` does; anything else is a PNG.
+    QString suffix = QFileInfo(path).suffix().toLower();
+    if (suffix == QLatin1String("jpeg"))
+        suffix = QStringLiteral("jpg");
+    if (suffix != QLatin1String("ora") && suffix != QLatin1String("jpg") && suffix != QLatin1String("webp") && suffix != QLatin1String("png")) {
         path += QStringLiteral(".png");
+        suffix = QStringLiteral("png");
+    }
     if (!m_error.isEmpty()) {
         m_error.clear();
         emit errorChanged();
@@ -107,18 +114,58 @@ bool CanvasHistory::exportPicture(const QString &target) {
         fail(document.errors());
         return false;
     }
-    const Result<QByteArray> png = document->flattenToPng(); // the same flatten the viewer's picture is made with
-    if (!png) {
-        fail(png.errors());
+    // The same flatten the viewer's picture is made with.
+    const Result<QByteArray> bytes = suffix == QLatin1String("ora") ? mask::paintToOra(document.value())
+                                   : suffix == QLatin1String("png") ? document->flattenToPng() : document->flattenToPicture(suffix);
+    if (!bytes) {
+        fail(bytes.errors());
         return false;
     }
-    const Errors written = createFile(path, png.value(), tr("the picture of revision %1").arg(shortOf(m_b)));
+    const Errors written = createFile(path, bytes.value(), tr("the picture of revision %1").arg(shortOf(m_b)));
     if (hasErrors(written)) {
         fail(written);
         return false;
     }
     m_notice = tr("Saved %1").arg(QFileInfo(path).fileName());
     emit noticeChanged();
+    return true;
+}
+
+bool CanvasHistory::renameCanvas(const QString &name) {
+    const Result<canvas::CanvasInfo> done = store().rename(m_canvas, name);
+    if (!done) {
+        fail(done.errors());
+        return false;
+    }
+    emit storeChanged();
+    emit compareChanged(); // the export name follows the canvas's
+    return true;
+}
+
+bool CanvasHistory::duplicateCanvas(const QString &name) {
+    const Result<canvas::CanvasInfo> done = store().duplicate(m_canvas, name);
+    if (!done) {
+        fail(done.errors());
+        return false;
+    }
+    useCanvas(done->id);
+    return true;
+}
+
+bool CanvasHistory::deleteCanvas() {
+    const QString gone = m_canvas;
+    const Result<QString> done = store().remove(gone);
+    if (!done) {
+        fail(done.errors());
+        return false;
+    }
+    QString next;
+    for (const QVariant &row : canvasRows(store()))
+        if (row.toMap().value("id").toString() != gone) {
+            next = row.toMap().value("id").toString();
+            break;
+        }
+    useCanvas(next);
     return true;
 }
 

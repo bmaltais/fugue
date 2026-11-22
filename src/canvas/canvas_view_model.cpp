@@ -886,6 +886,13 @@ bool CanvasViewModel::setMaskEnabled(const QVariantList &positions, bool enabled
 
 bool CanvasViewModel::removeMask(const QVariantList &positions) { return applyEdit(makeEdit(canvas::LayerOp::RemoveMask, positionsOf(positions)), m_selected); }
 
+bool CanvasViewModel::clearCanvas() {
+    commitMask(); // the strokes painted so far are a step of their own, before this one
+    if (!layersEditable())
+        return false;
+    return land(store().clear(canvasId(), revisionB(), QStringLiteral("canvas-view:clear")), {});
+}
+
 bool CanvasViewModel::undo() {
     commitMask(); // a stroke not stored yet is the step undone
     if (!canUndo())

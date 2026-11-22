@@ -152,6 +152,59 @@ private slots:
         QVERIFY(!view.error().isEmpty());
     }
 
+    // The canvas as a whole (#232, File menu): export by extension, rename, duplicate, delete, clear.
+    void exportWritesLayersOrAPictureByTheExtension() {
+        CanvasViewModel view;
+        view.setStoreRoot(m_dir.filePath("store"));
+        view.setCanvasId(m_canvas);
+        QDir().mkpath(m_dir.filePath("out"));
+        for (const char *name : {"a.ora", "b.jpg", "c.webp", "d.JPEG"}) {
+            QVERIFY2(view.exportPicture(m_dir.filePath(QString("out/") + name)), qPrintable(view.error()));
+            QVERIFY(QFileInfo(m_dir.filePath(QString("out/") + name)).size() > 0);
+        }
+        QVERIFY(view.exportPicture(m_dir.filePath("out/e.txt"))); // another extension is a PNG
+        QVERIFY(QFileInfo(m_dir.filePath("out/e.txt.png")).exists());
+        QFile ora(m_dir.filePath("out/a.ora"));
+        QVERIFY(ora.open(QIODevice::ReadOnly));
+        QCOMPARE(ora.read(2), QByteArray("PK")); // a zip: the layers file
+    }
+
+    void renamingDuplicatingAndDeletingACanvas() {
+        CanvasViewModel view;
+        view.setStoreRoot(m_dir.filePath("store"));
+        view.setCanvasId(m_canvas);
+        QVERIFY(view.renameCanvas("Poster"));
+        QCOMPARE(store().info(m_canvas)->name, QString("Poster"));
+        QVERIFY(!view.renameCanvas("  "));
+        QVERIFY(!view.error().isEmpty());
+        QVERIFY(view.duplicateCanvas());
+        const QString copy = view.canvasId();
+        QVERIFY(copy != m_canvas);
+        QCOMPARE(store().info(copy)->name, QString("Poster copy"));
+        QCOMPARE(view.canvases().size(), 2);
+        QVERIFY(view.deleteCanvas()); // the copy goes; the original is shown
+        QCOMPARE(view.canvasId(), m_canvas);
+        QCOMPARE(view.canvases().size(), 1);
+        QVERIFY(view.deleteCanvas()); // the last one: the empty state
+        QCOMPARE(view.canvasId(), QString());
+        QCOMPARE(view.canvases().size(), 0);
+    }
+
+    void clearingTheCanvasIsOneUndoableStepOfTheHead() {
+        CanvasViewModel view;
+        view.setStoreRoot(m_dir.filePath("store"));
+        view.setCanvasId(m_canvas);
+        const QString before = view.revisionB();
+        QVERIFY(view.clearCanvas());
+        QVERIFY(view.revisionB() != before);
+        QCOMPARE(view.layers().size(), 1);
+        QCOMPARE(store().log(m_canvas)->size(), size_t(2));
+        QVERIFY(view.undo());
+        QCOMPARE(view.revisionB(), before);
+        view.show(m_c1); // a candidate is shown: the head is not editable
+        QVERIFY(!view.clearCanvas());
+    }
+
     // The History panel's steps (#228, the owner's decision): what changed, in words, newest first, no hash; the open
     // candidates counted and listed only with all revisions.
     void theHistoryNamesEachStepInWords() {

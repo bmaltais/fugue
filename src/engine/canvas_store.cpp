@@ -18,6 +18,7 @@
 #include "engine/canonical.h"
 #include "engine/canvas_layer_ops.h"
 #include "engine/hash.h"
+#include "engine/new_canvas.h"
 #include "engine/paint_file.h"
 #include "engine/paths.h"
 
@@ -335,6 +336,98 @@ Result<CanvasInfo> CanvasStore::info(const QString &canvasId) const {
     if (readFile(canvasDir(canvasId) + QStringLiteral("/head"), &head))
         found.head = QString::fromLatin1(head).trimmed();
     return found;
+}
+
+Result<CanvasInfo> CanvasStore::rename(const QString &canvasId, const QString &name) {
+    const Result<CanvasInfo> canvas = info(canvasId);
+    if (!canvas)
+        return canvas;
+    const QString trimmed = name.trimmed();
+    if (trimmed.isEmpty())
+        return makeError(QStringLiteral("input_invalid"), QStringLiteral("A canvas needs a name."));
+    const QJsonObject record{{"format", storeFormat}, {"id", canvasId}, {"name", trimmed}, {"created", canvas->created}};
+    const Errors written = replaceFile(canvasDir(canvasId) + QStringLiteral("/canvas.json"), jsonBytes(record), QStringLiteral("canvas.json"));
+    if (hasErrors(written))
+        return Result<CanvasInfo>(written);
+    return info(canvasId);
+}
+
+Result<CanvasInfo> CanvasStore::duplicate(const QString &canvasId, const QString &name) {
+    const Result<CanvasInfo> canvas = info(canvasId);
+    if (!canvas)
+        return canvas;
+    const QString id = QStringLiteral("canvas-") + QUuid::createUuid().toString(QUuid::Id128).left(12);
+    const QString from = canvasDir(canvasId), to = canvasDir(id);
+    const auto fail = [&to](const Errors &errors) {
+        QDir(to).removeRecursively(); // a copy that was never complete: only this call knew it
+        return Result<CanvasInfo>(errors);
+    };
+    const Errors folder = makeFolder(to);
+    if (hasErrors(folder))
+        return fail(folder);
+    // The head is read under its lock, so a move that is under way is either in the copy or not.
+    QLockFile lock(from + QStringLiteral("/head.lock"));
+    lock.setStaleLockTime(30000);
+    if (!lock.tryLock(10000))
+        return fail({makeError(QStringLiteral("node_failed"), QStringLiteral("Another process holds the lock of canvas %1.").arg(canvasId))});
+    for (const QString &sub : {QStringLiteral("commits"), QStringLiteral("resolved")}) {
+        const Errors made = makeFolder(to + QLatin1Char('/') + sub);
+        if (hasErrors(made))
+            return fail(made);
+        QDirIterator it(from + QLatin1Char('/') + sub, QDir::Files);
+        while (it.hasNext()) {
+            it.next();
+            if (!QFile::copy(it.filePath(), to + QLatin1Char('/') + sub + QLatin1Char('/') + it.fileName()))
+                return fail({makeError(QStringLiteral("node_failed"), QStringLiteral("A canvas file could not be copied: %1").arg(it.fileName()))});
+        }
+    }
+    QByteArray head;
+    if (readFile(from + QStringLiteral("/head"), &head)) {
+        const Errors written = replaceFile(to + QStringLiteral("/head"), head, QStringLiteral("the canvas head"));
+        if (hasErrors(written))
+            return fail(written);
+    }
+    lock.unlock();
+    const QString copyName = name.trimmed().isEmpty() ? canvas->name + QStringLiteral(" copy") : name.trimmed();
+    const QJsonObject record{{"format", storeFormat}, {"id", id}, {"name", copyName}, {"created", isoTime(utcNow(m_clock))}};
+    const Errors written = replaceFile(to + QStringLiteral("/canvas.json"), jsonBytes(record), QStringLiteral("canvas.json"));
+    if (hasErrors(written))
+        return fail(written);
+    return info(id);
+}
+
+Result<QString> CanvasStore::remove(const QString &canvasId) {
+    const Result<CanvasInfo> canvas = info(canvasId);
+    if (!canvas)
+        return Result<QString>(canvas.errors());
+    QLockFile lock(canvasDir(canvasId) + QStringLiteral("/head.lock"));
+    lock.setStaleLockTime(30000);
+    if (!lock.tryLock(10000))
+        return makeError(QStringLiteral("node_failed"), QStringLiteral("Another process holds the lock of canvas %1.").arg(canvasId));
+    // canvas.json goes first: a canvas without it is not one (info, list), whatever the rest of the removal does.
+    QFile::remove(canvasDir(canvasId) + QStringLiteral("/canvas.json"));
+    lock.unlock();
+    if (!QDir(canvasDir(canvasId)).removeRecursively())
+        return makeError(QStringLiteral("node_failed"), QStringLiteral("Canvas %1 could not be fully removed.").arg(canvasId));
+    return canvasId;
+}
+
+Result<Commit> CanvasStore::clear(const QString &canvasId, const QString &expected, const QString &producer) {
+    const Result<CanvasInfo> canvas = info(canvasId);
+    if (!canvas)
+        return Result<Commit>(canvas.errors());
+    if (canvas->head != expected)
+        return Commit{Revision{}, HeadMove{false, canvas->head}};
+    const Result<Revision> base = revision(canvasId, expected);
+    if (!base)
+        return Result<Commit>(base.errors());
+    const Result<Tree> baseTree = tree(base->tree);
+    if (!baseTree)
+        return Result<Commit>(baseTree.errors());
+    const Result<mask::PaintDocument> blank = mask::blankCanvas(baseTree->width, baseTree->height, mask::CanvasBackground{});
+    if (!blank)
+        return Result<Commit>(blank.errors());
+    return commit(canvasId, blank.value(), expected, producer);
 }
 
 std::vector<CanvasInfo> CanvasStore::list() const {

@@ -175,6 +175,9 @@ public:
     Q_INVOKABLE bool dropAt(const QVariantList &positions, int gap);
     Q_INVOKABLE bool setMaskEnabled(const QVariantList &positions, bool enabled);
     Q_INVOKABLE bool removeMask(const QVariantList &positions);
+    // Empties the canvas (File > Clear canvas): ONE new revision of the Head, the same size, one empty layer; Undo takes it
+    // back. False when the Head is not what is shown.
+    Q_INVOKABLE bool clearCanvas();
     Q_INVOKABLE bool undo();
     Q_INVOKABLE bool redo();
 

@@ -599,6 +599,74 @@ private slots:
         QVERIFY(!missing.error().hint.contains("fugue canvas new"));
         QVERIFY(!s.storeSelection(MaskPaint(8, 8, 4)).ok());
     }
+
+    // The canvas as a whole (#232): rename, duplicate, remove, clear.
+    void renamingKeepsTheIdAndTheHistory() {
+        CanvasStore s = store();
+        const Fixture f = canvasWithBase(s);
+        const Result<CanvasInfo> renamed = s.rename(f.id, "  Poster  ");
+        QVERIFY(renamed.ok());
+        QCOMPARE(renamed->name, QString("Poster"));
+        QCOMPARE(renamed->id, f.id);
+        QCOMPARE(renamed->head, f.head);
+        QCOMPARE(renamed->created, s.info(f.id)->created);
+        QCOMPARE(s.rename(f.id, "   ").error().code, QString("input_invalid"));
+        QCOMPARE(s.rename("canvas-nope", "x").error().code, QString("canvas_not_found"));
+    }
+
+    void aDuplicateHasTheWholeHistoryUnderANewId() {
+        CanvasStore s = store();
+        const Fixture f = canvasWithBase(s);
+        const Result<Commit> next = s.commit(f.id, withFill(f.base, "Fill", 100), f.head, "test");
+        QVERIFY(next.ok());
+        const Result<CanvasInfo> copy = s.duplicate(f.id, QString());
+        QVERIFY(copy.ok());
+        QVERIFY(copy->id != f.id);
+        QCOMPARE(copy->name, QString("fill copy"));
+        QCOMPARE(copy->head, next->revision.id);
+        QCOMPARE(s.log(copy->id)->size(), size_t(2));
+        // The two canvases are independent from here on.
+        QVERIFY(s.undo(copy->id, copy->head).ok());
+        QCOMPARE(s.info(f.id)->head, next->revision.id);
+        QCOMPARE(s.duplicate(f.id, "Named")->name, QString("Named"));
+        QCOMPARE(s.list().size(), size_t(3));
+        QCOMPARE(s.duplicate("canvas-nope", "x").error().code, QString("canvas_not_found"));
+    }
+
+    void removingACanvasDeletesItAndOnlyIt() {
+        CanvasStore s = store();
+        const Fixture a = canvasWithBase(s);
+        const Fixture b = canvasWithBase(s);
+        QVERIFY(s.remove(a.id).ok());
+        QCOMPARE(s.list().size(), size_t(1));
+        QCOMPARE(s.list().front().id, b.id);
+        QVERIFY(!QDir(m_dir.filePath("canvases/" + a.id)).exists());
+        QCOMPARE(s.info(a.id).error().code, QString("canvas_not_found"));
+        QCOMPARE(s.remove(a.id).error().code, QString("canvas_not_found"));
+        QVERIFY(s.load(b.id, b.head).ok());
+    }
+
+    void clearingIsOneUndoableRevisionOfTheSameSize() {
+        CanvasStore s = store();
+        const Fixture f = canvasWithBase(s);
+        const Result<Commit> cleared = s.clear(f.id, f.head, "canvas-view:clear");
+        QVERIFY(cleared.ok());
+        QVERIFY(cleared->move.moved);
+        QCOMPARE(cleared->revision.parent, f.head);
+        const Result<Tree> tree = s.tree(cleared->revision.tree);
+        QCOMPARE(tree->width, 512);
+        QCOMPARE(tree->height, 512);
+        QCOMPARE(tree->layers.size(), size_t(1));
+        QCOMPARE(tree->layers[0].tiles.size(), size_t(0));
+        QCOMPARE(s.log(f.id)->size(), size_t(2));
+        // A stale head changes nothing; undo brings the picture back.
+        const Result<Commit> stale = s.clear(f.id, f.head, "canvas-view:clear");
+        QVERIFY(stale.ok());
+        QVERIFY(!stale->move.moved);
+        QCOMPARE(stale->move.head, cleared->revision.id);
+        QVERIFY(s.undo(f.id, cleared->revision.id).ok());
+        QCOMPARE(s.info(f.id)->head, f.head);
+    }
 };
 
 QTEST_GUILESS_MAIN(TestCanvasStore)

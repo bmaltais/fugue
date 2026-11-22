@@ -83,9 +83,17 @@ public:
     // A revision as A, B unchanged (the head, or B itself, when B is not set).
     Q_INVOKABLE void setA(const QString &revision);
     Q_INVOKABLE void compare(const QString &a, const QString &b);
-    // Saves the picture of B (what the viewer shows) as a PNG at `target`, a path or a file URL; ".png" is
-    // added when the name ends in another extension. A file already there is never replaced. True when written.
+    // Saves the picture of B (what the viewer shows) at `target`, a path or a file URL, by its extension: .png, .jpg,
+    // .jpeg and .webp are the flattened picture, .ora keeps the layers; another extension (or none) gets ".png" added.
+    // A file already there is never replaced. True when written.
     Q_INVOKABLE bool exportPicture(const QString &target);
+    // The canvas as a whole (the Canvas view's File menu, #232). Each reads the store again; false (and `error`) when it
+    // could not. A blank name for duplicateCanvas is "<name> copy".
+    Q_INVOKABLE bool renameCanvas(const QString &name);
+    // Makes the copy and shows it.
+    Q_INVOKABLE bool duplicateCanvas(const QString &name = QString());
+    // Deletes the shown canvas for good and shows the newest of the others (none: the empty state).
+    Q_INVOKABLE bool deleteCanvas();
     // Accept a candidate into the head (see CanvasStore::accept); true when the head moved. The new head is selected.
     Q_INVOKABLE bool accept(const QString &revision);
     // Hide a candidate; true when done.
