@@ -10,6 +10,7 @@
 #include <cmath>
 
 #include "engine/file_roots.h"
+#include "engine/mask_ops.h"
 #include "engine/paths.h"
 #include "workflow/image_inputs.h"
 
@@ -203,6 +204,38 @@ void MaskLayer::clear() {
 void MaskLayer::fill() {
     m_paint->fill();
     changed(true);
+}
+
+bool MaskLayer::modify(const QString &kind, int amount) {
+    const std::vector<uint8_t> &now = m_paint->pixels();
+    const int w = m_paint->width(), h = m_paint->height();
+    std::vector<uint8_t> next;
+    if (kind == QLatin1String("grow"))
+        next = mask::ops::expanded(now, w, h, amount);
+    else if (kind == QLatin1String("shrink"))
+        next = mask::ops::expanded(now, w, h, -amount);
+    else if (kind == QLatin1String("feather"))
+        next = mask::ops::feathered(now, w, h, amount);
+    else if (kind == QLatin1String("border"))
+        next = mask::ops::border(now, w, h, amount);
+    else if (kind == QLatin1String("smooth"))
+        next = mask::ops::smoothed(now, w, h, amount);
+    else
+        return false;
+    if (next == now || !m_paint->assign(next))
+        return false;
+    changed(true);
+    return true;
+}
+
+bool MaskLayer::transformBy(double dx, double dy, double scaleX, double scaleY, double degrees) {
+    const mask::ops::Placement placement{dx, dy, scaleX, scaleY, degrees};
+    const std::vector<uint8_t> &now = m_paint->pixels();
+    const std::vector<uint8_t> next = mask::ops::transformed(now, m_paint->width(), m_paint->height(), placement);
+    if (next == now || !m_paint->assign(next))
+        return false;
+    changed(true);
+    return true;
 }
 
 void MaskLayer::undo() {

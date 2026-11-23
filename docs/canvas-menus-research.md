@@ -55,7 +55,7 @@ is a **placeholder**: a greyed row, not a command (no handler, no key, nothing i
 | Inverse (Ctrl+Shift+I) | built for the painted selection only | `invert()`; the rectangle has no inverse yet (disabled with the reason) |
 | Quick Mask (Q), Use selection | built | existing |
 | Subject, Sky, by words | placeholder, #238 | AI selection |
-| Modify (feather, grow, shrink), Transform selection | placeholder, #251 | selection model first |
+| Modify (border, smooth, expand, contract, feather), Transform selection | built (#251) | on the painted selection (a rectangle is painted into it first); each asks a pixel amount; Transform has numbers, no handles |
 
 ## Layer
 

@@ -183,7 +183,7 @@ QString NewCanvasModel::problem() const {
         return mask::canvasSizeProblem(m_clipboardPixels.width(), m_clipboardPixels.height());
     }
     if (m_source == QLatin1String("file"))
-        return m_file.isEmpty() ? tr("Choose a picture or an .ora file.") : QString();
+        return m_file.isEmpty() ? tr("Choose a picture, an .ora file or a .psd file.") : QString();
     if (width() < 1 || height() < 1)
         return tr("Type the width and the height in pixels, whole numbers.");
     if (const QString why = mask::canvasSizeProblem(width(), height()); !why.isEmpty())
@@ -311,7 +311,8 @@ QString NewCanvasModel::create() {
         why = makeFromClipboard(name);
         id = m_created;
     } else if (m_source == QLatin1String("file")) {
-        why = m_choices.makeFromFile(m_file, name, &id);
+        m_notes.clear();
+        why = m_choices.makeFromFile(m_file, name, &id, &m_notes);
     } else {
         why = m_choices.makeBlank(name, width(), height(), m_background == QLatin1String("colour") ? normalizeHex(m_colour) : m_background, &id);
     }

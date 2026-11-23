@@ -13,7 +13,9 @@
 #include "engine/atomic_file.h"
 #include "engine/canvas_diff.h"
 #include "engine/canvas_package.h"
+#include "engine/canvas_psd.h"
 #include "engine/paint_file.h"
+#include "engine/psd_file.h"
 
 namespace fugue {
 
@@ -102,7 +104,7 @@ bool CanvasHistory::exportPicture(const QString &target) {
     QString suffix = QFileInfo(path).suffix().toLower();
     if (suffix == QLatin1String("jpeg"))
         suffix = QStringLiteral("jpg");
-    if (suffix != QLatin1String("ora") && suffix != QLatin1String("jpg") && suffix != QLatin1String("webp") && suffix != QLatin1String("png")) {
+    if (suffix != QLatin1String("ora") && suffix != QLatin1String("psd") && suffix != QLatin1String("jpg") && suffix != QLatin1String("webp") && suffix != QLatin1String("png")) {
         path += QStringLiteral(".png");
         suffix = QStringLiteral("png");
     }
@@ -116,7 +118,18 @@ bool CanvasHistory::exportPicture(const QString &target) {
         return false;
     }
     // The same flatten the viewer's picture is made with.
-    const Result<QByteArray> bytes = suffix == QLatin1String("ora") ? mask::paintToOra(document.value())
+    Result<QByteArray> psdBytes = QByteArray();
+    QStringList left; // what a Photoshop file could not keep: said in the notice, never silent
+    if (suffix == QLatin1String("psd")) {
+        canvas::PictureExport asPsd;
+        asPsd.format = QStringLiteral("psd");
+        const Result<canvas::ExportedPicture> psd = canvas::exportRevisionAsPsd(store(), m_canvas, m_b, asPsd); // groups stay groups
+        psdBytes = psd ? Result<QByteArray>(psd->bytes) : Result<QByteArray>(psd.errors());
+        if (psd)
+            left = psd->notes;
+    }
+    const Result<QByteArray> bytes = suffix == QLatin1String("psd") ? psdBytes
+                                   : suffix == QLatin1String("ora") ? mask::paintToOra(document.value())
                                    : suffix == QLatin1String("png") ? document->flattenToPng() : document->flattenToPicture(suffix);
     if (!bytes) {
         fail(bytes.errors());
@@ -128,6 +141,8 @@ bool CanvasHistory::exportPicture(const QString &target) {
         return false;
     }
     m_notice = tr("Saved %1").arg(QFileInfo(path).fileName());
+    if (!left.isEmpty())
+        m_notice += QLatin1Char(' ') + left.join(QLatin1Char(' '));
     emit noticeChanged();
     return true;
 }
@@ -430,10 +445,13 @@ QString CanvasHistory::importPicture(const QString &path, const QString &name) {
     CanvasChoices choices;
     choices.setStoreRoot(m_root);
     QString id;
-    if (const QString why = choices.makeFromFile(path, name, &id); !why.isEmpty())
+    QStringList dropped;
+    if (const QString why = choices.makeFromFile(path, name, &id, &dropped); !why.isEmpty())
         return why;
     emit storeChanged();
     setCanvasId(id);
+    if (!dropped.isEmpty()) // a Photoshop file's layers Fugue could not keep: never silent
+        showNotice(tr("Imported, with changes: %1").arg(dropped.join(QLatin1Char(' '))));
     return {};
 }
 

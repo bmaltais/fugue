@@ -6,7 +6,7 @@
 // background whenever one changes (a large canvas takes a moment to encode), and says what the file will be: its size
 // in bytes, its pixels, a small preview of the encoded picture (a JPEG shows its artifacts).
 //
-// `open(canvasId, revision, mode)` loads the revision. mode "picture" is one file: format png, jpg, webp or ora (the
+// `open(canvasId, revision, mode)` loads the revision. mode "picture" is one file: format png, jpg, webp, ora or psd (the
 // layers kept, which is the "not flattened" choice), quality (jpg and a lossy webp), a size (a percentage, or a width or
 // a height, always in the canvas's proportions) and a background for the transparency. mode "layers" is one picture
 // per layer into a folder: png or webp, hidden layers or not, layer masks applied or not, a name prefix.
@@ -37,7 +37,7 @@ class CanvasExportModel : public QObject {
     // "picture" or "layers".
     Q_PROPERTY(QString mode READ mode NOTIFY changed)
     Q_PROPERTY(QString canvasName READ canvasName NOTIFY changed)
-    // "png", "jpg", "webp" or "ora" (picture); "png" or "webp" (layers).
+    // "png", "jpg", "webp", "ora" or "psd" (picture); "png" or "webp" (layers).
     Q_PROPERTY(QString format READ format WRITE setFormat NOTIFY changed)
     Q_PROPERTY(int quality READ quality WRITE setQuality NOTIFY changed)
     // Whether the format has a quality (jpg, and webp when not lossless), and whether it can be lossless (webp).
@@ -101,7 +101,7 @@ public:
     void setBackground(const QString &background);
     QString colour() const { return m_colour; }
     void setColour(const QString &colour);
-    bool hasBackground() const { return !m_layers && m_format != QLatin1String("ora"); }
+    bool hasBackground() const { return !m_layers && m_format != QLatin1String("ora") && m_format != QLatin1String("psd"); }
     bool visibleOnly() const { return m_visibleOnly; }
     void setVisibleOnly(bool on);
     bool applyMasks() const { return m_applyMasks; }

@@ -170,7 +170,7 @@ Item {
             objectName: "canvasPictureDialog"
             title: qsTr("Import a picture as a canvas") // the menu's Import picture…, the CLI's fugue canvas import
             fileMode: PortalFileDialog.OpenFile
-            nameFilters: [qsTr("Pictures and canvases (*.png *.jpg *.jpeg *.webp *.ora)"), qsTr("All files (*)")]
+            nameFilters: [qsTr("Pictures and canvases (*.png *.jpg *.jpeg *.webp *.ora *.psd)"), qsTr("All files (*)")]
             onAccepted: { picker.host.error = picker.host.edits.importCanvas(picker.host.nodeId, picker.host.name, d.selectedFile, ""); d.destroy() }
             onRejected: d.destroy()
         }

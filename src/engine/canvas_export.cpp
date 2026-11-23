@@ -11,6 +11,7 @@
 #include "engine/atomic_file.h"
 #include "engine/new_canvas.h"
 #include "engine/paint_file.h"
+#include "engine/psd_file.h"
 
 namespace fugue::canvas {
 
@@ -41,7 +42,7 @@ QString normalFormat(const QString &format, bool allowLayered) {
     const QString f = format.trimmed().toLower();
     if (f == QLatin1String("jpeg") || f == QLatin1String("jpg"))
         return QStringLiteral("jpg");
-    if (f == QLatin1String("png") || f == QLatin1String("webp") || (allowLayered && f == QLatin1String("ora")))
+    if (f == QLatin1String("png") || f == QLatin1String("webp") || (allowLayered && (f == QLatin1String("ora") || f == QLatin1String("psd"))))
         return f;
     return {};
 }
@@ -73,7 +74,7 @@ Result<QSize> exportSize(int canvasWidth, int canvasHeight, const PictureExport 
 Result<ExportedPicture> exportPicture(const mask::PaintDocument &document, const PictureExport &options) {
     const QString format = normalFormat(options.format, true);
     if (format.isEmpty())
-        return usage(QStringLiteral("The format is png, jpg, webp or ora, not %1.").arg(options.format));
+        return usage(QStringLiteral("The format is png, jpg, webp, ora or psd, not %1.").arg(options.format));
     if (const Errors bad = checkQuality(options.quality); hasErrors(bad))
         return bad;
     const Result<QSize> size = exportSize(document.width(), document.height(), options);
@@ -90,6 +91,15 @@ Result<ExportedPicture> exportPicture(const mask::PaintDocument &document, const
         if (!bytes)
             return bytes.errors();
         out.bytes = bytes.value();
+        return out;
+    }
+
+    if (format == QLatin1String("psd")) {
+        Result<mask::PsdExported> psd = mask::paintToPsd(resized ? document.scaledTo(out.width, out.height) : document);
+        if (!psd)
+            return psd.errors();
+        out.bytes = psd->bytes;
+        out.notes = psd->notes;
         return out;
     }
 

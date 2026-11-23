@@ -59,7 +59,8 @@ bool looksLikeOra(QByteArrayView bytes);
 // size, no history), or media_unreadable / value_out_of_range.
 bool looksLikePicture(QByteArrayView bytes);
 Result<PaintDocument> paintFromPicture(const QByteArray &bytes, const QString &layerName);
-// A file a canvas can be made from: an .ora (paintFromOra) or a picture (paintFromPicture, named after
+// A file a canvas can be made from: an .ora (paintFromOra), a Photoshop .psd (paintFromPsd, psd_file.h; the Result's
+// warnings list what it could not keep) or a picture (paintFromPicture, named after
 // the file). Anything else is media_unreadable and names the supported kinds.
 Result<PaintDocument> readCanvasFile(const QString &path);
 

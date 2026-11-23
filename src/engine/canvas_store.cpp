@@ -609,6 +609,32 @@ Result<Commit> CanvasStore::commit(const QString &canvasId, const PaintDocument 
 }
 
 Result<CanvasInfo> CanvasStore::create(const QString &name, const PaintDocument &document, const QString &producer) {
+    return createWithEdits(name, document, {}, producer);
+}
+
+Result<Tree> CanvasStore::loadTree(const QString &canvasId, const QString &revisionId) const {
+    const Result<Revision> found = revision(canvasId, revisionId);
+    if (!found)
+        return Result<Tree>(found.errors());
+    return tree(found->tree);
+}
+
+Result<CanvasInfo> CanvasStore::createWithEdits(const QString &name, const PaintDocument &document, const std::vector<LayerEdit> &edits, const QString &producer) {
+    // A document with edits is checked before anything is made on disk.
+    std::optional<Tree> edited;
+    if (!edits.empty()) {
+        Result<Tree> start = treeOf(document);
+        if (!start)
+            return Result<CanvasInfo>(start.errors());
+        Tree current = start.value();
+        for (const LayerEdit &edit : edits) {
+            Result<Tree> next = applyLayerEdit(current, edit);
+            if (!next)
+                return Result<CanvasInfo>(next.errors());
+            current = next.value();
+        }
+        edited = current;
+    }
     const QString id = QStringLiteral("canvas-") + QUuid::createUuid().toString(QUuid::Id128).left(12);
     const QString dir = canvasDir(id);
     const Errors folder = makeFolder(dir + QStringLiteral("/commits"));
@@ -622,7 +648,21 @@ Result<CanvasInfo> CanvasStore::create(const QString &name, const PaintDocument 
     const Errors written = replaceFile(dir + QStringLiteral("/canvas.json"), jsonBytes(record), QStringLiteral("canvas.json"));
     if (hasErrors(written))
         return fail(written);
-    const Result<Commit> first = commit(id, document, QString(), producer);
+    Result<Commit> first = Result<Commit>(makeError(QStringLiteral("node_failed"), QStringLiteral("The new canvas has no revision.")));
+    if (!edited) {
+        first = commit(id, document, QString(), producer);
+    } else {
+        // The tiles of the document are stored, then the edited tree names them: the groups hold the same tiles.
+        const Result<Tree> stored = treeOf(document, [this](const TileKey &, const QString &hash, const MaskPaint &tile) { return storeBlob(hash, tile); });
+        const Result<QString> treeHash = stored ? storeTreeRecord(*edited) : Result<QString>(stored.errors());
+        const Result<Revision> added = treeHash ? addCommit(id, treeHash.value(), QString(), producer) : Result<Revision>(treeHash.errors());
+        if (!added) {
+            first = Result<Commit>(added.errors());
+        } else {
+            const Result<HeadMove> moved = moveHead(id, QString(), added->id);
+            first = moved ? Result<Commit>(Commit{added.value(), moved.value()}) : Result<Commit>(moved.errors());
+        }
+    }
     if (!first || !first->move.moved)
         return fail(first ? Errors{makeError(QStringLiteral("node_failed"), QStringLiteral("The new canvas's head could not be set."))} : first.errors());
     return info(id);

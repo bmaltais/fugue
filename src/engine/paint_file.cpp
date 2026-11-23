@@ -17,6 +17,7 @@
 #include <archive_entry.h>
 
 #include "engine/atomic_file.h"
+#include "engine/psd_file.h"
 
 namespace fugue::mask {
 
@@ -514,10 +515,12 @@ Result<PaintDocument> readCanvasFile(const QString &path) {
     const QByteArray bytes = file.read(paintFileMaxBytes + 1);
     if (looksLikeOra(bytes) || bytes.startsWith("PK\x03\x04")) // any zip: paintFromOra says what is wrong with it
         return paintFromOra(bytes);
+    if (looksLikePsd(bytes))
+        return paintFromPsd(bytes);
     if (looksLikePicture(bytes))
         return paintFromPicture(bytes, info.completeBaseName().isEmpty() ? QStringLiteral("Layer 1") : info.completeBaseName().left(64));
     return makeError(QStringLiteral("media_unreadable"),
-                     QStringLiteral("%1 is not a file a canvas can be made from: Fugue reads an OpenRaster (.ora) file or a PNG, JPEG or WebP picture.").arg(info.fileName()),
+                     QStringLiteral("%1 is not a file a canvas can be made from: Fugue reads an OpenRaster (.ora) file, a Photoshop (.psd) file or a PNG, JPEG or WebP picture.").arg(info.fileName()),
                      QStringLiteral("Convert the picture to PNG, JPEG or WebP, or export an .ora."));
 }
 

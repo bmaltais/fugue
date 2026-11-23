@@ -108,13 +108,14 @@ Question {
                     Repeater {
                         model: root.layers ? [{id: "png", text: "PNG"}, {id: "webp", text: "WebP"}]
                                            : [{id: "png", text: "PNG"}, {id: "jpg", text: "JPEG"}, {id: "webp", text: "WebP"},
-                                              {id: "ora", text: qsTr("Layers (.ora)")}]
+                                              {id: "ora", text: qsTr("Layers (.ora)")}, {id: "psd", text: qsTr("Photoshop (.psd)")}]
                         Choice {
                             required property var modelData
                             objectName: "canvasExportFormat-" + modelData.id
                             text: modelData.text
                             current: backend.format === modelData.id
-                            tip: modelData.id === "ora" ? qsTr("Keep the layers: the OpenRaster file Krita and GIMP open") : ""
+                            tip: modelData.id === "ora" ? qsTr("Keep the layers: the OpenRaster file Krita and GIMP open")
+                                 : modelData.id === "psd" ? qsTr("Keep the layers: the Photoshop file Photoshop, Affinity, Photopea, Krita and GIMP open") : ""
                             onTapped: backend.format = modelData.id
                         }
                     }
@@ -268,8 +269,8 @@ Question {
         Label {
             objectName: "canvasExportSkipped"
             Layout.fillWidth: true
-            visible: root.layers && backend.skipped !== ""
-            text: qsTr("Left out, a selection is not a picture: %1").arg(backend.skipped)
+            visible: backend.skipped !== ""
+            text: root.layers ? qsTr("Left out, a selection is not a picture: %1").arg(backend.skipped) : backend.skipped
             color: root.look.label
             font.pixelSize: root.look.captionSize
             wrapMode: Text.Wrap
@@ -316,6 +317,7 @@ Question {
         target.suggestedName = backend.fileName
         target.selectedFile = root.layers ? "" : pictures + "/" + backend.fileName
         target.nameFilters = root.layers ? [] : [backend.format === "ora" ? qsTr("Layered image (*.ora)")
+                                               : backend.format === "psd" ? qsTr("Photoshop file (*.psd)")
                                                : qsTr("%1 images (*.%2)").arg(backend.format.toUpperCase()).arg(backend.format)]
         target.open()
     }

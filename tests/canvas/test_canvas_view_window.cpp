@@ -971,6 +971,84 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // #251: Select > Modify and Transform selection act on the painted selection, or on a rectangle painted into it first;
+    // each is one step of the selection's undo.
+    void modifyAndTransformSelectionAreCommandsWithSmallDialogs() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        QTRY_VERIFY(find(app.window, "canvasViewViewer"));
+        const auto row = [&](const QString &command, bool modify) {
+            menuRow(app, "Select", "canvas-view.select-all");
+            if (modify)
+                click(app, "subMenu-Modify");
+            QQuickItem *item = nullptr;
+            for (int i = 0; i < 100 && !item; ++i) {
+                item = find(app.window, "menuItem-" + command);
+                if (!item)
+                    QTest::qWait(20);
+            }
+            return item;
+        };
+        // Nothing selected: every row is greyed, and none is a placeholder any more.
+        for (const char *command : {"expand", "contract", "feather", "border", "smooth"}) {
+            QQuickItem *item = row(QString("canvas-view.selection-") + command, true);
+            QVERIFY(item && !item->isEnabled());
+            closeMenu(app);
+        }
+        QQuickItem *transform = row("canvas-view.selection-transform", false);
+        QVERIFY(transform && !transform->isEnabled());
+        QVERIFY(!find(app.window, "menuPlanned-251-Modify selection…"));
+        closeMenu(app);
+        // A rectangle: Contract paints it into the selection and takes 3 px off every side.
+        const QVariant rect = QVariantMap{{"x", 20}, {"y", 30}, {"width", 100}, {"height", 80}};
+        QVERIFY(QMetaObject::invokeMethod(view(app), "placeFree", Q_ARG(QVariant, rect)));
+        QTRY_VERIFY(view(app)->property("hasFreeRect").toBool());
+        QQuickItem *contract = row("canvas-view.selection-contract", true);
+        QVERIFY(contract && contract->isEnabled());
+        click(app, "menuItem-canvas-view.selection-contract");
+        QTRY_VERIFY(find(app.window, "canvasModifyAmount"));
+        find(app.window, "canvasModifyAmount")->setProperty("text", "3");
+        click(app, "canvasModifyOk");
+        QTRY_VERIFY(view(app)->property("maskSelected").toBool());
+        QVERIFY(!view(app)->property("hasFreeRect").toBool());
+        QVERIFY(view(app)->property("quickMask").toBool()); // the painted selection is shown as the Quick Mask
+        QObject *mask = view(app)->property("selectionMask").value<QObject *>();
+        const auto valueAt = [&](int x, int y) {
+            int v = -1;
+            QMetaObject::invokeMethod(mask, "valueAt", Q_RETURN_ARG(int, v), Q_ARG(int, x), Q_ARG(int, y));
+            return v;
+        };
+        QCOMPARE(valueAt(22, 60), 0);
+        QCOMPARE(valueAt(23, 60), 255);
+        QCOMPARE(valueAt(60, 32), 0);
+        QCOMPARE(valueAt(60, 33), 255);
+        // One step: Undo gives the rectangle as painted.
+        viaMenu(app, "Edit", "canvas-view.undo");
+        QTRY_COMPARE(valueAt(20, 60), 255);
+        // Expand it again on the painted selection, with the dialog's Enter.
+        QVERIFY(QMetaObject::invokeMethod(mask, "clear"));
+        QVERIFY(QMetaObject::invokeMethod(mask, "fillRect", Q_ARG(double, 100), Q_ARG(double, 100), Q_ARG(double, 40), Q_ARG(double, 40), Q_ARG(bool, false)));
+        QTRY_VERIFY(view(app)->property("maskSelected").toBool());
+        row("canvas-view.selection-expand", true);
+        click(app, "menuItem-canvas-view.selection-expand");
+        QTRY_VERIFY(find(app.window, "canvasModifyAmount"));
+        find(app.window, "canvasModifyAmount")->setProperty("text", "5");
+        click(app, "canvasModifyOk");
+        QTRY_COMPARE(valueAt(95, 120), 255);
+        QCOMPARE(valueAt(94, 120), 0);
+        // Transform: move 10 right and 20 down.
+        viaMenu(app, "Select", "canvas-view.selection-transform");
+        QTRY_VERIFY(find(app.window, "canvasTransformMoveX"));
+        find(app.window, "canvasTransformMoveX")->setProperty("text", "10");
+        find(app.window, "canvasTransformMoveY")->setProperty("text", "20");
+        click(app, "canvasTransformOk");
+        QTRY_COMPARE(valueAt(105, 140), 255);
+        QCOMPARE(valueAt(104, 140), 0);
+        QCOMPARE(valueAt(105, 114), 0);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void renameDuplicateClearDeleteAndCloseAreInTheFileMenu() {
         App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
         QVERIFY(app.open());
