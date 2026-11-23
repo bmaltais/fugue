@@ -256,6 +256,22 @@ Canvas Region's **Selection** input (advanced) is what Use selection writes: the
 it, the Mask input and the rectangle are not used; the selection's bounds are in X, Y, Width and Height so the frame
 and the size the model gets read right. A replay of the run reads the same selection.
 
+## Modify and transform a selection
+
+**Select > Modify** and **Select > Transform selection…** (#251) change the selection by a number you type, with Photoshop's
+meanings. Each asks in a small dialog (Enter applies, the last amount is offered again) and is one step of the selection's own undo
+(Ctrl+Z in the view). They need a selection: the painted one, or a rectangle (the free one, or the Region node's), which is
+painted into the selection first (the free rectangle goes; the Region node's area stays until Deselect). The result shows as the
+Quick Mask, the one view a painted selection has until the marching ants (#232) come.
+
+- **Expand** and **Contract**: every edge moves out or in by N pixels (round corners). A selection against the picture's edge is not eaten from that side.
+- **Feather**: the edge fades over about N pixels each side of where it was (a Gaussian). A selection reaching the picture's edge stays solid there.
+- **Border**: a band N pixels wide centered on the edge (an odd width puts the extra pixel outside); the inside is let go.
+- **Smooth**: blurs by N and keeps what is more than half selected: rounds corners and drops specks.
+- **Transform selection**: Scale in percent and Rotate in degrees about the selection's center, then Move right and down in pixels. There are no handles to drag yet, and no live preview: Undo takes it back. What leaves the picture is lost.
+
+An amount is 1 to 250 pixels. The work is `engine/mask_ops.h`: Expand and Contract run the Grow Mask node's own 3x3 pass (`morphPass`, shared), alternating the tapered and the full footprint so the growth looks round (the node alone makes a diamond).
+
 ## The menu bar
 
 The Canvas view has its own menu bar at the top, in the File > Canvas… dialog and in an area alike (#232). Every option of
@@ -270,7 +286,7 @@ the view is a row of a menu, with its key beside it; what does not apply to the 
 - **Select**: Select all (Ctrl+A: the whole canvas as the rectangle, or the whole Quick Mask), **Deselect** (Ctrl+D, and
   Escape when nothing is being dragged or run: it clears the free rectangle, sets the Canvas Region node's area back to 0, 0, 0, 0 = the
   whole canvas as one undo step, and clears a painted selection), Inverse (Ctrl+Shift+I, the painted selection), Quick Mask
-  and Use selection.
+  and Use selection, **Modify** and **Transform selection** (below).
 - **Layer**: Add layer mask, Invert mask, Mask overlay, Reveal all, Hide all. The layers panel keeps its own rows.
 - **View**: Fit, 100%, Zoom in, Zoom out, History, Layers, Compare, Advanced details, Snap region, and
   **Tools** (Hand, Zoom, Rectangle region, Mask brush, Mask eraser, swap, brush size).

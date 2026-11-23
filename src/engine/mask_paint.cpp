@@ -418,6 +418,17 @@ void MaskPaint::clear() {
     commitStep();
 }
 
+bool MaskPaint::assign(const std::vector<uint8_t> &pixels) {
+    if (m_stroking || pixels.size() != m_pixels.size())
+        return false;
+    beginStep();
+    touch({0, 0, m_width, m_height});
+    m_pixels = pixels;
+    note({0, 0, m_width, m_height});
+    commitStep();
+    return true;
+}
+
 void MaskPaint::fill() { fill(Rgba{0, 0, 0, 255}); }
 
 void MaskPaint::fill(Rgba color) {
