@@ -1,0 +1,172 @@
+name: AppImage
+
+# Builds Fugue-<version>-x86_64.AppImage (docs/appimage.md) for distributions other than Arch. It runs on a
+# v* tag (and then adds the file to the release package.yml makes), by hand (workflow_dispatch: the way to try it
+# without a release) and on a pull request or push to main that changes the packaging, because a packaging change
+# gets its own CI run before it is merged. The build is on Ubuntu 22.04, the oldest glibc Qt 6.11 supports, so the
+# file runs on anything newer; Qt 6.11 (the app's minimum) is not in any distribution that old, so it comes from
+# aqtinstall, version pinned. The AppImage is then started in clean Ubuntu and Fedora containers.
+on:
+  push:
+    branches: [main, master]
+    paths: [packaging/appimage/**, share/**, CMakeLists.txt, .github/workflows/appimage.yml]
+    tags: ['v*']
+  pull_request:
+    paths: [packaging/appimage/**, .github/workflows/appimage.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  QT_VERSION: 6.11.2
+  AQTINSTALL_VERSION: 3.3.0
+
+jobs:
+  build:
+    name: Build the AppImage
+    runs-on: ubuntu-latest
+    container: ubuntu:22.04
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 800M
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+    steps:
+      - name: Install git for the checkout
+        run: apt-get update && apt-get install -y --no-install-recommends git ca-certificates
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # tags, for the version
+          submodules: true # the bundled templates
+
+      - name: Install the build dependencies
+        # The -dev packages are what the app links (the PKGBUILD's libvips, libarchive, vulkan-icd-loader, zlib) and
+        # the libraries Qt's own plugins need at bundle time; linuxdeploy copies what it finds from here.
+        run: |
+          apt-get install -y --no-install-recommends build-essential cmake ninja-build pkg-config ccache curl file \
+            patchelf python3-pip desktop-file-utils libvips-dev libarchive-dev libvulkan-dev zlib1g-dev \
+            libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libfontconfig1-dev libdbus-1-3 \
+            libglib2.0-0 libwayland-dev libpulse-mainloop-glib0 libasound2 \
+            libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-shape0 \
+            libxcb-xkb1 libxcb-xinerama0 libxcb-randr0 libxcb-sync1 libxcb-xfixes0 libxcb-glx0
+
+      - name: Cache Qt
+        id: qt-cache
+        uses: actions/cache@v6
+        with:
+          path: qt
+          key: qt-${{ env.QT_VERSION }}-aqt-${{ env.AQTINSTALL_VERSION }}-linux-x64
+
+      - name: Install Qt ${{ env.QT_VERSION }}
+        if: steps.qt-cache.outputs.cache-hit != 'true'
+        # aqtinstall checks every archive against the checksum download.qt.io publishes.
+        run: |
+          pip3 install "aqtinstall==$AQTINSTALL_VERSION"
+          python3 -m aqt install-qt linux desktop "$QT_VERSION" linux_gcc_64 -m qtmultimedia qtimageformats qtshadertools --outputdir qt
+
+      - name: Restore the compiler cache
+        uses: actions/cache@v6
+        with:
+          path: .ccache
+          key: appimage-ccache-${{ github.sha }}
+          restore-keys: appimage-ccache-
+
+      - name: Check the AppRun (no Qt needed)
+        run: packaging/appimage/test-apprun.sh
+
+      - name: Build the AppImage
+        run: |
+          QT_ROOT="$GITHUB_WORKSPACE/qt/$QT_VERSION/gcc_64" packaging/appimage/build-appimage.sh --out dist
+          cp packaging/appimage/smoke-test.sh dist/ # the smoke jobs have no checkout
+          ls -l dist
+
+      - name: Compiler cache use
+        if: always()
+        run: ccache -s || true
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: appimage
+          path: dist/*
+
+  smoke:
+    name: Start it on ${{ matrix.image }}
+    needs: build
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        # The oldest and the newest Ubuntu LTS, and Fedora: a different libc build, a different Mesa, no Debian paths.
+        include:
+          - {image: 'ubuntu:22.04', family: apt}
+          - {image: 'ubuntu:24.04', family: apt}
+          - {image: 'fedora:latest', family: dnf}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: appimage
+          path: dist
+
+      - name: Install what a desktop already has (the host's GPU stack and a font), nothing of Fugue's
+        # Fugue bundles no GPU stack: libGL, libEGL, the Vulkan loader and Mesa come from the host. This list is the
+        # "needs on the host" of docs/appimage.md; a sentence there changes with it.
+        run: |
+          if [[ ${{ matrix.family }} == apt ]]; then
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y --no-install-recommends libgl1 libegl1 libvulkan1 mesa-vulkan-drivers libgl1-mesa-dri \
+              libfontconfig1 fonts-dejavu-core libxkbcommon0 libdbus-1-3 libglib2.0-0
+          else
+            dnf install -y mesa-libGL mesa-libEGL vulkan-loader mesa-dri-drivers fontconfig dejavu-sans-fonts \
+              libxkbcommon dbus-libs glib2
+          fi
+
+      - name: Check the checksum and the file name, and start it
+        run: |
+          cd dist
+          sha256sum -c ./*.AppImage.sha256
+          chmod +x ./*.AppImage
+          chmod +x smoke-test.sh
+          ./smoke-test.sh ./*-x86_64.AppImage
+
+  release:
+    name: Add it to the release
+    needs: [build, smoke]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: appimage
+          path: dist
+      - name: Wait for the release, then add the AppImage and its SHA256SUMS line
+        # package.yml makes the release for the same tag and uploads the packages with their SHA256SUMS. This waits
+        # for that file, adds the AppImage and its checksum line to the same release, and never replaces a line
+        # of another file.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for _ in $(seq 1 240); do
+            if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null | grep -qx SHA256SUMS; then found=1; break; fi
+            sleep 30
+          done
+          [[ ${found:-0} == 1 ]] || { echo "no release with a SHA256SUMS appeared in two hours (did package.yml fail?)"; exit 1; }
+          cd dist
+          image=$(ls ./*-x86_64.AppImage); image=${image#./}
+          gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS --dir .
+          grep -vF " $image" SHA256SUMS > SHA256SUMS.new || true
+          cat "$image.sha256" >> SHA256SUMS.new
+          mv SHA256SUMS.new SHA256SUMS
+          gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber "$image" SHA256SUMS

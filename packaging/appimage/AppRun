@@ -1,0 +1,35 @@
+#!/bin/sh
+# The AppImage's entry point. The binary is both the window and the command line (`fugue run x.fugue`,
+# `fugue --version`; with no arguments, or a .fugue file, the window), so this only finds the generation
+# helper and hands every argument over untouched.
+#
+# It sets no LD_LIBRARY_PATH and no QT_* variable: the bundled libraries are found through the RUNPATH
+# linuxdeploy writes and the plugins through usr/bin/qt.conf. Anything else would leak into the programs
+# Fugue starts (nodes, `uv`, ffmpeg, the user's browser) and break them against the bundled libraries.
+here=$(dirname "$(readlink -f "$0")")
+APPDIR=${APPDIR:-$here}
+export APPDIR
+
+# The helper is a separate download (it is large and ties to a GPU stack): look for it where a package or
+# the user puts it, in the order the packaged build tries (CUDA on an NVIDIA machine, then Vulkan, then CPU).
+# FUGUE_HELPER set by the user, even empty (no helper), wins.
+if [ -z "${FUGUE_HELPER+x}" ]; then
+    names="fugue-helper-vulkan fugue-helper-cpu"
+    [ -e /proc/driver/nvidia/version ] && names="fugue-helper-cuda $names"
+    # FUGUE_HELPER_DIRS (colon separated) replaces the folders searched.
+    dirs=${FUGUE_HELPER_DIRS:-${XDG_DATA_HOME:-$HOME/.local/share}/fugue/helper:$HOME/.local/lib/fugue:/usr/local/lib/fugue:/usr/lib/fugue}
+    rest=$dirs
+    while [ -n "$rest" ] && [ -z "${FUGUE_HELPER+x}" ]; do
+        dir=${rest%%:*}
+        case $rest in *:*) rest=${rest#*:} ;; *) rest= ;; esac
+        for name in $names; do
+            if [ -f "$dir/$name" ] && [ -x "$dir/$name" ]; then
+                FUGUE_HELPER=$dir/$name
+                export FUGUE_HELPER
+                break
+            fi
+        done
+    done
+fi
+
+exec "$APPDIR/usr/bin/fugue" "$@"
