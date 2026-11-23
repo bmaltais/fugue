@@ -22,6 +22,7 @@
 #include <optional>
 
 #include "cli/commands.h"
+#include "engine/compiler.h"
 #include "engine/queue.h"
 #include "engine/run_folder.h"
 
@@ -30,6 +31,11 @@ namespace fugue::cli {
 // `fugue run`: returns {"run", "status": "queued"} at once, or with --wait streams
 // events until run.done and exits 1 unless the run ended ok.
 Reply startRun(const Command &command, Context &context);
+
+// The steps of `fugue run` after the compile: the run folder, the queue entry and a detached worker. `document` is the
+// workflow as compiled (empty for a compiled graph), `file` the path the run is recorded under. Returns the queued run's
+// folder, or why it could not start. The canvas batch (cli/canvas_batch.cpp) starts each picture's run this way.
+Result<RunFolder> startCompiledRun(const Compilation &compilation, const QJsonObject &document, const QString &file, bool first, Context &context);
 
 // `fugue runs cancel`: removes a waiting run's entry, or signals the worker.
 Reply cancelRun(const Command &command, Context &context);

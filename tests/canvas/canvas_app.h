@@ -111,6 +111,7 @@ struct App {
     fugue::ImageActions *imageActions = nullptr; // likewise (test_canvas_image_actions)
     fugue::ProjectModel *projects = nullptr;     // the projects dialog's and the chip's (test_projects_window), likewise
     fugue::CanvasActions *canvasActions = nullptr; // the Canvas view's task bar (test_canvas_actions_window), likewise
+    fugue::CanvasBatch *canvasBatch = nullptr;     // Canvas > Automate > Batch… (test_canvas_batch_window), likewise
     // The side panels (#56), with their state in the test's own folder.
     fugue::ChromeVisibility chrome{dir.path() + "/chrome.json"};
     fugue::SidePanels sidePanels{dir.path() + "/side-panels.json", &chrome};
@@ -173,7 +174,7 @@ struct App {
     bool open() {
         // As main() does: the English catalog gives counted strings their plural forms.
         QCoreApplication::installTranslator(&translator);
-        const fugue::AppObjects objects{&translator, &theme, &commands, &model, &workflows, &settings, runs, imageActions, &colorHistory, &layoutColors, runBar, runQueue, &sidePanels, &nodeLibrary, &recentFiles, &chrome, &mediaLibrary, projects, &workspace, canvasActions, &activeCanvas};
+        const fugue::AppObjects objects{&translator, &theme, &commands, &model, &workflows, &settings, runs, imageActions, &colorHistory, &layoutColors, runBar, runQueue, &sidePanels, &nodeLibrary, &recentFiles, &chrome, &mediaLibrary, projects, &workspace, canvasActions, &activeCanvas, canvasBatch};
         fugue::followNodeTypeReloads(*reloader, objects);
         fugue::exposeToQml(engine, objects);
         engine.load(QUrl("qrc:/Main.qml"));

@@ -305,6 +305,7 @@ Item {
         case "canvas-view.new": case "canvas-view.import": return {enabled: true}
         case "canvas-view.open": return {enabled: canvasData.canvases.length > 0}
         case "canvas-view.export": case "canvas-view.export-options": case "canvas-view.export-layers": return {enabled: canvasData.revisionB !== ""}
+        case "canvas-view.batch": return {enabled: App.canvasBatch !== null}
         case "canvas-view.rename": case "canvas-view.share": case "canvas-view.duplicate": case "canvas-view.delete": case "canvas-view.close": return {enabled: has}
         case "canvas-view.clear": return {enabled: canvasData.layersEditable}
         case "canvas-view.select-all": return {enabled: shows && canvasData.pictureSize.width > 0}
@@ -383,6 +384,7 @@ Item {
         case "canvas-view.export-layers": exportWith("layers"); break
         case "canvas-view.rename": fileDialogs.askRename(); break
         case "canvas-view.share": fileDialogs.askShare(); break
+        case "canvas-view.batch": batchDialog.openDialog(); break
         case "canvas-view.duplicate": canvasData.duplicateCanvas(); break
         case "canvas-view.clear": fileDialogs.askClear(); break
         case "canvas-view.delete": fileDialogs.askDelete(); break
@@ -485,6 +487,11 @@ Item {
         defaultSuffix: "png"
         nameFilters: [qsTr("PNG images (*.png)"), qsTr("JPEG images (*.jpg *.jpeg)"), qsTr("WebP images (*.webp)"), qsTr("Layered image (*.ora)")]
         onAccepted: canvasData.exportPicture(selectedFile.toString())
+    }
+    // Batch… (#250): a canvas action over a folder of pictures.
+    CanvasBatchDialog {
+        id: batchDialog
+        parent: Overlay.overlay
     }
     CanvasFileDialogs {
         id: fileDialogs

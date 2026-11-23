@@ -32,7 +32,7 @@ is a **placeholder**: a greyed row, not a command (no handler, no key, nothing i
 | Canvas size… / Document properties | Ph, Kr, Af | placeholder, #240 | the resize revision |
 | Edit in external editor | Krita plugins | placeholder, #215 | issue exists |
 | Share / Publish | Ph Share, Af | built (#249) | **Share…** asks "As it is now…" (the layers, no history) or "With history…", then where; a `.fuguepack` that Open and Import picture… read back |
-| Automate / Batch | Ph Automate, Kr scripts | placeholder, #250 | a canvas action over a folder of pictures |
+| Automate / Batch | Ph Automate, Kr scripts | built (#250) | **Canvas > Automate > Batch…** (a submenu, so Photoshop's other Automate rows have a home): an action, a folder of pictures, a folder for the results and a format; `fugue canvas batch` is the same engine (`engine/canvas_batch.h`). Photoshop's Batch also takes a source of Opened Files or Import and per-file naming options; Fugue takes a folder, names the result after the picture (`-2`, `-3` when taken) and never overwrites |
 | Open recent | Ph, Pp, Kr, Af | skip | the canvas list is newest first and one click away |
 | Save, Save as, Revert, Save a copy | all | skip | autosaved revisions; Undo and History revert; Export is the copy |
 | Print | Ph, Kr, Af | skip | no print path in Fugue; Export is the way out |

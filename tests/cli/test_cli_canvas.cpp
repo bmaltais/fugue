@@ -595,6 +595,35 @@ private slots:
         QCOMPARE(fugue({"canvas", "resize", "canvas-nope", "--to", "0,0,8,8", "--json"}).errorCode(), QString("canvas_not_found"));
     }
 
+    // #250: a canvas action over a folder. The fugue has no model here, so every picture fails in its run, which is what
+    // the test needs: each failure is reported, the batch goes on, nothing is written and no temporary canvas is left.
+    // The loop, the names and the export are tests/nodes/test_canvas_batch.cpp's.
+    void aBatchReportsEachPictureAndLeavesNoCanvasBehind() {
+        QVERIFY(QDir().mkpath(path("work/in")));
+        QVERIFY(QFile::copy(oraFile("one.ora"), path("work/in/one.ora")));
+        QVERIFY(QFile::copy(oraFile("two.ora"), path("work/in/two.ora")));
+        const Outcome out = fugue({"canvas", "batch", "generative-fill", path("work/in"), path("work/out"), "--prompt", "a hat", "--json"});
+        QCOMPARE(out.exitCode, 1);
+        const QList<QByteArray> lines = out.out.trimmed().split('\n');
+        QCOMPARE(QJsonDocument::fromJson(lines.first()).object().value("event").toString(), QString("batch.started"));
+        const QJsonObject report = QJsonDocument::fromJson(lines.last()).object().value("report").toObject();
+        QCOMPARE(report.value("total").toInt(), 2);
+        QCOMPARE(report.value("failed").toInt(), 2);
+        QVERIFY(!report.value("items").toArray().at(0).toObject().value("error").toString().isEmpty());
+        QVERIFY(QDir(path("work/out")).isEmpty());
+        QCOMPARE(fugue({"canvas", "list", "--json"}).data().value("canvases").toArray().size(), 0);
+    }
+
+    void aBatchRefusesWhatCannotStart() {
+        QVERIFY(QDir().mkpath(path("work/empty")));
+        QCOMPARE(fugue({"canvas", "batch", "nonesuch", path("work/empty"), path("work/out"), "--json"}).errorCode(), QString("file_not_found"));
+        QCOMPARE(fugue({"canvas", "batch", "generative-fill", path("work/empty"), path("work/out"), "--prompt", "x", "--json"}).errorCode(), QString("input_invalid"));
+        QCOMPARE(fugue({"canvas", "batch", "generative-fill", path("work/nowhere"), path("work/out"), "--prompt", "x", "--json"}).errorCode(), QString("file_not_found"));
+        QCOMPARE(fugue({"canvas", "batch", "generative-fill", path("work/empty"), path("work/out"), "--json"}).errorCode(), QString("input_invalid")); // no prompt
+        QCOMPARE(fugue({"canvas", "batch", "generative-fill", path("work/empty"), path("work/out"), "--prompt", "x", "--format", "gif", "--json"}).errorCode(), QString("usage"));
+        QCOMPARE(fugue({"canvas", "batch", "generative-fill", path("work/empty"), "--json"}).errorCode(), QString("usage"));
+    }
+
     void errorsAreCodedAndHelpful() {
         QCOMPARE(fugue({"canvas", "show", "canvas-nope", "--json"}).errorCode(), QString("canvas_not_found"));
         QCOMPARE(fugue({"canvas", "new", "--size", "big", "--json"}).errorCode(), QString("usage"));

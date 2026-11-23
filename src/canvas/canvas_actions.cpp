@@ -160,6 +160,7 @@ void CanvasActions::rebuildList() {
                         {"glyph", e.action && !e.action->glyph.isEmpty() ? e.action->glyph : QStringLiteral("sparkles")},
                         {"selection", e.action ? e.action->selection : QStringLiteral("required")},
                         {"needsPrompt", e.action ? e.action->needsPrompt() : false},
+                        {"hasPrompt", e.action ? e.action->input(QStringLiteral("prompt")) != nullptr : false},
                         {"broken", !e.broken.isEmpty()},
                         {"reason", e.broken},
                         {"missing", 0},
@@ -342,6 +343,19 @@ QVariantMap CanvasActions::generate(const QVariantMap &request) {
     emit stateChanged();
     emit progressChanged();
     return {{"ok", true}, {"run", started}, {"action", id}};
+}
+
+Result<canvas::BatchAction> CanvasActions::batchAction(const QString &id) const {
+    const Entry *chosen = entry(id);
+    if (!chosen)
+        return makeError(QStringLiteral("file_not_found"), tr("There is no action %1.").arg(id));
+    if (!chosen->broken.isEmpty() || !chosen->action)
+        return makeError(QStringLiteral("action_invalid"), chosen->broken);
+    if (chosen->action->selection == QLatin1String("bounds"))
+        return makeError(QStringLiteral("action_invalid"), tr("%1 works on a crop frame beyond the canvas, so it cannot run over a folder.").arg(chosen->action->name));
+    if (m_workflows && m_workflows->missingModels(chosen->document.models()).value("count").toInt() > 0)
+        return makeError(QStringLiteral("model_missing"), tr("%1 needs models that are not on this machine. Download them first.").arg(chosen->action->name));
+    return canvas::BatchAction{chosen->id, chosen->file, chosen->document, *chosen->action, chosen->graph};
 }
 
 void CanvasActions::cancel() {

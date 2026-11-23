@@ -148,36 +148,30 @@ Plan graphToRun(const Command &command, Context &context) {
 
 } // namespace
 
-Reply startRun(const Command &command, Context &context) {
-    const QString file = command.positionals.at(0);
-    const Plan plan = graphToRun(command, context);
-    const Compilation &compilation = plan.compilation;
-    if (!compilation.ok())
-        return Reply::failure(compilation.errors());
-
+Result<RunFolder> startCompiledRun(const Compilation &compilation, const QJsonObject &document, const QString &file, bool first, Context &context) {
     const Result<RunFolder> folder = RunFolder::create(context.runsRoot);
     if (!folder)
-        return Reply::failure(folder.errors());
+        return folder.errors();
     const QString workflow = QFileInfo(file).absoluteFilePath();
     // The worker reads both back. Without workflow.json the run would save its images
     // without their workflow (11.7), so a failed write ends the run before it starts.
     Errors written;
     if (!folder->writeCompiled(compilation->toJson()))
         written.append(makeError("permission_denied", "The compiled graph could not be written to " + folder->path() + "."));
-    if (!plan.document.isEmpty())
-        written += folder->writeWorkflow(plan.document);
+    if (!document.isEmpty())
+        written += folder->writeWorkflow(document);
     // The worker is not started here, so "the current directory" of 13.6 is recorded now.
     written += folder->writeRoots(FileRoots::defaults(QDir::currentPath(), workflow));
     if (hasErrors(written)) {
         folder->finish(RunStatus::Failed, written, utcNow());
-        return Reply::failure(written);
+        return written;
     }
     folder->queued(workflow);
 
     const Queue queue(context.queueDir);
-    if (!queue.enqueue(folder->id(), workflow, command.has("first"))) {
+    if (!queue.enqueue(folder->id(), workflow, first)) {
         folder->finish(RunStatus::Failed, {}, utcNow());
-        return Reply::failure(makeError("internal", "The run queue could not be written.", "Check " + context.queueDir));
+        return makeError("internal", "The run queue could not be written.", "Check " + context.queueDir);
     }
     QProcess worker;
     worker.setProgram(QCoreApplication::applicationFilePath());
@@ -189,11 +183,23 @@ Reply startRun(const Command &command, Context &context) {
         queue.remove(folder->id());
         const Error error = makeError("internal", "The run worker could not be started.", worker.errorString());
         folder->finish(RunStatus::Failed, {error}, utcNow());
-        return Reply::failure(error);
+        return error;
     }
     // The worker records its own pid, in its queue entry and later in run.json; both
     // belong to it from here on (runs.h). Recording it from here would name a process
     // that may not have its command line yet (isRunWorker).
+    return folder;
+}
+
+Reply startRun(const Command &command, Context &context) {
+    const QString file = command.positionals.at(0);
+    const Plan plan = graphToRun(command, context);
+    const Compilation &compilation = plan.compilation;
+    if (!compilation.ok())
+        return Reply::failure(compilation.errors());
+    const Result<RunFolder> folder = startCompiledRun(compilation, plan.document, file, command.has("first"), context);
+    if (!folder)
+        return Reply::failure(folder.errors());
 
     if (command.has("wait")) {
         Reply reply;

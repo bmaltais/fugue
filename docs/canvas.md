@@ -20,6 +20,7 @@ fugue canvas import team.fuguepack                 # a package's canvas, as a ne
 fugue canvas export canvas-0123456789ab out.webp --quality 80 --scale 50%   # lossy WebP at half size
 fugue canvas export canvas-0123456789ab --format jpg --quality 60 --estimate   # the size it would be, nothing written
 fugue canvas export canvas-0123456789ab shots --layers   # one picture per layer into the folder shots
+fugue canvas batch generative-fill photos results --prompt "a red hat"   # an action over every picture of a folder
 fugue canvas list                                  # the canvases, newest first
 fugue canvas candidates canvas-0123456789ab        # revisions nobody points at (scripts)
 fugue canvas diff canvas-0123456789ab@sha256:ab12cd34   # what a revision changed, against its parent
@@ -173,6 +174,22 @@ You choose whether hidden layers are written, whether each layer's layer mask is
 layer is written as its own pixels: its opacity and blend mode are not applied. A mask layer (a selection) is not a picture and is left out, and the
 dialog says so. If any of the names is taken the whole export is refused before the first file is written. On the command line:
 `fugue canvas export <id> <folder> --layers [--format png|webp] [--only-visible] [--no-masks] [--prefix <text>]`.
+
+**Canvas > Automate > Batch…** (Photoshop's Automate > Batch) runs a canvas action over every picture of a folder. Choose
+the action (one whose models are not on this machine is greyed), type the prompt if it has one, choose the folder of pictures and the
+folder for the results, and a format (PNG, JPEG, WebP or the layers as .ora). **Run** makes each picture a canvas, runs the
+action on all of it (the whole picture is the selection), writes the result to the results folder under the picture's name
+(`harbour.png` becomes `harbour.png` there, or `harbour-2.png` when that name is taken: nothing is replaced) and removes
+the temporary canvas. It runs in the background, one picture at a time, through the same queue as every run, so it waits
+for the GPU and shows in the queue panel. The dialog lists each picture as Waiting, Running, Done, Failed (with the reason)
+or Cancelled, and a progress bar; a picture that fails never stops the others. **Cancel batch** ends the run under way and marks
+the pictures not started as cancelled; **Hide** closes the dialog and leaves the batch running (reopen it to see where it is).
+An action that works on a crop frame beyond the canvas (Expand) cannot be batched.
+
+`fugue canvas batch <action> <in-folder> <out-folder>` is the same without a window: `<action>` is an action file or the id of a
+bundled one, `--prompt <text>`, `--seed <n>` and the picture options of `canvas export` (`--format`, `--quality`, `--scale`,
+`--size`, ...) apply, `--keep` leaves each temporary canvas in the store with the result as its head, and the command prints one line
+per picture (one JSON event per line with `--json`). Its exit code is 1 when any picture failed or was cancelled.
 
 ## Layers
 

@@ -1337,7 +1337,6 @@
   "Rename the canvas": "Rename the canvas",
   "Reveal the whole layer mask": "Reveal the whole layer mask",
   "Rulers, grid and guides": "Rulers, grid and guides",
-  "Run an action on a folder…": "Run an action on a folder…",
   "Select subject…": "Select subject…",
   "Select the whole canvas": "Select the whole canvas",
   "Share…": "Share…",
@@ -1438,5 +1437,49 @@
   "Saved 1 file in %1": "Saved 1 file in %1",
   "Transparent, white for a JPEG, which has no transparency": "Transparent, white for a JPEG, which has no transparency",
   "Visible layers only": "Visible layers only",
-  "the exported canvas": "the exported canvas"
+  "the exported canvas": "the exported canvas",
+  "%1 of %2 pictures…": "%1 of %2 pictures…",
+  "%1 works on a crop frame beyond the canvas, so it cannot run over a folder.": "%1 works on a crop frame beyond the canvas, so it cannot run over a folder.",
+  "%n cancelled": {
+    "one": "%n cancelled",
+    "other": "%n cancelled"
+  },
+  "%n failed": {
+    "one": "%n failed",
+    "other": "%n failed"
+  },
+  "%n pictures done": {
+    "one": "%n picture done",
+    "other": "%n pictures done"
+  },
+  "&Automate": "&Automate",
+  "A batch is already running: wait for it, or Cancel it.": "A batch is already running: wait for it, or Cancel it.",
+  "Action": "Action",
+  "Batch": "Batch",
+  "Batch progress": "Batch progress",
+  "Batch…": "Batch…",
+  "Cancel batch": "Cancel batch",
+  "Cancelled.": "Cancelled.",
+  "Choose folder…": "Choose folder…",
+  "Choose the folder for the results": "Choose the folder for the results",
+  "Choose the folder of pictures": "Choose the folder of pictures",
+  "Choose the folder of pictures.": "Choose the folder of pictures.",
+  "Choose the folder to write the results to.": "Choose the folder to write the results to.",
+  "Each picture becomes a canvas, the action runs on all of it, and the result is saved as a new file; a name that is taken gets -2, -3, and nothing is replaced. It runs in the background.": "Each picture becomes a canvas, the action runs on all of it, and the result is saved as a new file; a name that is taken gets -2, -3, and nothing is replaced. It runs in the background.",
+  "Its models are not on this machine: download them in the Canvas view first": "Its models are not on this machine: download them in the Canvas view first",
+  "JPEG": "JPEG",
+  "New batch": "New batch",
+  "No folder chosen": "No folder chosen",
+  "Not started: the batch was cancelled.": "Not started: the batch was cancelled.",
+  "PNG": "PNG",
+  "Pictures": "Pictures",
+  "Run a canvas action over every picture of a folder and save the results to another folder": "Run a canvas action over every picture of a folder and save the results to another folder",
+  "Running…": "Running…",
+  "Save to": "Save to",
+  "That folder has no pictures (.png, .jpg, .webp, .bmp, .tif or .ora).": "That folder has no pictures (.png, .jpg, .webp, .bmp, .tif or .ora).",
+  "The folder cannot be read": "The folder cannot be read",
+  "Type what to put in the pictures, then Run.": "Type what to put in the pictures, then Run.",
+  "Waiting": "Waiting",
+  "WebP": "WebP",
+  "What to put in each picture": "What to put in each picture"
 }
