@@ -396,6 +396,10 @@ foreach(test_name ${fugue_all_tests})
                XDG_CACHE_HOME=${test_home}/.cache
                QT_QPA_PLATFORMTHEME=generic
                QT_NO_XDG_DESKTOP_PORTAL=1
+               # Qt's incremental GC, in slices, can run in the middle of a window's creation: under load a Question then read
+               # its scope and the theme as null ("QML Question: Cannot find member data", "Cannot read property 'unit' of null"),
+               # 1 run in ~50 here (#279). One slice that finishes the whole collection (a pause is nothing offscreen) never does.
+               QV4_GC_TIMELIMIT=100000
                DBUS_SESSION_BUS_ADDRESS=unix:path=/nonexistent/fugue-tests-have-no-session-bus)
 endforeach()
 

@@ -1803,7 +1803,6 @@ echo '{"outputs": {"text": "painted"}}'
     // The panel lists this window's runs and a CLI run in one queue; "move to front" reorders the
     // waiting ones, "cancel" takes a run out whoever started it.
     void theQueuePanelListsCliRunsAndReordersAndCancels() {
-        QSKIP("Bypassed (flaky under load: waits for the cancelled run to finish, #279)");
         RunApp r(kGraph);
         QVERIFY(r.app.open());
         const QString runs = r.app.dir.path() + "/runs";
@@ -1859,6 +1858,9 @@ echo '{"outputs": {"text": "painted"}}'
         QTRY_VERIFY(!named(r, "queueEntry-cli-waiting"));
         // And the window's own first run.
         QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        // The list lays its rows out when the window next polishes (a frame): a click before that lands where the row was
+        // (the panel was still 28 px taller, the row 96 px higher), on nothing. One frame first.
+        r.app.window->grabWindow();
         click(r, named(r, "queueCancel-" + first));
         QTRY_COMPARE(finished.size(), 1);
         QCOMPARE(finished.first().at(0).toString(), first);

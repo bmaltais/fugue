@@ -221,7 +221,6 @@ private slots:
     // Q paints the selection, not a layer mask; Ctrl+Z undoes a stroke of it; Use selection writes it into the followed
     // Canvas Region (its hash and bounds, one undo step of the document).
     void quickMaskPaintsTheSelectionForTheRegion() {
-        QSKIP("Bypassed (flaky under load: QML Question theme null, #279)");
         App app(load(withRegion(m_canvas)));
         QVERIFY(app.open());
         app.model.select({"region"});
@@ -249,7 +248,7 @@ private slots:
         QCOMPARE(model(app)->property("region").toMap().value("selection").toString(), hash);
         key(app, Qt::Key_Q);
         QTRY_VERIFY(!view(app)->property("quickMask").toBool());
-        QVERIFY(!find(app.window, "canvasViewSelection"));
+        QVERIFY(find(app.window, "canvasViewSelection")->isVisible()); // leaving Quick Mask keeps the selection, shown as one
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
