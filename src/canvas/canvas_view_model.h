@@ -34,10 +34,9 @@
 //    is read again from it. useSelection() stores a selection painted in the view (Quick Mask) by content and writes its
 //    hash and bounds into the followed Canvas Region's `selection` input as one undo step (Region 1.2).
 // It makes no window. The `region` map is {valid, reason, x, y, width, height, context: {x, y, width, height}, reads,
-// readsId, readsShown, writable, editable, adopts, padding, scale, cap, multiple}: `editable` is false while X, Y, Width or
-// Height is linked to another node (the rectangle is then drawn but not edited); `adopts` is true for a node with no
-// canvas yet, drawn on the canvas shown, which setRegion and useForRegion write to its `canvas` input in the same undo
-// step (#228). Not valid, `reason` says why in plain words and `problem` names it: "notRegion", "linked" (the canvas
+// readsId, readsShown, writable, editable, active, pinned, padding, scale, cap, multiple}: `editable` is false while X, Y, Width or
+// Height is linked to another node (the rectangle is then drawn but not edited); `active` is true for a node with no
+// canvas chosen (it reads the Active canvas, #246: edits here leave its `canvas` empty), `pinned` for one that names a canvas. Not valid, `reason` says why in plain words and `problem` names it: "notRegion", "linked" (the canvas
 // input is linked), "otherCanvas" (with `nodeCanvas`, `known`, `nodeCanvasName`: useCanvasForNode, showNodeCanvas).
 
 #include <QFileSystemWatcher>
@@ -193,6 +192,8 @@ public:
     // shown (one undo step), or the view goes to the node's canvas (when this root has it).
     Q_INVOKABLE bool useCanvasForNode();
     Q_INVOKABLE void showNodeCanvas();
+    // A pinned node goes back to the Active canvas: its `canvas` input is emptied (one undo step).
+    Q_INVOKABLE bool useActiveCanvasForNode();
     // Reads the store again now (the watch does this on its own; a test and a person's refresh ask).
     Q_INVOKABLE void refresh();
 

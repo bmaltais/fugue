@@ -268,9 +268,11 @@ void CanvasViewModel::updateRegion() {
     if (m_edits && !m_follow.isEmpty()) {
         const QVariantMap state = m_edits->regionState(m_follow);
         const QSize size = pictureSize();
-        // The node's canvas: empty is none yet, and the canvas shown is adopted at the first edit (#228); another canvas
-        // is said in plain words with what to do (the view offers both answers); a link is changed where it comes from.
+        // The node's canvas: empty is the Active canvas (#246), which edits here keep empty (the view reports this canvas as
+        // the active one when it is used); a pinned canvas that is not the one shown is said in plain words with what to do
+        // (the view offers both answers); a link is changed where it comes from.
         const QString nodeCanvas = state.value("canvas").toString();
+        out.insert("pinned", !nodeCanvas.isEmpty());
         if (state.isEmpty()) {
             out.insert("reason", tr("The selected node is not a Canvas Region."));
             out.insert("problem", QStringLiteral("notRegion"));
@@ -301,7 +303,8 @@ void CanvasViewModel::updateRegion() {
             const bool readsShown = shownIsHead ? reads == QLatin1String("head") : (!readsId.isEmpty() && readsId == revisionB());
             out = QVariantMap{{"valid", true},
                               {"reason", QString()},
-                              {"adopts", nodeCanvas.isEmpty()},
+                              {"active", nodeCanvas.isEmpty()},
+                              {"pinned", !nodeCanvas.isEmpty()},
                               {"x", rect.x},
                               {"y", rect.y},
                               {"width", rect.width},
@@ -368,16 +371,7 @@ bool CanvasViewModel::setRegion(const QVariantMap &rect, bool snap) {
     if (!m_edits || m_follow.isEmpty() || !m_region.value("valid").toBool() || !m_region.value("editable").toBool())
         return false;
     const crop::Rect r = rectOf(snap ? snapRegion(rect) : rect);
-    // A node with no canvas yet takes the one shown, in the same undo step as the rectangle.
-    const bool adopts = m_region.value("adopts").toBool();
-    QUndoStack *stack = m_edits->undoStack();
-    if (adopts) {
-        stack->beginMacro(tr("Pick region"));
-        m_edits->setText(m_follow, QStringLiteral("canvas"), canvasId());
-    }
-    const bool written = m_edits->setRegion(m_follow, r.x, r.y, r.width, r.height) || adopts;
-    if (adopts)
-        stack->endMacro();
+    const bool written = m_edits->setRegion(m_follow, r.x, r.y, r.width, r.height);
     if (written)
         updateRegion();
     return written;
@@ -387,6 +381,18 @@ bool CanvasViewModel::useCanvasForNode() {
     if (!m_edits || m_follow.isEmpty() || canvasId().isEmpty() || m_region.value("problem").toString() != QLatin1String("otherCanvas"))
         return false;
     const QString problem = m_edits->setText(m_follow, QStringLiteral("canvas"), canvasId());
+    if (!problem.isEmpty()) {
+        fail({makeError(QStringLiteral("region_canvas"), problem)});
+        return false;
+    }
+    updateRegion();
+    return true;
+}
+
+bool CanvasViewModel::useActiveCanvasForNode() {
+    if (!m_edits || m_follow.isEmpty() || m_region.value("pinned").toBool() == false)
+        return false;
+    const QString problem = m_edits->setText(m_follow, QStringLiteral("canvas"), QString());
     if (!problem.isEmpty()) {
         fail({makeError(QStringLiteral("region_canvas"), problem)});
         return false;
@@ -405,15 +411,7 @@ bool CanvasViewModel::useForRegion() {
         || m_region.value("readsShown").toBool())
         return false;
     const QString wanted = revisionB() == m_head ? QStringLiteral("head") : revisionB();
-    const bool adopts = m_region.value("adopts").toBool(); // the canvas too, in the same undo step
-    QUndoStack *stack = m_edits->undoStack();
-    if (adopts) {
-        stack->beginMacro(tr("Use for region"));
-        m_edits->setText(m_follow, QStringLiteral("canvas"), canvasId());
-    }
     const QString problem = m_edits->setText(m_follow, QStringLiteral("revision"), wanted);
-    if (adopts)
-        stack->endMacro();
     if (!problem.isEmpty()) {
         fail({makeError(QStringLiteral("region_revision"), problem)});
         return false;
@@ -1019,15 +1017,7 @@ QVariantMap CanvasViewModel::useSelection(MaskLayer *selection) {
         fail(hash.errors());
         return no(hash.error().message);
     }
-    const bool adopts = m_region.value("adopts").toBool();
-    QUndoStack *stack = m_edits->undoStack();
-    if (adopts) { // the canvas too, in the same undo step
-        stack->beginMacro(tr("Use selection"));
-        m_edits->setText(m_follow, QStringLiteral("canvas"), canvasId());
-    }
-    const bool written = m_edits->setSelection(m_follow, hash.value(), left, top, right - left + 1, bottom - top + 1) || adopts;
-    if (adopts)
-        stack->endMacro();
+    const bool written = m_edits->setSelection(m_follow, hash.value(), left, top, right - left + 1, bottom - top + 1);
     updateRegion();
     return written ? QVariantMap{{"ok", true}, {"hash", hash.value()}} : no(tr("The Canvas Region uses this selection already."));
 }

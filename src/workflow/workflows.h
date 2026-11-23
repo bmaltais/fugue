@@ -185,6 +185,9 @@ public:
     // so turning it on again later never brings back an old session. Nothing is kept until
     // restoreSession() has run (on, it also keeps the tabs of a session that started with it off).
     void setSessionEnabled(bool enabled);
+    // Names the canvas last used in a Canvas view, for File > Export compiled (a Canvas Region with no canvas chosen
+    // reads it, #246). None: the newest canvas of the root.
+    void setActiveCanvas(std::function<QString()> shown) { m_activeCanvas = std::move(shown); }
     // At start, when no file was named: opens the saved workflows the last session had open, in
     // order, and shows the one that was shown. A file that is gone is skipped, and one banner line
     // says how many. From here on the open tabs are kept, after each change and at quit. A start with
@@ -354,6 +357,7 @@ private:
     RecoveryStore m_recovery;
     TrustStore m_trust;
     std::function<Errors(Registry &)> m_registerProviders;
+    std::function<QString()> m_activeCanvas;
     QTimer m_timer;
     std::vector<Tab> m_tabs;
     QString m_tabColorsPath;

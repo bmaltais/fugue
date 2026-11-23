@@ -6,10 +6,16 @@
 // at the right ("1024 × 768 · 22 Nov 14:03"), its id as the second line and a search keyword. `current` is checked.
 // `missing`, when not empty, is a stored id this root has none of: it heads the list, checked and dimmed. Then the two
 // ways to make one, a chunk of their own under a hairline, kept while searching: New canvas… and Import picture…,
-// whose values are {action: "new"} and {action: "import"}; a canvas row's value is {id}.
+// whose values are {action: "new"} and {action: "import"}; a canvas row's value is {id}. `withActive` (a node's picker,
+// #246) puts "Active canvas" first, checked while `current` is empty: the node reads the canvas last used in a Canvas view,
+// and a canvas row picked instead pins it; its value is {active: true}.
 
-function entries(rows, current, missing) {
+function entries(rows, current, missing, withActive) {
     const out = []
+    if (withActive)
+        out.push({ text: qsTr("Active canvas"), value: { active: true }, checked: current === "",
+                   detail: qsTr("follows the Canvas view"),
+                   note: qsTr("Reads the canvas you last used in the Canvas view, else the newest. Choosing a canvas below pins this node to it.") })
     if (missing !== "")
         out.push({ text: missing, detail: qsTr("Not in this root"), checked: true, dim: true,
                    note: qsTr("A canvas belongs to the Default or the project it was made in."),

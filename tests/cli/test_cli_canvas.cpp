@@ -90,6 +90,29 @@ private slots:
         QDir(path("work")).removeRecursively();
     }
 
+    // #246: with no window there is no canvas last used, so a Canvas Region with no canvas chosen reads the newest one,
+    // named in compiled.json; a pinned one keeps its id; with no canvas at all the compile still works (the run refuses).
+    void aRegionWithNoCanvasReadsTheNewestOneAtCompile() {
+        QFile flow(path("work/flow.fugue"));
+        QVERIFY(flow.open(QIODevice::WriteOnly));
+        flow.write(R"({"fugue": 1, "graph": {"nodes": {"r": {"type": "fugue/canvas-region", "version": "1.4.0"},
+            "p": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "r.image"}}}}}})");
+        flow.close();
+        const Outcome none = fugue({"compile", path("work/flow.fugue"), "--json"});
+        QVERIFY2(none.exitCode == 0, none.out + none.err);
+        const Outcome older = fugue({"canvas", "new", "--name", "Older", "--json"});
+        QTest::qWait(1100); // creation time is to the second
+        const Outcome newer = fugue({"canvas", "new", "--name", "Newer", "--json"});
+        const QString olderId = older.data().value("canvas").toString();
+        const QString newerId = newer.data().value("canvas").toString();
+        QVERIFY(!olderId.isEmpty() && olderId != newerId);
+        const Outcome compiled = fugue({"compile", path("work/flow.fugue"), "--json"});
+        QVERIFY2(compiled.exitCode == 0, compiled.out + compiled.err);
+        QVERIFY2(compiled.out.contains(newerId.toUtf8()), compiled.out);
+        QVERIFY(!compiled.out.contains(olderId.toUtf8()));
+        QVERIFY(compiled.out.contains(newer.data().value("head").toString().toUtf8())); // its head is named too
+    }
+
     void newMakesACanvasWithOneRevision() {
         const Outcome made = fugue({"canvas", "new", "--name", "Sketch", "--size", "640x480", "--json"});
         QVERIFY2(made.exitCode == 0, made.out + made.err);

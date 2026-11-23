@@ -134,8 +134,8 @@ Result<PaintDocument> openRevision(const CanvasHandle &handle) {
 Result<CanvasHandle> regionSource(const NodeContext &context) {
     CanvasHandle handle{context.input(QStringLiteral("canvas")).text().trimmed(), context.input(QStringLiteral("revision")).text().trimmed()};
     if (handle.canvas.isEmpty())
-        return makeInputError(QStringLiteral("input_invalid"), QStringLiteral("canvas"), QStringLiteral("No canvas is chosen."),
-                              QStringLiteral("Give the id `fugue canvas new` or `fugue canvas import` prints, such as canvas-0123456789ab."));
+        return makeInputError(QStringLiteral("input_invalid"), QStringLiteral("canvas"), QStringLiteral("Choose a canvas: this root has none yet, so there is no active canvas to read."),
+                              QStringLiteral("Make one (`fugue canvas new` or `fugue canvas import`, or New canvas in the Canvas view), or give this Canvas Region the id it prints, such as canvas-0123456789ab."));
     if (!canvas::isCanvasId(handle.canvas))
         return makeInputError(QStringLiteral("input_invalid"), QStringLiteral("canvas"),
                               QStringLiteral("\"%1\" is not a canvas id.").arg(handle.canvas),

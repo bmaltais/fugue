@@ -33,11 +33,16 @@ struct RunCompileSetup {
     // here, so the hash is in the cache key and in compiled.json. None: a Canvas Region keeps
     // whatever revision it was given.
     CanvasRevisionResolver resolveCanvas;
+    // Names the Active canvas (#246): what a Canvas Region with no canvas chosen reads, written into the compiled
+    // graph like the head. None: such a Region is left empty and its kernel asks for a canvas.
+    ActiveCanvasProvider activeCanvas;
 };
 
 // The setup with `trust` as the check: what every caller means by "the user's trust", and the
-// session's canvas store for the canvas revisions.
-RunCompileSetup runCompileSetup(std::function<Errors(Registry &)> registerProviders, const TrustStore &trust);
+// session's canvas store for the canvas revisions. `shownCanvas` is the canvas last used in a Canvas view (the window
+// passes it; the CLI has none): the Active canvas is it, else the newest canvas of the root.
+RunCompileSetup runCompileSetup(std::function<Errors(Registry &)> registerProviders, const TrustStore &trust,
+                                std::function<QString()> shownCanvas = {});
 
 // What one compile asks for.
 struct RunCompileRequest {
