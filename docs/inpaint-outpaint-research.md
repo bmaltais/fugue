@@ -382,7 +382,29 @@ Sheets: `expand__expand-lr.png`, `expand__expand-up.png`, `expandprompt__expand-
 | denoise 0.8 | identical to 1 | |
 | denoise 0.6 | 1.27 (inside change 33 instead of 42) / 1.00 (lamp **not removed**) | |
 
-At 4 steps the strength falls into steps: 0.3 and 0.4 give the same picture, 0.5 and 0.6 another, 0.75 a third,
+**Cause (#244, found and fixed).** Not a rounding bug of ours: stable-diffusion.cpp reads strength as a fraction of the
+steps (`pipeline/image.cpp`: it keeps the last `int(steps * strength) + 1` sigmas), and FLUX.2's schedule is shifted
+so the first sigmas crowd near 1. Measured with Klein 4B at 512 px (the log's `sigmas:` line): at 4 steps the
+schedule is 1.0, 0.96, 0.88, 0.72, 0, so strength 0.3 starts at 0.88, 0.5 at 0.96 and 0.75 at the very first sigma (a
+full redraw: the file is byte-identical to the text-to-image run); at 8 steps 0.5 starts at 0.925 and runs five steps.
+Strength was never a noise level, only a step index into a curve that spends most steps above 0.7, so steps and strength
+traded places and 8 steps did not make the scale finer. The library has the honest reading
+(`strength_as_noise_level`, `force_first_sigma`); the helper now sets both for a model that is not of the Stable
+Diffusion family (`helper/src/strength_args.h`), so strength is the sigma the start picture is noised to, at any step
+count. Same start picture, mean absolute difference to it (0 to 1):
+
+| Strength | 4 steps before | 8 steps before | any step count now |
+| --- | --- | --- | --- |
+| 0.3 | 0.039 | 0.042 (at 0.25) | 0.015 |
+| 0.5 | 0.063 | 0.054 | 0.023 |
+| 0.75 | 0 (full redraw) | 0.119 | 0.029 |
+| 0.9 | n/a | n/a | 0.039 (4 steps), 0.049 (8 steps) |
+
+The scale is now continuous and ordered, and 0.5 and 0.75 are lighter than the table below, which was measured with
+the step reading: **the Refine presets (0.5 light, 0.75 restyle) are to be re-measured**, a restyle now sits near 0.9
+[U]. Below the schedule's lowest sigma (0.51 at 8 steps, 0.72 at 4) the pass is one step from the exact sigma.
+
+*Measured before the fix.* At 4 steps the strength falls into steps: 0.3 and 0.4 give the same picture, 0.5 and 0.6 another, 0.75 a third,
 0.8 to 1 the full redraw (measured: identical files within each group). Refine on the chair:
 
 | Refine strength | Inside change | What the eye sees |
@@ -576,7 +598,7 @@ prompt (4.6). An empty prompt sent as is to Klein changes nothing.
 | G4 | **No outpaint pre-fill but gray**: Pad fills gray, Fill Masked's blur across a one-sided hole pulls the gray in. **Done in #243** (Pad `fill` 1.1.0 and an Extend Edges node, on `engine/edge_fill.h`) | 4.6 | Pad `fill` modes `gray`, `edge`, `edge-blur` (default), `transparent`; or an "Extend edges" node; the resize revision (G1) uses the same code |
 | G5 | **No removal model** (LaMa) | 4.5: Remove relies on an instruction to an edit model; the large edge removal is soft | **Done in #245** (pack `io.github.bmaltais.fugue-remove-object`: LaMa Fill and the group Remove Object; the scratch workflow `inpaint-workflows/remove-lama` uses it; Klein is untouched; how much it improves the edge removals is **[U]** until run on the 3090): A LaMa pack (Apache-2.0, ONNX, like the BiRefNet pack) as Remove's pre-fill, then the same Klein pass; MAT is research-only |
 | G6 | **Canvas Write's blend stops at the Region's box**: padding below Feather + Blend gives a hard edge | 4.2 (rectangle with padding 0: seam 5.4) | Canvas Region holds `padding >= feather + 16` with a warning, or Write grows its box; the router's 64 px floor avoids it for actions. **Done in #242**: Region raises padding to feather + 16 and warns `padding_raised` |
-| G7 | **Strength moves in steps at 4 steps, and 8 steps make it coarser, not finer** | 4.7 (0.5 at 8 steps changes less than 0.5 at 4) | Look at how the start step is chosen for FLUX.2's schedule in img2img [U whether this is a bug]; meanwhile Refine offers two strengths (light 0.5, restyle 0.75) rather than a slider |
+| G7 | **Strength moves in steps at 4 steps, and 8 steps make it coarser, not finer** | 4.7 (0.5 at 8 steps changes less than 0.5 at 4) | **Fixed (#244)**: not a bug of ours; the library's step-fraction reading of strength on a shifted schedule (4.7). The helper reads strength as a noise level for a flow model. Re-measure the Refine presets, then a slider is possible |
 | G8 | **An action needs a fallback prompt**: the `action` block's `optional` prompt sends an empty prompt, which Klein reads as "change nothing" | 4.5, 4.6 | `"fallback": "<text>"` on the prompt role: used when the person leaves the prompt empty (Remove: always; Expand: when empty) |
 | G9 | **Background replacement needs a subject mask** | 4.4 (a rim of the old window round the cat) | The planned Select subject (BiRefNet) as a selection, inverted and grown 8 px, for a Replace background action |
 | G10 | **Templates disagree with the findings**: `generative-fill` and `inpaint-region` keep scale 1 and Klein 9B; `outpaint` uses gray, 64 px of feathering and no reference | 4.2, 4.6 | Move them to the recommended workflows of section 5 (fugue-workflows; a branch, not pushed from here) |

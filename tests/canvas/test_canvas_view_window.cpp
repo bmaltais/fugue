@@ -206,6 +206,50 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // #247 and #248: the two export rows are real now, and each opens its dialog on the shown revision.
+    void theExportRowsOpenTheirDialogs() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        QTRY_VERIFY(find(app.window, "canvasMenuBar"));
+        const auto exportOpen = [&]() {
+            const QObject *box = app.window->findChild<QObject *>("canvasExportDialog");
+            return box && box->property("opened").toBool();
+        };
+        const auto openRow = [&](const QString &command) {
+            menuRow(app, "Canvas", "canvas-view.new");
+            click(app, "subMenu-Export");
+            QQuickItem *row = nullptr;
+            QTRY_VERIFY((row = find(app.window, "menuItem-" + command)));
+            QVERIFY(row->isEnabled());
+            QVERIFY(!find(app.window, "menuPlanned-247-Export with quality and scale…"));
+            QVERIFY(!find(app.window, "menuPlanned-248-Export layers as files…"));
+            click(app, "menuItem-" + command);
+        };
+        openRow("canvas-view.export-options");
+        QTRY_VERIFY(exportOpen());
+        QCOMPARE(find(app.window, "canvasExportTitle")->property("text").toString(), QString("Export with quality and scale"));
+        QTRY_VERIFY(find(app.window, "canvasExportEstimate")->property("text").toString().contains("px"));
+        QVERIFY(!find(app.window, "canvasExportQuality")); // a PNG has none
+        click(app, "canvasExportFormat-jpg");
+        QTRY_VERIFY(find(app.window, "canvasExportQuality"));
+        QVERIFY(find(app.window, "canvasExportBackground-white"));
+        click(app, "canvasExportScale-50");
+        QTRY_VERIFY(find(app.window, "canvasExportEstimate")->property("text").toString().contains("px"));
+        QVERIFY(find(app.window, "canvasExportOk")->isEnabled());
+        click(app, "canvasExportCancel");
+        QTRY_VERIFY(!exportOpen());
+
+        openRow("canvas-view.export-layers");
+        QTRY_VERIFY(exportOpen());
+        QCOMPARE(find(app.window, "canvasExportTitle")->property("text").toString(), QString("Export layers as files"));
+        QTRY_VERIFY(find(app.window, "canvasExportFiles"));
+        QVERIFY(find(app.window, "canvasExportVisibleOnly"));
+        QVERIFY(!find(app.window, "canvasExportFormat-jpg")); // layers keep their transparency
+        click(app, "canvasExportCancel");
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     // #239: a revision kept apart (made by the command line) can be looked at from All revisions: read only, no Accept or Drop.
     void aCandidateShownIsReadOnlyWithBackToLatestAndNoDecision() {
         App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));

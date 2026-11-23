@@ -17,6 +17,9 @@ fugue canvas export canvas-0123456789ab@head out.png  # flattened: .png, .jpg (o
 fugue canvas export canvas-0123456789ab team.fuguepack            # a package to share: the layers as they are now (head only)
 fugue canvas export canvas-0123456789ab team.fuguepack --history  # ... with every revision, so the other person can undo
 fugue canvas import team.fuguepack                 # a package's canvas, as a new canvas (a new id when yours is taken)
+fugue canvas export canvas-0123456789ab out.webp --quality 80 --scale 50%   # lossy WebP at half size
+fugue canvas export canvas-0123456789ab --format jpg --quality 60 --estimate   # the size it would be, nothing written
+fugue canvas export canvas-0123456789ab shots --layers   # one picture per layer into the folder shots
 fugue canvas list                                  # the canvases, newest first
 fugue canvas candidates canvas-0123456789ab        # revisions nobody points at (scripts)
 fugue canvas diff canvas-0123456789ab@sha256:ab12cd34   # what a revision changed, against its parent
@@ -156,6 +159,21 @@ side of a comparison. **File > Export > Export as…** saves the revision you ar
 the file extension: `.png`, `.jpg` or `.webp` (a JPEG has no transparency, so it is flattened onto white
 and the command says so; WebP is lossless); `.ora` keeps the layers. It never replaces a file.
 
+**File > Export > Export with quality and scale…** (Save for Web) is the same command with a window: PNG, JPEG, WebP or
+the layers kept (.ora); a quality (JPEG, and WebP unless Lossless); a size as 25, 50, 100 or 200 percent or in pixels
+(width and height keep the canvas's proportions); a background under the transparency (a JPEG has none, so it
+is white unless you choose another color); and a preview of the picture as it will be written, with its size in bytes,
+made again as you change a choice. **Export…** asks where and never replaces a file. On the command line the same
+choices are `--format`, `--quality 1-100` (`--lossless` for WebP), `--scale 50%`, `--size 800x600`, `--width`,
+`--height` and `--background transparent|white|black|#rrggbb`; `--estimate` prints the size and writes nothing.
+
+**File > Export > Export layers as files…** (Layers to Files) writes one picture per layer into a folder you choose, PNG or WebP,
+named `<prefix>-<place>-<layer name>`, for example `Harbour-01-Sky.png` (the bottom layer is 01; characters a file name cannot hold become `_`).
+You choose whether hidden layers are written, whether each layer's layer mask is applied, and the prefix (the canvas's name at first). A
+layer is written as its own pixels: its opacity and blend mode are not applied. A mask layer (a selection) is not a picture and is left out, and the
+dialog says so. If any of the names is taken the whole export is refused before the first file is written. On the command line:
+`fugue canvas export <id> <folder> --layers [--format png|webp] [--only-visible] [--no-masks] [--prefix <text>]`.
+
 ## Layers
 
 Every run that writes to a canvas lands as a layer, like a layer in Photoshop or Krita, and you can
@@ -247,7 +265,7 @@ The Canvas view has its own menu bar at the top, in the File > Canvas… dialog 
 the view is a row of a menu, with its key beside it; what does not apply to the canvas now is greyed.
 
 - **Canvas** (it was File; the window's File is the workflows', #262): New canvas…, Open canvas… (the picker), Import picture… (also a `.fuguepack`, below), **Export** (Export as…: PNG, JPEG, WebP flattened, .ora
-  with layers, by the extension; never replaces a file), **Share…** (asks, then where: a `.fuguepack` of the canvas as it is now, or with its history; see Sharing a canvas), Rename canvas…, Duplicate canvas (the whole history, under a new
+  with layers, by the extension; Export with quality and scale… and Export layers as files…, #247 and #248, above; never replaces a file), **Share…** (asks, then where: a `.fuguepack` of the canvas as it is now, or with its history; see Sharing a canvas), Rename canvas…, Duplicate canvas (the whole history, under a new
   id; the copy is shown), **Clear canvas…** (asks; one undoable step that leaves one empty layer of the same size),
   **Delete canvas…** (asks; permanent; the next canvas is shown, or the empty state) and Close canvas (the dialog closes; an
   area shows no canvas).

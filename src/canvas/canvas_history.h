@@ -87,6 +87,9 @@ public:
     // .jpeg and .webp are the flattened picture, .ora keeps the layers; another extension (or none) gets ".png" added.
     // A file already there is never replaced. True when written.
     Q_INVOKABLE bool exportPicture(const QString &target);
+    // Shows a sentence in `notice` / `error` (what another dialog, the export ones, did or why it could not).
+    Q_INVOKABLE void showNotice(const QString &text);
+    Q_INVOKABLE void showError(const QString &text);
     // The canvas as a whole (the Canvas view's File menu, #232). Each reads the store again; false (and `error`) when it
     // could not. A blank name for duplicateCanvas is "<name> copy".
     Q_INVOKABLE bool renameCanvas(const QString &name);

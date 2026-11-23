@@ -20,8 +20,8 @@ is a **placeholder**: a greyed row, not a command (no handler, no key, nothing i
 | Open canvas (this root's canvases) | Ph Open, Pp, Kr, Af | built | the canvas picker's rows (`canvasMenu.js`) as the canvas button's menu |
 | Import picture… | Ph Open, Kr Open, Af | built | `importPicture` |
 | Export as… (PNG, JPEG, WebP flattened; .ora with layers) | Ph Export As, Pp, Kr, Af | built | by the file's extension, as `fugue canvas export` does |
-| Export > Export as with quality and scale (Save for web) | Ph, Pp, Af | placeholder, #247 | needs a dialog with a preview and a size estimate |
-| Export > Export layers as files | Ph, Kr, Af | placeholder, #248 | one picture per layer, named |
+| Export > Export with quality and scale… (Save for web) | Ph, Pp, Af | built, #247 | `CanvasExportDialog` (picture mode): format, quality, size, background, a preview and the size in bytes; `fugue canvas export` with options |
+| Export > Export layers as files… | Ph, Kr, Af | built, #248 | the same dialog in layers mode: one picture per layer into a folder, named from the layer names; `fugue canvas export --layers` |
 | Export > Export PSD | Ph, Pp, Kr, Af | placeholder, #227 | issue exists |
 | Rename canvas… | Pp, Kr | built | `CanvasStore::rename` (new) |
 | Duplicate canvas | Pp, Af, Kr | built | `CanvasStore::duplicate` (new): the whole history under a new id |

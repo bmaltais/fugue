@@ -3,6 +3,7 @@
 // A canvas lives in the session's store (a project's own under FUGUE_HOME); `<canvas>` is its id,
 // `<canvas>@<revision>` a revision of it (a full hash, the start of one, or `head`).
 
+#include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QRegularExpression>
@@ -10,6 +11,7 @@
 #include "cli/commands.h"
 #include "engine/atomic_file.h"
 #include "engine/canvas_diff.h"
+#include "engine/canvas_export.h"
 #include "engine/canvas_layer_ops.h"
 #include "engine/canvas_package.h"
 #include "engine/canvas_resize.h"
@@ -165,12 +167,135 @@ Reply canvasImport(const Command &command, Context &) {
     return madeReply(made.value(), QStringLiteral("Imported"), document->width(), document->height());
 }
 
+// A whole number in a range, or a usage error naming the option.
+Result<int> wholeOption(const Command &command, const QString &name, int least, int most) {
+    bool ok = false;
+    const int value = command.value(name).toInt(&ok);
+    if (!ok || value < least || value > most)
+        return usageError(QStringLiteral("--%1 is a whole number from %2 to %3.").arg(name).arg(least).arg(most), command.value(name));
+    return value;
+}
+
+// The picture options of `canvas export` (engine/canvas_export.h) from the arguments; `layers` is the one-file-per-layer form.
+Result<canvas::PictureExport> pictureOptions(const Command &command, const QString &out) {
+    canvas::PictureExport options;
+    const QString suffix = QFileInfo(out).suffix().toLower();
+    const QString fromName = canvas::normalFormat(suffix, true);
+    if (command.has("format")) {
+        options.format = canvas::normalFormat(command.value("format"), true);
+        if (options.format.isEmpty())
+            return usageError(QStringLiteral("--format is png, jpg, webp or ora."), command.value("format"));
+        if (!fromName.isEmpty() && fromName != options.format)
+            return usageError(QStringLiteral("The file name ends in .%1 but --format is %2.").arg(suffix, options.format), out);
+    } else if (!fromName.isEmpty()) {
+        options.format = fromName;
+    } else {
+        return usageError(QStringLiteral("The file name ends in .%1; export writes .ora (layers), .png, .jpg or .webp (flattened).").arg(suffix), out);
+    }
+    if (command.has("quality")) {
+        if (options.format == QLatin1String("png") || options.format == QLatin1String("ora"))
+            return usageError(QStringLiteral("--quality applies to jpg and webp."), options.format);
+        const Result<int> quality = wholeOption(command, QStringLiteral("quality"), 1, 100);
+        if (!quality)
+            return quality.errors();
+        options.quality = quality.value();
+        options.lossless = options.format == QLatin1String("webp") && command.has("lossless"); // a quality on a webp asks for a lossy one
+    }
+    if (command.has("lossless") && options.format != QLatin1String("webp"))
+        return usageError(QStringLiteral("--lossless applies to webp."), options.format);
+    if (int(command.has("scale")) + int(command.has("size")) + int(command.has("width") || command.has("height")) > 1)
+        return usageError(QStringLiteral("Give one way to set the size: --scale, --size, or --width and/or --height."));
+    if (command.has("scale")) {
+        QString text = command.value("scale").trimmed();
+        const bool percent = text.endsWith(QLatin1Char('%'));
+        if (percent)
+            text.chop(1);
+        bool ok = false;
+        const double value = text.toDouble(&ok);
+        if (!ok || !(value > 0))
+            return usageError(QStringLiteral("--scale is a percentage such as 50% or a factor such as 0.5."), command.value("scale"));
+        options.scale = percent ? value / 100 : value;
+    }
+    if (command.has("size")) {
+        static const QRegularExpression pattern(QStringLiteral("^([0-9]{1,5})x([0-9]{1,5})$"));
+        const QRegularExpressionMatch match = pattern.match(command.value("size"));
+        if (!match.hasMatch())
+            return usageError(QStringLiteral("--size is <width>x<height>, such as 800x600."), command.value("size"));
+        options.width = match.captured(1).toInt();
+        options.height = match.captured(2).toInt();
+        if (options.width < 1 || options.height < 1)
+            return usageError(QStringLiteral("--size is at least 1x1."), command.value("size"));
+    }
+    for (const QString &name : QStringList{QStringLiteral("width"), QStringLiteral("height")}) {
+        if (!command.has(name))
+            continue;
+        const Result<int> side = wholeOption(command, name, 1, mask::paintFileMaxSide);
+        if (!side)
+            return side.errors();
+        (name == QLatin1String("width") ? options.width : options.height) = side.value();
+    }
+    if (command.has("background"))
+        options.background = command.value("background");
+    return options;
+}
+
+Reply layersExport(const Command &command, const Ref &ref, const QString &folder, const mask::PaintDocument &document, const QString &revision) {
+    for (const char *name : {"scale", "size", "width", "height", "background", "estimate"})
+        if (command.has(QString::fromLatin1(name)))
+            return Reply::failure(usageError(QStringLiteral("--%1 is for one picture; --layers writes each layer as it is.").arg(QString::fromLatin1(name))));
+    canvas::LayersExport options;
+    options.format = command.has("format") ? command.value("format") : QStringLiteral("png");
+    options.visibleOnly = command.has("only-visible");
+    options.applyMasks = !command.has("no-masks");
+    options.prefix = command.has("prefix") ? command.value("prefix") : QString();
+    if (command.has("quality")) {
+        const Result<int> quality = wholeOption(command, QStringLiteral("quality"), 1, 100);
+        if (!quality)
+            return Reply::failure(quality.errors());
+        options.quality = quality.value();
+        options.lossless = command.has("lossless");
+    }
+    const Result<canvas::LayerFiles> made = canvas::exportLayers(document, options);
+    if (!made)
+        return Reply::failure(made.errors());
+    const Errors written = canvas::writeLayerFiles(folder, made.value());
+    if (hasErrors(written))
+        return Reply::failure(written);
+    QJsonArray files;
+    qint64 total = 0;
+    for (const canvas::LayerFile &file : made->files) {
+        files.append(QJsonObject{{"position", file.position}, {"layer", file.name}, {"file", QDir(folder).absoluteFilePath(file.fileName)}, {"bytes", file.bytes.size()}});
+        total += file.bytes.size();
+    }
+    QJsonObject data{{"canvas", ref.canvas}, {"revision", revision}, {"folder", QFileInfo(folder).absoluteFilePath()}, {"format", canvas::normalFormat(options.format, false)},
+                     {"files", files}, {"bytes", total}};
+    QString text = QStringLiteral("Exported %1 layers of %2 revision %3 to %4.").arg(made->files.size()).arg(ref.canvas, revision, folder);
+    if (!made->skipped.isEmpty()) {
+        QJsonArray skipped;
+        for (const QString &name : made->skipped)
+            skipped.append(name);
+        data.insert(QStringLiteral("skipped"), skipped);
+        text += QStringLiteral(" Left out (mask layers are selections): %1.").arg(made->skipped.join(QStringLiteral(", ")));
+    }
+    return Reply::success(data, text);
+}
+
 Reply canvasExport(const Command &command, Context &) {
     const Ref ref = parseRef(command.positionals.at(0));
-    const QString out = command.positionals.at(1);
-    // By the extension: .ora is the layered file, a picture is the flattened canvas, .fuguepack the canvas to share.
-    const QString suffix = QFileInfo(out).suffix().toLower();
-    if (suffix == QLatin1String("fuguepack")) {
+    const bool layers = command.has("layers");
+    const bool estimate = command.has("estimate");
+    if (command.positionals.size() < 2 && !estimate)
+        return Reply::failure(usageError(QStringLiteral("Name the file to write (or the folder, with --layers), or add --estimate."), QStringLiteral("fugue canvas export <id[@rev]> <file> [options]")));
+    const QString out = command.positionals.size() > 1 ? command.positionals.at(1) : QString();
+    // A .fuguepack is a package to share (#249); every other target goes to the picture exporter below.
+    const bool package = QFileInfo(out).suffix().compare(QLatin1String("fuguepack"), Qt::CaseInsensitive) == 0;
+    if (command.has("history") && !package)
+        return Reply::failure(usageError(QStringLiteral("--history is for a package: name a file ending in .fuguepack."), QStringLiteral("fugue canvas export <id> <file>.fuguepack --history")));
+    if (package) {
+        for (const char *name : {"layers", "estimate", "lossless", "only-visible", "no-masks", "format", "quality", "scale", "size", "width", "height", "background", "prefix"})
+            if (command.has(QString::fromLatin1(name)))
+                return Reply::failure(usageError(QStringLiteral("--%1 is for a picture or a folder of layers; a .fuguepack is a package of the canvas as it is (add --history for every revision).").arg(QString::fromLatin1(name)),
+                                                 QStringLiteral("fugue canvas export <id> <file>.fuguepack [--history]")));
         if (ref.written && ref.revision != QLatin1String("head"))
             return Reply::failure(usageError(QStringLiteral("A package carries the head of a canvas, with or without its history; name the canvas without @%1.").arg(ref.revision), command.positionals.at(0)));
         const bool history = command.has("history");
@@ -181,9 +306,18 @@ Reply canvasExport(const Command &command, Context &) {
         return Reply::success(QJsonObject{{"canvas", ref.canvas}, {"part", history ? "history" : "head"}, {"path", QFileInfo(out).absoluteFilePath()}},
                               QStringLiteral("Wrote %1 (%2 of %3).").arg(out, history ? QStringLiteral("the head and its history") : QStringLiteral("the head only"), ref.canvas));
     }
-    const QString picture = suffix == QLatin1String("jpeg") ? QStringLiteral("jpg") : suffix;
-    if (suffix != QLatin1String("ora") && picture != QLatin1String("png") && picture != QLatin1String("jpg") && picture != QLatin1String("webp"))
-        return Reply::failure(usageError(QStringLiteral("The file name ends in .%1; export writes .ora (layers), .png, .jpg or .webp (flattened), or .fuguepack (a package to share).").arg(suffix), out));
+    if (!layers)
+        for (const char *name : {"only-visible", "no-masks", "prefix"})
+            if (command.has(QString::fromLatin1(name)))
+                return Reply::failure(usageError(QStringLiteral("--%1 is for --layers.").arg(QString::fromLatin1(name))));
+    Result<canvas::PictureExport> options = canvas::PictureExport{};
+    if (!layers) {
+        if (out.isEmpty() && !command.has("format"))
+            return Reply::failure(usageError(QStringLiteral("--estimate with no file needs --format png, jpg, webp or ora.")));
+        options = pictureOptions(command, out.isEmpty() ? QStringLiteral(".") + command.value("format") : out);
+        if (!options)
+            return Reply::failure(options.errors());
+    }
     const CanvasStore store = CanvasStore::forSession();
     const Result<QString> revision = store.resolve(ref.canvas, ref.revision);
     if (!revision)
@@ -191,20 +325,28 @@ Reply canvasExport(const Command &command, Context &) {
     const Result<mask::PaintDocument> document = store.load(ref.canvas, revision.value());
     if (!document)
         return Reply::failure(document.errors());
-    const Result<QByteArray> bytes = suffix == QLatin1String("ora") ? mask::paintToOra(document.value()) : document->flattenToPicture(picture);
-    if (!bytes)
-        return Reply::failure(bytes.errors());
-    const Errors written = createFile(out, bytes.value(), QStringLiteral("the exported canvas"));
-    if (hasErrors(written))
-        return Reply::failure(written);
-    QJsonObject data{{"canvas", ref.canvas}, {"revision", revision.value()}, {"path", QFileInfo(out).absoluteFilePath()}};
-    QString text = QStringLiteral("Exported %1 revision %2 to %3.").arg(ref.canvas, revision.value(), out);
-    if (suffix != QLatin1String("ora"))
-        data.insert(QStringLiteral("format"), picture);
-    if (picture == QLatin1String("jpg")) {
-        data.insert(QStringLiteral("background"), QStringLiteral("white"));
-        text += QStringLiteral(" JPEG has no transparency: the canvas was flattened onto white.");
+    if (layers)
+        return layersExport(command, ref, out, document.value(), revision.value());
+    const Result<canvas::ExportedPicture> picture = canvas::exportPicture(document.value(), options.value());
+    if (!picture)
+        return Reply::failure(picture.errors());
+    QJsonObject data{{"canvas", ref.canvas}, {"revision", revision.value()}, {"width", picture->width}, {"height", picture->height}, {"bytes", picture->bytes.size()}};
+    if (picture->format != QLatin1String("ora"))
+        data.insert(QStringLiteral("format"), picture->format);
+    if (!picture->background.isEmpty() && picture->background != QLatin1String("transparent"))
+        data.insert(QStringLiteral("background"), picture->background);
+    QString text;
+    if (estimate) {
+        text = QStringLiteral("%1 revision %2 as %3, %4 x %5: %6 bytes.").arg(ref.canvas, revision.value(), picture->format).arg(picture->width).arg(picture->height).arg(picture->bytes.size());
+    } else {
+        const Errors written = createFile(out, picture->bytes, QStringLiteral("the exported canvas"));
+        if (hasErrors(written))
+            return Reply::failure(written);
+        data.insert(QStringLiteral("path"), QFileInfo(out).absoluteFilePath());
+        text = QStringLiteral("Exported %1 revision %2 to %3.").arg(ref.canvas, revision.value(), out);
     }
+    if (picture->format == QLatin1String("jpg") && picture->background == QLatin1String("white") && !command.has("background"))
+        text += QStringLiteral(" JPEG has no transparency: the canvas was flattened onto white.");
     return Reply::success(data, text);
 }
 
