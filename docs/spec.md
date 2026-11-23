@@ -96,6 +96,7 @@ XDG variables are honored; the defaults are shown.
 | `~/.local/state/fugue/tabs.json` | The saved workflows open when the last session ended, for the next start ([12.10](#1210-several-workflows)). |
 | `~/.local/state/fugue/trust.json` | Which packs the user has allowed ([6.7](#67-trust)). |
 | `~/.local/state/fugue/workspaces.json` | The window's areas, once they are more than one Graph area ([12.16](#1216-areas-and-view-types-217)); a damaged one is kept as `workspaces.json.bad`. |
+| `~/.local/state/fugue/media.json` | What the media browser keeps ([12.14](#1214-side-panels)): the favorites, its mode, the workflows panel's view and the favorites filter. |
 | `~/.local/state/fugue/hashes.json` | Remembered file hashes, keyed by path, size and modification time. A project that inherits `models` also reads the Default's for files in the inherited model folders ([1.4.2](#142-projects)). |
 | `~/.cache/fugue/results/` | The result cache ([10](#10-result-cache)). |
 | `~/.cache/fugue/runs/<run-id>/` | Run folders ([9.7](#97-run-folder)). |
