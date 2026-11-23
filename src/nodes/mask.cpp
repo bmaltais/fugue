@@ -173,6 +173,19 @@ public:
     }
 };
 
+class MaskToAlphaKernel : public NodeKernel {
+public:
+    Result<Values> run(const NodeContext &context) override {
+        const Result<Pixels> image = pixelsOf(context.input("image"), "image");
+        if (!image.ok())
+            return Result<Values>(image.errors());
+        const Result<Pixels> mask = maskOf(context.input("mask"), "mask");
+        if (!mask.ok())
+            return Result<Values>(mask.errors());
+        return imageOutput(maskToAlpha(image.value(), mask.value()));
+    }
+};
+
 } // namespace
 
 void addMaskKernels(Kernels &kernels) {
@@ -181,6 +194,7 @@ void addMaskKernels(Kernels &kernels) {
     kernels.add("fugue/threshold-mask", std::make_shared<ThresholdMaskKernel>());
     kernels.add("fugue/combine-masks", std::make_shared<CombineMasksKernel>());
     kernels.add("fugue/fill-masked", std::make_shared<FillMaskedKernel>());
+    kernels.add("fugue/mask-to-alpha", std::make_shared<MaskToAlphaKernel>());
     kernels.add("fugue/overlay-mask", std::make_shared<OverlayMaskKernel>());
 }
 

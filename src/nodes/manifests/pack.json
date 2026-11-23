@@ -43,6 +43,7 @@
     "load-models",
     "load-upscale-model",
     "load-video",
+    "mask-to-alpha",
     "number",
     "number-math",
     "overlay-mask",

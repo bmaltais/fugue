@@ -278,4 +278,17 @@ Pixels overlayMask(const Pixels &image, const Pixels &maskIn, const std::array<f
     return out;
 }
 
+Pixels maskToAlpha(const Pixels &image, const Pixels &mask) {
+    const Pixels m = maskResized(mask, image.width, image.height);
+    Pixels out(image.width, image.height, 4, 1.0f);
+    for (int y = 0; y < image.height; ++y)
+        for (int x = 0; x < image.width; ++x) {
+            for (int ch = 0; ch < 3; ++ch)
+                out.at(x, y, ch) = image.at(x, y, ch);
+            const float alpha = image.channels == 4 ? image.at(x, y, 3) : 1.0f;
+            out.at(x, y, 3) = std::clamp(alpha * m.at(x, y, 0), 0.0f, 1.0f);
+        }
+    return out;
+}
+
 } // namespace fugue::nodes

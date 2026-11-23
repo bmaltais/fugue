@@ -1,7 +1,8 @@
 # Remove Background (Fugue pack)
 
-One node, **Remove Background**: gives the subject of a picture as a mask (`role: mask`, white is the
-subject). BiRefNet through ONNX Runtime, in this pack's own Python environment. User guide:
+Two things. The node **Remove Background Mask** gives the subject of a picture as a mask (`role: mask`, white is the
+subject). The group **Remove Background** (`cutout/`: that node, Feather Mask, Apply Mask as Alpha) gives the cutout, a
+picture with a transparent background (RGBA), and the mask. BiRefNet through ONNX Runtime, in this pack's own Python environment. User guide:
 [docs/masking.md](../../../docs/masking.md#remove-a-background).
 
 ## Licences (checked 2026-11-22)

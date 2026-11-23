@@ -550,6 +550,35 @@ private slots:
         }
     }
 
+    // ---- Mask to Alpha ----
+
+    void maskToAlphaPutsTheMaskInAlphaAndKeepsTheColors() {
+        const Img image{3, 1, 3, {0.2f, 0.4f, 0.6f, 0.2f, 0.4f, 0.6f, 0.9f, 0.8f, 0.7f}};
+        const Img out = runMask("fugue/mask-to-alpha", {{"image", Value(handleOf(image))}, {"mask", Value(handleOf(row({0.0f, 0.25f, 1.0f})))}}, "image");
+        const Img want{3, 1, 4, {0.2f, 0.4f, 0.6f, 0.0f, 0.2f, 0.4f, 0.6f, 0.25f, 0.9f, 0.8f, 0.7f, 1.0f}};
+        QVERIFY2(maxDiff(out, want) < 1e-6f, "colors are kept and alpha is the mask");
+    }
+
+    void maskToAlphaMultipliesAnAlphaTheImageHasAndStretchesTheMask() {
+        const Img image{2, 1, 4, {0.1f, 0.1f, 0.1f, 0.5f, 0.2f, 0.2f, 0.2f, 0.0f}};
+        const Img out = runMask("fugue/mask-to-alpha", {{"image", Value(handleOf(image))}, {"mask", Value(handleOf(filled(1, 1, 1, 0.5f)))}}, "image");
+        QCOMPARE(out.c, 4);
+        QVERIFY(std::fabs(out.d[3] - 0.25f) < 1e-6f);
+        QCOMPARE(out.d[7], 0.0f);
+    }
+
+    // The reason for the node: Composite Masked onto an RGB or a black RGBA destination bleeds the
+    // destination's color into the soft edge and cannot give an alpha of the mask.
+    void compositeMaskedIsNotAWayToCutOut() {
+        const Img image = filled(1, 1, 3, 0.8f);
+        const Img viaComposite = runMask("fugue/composite-masked", {{"destination", Value(handleOf(filled(1, 1, 4, 0.0f)))},
+                                                                      {"source", Value(handleOf(image))}, {"mask", Value(handleOf(row({0.5f})))}}, "image");
+        QVERIFY(std::fabs(viaComposite.d[0] - 0.4f) < 1e-6f);  // the color is darkened by the edge, not 0.8
+        const Img viaAlpha = runMask("fugue/mask-to-alpha", {{"image", Value(handleOf(image))}, {"mask", Value(handleOf(row({0.5f})))}}, "image");
+        QVERIFY(std::fabs(viaAlpha.d[0] - 0.8f) < 1e-6f);
+        QVERIFY(std::fabs(viaAlpha.d[3] - 0.5f) < 1e-6f);
+    }
+
     // ---- the manifests ----
 
     void everyNodeIsInTheBuiltinPackWithItsKernelAndItsMaskPortsHaveTheRole() {
@@ -566,6 +595,7 @@ private slots:
             {"fugue/grow-mask", {{"mask"}, {"mask"}}},
             {"fugue/invert-mask", {{"mask"}, {"mask"}}},
             {"fugue/image-to-mask", {{}, {"mask"}}},
+            {"fugue/mask-to-alpha", {{"mask"}, {}}},
             {"fugue/solid-mask", {{}, {"mask"}}},
             {"fugue/pad", {{}, {"mask"}}},
         };
