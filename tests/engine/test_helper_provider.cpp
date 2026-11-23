@@ -21,6 +21,7 @@
 #include "engine/helper_provider.h"
 #include "engine/model_offers.h"
 #include "engine/providers.h"
+#include "engine/settings.h"
 #include "provider_support.h"
 
 using namespace fugue;
@@ -163,6 +164,37 @@ private slots:
         QCOMPARE(run(*helper, encode()).state, QStringLiteral("done"));
         QCOMPARE(helper->pid(), pid);
         QCOMPARE(logLines(m_log).filter("start").size(), 1);
+    }
+
+    // #297: a sample asks the helper for pictures of the sampling by a key of the message (not a param),
+    // the helper's frame comes back as the status's preview bytes, and "off" asks for none.
+    void aSampleAsksForStepPicturesAndGetsThem() {
+        const auto sample = [&](const QString &capability) {
+            JobRequest request = encode({{"steps", 3}, {"frames", true}});
+            request.capability = capability;
+            return request;
+        };
+        auto helper = provider();
+        QList<JobStatus> seen;
+        QCOMPARE(run(*helper, sample("latent.sample"), nullptr, &seen).state, QStringLiteral("done"));
+        qsizetype frames = 0;
+        for (const JobStatus &status : seen)
+            frames += status.preview.startsWith("\x89PNG") ? 1 : 0;
+        QCOMPARE(frames, 3);
+        QCOMPARE(run(*helper, sample("text.encode")).state, QStringLiteral("done"));
+        QCOMPARE(logLines(m_log).filter("preview"), QStringList{"preview proj"}); // not for an encode
+
+        QVERIFY(changeSetting(settingsPath(), "step_preview", "off").isEmpty());
+        seen.clear();
+        QCOMPARE(run(*helper, sample("latent.sample"), nullptr, &seen).state, QStringLiteral("done"));
+        for (const JobStatus &status : seen)
+            QVERIFY(status.preview.isEmpty());
+        QCOMPARE(logLines(m_log).filter("preview").size(), 1);
+
+        QVERIFY(changeSetting(settingsPath(), "step_preview", "vae").isEmpty());
+        QCOMPARE(run(*helper, sample("latent.sample")).state, QStringLiteral("done"));
+        QCOMPARE(logLines(m_log).filter("preview"), (QStringList{"preview proj", "preview vae"}));
+        QVERIFY(changeSetting(settingsPath(), "step_preview", "fast").isEmpty());
     }
 
     void anIdleHelperIsStoppedAndStartedAgainWhenNeeded() {

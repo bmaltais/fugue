@@ -722,6 +722,14 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Rule: Floor (titles are 6u compact buttons in a 7u header). Primary (none). Destructive (none). Gaps (unchanged). Posture: pointer, and the window bar's Alt+letter (E, F, H, R, W).
 - Not done in this change: the workflow tabs still have their own row under the window bar (Blender has them in the bar's row), and the Canvas view's menus are in a row inside the view, not in its area's header.
 
+### 2026-11-23 Sampler preview: the picture while it samples (#297)
+
+- Control: Settings > General, `src/settings/SettingsPanel.qml` "Sampler preview" (`stepPreview`), a `Choices` of three (Off, Fast, Full picture), after Node pictures, before Reopen tabs at start. Writes `step_preview` in settings.json.
+- Old: a Sampler card showed nothing until its image was done.
+- New: while a local helper samples, the card shows the image changing, about eight times a run. Fast (the default) is a rough picture that costs almost nothing; Full picture is the model's decoder, clearer and a little slower. The note under the row says which is on and that it is for a model on this machine.
+- Why: a long run says what it is making (feedback while waiting), and the cost is a taste, so a setting inherited by projects. No control on the Sampler itself: the choice is about the machine, not the node.
+- Rule: Floor (the 28px `Choices` buttons are the existing ones). Primary (the three buttons, one choice). Destructive (none). Gaps (unchanged). Posture: pointer, once.
+
 ### 2026-11-22 node pictures: mode and per-node override (#263)
 
 - Control: Settings > General, `src/settings/SettingsPanel.qml` "Node pictures" (`pictureMode`), a `Choices` of three (Smart, Sinks and inputs only, All), after Magnify small nodes on hover, before Reopen tabs at start; the Graph header's View > Picture submenu (`view.picture-smart`, `view.picture-sinks`, `view.picture-all`, one checked); `node.picture-show`, `node.picture-hide` and `node.picture-default` ("Show picture", "Hide picture", "Default picture") in the Graph header's Node menu and the node's right-click menu, after Pin, left out where they would change nothing. Writes `picture_mode` in settings.json and `layout.nodes.<id>.picture`.

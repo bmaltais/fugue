@@ -22,7 +22,7 @@ const QStringList kKeys{"navigation",     "language",       "output_folder",
                         "inputs_folder",  "model_paths",    "model_folder_kinds",
                         "download_folder", "pack_paths",    "new_seed",
                         "embed_workflow", "corner_radius",  "hover_magnifier",
-                        "restore_tabs",   "picture_mode", "cache_results_gb", "cache_thumbnails_gb", "runs_kept"};
+                        "restore_tabs",   "picture_mode", "step_preview", "cache_results_gb", "cache_thumbnails_gb", "runs_kept"};
 
 QString oneOf(const QJsonValue &value, const QStringList &choices, const QString &key) {
     if (value.isString() && choices.contains(value.toString()))
@@ -93,6 +93,8 @@ void apply(Settings &settings, const QString &key, const QJsonValue &value) {
         settings.cornerRadius = value.isString() ? Settings::followOmarchy : value.toInt();
     else if (key == QLatin1String("picture_mode"))
         settings.pictureMode = value.toString();
+    else if (key == QLatin1String("step_preview"))
+        settings.stepPreview = value.toString();
     else if (key == QLatin1String("hover_magnifier"))
         settings.hoverMagnifier = value.toBool();
     else if (key == QLatin1String("restore_tabs"))
@@ -140,7 +142,7 @@ QString settingOriginName(SettingOrigin origin) {
 }
 
 SettingClass settingClass(const QString &key) {
-    static const QStringList preferences{"navigation", "language", "corner_radius", "hover_magnifier", "new_seed", "embed_workflow", "restore_tabs", "picture_mode"};
+    static const QStringList preferences{"navigation", "language", "corner_radius", "hover_magnifier", "new_seed", "embed_workflow", "restore_tabs", "picture_mode", "step_preview"};
     if (preferences.contains(key))
         return SettingClass::Preferences;
     if (key == QLatin1String("model_paths") || key == QLatin1String("model_folder_kinds"))
@@ -173,6 +175,8 @@ QJsonValue settingDefault(const QString &key) {
         return QStringLiteral("full");
     if (key == QLatin1String("picture_mode"))
         return QStringLiteral("smart");
+    if (key == QLatin1String("step_preview"))
+        return QStringLiteral("fast");
     if (key == QLatin1String("corner_radius"))
         return 8;
     if (key == QLatin1String("hover_magnifier"))
@@ -207,6 +211,8 @@ QString checkSetting(const QString &key, const QJsonValue &value) {
         return oneOf(value, {"full", "no-prompts", "none"}, key);
     if (key == QLatin1String("picture_mode"))
         return oneOf(value, {"smart", "sinks", "all"}, key);
+    if (key == QLatin1String("step_preview"))
+        return oneOf(value, {"off", "fast", "tae", "vae"}, key);
     if (key == QLatin1String("corner_radius")) {
         const double px = value.toDouble(-1);
         if (value == QJsonValue(QStringLiteral("omarchy"))
@@ -401,6 +407,8 @@ QJsonValue settingValue(const Settings &settings, const QString &key) {
         return settings.cornerRadius == Settings::followOmarchy ? QJsonValue(QStringLiteral("omarchy")) : QJsonValue(settings.cornerRadius);
     if (key == QLatin1String("picture_mode"))
         return settings.pictureMode;
+    if (key == QLatin1String("step_preview"))
+        return settings.stepPreview;
     if (key == QLatin1String("hover_magnifier"))
         return settings.hoverMagnifier;
     if (key == QLatin1String("restore_tabs"))

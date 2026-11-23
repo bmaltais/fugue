@@ -261,6 +261,26 @@ Popup {
                     }
                     SettingsParts.Setting {
                         visible: panel.page === 0
+                        title: qsTr("Sampler preview")
+                        key: "step_preview"
+                        origin: panel.model.origins["step_preview"] ?? ""
+                        onUseDefaultRequested: panel.apply(panel.model.useDefault("step_preview"))
+                        note: panel.model.stepPreview === "off"
+                              ? qsTr("The Sampler's card shows nothing until the image is done.")
+                              : panel.model.stepPreview === "fast"
+                                ? qsTr("The Sampler's card shows a rough picture of the image about eight times while it is made. It costs almost no time. Only for a model on this machine.")
+                                : qsTr("The Sampler's card shows the image as the model's decoder draws it, about eight times while it is made. It is clearer and costs a little more time and memory. Only for a model on this machine.")
+                        Choices {
+                            Layout.fillWidth: true
+                            name: "stepPreview"
+                            current: panel.model.stepPreview === "tae" ? "vae" : panel.model.stepPreview
+                            options: [{value: "off", text: qsTr("Off")}, {value: "fast", text: qsTr("Fast")},
+                                      {value: "vae", text: qsTr("Full picture")}]
+                            onPicked: value => panel.apply(panel.model.set("step_preview", value))
+                        }
+                    }
+                    SettingsParts.Setting {
+                        visible: panel.page === 0
                         title: qsTr("Reopen tabs at start")
                         key: "restore_tabs"
                         origin: panel.model.origins["restore_tabs"] ?? ""

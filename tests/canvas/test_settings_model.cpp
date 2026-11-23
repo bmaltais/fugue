@@ -198,6 +198,17 @@ private slots:
         QVERIFY(!model.set("canvas_show_new_results", true).isEmpty()); // no longer a setting
     }
 
+    // The Sampler's step picture (#297): fast by default, a preference; the default leaves the file.
+    void theStepPreviewIsFastAndPersists() {
+        SettingsModel model(settingsFile());
+        QCOMPARE(model.stepPreview(), QString("fast"));
+        QCOMPARE(model.set("step_preview", "vae"), QString());
+        QCOMPARE(SettingsModel(settingsFile()).stepPreview(), QString("vae"));
+        QVERIFY(!model.set("step_preview", "sharp").isEmpty());
+        QCOMPARE(model.set("step_preview", "fast"), QString());
+        QVERIFY(!readJsonObject(settingsFile()).value().contains("step_preview"));
+    }
+
     // Node pictures (#263): smart by default, a preference; the default leaves the file.
     void thePictureModeIsSmartAndPersists() {
         SettingsModel model(settingsFile());
