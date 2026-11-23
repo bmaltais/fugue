@@ -48,6 +48,19 @@ Item {
         color: cell.look.label
         font.pixelSize: cell.compact ? 10 : 14
     }
+    // A favorite wears a star in the upper right corner.
+    Text {
+        objectName: "favoriteMark"
+        visible: cell.item?.favorite === true
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.margins: cell.look.unit / 2
+        text: "\u2605"
+        color: cell.look.accent
+        style: Text.Outline
+        styleColor: Qt.rgba(0, 0, 0, 0.6)
+        font.pixelSize: cell.compact ? 10 : 14
+    }
     Column {
         // Until the picture is ready or failed, only the well: no glyph flashing under a thumbnail.
         visible: picture.status === Image.Error || picture.status === Image.Null

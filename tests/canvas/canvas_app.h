@@ -129,7 +129,7 @@ struct App {
     fugue::NodeLibrary nodeLibrary{&registry};
     fugue::RecentFiles recentFiles{dir.path() + "/recent-files.json"};
     // The media browser's results (#133): the run folders and thumbnails are the test's own.
-    fugue::MediaLibrary mediaLibrary{dir.path() + "/runs", dir.path() + "/thumbs"};
+    fugue::MediaLibrary mediaLibrary{dir.path() + "/runs", dir.path() + "/thumbs", dir.path() + "/media.json"};
     // The color picker's recent colors (#52), in the test's own folder, and layout coloring.
     fugue::ColorHistory colorHistory{dir.path() + "/recent-colors.json"};
     fugue::LayoutColors layoutColors{model};

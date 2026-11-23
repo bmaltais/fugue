@@ -128,6 +128,8 @@ public:
     // in it, by content. Switches to the tab when it is already open. False (with a notice)
     // when it cannot be read.
     Q_INVOKABLE bool openPath(const QString &pathOrUrl);
+    // An image file into a Load Image node of the current workflow (ImageInputs::sendFile).
+    Q_INVOKABLE bool sendImage(const QString &path) { return m_images->sendFile(path); }
     // Drag and drop: file URLs (or paths), each opened; others are skipped with a notice.
     Q_INVOKABLE void openUrls(const QVariantList &urls);
     // Files dropped on the window at a point of the canvas (world coordinates): images go into

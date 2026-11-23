@@ -417,6 +417,33 @@ private slots:
         QCOMPARE(read(file), jpeg);
     }
 
+    // The media browser's "Send to Load Image" (#133): a new node, or the one selected.
+    void aFileSentFromTheBrowserBecomesALoadImage() {
+        Pictures p;
+        QTemporaryDir other;
+        const QByteArray png = encoded(picture(), "PNG");
+        QVERIFY(write(other.filePath("out.png"), png));
+        QVERIFY(write(other.filePath("note.txt"), "text"));
+        Registry registry;
+        nodes::addBuiltinNodeTypes(registry);
+        CanvasModel canvas(&registry);
+        ImageInputs inputs(&canvas, &registry);
+        QSignalSpy said(&inputs, &ImageInputs::message);
+        QVERIFY(inputs.sendFile(other.filePath("out.png")));
+        QCOMPARE(canvas.document().graph.nodes.size(), 1);
+        const QString first = canvas.document().graph.nodes.cbegin()->inputs.value("file").literal().toString();
+        QVERIFY(first.startsWith(p.inputs())); // a copy in the inputs folder, the original untouched
+        QCOMPARE(read(first), png);
+        QVERIFY(QFileInfo::exists(other.filePath("out.png")));
+        // The new node is selected, so the next image goes into it instead of a second node.
+        QVERIFY(inputs.sendFile(other.filePath("out.png")));
+        QCOMPARE(canvas.document().graph.nodes.size(), 1);
+        said.clear();
+        QVERIFY(!inputs.sendFile(other.filePath("note.txt")));
+        QCOMPARE(canvas.document().graph.nodes.size(), 1);
+        QVERIFY(!said.isEmpty());
+    }
+
     // The picker's thumbnails are file URLs made from the path: #, ? and % are the name.
     void recentInputsCarryAFileUrlOfTheirPath() {
         Pictures p;

@@ -2,12 +2,14 @@
 // view lists what the current workflow's runs made, in a grid, a filmstrip and a single view, by
 // the pointer and the keys, and does an action on the current item.
 
+#include <QBuffer>
 #include <QImage>
 #include <QQuickStyle>
 #include <QtTest>
 
 #include "../canvas/canvas_app.h"
 #include "../window_grab.h"
+#include "engine/embed.h"
 #include "engine/run_folder.h"
 
 using namespace canvas_test;
@@ -29,7 +31,11 @@ QPoint center(QQuickItem *item) { return item->mapToScene(QPointF(item->width() 
 class TestMediaWindow : public QObject {
     Q_OBJECT
 
-    static void click(App &app, QQuickItem *item) { QTest::mouseClick(app.window, Qt::LeftButton, {}, center(item)); }
+    // A Flow places its buttons when the window is polished: grabbing it first makes the click land on the laid-out one.
+    static void click(App &app, QQuickItem *item) {
+        app.window->grabWindow();
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, center(item));
+    }
     static QQuickItem *named(App &app, const QString &name) { return item(app.window->contentItem(), name); }
 
     // A run of `workflow` that made `count` pictures, named <prefix>0.png...
@@ -62,6 +68,7 @@ private slots:
 
         app.commands.run("panel.workflows");
         QTRY_VERIFY(named(app, "workflowsViewSwitch"));
+        QTRY_VERIFY(named(app, "workflowsView-results")->x() > 0); // the Flow has laid its buttons out
         // Nothing of the media browser exists until the results are asked for.
         QVERIFY(!named(app, "workflowsResults"));
         click(app, named(app, "workflowsView-results"));
@@ -117,6 +124,114 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // Favorites, zoom, compare, send to Load Image, open the workflow, delete (to a trash of the test's own)
+    // and what the browser remembers (#133), by the buttons and keys.
+    void theBrowserMarksZoomsComparesSendsAndDeletes() {
+        App app(load(small));
+        QVERIFY(app.open());
+        const QString path = app.dir.filePath("acts.fugue");
+        QVERIFY(load(small).saveFile(path).isEmpty());
+        QVERIFY(app.workflows.openPath(path));
+        makeRun(app, "20261126-100000-000-aaaa", path, "pic", 3);
+        // The last picture was made by a workflow: it can be opened again.
+        QVERIFY(QFile::remove(app.dir.filePath("pic2.png")));
+        QImage image(64, 48, QImage::Format_RGB32);
+        image.fill(Qt::darkYellow);
+        QByteArray png;
+        QBuffer buffer(&png);
+        buffer.open(QIODevice::WriteOnly);
+        image.save(&buffer, "PNG");
+        const QByteArray embedded = fugue::pngWithWorkflow(png, R"({"fugue": 1, "graph": {"nodes": {"t": {"type": "fugue/text", "version": "1.0.0", "inputs": {"text": "again"}}}}})").value();
+        QFile with(app.dir.filePath("pic2.png"));
+        QVERIFY(with.open(QIODevice::WriteOnly) && with.write(embedded) == embedded.size());
+        with.close();
+        QDir().mkpath(app.dir.filePath("trash"));
+        app.mediaLibrary.setTrash([&app](const QString &file) {
+            return QFile::rename(file, app.dir.filePath("trash/") + QFileInfo(file).fileName());
+        });
+
+        app.commands.run("panel.workflows");
+        QTRY_VERIFY(named(app, "workflowsViewSwitch"));
+        QTRY_VERIFY(named(app, "workflowsView-results")->x() > 0); // the Flow has laid its buttons out
+        click(app, named(app, "workflowsView-results"));
+        QTRY_VERIFY(named(app, "mediaCell-2"));
+        QQuickItem *browser = named(app, "workflowsResults");
+        const QString shotDir = qEnvironmentVariable("FUGUE_SHOT_DIR");
+        auto shot = [&](const char *name) {
+            if (shotDir.isEmpty())
+                return;
+            QTest::qWait(400);
+            test_support::grab(app.window).save(shotDir + "/media-" + name + ".png");
+        };
+
+        // F marks the current one; the star shows and the library remembers it.
+        QTest::keyClick(app.window, Qt::Key_F);
+        QTRY_VERIFY(app.mediaLibrary.isFavorite(app.dir.filePath("pic0.png")));
+        QTRY_VERIFY(browser->property("items").toList()[0].toMap().value("favorite").toBool());
+        QTRY_VERIFY(named(app, "favoriteMark"));
+        shot("grid-favorite");
+        // The Favorites button narrows the list to it.
+        click(app, named(app, "workflowsResultsFavorites"));
+        QTRY_COMPARE(browser->property("items").toList().size(), 1);
+        click(app, named(app, "workflowsResultsFavorites"));
+        QTRY_COMPARE(browser->property("items").toList().size(), 3);
+
+        // Single: + zooms the picture, 0 fits it again.
+        click(app, named(app, "mediaMode-single"));
+        QTRY_VERIFY(named(app, "mediaViewer"));
+        QQuickItem *viewer = named(app, "mediaViewer");
+        QCOMPARE(viewer->property("zoom").toDouble(), 1.0);
+        QTest::keyClick(app.window, Qt::Key_Plus);
+        QTRY_VERIFY(viewer->property("zoom").toDouble() > 1.0);
+        shot("single-zoomed");
+        QTest::keyClick(app.window, Qt::Key_0);
+        QTRY_COMPARE(viewer->property("zoom").toDouble(), 1.0);
+
+        // C pins this picture; the next one chosen is compared with it.
+        QTest::keyClick(app.window, Qt::Key_C);
+        QCOMPARE(browser->property("compareIndex").toInt(), 0);
+        QVERIFY(!browser->property("comparing").toBool());
+        QTest::keyClick(app.window, Qt::Key_Right);
+        QTRY_VERIFY(browser->property("comparing").toBool());
+        QTRY_COMPARE(named(app, "mediaViewer")->property("mode").toString(), QString("slider"));
+        shot("compare");
+        QTest::keyClick(app.window, Qt::Key_C);
+        QVERIFY(!browser->property("comparing").toBool());
+
+        // The picture with a workflow in it: Open workflow makes a tab of it; Send puts it in a Load Image node.
+        QTest::keyClick(app.window, Qt::Key_End);
+        QCOMPARE(browser->property("currentIndex").toInt(), 2);
+        QTRY_VERIFY(named(app, "mediaAction-workflow")->isEnabled()); // the details of the new current item came
+        const int tabs = app.workflows.count();
+        click(app, named(app, "mediaAction-workflow"));
+        QCOMPARE(app.workflows.count(), tabs + 1);
+        app.workflows.setCurrent(tabs - 1);
+        QTRY_VERIFY(named(app, "mediaAction-send")->isEnabled());
+        const int before = app.model.document().graph.nodes.size();
+        click(app, named(app, "mediaAction-send"));
+        QTRY_COMPARE(app.model.document().graph.nodes.size(), before + 1);
+
+        // Move to trash asks first; Cancel leaves the file, the question again and Yes moves it.
+        const QString doomed = browser->property("currentItem").toMap().value("title").toString();
+        QVERIFY(!doomed.isEmpty());
+        QTest::keyClick(app.window, Qt::Key_Delete);
+        QTRY_VERIFY(named(app, "mediaConfirm")->isVisible());
+        shot("confirm-delete");
+        click(app, named(app, "mediaConfirmNo"));
+        QVERIFY(QFileInfo::exists(app.dir.filePath(doomed)));
+        QTest::keyClick(app.window, Qt::Key_Delete);
+        QTRY_VERIFY(named(app, "mediaConfirm")->isVisible());
+        click(app, named(app, "mediaConfirmYes"));
+        QTRY_VERIFY(!QFileInfo::exists(app.dir.filePath(doomed)));
+        QVERIFY(QFileInfo::exists(app.dir.filePath("trash/" + doomed)));
+        QTRY_COMPARE(browser->property("items").toList().size(), 2);
+
+        // The mode and the view are kept for the next window.
+        QCOMPARE(app.mediaLibrary.resultsMode(), QString("single"));
+        QCOMPARE(app.mediaLibrary.resultsView(), QString("results"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     // A video's cell shows a frame of it, and a file ffmpeg cannot read keeps its glyph and name.
     void aVideoCellShowsAFrameAndABrokenOneTheGlyph() {
         const QString ffmpeg = QStandardPaths::findExecutable("ffmpeg");
@@ -140,6 +255,7 @@ private slots:
                                    {"nodes", QJsonObject{{"save", QJsonObject{{"state", "cached"}, {"outputs", outputs}}}}}}));
         app.commands.run("panel.workflows");
         QTRY_VERIFY(named(app, "workflowsViewSwitch"));
+        QTRY_VERIFY(named(app, "workflowsView-results")->x() > 0); // the Flow has laid its buttons out
         click(app, named(app, "workflowsView-results"));
         QTRY_COMPARE(named(app, "workflowsResults")->property("items").toList().size(), 2);
         // The cell's picture is its Image child: ready for the clip, an error for the broken file.
@@ -167,6 +283,7 @@ private slots:
         QVERIFY(app.open());
         app.commands.run("panel.workflows");
         QTRY_VERIFY(named(app, "workflowsViewSwitch"));
+        QTRY_VERIFY(named(app, "workflowsView-results")->x() > 0); // the Flow has laid its buttons out
         click(app, named(app, "workflowsView-results"));
         QTRY_VERIFY(named(app, "workflowsResults"));
         QVERIFY(named(app, "workflowsResults")->property("items").toList().isEmpty());

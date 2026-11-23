@@ -128,6 +128,12 @@ public:
     // Whether the node and input are the ones an image can be pasted into.
     Q_INVOKABLE bool accepts(const QString &node, const QString &input) const;
 
+    // An image file the person chose elsewhere (the media browser's "Send to Load Image", #133): it is
+    // taken into the inputs folder as a dropped file is, into the one Load Image that is selected,
+    // else a new Load Image node at the pointer; one undo step. False, with a `message`, when the file is no
+    // image or cannot be taken.
+    bool sendFile(const QString &path);
+
     // Dropped files: each image goes to a Load Image node, the first into `onNode` when that is
     // one, the rest to new nodes below `at`. Files that are not images are skipped with a
     // message. True when any image was placed.

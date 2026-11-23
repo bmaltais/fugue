@@ -2596,7 +2596,9 @@ and the window keeps its item budget.
   (rows under a heading per run, newest first), *Filmstrip* (the current item large over a strip), *Single*
   (one item large; a video or sound in `MediaView`). Keys: Left/Right (PageUp/PageDown) step, Up/Down move a
   grid row, Home/End, Enter opens the item large, Escape goes back to the mode it came from and then asks to
-  close, I shows the details. Actions: Open, Show folder, Copy path. The core is plain C++
+  close, I shows the details. Actions (the host gives them; the Results view gives these): *Favorite* (F, a
+  toggle, a star on the cell), *Open*, *Re-run*, *Open workflow*, *Send to Load Image*, *Show folder*, *Copy path*,
+  *Move to trash* (Delete). The core is plain C++
   (`media/media_items.h`): a run's results are the media outputs of the nodes nothing else reads (from
   `workflow.json`), `mediaOfWorkflow` takes the newest 40 runs whose `run.json` names the workflow's path
   (an unsaved workflow has none), a file in several runs stays with the newest, a missing file is left out;
@@ -2608,13 +2610,30 @@ and the window keeps its item budget.
   (`engine/ffmpeg.h`, killed after 15 s); a file that cannot be read, or a machine without ffmpeg, gives
   an image load error and the cell keeps its glyph and name. The queue's finished rows use them too. The panel refreshes the list when Results opens, the workflow changes, a run ends
   or the refresh button is pressed.
+- **Favorites, trash, re-run, send, zoom, compare, memory** (#133, `media/media_state.h`, `MediaLibrary`):
+  - *Favorites* are paths kept in `~/.local/state/fugue/media.json` (`{"favorites": [...], "mode", "view",
+    "only_favorites"}`; a file that is gone from the disk stays until `prune`). A row carries `favorite`; the
+    *Favorites* toggle beside Refresh narrows the Results view to them (`MediaLibrary.onlyFavorites`).
+  - *Move to trash* asks first, in the actions' place ("Move <file> to the trash?", *Move to trash* and *Cancel*;
+    Escape cancels), then `QFile::moveToTrash` (the desktop's trash, never a delete); a failure changes nothing.
+    The run folder's record is left as it is; the file drops out of the list because it is gone.
+  - *Open workflow* opens the workflow embedded in a PNG or WebP (11.7) as a new tab (`Workflows::openPath`);
+    *Re-run* does that and runs it (`run.start`). The embedded workflow holds the seed it was made with, and
+    only new nodes get a fresh seed, so the same seed runs again. Both are off for a file with no workflow.
+  - *Send to Load Image* (`ImageInputs::sendFile`) takes the picture into the inputs folder as a dropped
+    file is (byte for byte, named by its content, 14.1) and points the one selected Load Image at it, else makes
+    a Load Image node at the pointer; one undo step; the notice says which. Images only.
+  - *Zoom*: in Single and Filmstrip an image of known size shows in `CompareView`'s single mode: the wheel
+    zooms about the pointer, a drag pans, `+`/`-` zoom, `0` fits, `1` is 100% (Fit and 100% buttons).
+  - *Compare*: C (or the Compare button) pins the current image as A; the image chosen next is B and the two
+    show in `CompareView` (Slider, Slider horizontal, Side by side, Flip; no Difference picture is made
+    here). C or Escape leaves it. A change of the list ends it.
+  - *Remembered*: the browser's mode, whether the workflows panel was on Files or Results, and the favorites filter
+    are kept in `media.json` and restored with the next panel.
 - **Not built** (follow-ups of #133): hosting the browser on a node's face and in the large view, a Media
-  Browser node, Preview showing a batch as a filmstrip, Compare Images taking two items from the list;
-  the details of a video or sound (container tag, 11.7); saved files that
-  are in no run folder (a scan of the output folder grouped by embedded workflow); favorites, delete,
-  re-run with the same seed, send to a Load Image node, open the workflow that made it, drag back onto the
-  graph; remembering the mode and view; zoom and
-  fine-grained image compare in Single.
+  Browser node, Preview showing a batch as a filmstrip; the details of a video or sound (container tag,
+  11.7); saved files that are in no run folder (a scan of the output folder grouped by embedded workflow);
+  drag back onto the graph; zoom and pan of a video; fine-grained compare of a pair with a difference picture.
 - **Not built** (follow-ups): a model library tab (M), assets, a log or terminal panel at the bottom,
   bookmarks and a preview of a node in the library.
 
