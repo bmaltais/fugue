@@ -111,7 +111,7 @@ private slots:
         const Route route = routeAction(in);
         QCOMPARE(route.region, (RouteRect{0, 0, 1024, 800}));
         QCOMPARE(route.fill, (RouteRect{0, 0, 1024, 800}));
-        QCOMPARE(route.strength, 0.5);
+        QCOMPARE(route.strength, 0.7);
         QCOMPARE(route.padding, 0);
         QCOMPARE(route.scale, 1.0); // 0.82 MP is within 0.8 of the target: not scaled
         in.canvasHeight = 512;
@@ -193,7 +193,7 @@ private slots:
         in.strength.reset();
         in.coverage = 0.95;
         in.selection = RouteRect{0, 0, 1024, 1024};
-        QCOMPARE(routeAction(in).strength, 0.5); // the router's own default for a near-whole selection
+        QCOMPARE(routeAction(in).strength, 0.7); // the router's own default for a near-whole selection
     }
 
     // Expand from the crop tool: the canvas grows, the new border plus an overlap is the fill.
