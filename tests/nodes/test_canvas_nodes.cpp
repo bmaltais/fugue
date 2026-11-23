@@ -288,6 +288,24 @@ private slots:
         QCOMPARE(handle->revision, headOf(id));
     }
 
+    // The Harmonize action (a region, then a seam map from the region's mask and size): picture, mask and the width and
+    // height outputs agree at every scale and cap, so the VAE Encode never sees a mask of another size.
+    void theRegionsPictureMaskAndSizeAgreeWhenScaledAndCapped() {
+        Bench bench;
+        const QString id = makeCanvas();
+        for (const auto &[scale, cap] : {std::pair{1.0, 0.0}, std::pair{2.0, 0.0}, std::pair{4.0, 0.02}}) {
+            const Result<Values> r = bench.region(id, {{"x", Value(33)}, {"y", Value(21)}, {"width", Value(111)}, {"height", Value(97)},
+                                                       {"padding", Value(16)}, {"scale", Value(scale)}, {"max_megapixels", Value(cap)}, {"multiple", Value(16)}});
+            QVERIFY(r.ok());
+            const Pixels image = pixelsOf(r->value("image"), "image").value();
+            const Pixels mask = maskOf(r->value("mask"), "mask").value();
+            QCOMPARE(mask.width, image.width);
+            QCOMPARE(mask.height, image.height);
+            QCOMPARE(double(image.width), r->value("width").number());
+            QCOMPARE(double(image.height), r->value("height").number());
+        }
+    }
+
     void paddingMarksTheRectangleInsideTheRegionsMask() {
         Bench bench;
         const QString id = makeCanvas();
