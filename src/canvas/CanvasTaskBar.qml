@@ -76,6 +76,8 @@ Item {
     // An action on the canvas bounds (Expand) grows the canvas by a side and an amount from the bar, not by a selection
     // (design 4): the bar stays up while it is the chosen action, so it can be used with nothing selected.
     readonly property bool boundsAction: current.selection === "bounds"
+    // An action on the whole picture (Upscale) ignores the selection and shows the bar with nothing selected.
+    readonly property bool wholeAction: current.selection === "none" && chosen !== "auto"
     property string expandSide: "right"
     property int expandPercent: 25
     readonly property string expandText: expandSide === "left" ? qsTr("Left, %1%").arg(expandPercent)
@@ -88,12 +90,12 @@ Item {
                                     : current.broken === true ? current.reason
                                     : missingPack ? qsTr("Install the pack first")
                                     : missingModels ? qsTr("Download the models first")
-                                    : selection === null && !boundsAction && !optionalAction ? qsTr("Select an area first")
+                                    : selection === null && !boundsAction && !optionalAction && !wholeAction ? qsTr("Select an area first")
                                     : current.hasLayer === true && currentLayer === "" ? qsTr("Select one layer first")
                                     : current.needsPrompt === true && !hasPrompt ? qsTr("Type what to put in the selection")
                                     : ""
     readonly property bool hasWord: mine && actions !== null && (actions.error !== "" || actions.notice !== "")
-    readonly property bool shown: actions !== null && canvasId !== "" && (selection !== null || busy || hasWord || boundsAction || optionalAction)
+    readonly property bool shown: actions !== null && canvasId !== "" && (selection !== null || busy || hasWord || boundsAction || optionalAction || wholeAction)
     visible: shown
     // Where the bar may go when the picture is too narrow for it (a small area): the host's whole width, in this item's
     // coordinates. Then it docks across the foot of the picture rather than squeezing its controls.

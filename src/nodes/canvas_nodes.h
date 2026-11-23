@@ -7,7 +7,7 @@
 
 namespace fugue::nodes {
 
-// Registers fugue/canvas-region and fugue/canvas-write.
+// Registers fugue/canvas-region, fugue/canvas-write and fugue/canvas-new.
 void addCanvasKernels(Kernels &kernels);
 
 } // namespace fugue::nodes

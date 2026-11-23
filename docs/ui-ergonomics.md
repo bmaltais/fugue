@@ -122,6 +122,14 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 - Why: the owner's live-preview decision (Opus design review): feedback where the eye already is (Fitts), and the frame is clipped to the selection so the unchanged padding never appears to change.
 - Deviations, each to confirm: the outline is dimmed, not removed, while a frame shows; no reduced-motion variant yet (Fugue has no such setting).
 
+### 2026-11-23 Canvas view: Upscale in the task bar (#231 slice 8)
+
+- Control: the action menu lists Upscale and Upscale (no model). No new control: the bar shows with nothing selected while one of them is chosen (like Remove background), at the foot of the picture, and Scale (2x or 4x) is a row of word buttons in the Advanced popover, with the model picker for Upscale. The prompt hint reads "No prompt needed: press Generate". When the run ends the view that showed the source switches to the new canvas and the notice says "Made a new canvas: the original is as it was (File > Open canvas...)."
+- Old: no upscale in the bar.
+- New: one click makes a bigger copy of the whole picture as a canvas of its own; a selection is not read.
+- Why: a canvas keeps its size and its revisions are immutable, so a bigger picture is a new canvas (design 14, open question 4); Scale lives in Advanced as Refine's Strength does, so the simple state stays Action, Prompt, Generate.
+- Deviations, each to confirm: the button still says Generate; Scale is not on the bar itself; the view switches to the new canvas at once (the source stays one File > Open canvas away).
+
 ### 2026-11-23 Canvas view: Remove background in the task bar (#231 slice 6)
 
 - Control: the action menu lists Remove background. A missing pack shows in the status row the line "Needs the Remove Background pack" and a compact `ViewButton` `canvasTaskInstallPack` ("Install…", download glyph) before the Download button; Generate is disabled with the tip "Install the pack first". For an action whose selection is optional the bar also shows with nothing selected while that action is chosen (at the foot of the picture); with no single current layer the tip reads "Select one layer first".

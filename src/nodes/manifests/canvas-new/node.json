@@ -1,0 +1,21 @@
+{
+  "manifest": 1,
+  "id": "fugue/canvas-new",
+  "version": "1.0.0",
+  "deterministic": false,
+  "name": "Canvas New",
+  "description": "Make a new canvas from a picture: one layer holding the picture whole, at its own size, named Layer 1. The canvas it came from is not touched, so this is where an upscale lands (the picture is bigger than the source, and a canvas keeps its size). Every run makes one more canvas, with the name you give (a name that is taken gets a number after it). The canvas must fit what a canvas can be (at most 16384 px a side and 67 megapixels); when the picture is bigger the run says so and makes nothing.",
+  "category": "Image/Canvas",
+  "keywords": ["canvas", "new", "create", "import", "upscale", "picture to canvas"],
+  "sink": true,
+  "runtime": {"kind": "builtin"},
+  "inputs": [
+    {"name": "image", "type": "image", "label": "Image", "description": "The picture the new canvas is made of."},
+    {"name": "name", "type": "text", "label": "Canvas name", "default": "Upscaled", "widget": "line",
+     "description": "The new canvas's name. One already taken gets a number after it (Upscaled 2). Empty: Untitled."}
+  ],
+  "outputs": [
+    {"name": "canvas", "type": "fugue/canvas", "label": "Canvas", "description": "The new canvas, at its one revision."},
+    {"name": "id", "type": "text", "label": "Canvas id", "description": "The new canvas's id, such as canvas-0123456789ab."}
+  ]
+}

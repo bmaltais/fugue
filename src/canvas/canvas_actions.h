@@ -206,6 +206,9 @@ signals:
     void historyChanged();
     // A run of a Generate ended: "ok", "failed" or "cancelled".
     void finished(const QString &run, const QString &status);
+    // An action whose result is a new canvas (Upscale: Canvas New) finished: the canvas it ran on and the one it made. The view that
+    // shows `source` switches to `made`; the source itself is as it was.
+    void canvasMade(const QString &source, const QString &made);
 
 private:
     struct Entry {
@@ -275,6 +278,7 @@ private:
     QVariantMap m_liveBox, m_liveClip;
     bool m_liveFade = false;
     void clearLive(bool fade);
+    QHash<QString, QStringList> m_made; // per run, the canvases its Canvas New nodes made
     QHash<QString, QList<WriteResult>> m_writes; // per run, its Writes' landed revisions
     QHash<QString, Errors> m_nodeErrors;         // per run, its node errors so far
 };

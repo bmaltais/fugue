@@ -3,6 +3,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QRegularExpression>
+#include <QSet>
 
 #include <algorithm>
 #include <cmath>
@@ -13,6 +14,7 @@
 #include "engine/canvas_tiles.h"
 #include "engine/clock.h"
 #include "engine/hash.h"
+#include "engine/new_canvas.h"
 #include "nodes/canvas_region_ops.h"
 #include "nodes/kernels.h"
 #include "nodes/pixel_io.h"
@@ -517,11 +519,50 @@ public:
     }
 };
 
+// Canvas New (1.0.0): a picture becomes a canvas of its own, one layer, at the picture's size. The source canvas is not read.
+class CanvasNewKernel : public NodeKernel {
+public:
+    Result<Values> run(const NodeContext &context) override {
+        const Result<Pixels> picture = pixelsOf(context.input(QStringLiteral("image")), QStringLiteral("image"));
+        if (!picture)
+            return Result<Values>(picture.errors());
+        if (const QString why = mask::canvasSizeProblem(picture->width, picture->height); !why.isEmpty())
+            return makeInputError(QStringLiteral("canvas_too_big"), QStringLiteral("image"),
+                                  QStringLiteral("The picture is %1 x %2, which is too big for a canvas. %3").arg(picture->width).arg(picture->height).arg(why),
+                                  QStringLiteral("Choose a smaller scale."));
+        const mask::MaskPaint layer = pixelsToLayer(picture.value());
+        const Result<mask::PaintDocument> document = mask::canvasFromPixels(picture->width, picture->height, layer.pixels(), QStringLiteral("Layer 1"));
+        if (!document)
+            return Result<Values>(document.errors());
+        CanvasStore store = CanvasStore::forSession();
+        QString base = context.input(QStringLiteral("name")).text().trimmed().left(120);
+        if (base.isEmpty())
+            base = QStringLiteral("Untitled");
+        QSet<QString> taken;
+        for (const canvas::CanvasInfo &info : store.list())
+            taken.insert(info.name);
+        QString name = base;
+        for (int n = 2; taken.contains(name); ++n)
+            name = QStringLiteral("%1 %2").arg(base).arg(n);
+        const Result<canvas::CanvasInfo> made = store.create(name, document.value(), QStringLiteral("canvas-new:") + context.node);
+        if (!made)
+            return Result<Values>(made.errors());
+        const Result<QJsonObject> handle = canvas::writeCanvasHandle(context.workDir, {made->id, made->head});
+        if (!handle)
+            return Result<Values>(handle.errors());
+        Values out;
+        out.insert(QStringLiteral("canvas"), Value(handle.value()));
+        out.insert(QStringLiteral("id"), Value(made->id));
+        return Result<Values>(out);
+    }
+};
+
 } // namespace
 
 void addCanvasKernels(Kernels &kernels) {
     kernels.add("fugue/canvas-region", std::make_shared<CanvasRegionKernel>());
     kernels.add("fugue/canvas-write", std::make_shared<CanvasWriteKernel>());
+    kernels.add("fugue/canvas-new", std::make_shared<CanvasNewKernel>());
 }
 
 } // namespace fugue::nodes
