@@ -1,15 +1,15 @@
 {
   "manifest": 1,
   "id": "fugue/canvas-region",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "name": "Canvas Region",
   "description": "Take a region of a canvas to work on: the picture there with room around it, the mask of the part to change, and a stitch that remembers where it came from. The region is a rectangle, the bounds of a mask you connect, or a selection painted in the Canvas view, grown by Padding, and redrawn at the Scale you give, or at a target size in megapixels (as Crop to Mask does, up or down), within the megapixel cap. Padding is raised to Feather + 16 so Canvas Write's blend has room to fade (the node warns). The canvas is read at one revision: head is named once when the workflow is compiled, so a run is repeatable and a re-run of the same revision is a cache hit. Give the stitch to Canvas Write to put the result back as a new layer, or to Stitch.",
   "category": "Image/Canvas",
   "keywords": ["canvas", "region", "select", "inpaint", "outpaint", "generative fill", "layer", "crop"],
   "runtime": {"kind": "builtin"},
   "inputs": [
-    {"name": "canvas", "type": "text", "label": "Canvas", "widget": "canvas",
-     "description": "The canvas's id, as `fugue canvas new` prints it (canvas-0123456789ab). The window picks it from this folder's canvases, or makes one (New canvas, Import picture); a canvas belongs to the Default or the project it was made in."},
+    {"name": "canvas", "type": "text", "label": "Canvas", "widget": "canvas", "default": "",
+     "description": "Empty is the Active canvas: the one in the Canvas view you used last, else the newest, named when the workflow is compiled so a run is repeatable. Or a canvas's id, as `fugue canvas new` prints it (canvas-0123456789ab), which pins the node to it. The window picks it from this folder's canvases, or makes one (New canvas, Import picture); a canvas belongs to the Default or the project it was made in."},
     {"name": "revision", "type": "text", "label": "Revision", "default": "head", "widget": "line", "advanced": true,
      "description": "head, or a revision's hash (or its first 8 digits or more). head is replaced by the revision it is at when the workflow is compiled."},
     {"name": "layer", "type": "text", "label": "Layer", "default": "", "widget": "line", "advanced": true,

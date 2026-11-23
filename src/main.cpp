@@ -43,6 +43,7 @@
 #include "engine/settings.h"
 #include "settings/settings_model.h"
 #include "theme.h"
+#include "canvas/active_canvas.h"
 #include "workflow/workflows.h"
 #include "translator.h"
 
@@ -135,7 +136,10 @@ int main(int argc, char *argv[]) {
     // The cache is kept within its limits at start and while idle, never during a run (10.6, #141).
     appSettings.cache()->startAutomatic();
     // The window runs its own runs (spec 9.8) on a thread of their own, queued with the CLI's.
+    fugue::ActiveCanvas activeCanvas; // the canvas last used in a Canvas view: a Region with no canvas reads it (#246)
     fugue::RunSetup runSetup;
+    runSetup.activeCanvas = [&activeCanvas] { return activeCanvas.shown(); };
+    workflows.setActiveCanvas(runSetup.activeCanvas);
     runSetup.addNodeTypes = addNodeTypes;
     runSetup.addKernels = fugue::nodes::addBuiltinKernels;
     fugue::RunService runService(runSetup);
@@ -184,7 +188,7 @@ int main(int argc, char *argv[]) {
     const fugue::AppObjects objects{&translator, &theme,   &commands, &canvasModel,  &workflows,
                                     &appSettings, &runs, &imageActions, &colorHistory, &layoutColors,
                                     &runBar,      &runQueue,    &sidePanels,   &nodeLibrary,  &recentFiles,  &chrome,
-                                    &mediaLibrary, &projects, &workspace, &canvasActions};
+                                    &mediaLibrary, &projects, &workspace, &canvasActions, &activeCanvas};
     // The registry is filled again when the packs or the trust change, so what is installed is
     // usable with no restart (#70). Made after what it refreshes, so it goes first.
     fugue::RegistryReloader reloader(&registry, addNodeTypes);

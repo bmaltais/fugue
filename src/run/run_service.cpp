@@ -381,7 +381,7 @@ private:
     Compilation compileRequest(const RunRequest &request) {
         refill(m_compileRegistry, m_compileTypes);
         return compileForRun(request.document, m_compileRegistry, {request.target, {}, request.entered},
-                             runCompileSetup(m_setup.registerProviders, m_trust));
+                             runCompileSetup(m_setup.registerProviders, m_trust, m_setup.activeCanvas));
     }
 
     // The run.done of a waiting run whose entry someone else took: only a cancel does that

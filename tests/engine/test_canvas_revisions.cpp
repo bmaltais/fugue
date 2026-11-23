@@ -6,6 +6,7 @@
 #include <QJsonObject>
 #include <QtTest>
 
+#include "engine/canvas_store.h"
 #include "engine/compile_for_run.h"
 #include "engine/document.h"
 #include "engine/registry.h"
@@ -27,7 +28,7 @@ Registry makeRegistry() {
     Registry r;
     const char *manifests[] = {
         "{'manifest': 1, 'id': 'fugue/canvas-region', 'version': '1.0.0', 'name': 'Canvas Region', 'runtime': {'kind': 'builtin'},"
-        " 'inputs': [{'name': 'canvas', 'type': 'text'}, {'name': 'revision', 'type': 'text', 'default': 'head'}],"
+        " 'inputs': [{'name': 'canvas', 'type': 'text', 'default': ''}, {'name': 'revision', 'type': 'text', 'default': 'head'}],"
         " 'outputs': [{'name': 'width', 'type': 'number'}]}",
         "{'manifest': 1, 'id': 'fugue/text', 'version': '1.0.0', 'name': 'Text', 'runtime': {'kind': 'builtin'},"
         " 'inputs': [{'name': 'text', 'type': 'text', 'default': 'x'}],"
@@ -154,6 +155,82 @@ private slots:
         QVERIFY(c.ok());
         QCOMPARE(fake.asked, 0);
         QVERIFY(c->nodes.value("r").inputs.value("revision").isEmpty());
+    }
+
+    // #246: an empty canvas is the Active canvas, named once at compile and recorded.
+    void anEmptyCanvasBecomesTheActiveCanvasAndIsRecorded() {
+        Fake fake;
+        RunCompileSetup setup;
+        setup.resolveCanvas = fake.resolver();
+        setup.activeCanvas = [] { return QString("canvas-aaaaaaaaaaaa"); };
+        for (const char *empty : {"'canvas': ''", "'canvas': '  '", "'revision': 'head'"}) {
+            Registry registry = makeRegistry();
+            const Compilation c = compileForRun(document(empty), registry, {}, setup);
+            QVERIFY(c.ok());
+            QCOMPARE(c->nodes.value("r").inputs.value("canvas").literal().toString(), QString("canvas-aaaaaaaaaaaa"));
+            QCOMPARE(regionRevision(c), hashA); // and its head is pinned too
+            QVERIFY(QJsonDocument(c->toJson()).toJson().contains("canvas-aaaaaaaaaaaa"));
+        }
+    }
+
+    void aPinnedCanvasKeepsItsIdWhateverIsActive() {
+        Fake fake;
+        RunCompileSetup setup;
+        setup.resolveCanvas = fake.resolver();
+        setup.activeCanvas = [] { return QString("canvas-bbbbbbbbbbbb"); };
+        Registry registry = makeRegistry();
+        const Compilation c = compileForRun(document("'canvas': 'canvas-aaaaaaaaaaaa'"), registry, {}, setup);
+        QVERIFY(c.ok());
+        QCOMPARE(c->nodes.value("r").inputs.value("canvas").literal().toString(), QString("canvas-aaaaaaaaaaaa"));
+    }
+
+    // The cache key is the node's inputs: another active canvas is another resolved id, so another key.
+    void anotherActiveCanvasIsAnotherResolvedGraph() {
+        Fake fake;
+        RunCompileSetup first;
+        first.resolveCanvas = fake.resolver();
+        first.activeCanvas = [] { return QString("canvas-aaaaaaaaaaaa"); };
+        Registry registry = makeRegistry();
+        const Compilation a = compileForRun(document("'canvas': ''"), registry, {}, first);
+        Registry again = makeRegistry();
+        const Compilation pinned = compileForRun(document("'canvas': 'canvas-aaaaaaaaaaaa'"), again, {}, first);
+        QVERIFY(a.ok() && pinned.ok());
+        QCOMPARE(a->nodes.value("r").inputs, pinned->nodes.value("r").inputs); // resolved, an active canvas is the pinned one
+    }
+
+    // The headless answer (no window): the shown canvas when the root has it, else the newest, else none.
+    void theActiveCanvasIsTheShownOneElseTheNewest() {
+        canvas::CanvasStore store = canvas::CanvasStore::forSession();
+        mask::PaintDocument doc(64, 64);
+        doc.addLayer(mask::LayerKind::Paint, "Base");
+        const QString older = store.create("older", doc, "test")->id;
+        QTest::qWait(5);
+        const QString newer = store.create("newer", doc, "test")->id;
+        QCOMPARE(activeCanvasOrNewest({}), newer); // no window, no shown canvas: the newest
+        QCOMPARE(activeCanvasOrNewest(older), older);
+        QCOMPARE(activeCanvasOrNewest("canvas-000000000000"), newer); // gone: the newest
+    }
+
+    void withNoActiveCanvasTheInputStaysEmptyForTheKernel() {
+        Fake fake;
+        RunCompileSetup setup;
+        setup.resolveCanvas = fake.resolver();
+        setup.activeCanvas = [] { return QString(); };
+        Registry registry = makeRegistry();
+        const Compilation c = compileForRun(document("'canvas': ''"), registry, {}, setup);
+        QVERIFY(c.ok());
+        QCOMPARE(fake.asked, 0);
+    }
+
+    void aLinkedCanvasIsNotTheActiveOne() {
+        Fake fake;
+        RunCompileSetup setup;
+        setup.resolveCanvas = fake.resolver();
+        setup.activeCanvas = [] { return QString("canvas-aaaaaaaaaaaa"); };
+        Registry registry = makeRegistry();
+        const Compilation c = compileForRun(document("'canvas': {'from': 't.text'}"), registry, {}, setup);
+        QVERIFY(c.ok());
+        QVERIFY(c->nodes.value("r").inputs.value("canvas").kind() == InputValue::Kind::Link);
     }
 
     void withoutAResolverNothingChanges() {
