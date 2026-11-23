@@ -80,8 +80,14 @@ say "building $file with Qt $("$qt/bin/qmake" -query QT_VERSION)"
 # --- build the app and install it into the AppDir -------------------------------------------------------------
 appdir=$work/AppDir
 rm -rf "$appdir" "$work/build"
+# glib's gio headers have a struct field called `signals`, which Qt's `signals` keyword turns into `public`: a
+# header that reaches them after Qt's macros fails (seen with aqtinstall's Qt 6.11.2 and Ubuntu 22.04's libvips,
+# whose pkg-config flags put glib on the include path). Reading gio first makes any later include a no-op.
+# The Arch build does not hit it, and the flag is harmless there.
+pkg-config --exists gio-2.0 || die "libglib2.0-dev (gio-2.0) is needed: libvips's headers use it"
+cxxflags="-include gio/gio.h $(pkg-config --cflags gio-2.0)"
 generator=(); command -v ninja >/dev/null && generator=(-G Ninja)
-cmake -S "$root" -B "$work/build" "${generator[@]}" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$qt" \
+cmake -S "$root" -B "$work/build" "${generator[@]}" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$qt" -DCMAKE_CXX_FLAGS="$cxxflags" \
   -DCMAKE_INSTALL_PREFIX=/usr >/dev/null
 cmake --build "$work/build" --target fugue --parallel "$(nproc)"
 DESTDIR=$appdir cmake --install "$work/build" --prefix /usr
