@@ -730,6 +730,14 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 - Why: a long run says what it is making (feedback while waiting), and the cost is a taste, so a setting inherited by projects. No control on the Sampler itself: the choice is about the machine, not the node.
 - Rule: Floor (the 28px `Choices` buttons are the existing ones). Primary (the three buttons, one choice). Destructive (none). Gaps (unchanged). Posture: pointer, once.
 
+### 2026-11-23 the live frame shows in every picture mode
+
+- Control: none new; the Sampler preview and Node pictures settings behave together (`CanvasRuns::show`, `RunThread::withThumbnails`).
+- Old: in Sinks and inputs only (or Smart, where a node's picture is dropped) a Sampler's live frame never showed: its picture slot was hidden and the frame's thumbnail was not even made.
+- New: while a node (or, on a group card, a node inside it) runs and sends live frames, its card shows the frame whatever the mode says. When the node ends, the picture goes again unless the mode keeps it, so the card is tall during the run and short after. A node whose own override is Hide picture shows no frame.
+- Why: feedback while waiting is the point of the preview (the mode is about the finished graph, a frame is about now); the override is the owner's explicit word on one node and wins, as it does over the mode. The card growing while a run is live is expected, the way a card grows when a result arrives in Smart mode.
+- Rule: Floor (none). Primary (none). Destructive (none). Gaps (unchanged). Posture: none. Not seen in a real window.
+
 ### 2026-11-22 node pictures: mode and per-node override (#263)
 
 - Control: Settings > General, `src/settings/SettingsPanel.qml` "Node pictures" (`pictureMode`), a `Choices` of three (Smart, Sinks and inputs only, All), after Magnify small nodes on hover, before Reopen tabs at start; the Graph header's View > Picture submenu (`view.picture-smart`, `view.picture-sinks`, `view.picture-all`, one checked); `node.picture-show`, `node.picture-hide` and `node.picture-default` ("Show picture", "Hide picture", "Default picture") in the Graph header's Node menu and the node's right-click menu, after Pin, left out where they would change nothing. Writes `picture_mode` in settings.json and `layout.nodes.<id>.picture`.

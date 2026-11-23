@@ -221,6 +221,7 @@ private:
     const Registry *m_registry;
     struct NodeInfo {
         bool picture = true;      // the node shows its picture now (#263): the mode, its type and its override say so
+        bool hideOverride = false; // the node's own Hide picture: no live frame either
         bool showsResult = false; // Preview, Save Image: a placeholder until a result comes
         bool savesFile = false;   // Save Image, Save Video, Save Audio: its chip or player names the file it wrote
         bool compares = false;    // Compare Images: its slot is a viewer of A and B (#62)

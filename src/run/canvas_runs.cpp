@@ -367,7 +367,13 @@ void CanvasRuns::show(const QString &tab, const QString &node) {
     // (Load Image before it runs), else a dimmed placeholder on a node made to show one.
     const NodeInfo info = m_nodeInfo.value(node);
     const Picture cropped = info.followsInput() ? cropSource(tab, node) : Picture{};
-    if (!info.picture) {
+    // A node whose picture the mode hides still shows the live frame of its running step (or of a
+    // running node inside a group), unless its own override hides it; the slot goes when the run ends.
+    const bool liveHidden = !info.picture && !info.hideOverride && view.live && !view.thumbnail.isEmpty()
+                            && view.thumbnailWidth > 0 && view.thumbnailHeight > 0 && aggregate(view) == QLatin1String("running");
+    if (liveHidden) {
+        image(view.thumbnail, view.thumbnailWidth, view.thumbnailHeight, {});
+    } else if (!info.picture) {
         // Hidden (#263): no slot, so the node is as short as its rows.
     } else if (info.followsInput()) {
         // A Crop shows what arrives at its input, never its own result: the frame is drawn over it.
@@ -859,6 +865,7 @@ void CanvasRuns::readNodes() {
         }
         info.showsResult = it->type == QLatin1String("fugue/preview") || info.savesFile || info.compares;
         info.picture = m_canvas->showsPicture(it.key());
+        info.hideOverride = m_canvas->pictureOverride(it.key()) == PictureOverride::Hide;
         if (info.compares) {
             // What made A and B names them: the linked node's title, else the plain letter.
             const auto labelOf = [&](const char *name, const QString &fallback) {
