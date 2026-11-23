@@ -17,6 +17,7 @@
 
 #include "engine/atomic_file.h"
 #include "engine/canonical.h"
+#include "engine/canvas_layer_merge.h"
 #include "engine/canvas_layer_ops.h"
 #include "engine/canvas_resize.h"
 #include "engine/hash.h"
@@ -84,33 +85,157 @@ bool isCanvasId(const QString &text) {
     return pattern.match(text).hasMatch();
 }
 
-int Tree::tileCount() const {
-    int count = 0;
-    for (const LayerRecord &layer : layers)
-        count += int(layer.tiles.size());
+int groupDepth(const LayerRecord &layer) {
+    if (!layer.group)
+        return 0;
+    int deepest = 0;
+    for (const LayerRecord &child : layer.children)
+        deepest = std::max(deepest, groupDepth(child));
+    return deepest + 1;
+}
+
+bool treeHasGroup(const Tree &tree) {
+    return std::any_of(tree.layers.begin(), tree.layers.end(), [](const LayerRecord &l) { return l.group; });
+}
+
+Error groupsRefused(const QString &what) {
+    return makeError(QStringLiteral("input_invalid"), QStringLiteral("%1 cannot be done while the canvas has groups: it would turn each group into one flat layer.").arg(what),
+                     QStringLiteral("Ungroup the layers first (Layer > Ungroup layers, or `fugue canvas layer ungroup`)."));
+}
+
+Result<bool> CanvasStore::hasGroups(const QString &canvasId, const QString &revisionId) const {
+    const Result<Revision> found = revision(canvasId, revisionId);
+    if (!found)
+        return Result<bool>(found.errors());
+    const Result<Tree> stored = tree(found->tree);
+    if (!stored)
+        return Result<bool>(stored.errors());
+    return treeHasGroup(stored.value());
+}
+
+int LayerRecord::tileCount() const {
+    int count = int(tiles.size());
+    for (const LayerRecord &child : children)
+        count += child.tileCount();
     return count;
 }
 
+int Tree::tileCount() const {
+    int count = 0;
+    for (const LayerRecord &layer : layers)
+        count += layer.tileCount();
+    return count;
+}
+
+namespace {
+
+QJsonObject layerToJson(const LayerRecord &layer) {
+    QJsonObject tiles;
+    for (const auto &[key, hash] : layer.tiles)
+        tiles.insert(key.text(), hash);
+    // A group is kind "group" with its children; a store from before groups reads it as an unknown kind (canvas_corrupt) rather than as an empty layer.
+    QJsonObject item{{"name", layer.name}, {"kind", layer.group ? QStringLiteral("group") : kindName(layer.kind)}, {"visible", layer.visible}, {"opacity", layer.opacity}, {"tiles", tiles}};
+    // Only what differs from the default, so a tree from before these existed has the same hash.
+    if (layer.group) {
+        QJsonArray children;
+        for (const LayerRecord &child : layer.children)
+            children.append(layerToJson(child));
+        item.insert("children", children);
+    }
+    if (!layer.compositeOp.isEmpty())
+        item.insert("blend", layer.compositeOp);
+    if (layer.hasMask) {
+        QJsonObject maskTiles;
+        for (const auto &[key, hash] : layer.maskTiles)
+            maskTiles.insert(key.text(), hash);
+        item.insert("mask", QJsonObject{{"enabled", layer.maskEnabled}, {"tiles", maskTiles}});
+    }
+    if (!layer.producer.isEmpty() || !layer.created.isEmpty())
+        item.insert("origin", QJsonObject{{"producer", layer.producer}, {"time", layer.created}});
+    return item;
+}
+
+Result<LayerRecord> layerFromJson(const QJsonObject &item, int width, int height, int depth) {
+    LayerRecord layer;
+    const QString kind = item.value("kind").toString();
+    layer.group = kind == QLatin1String("group");
+    if (layer.group)
+        layer.kind = LayerKind::Paint;
+    if ((!layer.group && !kindFromName(kind, &layer.kind)) || !item.value("name").isString() || !item.value("visible").isBool() ||
+        !item.value("opacity").isDouble())
+        return corrupt(QStringLiteral("a layer of a tree is not well formed"));
+    layer.name = item.value("name").toString();
+    layer.visible = item.value("visible").toBool();
+    layer.opacity = item.value("opacity").toDouble();
+    const QJsonObject tiles = item.value("tiles").toObject();
+    if ((layer.kind == LayerKind::Picture || layer.group) && !tiles.isEmpty())
+        return corrupt(QStringLiteral("a picture layer or a group has tiles"));
+    const auto readTiles = [width, height](const QJsonObject &from, TileMap *to) {
+        for (auto it = from.begin(); it != from.end(); ++it) {
+            TileKey key;
+            if (!TileKey::parse(it.key(), &key) || key.x >= tilesAcross(width) || key.y >= tilesDown(height) || !isSha256(it.value().toString()))
+                return false;
+            to->emplace(key, it.value().toString());
+        }
+        return true;
+    };
+    if (!readTiles(tiles, &layer.tiles))
+        return corrupt(QStringLiteral("a tile of a tree is not well formed"));
+    if (layer.group) {
+        const QJsonArray children = item.value("children").toArray();
+        if (children.isEmpty() || depth >= maxGroupDepth)
+            return corrupt(QStringLiteral("a group of a tree is empty or nested too deep"));
+        for (const QJsonValue &value : children) {
+            Result<LayerRecord> child = layerFromJson(value.toObject(), width, height, depth + 1);
+            if (!child)
+                return child;
+            if (!child->group && child->kind != LayerKind::Paint)
+                return corrupt(QStringLiteral("a group holds a mask or picture layer"));
+            layer.children.push_back(std::move(child.value()));
+        }
+    }
+    if (item.contains("blend")) {
+        layer.compositeOp = item.value("blend").toString();
+        if (layer.compositeOp.isEmpty() || layer.compositeOp.size() > 64)
+            return corrupt(QStringLiteral("a layer's blend is not well formed"));
+    }
+    if (item.contains("mask")) {
+        const QJsonObject mask = item.value("mask").toObject();
+        if (layer.kind == LayerKind::Mask || !mask.value("enabled").isBool() || !readTiles(mask.value("tiles").toObject(), &layer.maskTiles))
+            return corrupt(QStringLiteral("a layer's mask is not well formed"));
+        layer.hasMask = true;
+        layer.maskEnabled = mask.value("enabled").toBool();
+    }
+    if (item.contains("origin")) {
+        const QJsonObject origin = item.value("origin").toObject();
+        layer.producer = origin.value("producer").toString();
+        layer.created = origin.value("time").toString();
+    }
+    return layer;
+}
+
+// Counts the layers (groups' children included) and tiles (masks included) of a JSON layer list; false past a cap or too deep.
+bool withinCaps(const QJsonArray &layers, int depth, int *layerTotal, int *tileTotal) {
+    if (depth > maxGroupDepth)
+        return false;
+    for (const QJsonValue &value : layers) {
+        const QJsonObject item = value.toObject();
+        *layerTotal += 1;
+        *tileTotal += item.value("tiles").toObject().size() + item.value("mask").toObject().value("tiles").toObject().size();
+        if (*layerTotal > maxTreeLayers || *tileTotal > maxTreeTiles)
+            return false;
+        if (!withinCaps(item.value("children").toArray(), depth + 1, layerTotal, tileTotal))
+            return false;
+    }
+    return true;
+}
+
+} // namespace
+
 QJsonObject treeToJson(const Tree &tree) {
     QJsonArray layers;
-    for (const LayerRecord &layer : tree.layers) {
-        QJsonObject tiles;
-        for (const auto &[key, hash] : layer.tiles)
-            tiles.insert(key.text(), hash);
-        QJsonObject item{{"name", layer.name}, {"kind", kindName(layer.kind)}, {"visible", layer.visible}, {"opacity", layer.opacity}, {"tiles", tiles}};
-        // Only what differs from the default, so a tree from before these existed has the same hash.
-        if (!layer.compositeOp.isEmpty())
-            item.insert("blend", layer.compositeOp);
-        if (layer.hasMask) {
-            QJsonObject maskTiles;
-            for (const auto &[key, hash] : layer.maskTiles)
-                maskTiles.insert(key.text(), hash);
-            item.insert("mask", QJsonObject{{"enabled", layer.maskEnabled}, {"tiles", maskTiles}});
-        }
-        if (!layer.producer.isEmpty() || !layer.created.isEmpty())
-            item.insert("origin", QJsonObject{{"producer", layer.producer}, {"time", layer.created}});
-        layers.append(item);
-    }
+    for (const LayerRecord &layer : tree.layers)
+        layers.append(layerToJson(layer));
     return QJsonObject{{"format", storeFormat}, {"width", tree.width}, {"height", tree.height}, {"layers", layers}};
 }
 
@@ -122,54 +247,19 @@ Result<Tree> treeFromJson(const QJsonObject &object) {
     tree.height = object.value("height").toInt();
     if (tree.width < 1 || tree.height < 1 || qint64(tree.width) * tree.height > mask::paintFileMaxPixels)
         return corrupt(QStringLiteral("a tree has a size that cannot be"));
-    // A tree comes from files that may be someone else's: its size is bounded before it is walked.
+    // A tree comes from files that may be someone else's: its size is bounded before it is walked. Layers and tiles are
+    // counted through the groups' children too (to the depth a tree may have), masks included.
     const QJsonArray layerList = object.value("layers").toArray();
-    if (layerList.size() > maxTreeLayers)
-        return corrupt(QStringLiteral("a tree has more than %1 layers").arg(maxTreeLayers));
-    int tileTotal = 0;
+    int layerTotal = 0, tileTotal = 0;
+    if (!withinCaps(layerList, 0, &layerTotal, &tileTotal))
+        return corrupt(layerTotal > maxTreeLayers ? QStringLiteral("a tree has more than %1 layers").arg(maxTreeLayers)
+                                                  : tileTotal > maxTreeTiles ? QStringLiteral("a tree has more than %1 tiles").arg(maxTreeTiles)
+                                                                             : QStringLiteral("a tree has groups nested too deep"));
     for (const QJsonValue &value : layerList) {
-        const QJsonObject item = value.toObject();
-        if (tileTotal += item.value("tiles").toObject().size() + item.value("mask").toObject().value("tiles").toObject().size(); tileTotal > maxTreeTiles)
-            return corrupt(QStringLiteral("a tree has more than %1 tiles").arg(maxTreeTiles));
-        LayerRecord layer;
-        if (!kindFromName(item.value("kind").toString(), &layer.kind) || !item.value("name").isString() || !item.value("visible").isBool() ||
-            !item.value("opacity").isDouble())
-            return corrupt(QStringLiteral("a layer of a tree is not well formed"));
-        layer.name = item.value("name").toString();
-        layer.visible = item.value("visible").toBool();
-        layer.opacity = item.value("opacity").toDouble();
-        const QJsonObject tiles = item.value("tiles").toObject();
-        if (layer.kind == LayerKind::Picture && !tiles.isEmpty())
-            return corrupt(QStringLiteral("a picture layer has tiles"));
-        const auto readTiles = [&tree](const QJsonObject &from, TileMap *to) {
-            for (auto it = from.begin(); it != from.end(); ++it) {
-                TileKey key;
-                if (!TileKey::parse(it.key(), &key) || key.x >= tilesAcross(tree.width) || key.y >= tilesDown(tree.height) || !isSha256(it.value().toString()))
-                    return false;
-                to->emplace(key, it.value().toString());
-            }
-            return true;
-        };
-        if (!readTiles(tiles, &layer.tiles))
-            return corrupt(QStringLiteral("a tile of a tree is not well formed"));
-        if (item.contains("blend")) {
-            layer.compositeOp = item.value("blend").toString();
-            if (layer.compositeOp.isEmpty() || layer.compositeOp.size() > 64)
-                return corrupt(QStringLiteral("a layer's blend is not well formed"));
-        }
-        if (item.contains("mask")) {
-            const QJsonObject mask = item.value("mask").toObject();
-            if (layer.kind == LayerKind::Mask || !mask.value("enabled").isBool() || !readTiles(mask.value("tiles").toObject(), &layer.maskTiles))
-                return corrupt(QStringLiteral("a layer's mask is not well formed"));
-            layer.hasMask = true;
-            layer.maskEnabled = mask.value("enabled").toBool();
-        }
-        if (item.contains("origin")) {
-            const QJsonObject origin = item.value("origin").toObject();
-            layer.producer = origin.value("producer").toString();
-            layer.created = origin.value("time").toString();
-        }
-        tree.layers.push_back(std::move(layer));
+        Result<LayerRecord> layer = layerFromJson(value.toObject(), tree.width, tree.height, 0);
+        if (!layer)
+            return Result<Tree>(layer.errors());
+        tree.layers.push_back(std::move(layer.value()));
     }
     return tree;
 }
@@ -314,6 +404,10 @@ Result<Revision> CanvasStore::addCommit(const QString &canvasId, const QString &
 }
 
 Result<QString> CanvasStore::storeTreeRecord(const Tree &tree) {
+    for (const LayerRecord &layer : tree.layers)
+        if (groupDepth(layer) > maxGroupDepth)
+            return Result<QString>(makeError(QStringLiteral("input_invalid"), QStringLiteral("Groups nest at most %1 deep.").arg(maxGroupDepth),
+                                             QStringLiteral("Ungroup one of the outer groups first.")));
     const QJsonObject json = treeToJson(tree);
     const QString hash = canonicalHash(json);
     if (hash.isEmpty())
@@ -457,6 +551,11 @@ Result<Commit> CanvasStore::resize(const QString &canvasId, const QString &expec
         return Result<Commit>(canvas.errors());
     if (canvas->head != expected)
         return Commit{Revision{}, HeadMove{false, canvas->head}};
+    const Result<bool> grouped = hasGroups(canvasId, expected);
+    if (!grouped)
+        return Result<Commit>(grouped.errors());
+    if (grouped.value())
+        return Result<Commit>(groupsRefused(QStringLiteral("Resizing the canvas")));
     const Result<PaintDocument> current = load(canvasId, expected);
     if (!current)
         return Result<Commit>(current.errors());
@@ -771,6 +870,8 @@ Result<Accepted> CanvasStore::accept(const QString &canvasId, const QString &rev
                                               QStringLiteral("Revision %1 was made from an older revision than the head and %2, so it cannot be placed on the head.").arg(revisionId.left(19), why),
                                               QStringLiteral("Drop it and run the fill again from the canvas as it is now.")));
         };
+        if (treeHasGroup(before.value()) || treeHasGroup(after.value()) || treeHasGroup(now.value()))
+            return Result<Accepted>(groupsRefused(QStringLiteral("Placing a layer on a newer head")));
         if (before->width != now->width || before->height != now->height || after->width != now->width || after->height != now->height)
             return conflict(QStringLiteral("the canvas has another size now"));
         if (after->layers.size() <= before->layers.size())
@@ -834,24 +935,39 @@ Error noStep(const QString &what) {
 }
 
 // Every tile a tree refers to, layer and mask, for checking that an edit added none.
+void collectTiles(const LayerRecord &layer, std::set<QString> *all) {
+    for (const auto &entry : layer.tiles)
+        all->insert(entry.second);
+    for (const auto &entry : layer.maskTiles)
+        all->insert(entry.second);
+    for (const LayerRecord &child : layer.children)
+        collectTiles(child, all);
+}
+
 std::set<QString> tilesOf(const Tree &tree) {
     std::set<QString> all;
-    for (const LayerRecord &layer : tree.layers) {
-        for (const auto &entry : layer.tiles)
-            all.insert(entry.second);
-        for (const auto &entry : layer.maskTiles)
-            all.insert(entry.second);
-    }
+    for (const LayerRecord &layer : tree.layers)
+        collectTiles(layer, &all);
     return all;
 }
 
 } // namespace
 
 Result<Commit> CanvasStore::editLayers(const QString &canvasId, const QString &base, const LayerEdit &edit, const QString &producer) {
+    if (layerOpNeedsPixels(edit.op)) {
+        // Merge down and Flatten composite pixels: they read the tiles of the layers and store the one they make.
+        const TileReader read = [this](const QString &hash, int width, int height, int channels) { return readBlob(hash, width, height, channels); };
+        const TileSink sink = [this](const TileKey &, const QString &hash, const MaskPaint &tile) { return storeBlob(hash, tile); };
+        return commitTree(canvasId, base, [&](const Tree &tree) { return applyPixelEdit(tree, edit, read, sink); }, producer, true);
+    }
     return commitEdit(canvasId, base, edit, producer, false);
 }
 
 Result<Commit> CanvasStore::commitEdit(const QString &canvasId, const QString &base, const LayerEdit &edit, const QString &producer, bool newTiles) {
+    return commitTree(canvasId, base, [&edit](const Tree &tree) { return applyLayerEdit(tree, edit); }, producer, newTiles);
+}
+
+Result<Commit> CanvasStore::commitTree(const QString &canvasId, const QString &base, const std::function<Result<Tree>(const Tree &)> &change, const QString &producer, bool newTiles) {
     const Result<CanvasInfo> canvas = info(canvasId);
     if (!canvas)
         return Result<Commit>(canvas.errors());
@@ -863,7 +979,7 @@ Result<Commit> CanvasStore::commitEdit(const QString &canvasId, const QString &b
     const Result<Tree> before = tree(from->tree);
     if (!before)
         return Result<Commit>(before.errors());
-    const Result<Tree> after = applyLayerEdit(before.value(), edit);
+    const Result<Tree> after = change(before.value());
     if (!after)
         return Result<Commit>(after.errors());
     if (treeToJson(after.value()) == treeToJson(before.value()))
@@ -1042,6 +1158,19 @@ Result<PaintDocument> documentOf(const Tree &stored, const std::function<Result<
         }
         if (layer.kind == LayerKind::Picture) {
             document.loadLayer(info, MaskPaint(1, 1, 4), mask ? &*mask : nullptr);
+            continue;
+        }
+        if (layer.group) {
+            // A document has no groups: a group is the one paint layer its children composite to (a consumer of the
+            // revision, a node or an export, sees the group as drawn); the group's own opacity, blend and mask apply as to any layer.
+            Tree inner;
+            inner.width = width;
+            inner.height = height;
+            inner.layers = layer.children;
+            const Result<PaintDocument> children = documentOf(inner, read);
+            if (!children)
+                return Result<PaintDocument>(children.errors());
+            document.loadLayer(info, children->flatten(), mask ? &*mask : nullptr);
             continue;
         }
         const Result<MaskPaint> pixels = assemble(layer.channels(), layer.tiles);

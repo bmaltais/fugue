@@ -217,6 +217,66 @@ private slots:
         QCOMPARE(revisionCount(), 2);
         QCOMPARE(names(model.layers()), (QStringList{"Fill 2", "Fill 1", "Base"})); // its layers are shown, read only
     }
+
+    // ---- #252: the Layer menu's operations, each one revision and one undo ----------------------------------
+    void newLayerGoesAboveTheCurrentOneAndIsSelected() {
+        CanvasViewModel model;
+        open(model);
+        model.selectLayer(1); // Fill 1
+        QVERIFY(model.newLayer());
+        QCOMPARE(names(model.layers()), (QStringList{"Fill 2", "Layer 4", "Fill 1", "Base"}));
+        QCOMPARE(model.selection(), at({2}));
+        QCOMPARE(revisionCount(), 2);
+        QVERIFY(model.undo());
+        QCOMPARE(names(model.layers()), (QStringList{"Fill 2", "Fill 1", "Base"}));
+    }
+
+    void mergeDownFlattenGroupAndUngroupAreOneRevisionEach() {
+        CanvasViewModel model;
+        open(model);
+        QVERIFY(model.mergeDown(2));
+        QCOMPARE(names(model.layers()), (QStringList{"Fill 1", "Base"}));
+        QCOMPARE(model.selection(), at({1}));
+        QCOMPARE(revisionCount(), 2);
+        QVERIFY(model.undo());
+        QCOMPARE(names(model.layers()), (QStringList{"Fill 2", "Fill 1", "Base"}));
+        QVERIFY(!model.mergeDown(0)); // nothing under the bottom layer
+
+        QVERIFY(model.groupLayers(at({1, 2})));
+        QCOMPARE(names(model.layers()), (QStringList{"Group 4", "Base"}));
+        QCOMPARE(model.layers().first().toMap().value("kind").toString(), QStringLiteral("group"));
+        QCOMPARE(model.layers().first().toMap().value("children").toInt(), 2);
+        QCOMPARE(model.selection(), at({1}));
+        QVERIFY(model.ungroup(at({1})));
+        QCOMPARE(names(model.layers()), (QStringList{"Fill 2", "Fill 1", "Base"}));
+        QCOMPARE(model.selection(), at({1, 2}));
+        QVERIFY(!model.ungroup(at({0}))); // Base is no group
+
+        QVERIFY(model.flatten());
+        QCOMPARE(names(model.layers()), (QStringList{"Background"}));
+        QVERIFY(!model.flatten()); // flat already
+        QVERIFY(model.error().isEmpty());
+    }
+
+    void thePropertiesDialogIsOneRevision() {
+        CanvasViewModel model;
+        open(model);
+        QVERIFY(model.setProperties(1, QVariantMap{{"name", "Red"}, {"opacity", 0.4}, {"blend", "multiply"}, {"maskEnabled", false}}));
+        QCOMPARE(revisionCount(), 2);
+        const QVariantMap row = model.layers().at(1).toMap();
+        QCOMPARE(row.value("name").toString(), QStringLiteral("Red"));
+        QCOMPARE(row.value("opacity").toDouble(), 0.4);
+        QCOMPARE(row.value("blend").toString(), QStringLiteral("multiply"));
+        QCOMPARE(row.value("maskEnabled").toBool(), false);
+        QVERIFY(model.setProperties(1, QVariantMap{{"removeMask", true}}));
+        QCOMPARE(model.layers().at(1).toMap().value("hasMask").toBool(), false);
+        QVERIFY(model.undo());
+        QCOMPARE(model.layers().at(1).toMap().value("hasMask").toBool(), true);
+        QVERIFY(model.undo());
+        QCOMPARE(names(model.layers()), (QStringList{"Fill 2", "Fill 1", "Base"})); // one undo took the whole dialog back
+        QVERIFY(!model.setProperties(1, QVariantMap{}));
+        QVERIFY(model.stepName(model.revisionB()).size() > 0);
+    }
 };
 
 QTEST_MAIN(TestCanvasLayersModel)

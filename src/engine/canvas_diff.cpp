@@ -66,7 +66,7 @@ TreeDiff diffTrees(const Tree &a, const Tree &b) {
             continue;
         for (int i = 0; i < int(a.layers.size()); ++i)
             if (!used[i] && a.layers[i].kind == b.layers[j].kind && a.layers[i].tiles == b.layers[j].tiles &&
-                a.layers[i].maskTiles == b.layers[j].maskTiles) {
+                a.layers[i].maskTiles == b.layers[j].maskTiles && a.layers[i].group == b.layers[j].group && a.layers[i].children == b.layers[j].children) {
                 pairOf[j] = i;
                 used[i] = true;
                 break;
@@ -87,8 +87,10 @@ TreeDiff diffTrees(const Tree &a, const Tree &b) {
         const LayerRecord &earlier = a.layers[pairOf[j]];
         if (earlier.name != later.name)
             entry.properties << QStringLiteral("name");
-        if (earlier.kind != later.kind)
+        if (earlier.kind != later.kind || earlier.group != later.group)
             entry.properties << QStringLiteral("kind");
+        if (earlier.children != later.children)
+            entry.properties << QStringLiteral("contents"); // a group's layers (#252)
         if (earlier.visible != later.visible)
             entry.properties << QStringLiteral("visible");
         if (earlier.opacity != later.opacity)

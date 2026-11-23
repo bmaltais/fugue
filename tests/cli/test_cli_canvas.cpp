@@ -373,6 +373,44 @@ private slots:
     }
 
 
+    // New, merge, group, ungroup and flatten from the command line (#252): one revision each.
+    void layersAreCreatedMergedGroupedAndFlattened() {
+        const QString source = oraFile("in.ora"); // Paint (0), Mask (1)
+        const QString id = fugue({"canvas", "import", source, "--json"}).data().value("canvas").toString();
+        const auto layers = [&] { return fugue({"canvas", "layer", "list", id, "--json"}).data().value("layers").toArray(); };
+
+        const Outcome made = fugue({"canvas", "layer", "new", id, "--name", "Sky", "--json"});
+        QVERIFY2(made.exitCode == 0, made.out + made.err);
+        QCOMPARE(layers().at(0).toObject().value("name").toString(), QString("Sky"));
+        QCOMPARE(fugue({"canvas", "layer", "new", id, "0", "--json"}).exitCode, 0); // above the bottom one
+        QCOMPARE(layers().size(), 4);
+
+        const Outcome grouped = fugue({"canvas", "layer", "group", id, "0", "1", "--name", "Pair", "--json"});
+        QVERIFY2(grouped.exitCode == 0, grouped.out + grouped.err);
+        const QJsonObject top = layers().at(0).toObject();
+        QCOMPARE(top.value("name").toString(), QString("Sky"));
+        const QJsonObject pair = layers().at(2).toObject(); // top first: Sky, Mask, Pair
+        QCOMPARE(pair.value("kind").toString(), QString("group"));
+        QCOMPARE(pair.value("children").toArray().size(), 2);
+        QCOMPARE(fugue({"canvas", "layer", "ungroup", id, "Pair", "--json"}).exitCode, 0);
+        QCOMPARE(layers().size(), 4);
+        QCOMPARE(fugue({"canvas", "layer", "ungroup", id, "0", "--json"}).errorCode(), QString("input_invalid"));
+
+        // Merge down: the layer into the one under it (a mask layer does not merge).
+        QCOMPARE(fugue({"canvas", "layer", "merge", id, "Layer 4", "--json"}).exitCode, 0);
+        QCOMPARE(layers().size(), 3);
+        QCOMPARE(fugue({"canvas", "layer", "merge", id, "Sky", "--json"}).errorCode(), QString("input_invalid")); // the Mask is under it
+        QCOMPARE(fugue({"canvas", "layer", "merge", id, "0", "--json"}).errorCode(), QString("input_invalid"));
+        QCOMPARE(fugue({"canvas", "layer", "merge", id, "--json"}).errorCode(), QString("usage"));
+
+        const Outcome flat = fugue({"canvas", "layer", "flatten", id, "--json"});
+        QVERIFY2(flat.exitCode == 0, flat.out + flat.err);
+        const QJsonArray after = layers();
+        QCOMPARE(after.at(after.size() - 1).toObject().value("name").toString(), QString("Background"));
+        QCOMPARE(fugue({"canvas", "layer", "flatten", id, "0", "--json"}).errorCode(), QString("usage"));
+        QCOMPARE(fugue({"canvas", "layer", "rm", id, "0", "--name", "x", "--json"}).errorCode(), QString("usage"));
+    }
+
     // Layer edits from the command line (#226): each is one revision of the head, named by position or name.
     void layersAreListedEditedAndUndone() {
         const QString source = oraFile("in.ora"); // Paint (0), Mask (1)

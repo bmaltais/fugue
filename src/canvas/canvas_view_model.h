@@ -17,7 +17,7 @@
 //    goes along and `headNotice` says what came, with Undo.
 //  - layers (#226): `layers` are the shown revision's layers, top first, as {position (0 is the bottom), name, kind,
 //    visible, opacity, blend (an id of blendModes, or "" for an op Fugue does not draw), compositeOp, hasMask, maskEnabled,
-//    producer, from (the producer as a person reads it), created, depth (0: groups are later), thumbnail, maskThumbnail
+//    producer, from (the producer as a person reads it), created, depth (0: a group is one row, its children inside it are not listed; kind "group"), thumbnail, maskThumbnail
 //    (small PNGs of the layer's own pixels and of its mask)}. `selection` is a list of positions (ctrl/shift add, as an
 //    outliner does), kept across an edit. Every edit (setVisible, setOpacity, setBlend, rename, removeLayers, duplicate,
 //    moveLayers, raise/lower, setMaskEnabled, removeMask) is CanvasStore::editLayers on the shown revision when it is
@@ -143,6 +143,17 @@ public:
     Q_INVOKABLE bool dropAt(const QVariantList &positions, int gap);
     Q_INVOKABLE bool setMaskEnabled(const QVariantList &positions, bool enabled);
     Q_INVOKABLE bool removeMask(const QVariantList &positions);
+    // #252, the Layer menu: each is one revision of the head. newLayer puts an empty paint layer above the current one (on top
+    // when none is) and selects it; mergeDown draws the layer at `position` into the one under it (selected after); flatten
+    // makes every shown layer one; groupLayers puts the layers into a new group (selected); ungroup takes the children of the
+    // groups out (selected). setProperties applies what a Layer properties dialog changed to one layer as ONE revision: any of
+    // `name`, `opacity` (0 to 1), `blend` (an id of blendModes), `maskEnabled` and `removeMask` (true), those that differ.
+    Q_INVOKABLE bool newLayer();
+    Q_INVOKABLE bool mergeDown(int position);
+    Q_INVOKABLE bool flatten();
+    Q_INVOKABLE bool groupLayers(const QVariantList &positions);
+    Q_INVOKABLE bool ungroup(const QVariantList &positions);
+    Q_INVOKABLE bool setProperties(int position, const QVariantMap &changes);
     // Empties the canvas (File > Clear canvas): ONE new revision of the Head, the same size, one empty layer; Undo takes it
     // back. False when the Head is not what is shown.
     Q_INVOKABLE bool clearCanvas();

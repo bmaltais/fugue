@@ -6,7 +6,8 @@ import QtQuick.Layouts
 import Fugue
 import "../menu"
 
-// The questions of the Canvas view's File menu (#232 slice B): Rename canvas…, Share… (#249), Clear canvas… and Delete canvas…. Each
+// The questions of the Canvas view's menus: File's Rename canvas…, Share… (#249), Clear canvas… and Delete canvas… (#232 slice B), and
+// Layer's Layer properties… (#252: name, opacity, blend mode and layer mask of one layer, applied as ONE revision). Each
 // asks first with the safe answer highlighted and focused (docs/ui-ergonomics.md D8, D9); Delete and Clear are in the
 // danger tint, after the wider gap. They act through the view's model (`view.backend`).
 Item {
@@ -23,6 +24,123 @@ Item {
     function askShare() { shareAsk.open() }
     function askClear() { clearAsk.open() }
     function askDelete() { deleteAsk.open() }
+    // Layer properties… of the layer at `position`: what the dialog shows is that layer's now; Apply writes what differs.
+    property var propsRow: null
+    property string propsBlend: "normal"
+    property bool propsMaskOn: true
+    property bool propsMaskRemove: false
+    property real propsOpacity: 1
+    function askProperties(position) {
+        const row = view.backend.layers.find(r => r.position === position)
+        if (!row)
+            return
+        propsRow = row
+        propsBlend = row.blend !== "" ? row.blend : "normal"
+        propsMaskOn = row.maskEnabled
+        propsMaskRemove = false
+        propsOpacity = row.opacity
+        propsName.text = row.name
+        propsAsk.open()
+    }
+    function applyProperties() {
+        const row = propsRow
+        const changes = {}
+        const name = propsName.text.trim()
+        if (name !== "" && name !== row.name)
+            changes.name = name
+        if (Math.abs(propsOpacity - row.opacity) > 0.0005)
+            changes.opacity = propsOpacity
+        if (row.blend !== "" && propsBlend !== row.blend)
+            changes.blend = propsBlend
+        if (row.hasMask && propsMaskRemove)
+            changes.removeMask = true
+        else if (row.hasMask && propsMaskOn !== row.maskEnabled)
+            changes.maskEnabled = propsMaskOn
+        propsAsk.close()
+        if (Object.keys(changes).length > 0)
+            view.backend.setProperties(row.position, changes)
+    }
+
+    Question {
+        id: propsAsk
+        objectName: "canvasPropertiesAsk"
+        onOpened: { propsName.forceActiveFocus(); propsName.selectAll() }
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 3 * root.u
+            Label { text: qsTr("Layer properties"); font.bold: true; Layout.fillWidth: true }
+            Label { text: qsTr("Name"); color: root.look.label }
+            ThemedTextField {
+                id: propsName
+                objectName: "canvasPropertiesName"
+                Layout.fillWidth: true
+                onAccepted: propsOk.clicked()
+                Accessible.name: qsTr("Layer name")
+            }
+            DragNumberField {
+                objectName: "canvasPropertiesOpacity"
+                Layout.fillWidth: true
+                look: root.look
+                label: qsTr("Opacity")
+                tip: qsTr("Drag to change, click to type, double-click for 100%; Ctrl snaps to 10%, Shift is finer")
+                value: root.propsOpacity
+                format: v => qsTr("%1%").arg(Math.round(v * 100))
+                parse: text => Number(String(text).replace("%", "").trim()) / 100
+                onCommitted: v => root.propsOpacity = v
+            }
+            Label { text: qsTr("Blend mode"); color: root.look.label; visible: root.propsRow !== null && root.propsRow.blend !== "" }
+            Flow {
+                Layout.fillWidth: true
+                spacing: root.u
+                visible: root.propsRow !== null && root.propsRow.blend !== ""
+                Repeater {
+                    model: root.view.backend.blendModes
+                    ViewButton {
+                        required property var modelData
+                        objectName: "canvasPropertiesBlend-" + modelData.id
+                        look: root.look
+                        accented: false
+                        text: modelData.label
+                        current: root.propsBlend === modelData.id
+                        onTapped: root.propsBlend = modelData.id
+                    }
+                }
+            }
+            Label { text: qsTr("Layer mask"); color: root.look.label; visible: root.propsRow !== null && root.propsRow.hasMask }
+            Row {
+                spacing: root.u
+                visible: root.propsRow !== null && root.propsRow.hasMask
+                ViewButton {
+                    objectName: "canvasPropertiesMaskOn"
+                    look: root.look
+                    accented: false
+                    enabled: !root.propsMaskRemove
+                    text: root.propsMaskOn ? qsTr("Mask on") : qsTr("Mask off")
+                    checkable: true
+                    current: root.propsMaskOn
+                    onTapped: root.propsMaskOn = !root.propsMaskOn
+                }
+                ViewButton {
+                    objectName: "canvasPropertiesMaskDelete"
+                    look: root.look
+                    danger: true
+                    text: root.propsMaskRemove ? qsTr("Keep the mask") : qsTr("Delete mask")
+                    onTapped: root.propsMaskRemove = !root.propsMaskRemove
+                }
+            }
+            QuestionAnswers {
+                ThemedButton { text: qsTr("Cancel"); onClicked: propsAsk.close() }
+                ThemedButton {
+                    id: propsOk
+                    objectName: "canvasPropertiesOk"
+                    text: qsTr("Apply")
+                    highlighted: true
+                    enabled: propsName.text.trim() !== ""
+                    onClicked: root.applyProperties()
+                }
+            }
+        }
+    }
 
     Question {
         id: renameAsk

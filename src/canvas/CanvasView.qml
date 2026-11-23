@@ -164,6 +164,16 @@ Item {
     property string selectionProblem: ""
     readonly property bool brushing: tool === "brush" || tool === "eraser"
     readonly property real maxBrush: Math.max(64, Math.min(2048, Math.max(canvasData.pictureSize.width, canvasData.pictureSize.height)))
+    // #252: the rows the layers panel has selected, and whether Merge down has two shown layers that can merge (paint layers or groups).
+    readonly property var chosenRows: layersPanel.chosen.map(p => canvasData.layers.find(r => r.position === p)).filter(r => r !== undefined)
+    readonly property bool mergeable: {
+        const upper = layersPanel.current
+        if (!canvasData.layersEditable || upper === null || chosenRows.length !== 1 || upper.position < 1)
+            return false
+        const lower = canvasData.layers.find(r => r.position === upper.position - 1)
+        const merges = r => r !== undefined && r.visible && r.kind !== "mask" && r.kind !== "picture"
+        return merges(upper) && merges(lower)
+    }
     readonly property bool paintsMask: !quickMask && canvasData.maskTarget >= 0
     readonly property var maskRow: canvasData.layers.find(r => r.position === canvasData.maskTarget) ?? null
     readonly property var paintTarget: quickMask ? selectionLayer : paintsMask ? layerMask : null
@@ -297,6 +307,12 @@ Item {
         case "canvas-view.mask-invert": return {enabled: quickMask || paintsMask}
         case "canvas-view.mask-overlay": return {enabled: paintsMask, checkable: true, checked: maskOverlay}
         case "canvas-view.mask-reveal": case "canvas-view.mask-hide": return {enabled: paintsMask}
+        // #252: the layer operations, on the layers panel's selection.
+        case "canvas-view.new-layer": case "canvas-view.flatten": return {enabled: canvasData.layersEditable && canvasData.layers.length > 0}
+        case "canvas-view.group": return {enabled: canvasData.layersEditable && chosenRows.length > 0 && chosenRows.every(r => r.kind !== "picture")}
+        case "canvas-view.ungroup": return {enabled: canvasData.layersEditable && chosenRows.length > 0 && chosenRows.every(r => r.kind === "group")}
+        case "canvas-view.merge-down": return {enabled: mergeable}
+        case "canvas-view.layer-properties": return {enabled: canvasData.layersEditable && layersPanel.current !== null}
         case "canvas-view.undo": return {enabled: !quickMask || selectionLayer.canUndo}
         case "canvas-view.redo": return {enabled: !quickMask || selectionLayer.canRedo}
         // The keys the view handles by hand are shown as text (they are not bound twice).
@@ -341,6 +357,12 @@ Item {
         case "canvas-view.brush-larger": stepSize(true); break
         case "canvas-view.quick-mask": toggleQuickMask(); break
         case "canvas-view.add-mask": addMaskToCurrent(); break
+        case "canvas-view.new-layer": canvasData.newLayer(); break
+        case "canvas-view.merge-down": if (mergeable) canvasData.mergeDown(layersPanel.current.position); break
+        case "canvas-view.flatten": canvasData.flatten(); break
+        case "canvas-view.group": canvasData.groupLayers(layersPanel.chosen); break
+        case "canvas-view.ungroup": canvasData.ungroup(layersPanel.chosen); break
+        case "canvas-view.layer-properties": if (layersPanel.current) fileDialogs.askProperties(layersPanel.current.position); break
         case "canvas-view.mask-overlay": maskOverlay = !maskOverlay; break
         case "canvas-view.mask-invert": if (quickMask) selectionLayer.invert(); else canvasData.invertMask(); break
         // Undo follows what is being done: a Quick Mask stroke, a layer mask's revision, else the document's (the region).
@@ -1132,6 +1154,7 @@ Item {
         model: canvasData
         ownShortcuts: root.ownShortcuts
         onMaskTargeted: root.paintTheMask()
+        onPropertiesRequested: position => fileDialogs.askProperties(position)
     }
     // The masks painted on the picture (#230): the targeted layer mask (its hidden part in red, while Overlay is on) and
     // the Quick Mask selection (red where painted). Under the region's frame, over the picture.
