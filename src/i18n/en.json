@@ -1439,7 +1439,6 @@
   "Smart": "Smart",
   "The canvas changed size while this ran, so nothing was written. Run again.": "The canvas changed size while this ran, so nothing was written. Run again.",
   "Show every revision, the ones kept apart too": "Show every revision, the ones kept apart too",
-  "Apply": "Apply",
   "Blend mode": "Blend mode",
   "Combine": "Combine",
   "Flatten: every shown layer becomes one; hidden layers are dropped (one undo step)": "Flatten: every shown layer becomes one; hidden layers are dropped (one undo step)",
