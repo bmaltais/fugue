@@ -187,8 +187,12 @@ void FileHashes::remember(const QString &path, const QString &hash) {
 bool FileHashes::save() {
     QDir().mkpath(QFileInfo(m_storePath).absolutePath());
     QLockFile lockFile(m_storePath + QStringLiteral(".lock"));
-    if (!lockFile.lock())
+    lockFile.setStaleLockTime(30000);
+    // A deadline, never forever: a holder that is alive but stuck must not hang every other process (#205).
+    if (!lockFile.tryLock(10000)) {
+        qWarning("FileHashes: %s is held by another process; not saved", qPrintable(m_storePath + QStringLiteral(".lock")));
         return false;
+    }
 
     // What other processes saved, then ours on top, then only what is still true. The files
     // are looked at and the store written without the lock, so a lookup meanwhile does not wait.

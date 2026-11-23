@@ -7,10 +7,7 @@
 
 namespace fugue::mask {
 
-namespace {
-
-// `source` placed on a width x height buffer at (dx, dy) (what sticks out is cut); `outside` fills the rest.
-MaskPaint moved(const MaskPaint &source, int width, int height, int dx, int dy, uint8_t outside) {
+MaskPaint movedPixels(const MaskPaint &source, int width, int height, int dx, int dy, uint8_t outside) {
     const int channels = source.channels();
     std::vector<uint8_t> pixels(size_t(width) * size_t(height) * size_t(channels), outside);
     const int x0 = std::max(0, dx), x1 = std::min(width, dx + source.width());
@@ -22,8 +19,6 @@ MaskPaint moved(const MaskPaint &source, int width, int height, int dx, int dy, 
         }
     return MaskPaint(width, height, pixels, channels);
 }
-
-} // namespace
 
 bool growsCanvas(int oldWidth, int oldHeight, const IRect &to) {
     return to.x < 0 || to.y < 0 || to.x + to.width > oldWidth || to.y + to.height > oldHeight;
@@ -40,7 +35,7 @@ Result<PaintDocument> resizedCanvas(const PaintDocument &document, const IRect &
 
     if (growsCanvas(oldWidth, oldHeight, to) && fill != edgefill::Mode::Transparent) {
         // What the old canvas shows, in the new canvas's pixels; the hole is everything the old canvas does not cover.
-        const MaskPaint flat = moved(document.flatten(), to.width, to.height, dx, dy, 0);
+        const MaskPaint flat = movedPixels(document.flatten(), to.width, to.height, dx, dy, 0);
         edgefill::Image image;
         image.width = to.width;
         image.height = to.height;
@@ -69,7 +64,7 @@ Result<PaintDocument> resizedCanvas(const PaintDocument &document, const IRect &
         const MaskPaint *layerMask = info.hasMask ? document.maskPixels(info.id) : nullptr;
         std::optional<MaskPaint> mask;
         if (layerMask)
-            mask = moved(*layerMask, to.width, to.height, dx, dy, 255); // a new area does not hide the layer
+            mask = movedPixels(*layerMask, to.width, to.height, dx, dy, 255); // a new area does not hide the layer
         if (info.kind == LayerKind::Picture) {
             out.loadLayer(info, MaskPaint(1, 1, 4), mask ? &*mask : nullptr);
             continue;
@@ -77,7 +72,7 @@ Result<PaintDocument> resizedCanvas(const PaintDocument &document, const IRect &
         const MaskPaint *pixels = document.pixels(info.id);
         if (!pixels)
             continue;
-        out.loadLayer(info, moved(*pixels, to.width, to.height, dx, dy, 0), mask ? &*mask : nullptr);
+        out.loadLayer(info, movedPixels(*pixels, to.width, to.height, dx, dy, 0), mask ? &*mask : nullptr);
     }
     out.forgetHistory();
     return out;

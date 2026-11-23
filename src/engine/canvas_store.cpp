@@ -18,6 +18,7 @@
 #include "engine/atomic_file.h"
 #include "engine/canonical.h"
 #include "engine/canvas_layer_merge.h"
+#include "engine/canvas_tree_resize.h"
 #include "engine/canvas_layer_ops.h"
 #include "engine/canvas_resize.h"
 #include "engine/hash.h"
@@ -96,21 +97,6 @@ int groupDepth(const LayerRecord &layer) {
 
 bool treeHasGroup(const Tree &tree) {
     return std::any_of(tree.layers.begin(), tree.layers.end(), [](const LayerRecord &l) { return l.group; });
-}
-
-Error groupsRefused(const QString &what) {
-    return makeError(QStringLiteral("input_invalid"), QStringLiteral("%1 cannot be done while the canvas has groups: it would turn each group into one flat layer.").arg(what),
-                     QStringLiteral("Ungroup the layers first (Layer > Ungroup layers, or `fugue canvas layer ungroup`)."));
-}
-
-Result<bool> CanvasStore::hasGroups(const QString &canvasId, const QString &revisionId) const {
-    const Result<Revision> found = revision(canvasId, revisionId);
-    if (!found)
-        return Result<bool>(found.errors());
-    const Result<Tree> stored = tree(found->tree);
-    if (!stored)
-        return Result<bool>(stored.errors());
-    return treeHasGroup(stored.value());
 }
 
 int LayerRecord::tileCount() const {
@@ -409,6 +395,14 @@ Result<QString> CanvasStore::storeTreeRecord(const Tree &tree) {
             return Result<QString>(makeError(QStringLiteral("input_invalid"), QStringLiteral("Groups nest at most %1 deep.").arg(maxGroupDepth),
                                              QStringLiteral("Ungroup one of the outer groups first.")));
     const QJsonObject json = treeToJson(tree);
+    // The caps treeFromJson enforces on reading: a tree past them would be stored and then read back as canvas_corrupt.
+    int layerTotal = 0, tileTotal = 0;
+    if (!withinCaps(json.value("layers").toArray(), 0, &layerTotal, &tileTotal))
+        return Result<QString>(makeError(QStringLiteral("input_invalid"),
+                                         layerTotal > maxTreeLayers ? QStringLiteral("The canvas would have more than %1 layers (groups' layers included), which is the most it can hold.").arg(maxTreeLayers)
+                                         : tileTotal > maxTreeTiles ? QStringLiteral("The canvas would have more than %1 tiles, which is the most it can hold.").arg(maxTreeTiles)
+                                                                    : QStringLiteral("Groups nest at most %1 deep.").arg(maxGroupDepth),
+                                         QStringLiteral("Delete or merge layers, or make the canvas smaller.")));
     const QString hash = canonicalHash(json);
     if (hash.isEmpty())
         return corrupt(QStringLiteral("a tree has no canonical form"));
@@ -573,18 +567,10 @@ Result<Commit> CanvasStore::resize(const QString &canvasId, const QString &expec
         return Result<Commit>(canvas.errors());
     if (canvas->head != expected)
         return Commit{Revision{}, HeadMove{false, canvas->head}};
-    const Result<bool> grouped = hasGroups(canvasId, expected);
-    if (!grouped)
-        return Result<Commit>(grouped.errors());
-    if (grouped.value())
-        return Result<Commit>(groupsRefused(QStringLiteral("Resizing the canvas")));
-    const Result<PaintDocument> current = load(canvasId, expected);
-    if (!current)
-        return Result<Commit>(current.errors());
-    const Result<PaintDocument> resized = mask::resizedCanvas(current.value(), to, fill, blur);
-    if (!resized)
-        return Result<Commit>(resized.errors());
-    return commit(canvasId, resized.value(), expected, producer);
+    // At the tree level, so a group stays one: every layer and every child of a group is moved and re-tiled.
+    const TileReader read = [this](const QString &hash, int width, int height, int channels) { return readBlob(hash, width, height, channels); };
+    const TileSink sink = [this](const TileKey &, const QString &hash, const MaskPaint &tile) { return storeBlob(hash, tile); };
+    return commitTree(canvasId, expected, [&](const Tree &tree) { return resizedTree(tree, to, fill, blur, read, sink); }, producer, true, true);
 }
 
 std::vector<CanvasInfo> CanvasStore::list() const {
@@ -880,7 +866,7 @@ Result<std::vector<Candidate>> CanvasStore::candidates(const QString &canvasId, 
         if (history->contains(id))
             continue;
         const QString state = resolution(canvasId, id);
-        if (state == QLatin1String("accepted") || state == QLatin1String("undone") || (state == QLatin1String("dropped") && !withDropped))
+        if (state == QLatin1String("accepted") || state == QLatin1String("undone") || state == QLatin1String("lost") || (state == QLatin1String("dropped") && !withDropped))
             continue;
         const Result<Revision> record = revision(canvasId, id);
         if (!record)
@@ -941,8 +927,6 @@ Result<Accepted> CanvasStore::accept(const QString &canvasId, const QString &rev
                                               QStringLiteral("Revision %1 was made from an older revision than the head and %2, so it cannot be placed on the head.").arg(revisionId.left(19), why),
                                               QStringLiteral("Drop it and run the fill again from the canvas as it is now.")));
         };
-        if (treeHasGroup(before.value()) || treeHasGroup(after.value()) || treeHasGroup(now.value()))
-            return Result<Accepted>(groupsRefused(QStringLiteral("Placing a layer on a newer head")));
         if (before->width != now->width || before->height != now->height || after->width != now->width || after->height != now->height)
             return conflict(QStringLiteral("the canvas has another size now"));
         if (after->layers.size() <= before->layers.size())
@@ -950,18 +934,13 @@ Result<Accepted> CanvasStore::accept(const QString &canvasId, const QString &rev
         for (size_t i = 0; i < before->layers.size(); ++i)
             if (!sameLayer(before->layers[i], after->layers[i]))
                 return conflict(QStringLiteral("it changed the layer %1").arg(before->layers[i].name));
-        const Result<PaintDocument> candidateDocument = load(canvasId, revisionId);
-        Result<PaintDocument> onHead = load(canvasId, head);
-        if (!candidateDocument || !onHead)
-            return Result<Accepted>(!candidateDocument ? candidateDocument.errors() : onHead.errors());
-        for (int i = int(before->layers.size()); i < candidateDocument->layerCount(); ++i) {
-            const mask::LayerInfo layer = candidateDocument->layer(i);
-            const MaskPaint *pixels = candidateDocument->pixels(layer.id);
-            if (!pixels)
-                return Result<Accepted>(corrupt(QStringLiteral("a layer has no pixels")));
-            onHead->loadLayer(layer, *pixels, candidateDocument->maskPixels(layer.id));
-        }
-        const Result<Commit> made = commit(canvasId, onHead.value(), head, QStringLiteral("accept:") + revisionId.left(19));
+        // At the tree level (groups kept, nothing re-encoded): the layers it added go on top of the head's, tiles and all.
+        const std::vector<LayerRecord> added(after->layers.begin() + before->layers.size(), after->layers.end());
+        const Result<Commit> made = commitTree(canvasId, head, [&](const Tree &headTree) {
+            Tree placed = headTree;
+            placed.layers.insert(placed.layers.end(), added.begin(), added.end());
+            return Result<Tree>(placed);
+        }, QStringLiteral("accept:") + revisionId.left(19), true);
         if (!made)
             return Result<Accepted>(made.errors());
         done.rebased = true;
@@ -971,8 +950,10 @@ Result<Accepted> CanvasStore::accept(const QString &canvasId, const QString &rev
     }
     if (done.moved) {
         const Errors marked = replaceFile(resolvedPath(canvasId, revisionId), QStringLiteral("accepted %1\n").arg(done.head.id).toLatin1(), QStringLiteral("a canvas resolution"));
+        // The head has moved: the layer landed, and the revision is in the head's history, which hides it from the candidates anyway.
+        // Failing here would make a caller run again and duplicate the layer, so the failure is only noted.
         if (hasErrors(marked))
-            return Result<Accepted>(marked);
+            done.note = QStringLiteral("The layer was placed, but its acceptance could not be recorded: %1").arg(marked.first().message);
     }
     return done;
 }
@@ -1038,7 +1019,7 @@ Result<Commit> CanvasStore::commitEdit(const QString &canvasId, const QString &b
     return commitTree(canvasId, base, [&edit](const Tree &tree) { return applyLayerEdit(tree, edit); }, producer, newTiles);
 }
 
-Result<Commit> CanvasStore::commitTree(const QString &canvasId, const QString &base, const std::function<Result<Tree>(const Tree &)> &change, const QString &producer, bool newTiles) {
+Result<Commit> CanvasStore::commitTree(const QString &canvasId, const QString &base, const std::function<Result<Tree>(const Tree &)> &change, const QString &producer, bool newTiles, bool keepSame) {
     const Result<CanvasInfo> canvas = info(canvasId);
     if (!canvas)
         return Result<Commit>(canvas.errors());
@@ -1053,7 +1034,7 @@ Result<Commit> CanvasStore::commitTree(const QString &canvasId, const QString &b
     const Result<Tree> after = change(before.value());
     if (!after)
         return Result<Commit>(after.errors());
-    if (treeToJson(after.value()) == treeToJson(before.value()))
+    if (!keepSame && treeToJson(after.value()) == treeToJson(before.value()))
         return Commit{from.value(), HeadMove{false, base}};
     const std::set<QString> had = tilesOf(before.value()), has = tilesOf(after.value());
     if (!newTiles && !std::includes(had.begin(), had.end(), has.begin(), has.end()))
@@ -1067,9 +1048,28 @@ Result<Commit> CanvasStore::commitTree(const QString &canvasId, const QString &b
     const Result<HeadMove> moved = moveHead(canvasId, base, added->id);
     if (!moved)
         return Result<Commit>(moved.errors());
-    if (!moved->moved) // lost a race with a run: not a candidate for anyone to review, an edit that did not happen
-        (void)replaceFile(resolvedPath(canvasId, added->id), QByteArrayLiteral("undone\n"), QStringLiteral("a canvas resolution"));
+    if (!moved->moved) // lost a race with a run: not a candidate to review and not a redo target, an edit that did not happen
+        (void)replaceFile(resolvedPath(canvasId, added->id), QByteArrayLiteral("lost\n"), QStringLiteral("a canvas resolution"));
     return Commit{added.value(), moved.value()};
+}
+
+Result<TileMap> CanvasStore::storeLayerTiles(const MaskPaint &layer) {
+    return cutLayer(layer, [this](const TileKey &, const QString &hash, const MaskPaint &tile) { return storeBlob(hash, tile); });
+}
+
+Result<Revision> CanvasStore::addLayerRevision(const QString &canvasId, const QString &parent, const LayerRecord &layer, const QString &producer) {
+    const Result<Revision> from = revision(canvasId, parent);
+    if (!from)
+        return Result<Revision>(from.errors());
+    Result<Tree> stored = tree(from->tree);
+    if (!stored)
+        return Result<Revision>(stored.errors());
+    Tree grown = std::move(stored.value());
+    grown.layers.push_back(layer);
+    const Result<QString> treeHash = storeTreeRecord(grown);
+    if (!treeHash)
+        return Result<Revision>(treeHash.errors());
+    return addCommit(canvasId, treeHash.value(), parent, producer);
 }
 
 Result<Commit> CanvasStore::setLayerMask(const QString &canvasId, const QString &base, int position, const MaskPaint &mask, const QString &producer) {

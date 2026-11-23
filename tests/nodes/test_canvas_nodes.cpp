@@ -560,8 +560,8 @@ private slots:
         QVERIFY(CanvasStore::forSession().candidates(id, true).value().empty());
     }
 
-    // #252: a document has no groups, so a write (and a resize or an accept's rebase) refuses a canvas that has one instead of flattening it.
-    void aWriteOnACanvasWithAGroupIsRefusedAndWritesNothing() {
+    // #274: a write on a canvas with a group keeps the group and puts the layer on top, and so does a resize.
+    void aWriteOnACanvasWithAGroupKeepsTheGroup() {
         Bench bench;
         const QString id = makeCanvas();
         canvas::LayerEdit group;
@@ -571,14 +571,36 @@ private slots:
         QVERIFY(grouped && grouped->move.moved);
         const Result<Values> r = bench.region(id, {{"x", Value(60)}, {"y", Value(50)}, {"width", Value(100)}, {"height", Value(80)}});
         const Result<Values> w = writeGreen(bench, r);
-        QVERIFY(!w.ok());
-        QCOMPARE(codeOf(w), QString("input_invalid"));
-        QVERIFY(w.errors().first().message.contains("groups"));
-        QCOMPARE(headOf(id), grouped->revision.id);
-        QCOMPARE(CanvasStore::forSession().log(id)->size(), size_t(2));
+        QVERIFY2(w.ok(), qPrintable(w.errors().value(0).message));
+        const canvas::Tree written = CanvasStore::forSession().loadTree(id, headOf(id)).value();
+        QCOMPARE(written.layers.size(), size_t(2));
+        QVERIFY(written.layers[0].group);
+        QVERIFY(!written.layers[1].group);
+        QCOMPARE(CanvasStore::forSession().revision(id, headOf(id))->parent, grouped->revision.id);
         const auto resized = CanvasStore::forSession().resize(id, headOf(id), mask::IRect{0, 0, 10, 10}, edgefill::Mode::Edge, 0, "x");
-        QVERIFY(!resized);
-        QCOMPARE(resized.error().code, QString("input_invalid"));
+        QVERIFY2(resized && resized->move.moved, resized ? "" : qPrintable(resized.errors().value(0).message));
+        const canvas::Tree small = CanvasStore::forSession().loadTree(id, headOf(id)).value();
+        QVERIFY(small.layers[0].group);
+        QCOMPARE(small.width, 10);
+    }
+
+    // #274: the next "Fill n" counts the layers inside groups too.
+    void theNextFillNameCountsLayersInsideGroups() {
+        Bench bench;
+        const QString id = makeCanvas();
+        canvas::LayerEdit rename;
+        rename.op = canvas::LayerOp::Rename;
+        rename.layers = {0};
+        rename.text = "Fill 7";
+        QVERIFY(CanvasStore::forSession().editLayers(id, headOf(id), rename, "x")->move.moved);
+        canvas::LayerEdit group;
+        group.op = canvas::LayerOp::Group;
+        group.layers = {0};
+        QVERIFY(CanvasStore::forSession().editLayers(id, headOf(id), group, "x")->move.moved);
+        const Result<Values> r = bench.region(id, {{"x", Value(60)}, {"y", Value(50)}, {"width", Value(100)}, {"height", Value(80)}});
+        const Result<Values> w = writeGreen(bench, r);
+        QVERIFY2(w.ok(), qPrintable(w.errors().value(0).message));
+        QCOMPARE(CanvasStore::forSession().loadTree(id, headOf(id))->layers.back().name, QString("Fill 8"));
     }
 
     // #239: candidate review is not a user concept: an old workflow's saved candidate=true is ignored, and the layer lands on the head.
