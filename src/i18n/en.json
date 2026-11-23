@@ -1373,5 +1373,21 @@
   "WebP images (*.webp)": "WebP images (*.webp)",
   "Layered image (*.ora)": "Layered image (*.ora)",
   "Mute (%1%; the wheel changes the volume)": "Mute (%1%; the wheel changes the volume)",
-  "Volume": "Volume"
+  "Volume": "Volume",
+  "Default picture": "Default picture",
+  "Every node that has a picture shows it.": "Every node that has a picture shows it.",
+  "Hide picture": "Hide picture",
+  "Hide the node's picture whatever the picture mode says": "Hide the node's picture whatever the picture mode says",
+  "Let the picture mode decide whether the node shows its picture": "Let the picture mode decide whether the node shows its picture",
+  "Node pictures": "Node pictures",
+  "Node pictures: every node that has one": "Node pictures: every node that has one",
+  "Node pictures: only the nodes that load a file or end a chain": "Node pictures: only the nodes that load a file or end a chain",
+  "Node pictures: Smart (nodes that make, load or end a chain show one)": "Node pictures: Smart (nodes that make, load or end a chain show one)",
+  "Nodes that make a picture, load one or end a chain show it; a node that only changes the one before it does not. A node's right-click menu can show or hide its picture.": "Nodes that make a picture, load one or end a chain show it; a node that only changes the one before it does not. A node's right-click menu can show or hide its picture.",
+  "Only the nodes that load a file and the ones that end a chain (Preview, Save, Compare) show a picture.": "Only the nodes that load a file and the ones that end a chain (Preview, Save, Compare) show a picture.",
+  "&Picture": "&Picture",
+  "Show picture": "Show picture",
+  "Show the node's picture whatever the picture mode says": "Show the node's picture whatever the picture mode says",
+  "Sinks and inputs only": "Sinks and inputs only",
+  "Smart": "Smart"
 }
