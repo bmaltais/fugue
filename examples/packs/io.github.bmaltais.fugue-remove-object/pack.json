@@ -1,0 +1,15 @@
+{
+  "manifest": 1,
+  "id": "io.github.bmaltais.fugue-remove-object",
+  "version": "1.0.0",
+  "name": "Remove Object",
+  "description": "Fills a masked part of a picture from its surroundings (LaMa Fill), or grows the mask a little first (the group Remove Object). Used as the pre-fill of the Remove action: a clean base for the edit model to polish. LaMa (big-lama; code and weights Apache-2.0, github.com/advimman/lama; the ONNX export is by Carve, Apache-2.0) through ONNX Runtime (MIT), on the CPU or an NVIDIA GPU, in the pack's own Python environment. Nothing is bundled: the model is downloaded from the model picker after a question that names its licence.",
+  "license": "MIT",
+  "nodes": ["lama-fill", "remove-object"],
+  "types": [
+    {"id": "io.github.bmaltais.fugue-remove-object/lama-model", "version": 1, "kind": "resource",
+     "name": "LaMa model", "extensions": [".onnx"], "folders": ["lama"]}
+  ],
+  "setup": {"command": ["uv", "sync", "--no-dev", "--extra", "cpu"],
+            "description": "Create the pack's Python environment (ONNX Runtime for the CPU, NumPy, Pillow) in its folder; needs uv and the network."}
+}

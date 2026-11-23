@@ -13,6 +13,7 @@ with their slices.
 | --- | --- | --- | --- |
 | [generative-fill](generative-fill/workflow.fugue) | Generative fill / replace | FLUX.2 Klein 4B Q8 | the crop as reference, no pre-fill, 4 steps, guidance 1, strength 1, Blend 16 |
 | [remove](remove/workflow.fugue) | Remove | FLUX.2 Klein 4B Q8 | Fill Masked `blur`, the blurred crop as reference, a fixed removal instruction as the prompt, padding at least 128 |
+| [remove-lama](remove-lama/workflow.fugue) | Remove, with LaMa | FLUX.2 Klein 4B Q8 | as Remove, but LaMa Fill (pack [Remove Object](../../examples/packs/io.github.bmaltais.fugue-remove-object), #245) is the pre-fill instead of Fill Masked's blur; the same instruction and Klein pass follow |
 | [expand](expand/workflow.fugue) | Expand (outpaint) | FLUX.2 Klein 4B Q8 | the new strip plus 32 px as the selection, 256 px of context (padding), the crop as reference, no colour match |
 | [refine](refine/workflow.fugue) | Refine | FLUX.2 Klein 4B Q8 | strength 0.5 (0.75 to restyle), the crop as reference |
 

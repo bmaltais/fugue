@@ -1,0 +1,3 @@
+{"cases": [
+  {"name": "fill", "inputs": {"image": "sample.png", "mask": "sample-mask.png", "device": "cpu"}}
+]}

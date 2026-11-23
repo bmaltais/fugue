@@ -1,0 +1,90 @@
+{
+  "fugue": 1,
+  "graph": {
+    "nodes": {}
+  },
+  "groups": {
+    "io.github.bmaltais.fugue-remove-object/remove-object": {
+      "name": "Remove Object",
+      "version": "1.0.0",
+      "category": "Image/Mask",
+      "description": "Take an object out of a picture: the mask is grown a few pixels so no rim of it is left, then LaMa fills the place from its surroundings. The image comes back with the masked part filled. It is the pre-fill of the Remove action; add an edit model pass (Fill Masked's place in the Remove workflow) for the finish.",
+      "inputs": [
+        {
+          "name": "image",
+          "label": "Image",
+          "targets": [
+            "fill.image"
+          ]
+        },
+        {
+          "name": "mask",
+          "label": "Mask",
+          "targets": [
+            "grow.mask"
+          ]
+        },
+        {
+          "name": "model",
+          "label": "Model",
+          "targets": [
+            "fill.model"
+          ]
+        },
+        {
+          "name": "grow",
+          "label": "Grow mask",
+          "section": "Advanced",
+          "targets": [
+            "grow.expand"
+          ]
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "label": "Filled",
+          "from": "fill.image"
+        }
+      ],
+      "nodes": {
+        "grow": {
+          "type": "fugue/grow-mask",
+          "version": "1.0.1",
+          "inputs": {
+            "expand": 8
+          }
+        },
+        "fill": {
+          "type": "io.github.bmaltais.fugue-remove-object/lama-fill",
+          "version": "1.0.0",
+          "inputs": {
+            "mask": {
+              "from": "grow.mask"
+            }
+          }
+        }
+      }
+    }
+  },
+  "layout": {
+    "groups": {
+      "io.github.bmaltais.fugue-remove-object/remove-object": {
+        "nodes": {
+          "grow": {
+            "pos": [
+              0,
+              0
+            ]
+          },
+          "fill": {
+            "pos": [
+              340,
+              0
+            ]
+          }
+        }
+      }
+    }
+  }
+}

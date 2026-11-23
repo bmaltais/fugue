@@ -3421,6 +3421,17 @@ nodes `find` (Remove Background Mask), `soften` (Feather Mask, direction inward)
 (`packs/<id>/`, 11.10) so the window offers to install it; without the pack the embedded group's `find` node is unmet and the
 usual missing-pack banner names it.
 
+Built (#245, G5): **Remove Object**, `examples/packs/io.github.bmaltais.fugue-remove-object` (guide:
+[masking.md](masking.md#remove-an-object)), LaMa (big-lama, Apache-2.0) through ONNX Runtime. One persistent command node,
+`lama-fill` 1.0.0, in `Image/Mask`: inputs `image`, `mask` (`role: mask`, white is what to remove), `model` (optional;
+`.../lama-model`, `.onnx`, folder `lama`) and the advanced `device`; output `image`, the picture with the masked pixels
+filled and every other pixel unchanged (alpha kept). The ONNX export (Carve/LaMa-ONNX `lama_fp32.onnx`, Apache-2.0, pinned
+to a commit and a sha256 in `catalog/lama.json`) has a fixed 512 x 512 input, so the picture is mirrored out to a square
+(the margin is never a hole), run, and the output taken back at the picture's size and mixed in by the mask's weight; a
+hole is the mask at or above 128. The group `remove-object` 1.0.0 is Grow Mask (`grow`, default 8, Advanced) then LaMa
+Fill. It is the pre-fill of the Remove action (`inpaint-workflows/remove-lama`: LaMa Fill where Fill Masked was, the same
+Klein pass after). MAT (Places512, "research purposes only") is not offered. `onnx_node.py` is now copied in three packs.
+
 Built (#178, second pack): **Segment by Points or Box**, `examples/packs/io.github.bmaltais.fugue-segment` (guide:
 [masking.md](masking.md#select-an-object-by-points-or-a-box)), SAM 2.1 through ONNX Runtime. One persistent command node,
 `segment` 1.0.0, in `Image/Mask`: inputs `image`, `model` (optional; `.../sam2-model`, extension `.zip`, folder `sam2`), the
