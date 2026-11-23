@@ -5,6 +5,7 @@
   "name": "Upscale with Model",
   "description": "Makes an image bigger with an upscale model (Real-ESRGAN and the like), which draws in detail a plain resize cannot. The size grows by the model's own factor, 2 or 4 times. Big images are done in tiles, so they fit in memory. To change the result's size, follow it with Resize or Upscale Image.",
   "category": "Image/Transform",
+  "picture": "result",
   "keywords": ["upscale", "enlarge", "esrgan", "real-esrgan", "super resolution", "4x", "2x", "detail", "ImageUpscaleWithModel"],
   "runtime": {"kind": "builtin"},
   "capabilities": ["image.upscale"],

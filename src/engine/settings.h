@@ -25,6 +25,8 @@
 // | corner_radius    | 0 to 16 px, or "omarchy" (#63)           | 8                        |
 // | hover_magnifier  | true or false: far out, a short hover    | false                    |
 // |                  | shows a node at zoom 1 (12.6, #74, #123)  |                          |
+// | picture_mode    | "smart", "sinks" or "all": which nodes    | "smart"                  |
+// |                  | show a picture (12.7, #263)               |                          |
 // | restore_tabs     | true or false: start with the saved       | true                     |
 // |                  | workflows that were open when the session |                          |
 // |                  | ended (12.10, #212)                        |                          |
@@ -63,6 +65,7 @@ struct Settings {
     static constexpr int followOmarchy = -1;
     static constexpr int maxCornerRadius = 16;
     int cornerRadius = 8;
+    QString pictureMode = QStringLiteral("smart"); // which nodes show a picture (#263)
     bool hoverMagnifier = false; // the hover magnifier (#74), off unless set (#123)
     bool canvasShowNewResults = true; // the Canvas view moves to a new candidate at once (#225)
     bool restoreTabs = true;     // reopen the last session's saved tabs at start (#212)

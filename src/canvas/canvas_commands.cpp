@@ -75,6 +75,9 @@ void registerCanvasCommands(fugue::CommandRegistry &commands, CanvasModel &canva
             emit model->nodeRenameRequested(model->selectedIds().first());
     });
     commands.setHandler("node.pin", [model] { model->togglePinned(); });
+    commands.setHandler("node.picture-show", [model] { model->setPictureOverride(QStringLiteral("show")); });
+    commands.setHandler("node.picture-hide", [model] { model->setPictureOverride(QStringLiteral("hide")); });
+    commands.setHandler("node.picture-default", [model] { model->setPictureOverride({}); });
     for (const char *mode : {"left", "right", "top", "bottom"})
         commands.setHandler(QStringLiteral("node.align-") + QLatin1String(mode), [model, mode] { model->alignSelection(QLatin1String(mode)); });
     for (const char *mode : {"horizontal", "vertical"})

@@ -418,6 +418,10 @@ std::optional<NodeType> readManifest(const QJsonObject &manifest, Errors &errors
             r.fail(QStringLiteral("alias \"%1\" is not a node type id.").arg(alias));
     r.boolean(manifest, "sink", type.sink, where);
     r.boolean(manifest, "deterministic", type.deterministic, where);
+    r.string(manifest, "picture", type.picture, where);
+    if (!type.picture.isEmpty() && type.picture != QLatin1String("always") && type.picture != QLatin1String("result")
+        && type.picture != QLatin1String("never"))
+        r.fail(QStringLiteral("\"picture\" must be \"always\", \"result\" or \"never\", not %1.").arg(shown(manifest.value("picture"))));
 
     static const QStringList kinds{"command", "group", "native", "script", "builtin"};
     const QJsonValue runtime = manifest.value("runtime");
@@ -436,7 +440,7 @@ std::optional<NodeType> readManifest(const QJsonObject &manifest, Errors &errors
 
     r.unknownFields(manifest,
                     {"manifest", "id", "version", "name", "description", "category", "keywords", "aliases",
-                     "sink", "deterministic", "runtime", "inputs", "outputs", "needs", "capabilities", "ui"},
+                     "sink", "deterministic", "picture", "runtime", "inputs", "outputs", "needs", "capabilities", "ui"},
                     where);
 
     QSet<QString> seen;
@@ -506,6 +510,7 @@ QJsonObject NodeType::toJson() const {
     if (!aliases.isEmpty())
         o.insert("aliases", QJsonArray::fromStringList(aliases));
     putIfTrue(o, "sink", sink);
+    putIf(o, "picture", picture);
     if (!deterministic)
         o.insert("deterministic", false);
     if (!needs.isEmpty())

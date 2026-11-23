@@ -5,6 +5,7 @@
   "name": "Crop",
   "description": "Cut a rectangle out of an image. A rectangle that runs past the edge stops at the edge.",
   "category": "Image/Transform",
+  "picture": "result",
   "keywords": ["trim", "cut"],
   "runtime": {"kind": "builtin"},
   "inputs": [

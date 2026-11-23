@@ -84,6 +84,20 @@ QList<Row> menuRows() {
         {"node.align-bottom", QT_TRANSLATE_NOOP("Command", "Align the selected nodes to the bottom edge"), QT_TRANSLATE_NOOP("Command", "Bottom"), {}, "canvas", "same"},
         {"node.distribute-horizontal", QT_TRANSLATE_NOOP("Command", "Space the selected nodes evenly, left to right"), QT_TRANSLATE_NOOP("Command", "Horizontally"), {}, "canvas", "same"},
         {"node.distribute-vertical", QT_TRANSLATE_NOOP("Command", "Space the selected nodes evenly, top to bottom"), QT_TRANSLATE_NOOP("Command", "Vertically"), {}, "canvas", "same"},
+        // Node pictures (#263): a node's own override of the picture mode; handlers are bound below.
+        {"node.picture-show", QT_TRANSLATE_NOOP("Command", "Show the node's picture whatever the picture mode says"),
+         QT_TRANSLATE_NOOP("Command", "Show picture"), {}, "canvas", "added"},
+        {"node.picture-hide", QT_TRANSLATE_NOOP("Command", "Hide the node's picture whatever the picture mode says"),
+         QT_TRANSLATE_NOOP("Command", "Hide picture"), {}, "canvas", "added"},
+        {"node.picture-default", QT_TRANSLATE_NOOP("Command", "Let the picture mode decide whether the node shows its picture"),
+         QT_TRANSLATE_NOOP("Command", "Default picture"), {}, "canvas", "added"},
+        // The picture mode (#263), a preference: the settings model binds these (settings_model.cpp).
+        {"view.picture-smart", QT_TRANSLATE_NOOP("Command", "Node pictures: Smart (nodes that make, load or end a chain show one)"),
+         QT_TRANSLATE_NOOP("Command", "Smart"), {}, "canvas", "added"},
+        {"view.picture-sinks", QT_TRANSLATE_NOOP("Command", "Node pictures: only the nodes that load a file or end a chain"),
+         QT_TRANSLATE_NOOP("Command", "Sinks and inputs only"), {}, "canvas", "added"},
+        {"view.picture-all", QT_TRANSLATE_NOOP("Command", "Node pictures: every node that has one"),
+         QT_TRANSLATE_NOOP("Command", "All"), {}, "canvas", "added"},
         // Handlers come from ImageActions (image_actions.h).
         {"node.open-image", QT_TRANSLATE_NOOP("Command", "Open the node's image in the default viewer"),
          QT_TRANSLATE_NOOP("Command", "Open Image"), {}, "canvas", "same"},
@@ -208,6 +222,10 @@ void bindMenuCommands(CommandRegistry &registry, CanvasModel &canvas, std::funct
 
     const auto selected = [model] { return !model->selectedIds().isEmpty(); };
     const auto hasNodes = [model] { return model->nodes()->rowCount() > 0; };
+    // A picture override acts on the selected nodes that can have a picture, and is offered only where it changes one.
+    for (const auto &[id, value] : {std::pair{"node.picture-show", PictureOverride::Show}, {"node.picture-hide", PictureOverride::Hide},
+                                    {"node.picture-default", PictureOverride::Default}})
+        registry.setEnabledWhen(QString::fromLatin1(id), [model, value = value] { return model->pictureCommandApplies(value); });
     registry.setEnabledWhen("edit.undo", [model] { return model->canUndo(); });
     registry.setEnabledWhen("edit.redo", [model] { return model->canRedo(); });
     for (const char *id : {"edit.copy", "edit.clone", "edit.delete", "node.bypass", "node.mute",

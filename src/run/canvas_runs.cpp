@@ -106,6 +106,8 @@ CanvasRuns::CanvasRuns(CanvasModel *canvas, Workflows *workflows, RunService *se
     for (auto signal : {&QAbstractItemModel::rowsInserted, &QAbstractItemModel::rowsRemoved})
         connect(m_canvas->links(), signal, this, [this] { if (!m_running.isEmpty()) emit runningNodesChanged(); });
     connect(m_canvas->links(), &QAbstractItemModel::modelReset, this, [this] { if (!m_running.isEmpty()) emit runningNodesChanged(); });
+    // The picture mode changed (Settings, the View menu): the slots come or go.
+    connect(m_canvas, &CanvasModel::pictureModeChanged, this, &CanvasRuns::refreshInputs);
     connect(m_canvas, &CanvasModel::documentReset, this, &CanvasRuns::showTab);
     connect(m_workflows, &Workflows::currentChanged, this, &CanvasRuns::showTab);
     showTab();
@@ -185,6 +187,7 @@ QString CanvasRuns::startOne(const QString &tab, const QString &target, bool fir
     request.target = target;
     request.entered = m_canvas->scopePath();
     request.first = first;
+    request.noPictures = noPictures();
     const QString id = m_service->start(request);
     // The run has the numbers shown; the next one gets the next (spec 6.2).
     m_canvas->widgets()->advanceSeeds();
@@ -345,7 +348,9 @@ void CanvasRuns::show(const QString &tab, const QString &node) {
     // (Load Image before it runs), else a dimmed placeholder on a node made to show one.
     const NodeInfo info = m_nodeInfo.value(node);
     const Picture cropped = info.followsInput() ? cropSource(tab, node) : Picture{};
-    if (info.followsInput()) {
+    if (!info.picture) {
+        // Hidden (#263): no slot, so the node is as short as its rows.
+    } else if (info.followsInput()) {
         // A Crop shows what arrives at its input, never its own result: the frame is drawn over it.
         // So does a node that paints a mask over an input (Paint Mask), the mask drawn over it.
         if (cropped.width > 0 && cropped.height > 0)
@@ -366,7 +371,7 @@ void CanvasRuns::show(const QString &tab, const QString &node) {
         text(tr("File not found"), 0.5, true);
     else if (info.showsResult && aggregate(view) != QLatin1String("running"))
         text(tr("No result yet"), 0.5, true);
-    if (info.compares && !view.compare.isEmpty()) {
+    if (info.picture && info.compares && !view.compare.isEmpty()) {
         QVariantMap compare = view.compare;
         compare.insert("labelA", info.labelA);
         compare.insert("labelB", info.labelB);
@@ -830,6 +835,7 @@ void CanvasRuns::readNodes() {
                 info.cropFrom = keyFor(image.from().node);
         }
         info.showsResult = it->type == QLatin1String("fugue/preview") || info.savesFile || info.compares;
+        info.picture = m_canvas->showsPicture(it.key());
         if (info.compares) {
             // What made A and B names them: the linked node's title, else the plain letter.
             const auto labelOf = [&](const char *name, const QString &fallback) {
@@ -862,13 +868,24 @@ void CanvasRuns::readNodes() {
                 }
             }
         }
-        if (info.showsResult || info.followsInput() || !info.imageFile.isEmpty())
+        if (info.showsResult || info.followsInput() || !info.imageFile.isEmpty() || !info.picture)
             m_nodeInfo.insert(keyFor(it.key()), info);
     }
     TabRuns &runs = m_tabs[m_shownTab];
     for (auto it = m_nodeInfo.cbegin(); it != m_nodeInfo.cend(); ++it)
         if ((it->showsResult || it->followsInput()) && !runs.nodes.contains(it.key()))
             runs.nodes.insert(it.key(), NodeView{});
+}
+
+QSet<QString> CanvasRuns::noPictures() const {
+    QSet<QString> hidden, followed;
+    for (auto it = m_nodeInfo.cbegin(); it != m_nodeInfo.cend(); ++it) {
+        if (!it->picture)
+            hidden.insert(it.key());
+        else if (it->followsInput() && !it->cropFrom.isEmpty())
+            followed.insert(it->cropFrom); // the picture a shown Crop or Paint Mask draws over
+    }
+    return hidden - followed;
 }
 
 // After an edit (a paste, a drop, a pick, an undo): a Load Image whose file changed shows the
@@ -886,8 +903,12 @@ void CanvasRuns::refreshInputs() {
         const QString was = before.value(node).imageFile, now = m_nodeInfo.value(node).imageFile;
         if (was == now) {
             // A new Preview or Save Image: its placeholder. A Crop wired to another node: that picture.
-            if (!before.contains(node) || before.value(node).cropFrom != m_nodeInfo.value(node).cropFrom)
+            // A picture shown or hidden (the mode, the node's override): its slot comes or goes (#263).
+            const bool pictureChanged = before.value(node).picture != m_nodeInfo.value(node).picture;
+            if (!before.contains(node) || before.value(node).cropFrom != m_nodeInfo.value(node).cropFrom || pictureChanged)
                 show(m_shownTab, node);
+            if (pictureChanged)
+                requestInputPreview(node);
             continue;
         }
         if (runs.nodes.contains(node)) {
@@ -906,7 +927,8 @@ void CanvasRuns::refreshInputs() {
 
 void CanvasRuns::requestInputPreview(const QString &node) {
     const QString file = m_nodeInfo.value(node).imageFile;
-    if (file.isEmpty() || !m_rowsMade.contains(rowFor(node)))
+    // A hidden picture is not made (#263).
+    if (file.isEmpty() || !m_nodeInfo.value(node).picture || !m_rowsMade.contains(rowFor(node)))
         return;
     m_service->previewFile(m_shownTab + '\n' + node, file);
 }

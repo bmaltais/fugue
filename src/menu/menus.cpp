@@ -51,6 +51,12 @@ QVariantMap distribute(bool hideWhenOff) {
                        {"node.distribute-horizontal", "node.distribute-vertical"}, hideWhenOff);
 }
 
+// The picture mode (#263), a choice of three with a check on the one in force.
+QVariantMap pictureMenu() {
+    return submenu(QT_TRANSLATE_NOOP("Menu", "&Picture"),
+                   {command("view.picture-smart"), command("view.picture-sinks"), command("view.picture-all")});
+}
+
 // The Run menu, and the menu behind the run toolbar's split button (#60): the same rows.
 QVariantList runItems() {
     return {command("run.start"), command("run.start-first"), command("run.to-here"), separator(), command("run.cancel")};
@@ -116,12 +122,13 @@ QVariantList graph() {
     return {
         submenu(QT_TRANSLATE_NOOP("Menu", "&View"),
                 {command("view.fit"), command("view.zoom-in"), command("view.zoom-out"), separator(),
-                 command("view.toggle-links")}),
+                 command("view.toggle-links"), pictureMenu()}),
         submenu(QT_TRANSLATE_NOOP("Menu", "&Select"), {command("edit.select-all")}),
         submenu(QT_TRANSLATE_NOOP("Menu", "&Add"), {command("node.search"), command("edit.paste-connected")}),
         submenu(QT_TRANSLATE_NOOP("Menu", "&Node"),
                 {command("edit.rename"), colors(), command("edit.clone"), command("edit.delete"), separator(),
-                 command("node.bypass"), command("node.mute"), command("node.collapse"), command("node.pin"), align(false),
+                 command("node.bypass"), command("node.mute"), command("node.collapse"), command("node.pin"), ifOn("node.picture-show"),
+                 ifOn("node.picture-hide"), ifOn("node.picture-default"), align(false),
                  distribute(false), separator(), command("node.open-image"), command("node.copy-image"),
                  command("node.save-image"), separator(), command("frame.make"), command("group.make"),
                  command("group.ungroup"), command("group.enter"), command("group.leave"), command("group.make-unique"),
@@ -195,7 +202,8 @@ QVariantList canvas() {
 // Right-click on a node: it is selected first, so each command acts on the selection.
 QVariantList node() {
     return {ifOn("group.expose"), ifOn("group.unexpose"), command("edit.rename"), separator(), command("node.bypass"),
-            command("node.mute"), command("node.collapse"), command("node.pin"), colors(), align(true), distribute(true), separator(),
+            command("node.mute"), command("node.collapse"), command("node.pin"), ifOn("node.picture-show"), ifOn("node.picture-hide"),
+            ifOn("node.picture-default"), colors(), align(true), distribute(true), separator(),
             ifOn("node.open-image"), ifOn("node.copy-image"), ifOn("node.save-image"), ifOn("compare.copy-a"), ifOn("compare.copy-b"),
             ifOn("compare.copy-view"), separator(),
             command("edit.copy"),

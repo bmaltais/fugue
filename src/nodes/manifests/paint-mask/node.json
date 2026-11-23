@@ -5,6 +5,7 @@
   "name": "Paint Mask",
   "description": "Paint a mask over any picture, a generated one too. White is the part to change.",
   "category": "Image/Mask",
+  "picture": "result",
   "keywords": ["inpaint", "brush", "draw", "select", "region", "outpaint"],
   "runtime": {"kind": "builtin"},
   "inputs": [

@@ -69,6 +69,18 @@ const QByteArray kGraph = R"({
   }}
 })";
 
+// A Generate Image, a Resize of it and a Preview of that: the middle one only repeats the picture before it.
+const QByteArray kChain = R"({
+  "fugue": 1,
+  "graph": {"nodes": {
+    "words": {"type": "fugue/text", "version": "1.0.0", "inputs": {"text": "a cat"}},
+    "gen": {"type": "fugue/generate-image", "version": "1.0.0", "inputs": {"prompt": {"from": "words.text"}, "seed": 5}},
+    "rz": {"type": "fugue/resize", "version": "1.0.0", "inputs": {"image": {"from": "gen.image"}, "width": 160, "height": 120}},
+    "show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "rz.image"}}}
+  }},
+  "layout": {"nodes": {"words": {"pos": [0, 0]}, "gen": {"pos": [300, 0]}, "rz": {"pos": [600, 0]}, "show": {"pos": [900, 0]}}}
+})";
+
 QByteArray png(int width, int height) {
     QImage image(width, height, QImage::Format_RGB32);
     image.fill(Qt::darkCyan);
@@ -306,6 +318,103 @@ private slots:
         r.app.key(Qt::Key_Z, Qt::ControlModifier);
         QTRY_COMPARE(r.role("src", NodeList::Thumbnail).toString(), QString());
         QTRY_COMPARE(r.role("src", NodeList::Height).toReal(), height);
+        QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
+    }
+
+    // Node pictures (#263): Smart shows no picture on a node that only changes the one before it, and its thumbnail is
+    // not made; the node's own Show picture brings it back (stored in the layout) and Hide picture takes one away; the
+    // View > Picture commands set the mode.
+    void aTransformShowsNoPictureUnderSmartAndAnOverrideOrTheModeBringsItBack() {
+        RunApp r(kChain);
+        QVERIFY(r.app.open());
+        QSignalSpy events(r.service.get(), &RunService::event);
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        const auto run = [&](int count) {
+            r.app.key(Qt::Key_Return, Qt::ControlModifier);
+            QTRY_COMPARE(finished.size(), count);
+            QCOMPARE(finished.last().at(1).toString(), QStringLiteral("ok"));
+        };
+        const auto thumbnailsOf = [&](const QString &node) {
+            QJsonObject found;
+            for (const QList<QVariant> &args : events) {
+                const QJsonObject e = args.at(1).toJsonObject();
+                if (e.value("node").toString() == node && e.value("event").toString().startsWith("node.done"))
+                    found = e.value("thumbnails").toObject();
+            }
+            return found;
+        };
+        const auto height = [&](const QString &node) { return r.role(node, NodeList::Height).toReal(); };
+        const auto layoutPicture = [&](const QString &node) {
+            return r.app.model.document().layout.value("nodes").toObject().value(node).toObject().value("picture").toString();
+        };
+
+        QTRY_VERIFY(r.app.commands.trigger("view.picture-smart"));
+        QCOMPARE(r.app.model.pictureMode(), fugue::PictureMode::Smart);
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(r.jobs().size(), 1);
+        r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(0), {{"image.png", png(320, 240)}}); });
+        QTRY_COMPARE(finished.size(), 1);
+        QVERIFY(r.role("gen", NodeList::Thumbnail).toString().startsWith("file://"));
+        QVERIFY(r.role("show", NodeList::Thumbnail).toString().startsWith("file://"));
+        QCOMPARE(r.role("rz", NodeList::Thumbnail).toString(), QString());
+        QVERIFY(!thumbnailsOf("gen").isEmpty());
+        QVERIFY(thumbnailsOf("rz").isEmpty()); // not made at all
+        const qreal bare = height("rz");
+
+        // Show picture: stored in the layout; the picture comes with the next run (a cached one is quick).
+        r.app.model.select({"rz"});
+        QVERIFY(r.app.commands.isEnabled("node.picture-show"));
+        QVERIFY(!r.app.commands.isEnabled("node.picture-hide"));
+        QVERIFY(!r.app.commands.isEnabled("node.picture-default"));
+        QVERIFY(r.app.commands.trigger("node.picture-show"));
+        QCOMPARE(layoutPicture("rz"), QString("show"));
+        QVERIFY(!r.app.commands.isEnabled("node.picture-show"));
+        QVERIFY(r.app.commands.isEnabled("node.picture-default"));
+        run(2);
+        QVERIFY(r.role("rz", NodeList::Thumbnail).toString().startsWith("file://"));
+        QVERIFY(height("rz") > bare);
+
+        // Hide picture on Generate Image: its picture goes at once, the node is shorter.
+        const qreal tall = height("gen");
+        r.app.model.select({"gen"});
+        QVERIFY(r.app.commands.trigger("node.picture-hide"));
+        QCOMPARE(layoutPicture("gen"), QString("hide"));
+        QTRY_COMPARE(r.role("gen", NodeList::Thumbnail).toString(), QString());
+        QVERIFY(height("gen") < tall);
+        QVERIFY(r.app.commands.trigger("node.picture-default"));
+        QVERIFY(layoutPicture("gen").isEmpty());
+        QTRY_VERIFY(r.role("gen", NodeList::Thumbnail).toString().startsWith("file://")); // what it showed, back
+
+        // Default again: Smart hides the transform's picture.
+        r.app.model.select({"rz"});
+        QVERIFY(r.app.commands.trigger("node.picture-default"));
+        QTRY_COMPARE(r.role("rz", NodeList::Thumbnail).toString(), QString());
+        QCOMPARE(height("rz"), bare);
+        r.app.key(Qt::Key_Z, Qt::ControlModifier); // undo: one step
+        QCOMPARE(layoutPicture("rz"), QString("show"));
+        QTRY_VERIFY(r.role("rz", NodeList::Thumbnail).toString().startsWith("file://"));
+        r.app.key(Qt::Key_Z, Qt::ControlModifier); // the step before: Generate Image's Default picture
+        QCOMPARE(layoutPicture("gen"), QString("hide"));
+        QTRY_COMPARE(r.role("gen", NodeList::Thumbnail).toString(), QString());
+        r.app.key(Qt::Key_Y, Qt::ControlModifier);
+        QTRY_VERIFY(r.role("gen", NodeList::Thumbnail).toString().startsWith("file://"));
+        r.app.model.select({"rz"});
+        QVERIFY(r.app.commands.trigger("node.picture-default"));
+        QTRY_COMPARE(r.role("rz", NodeList::Thumbnail).toString(), QString());
+
+        // View > Picture > All: the mode is the setting, and a run makes the pictures.
+        QVERIFY(r.app.commands.trigger("view.picture-all"));
+        QCOMPARE(r.app.model.pictureMode(), fugue::PictureMode::All);
+        QCOMPARE(r.app.settings.pictureMode(), QString("all"));
+        QVERIFY(r.app.commands.entry("view.picture-all").value("checked").toBool());
+        QVERIFY(!r.app.commands.entry("view.picture-smart").value("checked").toBool());
+        run(3);
+        QVERIFY(r.role("rz", NodeList::Thumbnail).toString().startsWith("file://"));
+        // Sinks and inputs only: a generator loses its picture too; the Preview keeps it.
+        QVERIFY(r.app.commands.trigger("view.picture-sinks"));
+        QTRY_COMPARE(r.role("gen", NodeList::Thumbnail).toString(), QString());
+        QTRY_COMPARE(r.role("rz", NodeList::Thumbnail).toString(), QString());
+        QVERIFY(r.role("show", NodeList::Thumbnail).toString().startsWith("file://"));
         QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
     }
 

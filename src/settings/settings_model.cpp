@@ -14,6 +14,7 @@
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
 #include "engine/atomic_file.h"
+#include "engine/node_picture.h"
 #include "engine/json.h"
 #include "engine/model_library.h"
 #include "engine/pack_loader.h"
@@ -106,6 +107,13 @@ void SettingsModel::registerCommands(CommandRegistry &registry, std::function<vo
     m_openUrl = std::move(openUrl);
     registry.setHandler(QStringLiteral("app.settings"),
                         [&registry] { emit registry.windowRequested(QStringLiteral("app.settings")); });
+    // The picture mode (#263), a preference: the View menu writes the same key as the panel, as a choice with a check.
+    for (const PictureMode mode : {PictureMode::Smart, PictureMode::Sinks, PictureMode::All}) {
+        const QString name = pictureModeName(mode);
+        const QString id = QStringLiteral("view.picture-") + name;
+        registry.setHandler(id, [this, name] { set(QStringLiteral("picture_mode"), name); });
+        registry.setCheckedWhen(id, [this, name] { return pictureMode() == name; });
+    }
     registry.setHandler(QStringLiteral("cache.clear-previews"),
                         [&registry] { emit registry.windowRequested(QStringLiteral("cache.clear-previews")); });
 }
@@ -200,6 +208,8 @@ void SettingsModel::pushLive() {
         m_translator->setLanguageOverride(m_effective.settings.language);
     if (m_canvas)
         m_canvas->setNewNodeOptions(m_effective.settings.newSeed, m_effective.settings.embedWorkflow);
+    if (m_canvas)
+        m_canvas->setPictureMode(pictureModeFromName(m_effective.settings.pictureMode));
     if (m_theme)
         m_theme->setCornerRadius(m_effective.settings.cornerRadius);
 }

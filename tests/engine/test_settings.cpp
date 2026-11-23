@@ -118,6 +118,26 @@ private slots:
         QCOMPARE(bad.settings.cornerRadius, 8);
     }
 
+    // The picture mode (#263): smart unless set; smart, sinks or all, nothing else.
+    void thePictureModeIsSmartUnlessSet() {
+        QTemporaryDir dir;
+        QCOMPARE(settingDefault("picture_mode"), QJsonValue("smart"));
+        QCOMPARE(readSettings(dir.filePath("settings.json")).settings.pictureMode, QString("smart"));
+        for (const char *good : {"smart", "sinks", "all"})
+            QCOMPARE(checkSetting("picture_mode", good), QString());
+        for (const QJsonValue &bad : {QJsonValue("some"), QJsonValue(true), QJsonValue("All")})
+            QVERIFY(!checkSetting("picture_mode", bad).isEmpty());
+        write(dir.filePath("settings.json"), R"({"picture_mode": "sinks"})");
+        QCOMPARE(readSettings(dir.filePath("settings.json")).settings.pictureMode, QString("sinks"));
+        QCOMPARE(settingValue(readSettings(dir.filePath("settings.json")).settings, "picture_mode"), QJsonValue("sinks"));
+        write(dir.filePath("settings.json"), R"({"picture_mode": "none"})");
+        const SettingsFile bad = readSettings(dir.filePath("settings.json"));
+        QCOMPARE(bad.problems.size(), 1);
+        QCOMPARE(bad.settings.pictureMode, QString("smart"));
+        // A project inherits it with the other preferences.
+        QCOMPARE(settingClass("picture_mode"), SettingClass::Preferences);
+    }
+
     // The hover magnifier (#123): off unless the file says true; a bad value is a problem.
     void theHoverMagnifierIsOffUnlessSet() {
         QTemporaryDir dir;

@@ -223,7 +223,8 @@ bool CommandRegistry::actsOnGraph(const QString &id) const {
         return false;
     // The panels and bars share the `canvas` context and act on the window.
     static const QStringList graphViews = {QStringLiteral("view.fit"), QStringLiteral("view.zoom-in"), QStringLiteral("view.zoom-out"),
-                                           QStringLiteral("view.toggle-links")};
+                                           QStringLiteral("view.toggle-links"),
+                                           QStringLiteral("view.picture-smart"), QStringLiteral("view.picture-sinks"), QStringLiteral("view.picture-all")};
     if (id.startsWith(QLatin1String("panel.")) || (id.startsWith(QLatin1String("view.")) && !graphViews.contains(id)))
         return false;
     return true;
