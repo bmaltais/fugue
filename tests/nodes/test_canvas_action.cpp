@@ -439,7 +439,7 @@ private slots:
             }
         const auto &nodes = document->graph.nodes;
         QCOMPARE(nodes.value("sample").inputs.value("steps").literal().toInt(), 4);
-        QCOMPARE(nodes.value("sample").inputs.value("denoise").literal().toDouble(), 0.9); // the measured restyle preset (#271)
+        QCOMPARE(nodes.value("sample").inputs.value("denoise").literal().toDouble(), 1.0); // below 1 the blurred seam is not redrawn: a frosted ring (GPU check, canvas-actions-verification)
         QVERIFY(nodes.value("sample").inputs.value("soft_mask").literal().toBool());       // seams strong, the rest light
         QCOMPARE(nodes.value("write").inputs.value("name").literal().toString(), QStringLiteral("Harmonized"));
         QCOMPARE(nodes.value("match").type, QStringLiteral("fugue/color-match"));
