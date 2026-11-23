@@ -22,6 +22,7 @@
 
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
+#include "engine/canvas_package.h"
 #include "engine/document.h"
 #include "engine/paint_document.h"
 #include "engine/paint_file.h"
@@ -432,6 +433,45 @@ private slots:
         QVERIFY(!bare.exportCompiled(dir.filePath("bare")));
         QVERIFY(bare.notice().contains("unknown_provider") || bare.notice().contains("Studio"));
         QVERIFY(!QFileInfo::exists(dir.filePath("bare.json")));
+    }
+
+    // #249: a package that carries a canvas is imported as a canvas of the project, never opened as a workflow and never
+    // over a canvas there: its id is taken here, so the canvas gets a new one and the banner says so.
+    void aCanvasPackageImportsAsANewCanvas() {
+        QTemporaryDir dir, state;
+        canvas::CanvasStore store = canvas::CanvasStore::forSession();
+        mask::PaintDocument doc(64, 64);
+        doc.addLayer(mask::LayerKind::Paint, "Base");
+        doc.brush.color = mask::Rgba{20, 80, 200, 255};
+        doc.fillRect(0, 0, 64, 64);
+        const QString id = store.create("Shared sketch", doc, "new")->id;
+        const size_t canvasesBefore = store.list().size(); // the session's store may hold others
+        const QString zip = dir.filePath("canvas.fuguepack");
+        QVERIFY(!hasErrors(canvas::writeCanvasPackage(store, id, canvas::SharedPart::History, zip)));
+
+        CanvasModel canvas(&m_registry);
+        CommandRegistry commands;
+        registerMenuCommands(commands);
+        WorkflowLocations locations;
+        locations.recoveryDir = state.filePath("recovery");
+        locations.trustPath = state.filePath("trust.json");
+        locations.templateRoots = {};
+        Workflows workflows(&canvas, &m_registry, &commands, locations);
+        const int before = workflows.count();
+        QVERIFY2(workflows.openPath(zip), qPrintable(workflows.notice()));
+        QCOMPARE(workflows.count(), before); // no workflow tab
+        QVERIFY(workflows.notice().contains("Shared sketch"));
+        QVERIFY(workflows.notice().contains("history"));
+        QVERIFY(workflows.notice().contains("yours is untouched"));
+        QCOMPARE(store.list().size(), canvasesBefore + 1);
+        QCOMPARE(store.info(id)->name, QString("Shared sketch"));
+        // A package that is not what it says is refused with its reason and adds nothing.
+        QFile bad(dir.filePath("bad.fuguepack"));
+        QVERIFY(bad.open(QIODevice::WriteOnly));
+        bad.write("PK\x03\x04 not really a zip");
+        bad.close();
+        QVERIFY(!workflows.openPath(dir.filePath("bad.fuguepack")));
+        QCOMPARE(store.list().size(), canvasesBefore + 1);
     }
 
     void theWindowExportsAndOpensAPackage() {

@@ -308,6 +308,12 @@ public:
         if (autoName)
             name = promptName(upstreamPrompt(context.document, context.node));
 
+        // A Canvas Write stores the revision as a document, which has no groups: refuse rather than flatten them.
+        const Result<bool> grouped = CanvasStore::forSession().hasGroups(base->canvas, base->revision);
+        if (!grouped)
+            return Result<Values>(grouped.errors());
+        if (grouped.value())
+            return Result<Values>(canvas::groupsRefused(QStringLiteral("Writing a layer")));
         Result<PaintDocument> opened = openRevision(base.value());
         if (!opened)
             return Result<Values>(opened.errors());
@@ -378,6 +384,11 @@ public:
             const Result<mask::PaintDocument> there = store.load(base->canvas, current->head);
             if (!there)
                 return Result<Values>(there.errors());
+            const Result<bool> groupedNow = store.hasGroups(base->canvas, current->head);
+            if (!groupedNow)
+                return Result<Values>(groupedNow.errors());
+            if (groupedNow.value())
+                return Result<Values>(canvas::groupsRefused(QStringLiteral("Writing a layer")));
             if (there->width() != width || there->height() != height)
                 return cannotPlace(current->head);
         }

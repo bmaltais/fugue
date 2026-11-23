@@ -23,8 +23,9 @@ import "widgets"
 // rebindable): H, F2, Ctrl+D, ] and [, X or Delete, Ctrl+Z and Ctrl+Shift+Z. `ownShortcuts` binds them here as well, for a host that is a modal popup (the File > Canvas…
 // dialog), whose window's shortcuts sleep.
 //
-// Rows are 8u (32px) with 24px thumbnails and a 28px eye; every control is 28px. Groups are later: a row has `depth`,
-// which indents it, so a nested list fits without a new model.
+// Rows are 8u (32px) with 24px thumbnails and a 28px eye; every control is 28px. A group (#252) is one row of kind
+// "group" whose thumbnail is its children's composite; its children are not listed (Ungroup takes them out), and a row
+// has `depth`, which indents it, so a nested list can come without a new model.
 Rectangle {
     id: root
     objectName: "canvasLayersPanel"
@@ -33,6 +34,8 @@ Rectangle {
     property bool ownShortcuts: false
     // A layer mask became the brush's target (a click on its thumbnail, Add mask): the view takes the brush.
     signal maskTargeted
+    // Layer properties… of this layer (the view opens the dialog).
+    signal propertiesRequested(int position)
     readonly property real u: look.unit
     readonly property var rows: model.layers
     readonly property var chosen: model.selection
@@ -64,6 +67,12 @@ Rectangle {
     function blendLabel(id) {
         const found = model.blendModes.find(b => b.id === id)
         return found ? found.label : (current ? current.compositeOp : "")
+    }
+    // Whether the layer and the one under it are shown paint layers or groups, which Merge down needs.
+    function canMergeDown(row) {
+        const under = rows.find(r => r.position === row.position - 1)
+        const merges = r => r !== undefined && r.visible && r.kind !== "mask" && r.kind !== "picture"
+        return merges(row) && merges(under)
     }
     function addMask(position) {
         if (editable && model.addMask(position))
@@ -139,7 +148,13 @@ Rectangle {
             {heading: true, enabled: false, text: qsTr("Arrange")},
             {text: qsTr("Duplicate"), value: "duplicate", detail: keysOf("canvas-layers.duplicate"), enabled: !off},
             {text: qsTr("Move up"), value: "raise", detail: keysOf("canvas-layers.raise"), enabled: !off},
-            {text: qsTr("Move down"), value: "lower", detail: keysOf("canvas-layers.lower"), enabled: !off}
+            {text: qsTr("Move down"), value: "lower", detail: keysOf("canvas-layers.lower"), enabled: !off},
+            {heading: true, enabled: false, text: qsTr("Combine")},
+            {text: qsTr("New layer"), value: "new", detail: keysOf("canvas-view.new-layer"), enabled: !off},
+            {text: qsTr("Group layers"), value: "group", detail: keysOf("canvas-view.group"), enabled: !off && row.kind !== "picture"},
+            {text: qsTr("Ungroup layers"), value: "ungroup", detail: keysOf("canvas-view.ungroup"), enabled: !off && row.kind === "group"},
+            {text: qsTr("Merge down"), value: "merge", detail: keysOf("canvas-view.merge-down"), enabled: !off && sel.length === 1 && canMergeDown(row)},
+            {text: qsTr("Layer properties…"), value: "properties", enabled: !off && sel.length === 1}
         ]
         if (row.hasMask)
             entries.push({heading: true, enabled: false, text: qsTr("Layer mask")},
@@ -158,6 +173,11 @@ Rectangle {
             case "duplicate": model.duplicate(sel); break
             case "raise": model.raise(sel); break
             case "lower": model.lower(sel); break
+            case "new": model.newLayer(); break
+            case "group": model.groupLayers(sel); break
+            case "ungroup": model.ungroup(sel); break
+            case "merge": model.mergeDown(row.position); break
+            case "properties": root.propertiesRequested(row.position); break
             case "mask": model.setMaskEnabled(sel, !row.maskEnabled); break
             case "mask-delete": model.removeMask(sel); break
             case "mask-paint": root.paintMask(row.position); break
