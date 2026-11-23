@@ -311,6 +311,26 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // #278: the arrow opens a group in the list, its layers sit indented under it, and the eye of one hides that layer alone.
+    void anArrowOpensAGroupAndALayerInsideIsHiddenInPlace() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        QVERIFY(QMetaObject::invokeMethod(model(app), "groupLayers", Q_ARG(QVariantList, (QVariantList{1, 2}))));
+        QTRY_VERIFY(find(app.window, "canvasLayerArrow-1"));
+        QVERIFY(!find(app.window, "canvasLayer-2")); // closed: only the group and Base
+        click(app, "canvasLayerArrow-1");
+        QTRY_COMPARE(layers(app).size(), 4);
+        QTRY_VERIFY(find(app.window, "canvasLayerEye-2"));
+        QCOMPARE(layer(app, 2).value("depth").toInt(), 1);
+        const int before = revisions();
+        click(app, "canvasLayerEye-2");
+        QTRY_COMPARE(revisions(), before + 1);
+        QVERIFY(!layer(app, 2).value("visible").toBool());
+        QCOMPARE(layers(app).size(), 4); // the group stayed open through the edit
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void anOlderRevisionReadsOnly() {
         App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
         QVERIFY(app.open());
@@ -374,6 +394,13 @@ private slots:
         QTRY_VERIFY(menu(app) && menu(app)->property("opened").toBool());
         QTest::qWait(300);
         QVERIFY(test_support::grab(app.window).save(QString::fromLocal8Bit(dir) + "/canvas-layers-menu.png"));
+        QTest::keyClick(app.window, Qt::Key_Escape);
+        QVERIFY(QMetaObject::invokeMethod(model(app), "groupLayers", Q_ARG(QVariantList, (QVariantList{1, 2}))));
+        QTRY_VERIFY(find(app.window, "canvasLayerArrow-1"));
+        click(app, "canvasLayerArrow-1");
+        QTRY_VERIFY(find(app.window, "canvasLayerEye-2"));
+        QTest::qWait(400);
+        QVERIFY(test_support::grab(app.window).save(QString::fromLocal8Bit(dir) + "/canvas-layers-tree.png"));
     }
 };
 

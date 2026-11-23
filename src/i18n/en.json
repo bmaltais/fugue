@@ -1655,5 +1655,17 @@
   "Selection from layer mask": "Selection from layer mask",
   "Ctrl+click the mask": "Ctrl+click the mask",
   "This layer has no mask.": "This layer has no mask.",
-  "Only a paint layer has pixels to select.": "Only a paint layer has pixels to select."
+  "Only a paint layer has pixels to select.": "Only a paint layer has pixels to select.",
+  "Close the group (Left); Alt+click closes every group": "Close the group (Left); Alt+click closes every group",
+  "Generate reads a layer of the top level: take it out of its group first.": "Generate reads a layer of the top level: take it out of its group first.",
+  "Layers inside different groups are changed one group at a time.": "Layers inside different groups are changed one group at a time.",
+  "Locked by its group: its layers cannot be added, removed or moved while the group is locked. Click to lock this layer too": "Locked by its group: its layers cannot be added, removed or moved while the group is locked. Click to lock this layer too",
+  "Open the group to see its %n layers (Right); Alt+click opens every group": {
+    "one": "Open the group to see its %n layer (Right); Alt+click opens every group",
+    "other": "Open the group to see its %n layers (Right); Alt+click opens every group"
+  },
+  "Pick layers of one group at a time.": "Pick layers of one group at a time.",
+  "Take the layer out of its group (Ungroup) first.": "Take the layer out of its group (Ungroup) first.",
+  "The mask of a layer inside a group cannot be painted or selected from yet.": "The mask of a layer inside a group cannot be painted or selected from yet.",
+  "This layer is inside a group: moving and transforming work on the layers of the top level for now.": "This layer is inside a group: moving and transforming work on the layers of the top level for now."
 }

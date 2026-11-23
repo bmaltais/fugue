@@ -10,8 +10,8 @@
 // Layers are named by their position in the tree, bottom first (0 is the bottom), as the tree lists
 // them. One edit can take several layers (a selection in the window): it is still one revision.
 // Groups (#252) are layers that hold layers (LayerRecord::group, children): the positions here are the
-// tree's top level; Group puts layers into a group, Ungroup takes a group's children out, and nothing
-// else reaches inside one.
+// tree's top level, or, with `LayerEdit::parent` (#278), the children of one group; Group puts layers into a group,
+// Ungroup takes a group's children out, and every other edit works on the layers of the level it is given.
 
 #include <QString>
 
@@ -42,7 +42,12 @@ struct LayerEdit {
     QString text;            // Rename: the new name; Blend: a blend id (mask::blendId: "normal", "multiply", ...)
     int to = 0;              // Move: the position the lowest of the moved layers ends at (the others stay above it, in order)
     TileMap maskTiles;       // SetMask: the mask's one-channel tiles (absent tiles are 0, black: hidden)
-    std::vector<LayerEdit> steps; // Properties: the edits it is made of, in order
+    std::vector<LayerEdit> steps; // Properties: the edits it is made of, in order (each names its own `parent`)
+    // The group the edit works inside (#278): the index of a group at the top level, then of a group in its children, and so on; empty is
+    // the top level. `layers`, `to` and the new layer's place are then positions among that group's children (bottom first). A locked
+    // group refuses what adds, removes, moves or masks its layers (Remove, Move, Duplicate, RemoveMask, SetMask, New, Group, Ungroup);
+    // showing, opacity, blend, names and the mask switch stay open. MergeDown, Flatten and a Properties edit take no parent.
+    std::vector<int> parent;
 };
 
 // A locked layer (#226) refuses what changes its pixels or its mask, takes it out of the stack or merges it: Remove, RemoveMask, SetMask,
