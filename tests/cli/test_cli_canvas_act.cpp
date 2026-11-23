@@ -247,6 +247,7 @@ private slots:
         const QJsonArray made = ran.data().value("canvases").toArray();
         QCOMPARE(made.size(), 1);
         QCOMPARE(fugue({"canvas", "show", made.at(0).toString(), "--json"}).data().value("width").toInt(), 64);
+        QCOMPARE(layers(made.at(0).toString()).at(0).toObject().value("name").toString(), QString("Upscaled")); // not "Layer 1" (#311)
         QCOMPARE(fugue({"canvas", "show", id, "--json"}).data().value("revision").toString(), before);
         QCOMPARE(ran.data().value("layers").toArray().size(), 0);
         QVERIFY(QString::fromUtf8(ran.err).contains("new"));

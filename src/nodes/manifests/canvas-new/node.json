@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "deterministic": false,
   "name": "Canvas New",
-  "description": "Make a new canvas from a picture: one layer holding the picture whole, at its own size, named Layer 1. The canvas it came from is not touched, so this is where an upscale lands (the picture is bigger than the source, and a canvas keeps its size). Every run makes one more canvas, with the name you give (a name that is taken gets a number after it). The canvas must fit what a canvas can be (at most 16384 px a side and 67 megapixels); when the picture is bigger the run says so and makes nothing.",
+  "description": "Make a new canvas from a picture: one layer holding the picture whole, at its own size, named as the canvas is (Upscaled; Layer 1 when no name is given). The canvas it came from is not touched, so this is where an upscale lands (the picture is bigger than the source, and a canvas keeps its size). Every run makes one more canvas, with the name you give (a name that is taken gets a number after it). The canvas must fit what a canvas can be (at most 16384 px a side and 67 megapixels); when the picture is bigger the run says so and makes nothing.",
   "category": "Image/Canvas",
   "keywords": ["canvas", "new", "create", "import", "upscale", "picture to canvas"],
   "sink": true,
