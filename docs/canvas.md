@@ -114,6 +114,9 @@ pasted parts and press Generate (or select nothing to treat the whole picture as
 scene and remove hard edges and halos ..."). For a flat picture made elsewhere (a Photoshop collage as a jpg or png), the
 `harmonize-image` template (File > Browse templates, Image editing) does the same from a Load Image with a painted mask of
 the pasted parts and saves the result at the original size; paint nothing for a mild whole-picture pass.
+In `harmonize-image` the painted mask is resized (Resize, node `mask_work`) to the size of the working picture (Resize to
+Megapixels, node `work`) before the seam map is built, so the VAE Encode gets a picture and a map of one size for any
+picture; the canvas action cuts both from the same region.
 
 How it works (nothing new in the node set): the mask's edge becomes a seam band (Grow Mask outward minus inward, 48 px
 of the picture each way, Advanced nodes `outer` and `inner`) that the model redraws at the full Strength; the pasted
