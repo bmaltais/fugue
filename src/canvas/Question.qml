@@ -16,7 +16,9 @@ Popup {
     padding: 6 * look.unit
     // The window's text size, not Material's 14px, so a question reads as Settings and Projects do (#235).
     font.pixelSize: look.textSize
-    width: Math.min((parent ? parent.width : 520) - 12 * look.unit, 520)
+    // The overlay's width, not the parent's: a question is declared inside a zero-size host Item (a dialogs holder), whose
+    // width made this negative and the surface vanish (the frame and padding were lost, the answers jammed on the text).
+    width: Math.min((Overlay.overlay ? Overlay.overlay.width : 520) - 12 * look.unit, 520)
     exit: null
     Overlay.modal: Rectangle { color: App.theme.look.scrim }
     background: PopupSurface { look: App.theme.look }

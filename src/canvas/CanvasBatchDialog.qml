@@ -26,7 +26,7 @@ Question {
     readonly property int pictures: batch && inFolder !== "" ? batch.pictureCount(inFolder) : -1
     readonly property bool ready: batch !== null && !batch.busy && actionRow !== null && actionRow.missing === 0 && pictures > 0 && outFolder !== ""
                                   && (!actionRow.needsPrompt || promptField.text.trim() !== "")
-    width: Math.min((parent ? parent.width : 640) - 12 * look.unit, 560)
+    width: Math.min((Overlay.overlay ? Overlay.overlay.width : 640) - 12 * look.unit, 560)
 
     function openDialog() {
         if (batch && !batch.busy && !batch.finished) {
