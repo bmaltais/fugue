@@ -266,6 +266,26 @@ Pixels fillMasked(const Pixels &image, const Pixels &maskIn, FillMode mode) {
     return out;
 }
 
+Pixels extendEdges(const Pixels &image, const Pixels &maskIn, edgefill::Mode mode, int blur) {
+    const Pixels mask = maskResized(maskIn, image.width, image.height);
+    const size_t pixels = size_t(image.width) * image.height;
+    std::vector<uint8_t> hole(pixels);
+    for (size_t i = 0; i < pixels; ++i)
+        hole[i] = mask.data[i] > 0.0f ? 1 : 0;
+    edgefill::Image filled{image.width, image.height, image.channels, image.data};
+    edgefill::fillHole(filled, hole, mode, blur);
+    Pixels out = image;
+    const int channels = image.channels;
+    for (size_t i = 0; i < pixels; ++i) {
+        const float m = std::min(mask.data[i], 1.0f);
+        if (m <= 0.0f)
+            continue;
+        for (int ch = 0; ch < channels; ++ch)
+            out.data[i * channels + ch] = (1.0f - m) * image.data[i * channels + ch] + m * filled.data[i * channels + ch];
+    }
+    return out;
+}
+
 Pixels overlayMask(const Pixels &image, const Pixels &maskIn, const std::array<float, 3> &color, float opacity) {
     const Pixels mask = maskResized(maskIn, image.width, image.height);
     Pixels out = image;

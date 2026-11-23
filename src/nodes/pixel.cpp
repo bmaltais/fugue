@@ -18,6 +18,7 @@
 #include <utility>
 #include <vector>
 
+#include "engine/edge_fill.h"
 #include "engine/vips.h"
 #include "nodes/pixel_io.h"
 #include "nodes/resample.h"
@@ -28,6 +29,7 @@ namespace {
 
 // The largest side Resize makes, as its manifest's `max` (the scheduler checks that first).
 constexpr int kMaxSide = 16384;
+constexpr int kMaxBlur = 512; // Pad's blur, as its manifest's `max`
 
 // `side` scaled by to / from, rounded half to even (Python's round()), and at least 1.
 int scaled(int side, int to, int from) { return std::max(1, int(std::nearbyint(double(side) * to / from))); }
@@ -405,8 +407,10 @@ public:
 
 // ---- more pixel nodes (ticket #29, spec 14.2) ---------------------------------------
 
-// ComfyUI's ImagePadForOutpaint: new area 0.5 gray (alpha 1), mask 1 over it and 0 over the
-// original; feathering fades the mask inward from the padded edges as ((f - d) / f)^2.
+// ComfyUI's ImagePadForOutpaint, with a choice of what the new area holds (#243; engine/edge_fill.h, also
+// the canvas resize's): gray 0.5 (alpha 1) as ComfyUI, the nearest picture stretched outward ("edge"), that
+// blurred ("edge-blur", the default: the benchmark's best outpaint start), or transparent. Mask 1 over the
+// new area and 0 over the original; feathering fades the mask inward from the padded edges as ((f - d) / f)^2.
 class PadKernel : public NodeKernel {
 public:
     Result<Values> run(const NodeContext &context) override {
@@ -431,17 +435,32 @@ public:
             return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("left"),
                                   QStringLiteral("The padded image would be %1 x %2, past %3 on a side.")
                                       .arg(width).arg(height).arg(kMaxSide));
-        Pixels image(width, height, in.channels, 0.5f);
+        const QString fillName = context.input("fill").text();
+        edgefill::Mode fill = edgefill::Mode::EdgeBlur;
+        if (!edgefill::modeFromName(fillName, &fill))
+            return makeInputError(QStringLiteral("value_not_in_choices"), QStringLiteral("fill"),
+                                  QStringLiteral("\"%1\" is not a fill this node knows.").arg(fillName));
+        const int blur = int(std::lround(context.input("blur").number()));
+        if (blur < 0 || blur > kMaxBlur)
+            return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("blur"),
+                                  QStringLiteral("A blur of %1 is outside 0 to %2.").arg(blur).arg(kMaxBlur));
+        // A transparent fill needs an alpha channel to be transparent in.
+        const int channels = fill == edgefill::Mode::Transparent ? 4 : in.channels;
+        Pixels image(width, height, channels, 0.0f);
         Pixels mask(width, height, 1, 1.0f);
-        if (in.channels == 4)
-            for (int y = 0; y < height; ++y)
-                for (int x = 0; x < width; ++x)
-                    image.at(x, y, 3) = 1.0f;
+        std::vector<uint8_t> hole(size_t(width) * size_t(height), 1);
+        for (int y = 0; y < in.height; ++y)
+            for (int x = 0; x < in.width; ++x) {
+                hole[size_t(y + top) * width + size_t(x + left)] = 0;
+                for (int ch = 0; ch < channels; ++ch)
+                    image.at(x + left, y + top, ch) = ch < in.channels ? in.at(x, y, ch) : 1.0f;
+            }
+        edgefill::Image filled{width, height, channels, std::move(image.data)};
+        edgefill::fillHole(filled, hole, fill, blur);
+        image.data = std::move(filled.data);
         const bool feather = feathering > 0 && feathering * 2 < in.height && feathering * 2 < in.width;
         for (int y = 0; y < in.height; ++y)
             for (int x = 0; x < in.width; ++x) {
-                for (int ch = 0; ch < in.channels; ++ch)
-                    image.at(x + left, y + top, ch) = in.at(x, y, ch);
                 float value = 0.0f;
                 if (feather) {
                     const int dt = top != 0 ? y : in.height;

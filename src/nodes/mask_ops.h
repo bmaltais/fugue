@@ -7,6 +7,7 @@
 
 #include <array>
 
+#include "engine/edge_fill.h"
 #include "nodes/resample.h"
 
 namespace fugue::nodes {
@@ -49,6 +50,14 @@ enum class FillMode { Gray, Blur };
 // The mask is stretched to the image's size. Where m = 0 the pixel is returned as it was; elsewhere
 // out = image * (1 - m) + fill * m.
 Pixels fillMasked(const Pixels &image, const Pixels &mask, FillMode mode);
+
+// `image` with what lies under `mask` filled from its edge (#243, engine/edge_fill.h, shared with Pad and the canvas
+// resize): each masked pixel takes the colour of the nearest pixel the mask leaves (m = 0), stretched outward, and for
+// EdgeBlur blurred by `blur` px (the picture itself is not blurred). Gray and Transparent are the fills' other
+// modes. Better than fillMasked's blur for a hole open on one side (an outpaint strip), where a blur across it pulls
+// the far side in. The mask is stretched to the image's size; where m = 0 the pixel is as it was, elsewhere
+// out = image * (1 - m) + fill * m. A picture with nothing left outside the mask is all gray.
+Pixels extendEdges(const Pixels &image, const Pixels &mask, edgefill::Mode mode, int blur);
 
 // `image` with `color` (RGB, 0..1) laid over it at mask * opacity. The mask is stretched to the
 // image's size; an alpha channel is left alone.

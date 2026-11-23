@@ -25,6 +25,7 @@
     "empty-latent",
     "empty-video-latent",
     "enhance-prompt",
+    "extend-edges",
     "extend-song",
     "feather-mask",
     "fill-masked",

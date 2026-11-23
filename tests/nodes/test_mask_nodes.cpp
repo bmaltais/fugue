@@ -422,6 +422,55 @@ private slots:
         QVERIFY(changed > 100);
     }
 
+    // ---- Extend Edges (#243) ----
+
+    void extendEdgesStretchesTheNearestPictureIntoAOneSidedHole() {
+        // 6 x 1: red red red | hole hole hole (the far side is a hole open to the edge): the hole is red, not gray.
+        const Img image{6, 1, 3, {1, 0, 0, 1, 0, 0, 1, 0, 0, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f}};
+        const Img mask = row({0, 0, 0, 1, 1, 1});
+        const Img out = runMask("fugue/extend-edges", {{"image", Value(handleOf(image))}, {"mask", Value(handleOf(mask))}, {"mode", "edge"}, {"blur", 0}}, "image");
+        for (int x = 0; x < 6; ++x) {
+            QCOMPARE(out.d[size_t(x) * 3], 1.0f);
+            QCOMPARE(out.d[size_t(x) * 3 + 1], 0.0f);
+        }
+    }
+
+    void extendEdgesLeavesTheMaskZeroByteIdenticalAndMixesAPartialMask_data() {
+        QTest::addColumn<QString>("mode");
+        QTest::newRow("edge") << "edge";
+        QTest::newRow("edge-blur") << "edge-blur";
+    }
+    void extendEdgesLeavesTheMaskZeroByteIdenticalAndMixesAPartialMask() {
+        QFETCH(QString, mode);
+        Img image, mask;
+        fillFixture(image, mask);
+        const Img out = runMask("fugue/extend-edges", {{"image", Value(handleOf(image))}, {"mask", Value(handleOf(mask))}, {"mode", mode}, {"blur", 6}}, "image");
+        QCOMPARE(out.w, image.w);
+        int kept = 0, changed = 0;
+        for (size_t i = 0; i < mask.d.size(); ++i)
+            for (int ch = 0; ch < 3; ++ch) {
+                if (mask.d[i] == 0.0f) {
+                    QCOMPARE(out.d[i * 3 + ch], image.d[i * 3 + ch]);
+                    ++kept;
+                } else if (out.d[i * 3 + ch] != image.d[i * 3 + ch]) {
+                    ++changed;
+                }
+            }
+        QVERIFY(kept > 500);
+        QVERIFY(changed > 100);
+    }
+
+    void extendEdgesOfAMaskedEverythingIsGrayAndBadInputsAreRefused() {
+        const Img image{3, 1, 3, {1, 0, 0, 0, 1, 0, 0, 0, 1}};
+        const Img out = runMask("fugue/extend-edges", {{"image", Value(handleOf(image))}, {"mask", Value(handleOf(filled(3, 1, 1, 1.0f)))}, {"mode", "edge-blur"}, {"blur", 24}}, "image");
+        for (float v : out.d)
+            QCOMPARE(v, 0.5f);
+        QCOMPARE(runNode("fugue/extend-edges", {{"image", Value(handleOf(image))}, {"mask", Value(handleOf(row({0, 0, 1})))}, {"mode", "gray"}, {"blur", 1}}).errors().value(0).code,
+                 QString("value_not_in_choices"));
+        QCOMPARE(runNode("fugue/extend-edges", {{"image", Value(handleOf(image))}, {"mask", Value(handleOf(row({0, 0, 1})))}, {"mode", "edge"}, {"blur", 5000}}).errors().value(0).code,
+                 QString("value_out_of_range"));
+    }
+
     void fillMaskedBlurStaysWithinTheRangeOfTheColorsAroundIt() {
         // A binary mask: the filled pixels are averages of the kept ones, so no channel leaves
         // the range of what is kept.
@@ -591,6 +640,7 @@ private slots:
             {"fugue/threshold-mask", {{"mask"}, {"mask"}}},
             {"fugue/combine-masks", {{"destination", "source"}, {"mask"}}},
             {"fugue/fill-masked", {{"mask"}, {}}},
+            {"fugue/extend-edges", {{"mask"}, {}}},
             {"fugue/overlay-mask", {{"mask"}, {}}},
             {"fugue/grow-mask", {{"mask"}, {"mask"}}},
             {"fugue/invert-mask", {{"mask"}, {"mask"}}},
@@ -609,8 +659,9 @@ private slots:
                 QVERIFY2((output.role == "mask") == ports.second.contains(output.name), qPrintable(QString(id) + " output " + output.name));
         }
         // #29's nodes took the role at a patch version.
-        for (const char *id : {"fugue/grow-mask", "fugue/invert-mask", "fugue/image-to-mask", "fugue/solid-mask", "fugue/pad"})
+        for (const char *id : {"fugue/grow-mask", "fugue/invert-mask", "fugue/image-to-mask", "fugue/solid-mask"})
             QCOMPARE(registry.nodeType(QString::fromLatin1(id))->version.toString(), QString("1.0.1"));
+        QCOMPARE(registry.nodeType("fugue/pad")->version.toString(), QString("1.1.0")); // fill and blur added (#243)
     }
 
     void theNewNodesHaveTheDefaultsOfTheDesign() {
@@ -629,6 +680,10 @@ private slots:
         QCOMPARE(input("overlay-mask", "color")->defaultValue.toString(), QString("#ff3b30"));
         QCOMPARE(input("overlay-mask", "opacity")->defaultValue.toDouble(), 0.5);
         QCOMPARE(input("fill-masked", "mode")->defaultValue.toString(), QString("blur"));
+        QCOMPARE(input("extend-edges", "mode")->defaultValue.toString(), QString("edge-blur"));
+        QCOMPARE(input("extend-edges", "blur")->defaultValue.toInt(), 24);
+        QVERIFY(input("extend-edges", "blur")->advanced);
+        QCOMPARE(input("pad", "fill")->defaultValue.toString(), QString("edge-blur"));
         QCOMPARE(input("combine-masks", "operation")->defaultValue.toString(), QString("multiply"));
         QVERIFY(input("composite-masked", "mask")->optional);
         QVERIFY(input("composite-masked", "resize_source")->advanced);
