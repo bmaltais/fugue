@@ -448,6 +448,50 @@ private slots:
         QVERIFY2(slot.bottom() + r.app.model.rowHeight() <= height, qPrintable(QString("slot bottom %1, row %2, height %3").arg(slot.bottom()).arg(r.app.model.rowHeight()).arg(height)));
     }
 
+    // A group that exposes a Load Image's file on its face shows that picture before any run, as a Load Image does,
+    // in every picture mode; Hide picture takes it away and Show picture brings it back. After a run it shows the
+    // image its group makes, and not when hidden.
+    void aGroupExposingALoadImagesFileShowsThePicture() {
+        RunApp r(R"({
+          "fugue": 1,
+          "groups": {"local/pic": {
+            "version": "1.0.0", "name": "Picture",
+            "inputs": [{"name": "picture", "targets": ["load.file"]}],
+            "outputs": [{"name": "image", "from": "size.image"}],
+            "nodes": {"load": {"type": "fugue/load-image", "version": "1.0.0"},
+                      "size": {"type": "fugue/resize-megapixels", "version": "1.0.0", "inputs": {"image": {"from": "load.image"}}}}}},
+          "graph": {"nodes": {"grp": {"type": "local/pic", "version": "1.0.0"},
+            "show": {"type": "fugue/preview", "version": "1.0.0", "inputs": {"value": {"from": "grp.image"}}}}},
+          "layout": {"nodes": {"grp": {"pos": [100, 100]}, "show": {"pos": [500, 100]}}, "view": {"center": [300, 300], "zoom": 1}}
+        })");
+        QVERIFY(r.app.open());
+        const QString file = r.app.dir.filePath("face.png");
+        QImage picture(64, 32, QImage::Format_RGB32);
+        picture.fill(Qt::red);
+        QVERIFY(picture.save(file));
+        QVERIFY(r.app.model.widgets()->setText("grp", "picture", file).isEmpty());
+        const auto shown = [&] { return r.role("grp", NodeList::Thumbnail).toString().startsWith("file://"); };
+        for (const char *mode : {"view.picture-smart", "view.picture-sinks", "view.picture-all"}) {
+            QVERIFY(r.app.commands.trigger(mode));
+            QTRY_VERIFY2(shown(), mode);
+        }
+        QVERIFY(r.app.commands.trigger("view.picture-smart"));
+        r.app.model.select({"grp"});
+        QVERIFY(r.app.commands.trigger("node.picture-hide"));
+        QTRY_VERIFY(!shown());
+        QVERIFY(r.app.commands.trigger("node.picture-show"));
+        QTRY_VERIFY(shown());
+
+        // A run: the picture is now what the group makes (the resized image), not the file's.
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(finished.size(), 1);
+        QTRY_COMPARE(r.role("grp", NodeList::ThumbnailInfo).toString(), QStringLiteral("1456 \u00d7 720"));
+        QVERIFY(r.app.commands.trigger("node.picture-hide"));
+        QTRY_VERIFY(!shown());
+        QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
+    }
+
     // A node nothing can serve says so before any run, and how to fix it (8.5); a run that
     // reaches it fails with the same words.
     void aNodeNoProviderCanServeShowsWhatIsMissing() {
@@ -537,8 +581,10 @@ private slots:
             QVERIFY(QFileInfo(place.filePath("first/inputs/" + name)).isFile());
 
             QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+            QSignalSpy ev(r.service.get(), &RunService::event);
             r.app.key(Qt::Key_Return, Qt::ControlModifier);
             QTRY_COMPARE(finished.size(), 1);
+            for (auto &a : ev) qWarning().noquote() << QJsonDocument(a.at(1).toJsonObject()).toJson(QJsonDocument::Compact).left(400);
             QString status;
             key = ranNode(r, finished.first().at(0).toString(), "src", &status).value("key").toString();
             QCOMPARE(status, QString("ok"));

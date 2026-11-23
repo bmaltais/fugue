@@ -13,6 +13,7 @@
 #include "canvas/canvas_model.h"
 #include "commands/command_registry.h"
 #include "engine/file_roots.h"
+#include "engine/groups.h"
 #include "engine/paths.h"
 #include "engine/registry.h"
 #include "workflow/workflows.h"
@@ -630,7 +631,7 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
                     view.thumbnailFile.clear();
                     view.text.clear();
                 }
-            } else if (!thumbnails.isEmpty() && !inner) {
+            } else if (!thumbnails.isEmpty() && (!inner || m_nodeInfo.value(top).resultFrom == path)) {
                 const QJsonObject thumbnail = thumbnails.contains("image")  ? thumbnails.value("image").toObject()
                                               : thumbnails.contains("file") ? thumbnails.value("file").toObject()
                                                                             : thumbnails.begin().value().toObject();
@@ -841,6 +842,7 @@ void CanvasRuns::readNodes() {
         return;
     // The level shown: its cards are the ones with a slot.
     const Document document = m_canvas->scopeDocument();
+    const Document whole = m_canvas->document(); // the groups, for the face of an instance
     for (auto it = document.graph.nodes.cbegin(); it != document.graph.nodes.cend(); ++it) {
         NodeInfo info;
         info.savesFile = it->type == QLatin1String("fugue/save-image") || it->type == QLatin1String("fugue/save-video")
@@ -866,7 +868,22 @@ void CanvasRuns::readNodes() {
             info.labelA = labelOf("a", QStringLiteral("A"));
             info.labelB = labelOf("b", QStringLiteral("B"));
         }
-        if (const NodeType *type = m_registry->nodeTypeFor(it->type, it->version.major)) {
+        // A group instance is typed by its face (its exposed ports), so a group that exposes a Load Image's
+        // file shows that picture as a Load Image does, and its first image output shows its result.
+        std::optional<NodeType> face;
+        const NodeType *type = m_registry->nodeTypeFor(it->type, it->version.major);
+        if (const GroupDefinition *group = type ? nullptr : whole.group(it->type)) {
+            face = groupFace(whole, *m_registry, it->type);
+            type = &*face;
+            for (const GroupOutput &output : group->outputs) {
+                const OutputSpec *spec = face->output(output.name);
+                if (spec && spec->type.type.id == QLatin1String("image") && !spec->type.list) {
+                    info.resultFrom = keyFor(it.key()) + QLatin1Char('/') + output.from.node;
+                    break;
+                }
+            }
+        }
+        if (type) {
             for (const InputSpec &input : type->inputs) {
                 const InputValue value = it->inputs.value(input.name);
                 // A mask painted over an image input: the slot shows that input's picture (Paint Mask).
@@ -886,7 +903,7 @@ void CanvasRuns::readNodes() {
                 }
             }
         }
-        if (info.showsResult || info.followsInput() || !info.imageFile.isEmpty() || !info.picture)
+        if (info.showsResult || info.followsInput() || !info.imageFile.isEmpty() || !info.resultFrom.isEmpty() || !info.picture)
             m_nodeInfo.insert(keyFor(it.key()), info);
     }
     TabRuns &runs = m_tabs[m_shownTab];
@@ -898,8 +915,11 @@ void CanvasRuns::readNodes() {
 QSet<QString> CanvasRuns::noPictures() const {
     QSet<QString> hidden, followed;
     for (auto it = m_nodeInfo.cbegin(); it != m_nodeInfo.cend(); ++it) {
-        if (!it->picture)
+        if (!it->picture) {
             hidden.insert(it.key());
+            if (!it->resultFrom.isEmpty())
+                hidden.insert(it->resultFrom); // a group's picture is its inside's
+        }
         else if (it->followsInput() && !it->cropFrom.isEmpty())
             followed.insert(it->cropFrom); // the picture a shown Crop or Paint Mask draws over
     }
