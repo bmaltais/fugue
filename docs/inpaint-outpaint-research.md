@@ -24,7 +24,7 @@ measurement. Related: [masking.md](masking.md), [spec 14.4](spec.md#144-masking-
   - **Small regions need scale**: Canvas Region redraws at the crop's own size; scaling towards 1 MP hides a
     rectangle's box.
   - Blend 16 suffices; Feather, the soft mask and more steps added nothing; Color Match ruins a replacement.
-  - At 4 steps strength moves in steps: Refine 0.5 is a light pass, 0.75 a restyle.
+  - Strength is a noise level since #244; re-measured in 4.7: Refine light 0.55, default 0.7, restyle 0.9.
   - **Klein 4B is as good as 9B by eye** at half the time and memory: better on the small rectangle and on Expand
     (9B handed back the pre-fill on the portrait), a little behind on the seam number for the edge removal and the
     background. Qwen-Image-Edit gives the cleanest seams at 10 to 20 times the time.
@@ -157,7 +157,7 @@ feather and grow defaults, Fooocus's erode/dilate and "respective field" default
 | **The reference brings the object back** | For removal, the reference still shows the object | A faint lamp silhouette with a large padding or `scale` 2 | Remove: reference the blurred pre-fill, not the original (4.3) |
 | **The prompt is drawn literally** | A distilled edit model follows the words | "Empty background ..." as the hidden Remove prompt paints a white blank over the plant at the window | A removal instruction, not a description (4.5) |
 | **Outpaint repeats the subject** | The prompt names the subject and the region shows little of it, so the model draws it again in the new strip | The portrait extended upward gets a second, smaller woman above her head | Keep a large context band, prompt the whole scene as an instruction (4.6) |
-| **Denoise below 1 does nothing** | With 4 distilled steps the strength falls into steps: 0.3 and 0.4 give the same picture, 0.5 and 0.6 another, 0.8 and 1 the same | A Refine at 0.5 changes only details; Remove at 0.6 leaves the lamp | Refine 0.5 (a light pass) or 0.75 (a restyle); Fill and Remove at 1 |
+| **Denoise below 1 does nothing** | With 4 distilled steps the strength falls into steps: 0.3 and 0.4 give the same picture, 0.5 and 0.6 another, 0.8 and 1 the same | A Refine at 0.5 changes only details; Remove at 0.6 leaves the lamp | (before #244) Refine 0.5 (a light pass) or 0.75 (a restyle); now light 0.55, default 0.7, restyle 0.9 (4.7); Fill and Remove at 1 |
 | **Edge artifacts** | A selection on the canvas's edge has no picture beyond it | Canvas Region moves the box inside (as Crop to Mask does); nothing beyond the edge was needed | The router keeps the padding on the inner sides (6) |
 
 ## 3. What Fugue can run on this machine
@@ -401,8 +401,41 @@ count. Same start picture, mean absolute difference to it (0 to 1):
 | 0.9 | n/a | n/a | 0.039 (4 steps), 0.049 (8 steps) |
 
 The scale is now continuous and ordered, and 0.5 and 0.75 are lighter than the table below, which was measured with
-the step reading: **the Refine presets (0.5 light, 0.75 restyle) are to be re-measured**, a restyle now sits near 0.9
-[U]. Below the schedule's lowest sigma (0.51 at 8 steps, 0.72 at 4) the pass is one step from the exact sigma.
+the step reading. Below the schedule's lowest sigma (0.51 at 8 steps, 0.72 at 4) the pass is one step from the exact sigma.
+
+**Refine presets re-measured (#271, 2026-11-23).** Klein 4B Q8, 4 steps, guidance 1, seed 42, reference on, Blend 16,
+the helper built from `main` with #244 (the CUDA helper of `~/github/fugue` predates it and reads strength as a step
+fraction, so a build was made in the worktree), RTX 3090, the real canvas path of 4.1. Three pictures: the chair of the
+reading nook (the "green velvet armchair" prompt, padding 238), and the whole cat and the whole portrait with the
+fallback prompt "Refine the details, keeping everything as it is.". Inside change (mean absolute difference to the
+start picture, 0 to 255; outside the mask byte-identical in every run, seam 1.0 to 1.03 on the chair):
+
+| Strength | chair | cat | portrait | What the eye sees |
+| --- | --- | --- | --- | --- |
+| 0.15 | 1.6 | 1.8 | 2.6 | the VAE round trip only: the floor |
+| 0.3 | 1.7 | 1.9 | 2.7 | same as 0.15 |
+| 0.4 | 1.7 | 2.0 | 2.9 | same, a touch crisper fur |
+| **0.55** | 1.9 | 2.5 | 3.0 | **light**: fur and velvet re-rendered a little sharper, nothing moves |
+| **0.7** | 1.9 | 3.0 | 3.5 | **default**: clearly re-drawn fine detail (fur strands, hair, fabric folds), same composition and color |
+| 0.85 | 2.3 | 6.6 | 5.1 | richer color and a changed texture (the cat's coat goes more orange) |
+| **0.95** | 3.4 | 12.5 | 8.2 | **restyle**: a visibly different rendering; the reference still keeps the layout and the subject |
+
+Sampling took 3 to 5 s per pass; 0.15 was a little shorter (fewer steps run). The scale is smooth and monotonic and
+has no cliff, unlike the step reading. The chair barely moves at any strength because the reference (the crop) holds it
+(a no-reference run was 21 in the old table); a restyle of a masked object needs a prompt that differs from the
+picture, which is the person's to write. Montages (kept outside the repo): `sheets/refine-{chair,cat,portrait}.png` of `~/github/fugue-inpaint-out`.
+
+**Presets: light 0.55, default 0.7, restyle 0.9** (the old 0.5 light and 0.75 restyle were step-fraction numbers; on the
+noise-level scale 0.75 is a gentle pass and the old restyle sits near 0.9). 0.9 rather than 0.95 because 0.95 on the whole cat starts to repaint color.
+**Low strength.** Below 0.72 (4 steps) the pass is one step from the exact sigma: it ran without error at 0.15 and
+gave the VAE-round-trip result, indistinguishable from 0.3 and 0.4. Nothing below about 0.4 is useful, but it is
+harmless and it is not enforced in code; the presets sit above it, so the minimum is left alone.
+
+**Release note (values differ from ComfyUI's `denoise`).** For FLUX, FLUX.2, Qwen Image, Z-Image and the like Fugue's
+strength is the sigma the start picture is noised to, whatever the step count. ComfyUI's `denoise` is a fraction of
+the steps on the same shifted schedule, so the same number redraws differently there; Refine's 0.7 is not
+ComfyUI's 0.7. The Stable Diffusion family keeps the step-fraction reading. Fugue has no changelog file: this note
+and the one in canvas-actions-design.md are its record, for the release text.
 
 *Measured before the fix.* At 4 steps the strength falls into steps: 0.3 and 0.4 give the same picture, 0.5 and 0.6 another, 0.75 a third,
 0.8 to 1 the full redraw (measured: identical files within each group). Refine on the chair:
@@ -505,7 +538,7 @@ below are the rest.
 | Pre-fill | none | Fill Masked `blur` | the resize fills the new area with stretched, blurred edge pixels (G1, G4) | none |
 | Text Encode reference | the crop | the **pre-filled** crop | the crop | the crop |
 | Prompt | the person's | fixed: "Remove the object and fill in what is behind it, matching the surroundings." | the person's (a whole-scene description) or the fallback "Extend the picture beyond its edges, continuing the scene." | the person's, fallback "Refine the details, keeping everything as it is." [U] |
-| Steps, guidance, strength | 4, 1, 1 | 4, 1, 1 | 4, 1, 1 | 4, 1, **0.5** (0.75 to restyle) |
+| Steps, guidance, strength | 4, 1, 1 | 4, 1, 1 | 4, 1, 1 | 4, 1, **0.7** (0.55 light, 0.9 restyle) |
 | Soft mask | off | off | off | off |
 | Color Match | **off** (it pulls the new object to the old colours) | off (no visible change, 4.9) | off (no visible change, 4.9) | off |
 | Canvas Write Blend | 16 | 16 | 16 | 16 |
@@ -561,12 +594,12 @@ touches or passes the edge is worked out from the bounds, so it can never disagr
 | 1 | no canvas | none | |
 | 2 | a crop frame reaching past the canvas on any side | **Expand** to the frame | Photoshop's Generative Expand gesture |
 | 2b | a crop frame wholly inside the canvas | none ("that is a crop") | cropping needs no generation |
-| 3 | no selection, a prompt | **Refine** the whole canvas, strength 0.5 | an instruction for the whole picture; a full redraw would replace it |
+| 3 | no selection, a prompt | **Refine** the whole canvas, strength 0.7 | an instruction for the whole picture; a full redraw would replace it |
 | 3b | no selection, no prompt | none ("Select an area first") | |
 | 4 | a selection reaching past the edge | **Expand** to the union of canvas and selection; the whole new strip is filled | a strip left half empty would stay transparent |
 | 5 | fewer than 64 selected pixels | none (`mask_empty`) | |
 | 6 | a strength below 1 | **Refine** at that strength | the person asked to keep what is there |
-| 7 | 90% of the canvas or more selected, a prompt | **Refine**, 0.5 | a full redraw of everything is text-to-image, not an edit |
+| 7 | 90% of the canvas or more selected, a prompt | **Refine**, 0.7 | a full redraw of everything is text-to-image, not an edit |
 | 7b | the same, no prompt | none ("type what should be there") | nothing is left to continue |
 | 8 | no prompt | **Remove** | an empty prompt means "take it away" (4.5: the workflow brings its own instruction) |
 | 9 | otherwise | **Generative fill** | |
@@ -578,7 +611,7 @@ touches or passes the edge is worked out from the bounds, so it can never disagr
 | `padding` | half the selection's longer side, held to 64..256 px; Remove at least 128 | Fill best at 192 to 384 for a 476 px chair (4.2); the 64 px floor keeps padding above Blend + Feather; Remove needs surroundings (the plant at the edge) |
 | `region` | the bounds grown by the padding, moved inside the canvas with its size kept (all of a side when longer) | Canvas Region and Crop to Mask move their box the same way; nothing beyond the edge was needed (edge-plant) |
 | `scale` | up to 1 MP when the region is below 0.8 MP (InvokeAI's band), at most 4, never down | scale 2 hid the small rectangle's box and sharpened it (4.2); the Region's cap does the shrinking |
-| `strength` | 1 for Fill, Remove, Expand; 0.5 for Refine unless set | 4.7: 0.5 refines, 0.75 restyles, below 0.5 does nothing at 4 steps |
+| `strength` | 1 for Fill, Remove, Expand; 0.7 for Refine unless set | 4.7 (re-measured after #244): 0.55 polishes, 0.7 refines, 0.9 restyles; below about 0.3 nothing beyond the VAE round trip |
 | `edgeContact` | the bounds touch the canvas's edge | the region is moved inside; a reason says so |
 | Expand `fill` | each grown strip plus 32 px of overlap into the old picture, their bounds | overlap 32 is between 0 and 64 on both cases (4.6) |
 | Expand `region`, `padding` | the fill plus 256 px of the old picture beside it, cut at the canvas | 64 px of context duplicated the subject, 256 and 512 never did (4.6) |

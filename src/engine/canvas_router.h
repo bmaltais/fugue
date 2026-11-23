@@ -57,7 +57,7 @@ struct RouteInput {
 struct RouteTuning {
     int minSelectedPixels = 64;          // below this the selection is empty (mask_empty)
     double refineCoverage = 0.9;         // a selection this large of the canvas, with a prompt, refines
-    double refineStrength = 0.5;         // Refine's default strength
+    double refineStrength = 0.7;         // Refine's default strength: a noise level (#244); light 0.55, restyle 0.9 (4.7)
     double targetMegapixels = 1.0;       // the size a region is redrawn at (Region scale and cap)
     double maxScale = 4.0;               // the Region's own limit
     int minPadding = 64;                 // context around a selection, in canvas pixels
