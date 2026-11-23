@@ -122,6 +122,15 @@ Drafts from the 2026-11-20 pass that the rules above already answered. A window 
 - Why: the owner's live-preview decision (Opus design review): feedback where the eye already is (Fitts), and the frame is clipped to the selection so the unchanged padding never appears to change.
 - Deviations, each to confirm: the outline is dimmed, not removed, while a frame shows; no reduced-motion variant yet (Fugue has no such setting).
 
+### 2026-11-23 Canvas view: Remove background in the task bar (#231 slice 6)
+
+- Control: the action menu lists Remove background. A missing pack shows in the status row the line "Needs the Remove Background pack" and a compact `ViewButton` `canvasTaskInstallPack` ("Install…", download glyph) before the Download button; Generate is disabled with the tip "Install the pack first". For an action whose selection is optional the bar also shows with nothing selected while that action is chosen (at the foot of the picture); with no single current layer the tip reads "Select one layer first".
+- Old: the bar showed only with a selection (or while Expand was chosen); a missing node pack made an action broken with a node-type reason.
+- New: an optional-selection action needs no selection, so the bar stays up like Expand's; a missing pack is an offer, not a fault, in the same status row and place as the missing-models line (Install… takes the Download button's place: models wait for the pack).
+- Why: one click on the current layer (Photoshop's Remove Background); consent stays with the window (Install… opens Settings > Packs, which asks).
+- Rules met: Floor (ViewButton), Words ("Install…" ends in an ellipsis because a dialog follows), Primary (Generate stays the one accent), Keyboard (Tab and Enter).
+- Deviations, each to confirm: reaching the action with nothing selected takes one selection first (Auto never picks it); the button still says Generate; no entry in the Layers panel menu yet.
+
 ### 2026-11-23 Canvas view: Refine, Remove and Expand in the task bar (#231 slices 5 and 7)
 
 - Control: the action menu lists three more actions (no new control for Refine and Remove). For an action whose selection is `bounds` (Expand) the bar gets one more row, `canvasTaskExpandRow`: the label "Grow the canvas" and a `ViewButton` (`canvasTaskExpand`, "Right, 25%") that opens `canvasTaskExpandMenu` (Left, Right, Top, Bottom, each at 25% and 50%). While Expand is the chosen action the bar shows with nothing selected (at the foot of the picture), because Expand has no selection of its own; the prompt hint reads "Describe the scene, or leave empty". For an action with no prompt role (Remove) the hint reads "No prompt needed: press Generate".

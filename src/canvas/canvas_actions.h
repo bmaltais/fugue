@@ -62,6 +62,7 @@
 #include "engine/canvas_batch.h"
 #include "engine/document.h"
 #include "engine/error.h"
+#include "engine/templates.h"
 
 namespace fugue {
 
@@ -73,8 +74,10 @@ class CanvasActions : public QObject {
     Q_OBJECT
     QML_ELEMENT
     QML_UNCREATABLE("made in C++, read through App")
-    // [{id, name, description, glyph, selection, needsPrompt, broken, reason, missing (models not here), total,
-    //   download (the button's text, "" when nothing can be fetched), size}], the bundled first, in name order.
+    // [{id, name, description, glyph, selection, needsPrompt, hasLayer (its block has a layer role: it works on the current layer),
+    //   broken, reason, missing (models not here), total, download (the button's text, "" when nothing can be fetched), size,
+    //   packMissing (a pack its nodes need is not installed), packName, packText ("Needs the Remove Background pack"),
+    //   packInstallable (the template says where to get it)}], the bundled first, in name order.
     Q_PROPERTY(QVariantList actions READ actions NOTIFY actionsChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY stateChanged)       // runs of the last Generate waiting or active
     Q_PROPERTY(bool running READ running NOTIFY stateChanged) // one of them is active
@@ -156,6 +159,9 @@ public:
     Q_INVOKABLE QVariantMap selectionBounds(fugue::MaskLayer *selection) const;
     // Fetches the action's missing models through the window's download line (a template's Download).
     Q_INVOKABLE void download(const QString &action);
+    // Asks the window to install the pack the action needs (its template carries it, or says where it is): Settings > Packs shows what it
+    // is and asks before it installs and before it is trusted (6.6, 6.7). False when nothing says where to get it. Nothing is fetched here.
+    Q_INVOKABLE bool installPack(const QString &action);
     // Edit workflow (design 7): the action's workflow as a tab of the Graph, a copy no file holds (Save asks where; a
     // bundled action is never written). "auto" is the action Auto falls back to. {ok, action, name} or {ok: false, reason}.
     // The window then shows the Graph (the host's job: it knows its areas).
@@ -210,6 +216,10 @@ private:
         std::optional<canvas::Action> action;
         canvas::ActionGraph graph;
         QString broken; // the reason it cannot run, in words
+        QList<CarriedPack> carried; // the packs its template folder holds
+        // The packs its nodes need that are not installed (#231 slice 6): {id, name, source, ref}. The action is not broken for
+        // that: the bar offers to install them, and the inputs of the block that point into their nodes wait for them.
+        QVariantList needPacks;
     };
     struct WriteResult {
         bool cached = false;

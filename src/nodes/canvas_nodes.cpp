@@ -10,6 +10,7 @@
 
 #include "engine/canvas_handle.h"
 #include "engine/canvas_store.h"
+#include "engine/canvas_tiles.h"
 #include "engine/clock.h"
 #include "engine/hash.h"
 #include "nodes/canvas_region_ops.h"
@@ -304,9 +305,14 @@ public:
         const Result<int> blend = intInput(context, "blend", 0, kMaxBlend);
         if (!blend)
             return Result<Values>(blend.errors());
-        const Result<Pixels> redrawn = pixelsOf(context.input(QStringLiteral("image")), QStringLiteral("image"));
-        if (!redrawn)
-            return Result<Values>(redrawn.errors());
+        // Onto (1.6.0): the picture is a layer mask, not a layer, so there is no image to read.
+        const QString onto = context.input(QStringLiteral("onto")).text().trimmed();
+        Result<Pixels> redrawn = Pixels();
+        if (onto.isEmpty()) {
+            redrawn = pixelsOf(context.input(QStringLiteral("image")), QStringLiteral("image"));
+            if (!redrawn)
+                return Result<Values>(redrawn.errors());
+        }
         // "Fill" (the default) or nothing: named from the prompt upstream, else "Fill n" (below).
         QString name = context.input(QStringLiteral("name")).text().trimmed();
         const bool autoName = name.isEmpty() || name == QLatin1String("Fill");
@@ -343,6 +349,8 @@ public:
                 return Result<Values>(read.errors());
             mask = maskResized(read.value(), width, height);
         }
+        if (!onto.isEmpty())
+            return writeLayerMask(context, base.value(), baseTree.value(), onto, box, mask);
         if (shape && !shapeFits(*shape, redrawn->width, redrawn->height))
             return makeInputError(QStringLiteral("stitch_mismatch"), QStringLiteral("image"),
                                   QStringLiteral("The picture is %1 x %2 and the region was %3 x %4: its shape differs by more than 2%.")
@@ -436,6 +444,75 @@ public:
         out.insert(QStringLiteral("canvas"), Value(handle.value()));
         out.insert(QStringLiteral("accepted"), Value(true));
         out.insert(QStringLiteral("head"), Value(moved->head));
+        return Result<Values>(out);
+    }
+
+    // Onto (1.6.0): `layer_mask` becomes the layer mask of the layer named `onto`, one revision made from the one Region read.
+    // Inside the stitch's box the layer's mask moves toward the new one by `coverage` (the stitch's mask, or `mask`; all 1 without
+    // a stitch), so a selection limits the change and the rest of the old mask stays. A locked layer refuses (the store's rule, #226).
+    Result<Values> writeLayerMask(const NodeContext &context, const CanvasHandle &base, const canvas::Tree &tree, const QString &onto, const CropBox &box,
+                                  const Pixels &coverage) {
+        const int width = tree.width, height = tree.height;
+        int position = -1;
+        QStringList names;
+        for (int i = int(tree.layers.size()) - 1; i >= 0 && position < 0; --i) { // the top one of that name
+            names << tree.layers[size_t(i)].name;
+            if (tree.layers[size_t(i)].name == onto && tree.layers[size_t(i)].kind != LayerKind::Picture)
+                position = i;
+        }
+        if (position < 0)
+            return makeInputError(QStringLiteral("input_invalid"), QStringLiteral("onto"),
+                                  QStringLiteral("The canvas has no layer named \"%1\" at this revision.").arg(onto.left(60)),
+                                  QStringLiteral("Its layers are: %1.").arg(names.join(QStringLiteral(", ")).left(300)));
+        const Value given = context.input(QStringLiteral("layer_mask"));
+        if (!given.isMedia())
+            return makeInputError(QStringLiteral("input_missing"), QStringLiteral("layer_mask"), QStringLiteral("Onto needs a Layer mask to put on the layer."),
+                                  QStringLiteral("Connect the mask (Remove Background Mask's output) to Layer mask."));
+        const Result<Pixels> read = maskOf(given, QStringLiteral("layer_mask"));
+        if (!read)
+            return Result<Values>(read.errors());
+        // The mask where it belongs: the region's size stretched to its box, nothing outside it.
+        Pixels placed(width, height, 1, 0.0f);
+        const Pixels fitted = maskResized(read.value(), box.width, box.height);
+        for (int y = 0; y < box.height; ++y)
+            for (int x = 0; x < box.width; ++x)
+                placed.at(box.x + x, box.y + y, 0) = fitted.at(x, y, 0);
+        CanvasStore store = CanvasStore::forSession();
+        const canvas::LayerRecord &layer = tree.layers[size_t(position)];
+        Pixels old(width, height, 1, 1.0f); // no mask: everything shows
+        if (layer.hasMask) {
+            const Result<mask::MaskPaint> held = canvas::assembleLayer(width, height, 1, layer.maskTiles, [&](const canvas::TileKey &key, const QString &hash) {
+                const mask::IRect rect = canvas::tileRect(key, width, height);
+                return store.tilePixels(hash, rect.width, rect.height, 1);
+            });
+            if (!held)
+                return Result<Values>(held.errors());
+            old = layerToPixels(held.value());
+        }
+        std::vector<uint8_t> gray(size_t(width) * size_t(height));
+        for (int y = 0; y < height; ++y)
+            for (int x = 0; x < width; ++x) {
+                const float cover = std::clamp(coverage.at(x, y, 0), 0.0f, 1.0f);
+                const float value = old.at(x, y, 0) * (1 - cover) + placed.at(x, y, 0) * cover;
+                gray[size_t(y) * size_t(width) + size_t(x)] = uint8_t(std::lround(std::clamp(value, 0.0f, 1.0f) * 255.0f));
+            }
+        const Result<canvas::Commit> done = store.setLayerMask(base.canvas, base.revision, position, mask::MaskPaint(width, height, gray, 1),
+                                                               QStringLiteral("canvas-write:") + context.node);
+        if (!done)
+            return Result<Values>(done.errors());
+        // A head that moved meanwhile: the mask is for the layer as it was read, so nothing is written (a mask never "only adds").
+        if (!done->move.moved && done->move.head != base.revision)
+            return Result<Values>(makeError(QStringLiteral("canvas_head_moved"),
+                                            QStringLiteral("The canvas changed while this ran (its head is now %1), so the layer mask was not written.").arg(done->move.head.left(19)),
+                                            QStringLiteral("Run again from the canvas as it is now.")));
+        const QString landed = done->move.moved ? done->revision.id : base.revision; // a mask equal to the one there changes nothing
+        const Result<QJsonObject> handle = canvas::writeCanvasHandle(context.workDir, {base.canvas, landed});
+        if (!handle)
+            return Result<Values>(handle.errors());
+        Values out;
+        out.insert(QStringLiteral("canvas"), Value(handle.value()));
+        out.insert(QStringLiteral("accepted"), Value(true));
+        out.insert(QStringLiteral("head"), Value(landed));
         return Result<Values>(out);
     }
 };

@@ -10,6 +10,7 @@
 #include "engine/canvas_action.h"
 #include "engine/compiler.h"
 #include "engine/document.h"
+#include "engine/pack_loader.h"
 #include "engine/registry.h"
 #include "nodes/builtin.h"
 
@@ -515,6 +516,39 @@ private slots:
             QVERIFY(!hasErrors(compile(*bound, m_registry).problems()));
             if (hasPrompt)
                 QVERIFY(!bound->graph.nodes.value("encode").inputs.value("prompt").literal().toString().trimmed().isEmpty()); // the fallback
+        }
+    }
+
+    // Remove background (slice 6): the template carries the Remove Background pack; with it loaded the block fits its graph (the layer
+    // role goes to Region's Layer and Write's Onto, the model and the threshold to the pack's node), and the bound copy compiles with and
+    // without a selection. The pack's absence is the window's offer (tests/canvas/test_canvas_actions.cpp), not this check's.
+    void theRemoveBackgroundTemplateFitsItsGraphWithItsPackLoaded() {
+        const QString folder = QStringLiteral(FUGUE_SOURCE_DIR "/templates/remove-background-action");
+        Registry registry;
+        nodes::addBuiltinNodeTypes(registry);
+        const LoadedPack pack = loadPack(registry, folder + "/packs/io.github.bmaltais.fugue-remove-background");
+        QVERIFY2(pack.enabled && pack.disabled.isEmpty(), "the carried pack does not load");
+        const Result<Document> document = Document::loadFile(folder + "/workflow.fugue");
+        QVERIFY2(document, qPrintable(firstMessage(document.errors())));
+        const Result<std::optional<Action>> action = actionOf(*document);
+        QVERIFY(action && action->has_value());
+        QCOMPARE((*action)->selection, QStringLiteral("optional"));
+        QVERIFY(!(*action)->input("prompt")); // one click: no prompt, no seed
+        QVERIFY(!(*action)->input("seed"));
+        const Result<ActionGraph> graph = checkAction(**action, *document, registry);
+        QVERIFY2(graph, qPrintable(firstMessage(graph.errors())));
+        QCOMPARE(graph->writes, QStringList{"write"});
+        QCOMPARE(document->graph.nodes.value("write").version.toString(), QStringLiteral("1.6.0"));
+        QVERIFY(document->graph.nodes.value("region").inputs.value("canvas").literal().toString().isEmpty());
+        for (const std::optional<RouteRect> &rect : {std::optional<RouteRect>{}, std::optional<RouteRect>{RouteRect{20, 30, 200, 150}}}) {
+            ActionBinding binding{"c1", "sha256:" + QString(64, 'a'), rect, {}, std::nullopt, std::nullopt, {{"layer", "Photo"}}, {}};
+            const Result<Document> bound = bindAction(*document, **action, *graph, binding);
+            QVERIFY2(bound, qPrintable(firstMessage(bound.errors())));
+            QCOMPARE(bound->graph.nodes.value("region").inputs.value("layer").literal().toString(), QStringLiteral("Photo"));
+            QCOMPARE(bound->graph.nodes.value("write").inputs.value("onto").literal().toString(), QStringLiteral("Photo"));
+            QCOMPARE(bound->graph.nodes.value("region").inputs.value("padding").literal().toInt(), 0); // the layer whole, not the router's
+            const Compilation compiled = compile(*bound, registry);
+            QVERIFY2(compiled.ok(), qPrintable(compiled.errors().value(0).message));
         }
     }
 };

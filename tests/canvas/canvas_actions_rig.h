@@ -54,6 +54,21 @@ inline const QByteArray kTestAdvanced = QByteArray(kTestFill)
                  "choice_values": [2, 5, 9], "default": "Default", "section": "Advanced"},
                 {"name": "steps", "label": "Steps", "targets": ["gen.steps"], "section": "Advanced"}])");
 
+// An action on the current layer (slice 6; a stand-in for Remove background with no pack): a layer role, an optional selection,
+// the red channel of the layer as the mask, Canvas Write onto that layer.
+inline const QByteArray kCutAction = R"({
+  "fugue": 1,
+  "action": {"format": 1, "name": "Cut", "glyph": "layers", "selection": "optional", "region": "region",
+             "inputs": [{"role": "layer", "targets": ["region.layer", "write.onto"]}]},
+  "graph": {"nodes": {
+    "region": {"type": "fugue/canvas-region", "version": "1.4.0",
+               "inputs": {"canvas": "", "revision": "head", "layer": "", "padding": 0, "scale": 1, "max_megapixels": 0, "multiple": 1}},
+    "find": {"type": "fugue/image-to-mask", "version": "1.0.1", "inputs": {"image": {"from": "region.image"}, "channel": "red"}},
+    "write": {"type": "fugue/canvas-write", "version": "1.6.0",
+              "inputs": {"canvas": {"from": "region.canvas"}, "stitch": {"from": "region.stitch"}, "layer_mask": {"from": "find.mask"}, "onto": "", "blend": 0}}
+  }}
+})";
+
 // Its block names a node the graph lacks.
 inline const QByteArray kBroken = R"({
   "fugue": 1,
@@ -97,6 +112,17 @@ inline void writeFile(const QString &path, const QByteArray &bytes) {
     QFile file(path);
     QVERIFY(file.open(QIODevice::WriteOnly));
     file.write(bytes);
+}
+
+// A folder and what is in it, copied (a template of the repository into the test's own library).
+inline void copyTree(const QString &from, const QString &to) {
+    QDir().mkpath(to);
+    for (const QFileInfo &entry : QDir(from).entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot)) {
+        if (entry.isDir())
+            copyTree(entry.filePath(), to + "/" + entry.fileName());
+        else
+            QFile::copy(entry.filePath(), to + "/" + entry.fileName());
+    }
 }
 
 // The window's run objects without a window: RunService with the fake, CanvasRuns, CanvasActions.
@@ -164,6 +190,11 @@ struct Rig {
         QDir().mkpath(templatesDir + "/" + id);
         writeFile(templatesDir + "/" + id + "/template.json", QByteArray(R"({"title": ")") + title.toUtf8() + R"(", "description": "d", "category": "x"})");
         writeFile(templatesDir + "/" + id + "/workflow.fugue", workflow);
+        actions->refresh();
+    }
+    // The repository's template `id` (its pack and sample files with it), then the actions read again.
+    void addRepositoryTemplate(const QString &id) {
+        copyTree(QStringLiteral(FUGUE_SOURCE_DIR "/templates/") + id, templatesDir + "/" + id);
         actions->refresh();
     }
     QVariantMap row(const QString &id) const {
