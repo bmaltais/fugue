@@ -27,6 +27,9 @@ Item {
     property bool spaceHeld: false
     property bool flipErase: false
     property string prefix: "mask"
+    // The lasso makes a SELECTION of the target (a MaskLayer, selectPolygon): it replaces it, Shift adds, Alt subtracts
+    // (Photoshop's). Off, the lasso paints or erases the target as the Mask editor's does.
+    property bool selects: false
     signal resize(real size, real hardness)
     signal painted
     signal pressedAt
@@ -35,6 +38,9 @@ Item {
     readonly property bool brushing: tool === "brush" || tool === "eraser"
     readonly property alias area: mouse
     readonly property alias action: mouse.action
+    // A lasso drag is on (Escape drops it: the view asks `cancel()`).
+    readonly property bool lassoing: mouse.action === "lasso"
+    function cancel() { mouse.cancelDrag() }
 
     // The lasso's outline and the rectangle, in view coordinates, while a drag is on.
     Shape {
@@ -117,6 +123,12 @@ Item {
         property var screenPath: []              // the same, in view coordinates
         property real startSize: 64
         property real startHardness: 0.8
+        property int pressModifiers: 0
+        function cancelDrag() {
+            action = ""
+            path = []
+            screenPath = []
+        }
 
         // A tablet's pressure scales the brush; a mouse is full.
         PointHandler {
@@ -135,6 +147,7 @@ Item {
 
         onPressed: mouse => {
             pen.pressedAt()
+            pressModifiers = mouse.modifiers
             at = Qt.point(mouse.x, mouse.y)
             pressAt = at
             last = at
@@ -196,7 +209,11 @@ Item {
                 done = true
             } else if (action === "lasso") {
                 if (path.length >= 3) {
-                    pen.target.fillPolygon(path, erases(alt))
+                    const how = (modifiers | pressModifiers) & Qt.AltModifier ? "subtract" : (modifiers | pressModifiers) & Qt.ShiftModifier ? "add" : "replace"
+                    if (pen.selects)
+                        pen.target.selectPolygon(path, how)
+                    else
+                        pen.target.fillPolygon(path, erases(alt))
                     done = true
                 }
             } else if (action === "rect") {

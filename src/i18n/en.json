@@ -1240,8 +1240,6 @@
   "Invert the mask": "Invert the mask",
   "Invert, reveal or hide the whole mask": "Invert, reveal or hide the whole mask",
   "Layer mask of %1": "Layer mask of %1",
-  "Layer mask, off: the layer shows whole. Click to paint it, Shift+click turns it on.": "Layer mask, off: the layer shows whole. Click to paint it, Shift+click turns it on.",
-  "Layer mask: white shows the layer, black hides it. Click to paint it, Shift+click turns it off.": "Layer mask: white shows the layer, black hides it. Click to paint it, Shift+click turns it off.",
   "Make the brush larger": "Make the brush larger",
   "Make the brush smaller": "Make the brush smaller",
   "Mask brush": "Mask brush",
@@ -1635,5 +1633,15 @@
   "Only a paint layer can be read by Generate, not a group, a mask or a picture layer.": "Only a paint layer can be read by Generate, not a group, a mask or a picture layer.",
   "A layer above has the same name: rename one, so Generate reads this layer.": "A layer above has the same name: rename one, so Generate reads this layer.",
   "Lock or unlock the selected layers": "Lock or unlock the selected layers",
-  "Generate reads this layer only, or the whole picture again": "Generate reads this layer only, or the whole picture again"
+  "Generate reads this layer only, or the whole picture again": "Generate reads this layer only, or the whole picture again",
+  "Layer mask: white shows the layer, black hides it. Click to paint it, Shift+click turns it off, Ctrl+click selects it.": "Layer mask: white shows the layer, black hides it. Click to paint it, Shift+click turns it off, Ctrl+click selects it.",
+  "Layer mask, off: the layer shows whole. Click to paint it, Shift+click turns it on, Ctrl+click selects it.": "Layer mask, off: the layer shows whole. Click to paint it, Shift+click turns it on, Ctrl+click selects it.",
+  "Lasso: draw the area freehand; Shift adds, Alt subtracts": "Lasso: draw the area freehand; Shift adds, Alt subtracts",
+  "Lasso: draw a selection freehand; Shift adds, Alt subtracts": "Lasso: draw a selection freehand; Shift adds, Alt subtracts",
+  "Lasso": "Lasso",
+  "Selection from layer": "Selection from layer",
+  "Selection from layer mask": "Selection from layer mask",
+  "Ctrl+click the mask": "Ctrl+click the mask",
+  "This layer has no mask.": "This layer has no mask.",
+  "Only a paint layer has pixels to select.": "Only a paint layer has pixels to select."
 }
