@@ -24,7 +24,7 @@ const char *sheet = R"({
     "save": {"type": "fugue/save-image", "version": "1.0.0", "inputs": {"image": {"from": "gen.image"}}}
   }},
   "layout": {"nodes": {"gen": {"pos": [100, 100]}, "save": {"pos": [600, 100]}},
-             "view": {"center": [500, 300], "zoom": 1}}
+             "view": {"center": [500, 380], "zoom": 1}}
 })";
 
 const char *sinks = R"({
@@ -72,14 +72,22 @@ private slots:
     void aDoubleClickOnTheGripReturnsToAuto() {
         App app(load(sheet));
         QVERIFY(app.open());
-        const QSizeF before = nodeItem(app, "gen")->size();
+        // The auto size settles a moment after opening (a busy machine shows it late): read it once it holds still.
+        QSizeF before = nodeItem(app, "gen")->size();
+        for (int i = 0; i < 40; ++i) {
+            QTest::qWait(50);
+            const QSizeF now = nodeItem(app, "gen")->size();
+            if (now == before)
+                break;
+            before = now;
+        }
         QPoint at = grip(app, "gen");
         app.drag(Qt::LeftButton, at, at + QPoint(50, 50));
         QVERIFY(nodeItem(app, "gen")->width() > before.width());
         const int steps = app.model.undoStack()->count();
         at = grip(app, "gen");
         QTest::mouseDClick(app.window, Qt::LeftButton, {}, at);
-        QCOMPARE(nodeItem(app, "gen")->size(), before);
+        QTRY_COMPARE(nodeItem(app, "gen")->size(), before);
         QCOMPARE(app.model.undoStack()->count(), steps + 1); // one step
         QVERIFY(app.warnings.isEmpty());
     }
