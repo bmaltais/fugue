@@ -22,6 +22,9 @@ fugue canvas export canvas-0123456789ab out.webp --quality 80 --scale 50%   # lo
 fugue canvas export canvas-0123456789ab --format jpg --quality 60 --estimate   # the size it would be, nothing written
 fugue canvas export canvas-0123456789ab shots --layers   # one picture per layer into the folder shots
 fugue canvas batch generative-fill photos results --prompt "a red hat"   # an action over every picture of a folder
+fugue canvas actions                               # the task bar's actions, with the models and pack each needs
+fugue canvas act canvas-0123456789ab generative-fill --rect 100,80,512,512 --prompt "a red hat" --wait   # the bar's Generate, headless
+fugue canvas act canvas-0123456789ab expand --expand right --percent 25 --count 3 --wait
 fugue canvas list                                  # the canvases, newest first
 fugue canvas candidates canvas-0123456789ab        # revisions nobody points at (scripts)
 fugue canvas diff canvas-0123456789ab@sha256:ab12cd34   # what a revision changed, against its parent
@@ -222,6 +225,16 @@ An action that works on a crop frame beyond the canvas (Expand) cannot be batche
 bundled one, `--prompt <text>`, `--seed <n>` and the picture options of `canvas export` (`--format`, `--quality`, `--scale`,
 `--size`, ...) apply, `--keep` leaves each temporary canvas in the store with the result as its head, and the command prints one line
 per picture (one JSON event per line with `--json`). Its exit code is 1 when any picture failed or was cancelled.
+
+`fugue canvas act <canvas> <action>` runs ONE action on a canvas exactly as the task bar's Generate does, without a window: the same
+code binds the canvas, the head, the selection (`--rect x,y,w,h`, or `--selection mask.png`, white is selected, kept by content in
+the store as the lasso's is), the prompt and seed, the layer an action works on (`--layer`), Count (`--count 3`: three layers, the
+first visible, the others hidden), Expand (`--expand right --percent 25`: the canvas grows by one revision, then the strip is written)
+and any Advanced input (`--set steps=8`, `--set strength=Light`). Without `--wait` the runs are queued and the command returns; with
+`--wait` it blocks, prints progress on stderr (Ctrl+C cancels the runs), and says the new head and the new layers (or, for Upscale,
+the new canvas). A missing model or pack is refused before anything changes, saying what to fetch. `fugue canvas actions` lists the
+actions and what each needs. This is the way for a script or an agent to run the whole bar path, headless, on the GPU or on a
+stand-in action with no model (tests/cli/test_cli_canvas_act.cpp).
 
 ## Layers
 

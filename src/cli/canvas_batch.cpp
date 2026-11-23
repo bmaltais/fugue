@@ -13,6 +13,7 @@
 #include <csignal>
 
 #include "cli/commands.h"
+#include "cli/canvas_run.h"
 #include "cli/compile_step.h"
 #include "cli/runs.h"
 #include "engine/canvas_batch.h"
@@ -40,51 +41,6 @@ QString runMessage(const QJsonObject &done) {
     return QStringLiteral("The action did not finish.");
 }
 
-canvas::BatchRunResult runOne(const Document &bound, const QString &workflow, Context &context) {
-    const Compilation compilation = compileDocument(bound, context.registry);
-    if (!compilation.ok()) {
-        const Error first = compilation.errors().first();
-        return {QStringLiteral("failed"), first.code, first.message};
-    }
-    const Result<RunFolder> folder = startCompiledRun(compilation, bound.toJson(), workflow, false, context);
-    if (!folder)
-        return {QStringLiteral("failed"), folder.error().code, folder.error().message};
-    bool cancelling = false;
-    int orphaned = 0;
-    for (int pass = 0;; ++pass) {
-        const QList<QJsonObject> events = folder->events();
-        for (auto it = events.crbegin(); it != events.crend(); ++it)
-            if (it->value("event").toString() == "run.done") {
-                const RunStatus status = parseRunStatus(it->value("status").toString());
-                if (status == RunStatus::Ok)
-                    return {QStringLiteral("ok"), {}, {}};
-                if (status == RunStatus::Cancelled)
-                    return {QStringLiteral("cancelled"), {}, QStringLiteral("Cancelled.")};
-                const QString code = Error::fromJson(it->value("errors").toArray().at(0).toObject()).code;
-                return {QStringLiteral("failed"), code, runMessage(*it)};
-            }
-        if (g_stop.load() && !cancelling) {
-            cancelling = true;
-            QueueEntry entry;
-            const Queue queue(context.queueDir);
-            cancelRun(*folder, queue.find(folder->id(), &entry) ? std::optional<QueueEntry>(entry) : std::nullopt, context);
-        }
-        // A worker that died leaves no run.done (9.8): the same look as `fugue run --wait` takes.
-        if (pass % 10 == 0) {
-            Lock lock(context.lockPath);
-            endDeadRuns(context, lock);
-            const qint64 pid = qint64(folder->state().value("pid").toDouble());
-            const bool orphan = !isTerminal(folder->status()) && !Queue(context.queueDir).find(folder->id()) && !isRunWorker(pid, folder->id());
-            orphaned = orphan ? orphaned + 1 : 0;
-            if (orphaned >= 2)
-                folder->finish(RunStatus::Failed, {makeError("internal", "The run's worker is gone.")}, utcNow());
-        }
-        if (isTerminal(folder->status()) && pass > 40 && folder->events().isEmpty())
-            return {QStringLiteral("failed"), QStringLiteral("internal"), QStringLiteral("The run ended without a result.")};
-        QThread::msleep(50);
-    }
-}
-
 QString humanLine(const QJsonObject &event) {
     const QString kind = event.value("event").toString();
     if (kind == QLatin1String("batch.started"))
@@ -99,6 +55,76 @@ QString humanLine(const QJsonObject &event) {
                                                : QStringLiteral("%1: %2").arg(status, event.value("error").toString()));
     }
     return QStringLiteral("Done: %1 ok, %2 failed, %3 cancelled.").arg(event.value("ok").toInt()).arg(event.value("failed").toInt()).arg(event.value("cancelled").toInt());
+}
+
+} // namespace
+
+void installStopHandlers() {
+    struct sigaction handler {};
+    handler.sa_handler = onSignal;
+    sigemptyset(&handler.sa_mask);
+    sigaction(SIGINT, &handler, nullptr);
+    sigaction(SIGTERM, &handler, nullptr);
+}
+
+bool stopRequested() { return g_stop.load(); }
+
+Result<RunFolder> startBoundRun(const Document &bound, const QString &workflow, Context &context) {
+    const Compilation compilation = compileDocument(bound, context.registry);
+    if (!compilation.ok())
+        return compilation.errors();
+    return startCompiledRun(compilation, bound.toJson(), workflow, false, context);
+}
+
+canvas::BatchRunResult waitForRun(const RunFolder &folder, Context &context, const std::function<void(const QJsonObject &)> &onEvent) {
+    bool cancelling = false;
+    int orphaned = 0;
+    qsizetype seen = 0;
+    for (int pass = 0;; ++pass) {
+        const QList<QJsonObject> events = folder.events();
+        if (onEvent) {
+            for (; seen < events.size(); ++seen)
+                onEvent(events.at(seen));
+        }
+        for (auto it = events.crbegin(); it != events.crend(); ++it)
+            if (it->value("event").toString() == "run.done") {
+                const RunStatus status = parseRunStatus(it->value("status").toString());
+                if (status == RunStatus::Ok)
+                    return {QStringLiteral("ok"), {}, {}};
+                if (status == RunStatus::Cancelled)
+                    return {QStringLiteral("cancelled"), {}, QStringLiteral("Cancelled.")};
+                const QString code = Error::fromJson(it->value("errors").toArray().at(0).toObject()).code;
+                return {QStringLiteral("failed"), code, runMessage(*it)};
+            }
+        if (g_stop.load() && !cancelling) {
+            cancelling = true;
+            QueueEntry entry;
+            const Queue queue(context.queueDir);
+            cancelRun(folder, queue.find(folder.id(), &entry) ? std::optional<QueueEntry>(entry) : std::nullopt, context);
+        }
+        // A worker that died leaves no run.done (9.8): the same look as `fugue run --wait` takes.
+        if (pass % 10 == 0) {
+            Lock lock(context.lockPath);
+            endDeadRuns(context, lock);
+            const qint64 pid = qint64(folder.state().value("pid").toDouble());
+            const bool orphan = !isTerminal(folder.status()) && !Queue(context.queueDir).find(folder.id()) && !isRunWorker(pid, folder.id());
+            orphaned = orphan ? orphaned + 1 : 0;
+            if (orphaned >= 2)
+                folder.finish(RunStatus::Failed, {makeError("internal", "The run's worker is gone.")}, utcNow());
+        }
+        if (isTerminal(folder.status()) && pass > 40 && folder.events().isEmpty())
+            return {QStringLiteral("failed"), QStringLiteral("internal"), QStringLiteral("The run ended without a result.")};
+        QThread::msleep(50);
+    }
+}
+
+namespace {
+
+canvas::BatchRunResult runOne(const Document &bound, const QString &workflow, Context &context) {
+    const Result<RunFolder> folder = startBoundRun(bound, workflow, context);
+    if (!folder)
+        return {QStringLiteral("failed"), folder.errors().first().code, folder.errors().first().message};
+    return waitForRun(*folder, context);
 }
 
 } // namespace
@@ -127,11 +153,7 @@ Reply canvasBatch(const Command &command, Context &context) {
         return Reply::failure(picture.errors());
     spec.picture = picture.value();
 
-    struct sigaction handler {};
-    handler.sa_handler = onSignal;
-    sigemptyset(&handler.sa_mask);
-    sigaction(SIGINT, &handler, nullptr);
-    sigaction(SIGTERM, &handler, nullptr);
+    installStopHandlers();
 
     bool streaming = false;
     canvas::BatchHooks hooks;
