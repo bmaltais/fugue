@@ -3,7 +3,7 @@
 Issue #47. Date: 2026-11-19. Status: **approved** by the owner; step 2 built it, with section
 18's questions as recommended (what differs is in [spec Appendix A](spec.md#appendix-a-choices-made-in-this-document)).
 
-[spec 12](spec.md#12-canvas) fixes how the canvas behaves, and its feel is approved. This document
+[spec 12](spec.md#12-the-graph) fixes how the canvas behaves, and its feel is approved. This document
 fixes how it looks: every size, color, state and motion the restyle (#47 step 2, on top of #16)
 builds. Everything derives from three inputs, the theme's palette, the corner radius setting and
 `theme.textSize`, so it holds on every Omarchy theme, light or dark, with square or round corners.

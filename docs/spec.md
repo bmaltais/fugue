@@ -28,7 +28,7 @@ Contents:
 9. [Execution](#9-execution)
 10. [Result cache](#10-result-cache)
 11. [Workflow files](#11-workflow-files)
-12. [Canvas](#12-canvas)
+12. [The Graph](#12-the-graph)
 13. [CLI and agent interface](#13-cli-and-agent-interface)
 14. [Built-in nodes](#14-built-in-nodes)
 15. [Milestones](#15-milestones)
@@ -2195,7 +2195,7 @@ list`, and copied out by opening one or by `fugue workflow new <file> --template
 
 ---
 
-## 12. Canvas
+## 12. The Graph
 
 The look and feel of the prototype is approved. This section fixes behavior.
 
@@ -2208,7 +2208,7 @@ The look and feel of the prototype is approved. This section fixes behavior.
 
 ### 12.2 Construction
 
-Our own canvas, no library: node bodies as QML items in a Repeater under one transformed item,
+Our own graph view, no library: node bodies as QML items in a Repeater under one transformed item,
 wires as shape paths. Not `Canvas`, not `QQuickPaintedItem`, not Qt Canvas Painter (GPL or
 commercial). Each wire is its own `Shape` with the default geometry renderer, not `CurveRenderer`
 ([spikes/05](spikes/05-canvas.md): same cost as one Shape, 1.5 ms per frame at 300 nodes;
@@ -2220,7 +2220,7 @@ Two presets, chosen in settings (`navigation`, applied at once):
 
 | | Legacy (default, ComfyUI's default) | Standard |
 | --- | --- | --- |
-| Left-drag on empty canvas | pans | selects |
+| Left-drag on empty graph | pans | selects |
 | Wheel | zooms at the pointer | pans |
 | Select with a marquee | Ctrl+drag | left-drag |
 | Zoom | wheel | Ctrl+wheel |
@@ -2268,7 +2268,7 @@ and the `?` overlay marks each one.
 | `node.mute` | Mute | Ctrl+M | same |
 | `node.collapse` | Collapse | Alt+C | same |
 | `node.pin` | Pin in place | P | same |
-| `node.search` | Add a node by search | double-click empty canvas, Tab, Shift+A | keys added |
+| `node.search` | Add a node by search | double-click empty graph, Tab, Shift+A | keys added |
 | `frame.make` | Frame the selection | Ctrl+G | same |
 | `group.make` | Make a group | Ctrl+Shift+E | same |
 | `group.ungroup` | Ungroup | Ctrl+Shift+G | added |
@@ -2298,7 +2298,7 @@ and the `?` overlay marks each one.
 | `canvas-layers.raise`, `canvas-layers.lower` | Move the selected layers up, down | `]`, `[`, drag a layer | added |
 | `canvas-layers.delete` | Delete the selected layers | X, Delete | added |
 | `canvas-layers.mask` | Turn the layer mask off or on | none (Shift+click the mask) | added |
-| `canvas-layers.undo`, `canvas-layers.redo` | Undo, redo the last canvas change (the head back and forward) | Ctrl+Z; Ctrl+Shift+Z, Ctrl+Y | added |
+| `canvas-layers.undo`, `canvas-layers.redo` | Undo, redo the last change to the canvas (the head back and forward) | Ctrl+Z; Ctrl+Shift+Z, Ctrl+Y | added |
 | `canvas-view.tool-hand`, `canvas-view.tool-zoom`, `canvas-view.tool-region` | The Canvas view's Hand, Zoom and Rectangle region tools (14.5, #230) | H (Space held: a moment's Hand), Z, M or R | added (Photoshop's keys) |
 | `canvas-view.tool-move`, `canvas-view.free-transform` | The Move tool (a drag moves the current layer, the arrow keys nudge it) and Free Transform (the box with eight handles, turn, numbers; Enter keeps it as one revision, Escape leaves it) (#236) | V, Ctrl+T | added (Photoshop's keys) |
 | `canvas-view.tool-brush`, `canvas-view.tool-eraser`, `canvas-view.brush-swap` | The mask brush and eraser, and swap them | B, E, X | added (Photoshop's keys) |
@@ -2348,8 +2348,8 @@ the `app` keys stay the window's (Ctrl+Z, Ctrl+S, Ctrl+Q) except the bare Q, whi
 
 Mouse:
 
-- Double-click on empty canvas opens node search.
-- Releasing a dragged link on empty canvas opens search filtered to nodes with a compatible port.
+- Double-click on empty graph opens node search.
+- Releasing a dragged link on empty graph opens search filtered to nodes with a compatible port.
 - Shift+drag an output moves all its links. Ctrl+Alt+click on a port disconnects it.
 - Shift or Ctrl+click adds to the selection.
 
@@ -2368,7 +2368,7 @@ belong to the field. Hence the Ctrl and F1 alternatives for quit and the overlay
   menus, then split and close. The Graph's are View (fit, zoom, links), Select (select all), Add (node search, paste connected)
   and Node (rename, colors, clone, delete, bypass, mute, collapse, pin, align, distribute, images, frame, groups); the Canvas
   view's are Canvas, Edit, Select, Layer and View. A command is listed at one level only. The Graph's header is also above the
-  canvas while the window has one area; in a header too narrow for the titles they fold into one Menu button.
+  graph while the window has one area; in a header too narrow for the titles they fold into one Menu button.
 - The menu bar and the context menus list command ids; each item's name, key and enabled
   state come from the registry when the menu opens, and a command not built yet shows as
   unavailable. Alt+letter opens a top menu where 12.4 binds nothing to it.
@@ -2468,15 +2468,15 @@ started from a terminal too ([12.13](#1213-run-toolbar-and-queue-panel)).
 
 ### 12.13 Run toolbar and queue panel
 
-A toolbar floats over the canvas (#60, M3), as ComfyUI's action bar, and a panel hangs from it. Both
+A toolbar floats over the graph (#60, M3), as ComfyUI's action bar, and a panel hangs from it. Both
 read and write the queue of [9.8](#98-runs-across-processes) and the commands of [12.4](#124-default-keymap);
 they add no queue of their own.
 
 - **Toolbar** (`RunToolbar.qml`): a grip, the batch count, **Run** with a menu behind it (the Run menu's
   rows: Run, Run first, Run to here, Cancel), **Cancel**, and the **queue** button with the number
-  of runs going and waiting. It floats anywhere over the canvas (#120): dragging the grip moves it
+  of runs going and waiting. It floats anywhere over the graph (#120): dragging the grip moves it
   across as well as up and down, and the arrow keys on the grip move it by 2u (Shift: 10u). It stays
-  inside the canvas, 4u from the edges, also when the window is resized, and a drag is pulled
+  inside the graph, 4u from the edges, also when the window is resized, and a drag is pulled
   lightly (within 3u) to the edges and the middle. It starts centered at the top. The place is
   remembered with the batch count in `~/.local/state/fugue/run-bar.json` as fractions of the room
   the bar has (`place`: x and y, 0 to 1), so a resized window keeps it where it was relative to the
@@ -2486,7 +2486,7 @@ they add no queue of their own.
   document as it is then, so a seed set to increment gives each its own number (ComfyUI's batch
   count). It applies to Run, Run first and Run to here.
 - **Queue panel** (`RunQueuePanel.qml`, `panel.queue`, Alt+Q, or the toolbar's queue button): hung from
-  the bar wherever it is, centered on it (held inside the canvas), under it when there is room, else
+  the bar wherever it is, centered on it (held inside the graph), under it when there is room, else
   on the side with more room, and kept shorter to fit there. *Running and
   waiting* lists the run going first, then the waiting ones in queue order, **whoever started them**:
   this window, or `fugue run` from a terminal. A row has the workflow's name, the node going with its
@@ -2510,14 +2510,14 @@ they add no queue of their own.
 
 ### 12.14 Side panels
 
-A dockable panel beside the canvas (#56), as ComfyUI's sidebar, with two tabs: the **node library**
+A dockable panel beside the graph (#56), as ComfyUI's sidebar, with two tabs: the **node library**
 (`panel.nodes`, N) and the **workflows panel** (`panel.workflows`, W). One is open at a time: its key
 opens it, the same key closes it, the other key replaces it. Each is a checked item in the View menu's Bars and panels submenu
-while it is the open one. The canvas gives up the panel's width; the panel is made only while open,
+while it is the open one. The graph gives up the panel's width; the panel is made only while open,
 and the window keeps its item budget.
 
 - **Tab strip** (#159, `SideTabStrip.qml`): a slim vertical strip on the window's **left edge**, under the menu bar and
-  the workflow tabs and beside the canvas, with one icon per registered panel (a table in `panels/side_panels.cpp`:
+  the workflow tabs and beside the graph, with one icon per registered panel (a table in `panels/side_panels.cpp`:
   tab id, registry id, command, Lucide glyph, name; a new panel is one row and gets a tab). A click opens the panel,
   a second click on the same tab closes it, a click on the other tab replaces it, exactly as the keys do (one path:
   `SidePanels::toggle`, so the strip, N and W and the View menu's checks always agree). The open tab is marked (accent
@@ -2525,24 +2525,24 @@ and the window keeps its item budget.
   focus and Enter or Space; the strip is 44 px wide with 44 px tabs and 24 px glyphs. It is always there, also with
   no panel open (it is the way in), except in focus mode (12.15), which hides it like every other bar (registry id
   `side-tabs`, no toggle of its own; a panel asked for in focus mode still shows). When the window is narrow the
-  panel gives way, never the strip: the canvas keeps at least 160 px. The strip stays on the left when a panel is
+  panel gives way, never the strip: the graph keeps at least 160 px. The strip stays on the left when a panel is
   docked on the right. **Action tabs** (#192): a row of kind `action` launches a command instead of toggling a panel and is never marked open or
   checked: Templates (`file.templates`, third in the top group directly under Workflows) and Settings (`app.settings`, Ctrl+,,
   alone at the lower end past a hairline). Which end a row sits at is its `edge` field in the table, not QML. The run queue (`panel.queue`) is a floating panel of the run toolbar, not a docked side
   panel, and the media results are a view inside the workflows panel; neither has a tab (follow-ups: a queue and a
   results tab once they are docked panels).
 - **Container** (`SidePanel.qml`): a title bar with a button that moves the panel to the other side
-  and one that closes it, the content below, and a grip on the canvas-facing edge (drag, or Left and
-  Right on it with the focus) that sets the width, 200 to 640 px. It knows nothing of the canvas or
+  and one that closes it, the content below, and a grip on the graph-facing edge (drag, or Left and
+  Right on it with the focus) that sets the width, 200 to 640 px. It knows nothing of the graph or
   of what it holds. Which panel is open, its side and its width are remembered in
   `~/.local/state/fugue/side-panels.json`; a window starts with what it closed with.
-  The sides are the window's, left and right: the canvas never mirrors, and neither does the side.
+  The sides are the window's, left and right: the graph never mirrors, and neither does the side.
 - **Node library** (`NodeLibraryPanel.qml`, `search/node_library.h`): a search field over every node
   type in a tree by category (the `/` parts of `category`; closed at first, a click, Enter, Left and
   Right open and close one, with the count of nodes under it). The filter is node search's own
   ranking ([12.8](#128-node-search)), so a word finds the same nodes in both, and a query opens every
   category on the way to a match. A **click or Enter adds the node** in the middle of the view; **dragging
-  a row onto the canvas** adds it where it is let go (a drop over the panel adds nothing); one undo step
+  a row onto the graph** adds it where it is let go (a drop over the panel adds nothing); one undo step
   either way, as with search. A node's tooltip is its description. Groups of the library
   (`local/<name>`) are listed with the other nodes, and each has a **trash can** at the far end of
   its row (a built-in node and another pack's node have none; a pack is removed from Settings >
@@ -2561,7 +2561,7 @@ and the window keeps its item budget.
   shows the images, videos and sounds the *current workflow's* runs made, in the **media browser**
   (`MediaBrowser.qml`), made only while Results is shown. The browser is standalone: it takes a list of items
   `{url, kind, title, thumb, group}` and details of the current one, and says the current item and the
-  action asked (`actionRequested`, `activated`); it knows nothing of the canvas, files or runs. Modes: *Grid*
+  action asked (`actionRequested`, `activated`); it knows nothing of the graph, files or runs. Modes: *Grid*
   (rows under a heading per run, newest first), *Filmstrip* (the current item large over a strip), *Single*
   (one item large; a video or sound in `MediaView`). Keys: Left/Right (PageUp/PageDown) step, Up/Down move a
   grid row, Home/End, Enter opens the item large, Escape goes back to the mode it came from and then asks to
@@ -2582,7 +2582,7 @@ and the window keeps its item budget.
   the details of a video or sound (container tag, 11.7); saved files that
   are in no run folder (a scan of the output folder grouped by embedded workflow); favorites, delete,
   re-run with the same seed, send to a Load Image node, open the workflow that made it, drag back onto the
-  canvas; remembering the mode and view; zoom and
+  graph; remembering the mode and view; zoom and
   fine-grained image compare in Single.
 - **Not built** (follow-ups): a model library tab (M), assets, a log or terminal panel at the bottom,
   bookmarks and a preview of a node in the library.
@@ -2608,9 +2608,9 @@ focus mode and the file all read that one place.
 
 - **Bars and panels** (a submenu at the end of the View menu, after fit, zoom and links, with **Focus mode** under it): one row per bar with a check while it is shown, then the
   panels (`panel.nodes`, `panel.workflows`, `panel.queue`), then **Focus mode** and **Reset bars and
-  panels**. The same menu is a submenu of the canvas's context menu, so a right click finds it even
+  panels**. The same menu is a submenu of the graph's context menu, so a right click finds it even
   with the menu bar hidden.
-- **Focus mode** (`view.focus-mode`, **H** on the canvas): hides every bar and panel; H again brings
+- **Focus mode** (`view.focus-mode`, **H** on the graph): hides every bar and panel; H again brings
   back exactly what was shown, no more and no less. Tab is not used: it already enters a group and opens
   node search (12.4). While it is on, what is asked for shows alone: a panel opened with N or W, the
   menu bar slid in with F10, which goes out again by itself (below). Focus mode is not
@@ -2620,14 +2620,14 @@ focus mode and the file all read that one place.
   unchecked) does not remove it: it collapses to a slim hot edge, 4 px tall across the window's top edge, and a
   **handle** (a menu glyph, 36 x 28 px, hanging under the edge at the left after the side strip and panel; at the
   right in a right-to-left language) that stay drawn, so the way back needs no hidden knowledge. The bar waits just
-  above the window and slides down **over** the canvas (the bar overlays: nothing under it moves or resizes while it
-  slides, and the canvas is pushed only while the bar is *shown*, pinned). The slide moves the bar's `y`, not the layout:
+  above the window and slides down **over** the graph (the bar overlays: nothing under it moves or resizes while it
+  slides, and the graph is pushed only while the bar is *shown*, pinned). The slide moves the bar's `y`, not the layout:
   170 ms, ease out (`Easing.OutCubic`).
   - **In**: the pointer on the edge or the handle for 120 ms (a pointer passing is not a request), a press on the handle
     at once, **F10** (it slides in and opens the first menu, as ever) and an **Alt mnemonic** (Alt+F and the rest keep
     working while it is out: they slide it in and open the menu).
   - **Out**: the pointer off the bar, edge and handle for 400 ms; a command chosen; the menu closed (with the pointer
-    not on the bar); **Escape** when no menu is open (the canvas's and a field's own Escape come first). While a menu of
+    not on the bar); **Escape** when no menu is open (the graph's and a field's own Escape come first). While a menu of
     the bar is open the bar stays. After a key or a command the pointer may still rest on the edge: it must leave and
     come back before the bar slides in again, so Escape is never undone at once. A touch screen has no hover: a tap on
     the edge or handle brings it in and it stays 4 s (or until a command or a menu closes).
@@ -2635,13 +2635,13 @@ focus mode and the file all read that one place.
   - The container is one component: **`AutoHide.qml`** takes any top bar as its child (`pinned`, `edgeShown`,
     `holdOpen`, `reveal()`, `conceal()`); it is used for the menu bar only; see the follow-ups below.
   - Focus mode (H) still hides everything, **the edge and handle too**; a bar asked for in focus mode (F10, an Alt
-    key) slides in alone over the canvas and out again, and leaving focus mode restores what it was (shown, or
+    key) slides in alone over the graph and out again, and leaving focus mode restores what it was (shown, or
     auto-hide). F10 does not change the remembered mode.
   - Screen readers: the handle is a button named "Show the menu bar" with a press action; the bar's own items are
     not exposed while it is out (F10 and the Alt keys are the keyboard way, as in every desktop menu bar).
 - **Nothing is lost.** The menu bar holds the commands that bring the others back, and it is never gone: the handle
   and the edge stay (except in focus mode, where H and the line at the bottom are the way out), F10 and the Alt keys
-  slide it in, the canvas's context menu has the same Bars and panels submenu, and **Reset bars and panels** (a key
+  slide it in, the graph's context menu has the same Bars and panels submenu, and **Reset bars and panels** (a key
   if the keymap file binds `view.reset-bars`) shows every bar, the menu bar pinned, and closes the panels. No notice
   is needed when hiding it. A newly hidden bar keeps its command in the keymap: any `view.toggle-...` can be bound in
   the keymap file (12.5).
@@ -3592,7 +3592,7 @@ The template **`generative-fill`** (fugue-workflows, category `edit`): Canvas Re
 | Spec | This document. | #1 |
 | **M0** engine, CLI and spikes | Spikes first: component-level go or no-go, libvips benchmark, GPU checks, canvas frame rate, plugin-interface research. Then the document model, compiler, scheduler and result cache, run folder and media handles, the provider interface with the `omarchy` provider, and the CLI skeleton. Driven by tests with fake nodes; no canvas. | #2 to #12, #34 |
 | **M1** first nodes | The twelve nodes of [14.1](#141-m1-the-first-twelve). | #13 to #15 |
-| **M2** canvas | The canvas of [section 12](#12-canvas) on the M0 engine: wires, search, copy and paste, undo, run, per-node state, save, open, recovery, import, tabs, keymap, theme. | #16 to #22 |
+| **M2** canvas | The canvas of [section 12](#12-the-graph) on the M0 engine: wires, search, copy and paste, undo, run, per-node state, save, open, recovery, import, tabs, keymap, theme. | #16 to #22 |
 | **M3** extension | Manifests and the loader, the command-node protocol, pack install and trust, groups, user docs with a five-minute tutorial and an example pack. | #23 to #27 |
 | **M4** rest of v0.1 | Video, song and text nodes, more pixel and mask nodes, the agent skill, providers as modules. | #28 to #31 |
 | **M5** component level | The helper and the component nodes. The M0 spike passed ([spikes/02](spikes/02-sdcpp-split.md)), so these are in v0.1. The optional ComfyUI provider is no longer needed as a fallback and moves after v0.1. | #32, #33 |
