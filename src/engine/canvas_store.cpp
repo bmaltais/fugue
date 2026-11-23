@@ -84,6 +84,34 @@ bool isCanvasId(const QString &text) {
     return pattern.match(text).hasMatch();
 }
 
+int groupDepth(const LayerRecord &layer) {
+    if (!layer.group)
+        return 0;
+    int deepest = 0;
+    for (const LayerRecord &child : layer.children)
+        deepest = std::max(deepest, groupDepth(child));
+    return deepest + 1;
+}
+
+bool treeHasGroup(const Tree &tree) {
+    return std::any_of(tree.layers.begin(), tree.layers.end(), [](const LayerRecord &l) { return l.group; });
+}
+
+Error groupsRefused(const QString &what) {
+    return makeError(QStringLiteral("input_invalid"), QStringLiteral("%1 cannot be done while the canvas has groups: it would turn each group into one flat layer.").arg(what),
+                     QStringLiteral("Ungroup the layers first (Layer > Ungroup layers, or `fugue canvas layer ungroup`)."));
+}
+
+Result<bool> CanvasStore::hasGroups(const QString &canvasId, const QString &revisionId) const {
+    const Result<Revision> found = revision(canvasId, revisionId);
+    if (!found)
+        return Result<bool>(found.errors());
+    const Result<Tree> stored = tree(found->tree);
+    if (!stored)
+        return Result<bool>(stored.errors());
+    return treeHasGroup(stored.value());
+}
+
 int LayerRecord::tileCount() const {
     int count = int(tiles.size());
     for (const LayerRecord &child : children)
@@ -99,8 +127,6 @@ int Tree::tileCount() const {
 }
 
 namespace {
-
-constexpr int kMaxGroupDepth = 8;
 
 QJsonObject layerToJson(const LayerRecord &layer) {
     QJsonObject tiles;
@@ -156,12 +182,14 @@ Result<LayerRecord> layerFromJson(const QJsonObject &item, int width, int height
         return corrupt(QStringLiteral("a tile of a tree is not well formed"));
     if (layer.group) {
         const QJsonArray children = item.value("children").toArray();
-        if (children.isEmpty() || depth >= kMaxGroupDepth)
+        if (children.isEmpty() || depth >= maxGroupDepth)
             return corrupt(QStringLiteral("a group of a tree is empty or nested too deep"));
         for (const QJsonValue &value : children) {
             Result<LayerRecord> child = layerFromJson(value.toObject(), width, height, depth + 1);
             if (!child)
                 return child;
+            if (!child->group && child->kind != LayerKind::Paint)
+                return corrupt(QStringLiteral("a group holds a mask or picture layer"));
             layer.children.push_back(std::move(child.value()));
         }
     }
@@ -339,6 +367,10 @@ Result<Revision> CanvasStore::addCommit(const QString &canvasId, const QString &
 }
 
 Result<QString> CanvasStore::storeTreeRecord(const Tree &tree) {
+    for (const LayerRecord &layer : tree.layers)
+        if (groupDepth(layer) > maxGroupDepth)
+            return Result<QString>(makeError(QStringLiteral("input_invalid"), QStringLiteral("Groups nest at most %1 deep.").arg(maxGroupDepth),
+                                             QStringLiteral("Ungroup one of the outer groups first.")));
     const QJsonObject json = treeToJson(tree);
     const QString hash = canonicalHash(json);
     if (hash.isEmpty())
@@ -482,6 +514,11 @@ Result<Commit> CanvasStore::resize(const QString &canvasId, const QString &expec
         return Result<Commit>(canvas.errors());
     if (canvas->head != expected)
         return Commit{Revision{}, HeadMove{false, canvas->head}};
+    const Result<bool> grouped = hasGroups(canvasId, expected);
+    if (!grouped)
+        return Result<Commit>(grouped.errors());
+    if (grouped.value())
+        return Result<Commit>(groupsRefused(QStringLiteral("Resizing the canvas")));
     const Result<PaintDocument> current = load(canvasId, expected);
     if (!current)
         return Result<Commit>(current.errors());
@@ -698,6 +735,8 @@ Result<Accepted> CanvasStore::accept(const QString &canvasId, const QString &rev
                                               QStringLiteral("Revision %1 was made from an older revision than the head and %2, so it cannot be placed on the head.").arg(revisionId.left(19), why),
                                               QStringLiteral("Drop it and run the fill again from the canvas as it is now.")));
         };
+        if (treeHasGroup(before.value()) || treeHasGroup(after.value()) || treeHasGroup(now.value()))
+            return Result<Accepted>(groupsRefused(QStringLiteral("Placing a layer on a newer head")));
         if (before->width != now->width || before->height != now->height || after->width != now->width || after->height != now->height)
             return conflict(QStringLiteral("the canvas has another size now"));
         if (after->layers.size() <= before->layers.size())

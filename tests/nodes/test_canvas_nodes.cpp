@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "engine/canvas_handle.h"
+#include "engine/canvas_layer_ops.h"
 #include "engine/canvas_store.h"
 #include "engine/compile_for_run.h"
 #include "engine/document.h"
@@ -557,6 +558,27 @@ private slots:
         // No hidden revision: the history is the base and theirs, and nothing waits for review.
         QCOMPARE(CanvasStore::forSession().log(id)->size(), size_t(2));
         QVERIFY(CanvasStore::forSession().candidates(id, true).value().empty());
+    }
+
+    // #252: a document has no groups, so a write (and a resize or an accept's rebase) refuses a canvas that has one instead of flattening it.
+    void aWriteOnACanvasWithAGroupIsRefusedAndWritesNothing() {
+        Bench bench;
+        const QString id = makeCanvas();
+        canvas::LayerEdit group;
+        group.op = canvas::LayerOp::Group;
+        group.layers = {0};
+        const auto grouped = CanvasStore::forSession().editLayers(id, headOf(id), group, "canvas-view:group");
+        QVERIFY(grouped && grouped->move.moved);
+        const Result<Values> r = bench.region(id, {{"x", Value(60)}, {"y", Value(50)}, {"width", Value(100)}, {"height", Value(80)}});
+        const Result<Values> w = writeGreen(bench, r);
+        QVERIFY(!w.ok());
+        QCOMPARE(codeOf(w), QString("input_invalid"));
+        QVERIFY(w.errors().first().message.contains("groups"));
+        QCOMPARE(headOf(id), grouped->revision.id);
+        QCOMPARE(CanvasStore::forSession().log(id)->size(), size_t(2));
+        const auto resized = CanvasStore::forSession().resize(id, headOf(id), mask::IRect{0, 0, 10, 10}, edgefill::Mode::Edge, 0, "x");
+        QVERIFY(!resized);
+        QCOMPARE(resized.error().code, QString("input_invalid"));
     }
 
     // #239: candidate review is not a user concept: an old workflow's saved candidate=true is ignored, and the layer lands on the head.

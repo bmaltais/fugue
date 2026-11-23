@@ -37,6 +37,9 @@ Result<Tree> mergeDown(const Tree &tree, int upper, const TileReader &read, cons
             return invalid(QStringLiteral("%1 is a %2 layer: only paint layers and groups merge.").arg(layer->name, layer->kind == mask::LayerKind::Mask ? QStringLiteral("mask") : QStringLiteral("picture")));
         if (!layer->visible)
             return invalid(QStringLiteral("%1 is hidden: show it, or delete it, before merging.").arg(layer->name));
+        if (layer->hasMask && !layer->maskEnabled)
+            return invalid(QStringLiteral("%1 has a layer mask that is turned off: merging would lose it.").arg(layer->name),
+                           QStringLiteral("Turn the mask on (it is then baked in) or delete it, then merge."));
     }
     LayerRecord drawn = bottom; // what the lower layer draws: opacity and mask baked in, no blend of its own against nothing
     drawn.compositeOp.clear();

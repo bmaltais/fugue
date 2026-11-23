@@ -216,6 +216,10 @@ public:
     // the layer has writes nothing (as editLayers). input_invalid for a mask of another size or channels.
     Result<Commit> setLayerMask(const QString &canvasId, const QString &base, int position, const mask::MaskPaint &mask, const QString &producer);
 
+    // Whether the revision has a group (#252). Writers that go through a PaintDocument (resize, a Canvas Write, the rebase of
+    // an accept) would store a group as one flat layer, so they refuse while there is one: groupsRefused() is their answer.
+    Result<bool> hasGroups(const QString &canvasId, const QString &revisionId) const;
+
     // ---- selections (#230, docs/canvas-actions-design.md 3) ----
     // A selection painted in a Canvas view (Quick Mask) kept by content: its one-channel tiles in blobs/ and
     // `selections/<hex>.json` ({format, width, height, tiles}), named by the canonical hash of that record, so an equal
@@ -262,6 +266,14 @@ private:
     QString m_root;
     Clock m_clock;
 };
+
+// How many groups deep a group goes (0 for a layer that is none); a tree holds at most maxGroupDepth.
+inline constexpr int maxGroupDepth = 8;
+int groupDepth(const LayerRecord &layer);
+// Whether any layer of the tree is a group.
+bool treeHasGroup(const Tree &tree);
+// input_invalid, in plain words: `what` cannot be done to a canvas that has groups (ungroup them first).
+Error groupsRefused(const QString &what);
 
 // The tree as the JSON that is hashed and stored, and back (a bad one is canvas_corrupt).
 QJsonObject treeToJson(const Tree &tree);

@@ -174,9 +174,16 @@ Result<Tree> applyLayerEdit(const Tree &tree, const LayerEdit &edit) {
         }
         break;
     case LayerOp::Group: {
-        for (int p : chosen)
-            if (tree.layers[size_t(p)].kind == mask::LayerKind::Picture)
-                return invalid(QStringLiteral("Layer %1 (%2) is a picture layer: a picture is a node's input and cannot be grouped.").arg(p).arg(tree.layers[size_t(p)].name));
+        int deepest = 0;
+        for (int p : chosen) {
+            const LayerRecord &layer = tree.layers[size_t(p)];
+            if (layer.kind != mask::LayerKind::Paint)
+                return invalid(QStringLiteral("Layer %1 (%2) is a %3 layer: only paint layers and groups can be grouped.")
+                                   .arg(p).arg(layer.name, layer.kind == mask::LayerKind::Mask ? QStringLiteral("mask") : QStringLiteral("picture")));
+            deepest = std::max(deepest, groupDepth(layer));
+        }
+        if (deepest + 1 > maxGroupDepth)
+            return invalid(QStringLiteral("Groups nest at most %1 deep.").arg(maxGroupDepth), QStringLiteral("Ungroup one of the groups first."));
         const QString name = edit.text.trimmed().isEmpty() ? numberedName(tree, QStringLiteral("Group")) : edit.text.trimmed();
         if (name.size() > kMaxName)
             return invalid(QStringLiteral("A layer's name is 1 to %1 characters.").arg(kMaxName));
@@ -200,6 +207,9 @@ Result<Tree> applyLayerEdit(const Tree &tree, const LayerEdit &edit) {
         for (int p : chosen)
             if (!tree.layers[size_t(p)].group)
                 return invalid(QStringLiteral("Layer %1 (%2) is not a group.").arg(p).arg(tree.layers[size_t(p)].name));
+            else if (const LayerRecord &g = tree.layers[size_t(p)]; !g.visible || g.opacity != 1 || !g.compositeOp.isEmpty() || g.hasMask)
+                return invalid(QStringLiteral("The group %1 is hidden, has an opacity or blend mode of its own, or has a layer mask: ungrouping would lose that.").arg(g.name),
+                               QStringLiteral("Show it, and set its opacity to 100%, its blend to Normal and delete its mask first (Layer properties…)."));
         std::vector<LayerRecord> layers;
         for (int p = 0; p < count; ++p) {
             if (chosen.count(p))

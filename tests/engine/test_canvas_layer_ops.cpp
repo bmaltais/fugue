@@ -12,6 +12,7 @@
 #include <QtTest>
 
 #include "engine/canonical.h"
+#include "engine/edge_fill.h"
 #include "engine/canvas_diff.h"
 #include "engine/canvas_layer_merge.h"
 #include "engine/canvas_layer_ops.h"
@@ -479,6 +480,71 @@ private slots:
         opacity.number = 3;
         props.steps = {rename, opacity};
         QVERIFY(!applyLayerEdit(sampleTree(), props).ok());
+    }
+
+    void groupsAreRefusedWhereTheyWouldBeLostOrCannotBeRead() {
+        Tree t = sampleTree();
+        // Mask and picture layers cannot be grouped; a mask layer cannot be a stored group child.
+        t.layers[1].kind = LayerKind::Mask;
+        QVERIFY(!applyLayerEdit(t, edit(LayerOp::Group, {1})).ok());
+        t = sampleTree();
+        Tree grouped = applyLayerEdit(t, edit(LayerOp::Group, {0, 1, 2})).value();
+        QCOMPARE(groupDepth(grouped.layers[0]), 1);
+        // Depth: eight nested groups are the most; the ninth is refused, and the store refuses to write a deeper tree.
+        Tree deep = grouped;
+        for (int i = 1; i < maxGroupDepth; ++i)
+            deep = applyLayerEdit(deep, edit(LayerOp::Group, {0})).value();
+        QCOMPARE(groupDepth(deep.layers[0]), maxGroupDepth);
+        QVERIFY(treeFromJson(treeToJson(deep)).ok());
+        QVERIFY(!applyLayerEdit(deep, edit(LayerOp::Group, {0})).ok());
+        QJsonObject bad = treeToJson(deep);
+        QJsonArray layers = bad.value("layers").toArray();
+        QJsonObject inner = layers.at(0).toObject();
+        QJsonObject wrapper{{"name", "x"}, {"kind", "group"}, {"visible", true}, {"opacity", 1}, {"tiles", QJsonObject()}, {"children", QJsonArray{inner}}};
+        bad.insert("layers", QJsonArray{wrapper});
+        QVERIFY(!treeFromJson(bad).ok());
+        // A stored group holding a mask layer is not readable.
+        QJsonObject maskChild{{"name", "m"}, {"kind", "mask"}, {"visible", true}, {"opacity", 1}, {"tiles", QJsonObject()}};
+        QJsonObject withMask{{"name", "g"}, {"kind", "group"}, {"visible", true}, {"opacity", 1}, {"tiles", QJsonObject()}, {"children", QJsonArray{maskChild}}};
+        QJsonObject doc = treeToJson(t);
+        doc.insert("layers", QJsonArray{withMask});
+        QVERIFY(!treeFromJson(doc).ok());
+        // Ungroup refuses a group whose own settings it would lose; plain ones come apart.
+        Tree half = grouped;
+        half.layers[0].opacity = 0.5;
+        QVERIFY(!applyLayerEdit(half, edit(LayerOp::Ungroup, {0})).ok());
+        Tree masked = grouped;
+        masked.layers[0].hasMask = true;
+        QVERIFY(!applyLayerEdit(masked, edit(LayerOp::Ungroup, {0})).ok());
+        QVERIFY(applyLayerEdit(grouped, edit(LayerOp::Ungroup, {0})).ok());
+    }
+
+    void mergeDownRefusesALayerMaskThatIsTurnedOff() {
+        CanvasStore s = store();
+        const CanvasInfo made = s.create("off", sample(), "test").value();
+        const Commit off = s.editLayers(made.id, made.head, edit(LayerOp::MaskEnabled, {1}), "canvas-view:mask-enabled").value(); // Fill 1's mask
+        QVERIFY(off.move.moved);
+        const auto merged = s.editLayers(made.id, off.revision.id, edit(LayerOp::MergeDown, {2}), "canvas-view:merge-down");
+        QVERIFY(!merged);
+        QVERIFY(merged.errors().first().message.contains("turned off"));
+        QCOMPARE(s.info(made.id)->head, off.revision.id);
+    }
+
+    void resizeAndAnAcceptsRebaseRefuseACanvasWithAGroup() {
+        CanvasStore s = store();
+        const CanvasInfo made = s.create("g", sample(), "test").value();
+        const Commit c = s.editLayers(made.id, made.head, edit(LayerOp::Group, {0, 1}), "canvas-view:group").value();
+        const auto resized = s.resize(made.id, c.revision.id, IRect{0, 0, 100, 100}, edgefill::Mode::Edge, 0, "x");
+        QVERIFY(!resized);
+        QVERIFY(resized.errors().first().message.contains("groups"));
+        // A candidate made from the revision before the group cannot be placed on the grouped head, and the message is about groups.
+        PaintDocument fill = s.load(made.id, made.head).value();
+        fill.loadLayer(LayerKind::Paint, "Fill 3", true, 1, solid(300, 300, {1, 2, 3, 255}));
+        const Revision candidate = s.addRevision(made.id, fill, made.head, "canvas-write:w").value();
+        const auto accepted = s.accept(made.id, candidate.id);
+        QVERIFY(!accepted);
+        QVERIFY(accepted.errors().first().message.contains("groups"));
+        QCOMPARE(s.info(made.id)->head, c.revision.id);
     }
 };
 
