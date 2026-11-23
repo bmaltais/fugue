@@ -1,0 +1,25 @@
+{
+  "manifest": 1,
+  "id": "fugue/text-template",
+  "version": "1.0.0",
+  "name": "Text Template",
+  "description": "Fills a template text with up to six pieces of text: {a} is replaced by input A, {b} by B, and so on.",
+  "category": "Text",
+  "keywords": ["template", "format", "fill", "placeholder", "prompt", "join", "combine", "concat", "string", "variable"],
+  "runtime": {"kind": "builtin"},
+  "inputs": [
+    {"name": "template", "type": "text", "label": "Template", "default": "{a}\n{b}", "widget": "multiline",
+     "description": "The text to fill. {a} to {f} are replaced by the inputs of those names; an input with nothing in it gives nothing. Write {{ and }} for a literal { and }. Any other name between braces is an error."},
+    {"name": "a", "type": "text", "label": "A", "default": "", "widget": "multiline"},
+    {"name": "b", "type": "text", "label": "B", "default": "", "widget": "multiline"},
+    {"name": "c", "type": "text", "label": "C", "default": "", "widget": "multiline"},
+    {"name": "d", "type": "text", "label": "D", "default": "", "widget": "multiline"},
+    {"name": "e", "type": "text", "label": "E", "default": "", "widget": "multiline"},
+    {"name": "f", "type": "text", "label": "F", "default": "", "widget": "multiline"},
+    {"name": "trim", "type": "boolean", "label": "Trim", "default": false, "advanced": true,
+     "description": "Remove the spaces and blank lines at the start and end of the result."}
+  ],
+  "outputs": [
+    {"name": "text", "type": "text", "label": "Text"}
+  ]
+}

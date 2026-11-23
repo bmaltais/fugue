@@ -40,6 +40,7 @@ void addBuiltinKernels(Kernels &kernels) {
     addPixelKernels(kernels);
     addSaveMediaKernels(kernels);
     addTextGenerationKernels(kernels);
+    addTextTemplateKernels(kernels);
     addUpscaleKernels(kernels);
     addUpscaleVideoModelKernels(kernels);
     // The programs of the packs on disk (7).
