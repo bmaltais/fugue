@@ -178,10 +178,15 @@ Item {
             Keys.onSpacePressed: button.tapped()
             TapHandler { onTapped: { button.forceActiveFocus(); button.tapped() } }
             HoverHandler { cursorShape: button.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor }
-            ToolTip.visible: hoverTip.hovered && button.tip !== ""
+            // A disabled item gets no hover (#281): while off, a handler on the parent stands in, in its coordinates.
+            readonly property bool tipOver: enabled ? hoverTip.hovered
+                : offHover.hovered && offHover.point.position.x >= x && offHover.point.position.x < x + width
+                  && offHover.point.position.y >= y && offHover.point.position.y < y + height
+            ToolTip.visible: tipOver && button.tip !== ""
             ToolTip.delay: App.theme.look.tooltipDelay
             ToolTip.text: button.tip
             HoverHandler { id: hoverTip }
+            HoverHandler { id: offHover; parent: button.parent; enabled: !button.enabled; blocking: false }
         }
 
         BarButton {

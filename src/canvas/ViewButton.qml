@@ -113,7 +113,20 @@ Rectangle {
         id: hover
         cursorShape: button.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
     }
-    ToolTip.visible: hover.hovered && button.tip !== "" && button.enabled
+    // Qt gives a disabled item, and every handler on it, no hover (#281), so a disabled button's own handler never
+    // fires and its tip ("why is this off") went unseen. While disabled, this handler watches the button's parent
+    // instead (the same trick as TipGate) and takes the pointer's place in the parent's coordinates. It only watches
+    // (not blocking), and clicks stay blocked: the button's TapHandler is as disabled as the button.
+    HoverHandler {
+        id: offHover
+        parent: button.parent
+        enabled: !button.enabled
+        blocking: false
+    }
+    readonly property bool tipOver: enabled ? hover.hovered
+        : offHover.hovered && offHover.point.position.x >= x && offHover.point.position.x < x + width
+          && offHover.point.position.y >= y && offHover.point.position.y < y + height
+    ToolTip.visible: tipOver && button.tip !== "" && button.visible
     ToolTip.delay: button.look.tooltipDelay
     ToolTip.text: button.tip
     Keys.onReturnPressed: button.tapped()
