@@ -75,5 +75,5 @@ is a **placeholder**: a greyed row, not a command (no handler, no key, nothing i
 | Compare, Show candidate, Advanced details | built, checked | |
 | Snap to the node's multiple | built, checked | the options bar's Snap |
 | Tools: Hand, Zoom, Rectangle region, Mask brush, Mask eraser, Quick Mask | built, checked | the strip's commands |
-| Rulers, Grid, Guides | placeholder, #253 | none in the view |
+| Rulers, Grid, Guides, Snap to them, Clear guides | built, #253 | `Ruler`, `GridLines`, `GuideLines`, `GuidesModel`; Photoshop's keys (Ctrl+R, Ctrl+', Ctrl+;, Shift+Ctrl+;); guides kept in the canvas's folder, not a revision |
 | Screen modes, Rotate view | skip | |

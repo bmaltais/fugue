@@ -1237,6 +1237,17 @@ private slots:
             QTRY_VERIFY(find(app.window, "canvasViewStatusDetails"));
             save(app, "status-line");
             click(app, "canvasViewAdvancedDetails");
+            // Rulers, a grid and two guides (#253).
+            viaMenu(app, "View", "canvas-view.rulers");
+            viaMenu(app, "View", "canvas-view.grid");
+            QObject *guides = guidesOf(app);
+            QTRY_COMPARE(guides->property("canvasSize").toSize(), QSize(512, 512));
+            QVERIFY(QMetaObject::invokeMethod(guides, "addGuide", Q_ARG(QString, "x"), Q_ARG(int, 180)));
+            QVERIFY(QMetaObject::invokeMethod(guides, "addGuide", Q_ARG(QString, "y"), Q_ARG(int, 300)));
+            QTRY_VERIFY(find(app.window, "canvasViewRulerTop"));
+            save(app, "rulers");
+            viaMenu(app, "View", "canvas-view.rulers");
+            viaMenu(app, "View", "canvas-view.grid");
             viaMenu(app, "View", "canvas-view.history");
             QTRY_VERIFY(find(app.window, "canvasHistoryPanel"));
             save(app, "history");
@@ -1264,6 +1275,114 @@ private slots:
             QTRY_VERIFY(find(app.window, "canvasViewEmptyNew"));
             save(app, "empty");
         }
+    }
+
+    // ---- rulers, grid and guides (#253) ----
+
+    QObject *guidesOf(App &app) const { return app.window->findChild<QObject *>("canvasViewGuides"); }
+    QVariantList guideRows(App &app) const { return guidesOf(app)->property("guides").toList(); }
+
+    // The View menu rows are real commands now, with Photoshop's keys, and they show and hide the overlays.
+    void theRulersGridAndGuidesAreCommandsThatShowTheirOverlays() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        QTRY_VERIFY(find(app.window, "canvasMenuBar"));
+        const auto keysOf = [&](const char *id) { return app.commands.entry(id).value("keys").toStringList(); };
+        QCOMPARE(keysOf("canvas-view.rulers"), QStringList{"Ctrl+R"});
+        QCOMPARE(keysOf("canvas-view.grid"), QStringList{"Ctrl+'"});
+        QCOMPARE(keysOf("canvas-view.guides"), QStringList{"Ctrl+;"});
+        QCOMPARE(keysOf("canvas-view.snap-to"), QStringList{"Ctrl+Shift+;"});
+        QVERIFY(!find(app.window, "menuPlanned-253-Rulers, grid and guides"));
+        QTRY_VERIFY(find(app.window, "canvasViewViewer"));
+        QVERIFY(!find(app.window, "canvasViewRulerTop")); // off at first
+        QVERIFY(!find(app.window, "canvasViewGrid"));
+        QVERIFY(!find(app.window, "canvasViewGridSpacing"));
+        viaMenu(app, "View", "canvas-view.rulers");
+        QTRY_VERIFY(find(app.window, "canvasViewRulerTop"));
+        QVERIFY(find(app.window, "canvasViewRulerLeft"));
+        viaMenu(app, "View", "canvas-view.grid");
+        QTRY_VERIFY(find(app.window, "canvasViewGrid"));
+        QTRY_VERIFY(find(app.window, "canvasViewGridSpacing"));
+        viaMenu(app, "View", "canvas-view.rulers");
+        QTRY_VERIFY(!find(app.window, "canvasViewRulerTop"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // A guide is pulled out of a ruler, kept in the canvas's sidecar file (not a revision, nothing for Undo), moved by
+    // dragging it and removed by dragging it back out.
+    void aGuideIsPulledFromARulerMovedAndDraggedBackToDelete() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        QTRY_COMPARE(model(app)->property("canvasId").toString(), m_canvas);
+        QTRY_VERIFY(!model(app)->property("revisionB").toString().isEmpty());
+        QTest::keyClick(app.window, Qt::Key_0);
+        QTest::qWait(50);
+        viaMenu(app, "View", "canvas-view.rulers");
+        QTRY_VERIFY(find(app.window, "canvasViewRulerTop"));
+        QTest::qWait(50);
+        const QString head = model(app)->property("head").toString();
+        // Top ruler -> a horizontal guide ("y") at the pixel row where it is let go.
+        QQuickItem *top = find(app.window, "canvasViewRulerTop");
+        const QPoint start = top->mapToScene(QPointF(top->width() / 2, top->height() / 2)).toPoint();
+        drag(app, start, pixelAt(app, 256, 200));
+        QTRY_COMPARE(guideRows(app).size(), 1);
+        QCOMPARE(guideRows(app)[0].toMap().value("axis").toString(), QString("y"));
+        QVERIFY(near(guideRows(app)[0].toMap().value("at").toInt(), 200));
+        // Left ruler -> a vertical guide ("x").
+        QQuickItem *left = find(app.window, "canvasViewRulerLeft");
+        drag(app, left->mapToScene(QPointF(left->width() / 2, left->height() / 2)).toPoint(), pixelAt(app, 100, 256));
+        QTRY_COMPARE(guideRows(app).size(), 2);
+        QCOMPARE(guideRows(app)[0].toMap().value("axis").toString(), QString("x"));
+        // Kept beside the canvas, not in its history.
+        QVERIFY(QFile::exists(canvas::CanvasStore::forSession().root() + "/canvases/" + m_canvas + "/guides.json"));
+        QCOMPARE(model(app)->property("head").toString(), head);
+        QCOMPARE(app.model.undoStack()->count(), 0);
+        QVERIFY(find(app.window, QString("guide-y-%1").arg(guideRows(app)[1].toMap().value("at").toInt())));
+        // Drag the horizontal guide down by 40 pixels.
+        const int at = guideRows(app)[1].toMap().value("at").toInt();
+        drag(app, pixelAt(app, 400, at), pixelAt(app, 400, at + 40));
+        QTRY_VERIFY(near(guideRows(app)[1].toMap().value("at").toInt(), at + 40));
+        // Dragged back onto the ruler, it is gone.
+        const int now = guideRows(app)[1].toMap().value("at").toInt();
+        drag(app, pixelAt(app, 400, now), start);
+        QTRY_COMPARE(guideRows(app).size(), 1);
+        // Released off the picture (outside the canvas), it is gone too; the sidecar says so.
+        const int column = guideRows(app)[0].toMap().value("at").toInt();
+        drag(app, pixelAt(app, column, 400), pixelAt(app, -30, 400));
+        QTRY_COMPARE(guideRows(app).size(), 0);
+        QCOMPARE(canvas::CanvasStore::forSession().guides(m_canvas)->guides.size(), size_t(0));
+        QCOMPARE(guidesOf(app)->property("problem").toString(), QString());
+        QCOMPARE(app.model.undoStack()->count(), 0);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // The Region frame snaps to a guide that is shown, through the one snap function, and to nothing when guides are hidden.
+    void theRegionFrameSnapsToAGuideAndToNothingWhenGuidesAreHidden() {
+        App app(load(fixture(m_canvas)));
+        openFollowing(app);
+        QObject *guides = guidesOf(app);
+        QTRY_VERIFY(guides);
+        QTRY_COMPARE(guides->property("canvasSize").toSize(), QSize(512, 512));
+        QVERIFY(QMetaObject::invokeMethod(guides, "addGuide", Q_ARG(QString, "x"), Q_ARG(int, 300)));
+        QTest::qWait(50);
+        drag(app, pixelAt(app, 421, 398), pixelAt(app, 304, 322)); // drawn from the far corner: a press on a guide is the guide's
+        QCOMPARE(app.model.undoStack()->count(), 1);
+        QCOMPARE(regionOf(app).value("x").toInt(), 300); // pulled from 304 to the guide
+        QCOMPARE(regionOf(app).value("y").toInt(), 322); // no line near: free
+        // Guides hidden: nothing pulls.
+        viaMenu(app, "View", "canvas-view.guides");
+        QTest::qWait(50);
+        drag(app, pixelAt(app, 480, 460), pixelAt(app, 304, 330)); // from outside the frame
+        QVERIFY(near(regionOf(app).value("x").toInt(), 304));
+        // Guides shown, Snap to guides and grid off: nothing pulls either.
+        viaMenu(app, "View", "canvas-view.guides");
+        viaMenu(app, "View", "canvas-view.snap-to");
+        QTest::qWait(50);
+        drag(app, pixelAt(app, 480, 460), pixelAt(app, 305, 330));
+        QVERIFY(near(regionOf(app).value("x").toInt(), 305));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
     void aStoreWithNoCanvasSaysSo() {

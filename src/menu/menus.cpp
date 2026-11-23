@@ -178,7 +178,10 @@ QVariantList canvasView() {
                          {command("canvas-view.tool-hand"), command("canvas-view.tool-zoom"), command("canvas-view.tool-region"),
                           command("canvas-view.tool-brush"), command("canvas-view.tool-eraser"), command("canvas-view.brush-swap"),
                           command("canvas-view.brush-smaller"), command("canvas-view.brush-larger")}),
-                 separator(), planned(QT_TRANSLATE_NOOP("Menu", "Rulers, grid and guides"), 253)}),
+                 separator(),
+                 // Rulers, grid and guides (#253).
+                 command("canvas-view.rulers"), command("canvas-view.grid"), command("canvas-view.guides"),
+                 command("canvas-view.snap-to"), command("canvas-view.clear-guides")}),
     };
 }
 

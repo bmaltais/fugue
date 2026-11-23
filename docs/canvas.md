@@ -276,7 +276,21 @@ the view is a row of a menu, with its key beside it; what does not apply to the 
   and Use selection.
 - **Layer**: Add layer mask, Invert mask, Mask overlay, Reveal all, Hide all. The layers panel keeps its own rows.
 - **View**: Fit, 100%, Zoom in, Zoom out, History, Layers, Compare, Advanced details, Snap region, and
-  **Tools** (Hand, Zoom, Rectangle region, Mask brush, Mask eraser, swap, brush size).
+  **Tools** (Hand, Zoom, Rectangle region, Mask brush, Mask eraser, swap, brush size); then the rulers, grid and guides below.
+
+**Rulers, grid and guides (#253).** View > Rulers (Ctrl+R) puts a ruler along the top and the left of the picture, in the
+canvas's own pixels; it follows zoom and pan. Drag from a ruler onto the picture to pull out a guide (from the top ruler a
+horizontal one, from the left a vertical one; its position shows in a chip while you drag). Drag a guide to move it; drag it
+back onto a ruler, or off the picture, and let go to remove it (View > Clear guides removes all). View > Guides (Ctrl+;)
+shows or hides them, View > Grid (Ctrl+') shows a grid, and while it is on the options bar has a **Grid** spacing field (the
+default is 64 px; the grid is not drawn, and does not snap, while its lines would be closer than 6 screen pixels).
+View > **Snap to guides and grid** (Shift+Ctrl+;) pulls the Rectangle region's edges (the selection) to a guide or grid
+line that is shown and within 8 screen pixels; a move keeps the rectangle's size and follows the edge nearer a line. It works
+with, and wins over, **Snap to 16** (the node's Multiple of) when a line is close. Guides and the grid's spacing belong to the
+canvas: they are kept in `guides.json` in the canvas's folder, not in a revision (no history step, Undo does not take them
+back; Duplicate canvas copies them), and a damaged file reads as no guides. Guides, grid and rulers are shown only for one
+picture, not while comparing. A press within 6 pixels of a guide with the Rectangle region or Hand tool takes the guide, not
+the frame.
 
 A greyed row with the tooltip "Not built yet (#N)" is a feature that is planned and tracked in issue N; it is not a command and has
 no key ([the research](canvas-menus-research.md) says what the other editors have and what was decided). The top bar keeps the

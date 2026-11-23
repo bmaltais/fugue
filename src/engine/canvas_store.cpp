@@ -467,6 +467,23 @@ Result<CanvasInfo> CanvasStore::rename(const QString &canvasId, const QString &n
     return info(canvasId);
 }
 
+Result<GuideSet> CanvasStore::guides(const QString &canvasId) const {
+    if (!isCanvasId(canvasId) || !QFileInfo::exists(canvasDir(canvasId) + QStringLiteral("/canvas.json")))
+        return notFound(QStringLiteral("canvas %1").arg(canvasId));
+    QByteArray bytes;
+    if (!readFile(canvasDir(canvasId) + QStringLiteral("/guides.json"), &bytes))
+        return GuideSet{};
+    return guidesFromJson(bytes);
+}
+
+Errors CanvasStore::setGuides(const QString &canvasId, const GuideSet &set) {
+    if (!isCanvasId(canvasId) || !QFileInfo::exists(canvasDir(canvasId) + QStringLiteral("/canvas.json")))
+        return {notFound(QStringLiteral("canvas %1").arg(canvasId))};
+    if (set.guides.size() > size_t(maxGuides))
+        return {makeError(QStringLiteral("input_invalid"), QStringLiteral("A canvas holds at most %1 guides.").arg(maxGuides))};
+    return replaceFile(canvasDir(canvasId) + QStringLiteral("/guides.json"), guidesToJson(set), QStringLiteral("the canvas's guides"));
+}
+
 Result<CanvasInfo> CanvasStore::duplicate(const QString &canvasId, const QString &name) {
     const Result<CanvasInfo> canvas = info(canvasId);
     if (!canvas)
@@ -503,6 +520,11 @@ Result<CanvasInfo> CanvasStore::duplicate(const QString &canvasId, const QString
             return fail(written);
     }
     lock.unlock();
+    if (QByteArray guideBytes; readFile(from + QStringLiteral("/guides.json"), &guideBytes)) { // the guides go with it (#253)
+        const Errors copied = replaceFile(to + QStringLiteral("/guides.json"), guideBytes, QStringLiteral("the canvas's guides"));
+        if (hasErrors(copied))
+            return fail(copied);
+    }
     const QString copyName = name.trimmed().isEmpty() ? canvas->name + QStringLiteral(" copy") : name.trimmed();
     const QJsonObject record{{"format", storeFormat}, {"id", id}, {"name", copyName}, {"created", isoTime(utcNow(m_clock))}};
     const Errors written = replaceFile(to + QStringLiteral("/canvas.json"), jsonBytes(record), QStringLiteral("canvas.json"));

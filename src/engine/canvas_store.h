@@ -52,6 +52,7 @@
 #include <memory>
 #include <vector>
 
+#include "engine/canvas_guides.h"
 #include "engine/canvas_tiles.h"
 #include "engine/edge_fill.h"
 #include "engine/clock.h"
@@ -184,6 +185,11 @@ public:
     // area's pre-fill (`blur` is EdgeBlur's radius). Undo takes it back. {moved: false, head: <the head>} when the head is not
     // `expected`; input_invalid for a size past the canvas limit or a rectangle that holds none of the canvas.
     Result<Commit> resize(const QString &canvasId, const QString &expected, const mask::IRect &to, edgefill::Mode fill, int blur, const QString &producer);
+    // The canvas's guides and grid spacing (#253), kept in `canvases/<id>/guides.json` beside canvas.json: NOT a revision (no
+    // history step, no Undo; a duplicate copies it). A canvas with no file has no guides and the default grid. canvas_not_found
+    // for an id this store lacks, canvas_corrupt for a file that does not validate (engine/canvas_guides.h).
+    Result<GuideSet> guides(const QString &canvasId) const;
+    Errors setGuides(const QString &canvasId, const GuideSet &set);
     // Every canvas of the store, newest first (by creation time, then id); one that cannot be read is left out.
     std::vector<CanvasInfo> list() const;
 
