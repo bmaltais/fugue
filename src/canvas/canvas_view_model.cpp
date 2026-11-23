@@ -315,6 +315,8 @@ void CanvasViewModel::updateRegion() {
                               {"padding", state.value("padding").toInt()},
                               {"scale", state.value("scale").toDouble()},
                               {"cap", state.value("cap").toDouble()},
+                              {"target", state.value("target").toDouble()},
+                              {"feather", state.value("feather").toInt()},
                               {"multiple", state.value("multiple").toInt()},
                               {"selection", state.value("selection").toString()},
                               {"selectionWritable", state.value("selectionWritable").toBool()},
@@ -351,8 +353,8 @@ QVariantMap CanvasViewModel::previewRegion(const QVariantMap &rect) const {
     const crop::Size canvas{size.width(), size.height()};
     const crop::Rect r = rectOf(rect);
     const region::Settings settings{m_region.value("padding").toInt(), m_region.value("scale").toDouble(), m_region.value("cap").toDouble(),
-                                    m_region.value("multiple").toInt()};
-    const crop::Rect context = region::context(r, settings.padding, canvas);
+                                    m_region.value("multiple").toInt(), m_region.value("target").toDouble(), m_region.value("feather").toInt()};
+    const crop::Rect context = region::context(r, settings.padding, canvas, settings.feather);
     const crop::Size model = region::modelSize(r, settings, canvas);
     QVariantMap out = mapOf(r);
     out.insert("context", mapOf(context));

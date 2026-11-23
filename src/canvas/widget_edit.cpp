@@ -189,6 +189,9 @@ QVariantMap WidgetEdit::regionState(const QString &node) const {
                       {"selectionWritable", target(node, QStringLiteral("selection")).spec != nullptr && !linked("selection")}};
     for (const char *name : kRegionNumbers)
         state.insert(QLatin1String(name) == QLatin1String("max_megapixels") ? QStringLiteral("cap") : QLatin1String(name), number(name));
+    // Region 1.3 (#242): the target size and the feather shape the model's size; an older Region has no target (0).
+    state.insert(QStringLiteral("target"), target(node, QStringLiteral("target_megapixels")).spec ? number("target_megapixels") : 0.0);
+    state.insert(QStringLiteral("feather"), target(node, QStringLiteral("feather")).spec ? number("feather") : 0.0);
     return state;
 }
 

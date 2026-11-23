@@ -42,7 +42,9 @@ the window, see below):
   painted in the Canvas view (Selection, see Tools below),
   adds Padding around it, and gives you that part of the canvas as a picture, the mask of the part to
   change, and a stitch. Scale and Cap set the size it is redrawn at (a small region is drawn larger,
-  up to the megapixel cap); Feather softens the mask's edge outward. Its Revision is `head` unless you
+  up to the megapixel cap); Target size (megapixels, 0 off) instead redraws it at about that size, up or down, as
+  Crop to Mask does, so a small selection reaches the model's size (the Cap still brings it down). Padding is held at
+  Feather + 16 or more (the node warns `padding_raised`) because Canvas Write's blend stops at the region's box; Feather softens the mask's edge outward. Its Revision is `head` unless you
   give a hash.
 - **Canvas Write** puts a picture on the canvas as a new layer, blended in through a layer mask
   (Blend pixels soften the seam): the layer holds the whole redrawn picture and the mask decides how

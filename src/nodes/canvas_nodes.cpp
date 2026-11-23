@@ -158,6 +158,8 @@ public:
         const Result<int> multiple = intInput(context, "multiple", 1, 256);
         const double scale = context.input(QStringLiteral("scale")).number();
         const double cap = context.input(QStringLiteral("max_megapixels")).number();
+        // Region 1.3 (#242): an older workflow has no such input, which reads as 0 (off).
+        const double target = context.input(QStringLiteral("target_megapixels")).number();
         for (const Result<int> *checked : {&padding, &feather, &multiple})
             if (!checked->ok())
                 return Result<Values>(checked->errors());
@@ -165,6 +167,9 @@ public:
             return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("scale"), QStringLiteral("A scale of %1 is outside 0.25 to 4.").arg(scale));
         if (!(cap >= 0 && cap <= 16))
             return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("max_megapixels"), QStringLiteral("%1 megapixels is outside 0 to 16.").arg(cap));
+
+        if (!(target >= 0 && target <= 16))
+            return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("target_megapixels"), QStringLiteral("%1 megapixels is outside 0 to 16.").arg(target));
 
         Result<PaintDocument> opened = openRevision(source.value());
         if (!opened)
@@ -243,8 +248,15 @@ public:
             mask = boxMask(*bounds, composite.width, composite.height);
         }
 
-        const CropBox box = paddedBox(*bounds, padding.value(), composite.width, composite.height);
-        const CropSize size = regionSize(box, scale, cap, multiple.value());
+        // Write's blend stops at this box: room for the feather and a default blend, or the seam is a hard edge (#242).
+        const int room = paddingFor(padding.value(), feather.value());
+        if (room > padding.value())
+            warnings << warning(makeInputError(QStringLiteral("padding_raised"), QStringLiteral("padding"),
+                                               QStringLiteral("Padding %1 leaves no room for the blend: it was raised to %2 (Feather %3 + %4).")
+                                                   .arg(padding.value()).arg(room).arg(feather.value()).arg(kMinBlendRoom),
+                                               QStringLiteral("Set Padding to at least Feather + %1 to silence this.").arg(kMinBlendRoom)));
+        const CropBox box = paddedBox(*bounds, room, composite.width, composite.height);
+        const CropSize size = regionSize(box, scale, cap, multiple.value(), target);
         Cropped crop = cropAt(composite, mask, box, size);
         // The feather is in canvas pixels; the region may have been redrawn at another scale.
         const int radius = int(std::lround(double(feather.value()) * size.width / box.width));

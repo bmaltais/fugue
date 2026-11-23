@@ -17,6 +17,8 @@ struct Settings {
     double scale = 1;
     double capMegapixels = 1.5;
     int multiple = 16;
+    double targetMegapixels = 0; // Region 1.3: 0 uses the scale
+    int feather = 0;             // raises the padding to feather + 16 (nodes::paddingFor)
 };
 
 // The rectangle the node takes from x, y, width, height on a canvas (a width or height of 0 runs to the
@@ -30,8 +32,9 @@ crop::Rect initial(int x, int y, int width, int height, const crop::Size &canvas
 // snap). A multiple of 1 or less changes nothing.
 crop::Rect snapped(const crop::Rect &rect, int multiple, const crop::Size &canvas, bool keepSize = false);
 
-// The rectangle grown by the padding and kept inside the canvas: the picture the node cuts (the dashed box).
-crop::Rect context(const crop::Rect &rect, int padding, const crop::Size &canvas);
+// The rectangle grown by the padding (raised to feather + 16, as the node does) and kept inside the
+// canvas: the picture the node cuts (the dashed box).
+crop::Rect context(const crop::Rect &rect, int padding, const crop::Size &canvas, int feather = 0);
 
 // The size the node redraws the context at (scale, megapixel cap and multiple).
 crop::Size modelSize(const crop::Rect &rect, const Settings &settings, const crop::Size &canvas);
