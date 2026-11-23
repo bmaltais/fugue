@@ -49,6 +49,7 @@
 #include <QStringList>
 
 #include <functional>
+#include <memory>
 #include <vector>
 
 #include "engine/canvas_tiles.h"
@@ -60,6 +61,9 @@
 namespace fugue::canvas {
 
 inline constexpr int storeFormat = 1;
+// What treeFromJson accepts (a canvas is at most 8192 x 8192: 1024 tiles a layer).
+inline constexpr int maxTreeLayers = 512;
+inline constexpr int maxTreeTiles = 100000;
 
 // What one layer of a tree is.
 struct LayerRecord {
@@ -132,7 +136,7 @@ struct Accepted {
 // A revision with its tree, as a canvas made elsewhere carries it (importCanvas).
 struct ImportedRevision {
     Revision revision;
-    Tree tree;
+    std::shared_ptr<const Tree> tree; // revisions of one tree share it: it is checked and stored once
 };
 // The pixels of the tile with this hash, `width` x `height` x `channels` (a package's tile, read and decoded).
 using TileFetch = std::function<Result<mask::MaskPaint>(const QString &hash, int width, int height, int channels)>;

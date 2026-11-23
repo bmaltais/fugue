@@ -445,6 +445,7 @@ private slots:
         doc.brush.color = mask::Rgba{20, 80, 200, 255};
         doc.fillRect(0, 0, 64, 64);
         const QString id = store.create("Shared sketch", doc, "new")->id;
+        const size_t canvasesBefore = store.list().size(); // the session's store may hold others
         const QString zip = dir.filePath("canvas.fuguepack");
         QVERIFY(!hasErrors(canvas::writeCanvasPackage(store, id, canvas::SharedPart::History, zip)));
 
@@ -462,7 +463,7 @@ private slots:
         QVERIFY(workflows.notice().contains("Shared sketch"));
         QVERIFY(workflows.notice().contains("history"));
         QVERIFY(workflows.notice().contains("yours is untouched"));
-        QCOMPARE(store.list().size(), size_t(2));
+        QCOMPARE(store.list().size(), canvasesBefore + 1);
         QCOMPARE(store.info(id)->name, QString("Shared sketch"));
         // A package that is not what it says is refused with its reason and adds nothing.
         QFile bad(dir.filePath("bad.fuguepack"));
@@ -470,7 +471,7 @@ private slots:
         bad.write("PK\x03\x04 not really a zip");
         bad.close();
         QVERIFY(!workflows.openPath(dir.filePath("bad.fuguepack")));
-        QCOMPARE(store.list().size(), size_t(2));
+        QCOMPARE(store.list().size(), canvasesBefore + 1);
     }
 
     void theWindowExportsAndOpensAPackage() {

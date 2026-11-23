@@ -7,6 +7,7 @@
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
+#include <QSet>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -121,8 +122,15 @@ Result<Tree> treeFromJson(const QJsonObject &object) {
     tree.height = object.value("height").toInt();
     if (tree.width < 1 || tree.height < 1 || qint64(tree.width) * tree.height > mask::paintFileMaxPixels)
         return corrupt(QStringLiteral("a tree has a size that cannot be"));
-    for (const QJsonValue &value : object.value("layers").toArray()) {
+    // A tree comes from files that may be someone else's: its size is bounded before it is walked.
+    const QJsonArray layerList = object.value("layers").toArray();
+    if (layerList.size() > maxTreeLayers)
+        return corrupt(QStringLiteral("a tree has more than %1 layers").arg(maxTreeLayers));
+    int tileTotal = 0;
+    for (const QJsonValue &value : layerList) {
         const QJsonObject item = value.toObject();
+        if (tileTotal += item.value("tiles").toObject().size() + item.value("mask").toObject().value("tiles").toObject().size(); tileTotal > maxTreeTiles)
+            return corrupt(QStringLiteral("a tree has more than %1 tiles").arg(maxTreeTiles));
         LayerRecord layer;
         if (!kindFromName(item.value("kind").toString(), &layer.kind) || !item.value("name").isString() || !item.value("visible").isBool() ||
             !item.value("opacity").isDouble())
@@ -528,55 +536,82 @@ Result<CanvasInfo> CanvasStore::importCanvas(const QString &wantedId, const QStr
         return invalid(QStringLiteral("A canvas needs a name of 1 to 200 characters."));
     if (chain.empty())
         return invalid(QStringLiteral("A canvas needs at least one revision."));
-    // Checked first, with nothing written: the chain and every tree.
+    // Checked first, with nothing written: the chain and every distinct tree (once, whatever the number of revisions).
     QString previous;
+    QSet<const Tree *> checked;
     for (const ImportedRevision &item : chain) {
         const Revision &rev = item.revision;
-        if (!isSha256(rev.id) || !isSha256(rev.tree) || (!rev.parent.isEmpty() && !isSha256(rev.parent)) || rev.producer.size() > 200 || rev.time.size() > 64)
+        if (!item.tree || !isSha256(rev.id) || !isSha256(rev.tree) || (!rev.parent.isEmpty() && !isSha256(rev.parent)) || rev.producer.size() > 200 || rev.time.size() > 64)
             return invalid(QStringLiteral("A revision of the canvas is not well formed."));
         if (rev.parent != previous)
             return invalid(QStringLiteral("The revisions of the canvas are not one line of parents."));
         if (makeRevision(rev.tree, rev.parent, rev.producer, rev.time).id != rev.id)
             return corrupt(QStringLiteral("the revision %1 is not the record it is named for").arg(rev.id));
-        if (canonicalHash(treeToJson(item.tree)) != rev.tree)
-            return corrupt(QStringLiteral("the tree %1 is not the content it is named for").arg(rev.tree));
+        if (!checked.contains(item.tree.get())) {
+            if (canonicalHash(treeToJson(*item.tree)) != rev.tree)
+                return corrupt(QStringLiteral("the tree %1 is not the content it is named for").arg(rev.tree));
+            checked.insert(item.tree.get());
+        }
         previous = rev.id;
     }
-    const QString id = isCanvasId(wantedId) && !QFileInfo::exists(canvasDir(wantedId)) ? wantedId
-                                                                                  : QStringLiteral("canvas-") + QUuid::createUuid().toString(QUuid::Id128).left(12);
-    const QString dir = canvasDir(id);
+    // The folder is claimed with a plain mkdir, which fails when it exists: two imports of one id cannot share it, and a
+    // failure removes only a folder this call made.
+    QDir().mkpath(m_root + QStringLiteral("/canvases"));
+    QString id, dir;
+    bool claimed = false;
+    for (int attempt = 0; attempt < 8 && !claimed; ++attempt) {
+        id = attempt == 0 && isCanvasId(wantedId) ? wantedId : QStringLiteral("canvas-") + QUuid::createUuid().toString(QUuid::Id128).left(12);
+        dir = canvasDir(id);
+        claimed = QDir().mkdir(dir);
+    }
+    if (!claimed)
+        return Result<CanvasInfo>(makeError(QStringLiteral("permission_denied"), QStringLiteral("Fugue could not make a folder for the canvas in %1.").arg(m_root)));
     const auto fail = [&dir](const Errors &errors) {
         QDir(dir).removeRecursively(); // a canvas that was never complete: only this call knew it
         return Result<CanvasInfo>(errors);
     };
-    const Errors folder = makeFolder(dir + QStringLiteral("/commits"));
-    if (hasErrors(folder))
-        return Result<CanvasInfo>(folder);
+    if (const Errors folder = makeFolder(dir + QStringLiteral("/commits")); hasErrors(folder))
+        return fail(folder);
+    // Each distinct tile (hash and place) is verified once; a hash placed where its pixels do not fit is refused, as is
+    // one that is stored already but is not the pixels it is named for.
+    QSet<QString> verified;
+    QSet<const Tree *> stored;
     for (const ImportedRevision &item : chain) {
-        const Tree &tree = item.tree;
-        const auto storeTiles = [&](const TileMap &tiles, int channels) {
-            for (const auto &[key, hash] : tiles) {
-                if (QFileInfo::exists(blobPath(hash)))
-                    continue;
-                const mask::IRect rect = tileRect(key, tree.width, tree.height);
-                const Result<MaskPaint> tile = fetch(hash, rect.width, rect.height, channels);
-                if (!tile)
-                    return tile.errors();
-                if (tile->width() != rect.width || tile->height() != rect.height || tile->channels() != channels ||
-                    tileHash(rect.width, rect.height, channels, tileBytes(*tile, mask::IRect{0, 0, rect.width, rect.height})) != hash)
-                    return Errors{makeError(QStringLiteral("canvas_corrupt"), QStringLiteral("The tile %1 does not hold the pixels it is named for.").arg(hash))};
-                if (const Errors stored = storeBlob(hash, *tile); hasErrors(stored))
-                    return stored;
-            }
-            return Errors{};
-        };
-        for (const LayerRecord &layer : tree.layers)
-            for (const Errors &problems : {storeTiles(layer.tiles, layer.channels()), storeTiles(layer.maskTiles, 1)})
-                if (hasErrors(problems))
-                    return fail(problems);
-        const Result<QString> stored = storeTreeRecord(tree);
-        if (!stored)
-            return fail(stored.errors());
+        const Tree &tree = *item.tree;
+        if (!stored.contains(item.tree.get())) {
+            stored.insert(item.tree.get());
+            const auto storeTiles = [&](const TileMap &tiles, int channels) {
+                for (const auto &[key, hash] : tiles) {
+                    const mask::IRect rect = tileRect(key, tree.width, tree.height);
+                    const QString place = QStringLiteral("%1|%2|%3|%4").arg(hash).arg(rect.width).arg(rect.height).arg(channels);
+                    if (verified.contains(place))
+                        continue;
+                    if (QFileInfo::exists(blobPath(hash))) {
+                        if (const Result<MaskPaint> have = readBlob(hash, rect.width, rect.height, channels); !have)
+                            return have.errors();
+                        verified.insert(place);
+                        continue;
+                    }
+                    const Result<MaskPaint> tile = fetch(hash, rect.width, rect.height, channels);
+                    if (!tile)
+                        return tile.errors();
+                    if (tile->width() != rect.width || tile->height() != rect.height || tile->channels() != channels ||
+                        tileHash(rect.width, rect.height, channels, tileBytes(*tile, mask::IRect{0, 0, rect.width, rect.height})) != hash)
+                        return Errors{makeError(QStringLiteral("canvas_corrupt"), QStringLiteral("The tile %1 does not hold the pixels it is named for.").arg(hash))};
+                    if (const Errors put = storeBlob(hash, *tile); hasErrors(put))
+                        return put;
+                    verified.insert(place);
+                }
+                return Errors{};
+            };
+            for (const LayerRecord &layer : tree.layers)
+                for (const Errors &problems : {storeTiles(layer.tiles, layer.channels()), storeTiles(layer.maskTiles, 1)})
+                    if (hasErrors(problems))
+                        return fail(problems);
+            const Result<QString> put = storeTreeRecord(tree);
+            if (!put)
+                return fail(put.errors());
+        }
         const Errors written = writeOnce(dir + QStringLiteral("/commits/") + hexOf(item.revision.id) + QStringLiteral(".json"), jsonBytes(commitRecord(item.revision)),
                                          QStringLiteral("a canvas revision"));
         if (hasErrors(written))

@@ -8,6 +8,8 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QElapsedTimer>
+#include <QProcess>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -407,6 +409,111 @@ private slots:
         QVERIFY(got->renamedId);
         QVERIFY(got->info.id.startsWith("canvas-"));
         QVERIFY(!QFileInfo::exists(m_dir.path() + "/escape"));
+    }
+
+    // The review's four findings (#249).
+
+    void manyRevisionsOfOneTreeAreCheckedAndStoredOnce() {
+        CanvasStore from = storeAt("a");
+        const QString id = from.create("Many", sample(), "new")->id;
+        const PaintDocument doc = from.load(id, from.info(id)->head).value();
+        for (int i = 0; i < 300; ++i) // the same pixels again: 300 revisions, one tree
+            QVERIFY(from.commit(id, doc, from.info(id)->head, "again")->move.moved);
+        QVERIFY(!hasErrors(writeCanvasPackage(from, id, SharedPart::History, zipPath("many"))));
+        CanvasStore to = storeAt("b");
+        QElapsedTimer timer;
+        timer.start();
+        const Result<CanvasImported> got = importCanvasPackage(zipPath("many"), to);
+        QVERIFY(got.ok());
+        QCOMPARE(got->revisions, 301);
+        QVERIFY(timer.elapsed() < 20000);
+        QCOMPARE(QDir(to.root() + "/trees").entryList(QDir::Files).size(), 1); // one tree file, however many revisions
+    }
+
+    void aTreeWithTooManyLayersOrTilesIsRefused() {
+        QJsonArray layers;
+        for (int i = 0; i < maxTreeLayers + 1; ++i)
+            layers.append(QJsonObject{{"name", "l"}, {"kind", "paint"}, {"visible", true}, {"opacity", 1}, {"tiles", QJsonObject{}}});
+        const QJsonObject json{{"format", 1}, {"width", 64}, {"height", 64}, {"layers", layers}};
+        QCOMPARE(treeFromJson(json).errors().first().code, QString("canvas_corrupt"));
+        QCOMPARE(treeFromJson(QJsonObject{{"format", 1}, {"width", 64}, {"height", 64}, {"layers", QJsonArray{}}}).ok(), true);
+    }
+
+    void twoImportsOfOneIdNeverShareAFolderAndAFailureKeepsTheOtherCanvas() {
+        CanvasStore from = storeAt("a");
+        const QString id = threeRevisions(from);
+        QVERIFY(!hasErrors(writeCanvasPackage(from, id, SharedPart::Head, zipPath("good"))));
+        CanvasStore to = storeAt("b");
+        // A folder with the packaged id is there already (a canvas being imported by another process, say): it is not entered.
+        QVERIFY(QDir().mkpath(to.root() + "/canvases/" + id + "/commits"));
+        QFile marker(to.root() + "/canvases/" + id + "/marker");
+        QVERIFY(marker.open(QIODevice::WriteOnly));
+        marker.close();
+        const Result<CanvasImported> got = importCanvasPackage(zipPath("good"), to);
+        QVERIFY(got.ok());
+        QVERIFY(got->renamedId);
+        QVERIFY(QFileInfo::exists(to.root() + "/canvases/" + id + "/marker"));
+        // A failing import of that id removes only what it made.
+        QList<ZipEntry> entries = entriesOf(zipPath("good"));
+        for (int i = 0; i < entries.size(); ++i)
+            if (entries[i].name.contains("/tiles/")) {
+                entries.removeAt(i);
+                break;
+            }
+        CanvasStore other = storeAt("c"); // a store with no tiles yet, with that id's folder taken
+        QVERIFY(QDir().mkpath(other.root() + "/canvases/" + id));
+        QVERIFY(!importCanvasPackage(zipped(entries, "broken"), other).ok());
+        QVERIFY(QFileInfo::exists(other.root() + "/canvases/" + id)); // not this call's: left alone
+        QVERIFY(to.info(got->info.id).ok());
+    }
+
+    void aStoredTileCannotBePlacedWhereItsPixelsDoNotFit() {
+        CanvasStore store = storeAt("b");
+        const QString id = store.create("Have", sample(300), "new")->id; // tiles of 256 and of 44 pixels
+        Tree tree = store.tree(store.revision(id, store.info(id)->head)->tree).value();
+        const QString big = tree.layers[0].tiles.at(TileKey{0, 0});
+        tree.layers[0].tiles[TileKey{1, 1}] = big; // a 256 x 256 tile at the 44 x 44 corner
+        const QString treeHash = canonicalHash(treeToJson(tree));
+        ImportedRevision item;
+        item.tree = std::make_shared<const Tree>(tree);
+        item.revision = CanvasStore::makeRevision(treeHash, QString(), "x", "2026-11-23T00:00:00.000Z");
+        const auto fetch = [](const QString &, int, int, int) -> Result<MaskPaint> { return makeError("canvas_corrupt", "not given"); };
+        const Result<CanvasInfo> made = store.importCanvas("canvas-new1", "Bad", {item}, fetch);
+        QVERIFY(!made.ok());
+        QCOMPARE(made.errors().first().code, QString("canvas_corrupt"));
+        QCOMPARE(canvasCount(store), 1);
+        QVERIFY(!QFileInfo::exists(store.root() + "/canvases/canvas-new1"));
+    }
+
+    void exportRefusesWhatImportWouldRefuse() {
+        CanvasStore from = storeAt("a");
+        const QString id = threeRevisions(from);
+        UnpackLimits few = packageLimits();
+        few.maxEntries = 3;
+        Errors e = writeCanvasPackage(from, id, SharedPart::Head, zipPath("few"), few);
+        QCOMPARE(e.first().code, QString("value_out_of_range"));
+        QVERIFY(!QFileInfo::exists(zipPath("few")));
+        UnpackLimits small = packageLimits();
+        small.maxFile = 100; // no tile fits
+        e = writeCanvasPackage(from, id, SharedPart::Head, zipPath("small"), small);
+        QCOMPARE(e.first().code, QString("value_out_of_range"));
+        QVERIFY(e.first().message.contains("too large"));
+        QVERIFY(!QFileInfo::exists(zipPath("small")));
+    }
+
+    void aStaleImportFolderIsRemovedOnTheNextImport() {
+        CanvasStore from = storeAt("a");
+        const QString id = threeRevisions(from);
+        QVERIFY(!hasErrors(writeCanvasPackage(from, id, SharedPart::Head, zipPath("good"))));
+        CanvasStore to = storeAt("b");
+        QVERIFY(QDir().mkpath(to.root() + "/import-old/x"));
+        QVERIFY(QDir().mkpath(to.root() + "/import-new"));
+        QVERIFY(QFile::setPermissions(to.root() + "/import-old", QFile::permissions(to.root() + "/import-old"))); // keeps it a plain folder
+        // Two days old: its modification time is set through touch(1)'s equivalent.
+        QProcess::execute("touch", {"-d", "2 days ago", to.root() + "/import-old"});
+        QVERIFY(importCanvasPackage(zipPath("good"), to).ok());
+        QVERIFY(!QFileInfo::exists(to.root() + "/import-old"));
+        QVERIFY(QFileInfo::exists(to.root() + "/import-new"));
     }
 
     void tooManyEntriesAndOversizedFilesAreRefused() {

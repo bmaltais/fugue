@@ -25,6 +25,7 @@
 #include "engine/canvas_store.h"
 #include "engine/error.h"
 #include "engine/result.h"
+#include "engine/zip_archive.h"
 
 namespace fugue::canvas {
 
@@ -33,7 +34,9 @@ enum class SharedPart { Head, History };
 // Writes the package to `zipPath`, never over a file there. The canvas must have a head. Errors: canvas_not_found,
 // canvas_corrupt (a stored object that is not what it is named for: nothing is written), a file that cannot be
 // written, a package over 3 GB (value_out_of_range).
-Errors writeCanvasPackage(const CanvasStore &store, const QString &canvasId, SharedPart part, const QString &zipPath);
+// What a package may hold (the limits importing applies); a test passes smaller ones.
+UnpackLimits packageLimits();
+Errors writeCanvasPackage(const CanvasStore &store, const QString &canvasId, SharedPart part, const QString &zipPath, const UnpackLimits &limits = packageLimits());
 
 // True when the file is a zip that holds a canvas.json in its top folder (the headers are read, nothing else).
 bool isCanvasPackage(const QString &path);

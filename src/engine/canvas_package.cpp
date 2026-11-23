@@ -1,5 +1,6 @@
 #include "canvas_package.h"
 
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -28,7 +29,7 @@ constexpr int packageFormat = 1;
 constexpr qint64 kMaxPacked = qint64(3) << 30;
 constexpr int kMaxRevisions = 5000;
 // What the unpacking accepts: a tile PNG is at most a few hundred KB, a tree some MB; the count is the tiles of a long history.
-constexpr UnpackLimits kLimits{qint64(64) << 20, qint64(4) << 30, 200000};
+constexpr UnpackLimits kPackageLimits{qint64(64) << 20, qint64(4) << 30, 200000};
 
 QString hexOf(const QString &hash) { return hash.mid(QStringLiteral("sha256:").size()); }
 
@@ -93,7 +94,16 @@ bool pngSize(const QByteArray &png, int *width, int *height) {
 
 } // namespace
 
-Errors writeCanvasPackage(const CanvasStore &store, const QString &canvasId, SharedPart part, const QString &zipPath) {
+namespace {
+Errors tooBig(const QString &what, const UnpackLimits &limits) {
+    return {makeError(QStringLiteral("value_out_of_range"), QStringLiteral("This canvas is too large to share as a package: %1, and Fugue opens at most %2 files of %3 MB each.").arg(what).arg(limits.maxEntries).arg(limits.maxFile >> 20),
+                      QStringLiteral("Share the head only, or resize the canvas."))};
+}
+} // namespace
+
+UnpackLimits packageLimits() { return kPackageLimits; }
+
+Errors writeCanvasPackage(const CanvasStore &store, const QString &canvasId, SharedPart part, const QString &zipPath, const UnpackLimits &limits) {
     const Result<CanvasInfo> info = store.info(canvasId);
     if (!info)
         return info.errors();
@@ -131,6 +141,8 @@ Errors writeCanvasPackage(const CanvasStore &store, const QString &canvasId, Sha
         if (!tree)
             return tree.errors();
         const QByteArray bytes = jsonBytes(treeToJson(tree.value()));
+        if (bytes.size() > limits.maxFile)
+            return tooBig(QStringLiteral("a revision of this canvas is described by %1 MB of data").arg(bytes.size() >> 20), limits);
         entries << ZipEntry{folder + QStringLiteral("/trees/") + hexOf(revision.tree) + QStringLiteral(".json"), bytes, {}};
         total += bytes.size();
         for (const TileUse &use : tilesOf(tree.value())) {
@@ -142,9 +154,15 @@ Errors writeCanvasPackage(const CanvasStore &store, const QString &canvasId, Sha
             if (!tile)
                 return tile.errors();
             const QString file = store.blobFile(use.hash);
-            total += QFileInfo(file).size();
+            const qint64 size = QFileInfo(file).size();
+            if (size > limits.maxFile)
+                return tooBig(QStringLiteral("one of its tiles is %1 MB").arg(size >> 20), limits);
+            total += size;
             entries << ZipEntry{folder + QStringLiteral("/tiles/") + hexOf(use.hash) + QStringLiteral(".png"), {}, file};
         }
+        // What importing accepts, so no package is written that Fugue itself would refuse (one entry more for canvas.json).
+        if (entries.size() + 1 > limits.maxEntries)
+            return tooBig(QStringLiteral("it would hold %1 files").arg(entries.size() + 1), limits);
         if (total > kMaxPacked)
             return {makeError(QStringLiteral("value_out_of_range"), QStringLiteral("The canvas comes to %1 GB; a package holds at most %2 GB.").arg(double(total) / (1 << 30), 0, 'f', 1).arg(kMaxPacked >> 30),
                               QStringLiteral("Share the head only, or resize the canvas."))};
@@ -178,10 +196,14 @@ Result<CanvasImported> importCanvasPackage(const QString &zipPath, CanvasStore &
     // Unpacked inside the store's root and nowhere else; removed when this returns.
     if (!QDir().mkpath(store.root()))
         return makeError(QStringLiteral("permission_denied"), QStringLiteral("Fugue could not make the folder %1.").arg(store.root()));
+    // A folder a crashed import left behind (older than a day) goes now.
+    for (const QFileInfo &stale : QDir(store.root()).entryInfoList({QStringLiteral("import-*")}, QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks))
+        if (stale.lastModified().secsTo(QDateTime::currentDateTime()) > 24 * 3600)
+            QDir(stale.absoluteFilePath()).removeRecursively();
     QTemporaryDir unpacked(store.root() + QStringLiteral("/import-XXXXXX"));
     if (!unpacked.isValid())
         return makeError(QStringLiteral("permission_denied"), QStringLiteral("Fugue could not unpack %1: %2.").arg(QFileInfo(zipPath).fileName(), unpacked.errorString()));
-    if (const Errors problems = unpackZip(zipPath, unpacked.path(), kLimits); hasErrors(problems))
+    if (const Errors problems = unpackZip(zipPath, unpacked.path(), kPackageLimits); hasErrors(problems))
         return Result<CanvasImported>(problems);
 
     // The folder with canvas.json: the top, or the one folder at the top.
@@ -193,7 +215,7 @@ Result<CanvasImported> importCanvasPackage(const QString &zipPath, CanvasStore &
         folder = tops.first().absoluteFilePath();
     }
     QByteArray manifestBytes;
-    if (!readAll(folder + QStringLiteral("/canvas.json"), kLimits.maxFile, &manifestBytes))
+    if (!readAll(folder + QStringLiteral("/canvas.json"), kPackageLimits.maxFile, &manifestBytes))
         return notAPackage(zipPath, QStringLiteral("canvas.json cannot be read"));
     QJsonParseError parse;
     const QJsonObject manifest = QJsonDocument::fromJson(manifestBytes, &parse).object();
@@ -209,7 +231,7 @@ Result<CanvasImported> importCanvasPackage(const QString &zipPath, CanvasStore &
     const QString shownName = name.trimmed().isEmpty() ? manifest.value("name").toString() : name;
 
     std::vector<ImportedRevision> chain;
-    QHash<QString, Tree> trees;
+    QHash<QString, std::shared_ptr<const Tree>> trees;
     for (const QJsonValue &value : listed) {
         const QJsonObject item = value.toObject();
         ImportedRevision made;
@@ -223,7 +245,7 @@ Result<CanvasImported> importCanvasPackage(const QString &zipPath, CanvasStore &
             return notAPackage(zipPath, QStringLiteral("a revision names a tree that is not a hash"));
         if (!trees.contains(made.revision.tree)) {
             QByteArray bytes;
-            if (!readAll(folder + QStringLiteral("/trees/") + hexOf(made.revision.tree) + QStringLiteral(".json"), kLimits.maxFile, &bytes))
+            if (!readAll(folder + QStringLiteral("/trees/") + hexOf(made.revision.tree) + QStringLiteral(".json"), kPackageLimits.maxFile, &bytes))
                 return notAPackage(zipPath, QStringLiteral("the tree %1 is missing").arg(made.revision.tree));
             const QJsonObject json = QJsonDocument::fromJson(bytes).object();
             if (canonicalHash(json) != made.revision.tree)
@@ -231,16 +253,16 @@ Result<CanvasImported> importCanvasPackage(const QString &zipPath, CanvasStore &
             const Result<Tree> tree = treeFromJson(json);
             if (!tree)
                 return Result<CanvasImported>(tree.errors());
-            trees.insert(made.revision.tree, tree.value());
+            trees.insert(made.revision.tree, std::make_shared<const Tree>(tree.value()));
         }
-        made.tree = trees.value(made.revision.tree);
+        made.tree = trees.value(made.revision.tree); // one tree, shared by every revision that has it
         chain.push_back(std::move(made));
     }
 
     const TileFetch fetch = [&folder](const QString &hash, int width, int height, int channels) -> Result<mask::MaskPaint> {
         QByteArray png;
         int wide = 0, high = 0;
-        if (!isSha256(hash) || !readAll(folder + QStringLiteral("/tiles/") + hexOf(hash) + QStringLiteral(".png"), kLimits.maxFile, &png))
+        if (!isSha256(hash) || !readAll(folder + QStringLiteral("/tiles/") + hexOf(hash) + QStringLiteral(".png"), kPackageLimits.maxFile, &png))
             return corrupt(QStringLiteral("the tile %1 is missing").arg(hash));
         if (!pngSize(png, &wide, &high) || wide != width || high != height)
             return corrupt(QStringLiteral("the tile %1 is not the size its place gives").arg(hash));
