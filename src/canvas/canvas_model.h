@@ -133,6 +133,8 @@ public:
         ThumbnailText, // text in the thumbnail's place: a shown text or number, a label ("Video · 0:04")
         ThumbnailDim,  // drawn at half strength: a placeholder ("No result yet"), or the last run's
                        // picture while the node runs again, until this run's preview comes
+        LiveFrame,     // a running node's live frame, drawn over the canvas beside the card (never in it, #297), else empty
+        LiveAspect,    // its height / width
         Compare,       // a Compare Images node's result: {a, b, difference, composite: {url, source, width, height}, labelA, labelB}, else empty
         CompareView,   // its viewer's state (compareView), session only
         Media,         // a video or sound result's player: {type, url, label, width, height, duration, file}, else empty
@@ -781,6 +783,8 @@ private:
         QString thumbnailFile;
         QString thumbnailText;
         bool thumbnailDim = false;
+        QString liveFrame;
+        qreal liveAspect = 1;
         QVariantMap compare;
         QVariantMap media;
         QVariantMap values;

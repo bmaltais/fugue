@@ -981,6 +981,41 @@ FocusScope {
             }
         }
 
+        // The live frame of a running node whose picture is hidden: beside its card, over the others.
+        // An item exists only while a node has a frame (and while it fades): the Instantiator's rows
+        // are objects, not items.
+        Component {
+            id: liveFrameComponent
+            LiveFrame { look: canvas.look }
+        }
+        Instantiator {
+            model: canvas.model.nodes
+            delegate: QtObject {
+                id: row
+                required property string liveFrame
+                required property real liveAspect
+                required property real posX
+                required property real posY
+                required property real nodeWidth
+                required property real nodeHeight
+                property var overlay: null
+                function open() {
+                    if (liveFrame === "" || overlay)
+                        return
+                    overlay = liveFrameComponent.createObject(world, {source: row})
+                    overlay.gone.connect(() => {
+                        const gone = overlay
+                        overlay = null
+                        if (gone)
+                            gone.destroy()
+                    })
+                }
+                onLiveFrameChanged: open()
+                Component.onCompleted: open()
+                Component.onDestruction: if (overlay) overlay.destroy()
+            }
+        }
+
         // Zoomed out, frame titles sit above the nodes on their frame's fill, so the frames
         // read as the map; at least 10 px on screen.
         Repeater {

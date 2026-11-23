@@ -734,9 +734,17 @@ Settings, the shortcuts overlay, the quit question, About, every menu except Run
 
 - Control: none new; the Sampler preview and Node pictures settings behave together (`CanvasRuns::show`, `RunThread::withThumbnails`).
 - Old: in Sinks and inputs only (or Smart, where a node's picture is dropped) a Sampler's live frame never showed: its picture slot was hidden and the frame's thumbnail was not even made.
-- New: while a node (or, on a group card, a node inside it) runs and sends live frames, its card shows the frame whatever the mode says. When the node ends, the picture goes again unless the mode keeps it, so the card is tall during the run and short after. A node whose own override is Hide picture shows no frame.
+- New: while a node (or, on a group card, a node inside it) runs and sends live frames, its card shows the frame whatever the mode says. When the node ends, the picture goes again unless the mode keeps it, so the card is tall during the run and short after (superseded by the overlay below). A node whose own override is Hide picture shows no frame.
 - Why: feedback while waiting is the point of the preview (the mode is about the finished graph, a frame is about now); the override is the owner's explicit word on one node and wins, as it does over the mode. The card growing while a run is live is expected, the way a card grows when a result arrives in Smart mode.
 - Rule: Floor (none). Primary (none). Destructive (none). Gaps (unchanged). Posture: none. Not seen in a real window.
+
+### 2026-11-23 the live frame is an overlay where the picture is hidden
+
+- Control: none new; `src/canvas/LiveFrame.qml`, drawn by `FugueCanvas.qml` in the world over the cards (`CanvasRuns::show` sends `liveFrame`, `liveAspect`).
+- Old: where the mode hides a node's picture, the card gained a picture slot at the first live frame and lost it at the end, so the card grew and shrank and its wires rerouted twice a run, and it could cover the nodes below.
+- New: the frame is a separate item directly under the card, as wide as the card, its height from the frame's aspect (0.5 to 1 of the width, as a card's picture), on the card surface with a hairline and the picture's rounded well. It is above every card, ignores the pointer (clicks reach what is under it), follows pan and zoom with the world and fades out in 200 ms when the node stops running or its result comes. A group's card shows its inside's frame the same way. Where the card shows its picture (Smart mode for a Sampler, or a sink) the frame stays in the card and there is no overlay; Hide picture shows nothing. Far out, the hover magnifier's copy of a card has no overlay.
+- Why: a live frame never changes layout (no reflow, no wires moving, nothing covered for good); the frame is about now and the card about the graph. Under the card, not beside it, because a card's neighbours sit to its left and right along the wires, and the space below is the one a wire never crosses.
+- Rule: Floor (none). Primary (none). Destructive (none). Gaps (1u under the card). Posture: none (non-interactive). Not seen in a real window.
 
 ### 2026-11-22 node pictures: mode and per-node override (#263)
 
