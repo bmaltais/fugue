@@ -15,6 +15,7 @@ pkg_check_modules(VIPS REQUIRED IMPORTED_TARGET vips-cpp)
 # Shared packages are zips (engine/share_package.h); pacman itself needs libarchive.
 pkg_check_modules(ARCHIVE REQUIRED IMPORTED_TARGET libarchive)
 find_package(Vulkan REQUIRED) # free GPU memory by device type (spec 8.10); no device is created
+find_package(ZLIB REQUIRED) # the PSD reader inflates channel data into a buffer of exactly the promised size (engine/psd_file.cpp)
 
 # The engine: documents, compiler, scheduler, cache, providers. It runs with
 # no display (the CLI and tests use it headless), so it never links Gui or
@@ -22,7 +23,7 @@ find_package(Vulkan REQUIRED) # free GPU memory by device type (spec 8.10); no d
 file(GLOB fugue_engine_sources CONFIGURE_DEPENDS src/engine/*.cpp src/engine/*.h)
 add_library(fugue_engine STATIC ${fugue_engine_sources})
 target_include_directories(fugue_engine PUBLIC src)
-target_link_libraries(fugue_engine PUBLIC Qt6::Core Qt6::Network PkgConfig::VIPS PRIVATE Vulkan::Vulkan PkgConfig::ARCHIVE)
+target_link_libraries(fugue_engine PUBLIC Qt6::Core Qt6::Network PkgConfig::VIPS PRIVATE Vulkan::Vulkan PkgConfig::ARCHIVE ZLIB::ZLIB)
 target_compile_options(fugue_engine PUBLIC -Wall -Wextra)
 # The model catalogs (spec 8.9, #134) are compiled in: src/catalog/*.json under :/fugue/catalog.
 file(GLOB fugue_catalogs CONFIGURE_DEPENDS RELATIVE ${CMAKE_SOURCE_DIR}/src/catalog src/catalog/*.json)

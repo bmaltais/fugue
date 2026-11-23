@@ -2,8 +2,11 @@
 
 #include <QSet>
 
+#include <zlib.h>
+
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <optional>
 
 #include "engine/new_canvas.h"
@@ -251,15 +254,22 @@ std::optional<std::vector<uint8_t>> decodeChannel(int compression, Reader r, int
         return out;
     }
     if (compression == 2 || compression == 3) {
-        QByteArray framed;
-        framed.reserve(int(r.left()) + 4);
-        for (int shift = 24; shift >= 0; shift -= 8)
-            framed.append(char((count >> shift) & 0xff)); // the size qUncompress allocates: the one the header promises
-        framed += r.bytes(r.left());
-        const QByteArray plain = qUncompress(framed);
-        if (plain.size() != count)
+        // Inflate straight into exactly `count` bytes: a stream that holds more (a zlib bomb) or less is refused, and no
+        // size the stream claims is trusted.
+        const QByteArray packed = r.bytes(r.left());
+        out.resize(size_t(count));
+        z_stream stream{};
+        if (inflateInit(&stream) != Z_OK)
             return std::nullopt;
-        out.assign(plain.begin(), plain.end());
+        stream.next_in = reinterpret_cast<Bytef *>(const_cast<char *>(packed.constData()));
+        stream.avail_in = uInt(std::min<qsizetype>(packed.size(), std::numeric_limits<uInt>::max()));
+        stream.next_out = out.data();
+        stream.avail_out = uInt(count);
+        const int status = inflate(&stream, Z_FINISH);
+        const bool exact = status == Z_STREAM_END && stream.avail_out == 0;
+        inflateEnd(&stream);
+        if (!exact) // Z_BUF_ERROR with no room left is a stream longer than promised; a short one ends with room left
+            return std::nullopt;
         if (compression == 3) // the prediction: each byte is the difference to the one before it in the row
             for (int y = 0; y < height; ++y)
                 for (int x = 1; x < width; ++x)
@@ -275,19 +285,25 @@ struct Channel {
 };
 
 struct Record {
-    int top = 0, left = 0, bottom = 0, right = 0;
+    qint64 top = 0, left = 0, bottom = 0, right = 0; // 32-bit in the file; wide here so no sum of them overflows
     std::vector<Channel> channels;
     QString blendKey = QStringLiteral("norm");
     int opacity = 255;
     bool clipping = false;
     bool visible = true;
     bool hasMask = false, maskDisabled = false;
-    int maskTop = 0, maskLeft = 0, maskBottom = 0, maskRight = 0, maskDefault = 0;
+    qint64 maskTop = 0, maskLeft = 0, maskBottom = 0, maskRight = 0;
+    int maskDefault = 0;
+    bool maskRelative = false;
+    // The "real" user mask a layer with a vector mask too has (channel -3): its own rectangle, default and flags.
+    bool hasRealMask = false, realMaskDisabled = false;
+    qint64 realTop = 0, realLeft = 0, realBottom = 0, realRight = 0;
+    int realDefault = 0;
     QString name;
     int divider = 0; // lsct type: 1 or 2 open/closed group, 3 its end
     bool adjustment = false, text = false, smart = false, effects = false, vectorMask = false;
-    int layerWidth() const { return right - left; }
-    int layerHeight() const { return bottom - top; }
+    qint64 layerWidth() const { return right - left; }
+    qint64 layerHeight() const { return bottom - top; }
 };
 
 const QSet<QString> &adjustmentKeys() {
@@ -492,6 +508,7 @@ Result<PaintDocument> paintFromPsd(const QByteArray &bytes) {
     std::vector<Record> records;
     // ---- the layer records
     int layerTotal = 0;
+    bool mergedHasAlpha = false;
     Reader info(nullptr, 0);
     qint64 infoLength = 0;
     if (layerSectionLength > 0) {
@@ -502,6 +519,7 @@ Result<PaintDocument> paintFromPsd(const QByteArray &bytes) {
     }
     if (infoLength >= 2) {
         const int count = info.i16();
+        mergedHasAlpha = count < 0; // only then is the merged image's first alpha channel its transparency
         layerTotal = std::abs(count);
         if (layerTotal > 4 * paintFileMaxLayers + 16)
             return cannotHold(QStringLiteral("This Photoshop file has %1 layers; a Fugue canvas holds at most %2.").arg(layerTotal).arg(paintFileMaxLayers),
@@ -536,7 +554,25 @@ Result<PaintDocument> paintFromPsd(const QByteArray &bytes) {
                 rec.maskDefault = maskData.u8();
                 const int maskFlags = maskData.u8();
                 rec.maskDisabled = maskFlags & 2;
+                rec.maskRelative = maskFlags & 1; // the rectangle is counted from the layer's top left
+                if (maskFlags & 16) { // parameters: a density byte and/or a feather double, for the user and the vector mask
+                    const int params = maskData.u8();
+                    if (params & 1) maskData.skip(1);
+                    if (params & 2) maskData.skip(8);
+                    if (params & 4) maskData.skip(1);
+                    if (params & 8) maskData.skip(8);
+                }
                 rec.hasMask = maskData.ok();
+                if (rec.hasMask && maskData.left() >= 18) { // the form with a real user mask: flags, default, rectangle
+                    const int realFlags = maskData.u8();
+                    rec.realDefault = maskData.u8();
+                    rec.realTop = maskData.i32(), rec.realLeft = maskData.i32(), rec.realBottom = maskData.i32(), rec.realRight = maskData.i32();
+                    rec.realMaskDisabled = realFlags & 2;
+                    rec.hasRealMask = maskData.ok() && (realFlags & 1) == 0;
+                }
+                if (rec.maskRelative) {
+                    rec.maskTop += rec.top, rec.maskBottom += rec.top, rec.maskLeft += rec.left, rec.maskRight += rec.left;
+                }
             }
             extra.skip(extra.u32()); // blending ranges
             const int nameLength = extra.u8();
@@ -588,31 +624,57 @@ Result<PaintDocument> paintFromPsd(const QByteArray &bytes) {
         }
     }
 
-    // ---- the channel data of each record, in order
+    // ---- what is kept, and the sizes of every record checked before any pixel is decoded
+    int real = 0;
+    for (const Record &rec : records)
+        if (rec.divider == 0 && !rec.adjustment)
+            ++real;
+    if (real > paintFileMaxLayers)
+        return cannotHold(QStringLiteral("This Photoshop file has %1 layers; a Fugue canvas holds at most %2.").arg(real).arg(paintFileMaxLayers),
+                          QStringLiteral("Merge or delete layers in Photoshop, then save again."));
+    for (const Record &rec : records) {
+        if (rec.divider != 0 || rec.adjustment)
+            continue;
+        const auto fine = [](qint64 w, qint64 h) { return w >= 0 && h >= 0 && w <= psdMaxSide && h <= psdMaxSide; };
+        if (!fine(rec.layerWidth(), rec.layerHeight()) || (rec.hasMask && !fine(rec.maskRight - rec.maskLeft, rec.maskBottom - rec.maskTop)) ||
+            (rec.hasRealMask && !fine(rec.realRight - rec.realLeft, rec.realBottom - rec.realTop)))
+            return unreadable(QStringLiteral("layer \"%1\" has a size the format does not allow").arg(rec.name));
+    }
+
+    // ---- the channel data of each record, in order; only what is kept is decoded, and the total is capped
     std::vector<std::vector<std::pair<int, std::vector<uint8_t>>>> planes(records.size()); // per record: channel id and its bytes
+    qint64 decoded = 0;
     for (size_t i = 0; i < records.size(); ++i) {
         Record &rec = records[i];
+        QSet<int> seen;
         for (const Channel &channel : rec.channels) {
             Reader data = info.take(channel.length);
             if (!info.ok())
                 return unreadable(QStringLiteral("the pixels of layer %1 are cut short").arg(i + 1));
-            if (channel.length < 2)
-                continue;
+            if (seen.contains(channel.id))
+                return unreadable(QStringLiteral("layer %1 has the same channel twice").arg(i + 1));
+            seen.insert(channel.id);
+            if (channel.length < 2 || rec.divider != 0 || rec.adjustment)
+                continue; // nothing kept to read
             const int compression = data.u16();
-            int w = rec.layerWidth(), h = rec.layerHeight();
-            if (channel.id == -2 || channel.id == -3) {
-                if (channel.id == -3)
+            qint64 w = rec.layerWidth(), h = rec.layerHeight();
+            if (channel.id == -2) {
+                if (!rec.hasMask)
                     continue;
                 w = rec.maskRight - rec.maskLeft;
                 h = rec.maskBottom - rec.maskTop;
+            } else if (channel.id == -3) {
+                if (!rec.hasRealMask)
+                    continue;
+                w = rec.realRight - rec.realLeft;
+                h = rec.realBottom - rec.realTop;
+            } else if (channel.id < -3 || channel.id > 2) {
+                continue; // a spot or extra alpha channel of the layer: not read
             }
-            if (rec.divider != 0 || rec.adjustment)
-                continue; // no picture to read
-            if (w < 0 || h < 0 || w > psdMaxSide || h > psdMaxSide)
-                return unreadable(QStringLiteral("layer \"%1\" has a size the format does not allow").arg(rec.name));
-            if (channel.id < -3 || channel.id > 2 || channel.id == -3)
-                continue; // a spot or alpha channel of the layer: not read
-            std::optional<std::vector<uint8_t>> plane = decodeChannel(compression, data, w, h);
+            decoded += w * h;
+            if (decoded > paintFileMaxLayerBytes)
+                return cannotHold(QStringLiteral("The layers of this Photoshop file hold more pixels than a canvas can keep."), QStringLiteral("Make the picture smaller or merge layers, then save again."));
+            std::optional<std::vector<uint8_t>> plane = decodeChannel(compression, data, int(w), int(h));
             if (!plane)
                 return unreadable(QStringLiteral("the pixels of layer \"%1\" are damaged or use a compression Fugue does not read").arg(rec.name));
             planes[i].emplace_back(channel.id, std::move(*plane));
@@ -649,13 +711,6 @@ Result<PaintDocument> paintFromPsd(const QByteArray &bytes) {
     }
 
     // ---- the layers
-    int real = 0;
-    for (const Record &rec : records)
-        if (rec.divider == 0 && !rec.adjustment)
-            ++real;
-    if (real > paintFileMaxLayers)
-        return cannotHold(QStringLiteral("This Photoshop file has %1 layers; a Fugue canvas holds at most %2.").arg(real).arg(paintFileMaxLayers),
-                          QStringLiteral("Merge or delete layers in Photoshop, then save again."));
     if (qint64(real) * cw * ch * 4 > paintFileMaxLayerBytes)
         return cannotHold(QStringLiteral("The layers of this Photoshop file hold more pixels than a canvas can keep."), QStringLiteral("Make the picture smaller or merge layers, then save again."));
 
@@ -674,19 +729,18 @@ Result<PaintDocument> paintFromPsd(const QByteArray &bytes) {
                     return &data;
             return nullptr;
         };
-        const int lw = std::max(0, rec.layerWidth()), lh = std::max(0, rec.layerHeight());
+        const qint64 lw = std::max<qint64>(0, rec.layerWidth()), lh = std::max<qint64>(0, rec.layerHeight());
         const std::vector<uint8_t> *colors[3] = {planeOfId(0), planeOfId(1), planeOfId(2)};
         const std::vector<uint8_t> *alpha = planeOfId(-1);
         std::vector<uint8_t> rgba(size_t(cw) * ch * 4, 0);
-        for (int y = 0; y < lh; ++y) {
-            const int cy = rec.top + y;
-            if (cy < 0 || cy >= ch)
-                continue;
-            for (int x = 0; x < lw; ++x) {
-                const int cx = rec.left + x;
-                if (cx < 0 || cx >= cw)
-                    continue;
-                const size_t from = size_t(y) * lw + x, to = (size_t(cy) * cw + cx) * 4;
+        // Only the part of the layer on the canvas is visited (the rectangle is the file's, not to be trusted for a loop bound).
+        const qint64 y0 = std::max<qint64>(0, -rec.top), y1 = std::min<qint64>(lh, ch - rec.top);
+        const qint64 x0 = std::max<qint64>(0, -rec.left), x1 = std::min<qint64>(lw, cw - rec.left);
+        for (qint64 y = y0; y < y1; ++y) {
+            const qint64 cy = rec.top + y;
+            for (qint64 x = x0; x < x1; ++x) {
+                const qint64 cx = rec.left + x;
+                const size_t from = size_t(y * lw + x), to = size_t((cy * cw + cx) * 4);
                 for (int c = 0; c < 3; ++c)
                     rgba[to + c] = colors[c] && from < colors[c]->size() ? (*colors[c])[from] : 0;
                 rgba[to + 3] = alpha ? (from < alpha->size() ? (*alpha)[from] : 0) : 255;
@@ -721,25 +775,27 @@ Result<PaintDocument> paintFromPsd(const QByteArray &bytes) {
         if (rec.clipping)
             dropped << warning(QStringLiteral("The layer \"%1\" was clipped to the layer below: the clipping was dropped.").arg(rec.name));
 
-        const std::vector<uint8_t> *maskPlane = planeOfId(-2);
+        // A layer with a vector mask too carries its pixel mask as channel -3 (the "real" user mask): prefer that one.
+        const std::vector<uint8_t> *maskPlane = rec.hasRealMask && planeOfId(-3) ? planeOfId(-3) : planeOfId(-2);
+        const bool usesReal = maskPlane && maskPlane == planeOfId(-3);
+        const qint64 mTop = usesReal ? rec.realTop : rec.maskTop, mLeft = usesReal ? rec.realLeft : rec.maskLeft;
+        const qint64 mw = std::max<qint64>(0, usesReal ? rec.realRight - rec.realLeft : rec.maskRight - rec.maskLeft);
+        const qint64 mh = std::max<qint64>(0, usesReal ? rec.realBottom - rec.realTop : rec.maskBottom - rec.maskTop);
+        const int mDefault = usesReal ? rec.realDefault : rec.maskDefault;
         std::optional<MaskPaint> layerMask;
-        const int mw = std::max(0, rec.maskRight - rec.maskLeft), mh = std::max(0, rec.maskBottom - rec.maskTop);
         if (rec.hasMask && (maskPlane || mw == 0 || mh == 0)) {
-            std::vector<uint8_t> mask(size_t(cw) * ch, uint8_t(rec.maskDefault));
-            if (maskPlane)
-                for (int y = 0; y < mh; ++y) {
-                    const int cy = rec.maskTop + y;
-                    if (cy < 0 || cy >= ch)
-                        continue;
-                    for (int x = 0; x < mw; ++x) {
-                        const int cx = rec.maskLeft + x;
-                        if (cx >= 0 && cx < cw && size_t(y) * mw + x < maskPlane->size())
-                            mask[size_t(cy) * cw + cx] = (*maskPlane)[size_t(y) * mw + x];
-                    }
-                }
+            std::vector<uint8_t> mask(size_t(cw) * ch, uint8_t(mDefault));
+            if (maskPlane) {
+                const qint64 my0 = std::max<qint64>(0, -mTop), my1 = std::min<qint64>(mh, ch - mTop);
+                const qint64 mx0 = std::max<qint64>(0, -mLeft), mx1 = std::min<qint64>(mw, cw - mLeft);
+                for (qint64 y = my0; y < my1; ++y)
+                    for (qint64 x = mx0; x < mx1; ++x)
+                        if (size_t(y * mw + x) < maskPlane->size())
+                            mask[size_t((mTop + y) * cw + mLeft + x)] = (*maskPlane)[size_t(y * mw + x)];
+            }
             layerMask = MaskPaint(cw, ch, mask, 1);
             li.hasMask = true;
-            li.maskEnabled = !rec.maskDisabled;
+            li.maskEnabled = !(usesReal ? rec.realMaskDisabled : rec.maskDisabled);
         }
         document.loadLayer(li, MaskPaint(cw, ch, rgba, 4), layerMask ? &*layerMask : nullptr);
     }
@@ -751,7 +807,8 @@ Result<PaintDocument> paintFromPsd(const QByteArray &bytes) {
         if (!r.ok() || (compression != 0 && compression != 1))
             return unreadable(QStringLiteral("it holds no layers and its merged picture is missing or uses a compression Fugue does not read"));
         std::vector<std::vector<uint8_t>> merged;
-        const int usable = std::min(channelCount, 4);
+        const bool withAlpha = mergedHasAlpha && channelCount >= 4; // a flat file's 4th channel may be a saved selection, not transparency
+        const int usable = withAlpha ? 4 : 3;
         if (compression == 0) {
             for (int c = 0; c < usable; ++c) {
                 std::optional<std::vector<uint8_t>> plane = decodeChannel(0, r.take(planeBytes), cw, ch);
@@ -785,8 +842,8 @@ Result<PaintDocument> paintFromPsd(const QByteArray &bytes) {
         for (size_t p = 0; p < size_t(cw) * ch; ++p) {
             for (int c = 0; c < 3; ++c)
                 rgba[p * 4 + c] = merged[size_t(c)][p];
-            rgba[p * 4 + 3] = merged.size() > 3 ? merged[3][p] : 255;
-            if (merged.size() > 3 && rgba[p * 4 + 3] > 0 && rgba[p * 4 + 3] < 255) // the white Photoshop blended in: take it out
+            rgba[p * 4 + 3] = withAlpha ? merged[3][p] : 255;
+            if (withAlpha && rgba[p * 4 + 3] > 0 && rgba[p * 4 + 3] < 255) // the white Photoshop blended in: take it out
                 for (int c = 0; c < 3; ++c) {
                     const int a = rgba[p * 4 + 3];
                     rgba[p * 4 + c] = uint8_t(std::clamp((rgba[p * 4 + c] * 255 - 255 * (255 - a) + a / 2) / a, 0, 255));

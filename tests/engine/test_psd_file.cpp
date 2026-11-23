@@ -69,17 +69,20 @@ struct RawLayer {
     int clipping = 0;
     QByteArray tags; // whole blocks
     bool pixels = true;
+    qint32 top = 0, left = 0, bottom = 2, right = 2;
+    QByteArray zip;      // when set: every channel is this zlib stream (compression 2)
+    bool twice = false;  // the red channel listed twice
 };
 
-QByteArray rawPsd(const std::vector<RawLayer> &layers, int depth = 8, int version = 1) {
+QByteArray rawPsd(const std::vector<RawLayer> &layers, int depth = 8, int version = 1, bool negative = false) {
     QByteArray records, data;
     for (const RawLayer &l : layers) {
-        put32(records, 0), put32(records, 0), put32(records, 2), put32(records, 2);
-        const int n = l.pixels ? 4 : 0;
+        put32(records, quint32(l.top)), put32(records, quint32(l.left)), put32(records, quint32(l.bottom)), put32(records, quint32(l.right));
+        const int n = l.pixels ? (l.twice ? 5 : 4) : 0;
         put16(records, n);
         for (int c = 0; c < n; ++c) {
-            put16(records, c == 3 ? 0xffff : c);
-            put32(records, 2 + 4);
+            put16(records, c == 3 ? 0xffff : c == 4 ? 0 : c);
+            put32(records, quint32(2 + (l.zip.isEmpty() ? 4 : l.zip.size())));
         }
         records.append("8BIM").append(l.key).append(char(l.opacity)).append(char(l.clipping)).append(char(l.flags)).append('\0');
         QByteArray extra;
@@ -92,13 +95,18 @@ QByteArray rawPsd(const std::vector<RawLayer> &layers, int depth = 8, int versio
         put32(records, quint32(extra.size()));
         records += extra;
         for (int c = 0; c < n; ++c) {
+            if (!l.zip.isEmpty()) {
+                put16(data, 2);
+                data += l.zip;
+                continue;
+            }
             put16(data, 0);
             for (int p = 0; p < 4; ++p)
                 data.append(char(c == 0 ? 200 : c == 1 ? 100 : c == 2 ? 50 : 255));
         }
     }
     QByteArray info;
-    put16(info, quint32(layers.size()));
+    put16(info, quint32(negative ? -int(layers.size()) : int(layers.size())) & 0xffff);
     info += records + data;
     if (info.size() % 2)
         info.append('\0');
@@ -208,17 +216,16 @@ private slots:
         const Result<PaintDocument> back = paintFromPsd(flatOnly);
         QVERIFY2(back, qPrintable(back.error().message));
         QCOMPARE(back->layerCount(), 1);
-        // The merged image is blended onto white (as Photoshop's is) and un-blended on reading: alpha is exact and a
-        // color is within the rounding of that for all but the faintest pixels.
+        // A flat file's 4th channel is not known to be transparency (it may be a saved selection): alpha is read only when the
+        // layer count was negative. So the picture is opaque and its colors are the merged ones, as stored (matted on white).
         const std::vector<uint8_t> got = back->pixels(back->layer(0).id)->pixels();
         const MaskPaint flat = d.flatten();
         const std::vector<uint8_t> &want = flat.pixels();
         QCOMPARE(got.size(), want.size());
         for (size_t p = 0; p + 3 < got.size(); p += 4) {
-            QCOMPARE(got[p + 3], want[p + 3]);
-            if (want[p + 3] >= 128)
-                for (int c = 0; c < 3; ++c)
-                    QVERIFY(std::abs(int(got[p + c]) - int(want[p + c])) <= 2);
+            QCOMPARE(got[p + 3], uint8_t(255));
+            for (int c = 0; c < 3; ++c)
+                QCOMPARE(int(got[p + c]), (want[p + c] * want[p + 3] + 255 * (255 - want[p + 3]) + 127) / 255);
         }
     }
 
@@ -386,6 +393,52 @@ private slots:
                 QVERIFY(d->layerCount() <= paintFileMaxLayers);
         }
         QVERIFY(refused > 0);
+    }
+
+    void aZlibBombIsRefused() {
+        // 200 KB of zeros inflate from a few hundred bytes; the layer promises 2 x 2 = 4 bytes
+        RawLayer layer;
+        layer.name = "Bomb";
+        const QByteArray huge(200000, '\0');
+        layer.zip = qCompress(huge, 9).mid(4);
+        const Result<PaintDocument> d = paintFromPsd(rawPsd({layer}));
+        QVERIFY(!d);
+        QCOMPARE(d.error().code, QString("media_unreadable"));
+        // a stream of exactly the promised size is fine
+        layer.zip = qCompress(QByteArray(4, '\x40'), 9).mid(4);
+        QVERIFY(paintFromPsd(rawPsd({layer})));
+    }
+
+    void aRectanglePastAnyBoundIsRefusedNotLooped() {
+        RawLayer layer;
+        layer.name = "Wide", layer.pixels = false, layer.right = 0x7fffffff;
+        QVERIFY(!paintFromPsd(rawPsd({layer})));
+        RawLayer neg;
+        neg.name = "Negative", neg.pixels = false, neg.top = qint32(0x80000000), neg.bottom = 0x7fffffff;
+        QVERIFY(!paintFromPsd(rawPsd({neg})));
+        RawLayer far; // a sane size far off the canvas: kept, empty on the canvas, said
+        far.name = "Far", far.left = 1000000, far.right = 1000002;
+        const Result<PaintDocument> d = paintFromPsd(rawPsd({far}));
+        QVERIFY(d);
+        QCOMPARE(d->layerCount(), 1);
+        QVERIFY(d->pixels(d->layer(0).id)->isEmpty());
+    }
+
+    void aChannelListedTwiceIsRefused() {
+        RawLayer layer;
+        layer.name = "Twice", layer.twice = true;
+        QVERIFY(!paintFromPsd(rawPsd({layer})));
+    }
+
+    void aFlatFilesFourthChannelIsTransparencyOnlyWhenTheCountWasNegative() {
+        RawLayer adjust; // nothing kept, so the merged image is the picture
+        adjust.name = "Curves", adjust.pixels = false, adjust.tags = block("curv", QByteArray(4, '\0'));
+        const Result<PaintDocument> opaque = paintFromPsd(rawPsd({adjust}));
+        QVERIFY(opaque);
+        QCOMPARE(opaque->pixels(opaque->layer(0).id)->rgbaAt(0, 0).a, uint8_t(255));
+        const Result<PaintDocument> clear = paintFromPsd(rawPsd({adjust}, 8, 1, true));
+        QVERIFY(clear);
+        QCOMPARE(clear->pixels(clear->layer(0).id)->rgbaAt(0, 0).a, uint8_t(0x20)); // the 4th plane of the builder
     }
 
     void aHugeCountOfLayersIsRefused() {

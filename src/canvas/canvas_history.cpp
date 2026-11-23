@@ -117,9 +117,12 @@ bool CanvasHistory::exportPicture(const QString &target) {
     }
     // The same flatten the viewer's picture is made with.
     Result<QByteArray> psdBytes = QByteArray();
+    QStringList left; // what a Photoshop file could not keep: said in the notice, never silent
     if (suffix == QLatin1String("psd")) {
         const Result<mask::PsdExported> psd = mask::paintToPsd(document.value());
         psdBytes = psd ? Result<QByteArray>(psd->bytes) : Result<QByteArray>(psd.errors());
+        if (psd)
+            left = psd->notes;
     }
     const Result<QByteArray> bytes = suffix == QLatin1String("psd") ? psdBytes
                                    : suffix == QLatin1String("ora") ? mask::paintToOra(document.value())
@@ -134,6 +137,8 @@ bool CanvasHistory::exportPicture(const QString &target) {
         return false;
     }
     m_notice = tr("Saved %1").arg(QFileInfo(path).fileName());
+    if (!left.isEmpty())
+        m_notice += QLatin1Char(' ') + left.join(QLatin1Char(' '));
     emit noticeChanged();
     return true;
 }
