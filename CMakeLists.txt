@@ -9,6 +9,13 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
+# lld links a 12 MB test executable several times faster than GNU ld; any linker without it keeps the default.
+include(CheckLinkerFlag)
+check_linker_flag(CXX -fuse-ld=lld fugue_linker_has_lld)
+if(fugue_linker_has_lld)
+  add_link_options(-fuse-ld=lld)
+endif()
+
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickControls2 DBus Test ShaderTools)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(VIPS REQUIRED IMPORTED_TARGET vips-cpp)
