@@ -1,5 +1,6 @@
 #include "canvas_package.h"
 
+#include <functional>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -59,10 +60,15 @@ std::vector<TileUse> tilesOf(const Tree &tree) {
             uses.push_back({hash, rect.width, rect.height, channels});
         }
     };
-    for (const LayerRecord &layer : tree.layers) {
+    // A group's tiles are its children's (#252): walk them too.
+    const std::function<void(const LayerRecord &)> walk = [&](const LayerRecord &layer) {
         add(layer.tiles, layer.channels());
         add(layer.maskTiles, 1);
-    }
+        for (const LayerRecord &child : layer.children)
+            walk(child);
+    };
+    for (const LayerRecord &layer : tree.layers)
+        walk(layer);
     return uses;
 }
 

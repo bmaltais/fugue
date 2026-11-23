@@ -216,7 +216,7 @@ Result<LayerRecord> layerFromJson(const QJsonObject &item, int width, int height
 
 // Counts the layers (groups' children included) and tiles (masks included) of a JSON layer list; false past a cap or too deep.
 bool withinCaps(const QJsonArray &layers, int depth, int *layerTotal, int *tileTotal) {
-    if (depth > maxGroupDepth)
+    if (depth > maxGroupDepth && !layers.isEmpty())
         return false;
     for (const QJsonValue &value : layers) {
         const QJsonObject item = value.toObject();
@@ -703,10 +703,19 @@ Result<CanvasInfo> CanvasStore::importCanvas(const QString &wantedId, const QStr
                 }
                 return Errors{};
             };
-            for (const LayerRecord &layer : tree.layers)
+            // Through a group's children too (#252).
+            const std::function<Errors(const LayerRecord &)> storeLayer = [&](const LayerRecord &layer) -> Errors {
                 for (const Errors &problems : {storeTiles(layer.tiles, layer.channels()), storeTiles(layer.maskTiles, 1)})
                     if (hasErrors(problems))
-                        return fail(problems);
+                        return problems;
+                for (const LayerRecord &child : layer.children)
+                    if (const Errors problems = storeLayer(child); hasErrors(problems))
+                        return problems;
+                return Errors{};
+            };
+            for (const LayerRecord &layer : tree.layers)
+                if (const Errors problems = storeLayer(layer); hasErrors(problems))
+                    return fail(problems);
             const Result<QString> put = storeTreeRecord(tree);
             if (!put)
                 return fail(put.errors());

@@ -430,6 +430,56 @@ private slots:
         QCOMPARE(QDir(to.root() + "/trees").entryList(QDir::Files).size(), 1); // one tree file, however many revisions
     }
 
+    // #252: a group's tiles are its children's; they travel, in both modes, and the import caps count them.
+    void groupsRoundTripInHeadAndHistoryModes() {
+        CanvasStore from = storeAt("a");
+        const QString id = threeRevisions(from);
+        LayerEdit group;
+        group.op = LayerOp::Group;
+        group.layers = {0, 1};
+        group.text = "Pair";
+        const Commit grouped = from.editLayers(id, from.info(id)->head, group, "canvas-view:group").value();
+        QVERIFY(grouped.move.moved);
+        const Tree original = from.tree(from.revision(id, grouped.revision.id)->tree).value();
+        QVERIFY(original.layers[0].group);
+        for (const SharedPart part : {SharedPart::Head, SharedPart::History}) {
+            const QString name = part == SharedPart::Head ? "ghead" : "ghist";
+            QVERIFY(!hasErrors(writeCanvasPackage(from, id, part, zipPath(name))));
+            CanvasStore to = storeAt(QString("to-") + name);
+            const Result<CanvasImported> got = importCanvasPackage(zipPath(name), to);
+            QVERIFY2(got.ok(), qPrintable(firstMessage(got.errors())));
+            const Tree copy = to.tree(to.revision(id, got->info.head)->tree).value();
+            QCOMPARE(copy.layers, original.layers); // the group, its children, their tiles and masks
+            QCOMPARE(got->revisions, part == SharedPart::Head ? 1 : 4);
+            // Every tile of a child is in the store: the group loads as the same picture.
+            QCOMPARE(to.load(id, got->info.head)->flatten().pixels(), from.load(id, grouped.revision.id)->flatten().pixels());
+        }
+    }
+
+    void theTreeCapsCountAGroupsChildren() {
+        QJsonArray inner;
+        for (int i = 0; i < maxTreeLayers; ++i)
+            inner.append(QJsonObject{{"name", "l"}, {"kind", "paint"}, {"visible", true}, {"opacity", 1}, {"tiles", QJsonObject{}}});
+        const QJsonObject group{{"name", "g"}, {"kind", "group"}, {"visible", true}, {"opacity", 1}, {"tiles", QJsonObject{}}, {"children", inner}};
+        // The 512 children plus the group itself are 513 layers.
+        const QJsonObject json{{"format", 1}, {"width", 64}, {"height", 64}, {"layers", QJsonArray{group}}};
+        QCOMPARE(treeFromJson(json).errors().first().code, QString("canvas_corrupt"));
+        // Tiles inside a group count too: 100 children of 1024 tiles each (a 16384 x 4096 canvas) are past the cap; 90 are not.
+        QJsonObject tiles;
+        for (int y = 0; y < 16; ++y)
+            for (int x = 0; x < 64; ++x)
+                tiles.insert(QString("%1,%2").arg(x).arg(y), "sha256:" + QString(64, 'a'));
+        const auto grouped = [&](int children) {
+            QJsonArray many;
+            for (int i = 0; i < children; ++i)
+                many.append(QJsonObject{{"name", "l"}, {"kind", "paint"}, {"visible", true}, {"opacity", 1}, {"tiles", tiles}});
+            return QJsonObject{{"format", 1}, {"width", 16384}, {"height", 4096},
+                               {"layers", QJsonArray{QJsonObject{{"name", "g"}, {"kind", "group"}, {"visible", true}, {"opacity", 1}, {"tiles", QJsonObject{}}, {"children", many}}}}};
+        };
+        QCOMPARE(treeFromJson(grouped(100)).errors().first().code, QString("canvas_corrupt"));
+        QVERIFY(treeFromJson(grouped(90)).ok());
+    }
+
     void aTreeWithTooManyLayersOrTilesIsRefused() {
         QJsonArray layers;
         for (int i = 0; i < maxTreeLayers + 1; ++i)
