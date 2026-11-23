@@ -125,6 +125,11 @@ QList<Row> defaultRows() {
         {"canvas-view.group", QT_TRANSLATE_NOOP("Command", "Put the selected layers in a new group"), {"Ctrl+G"}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Group layers")},
         {"canvas-view.ungroup", QT_TRANSLATE_NOOP("Command", "Take the layers out of the selected groups"), {"Ctrl+Shift+G"}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Ungroup layers")},
         {"canvas-view.layer-properties", QT_TRANSLATE_NOOP("Command", "Name, opacity, blend mode and layer mask of the selected layer in one dialog"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Layer properties…")},
+        // #236: Edit > Paste as new layer (Ctrl+V while the view is the one in use: the Graph's own Ctrl+V pastes nodes), Paste as new
+        // canvas, and Canvas > Place picture….
+        {"canvas-view.paste-layer", QT_TRANSLATE_NOOP("Command", "Paste the clipboard's picture as a new layer, centered in the view (one undo step)"), {"Ctrl+V"}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Paste as new layer")},
+        {"canvas-view.paste-canvas", QT_TRANSLATE_NOOP("Command", "Make a new canvas of the clipboard's picture"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Paste as new canvas")},
+        {"canvas-view.place-picture", QT_TRANSLATE_NOOP("Command", "Place a picture file on the canvas as a new layer (one undo step)"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Place picture…")},
         {"canvas-view.fit", QT_TRANSLATE_NOOP("Command", "Fit the picture in the view"), {}, {"Home or 0"}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Fit")},
         {"canvas-view.actual-size", QT_TRANSLATE_NOOP("Command", "Show the picture at 100%"), {}, {"1"}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "100%")},
         {"canvas-view.zoom-in", QT_TRANSLATE_NOOP("Command", "Zoom in the picture"), {}, {"+"}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Zoom in")},

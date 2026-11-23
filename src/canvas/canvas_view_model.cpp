@@ -3,12 +3,15 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QUrl>
 #include <QLocale>
 #include <QPointer>
 #include <QUndoStack>
 
 #include <algorithm>
 
+#include "canvas/picture_import.h"
 #include "canvas/region_pick.h"
 #include "canvas/snap.h"
 
@@ -200,6 +203,8 @@ QString CanvasViewModel::stepName(const QString &revisionId) {
             name = added.size() == 1 ? tr("Grouped: %1").arg(added.first()) : tr("Grouped");
         else if (producer == QLatin1String("canvas-view:ungroup") || producer == QLatin1String("canvas-cli:ungroup"))
             name = removed.size() == 1 ? tr("Ungrouped: %1").arg(removed.first()) : tr("Ungrouped");
+        else if (producer == QLatin1String("canvas-view:paste"))
+            name = added.size() == 1 ? tr("Layer pasted: %1").arg(added.first()) : tr("Layer pasted");
         else if (producer == QLatin1String("canvas-view:properties")) {
             // The layer the dialog changed: the first one that differs (its new name when it was renamed).
             QString changed;
@@ -649,6 +654,46 @@ bool CanvasViewModel::applyEdit(const canvas::LayerEdit &edit, const QList<int> 
     if (!layersEditable())
         return false;
     return land(store().editLayers(canvasId(), revisionB(), edit, QStringLiteral("canvas-view:") + canvas::layerOpName(edit.op)), select);
+}
+
+bool CanvasViewModel::placePicture(const mask::MaskPaint &picture, double cx, double cy, const QString &name) {
+    if (!layersEditable())
+        return false;
+    commitMask(); // the strokes painted so far are a step of their own, before this one
+    if (!layersEditable())
+        return false;
+    const QSize size = pictureSize();
+    // Above the current layer (the last one picked), else on top.
+    const int above = m_selected.isEmpty() ? -1 : m_selected.last();
+    const int next = above < 0 ? int(m_layers.size()) : above + 1;
+    return land(store().pasteLayer(canvasId(), revisionB(), picture, cx < 0 ? size.width() / 2.0 : cx, cy < 0 ? size.height() / 2.0 : cy, above, name,
+                                   QStringLiteral("canvas-view:paste")),
+                {next});
+}
+
+bool CanvasViewModel::pasteLayer(double cx, double cy) {
+    if (!layersEditable())
+        return false;
+    const ImportedPicture picture = pictureFromClipboard();
+    if (!picture.ok()) {
+        fail({makeError(QStringLiteral("input_invalid"), picture.problem)});
+        return false;
+    }
+    return placePicture(picture.pixels, cx, cy, {});
+}
+
+bool CanvasViewModel::isPictureFile(const QString &pathOrUrl) const { return fugue::isPictureFile(pathOrUrl); }
+
+bool CanvasViewModel::placeFile(const QString &pathOrUrl, double cx, double cy) {
+    if (!layersEditable())
+        return false;
+    const ImportedPicture picture = pictureFromFile(pathOrUrl);
+    if (!picture.ok()) {
+        fail({makeError(QStringLiteral("input_invalid"), picture.problem)});
+        return false;
+    }
+    const QUrl url(pathOrUrl);
+    return placePicture(picture.pixels, cx, cy, QFileInfo(url.isLocalFile() ? url.toLocalFile() : pathOrUrl).completeBaseName());
 }
 
 bool CanvasViewModel::land(const Result<canvas::Commit> &done, const QList<int> &select) {

@@ -99,6 +99,8 @@ TreeDiff diffTrees(const Tree &a, const Tree &b) {
             entry.properties << QStringLiteral("blend");
         if (earlier.hasMask != later.hasMask || earlier.maskEnabled != later.maskEnabled || earlier.maskTiles != later.maskTiles)
             entry.properties << QStringLiteral("mask");
+        if (earlier.source != later.source && earlier.tiles == later.tiles)
+            entry.properties << QStringLiteral("placement"); // the original or where it is placed changed (#236)
         tileDifference(earlier.tiles, later.tiles, std::max(a.width, b.width), std::max(a.height, b.height), &entry);
         if (entry.tilesChanged > 0 || !entry.properties.isEmpty())
             diff.layers.push_back(entry);

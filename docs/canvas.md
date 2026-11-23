@@ -337,6 +337,27 @@ back; Duplicate canvas copies them), and a damaged file reads as no guides. Guid
 picture, not while comparing. A press within 6 pixels of a guide with the Rectangle region or Hand tool takes the guide, not
 the frame.
 
+**Paste and place a picture (#236).** Edit > **Paste as new layer** (Ctrl+V while the Canvas view is the one in use: the pointer is
+over it or it has the focus, as for every key of the view; the Graph's Ctrl+V still pastes nodes) puts the clipboard's picture on the
+canvas as a new layer above the current one (on top when none is picked), centered in what the view shows of the canvas, named
+"Pasted 1", "Pasted 2"... A picture file dropped on the picture, or Canvas > **Place picture…**, does the same and names the
+layer after the file. Each is ONE revision (producer `canvas-view:paste`, history "Layer pasted: Pasted 1"); Undo takes it back.
+Edit > **Paste as new canvas** makes a canvas of the clipboard's picture (the same as File > Paste as new canvas). The picture is
+**kept whole**: one bigger than the canvas is shown cut at the canvas's edge, and its off-canvas part stays in the layer's original
+(below), so it can be scaled down later. A picture comes from outside and is checked first: at most 16384 px a side and 64
+megapixels (the canvas's own limit), a file at most 256 MB and only a PNG, JPEG, WebP, GIF, BMP or TIFF by its name, its size read
+from the header before anything is decoded; a refusal says why under the picture and changes nothing.
+
+**A layer's original (#236).** A pasted picture, and a layer after a transform (below), keeps the pixels it started from: the layer
+record has an optional `"source"` ({width, height, tiles, an optional mask's tiles, the placement (cx, cy, width, height, angle,
+flipX, flipY, filter) and `rendered`}), written only for a layer that has one, so every tree from before keeps its hash. The
+source's tiles are blobs like any other (shared by content, carried by a package and a duplicate). The layer's own tiles stay the
+picture a revision SHOWS (the original placed, cut at the canvas), so the composite, nodes, a flattened export, **.ora and .psd read the
+shown layer as they always did and never see the original**: a file exported and opened elsewhere has the transformed pixels, canvas
+sized, with the layer's mask; the original stays in Fugue (and in a `.fuguepack`). `rendered` is a hash of the shown tiles and mask
+the placement produced: a layer painted on, or given another mask, since then no longer matches it, and its next transform starts
+from the layer as it is then (Photoshop's rasterise-on-paint).
+
 A greyed row with the tooltip "Not built yet (#N)" is a feature that is planned and tracked in issue N; it is not a command and has
 no key ([the research](canvas-menus-research.md) says what the other editors have and what was decided). The top bar keeps the
 canvas picker, Fit and 100%; each tool's own settings stay in the options bar.

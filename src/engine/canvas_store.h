@@ -50,9 +50,11 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "engine/canvas_guides.h"
+#include "engine/canvas_layer_source.h"
 #include "engine/canvas_tiles.h"
 #include "engine/edge_fill.h"
 #include "engine/clock.h"
@@ -82,12 +84,14 @@ struct LayerRecord {
     // its own opacity, blend and layer mask apply to the composite). Stored as kind "group" with "children".
     bool group = false;
     std::vector<LayerRecord> children;
+    // The pixels this layer was placed or transformed from (#236, engine/canvas_layer_source.h); `tiles` stay what the canvas shows.
+    std::optional<LayerSource> source;
     int channels() const { return kind == mask::LayerKind::Mask ? 1 : 4; }
     int tileCount() const; // its own tiles and its children's
     bool operator==(const LayerRecord &o) const {
         return name == o.name && kind == o.kind && visible == o.visible && opacity == o.opacity && tiles == o.tiles && compositeOp == o.compositeOp &&
                hasMask == o.hasMask && maskEnabled == o.maskEnabled && maskTiles == o.maskTiles && producer == o.producer && created == o.created &&
-               group == o.group && children == o.children;
+               group == o.group && children == o.children && source == o.source;
     }
 };
 
@@ -237,6 +241,15 @@ public:
     // ONE new revision, producer `producer` (`canvas-view:mask-add`, `canvas-view:mask-paint`); a mask equal to the one
     // the layer has writes nothing (as editLayers). input_invalid for a mask of another size or channels.
     Result<Commit> setLayerMask(const QString &canvasId, const QString &base, int position, const mask::MaskPaint &mask, const QString &producer);
+
+    // A picture placed on the canvas as a new layer (#236; Edit > Paste as new layer, a dropped file): the picture, which may be
+    // bigger than the canvas, is kept whole as the layer's original (engine/canvas_layer_source.h) and shown centered on (`cx`, `cy`)
+    // canvas pixels, cut at the canvas's edge. The layer goes right above the layer at `above` (a position, bottom first; -1: on
+    // top) and is named `name`, or "Pasted N" for the lowest N no layer has. ONE revision of `base` (the head), producer `producer`
+    // ("canvas-view:paste"); {moved: false, head: <the head>} when the head is not `base`. input_invalid for a picture that is
+    // not four-channel or is past what a canvas holds (placeableProblem), or an `above` that is no layer.
+    Result<Commit> pasteLayer(const QString &canvasId, const QString &base, const mask::MaskPaint &picture, double cx, double cy, int above, const QString &name,
+                              const QString &producer);
 
     // A layer written at the tree level, groups kept (#274; a Canvas Write): `layer` goes on top of the revision `parent`'s layers as a
     // new revision with that parent (producer `producer`), the head not moved: moveHead does that, or accept places it on a newer

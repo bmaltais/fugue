@@ -154,6 +154,15 @@ public:
     Q_INVOKABLE bool groupLayers(const QVariantList &positions);
     Q_INVOKABLE bool ungroup(const QVariantList &positions);
     Q_INVOKABLE bool setProperties(int position, const QVariantMap &changes);
+    // #236, Edit > Paste as new layer and a picture file dropped on the view: the picture (untrusted: canvas/picture_import.h) goes on the
+    // Head as a new layer right above the current one (on top when none), centered on (`cx`, `cy`) canvas pixels (a negative
+    // `cx` or `cy`: the canvas's center), named "Pasted N" (a file: its name). It is kept whole as the layer's original, so a
+    // picture bigger than the canvas can be scaled down later. ONE revision, producer `canvas-view:paste`, history "Layer
+    // pasted: <name>". False, with `error` in words, when nothing could be placed (no picture, too large, not the Head).
+    Q_INVOKABLE bool pasteLayer(double cx = -1, double cy = -1);
+    Q_INVOKABLE bool placeFile(const QString &pathOrUrl, double cx = -1, double cy = -1);
+    // Whether a dragged file is one placeFile reads (a drop takes only pictures; the window's own drop keeps the rest).
+    Q_INVOKABLE bool isPictureFile(const QString &pathOrUrl) const;
     // Empties the canvas (File > Clear canvas): ONE new revision of the Head, the same size, one empty layer; Undo takes it
     // back. False when the Head is not what is shown.
     Q_INVOKABLE bool clearCanvas();
@@ -220,6 +229,8 @@ signals:
 private:
     // Stores the edit on the shown head and moves the view to it, with `select` as the selection there.
     bool applyEdit(const canvas::LayerEdit &edit, const QList<int> &select);
+    // A picture placed as a layer (pasteLayer, placeFile).
+    bool placePicture(const mask::MaskPaint &picture, double cx, double cy, const QString &name);
     // A stored edit: the view moves on to it (false, with `error`, when it did not land).
     bool land(const Result<canvas::Commit> &done, const QList<int> &select);
     // The target's mask read again from the shown revision when it is another one (an undo, a run's layer).

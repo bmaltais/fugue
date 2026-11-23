@@ -4,7 +4,10 @@
 // is the test's own (FUGUE_HOME and the XDG folders point at a temporary folder); no window is launched outside the test
 // process and no real pointer is moved.
 
+#include <QClipboard>
 #include <QDir>
+#include <QGuiApplication>
+#include <QImage>
 #include <QQuickStyle>
 #include <QTemporaryDir>
 #include <QUndoStack>
@@ -897,10 +900,10 @@ private slots:
         // A planned feature is a greyed row that is no command: it has no key and pressing it does nothing.
         QQuickItem *placeholder = menuRow(app, "Canvas", "canvas-view.new"); // opens File
         QVERIFY(placeholder);
-        QQuickItem *planned = find(app.window, "menuPlanned-236-Place picture…");
+        QQuickItem *planned = find(app.window, "menuPlanned-215-Edit in an external editor…");
         QVERIFY(planned);
         QVERIFY(!planned->isEnabled());
-        QCOMPARE(planned->property("plannedNote").toString(), QString("Not built yet (#236)"));
+        QCOMPARE(planned->property("plannedNote").toString(), QString("Not built yet (#215)"));
         QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(planned));
         QVERIFY(dialog(app)->property("opened").toBool());
         closeMenu(app);
@@ -1110,6 +1113,32 @@ private slots:
         QVERIFY(model(app)->property("notice").toString().contains("history"));
         QVERIFY(model(app)->property("notice").toString().contains("untouched")); // its id was taken here
         QVERIFY(canvas::CanvasStore::forSession().info(m_canvas).ok());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // #236: Edit > Paste as new layer (and its Ctrl+V while the view is the one in use) puts the clipboard's picture on the canvas as ONE
+    // revision; Paste as new canvas is there too; a Place picture… row is live.
+    void editPastesTheClipboardsPictureAsALayer() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        QTRY_COMPARE(model(app)->property("canvasId").toString(), m_canvas);
+        QTRY_COMPARE(model(app)->property("layers").toList().size(), 1);
+        QImage image(30, 20, QImage::Format_RGBA8888);
+        image.fill(QColor(0, 200, 0));
+        QGuiApplication::clipboard()->setImage(image);
+        QTRY_VERIFY(QGuiApplication::clipboard()->mimeData()->hasImage());
+        QQuickItem *placeRow = menuRow(app, "Canvas", "canvas-view.place-picture");
+        QVERIFY(placeRow && placeRow->isEnabled());
+        closeMenu(app);
+        QQuickItem *canvasRow = menuRow(app, "Edit", "canvas-view.paste-canvas");
+        QVERIFY(canvasRow && canvasRow->isEnabled());
+        closeMenu(app);
+        const int revisions = int(canvas::CanvasStore::forSession().log(m_canvas)->size());
+        viaMenu(app, "Edit", "canvas-view.paste-layer");
+        QTRY_COMPARE(model(app)->property("layers").toList().size(), 2);
+        QCOMPARE(model(app)->property("layers").toList().first().toMap().value("name").toString(), QString("Pasted 1"));
+        QCOMPARE(int(canvas::CanvasStore::forSession().log(m_canvas)->size()), revisions + 1);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 

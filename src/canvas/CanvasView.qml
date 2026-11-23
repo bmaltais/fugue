@@ -358,6 +358,8 @@ Item {
         case "canvas-view.batch": return {enabled: App.canvasBatch !== null}
         case "canvas-view.rename": case "canvas-view.share": case "canvas-view.duplicate": case "canvas-view.delete": case "canvas-view.close": return {enabled: has}
         case "canvas-view.clear": return {enabled: canvasData.layersEditable}
+        case "canvas-view.paste-layer": case "canvas-view.place-picture": return {enabled: canvasData.layersEditable}
+        case "canvas-view.paste-canvas": return {enabled: true}
         case "canvas-view.select-all": return {enabled: shows && canvasData.pictureSize.width > 0}
         case "canvas-view.deselect": return {enabled: deselectable}
         case "canvas-view.invert-selection": return {enabled: quickMask}
@@ -446,6 +448,9 @@ Item {
         case "canvas-view.batch": batchDialog.openDialog(); break
         case "canvas-view.duplicate": canvasData.duplicateCanvas(); break
         case "canvas-view.clear": fileDialogs.askClear(); break
+        case "canvas-view.paste-layer": pasteLayer(); break
+        case "canvas-view.paste-canvas": pasteAsNewCanvas(); break
+        case "canvas-view.place-picture": placePicture(); break
         case "canvas-view.delete": fileDialogs.askDelete(); break
         case "canvas-view.close": closeCanvas(); break
         case "canvas-view.select-all": selectAll(); break
@@ -599,6 +604,37 @@ Item {
     function importPicture() {
         (pictureDialog.createObject(root) as FilePicker).open()
     }
+    // Paste as new layer, Place picture… and a dropped file (#236): the picture is put on the canvas as a layer, centered in
+    // what the view shows of the canvas (a drop: where it fell). Each is one revision; a problem is said under the picture.
+    function visibleCenter() {
+        const k = pictureView.imageScale, size = canvasData.pictureSize
+        if (k <= 0 || size.width <= 0)
+            return {x: -1, y: -1}
+        const span = (offset, shown, whole) => {
+            const from = Math.max(0, -offset / k), to = Math.min(whole, (shown - offset) / k)
+            return to > from ? (from + to) / 2 : whole / 2
+        }
+        return {x: span(pictureView.imageX, pictureView.width, size.width), y: span(pictureView.imageY, pictureView.height, size.height)}
+    }
+    function pasteLayer() {
+        const at = visibleCenter()
+        canvasData.pasteLayer(at.x, at.y)
+    }
+    function placeFiles(urls, x, y) {
+        for (const url of urls)
+            if (!canvasData.placeFile(url.toString(), x, y))
+                break // the problem is said under the picture; the rest would only repeat it
+    }
+    function placePicture() {
+        (placeDialog.createObject(root) as FilePicker).open()
+    }
+    function pasteAsNewCanvas() {
+        if (!newCanvasDialog)
+            newCanvasDialog = newCanvasComponent.createObject(root, { storeRoot: canvasData.storeRoot })
+        const why = newCanvasDialog.model.pasteAsNew()
+        if (why !== "")
+            newCanvasDialog.openNew(why)
+    }
     Component {
         id: exportComponent
         CanvasExportDialog {
@@ -617,6 +653,18 @@ Item {
                 if (madeDialog.model.importNotes() !== "") // a Photoshop file's layers Fugue could not keep: never silent
                     canvasData.showNotice(qsTr("Imported, with changes: %1").arg(madeDialog.model.importNotes()))
             }
+        }
+    }
+    Component {
+        id: placeDialog
+        FilePicker {
+            id: d
+            objectName: "canvasViewPlaceDialog"
+            title: qsTr("Place a picture on the canvas")
+            fileMode: PortalFileDialog.OpenFile
+            nameFilters: [qsTr("Pictures (*.png *.jpg *.jpeg *.webp)"), qsTr("All files (*)")]
+            onAccepted: { const at = root.visibleCenter(); canvasData.placeFile(d.selectedFile.toString(), at.x, at.y); d.destroy() }
+            onRejected: d.destroy()
         }
     }
     Component {
@@ -1147,6 +1195,22 @@ Item {
         sizeB: canvasData.sizeB
         labelA: root.compareOn ? root.labelOf(root.rowA) : root.labelOf(root.rowB)
         labelB: root.labelOf(root.rowB)
+    }
+    // A picture file dropped on the picture is placed as a new layer where it fell (#236); anything else is left to the window's own drop.
+    DropArea {
+        id: pictureDrop
+        objectName: "canvasViewDropArea"
+        anchors.fill: pictureView
+        keys: ["text/uri-list"]
+        enabled: pictureView.visible && canvasData.layersEditable && !root.compareOn
+        onEntered: drag => { drag.accepted = drag.hasUrls && drag.urls.length > 0 && drag.urls.every(url => canvasData.isPictureFile(url.toString())) }
+        onDropped: drop => {
+            if (!drop.hasUrls)
+                return
+            const k = pictureView.imageScale
+            drop.accept()
+            root.placeFiles(drop.urls, k > 0 ? (drop.x - pictureView.imageX) / k : -1, k > 0 ? (drop.y - pictureView.imageY) / k : -1)
+        }
     }
     // History (#228, the owner's decision; Photoshop's History panel is the reference): the canvas's changes in words,
     // newest first, at the start side of the picture, closed at first. A click shows that step (read only: the Layers
