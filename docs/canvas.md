@@ -441,7 +441,8 @@ the foot of the picture in a small area):
   and a bundled action is never written; from the File > Canvas… dialog, which hides the Graph, the dialog closes) and
   **Clear prompt history…** (it asks first).
 
-While it runs, the selection's outline moves and the bar says "Generating… 45%". The result is a layer on the latest
+While it runs, the selection's outline moves and the bar says "Generating… 45%". With the Sampler preview setting on,
+the sampler's step frames also show inside the selection (clipped to it, over the dimmed outline) and fade into the layer when it lands. The result is a layer on the latest
 version, named from the prompt, with the selection's soft edge as its layer mask; Undo takes it back. Generate works on
 the latest version only: on an older step the bar says so and offers **Back to latest**. When something goes wrong the
 bar says it in one line ("Not enough GPU memory. Try a smaller selection."). On first use it says which models are

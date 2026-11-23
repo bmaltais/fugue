@@ -181,8 +181,16 @@ private slots:
         r.onFake([&](FakeProvider &f) { f.progress(f.jobs().at(0), 0.45, "sampling"); });
         QTRY_COMPARE(textOf(r.app.window, "canvasTaskStatus"), QStringLiteral("Generating… 45%"));
         QVERIFY(find(r.app.window, "canvasTaskShimmer"));
+        // The Sampler's step frame shows in the selection over the shimmer, and goes with the run.
+        QVERIFY(!find(r.app.window, "canvasLiveFill"));
+        const QString step = m_dir.filePath("step.png");
+        QVERIFY(QImage(32, 32, QImage::Format_RGB32).save(step));
+        emit r.service->event(r.actions->lastRun(), {{"event", "node.preview"}, {"node", "gen"},
+                                                      {"thumbnails", QJsonObject{{"preview", QJsonObject{{"url", QUrl::fromLocalFile(step).toString()}}}}}});
+        QTRY_VERIFY(find(r.app.window, "canvasLiveFill"));
         r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(0), {{"image.png", png(64, 64)}}); });
         QTRY_VERIFY(!r.actions->busy());
+        QTRY_VERIFY(!find(r.app.window, "canvasLiveFill")); // faded away
         QTRY_VERIFY(find(r.app.window, "canvasLayer-1")); // the layer, in the layers panel
         QVERIFY(head() != m_head);
         QTRY_VERIFY(find(r.app.window, "canvasTaskGenerate"));

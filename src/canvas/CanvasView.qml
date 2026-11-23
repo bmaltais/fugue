@@ -1649,6 +1649,17 @@ Item {
             brushOpacity: root.brushOpacity
         }
     }
+    // A canvas action's live step frame, inside its selection: above the picture, under the region frame and the shimmer.
+    CanvasLiveFill {
+        anchors.fill: pictureView
+        visible: pictureView.visible && !root.compareOn && !pictureView.paired && pictureView.mode !== "difference" && (active || opacity > 0)
+        actions: App.canvasActions
+        canvasId: canvasData.canvasId
+        originX: pictureView.imageX
+        originY: pictureView.imageY
+        zoom: pictureView.imageScale
+        clip: true
+    }
     Item {
         id: regionLayer
         objectName: "canvasViewRegion"

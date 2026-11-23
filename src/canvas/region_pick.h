@@ -35,6 +35,8 @@ crop::Rect snapped(const crop::Rect &rect, int multiple, const crop::Size &canva
 // The rectangle grown by the padding (raised to feather + 16, as the node does) and kept inside the
 // canvas: the picture the node cuts (the dashed box).
 crop::Rect context(const crop::Rect &rect, int padding, const crop::Size &canvas, int feather = 0);
+// The same from plain numbers (a caller that cannot name crop::Rect, as vips.h's VipsRect macro gets in the way).
+crop::Rect contextOf(int x, int y, int width, int height, int padding, int canvasWidth, int canvasHeight, int feather = 0);
 
 // The size the node redraws the context at (scale, megapixel cap and multiple).
 crop::Size modelSize(const crop::Rect &rect, const Settings &settings, const crop::Size &canvas);

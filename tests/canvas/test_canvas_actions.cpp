@@ -196,6 +196,39 @@ private slots:
         QCOMPARE(r.actions->history("test-fill"), QStringList{"a red umbrella"});
     }
 
+    // The live step frame (item 2 of the live preview): the active run's newest node.preview picture, with the context box it
+    // is a picture of and the selection inside it, in canvas pixels; gone when the run ends (faded after a good one).
+    void aStepFrameShowsInTheSelectionAndGoesWhenTheRunEnds() {
+        Rig r;
+        const QString run = press(r).value("run").toString();
+        QTRY_VERIFY(r.actions->running());
+        const auto frame = [&](const QString &id, const QString &url) {
+            emit r.service->event(id, {{"event", "node.preview"}, {"node", "gen"}, {"thumbnails", QJsonObject{{"preview", QJsonObject{{"url", url}}}}}});
+        };
+        frame("another-run", "file:///other.png");
+        QCOMPARE(r.actions->liveFrame(), QString());
+        frame(run, "file:///step1.png");
+        QCOMPARE(r.actions->liveFrame(), QStringLiteral("file:///step1.png"));
+        QCOMPARE(r.actions->liveBox(), rect(32, 32, 192, 192)); // the selection 96,96 64x64 and 64 of padding
+        QCOMPARE(r.actions->liveClip(), rect(96, 96, 64, 64));  // the frame shows inside the selection only
+        frame(run, "file:///step2.png");
+        QCOMPARE(r.actions->liveFrame(), QStringLiteral("file:///step2.png")); // the newest wins
+        r.actions->cancel();
+        QTRY_VERIFY(!r.actions->busy());
+        QCOMPARE(r.actions->liveFrame(), QString());
+        QVERIFY(!r.actions->liveFade()); // a cancel removes it at once
+        // A good end: the frame fades into the new layer.
+        const QString second = press(r).value("run").toString();
+        QTRY_VERIFY(r.actions->running());
+        frame(second, "file:///step3.png");
+        QCOMPARE(r.actions->liveFrame(), QStringLiteral("file:///step3.png"));
+        QTRY_VERIFY(!r.jobs().isEmpty());
+        r.onFake([&](FakeProvider &f) { f.finish(f.jobs().last(), {{"image.png", png(64, 64)}}); });
+        QTRY_VERIFY(!r.actions->busy());
+        QCOMPARE(r.actions->liveFrame(), QString());
+        QVERIFY(r.actions->liveFade());
+    }
+
     // Expand (slice 7): an action on the canvas bounds grows the canvas first (one revision, one side, an "Expanded area" layer
     // under the picture), then its Region reads the grown canvas at that revision: the new strip and the overlap.
     void anActionOnTheBoundsGrowsTheCanvasThenFillsTheStrip() {
