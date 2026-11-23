@@ -1660,6 +1660,8 @@ it as a module folder and run it with no code of its own in Fugue.
   shows no frame; preview thumbnails are made for hidden pictures too. A canvas action's run (the task bar's
   Generate) has no card: its newest frame is drawn on the Canvas view inside the selection instead
   (`docs/canvas-actions-design.md`, Progress).
+  With the task bar's Live on, a run to the node before Canvas Write (`RunRequest.target`) draws the same frame as a preview and lands no
+  layer (`docs/canvas-actions-design.md` 16).
 - The component-level helper is based on stable-diffusion.cpp with separate encode, sample and
   decode steps, C++ only. The M0 spike showed the split works
   ([spikes/02](spikes/02-sdcpp-split.md)).

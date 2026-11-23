@@ -204,6 +204,34 @@ private slots:
         QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
     }
 
+    // Live (#315): the toggle in the bar turns the link on; typing a prompt starts a preview in the selection that lands nothing;
+    // Enter keeps it as a layer through the same seed (the sampler is a cache hit).
+    void liveFollowsThePromptAndEnterKeepsThePreview() {
+        Rig r;
+        r.actions->setLiveQuiet(20);
+        QVERIFY(r.app.open());
+        openDialog(r.app);
+        drawRectangle(r.app);
+        QTRY_VERIFY(taskBar(r.app));
+        chooseAction(r.app, indexOf(r, "test-fill"));
+        typePrompt(r.app, "a red umbrella");
+        click(r.app, "canvasTaskLive");
+        QVERIFY(r.actions->live());
+        QTRY_COMPARE(r.jobs().size(), 1);
+        QVERIFY(find(r.app.window, "canvasTaskGenerate")); // a preview is not a Generate
+        r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(0), {{"image.png", png(64, 64)}}); });
+        QTRY_VERIFY(!r.actions->liveBusy());
+        QCOMPARE(head(), m_head);
+        QTest::keyClick(r.app.window, Qt::Key_Return);
+        QTRY_VERIFY(head() != m_head);
+        QCOMPARE(r.jobs().size(), 1);
+        QTest::qWait(200); // the kept layer starts no new preview
+        QCOMPARE(r.jobs().size(), 1);
+        click(r.app, "canvasTaskLive");
+        QVERIFY(!r.actions->live());
+        QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
+    }
+
     // Escape cancels this bar's run: nothing lands, nothing is said; an error is one plain line in the error color.
     void escapeCancelsAndAnErrorIsOnePlainLine() {
         Rig r;

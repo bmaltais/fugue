@@ -26,7 +26,7 @@ sees a node. A film team keeps its own actions in the project, versioned and sha
 
 What this design does not do:
 - Make Fugue a paint program. The scope guard of #206 holds.
-- Add live mode.
+- Add live mode to the first slices. It is a later, separate toggle: [16](#16-live-link-315).
 - Generate nodes dynamically. The Krita maintainer warns this is costly to keep working (discussion #385).
   Fugue's bundled actions are fixed graphs the user can see.
 
@@ -487,6 +487,8 @@ These changes go in fugue-workflows, in the order the slices need them:
    Enter in the prompt generates.
 8. **Prompt history**: 200 per action per root, never inherited, clearable. Is that right for client work, or should
    it be off in projects by default?
+9. **Live link** (16): previews are never layers, and Live starts off every session. Both are built as recommended;
+   the owner confirms, and says whether a fast "live" setting per action is wanted (16.5).
 
 ## 15. Slices, in order
 
@@ -513,3 +515,80 @@ Sizes: S is a day or less, M a few days, L a week or more.
 | 10 | `fugue canvas act` for scripts and agents | S | 1 |
 | | *Built 2026-11-23 (slice 10; branch canvas-act-cli):* `fugue canvas act <canvas>[@rev] <action> [--prompt] [--seed] [--count] [--layer] [--rect x,y,w,h \| --selection mask.png] [--expand side --percent 25\|50 \| --pixels N] [--set input=value]... [--wait]` and `fugue canvas actions` (alias `act --list`). Shared code, not a second copy: `engine/canvas_act.h` now holds the listing (`collectActions`, `ActionEntry`), the checks and binding of Generate (`planAct`: the rectangle held in the canvas, Expand's growth, the router's padding and scale, the layer role, the seeds and hidden variations of Count, the bound copy of each run), the plain words of an error (`plainWords`) and the cached-Write replacement (`placeWriteAgain`); `CanvasActions::refresh()` and `generate()` call them and keep only what is the bar's (auto routing, the settings, the live frame rectangles, the busy state, history); the CLI queues the copies with `startBoundRun`/`waitForRun` (factored out of `canvas batch`). Decisions (each to confirm): (1) **no `--wait` queues and returns** (like `fugue run`), `--wait` blocks: a script that wants the result passes it. (2) **`--set` takes both forms**: `input=value` for a block input (not prompt, seed, layer: they have flags; a choice by its word) and `node.input=value` for a node of the copy. (3) A model or pack missing is refused **before Expand grows the canvas** (the bar's order too), the message names the files and the hint says `fugue model get <action>`; no download is started by `act`. (4) `--selection` is a PNG the canvas size, first channel above 0 selected; its bounds feed the Region; another size is `usage`. (5) `--count` on an action with no seed is `usage` (the bar silently makes one). (6) The action may also be a workflow file with an `action` block, which is how tests use stand-ins with no model. (7) A failed run ends the rest of the Count (as the bar does); the exit is 1 with the bar's plain words. Not done: no prompt history or remembered Advanced values are read or written (the bar's per-root settings stay the bar's), no `--json` event stream (one answer at the end; progress is text on stderr), `--rect` ignores an `auto` route (an action id is required). |
 | later | ~~Live preview in the selection (`node.preview`)~~ built (item 2 of the live preview), Select subject as a selection, sharing actions over the mesh (#203) | | |
+
+## 16. Live link (#315)
+
+Written 2026-11-23. A **Live** toggle in the task bar re-runs the chosen action on the current selection when the canvas, the
+selection or the prompt changes, like a live preview. It keeps the scope guard of #206 (no paint program, no new
+generation path): the preview is the action's own graph, run through `RunService`.
+
+### 16.1 What exists (research)
+
+- **Krita AI Diffusion** (GPL: ideas only) has a *Live* mode [U, from memory; its docs were not reachable]: it re-generates when the
+  canvas or selection changes, on a fixed seed, with a fast low-step setup, shows the result as a preview over the canvas, and
+  applies it to a layer only when the person presses Apply. So the preview is not a layer.
+- **ComfyUI** has *Auto Queue* (on change or instant) [U]: it queues a prompt whenever the graph changes and stays at one pending
+  item. It re-runs the whole graph, with no cancel of the run in flight.
+- **Photoshop** (Generative Fill, Neural Filters) has no live regeneration for generative fill [U]; Neural Filters preview as you move
+  a slider, then apply.
+- **Fugue today.** `CanvasActions::generate` builds the request, `canvas::planAct` binds the copy, `RunService::start` queues it as an
+  ordinary run, and Canvas Write lands a layer on the head (#229). `RunRequest.target` ("run to here") stops a run at a node.
+  The result cache keys every node by its inputs, so a repeat with the same seed re-uses the Region, the Sampler and the Decode.
+  `node.preview` gives the sampler's step frames, which the Canvas view already draws inside the selection (live frame).
+
+### 16.2 The design
+
+1. **A preview is never a layer.** A live run is the action's graph run to the node Canvas Write takes its `image` from
+   (`RunRequest.target`), so Canvas Write does not run. No layer, no revision, no history entry, no undo step. The picture
+   shows in the selection through the existing live frame (the step frames, then the finished decode).
+2. **Generate keeps it.** While Live is on, the preview and Generate share one seed (picked when Live goes on; "Another preview" in the
+   More menu picks another). Generate is then the same graph and seed, so Region, Sampler and Decode are cache hits and only Canvas Write
+   runs: a layer lands with the picture that was shown, in the time it takes to write it. One Generate is one layer, one undo
+   step, as today.
+3. **No feedback loop.** The preview writes nothing, so it cannot change what triggers it. The layer a Generate lands moves the head;
+   that revision is the runner's own (from the Write's event), so noting it adopts it as shown and starts nothing.
+4. **What counts as a change** (the state key): canvas, shown revision, action, prompt, selection (rectangle, or the Quick Mask's
+   stroke count), the Layers panel's Region layer, the current layer. Advanced values and Count do not trigger it; the next change picks them up.
+5. **GPU cost and one queue.** The decisions are `engine/live_link.h` (a state machine with no timer and no clock): a run starts only
+   after the state has been still for 600 ms, or half the last run's time if that is longer, at most 5 s (a slow model waits longer, so
+   it cannot flood the GPU); at most one preview run exists; a change that makes it stale cancels it at once and the next waits for
+   its end; the same state is never run twice; not ready (no selection, a blocker, a Generate running) cancels and starts nothing. A preview is an
+   ordinary queued run: it shows in the queue panel, waits for the one GPU and for runs queued before it. Live starts off every
+   session and per canvas view, is turned off when the canvas changes, and a failed preview switches it off with the one-line error, so a
+   broken action cannot retry on every keystroke.
+6. **Eligible actions.** An action whose Canvas Write has an `image` link and a selection (Generative fill, Refine, Remove). Expand
+   (the canvas bounds) and Upscale refuse: "cannot preview".
+7. **Undo and candidates.** Nothing to undo and no candidates are made. A Generate in the middle of a preview cancels it and its run is
+   ignored from then on.
+8. **Prompt history.** A preview does not add to it (only Generate does).
+
+### 16.3 Where it lives
+
+- `src/engine/live_link.{h,cpp}`: the decisions, `test_live_link` with a fake clock (the `now` argument).
+- `CanvasActions`: `live`, `liveBusy`, `setLive`, `liveNote(key, revision, ready)`, `liveReroll`, the `liveDue` signal, a
+  single-shot QTimer that calls the engine class; `generate({... live: true})` starts the preview.
+- `CanvasTaskBar.qml`: the toggle, the key, and answering `liveDue` with the same request Generate builds. Nothing else.
+
+### 16.4 Rejected options
+
+- **Live runs that land layers** (re-run on every change, each a layer): fills history in seconds, and each landed layer is itself a
+  change, so it loops. Rejected.
+- **Live runs as candidates** (revisions kept but not accepted): there is no candidate review in the view any more (#239), they would pile up in
+  the store, and they cost disk for pictures nobody asked to keep.
+- **A throw-away copy of the canvas** to write to: needs a Canvas Write variant or a second store. A run to the node before the Write
+  is simpler and writes nothing.
+- **A lower-step "live" variant of the graph made by Fugue**: the step count and sampler are the action's own choices (the Krita
+  maintainer's warning about dynamic graphs applies). See 16.5.
+- **Re-run on every change with no debounce, or a queue of pending runs**: floods the GPU; only the latest state matters.
+- **Cancelling only at the debounce**: the run in flight is wasted GPU while the person is still drawing, so it is cancelled at the first change.
+- **On by default, or remembered across sessions**: it uses the GPU without a press, so it is an explicit toggle for each session.
+- **A global key shortcut**: no key has been agreed; the toggle is a button until the keymap work (#206) names one.
+
+### 16.5 Not done, and to confirm
+
+- A per-action **fast preview setting** (an optional `live` block in the action file naming lower steps or a turbo model, as Krita's live
+  mode uses). Without it a 20 s model is a poor live preview; the longer wait for a slow run is the only protection. Needs an owner
+  decision on the block's shape, so it is left out.
+- Whether Enter in the prompt should keep the preview (it does: it is Generate), or Enter should re-roll while Live is on.
+- Verified only with the fake provider: that a real Generate after a preview is a cache hit through Region, Sampler and Decode (the fake
+  test shows the sampler is not run twice; a check with a real model on the 3090 is open).
