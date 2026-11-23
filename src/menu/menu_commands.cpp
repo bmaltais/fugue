@@ -44,7 +44,6 @@ QList<Row> menuRows() {
         // The projects dialog (spec 1.4.2): the window opens it; ProjectModel sets the handler.
         {"file.projects", QT_TRANSLATE_NOOP("Command", "Projects: switch, make or add one"), QT_TRANSLATE_NOOP("Command", "Projects…"), {}, "app", "added"},
         // The canvas revisions and candidates (#210); the window opens the dialog (Main.qml).
-        {"file.canvas-history", QT_TRANSLATE_NOOP("Command", "Canvas history: revisions, candidates, compare"), QT_TRANSLATE_NOOP("Command", "Canvas history…"), {}, "app", "added"},
         // The New canvas dialog (#232): a blank canvas of a size, the clipboard's picture or a file; the window opens it (CommandUi.qml).
         {"canvas.new", QT_TRANSLATE_NOOP("Command", "New canvas: a size and a background, the clipboard's picture or a file"),
          QT_TRANSLATE_NOOP("Command", "New canvas…"), {"Ctrl+Alt+N"}, "app", "added"},
@@ -189,7 +188,7 @@ void registerMenuCommands(CommandRegistry &registry) {
     }
     for (const auto &[id, label] : menuLabels())
         registry.setLabel(QString::fromLatin1(id), QString::fromUtf8(label));
-    for (const char *id : {"app.menu-bar", "app.context-menu", "help.about", "file.canvas-history", "file.canvas-view", "canvas.new", "canvas.paste-new"})
+    for (const char *id : {"app.menu-bar", "app.context-menu", "help.about", "file.canvas-view", "canvas.new", "canvas.paste-new"})
         registry.setHandler(QString::fromLatin1(id), [&registry, id] { emit registry.windowRequested(QString::fromLatin1(id)); });
     // Only a picture itself makes a canvas (a copied file's path is not one): the same test the dialog's Clipboard choice uses.
     registry.setEnabledWhen("canvas.paste-new", [] {

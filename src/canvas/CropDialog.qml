@@ -57,28 +57,12 @@ LargeViewDialog {
     }
     onConfirm: apply()
 
-    tools: Row {
-        spacing: root.look.unit
-        Repeater {
-            model: [{id: "free", text: qsTr("Free")}, {id: "source", text: qsTr("Original")}, {id: "1:1", text: "1:1"},
-                    {id: "4:3", text: "4:3"}, {id: "3:2", text: "3:2"}, {id: "16:9", text: "16:9"}]
-            delegate: ViewButton {
-                required property var modelData
-                objectName: "cropRatio-" + modelData.id
-                look: root.look
-                text: modelData.text
-                accented: false // the chosen ratio is the quiet marking: OK is the one accent fill (D7)
-                current: root.ratioName === modelData.id
-                onTapped: root.pickRatio(modelData.id)
-            }
-        }
-        ViewButton {
-            objectName: "cropRatioTurn"
-            look: root.look
-            text: qsTr("Turn")
-            enabled: root.turnedRatio() !== ""
-            onTapped: root.pickRatio(root.turnedRatio())
-        }
+    tools: RatioButtons {
+        prefix: "crop"
+        look: root.look
+        ratioName: root.ratioName
+        turned: root.turnedRatio()
+        onPicked: id => root.pickRatio(id)
     }
 
     CropView {
@@ -93,39 +77,11 @@ LargeViewDialog {
 
     footer: Row {
         spacing: 2 * root.look.unit
-        Repeater {
-            model: [{id: "x", text: qsTr("X")}, {id: "y", text: qsTr("Y")}, {id: "width", text: qsTr("Width")}, {id: "height", text: qsTr("Height")}]
-            delegate: Row {
-                id: entry
-                required property var modelData
-                spacing: root.look.unit
-                height: field.implicitHeight
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: entry.modelData.text
-                    color: root.look.label
-                    font.pixelSize: root.look.labelSize
-                }
-                ThemedTextField {
-                    id: field
-                    objectName: "cropField-" + entry.modelData.id
-                    width: 14 * root.look.unit
-                    text: String(root.draft[entry.modelData.id])
-                    inputMethodHints: Qt.ImhDigitsOnly
-                    validator: IntValidator { bottom: 0; top: 99999 }
-                    selectByMouse: true
-                    // Typing edits the text; the frame follows when it is entered or left. Enter also
-                    // goes on to the window, which applies it (the field takes it first).
-                    onEditingFinished: {
-                        root.setField(entry.modelData.id, text)
-                        text = String(root.draft[entry.modelData.id])
-                    }
-                    Connections {
-                        target: root
-                        function onDraftChanged() { if (!field.activeFocus) field.text = String(root.draft[entry.modelData.id]) }
-                    }
-                }
-            }
+        RectangleFields {
+            prefix: "crop"
+            look: root.look
+            values: root.draft
+            onEdited: (field, text) => root.setField(field, text)
         }
         Item { width: 2 * root.look.unit; height: 1 }
         ViewButton {

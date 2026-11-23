@@ -464,6 +464,21 @@ private slots:
         save("type-menu");
     }
 
+    // #228: in a narrow Canvas area the layers panel gives the picture most of the width (a quarter of the view, never under 32u).
+    void theLayersPanelIsNarrowInANarrowArea() {
+        App app(load(withRegion(m_canvas)));
+        QVERIFY(app.open());
+        QVERIFY(app.commands.trigger("area.split-row"));
+        QQuickItem *area = nullptr;
+        QTRY_VERIFY((area = find(app.window, "canvasArea")) != nullptr);
+        QQuickItem *panel = nullptr;
+        QTRY_VERIFY((panel = find(app.window, "canvasLayersPanel")) != nullptr);
+        const qreal u = 4, view = area->width();
+        QCOMPARE(panel->width(), qBound(32 * u, view / 4, 56 * u));
+        QVERIFY(panel->width() <= 56 * u);
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     // #226, last because it edits the shared canvas: over a Canvas area's layers panel the keys are the panel's (the
     // window's own shortcuts, the `canvas-layers` context), so Delete deletes the layer and not the selected node.
     void theLayersPanelOwnsTheKeysUnderThePointer() {

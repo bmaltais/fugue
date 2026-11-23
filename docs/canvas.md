@@ -151,11 +151,7 @@ view says so. The view refreshes by itself when a run moves the head.
 
 Under the picture there is one thin **status line**, as Photoshop's: the zoom and the canvas size ("32% · 2000 × 2000") and, while you drag or when a rectangle is set, its size and place ("456 × 777 at 0, 253"). **Advanced details** at its end opens, for those who want the numbers, the context and the size the model gets, what the node reads, the revision shown and what changed in it. Nothing else of that kind is written under the picture; only what you must act on is (a linked input, Compare on, an error).
 
-File > Canvas history… lists your canvases (or, with none yet, offers New canvas… and Import picture…); open one to
-see its revisions and candidates, and click a revision to see it at full size (zoom and pan; the head is shown
-first). Press **Compare** to see a candidate against the head and any other revision against the one before it (the
-same views as Compare Images), and **Accept** (or Enter) or **Drop** on a candidate. Ctrl+click a revision to use it as the left
-side of a comparison. **File > Export > Export as…** saves the revision you are looking at: a flattened PNG, JPEG or WebP, or an .ora or .psd with its layers, by the file's extension.
+The Canvas view's **History** panel (View > History) lists the revisions of the canvas, newest first, and **All revisions** adds the ones kept apart (a candidate the command line made, open or dropped); click one to see it at full size, read only, with **Back to latest** to leave it. **File > Open canvas…** in the view's own menu lists your canvases, and **New canvas…** and **Import picture…** make one. There is no separate history window any more (#228, D1); **Compare** is the view's. **File > Export > Export as…** saves the revision you are looking at: a flattened PNG, JPEG or WebP, or an .ora or .psd with its layers, by the file's extension.
 
 `fugue canvas export <id>[@<revision>] <file>` writes the same flattened picture from the command line by
 the file extension: `.png`, `.jpg` or `.webp` (a JPEG has no transparency, so it is flattened onto white
