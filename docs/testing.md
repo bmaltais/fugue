@@ -48,5 +48,5 @@ test's own temporary folder), because shards run at the same time.
 6. Never assert a CPU-time or wall-clock limit on a window: it measures the machine. Count the work (items made), or
    compare with a measurement of the same process. Click only on a laid-out window (`grabWindow()` runs the polish
    that moves a list's rows), and wait on state. ctest runs with `QV4_GC_TIMELIMIT=100000` (CMakeLists.txt): Qt's sliced
-   GC under load made a Question read its theme as null in 1 run in 50.
+   GC under load made a Question read its theme as null in 1 run in 50 (the Question now reads `App.theme.look` directly, #320; the setting stays for other components).
 7. A change that adds more than about 2 s to the suite says so in its PR body.
