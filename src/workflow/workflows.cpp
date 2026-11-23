@@ -757,6 +757,21 @@ void Workflows::loadHostModels() {
     });
 }
 
+QList<Template> Workflows::templateList() const {
+    return TemplateLibrary(m_templateRoots, m_registry).list();
+}
+
+bool Workflows::openCopyOf(const QString &file, const QString &title) {
+    const Result<Document> document = Document::loadFile(file);
+    if (!document) {
+        setNotice(tr("Could not open %1: %2").arg(title, firstMessage(document.errors())));
+        return false;
+    }
+    addTab(document.value(), {}, title, true, true);
+    analyze(document.value(), title);
+    return true;
+}
+
 bool Workflows::openTemplateById(const QString &id) {
     const std::optional<Template> chosen = TemplateLibrary(m_templateRoots, m_registry).find(id);
     if (!chosen) {

@@ -92,6 +92,70 @@ private slots:
         QVERIFY(broken.value("reason").toString().contains("has no node nowhere"));
     }
 
+    // Actions from the template library (#231, design 8): a template whose workflow has a valid block is an action; a plain
+    // one is not; one with a broken block is listed as broken; a template wins over the same id compiled into Fugue.
+    void aTemplateWithAnActionBlockIsAnAction() {
+        Rig r;
+        QVERIFY(r.row("lib-fill").isEmpty());
+        r.addTemplate("lib-fill", kTestFill);
+        QCOMPARE(r.row("lib-fill").value("name").toString(), QStringLiteral("Test fill"));
+        QCOMPARE(r.row("lib-fill").value("broken").toBool(), false);
+        r.addTemplate("lib-plain", R"({"fugue": 1, "graph": {"nodes": {}}})");
+        QVERIFY(r.row("lib-plain").isEmpty()); // an ordinary workflow is not an action
+        r.addTemplate("lib-broken", kBroken);
+        QVERIFY(r.row("lib-broken").value("broken").toBool());
+        QVERIFY(r.row("lib-broken").value("reason").toString().contains("has no node nowhere"));
+        // A template of the library runs like a file one: one press, one layer.
+        QVariantMap request{{"action", "lib-fill"}, {"canvas", m_canvas}, {"revision", head()}, {"prompt", "a hat"}, {"rect", rect(96, 96, 64, 64)}};
+        QVERIFY2(r.actions->generate(request).value("ok").toBool(), qPrintable(r.actions->error()));
+        QTRY_COMPARE(r.jobs().size(), 1);
+        r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(0), {{"image.png", png(64, 64)}}); });
+        QTRY_VERIFY(!r.actions->busy());
+        QCOMPARE(layers(head()), 2);
+    }
+
+    void aTemplateReplacesTheActionCompiledIntoFugueOfTheSameId() {
+        Rig r;
+        QCOMPARE(r.row("test-fill").value("name").toString(), QStringLiteral("Test fill")); // the file of the roots
+        QByteArray renamed = kTestFill;
+        renamed.replace("Test fill", "House fill");
+        r.addTemplate("test-fill", renamed);
+        QCOMPARE(r.row("test-fill").value("name").toString(), QStringLiteral("House fill"));
+        int same = 0;
+        for (const QVariant &row : r.actions->actions())
+            same += row.toMap().value("id") == "test-fill";
+        QCOMPARE(same, 1);
+        // A plain template of that id hides nothing.
+        QDir(r.templatesDir + "/test-fill").removeRecursively();
+        r.addTemplate("test-fill", R"({"fugue": 1, "graph": {"nodes": {}}})");
+        QCOMPARE(r.row("test-fill").value("name").toString(), QStringLiteral("Test fill"));
+    }
+
+    // Edit workflow (design 7): the action's graph opens as a tab with no file; nothing is written.
+    void editWorkflowOpensTheActionsGraphAsAnUnsavedTab() {
+        Rig r;
+        r.addTemplate("lib-fill", kTestFill, "Library fill");
+        const QVariantMap library = r.actions->editWorkflow("lib-fill");
+        QVERIFY2(library.value("ok").toBool(), qPrintable(library.value("reason").toString()));
+        QCOMPARE(r.app.workflows.count(), 1); // the blank tab of a fresh window is replaced
+        QVariantMap tab = r.app.workflows.tabs().at(r.app.workflows.current()).toMap();
+        QCOMPARE(tab.value("title").toString(), QStringLiteral("Library fill"));
+        QVERIFY(tab.value("path").toString().isEmpty());
+        QVERIFY(tab.value("unsaved").toBool());
+        // One compiled into Fugue (a file of the roots) opens as a copy named after the action.
+        const QVariantMap file = r.actions->editWorkflow("test-fill");
+        QVERIFY(file.value("ok").toBool());
+        QCOMPARE(r.app.workflows.count(), 2);
+        tab = r.app.workflows.tabs().at(r.app.workflows.current()).toMap();
+        QCOMPARE(tab.value("title").toString(), QStringLiteral("Test fill"));
+        QVERIFY(tab.value("path").toString().isEmpty());
+        // "auto" is the action Auto falls back to; one that is not there says so in words.
+        QVERIFY(r.actions->editWorkflow("auto").value("ok").toBool());
+        const QVariantMap none = r.actions->editWorkflow("nowhere");
+        QVERIFY(!none.value("ok").toBool());
+        QCOMPARE(r.app.workflows.count(), 3);
+    }
+
     void generateQueuesOneRunThatLandsALayerOnTheHead() {
         Rig r;
         const QVariantMap started = press(r);

@@ -95,7 +95,7 @@ struct Rig {
     std::unique_ptr<RunService> service;
     std::unique_ptr<CanvasRuns> runs;
     std::unique_ptr<CanvasActions> actions;
-    QString actionsDir;
+    QString actionsDir, templatesDir;
 
     explicit Rig(const QByteArray &document = R"({"fugue": 1, "graph": {"nodes": {}}})", const Look &look = {}) : app(load(document), {}, look) {
         RunSetup setup;
@@ -124,6 +124,10 @@ struct Rig {
         QDir().mkpath(actionsDir);
         writeFile(actionsDir + "/test-fill.fugue", kTestFill);
         writeFile(actionsDir + "/broken.fugue", kBroken);
+        // The template library is the test's own (empty), never the repository's or the owner's.
+        templatesDir = root + "/templates";
+        QDir().mkpath(templatesDir);
+        app.workflows.setTemplateRoots({{templatesDir, true}});
         actions = std::make_unique<CanvasActions>(service.get(), &app.registry, &app.workflows);
         actions->setRoots({CanvasActions::bundledRoot(), actionsDir});
         actions->setHistoryPath(root + "/state/canvas-prompts.json");
@@ -142,6 +146,13 @@ struct Rig {
         return list;
     }
     void onFake(const std::function<void(FakeProvider &)> &call) { service->onRunThread([&] { call(*fake); }); }
+    // A template of the test's library: <id>/template.json and <id>/workflow.fugue; then the actions read again.
+    void addTemplate(const QString &id, const QByteArray &workflow, const QString &title = QStringLiteral("A template")) {
+        QDir().mkpath(templatesDir + "/" + id);
+        writeFile(templatesDir + "/" + id + "/template.json", QByteArray(R"({"title": ")") + title.toUtf8() + R"(", "description": "d", "category": "x"})");
+        writeFile(templatesDir + "/" + id + "/workflow.fugue", workflow);
+        actions->refresh();
+    }
     QVariantMap row(const QString &id) const {
         for (const QVariant &v : actions->actions())
             if (v.toMap().value("id") == id)

@@ -2009,6 +2009,13 @@ Item {
         roomX: -pictureView.x
         roomWidth: root.width
         onBackToLatest: canvasData.show(canvasData.head)
+        // Edit workflow opened a tab: the Graph's area takes the focus; the dialog, which hides it, closes.
+        onWorkflowOpened: {
+            if (root.hostCloses)
+                root.closeRequested()
+            else if (App.workspace)
+                App.workspace.active = App.workspace.graphArea
+        }
     }
 
     // What the picture area says when there is nothing to show, and what to do about it in the app.

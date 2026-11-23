@@ -267,6 +267,45 @@ private slots:
         QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
     }
 
+    // ⋯ > Edit workflow (design 7): the chosen action's graph opens as a tab and the Graph's area takes over.
+    void editWorkflowShowsTheGraphInAnArea() {
+        Rig r;
+        QVERIFY(r.app.open());
+        QVERIFY(r.app.commands.trigger("area.split-row"));
+        QTRY_VERIFY(find(r.app.window, "canvasArea"));
+        QTRY_VERIFY(find(r.app.window, "canvasLayer-0"));
+        QVERIFY(r.app.workspace.active() != r.app.workspace.graphArea()); // the new area is the Canvas's
+        drawRectangle(r.app, 80);
+        QTRY_VERIFY(taskBar(r.app));
+        chooseAction(r.app, indexOf(r, "test-fill"));
+        click(r.app, "canvasTaskMore");
+        QObject *menu = nullptr;
+        QTRY_VERIFY((menu = r.app.window->findChild<QObject *>("canvasTaskMoreMenu")) && menu->property("opened").toBool());
+        QMetaObject::invokeMethod(menu, "choose", Q_ARG(QVariant, 0)); // Edit workflow
+        QTRY_COMPARE(r.app.workflows.tabs().at(r.app.workflows.current()).toMap().value("title").toString(), QStringLiteral("Test fill")); // replaces the blank tab
+        QCOMPARE(r.app.workflows.tabs().at(r.app.workflows.current()).toMap().value("title").toString(), QStringLiteral("Test fill"));
+        QCOMPARE(r.app.workspace.active(), r.app.workspace.graphArea());
+        QCOMPARE(r.actions->error(), QString());
+        QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
+    }
+
+    // In the dialog, which hides the Graph, Edit workflow closes it.
+    void editWorkflowClosesTheDialog() {
+        Rig r;
+        QVERIFY(r.app.open());
+        openDialog(r.app);
+        drawRectangle(r.app, 80);
+        QTRY_VERIFY(taskBar(r.app));
+        chooseAction(r.app, indexOf(r, "test-fill"));
+        click(r.app, "canvasTaskMore");
+        QObject *menu = nullptr;
+        QTRY_VERIFY((menu = r.app.window->findChild<QObject *>("canvasTaskMoreMenu")) && menu->property("opened").toBool());
+        QMetaObject::invokeMethod(menu, "choose", Q_ARG(QVariant, 0));
+        QTRY_COMPARE(r.app.workflows.tabs().at(r.app.workflows.current()).toMap().value("title").toString(), QStringLiteral("Test fill"));
+        QTRY_VERIFY(!dialog(r.app)->property("opened").toBool());
+        QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
+    }
+
     // Pictures: FUGUE_SHOT_DIR=<dir> test_canvas_actions_window savesThePicturesOfTheBar (nothing without the variable),
     // dark and light: the bar under a rectangle, generating, the missing models, and a narrow area.
     void savesThePicturesOfTheBar_data() {
