@@ -90,6 +90,8 @@ class Workflows : public QObject {
     // `requires.packs` says where the first such pack can be had (#91): {id, source, ref, text}.
     // installPack() asks the window to install it (Settings > Packs, which asks the person).
     Q_PROPERTY(QVariantMap packOffer READ packOffer NOTIFY noticeChanged)
+    // Every such pack (#266), one entry each; the banner has a button per entry (installPackById(id)).
+    Q_PROPERTY(QVariantList packOffers READ packOffers NOTIFY noticeChanged)
 
 public:
     Workflows(CanvasModel *canvas, const Registry *registry, CommandRegistry *commands,
@@ -114,6 +116,7 @@ public:
     QVariantList downloadRoots() const { return downloadOffer().isEmpty() ? QVariantList() : m_offer.roots; }
     QString downloadRoot() const { return m_offer.root; }
     QVariantMap packOffer() const;
+    QVariantList packOffers() const;
     QString pathOf(int index) const;
     // Pasting and dropping images into the canvas (workflow/image_inputs.h).
     ImageInputs *images() const { return m_images; }
@@ -321,7 +324,7 @@ private:
         QJsonArray models; // the workflow's, as Document::models() gives them
         QVariantList roots;
         QString root; // where they go (ModelLibrary::fitDownloadRoot)
-        QVariantMap pack; // the first missing pack it says where to get: id, source, ref, text
+        QVariantList packs; // each missing pack it says where to get: {id, source, ref, text}
     };
     // The banner's line on the nodes and models of `document` that are not here, empty for none;
     // with what it may offer to download.

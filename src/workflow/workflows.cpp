@@ -877,9 +877,21 @@ QString Workflows::missingNotice(const Document &document, const QString &title,
         lines << tr("%1 carries the pack %2 %3, which its nodes need. Installing it asks first, and the pack is not trusted until you allow it.")
                      .arg(title, carried.value("id").toString(), carried.value("version").toString());
     const QStringList missing = missingTypes(document, *m_registry);
+    // #266: each missing pack once, by display name; a node type with no pack of its own stays named.
+    QStringList missingPacks; // ids, in the order the types come
+    QStringList names;
+    for (const QString &type : missing) {
+        const QString pack = packOfType(type);
+        if (pack.isEmpty())
+            names << type;
+        else if (!missingPacks.contains(pack)) {
+            missingPacks << pack;
+            names << packNeedOf(document, pack).value("name").toString();
+        }
+    }
     if (!missing.isEmpty())
         lines << tr("%1 uses nodes that are not installed (%2). They open as placeholders and keep their inputs.")
-                     .arg(title, missing.join(QStringLiteral(", ")));
+                     .arg(title, names.join(QStringLiteral(", ")));
     // Spec 4.3: the models it names that are not here, without reading a model file.
     FileHashes hashes(FileHashes::defaultPath());
     ModelLibrary library = ModelLibrary::current(m_registry);
@@ -897,20 +909,19 @@ QString Workflows::missingNotice(const Document &document, const QString &title,
     if (!models.isEmpty())
         lines << tr("%1 needs models that are not in the model folders: %2.").arg(title, models.join(QStringLiteral("; ")));
     if (offer) {
-        // The first missing pack the workflow says where to get (4.3).
-        offer->pack = carried;
-        const QJsonObject packs = document.requirements.value(QStringLiteral("packs")).toObject();
-        for (const QString &type : carried.isEmpty() ? missing : QStringList()) {
-            const QString pack = packOfType(type);
-            const QJsonObject entry = packs.value(pack).toObject();
-            if (entry.value(QStringLiteral("source")).toString().isEmpty() || !m_registry->packVersion(pack).isEmpty())
-                continue;
-            offer->pack = QVariantMap{{"id", pack},
-                                      {"source", entry.value(QStringLiteral("source")).toString()},
-                                      {"ref", entry.value(QStringLiteral("ref")).toString()},
-                                      {"text", tr("Install %1…").arg(pack)}};
-            break;
-        }
+        // Each missing pack the workflow says where to get (4.3); the carried one alone when it carries any.
+        offer->packs.clear();
+        if (!carried.isEmpty())
+            offer->packs << carried;
+        else
+            for (const QString &pack : missingPacks) {
+                const QVariantMap need = packNeedOf(document, pack);
+                if (need.value("installable").toBool())
+                    offer->packs << QVariantMap{{"id", pack},
+                                                {"source", need.value("source")},
+                                                {"ref", need.value("ref")},
+                                                {"text", tr("Install %1…").arg(need.value("name").toString())}};
+            }
         offer->text = offerText(absent);
         offer->models = document.models();
         offer->root = library.downloadRoot();
@@ -933,8 +944,13 @@ void Workflows::refreshMissing(bool force) {
     emit noticeChanged(); // the offer may differ with the same line
 }
 
+QVariantList Workflows::packOffers() const {
+    return !m_notice.isEmpty() && m_notice == m_missingNotice ? m_offer.packs : QVariantList();
+}
+
 QVariantMap Workflows::packOffer() const {
-    return !m_notice.isEmpty() && m_notice == m_missingNotice ? m_offer.pack : QVariantMap();
+    const QVariantList offers = packOffers();
+    return offers.isEmpty() ? QVariantMap() : offers.first().toMap();
 }
 
 void Workflows::installPack() {
