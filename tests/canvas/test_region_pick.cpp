@@ -55,7 +55,8 @@ private slots:
         QCOMPARE(region::context({100, 100, 200, 200}, 64, canvas), (Rect{36, 36, 328, 328}));
         QCOMPARE(region::context({0, 0, 200, 200}, 64, canvas), (Rect{0, 0, 328, 328}));            // slid in, not cut short
         QCOMPARE(region::context({0, 0, 1000, 800}, 64, canvas), (Rect{0, 0, 1000, 800}));          // the whole canvas is all there is
-        QCOMPARE(region::context({100, 100, 200, 200}, 0, canvas), (Rect{100, 100, 200, 200}));
+        QCOMPARE(region::context({100, 100, 200, 200}, 0, canvas), (Rect{84, 84, 232, 232})); // the least padding: room for the blend
+        QCOMPARE(region::context({100, 100, 200, 200}, 0, canvas, 40), (Rect{44, 44, 312, 312})); // feather + 16
     }
 
     void theModelSizeFollowsScaleCapAndMultiple() {
@@ -86,10 +87,12 @@ private slots:
                 settings.scale = 1.5;
                 settings.capMegapixels = 0.5;
                 settings.multiple = 8;
+                settings.feather = padding == 16 ? 30 : 0;
+                settings.targetMegapixels = padding == 300 ? 0.25 : 0;
                 const nodes::CropBox bounds = *nodes::rectBox(r.x, r.y, r.width, r.height, canvas.width, canvas.height);
-                const nodes::CropBox box = nodes::paddedBox(bounds, padding, canvas.width, canvas.height);
-                const nodes::CropSize size = nodes::regionSize(box, settings.scale, settings.capMegapixels, settings.multiple);
-                QCOMPARE(region::context(r, padding, canvas), (Rect{box.x, box.y, box.width, box.height}));
+                const nodes::CropBox box = nodes::paddedBox(bounds, nodes::paddingFor(padding, settings.feather), canvas.width, canvas.height);
+                const nodes::CropSize size = nodes::regionSize(box, settings.scale, settings.capMegapixels, settings.multiple, settings.targetMegapixels);
+                QCOMPARE(region::context(r, padding, canvas, settings.feather), (Rect{box.x, box.y, box.width, box.height}));
                 QCOMPARE(region::modelSize(r, settings, canvas), (Size{size.width, size.height}));
             }
         }

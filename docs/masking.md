@@ -99,6 +99,11 @@ picture around it. (The inpaint template is the other way: there the reference h
   Padding 64 px, 1 megapixel and Blend 16 px are the defaults; Megapixels 0 keeps the crop's size.
 - **Denoise.** 1 replaces what is under the mask. Lower keeps its shapes and colors. Below 1, put
   a Fill Masked (blur) before VAE Encode when the old content should not show through.
+- **Outpainting.** Pad adds the room and fills it from the picture's own edge, stretched and blurred
+  (Fill `edge-blur`, the default; `edge`, `gray` and `transparent` are the others), because an
+  outpaint that starts from gray or from a blur across a one-sided hole pulls the gray in. Extend
+  Edges does the same for any masked hole (a strip at the picture's edge, a removal beside it). The
+  Canvas view's Expand uses the same fill (`fugue canvas resize`).
 - **Color shift.** An edit can come back a little lighter, darker or tinted at the seam. Color Match
   (the picture, a reference, and the mask so only the kept part is measured) moves the picture's
   colors to the reference's; put it before Composite Masked or Stitch, and lower Strength to keep

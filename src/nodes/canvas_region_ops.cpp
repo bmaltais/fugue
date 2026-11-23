@@ -31,10 +31,19 @@ int snapped(double value, int step, bool down) {
 
 } // namespace
 
-CropSize regionSize(const CropBox &box, double scale, double capMegapixels, int multiple) {
+int paddingFor(int padding, int feather) {
+    return std::max(padding, std::max(0, feather) + kMinBlendRoom);
+}
+
+CropSize regionSize(const CropBox &box, double scale, double capMegapixels, int multiple, double targetMegapixels) {
     const int step = std::max(1, multiple);
     double width = box.width * (scale > 0 ? scale : 1.0);
     double height = box.height * (scale > 0 ? scale : 1.0);
+    if (targetMegapixels > 0) { // Crop to Mask's rule, not a second copy of it
+        const CropSize target = cropSizeFor(box, targetMegapixels, step);
+        width = target.width;
+        height = target.height;
+    }
     bool capped = false;
     if (capMegapixels > 0 && width * height > capMegapixels * 1e6) {
         const double shrink = std::sqrt(capMegapixels * 1e6 / (width * height));

@@ -170,6 +170,29 @@ private slots:
         QTest::newRow("the cap bites after the scale") << CropBox{0, 0, 1000, 1000} << 4.0 << 1.0 << 16 << CropSize{992, 992};
         QTest::newRow("no side past the limit") << CropBox{0, 0, 16000, 100} << 1.0 << 0.0 << 16 << CropSize{4096, 16};
     }
+
+    void aTargetBringsASmallRegionUpToTheModelsSizeAndDownFromALargeOne() {
+        // Crop to Mask's rule: 432 x 464 is about 0.2 MP, brought up to about 1 MP in its shape (#242).
+        const CropBox small{0, 0, 432, 464};
+        const CropSize up = regionSize(small, 1, 0, 16, 1.0);
+        QCOMPARE(up, cropSizeFor(small, 1.0, 16)); // the same function, not a copy of its rule
+        QVERIFY(up.width * up.height > 900000);
+        const CropBox large{0, 0, 3000, 2000};
+        QCOMPARE(regionSize(large, 1, 0, 16, 1.0), cropSizeFor(large, 1.0, 16));
+        QVERIFY(regionSize(large, 1, 0, 16, 1.0).width < 3000);
+        // The scale is not used with a target; the cap still only brings it down; 0 is off.
+        QCOMPARE(regionSize(small, 4, 0, 16, 1.0), up);
+        const CropSize capped = regionSize(small, 1, 0.5, 16, 1.0);
+        QVERIFY(double(capped.width) * capped.height <= 0.5e6);
+        QCOMPARE(regionSize(small, 2, 0, 16, 0), regionSize(small, 2, 0, 16));
+    }
+
+    void thePaddingHoldsRoomForTheFeatherAndTheBlend() {
+        QCOMPARE(paddingFor(0, 0), 16);
+        QCOMPARE(paddingFor(64, 0), 64);
+        QCOMPARE(paddingFor(20, 32), 48);
+        QCOMPARE(paddingFor(100, 32), 100);
+    }
     void theRegionSizeFollowsScaleCapAndMultiple() {
         QFETCH(CropBox, box);
         QFETCH(double, scale);
@@ -243,20 +266,20 @@ private slots:
         Bench bench;
         const QString id = makeCanvas();
         const Result<Values> r = bench.region(id, {{"x", Value(40)}, {"y", Value(30)}, {"width", Value(150)}, {"height", Value(120)},
-                                                   {"padding", Value(0)}, {"scale", Value(1)}, {"max_megapixels", Value(0)}, {"multiple", Value(1)}});
+                                                   {"padding", Value(16)}, {"scale", Value(1)}, {"max_megapixels", Value(0)}, {"multiple", Value(1)}});
         QVERIFY2(r.ok(), qPrintable(codeOf(r)));
-        QCOMPARE(r->value("width").number(), 150.0);
-        QCOMPARE(r->value("height").number(), 120.0);
+        QCOMPARE(r->value("width").number(), 182.0); // 150 + 2 x 16 (the least padding: room for the blend)
+        QCOMPARE(r->value("height").number(), 152.0);
         const Pixels image = pixelsOf(r->value("image"), "image").value();
-        QCOMPARE(image.width, 150);
-        QCOMPARE(image.height, 120);
+        QCOMPARE(image.width, 182);
+        QCOMPARE(image.height, 152);
         QCOMPARE(image.channels, 4);
         // (50,40) is the red block's corner: at (10,10) in the region. (0,0) is empty canvas.
-        QCOMPARE(image.at(10, 10, 0), 200 / 255.0f);
-        QCOMPARE(image.at(10, 10, 3), 1.0f);
+        QCOMPARE(image.at(26, 26, 0), 200 / 255.0f);
+        QCOMPARE(image.at(26, 26, 3), 1.0f);
         QCOMPARE(image.at(0, 0, 3), 0.0f);
         const Pixels mask = maskOf(r->value("mask"), "mask").value();
-        QCOMPARE(mask.at(75, 60, 0), 1.0f); // the rectangle is all of it with no padding
+        QCOMPARE(mask.at(75, 60, 0), 1.0f); // the rectangle is all of it with the least padding
         // The handle says which canvas and revision was read.
         const auto handle = canvas::canvasHandleFrom(r->value("canvas").json());
         QVERIFY(handle);
@@ -287,11 +310,11 @@ private slots:
         Result<Values> maskValue = namedOutput(m, "mask");
         QVERIFY(maskValue.ok());
         const MediaHandle file = maskValue->value("mask").media().saved(bench.dir.path(), "m", bench.hashes).value();
-        const Result<Values> r = bench.region(id, {{"mask", Value(file)}, {"padding", Value(10)}, {"max_megapixels", Value(0)}, {"multiple", Value(1)},
+        const Result<Values> r = bench.region(id, {{"mask", Value(file)}, {"padding", Value(20)}, {"max_megapixels", Value(0)}, {"multiple", Value(1)},
                                                    {"x", Value(0)}, {"width", Value(5)}});
         QVERIFY2(r.ok(), qPrintable(codeOf(r)));
-        QCOMPARE(r->value("width").number(), 60.0); // 40 + 2 x 10: the rectangle inputs are not used
-        QCOMPARE(r->value("height").number(), 60.0);
+        QCOMPARE(r->value("width").number(), 80.0); // 40 + 2 x 20: the rectangle inputs are not used
+        QCOMPARE(r->value("height").number(), 80.0);
     }
 
     // Region 1.2 (#230): a selection painted in the Canvas view, stored by its hash, is the part to change; the mask and
@@ -303,16 +326,16 @@ private slots:
         mask::MaskPaint painted(kW, kH);
         painted.fillRect(100, 60, 40, 30);
         const QString hash = CanvasStore::forSession().storeSelection(painted).value();
-        const Result<Values> r = bench.region(id, {{"selection", Value(hash)}, {"padding", Value(10)}, {"max_megapixels", Value(0)}, {"multiple", Value(1)},
+        const Result<Values> r = bench.region(id, {{"selection", Value(hash)}, {"padding", Value(20)}, {"max_megapixels", Value(0)}, {"multiple", Value(1)},
                                                    {"x", Value(0)}, {"width", Value(5)}});
         QVERIFY2(r.ok(), qPrintable(codeOf(r)));
-        QCOMPARE(r->value("width").number(), 60.0); // 40 + 2 x 10
-        QCOMPARE(r->value("height").number(), 50.0);
+        QCOMPARE(r->value("width").number(), 80.0); // 40 + 2 x 20
+        QCOMPARE(r->value("height").number(), 70.0);
         QCOMPARE(codeOf(bench.region(id, {{"selection", Value(CanvasStore::forSession().storeSelection(mask::MaskPaint(kW, kH)).value())}})), QString("mask_empty"));
         QCOMPARE(codeOf(bench.region(id, {{"selection", Value("sha256:" + QString(64, '0'))}})), QString("canvas_not_found"));
         QCOMPARE(codeOf(bench.region(id, {{"selection", Value("not a hash")}})), QString("input_invalid"));
         const NodeType &type = *bench.registry.nodeType("fugue/canvas-region");
-        QCOMPARE(type.version.toString(), QString("1.2.0"));
+        QCOMPARE(type.version.toString(), QString("1.3.0"));
     }
 
     void anEmptyMaskOrARectangleOffTheCanvasIsRefused() {
@@ -327,18 +350,46 @@ private slots:
     void theScaleAndTheCapSetTheSizeTheRegionIsRedrawnAt() {
         Bench bench;
         const QString id = makeCanvas();
-        const Values rect{{"x", Value(0)}, {"y", Value(0)}, {"width", Value(200)}, {"height", Value(100)}, {"padding", Value(0)}};
+        const Values rect{{"x", Value(0)}, {"y", Value(0)}, {"width", Value(200)}, {"height", Value(100)}, {"padding", Value(16)}};
         Values doubled = rect;
         doubled.insert("scale", Value(2));
         doubled.insert("max_megapixels", Value(0));
         const Result<Values> big = bench.region(id, doubled);
-        QCOMPARE(big->value("width").number(), 400.0);
-        QCOMPARE(big->value("height").number(), 208.0); // 200 snapped to the nearest multiple of 16
+        QCOMPARE(big->value("width").number(), 464.0); // (200 + 2 x 16) x 2
+        QCOMPARE(big->value("height").number(), 272.0); // (100 + 2 x 16) x 2 = 264, snapped to the nearest multiple of 16
         Values capped = rect;
         capped.insert("scale", Value(4));
         capped.insert("max_megapixels", Value(0.05));
         const Result<Values> small = bench.region(id, capped);
         QVERIFY(small->value("width").number() * small->value("height").number() <= 50000.0);
+    }
+
+    void aRegionRedrawnAtATargetSizeAndPaddingRaisedForTheBlend() {
+        Bench bench;
+        const QString id = makeCanvas();
+        const Values rect{{"x", Value(60)}, {"y", Value(50)}, {"width", Value(100)}, {"height", Value(80)}, {"max_megapixels", Value(0)}};
+        Values fixed = rect;
+        fixed.insert("padding", Value(16));
+        fixed.insert("target_megapixels", Value(0.25));
+        const Result<Values> r = bench.region(id, fixed, "target");
+        QVERIFY2(r.ok(), qPrintable(codeOf(r)));
+        QVERIFY(r.warnings().isEmpty());
+        const double pixels = r->value("width").number() * r->value("height").number();
+        QVERIFY(pixels > 0.2e6 && pixels < 0.3e6); // 132 x 112 brought up to about 0.25 MP
+        // Padding 0 with a feather: raised to feather + 16 with a warning that names the input.
+        Values low = rect;
+        low.insert("padding", Value(0));
+        low.insert("feather", Value(8));
+        low.insert("multiple", Value(1));
+        const Result<Values> raised = bench.region(id, low, "raised");
+        QVERIFY2(raised.ok(), qPrintable(codeOf(raised)));
+        QCOMPARE(raised.warnings().value(0).code, QString("padding_raised"));
+        QCOMPARE(raised.warnings().value(0).input, QString("padding"));
+        QCOMPARE(raised->value("width").number(), 148.0); // 100 + 2 * 24
+        QCOMPARE(raised->value("height").number(), 128.0);
+        Values bad = rect;
+        bad.insert("target_megapixels", Value(40));
+        QCOMPARE(codeOf(bench.region(id, bad, "bad")), QString("value_out_of_range"));
     }
 
     void theFeatherSoftensTheMaskOutputOnly() {
@@ -658,16 +709,16 @@ private slots:
         green.fill(Rgba{0, 255, 0, 255});
         doc.loadLayer(LayerKind::Paint, "Hidden green", false, 1, green);
         QVERIFY(CanvasStore::forSession().commit(id, doc, headOf(id), "test")->move.moved);
-        const Values box{{"x", Value(60)}, {"y", Value(50)}, {"width", Value(16)}, {"height", Value(16)}, {"padding", Value(0)}, {"multiple", Value(1)}};
+        const Values box{{"x", Value(60)}, {"y", Value(50)}, {"width", Value(16)}, {"height", Value(16)}, {"padding", Value(16)}, {"multiple", Value(1)}};
         const Result<Values> composite = bench.region(id, box, "composite");
         QVERIFY2(composite.ok(), qPrintable(codeOf(composite)));
-        QCOMPARE(pixelsOf(composite->value("image"), "image")->at(4, 4, 0), 200.0f / 255.0f); // the red block: the hidden layer is not read
+        QCOMPARE(pixelsOf(composite->value("image"), "image")->at(20, 20, 0), 200.0f / 255.0f); // the red block: the hidden layer is not read
         Values named = box;
         named.insert("layer", Value("Hidden green"));
         const Result<Values> layer = bench.region(id, named, "named");
         QVERIFY2(layer.ok(), qPrintable(codeOf(layer)));
-        QCOMPARE(pixelsOf(layer->value("image"), "image")->at(4, 4, 1), 1.0f);
-        QCOMPARE(pixelsOf(layer->value("image"), "image")->at(4, 4, 0), 0.0f);
+        QCOMPARE(pixelsOf(layer->value("image"), "image")->at(20, 20, 1), 1.0f);
+        QCOMPARE(pixelsOf(layer->value("image"), "image")->at(20, 20, 0), 0.0f);
         named.insert("layer", Value("Nope"));
         const Result<Values> missing = bench.region(id, named, "missing");
         QCOMPARE(codeOf(missing), QString("input_invalid"));

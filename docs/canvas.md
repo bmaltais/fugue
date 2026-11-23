@@ -22,6 +22,7 @@ fugue canvas drop canvas-0123456789ab@sha256:ab12cd34   # hide one (it is kept)
 fugue canvas layer list canvas-0123456789ab        # the layers, top first, with their positions
 fugue canvas layer set canvas-0123456789ab "Fill 1" --blend multiply   # one new revision
 fugue canvas undo canvas-0123456789ab              # back to the revision before; redo goes forward
+fugue canvas resize canvas-0123456789ab --to -256,0,1280,1024   # grow 256 px to the left: one revision, a pre-filled "Expanded area" layer at the bottom
 ```
 
 `<id>@<revision>` names a revision by `head`, its full hash, or the first 8 hex digits or more.
@@ -42,7 +43,9 @@ the window, see below):
   painted in the Canvas view (Selection, see Tools below),
   adds Padding around it, and gives you that part of the canvas as a picture, the mask of the part to
   change, and a stitch. Scale and Cap set the size it is redrawn at (a small region is drawn larger,
-  up to the megapixel cap); Feather softens the mask's edge outward. Its Revision is `head` unless you
+  up to the megapixel cap); Target size (megapixels, 0 off) instead redraws it at about that size, up or down, as
+  Crop to Mask does, so a small selection reaches the model's size (the Cap still brings it down). Padding is held at
+  Feather + 16 or more (the node warns `padding_raised`) because Canvas Write's blend stops at the region's box; Feather softens the mask's edge outward. Its Revision is `head` unless you
   give a hash.
 - **Canvas Write** puts a picture on the canvas as a new layer, blended in through a layer mask
   (Blend pixels soften the seam): the layer holds the whole redrawn picture and the mask decides how

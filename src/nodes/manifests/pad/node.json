@@ -1,9 +1,9 @@
 {
   "manifest": 1,
   "id": "fugue/pad",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "name": "Pad",
-  "description": "Add room around an image for outpainting. The new area is gray; the mask is 1 over the new area and 0 over the original. Feathering fades the mask inward from the padded edges (ComfyUI's Pad Image for Outpainting).",
+  "description": "Add room around an image for outpainting. The new area holds the nearest picture stretched outward and blurred (edge-blur, the default), stretched only (edge), 0.5 gray as ComfyUI does (gray) or transparent; the mask is 1 over the new area and 0 over the original. Feathering fades the mask inward from the padded edges (ComfyUI's Pad Image for Outpainting).",
   "category": "Image/Transform",
   "keywords": [
     "outpaint",
@@ -61,12 +61,35 @@
       "integer": true
     },
     {
+      "name": "fill",
+      "type": "text",
+      "label": "Fill",
+      "default": "edge-blur",
+      "choices": [
+        "edge-blur",
+        "edge",
+        "gray",
+        "transparent"
+      ]
+    },
+    {
       "name": "feathering",
       "type": "number",
       "label": "Feathering",
       "default": 40,
       "min": 0,
       "max": 16384,
+      "step": 1,
+      "integer": true,
+      "advanced": true
+    },
+    {
+      "name": "blur",
+      "type": "number",
+      "label": "Blur",
+      "default": 24,
+      "min": 0,
+      "max": 512,
       "step": 1,
       "integer": true,
       "advanced": true

@@ -1,7 +1,7 @@
 #include "nodes/kernels.h"
 
 // Ticket #171: the mask and composite nodes (spec 14.4): Composite Masked, Feather Mask,
-// Threshold Mask, Combine Masks, Fill Masked, Overlay Mask. The kernels only read the inputs and
+// Threshold Mask, Combine Masks, Fill Masked, Extend Edges (#243), Overlay Mask. The kernels only read the inputs and
 // write the outputs; the arithmetic is mask_ops.h's, plain functions on float buffers.
 //
 // Composite Masked, Threshold Mask and Combine Masks are ComfyUI's ImageCompositeMasked,
@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <utility>
 
 #include "nodes/mask_ops.h"
@@ -155,6 +156,28 @@ public:
     }
 };
 
+// Extend Edges (#243): the masked part filled from the nearest picture, stretched outward and blurred.
+class ExtendEdgesKernel : public NodeKernel {
+public:
+    Result<Values> run(const NodeContext &context) override {
+        const Result<Pixels> image = pixelsOf(context.input("image"), "image");
+        if (!image.ok())
+            return Result<Values>(image.errors());
+        const Result<Pixels> mask = maskOf(context.input("mask"), "mask");
+        if (!mask.ok())
+            return Result<Values>(mask.errors());
+        static constexpr std::pair<const char *, edgefill::Mode> kModes[] = {{"edge", edgefill::Mode::Edge}, {"edge-blur", edgefill::Mode::EdgeBlur}};
+        const Result<edgefill::Mode> mode = choiceOf(context, QStringLiteral("mode"), kModes);
+        if (!mode)
+            return mode.errors();
+        const int blur = int(std::lround(context.input("blur").number()));
+        if (blur < 0 || blur > kMaxFeather)
+            return makeInputError(QStringLiteral("value_out_of_range"), QStringLiteral("blur"),
+                                  QStringLiteral("A blur of %1 is outside 0 to %2.").arg(blur).arg(kMaxFeather));
+        return imageOutput(extendEdges(image.value(), mask.value(), mode.value(), blur));
+    }
+};
+
 class OverlayMaskKernel : public NodeKernel {
 public:
     Result<Values> run(const NodeContext &context) override {
@@ -194,6 +217,7 @@ void addMaskKernels(Kernels &kernels) {
     kernels.add("fugue/threshold-mask", std::make_shared<ThresholdMaskKernel>());
     kernels.add("fugue/combine-masks", std::make_shared<CombineMasksKernel>());
     kernels.add("fugue/fill-masked", std::make_shared<FillMaskedKernel>());
+    kernels.add("fugue/extend-edges", std::make_shared<ExtendEdgesKernel>());
     kernels.add("fugue/mask-to-alpha", std::make_shared<MaskToAlphaKernel>());
     kernels.add("fugue/overlay-mask", std::make_shared<OverlayMaskKernel>());
 }

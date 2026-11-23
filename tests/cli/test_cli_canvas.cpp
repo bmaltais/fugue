@@ -377,6 +377,42 @@ private slots:
         QCOMPARE(fugue({"canvas", "layer", "set", id, "0", "--blend", "dodge", "--json"}).errorCode(), QString("input_invalid"));
     }
 
+    // Resize (#240): one revision, the canvas of a rectangle of the old one, with a pre-fill layer when it grows.
+    void aCanvasIsGrownShiftedAndCutInOneRevision() {
+        const Outcome made = fugue({"canvas", "new", "--size", "64x32", "--background", "#c83c3c", "--json"});
+        QVERIFY2(made.exitCode == 0, made.out + made.err);
+        const QString id = made.data().value("canvas").toString();
+        const QString first = made.data().value("head").toString();
+
+        const Outcome grown = fugue({"canvas", "resize", id, "--to", "-16,0,96,48", "--json"});
+        QVERIFY2(grown.exitCode == 0, grown.out + grown.err);
+        QCOMPARE(grown.data().value("width").toInt(), 96);
+        QCOMPARE(grown.data().value("fill").toString(), QString("edge-blur"));
+        const QJsonArray layers = fugue({"canvas", "layer", "list", id, "--json"}).data().value("layers").toArray();
+        QCOMPARE(layers.size(), 2);
+        QCOMPARE(layers.at(1).toObject().value("name").toString(), QString("Expanded area")); // the bottom
+        QCOMPARE(fugue({"canvas", "log", id, "--json"}).data().value("revisions").toArray().at(0).toObject().value("producer").toString(),
+                 QString("canvas-cli:resize"));
+
+        const Outcome clear = fugue({"canvas", "resize", id, "--to", "0,0,96,56", "--fill", "transparent", "--json"});
+        QVERIFY2(clear.exitCode == 0, clear.out + clear.err);
+        QCOMPARE(fugue({"canvas", "layer", "list", id, "--json"}).data().value("layers").toArray().size(), 2); // no new layer
+        const Outcome cut = fugue({"canvas", "resize", id, "--to", "8,8,32,32", "--json"});
+        QVERIFY2(cut.exitCode == 0, cut.out + cut.err);
+        QCOMPARE(fugue({"canvas", "undo", id}).exitCode, 0);
+        QCOMPARE(fugue({"canvas", "undo", id}).exitCode, 0);
+        QCOMPARE(fugue({"canvas", "undo", id}).exitCode, 0);
+        QCOMPARE(fugue({"canvas", "show", id, "--json"}).data().value("revision").toString(), first);
+
+        QCOMPARE(fugue({"canvas", "resize", id, "--json"}).errorCode(), QString("usage"));
+        QCOMPARE(fugue({"canvas", "resize", id, "--to", "1,2,3", "--json"}).errorCode(), QString("usage"));
+        QCOMPARE(fugue({"canvas", "resize", id, "--to", "0,0,8,8", "--fill", "paint", "--json"}).errorCode(), QString("usage"));
+        QCOMPARE(fugue({"canvas", "resize", id, "--to", "0,0,8,8", "--blur", "-1", "--json"}).errorCode(), QString("usage"));
+        QCOMPARE(fugue({"canvas", "resize", id, "--to", "100,0,8,8", "--json"}).errorCode(), QString("input_invalid"));
+        QCOMPARE(fugue({"canvas", "resize", id, "--to", "0,0,99999,8", "--json"}).errorCode(), QString("input_invalid"));
+        QCOMPARE(fugue({"canvas", "resize", "canvas-nope", "--to", "0,0,8,8", "--json"}).errorCode(), QString("canvas_not_found"));
+    }
+
     void errorsAreCodedAndHelpful() {
         QCOMPARE(fugue({"canvas", "show", "canvas-nope", "--json"}).errorCode(), QString("canvas_not_found"));
         QCOMPARE(fugue({"canvas", "new", "--size", "big", "--json"}).errorCode(), QString("usage"));

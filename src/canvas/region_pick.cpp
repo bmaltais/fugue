@@ -54,13 +54,13 @@ crop::Rect snapped(const crop::Rect &rect, int multiple, const crop::Size &canva
     return out;
 }
 
-crop::Rect context(const crop::Rect &rect, int padding, const crop::Size &canvas) {
-    return rectOf(nodes::paddedBox(boxOf(rect), padding, canvas.width, canvas.height));
+crop::Rect context(const crop::Rect &rect, int padding, const crop::Size &canvas, int feather) {
+    return rectOf(nodes::paddedBox(boxOf(rect), nodes::paddingFor(padding, feather), canvas.width, canvas.height));
 }
 
 crop::Size modelSize(const crop::Rect &rect, const Settings &settings, const crop::Size &canvas) {
-    const nodes::CropSize size = nodes::regionSize(boxOf(context(rect, settings.padding, canvas)), settings.scale,
-                                                   settings.capMegapixels, settings.multiple);
+    const nodes::CropSize size = nodes::regionSize(boxOf(context(rect, settings.padding, canvas, settings.feather)), settings.scale,
+                                                   settings.capMegapixels, settings.multiple, settings.targetMegapixels);
     return {size.width, size.height};
 }
 

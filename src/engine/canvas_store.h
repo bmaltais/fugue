@@ -52,6 +52,7 @@
 #include <vector>
 
 #include "engine/canvas_tiles.h"
+#include "engine/edge_fill.h"
 #include "engine/clock.h"
 #include "engine/paint_document.h"
 #include "engine/result.h"
@@ -159,6 +160,12 @@ public:
     // Empties the canvas: ONE new revision of the head, which must be `expected`, that has the same size and one empty
     // transparent layer; Undo takes it back. {moved: false, head: <the head>} when the head is not `expected`.
     Result<Commit> clear(const QString &canvasId, const QString &expected, const QString &producer);
+    // Grows, shifts or cuts the canvas (#240, engine/canvas_resize.h): ONE new revision of the head, which must be `expected`,
+    // whose canvas is the rectangle `to` of the old one (in its pixels; x and y may be negative, and it may reach past any
+    // side), layers moved and re-tiled, and, when it grows and `fill` is not Transparent, a new bottom layer holding the new
+    // area's pre-fill (`blur` is EdgeBlur's radius). Undo takes it back. {moved: false, head: <the head>} when the head is not
+    // `expected`; input_invalid for a size past the canvas limit or a rectangle that holds none of the canvas.
+    Result<Commit> resize(const QString &canvasId, const QString &expected, const mask::IRect &to, edgefill::Mode fill, int blur, const QString &producer);
     // Every canvas of the store, newest first (by creation time, then id); one that cannot be read is left out.
     std::vector<CanvasInfo> list() const;
 

@@ -111,6 +111,10 @@ private slots:
         Values inputs{{node == "grow-mask" ? "mask" : "image", Value(handleOf(in))}};
         for (auto it = params.begin(); it != params.end(); ++it)
             inputs.insert(it.key(), Value(it.value()));
+        if (node == "pad") { // ComfyUI's Pad fills gray; the node's default is the edge-blur fill (#243)
+            inputs.insert("fill", Value(QString("gray")));
+            inputs.insert("blur", Value(0));
+        }
         const Result<Values> result = runNode("fugue/" + node, inputs);
         QVERIFY2(result.ok(), qPrintable(result.errors().value(0).message));
         const QString out = node == "grow-mask" ? "mask" : "image";
@@ -130,9 +134,69 @@ private slots:
     void padHasNoRoomToGrowPastTheLimit() {
         const Img in{4, 4, 3, std::vector<float>(48, 0.2f)};
         const Result<Values> r = runNode("fugue/pad", {{"image", Value(handleOf(in))}, {"left", 16384}, {"top", 0},
-                                                       {"right", 0}, {"bottom", 0}, {"feathering", 0}});
+                                                       {"right", 0}, {"bottom", 0}, {"feathering", 0}, {"fill", "gray"}, {"blur", 0}});
         QVERIFY(!r.ok());
         QCOMPARE(r.errors().value(0).code, QString("value_out_of_range"));
+    }
+
+    // ---- Pad's fill modes (#243): the new area holds the nearest picture, stretched, blurred, gray or transparent ----
+
+    Result<Values> pad(const Img &in, int left, int top, int right, int bottom, const QString &fill, int blur = 24) {
+        return runNode("fugue/pad", {{"image", Value(handleOf(in))}, {"left", left}, {"top", top}, {"right", right},
+                                     {"bottom", bottom}, {"feathering", 0}, {"fill", fill}, {"blur", blur}});
+    }
+
+    void padFillsTheNewAreaFromTheEdge() {
+        // A 2 x 1 picture, red then blue, with 2 px on every side.
+        const Img in{2, 1, 3, {1, 0, 0, 0, 0, 1}};
+        const Result<Values> r = pad(in, 2, 2, 2, 2, "edge");
+        QVERIFY(r.ok());
+        const Img out = imgOf(r.value().value("image").media());
+        QCOMPARE(out.w, 6);
+        QCOMPARE(out.h, 5);
+        const auto at = [&](int x, int y, int c) { return out.d[(size_t(y) * 6 + size_t(x)) * 3 + size_t(c)]; };
+        QCOMPARE(at(0, 0, 0), 1.0f); // the corners take the corner pixel
+        QCOMPARE(at(5, 4, 2), 1.0f);
+        QCOMPARE(at(2, 0, 0), 1.0f); // above the red
+        QCOMPARE(at(3, 4, 2), 1.0f); // below the blue
+        QCOMPARE(at(2, 2, 0), 1.0f); // the picture is untouched
+        QCOMPARE(at(3, 2, 2), 1.0f);
+        const Img mask = imgOf(r.value().value("mask").media());
+        QCOMPARE(mask.d[size_t(2) * 6 + 2], 0.0f); // 0 over the original, 1 over the new area
+        QCOMPARE(mask.d[0], 1.0f);
+    }
+
+    void padBlurSoftensTheEdgeFillButNotThePicture() {
+        Img in{4, 1, 3, {}};
+        for (int x = 0; x < 4; ++x)
+            for (int c = 0; c < 3; ++c)
+                in.d.push_back(x < 2 ? (c == 0 ? 1.0f : 0.0f) : (c == 2 ? 1.0f : 0.0f));
+        const Img sharp = imgOf(pad(in, 0, 6, 0, 0, "edge", 0).value().value("image").media());
+        const Img soft = imgOf(pad(in, 0, 6, 0, 0, "edge-blur", 4).value().value("image").media());
+        const auto at = [](const Img &i, int x, int y, int c) { return i.d[(size_t(y) * size_t(i.w) + size_t(x)) * 3 + size_t(c)]; };
+        QCOMPARE(at(sharp, 1, 0, 0), 1.0f);
+        QVERIFY(at(soft, 1, 0, 0) < 1.0f && at(soft, 1, 0, 0) > 0.5f);
+        for (int x = 0; x < 4; ++x)
+            for (int c = 0; c < 3; ++c)
+                QCOMPARE(at(soft, x, 6, c), at(sharp, x, 6, c)); // the picture itself
+    }
+
+    void padTransparentMakesAnAlphaChannelAndGrayIsAHalf() {
+        const Img in{2, 1, 3, {1, 0, 0, 0, 0, 1}};
+        const Img clear = imgOf(pad(in, 1, 0, 0, 0, "transparent").value().value("image").media());
+        QCOMPARE(clear.c, 4);
+        QCOMPARE(clear.d[3], 0.0f);       // the new pixel
+        QCOMPARE(clear.d[4 + 3], 1.0f);   // the picture is opaque
+        QCOMPARE(clear.d[4], 1.0f);
+        const Img gray = imgOf(pad(in, 1, 0, 0, 0, "gray").value().value("image").media());
+        QCOMPARE(gray.c, 3);
+        QCOMPARE(gray.d[0], 0.5f);
+    }
+
+    void padRefusesAFillOrBlurItDoesNotKnow() {
+        const Img in{2, 1, 3, {1, 0, 0, 0, 0, 1}};
+        QCOMPARE(pad(in, 1, 0, 0, 0, "paint").errors().value(0).code, QString("value_not_in_choices"));
+        QCOMPARE(pad(in, 1, 0, 0, 0, "edge", 9999).errors().value(0).code, QString("value_out_of_range"));
     }
 
     void blurAndSharpenRefuseARadiusOutsideTheirRange() {

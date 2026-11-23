@@ -104,6 +104,7 @@ Reply canvasAccept(const Command &command, Context &context);
 Reply canvasDrop(const Command &command, Context &context);
 Reply canvasDiff(const Command &command, Context &context);
 Reply canvasLayer(const Command &command, Context &context);
+Reply canvasResize(const Command &command, Context &context);
 Reply canvasUndo(const Command &command, Context &context);
 Reply canvasRedo(const Command &command, Context &context);
 

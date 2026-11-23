@@ -21,8 +21,14 @@ Pixels boxMask(const CropBox &box, int canvasWidth, int canvasHeight);
 // The size a region is redrawn at (Krita's resolution multiplier and pixel cap): the box times
 // `scale`, brought down to `capMegapixels` (0: no cap) keeping its shape, each side a multiple of
 // `multiple` (nearest, one step at least; rounded down when the cap bites, so it is never passed)
-// and none above kMaxCropSide.
-CropSize regionSize(const CropBox &box, double scale, double capMegapixels, int multiple);
+// and none above kMaxCropSide. With `targetMegapixels` above 0 the size is Crop to Mask's (cropSizeFor:
+// up and down to about that many megapixels, `scale` unused) and the cap still only brings it down.
+CropSize regionSize(const CropBox &box, double scale, double capMegapixels, int multiple, double targetMegapixels = 0);
+
+// The padding Canvas Region really uses: `padding`, raised to `feather` + kMinBlendRoom so Canvas Write's
+// blend (which stops at the region's box) has room to fade out instead of ending in a hard edge (#242).
+constexpr int kMinBlendRoom = 16; // Canvas Write's default blend
+int paddingFor(int padding, int feather);
 
 // The layer Canvas Write adds: RGBA, the picture's size, empty outside `box`. `redrawn` (any size)
 // is resized to the box, and its alpha is `mask` (the picture's size) feathered outward by `blend`
