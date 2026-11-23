@@ -154,6 +154,22 @@ private slots:
         file.close();
         const ImportedPicture refused = pictureFromFile(m_dir.filePath("huge.png"));
         QVERIFY(!refused.ok());
+        QVERIFY2(refused.problem.contains("40000"), qPrintable(refused.problem)); // said from the header, nothing decoded
+        // The size comes from the decoder's own header for every format (a WebP, which Qt's reader may not size), and the cap is the decoder's.
+        const MaskPaint webpPixels = solid(30, 20, {1, 2, 3, 255});
+        const QByteArray webp = webpPixels.toPicture("webp").value();
+        int w = 0, h = 0;
+        QVERIFY(MaskPaint::pictureSize(webp, &w, &h));
+        QCOMPARE(w, 30);
+        QCOMPARE(h, 20);
+        QVERIFY(!MaskPaint::fromPicture(webp, 599)); // 600 pixels: one over the cap, refused before decoding
+        QVERIFY(MaskPaint::fromPicture(webp, 600));
+        QVERIFY(!MaskPaint::pictureSize("not a picture", &w, &h));
+        QFile webpFile(m_dir.filePath("p.webp"));
+        QVERIFY(webpFile.open(QIODevice::WriteOnly));
+        webpFile.write(webp);
+        webpFile.close();
+        QVERIFY(pictureFromFile(m_dir.filePath("p.webp")).ok());
     }
 
     // ---- #236 slice 2: transforms ----

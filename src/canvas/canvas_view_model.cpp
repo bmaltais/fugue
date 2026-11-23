@@ -1,6 +1,9 @@
 #include "canvas/canvas_view_model.h"
 
+#include <QClipboard>
 #include <QDateTime>
+#include <QGuiApplication>
+#include <QMimeData>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -768,14 +771,16 @@ QVariantMap CanvasViewModel::layerBox(int position) const {
                        {"sourceWidth", placement->sourceWidth}, {"sourceHeight", placement->sourceHeight}, {"corners", corners}};
 }
 
-bool CanvasViewModel::applyTransform(int position, const canvas::LayerTransform &placement) {
-    commitMask();
+bool CanvasViewModel::applyTransform(int position, const canvas::LayerTransform &placement, const canvas::CurrentPlacement &seen) {
     if (!layersEditable())
         return false;
-    return land(store().transformLayer(canvasId(), revisionB(), position, placement, QStringLiteral("canvas-view:transform")), {position});
+    // `seen` is the placement the caller worked from; the store refuses when the layer is no longer that (a stale guard).
+    const canvas::SeenPlacement guard{seen.transform, seen.original, seen.sourceWidth, seen.sourceHeight};
+    return land(store().transformLayer(canvasId(), revisionB(), position, placement, QStringLiteral("canvas-view:transform"), &guard), {position});
 }
 
 bool CanvasViewModel::beginTransform(int position) {
+    commitMask(); // the box is of the revision after any stroke not stored yet
     QString why;
     const Result<canvas::CurrentPlacement> now = placementOf(position, &why);
     if (!now) {
@@ -854,6 +859,7 @@ void CanvasViewModel::endTransform() {
 }
 
 bool CanvasViewModel::transformLayer(int position, const QVariantMap &spec) {
+    commitMask(); // a stroke not stored yet is a revision of its own: the placement below is read from the revision after it
     QString why;
     const Result<canvas::CurrentPlacement> now = placementOf(position, &why);
     if (!now) {
@@ -882,30 +888,33 @@ bool CanvasViewModel::transformLayer(int position, const QVariantMap &spec) {
         fail({makeError(QStringLiteral("input_invalid"), tr("The layer cannot be placed there: %1").arg(problem))});
         return false;
     }
-    return applyTransform(position, canvas::snappedToPixels(t));
+    return applyTransform(position, canvas::snappedToPixels(t), now.value());
 }
 
 bool CanvasViewModel::flipLayer(int position, bool horizontal) {
+    commitMask(); // a stroke not stored yet is a revision of its own: the placement below is read from the revision after it
     QString why;
     const Result<canvas::CurrentPlacement> now = placementOf(position, &why);
     if (!now) {
         fail({makeError(QStringLiteral("input_invalid"), why)});
         return false;
     }
-    return applyTransform(position, canvas::flippedOnScreen(now->transform, horizontal));
+    return applyTransform(position, canvas::flippedOnScreen(now->transform, horizontal), now.value());
 }
 
 bool CanvasViewModel::turnLayer(int position, bool clockwise) {
+    commitMask(); // a stroke not stored yet is a revision of its own: the placement below is read from the revision after it
     QString why;
     const Result<canvas::CurrentPlacement> now = placementOf(position, &why);
     if (!now) {
         fail({makeError(QStringLiteral("input_invalid"), why)});
         return false;
     }
-    return applyTransform(position, canvas::turnedQuarter(now->transform, clockwise));
+    return applyTransform(position, canvas::turnedQuarter(now->transform, clockwise), now.value());
 }
 
 bool CanvasViewModel::moveLayerBy(int position, double dx, double dy) {
+    commitMask(); // a stroke not stored yet is a revision of its own: the placement below is read from the revision after it
     QString why;
     const Result<canvas::CurrentPlacement> now = placementOf(position, &why);
     if (!now) {
@@ -915,7 +924,12 @@ bool CanvasViewModel::moveLayerBy(int position, double dx, double dy) {
     canvas::LayerTransform t = now->transform;
     t.cx += std::round(dx);
     t.cy += std::round(dy);
-    return applyTransform(position, t);
+    return applyTransform(position, t, now.value());
+}
+
+bool CanvasViewModel::clipboardHasPicture() const {
+    const QClipboard *board = QGuiApplication::instance() ? QGuiApplication::clipboard() : nullptr;
+    return board && board->mimeData() && board->mimeData()->hasImage();
 }
 
 bool CanvasViewModel::pasteLayer(double cx, double cy) {

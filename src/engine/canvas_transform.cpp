@@ -70,8 +70,9 @@ Taps axisTaps(int src, int dst, ResampleFilter filter, bool flip, int from, int 
     return out;
 }
 
-// The scaled picture (W x H, flipped) over `rect`, premultiplied float RGBA, row after row.
-std::vector<float> scaledWindow(const mask::MaskPaint &src, int W, int H, const LayerTransform &t, const Rect &rect) {
+// The scaled picture (W x H, flipped) over `rect`, premultiplied float RGBA, row after row. The source rows are read one at a time and added
+// into the output rows that use them, so the memory is the output rectangle and one line, however much the picture is shrunk.
+std::vector<float> scaledWindow(const mask::MaskPaint &src, int W, int H, const LayerTransform &t, const Rect &rect, size_t *peak) {
     std::vector<float> out(size_t(rect.w) * size_t(rect.h) * 4, 0.0f);
     if (rect.empty())
         return out;
@@ -83,26 +84,35 @@ std::vector<float> scaledWindow(const mask::MaskPaint &src, int W, int H, const 
             rmin = std::min(rmin, tap.index);
             rmax = std::max(rmax, tap.index);
         }
+    struct Use {
+        int row;
+        float weight;
+    };
+    std::vector<std::vector<Use>> users(size_t(rmax - rmin + 1)); // for each source row, the output rows that take it
+    for (int j = 0; j < rect.h; ++j)
+        for (const Tap &tap : rows[size_t(j)])
+            users[size_t(tap.index - rmin)].push_back({j, tap.weight});
     const std::vector<uint8_t> &px = src.pixels();
-    std::vector<float> across(size_t(rmax - rmin + 1) * size_t(rect.w) * 4, 0.0f); // each needed source row, scaled across
+    std::vector<float> line(size_t(rect.w) * 4);
+    if (peak)
+        *peak = std::max(*peak, (out.size() + line.size()) * sizeof(float));
     for (int r = rmin; r <= rmax; ++r) {
-        float *line = &across[size_t(r - rmin) * size_t(rect.w) * 4];
+        if (users[size_t(r - rmin)].empty())
+            continue;
+        std::fill(line.begin(), line.end(), 0.0f);
         for (int c = 0; c < rect.w; ++c)
             for (const Tap &tap : cols[size_t(c)]) {
                 const uint8_t *p = &px[(size_t(r) * size_t(src.width()) + size_t(tap.index)) * 4];
                 const float a = p[3] / 255.0f;
-                line[c * 4 + 0] += tap.weight * p[0] / 255.0f * a;
-                line[c * 4 + 1] += tap.weight * p[1] / 255.0f * a;
-                line[c * 4 + 2] += tap.weight * p[2] / 255.0f * a;
-                line[c * 4 + 3] += tap.weight * a;
+                line[size_t(c) * 4 + 0] += tap.weight * p[0] / 255.0f * a;
+                line[size_t(c) * 4 + 1] += tap.weight * p[1] / 255.0f * a;
+                line[size_t(c) * 4 + 2] += tap.weight * p[2] / 255.0f * a;
+                line[size_t(c) * 4 + 3] += tap.weight * a;
             }
-    }
-    for (int j = 0; j < rect.h; ++j) {
-        float *dest = &out[size_t(j) * size_t(rect.w) * 4];
-        for (const Tap &tap : rows[size_t(j)]) {
-            const float *line = &across[size_t(tap.index - rmin) * size_t(rect.w) * 4];
+        for (const Use &use : users[size_t(r - rmin)]) {
+            float *dest = &out[size_t(use.row) * size_t(rect.w) * 4];
             for (int k = 0; k < rect.w * 4; ++k)
-                dest[k] += tap.weight * line[k];
+                dest[k] += use.weight * line[size_t(k)];
         }
     }
     return out;
@@ -189,13 +199,14 @@ QString transformProblem(const LayerTransform &t) {
     return {};
 }
 
-Result<mask::MaskPaint> renderPlaced(const mask::MaskPaint &source, const LayerTransform &requested, int canvasWidth, int canvasHeight) {
+Result<mask::MaskPaint> renderPlaced(const mask::MaskPaint &source, const LayerTransform &requested, int canvasWidth, int canvasHeight, const RenderOptions &options) {
     if (source.channels() != 4)
         return invalid(QStringLiteral("Only a color layer is placed."));
     if (const QString why = transformProblem(requested); !why.isEmpty())
         return invalid(why);
     const LayerTransform t = requested.normalized();
     const int W = int(std::lround(t.width)), H = int(std::lround(t.height));
+    const int tile = std::max(16, options.tile);
     std::vector<uint8_t> out(size_t(canvasWidth) * size_t(canvasHeight) * 4, 0);
     const auto finish = [&] { return mask::MaskPaint(canvasWidth, canvasHeight, out, 4); };
     const int quarters = quarterTurns(t.angle);
@@ -209,15 +220,18 @@ Result<mask::MaskPaint> renderPlaced(const mask::MaskPaint &source, const LayerT
         return finish();
     }
 
-    if (quarters == 0) { // scaled and not turned: only the part on the canvas is computed
+    // The rest is drawn in tiles of the canvas, each from the window of the scaled picture it needs, so the memory is a tile's, not the picture's.
+    if (quarters == 0) { // scaled and not turned
         const int left = int(std::lround(t.cx - W / 2.0)), top = int(std::lround(t.cy - H / 2.0));
         const Rect show{std::max(0, left) - left, std::max(0, top) - top, std::min(canvasWidth, left + W) - std::max(0, left), std::min(canvasHeight, top + H) - std::max(0, top)};
-        if (show.empty())
-            return finish();
-        const std::vector<float> scaled = scaledWindow(source, W, H, t, show);
-        for (int j = 0; j < show.h; ++j)
-            for (int i = 0; i < show.w; ++i)
-                store(&scaled[(size_t(j) * size_t(show.w) + size_t(i)) * 4], &out[(size_t(show.y + top + j) * size_t(canvasWidth) + size_t(show.x + left + i)) * 4]);
+        for (int ty = show.y; ty < show.y + show.h; ty += tile)
+            for (int tx = show.x; tx < show.x + show.w; tx += tile) {
+                const Rect part{tx, ty, std::min(tile, show.x + show.w - tx), std::min(tile, show.y + show.h - ty)};
+                const std::vector<float> scaled = scaledWindow(source, W, H, t, part, options.peakBytes);
+                for (int j = 0; j < part.h; ++j)
+                    for (int i = 0; i < part.w; ++i)
+                        store(&scaled[(size_t(j) * size_t(part.w) + size_t(i)) * 4], &out[(size_t(part.y + top + j) * size_t(canvasWidth) + size_t(part.x + left + i)) * 4]);
+            }
         return finish();
     }
 
@@ -225,7 +239,7 @@ Result<mask::MaskPaint> renderPlaced(const mask::MaskPaint &source, const LayerT
     const double angle = t.angle * kPi / 180.0;
     double cosA = std::cos(angle), sinA = std::sin(angle);
     if (quarters > 0) { // a quarter turn is exact
-        cosA = quarters == 0 ? 1 : quarters == 2 ? -1 : 0;
+        cosA = quarters == 2 ? -1 : 0;
         sinA = quarters == 1 ? 1 : quarters == 3 ? -1 : 0;
     }
     const auto back = [&](double x, double y, double *px, double *py) { // canvas point -> point in the scaled picture
@@ -233,74 +247,78 @@ Result<mask::MaskPaint> renderPlaced(const mask::MaskPaint &source, const LayerT
         *px = dx * cosA + dy * sinA + W / 2.0;
         *py = -dx * sinA + dy * cosA + H / 2.0;
     };
-    double minX = 1e300, minY = 1e300, maxX = -1e300, maxY = -1e300;
-    for (const double x : {0.0, double(canvasWidth)})
-        for (const double y : {0.0, double(canvasHeight)}) {
-            double px, py;
-            back(x, y, &px, &py);
-            minX = std::min(minX, px);
-            maxX = std::max(maxX, px);
-            minY = std::min(minY, py);
-            maxY = std::max(maxY, py);
-        }
     const int pad = t.filter == ResampleFilter::Nearest ? 1 : int(supportOf(t.filter)) + 1;
-    const int rx0 = std::max(0, int(std::floor(minX)) - pad), ry0 = std::max(0, int(std::floor(minY)) - pad);
-    const int rx1 = std::min(W, int(std::ceil(maxX)) + pad), ry1 = std::min(H, int(std::ceil(maxY)) + pad);
-    const Rect need{rx0, ry0, rx1 - rx0, ry1 - ry0};
-    if (need.empty())
-        return finish();
-    const std::vector<float> scaled = scaledWindow(source, W, H, t, need);
-    const auto at = [&](int x, int y, int k) { // clamped to the window
-        x = std::clamp(x, need.x, need.x + need.w - 1) - need.x;
-        y = std::clamp(y, need.y, need.y + need.h - 1) - need.y;
-        return scaled[(size_t(y) * size_t(need.w) + size_t(x)) * 4 + size_t(k)];
-    };
     const double reach = t.filter == ResampleFilter::Nearest ? 0 : supportOf(t.filter);
-    for (int y = 0; y < canvasHeight; ++y)
-        for (int x = 0; x < canvasWidth; ++x) {
-            double px, py;
-            back(x + 0.5, y + 0.5, &px, &py);
-            // How much of this canvas pixel the picture covers: a soft one pixel edge, hard for nearest.
-            const double ex = std::min(px, W - px), ey = std::min(py, H - py);
-            const bool hardEdge = t.filter == ResampleFilter::Nearest || quarters > 0; // a quarter turn lands on pixels: no edge to soften
-            if (ex < (hardEdge ? 0.0 : -0.5) || ey < (hardEdge ? 0.0 : -0.5))
-                continue;
-            const double cover = hardEdge ? 1.0 : std::clamp(ex + 0.5, 0.0, 1.0) * std::clamp(ey + 0.5, 0.0, 1.0);
-            float p[4] = {0, 0, 0, 0};
-            if (t.filter == ResampleFilter::Nearest) {
-                for (int k = 0; k < 4; ++k)
-                    p[k] = at(int(std::floor(px)), int(std::floor(py)), k);
-            } else {
-                const double sx = px - 0.5, sy = py - 0.5;
-                const int x0 = int(std::floor(sx)) - int(reach) + 1, x1 = int(std::floor(sx)) + int(reach);
-                const int y0 = int(std::floor(sy)) - int(reach) + 1, y1 = int(std::floor(sy)) + int(reach);
-                double wsum = 0;
-                for (int yy = y0; yy <= y1; ++yy) {
-                    const double wy = kernelOf(t.filter, sy - yy);
-                    for (int xx = x0; xx <= x1; ++xx) {
-                        const double w = wy * kernelOf(t.filter, sx - xx);
-                        if (w == 0)
-                            continue;
-                        wsum += w;
-                        for (int k = 0; k < 4; ++k)
-                            p[k] += float(w) * at(xx, yy, k);
-                    }
+    const bool hardEdge = t.filter == ResampleFilter::Nearest || quarters > 0; // a quarter turn lands on pixels: no edge to soften
+    for (int cy0 = 0; cy0 < canvasHeight; cy0 += tile)
+        for (int cx0 = 0; cx0 < canvasWidth; cx0 += tile) {
+            const int cx1 = std::min(canvasWidth, cx0 + tile), cy1 = std::min(canvasHeight, cy0 + tile);
+            double minX = 1e300, minY = 1e300, maxX = -1e300, maxY = -1e300;
+            for (const double x : {double(cx0), double(cx1)})
+                for (const double y : {double(cy0), double(cy1)}) {
+                    double px, py;
+                    back(x, y, &px, &py);
+                    minX = std::min(minX, px);
+                    maxX = std::max(maxX, px);
+                    minY = std::min(minY, py);
+                    maxY = std::max(maxY, py);
                 }
-                if (wsum != 0)
+            const int rx0 = std::max(0, int(std::floor(minX)) - pad), ry0 = std::max(0, int(std::floor(minY)) - pad);
+            const int rx1 = std::min(W, int(std::ceil(maxX)) + pad), ry1 = std::min(H, int(std::ceil(maxY)) + pad);
+            const Rect need{rx0, ry0, rx1 - rx0, ry1 - ry0};
+            if (need.empty())
+                continue;
+            const std::vector<float> scaled = scaledWindow(source, W, H, t, need, options.peakBytes);
+            const auto at = [&](int x, int y, int k) { // clamped to the window
+                x = std::clamp(x, need.x, need.x + need.w - 1) - need.x;
+                y = std::clamp(y, need.y, need.y + need.h - 1) - need.y;
+                return scaled[(size_t(y) * size_t(need.w) + size_t(x)) * 4 + size_t(k)];
+            };
+            for (int y = cy0; y < cy1; ++y)
+                for (int x = cx0; x < cx1; ++x) {
+                    double px, py;
+                    back(x + 0.5, y + 0.5, &px, &py);
+                    // How much of this canvas pixel the picture covers: a soft one pixel edge, hard for nearest and quarter turns.
+                    const double ex = std::min(px, W - px), ey = std::min(py, H - py);
+                    if (ex < (hardEdge ? 0.0 : -0.5) || ey < (hardEdge ? 0.0 : -0.5))
+                        continue;
+                    const double cover = hardEdge ? 1.0 : std::clamp(ex + 0.5, 0.0, 1.0) * std::clamp(ey + 0.5, 0.0, 1.0);
+                    float p[4] = {0, 0, 0, 0};
+                    if (t.filter == ResampleFilter::Nearest) {
+                        for (int k = 0; k < 4; ++k)
+                            p[k] = at(int(std::floor(px)), int(std::floor(py)), k);
+                    } else {
+                        const double sx = px - 0.5, sy = py - 0.5;
+                        const int x0 = int(std::floor(sx)) - int(reach) + 1, x1 = int(std::floor(sx)) + int(reach);
+                        const int y0 = int(std::floor(sy)) - int(reach) + 1, y1 = int(std::floor(sy)) + int(reach);
+                        double wsum = 0;
+                        for (int yy = y0; yy <= y1; ++yy) {
+                            const double wy = kernelOf(t.filter, sy - yy);
+                            for (int xx = x0; xx <= x1; ++xx) {
+                                const double w = wy * kernelOf(t.filter, sx - xx);
+                                if (w == 0)
+                                    continue;
+                                wsum += w;
+                                for (int k = 0; k < 4; ++k)
+                                    p[k] += float(w) * at(xx, yy, k);
+                            }
+                        }
+                        if (wsum != 0)
+                            for (float &v : p)
+                                v = float(v / wsum);
+                        p[3] = std::clamp(p[3], 0.0f, 1.0f); // a sharp kernel overshoots: color stays within its alpha
+                        for (int k = 0; k < 3; ++k)
+                            p[k] = std::clamp(p[k], 0.0f, p[3]);
+                    }
                     for (float &v : p)
-                        v = float(v / wsum);
-                p[3] = std::clamp(p[3], 0.0f, 1.0f); // a sharp kernel overshoots: color stays within its alpha
-                for (int k = 0; k < 3; ++k)
-                    p[k] = std::clamp(p[k], 0.0f, p[3]);
-            }
-            for (float &v : p)
-                v = float(v * cover);
-            store(p, &out[(size_t(y) * size_t(canvasWidth) + size_t(x)) * 4]);
+                        v = float(v * cover);
+                    store(p, &out[(size_t(y) * size_t(canvasWidth) + size_t(x)) * 4]);
+                }
         }
     return finish();
 }
 
-Result<mask::MaskPaint> renderPlacedMask(const mask::MaskPaint &source, const LayerTransform &transform, int canvasWidth, int canvasHeight) {
+Result<mask::MaskPaint> renderPlacedMask(const mask::MaskPaint &source, const LayerTransform &transform, int canvasWidth, int canvasHeight, const RenderOptions &options) {
     if (source.channels() != 1)
         return invalid(QStringLiteral("Only a one-channel mask is placed as a mask."));
     std::vector<uint8_t> color(size_t(source.width()) * size_t(source.height()) * 4);
@@ -308,7 +326,7 @@ Result<mask::MaskPaint> renderPlacedMask(const mask::MaskPaint &source, const La
         color[i * 4] = color[i * 4 + 1] = color[i * 4 + 2] = source.pixels()[i];
         color[i * 4 + 3] = 255;
     }
-    const Result<mask::MaskPaint> drawn = renderPlaced(mask::MaskPaint(source.width(), source.height(), color, 4), transform, canvasWidth, canvasHeight);
+    const Result<mask::MaskPaint> drawn = renderPlaced(mask::MaskPaint(source.width(), source.height(), color, 4), transform, canvasWidth, canvasHeight, options);
     if (!drawn)
         return drawn;
     std::vector<uint8_t> out(size_t(canvasWidth) * size_t(canvasHeight));
@@ -404,7 +422,7 @@ Result<CurrentPlacement> currentPlacement(const LayerRecord &layer, int canvasWi
     return out;
 }
 
-Result<Tree> transformedTree(const Tree &tree, int position, const LayerTransform &requested, const TileReader &read, const TileSink &consume) {
+Result<Tree> transformedTree(const Tree &tree, int position, const LayerTransform &requested, const TileReader &read, const TileSink &consume, const SeenPlacement *seen) {
     if (position < 0 || position >= int(tree.layers.size()))
         return invalid(QStringLiteral("There is no layer %1: the revision has %2.").arg(position).arg(tree.layers.size()));
     const LayerRecord &layer = tree.layers[size_t(position)];
@@ -415,6 +433,12 @@ Result<Tree> transformedTree(const Tree &tree, int position, const LayerTransfor
     if (const QString why = transformProblem(requested); !why.isEmpty())
         return invalid(why);
     const LayerTransform target = requested.normalized();
+    if (seen) {
+        const bool current = hasCurrentOriginal(layer);
+        if (current != seen->original ||
+            (current && (!(layer.source->transform == seen->transform) || layer.source->width != seen->sourceWidth || layer.source->height != seen->sourceHeight)))
+            return invalid(QStringLiteral("%1 changed since it was looked at: nothing was changed.").arg(layer.name), QStringLiteral("Look at it again and do it once more."));
+    }
     if (hasCurrentOriginal(layer) && layer.source->transform == target)
         return tree;
 

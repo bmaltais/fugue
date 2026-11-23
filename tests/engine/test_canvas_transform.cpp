@@ -194,6 +194,44 @@ private slots:
         QVERIFY2(timer.elapsed() < 3000, qPrintable(QString::number(timer.elapsed())));
     }
 
+    // A render is drawn in tiles of the canvas: any tile size gives the same pixels as one whole piece, with every filter, scaled, turned or both.
+    void tilesGiveTheSamePixelsAsOneWholeRender() {
+        const MaskPaint src = ramp(37, 29);
+        for (const ResampleFilter filter : {ResampleFilter::Lanczos, ResampleFilter::Bicubic, ResampleFilter::Nearest})
+            for (const double angle : {0.0, 30.0, 90.0, -143.0})
+                for (const double scale : {0.4, 1.0, 2.7}) {
+                    const LayerTransform t = place(80, 70, 41, 33, 37 * scale, 29 * scale, angle, filter);
+                    RenderOptions small;
+                    small.tile = 16;
+                    RenderOptions whole;
+                    whole.tile = 100000;
+                    const MaskPaint a = renderPlaced(src, t, 80, 70, small).value(), b = renderPlaced(src, t, 80, 70, whole).value();
+                    QVERIFY2(same(a, b), qPrintable(QString("filter %1 angle %2 scale %3").arg(int(filter)).arg(angle).arg(scale)));
+                }
+        // The mask goes through the same tiles.
+        const MaskPaint gray(20, 10, std::vector<uint8_t>(200, 77), 1);
+        RenderOptions small;
+        small.tile = 16;
+        QVERIFY(same(renderPlacedMask(gray, place(50, 40, 25, 20, 40, 20, 20), 50, 40, small).value(), renderPlacedMask(gray, place(50, 40, 25, 20, 40, 20, 20), 50, 40).value()));
+    }
+
+    // What a render holds besides the canvas's own bytes is a tile's buffers: a big picture shrunk, or scaled up and turned, stays small.
+    void theMemoryOfARenderIsATilesNotThePictures() {
+        const MaskPaint big = solid(3000, 2000, {10, 120, 230, 255});
+        size_t peak = 0;
+        RenderOptions options;
+        options.peakBytes = &peak;
+        // 2x up and turned 45 degrees: the scaled picture would be 6000 x 4000 x 16 bytes = 384 MB whole.
+        const MaskPaint turned = renderPlaced(big, place(600, 500, 300, 250, 6000, 4000, 45), 600, 500, options).value();
+        QCOMPARE(at(turned, 300, 250), (Rgba{10, 120, 230, 255}));
+        QVERIFY2(peak < size_t(8) << 20, qPrintable(QString::number(peak)));
+        // 8x down: the source's rows are taken one at a time, not held.
+        peak = 0;
+        const MaskPaint small = renderPlaced(big, place(400, 300, 190, 125, 375, 250), 400, 300, options).value();
+        QCOMPARE(at(small, 190, 125), (Rgba{10, 120, 230, 255}));
+        QVERIFY2(peak < size_t(2) << 20, qPrintable(QString::number(peak)));
+    }
+
     void aPlacementThatCannotBeDrawnIsRefusedInWords() {
         const MaskPaint src = solid(4, 4, {1, 1, 1, 255});
         QVERIFY(!renderPlaced(src, place(10, 10, 5, 5, 0, 4), 10, 10));
@@ -232,6 +270,30 @@ private slots:
         // Undo takes each step back.
         QVERIFY(s.undo(c.id, back.revision.id).value().moved);
         QCOMPARE(s.info(c.id)->head, shrunk.revision.id);
+    }
+
+    // A placement read from one revision is never applied to another: the store refuses when the layer is not what the caller saw.
+    void aTransformFromAStalePlacementIsRefused() {
+        CanvasStore s = store();
+        const CanvasInfo c = made(s, 100, 80);
+        const Commit pasted = s.pasteLayer(c.id, c.head, solid(30, 20, {9, 9, 9, 255}), 50, 40, -1, {}, "p").value();
+        const Tree t = s.loadTree(c.id, pasted.revision.id).value();
+        const SeenPlacement seen{t.layers[1].source->transform, true, 30, 20};
+        LayerTransform moved = seen.transform;
+        moved.cx += 5;
+        // Another transform lands first (a second window, a run): the placement the caller saw is old.
+        const Commit other = s.transformLayer(c.id, pasted.revision.id, 1, place(0, 0, 60, 40, 30, 20, 90), "t").value();
+        QVERIFY(other.move.moved);
+        const Result<Commit> late = s.transformLayer(c.id, other.revision.id, 1, moved, "t", &seen);
+        QVERIFY(!late);
+        QVERIFY(late.error().message.contains("changed since"));
+        QCOMPARE(s.info(c.id)->head, other.revision.id);
+        // The current one is accepted, and a layer with no original is not what a caller that saw one looked at.
+        const Tree now = s.loadTree(c.id, other.revision.id).value();
+        const SeenPlacement fresh{now.layers[1].source->transform, true, 30, 20};
+        QVERIFY(s.transformLayer(c.id, other.revision.id, 1, moved, "t", &fresh)->move.moved);
+        const SeenPlacement none{moved, false, 30, 20};
+        QVERIFY(!s.transformLayer(c.id, s.info(c.id)->head, 1, place(0, 0, 10, 10, 30, 20), "t", &none));
     }
 
     void aBiggerPictureScaledDownShowsAllOfIt() {
@@ -341,15 +403,29 @@ private slots:
         QVERIFY(!s.transformLayer(c.id, grouped.revision.id, 0, place(4, 4, 0, 0, 0, 0), "t")); // bad numbers too
     }
 
-    void aCanvasGrownOnTheLeftCarriesTheOriginalAlong() {
+    // Growing the canvas draws the layer again from its original, so the part that stuck out of the canvas shows.
+    void aCanvasGrownRevealsThePartOfAPictureThatStuckOut() {
         CanvasStore s = store();
         const CanvasInfo c = made(s, 100, 80);
-        const Commit pasted = s.pasteLayer(c.id, c.head, solid(30, 20, {9, 9, 9, 255}), 50, 40, -1, {}, "p").value();
+        const MaskPaint big = ramp(200, 150); // pixel (x, y) is (x * 10, y * 10, 7)
+        const Commit pasted = s.pasteLayer(c.id, c.head, big, 50, 40, -1, {}, "p").value(); // its corner is at (-50, -35)
+        QCOMPARE(at(shown(s, c.id, pasted.revision.id, 1), 0, 0), (Rgba{uint8_t(50 * 10 % 256), uint8_t(35 * 10 % 256), 7, 255})); // picture pixel (50, 35)
         const double before = s.loadTree(c.id, pasted.revision.id)->layers[1].source->transform.cx;
-        const Commit grown = s.resize(c.id, pasted.revision.id, IRect{-10, 0, 110, 80}, edgefill::Mode::Transparent, 0, "canvas-view:resize").value();
+        const Commit grown = s.resize(c.id, pasted.revision.id, IRect{-50, -35, 200, 150}, edgefill::Mode::Transparent, 0, "canvas-view:resize").value();
         const Tree t = s.loadTree(c.id, grown.revision.id).value();
         QVERIFY(hasCurrentOriginal(t.layers[1]));
-        QCOMPARE(t.layers[1].source->transform.cx, before + 10);
+        QCOMPARE(t.layers[1].source->transform.cx, before + 50);
+        const MaskPaint now = shown(s, c.id, grown.revision.id, 1);
+        QCOMPARE(now.width(), 200);
+        QCOMPARE(at(now, 0, 0), (Rgba{0, 0, 7, 255}));     // picture pixel (0, 0): was off the canvas
+        QCOMPARE(at(now, 199, 149).a, uint8_t(255));        // and its far corner
+        QCOMPARE(at(now, 60, 40), at(big, 60, 40));
+        // The same placement again is the layer as it is: nothing to write; a different one starts from the original.
+        QVERIFY(!s.transformLayer(c.id, grown.revision.id, 1, t.layers[1].source->transform, "t")->move.moved);
+        // Shrinking the canvas and growing it back keeps the picture whole too.
+        const Commit cut = s.resize(c.id, grown.revision.id, IRect{60, 40, 40, 30}, edgefill::Mode::Transparent, 0, "canvas-view:resize").value();
+        const Commit again = s.resize(c.id, cut.revision.id, IRect{-60, -40, 200, 150}, edgefill::Mode::Transparent, 0, "canvas-view:resize").value();
+        QVERIFY(same(shown(s, c.id, again.revision.id, 1), now));
     }
 
     void thePlacementsAreStoredToAThousandthSoEqualOnesAreEqual() {

@@ -564,12 +564,25 @@ Result<MaskPaint> MaskPaint::fromPng(const QByteArray &bytes) {
     }
 }
 
-Result<MaskPaint> MaskPaint::fromPicture(const QByteArray &bytes) {
+bool MaskPaint::pictureSize(const QByteArray &bytes, int *width, int *height) {
+    if (!initVips())
+        return false;
+    try {
+        const vips::VImage image = vips::VImage::new_from_buffer(bytes.constData(), size_t(bytes.size()), ""); // lazy: the header only
+        *width = image.width();
+        *height = image.height();
+        return true;
+    } catch (const vips::VError &) {
+        return false;
+    }
+}
+
+Result<MaskPaint> MaskPaint::fromPicture(const QByteArray &bytes, qint64 maxPixels) {
     if (!initVips())
         return vipsUnavailable();
     try {
         vips::VImage image = vips::VImage::new_from_buffer(bytes.constData(), size_t(bytes.size()), "");
-        if (image.width() < 1 || image.height() < 1 || double(image.width()) * image.height() > 268435456.0)
+        if (image.width() < 1 || image.height() < 1 || double(image.width()) * image.height() > double(std::min<qint64>(maxPixels, 268435456)))
             return makeError(QStringLiteral("media_unreadable"), QStringLiteral("This picture is empty or too large."));
         if (image.format() == VIPS_FORMAT_USHORT)
             image = image.linear(1.0 / 257.0, 0.5);

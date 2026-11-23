@@ -4,7 +4,6 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QGuiApplication>
-#include <QImageReader>
 #include <QMimeData>
 #include <QObject>
 #include <QUrl>
@@ -12,6 +11,7 @@
 #include <cstring>
 
 #include "engine/canvas_transform.h"
+#include "engine/paint_file.h"
 
 namespace fugue {
 
@@ -75,15 +75,20 @@ ImportedPicture pictureFromFile(const QString &pathOrUrl) {
         return refused(QObject::tr("%1 is not there.").arg(info.fileName()));
     if (info.size() > maxPictureFileBytes)
         return refused(QObject::tr("%1 is larger than %2 MB.").arg(info.fileName()).arg(maxPictureFileBytes >> 20));
-    // The size is read from the header first, so a picture that would not fit is never decoded.
-    QImageReader reader(path);
-    if (const QSize size = reader.size(); size.isValid())
-        if (const QString why = sizeProblem(size.width(), size.height()); !why.isEmpty())
-            return refused(why);
+    // The file is read ONCE (what is checked is what is decoded), up to its cap; the size comes from the picture's own header (libvips, the
+    // decoder: whatever format it is), and a picture past what a canvas holds is refused before a single pixel is decoded.
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly))
         return refused(QObject::tr("%1 could not be opened.").arg(info.fileName()));
-    const Result<mask::MaskPaint> decoded = mask::MaskPaint::fromPicture(file.readAll());
+    const QByteArray bytes = file.read(maxPictureFileBytes + 1);
+    if (bytes.size() > maxPictureFileBytes)
+        return refused(QObject::tr("%1 is larger than %2 MB.").arg(info.fileName()).arg(maxPictureFileBytes >> 20));
+    int width = 0, height = 0;
+    if (!mask::MaskPaint::pictureSize(bytes, &width, &height))
+        return refused(QObject::tr("%1 could not be read as a picture.").arg(info.fileName()));
+    if (const QString why = sizeProblem(width, height); !why.isEmpty())
+        return refused(why);
+    const Result<mask::MaskPaint> decoded = mask::MaskPaint::fromPicture(bytes, mask::paintFileMaxPixels);
     if (!decoded)
         return refused(QObject::tr("%1 could not be read as a picture.").arg(info.fileName()));
     if (const QString why = sizeProblem(decoded->width(), decoded->height()); !why.isEmpty())

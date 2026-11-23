@@ -3,7 +3,10 @@
 // it; Ctrl+T opens the box with its handles and numbers, nothing is stored until Enter (one revision), Escape leaves the layer as
 // it was; a group is refused in words.
 
+#include <QClipboard>
 #include <QDir>
+#include <QGuiApplication>
+#include <QImage>
 #include <QQuickStyle>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -61,11 +64,6 @@ MaskPaint solid(int w, int h, Rgba c) {
     MaskPaint m(w, h, 4);
     m.fill(c);
     return m;
-}
-
-QByteArray withRegion(const QString &canvas) {
-    return QStringLiteral(R"({"fugue": 1, "graph": {"nodes": {"region": {"type": "fugue/canvas-region", "version": "1.2.0", "inputs": {"canvas": "%1"}}}},
-  "layout": {"nodes": {"region": {"pos": [20, 20]}}, "view": {"center": [200, 200], "zoom": 1}}})").arg(canvas).toUtf8();
 }
 
 } // namespace
@@ -223,6 +221,36 @@ private slots:
         QCOMPARE(t.height, 32.0);
         QCOMPARE(model(app)->property("steps").toList().first().toMap().value("name").toString(), QString("Layer scaled: Card"));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // Ctrl+V over the view is a layer only when the clipboard has a picture; else (nodes, text, or an earlier step shown) it is the Graph's paste.
+    void ctrlVFallsThroughToTheGraphsPasteWhenThereIsNoPictureToPlace() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        int graphPastes = 0;
+        QVERIFY(app.commands.setHandler("edit.paste", [&] { ++graphPastes; }));
+        app.commands.setEnabledWhen("edit.paste", [] { return true; });
+        QGuiApplication::clipboard()->setText("some nodes");
+        QTRY_VERIFY(!QGuiApplication::clipboard()->mimeData()->hasImage());
+        hoverPicture(app);
+        key(app, Qt::Key_V, Qt::ControlModifier);
+        QTRY_COMPARE(graphPastes, 1);
+        QCOMPARE(revisions(), 1);
+        // With a picture on the clipboard it is a layer, and the Graph's paste does not run.
+        QImage image(20, 10, QImage::Format_RGBA8888);
+        image.fill(Qt::red);
+        QGuiApplication::clipboard()->setImage(image);
+        QTRY_VERIFY(QGuiApplication::clipboard()->mimeData()->hasImage());
+        key(app, Qt::Key_V, Qt::ControlModifier);
+        QTRY_COMPARE(revisions(), 2);
+        QCOMPARE(graphPastes, 1);
+        // A step shown that is not the latest: the command is off, and the key is still the Graph's.
+        QVERIFY(QMetaObject::invokeMethod(model(app), "show", Q_ARG(QString, m_head)));
+        QTRY_VERIFY(!model(app)->property("layersEditable").toBool());
+        key(app, Qt::Key_V, Qt::ControlModifier);
+        QTRY_COMPARE(graphPastes, 2);
+        QCOMPARE(revisions(), 2);
     }
 
     void escapeLeavesTheLayerAsItWasAndAGroupIsRefusedInWords() {

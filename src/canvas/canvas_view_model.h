@@ -165,6 +165,8 @@ public:
     // picture bigger than the canvas can be scaled down later. ONE revision, producer `canvas-view:paste`, history "Layer
     // pasted: <name>". False, with `error` in words, when nothing could be placed (no picture, too large, not the Head).
     Q_INVOKABLE bool pasteLayer(double cx = -1, double cy = -1);
+    // Whether the clipboard holds a picture (else Ctrl+V over this view is the Graph's: it pastes nodes).
+    Q_INVOKABLE bool clipboardHasPicture() const;
     Q_INVOKABLE bool placeFile(const QString &pathOrUrl, double cx = -1, double cy = -1);
     // Whether a dragged file is one placeFile reads (a drop takes only pictures; the window's own drop keeps the rest).
     Q_INVOKABLE bool isPictureFile(const QString &pathOrUrl) const;
@@ -261,7 +263,7 @@ private:
     bool placePicture(const mask::MaskPaint &picture, double cx, double cy, const QString &name);
     // The placement of the layer at `position` of the shown revision (an empty `why` when it can be moved).
     Result<canvas::CurrentPlacement> placementOf(int position, QString *why) const;
-    bool applyTransform(int position, const canvas::LayerTransform &placement);
+    bool applyTransform(int position, const canvas::LayerTransform &placement, const canvas::CurrentPlacement &seen);
     // A stored edit: the view moves on to it (false, with `error`, when it did not land).
     bool land(const Result<canvas::Commit> &done, const QList<int> &select);
     // The target's mask read again from the shown revision when it is another one (an undo, a run's layer).

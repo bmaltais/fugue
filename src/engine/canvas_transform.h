@@ -40,11 +40,19 @@ LayerTransform turnedQuarter(const LayerTransform &transform, bool clockwise);
 // and maxTransformArea. Empty when it can, else the reason in plain words.
 QString transformProblem(const LayerTransform &transform);
 
+// How a render is cut up. It is drawn in square tiles of the canvas (`tile` pixels a side, 256 by default), each from the window of the
+// scaled picture it needs, so what it holds besides the canvas's own bytes is a tile's float buffers whatever the sizes; `peakBytes`, when
+// given, gets the largest of those buffers (a test checks it stays bounded, and that any tile size draws the same pixels).
+struct RenderOptions {
+    int tile = 256;
+    size_t *peakBytes = nullptr;
+};
+
 // The canvas's pixels (`canvasWidth` x `canvasHeight`, straight RGBA, transparent where the picture is not) the source
 // shows when placed by `transform`. input_invalid for a placement transformProblem refuses.
-Result<mask::MaskPaint> renderPlaced(const mask::MaskPaint &source, const LayerTransform &transform, int canvasWidth, int canvasHeight);
+Result<mask::MaskPaint> renderPlaced(const mask::MaskPaint &source, const LayerTransform &transform, int canvasWidth, int canvasHeight, const RenderOptions &options = {});
 // The same for a one-channel mask that travels with the layer: where the picture is not, the mask is 255 (it hides nothing).
-Result<mask::MaskPaint> renderPlacedMask(const mask::MaskPaint &source, const LayerTransform &transform, int canvasWidth, int canvasHeight);
+Result<mask::MaskPaint> renderPlacedMask(const mask::MaskPaint &source, const LayerTransform &transform, int canvasWidth, int canvasHeight, const RenderOptions &options = {});
 
 // What a transform starts from for the layer at one place of a tree.
 struct CurrentPlacement {
@@ -72,6 +80,7 @@ Result<CurrentPlacement> currentPlacement(const LayerRecord &layer, int canvasWi
 // the first time, which then become its original), its mask with it, and the original and the new placement are kept. The tiles are
 // read and written through `read` and `consume`. input_invalid, in plain words, for a position that is not there, a group, a mask
 // or picture layer, or a placement that cannot be drawn. A placement equal to the current one gives the tree as it is.
-Result<Tree> transformedTree(const Tree &tree, int position, const LayerTransform &transform, const TileReader &read, const TileSink &consume);
+// `seen`, when given, must still be the layer's placement (SeenPlacement): else input_invalid, "The layer changed meanwhile".
+Result<Tree> transformedTree(const Tree &tree, int position, const LayerTransform &transform, const TileReader &read, const TileSink &consume, const SeenPlacement *seen = nullptr);
 
 } // namespace fugue::canvas

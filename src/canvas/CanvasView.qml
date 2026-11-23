@@ -522,7 +522,7 @@ Item {
         case "canvas-view.flip-vertical": if (transformable) canvasData.flipLayer(layersPanel.current.position, false); break
         case "canvas-view.turn-clockwise": if (transformable) canvasData.turnLayer(layersPanel.current.position, true); break
         case "canvas-view.turn-counterclockwise": if (transformable) canvasData.turnLayer(layersPanel.current.position, false); break
-        case "canvas-view.paste-layer": pasteLayer(); break
+        case "canvas-view.paste-layer": pasteLayerOrNodes(); break
         case "canvas-view.paste-canvas": pasteAsNewCanvas(); break
         case "canvas-view.place-picture": placePicture(); break
         case "canvas-view.delete": fileDialogs.askDelete(); break
@@ -574,6 +574,8 @@ Item {
             const state = root.menuState(id)
             if (state === undefined || state.enabled)
                 root.runTool(id)
+            else if (id === "canvas-view.paste-layer") // not on the latest version: the key still belongs to the Graph's paste
+                App.commands.trigger("edit.paste")
         }
     }
     // Escape clears the selection wherever the focus is, as Ctrl+D does (a key to a focused item would miss it after a click
@@ -689,6 +691,12 @@ Item {
             return to > from ? (from + to) / 2 : whole / 2
         }
         return {x: span(pictureView.imageX, pictureView.width, size.width), y: span(pictureView.imageY, pictureView.height, size.height)}
+    }
+    // Ctrl+V over this view: a picture on the clipboard is a layer; anything else is the Graph's paste (nodes), which this view's key hides.
+    function pasteLayerOrNodes() {
+        if (!canvasData.clipboardHasPicture() && App.commands.trigger("edit.paste"))
+            return
+        pasteLayer()
     }
     function pasteLayer() {
         const at = visibleCenter()

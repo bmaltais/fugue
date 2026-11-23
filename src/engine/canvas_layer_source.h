@@ -53,6 +53,15 @@ struct LayerTransform {
 inline constexpr int maxTransformSide = 32768;
 inline constexpr double maxTransformArea = 268435456.0; // 16384 x 16384
 
+// The placement a caller worked from when it asked for a transform (CanvasStore::transformLayer): the store refuses the transform when the layer is
+// no longer that, so a placement read from one revision is never applied to another.
+struct SeenPlacement {
+    LayerTransform transform;
+    bool original = false; // the layer had a current original (else it was its own pixels)
+    int sourceWidth = 0;
+    int sourceHeight = 0;
+};
+
 struct LayerSource {
     int width = 0;
     int height = 0;

@@ -256,7 +256,10 @@ public:
     // layer painted on since starts again from the layer as it is) and its layer mask goes through the same placement. ONE new
     // revision, producer `producer` ("canvas-view:transform"); a placement equal to the current one writes nothing. input_invalid, in
     // words, for a group, a mask or picture layer, or a placement that cannot be drawn.
-    Result<Commit> transformLayer(const QString &canvasId, const QString &base, int position, const LayerTransform &transform, const QString &producer);
+    // `seen`, when given, is the placement the caller read the layer at: when the layer is not that any more (a different original, a different
+    // placement) nothing is written and the answer is input_invalid ("The layer changed meanwhile").
+    Result<Commit> transformLayer(const QString &canvasId, const QString &base, int position, const LayerTransform &transform, const QString &producer,
+                                  const SeenPlacement *seen = nullptr);
 
     // A layer written at the tree level, groups kept (#274; a Canvas Write): `layer` goes on top of the revision `parent`'s layers as a
     // new revision with that parent (producer `producer`), the head not moved: moveHead does that, or accept places it on a newer
