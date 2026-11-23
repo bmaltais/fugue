@@ -449,6 +449,9 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
 
     if (kind == QLatin1String("run.started")) {
         m_active = run;
+        // The pictures shown are the last run's again until this run's previews come (a group's too).
+        for (NodeView &view : runs.nodes)
+            view.live = false;
         emit changed();
         return;
     }
@@ -572,9 +575,9 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
             if (!inner)
                 view.live = false;
         } else if (kind == QLatin1String("node.preview")) {
-            if (inner)
-                continue;
             const QJsonObject thumbnail = event.value("thumbnails").toObject().value("preview").toObject();
+            // A group's card shows its inside's frame as its picture while that runs, until the
+            // group's own result replaces it.
             if (thumbnail.isEmpty())
                 continue;
             view.thumbnail = thumbnail.value("url").toString();
