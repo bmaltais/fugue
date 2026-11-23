@@ -360,6 +360,49 @@ private slots:
         QVERIFY(bound);
         QVERIFY(!hasErrors(compile(*bound, m_registry).problems()));
     }
+
+    // The Harmonize template (a pasted-together picture made one photograph): an optional selection, the prompt joined to the
+    // built-in instruction, the seam map from the selection's edge, Klein 4B at the measured restyle strength with a soft
+    // mask, colour matched back, a layer called Harmonized. Its block fits its graph, no input overlaps, and the bound
+    // copy compiles with and without a prompt.
+    void theHarmonizeTemplateFitsItsGraphAndItsBoundCopyCompiles() {
+        const Result<Document> document = Document::loadFile(QStringLiteral(FUGUE_SOURCE_DIR "/templates/harmonize/workflow.fugue"));
+        QVERIFY2(document, qPrintable(firstMessage(document.errors())));
+        const Result<std::optional<Action>> action = actionOf(*document);
+        QVERIFY(action && action->has_value());
+        QCOMPARE((*action)->name, QStringLiteral("Harmonize"));
+        QCOMPARE((*action)->selection, QStringLiteral("optional"));
+        QVERIFY(!(*action)->needsPrompt()); // the built-in instruction does the work; the prompt only adds to it
+        const Result<ActionGraph> graph = checkAction(**action, *document, m_registry);
+        QVERIFY2(graph, qPrintable(firstMessage(graph.errors())));
+        QStringList seen; // no two inputs bind one target
+        for (const ActionInput &input : (*action)->inputs)
+            for (const PortRef &target : input.targets) {
+                const QString key = target.node + "." + target.port;
+                QVERIFY2(!seen.contains(key), qPrintable(key + " is bound twice"));
+                seen << key;
+            }
+        const auto &nodes = document->graph.nodes;
+        QCOMPARE(nodes.value("sample").inputs.value("steps").literal().toInt(), 4);
+        QCOMPARE(nodes.value("sample").inputs.value("denoise").literal().toDouble(), 0.9); // the measured restyle preset (#271)
+        QVERIFY(nodes.value("sample").inputs.value("soft_mask").literal().toBool());       // seams strong, the rest light
+        QCOMPARE(nodes.value("write").inputs.value("name").literal().toString(), QStringLiteral("Harmonized"));
+        QCOMPARE(nodes.value("match").type, QStringLiteral("fugue/color-match"));
+        QVERIFY(nodes.value("prompt_join").inputs.value("a").literal().toString().contains("one photograph"));
+        QVERIFY(nodes.value("region").inputs.value("canvas").literal().toString().isEmpty());
+        for (const QVariantMap &prompt : {QVariantMap{}, QVariantMap{{"prompt", "warm evening light"}}}) {
+            QMap<QString, QJsonValue> values{{"seed", 7}};
+            if (prompt.contains("prompt"))
+                values.insert("prompt", prompt.value("prompt").toString());
+            // No selection (the whole picture), then a rectangle.
+            for (const std::optional<RouteRect> &rect : {std::optional<RouteRect>{}, std::optional<RouteRect>{RouteRect{100, 100, 200, 150}}}) {
+                ActionBinding binding{"c1", "sha256:" + QString(64, 'a'), rect, {}, std::nullopt, std::nullopt, values};
+                const Result<Document> bound = bindAction(*document, **action, *graph, binding);
+                QVERIFY2(bound, qPrintable(firstMessage(bound.errors())));
+                QVERIFY(!hasErrors(compile(*bound, m_registry).problems()));
+            }
+        }
+    }
 };
 
 QTEST_GUILESS_MAIN(TestCanvasAction)

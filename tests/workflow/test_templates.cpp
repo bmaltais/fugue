@@ -1075,6 +1075,37 @@ private slots:
         QVERIFY(document.groups.isEmpty());
     }
 
+    // The flat Harmonize template: Load Image with a painted mask of the pasted parts, a seam softened in the reference, the
+    // seam map, Klein 4B, colours matched back to the original, resized back, saved; in plain nodes, loading the sample
+    // collage and its mask from inputs/.
+    void theHarmonizeImageTemplateMakesACollageOneWithASeamMap() {
+        const QString root = QStringLiteral(FUGUE_SOURCE_DIR "/templates");
+        QVERIFY2(bundledProblem(root).isEmpty(), qPrintable(bundledProblem(root)));
+        Fixture f;
+        const TemplateLibrary library({{root, false}}, &f.registry);
+        const auto found = library.find("harmonize-image");
+        QVERIFY2(found.has_value(), "the template harmonize-image is not here; the templates submodule is stale");
+        QCOMPARE(found->category, QStringLiteral("edit"));
+        const Document document = Document::loadFile(found->workflow).value();
+        QVERIFY(!hasErrors(compile(document, f.registry).problems()));
+        const auto &nodes = document.graph.nodes;
+        QCOMPARE(nodes.value("sample").inputs.value("steps").literal().toInt(), 4);
+        QCOMPARE(nodes.value("sample").inputs.value("guidance").literal().toDouble(), 1.0);
+        QCOMPARE(nodes.value("sample").inputs.value("denoise").literal().toDouble(), 0.9);
+        QVERIFY(nodes.value("sample").inputs.value("soft_mask").literal().toBool());
+        QCOMPARE(nodes.value("match").type, QStringLiteral("fugue/color-match"));
+        QCOMPARE(nodes.value("match").inputs.value("reference").from().toString(), QStringLiteral("load.image"));
+        QCOMPARE(nodes.value("save").type, QStringLiteral("fugue/save-image"));
+        QVERIFY(document.groups.isEmpty());
+        const QDir folder = QFileInfo(found->workflow).dir();
+        for (const QString &input : {nodes.value("load").inputs.value("file").literal().toString(), nodes.value("load").inputs.value("mask").literal().toString()})
+            QVERIFY2(QFileInfo::exists(folder.filePath(input)), qPrintable(input));
+        // The canvas action of the same name is in the Canvas actions category.
+        const auto action = library.find("harmonize");
+        QVERIFY(action.has_value());
+        QCOMPARE(action->category, QStringLiteral("canvas"));
+    }
+
     // The video to video template (#130): VAE Encode Video makes the start latent of a clip that
     // ships beside the template, and the Sampler 1.2.0 redraws it by Denoise, in plain nodes.
     void theVideoToVideoTemplateRedrawsAClipByDenoise() {

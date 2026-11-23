@@ -105,6 +105,30 @@ A fill lands on the canvas at once. The `generative-fill` template (File > Brows
 `fugue workflow new fill.fugue --template generative-fill`) is Canvas Region, a FLUX.2 Klein redraw
 and Canvas Write. Put your canvas's id and the rectangle in Canvas Region and run it.
 
+## Harmonize a collage
+
+Harmonize (the `harmonize` template, category Canvas actions) makes a picture assembled from pasted parts look like one
+photograph: one light direction, colour grade, shadows, sharpness and grain, with every object and face kept. Select the
+pasted parts and press Generate (or select nothing to treat the whole picture as pasted); the result is a layer called
+**Harmonized**. Its prompt only adds to a built-in instruction ("make this one photograph: blend any pasted part into the
+scene and remove hard edges and halos ..."). For a flat picture made elsewhere (a Photoshop collage as a jpg or png), the
+`harmonize-image` template (File > Browse templates, Image editing) does the same from a Load Image with a painted mask of
+the pasted parts and saves the result at the original size; paint nothing for a mild whole-picture pass.
+
+How it works (nothing new in the node set): the mask's edge becomes a seam band (Grow Mask outward minus inward, 48 px
+of the picture each way, Advanced nodes `outer` and `inner`) that the model redraws at the full Strength; the pasted
+parts inside it are redrawn at about 0.75 of it, and the rest of the picture at about 0.5, through the Sampler's soft mask
+(differential diffusion: gray in the mask is held until later in the run). Before the model sees the picture, the seam band
+is blurred (Blur 30 px blended in through the band), because FLUX.2 Klein copies a hard edge that its reference shows,
+even at strength 1: softening what it is shown is what lets it blend. Colour Match then moves the result back to the
+picture's own colour statistics so the grade does not drift. Strength is the Sampler's noise level, default 0.9 (the
+Refine "restyle" preset of 4.7: at 0.7 a blurred ring of the seam band stays visible). Measured only on one made-up
+collage (a cat photo pasted on the reading nook as a disc, 1 MP, 3090, about 12 s).
+Limits: the whole-picture pass without a mask cannot find seams, so a hard-edged paste stays; a very bright or
+differently lit part (a blown window) keeps some of its own light; band widths are in the picture's pixels (use about
+four times as much on a 4K picture) and the model works at 1 MP, so a large picture comes back resampled (upscale it
+afterwards, or work on a crop).
+
 When a run's layer lands on the head, a Canvas view that is looking at the head (File > Canvas…, or a Canvas area)
 goes along to it and says so for a moment, "Layer <name> added", with **Undo** (the head back one step; Ctrl+Z over the
 Layers panel does the same). Delete a layer you do not want in the Layers panel. An older workflow that has Canvas
