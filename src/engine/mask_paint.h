@@ -111,6 +111,9 @@ public:
     void clear();
     void fill();
     void fill(Rgba color);
+    // Replaces the pixels of a mask with `pixels` (width x height bytes; any other size is refused) as one step: only the
+    // tiles that differ are kept, so a modify of a small selection costs its own size (mask_ops.h makes such a result).
+    bool assign(const std::vector<uint8_t> &pixels);
 
     bool canUndo() const { return !m_undo.empty() && !m_stroking; }
     bool canRedo() const { return !m_redo.empty() && !m_stroking; }
