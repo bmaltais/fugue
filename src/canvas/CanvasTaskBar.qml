@@ -48,7 +48,7 @@ Item {
     function readMaskBounds() { maskBounds = actions && quickMask && !quickMask.empty ? actions.selectionBounds(quickMask) : ({}) }
     Connections {
         target: bar.quickMask
-        function onHistoryChanged() { bar.readMaskBounds() }
+        function onHistoryChanged() { bar.readMaskBounds(); bar.maskTick++ }
     }
     onQuickMaskChanged: readMaskBounds()
     readonly property bool usesMask: quickMask !== null && maskBounds.width !== undefined
@@ -106,14 +106,49 @@ Item {
     // Narrow: the action menu folds to its glyph (design 4: below 360 px).
     readonly property bool narrow: box.width < 90 * u
 
-    function generate() {
+    // Live (#315, design 16): while on, a change of the canvas, the selection or the prompt re-runs the action as a preview in the
+    // selection, once it has been still (App.canvasActions decides when: engine/live_link.h); Generate then keeps the preview.
+    property bool liveMine: false
+    readonly property bool liveOn: liveMine && actions !== null && actions.live
+    readonly property bool liveOther: actions !== null && actions.live && !liveMine
+    property int maskTick: 0
+    readonly property bool liveReady: liveOn && blocker === "" && !busy && selection !== null && !boundsAction
+    readonly property string liveKey: [canvasId, chosen, promptField.text, JSON.stringify(selection), maskTick, regionLayer, currentLayer].join("|")
+    onLiveKeyChanged: reportLive()
+    onLiveReadyChanged: reportLive()
+    onRevisionChanged: reportLive()
+    onCanvasIdChanged: setLive(false)
+    Component.onDestruction: setLive(false)
+    function reportLive() {
+        if (liveOn)
+            actions.liveNote(liveKey, revision, liveReady)
+    }
+    function setLive(on) {
+        if (!actions || on === liveMine)
+            return
+        if (on && actions.live)
+            return
+        liveMine = on
+        actions.setLive(on)
+        if (on)
+            reportLive()
+    }
+    Connections {
+        target: bar.actions
+        function onLiveDue() { if (bar.liveOn) bar.generate(true) }
+        function onLiveStateChanged() { if (bar.liveMine && !bar.actions.live) bar.liveMine = false }
+    }
+    function generate(live) {
         if (!actions || busy)
             return
         if (blocker !== "") {
-            actions.clearError()
+            if (live !== true)
+                actions.clearError()
             return
         }
         const request = {action: chosen, canvas: canvasId, revision: revision, prompt: promptField.text}
+        if (live === true)
+            request.live = true
         if (regionLayer !== "")
             request.layer = regionLayer
         if (currentLayer !== "")
@@ -129,7 +164,8 @@ Item {
         } else if (selection !== null) {
             request.rect = selection
         }
-        historyStep = -1
+        if (live !== true)
+            historyStep = -1
         actions.generate(request)
     }
     // Escape while this bar's runs go ends them (the view asks; the prompt field too). True when it did.
@@ -202,8 +238,9 @@ Item {
             workflowOpened()
     }
     function more() {
-        openMenu(moreButton, [{text: qsTr("Clear prompt history…"), value: "clear", enabled: history.length > 0}],
-                 value => { if (value === "clear") clearAsk.open() }, 48, "canvasTaskMoreMenu")
+        openMenu(moreButton, [{text: qsTr("Another preview"), value: "reroll", enabled: liveOn},
+                              {text: qsTr("Clear prompt history…"), value: "clear", enabled: history.length > 0}],
+                 value => { if (value === "clear") clearAsk.open(); else if (value === "reroll") actions.liveReroll() }, 48, "canvasTaskMoreMenu")
     }
     function advanced() {
         if (advancedPopover.opened)
@@ -380,7 +417,7 @@ Item {
                     primary: true
                     enabled: bar.blocker === ""
                     text: qsTr("Generate")
-                    tip: bar.blocker !== "" ? bar.blocker : qsTr("Generate into the selection (Enter)")
+                    tip: bar.blocker !== "" ? bar.blocker : bar.liveOn ? qsTr("Keep the preview as a layer (Enter)") : qsTr("Generate into the selection (Enter)")
                     onTapped: bar.generate()
                 }
                 ViewButton {
@@ -402,6 +439,19 @@ Item {
                     accented: false
                     tip: qsTr("Advanced: the action's other settings, Count and Edit workflow")
                     onTapped: bar.advanced()
+                }
+                ViewButton {
+                    objectName: "canvasTaskLive"
+                    look: bar.look
+                    text: qsTr("Live")
+                    flat: true
+                    checkable: true
+                    current: bar.liveOn
+                    enabled: !bar.liveOther
+                    tip: bar.liveOther ? qsTr("Live is on in another canvas")
+                         : bar.liveOn ? qsTr("Live is on: the preview follows your changes. Generate keeps it, Live again stops it")
+                         : qsTr("Live: preview the action in the selection as you change the canvas or the prompt (uses the GPU while you edit)")
+                    onTapped: bar.setLive(!bar.liveOn)
                 }
                 ViewButton {
                     id: moreButton

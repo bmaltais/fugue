@@ -47,9 +47,11 @@
 #include <QHash>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QElapsedTimer>
 #include <QObject>
 #include <QSet>
 #include <QStringList>
+#include <QTimer>
 #include <QVariantList>
 #include <QVariantMap>
 #include <QtQmlIntegration/qqmlintegration.h>
@@ -63,6 +65,7 @@
 #include "engine/canvas_batch.h"
 #include "engine/document.h"
 #include "engine/error.h"
+#include "engine/live_link.h"
 #include "engine/templates.h"
 
 namespace fugue {
@@ -99,6 +102,10 @@ class CanvasActions : public QObject {
     Q_PROPERTY(QVariantMap liveBox READ liveBox NOTIFY liveChanged)
     Q_PROPERTY(QVariantMap liveClip READ liveClip NOTIFY liveChanged)
     Q_PROPERTY(bool liveFade READ liveFade NOTIFY liveChanged)
+    // The live link (#315, design 16): while `live` is on, a change of the canvas, the selection or the prompt re-runs the chosen action as a
+    // preview, once it has been still; the preview shows in the selection (liveFrame) and writes nothing. Generate then keeps it.
+    Q_PROPERTY(bool live READ live NOTIFY liveStateChanged)
+    Q_PROPERTY(bool liveBusy READ liveBusy NOTIFY liveStateChanged) // a preview run is waiting or active
     // Which run of the Generate is going or next ("Generating 2 of 3") and how many it made (1 when Count is 1), 0 when idle.
     Q_PROPERTY(int runNumber READ runNumber NOTIFY stateChanged)
     Q_PROPERTY(int runTotal READ runTotal NOTIFY stateChanged)
@@ -144,11 +151,23 @@ public:
     bool liveFade() const { return m_liveFade; }
     bool downloading() const;
     QString downloadText() const;
+    bool live() const { return m_link.enabled(); }
+    bool liveBusy() const { return !m_liveRun.isEmpty(); }
+    // The quietest the link waits (milliseconds; 600 by default). For tests.
+    void setLiveQuiet(qint64 ms) { m_link.setBase(ms); }
 
     // Generate. `request`: {action ("auto" or an id), canvas, revision (the full hash shown), prompt, rect {x, y, width,
     // height} (canvas pixels; with `selection` the selection's bounds), selection (a stored selection's hash), seed (a
     // number: fixed; none: random), layer (the name of one layer Canvas Region reads instead of the whole picture, #226)}. {ok, run, action, reason}: `reason` (also `error`) says in words why nothing started.
     Q_INVOKABLE QVariantMap generate(const QVariantMap &request);
+    // The live link (design 16). setLive(true) picks the seed every preview and the Generate that keeps it use (so the preview is the
+    // picture that lands; liveReroll() picks another). The bar calls liveNote() on every change of what a run reads: `key` names it
+    // all (canvas, revision, action, prompt, selection, layer, ...), `revision` is the revision shown, `ready` says a run may start
+    // (a selection, no blocker, nothing else generating). When the state has been still, liveDue() asks the bar to start the preview:
+    // generate() with `live: true`, the same request a Generate makes. A preview that fails, or that nobody starts, switches live off.
+    Q_INVOKABLE void setLive(bool on);
+    Q_INVOKABLE void liveNote(const QString &key, const QString &revision, bool ready);
+    Q_INVOKABLE void liveReroll();
     // `count` (1 to 4): the runs of this Generate; none: the action's remembered Count. An action with no seed role makes one.
     // Ends this bar's runs, the waiting ones first.
     Q_INVOKABLE void cancel();
@@ -205,6 +224,9 @@ signals:
     void liveChanged();
     void downloadsChanged();
     void historyChanged();
+    void liveStateChanged();
+    // The live link wants a preview now: the bar answers with generate({... live: true}).
+    void liveDue();
     // A run of a Generate ended: "ok", "failed" or "cancelled".
     void finished(const QString &run, const QString &status);
     // An action whose result is a new canvas (Upscale: Canvas New) finished: the canvas it ran on and the one it made. The view that
@@ -267,6 +289,22 @@ private:
     QVariantMap m_liveBox, m_liveClip;
     bool m_liveFade = false;
     void clearLive(bool fade);
+    // The live link's preview run.
+    QVariantMap generateNow(const QVariantMap &request, bool live);
+    QVariantMap startLive(const Entry &chosen, const canvas::ActPlan &plan, const QString &canvasId);
+    void onLiveEvent(const QJsonObject &event);
+    void endLive(const QString &status, const Errors &errors);
+    void liveStep();
+    void detachLive();
+    qint64 liveNow() const { return m_liveClock.elapsed(); }
+    LiveLink m_link;
+    QElapsedTimer m_liveClock;
+    QTimer m_liveTimer;
+    QString m_liveRun, m_liveTarget;
+    Errors m_liveErrors;
+    qint64 m_liveSeed = 0;
+    QString m_noteKey, m_noteRevision;
+    QSet<QString> m_ownRevisions; // revisions this runner's Generates landed: not a change the person made
     // The growth an Expand made before its runs (#310): taken back when the last run ends cancelled or failed and the canvas is as the
     // growth left it. `m_growEnd` is the first run's status that was not ok.
     canvas::ActPlan m_grown;

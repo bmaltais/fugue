@@ -70,6 +70,9 @@ CanvasActions::CanvasActions(RunService *service, const Registry *registry, Work
         // The models may be here now.
         connect(m_workflows->downloads(), &ModelDownloads::finished, this, [this] { refresh(); });
     }
+    m_liveClock.start();
+    m_liveTimer.setSingleShot(true);
+    connect(&m_liveTimer, &QTimer::timeout, this, &CanvasActions::liveStep);
     refresh();
 }
 
@@ -212,6 +215,20 @@ QVariantMap CanvasActions::route(const QString &canvasId, const QString &revisio
 }
 
 QVariantMap CanvasActions::generate(const QVariantMap &request) {
+    const bool live = request.value("live").toBool();
+    if (!live && !m_liveRun.isEmpty())
+        detachLive(); // a Generate keeps the preview: its run is not wanted any more
+    const QVariantMap result = generateNow(request, live);
+    if (live && !result.value("ok").toBool()) {
+        m_link.ended(LiveLink::End::Failed, liveNow()); // a preview that cannot start switches live off; the error line says why
+        emit liveStateChanged();
+    }
+    return result;
+}
+
+QVariantMap CanvasActions::generateNow(const QVariantMap &request, bool live) {
+    if (live && (busy() || !m_liveRun.isEmpty()))
+        return {{"ok", false}, {"reason", tr("Another run is going.")}};
     if (busy())
         return refuse(tr("Generate is already running: wait for it, or Cancel it."));
     setError({}, {});
@@ -254,6 +271,8 @@ QVariantMap CanvasActions::generate(const QVariantMap &request) {
     const Entry *chosen = entry(id);
     if (!chosen)
         return refuse(tr("There is no action %1.").arg(id));
+    if (live && (chosen->action->selection == QLatin1String("bounds") || chosen->graph.writes.isEmpty()))
+        return refuse(tr("%1 cannot preview: it works on the whole canvas.").arg(chosen->action->name));
     m_actionName = chosen->action ? chosen->action->name : id;
     if (!chosen->broken.isEmpty()) {
         m_errorCode = QStringLiteral("action_invalid");
@@ -287,7 +306,9 @@ QVariantMap CanvasActions::generate(const QVariantMap &request) {
     const QVariant fixedSeed = request.value("seed");
     if (fixedSeed.isValid() && !fixedSeed.isNull())
         act.seed = fixedSeed.toLongLong();
-    act.count = request.contains("count") ? request.value("count").toInt() : variations(id);
+    else if (m_link.enabled())
+        act.seed = m_liveSeed; // live: the preview and the Generate that keeps it are the same picture
+    act.count = live ? 1 : request.contains("count") ? request.value("count").toInt() : variations(id);
     act.beforeChange = [&]() -> std::optional<Error> {
         if (m_workflows && m_workflows->missingModels(withRemembered(*chosen, remembered).models()).value("count").toInt() > 0)
             return makeError(QStringLiteral("model_missing"), tr("%1 needs models that are not on this machine. Download them first.").arg(m_actionName));
@@ -302,6 +323,8 @@ QVariantMap CanvasActions::generate(const QVariantMap &request) {
             m_errorAction = id;
         return refuse(plan.error().message);
     }
+    if (live)
+        return startLive(*chosen, *plan, canvasId);
     m_grown = {};
     m_growEnd.clear();
     if (plan->grew) {
@@ -371,6 +394,10 @@ void CanvasActions::cancel() {
 }
 
 void CanvasActions::onEvent(const QString &run, const QJsonObject &event) {
+    if (run == m_liveRun) {
+        onLiveEvent(event);
+        return;
+    }
     if (!m_runs.contains(run))
         return;
     const QString kind = event.value("event").toString();
@@ -403,6 +430,12 @@ void CanvasActions::onEvent(const QString &run, const QJsonObject &event) {
         if (chosen && chosen->graph.writes.contains(node)) {
             const QJsonObject meta = event.value("outputs").toObject().value("canvas").toObject().value("meta").toObject();
             m_writes[run] << WriteResult{kind == QLatin1String("node.cached"), meta.value("canvas").toString(), meta.value("revision").toString()};
+            if (m_link.enabled() && !m_writes[run].last().revision.isEmpty()) {
+                // The layer this Generate lands is the preview kept, not a change to preview again.
+                m_ownRevisions.insert(m_writes[run].last().revision);
+                if (m_noteRevision == m_writes[run].last().revision)
+                    m_link.adopt(m_noteKey);
+            }
         }
         if (chosen && chosen->graph.news.contains(node) && kind == QLatin1String("node.done")) {
             const QString made = event.value("outputs").toObject().value("canvas").toObject().value("meta").toObject().value("canvas").toString();
@@ -728,6 +761,170 @@ void CanvasActions::download(const QString &action) {
         return;
     m_workflows->downloadModels(withRemembered(*chosen, settingsOf(action).value("values").toObject()).models(), QStringLiteral("action:") + action);
     emit downloadsChanged();
+}
+
+// --- the live link (#315, design 16) ---
+
+void CanvasActions::setLive(bool on) {
+    if (on == m_link.enabled())
+        return;
+    m_link.setEnabled(on, liveNow());
+    if (on) {
+        m_liveSeed = QRandomGenerator::global()->bounded(1, 2147483647);
+        m_ownRevisions.clear();
+    } else {
+        detachLive();
+        m_liveTimer.stop();
+        clearLive(false);
+    }
+    emit liveStateChanged();
+    m_liveTimer.start(0);
+}
+
+void CanvasActions::liveReroll() {
+    if (!m_link.enabled())
+        return;
+    m_liveSeed = QRandomGenerator::global()->bounded(1, 2147483647);
+    m_noteKey.append(QLatin1Char('+')); // the state differs, so the preview runs again
+    detachLive();
+    m_link.note(m_noteKey, true, liveNow());
+    m_liveTimer.start(0);
+}
+
+void CanvasActions::liveNote(const QString &key, const QString &revision, bool ready) {
+    if (!m_link.enabled())
+        return;
+    const QString seeded = key + QLatin1Char('|') + revision + QLatin1Char('|') + QString::number(m_liveSeed);
+    m_noteKey = seeded;
+    m_noteRevision = revision;
+    if (m_ownRevisions.contains(revision))
+        m_link.adopt(seeded);
+    m_link.note(seeded, ready, liveNow());
+    m_liveTimer.start(0);
+}
+
+void CanvasActions::liveStep() {
+    const LiveLink::Step step = m_link.poll(liveNow());
+    switch (step.what) {
+    case LiveLink::Do::Cancel:
+        if (!m_liveRun.isEmpty())
+            m_service->cancel(m_liveRun);
+        break;
+    case LiveLink::Do::Start:
+        emit liveDue();
+        if (m_liveRun.isEmpty()) { // nobody started it (no bar shows this canvas): off, so it does not spin
+            m_link.ended(LiveLink::End::Failed, liveNow());
+            emit liveStateChanged();
+        }
+        break;
+    case LiveLink::Do::Nothing:
+        if (step.waitMs > 0)
+            m_liveTimer.start(int(step.waitMs));
+        break;
+    }
+}
+
+// The run ends without a word: a Generate has taken over, or live went off.
+void CanvasActions::detachLive() {
+    if (m_liveRun.isEmpty())
+        return;
+    const QString run = m_liveRun;
+    m_liveRun.clear();
+    m_liveRects.remove(run);
+    m_liveErrors.clear();
+    m_service->cancel(run);
+    m_link.ended(LiveLink::End::Cancelled, liveNow());
+    emit liveStateChanged();
+}
+
+QVariantMap CanvasActions::startLive(const Entry &chosen, const canvas::ActPlan &plan, const QString &canvasId) {
+    // The run stops where Canvas Write would take the picture: the node its `image` comes from.
+    const Document &bound = plan.runs.first();
+    QString target;
+    for (const QString &write : chosen.graph.writes) {
+        const InputValue image = bound.graph.nodes.value(write).inputs.value(QStringLiteral("image"));
+        if (image.kind() == InputValue::Kind::Link) {
+            target = image.from().node;
+            break;
+        }
+    }
+    if (target.isEmpty())
+        return refuse(tr("%1 cannot preview: it makes no picture to show first.").arg(m_actionName));
+    RunRequest run;
+    run.document = bound;
+    run.workflow = chosen.file;
+    run.target = target;
+    m_liveRun = m_service->start(run);
+    m_liveTarget = target;
+    m_liveErrors.clear();
+    m_canvas = canvasId;
+    if (plan.rect) {
+        const Node &regionNode = bound.graph.nodes[chosen.graph.region];
+        const auto literal = [&](const char *name) { return regionNode.inputs.value(QLatin1String(name)).literal().toInt(); };
+        const canvas::RouteRect &sel = *plan.rect;
+        const auto box = region::contextOf(sel.x, sel.y, sel.width, sel.height, literal("padding"), plan.width, plan.height, literal("feather"));
+        const int left = std::max(box.x, sel.x), top = std::max(box.y, sel.y);
+        const int right = std::min(box.x + box.width, sel.x + sel.width), bottom = std::min(box.y + box.height, sel.y + sel.height);
+        const auto map = [](int x, int y, int w, int h) { return QVariantMap{{"x", x}, {"y", y}, {"width", w}, {"height", h}}; };
+        if (right > left && bottom > top)
+            m_liveRects.insert(m_liveRun, LiveRect{map(box.x, box.y, box.width, box.height), map(left, top, right - left, bottom - top)});
+    }
+    emit liveStateChanged();
+    emit stateChanged();
+    return {{"ok", true}, {"run", m_liveRun}, {"action", chosen.id}, {"live", true}};
+}
+
+void CanvasActions::onLiveEvent(const QJsonObject &event) {
+    const QString kind = event.value("event").toString();
+    const QString node = event.value("node").toString();
+    const auto show = [&](const QString &url) {
+        const auto rects = m_liveRects.constFind(m_liveRun);
+        if (url.isEmpty() || rects == m_liveRects.cend())
+            return;
+        m_liveFrame = url;
+        m_liveBox = rects->box;
+        m_liveClip = rects->clip;
+        m_liveFade = false;
+        emit liveChanged();
+    };
+    if (kind == QLatin1String("node.preview")) {
+        show(event.value("thumbnails").toObject().value("preview").toObject().value("url").toString());
+    } else if (kind == QLatin1String("node.done") || kind == QLatin1String("node.cached")) {
+        if (node == m_liveTarget) { // the finished picture replaces the step frame
+            const QJsonObject thumbnails = event.value("thumbnails").toObject();
+            const QJsonObject picture = thumbnails.contains("image") ? thumbnails.value("image").toObject()
+                                        : thumbnails.isEmpty()       ? QJsonObject()
+                                                                     : thumbnails.begin().value().toObject();
+            show(picture.value("url").toString());
+        }
+    } else if (kind == QLatin1String("node.error")) {
+        m_liveErrors << Error::fromJson(event.value("error").toObject());
+    } else if (kind == QLatin1String("run.done")) {
+        Errors errors = m_liveErrors;
+        for (const QJsonValue &value : event.value("errors").toArray())
+            errors << Error::fromJson(value.toObject());
+        endLive(event.value("status").toString(), errors);
+    }
+}
+
+void CanvasActions::endLive(const QString &status, const Errors &errors) {
+    m_liveRects.remove(m_liveRun);
+    m_liveRun.clear();
+    m_liveErrors.clear();
+    if (status == QLatin1String("ok")) {
+        m_link.ended(LiveLink::End::Ok, liveNow());
+    } else if (status == QLatin1String("cancelled")) {
+        m_link.ended(LiveLink::End::Cancelled, liveNow());
+    } else {
+        const auto hard = std::find_if(errors.cbegin(), errors.cend(), [](const Error &e) { return e.severity == Error::Severity::Error; });
+        const Error first = hard != errors.cend() ? *hard : makeError(QStringLiteral("node_failed"), tr("%1 did not finish.").arg(m_actionName));
+        setError(plainWords(first, m_actionName), first.code, cannotRunNow(first.code) ? m_action : QString());
+        m_link.ended(LiveLink::End::Failed, liveNow());
+        clearLive(false);
+    }
+    emit liveStateChanged();
+    emit stateChanged();
+    m_liveTimer.start(0);
 }
 
 } // namespace fugue

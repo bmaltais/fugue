@@ -1680,5 +1680,14 @@
   "Copied (%1 × %2)": "Copied (%1 × %2)",
   "Pick a layer to copy.": "Pick a layer to copy.",
   "Copy Merged copies every shown layer.": "Copy Merged copies every shown layer.",
-  "There is no clipboard to copy to.": "There is no clipboard to copy to."
+  "There is no clipboard to copy to.": "There is no clipboard to copy to.",
+  "Keep the preview as a layer (Enter)": "Keep the preview as a layer (Enter)",
+  "Live": "Live",
+  "Live is on in another canvas": "Live is on in another canvas",
+  "Live is on: the preview follows your changes. Generate keeps it, Live again stops it": "Live is on: the preview follows your changes. Generate keeps it, Live again stops it",
+  "Live: preview the action in the selection as you change the canvas or the prompt (uses the GPU while you edit)": "Live: preview the action in the selection as you change the canvas or the prompt (uses the GPU while you edit)",
+  "Another preview": "Another preview",
+  "Another run is going.": "Another run is going.",
+  "%1 cannot preview: it works on the whole canvas.": "%1 cannot preview: it works on the whole canvas.",
+  "%1 cannot preview: it makes no picture to show first.": "%1 cannot preview: it makes no picture to show first."
 }

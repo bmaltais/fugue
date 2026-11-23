@@ -23,7 +23,7 @@ using namespace actions_test;
 class TestCanvasActions : public QObject {
     Q_OBJECT
     QTemporaryDir m_dir;
-    QString m_canvas, m_head;
+    QString m_canvas, m_head, m_prompt;
 
     canvas::CanvasStore store() const { return canvas::CanvasStore::forSession(); }
     QString head() const { return store().info(m_canvas)->head; }
@@ -424,6 +424,49 @@ private slots:
         r.actions->cancel();
         QTRY_VERIFY(!r.actions->busy());
         QVERIFY(r.actions->runTotal() == 0);
+    }
+
+    // The live link (#315, design 16): a preview run stops before Canvas Write, so it lands nothing; a new change cancels the stale
+    // run; Generate keeps the preview (the same seed, so the picture is the cached one) and the layer it lands is no new change.
+    void aLivePreviewWritesNothingAndGenerateKeepsIt() {
+        Rig r;
+        r.actions->setLiveQuiet(20);
+        connect(r.actions.get(), &CanvasActions::liveDue, this, [&] {
+            QVariantMap request{{"action", "test-fill"}, {"canvas", m_canvas}, {"revision", head()}, {"prompt", m_prompt}, {"rect", rect(96, 96, 64, 64)}, {"live", true}};
+            r.actions->generate(request);
+        });
+        const auto note = [&](bool ready = true) { r.actions->liveNote(m_canvas + "|" + head() + "|" + m_prompt, head(), ready); };
+        m_prompt = "a red umbrella";
+        r.actions->setLive(true);
+        note();
+        QTRY_VERIFY(r.actions->liveBusy());
+        QVERIFY(!r.actions->busy()); // a preview is not a Generate: the bar still offers Generate
+        QTRY_COMPARE(r.jobs().size(), 1);
+        // The prompt changes while it runs: the stale run is cancelled and a new one starts once things are still.
+        m_prompt = "a blue umbrella";
+        note();
+        QTRY_COMPARE(r.jobs().size(), 2);
+        r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(1), {{"image.png", png(64, 64)}}); });
+        QTRY_VERIFY(!r.actions->liveBusy());
+        QCOMPARE(head(), m_head); // nothing landed
+        QVERIFY(r.actions->live());
+        // Generate keeps it: the same seed and prompt, so the sampler is a cache hit (no third job) and one layer lands.
+        const QVariantMap kept = press(r, {{"prompt", m_prompt}});
+        QVERIFY2(kept.value("ok").toBool(), qPrintable(kept.value("reason").toString()));
+        QTRY_VERIFY(!r.actions->busy());
+        QCOMPARE(r.jobs().size(), 2);
+        QVERIFY(head() != m_head);
+        QCOMPARE(layers(head()), 2);
+        // That layer's revision is its own: noting it starts no new preview.
+        note();
+        QTest::qWait(150);
+        QVERIFY(!r.actions->liveBusy());
+        QCOMPARE(r.jobs().size(), 2);
+        // Not ready (the bar has no selection): nothing starts.
+        m_prompt = "a green umbrella";
+        note(false);
+        QTest::qWait(150);
+        QCOMPARE(r.jobs().size(), 2);
     }
 
     void cancelEndsEveryRunOfACountAndAFailureEndsTheRest() {
