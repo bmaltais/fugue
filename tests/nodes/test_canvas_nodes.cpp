@@ -487,8 +487,8 @@ private slots:
         QCOMPARE(CanvasStore::forSession().load(id, headOf(id))->layerCount(), 2);
     }
 
-    // A head move the run cannot be placed on (the canvas has another size now) keeps a candidate and warns, as before.
-    void aWriteThatCannotBePlacedStaysACandidateAndSaysSo() {
+    // #239: a head move the run cannot be placed on (the canvas has another size now) fails the run in plain words and writes nothing.
+    void aWriteThatCannotBePlacedSaysSoAndWritesNothing() {
         Bench bench;
         const QString id = makeCanvas();
         const QString base = headOf(id);
@@ -499,53 +499,53 @@ private slots:
         QVERIFY(theirs && theirs->move.moved);
 
         const Result<Values> w = writeGreen(bench, r);
-        QVERIFY2(w.ok(), qPrintable(codeOf(w))); // a result, not an error
-        QVERIFY(!w->value("accepted").json().toBool());
+        QVERIFY(!w.ok());
+        QCOMPARE(codeOf(w), QString("canvas_head_moved"));
+        QVERIFY(w.errors().first().message.contains("nothing was written"));
         QCOMPARE(headOf(id), theirs->revision.id);
-        QCOMPARE(w->value("head").text(), theirs->revision.id);
-        QCOMPARE(w.problems().first().code, QString("canvas_head_moved"));
-        QCOMPARE(w.problems().first().severity, Error::Severity::Warning);
-        // The candidate is stored and reachable: its handle names it, and it holds the green layer.
-        const auto candidate = canvas::canvasHandleFrom(w->value("canvas").json());
-        QVERIFY(candidate && candidate->revision != theirs->revision.id);
-        QCOMPARE(CanvasStore::forSession().revision(id, candidate->revision)->parent, base);
-        QCOMPARE(pixel(id, candidate->revision, 100, 80, 1), 255);
+        // No hidden revision: the history is the base and theirs, and nothing waits for review.
+        QCOMPARE(CanvasStore::forSession().log(id)->size(), size_t(2));
+        QVERIFY(CanvasStore::forSession().candidates(id, true).value().empty());
     }
 
-    // The default is off: nothing is asked for review unless the workflow says so.
-    void theCandidateInputIsOffByDefaultAndAdvanced() {
+    // #239: candidate review is not a user concept: an old workflow's saved candidate=true is ignored, and the layer lands on the head.
+    void aSavedCandidateOnIsIgnoredAndTheLayerLandsOnTheHead() {
         Registry registry;
         nodes::addBuiltinNodeTypes(registry);
         const NodeType &type = *registry.nodeType("fugue/canvas-write");
-        for (const InputSpec &spec : type.inputs)
-            if (spec.name == "candidate") {
-                QVERIFY(!spec.defaultValue.toBool());
-                QVERIFY(spec.advanced);
-                return;
-            }
-        QFAIL("no candidate input");
-    }
+        QVERIFY(!type.input("candidate"));
+        QVERIFY(type.retiredInputs.contains("candidate"));
 
-    // Keep as candidate (#210): the head stays, nothing is warned, and the revision is a candidate.
-    void aWriteKeptAsACandidateLeavesTheHeadAndListsTheRevision() {
-        Bench bench;
+        QTemporaryDir dir;
+        Kernels kernels;
+        nodes::addBuiltinKernels(kernels);
+        FileHashes hashes(dir.filePath("hashes.json"));
+        ResultCache cache(dir.filePath("results"));
         const QString id = makeCanvas();
         const QString before = headOf(id);
-        const Result<Values> r = bench.region(id, {{"x", Value(60)}, {"y", Value(50)}, {"width", Value(100)}, {"height", Value(80)}});
-        const Result<Values> w = writeGreen(bench, r, {{"candidate", Value(true)}});
-        QVERIFY2(w.ok(), qPrintable(codeOf(w)));
-        QVERIFY(w.problems().isEmpty());
-        QVERIFY(!w->value("accepted").json().toBool());
-        QCOMPARE(headOf(id), before);
-        QCOMPARE(w->value("head").text(), before);
-        const auto handle = canvas::canvasHandleFrom(w->value("canvas").json());
-        QVERIFY(handle);
-        const auto open = CanvasStore::forSession().candidates(id).value();
-        QCOMPARE(open.size(), size_t(1));
-        QCOMPARE(open[0].revision.id, handle->revision);
-        QVERIFY(open[0].onHead);
-        QVERIFY(CanvasStore::forSession().accept(id, handle->revision)->moved);
-        QCOMPARE(pixel(id, headOf(id), 100, 80, 1), 255);
+        // A workflow saved with Write 1.3.0 and Keep as candidate on.
+        const QByteArray text = QByteArray("{\"fugue\": 1, \"graph\": {\"nodes\": {"
+                                           "\"r\": {\"type\": \"fugue/canvas-region\", \"version\": \"1.0.0\", \"inputs\": {\"canvas\": \"") + id.toUtf8() +
+                                "\", \"x\": 60, \"y\": 50, \"width\": 100, \"height\": 80, \"padding\": 16}},"
+                                "\"w\": {\"type\": \"fugue/canvas-write\", \"version\": \"1.3.0\", \"inputs\": {"
+                                "\"canvas\": {\"from\": \"r.canvas\"}, \"image\": {\"from\": \"r.image\"}, \"stitch\": {\"from\": \"r.stitch\"}, \"blend\": 4, \"candidate\": true}}}}}";
+        const Document document = Document::load(text).value();
+        RunCompileSetup setup;
+        setup.resolveCanvas = sessionCanvasResolver();
+        const Compilation compiled = compileForRun(document, registry, {}, setup);
+        QVERIFY2(compiled.ok(), qPrintable(compiled.errors().value(0).message));
+        QVERIFY2(compiled.warnings().isEmpty(), qPrintable(compiled.warnings().value(0).message)); // no notice either
+        const auto folder = RunFolder::create(dir.filePath("runs"));
+        RunEnvironment environment;
+        environment.registry = &registry;
+        environment.kernels = &kernels;
+        environment.cache = &cache;
+        environment.hashes = &hashes;
+        const RunOutcome outcome = runGraph(*compiled, *folder, environment, {});
+        QVERIFY2(outcome.status == RunStatus::Ok, qPrintable(outcome.errors.value(0).message));
+        QVERIFY(headOf(id) != before);
+        QVERIFY(outcome.outputs.value("w").value("accepted").json().toBool());
+        QVERIFY(CanvasStore::forSession().candidates(id).value().empty());
     }
 
     void withoutAStitchTheImageCoversTheWholeCanvas() {
@@ -588,13 +588,17 @@ private slots:
         const QString id = makeCanvas();
         const QString base = headOf(id);
         const Result<Values> r = bench.region(id, {{"x", Value(60)}, {"y", Value(50)}, {"width", Value(100)}, {"height", Value(80)}, {"padding", Value(30)}});
-        const Result<Values> masked = writeGreen(bench, r, {{"blend", Value(12)}, {"candidate", Value(true)}}, "masked");
-        const Result<Values> baked = writeGreen(bench, r, {{"blend", Value(12)}, {"candidate", Value(true)}, {"bake", Value(true)}}, "baked");
-        QVERIFY2(masked.ok() && baked.ok(), qPrintable(codeOf(masked) + codeOf(baked)));
+        const Result<Values> masked = writeGreen(bench, r, {{"blend", Value(12)}}, "masked");
+        QVERIFY2(masked.ok(), qPrintable(codeOf(masked)));
         const QString a = canvas::canvasHandleFrom(masked->value("canvas").json())->revision;
+        // The same fill on a second canvas, baked.
+        const QString id2 = makeCanvas();
+        const Result<Values> r2 = bench.region(id2, {{"x", Value(60)}, {"y", Value(50)}, {"width", Value(100)}, {"height", Value(80)}, {"padding", Value(30)}});
+        const Result<Values> baked = writeGreen(bench, r2, {{"blend", Value(12)}, {"bake", Value(true)}}, "baked");
+        QVERIFY2(baked.ok(), qPrintable(codeOf(baked)));
         const QString b = canvas::canvasHandleFrom(baked->value("canvas").json())->revision;
         const PaintDocument withMask = CanvasStore::forSession().load(id, a).value();
-        const PaintDocument withBake = CanvasStore::forSession().load(id, b).value();
+        const PaintDocument withBake = CanvasStore::forSession().load(id2, b).value();
         const mask::LayerInfo top = withMask.layer(1);
         QVERIFY(top.hasMask && top.maskEnabled);
         QVERIFY(!withBake.layer(1).hasMask);

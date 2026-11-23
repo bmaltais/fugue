@@ -350,48 +350,54 @@ public:
             document.loadLayer(info, pixelsToLayer(placed.layer), &layerMask);
         }
 
-        // A candidate revision first, then the head, by compare-and-swap from the revision this
-        // work started at (the store's rule, 14.5). Losing the race is a result, not a failure.
+        // The result lands on the head and nowhere else: a revision made from the one this work started at, then the head
+        // by compare-and-swap (the store's rule, 14.5). A head that moved meanwhile takes the layer as it is now (layers
+        // only add). A canvas that changed size cannot take it: the run says so and writes nothing (#239).
         CanvasStore store = CanvasStore::forSession();
+        const auto cannotPlace = [&](const QString &head) {
+            return Result<Values>(makeError(QStringLiteral("canvas_head_moved"),
+                                            QStringLiteral("The canvas changed size while this ran (its head is now %1), so the new layer could not be placed on it and nothing was written.").arg(head.left(19)),
+                                            QStringLiteral("Run again from the canvas as it is now.")));
+        };
+        const Result<canvas::CanvasInfo> current = store.info(base->canvas);
+        if (!current)
+            return Result<Values>(current.errors());
+        if (current->head != base->revision) {
+            const Result<mask::PaintDocument> there = store.load(base->canvas, current->head);
+            if (!there)
+                return Result<Values>(there.errors());
+            if (there->width() != width || there->height() != height)
+                return cannotPlace(current->head);
+        }
         const Result<canvas::Revision> added =
             store.addRevision(base->canvas, document, base->revision, QStringLiteral("canvas-write:") + context.node);
         if (!added)
             return Result<Values>(added.errors());
-        const bool keep = context.input(QStringLiteral("candidate")).json().toBool();
-        // Kept for review: the head stays where it is and the revision waits as a candidate (accepted off, no warning).
-        Result<canvas::HeadMove> moved = keep ? Result<canvas::HeadMove>(canvas::HeadMove{false, QString()}) : store.moveHead(base->canvas, base->revision, added->id);
+        Result<canvas::HeadMove> moved = store.moveHead(base->canvas, base->revision, added->id);
         if (!moved)
             return Result<Values>(moved.errors());
-        if (keep) {
-            const Result<canvas::CanvasInfo> now = store.info(base->canvas);
-            if (!now)
-                return Result<Values>(now.errors());
-            moved = canvas::HeadMove{false, now->head};
-        }
-        // The head moved while this ran (the compare-and-swap lost): the layer goes onto the head as it is now, as a new
-        // revision, the same placement accept does (layers only add, 14.5). Only when that is impossible does the revision
-        // stay a candidate, with a warning. A later write racing this one is retried against the newer head.
+        // Lost the race: place the layer on the head as it is now, as a new revision (the same placement accept does).
+        // A later write racing this one is retried against the newer head.
         QString landed = added->id;
-        Errors warnings;
-        if (!keep && !moved->moved) {
-            bool impossible = false;
-            for (int attempt = 0; attempt < 4 && !moved->moved && !impossible; ++attempt) {
-                const Result<canvas::Accepted> placed = store.accept(base->canvas, added->id);
-                if (placed) {
-                    moved = canvas::HeadMove{placed->moved, placed->moved ? placed->head.id : placed->current};
-                    if (placed->moved)
-                        landed = placed->head.id;
-                } else if (!placed.errors().isEmpty() && placed.errors().first().code == QLatin1String("canvas_conflict")) {
-                    impossible = true;
-                } else {
-                    return Result<Values>(placed.errors());
-                }
+        for (int attempt = 0; attempt < 4 && !moved->moved; ++attempt) {
+            const Result<canvas::Accepted> placed = store.accept(base->canvas, added->id);
+            if (placed) {
+                moved = canvas::HeadMove{placed->moved, placed->moved ? placed->head.id : placed->current};
+                if (placed->moved)
+                    landed = placed->head.id;
+            } else {
+                // Not placeable after all (the canvas changed size in the meantime): hide the revision, report, write nothing visible.
+                store.drop(base->canvas, added->id);
+                if (!placed.errors().isEmpty() && placed.errors().first().code == QLatin1String("canvas_conflict"))
+                    return cannotPlace(moved->head);
+                return Result<Values>(placed.errors());
             }
-            if (!moved->moved)
-                warnings << warning(makeError(QStringLiteral("canvas_head_moved"),
-                                              QStringLiteral("The canvas changed while this ran (its head is now %1) and the new layer could not be placed on it, so it was kept as a candidate revision, %2, and the head was not moved.")
-                                                  .arg(moved->head.left(19), added->id.left(19)),
-                                              QStringLiteral("Run again from the canvas as it is now, or keep both.")));
+        }
+        if (!moved->moved) {
+            store.drop(base->canvas, added->id);
+            return Result<Values>(makeError(QStringLiteral("canvas_head_moved"),
+                                            QStringLiteral("The canvas kept changing while this ran, so the new layer could not be placed and nothing was written."),
+                                            QStringLiteral("Run again from the canvas as it is now.")));
         }
         const Result<QJsonObject> handle = canvas::writeCanvasHandle(context.workDir, {base->canvas, landed});
         if (!handle)
@@ -399,9 +405,9 @@ public:
 
         Values out;
         out.insert(QStringLiteral("canvas"), Value(handle.value()));
-        out.insert(QStringLiteral("accepted"), Value(moved->moved));
+        out.insert(QStringLiteral("accepted"), Value(true));
         out.insert(QStringLiteral("head"), Value(moved->head));
-        return Result<Values>(out, warnings);
+        return Result<Values>(out);
     }
 };
 

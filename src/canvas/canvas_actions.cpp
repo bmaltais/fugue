@@ -194,8 +194,8 @@ QString CanvasActions::plainWords(const Error &error, const QString &actionName)
         return tr("Not enough GPU memory. Try a smaller selection.");
     if (error.code == QLatin1String("stitch_mismatch"))
         return tr("The action's workflow returned a picture of another shape.");
-    if (error.code == QLatin1String("canvas_conflict"))
-        return tr("The canvas changed size while this ran. The result is kept in History. Run again.");
+    if (error.code == QLatin1String("canvas_conflict") || error.code == QLatin1String("canvas_head_moved"))
+        return tr("The canvas changed size while this ran, so nothing was written. Run again.");
     return error.message;
 }
 
@@ -396,9 +396,6 @@ void CanvasActions::endRun(const QString &run, const QString &status, const Erro
         for (const WriteResult &write : writes)
             if (write.cached && !write.revision.isEmpty())
                 placeAgain(write);
-        for (const Error &e : errors)
-            if (e.code == QLatin1String("canvas_head_moved"))
-                setError(tr("The canvas changed while this ran, so the result is kept in History as a candidate. Run again."), e.code);
     } else if (status != QLatin1String("cancelled")) {
         const auto hard = std::find_if(errors.cbegin(), errors.cend(), [](const Error &e) { return e.severity == Error::Severity::Error; });
         const Error first = hard != errors.cend() ? *hard : makeError(QStringLiteral("node_failed"), tr("%1 did not finish.").arg(m_actionName));

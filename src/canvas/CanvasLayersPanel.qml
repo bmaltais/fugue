@@ -31,9 +31,6 @@ Rectangle {
     required property CanvasLook look
     required property CanvasViewModel model
     property bool ownShortcuts: false
-    // The view shows its own Accept and Drop for this candidate where the eye is (the new-candidate banner): the panel
-    // then offers only Back to latest, so no decision is offered twice.
-    property bool decisionElsewhere: false
     // A layer mask became the brush's target (a click on its thumbnail, Add mask): the view takes the brush.
     signal maskTargeted
     readonly property real u: look.unit
@@ -434,7 +431,7 @@ Rectangle {
                 }
                 // The eye, at the right as an outliner's toggles are. A hidden layer's is flat and dim (the font has no
                 // crossed eye). While one layer is shown alone its eye alone is on and the others' are flat and dim, as
-                // the picture is: the quiet marking, never the accent fill, which is the view's Accept's (D7).
+                // the picture is: the quiet marking, never the accent fill.
                 ViewButton {
                     id: eye
                     objectName: "canvasLayerEye-" + row.position
@@ -478,7 +475,6 @@ Rectangle {
             // Read only (another step than the latest is shown): why, in plain words, and what to do about it here.
             Column {
                 objectName: "canvasLayersReadOnly"
-                readonly property string kind: root.model.kindB
                 visible: !root.editable && root.rows.length > 0
                 width: parent.width
                 spacing: root.u
@@ -488,12 +484,8 @@ Rectangle {
                     wrapMode: Text.Wrap
                     color: root.look.label
                     font.pixelSize: root.look.captionSize
-                    text: parent.kind === "candidate" ? qsTr("You are looking at a new candidate. Accept or Drop it, or go back to the latest version, to change layers.")
-                          : parent.kind === "dropped" ? qsTr("You are looking at a dropped candidate. Accept it, or go back to the latest version, to change layers.")
-                          : qsTr("You are looking at an earlier step. Go back to the latest version to change layers.")
+                    text: qsTr("You are looking at an earlier step. Go back to the latest version to change layers.")
                 }
-                // Back to latest, then the candidate's decision (Accept is not the accent fill here: the view's bar has the
-                // one primary), Drop apart and last.
                 Flow {
                     width: parent.width
                     spacing: root.u
@@ -503,25 +495,6 @@ Rectangle {
                         text: qsTr("Back to latest")
                         tip: qsTr("Show the latest version, whose layers can be changed")
                         onTapped: root.model.show(root.model.head)
-                    }
-                    ViewButton {
-                        objectName: "canvasLayersAccept"
-                        look: root.look
-                        visible: !root.decisionElsewhere && (root.model.kindB === "candidate" || root.model.kindB === "dropped")
-                        text: qsTr("Accept")
-                        tip: qsTr("Make this candidate the latest version of the canvas")
-                        onTapped: root.model.accept(root.model.revisionB)
-                    }
-                    Item { width: 2 * root.u; height: 1; visible: dropButton.visible }
-                    ViewButton {
-                        id: dropButton
-                        objectName: "canvasLayersDrop"
-                        look: root.look
-                        visible: !root.decisionElsewhere && root.model.kindB === "candidate"
-                        danger: true
-                        text: qsTr("Drop")
-                        tip: qsTr("Hide this candidate (it is kept, and Accept still takes it)")
-                        onTapped: root.model.drop(root.model.revisionB)
                     }
                 }
             }

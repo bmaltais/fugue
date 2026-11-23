@@ -15,9 +15,9 @@ fugue canvas show canvas-0123456789ab@sha256:ab12cd34   # one revision: tree has
 fugue canvas export canvas-0123456789ab out.ora    # the head as an .ora (never replaces a file)
 fugue canvas export canvas-0123456789ab@head out.png  # flattened: .png, .jpg (on white) or .webp
 fugue canvas list                                  # the canvases, newest first
-fugue canvas candidates canvas-0123456789ab        # results waiting for your review
+fugue canvas candidates canvas-0123456789ab        # revisions nobody points at (scripts)
 fugue canvas diff canvas-0123456789ab@sha256:ab12cd34   # what a revision changed, against its parent
-fugue canvas accept canvas-0123456789ab            # the one candidate becomes the head
+fugue canvas accept canvas-0123456789ab            # the one candidate becomes the head (scripts)
 fugue canvas drop canvas-0123456789ab@sha256:ab12cd34   # hide one (it is kept)
 fugue canvas layer list canvas-0123456789ab        # the layers, top first, with their positions
 fugue canvas layer set canvas-0123456789ab "Fill 1" --blend multiply   # one new revision
@@ -61,9 +61,8 @@ writes nothing a second time, and a run can be replayed exactly. Canvas Write ne
 makes a new revision from the one Region read and moves the head to it: the fill is a layer on the
 canvas at once, to hide, edit or delete (Undo removes it too). If something else moved the head
 meanwhile, the layer is added onto the head as it is now, as a new revision. Only if that is
-impossible (the canvas changed size) is the new revision
-kept as a candidate, with the warning `canvas_head_moved`, and the head stays as the other change
-left it. The next run reads the head as it has become. To keep reading one revision (to try several fills of the same picture), give
+impossible (the canvas changed size) the run says so in plain words (`canvas_head_moved`) and writes
+nothing. There is no review step: a run is a layer, delete it or Undo. The next run reads the head as it has become. To keep reading one revision (to try several fills of the same picture), give
 Region that revision's hash, or freeze it.
 
 Region's picture keeps the canvas's transparency. A stitch from Region also goes to Stitch. Region
@@ -89,49 +88,41 @@ The size, background and color of the last canvas you made are there the next ti
 
 **Pick region…**, the last entry of that list, opens the canvas at the node's revision (`head` is read as it is now) in a large view with a rectangle on it, so the region is dragged out instead of typed. Drag inside the rectangle to move it, drag a handle to resize it (Shift keeps its shape, Alt resizes from the center), or type X, Y, Width and Height under the picture; Free, Original, 1:1, 4:3, 3:2, 16:9 and Turn lock its shape, and **Snap to 16** (the node's Multiple of) puts its edges on multiples of 16. The dashed outer box is what the node will cut (the rectangle and its Padding), and the line under the picture says the size the model will get (Scale, Cap and Multiple of applied, as the node does). Zoom and pan work as in every large view; a large canvas is drawn from a smaller copy, the numbers stay in the canvas's pixels. **Apply** writes X, Y, Width and Height in one step (Undo takes all four back); Cancel or Escape change nothing. With a mask connected the node uses the mask's bounds and the window says so; with X, Y, Width or Height linked to another node there is nothing to apply.
 
-## Review a fill
+## Fill a region
 
-A fill lands on the canvas at once; you do not have to review it. When you do want a review step,
-turn Canvas Write's advanced **Keep as candidate** on: it leaves the head where it is and stores the new layer as a **candidate**: a revision made from the one Region
-read, waiting for you. The `generative-fill` template (File > Browse templates, or
+A fill lands on the canvas at once. The `generative-fill` template (File > Browse templates, or
 `fugue workflow new fill.fugue --template generative-fill`) is Canvas Region, a FLUX.2 Klein redraw
-and Canvas Write, with that off. Turn it on for the review below. Put your canvas's id and the rectangle in Canvas Region and run it.
+and Canvas Write. Put your canvas's id and the rectangle in Canvas Region and run it.
 
 When a run's layer lands on the head, a Canvas view that is looking at the head (File > Canvas…, or a Canvas area)
 goes along to it and says so for a moment, "Layer <name> added", with **Undo** (the head back one step; Ctrl+Z over the
-Layers panel does the same). Delete a layer you do not want in the Layers panel.
+Layers panel does the same). Delete a layer you do not want in the Layers panel. An older workflow that has Canvas
+Write's former **Keep as candidate** saved lands on the head all the same: the value is ignored, with no error and no notice.
+While an earlier step is shown, the Layers panel says so and offers **Back to latest**: layers are changed on the latest
+version.
 
-When a run leaves a candidate instead (Keep as candidate on, or a head that moved in a way the layer could not follow),
-the view shows it at once over the head, with a banner over the foot of the picture, "New candidate <hash> from <the
-Canvas Write's title>": **Back to latest** (the candidate stays pending), **Accept** (or Enter) or **Drop**. Several
-candidates at once: the newest is shown and the others are counted. A view on another revision, with Compare on, or
-while you drag the region is never moved (a candidate that came during a drag shows when you let go). Turn it off in
-Settings > General, **Show new candidates**. While a candidate or an earlier revision is shown, the Layers panel says
-so and offers **Back to latest** (and, for a candidate, Accept and Drop): layers are changed on the latest version.
+For scripts (film teams), the store still has candidates, revisions nobody points at, which the command line makes and
+reads; the window does not review them:
 
-- `fugue canvas candidates <id>` lists what waits, newest first; run the template again for another
-  candidate to compare (they are all made from the head you started at).
+- `fugue canvas candidates <id>` lists them, newest first.
 - `fugue canvas diff <id>@<candidate>` says what a candidate adds: the layer, how many tiles, and
   the rectangle they cover.
 - `fugue canvas accept <id>@<candidate>` makes it the head. If something else became the head
   meanwhile and the candidate only added a layer, the layer is placed on the new head as a new
-  revision; if the candidate changed more than that, `canvas_conflict` says so and you run the fill
-  again. `fugue canvas drop <id>@<candidate>` hides it. Neither deletes anything: a dropped one can
+  revision; if the candidate changed more than that, `canvas_conflict` says so.
+  `fugue canvas drop <id>@<candidate>` hides it. Neither deletes anything: a dropped one can
   still be accepted, and every revision stays in `fugue canvas log` or `candidates --all`.
-- A Write that lost the race for the head is placed on the new head; only one that cannot be placed (`canvas_head_moved`) is a candidate.
 
 In the window, File > Canvas… is the picture of one canvas (the newest at first), its Layers panel with Undo and
 Redo, and a **History** panel you can open from the bar: each change in words, newest first ("Layer added: A wooden
 table", "Opacity 50%: Fill", "Layer deleted: Sketch"), whoever made it. Click a step to look at the canvas as it was
-then (read only) and **Back to latest** to return; **All revisions** adds the candidates, pending and dropped. When
-candidates wait, one chip says how many ("2 pending"); click it to review the newest. The picture
+then (read only) and **Back to latest** to return; **All revisions** lists every revision, the ones kept apart by the
+command line too. The picture
 zooms with the wheel and pans with the middle button or Space held (Home or 0 fits, 1 is 100%, + and - zoom); a left
 drag draws a region. The canvas button opens the
 list of your canvases, with **New canvas…** and **Import picture…** under it; with no canvas yet the picture's place
-offers the same two. A candidate shows over the latest version; **Show candidate** off shows the latest alone, so you can
-flip between before and after. **Accept** (or Enter) and **Drop** are in the bar (Export… is in File > Export) (Drop only hides: a dropped
-candidate can still be accepted), and **Compare** opens the views of Compare Images (slider, horizontal slider, side
-by side, flip and difference) against the latest version; the view you pick last comes back next time. The view follows the Canvas
+offers the same two. Export… is in File > Export, and **Compare** opens the views of Compare Images (slider, horizontal slider, side
+by side, flip and difference) against the step before; the view you pick last comes back next time. The view follows the Canvas
 Region node you select in the graph, or by itself the only one that reads this canvas (a new one with no canvas yet
 takes this canvas at your first change): its rectangle (and the padded box the node cuts) is drawn on the picture;
 A node reads the latest version unless you pinned it to a step; only then a line under the picture says which step and **Use for region** points it at the step you are looking at (the latest version, if you are on it), as one
@@ -143,9 +134,9 @@ or a handle to resize it (Shift keeps its shape, or makes a new one square; Alt 
 and position in the status line, the padded box and its small label (the model's size is in the tooltip of the frame) follow the pointer, and **Snap to 16** (the node's
 Multiple of) puts the edges on multiples of 16. Letting go writes X, Y, Width and Height in one undo step, with no
 Apply; Esc during a drag leaves the node as it was. The wheel zooms and the middle button (or Space held) pans, and
-neither moves the rectangle. It works on whichever revision you are looking at, a candidate included. With X, Y,
+neither moves the rectangle. It works on whichever revision you are looking at. With X, Y,
 Width or Height linked to another node, or while Compare is on, it is only drawn; with no Canvas Region selected the
-view says so. The view refreshes by itself when a run adds a candidate or moves the head.
+view says so. The view refreshes by itself when a run moves the head.
 
 Under the picture there is one thin **status line**, as Photoshop's: the zoom and the canvas size ("32% · 2000 × 2000") and, while you drag or when a rectangle is set, its size and place ("456 × 777 at 0, 253"). **Advanced details** at its end opens, for those who want the numbers, the context and the size the model gets, what the node reads, the revision shown and what changed in it. Nothing else of that kind is written under the picture; only what you must act on is (a linked input, Compare on, an error).
 
@@ -208,8 +199,7 @@ an eye:
   `]` and `[` move up and down, F2 renames, Ctrl+Z and Ctrl+Shift+Z undo and redo. Elsewhere those
   keys keep their meaning in the graph.
 - Each change is a new revision of the head and shows at once; **Undo** and **Redo** at the top of
-  the panel go back and forward. Layers are changed on the head only: on an older revision or a
-  candidate the list is there to look at.
+  the panel go back and forward. Layers are changed on the head only: on an older revision the list is there to look at.
 - Hover a layer to see where it came from (the Canvas Write that made it, and when).
 
 ## Tools, masks and Quick Mask
@@ -261,12 +251,12 @@ the view is a row of a menu, with its key beside it; what does not apply to the 
   whole canvas as one undo step, and clears a painted selection), Inverse (Ctrl+Shift+I, the painted selection), Quick Mask
   and Use selection.
 - **Layer**: Add layer mask, Invert mask, Mask overlay, Reveal all, Hide all. The layers panel keeps its own rows.
-- **View**: Fit, 100%, Zoom in, Zoom out, History, Layers, Compare, Show candidate, Advanced details, Snap region, and
+- **View**: Fit, 100%, Zoom in, Zoom out, History, Layers, Compare, Advanced details, Snap region, and
   **Tools** (Hand, Zoom, Rectangle region, Mask brush, Mask eraser, swap, brush size).
 
 A greyed row with the tooltip "Not built yet (#N)" is a feature that is planned and tracked in issue N; it is not a command and has
 no key ([the research](canvas-menus-research.md) says what the other editors have and what was decided). The top bar keeps the
-canvas picker, the pending chip, Accept and Drop, Fit and 100%; each tool's own settings stay in the options bar.
+canvas picker, Fit and 100%; each tool's own settings stay in the options bar.
 
 ## The task bar: Generate on the canvas
 

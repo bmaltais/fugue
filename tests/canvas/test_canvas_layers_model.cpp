@@ -186,7 +186,6 @@ private slots:
         // An undone edit is not a candidate: nothing waits for review.
         QVERIFY(model.undo());
         QVERIFY(store().candidates(m_canvas)->empty());
-        QCOMPARE(model.newResult(), QString());
     }
 
     void soloIsAViewOnlyStateAndNeverARevision() {

@@ -6,8 +6,7 @@ import Fugue
 // dialog only frames it and gives it its context: the canvas, the document and the Graph's selection (the view finds
 // the Canvas Region node to follow from it). One bar (#228): the frame's own bar is off and its close sits
 // at the end of the view's tools, after the view's Fit and 100%, as the Mask editor's and the Crop window's bars end.
-// `openFor(id)` opens it on a canvas (empty: the newest, or the selected region's); Escape closes, Enter accepts a
-// shown candidate (the view's key).
+// `openFor(id)` opens it on a canvas (empty: the newest, or the selected region's); Escape closes.
 LargeViewDialog {
     id: root
     objectName: "canvasViewDialog"

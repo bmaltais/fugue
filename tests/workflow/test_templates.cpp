@@ -1068,7 +1068,7 @@ private slots:
         const auto &nodes = document.graph.nodes;
         QCOMPARE(nodes.value("region").type, QStringLiteral("fugue/canvas-region"));
         QCOMPARE(nodes.value("write").type, QStringLiteral("fugue/canvas-write"));
-        QVERIFY(!nodes.value("write").inputs.contains("candidate") || !nodes.value("write").inputs.value("candidate").literal().toBool()); // lands on the head (#229)
+        QVERIFY(!nodes.value("write").inputs.contains("candidate")); // lands on the head, and never mentions candidates (#239)
         QVERIFY(nodes.value("region").inputs.value("canvas").literal().toString().isEmpty()); // the person picks one
         QCOMPARE(nodes.value("sample").inputs.value("steps").literal().toInt(), 4);
         QCOMPARE(nodes.value("sample").inputs.value("guidance").literal().toDouble(), 1.0);

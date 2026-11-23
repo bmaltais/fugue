@@ -1,9 +1,10 @@
 {
   "manifest": 1,
   "id": "fugue/canvas-write",
-  "version": "1.3.0",
+  "version": "1.4.0",
+  "retired_inputs": ["candidate"],
   "name": "Canvas Write",
-  "description": "Put a result on a canvas as a new layer, straight onto the head: a new revision is made from the one Canvas Region read and the head moves to it, so the layer is there to keep, hide or delete (Undo removes it too). When something else moved the head while this ran, the layer is added onto the head as it is now (layers only add), and the node reports the head it landed on. Only when that is impossible (the canvas changed size) does the new revision stay as a candidate, with a warning and accepted off. For a review step, turn Keep as candidate on: the head then never moves and the result waits for you to compare and accept or drop (fugue canvas candidates, diff, accept, drop). The picture is resized to the stitch's box and the new layer holds it whole, with a layer mask that blends it in: the mask softened outward by Blend pixels, as Stitch does (turn Bake the blend on to put the blend into the layer's own pixels instead, as before). The layer is named from the prompt that made the picture, else Fill 1, Fill 2 and so on.",
+  "description": "Put a result on a canvas as a new layer, straight onto the head: a new revision is made from the one Canvas Region read and the head moves to it, so the layer is there to keep, hide or delete (Undo removes it too). When something else moved the head while this ran, the layer is added onto the head as it is now (layers only add), and the node reports the head it landed on. When that is impossible (the canvas changed size while the run was going) the run says so and writes nothing. The picture is resized to the stitch's box and the new layer holds it whole, with a layer mask that blends it in: the mask softened outward by Blend pixels, as Stitch does (turn Bake the blend on to put the blend into the layer's own pixels instead, as before). The layer is named from the prompt that made the picture, else Fill 1, Fill 2 and so on.",
   "category": "Image/Canvas",
   "keywords": ["canvas", "write", "layer", "revision", "generative fill", "accept", "place"],
   "sink": true,
@@ -19,8 +20,6 @@
      "description": "The mask to blend through, at the canvas's size. Without one, the stitch's, and without a stitch the whole picture."},
     {"name": "blend", "type": "number", "label": "Blend", "default": 16, "min": 0, "max": 512, "step": 1, "integer": true,
      "description": "How far the edge of the mask fades outward, in canvas pixels."},
-    {"name": "candidate", "type": "boolean", "label": "Keep as candidate", "default": false, "advanced": true,
-     "description": "Off (the default): the result lands on the head as a layer. On: keep the result for review: the head does not move, and the new revision waits as a candidate to accept into the head or drop."},
     {"name": "bake", "type": "boolean", "label": "Bake the blend into the layer", "default": false, "advanced": true,
      "description": "Off: the layer is the redrawn picture whole and the blend is its layer mask, which can be turned off or edited later. On: the blend is put into the layer's pixels and there is no layer mask (the composite is the same)."},
     {"name": "name", "type": "text", "label": "Layer name", "default": "Fill", "widget": "line",
@@ -28,7 +27,7 @@
   ],
   "outputs": [
     {"name": "canvas", "type": "fugue/canvas", "label": "Canvas", "description": "The revision that holds the new layer."},
-    {"name": "accepted", "type": "boolean", "label": "Accepted", "description": "Whether the layer landed on the head (directly, or placed on a head that moved meanwhile). Off for a kept candidate."},
-    {"name": "head", "type": "text", "label": "Head", "description": "The canvas's head after the write: the revision that holds the new layer when accepted, else the head that stayed."}
+    {"name": "accepted", "type": "boolean", "label": "Accepted", "description": "Whether the layer landed on the head (directly, or placed on a head that moved meanwhile). Always on: a result that cannot be placed fails the run."},
+    {"name": "head", "type": "text", "label": "Head", "description": "The canvas's head after the write: the revision that holds the new layer."}
   ]
 }

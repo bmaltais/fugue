@@ -79,6 +79,8 @@ struct NodeType {
     QString category; // levels separated by '/'
     QStringList keywords;
     QStringList aliases; // old ids this type answers to (3.6)
+    // Inputs the type used to have: a saved value for one is dropped without a word, no error and no notice (3.6).
+    QStringList retiredInputs;
     bool sink = false;
     // Whether the node shows a picture (#263): "always", "result" or "never"; empty: by category
     // (node_picture.h pictureRole). Packs say it for their own types.

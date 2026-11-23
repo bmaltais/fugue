@@ -262,11 +262,9 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
-    // A run adds a candidate (as Canvas Write does) while a Canvas area is open on the head: the area shows it with its banner.
-    void aCanvasAreaShowsANewResultOfARunAndTheBannerDecides() {
-        // The Canvas Write that made it is in the open document: the banner names it by its title, never its id (#228).
-        App app(load(R"({"fugue": 1, "graph": {"nodes": {"pot": {"type": "fugue/canvas-write", "version": "1.2.0", "inputs": {}}}},
-                         "layout": {"nodes": {"pot": {"pos": [20, 20]}}}})"));
+    // #239: a candidate added while a Canvas area is open on the head (by the command line) leaves the area where it is: no banner.
+    void aCanvasAreaStaysOnTheHeadWhenACandidateArrives() {
+        App app(load(blank));
         QVERIFY(app.open());
         QVERIFY(app.commands.trigger("area.split-row"));
         QQuickItem *area = nullptr;
@@ -275,7 +273,7 @@ private slots:
         QTRY_COMPARE(backend->property("canvasId").toString(), m_canvas);
         const QString head = backend->property("head").toString();
         QTRY_VERIFY(!head.isEmpty());
-        QVERIFY(!find(app.window, "canvasViewNewResult"));
+        const int before = backend->property("choices").toList().size();
         std::thread run([=] {
             QThread::msleep(300);
             PaintDocument base(256, 256);
@@ -283,17 +281,11 @@ private slots:
             base.addLayer(LayerKind::Paint, "Flower pot");
             canvas::CanvasStore::forSession().addRevision(m_canvas, base, head, "canvas-write:pot");
         });
-        QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "canvasViewNewResult"), 5000);
+        QTRY_VERIFY_WITH_TIMEOUT(backend->property("choices").toList().size() > before, 5000);
         run.join();
-        const QString shown = backend->property("revisionB").toString();
-        QVERIFY(shown != head);
-        QCOMPARE(backend->property("newResult").toString(), shown);
-        const QString said = find(app.window, "canvasViewNewResultText")->property("text").toString();
-        QVERIFY2(said.startsWith("A new candidate from Canvas Write") && !said.contains("pot"), qPrintable(said));
-        QVERIFY(!find(app.window, "canvasViewAccept")); // the bar's pair hides while the banner has it: one primary
-        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(find(app.window, "canvasViewNewAccept")));
-        QTRY_COMPARE(backend->property("head").toString(), shown);
-        QTRY_VERIFY(!find(app.window, "canvasViewNewResult"));
+        QTest::qWait(300);
+        QCOMPARE(backend->property("revisionB").toString(), head);
+        QVERIFY(!find(app.window, "canvasViewNewResult"));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 

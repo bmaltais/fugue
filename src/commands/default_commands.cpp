@@ -116,7 +116,6 @@ QList<Row> defaultRows() {
         {"canvas-view.history", QT_TRANSLATE_NOOP("Command", "Show or hide the history of the canvas"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "History")},
         {"canvas-view.layers", QT_TRANSLATE_NOOP("Command", "Show or hide the layers panel"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Layers")},
         {"canvas-view.compare", QT_TRANSLATE_NOOP("Command", "Compare the shown step with the one before it"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Compare")},
-        {"canvas-view.show-candidate", QT_TRANSLATE_NOOP("Command", "Show a candidate over the latest version, or the latest version alone"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Show candidate")},
         {"canvas-view.details", QT_TRANSLATE_NOOP("Command", "Show or hide the advanced details under the picture"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Advanced details")},
         {"canvas-view.snap", QT_TRANSLATE_NOOP("Command", "Snap the region's edges to the node's Multiple of"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Snap region")},
     };

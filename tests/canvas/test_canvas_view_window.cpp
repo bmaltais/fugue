@@ -1,6 +1,5 @@
 // The Canvas view in the real window (#221, epics #216/#217, spec 14.5), offscreen: File > Canvas… opens the picture of the
-// newest canvas at its head; the strip picks a revision, a candidate shows over the head (Show candidate puts the head back),
-// Accept and Drop act on it, Compare opens the modes, the wheel and keys zoom, and a Canvas Region selected in the graph is
+// newest canvas at its head; the History picks a revision, Compare opens the modes, the wheel and keys zoom, and a Canvas Region selected in the graph is
 // the follow target: its rectangle is drawn on the picture and "Region reads from this revision" is one undo step. The store
 // is the test's own (FUGUE_HOME and the XDG folders point at a temporary folder); no window is launched outside the test
 // process and no real pointer is moved.
@@ -185,12 +184,12 @@ private slots:
         openDialog(app);
         QTRY_COMPARE(model(app)->property("canvasId").toString(), m_canvas);
         QTRY_VERIFY(!model(app)->property("revisionB").toString().isEmpty());
-        // No strip and no hashes (#228): the two candidates are one chip.
+        // No strip and no hashes (#228), and no review of candidates (#239): no chip for the two kept apart.
         QVERIFY(!find(app.window, "canvasViewChoice-head"));
-        QTRY_COMPARE(find(app.window, "canvasViewPending")->property("text").toString(), QString("2 pending"));
+        QVERIFY(!find(app.window, "canvasViewPending"));
         QVERIFY(!find(app.window, "canvasHistoryPanel")); // closed at first
         QCOMPARE(model(app)->property("revisionB").toString(), m_head);
-        // The head alone: nothing to accept, drop or overlay; Export is there.
+        // The head alone: Export is there.
         QVERIFY(!find(app.window, "canvasViewAccept"));
         QVERIFY(!find(app.window, "canvasViewOverlay")); // it lives in the View menu now
         QVERIFY(!find(app.window, "canvasViewExport")); // and Export in the File menu
@@ -201,27 +200,27 @@ private slots:
         QTRY_VERIFY((exportRow = find(app.window, "menuItem-canvas-view.export")));
         QVERIFY(exportRow->isEnabled());
         closeMenu(app);
-        QQuickItem *candidateRow = menuRow(app, "View", "canvas-view.show-candidate");
-        QVERIFY(candidateRow && !candidateRow->isEnabled()); // the head alone: nothing to show over it
+        QVERIFY(!menuRow(app, "View", "canvas-view.show-candidate")); // no candidate toggle in the product (#239)
         closeMenu(app);
         QVERIFY(!find(app.window, "canvasViewRegionRow")); // nothing followed
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
-    void aCandidateShowsOverTheHeadAndTheToggleBringsTheHeadBack() {
+    // #239: a revision kept apart (made by the command line) can be looked at from All revisions: read only, no Accept or Drop.
+    void aCandidateShownIsReadOnlyWithBackToLatestAndNoDecision() {
         App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
         QVERIFY(app.open());
         openDialog(app);
         showRevision(app, m_a);
-        QTRY_COMPARE(model(app)->property("revisionB").toString(), m_a);
-        QVERIFY(find(app.window, "canvasViewAccept"));
-        QVERIFY(find(app.window, "canvasViewDrop"));
-        QObject *viewer = view(app)->property("viewer").value<QObject *>();
-        QCOMPARE(viewer->property("sourceA").toUrl(), model(app)->property("sourceB").toUrl()); // the candidate
-        viaMenu(app, "View", "canvas-view.show-candidate");
-        QTRY_COMPARE(viewer->property("sourceA").toUrl(), model(app)->property("headSource").toUrl()); // the head alone
-        viaMenu(app, "View", "canvas-view.show-candidate");
-        QTRY_COMPARE(viewer->property("sourceA").toUrl(), model(app)->property("sourceB").toUrl());
+        QTRY_VERIFY(find(app.window, "canvasLayersReadOnly"));
+        QVERIFY(find(app.window, "canvasLayersGoHead"));
+        QVERIFY(!find(app.window, "canvasViewAccept"));
+        QVERIFY(!find(app.window, "canvasViewDrop"));
+        QVERIFY(!find(app.window, "canvasLayersAccept"));
+        QVERIFY(!find(app.window, "canvasLayersDrop"));
+        QVERIFY(!find(app.window, "canvasViewNewResult"));
+        click(app, "canvasLayersGoHead");
+        QTRY_COMPARE(model(app)->property("revisionB").toString(), m_head);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
@@ -232,14 +231,8 @@ private slots:
         showRevision(app, m_a);
         QTRY_COMPARE(model(app)->property("revisionB").toString(), m_a);
         QVERIFY(!find(app.window, "canvasViewMode-slider"));
-        QQuickItem *overlayRow = menuRow(app, "View", "canvas-view.show-candidate");
-        QVERIFY(overlayRow && overlayRow->isEnabled()); // the overlay toggle is for the picture alone
-        closeMenu(app);
         viaMenu(app, "View", "canvas-view.compare");
         QTRY_VERIFY(find(app.window, "canvasViewMode-slider"));
-        overlayRow = menuRow(app, "View", "canvas-view.show-candidate");
-        QVERIFY(overlayRow && !overlayRow->isEnabled());
-        closeMenu(app);
         QObject *viewer = view(app)->property("viewer").value<QObject *>();
         QTRY_COMPARE(viewer->property("mode").toString(), QString("slider"));
         QCOMPARE(viewer->property("sourceA").toUrl(), model(app)->property("sourceA").toUrl());
@@ -248,22 +241,6 @@ private slots:
         QTRY_COMPARE(viewer->property("mode").toString(), QString("difference"));
         viaMenu(app, "View", "canvas-view.compare");
         QTRY_COMPARE(viewer->property("mode").toString(), QString("single"));
-    }
-
-    void acceptAndDropAct() {
-        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
-        QVERIFY(app.open());
-        openDialog(app);
-        showRevision(app, m_b);
-        click(app, "canvasViewDrop");
-        QTRY_COMPARE(model(app)->property("pendingCount").toInt(), 1);
-        showRevision(app, m_a);
-        click(app, "canvasViewAccept");
-        QTRY_COMPARE(model(app)->property("head").toString(), m_a);
-        QTRY_VERIFY(!find(app.window, "canvasViewAccept"));
-        QCOMPARE(model(app)->property("revisionB").toString(), m_a);
-        const auto info = canvas::CanvasStore::forSession().info(m_canvas);
-        QCOMPARE(info->head, m_a);
     }
 
     void aStoreChangeWhileOpenShowsWithoutAClick() {
@@ -277,11 +254,11 @@ private slots:
                               .addRevision(m_canvas, withFill(base, "Fill C", 200), m_head, "canvas-write:c")
                               .value()
                               .id;
-        QTRY_COMPARE_WITH_TIMEOUT(model(app)->property("pendingCount").toInt(), 3, 4000);
+        QTRY_COMPARE_WITH_TIMEOUT(model(app)->property("choices").toList().size(), 4, 4000);
         QVERIFY(c.size() > 0);
     }
 
-    // A running workflow adds a candidate the way Canvas Write does (addRevision from the head, the head left where it is),
+    // A candidate is added the way the command line does (addRevision from the head, the head left where it is),
     // from another thread a moment later; the view sees it through the folder watch alone.
     static std::thread arrivesLater(const QString &canvas, const QString &head, const QString &name, int x) {
         return std::thread([=] {
@@ -292,46 +269,19 @@ private slots:
         });
     }
 
-    void aResultOfARunWhileOpenIsShownOverTheHeadWithItsBanner() {
+    // #239: a candidate arriving (made apart, by the command line) does not move the view and shows no banner.
+    void aCandidateWhileOpenLeavesTheViewOnTheHeadWithNoBanner() {
         App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
         QVERIFY(app.open());
         openDialog(app);
         QTRY_VERIFY(!model(app)->property("revisionB").toString().isEmpty());
-        QVERIFY(!find(app.window, "canvasViewNewResult"));
         std::thread run = arrivesLater(m_canvas, m_head, "run1", 200);
-        QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "canvasViewNewResult"), 5000); // the strip refreshed and the view moved
+        QTRY_VERIFY_WITH_TIMEOUT(model(app)->property("choices").toList().size() > 3, 5000);
         run.join();
-        const QString shown = model(app)->property("revisionB").toString();
-        QCOMPARE(model(app)->property("newResult").toString(), shown);
-        QCOMPARE(model(app)->property("revisionA").toString(), m_head);
-        QVERIFY(model(app)->property("pendingCount").toInt() >= 3); // it stays pending
-        const QString said = find(app.window, "canvasViewNewResultText")->property("text").toString();
-        QVERIFY2(said.startsWith("A new candidate") && !said.contains("run1"), qPrintable(said)); // a node by its title, never its id
-        QVERIFY(!find(app.window, "canvasViewAccept")); // the bar's pair hides while the banner shows its own: one primary
-        QVERIFY(!find(app.window, "canvasViewDrop"));
-        QObject *viewer = view(app)->property("viewer").value<QObject *>();
-        QCOMPARE(viewer->property("sourceA").toUrl(), model(app)->property("sourceB").toUrl()); // the combined picture
-        // Back to Head: the Head alone, the banner gone, the candidate still in the strip.
-        click(app, "canvasViewNewBack");
-        QTRY_COMPARE(model(app)->property("revisionB").toString(), m_head);
-        QTRY_VERIFY(!find(app.window, "canvasViewNewResult"));
-        QVERIFY(model(app)->property("pendingCount").toInt() >= 3); // it stays pending
-        // Another run: Accept from the banner moves the head to it.
-        std::thread again = arrivesLater(m_canvas, m_head, "run2", 300);
-        QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "canvasViewNewResult"), 5000);
-        again.join();
-        const QString second = model(app)->property("revisionB").toString();
-        click(app, "canvasViewNewAccept");
-        QTRY_COMPARE(model(app)->property("head").toString(), second);
-        QTRY_VERIFY(!find(app.window, "canvasViewNewResult"));
-        // And Drop from the banner hides the next one.
-        std::thread third = arrivesLater(m_canvas, second, "run3", 100);
-        QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "canvasViewNewResult"), 5000);
-        third.join();
-        const int pending = model(app)->property("pendingCount").toInt();
-        click(app, "canvasViewNewDrop");
-        QTRY_VERIFY(!find(app.window, "canvasViewNewResult"));
-        QTRY_COMPARE(model(app)->property("pendingCount").toInt(), pending - 1);
+        QTest::qWait(300);
+        QCOMPARE(model(app)->property("revisionB").toString(), m_head);
+        QVERIFY(!find(app.window, "canvasViewNewResult"));
+        QVERIFY(!find(app.window, "canvasViewAccept"));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
@@ -359,40 +309,6 @@ private slots:
         click(app, "canvasViewHeadToastUndo");
         QTRY_COMPARE(model(app)->property("head").toString(), m_head);
         QTRY_VERIFY(!find(app.window, "canvasViewHeadToast"));
-        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
-    }
-
-    void aResultIsNotShownWithCompareOnOrTheSettingOffAndShowsWhenCompareEnds() {
-        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
-        QVERIFY(app.open());
-        openDialog(app);
-        QTRY_VERIFY(!model(app)->property("revisionB").toString().isEmpty());
-        // A head with a parent, so Compare is possible.
-        QVERIFY(canvas::CanvasStore::forSession().accept(m_canvas, m_a));
-        QTRY_COMPARE_WITH_TIMEOUT(model(app)->property("head").toString(), m_a, 4000);
-        QTRY_COMPARE(model(app)->property("revisionB").toString(), m_a);
-        // Compare on (the head against its parent): the new result waits in the strip.
-        viaMenu(app, "View", "canvas-view.compare");
-        QTRY_VERIFY(find(app.window, "canvasViewMode-slider"));
-        std::thread run = arrivesLater(m_canvas, m_a, "run1", 200);
-        QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "canvasViewChoice-run1") || model(app)->property("choices").toList().size() > 3, 5000);
-        run.join();
-        QTest::qWait(300);
-        QCOMPARE(model(app)->property("revisionB").toString(), m_a);
-        QVERIFY(!find(app.window, "canvasViewNewResult"));
-        viaMenu(app, "View", "canvas-view.compare"); // Compare off: now it shows
-        QTRY_VERIFY(find(app.window, "canvasViewNewResult"));
-        click(app, "canvasViewNewBack");
-        QTRY_VERIFY(!find(app.window, "canvasViewNewResult"));
-        // The setting off (Settings > General, live): no banner, the strip still lists it.
-        QCOMPARE(app.settings.set("canvas_show_new_results", false), QString());
-        QTRY_VERIFY(!model(app)->property("showNewResults").toBool());
-        std::thread off = arrivesLater(m_canvas, m_a, "run2", 300);
-        QTRY_VERIFY_WITH_TIMEOUT(model(app)->property("choices").toList().size() > 4, 5000);
-        off.join();
-        QTest::qWait(300);
-        QCOMPARE(model(app)->property("revisionB").toString(), m_a);
-        QVERIFY(!find(app.window, "canvasViewNewResult"));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
@@ -555,7 +471,7 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
-    void aResultThatArrivesMidDragWaitsForTheReleaseAndTheDragIsKept() {
+    void aRevisionThatArrivesMidDragLeavesTheDragAndThePictureAlone() {
         App app(load(fixture(m_canvas)));
         openFollowing(app);
         const QPoint from = pixelAt(app, 300, 320), to = pixelAt(app, 420, 400);
@@ -570,7 +486,7 @@ private slots:
         QVERIFY(find(app.window, "canvasViewFrame")->property("dragging").toBool());
         QTest::mouseRelease(app.window, Qt::LeftButton, {}, to);
         QCOMPARE(app.model.undoStack()->count(), 1); // the drag was committed
-        QTRY_VERIFY(find(app.window, "canvasViewNewResult")); // and then the result shows
+        QCOMPARE(model(app)->property("revisionB").toString(), m_head);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
@@ -1045,8 +961,8 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
-    // D5: Home fits as in the Graph; Enter accepts the shown candidate (Accept is the primary).
-    void homeFitsAndEnterAcceptsTheShownCandidate() {
+    // D5: Home fits as in the Graph; Enter does nothing here (#239: no candidate to accept; it is the host's).
+    void homeFitsAndEnterDoesNothingInTheView() {
         App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
         QVERIFY(app.open());
         openDialog(app);
@@ -1056,14 +972,14 @@ private slots:
         QTRY_VERIFY(viewer->property("actual").toBool());
         QTest::keyClick(app.window, Qt::Key_Home);
         QTRY_VERIFY(!viewer->property("actual").toBool());
-        QTest::keyClick(app.window, Qt::Key_Return); // the Head: nothing to accept, nothing happens
+        QTest::keyClick(app.window, Qt::Key_Return);
         QCOMPARE(model(app)->property("head").toString(), m_head);
         QVERIFY(dialog(app)->property("opened").toBool());
         showRevision(app, m_a);
         QTRY_COMPARE(model(app)->property("revisionB").toString(), m_a);
         QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(find(app.window, "canvasViewViewer")));
         QTest::keyClick(app.window, Qt::Key_Return);
-        QTRY_COMPARE(model(app)->property("head").toString(), m_a);
+        QCOMPARE(model(app)->property("head").toString(), m_head); // a revision kept apart is not accepted by Enter
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
@@ -1080,11 +996,9 @@ private slots:
         click(app, "canvasViewMode-slider_horizontal");
         QObject *viewer = view(app)->property("viewer").value<QObject *>();
         QTRY_COMPARE(viewer->property("mode").toString(), QString("slider_horizontal"));
-        // Only Accept wears the accent fill: Compare on, its mode and the shown chip are quiet.
+        // Compare on and its mode are quiet.
         for (const char *name : {"canvasViewMode-slider_horizontal"})
             QVERIFY2(!find(app.window, name)->property("marked").toBool() && find(app.window, name)->property("current").toBool(), name);
-        QVERIFY(!find(app.window, "canvasViewPending")->property("marked").toBool());
-        QVERIFY(find(app.window, "canvasViewAccept")->property("marked").toBool());
         QQuickItem *compareRow = menuRow(app, "View", "canvas-view.compare");
         QVERIFY(compareRow && compareRow->property("checkable").toBool() && compareRow->property("checked").toBool()); // on, in the menu
         closeMenu(app);
@@ -1153,7 +1067,7 @@ private slots:
     }
 
     // Pictures: FUGUE_SHOT_DIR=<dir> test_canvas_view_window savesThePicturesOfTheWindow (nothing without the variable),
-    // dark and light: a candidate with a region followed, a run's new candidate under its banner, the canvas menu, the
+    // dark and light: a revision with a region followed, the canvas menu, the
     // New canvas question, and the empty store.
     void savesThePicturesOfTheWindow_data() {
         QTest::addColumn<QString>("theme");
@@ -1190,10 +1104,6 @@ private slots:
             viaMenu(app, "View", "canvas-view.history");
             showRevision(app, model(app)->property("head").toString());
             QTRY_COMPARE(model(app)->property("revisionB").toString(), m_head);
-            std::thread run = arrivesLater(m_canvas, m_head, "write", 260);
-            QTRY_VERIFY_WITH_TIMEOUT(find(app.window, "canvasViewNewResult"), 5000);
-            run.join();
-            save(app, "banner");
             click(app, "canvasViewCanvas");
             QTRY_VERIFY(app.window->findChild<QObject *>("widgetMenu"));
             save(app, "menu");

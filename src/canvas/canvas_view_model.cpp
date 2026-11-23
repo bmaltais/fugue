@@ -39,9 +39,6 @@ CanvasViewModel::CanvasViewModel(QObject *parent) : CanvasHistory(parent) {
         rebuildLayers();
         emit pictureChanged();
         updateRegion();
-        // Looking at anything else than the result shown by itself (or it, once decided) ends its banner.
-        if (!m_newResult.isEmpty() && (revisionB() != m_newResult || kindB() != QLatin1String("candidate")))
-            clearNewResult();
         // Anything else shown (an undo of the layer included) ends the Head's notice.
         if (!m_headNotice.isEmpty() && revisionB() != m_noticeHead)
             clearHeadNotice();
@@ -49,7 +46,7 @@ CanvasViewModel::CanvasViewModel(QObject *parent) : CanvasHistory(parent) {
 }
 
 void CanvasViewModel::watch() {
-    // The store's canvases folder, and the canvas's own with its commits and resolved folders: a new candidate is a file
+    // The store's canvases folder, and the canvas's own with its commits and resolved folders: a new revision is a file
     // in commits, a head moved is a rename in the canvas folder.
     const QString base = store().root() + QStringLiteral("/canvases");
     QStringList want;
@@ -99,7 +96,6 @@ void CanvasViewModel::refresh() {
     }
     watch();
     emit storeChanged(); // the canvas list too
-    showArrivals();
     // A read that failed (a run is writing, a slow disk) is tried again a few times before it is left to the person.
     if (!error().isEmpty() && !canvasId().isEmpty() && m_retries < 3) {
         ++m_retries;
@@ -116,90 +112,8 @@ void CanvasViewModel::clearHeadNotice() {
     emit headNoticeChanged();
 }
 
-QString CanvasViewModel::newResultFrom() const {
-    for (const QVariant &row : revisions())
-        if (row.toMap().value("id").toString() == m_newResult) {
-            // A person reads the node's title (#228), never its id: the Canvas Write of the open document that made it,
-            // and nothing when the document has no such node (a run of another workflow, the command line).
-            const QString producer = row.toMap().value("producer").toString();
-            if (!producer.startsWith(QLatin1String("canvas-write:")) || !m_edits)
-                return {};
-            return m_edits->nodeName(producer.mid(13));
-        }
-    return {};
-}
-
-void CanvasViewModel::clearNewResult() {
-    if (m_newResult.isEmpty() && m_newOthers == 0)
-        return;
-    m_newResult.clear();
-    m_newOthers = 0;
-    emit newResultChanged();
-}
-
-void CanvasViewModel::setShowNewResults(bool on) {
-    if (m_showNew == on)
-        return;
-    m_showNew = on;
-    if (!on)
-        m_arrived.clear();
-    emit newResultChanged();
-}
-
-void CanvasViewModel::setViewLocked(bool locked) {
-    if (m_locked == locked)
-        return;
-    m_locked = locked;
-    emit newResultChanged();
-    if (!locked)
-        showArrivals();
-}
-
-// Moves the view to the newest candidate that arrived, when that takes nothing from the person (see the header).
-void CanvasViewModel::showArrivals() {
-    if (m_arrived.isEmpty() || m_locked || !m_showNew)
-        return;
-    const bool onHead = !m_head.isEmpty() && revisionB() == m_head;
-    const bool onOwn = !m_newResult.isEmpty() && revisionB() == m_newResult;
-    if (!onHead && !onOwn) {
-        m_arrived.clear(); // looking at something the person chose: the strip lists the new one, nothing more
-        return;
-    }
-    const QString newest = m_arrived.first();
-    const int others = m_arrived.size() - 1 + (onOwn ? m_newOthers + 1 : 0);
-    m_arrived.clear();
-    show(newest); // ends the banner of an earlier result (compareChanged), the new one starts below
-    if (revisionB() != newest)
-        return;
-    m_newResult = newest;
-    m_newOthers = others;
-    emit newResultChanged();
-}
-
 void CanvasViewModel::rebuild() {
     watch();
-    // The candidates that were not here at the last read are the arrivals; a canvas read for the first time has none.
-    QStringList open;
-    for (const QVariant &value : revisions())
-        if (value.toMap().value("kind").toString() == QLatin1String("candidate"))
-            open << value.toMap().value("id").toString();
-    if (m_knownCanvas != canvasId()) {
-        m_knownCanvas = canvasId();
-        m_arrived.clear();
-        m_known = open;
-        clearNewResult();
-    } else if (error().isEmpty()) { // a failed read lists nothing: it says nothing about what arrived
-        QStringList fresh;
-        for (const QString &id : std::as_const(open))
-            if (!m_known.contains(id))
-                fresh << id;
-        if (!fresh.isEmpty()) {
-            fresh << m_arrived;
-            m_arrived = fresh; // newest first, as the rows are
-        }
-        m_known = open;
-        m_arrived.removeIf([&open](const QString &id) { return !open.contains(id); }); // resolved before it was shown
-    }
     m_choices.clear();
     m_earlier.clear();
     int recent = 0;
@@ -220,7 +134,6 @@ void CanvasViewModel::rebuild() {
     // The History panel's steps: the Head's revisions in words; with Show all revisions the candidates first.
     m_steps.clear();
     m_allSteps.clear();
-    m_pending = 0;
     QVariantList candidates;
     for (const QVariant &value : revisions()) {
         const QVariantMap row = value.toMap();
@@ -231,7 +144,6 @@ void CanvasViewModel::rebuild() {
                          {"timeText", time.isValid() ? QLocale().toString(time, QLocale::ShortFormat) : QString()}};
         const QString name = stepName(id);
         if (kind == QLatin1String("candidate") || kind == QLatin1String("dropped")) {
-            m_pending += kind == QLatin1String("candidate") ? 1 : 0;
             step.insert("name", kind == QLatin1String("candidate") ? tr("Candidate: %1").arg(name) : tr("Dropped: %1").arg(name));
             candidates.append(step);
         } else {
@@ -341,39 +253,15 @@ void CanvasViewModel::setFollowNode(const QString &node) {
     updateRegion();
 }
 
-void CanvasViewModel::setOverlay(bool on) {
-    if (m_overlay == on)
-        return;
-    m_overlay = on;
-    emit pictureChanged();
-    updateRegion();
-}
-
-bool CanvasViewModel::showsCandidate() const {
-    const QString kind = kindB();
-    return kind == QLatin1String("candidate") || kind == QLatin1String("dropped");
-}
-
 QUrl CanvasViewModel::pictureSource() const {
     if (m_solo >= 0 && !m_soloSource.isEmpty())
         return m_soloSource;
-    return showsCandidate() && !m_overlay && !m_headSource.isEmpty() ? m_headSource : sourceB();
+    return sourceB();
 }
 
-QSize CanvasViewModel::pictureSize() const { return showsCandidate() && !m_overlay && m_headSize.isValid() ? m_headSize : sizeB(); }
+QSize CanvasViewModel::pictureSize() const { return sizeB(); }
 
-void CanvasViewModel::show(const QString &revision) {
-    for (const QVariant &row : revisions())
-        if (row.toMap().value("id").toString() == revision) {
-            const QString kind = row.toMap().value("kind").toString();
-            if ((kind == QLatin1String("candidate") || kind == QLatin1String("dropped")) && !m_head.isEmpty()) {
-                compare(m_head, revision);
-                return;
-            }
-            break;
-        }
-    select(revision);
-}
+void CanvasViewModel::show(const QString &revision) { select(revision); }
 
 void CanvasViewModel::updateRegion() {
     QVariantMap out{{"valid", false}, {"reason", QString()}};
