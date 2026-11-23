@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Dialogs
 import Fugue
 
 // The Save Image picker (#57): asked for by App.imageActions (node.save-image), which then
@@ -10,11 +9,11 @@ Item {
     id: root
     readonly property ImageActions actions: App.imageActions
 
-    FileDialog {
+    FilePicker {
         id: dialog
         objectName: "imageSaveDialog"
         title: qsTr("Save the image")
-        fileMode: FileDialog.SaveFile
+        fileMode: PortalFileDialog.SaveFile
         onAccepted: if (root.actions) root.actions.saveTo(selectedFile.toString())
         onRejected: if (root.actions) root.actions.cancelSave() // gone first when the window closes
     }

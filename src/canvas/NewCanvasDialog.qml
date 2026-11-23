@@ -1,9 +1,9 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Dialogs
 import QtQuick.Layouts
 import Fugue
+import "../menu"
 
 // New canvas (#232, epic #206, spec 14.5): Photoshop's New Document, on a Question. A name; where the canvas
 // starts (blank, the picture on the clipboard, a picture file); for a blank one a preset or a typed size and a
@@ -266,11 +266,11 @@ Question {
             backend.create()
     }
 
-    FileDialog {
+    FilePicker {
         id: fileDialog
         objectName: "newCanvasFileDialog"
         title: qsTr("Make a canvas from a picture") // the same file types as Import picture…
-        fileMode: FileDialog.OpenFile
+        fileMode: PortalFileDialog.OpenFile
         nameFilters: [qsTr("Pictures and canvases (*.png *.jpg *.jpeg *.webp *.ora)"), qsTr("All files (*)")]
         onAccepted: backend.file = fileDialog.selectedFile.toString()
     }

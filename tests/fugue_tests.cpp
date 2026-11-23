@@ -231,6 +231,84 @@ private slots:
         }
     }
 
+    // FilePicker (src/menu/FilePicker.qml) asks the desktop portal and opens Qt's own dialog, an item of the
+    // window, when there is no portal or its call fails. The tests have no session bus, so Qt's is what they see.
+    void filePickerFallsBackToQtsDialog() {
+        QQmlApplicationEngine engine;
+        engine.loadData(R"(
+            import QtQuick
+            import Fugue
+            import "qrc:/menu"
+            Window {
+                width: 640; height: 480; visible: true
+                FilePicker { objectName: "defaultPicker" }
+                FilePicker { objectName: "offPicker"; usePortal: false }
+                FilePicker { objectName: "brokenPortal"; usePortal: true; fileMode: PortalFileDialog.SaveFile }
+                FilePicker { objectName: "folderPicker"; usePortal: false; fileMode: PortalFileDialog.Directory }
+            })");
+        QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto made = [&](const char *impl) {
+            for (QObject *child : window->findChildren<QObject *>())
+                if (QByteArray(child->metaObject()->className()).startsWith(impl))
+                    return true;
+            return false;
+        };
+        auto picker = [&](const char *name) {
+            QObject *found = window->findChild<QObject *>(name);
+            [&] { QVERIFY(found); }();
+            return found;
+        };
+        // No bus, so no portal: the default is Qt's dialog.
+        QObject *byDefault = picker("defaultPicker");
+        QCOMPARE(byDefault->property("usePortal").toBool(), false);
+        QVERIFY(QMetaObject::invokeMethod(byDefault, "open"));
+        QCOMPARE(byDefault->property("route").toString(), QString("qt"));
+        QTRY_VERIFY(made("QQuickFileDialogImpl"));
+        QVERIFY(QMetaObject::invokeMethod(byDefault, "close"));
+
+        QObject *off = picker("offPicker");
+        QVERIFY(QMetaObject::invokeMethod(off, "open"));
+        QCOMPARE(off->property("route").toString(), QString("qt"));
+        QVERIFY(QMetaObject::invokeMethod(off, "close"));
+
+        // The portal is asked for but its call cannot be made: the failure opens Qt's dialog, and says so.
+        QObject *broken = picker("brokenPortal");
+        QTest::ignoreMessage(QtWarningMsg, QRegularExpression("FilePicker: the file chooser portal failed"));
+        QVERIFY(QMetaObject::invokeMethod(broken, "open"));
+        QCOMPARE(broken->property("route").toString(), QString("qt"));
+        QVERIFY(QMetaObject::invokeMethod(broken, "close"));
+
+        QObject *folders = picker("folderPicker");
+        QVERIFY(QMetaObject::invokeMethod(folders, "open"));
+        QTRY_VERIFY(made("QQuickFolderDialogImpl"));
+        QVERIFY(QMetaObject::invokeMethod(folders, "close"));
+    }
+
+    // What a picker's call site reads, as the portal answers: selectedFile set, then accepted.
+    void filePickerPassesTheAnswerOn() {
+        QQmlApplicationEngine engine;
+        engine.loadData(R"(
+            import QtQuick
+            import Fugue
+            import "qrc:/menu"
+            Window {
+                width: 200; height: 200; visible: true
+                property url got
+                property int accepts: 0
+                FilePicker { objectName: "picker"; usePortal: false; onAccepted: { accepts++; got = selectedFile } }
+            })");
+        QVERIFY(!engine.rootObjects().isEmpty());
+        QObject *window = engine.rootObjects().first();
+        QObject *picker = window->findChild<QObject *>("picker");
+        QVERIFY(picker);
+        picker->setProperty("selectedFile", QUrl::fromLocalFile("/tmp/x.fugue"));
+        QVERIFY(QMetaObject::invokeMethod(picker, "accepted"));
+        QCOMPARE(window->property("accepts").toInt(), 1);
+        QCOMPARE(window->property("got").toUrl(), QUrl::fromLocalFile("/tmp/x.fugue"));
+    }
+
     void themeFallsBack() {
         QTemporaryDir dir;
         Theme theme(dir.path());

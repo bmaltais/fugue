@@ -872,7 +872,7 @@ Widgets come from a fixed set. No pack ships UI code in v0.1, so every node look
 | `line` (default for text), `multiline` | text | |
 | `toggle` | boolean | |
 | `choice` | text with `choices` | Default when `choices` is present. |
-| `file`, `folder` | text | Opens the portal picker. The value is a path. |
+| `file`, `folder` | text | Opens the portal picker (`FilePicker`; Qt's own dialog when there is no portal). The value is a path. |
 | `color` | text | Value is `#rrggbb` or `#rrggbbaa`. |
 | `mask` | text | A painted mask: the value is the path of an 8-bit gray PNG in the inputs folder, empty for none. The face shows it over the picture of the input named in `over` and opens the mask editor ([14.4](#144-masking-and-inpainting-167)). |
 | `paint` | text | A painted canvas (#181): the value is the path of an OpenRaster `.ora` file in the inputs folder, empty for none; `over` names the picture input it is painted over. The mask widget's twin: it holds an input file, so a save copies it, a package carries it and its bytes key the cache ([14.4](#144-masking-and-inpainting-167)). Its row opens the paint window (the mask editor's frame with a layers panel, a color swatch and an opacity slider: [14.4](#144-masking-and-inpainting-167)); the row reads "Painted" or "None" and the node's picture slot shows the result. |
@@ -2017,7 +2017,14 @@ kept within a limit (#141):
 
 - One format: the `.fugue` document of [section 4](#4-the-workflow-document).
 - Workflows are ordinary files wherever the user saves them. File dialogs go through the desktop
-  portal, never `QFileDialog`. Fugue keeps a recent list and suggests `~/Documents/Fugue`.
+  portal, never `QFileDialog`: every picker is `FilePicker` (`src/menu/FilePicker.qml`), which asks
+  `org.freedesktop.portal.FileChooser` (OpenFile, SaveFile; `src/menu/portal_file_dialog.*`) over
+  D-Bus, with the name filters, the current folder and a suggested name, and takes the `file://`
+  URIs of the Response (a cancel is Response 1). Qt's `FileDialog` is no stand-in for the portal:
+  Omarchy's platform theme (qtengine) has no native file dialog, so it would always be Qt's own QML
+  one. That one is only the fallback, when the portal is not on the bus or its call fails, shown
+  inside the window. A save adds the default suffix to a name typed without one. Fugue keeps a
+  recent list and suggests `~/Documents/Fugue`.
 - Templates ship with the app, and the person has a templates folder of their own ([11.10](#1110-templates)).
 
 ### 11.2 Saving

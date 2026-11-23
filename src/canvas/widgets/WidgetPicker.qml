@@ -3,10 +3,12 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
+import Fugue
 import ".."
+import "../../menu"
 
 // What a widget opens beyond its field: the menu of a choice, seed or model widget, and the
-// file, folder and color pickers (the desktop portal's, Qt's own where there is none). An
+// file, folder and color pickers (the desktop portal's, through FilePicker; Qt's own where there is none). An
 // InputWidget makes one the first time it needs it.
 Item {
     id: picker
@@ -159,15 +161,15 @@ Item {
     }
     // Import picture…: the file dialog, then a canvas named after the file, at once.
     function askPicture() {
-        (pictureDialog.createObject(picker) as FileDialog).open()
+        (pictureDialog.createObject(picker) as FilePicker).open()
     }
     Component {
         id: pictureDialog
-        FileDialog {
+        FilePicker {
             id: d
             objectName: "canvasPictureDialog"
             title: qsTr("Import a picture as a canvas") // the menu's Import picture…, the CLI's fugue canvas import
-            fileMode: FileDialog.OpenFile
+            fileMode: PortalFileDialog.OpenFile
             nameFilters: [qsTr("Pictures and canvases (*.png *.jpg *.jpeg *.webp *.ora)"), qsTr("All files (*)")]
             onAccepted: { picker.host.error = picker.host.edits.importCanvas(picker.host.nodeId, picker.host.name, d.selectedFile, ""); d.destroy() }
             onRejected: d.destroy()
@@ -179,26 +181,27 @@ Item {
         if (kind === "color")
             (colorDialog.createObject(picker) as ColorDialog).open()
         else if (kind === "folder")
-            (folderDialog.createObject(picker) as FolderDialog).open()
+            (folderDialog.createObject(picker) as FilePicker).open()
         else
-            (fileDialog.createObject(picker) as FileDialog).open()
+            (fileDialog.createObject(picker) as FilePicker).open()
     }
     Component {
         id: fileDialog
-        FileDialog {
+        FilePicker {
             id: d
             objectName: "widgetFileDialog"
             title: picker.host.port.label
-            fileMode: FileDialog.OpenFile
+            fileMode: PortalFileDialog.OpenFile
             onAccepted: { picker.host.edits.setPath(picker.host.nodeId, picker.host.name, d.selectedFile); d.destroy() }
             onRejected: d.destroy()
         }
     }
     Component {
         id: folderDialog
-        FolderDialog {
+        FilePicker {
             id: d
             objectName: "widgetFolderDialog"
+            fileMode: PortalFileDialog.Directory
             title: picker.host.port.label
             onAccepted: { picker.host.edits.setPath(picker.host.nodeId, picker.host.name, d.selectedFolder); d.destroy() }
             onRejected: d.destroy()
