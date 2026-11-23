@@ -317,6 +317,7 @@ ModelShape shapeOf(const Header &header) {
     shape.textWidth = inputWidth(
         tensor(shapes, {QStringLiteral("cap_embedder.1.weight"), QStringLiteral("txt_in.weight"),
                         QStringLiteral("context_embedder.weight"), QStringLiteral("text_embedding.0.weight")}));
+    shape.clipWidth = inputWidth(tensor(shapes, {QStringLiteral("vector_in.in_layer.weight")}));
     std::optional<QList<qint64>> image =
         tensor(shapes, {QStringLiteral("x_embedder.weight"), QStringLiteral("all_x_embedder.2-1.weight"), QStringLiteral("img_in.weight"),
                         QStringLiteral("x_embedder.proj.weight"), QStringLiteral("input_blocks.0.0.weight"),
@@ -462,14 +463,33 @@ Fit textEncoderFits(const ModelShape &diffusionModel, const ModelShape &textEnco
 Fit loadableTextEncoderFits(const ModelShape &diffusionModel, const ModelShape &textEncoder) {
     if (!textEncoder.unloadable.isEmpty())
         return Fit::DoesNotFit;
-    // Wan's UMT5 (t5xxl_path) is the one T5 Load Models takes: a video model that reads T5.
-    const bool wan = diffusionModel.textKind == TextKind::T5 && diffusionModel.videoVae.value_or(false);
-    if (textEncoder.textKind && *textEncoder.textKind != TextKind::Llm && !(wan && *textEncoder.textKind == TextKind::T5))
+    // The T5 of Wan and FLUX.1 (t5xxl_path) is the one T5 Load Models takes; CLIP has its own input.
+    if (textEncoder.textKind && *textEncoder.textKind != TextKind::Llm &&
+        !(loadsT5(diffusionModel) && *textEncoder.textKind == TextKind::T5))
         return Fit::DoesNotFit;
     if (!diffusionModel.llmFamily.isEmpty() && !textEncoder.llmFamily.isEmpty()
         && diffusionModel.llmFamily != textEncoder.llmFamily)
         return Fit::DoesNotFit;
     return textEncoderFits(diffusionModel, textEncoder);
+}
+
+bool loadsT5(const ModelShape &diffusionModel) {
+    const bool wan = diffusionModel.textKind == TextKind::T5 && diffusionModel.videoVae.value_or(false);
+    return wan || (diffusionModel.textKind == TextKind::T5 && diffusionModel.clipWidth);
+}
+
+Fit loadableClipFits(const ModelShape &diffusionModel, const ModelShape &clip) {
+    if (!clip.unloadable.isEmpty())
+        return Fit::DoesNotFit;
+    if (clip.textKind && *clip.textKind != TextKind::Clip)
+        return Fit::DoesNotFit;
+    if (!diffusionModel.textKind) // nothing known of the model
+        return Fit::Unknown;
+    if (!diffusionModel.clipWidth)
+        return Fit::DoesNotFit;
+    if (!clip.hiddenSize)
+        return Fit::Unknown;
+    return *clip.hiddenSize == *diffusionModel.clipWidth ? Fit::Fits : Fit::DoesNotFit;
 }
 
 Fit vaeFits(const ModelShape &diffusionModel, const ModelShape &vae) {

@@ -294,6 +294,30 @@ private slots:
         QCOMPARE(loadableTextEncoderFits(klein4b, qwen4b), Fit::Fits);
     }
 
+    // FLUX.1 (#241) reads a CLIP-L beside its T5: both are Load Models', each in its input.
+    void flux1TakesItsT5AndAClipLEncoder() {
+        writeSafetensors(file("flux1-fill.safetensors"), {{"txt_in.weight", QJsonArray{3072, 4096}},
+                                                          {"vector_in.in_layer.weight", QJsonArray{3072, 768}},
+                                                          {"img_in.weight", QJsonArray{3072, 384}}});
+        writeSafetensors(file("t5xxl.safetensors"), {{"encoder.embed_tokens.weight", QJsonArray{32128, 4096}},
+                                                     {"encoder.block.0.layer.0.SelfAttention.q.weight", QJsonArray{4096, 4096}}});
+        writeSafetensors(file("clip_l.safetensors"), {{"text_model.embeddings.token_embedding.weight", QJsonArray{49408, 768}}});
+        writeSafetensors(file("clip_g.safetensors"), {{"text_model.embeddings.token_embedding.weight", QJsonArray{49408, 1280}}});
+        const ModelShape flux1 = shape(file("flux1-fill.safetensors")), t5 = shape(file("t5xxl.safetensors"));
+        const ModelShape clipL = shape(file("clip_l.safetensors")), clipG = shape(file("clip_g.safetensors"));
+        QCOMPARE(flux1.clipWidth, std::optional<int>(768));
+        QVERIFY(loadsT5(flux1));
+        QCOMPARE(loadableTextEncoderFits(flux1, t5), Fit::Fits);
+        QCOMPARE(loadableTextEncoderFits(flux1, clipL), Fit::DoesNotFit); // it has its own input
+        QCOMPARE(loadableClipFits(flux1, clipL), Fit::Fits);
+        QCOMPARE(loadableClipFits(flux1, clipG), Fit::DoesNotFit); // 1280 wide
+        QCOMPARE(loadableClipFits(flux1, t5), Fit::DoesNotFit);
+        // SD3's T5 and a model that reads no CLIP stay out.
+        QVERIFY(!loadsT5(diffusionModel(4096, 16, TextKind::T5)));
+        QCOMPARE(loadableClipFits(diffusionModel(7680, 32), clipL), Fit::DoesNotFit);
+        QCOMPARE(loadableClipFits(ModelShape{}, clipL), Fit::Unknown);
+    }
+
     // Wan (#105): text_embedding beside a 3D patch_embedding, as its GGUF names them. It reads UMT5
     // (a T5) and wants a video VAE, and its UMT5 is the one T5 Load Models takes (t5xxl_path).
     void wanReadsUmt5AndTakesAVideoVae() {
@@ -322,7 +346,7 @@ private slots:
         QCOMPARE(loadableTextEncoderFits(wan, shape(file("qwen_3_8b.safetensors"))), Fit::DoesNotFit); // an LLM, not T5
         QCOMPARE(vaeFits(wan, shape(file("wan_2.1_vae.safetensors"))), Fit::Fits);
         QCOMPARE(vaeFits(wan, shape(file("ae.safetensors"))), Fit::DoesNotFit); // 16 channels, but an image VAE
-        // Only Wan's: FLUX.1's T5 stays out of Load Models.
+        // Only Wan's and FLUX.1's: SD3's T5 stays out of Load Models.
         QCOMPARE(loadableTextEncoderFits(diffusionModel(4096, 16, TextKind::T5), umt5), Fit::DoesNotFit);
     }
 
