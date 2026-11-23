@@ -481,6 +481,7 @@ void CanvasModel::portsFromType(NodeRow &row, const Node &node) const {
                 Port port;
                 port.name = port.label = exposed.name;
                 port.section = exposed.section;
+                port.advanced = exposed.section == QLatin1String(kAdvancedSection);
                 row.inputs.push_back(port);
             }
         }
