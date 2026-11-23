@@ -1062,7 +1062,7 @@ private slots:
         const TemplateLibrary library({{root, false}}, &f.registry);
         const auto found = library.find("generative-fill");
         QVERIFY2(found.has_value(), "the template generative-fill is not here; the templates submodule is stale");
-        QCOMPARE(found->category, QStringLiteral("edit"));
+        QCOMPARE(found->category, QStringLiteral("canvas"));
         const Document document = Document::loadFile(found->workflow).value();
         QVERIFY(!hasErrors(compile(document, f.registry).problems()));
         const auto &nodes = document.graph.nodes;

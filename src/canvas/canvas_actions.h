@@ -24,6 +24,10 @@
 // else its added layers are placed on the head, the "layers only add" rule). When that revision is still on the head,
 // `notice` says so ("Same prompt, seed and selection as …"): correct, not a fault.
 //
+// Where the actions come from: the template library (a template whose workflow has a valid `action` block is an action,
+// the person's own and a project's first; nothing else indexes them), then the files compiled into Fugue, which a template
+// of the same id replaces. A plain template is not an action and never hides one.
+//
 // Prompt history (design 4, decision 8): per action, newest first, at most 200, in the root's state folder
 // (canvas-prompts.json, atomic writes, never inherited by a project); clearHistory() empties it.
 
@@ -114,6 +118,10 @@ public:
     Q_INVOKABLE QVariantMap selectionBounds(fugue::MaskLayer *selection) const;
     // Fetches the action's missing models through the window's download line (a template's Download).
     Q_INVOKABLE void download(const QString &action);
+    // Edit workflow (design 7): the action's workflow as a tab of the Graph, a copy no file holds (Save asks where; a
+    // bundled action is never written). "auto" is the action Auto falls back to. {ok, action, name} or {ok: false, reason}.
+    // The window then shows the Graph (the host's job: it knows its areas).
+    Q_INVOKABLE QVariantMap editWorkflow(const QString &id);
     // Reads the actions and their models again.
     Q_INVOKABLE void refresh();
     // The action "auto" stands for with this selection and prompt: {action (an id or ""), reason}.
@@ -142,6 +150,7 @@ private:
     struct Entry {
         QString id;
         QString file;
+        bool library = false; // from the template library, else compiled into Fugue
         Document document;
         std::optional<canvas::Action> action;
         canvas::ActionGraph graph;

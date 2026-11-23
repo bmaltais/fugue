@@ -13,7 +13,7 @@ import "widgets"
 // rectangle on the picture, or a Quick Mask selection while Quick Mask is on), and while its runs go or its last word
 // stands. Simple state, from the start: the action menu (Auto, then the actions; in a narrow area its glyph alone), the
 // prompt (Enter generates; Up and Down in an empty field step through the earlier prompts; the clock opens the last 20),
-// Generate (the one primary; Cancel while this bar's runs wait or go, Escape too), and ⋯ (Clear prompt history…). Under
+// Generate (the one primary; Cancel while this bar's runs wait or go, Escape too), and ⋯ (Edit workflow, Clear prompt history…). Under
 // them, only when there is something to say: the progress ("Generating… 45%"), what is missing and its Download, the
 // latest version to go back to, or the last error in plain words. While a run goes the selection's outline shimmers
 // (marching dashes in the accent). Everything it does is App.canvasActions (canvas/canvas_actions.h).
@@ -33,6 +33,8 @@ Item {
     property real originY: 0
     property real zoom: 1
     signal backToLatest()
+    // Edit workflow opened the action's graph as a tab: the host shows the Graph (an area makes it active, the dialog closes).
+    signal workflowOpened()
 
     readonly property real u: look.unit
     readonly property CanvasActions actions: App.canvasActions
@@ -146,6 +148,7 @@ Item {
         menu.open()
     }
     function chooseAction() {
+        actions.refresh() // an action added to the library, or saved, since the bar was drawn
         const rows = [{text: qsTr("Auto"), value: "auto", checked: chosen === "auto", note: qsTr("Picks the action from the selection and the prompt")}]
         for (const row of actionRows)
             rows.push({text: row.name, value: row.id, checked: chosen === row.id, enabled: !row.broken,
@@ -156,9 +159,16 @@ Item {
         openMenu(historyButton, history.slice(0, 20).map(text => ({text: text, value: text})),
                  value => { promptField.text = value; promptField.forceActiveFocus() }, 72, "canvasTaskHistoryMenu")
     }
+    // Edit workflow (design 7): the chosen action's graph, in a tab of the Graph. The error line says why it did not open.
+    function editWorkflow() {
+        if (actions && actions.editWorkflow(current.id ?? chosen).ok)
+            workflowOpened()
+    }
     function more() {
-        openMenu(moreButton, [{text: qsTr("Clear prompt history…"), value: "clear", enabled: history.length > 0}],
-                 value => { if (value === "clear") clearAsk.open() }, 48, "canvasTaskMoreMenu")
+        openMenu(moreButton, [{text: qsTr("Edit workflow"), value: "edit", enabled: actions !== null && (current.id ?? "") !== "",
+                               note: qsTr("Open %1 as a workflow in the Graph").arg(current.name ?? "")},
+                              {text: qsTr("Clear prompt history…"), value: "clear", enabled: history.length > 0}],
+                 value => { if (value === "edit") bar.editWorkflow(); else if (value === "clear") clearAsk.open() }, 48, "canvasTaskMoreMenu")
     }
 
     // The shimmer on the selection while it is redrawn: the accent's dashes marching on the dark halo of the frame.

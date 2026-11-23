@@ -18,6 +18,7 @@ using namespace fugue::canvas;
 
 namespace {
 
+const QString kTemplate = QStringLiteral(FUGUE_SOURCE_DIR "/templates/generative-fill/workflow.fugue");
 const QString kBundled = QStringLiteral(FUGUE_SOURCE_DIR "/share/actions/generative-fill.fugue");
 
 // A small fill: a Region, a Text Encode and a Sampler (stand-ins for the model chain), a Write.
@@ -305,6 +306,21 @@ private slots:
         // No selection where one is required: said in words, nothing bound.
         const ActionBinding none{"c1", "sha256:" + QString(64, 'a'), {}, {}, {}, {}, {{"prompt", "x"}}};
         QVERIFY(bindAction(document, action, graph, none).error().message.contains("Select an area first"));
+    }
+
+    // The fugue-workflows template carries the same action (#231 slice 2): the Canvas view's task bar lists it from the
+    // library; the file compiled into Fugue is only the fallback of a library that lacks it, so the two must agree.
+    void theGenerativeFillTemplateCarriesTheBundledAction() {
+        const Result<Document> tmpl = Document::loadFile(kTemplate);
+        QVERIFY2(tmpl, qPrintable(firstMessage(tmpl.errors())));
+        const Result<std::optional<Action>> action = actionOf(*tmpl);
+        QVERIFY2(action && action->has_value(), "the template has no action block (is the templates submodule at the pinned commit?)");
+        const Result<ActionGraph> graph = checkAction(**action, *tmpl, m_registry);
+        QVERIFY2(graph, qPrintable(firstMessage(graph.errors())));
+        const Result<Document> bundled = Document::loadFile(kBundled);
+        QVERIFY(bundled);
+        QCOMPARE(tmpl->sourceHash(), bundled->sourceHash());
+        QCOMPARE(tmpl->extra.value("action"), bundled->extra.value("action"));
     }
 
     // The bundled Generative fill (research 5.1): Klein 4B, the crop as Text Encode's reference, 4 steps, guidance 1,

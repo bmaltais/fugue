@@ -86,6 +86,7 @@ CanvasActions::CanvasActions(RunService *service, const Registry *registry, Work
       m_historyPath(stateDir() + QStringLiteral("/canvas-prompts.json")) {
     connect(m_service, &RunService::event, this, &CanvasActions::onEvent);
     if (m_workflows) {
+        connect(m_workflows, &Workflows::templatesChanged, this, [this] { refresh(); });
         connect(m_workflows->downloads(), &ModelDownloads::changed, this, &CanvasActions::downloadsChanged);
         // The models may be here now.
         connect(m_workflows->downloads(), &ModelDownloads::finished, this, [this] { refresh(); });
@@ -116,39 +117,64 @@ QString CanvasActions::downloadText() const {
 
 void CanvasActions::refresh() {
     m_entries.clear();
+    // Where an action may come from, in order, the first of an id winning: the templates of the library (the person's own
+    // first, a template of the library being how a person's own and a project's actions arrive, design 8), then the files
+    // of the roots (the ones compiled into Fugue; they stay the fallback of a library that lacks them).
+    struct Source {
+        QString id, file, title;
+        bool library;
+    };
+    QList<Source> sources;
+    if (m_workflows)
+        for (const Template &t : m_workflows->templateList())
+            sources.append({t.id, t.workflow, t.title, true});
+    for (const QString &root : std::as_const(m_roots))
+        for (const QString &name : QDir(root).entryList({QStringLiteral("*.fugue")}, QDir::Files, QDir::Name))
+            sources.append({QFileInfo(name).completeBaseName(), QDir(root).filePath(name), {}, false});
     QSet<QString> seen;
-    for (const QString &root : std::as_const(m_roots)) {
-        const QStringList files = QDir(root).entryList({QStringLiteral("*.fugue")}, QDir::Files, QDir::Name);
-        for (const QString &name : files) {
-            Entry entry;
-            entry.id = QFileInfo(name).completeBaseName();
-            entry.file = QDir(root).filePath(name);
-            if (seen.contains(entry.id))
-                continue;
-            QFile file(entry.file);
-            const Result<Document> loaded = file.open(QIODevice::ReadOnly) ? Document::load(file.readAll())
-                                                                          : Result<Document>(makeError("file_not_found", entry.file));
-            if (!loaded)
-                continue; // not a workflow: not an action either
-            entry.document = loaded.value();
-            const Result<std::optional<canvas::Action>> action = canvas::actionOf(entry.document);
-            if (action && !action->has_value())
-                continue; // a plain workflow
-            seen.insert(entry.id);
-            if (!action) {
-                entry.broken = action.error().code == QLatin1String("unsupported_format_version") ? tr("Needs a newer Fugue.") : action.error().message;
-            } else {
-                entry.action = **action;
-                const Result<canvas::ActionGraph> graph = canvas::checkAction(**action, entry.document, *m_registry);
-                if (graph)
-                    entry.graph = graph.value();
-                else
-                    entry.broken = graph.error().message;
-            }
-            m_entries << entry;
+    for (const Source &source : std::as_const(sources)) {
+        if (seen.contains(source.id))
+            continue;
+        QFile file(source.file);
+        const Result<Document> loaded = file.open(QIODevice::ReadOnly) ? Document::load(file.readAll())
+                                                                      : Result<Document>(makeError("file_not_found", source.file));
+        if (!loaded)
+            continue; // not a workflow: not an action either
+        Entry entry;
+        entry.id = source.id;
+        entry.file = source.file;
+        entry.library = source.library;
+        entry.document = loaded.value();
+        const Result<std::optional<canvas::Action>> action = canvas::actionOf(entry.document);
+        if (action && !action->has_value())
+            continue; // a plain workflow: it never hides an action of the same id
+        seen.insert(entry.id);
+        if (!action) {
+            entry.broken = action.error().code == QLatin1String("unsupported_format_version") ? tr("Needs a newer Fugue.") : action.error().message;
+        } else {
+            entry.action = **action;
+            const Result<canvas::ActionGraph> graph = canvas::checkAction(**action, entry.document, *m_registry);
+            if (graph)
+                entry.graph = graph.value();
+            else
+                entry.broken = graph.error().message;
         }
+        m_entries << entry;
     }
     rebuildList();
+}
+
+QVariantMap CanvasActions::editWorkflow(const QString &id) {
+    const Entry *e = entry(id.isEmpty() || id == QLatin1String("auto") ? QStringLiteral("generative-fill") : id);
+    if (!e || !m_workflows)
+        return refuse(tr("There is no such action."));
+    // A template opens as templates do (its sample files taken in, its packs offered); a file compiled into Fugue opens
+    // as a copy. Either is a tab with no file: Save asks where, and the original is never written.
+    const QString name = e->action ? e->action->name : e->id;
+    const bool opened = e->library ? m_workflows->openTemplateById(e->id) : m_workflows->openCopyOf(e->file, name);
+    if (!opened)
+        return refuse(m_workflows->notice());
+    return {{"ok", true}, {"action", e->id}, {"name", name}};
 }
 
 void CanvasActions::rebuildList() {

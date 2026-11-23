@@ -158,6 +158,14 @@ public:
     void setModelSource(ModelSource source) { m_source = std::move(source); }
     // Asks the providers for their models, then templatesChanged() so the dialog reads again.
     Q_INVOKABLE void loadHostModels();
+    // Every template this Fugue can open (TemplateLibrary::list()), for what lists them in its own way (the Canvas task
+    // bar's actions, #231), and the roots they come from (a test, or a project switch, may change them).
+    QList<Template> templateList() const;
+    void setTemplateRoots(const QList<TemplateRoot> &roots) { m_templateRoots = roots; }
+    // A workflow file as a new tab with no file, named `title` (an action's, #231 Edit workflow): saving asks where, so the
+    // file it came from (a bundled template, or compiled into Fugue) is never written. False (with a notice) when it
+    // cannot be read.
+    bool openCopyOf(const QString &file, const QString &title);
     // Opens the template with this id (openTemplate); false when there is none.
     Q_INVOKABLE bool openTemplateById(const QString &id);
     // The person's own templates folder, as the dialog names it.
