@@ -82,6 +82,13 @@ void FakeProvider::progress(const QString &job, double value, const QString &sta
     change(job, running);
 }
 
+void FakeProvider::preview(const QString &job, const QByteArray &frame) {
+    JobStatus running;
+    running.state = QStringLiteral("running");
+    running.preview = frame;
+    change(job, running);
+}
+
 void FakeProvider::finish(const QString &job, const QMap<QString, QByteArray> &files,
                           const QJsonObject &used) {
     if (!m_jobs.contains(job))

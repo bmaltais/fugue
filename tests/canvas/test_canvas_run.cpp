@@ -567,6 +567,31 @@ private slots:
         QVERIFY(r.role("top", NodeList::Height).toReal() <= bare);
     }
 
+    // The service makes a thumbnail for a live frame of a node whose picture is hidden (the key of the live
+    // preview in Sinks mode), and none for its result.
+    void aHiddenPicturesLiveFrameGetsAThumbnailButItsResultDoesNot() {
+        RunApp r(kChain);
+        QVERIFY(r.app.open());
+        QVERIFY(r.app.commands.trigger("view.picture-sinks"));
+        QSignalSpy events(r.service.get(), &RunService::event);
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(r.jobs().size(), 1);
+        r.onFake([&](FakeProvider &f) { f.preview(f.jobs().at(0), png(64, 32)); });
+        const auto thumbnails = [&](const char *kind) {
+            for (const QList<QVariant> &args : events) {
+                const QJsonObject e = args.at(1).toJsonObject();
+                if (e.value("node").toString() == "gen" && e.value("event").toString() == kind)
+                    return e.value("thumbnails").toObject();
+            }
+            return QJsonObject{{"none", true}};
+        };
+        QTRY_VERIFY(!thumbnails("node.preview").contains("none"));
+        QVERIFY(!thumbnails("node.preview").value("preview").toObject().isEmpty());
+        r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(0), {{"image.png", png(320, 240)}}); });
+        QTRY_VERIFY(!thumbnails("node.done").contains("none"));
+        QVERIFY(thumbnails("node.done").isEmpty());
+    }
+
     // A node nothing can serve says so before any run, and how to fix it (8.5); a run that
     // reaches it fails with the same words.
     void aNodeNoProviderCanServeShowsWhatIsMissing() {
