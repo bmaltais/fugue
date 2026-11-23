@@ -27,6 +27,9 @@ struct CopyArea {
 struct CopiedPicture {
     mask::MaskPaint pixels{1, 1, 4}; // straight RGBA, the size of `bounds`
     mask::IRect bounds;              // where it was cut from, in canvas pixels
+    // The painted selection cut to the same bounds (one channel, 255 selected): what a Load Image keeps as its mask beside the
+    // picture. Empty for a rectangle or no selection, which would only be all white.
+    std::optional<mask::MaskPaint> selection;
 };
 
 // A layer's own pixels at the canvas's size, its layer mask (when it has one switched on) multiplied into the alpha; its opacity and

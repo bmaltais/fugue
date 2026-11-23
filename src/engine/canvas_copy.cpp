@@ -67,6 +67,7 @@ Result<CopiedPicture> copyArea(const mask::MaskPaint &source, const CopyArea &ar
         return bounds.errors();
     const mask::IRect b = bounds.value();
     std::vector<uint8_t> out(size_t(b.width) * size_t(b.height) * 4);
+    std::vector<uint8_t> cut(area.selection ? size_t(b.width) * size_t(b.height) : 0);
     const std::vector<uint8_t> &in = source.pixels();
     for (int y = 0; y < b.height; ++y)
         for (int x = 0; x < b.width; ++x) {
@@ -76,9 +77,13 @@ Result<CopiedPicture> copyArea(const mask::MaskPaint &source, const CopyArea &ar
             if (area.selection) {
                 const uint8_t m = area.selection->pixels()[size_t(b.y + y) * size_t(source.width()) + size_t(b.x + x)];
                 out[to + 3] = uint8_t((out[to + 3] * m + 127) / 255);
+                cut[size_t(y) * size_t(b.width) + size_t(x)] = m;
             }
         }
-    return CopiedPicture{mask::MaskPaint(b.width, b.height, out, 4), b};
+    CopiedPicture copy{mask::MaskPaint(b.width, b.height, out, 4), b, std::nullopt};
+    if (area.selection)
+        copy.selection = mask::MaskPaint(b.width, b.height, cut, 1);
+    return copy;
 }
 
 Result<mask::MaskPaint> areaAsMask(int width, int height, const CopyArea &area) {

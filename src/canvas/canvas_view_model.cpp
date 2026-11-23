@@ -19,6 +19,7 @@
 
 #include "canvas/picture_import.h"
 #include "engine/canvas_copy.h"
+#include "workflow/image_inputs.h"
 #include "canvas/region_pick.h"
 #include "canvas/snap.h"
 
@@ -1136,6 +1137,7 @@ bool CanvasViewModel::copyPicture(const QString &what, MaskLayer *selection, int
                                                         : mask::IRect{}};
     QImage image;
     QString named;
+    QByteArray selectionPng; // a copy with a painted selection also offers it as a mask (workflow/image_inputs.h clipboardMaskType)
     if (asMask) {
         const Result<mask::MaskPaint> picture = canvas::areaAsMask(document->width(), document->height(), area);
         if (!picture) {
@@ -1167,6 +1169,9 @@ bool CanvasViewModel::copyPicture(const QString &what, MaskLayer *selection, int
             return false;
         }
         const mask::MaskPaint &pixels = copy->pixels;
+        if (copy->selection)
+            if (const Result<QByteArray> png = copy->selection->toPng(1))
+                selectionPng = png.value();
         image = QImage(pixels.width(), pixels.height(), QImage::Format_RGBA8888);
         for (int row = 0; row < image.height(); ++row)
             std::memcpy(image.scanLine(row), pixels.pixels().data() + size_t(row) * size_t(pixels.width()) * 4, size_t(pixels.width()) * 4);
@@ -1177,7 +1182,11 @@ bool CanvasViewModel::copyPicture(const QString &what, MaskLayer *selection, int
         fail({makeError(QStringLiteral("input_invalid"), tr("There is no clipboard to copy to."))});
         return false;
     }
-    board->setImage(image);
+    auto *data = new QMimeData;
+    data->setImageData(image);
+    if (!selectionPng.isEmpty())
+        data->setData(QString::fromLatin1(clipboardMaskType), selectionPng);
+    board->setMimeData(data);
     if (!error().isEmpty()) {
         m_error.clear();
         emit errorChanged();

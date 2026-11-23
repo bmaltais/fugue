@@ -112,6 +112,7 @@ private slots:
         QImage copy = clipboardImage().convertToFormat(QImage::Format_RGBA8888);
         QCOMPARE(copy.size(), QSize(50, 30));
         QCOMPARE(copy.pixelColor(0, 0), QColor(200, 60, 30, 255));
+        QVERIFY(QGuiApplication::clipboard()->mimeData()->hasFormat(QString::fromLatin1(clipboardMaskType))); // the selection rides along
         selection.clear();
         selection.fillRect(0, 0, 10, 10, false); // the layer under: Base is blue, Top hides it only in the merged copy
         QVERIFY(model.copyPicture(QStringLiteral("layer"), &selection, 0));

@@ -47,6 +47,12 @@ private slots:
         QCOMPARE(alphaAt(copy.pixels, 0, 0), uint8_t(0));
         QCOMPARE(alphaAt(copy.pixels, 1, 0), uint8_t(200));
         QCOMPARE(alphaAt(copy.pixels, 5, 2), uint8_t(100)); // 200 x 128 / 255
+        // The selection comes with the picture, cut the same way, for a Load Image's mask.
+        QVERIFY(copy.selection);
+        QCOMPARE(copy.selection->width(), 6);
+        QCOMPARE(int(copy.selection->at(5, 2)), 128);
+        QCOMPARE(int(copy.selection->at(0, 0)), 0);
+        QVERIFY(!copyArea(source, {nullptr, {1, 1, 3, 3}}).value().selection); // a rectangle is only white: no mask
     }
 
     void aRectangleAndNoSelectionCopyWithoutChangingAlpha() {

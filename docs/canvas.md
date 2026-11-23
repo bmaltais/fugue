@@ -433,8 +433,12 @@ selection is the painted one (lasso, Quick Mask, selection from a layer), else t
 Copy takes the whole layer. **Copy selection as mask** (Edit menu, no key) puts the selection itself on the clipboard as a gray picture
 of the canvas's size, white where it is selected, so it lines up with the canvas when used as a mask. Nothing is stored in the canvas
 and no undo step is made; a notice under the picture names what was copied, and a refusal (no layer picked, a mask layer, a selection
-that holds nothing) says why. What was copied pastes anywhere: Ctrl+V in the Graph makes a **Load Image** node holding it (its Image
-output is the picture, and its Mask output is the picture's transparent part; for a copied mask, wire its Image output to Image to Mask), Ctrl+V in the Canvas view makes it a new layer, and other programs take it as a PNG.
+that holds nothing) says why. What was copied pastes anywhere: Ctrl+V in the Graph makes a **Load Image** node holding it, with both parts: when the copy came from a
+painted selection (lasso, Quick Mask, selection from a layer) the clipboard also carries the selection, and the paste keeps it as the
+node's painted mask (white is the part to change, the picture's size), so the node's **Image** output is the pixels and its **Mask**
+output the selection from one Ctrl+C and one Ctrl+V. (A rectangle or no selection adds no mask: it would be all white.) A copied mask
+alone (Copy selection as mask) pastes as a gray picture: wire its Image output to Image to Mask. Ctrl+V in the Canvas view makes the
+picture a new layer, and other programs take it as a PNG.
 
 **Paste and place a picture (#236).** Edit > **Paste as new layer** (Ctrl+V while the Canvas view is the one in use: the pointer is
 over it or it has the focus, as for every key of the view; the Graph's Ctrl+V still pastes nodes) puts the clipboard's picture on the
