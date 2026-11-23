@@ -165,6 +165,9 @@ public:
     // A package another Fugue exported (engine/share_package.h, #91), unpacked and opened as
     // its template is (openTemplate). openPath() takes one by its contents.
     bool openPackage(const QString &path);
+    // A package that carries a canvas (engine/canvas_package.h, #249): imported into the project's canvases as a new
+    // canvas (a new id when its own is taken), and the banner says so. openPath() takes one by its contents.
+    bool openCanvasPackage(const QString &path);
     // Writes the shown workflow as a package at a path or file URL (".fuguepack" added when the
     // name does not end so), never over a file; `preview` is a picture it made, or empty. The banner says
     // where it went, and what it left out. False when nothing was written.

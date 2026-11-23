@@ -129,6 +129,14 @@ struct Accepted {
     QString current;   // the head when !moved
 };
 
+// A revision with its tree, as a canvas made elsewhere carries it (importCanvas).
+struct ImportedRevision {
+    Revision revision;
+    Tree tree;
+};
+// The pixels of the tile with this hash, `width` x `height` x `channels` (a package's tile, read and decoded).
+using TileFetch = std::function<Result<mask::MaskPaint>(const QString &hash, int width, int height, int channels)>;
+
 struct LayerEdit; // engine/canvas_layer_ops.h
 
 bool isCanvasId(const QString &text); // [a-z0-9][a-z0-9_-]{0,63}
@@ -232,8 +240,22 @@ public:
     // The pixels of one stored tile (`width` x `height`, `channels` as the layer's kind says); canvas_corrupt when missing or not what it is named for.
     Result<mask::MaskPaint> tilePixels(const QString &hash, int width, int height, int channels) const { return readBlob(hash, width, height, channels); }
 
+    // Where a stored tile's PNG is (it may not be there: readable only after tilePixels has checked it).
+    QString blobFile(const QString &hash) const { return blobPath(hash); }
     // The tree hash a document would have, with nothing written.
     static Result<QString> treeHashOf(const mask::PaintDocument &document);
+    // The revision with these fields and the hash its commit record is named by (what addRevision stores).
+    static Revision makeRevision(const QString &tree, const QString &parent, const QString &producer, const QString &time);
+
+    // ---- a canvas made elsewhere (#249; engine/canvas_package.h) ----
+    // Makes a canvas of `chain` (oldest first, one line of parents, the last the head) named `name`. The input is
+    // untrusted, so it is checked before anything stays: every revision is the record its id names (the same fields
+    // hash to the same id), a tree is the content its hash names, each parent is the revision before it, and each tile
+    // `fetch` gives is the pixels its hash names and the size its place gives. The canvas keeps `wantedId` when it is a
+    // valid id nobody has in this store; otherwise it gets a new one (the answer's id says which). Nothing is written
+    // outside the store's root; a failure leaves nothing behind. input_invalid for a chain that is not one,
+    // canvas_corrupt for a tree or tile that is not what it is named for.
+    Result<CanvasInfo> importCanvas(const QString &wantedId, const QString &name, const std::vector<ImportedRevision> &chain, const TileFetch &fetch);
 
 private:
     QString canvasDir(const QString &canvasId) const;

@@ -168,6 +168,35 @@ private slots:
         QVERIFY(fugue({"canvas", "export", id, out}).exitCode != 0);
     }
 
+    // #249: a canvas as a package, head only or with its history, and back in as a new canvas, never over one.
+    void aCanvasPackageGoesOutAndComesBackAsANewCanvas() {
+        const Outcome made = fugue({"canvas", "new", "--name", "Team", "--size", "300x200", "--background", "white", "--json"});
+        const QString id = made.data().value("canvas").toString();
+        QVERIFY(fugue({"canvas", "layer", "rename", id, "0", "Backdrop", "--json"}).exitCode == 0); // a second revision
+        const Outcome head = fugue({"canvas", "export", id, path("work/head.fuguepack"), "--json"});
+        QVERIFY2(head.exitCode == 0, head.out + head.err);
+        QCOMPARE(head.data().value("part").toString(), QString("head"));
+        const Outcome history = fugue({"canvas", "export", id, path("work/hist.fuguepack"), "--history", "--json"});
+        QVERIFY2(history.exitCode == 0, history.out + history.err);
+        // Never over a file, and never a revision other than the head.
+        QVERIFY(fugue({"canvas", "export", id, path("work/head.fuguepack"), "--json"}).exitCode != 0);
+        QVERIFY(fugue({"canvas", "export", id + "@sha256:abcdef0123", path("work/x.fuguepack"), "--json"}).exitCode != 0);
+
+        // Into the store that has it: the id is taken, so it is a new canvas and the old one stays.
+        const Outcome again = fugue({"canvas", "import", path("work/hist.fuguepack"), "--json"});
+        QVERIFY2(again.exitCode == 0, again.out + again.err);
+        QVERIFY(again.data().value("renamed").toBool());
+        QCOMPARE(again.data().value("packagedId").toString(), id);
+        QVERIFY(again.data().value("canvas").toString() != id);
+        QCOMPARE(again.data().value("revisions").toInt(), 2);
+        const Outcome onlyHead = fugue({"canvas", "import", path("work/head.fuguepack"), "--name", "Just the layers", "--json"});
+        QCOMPARE(onlyHead.data().value("revisions").toInt(), 1);
+        QCOMPARE(onlyHead.data().value("name").toString(), QString("Just the layers"));
+        QCOMPARE(fugue({"canvas", "list", "--json"}).data().value("canvases").toArray().size(), 3);
+        // A file that is not a package keeps the old behaviour.
+        QCOMPARE(fugue({"canvas", "import", path("work/missing.png"), "--json"}).exitCode == 0, false);
+    }
+
     void exportWritesAFlattenedPictureByTheExtension() {
         const QString source = oraFile("in.ora"); // 300 x 200: a red square on a transparent paint layer
         const Outcome imported = fugue({"canvas", "import", source, "--json"});

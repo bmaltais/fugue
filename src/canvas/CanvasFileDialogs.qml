@@ -1,10 +1,12 @@
 pragma ComponentBehavior: Bound
+import QtCore
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Fugue
+import "../menu"
 
-// The three questions of the Canvas view's File menu (#232 slice B): Rename canvas…, Clear canvas… and Delete canvas…. Each
+// The questions of the Canvas view's File menu (#232 slice B): Rename canvas…, Share… (#249), Clear canvas… and Delete canvas…. Each
 // asks first with the safe answer highlighted and focused (docs/ui-ergonomics.md D8, D9); Delete and Clear are in the
 // danger tint, after the wider gap. They act through the view's model (`view.backend`).
 Item {
@@ -18,6 +20,7 @@ Item {
     visible: false
 
     function askRename() { renameField.text = root.canvasName; renameAsk.open() }
+    function askShare() { shareAsk.open() }
     function askClear() { clearAsk.open() }
     function askDelete() { deleteAsk.open() }
 
@@ -47,6 +50,54 @@ Item {
                 }
             }
         }
+    }
+
+    // Share… (#249): what goes in the package, then where it is saved. The safe, smaller answer (no history) is the
+    // highlighted one; the file is never written over another (the model checks).
+    property bool shareWithHistory: false
+    Question {
+        id: shareAsk
+        objectName: "canvasShareAsk"
+        onOpened: shareHead.forceActiveFocus()
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 4 * root.u
+            Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                text: qsTr("Share “%1” as a package that opens in Fugue. With its history, the person can step back through every change; without, they get the layers as they are now.").arg(root.canvasName)
+            }
+            QuestionAnswers {
+                spacing: 4 * root.u
+                ThemedButton { text: qsTr("Cancel"); onClicked: shareAsk.close() }
+                ThemedButton {
+                    objectName: "canvasShareWithHistory"
+                    text: qsTr("With history…")
+                    onClicked: { shareAsk.close(); root.shareWithHistory = true; shareDialog.openFor() }
+                }
+                ThemedButton {
+                    id: shareHead
+                    objectName: "canvasShareHead"
+                    text: qsTr("As it is now…")
+                    highlighted: true
+                    onClicked: { shareAsk.close(); root.shareWithHistory = false; shareDialog.openFor() }
+                }
+            }
+        }
+    }
+    FilePicker {
+        id: shareDialog
+        objectName: "canvasShareDialog"
+        title: qsTr("Save the canvas as a package")
+        fileMode: PortalFileDialog.SaveFile
+        defaultSuffix: "fuguepack"
+        nameFilters: [qsTr("Fugue packages (*.fuguepack)")]
+        function openFor() {
+            currentFolder = StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
+            selectedFile = StandardPaths.writableLocation(StandardPaths.DocumentsLocation) + "/" + root.canvasName + ".fuguepack"
+            open()
+        }
+        onAccepted: root.view.backend.sharePackage(selectedFile.toString(), root.shareWithHistory)
     }
 
     Question {

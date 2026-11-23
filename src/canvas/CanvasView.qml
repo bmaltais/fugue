@@ -286,7 +286,7 @@ Item {
         case "canvas-view.new": case "canvas-view.import": return {enabled: true}
         case "canvas-view.open": return {enabled: canvasData.canvases.length > 0}
         case "canvas-view.export": return {enabled: canvasData.revisionB !== ""}
-        case "canvas-view.rename": case "canvas-view.duplicate": case "canvas-view.delete": case "canvas-view.close": return {enabled: has}
+        case "canvas-view.rename": case "canvas-view.share": case "canvas-view.duplicate": case "canvas-view.delete": case "canvas-view.close": return {enabled: has}
         case "canvas-view.clear": return {enabled: canvasData.layersEditable}
         case "canvas-view.select-all": return {enabled: shows && canvasData.pictureSize.width > 0}
         case "canvas-view.deselect": return {enabled: deselectable}
@@ -349,6 +349,7 @@ Item {
         case "canvas-view.import": importPicture(); break
         case "canvas-view.export": exportDialogOpen(); break
         case "canvas-view.rename": fileDialogs.askRename(); break
+        case "canvas-view.share": fileDialogs.askShare(); break
         case "canvas-view.duplicate": canvasData.duplicateCanvas(); break
         case "canvas-view.clear": fileDialogs.askClear(); break
         case "canvas-view.delete": fileDialogs.askDelete(); break
@@ -490,7 +491,7 @@ Item {
             objectName: "canvasViewImportDialog"
             title: qsTr("Import a picture as a canvas")
             fileMode: PortalFileDialog.OpenFile
-            nameFilters: [qsTr("Pictures and canvases (*.png *.jpg *.jpeg *.webp *.ora)"), qsTr("All files (*)")]
+            nameFilters: [qsTr("Pictures and canvases (*.png *.jpg *.jpeg *.webp *.ora *.fuguepack)"), qsTr("All files (*)")]
             onAccepted: { root.makeProblem = canvasData.importPicture(d.selectedFile, ""); d.destroy() }
             onRejected: d.destroy()
         }

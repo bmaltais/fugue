@@ -274,19 +274,31 @@ Result<Revision> CanvasStore::addRevision(const QString &canvasId, const PaintDo
     return addCommit(canvasId, treeHash.value(), parent, producer);
 }
 
-Result<Revision> CanvasStore::addCommit(const QString &canvasId, const QString &treeHash, const QString &parent, const QString &producer) {
+namespace {
+
+QJsonObject commitRecord(const Revision &made) {
+    return QJsonObject{{"format", storeFormat},
+                       {"tree", made.tree},
+                       {"parent", made.parent.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(made.parent)},
+                       {"producer", made.producer},
+                       {"time", made.time}};
+}
+
+} // namespace
+
+Revision CanvasStore::makeRevision(const QString &tree, const QString &parent, const QString &producer, const QString &time) {
     Revision made;
-    made.tree = treeHash;
+    made.tree = tree;
     made.parent = parent;
     made.producer = producer;
-    made.time = isoTime(utcNow(m_clock));
-    const QJsonObject record{{"format", storeFormat},
-                             {"tree", made.tree},
-                             {"parent", parent.isEmpty() ? QJsonValue(QJsonValue::Null) : QJsonValue(parent)},
-                             {"producer", producer},
-                             {"time", made.time}};
-    made.id = canonicalHash(record);
-    const Errors written = writeOnce(canvasDir(canvasId) + QStringLiteral("/commits/") + hexOf(made.id) + QStringLiteral(".json"), jsonBytes(record),
+    made.time = time;
+    made.id = canonicalHash(commitRecord(made));
+    return made;
+}
+
+Result<Revision> CanvasStore::addCommit(const QString &canvasId, const QString &treeHash, const QString &parent, const QString &producer) {
+    const Revision made = makeRevision(treeHash, parent, producer, isoTime(utcNow(m_clock)));
+    const Errors written = writeOnce(canvasDir(canvasId) + QStringLiteral("/commits/") + hexOf(made.id) + QStringLiteral(".json"), jsonBytes(commitRecord(made)),
                                      QStringLiteral("a canvas revision"));
     if (hasErrors(written))
         return Result<Revision>(written);
@@ -506,6 +518,77 @@ Result<CanvasInfo> CanvasStore::create(const QString &name, const PaintDocument 
     const Result<Commit> first = commit(id, document, QString(), producer);
     if (!first || !first->move.moved)
         return fail(first ? Errors{makeError(QStringLiteral("node_failed"), QStringLiteral("The new canvas's head could not be set."))} : first.errors());
+    return info(id);
+}
+
+Result<CanvasInfo> CanvasStore::importCanvas(const QString &wantedId, const QString &name, const std::vector<ImportedRevision> &chain, const TileFetch &fetch) {
+    const auto invalid = [](const QString &why) { return Result<CanvasInfo>(makeError(QStringLiteral("input_invalid"), why)); };
+    const QString title = name.simplified();
+    if (title.isEmpty() || title.size() > 200)
+        return invalid(QStringLiteral("A canvas needs a name of 1 to 200 characters."));
+    if (chain.empty())
+        return invalid(QStringLiteral("A canvas needs at least one revision."));
+    // Checked first, with nothing written: the chain and every tree.
+    QString previous;
+    for (const ImportedRevision &item : chain) {
+        const Revision &rev = item.revision;
+        if (!isSha256(rev.id) || !isSha256(rev.tree) || (!rev.parent.isEmpty() && !isSha256(rev.parent)) || rev.producer.size() > 200 || rev.time.size() > 64)
+            return invalid(QStringLiteral("A revision of the canvas is not well formed."));
+        if (rev.parent != previous)
+            return invalid(QStringLiteral("The revisions of the canvas are not one line of parents."));
+        if (makeRevision(rev.tree, rev.parent, rev.producer, rev.time).id != rev.id)
+            return corrupt(QStringLiteral("the revision %1 is not the record it is named for").arg(rev.id));
+        if (canonicalHash(treeToJson(item.tree)) != rev.tree)
+            return corrupt(QStringLiteral("the tree %1 is not the content it is named for").arg(rev.tree));
+        previous = rev.id;
+    }
+    const QString id = isCanvasId(wantedId) && !QFileInfo::exists(canvasDir(wantedId)) ? wantedId
+                                                                                  : QStringLiteral("canvas-") + QUuid::createUuid().toString(QUuid::Id128).left(12);
+    const QString dir = canvasDir(id);
+    const auto fail = [&dir](const Errors &errors) {
+        QDir(dir).removeRecursively(); // a canvas that was never complete: only this call knew it
+        return Result<CanvasInfo>(errors);
+    };
+    const Errors folder = makeFolder(dir + QStringLiteral("/commits"));
+    if (hasErrors(folder))
+        return Result<CanvasInfo>(folder);
+    for (const ImportedRevision &item : chain) {
+        const Tree &tree = item.tree;
+        const auto storeTiles = [&](const TileMap &tiles, int channels) {
+            for (const auto &[key, hash] : tiles) {
+                if (QFileInfo::exists(blobPath(hash)))
+                    continue;
+                const mask::IRect rect = tileRect(key, tree.width, tree.height);
+                const Result<MaskPaint> tile = fetch(hash, rect.width, rect.height, channels);
+                if (!tile)
+                    return tile.errors();
+                if (tile->width() != rect.width || tile->height() != rect.height || tile->channels() != channels ||
+                    tileHash(rect.width, rect.height, channels, tileBytes(*tile, mask::IRect{0, 0, rect.width, rect.height})) != hash)
+                    return Errors{makeError(QStringLiteral("canvas_corrupt"), QStringLiteral("The tile %1 does not hold the pixels it is named for.").arg(hash))};
+                if (const Errors stored = storeBlob(hash, *tile); hasErrors(stored))
+                    return stored;
+            }
+            return Errors{};
+        };
+        for (const LayerRecord &layer : tree.layers)
+            for (const Errors &problems : {storeTiles(layer.tiles, layer.channels()), storeTiles(layer.maskTiles, 1)})
+                if (hasErrors(problems))
+                    return fail(problems);
+        const Result<QString> stored = storeTreeRecord(tree);
+        if (!stored)
+            return fail(stored.errors());
+        const Errors written = writeOnce(dir + QStringLiteral("/commits/") + hexOf(item.revision.id) + QStringLiteral(".json"), jsonBytes(commitRecord(item.revision)),
+                                         QStringLiteral("a canvas revision"));
+        if (hasErrors(written))
+            return fail(written);
+    }
+    const Errors head = replaceFile(dir + QStringLiteral("/head"), chain.back().revision.id.toLatin1() + '\n', QStringLiteral("the canvas head"));
+    if (hasErrors(head))
+        return fail(head);
+    const QJsonObject record{{"format", storeFormat}, {"id", id}, {"name", title}, {"created", isoTime(utcNow(m_clock))}};
+    const Errors written = replaceFile(dir + QStringLiteral("/canvas.json"), jsonBytes(record), QStringLiteral("canvas.json"));
+    if (hasErrors(written))
+        return fail(written);
     return info(id);
 }
 

@@ -11,6 +11,7 @@
 #include "engine/atomic_file.h"
 #include "engine/canvas_diff.h"
 #include "engine/canvas_layer_ops.h"
+#include "engine/canvas_package.h"
 #include "engine/canvas_resize.h"
 #include "engine/canvas_store.h"
 #include "engine/new_canvas.h"
@@ -124,8 +125,29 @@ Reply canvasNew(const Command &command, Context &) {
     return madeReply(made.value(), QStringLiteral("Made"), width, height);
 }
 
+// `canvas import <file.fuguepack>`: the canvas of a package into the store, never over a canvas there.
+Reply importPackage(const Command &command, const QString &file) {
+    CanvasStore store = CanvasStore::forSession();
+    const Result<canvas::CanvasImported> got = canvas::importCanvasPackage(file, store, command.has("name") ? command.value("name") : QString());
+    if (!got)
+        return Reply::failure(got.errors());
+    QJsonObject data = canvasJson(got->info);
+    data.insert(QStringLiteral("part"), got->part == canvas::SharedPart::History ? QStringLiteral("history") : QStringLiteral("head"));
+    data.insert(QStringLiteral("revisions"), got->revisions);
+    data.insert(QStringLiteral("renamed"), got->renamedId);
+    QString text = QStringLiteral("Imported canvas %1 as %2 (%3).").arg(got->info.name, got->info.id,
+                                                                     got->part == canvas::SharedPart::History ? QStringLiteral("with its history, %1 revisions").arg(got->revisions) : QStringLiteral("the head only"));
+    if (got->renamedId) {
+        data.insert(QStringLiteral("packagedId"), got->packagedId);
+        text += QStringLiteral(" The package's id %1 is taken here, so it has a new one; the canvas that was here is untouched.").arg(got->packagedId);
+    }
+    return Reply::success(data, text);
+}
+
 Reply canvasImport(const Command &command, Context &) {
     const QString file = command.positionals.at(0);
+    if (canvas::isCanvasPackage(file))
+        return importPackage(command, file);
     const Result<mask::PaintDocument> document = mask::readCanvasFile(file);
     if (!document)
         return Reply::failure(document.errors());
@@ -140,11 +162,22 @@ Reply canvasImport(const Command &command, Context &) {
 Reply canvasExport(const Command &command, Context &) {
     const Ref ref = parseRef(command.positionals.at(0));
     const QString out = command.positionals.at(1);
-    // By the extension: .ora is the layered file, a picture is the flattened canvas.
+    // By the extension: .ora is the layered file, a picture is the flattened canvas, .fuguepack the canvas to share.
     const QString suffix = QFileInfo(out).suffix().toLower();
+    if (suffix == QLatin1String("fuguepack")) {
+        if (ref.written && ref.revision != QLatin1String("head"))
+            return Reply::failure(usageError(QStringLiteral("A package carries the head of a canvas, with or without its history; name the canvas without @%1.").arg(ref.revision), command.positionals.at(0)));
+        const bool history = command.has("history");
+        const CanvasStore shared = CanvasStore::forSession();
+        const Errors written = canvas::writeCanvasPackage(shared, ref.canvas, history ? canvas::SharedPart::History : canvas::SharedPart::Head, QFileInfo(out).absoluteFilePath());
+        if (hasErrors(written))
+            return Reply::failure(written);
+        return Reply::success(QJsonObject{{"canvas", ref.canvas}, {"part", history ? "history" : "head"}, {"path", QFileInfo(out).absoluteFilePath()}},
+                              QStringLiteral("Wrote %1 (%2 of %3).").arg(out, history ? QStringLiteral("the head and its history") : QStringLiteral("the head only"), ref.canvas));
+    }
     const QString picture = suffix == QLatin1String("jpeg") ? QStringLiteral("jpg") : suffix;
     if (suffix != QLatin1String("ora") && picture != QLatin1String("png") && picture != QLatin1String("jpg") && picture != QLatin1String("webp"))
-        return Reply::failure(usageError(QStringLiteral("The file name ends in .%1; export writes .ora (layers), .png, .jpg or .webp (flattened).").arg(suffix), out));
+        return Reply::failure(usageError(QStringLiteral("The file name ends in .%1; export writes .ora (layers), .png, .jpg or .webp (flattened), or .fuguepack (a package to share).").arg(suffix), out));
     const CanvasStore store = CanvasStore::forSession();
     const Result<QString> revision = store.resolve(ref.canvas, ref.revision);
     if (!revision)

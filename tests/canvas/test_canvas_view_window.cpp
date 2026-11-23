@@ -966,6 +966,31 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // #249: Share… asks what goes in, and the model's package opens again as a canvas of its own, history and all, with a
+    // notice; the same file again is a second canvas, never the first one replaced.
+    void shareAsksThenAPackageImportsAsANewCanvas() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        QTRY_COMPARE(model(app)->property("canvasId").toString(), m_canvas);
+        viaMenu(app, "Canvas", "canvas-view.share");
+        QTRY_VERIFY(find(app.window, "canvasShareHead"));
+        QVERIFY(find(app.window, "canvasShareWithHistory"));
+        const QString file = m_dir.filePath("shared.fuguepack");
+        bool written = false;
+        QVERIFY(QMetaObject::invokeMethod(model(app), "sharePackage", Q_RETURN_ARG(bool, written), Q_ARG(QString, file), Q_ARG(bool, true)));
+        QVERIFY(written);
+        QVERIFY(QFileInfo(file).isFile());
+        QString problem = "unset";
+        QVERIFY(QMetaObject::invokeMethod(model(app), "importPicture", Q_RETURN_ARG(QString, problem), Q_ARG(QString, file), Q_ARG(QString, QString())));
+        QVERIFY2(problem.isEmpty(), qPrintable(problem));
+        QTRY_VERIFY(model(app)->property("canvasId").toString() != m_canvas);
+        QVERIFY(model(app)->property("notice").toString().contains("history"));
+        QVERIFY(model(app)->property("notice").toString().contains("untouched")); // its id was taken here
+        QVERIFY(canvas::CanvasStore::forSession().info(m_canvas).ok());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     // ---- the cohesion batch (#228, .ui-ergonomics/2026-11-22-canvas-areas-cohesion.md) ----
 
     // L2: one bar. The frame's own bar is off; Fit, 100% and the close end the view's tools row, in that order.

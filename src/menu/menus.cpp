@@ -150,7 +150,7 @@ QVariantList canvasView() {
                           planned(QT_TRANSLATE_NOOP("Menu", "Export layers as files…"), 248),
                           planned(QT_TRANSLATE_NOOP("Menu", "Export PSD…"), 227)}),
                  planned(QT_TRANSLATE_NOOP("Menu", "Place picture…"), 236),
-                 planned(QT_TRANSLATE_NOOP("Menu", "Share…"), 249),
+                 command("canvas-view.share"),
                  planned(QT_TRANSLATE_NOOP("Menu", "Run an action on a folder…"), 250), separator(),
                  command("canvas-view.rename"), command("canvas-view.duplicate"),
                  planned(QT_TRANSLATE_NOOP("Menu", "Canvas size…"), 240),

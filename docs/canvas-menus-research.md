@@ -31,7 +31,7 @@ is a **placeholder**: a greyed row, not a command (no handler, no key, nothing i
 | Place embedded / linked | Ph, Pp, Af | placeholder, #236 | place a picture as a layer |
 | Canvas size… / Document properties | Ph, Kr, Af | placeholder, #240 | the resize revision |
 | Edit in external editor | Krita plugins | placeholder, #215 | issue exists |
-| Share / Publish | Ph Share, Af | placeholder, #249 | a package that carries a canvas (epic #206) |
+| Share / Publish | Ph Share, Af | built (#249) | **Share…** asks "As it is now…" (the layers, no history) or "With history…", then where; a `.fuguepack` that Open and Import picture… read back |
 | Automate / Batch | Ph Automate, Kr scripts | placeholder, #250 | a canvas action over a folder of pictures |
 | Open recent | Ph, Pp, Kr, Af | skip | the canvas list is newest first and one click away |
 | Save, Save as, Revert, Save a copy | all | skip | autosaved revisions; Undo and History revert; Export is the copy |

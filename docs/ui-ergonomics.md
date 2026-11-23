@@ -58,6 +58,14 @@ The D numbers are the audit's decisions of 2026-11-22. D4 (one button: `ViewButt
 
 ## Open
 
+### 2026-11-23 Share… of the Canvas view's menu (#249)
+
+- Control: `src/canvas/CanvasFileDialogs.qml`: the question `canvasShareAsk` (`canvasShareWithHistory`, `canvasShareHead`) and the save dialog `canvasShareDialog` (a `FilePicker`); the row `canvas-view.share` (Canvas > Share…, `menus.cpp`, `CanvasView.qml`) in place of the greyed placeholder; the Import picture… dialog (`canvasViewImportDialog`) also takes `*.fuguepack`. The window's File > Open takes one too (`Workflows::openCanvasPackage`).
+- Old: Share… was a greyed row ("Not built yet (#249)").
+- New: Share… asks one question, what goes in the package (As it is now… keeps no history, With history… keeps every step), each answer opens the portal's save dialog; Cancel closes. The notice (`canvasViewNotice`) says what was saved, or, on Import picture…, what was opened, with its history when it has one, and when its id was taken so it got a new one.
+- Why: sharing is a choice with a real consequence (the history is bigger and shows every step), so it is asked once, at the moment of the share, with the smaller, more private answer as the default (Hick: two answers). A canvas never replaces another on opening, so the person has nothing to confirm there, only to be told.
+- Rules met: Floor (answer buttons 28px), Primary (As it is now… the one accent fill, highlighted and focused, as D8 does for the safe answer), Destructive (nothing is removed; the package never overwrites a file), D9 (the primary answer last, at the right), Words (Share…, With history…, As it is now…, never "head" or a hash), Right-to-left (the row mirrors).
+
 ### Port loses to the resize corner
 
 - File: `src/canvas/FugueCanvas.qml` (`cornerAt` runs before `portUnder`)
