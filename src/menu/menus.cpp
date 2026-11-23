@@ -3,6 +3,8 @@
 #include <QCoreApplication>
 #include <QVariantMap>
 
+#include <algorithm>
+
 namespace fugue::menus {
 
 namespace {
@@ -258,6 +260,33 @@ QVariantList tree(const QString &name) {
     if (name == QLatin1String("colors")) // the selection toolbar's color button (#74)
         return colors().value("items").toList();
     return {};
+}
+
+ViewMenus viewMenus(const QString &viewType) {
+    if (viewType == QLatin1String("graph"))
+        return {QStringLiteral("graph"), QStringLiteral("graph"), false};
+    if (viewType == QLatin1String("canvas"))
+        return {QStringLiteral("canvas-view"), QStringLiteral("canvasHeader"), true};
+    return {};
+}
+
+qreal tabWidth(int count, qreal room, qreal preferred, qreal minimum) {
+    if (count <= 0)
+        return 0;
+    return std::max(minimum, std::min(preferred, room / count));
+}
+
+qreal tabScroll(int current, int count, qreal width, qreal room, qreal offset) {
+    const qreal content = count * width;
+    const qreal most = std::max<qreal>(0, content - room);
+    if (current >= 0 && current < count) {
+        const qreal start = current * width;
+        if (start < offset)
+            offset = start;
+        else if (start + width > offset + room)
+            offset = start + width - room;
+    }
+    return std::clamp(offset, qreal(0), most);
 }
 
 QStringList colorRoles() {

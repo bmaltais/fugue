@@ -644,6 +644,34 @@ private slots:
                      qPrintable(tabColorAt(1).name() + " wants " + colors.at(pick).value<QColor>().name()));
     }
 
+    // #262: the tabs are in the window bar's row, between the menus and the project chip and Close; with more than fit
+    // they keep their least width and the strip scrolls so the current tab stays whole.
+    void theTabsShareTheWindowBarsRowAndScrollToTheCurrentOne() {
+        App app(load(small));
+        QVERIFY(app.open());
+        app.workflows.dismissPendingTrust();
+        app.workflows.dismissNotice();
+        for (int i = 0; i < 24; ++i)
+            app.workflows.newWorkflow();
+        QTRY_COMPARE(app.workflows.tabs().size(), 25);
+        QQuickItem *tabs = item(app.window->contentItem(), "workflowTabs");
+        QQuickItem *bar = item(app.window->contentItem(), "menuBar");
+        QQuickItem *close = item(app.window->contentItem(), "closeApp");
+        QQuickItem *last = item(app.window->contentItem(), "menuTitle-4");
+        QVERIFY(tabs && bar && close && last && tabs->isVisible());
+        QTest::qWait(50);
+        const auto scene = [](QQuickItem *it) { return QRectF(it->mapToScene(QPointF(0, 0)), QSizeF(it->width(), it->height())); };
+        QVERIFY(scene(tabs).top() >= scene(bar).top() && scene(tabs).bottom() <= scene(bar).bottom()); // in the bar's row
+        QVERIFY(scene(tabs).left() >= scene(last).right());
+        QVERIFY(scene(tabs).right() <= scene(close).left());
+        // The current tab is the last made: whole inside the strip.
+        QQuickItem *current = nullptr;
+        QTRY_VERIFY((current = item(tabs, "tab-24")) != nullptr);
+        QTRY_VERIFY(scene(current).left() >= scene(tabs).left() - 0.5 && scene(current).right() <= scene(tabs).right() + 0.5);
+        app.workflows.setCurrent(0);
+        QTRY_VERIFY(scene(item(tabs, "tab-0")).left() >= scene(tabs).left() - 0.5);
+    }
+
     // #72: a node's warnings read from its header: hovering the count and triangle shows them,
     // a click keeps them up until a click elsewhere or Esc.
     void aNodesWarningsShowOnHoverAndStayOnClick() {

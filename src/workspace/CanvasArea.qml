@@ -29,6 +29,8 @@ AreaView {
         edits: root.edits
         selection: root.selection
         focus: true
+        // Its menus are in the area's header (AreaHeader.qml), as the Graph's are, not in the view.
+        ownMenus: false
     }
     Component.onCompleted: {
         // A kept canvas that is gone: the newest, as a new view opens on.
