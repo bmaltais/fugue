@@ -210,6 +210,9 @@ Item {
     // The view's keys are live (the `canvas-view` context): the pointer is over it, or its picture has the focus.
     // A menu of the view's own bar is open: the pointer is over the popup, not the view, yet the commands are the view's.
     property bool menuOpen: false
+    // Whether the view draws its own menu bar (Canvas, Edit, Select, Layer, View): the File > Canvas… dialog has no header
+    // for it; in an area it is the area header's (#262), which sets `menuOpen` as the view's own bar does.
+    property bool ownMenus: true
     // The host closes the view itself (the dialog): Close canvas asks it with `closeRequested`; an area just shows no canvas.
     property bool hostCloses: false
     signal closeRequested()
@@ -978,13 +981,17 @@ Item {
     }
 
     // One bar (#228, the owner's decision: no strip of revisions, no hashes): the canvas, the History and Layers panels,
-    // then the tools. It wraps when the view is narrow.
-    CanvasMenuBar {
+    // then the tools. It wraps when the view is narrow. The menu bar is there in the File > Canvas… dialog; in an area the
+    // menus are the area header's (`ownMenus` off, CanvasArea.qml).
+    Loader {
         id: menuBar
-        look: root.look
-        view: root
+        active: root.ownMenus
         width: parent.width
-        height: implicitHeight
+        height: item ? (item as Item).implicitHeight : 0
+        sourceComponent: CanvasMenuBar {
+            look: root.look
+            view: root
+        }
     }
     Flow {
         id: tools

@@ -181,7 +181,7 @@ QtObject {
             viewKey = key
         }
         if (host && header)
-            headerItem = header.createObject(host, {areaId: id, viewType: type, z: 2}) as Item
+            headerItem = header.createObject(host, {areaId: id, viewType: type, areaView: view, z: 2}) as Item
     }
     // A child's node as a plain object of its own: a part of this node read from a property is a reference into
     // it, which a new tree for this node would change under the child.

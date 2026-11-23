@@ -8,8 +8,8 @@ import "../canvas/widgets"
 // The bar at the top of an area while the window has more than one (#217 slice 1, spec 12.16; docs/ui-ergonomics.md):
 // the view-type menu at the start (the view's glyph, its name and a chevron; Blender's editor-type menu), then, at
 // the end, split side by side, split top and bottom and, a chunk of its own, close. Between them, the view's own menus
-// (#262, as Blender's editor headers: the Graph's View, Select, Add and Node; folded into one Menu button where they
-// do not fit). The window's global menus are the window bar's. The active area's bar has an
+// (#262, as Blender's editor headers: the Graph's View, Select, Add and Node, the Canvas view's Canvas, Edit, Select,
+// Layer and View; folded into one Menu button where they do not fit; menus.h `viewMenus` says which a view type has). The window's global menus are the window bar's. The active area's bar has an
 // accent line along its foot and its name in the text color; the others are quieter. AreaNode.qml makes one per
 // area (none while the window has one area: the default window has no header). It reads App.workspace and runs the
 // area commands of the area it heads, which it makes the active one first.
@@ -18,6 +18,10 @@ Rectangle {
     objectName: "areaHeader-" + areaId
     property int areaId: 0
     property string viewType: ""
+    // The area's view (AreaNode.qml), for the menus that need it: the Canvas view says what applies in its menus.
+    property var areaView: null
+    readonly property var viewMenus: MenuLayout.viewMenus(viewType)
+    readonly property var menusView: areaView?.view ?? null
     readonly property CanvasLook look: App.theme.look
     readonly property real u: look.unit
     readonly property bool active: App.workspace !== null && App.workspace.active === areaId
@@ -127,19 +131,20 @@ Rectangle {
         Keys.onSpacePressed: header.openViews()
     }
 
-    // The view's own menus, after the view-type menu, in the room between it and the splits. The Graph's here; the Canvas
-    // view keeps its own bar inside the view (the File > Canvas… dialog has no header).
+    // The view's own menus, after the view-type menu, in the room between it and the splits. The Canvas view's too: its
+    // bar is here while it is in an area, and inside the view only in the File > Canvas… dialog, which has no header.
     Loader {
         id: menus
         objectName: "areaMenus-" + header.areaId
-        active: header.viewType === "graph"
+        active: header.viewMenus.tree !== "" && (!header.viewMenus.needsView || header.menusView !== null)
         anchors.verticalCenter: parent.verticalCenter
         anchors.left: typeButton.right
         anchors.leftMargin: header.u
         sourceComponent: CanvasMenuBar {
             look: header.look
-            treeName: "graph"
-            idPrefix: "graph"
+            treeName: header.viewMenus.tree
+            idPrefix: header.viewMenus.prefix
+            view: header.viewMenus.needsView ? header.menusView : null
             maxWidth: Math.max(0, splits.x - typeButton.x - typeButton.width - 3 * header.u)
         }
     }

@@ -217,6 +217,28 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // #262: the Canvas view's menus are its area header's (as the Graph's are), not a bar inside the view; they act on the
+    // view as its own bar did (its keys are live while one is open, its rows carry its state).
+    void theCanvasViewsMenusAreItsAreaHeadersAndActOnTheView() {
+        App app(load(withRegion(m_canvas)));
+        QVERIFY(app.open());
+        QVERIFY(app.commands.trigger("area.split-column"));
+        QTRY_VERIFY(find(app.window, "canvasHeaderMenuBar"));
+        QVERIFY(!find(app.window, "canvasMenuBar")); // none inside the view
+        QObject *view = find(app.window, "canvasArea")->property("view").value<QObject *>();
+        QVERIFY(!view->property("ownMenus").toBool());
+        QQuickItem *edit = nullptr;
+        QTRY_VERIFY((edit = find(app.window, "canvasHeaderMenuTitle-Edit")) != nullptr);
+        QTRY_VERIFY(sceneRect(edit).bottom() <= sceneRect(find(app.window, "areaHeader-2")).bottom()); // in the header
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(edit));
+        QTRY_VERIFY(find(app.window, "menuItem-canvas-view.undo"));
+        QVERIFY(view->property("menuOpen").toBool());
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(edit)); // a second press closes it
+        QTRY_VERIFY(!find(app.window, "menuItem-canvas-view.undo"));
+        QVERIFY(!view->property("menuOpen").toBool());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void aCanvasAreaFollowsTheSelectedRegionAndKeepsItsCanvas() {
         App app(load(withRegion(m_canvas)));
         QVERIFY(app.open());
@@ -463,6 +485,20 @@ private slots:
         QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(find(app.window, "areaType-2")));
         QTRY_VERIFY(app.window->findChild<QObject *>("areaViewMenu"));
         save("type-menu");
+        app.key(Qt::Key_Escape);
+        // #262: the Canvas area's own menus in its header, one open; then the window bar with workflow tabs in its row.
+        QQuickItem *layer = nullptr;
+        QTRY_VERIFY((layer = find(app.window, "canvasHeaderMenuTitle-Layer")) != nullptr);
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(layer));
+        QTRY_VERIFY(find(app.window, "menuItem-canvas-view.new-layer"));
+        save("canvas-header-menu");
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(layer));
+        app.workflows.dismissPendingTrust();
+        app.workflows.dismissNotice();
+        for (int i = 0; i < 3; ++i)
+            app.workflows.newWorkflow();
+        QTRY_VERIFY(find(app.window, "tab-3"));
+        save("window-bar-tabs");
     }
 
     // #228: in a narrow Canvas area the layers panel gives the picture most of the width (a quarter of the view, never under 32u).

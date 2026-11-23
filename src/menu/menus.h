@@ -11,6 +11,7 @@
 // {title, items} whose title is English with `&` before its mnemonic, translated in the "Menu"
 // context.
 
+#include <QString>
 #include <QStringList>
 #include <QVariantList>
 
@@ -25,5 +26,24 @@ QVariantList tree(const QString &name);
 // order: none first, then accent, muted and the palette's hues. Each is a command
 // node.color.<role>.
 QStringList colorRoles();
+
+// The menus of a view type's area header (#262, Blender's editor headers): the registry's tree name (`tree`: one of
+// names()), the start of the object names its bar gets (`prefix`: two bars of one window never share a name), and
+// whether the bar needs the view itself (`needsView`: the Canvas view says what applies and what is checked; the Graph's
+// rows carry their own state). An empty tree: the view type has no menus in its header (an unknown type, a placeholder).
+struct ViewMenus {
+    QString tree;
+    QString prefix;
+    bool needsView = false;
+};
+ViewMenus viewMenus(const QString &viewType);
+
+// The workflow tabs in the window bar (#262, Blender's workspace tabs in its top bar). `room` is the width the bar leaves
+// the strip (the New button not counted). The tabs take their `preferred` width while they fit, then share the room
+// down to `minimum`; past that they keep `minimum` and the strip scrolls (tabScroll). No tabs: 0.
+qreal tabWidth(int count, qreal room, qreal preferred, qreal minimum);
+// The scroll offset that keeps tab `current` whole in the strip, moving the strip `offset` the least it can; the offset
+// stays inside the strip's content.
+qreal tabScroll(int current, int count, qreal width, qreal room, qreal offset);
 
 } // namespace fugue::menus

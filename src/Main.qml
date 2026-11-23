@@ -108,7 +108,7 @@ ApplicationWindow {
             }
         }
 
-        // The menu bar and the tabs hide from View > Bars and panels (#129; items are kept, not dropped:
+        // The window bar (its menus and, in its row, the workflow tabs) hides from View > Bars and panels (#129; items are kept, not dropped:
         // the window's item count is a budget and a Loader each would add to it). Not shown, the
         // menu bar auto-hides (#160): a slim edge and a handle stay, and it slides in over the canvas
         // for the pointer at the edge, F10 and the Alt keys (panels/AutoHide.qml). It sits above the
@@ -125,6 +125,7 @@ ApplicationWindow {
             MenuBar {
                 id: menuBar
                 width: parent.width
+                tabsAllowed: win.chromeIsShown("workflow-tabs")
                 onNeeded: menuBarHost.reveal()
             }
         }
@@ -133,11 +134,6 @@ ApplicationWindow {
             anchors { fill: parent; topMargin: menuBarHost.implicitHeight }
             spacing: 0
 
-            WorkflowTabs {
-                allowed: win.chromeIsShown("workflow-tabs")
-                Layout.fillWidth: true
-                Layout.preferredHeight: implicitHeight
-            }
             // Faster generation on an NVIDIA card with only the Vulkan helper (#97, spec 8.10).
             // Made only while shown: the window keeps few items (#5).
             Loader {

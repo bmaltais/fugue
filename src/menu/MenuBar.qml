@@ -3,9 +3,12 @@ import QtQuick
 import QtQuick.Controls
 import Fugue
 import "../canvas"
+import "../workflow"
 
-// The menu bar (#50): File, Edit, View, Node, Run and Help, built from the command
-// registry's "bar" tree (menus.h), so names, keys and enabled state are the registry's.
+// The window bar (#50, #262; Blender's top bar): the window's own menus, File, Edit, Run, Window and Help, built from
+// the command registry's "bar" tree (menus.h), so names, keys and enabled state are the registry's; a view's menus
+// are its area header's. After the menus, in the same row, the workflow tabs (workflow/WorkflowTabs.qml), then the
+// project chip and Close at the far end.
 // Alt+letter opens a menu (the letters after `&` in the titles, none of them bound in 12.4),
 // F10 (app.menu-bar) the first one (an auto-hidden bar slides in for both, panels/AutoHide.qml); Up and Down move in a menu, Left and Right to the next
 // menu, Enter runs, Escape closes. A press on another title while one is open moves there,
@@ -18,6 +21,8 @@ Rectangle {
     readonly property CanvasLook look: App.theme.look
     readonly property real u: look.unit
     readonly property bool rightToLeft: Application.layoutDirection === Qt.RightToLeft
+    // Off while View > Bars and panels has the workflow tabs hidden (#129).
+    property bool tabsAllowed: true
 
     // The top menus; read again when the language changes.
     property var tree: App.commands.menu("bar")
@@ -225,6 +230,17 @@ Rectangle {
                 }
             }
         }
+    }
+
+    // The workflow tabs: the room between the menus (or the menu button) and the chip, 2u clear of each.
+    WorkflowTabs {
+        id: tabs
+        allowed: bar.tabsAllowed
+        anchors.left: bar.narrow ? hamburger.right : titles.right
+        anchors.leftMargin: 2 * bar.u
+        anchors.right: chipLoader.left
+        anchors.rightMargin: 2 * bar.u
+        height: parent.height - 1
     }
 
     // The project chip (spec 1.4.2): which project this window is in, at the bar's far end; a press opens the

@@ -4,7 +4,8 @@
 # changed: say why in the commit (epic #217: the default window stays as simple as it is).
 # #228: the notices' dismiss buttons draw the Lucide x (a Glyph) in place of Material's text label: two items fewer.
 # #262: the Graph's area header sits above the canvas while the window has one area (view-type menu, split and close, and the Graph's own menus View, Select, Add and Node): 50 items more. The window bar has five menus (File, Edit, Run, Window, Help): one title fewer. With more areas the host's headers do this and the one above the canvas goes (test_area_split_window).
-items 245
+# #262 slice 3: the workflow tabs sit in the window bar's row, as a strip with the New button and no layout item: two items fewer.
+items 243
 ApplicationWindow 1
 ApplicationWindowContentControl 1
 areaClose-1 1

@@ -35,6 +35,7 @@
 #include "search/node_library.h"
 #include "canvas/new_canvas_model.h" // a QML type (NewCanvasModel, the New canvas dialog's): the module registers it from here
 #include "canvas/canvas_export_model.h" // a QML type (CanvasExportModel, the two export dialogs'): the module registers it from here
+#include "menu/menu_layout_qml.h" // a QML singleton (MenuLayout): the module registers it from here
 #include "settings/project_model.h"
 #include "settings/settings_model.h"
 #include "theme.h"
