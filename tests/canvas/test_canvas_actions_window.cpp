@@ -275,7 +275,7 @@ private slots:
         QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
     }
 
-    // ⋯ > Edit workflow (design 7): the chosen action's graph opens as a tab and the Graph's area takes over.
+    // Advanced > Edit workflow (design 7): the chosen action's graph opens as a tab and the Graph's area takes over.
     void editWorkflowShowsTheGraphInAnArea() {
         Rig r;
         QVERIFY(r.app.open());
@@ -286,14 +286,58 @@ private slots:
         drawRectangle(r.app, 80);
         QTRY_VERIFY(taskBar(r.app));
         chooseAction(r.app, indexOf(r, "test-fill"));
-        click(r.app, "canvasTaskMore");
-        QObject *menu = nullptr;
-        QTRY_VERIFY((menu = r.app.window->findChild<QObject *>("canvasTaskMoreMenu")) && menu->property("opened").toBool());
-        QMetaObject::invokeMethod(menu, "choose", Q_ARG(QVariant, 0)); // Edit workflow
+        click(r.app, "canvasTaskAdvancedButton");
+        QTRY_VERIFY(r.app.window->findChild<QObject *>("canvasTaskAdvanced")->property("opened").toBool());
+        click(r.app, "canvasTaskEdit"); // Edit workflow
         QTRY_COMPARE(r.app.workflows.tabs().at(r.app.workflows.current()).toMap().value("title").toString(), QStringLiteral("Test fill")); // replaces the blank tab
         QCOMPARE(r.app.workflows.tabs().at(r.app.workflows.current()).toMap().value("title").toString(), QStringLiteral("Test fill"));
         QCOMPARE(r.app.workspace.active(), r.app.workspace.graphArea());
         QCOMPARE(r.actions->error(), QString());
+        QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
+    }
+
+    // The Advanced popover (slice 4): the action's other inputs through the Graph's widgets, a choice's words, Count, Reset.
+    void theAdvancedPopoverEditsWhatGenerateUses() {
+        Rig r;
+        QVERIFY(r.app.open());
+        openDialog(r.app);
+        drawRectangle(r.app, 80);
+        QTRY_VERIFY(taskBar(r.app));
+        chooseAction(r.app, indexOf(r, "test-advanced"));
+        click(r.app, "canvasTaskAdvancedButton");
+        QObject *popover = nullptr;
+        QTRY_VERIFY((popover = r.app.window->findChild<QObject *>("canvasTaskAdvanced")) && popover->property("opened").toBool());
+        QTRY_VERIFY(find(r.app.window, "canvasTaskAdvancedWidget-strength"));
+        QVERIFY(find(r.app.window, "canvasTaskAdvancedWidget-steps"));
+        QVERIFY(!find(r.app.window, "canvasTaskAdvancedWidget-style")); // a choice of words has buttons instead
+        QVERIFY(find(r.app.window, "canvasTaskAdvancedChoice-style-Light"));
+        // The strength's widget shows the action's own default, 0.9.
+        QQuickItem *strength = find(r.app.window, "canvasTaskAdvancedWidget-strength");
+        QTRY_COMPARE(strength->property("number").toDouble(), 0.9);
+        click(r.app, "canvasTaskAdvancedChoice-style-Restyle");
+        QTRY_COMPARE(r.actions->choiceOf("test-advanced", "style"), QStringLiteral("Restyle"));
+        QTRY_VERIFY(find(r.app.window, "canvasTaskAdvancedReset"));
+        click(r.app, "canvasTaskCount-3");
+        QTRY_COMPARE(r.actions->variations("test-advanced"), 3);
+        // Generate runs the first of three with the word's number.
+        typePrompt(r.app, "a boat");
+        click(r.app, "canvasTaskGenerate");
+        QTRY_COMPARE(r.jobs().size(), 1);
+        QCOMPARE(r.actions->runTotal(), 3);
+        QTRY_VERIFY(textOf(r.app.window, "canvasTaskStatus").startsWith("Generating 1 of 3"));
+        QJsonObject params;
+        r.onFake([&](FakeProvider &f) { params = f.submitted(f.jobs().at(0)).params; });
+        QCOMPARE(params.value("guidance").toDouble(), 9.0);
+        r.actions->cancel();
+        QTRY_VERIFY(!r.actions->busy());
+        QVERIFY(!popover->property("opened").toBool()); // a press on the bar's own fields closed it
+        click(r.app, "canvasTaskAdvancedButton");
+        QTRY_VERIFY(popover->property("opened").toBool());
+        click(r.app, "canvasTaskAdvancedReset");
+        QTRY_VERIFY(!r.actions->hasAdvancedChanges("test-advanced"));
+        QCOMPARE(r.actions->variations("test-advanced"), 3); // Count stays
+        QTest::keyClick(r.app.window, Qt::Key_Escape); // closes it
+        QTRY_VERIFY(!popover->property("opened").toBool());
         QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
     }
 
@@ -305,10 +349,9 @@ private slots:
         drawRectangle(r.app, 80);
         QTRY_VERIFY(taskBar(r.app));
         chooseAction(r.app, indexOf(r, "test-fill"));
-        click(r.app, "canvasTaskMore");
-        QObject *menu = nullptr;
-        QTRY_VERIFY((menu = r.app.window->findChild<QObject *>("canvasTaskMoreMenu")) && menu->property("opened").toBool());
-        QMetaObject::invokeMethod(menu, "choose", Q_ARG(QVariant, 0));
+        click(r.app, "canvasTaskAdvancedButton");
+        QTRY_VERIFY(r.app.window->findChild<QObject *>("canvasTaskAdvanced")->property("opened").toBool());
+        click(r.app, "canvasTaskEdit");
         QTRY_COMPARE(r.app.workflows.tabs().at(r.app.workflows.current()).toMap().value("title").toString(), QStringLiteral("Test fill"));
         QTRY_VERIFY(!dialog(r.app)->property("opened").toBool());
         QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
@@ -350,6 +393,15 @@ private slots:
             r.onFake([&](FakeProvider &f) { f.fail(f.jobs().at(0), makeError("out_of_memory", "CUDA out of memory.")); });
             QTRY_VERIFY(!r.actions->busy());
             save(r.app, "error");
+            chooseAction(r.app, indexOf(r, "test-advanced"));
+            r.actions->setVariations("test-advanced", 2);
+            click(r.app, "canvasTaskAdvancedButton");
+            QTRY_VERIFY(find(r.app.window, "canvasTaskAdvancedWidget-strength"));
+            {
+                QObject *p = r.app.window->findChild<QObject *>("canvasTaskAdvanced");
+                QTRY_VERIFY(p->property("y").toReal() + p->property("height").toReal() <= r.app.window->height()); // kept in the window
+            }
+            save(r.app, "advanced");
         }
         {
             Rig r(R"({"fugue": 1, "graph": {"nodes": {}}})", Look{theme, 8});

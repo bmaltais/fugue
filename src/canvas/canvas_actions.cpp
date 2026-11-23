@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "canvas/canvas_model.h"
 #include "canvas/mask_layer.h"
 #include "canvas/region_pick.h"
 #include "engine/atomic_file.h"
@@ -18,6 +19,7 @@
 #include "engine/edge_fill.h"
 #include "engine/paths.h"
 #include "engine/registry.h"
+#include "canvas/widget_edit.h"
 #include "run/run_service.h"
 #include "workflow/model_downloads.h"
 #include "workflow/workflows.h"
@@ -114,7 +116,12 @@ Result<Shown> shownOf(const QString &canvasId, const QString &ref) {
 
 CanvasActions::CanvasActions(RunService *service, const Registry *registry, Workflows *workflows, QObject *parent)
     : QObject(parent), m_service(service), m_registry(registry), m_workflows(workflows), m_roots{bundledRoot()},
-      m_historyPath(stateDir() + QStringLiteral("/canvas-prompts.json")) {
+      m_historyPath(stateDir() + QStringLiteral("/canvas-prompts.json")),
+      m_settingsPath(stateDir() + QStringLiteral("/canvas-actions.json")) {
+    m_form = new CanvasModel(registry, this);
+    if (workflows)
+        m_form->widgets()->setDownloads(workflows->downloads());
+    connect(m_form, &CanvasModel::edited, this, &CanvasActions::syncForm);
     connect(m_service, &RunService::event, this, &CanvasActions::onEvent);
     if (m_workflows) {
         connect(m_workflows, &Workflows::templatesChanged, this, [this] { refresh(); });
@@ -133,6 +140,12 @@ void CanvasActions::setRoots(const QStringList &roots) {
 void CanvasActions::setHistoryPath(const QString &path) {
     m_historyPath = path;
     emit historyChanged();
+}
+
+void CanvasActions::setSettingsPath(const QString &path) { m_settingsPath = path; }
+
+int CanvasActions::runNumber() const {
+    return busy() ? std::min(int(m_order.size()), int(m_order.size() - m_runs.size()) + 1) : 0;
 }
 
 bool CanvasActions::downloading() const {
@@ -210,6 +223,7 @@ QVariantMap CanvasActions::editWorkflow(const QString &id) {
 
 void CanvasActions::rebuildList() {
     m_list.clear();
+    const QJsonObject remembered = readSettings();
     for (const Entry &e : std::as_const(m_entries)) {
         QVariantMap row{{"id", e.id},
                         {"name", e.action ? e.action->name : e.id},
@@ -217,6 +231,7 @@ void CanvasActions::rebuildList() {
                         {"glyph", e.action && !e.action->glyph.isEmpty() ? e.action->glyph : QStringLiteral("sparkles")},
                         {"selection", e.action ? e.action->selection : QStringLiteral("required")},
                         {"needsPrompt", e.action ? e.action->needsPrompt() : false},
+                        {"hasSeed", e.action ? e.action->input(QStringLiteral("seed")) != nullptr : false},
                         {"hasPrompt", e.action ? e.action->input(QStringLiteral("prompt")) != nullptr : false},
                         {"broken", !e.broken.isEmpty()},
                         {"reason", e.broken},
@@ -225,7 +240,8 @@ void CanvasActions::rebuildList() {
                         {"download", QString()},
                         {"size", QString()}};
         if (m_workflows) {
-            const QVariantMap missing = m_workflows->missingModels(e.document.models());
+            // The models the action would run with: a model picked in the Advanced popover counts.
+            const QVariantMap missing = m_workflows->missingModels(withRemembered(e, remembered.value(e.id).toObject().value("values").toObject()).models());
             row.insert("missing", missing.value("count"));
             row.insert("total", missing.value("total"));
             row.insert("download", missing.value("download"));
@@ -367,8 +383,16 @@ QVariantMap CanvasActions::generate(const QVariantMap &request) {
     }
     if (action.needsPrompt() && prompt.isEmpty())
         return refuse(tr("Type what to put in the selection, then Generate."));
+    // The Advanced values the person set (a model they picked is the one that must be here), a word only of a choice input.
+    QJsonObject remembered = settingsOf(id).value("values").toObject();
+    for (auto it = remembered.begin(); it != remembered.end();) {
+        const canvas::ActionInput *input = action.input(it.key());
+        const bool fits = input && inPopover(*input) &&
+                          (!input->choiceValues || (it->isString() && input->choices->contains(it->toString())));
+        it = fits ? it + 1 : remembered.erase(it);
+    }
     if (m_workflows) {
-        const QVariantMap missing = m_workflows->missingModels(chosen->document.models());
+        const QVariantMap missing = m_workflows->missingModels(withRemembered(*chosen, remembered).models());
         if (missing.value("count").toInt() > 0) {
             m_errorCode = QStringLiteral("model_missing");
             m_errorAction = id;
@@ -414,43 +438,58 @@ QVariantMap CanvasActions::generate(const QVariantMap &request) {
     }
     if (action.input(QStringLiteral("prompt")))
         binding.values.insert(QStringLiteral("prompt"), prompt);
-    if (action.input(QStringLiteral("seed"))) {
-        const QVariant seed = request.value("seed");
-        binding.values.insert(QStringLiteral("seed"), seed.isValid() && !seed.isNull() ? QJsonValue(seed.toLongLong())
-                                                                                       : QJsonValue(qint64(QRandomGenerator::global()->generate())));
+    for (auto it = remembered.begin(); it != remembered.end(); ++it)
+        binding.values.insert(it.key(), it.value());
+    // Count N: N runs of the same head and selection (an action with no seed role would repeat itself: one).
+    int total = 1;
+    if (action.input(QStringLiteral("seed")))
+        total = std::clamp(request.contains("count") ? request.value("count").toInt() : variations(id), 1, maxVariations);
+    const QVariant fixedSeed = request.value("seed");
+    const bool fixed = fixedSeed.isValid() && !fixedSeed.isNull();
+    QStringList started;
+    for (int n = 0; n < total; ++n) {
+        if (action.input(QStringLiteral("seed")))
+            binding.values.insert(QStringLiteral("seed"), fixed ? QJsonValue(fixedSeed.toLongLong() + n)
+                                                                : QJsonValue(qint64(QRandomGenerator::global()->generate())));
+        binding.suffix = total > 1 ? tr("(%1 of %2)").arg(n + 1).arg(total) : QString();
+        binding.hidden = n > 0;
+        const Result<Document> bound = canvas::bindAction(chosen->document, action, chosen->graph, binding);
+        if (!bound) {
+            if (!started.isEmpty())
+                break; // the same inputs bound once: only a changed seed could differ, so this does not happen; keep what started
+            return refuse(bound.error().message);
+        }
+        RunRequest run;
+        run.document = bound.value();
+        run.workflow = chosen->file;
+        const QString runId = m_service->start(run);
+        started << runId;
+        m_runs << runId;
+        if (binding.rect) {
+            // Where a step picture of this run goes: the Region's context box (the selection grown by padding, raised for the
+            // feather, kept in the canvas), and the selection inside it.
+            const Node &regionNode = bound.value().graph.nodes[chosen->graph.region];
+            const auto literal = [&](const char *name) { return regionNode.inputs.value(QLatin1String(name)).literal().toInt(); };
+            const int width = bounds && grown ? grown->width : shown->width, height = bounds && grown ? grown->height : shown->height;
+            const canvas::RouteRect &sel = *binding.rect;
+            const auto box = region::contextOf(sel.x, sel.y, sel.width, sel.height, literal("padding"), width, height, literal("feather"));
+            const int left = std::max(box.x, sel.x), top = std::max(box.y, sel.y);
+            const int right = std::min(box.x + box.width, sel.x + sel.width), bottom = std::min(box.y + box.height, sel.y + sel.height);
+            const auto map = [](int x, int y, int w, int h) { return QVariantMap{{"x", x}, {"y", y}, {"width", w}, {"height", h}}; };
+            if (right > left && bottom > top)
+                m_liveRects.insert(runId, LiveRect{map(box.x, box.y, box.width, box.height), map(left, top, right - left, bottom - top)});
+        }
     }
-    const Result<Document> bound = canvas::bindAction(chosen->document, action, chosen->graph, binding);
-    if (!bound)
-        return refuse(bound.error().message);
-
-    RunRequest run;
-    run.document = bound.value();
-    run.workflow = chosen->file;
-    const QString started = m_service->start(run);
-    m_runs << started;
-    if (binding.rect) {
-        // Where a step picture of this run goes: the Region's context box (the selection grown by padding, raised for the
-        // feather, kept in the canvas), and the selection inside it.
-        const Node &regionNode = bound.value().graph.nodes[chosen->graph.region];
-        const auto literal = [&](const char *name) { return regionNode.inputs.value(QLatin1String(name)).literal().toInt(); };
-        const int width = bounds && grown ? grown->width : shown->width, height = bounds && grown ? grown->height : shown->height;
-        const canvas::RouteRect &sel = *binding.rect;
-        const auto box = region::contextOf(sel.x, sel.y, sel.width, sel.height, literal("padding"), width, height, literal("feather"));
-        const int left = std::max(box.x, sel.x), top = std::max(box.y, sel.y);
-        const int right = std::min(box.x + box.width, sel.x + sel.width), bottom = std::min(box.y + box.height, sel.y + sel.height);
-        const auto map = [](int x, int y, int w, int h) { return QVariantMap{{"x", x}, {"y", y}, {"width", w}, {"height", h}}; };
-        if (right > left && bottom > top)
-            m_liveRects.insert(started, LiveRect{map(box.x, box.y, box.width, box.height), map(left, top, right - left, bottom - top)});
-    }
+    m_order = started;
     m_canvas = canvasId;
     m_action = id;
     m_progress = -1;
-    m_lastRun = started;
+    m_lastRun = started.last();
     if (!prompt.isEmpty() && action.input(QStringLiteral("prompt")))
         remember(id, prompt);
     emit stateChanged();
     emit progressChanged();
-    return {{"ok", true}, {"run", started}, {"action", id}};
+    return {{"ok", true}, {"run", started.first()}, {"runs", started}, {"action", id}};
 }
 
 Result<canvas::BatchAction> CanvasActions::batchAction(const QString &id) const {
@@ -547,6 +586,7 @@ void CanvasActions::endRun(const QString &run, const QString &status, const Erro
         const Error first = hard != errors.cend() ? *hard : makeError(QStringLiteral("node_failed"), tr("%1 did not finish.").arg(m_actionName));
         // A missing model offers the download; nothing else does.
         setError(plainWords(first, m_actionName), first.code, cannotRunNow(first.code) ? m_action : QString());
+        cancel(); // the rest of a Count N would fail the same way: one Generate ends as one
     }
     emit stateChanged();
     emit progressChanged();
@@ -574,6 +614,190 @@ void CanvasActions::placeAgain(const WriteResult &write) {
         }
         return;
     }
+}
+
+// --- the Advanced popover and Count (slice 4) ---
+
+QJsonObject CanvasActions::readSettings() const {
+    QFile file(m_settingsPath);
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+    return QJsonDocument::fromJson(file.readAll()).object().value("actions").toObject();
+}
+
+void CanvasActions::writeSettings(const QJsonObject &actions) {
+    if (actions.isEmpty()) {
+        QFile::remove(m_settingsPath);
+        return;
+    }
+    const QByteArray bytes = QJsonDocument(QJsonObject{{"format", 1}, {"actions", actions}}).toJson(QJsonDocument::Indented);
+    if (hasErrors(makeFolder(QFileInfo(m_settingsPath).absolutePath())))
+        return;
+    (void)replaceFile(m_settingsPath, bytes, QStringLiteral("the task bar's settings"));
+}
+
+QJsonObject CanvasActions::settingsOf(const QString &id) const { return readSettings().value(resolved(id)).toObject(); }
+
+void CanvasActions::storeSettings(const QString &id, const QJsonObject &entry) {
+    QJsonObject actions = readSettings();
+    if (entry.value("values").toObject().isEmpty() && !entry.contains("count"))
+        actions.remove(resolved(id));
+    else
+        actions.insert(resolved(id), entry);
+    writeSettings(actions);
+}
+
+QString CanvasActions::resolved(const QString &id) const {
+    return id.isEmpty() || id == QLatin1String("auto") ? QStringLiteral("generative-fill") : id;
+}
+
+bool CanvasActions::inPopover(const canvas::ActionInput &input) {
+    // What the bar has a field for stays on the bar; everything else is the popover's.
+    return input.role != QLatin1String("prompt") && input.role != QLatin1String("seed") && input.role != QLatin1String("layer");
+}
+
+Document CanvasActions::withRemembered(const Entry &entry, const QJsonObject &values) const {
+    Document document = entry.document;
+    if (!entry.action)
+        return document;
+    for (const canvas::ActionInput &input : entry.action->inputs) {
+        // What a run would use: the remembered value, else the block's default (else the file's own, which stays).
+        const QJsonValue value = values.contains(input.key()) ? values.value(input.key()) : input.defaultValue;
+        if (input.choiceValues || !inPopover(input) || value.isUndefined())
+            continue;
+        for (const PortRef &target : input.targets)
+            if (document.graph.nodes.contains(target.node))
+                document.graph.nodes[target.node].inputs.insert(target.port, InputValue::fromJson(value));
+    }
+    return document;
+}
+
+QVariantList CanvasActions::advanced(const QString &id) {
+    const Entry *e = entry(resolved(id));
+    QVariantList rows;
+    if (!e || !e->action || !e->broken.isEmpty()) {
+        m_formAction.clear();
+        return rows;
+    }
+    const QJsonObject values = settingsOf(id).value("values").toObject();
+    m_formAction = e->id;
+    m_loadingForm = true;
+    m_form->setDocument(withRemembered(*e, values));
+    m_loadingForm = false;
+    for (const canvas::ActionInput &input : e->action->inputs) {
+        if (!inPopover(input) || input.targets.isEmpty())
+            continue;
+        const PortRef &target = input.targets.first();
+        QVariantMap row{{"key", input.key()}, {"node", target.node}, {"input", target.port}, {"note", QString()}};
+        if (input.choiceValues) {
+            const QString word = values.value(input.key()).isString() && input.choices->contains(values.value(input.key()).toString())
+                                     ? values.value(input.key()).toString() : input.defaultValue.toString();
+            row.insert("kind", "choice");
+            row.insert("label", input.label.isEmpty() ? input.key() : input.label);
+            row.insert("choices", *input.choices);
+            row.insert("value", word);
+            row.insert("changed", word != input.defaultValue.toString());
+        } else {
+            const QVariantMap port = m_form->inputPort(target.node, target.port);
+            if (m_form->widgets()->spec(target.node, target.port).isEmpty())
+                continue; // nothing to edit it with
+            row.insert("kind", "widget");
+            row.insert("label", !input.label.isEmpty() ? input.label : port.value("label").toString());
+            row.insert("changed", values.contains(input.key()));
+        }
+        rows << row;
+    }
+    return rows;
+}
+
+void CanvasActions::syncForm() {
+    if (m_loadingForm || m_formAction.isEmpty())
+        return;
+    const Entry *e = entry(m_formAction);
+    if (!e || !e->action)
+        return;
+    const Document now = m_form->document();
+    QJsonObject values = readSettings().value(e->id).toObject().value("values").toObject();
+    for (const canvas::ActionInput &input : e->action->inputs) {
+        if (input.choiceValues || !inPopover(input) || input.targets.isEmpty())
+            continue;
+        const PortRef &target = input.targets.first();
+        const auto node = now.graph.nodes.constFind(target.node);
+        if (node == now.graph.nodes.constEnd())
+            continue;
+        const InputValue value = node->inputs.value(target.port);
+        const InputValue original = input.defaultValue.isUndefined() ? e->document.graph.nodes.value(target.node).inputs.value(target.port)
+                                                                     : InputValue::fromJson(input.defaultValue);
+        if (value.isEmpty() || value.kind() == InputValue::Kind::Link || value.toJson() == original.toJson())
+            values.remove(input.key()); // what the action has anyway: nothing to remember
+        else
+            values.insert(input.key(), value.toJson());
+    }
+    QJsonObject settings = settingsOf(e->id);
+    settings.insert("values", values);
+    if (values.isEmpty())
+        settings.remove("values");
+    storeSettings(e->id, settings);
+    rebuildList(); // the models it would run with may be others now
+    emit stateChanged();
+}
+
+QString CanvasActions::choiceOf(const QString &id, const QString &key) const {
+    const Entry *e = entry(resolved(id));
+    const canvas::ActionInput *input = e && e->action ? e->action->input(key) : nullptr;
+    if (!input || !input->choiceValues)
+        return {};
+    const QJsonValue word = settingsOf(id).value("values").toObject().value(key);
+    return word.isString() && input->choices->contains(word.toString()) ? word.toString() : input->defaultValue.toString();
+}
+
+bool CanvasActions::setChoice(const QString &id, const QString &key, const QString &word) {
+    const Entry *e = entry(resolved(id));
+    const canvas::ActionInput *input = e && e->action ? e->action->input(key) : nullptr;
+    if (!input || !input->choiceValues || !input->choices->contains(word))
+        return false;
+    QJsonObject settings = settingsOf(id);
+    QJsonObject values = settings.value("values").toObject();
+    if (input->defaultValue.toString() == word)
+        values.remove(key);
+    else
+        values.insert(key, word);
+    if (values.isEmpty())
+        settings.remove("values");
+    else
+        settings.insert("values", values);
+    storeSettings(id, settings);
+    emit stateChanged();
+    return true;
+}
+
+bool CanvasActions::hasAdvancedChanges(const QString &id) const { return !settingsOf(id).value("values").toObject().isEmpty(); }
+
+void CanvasActions::resetAdvanced(const QString &id) {
+    QJsonObject settings = settingsOf(id);
+    settings.remove("values");
+    storeSettings(id, settings);
+    if (m_formAction == resolved(id))
+        advanced(id);
+    emit stateChanged();
+}
+
+int CanvasActions::variations(const QString &id) const {
+    const Entry *e = entry(resolved(id));
+    if (!e || !e->action || !e->action->input(QStringLiteral("seed")))
+        return 1;
+    return std::clamp(settingsOf(id).value("count").toInt(1), 1, maxVariations);
+}
+
+void CanvasActions::setVariations(const QString &id, int count) {
+    QJsonObject settings = settingsOf(id);
+    count = std::clamp(count, 1, maxVariations);
+    if (count == 1)
+        settings.remove("count");
+    else
+        settings.insert("count", count);
+    storeSettings(id, settings);
+    emit stateChanged();
 }
 
 QJsonObject CanvasActions::readHistory() const {
@@ -646,7 +870,7 @@ void CanvasActions::download(const QString &action) {
     const Entry *chosen = entry(action);
     if (!chosen || !m_workflows)
         return;
-    m_workflows->downloadModels(chosen->document.models(), QStringLiteral("action:") + action);
+    m_workflows->downloadModels(withRemembered(*chosen, settingsOf(action).value("values").toObject()).models(), QStringLiteral("action:") + action);
     emit downloadsChanged();
 }
 

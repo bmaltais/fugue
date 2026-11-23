@@ -287,6 +287,9 @@ public:
     bool canAddGroup(const QString &group) const { return canHoldGroup(m_document, group); }
     // Whether the node of the level is a group instance.
     Q_INVOKABLE bool isGroup(const QString &node) const;
+    // One input of a node of the level as the face's rows have it (the same map, for an InputWidget drawn outside a node:
+    // the task bar's Advanced popover, #231); empty when the node or the input is not there.
+    Q_INVOKABLE QVariantMap inputPort(const QString &node, const QString &input) const;
     // How many nodes in the whole workflow (inside groups too) are instances of the group `node`
     // is one of; 0 when it is not a group.
     int groupInstances(const QString &node) const;

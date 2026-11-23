@@ -13,6 +13,8 @@
 
 #include "canvas_actions_rig.h"
 #include "canvas/mask_layer.h"
+#include "canvas/canvas_model.h"
+#include "canvas/widget_edit.h"
 #include "engine/canvas_store.h"
 
 using namespace actions_test;
@@ -262,6 +264,139 @@ private slots:
         QCOMPARE(region.value("padding").toInt(), 256);
         r.actions->cancel();
         QTRY_VERIFY(!r.actions->busy());
+    }
+
+    // The Advanced popover (slice 4): the rows are the block's inputs the bar has no field for; a value set through the form's
+    // widgets, or a choice's word, is remembered per action and root and is what the next Generate's run gets.
+    void theAdvancedPopoverListsTheBoundInputsAndRemembersTheirValues() {
+        Rig r;
+        QVariantList rows = r.actions->advanced("test-advanced");
+        QStringList keys;
+        for (const QVariant &row : rows)
+            keys << row.toMap().value("key").toString();
+        QCOMPARE(keys, (QStringList{"strength", "style", "steps"})); // not the prompt or the seed
+        QCOMPARE(rows.at(0).toMap().value("kind").toString(), QStringLiteral("widget"));
+        QCOMPARE(rows.at(0).toMap().value("node").toString(), QStringLiteral("gen"));
+        QCOMPARE(rows.at(1).toMap().value("kind").toString(), QStringLiteral("choice"));
+        QCOMPARE(rows.at(1).toMap().value("value").toString(), QStringLiteral("Default"));
+        QCOMPARE(rows.at(1).toMap().value("choices").toStringList(), (QStringList{"Light", "Default", "Restyle"}));
+        QVERIFY(!r.actions->hasAdvancedChanges("test-advanced"));
+        // The form is the action's workflow as a run would have it: the block's default for the strength (the file says 1).
+        QCOMPARE(r.actions->form()->inputPort("gen", "strength").value("literal").toDouble(), 0.9);
+        // An edit through the Graph's widget editor is remembered.
+        QVERIFY(r.actions->form()->widgets()->setValue("gen", "strength", 0.4).isEmpty());
+        QVERIFY(r.actions->form()->widgets()->setValue("gen", "steps", 12).isEmpty());
+        QVERIFY(r.actions->hasAdvancedChanges("test-advanced"));
+        QVERIFY(r.actions->setChoice("test-advanced", "style", "Restyle"));
+        QCOMPARE(r.actions->choiceOf("test-advanced", "style"), QStringLiteral("Restyle"));
+        QVERIFY(!r.actions->setChoice("test-advanced", "style", "Wild"));    // not one of its words
+        QVERIFY(!r.actions->setChoice("test-advanced", "steps", "Light"));   // not a choice input
+        QFile file(r.app.dir.path() + "/state/canvas-actions.json");
+        QVERIFY(file.open(QIODevice::ReadOnly));
+        const QJsonObject values = QJsonDocument::fromJson(file.readAll()).object().value("actions").toObject()
+                                       .value("test-advanced").toObject().value("values").toObject();
+        QCOMPARE(values.value("strength").toDouble(), 0.4);
+        QCOMPARE(values.value("steps").toInt(), 12);
+        QCOMPARE(values.value("style").toString(), QStringLiteral("Restyle"));
+        // Another run of the program (a new object over the same file) opens with them.
+        CanvasActions again(r.service.get(), &r.app.registry, &r.app.workflows);
+        again.setRoots({CanvasActions::bundledRoot(), r.actionsDir});
+        again.setSettingsPath(r.app.dir.path() + "/state/canvas-actions.json");
+        rows = again.advanced("test-advanced");
+        QCOMPARE(again.form()->inputPort("gen", "strength").value("literal").toDouble(), 0.4);
+        QCOMPARE(rows.at(1).toMap().value("value").toString(), QStringLiteral("Restyle"));
+        QCOMPARE(again.choiceOf("test-fill", "style"), QString()); // per action
+        QVERIFY(!again.hasAdvancedChanges("test-fill"));
+        // Generate uses them: the number the word stands for, the strength and the steps.
+        QVERIFY(press(r, {{"action", "test-advanced"}}).value("ok").toBool());
+        QTRY_COMPARE(r.jobs().size(), 1);
+        QJsonObject params;
+        r.onFake([&](FakeProvider &f) { params = f.submitted(f.jobs().at(0)).params; });
+        QCOMPARE(params.value("strength").toDouble(), 0.4);
+        QCOMPARE(params.value("steps").toInt(), 12);
+        QCOMPARE(params.value("guidance").toDouble(), 9.0);
+        r.actions->cancel();
+        QTRY_VERIFY(!r.actions->busy());
+        // Putting the value back to the action's own forgets it; Reset forgets the rest.
+        r.actions->advanced("test-advanced");
+        QVERIFY(r.actions->form()->widgets()->setValue("gen", "strength", 0.9).isEmpty());
+        QVERIFY(r.actions->form()->widgets()->setValue("gen", "steps", 12).isEmpty());
+        QVERIFY(r.actions->hasAdvancedChanges("test-advanced")); // steps and style are left
+        r.actions->resetAdvanced("test-advanced");
+        QVERIFY(!r.actions->hasAdvancedChanges("test-advanced"));
+        QCOMPARE(r.actions->choiceOf("test-advanced", "style"), QStringLiteral("Default"));
+        QCOMPARE(r.actions->form()->inputPort("gen", "strength").value("literal").toDouble(), 0.9);
+        // A broken action, or an unknown one, has no rows.
+        QVERIFY(r.actions->advanced("broken").isEmpty());
+        QVERIFY(r.actions->advanced("nowhere").isEmpty());
+    }
+
+    // Count N (slice 4, design 5): one Generate is N runs of the same head and selection with their own seeds; the first
+    // layer is shown, the rest land hidden, each named with its place.
+    void countMakesNRunsOfOneGenerateAndTheRestLandHidden() {
+        Rig r;
+        QCOMPARE(r.actions->variations("test-fill"), 1);
+        r.actions->setVariations("test-fill", 3);
+        QCOMPARE(r.actions->variations("test-fill"), 3);
+        r.actions->setVariations("test-fill", 9);
+        QCOMPARE(r.actions->variations("test-fill"), CanvasActions::maxVariations);
+        r.actions->setVariations("test-fill", 3);
+        const QVariantMap started = press(r, {{"seed", 10}});
+        QVERIFY2(started.value("ok").toBool(), qPrintable(r.actions->error()));
+        QCOMPARE(started.value("runs").toStringList().size(), 3);
+        QCOMPARE(r.actions->runTotal(), 3);
+        QCOMPARE(r.actions->runNumber(), 1);
+        for (int n = 0; n < 3; ++n) {
+            QTRY_COMPARE(r.jobs().size(), n + 1);
+            QTRY_COMPARE(r.actions->runNumber(), n + 1);
+            QJsonObject params;
+            r.onFake([&](FakeProvider &f) { params = f.submitted(f.jobs().at(n)).params; });
+            QCOMPARE(params.value("seed").toInt(), 10 + n); // one fixed seed counts up
+            r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(n), {{"image.png", png(64, 64, n == 0 ? Qt::red : Qt::green)}}); });
+        }
+        QTRY_VERIFY(!r.actions->busy());
+        QCOMPARE(r.actions->error(), QString());
+        const auto tree = store().tree(store().revision(m_canvas, head())->tree);
+        QVERIFY(tree);
+        QCOMPARE(tree->layers.size(), size_t(4)); // the base and three
+        QStringList names;
+        QList<bool> shown;
+        for (size_t i = 1; i < tree->layers.size(); ++i) {
+            names << tree->layers[i].name;
+            shown << tree->layers[i].visible;
+        }
+        QCOMPARE(names, (QStringList{"a red umbrella (1 of 3)", "a red umbrella (2 of 3)", "a red umbrella (3 of 3)"}));
+        QCOMPARE(shown, (QList<bool>{true, false, false}));
+        QCOMPARE(r.actions->history("test-fill"), QStringList{"a red umbrella"}); // one Generate, one history entry
+        // Random seeds differ; a request's count wins over the remembered one; an action with no seed makes one run.
+        QVERIFY(press(r, {{"count", 2}}).value("ok").toBool());
+        QCOMPARE(r.actions->runTotal(), 2);
+        r.actions->cancel();
+        QTRY_VERIFY(!r.actions->busy());
+        QVERIFY(r.actions->runTotal() == 0);
+    }
+
+    void cancelEndsEveryRunOfACountAndAFailureEndsTheRest() {
+        Rig r;
+        QSignalSpy finished(r.actions.get(), &CanvasActions::finished);
+        QVERIFY(press(r, {{"count", 3}}).value("ok").toBool());
+        QTRY_COMPARE(r.jobs().size(), 1);
+        r.actions->cancel();
+        QTRY_COMPARE(finished.size(), 3);
+        for (const QList<QVariant> &signal : finished)
+            QCOMPARE(signal.at(1).toString(), QStringLiteral("cancelled"));
+        QVERIFY(!r.actions->busy());
+        QCOMPARE(r.actions->error(), QString());
+        QCOMPARE(head(), m_head);
+        // A run that fails ends the others; the one error stays.
+        finished.clear();
+        QVERIFY(press(r, {{"count", 2}}).value("ok").toBool());
+        QTRY_COMPARE(r.jobs().size(), 2);
+        r.onFake([&](FakeProvider &f) { f.fail(f.jobs().at(1), makeError("out_of_memory", "CUDA out of memory.")); });
+        QTRY_COMPARE(finished.size(), 2);
+        QVERIFY(!r.actions->busy());
+        QCOMPARE(r.actions->error(), QStringLiteral("Not enough GPU memory. Try a smaller selection."));
+        QCOMPARE(head(), m_head);
     }
 
     void cancelEndsTheRunAndWritesNothing() {

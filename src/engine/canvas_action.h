@@ -8,7 +8,7 @@
 //   "action": {"format": 1, "name": "Generative fill", "description": "...", "glyph": "sparkles",
 //              "selection": "required" | "optional" | "bounds", "region": "<Canvas Region id>",
 //              "inputs": [{"role": "prompt", "targets": ["encode.prompt"], "label", "section", "default", "min", "max",
-//                          "choices", "optional", "fallback"}, {"name": "steps", "targets": ["sample.steps"]}, ...]}
+//                          "choices", "choice_values", "optional", "fallback"}, {"name": "steps", "targets": ["sample.steps"]}, ...]}
 // It is a top-level key the document keeps as `extra` on a round trip (spec 4.1) and it is outside sourceHash(), so it
 // changes no cache key. A role is one of prompt, negative_prompt, strength, seed, model, layer; an input with no role
 // is a plain one with a `name`. `fallback` (research G8) is the prompt a run uses when the person leaves it empty.
@@ -58,6 +58,9 @@ struct ActionInput {
     std::optional<double> min;
     std::optional<double> max;
     std::optional<QStringList> choices;
+    // `choice_values` (slice 4): the number each choice stands for, in the choices' order. The bar offers the words (Refine:
+    // Light, Default, Restyle) and a binding puts the number in the targets, which must take a number; `default` is then a word.
+    std::optional<QList<double>> choiceValues;
     bool optional = false; // the prompt may be empty
     QString fallback;      // the prompt used when it is left empty (G8)
 
@@ -106,6 +109,10 @@ struct ActionBinding {
     std::optional<double> scale;
     QMap<QString, QJsonValue> values; // by ActionInput::key(): the bar's values (prompt, seed, ...)
     QString layer; // the layer Canvas Region reads by name (#226), or empty: the canvas as it looks (the workflow's own Layer stays)
+    // A variation of a Generate with Count N (slice 4): each Canvas Write puts `suffix` after its layer's name ("(2 of 3)") and
+    // lands hidden when `hidden` (variations 2 to N).
+    QString suffix = {};
+    bool hidden = false;
 };
 
 // The run's copy of the workflow: `document` with the binding put in. An input with no value keeps its block default,
