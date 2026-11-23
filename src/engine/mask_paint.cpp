@@ -459,7 +459,9 @@ Result<QByteArray> MaskPaint::toPng(int compression) const {
     }
 }
 
-Result<QByteArray> MaskPaint::toPicture(const QString &suffix) const {
+Result<QByteArray> MaskPaint::toPicture(const QString &suffix) const { return toPicture(suffix, PictureEncoding{}); }
+
+Result<QByteArray> MaskPaint::toPicture(const QString &suffix, const PictureEncoding &encoding) const {
     const QString kind = suffix.toLower();
     if (kind == QLatin1String("png"))
         return toPng();
@@ -477,9 +479,11 @@ Result<QByteArray> MaskPaint::toPicture(const QString &suffix) const {
         if (kind == QLatin1String("jpg")) {
             if (m_channels == 4)
                 image = image.flatten(vips::VImage::option()->set("background", std::vector<double>{255, 255, 255}));
-            image.write_to_buffer(".jpg", &buffer, &size, vips::VImage::option()->set("Q", 92)->set("keep", VIPS_FOREIGN_KEEP_NONE));
+            image.write_to_buffer(".jpg", &buffer, &size, vips::VImage::option()->set("Q", std::clamp(encoding.quality, 1, 100))->set("keep", VIPS_FOREIGN_KEEP_NONE));
         } else {
-            image.write_to_buffer(".webp", &buffer, &size, vips::VImage::option()->set("lossless", true)->set("keep", VIPS_FOREIGN_KEEP_NONE));
+            image.write_to_buffer(".webp", &buffer, &size,
+                                  vips::VImage::option()->set("lossless", encoding.lossless)->set("Q", std::clamp(encoding.quality, 1, 100))
+                                      ->set("keep", VIPS_FOREIGN_KEEP_NONE));
         }
         QByteArray bytes(static_cast<const char *>(buffer), qsizetype(size));
         g_free(buffer);
@@ -487,6 +491,44 @@ Result<QByteArray> MaskPaint::toPicture(const QString &suffix) const {
     } catch (const vips::VError &error) {
         return vipsError(error);
     }
+}
+
+Result<MaskPaint> MaskPaint::resampled(int width, int height) const {
+    if (m_channels != 4 || width < 1 || height < 1)
+        return makeError(QStringLiteral("usage"), QStringLiteral("Only a color buffer is resampled, to at least 1 x 1."));
+    if (width == m_width && height == m_height)
+        return *this;
+    if (!initVips())
+        return vipsUnavailable();
+    try {
+        vips::VImage image = vips::VImage::new_from_memory(const_cast<uint8_t *>(m_pixels.data()), m_pixels.size(), m_width, m_height, m_channels, VIPS_FORMAT_UCHAR)
+                                 .copy(vips::VImage::option()->set("interpretation", VIPS_INTERPRETATION_sRGB));
+        vips::VImage out = image.thumbnail_image(width, vips::VImage::option()->set("height", height)->set("size", VIPS_SIZE_FORCE)->set("no_rotate", true));
+        if (out.bands() != 4 || out.format() != VIPS_FORMAT_UCHAR)
+            return makeError(QStringLiteral("internal"), QStringLiteral("The resampled picture is not 8-bit RGBA."));
+        size_t size = 0;
+        void *memory = out.write_to_memory(&size);
+        std::vector<uint8_t> pixels(static_cast<const uint8_t *>(memory), static_cast<const uint8_t *>(memory) + size);
+        g_free(memory);
+        return MaskPaint(out.width(), out.height(), pixels, 4);
+    } catch (const vips::VError &error) {
+        return vipsError(error);
+    }
+}
+
+MaskPaint MaskPaint::onBackground(uint8_t red, uint8_t green, uint8_t blue) const {
+    MaskPaint out(m_width, m_height, m_channels);
+    out.m_pixels = m_pixels;
+    if (m_channels != 4)
+        return out;
+    const uint8_t base[3] = {red, green, blue};
+    for (size_t i = 0; i + 3 < out.m_pixels.size(); i += 4) {
+        const unsigned a = out.m_pixels[i + 3];
+        for (size_t k = 0; k < 3; ++k)
+            out.m_pixels[i + k] = uint8_t((out.m_pixels[i + k] * a + base[k] * (255 - a) + 127) / 255);
+        out.m_pixels[i + 3] = 255;
+    }
+    return out;
 }
 
 Result<MaskPaint> MaskPaint::fromPng(const QByteArray &bytes) {

@@ -207,6 +207,80 @@ private slots:
         QCOMPARE(fugue({"canvas", "export", id, path("work/noext"), "--json"}).errorCode(), QString("usage"));
     }
 
+    void exportTakesAFormatAQualityASizeAndABackground() {
+        const Outcome imported = fugue({"canvas", "import", oraFile("in.ora"), "--json"}); // 300 x 200, a Paint layer and a Mask layer
+        QVERIFY2(imported.exitCode == 0, imported.out + imported.err);
+        const QString id = imported.data().value("canvas").toString();
+        const auto bytesOf = [&](const QStringList &args) {
+            const Outcome out = fugue(QStringList{"canvas", "export", id} + args + QStringList{"--estimate", "--json"});
+            return out.exitCode == 0 ? out.data() : QJsonObject{{"error", QString(out.out + out.err)}};
+        };
+        // --estimate writes nothing and says the size the file would be; the file is the same size.
+        const QJsonObject estimate = bytesOf({"--format", "webp", "--quality", "20", "--scale", "50%"});
+        QCOMPARE(estimate.value("width").toInt(), 150);
+        QCOMPARE(estimate.value("height").toInt(), 100);
+        const Outcome written = fugue({"canvas", "export", id, path("work/half.webp"), "--quality", "20", "--scale", "0.5", "--json"});
+        QVERIFY2(written.exitCode == 0, written.out + written.err);
+        QCOMPARE(readFile(path("work/half.webp")).size(), estimate.value("bytes").toInt());
+        QCOMPARE(written.data().value("width").toInt(), 150);
+        // A quality moves the size of a jpg.
+        QVERIFY(bytesOf({"--format", "jpg", "--quality", "10"}).value("bytes").toInt() < bytesOf({"--format", "jpg", "--quality", "100"}).value("bytes").toInt());
+        // The ways to say a size.
+        QCOMPARE(bytesOf({"--format", "png", "--width", "30"}).value("height").toInt(), 20);
+        QCOMPARE(bytesOf({"--format", "png", "--height", "20"}).value("width").toInt(), 30);
+        QCOMPARE(bytesOf({"--format", "png", "--size", "30x7"}).value("height").toInt(), 7);
+        // A background under the transparency; jpg cannot be transparent.
+        const Outcome blue = fugue({"canvas", "export", id, path("work/blue.png"), "--background", "#0000ff", "--json"});
+        QVERIFY2(blue.exitCode == 0, blue.out + blue.err);
+        QCOMPARE(blue.data().value("background").toString(), QString("#0000ff"));
+        const auto picture = fugue::mask::MaskPaint::fromPicture(readFile(path("work/blue.png")));
+        QVERIFY(picture);
+        QCOMPARE(picture->rgbaAt(250, 150), (fugue::mask::Rgba{0, 0, 255, 255}));
+        QCOMPARE(fugue({"canvas", "export", id, path("work/t.jpg"), "--background", "transparent", "--json"}).errorCode(), QString("input_invalid"));
+        // Wrong or conflicting options are usage errors that write nothing.
+        for (const QStringList &bad : {QStringList{path("work/a.png"), "--quality", "50"}, QStringList{path("work/a.jpg"), "--quality", "0"},
+                                       QStringList{path("work/a.png"), "--format", "jpg"}, QStringList{path("work/a.png"), "--scale", "0"},
+                                       QStringList{path("work/a.png"), "--scale", "50%", "--width", "10"}, QStringList{path("work/a.png"), "--size", "10"},
+                                       QStringList{path("work/a.png"), "--lossless"}, QStringList{path("work/a.png"), "--prefix", "x"},
+                                       QStringList{path("work/a.png"), "--width", "99999"}, QStringList{"--estimate"}}) {
+            const Outcome out = fugue(QStringList{"canvas", "export", id} + bad + QStringList{"--json"});
+            QVERIFY2(out.exitCode != 0, qPrintable(bad.join(' ')));
+            QVERIFY2(out.errorCode() == "usage" || out.errorCode() == "input_invalid", qPrintable(bad.join(' ') + " " + out.out));
+            QVERIFY(!QFileInfo::exists(path("work/a.png")) && !QFileInfo::exists(path("work/a.jpg")));
+        }
+        // A layered export at a size keeps the layers.
+        QCOMPARE(fugue({"canvas", "export", id, path("work/small.ora"), "--scale", "50%"}).exitCode, 0);
+        const auto small = fugue::mask::paintFromOra(readFile(path("work/small.ora")));
+        QVERIFY(small);
+        QCOMPARE(small->width(), 150);
+        QCOMPARE(small->layerCount(), 2);
+    }
+
+    void exportLayersWritesOneFilePerLayerIntoAFolder() {
+        const Outcome imported = fugue({"canvas", "import", oraFile("in.ora"), "--json"});
+        const QString id = imported.data().value("canvas").toString();
+        const Outcome out = fugue({"canvas", "export", id, path("work/layers"), "--layers", "--json"});
+        QVERIFY2(out.exitCode == 0, out.out + out.err);
+        // The Mask layer is a selection, not a picture: it is left out and said so.
+        QCOMPARE(out.data().value("files").toArray().size(), 1);
+        QCOMPARE(out.data().value("skipped").toArray().at(0).toString(), QString("Mask"));
+        QVERIFY(QFileInfo::exists(path("work/layers/01-Paint.png")));
+        const auto layer = fugue::mask::MaskPaint::fromPicture(readFile(path("work/layers/01-Paint.png")));
+        QVERIFY(layer);
+        QCOMPARE(layer->rgbaAt(50, 50), (fugue::mask::Rgba{200, 30, 30, 255}));
+        // Never over a file: the second run is refused and writes nothing new.
+        const Outcome again = fugue({"canvas", "export", id, path("work/layers"), "--layers", "--json"});
+        QVERIFY(again.exitCode != 0);
+        QCOMPARE(again.errorCode(), QString("permission_denied"));
+        // Another prefix and format is another set of files.
+        QCOMPARE(fugue({"canvas", "export", id, path("work/layers"), "--layers", "--prefix", "shot", "--format", "webp"}).exitCode, 0);
+        QVERIFY(QFileInfo::exists(path("work/layers/shot-01-Paint.webp")));
+        // Options of the other form are said, not ignored.
+        QCOMPARE(fugue({"canvas", "export", id, path("work/l2"), "--layers", "--scale", "50%", "--json"}).errorCode(), QString("usage"));
+        QCOMPARE(fugue({"canvas", "export", id, path("work/l2"), "--layers", "--format", "jpg", "--json"}).errorCode(), QString("usage"));
+        QVERIFY(!QFileInfo::exists(path("work/l2")));
+    }
+
     void importTakesAPlainPictureAsAOneLayerCanvas() {
         fugue::mask::MaskPaint picture(64, 48, 4);
         picture.fill(fugue::mask::Rgba{5, 6, 7, 255});
