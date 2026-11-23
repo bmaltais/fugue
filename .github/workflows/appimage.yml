@@ -177,10 +177,10 @@ jobs:
             export DEBIAN_FRONTEND=noninteractive
             apt-get update
             apt-get install -y --no-install-recommends libgl1 libegl1 libvulkan1 mesa-vulkan-drivers libgl1-mesa-dri \
-              libfontconfig1 fonts-dejavu-core libxkbcommon0 libdbus-1-3 libglib2.0-0
+              libfontconfig1 fonts-dejavu-core libwayland-client0 libxkbcommon0 libdbus-1-3 libglib2.0-0
           else
             dnf install -y mesa-libGL mesa-libEGL vulkan-loader mesa-dri-drivers fontconfig dejavu-sans-fonts \
-              libxkbcommon dbus-libs glib2
+              libwayland-client libxkbcommon dbus-libs glib2
           fi
 
       - name: Check the checksum and the file name, and start it

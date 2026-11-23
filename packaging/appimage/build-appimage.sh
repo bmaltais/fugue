@@ -109,10 +109,13 @@ CONF
 
 # --- bundle ------------------------------------------------------------------------------------------------------
 # QML_SOURCES_PATHS: the QML is compiled into the binary, so linuxdeploy-plugin-qt finds its imports in the sources.
-# The Wayland client plugins are named because the plugin only deploys xcb by default.
+# The Wayland client plugin (one libqwayland.so since Qt 6.5, in Qt's base package) is named because the plugin only
+# deploys xcb by default. What the Qt install really has is listed first, so a wrong name is easy to read in a log.
+say "Qt platform plugins: $(find "$qt/plugins/platforms" -name '*.so' -printf '%f ')"
+say "Qt wayland plugin folders: $(find "$qt/plugins" -maxdepth 1 -name 'wayland-*' -printf '%f ')"
 export QMAKE=$qt/bin/qmake
 export QML_SOURCES_PATHS=$root/src
-export EXTRA_PLATFORM_PLUGINS="libqwayland-generic.so;libqwayland-egl.so"
+export EXTRA_PLATFORM_PLUGINS="libqwayland.so"
 export EXTRA_QT_PLUGINS="iconengines;wayland-decoration-client;wayland-graphic-integration-client;wayland-shell-integration;imageformats;multimedia;tls;platforminputcontexts;xcbglintegrations;egldeviceintegrations"
 export NO_STRIP=1 # linuxdeploy's own strip is older than the toolchain's relocation format
 export LD_LIBRARY_PATH=$qt/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
@@ -135,7 +138,7 @@ find "$appdir/usr/lib" -maxdepth 2 \( -name 'libvulkan*' -o -name 'libGL.so*' -o
 missing=0
 need() { if [[ -z $(find "$appdir/usr" -path "$1" -print -quit) ]]; then echo "build-appimage: missing from the AppDir: $1" >&2; missing=1; fi; }
 need '*/plugins/platforms/libqxcb.so'
-need '*/plugins/platforms/libqwayland-generic.so'
+need '*/plugins/platforms/libqwayland.so'
 need '*/plugins/platforms/libqoffscreen.so' # the smoke tests and headless use
 need '*/plugins/imageformats/libqwebp.so'
 need '*/plugins/multimedia/libffmpegmediaplugin.so'
