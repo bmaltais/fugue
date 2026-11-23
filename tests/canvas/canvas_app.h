@@ -92,6 +92,17 @@ inline QString prepareLook(const QTemporaryDir &dir, const Look &look) {
 }
 
 struct App {
+    // Declared first, so destroyed last: once the engine and everything it made are gone, the events they left behind (deferred deletes,
+    // timers) are run before the next test builds its own engine. Back to back, the QML of a new window was seen to be made while the
+    // last one's leftovers ran, and a Question or the theme read from it came back empty, under load (docs: tests/canvas/canvas_app.h).
+    struct SettleAfterTeardown {
+        ~SettleAfterTeardown() {
+            for (int i = 0; i < 4; ++i) {
+                QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+                QTest::qWait(10);
+            }
+        }
+    } settleAfterTeardown; // first member: destroyed last
     QTemporaryDir dir;
     QString hyprctl;
     Translator translator{dir.path() + "/language"};
