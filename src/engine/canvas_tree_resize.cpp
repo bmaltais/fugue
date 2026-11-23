@@ -2,6 +2,7 @@
 
 #include <algorithm>
 
+#include "engine/canvas_transform.h"
 #include "engine/new_canvas.h"
 
 namespace fugue::canvas {
@@ -51,6 +52,48 @@ Result<LayerRecord> movedLayer(const Move &move, const LayerRecord &layer) {
         if (!tiles)
             return Result<LayerRecord>(tiles.errors());
         out.tiles = std::move(tiles.value());
+    }
+    if (layer.source) {
+        // A placed or transformed layer's original moves with it (#236): the placement shifts by the same corner and the layer is drawn
+        // again from the original on the new canvas, so a picture that stuck out of the old canvas shows its off-canvas part when the canvas
+        // grows (and a canvas cut and grown back is whole again). A layer painted on since (its original is not current) has no use for it.
+        if (hasCurrentOriginal(layer)) {
+            LayerSource source = *layer.source;
+            source.transform.cx += move.dx;
+            source.transform.cy += move.dy;
+            const auto assemble = [&](int channels, const TileMap &tiles) {
+                return assembleLayer(source.width, source.height, channels, tiles, [&](const TileKey &key, const QString &hash) {
+                    const mask::IRect rect = tileRect(key, source.width, source.height);
+                    return move.read(hash, rect.width, rect.height, channels);
+                });
+            };
+            const Result<mask::MaskPaint> picture = assemble(4, source.tiles);
+            if (!picture)
+                return Result<LayerRecord>(picture.errors());
+            const Result<mask::MaskPaint> shown = renderPlaced(picture.value(), source.transform, move.width, move.height);
+            if (!shown)
+                return Result<LayerRecord>(shown.errors());
+            Result<TileMap> tiles = cutLayer(shown.value(), move.consume);
+            if (!tiles)
+                return Result<LayerRecord>(tiles.errors());
+            out.tiles = std::move(tiles.value());
+            if (source.hasMask) {
+                const Result<mask::MaskPaint> maskPicture = assemble(1, source.maskTiles);
+                if (!maskPicture)
+                    return Result<LayerRecord>(maskPicture.errors());
+                const Result<mask::MaskPaint> maskShown = renderPlacedMask(maskPicture.value(), source.transform, move.width, move.height);
+                if (!maskShown)
+                    return Result<LayerRecord>(maskShown.errors());
+                Result<TileMap> maskTiles = cutLayer(maskShown.value(), move.consume);
+                if (!maskTiles)
+                    return Result<LayerRecord>(maskTiles.errors());
+                out.maskTiles = std::move(maskTiles.value());
+            }
+            source.rendered = renderedKey(out.tiles, out.hasMask, out.maskTiles);
+            out.source = std::move(source);
+        } else {
+            out.source.reset();
+        }
     }
     return out;
 }

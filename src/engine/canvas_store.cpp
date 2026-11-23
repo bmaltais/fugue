@@ -21,6 +21,7 @@
 #include "engine/canvas_tree_resize.h"
 #include "engine/canvas_layer_ops.h"
 #include "engine/canvas_resize.h"
+#include "engine/canvas_transform.h"
 #include "engine/hash.h"
 #include "engine/new_canvas.h"
 #include "engine/paint_file.h"
@@ -101,6 +102,8 @@ bool treeHasGroup(const Tree &tree) {
 
 int LayerRecord::tileCount() const {
     int count = int(tiles.size());
+    if (source)
+        count += source->tileCount();
     for (const LayerRecord &child : children)
         count += child.tileCount();
     return count;
@@ -130,6 +133,8 @@ QJsonObject layerToJson(const LayerRecord &layer) {
     }
     if (!layer.compositeOp.isEmpty())
         item.insert("blend", layer.compositeOp);
+    if (layer.source)
+        item.insert("source", sourceToJson(*layer.source));
     if (layer.hasMask) {
         QJsonObject maskTiles;
         for (const auto &[key, hash] : layer.maskTiles)
@@ -192,6 +197,14 @@ Result<LayerRecord> layerFromJson(const QJsonObject &item, int width, int height
         layer.hasMask = true;
         layer.maskEnabled = mask.value("enabled").toBool();
     }
+    if (item.contains("source")) {
+        if (layer.group || layer.kind != LayerKind::Paint)
+            return corrupt(QStringLiteral("a group, mask or picture layer has an original"));
+        Result<LayerSource> source = sourceFromJson(item.value("source").toObject());
+        if (!source)
+            return Result<LayerRecord>(source.errors());
+        layer.source = std::move(source.value());
+    }
     if (item.contains("origin")) {
         const QJsonObject origin = item.value("origin").toObject();
         layer.producer = origin.value("producer").toString();
@@ -207,7 +220,9 @@ bool withinCaps(const QJsonArray &layers, int depth, int *layerTotal, int *tileT
     for (const QJsonValue &value : layers) {
         const QJsonObject item = value.toObject();
         *layerTotal += 1;
-        *tileTotal += item.value("tiles").toObject().size() + item.value("mask").toObject().value("tiles").toObject().size();
+        *tileTotal += item.value("tiles").toObject().size() + item.value("mask").toObject().value("tiles").toObject().size() +
+                      item.value("source").toObject().value("tiles").toObject().size() +
+                      item.value("source").toObject().value("mask").toObject().value("tiles").toObject().size();
         if (*layerTotal > maxTreeLayers || *tileTotal > maxTreeTiles)
             return false;
         if (!withinCaps(item.value("children").toArray(), depth + 1, layerTotal, tileTotal))
@@ -727,9 +742,9 @@ Result<CanvasInfo> CanvasStore::importCanvas(const QString &wantedId, const QStr
         const Tree &tree = *item.tree;
         if (!stored.contains(item.tree.get())) {
             stored.insert(item.tree.get());
-            const auto storeTiles = [&](const TileMap &tiles, int channels) {
+            const auto storeTiles = [&](const TileMap &tiles, int channels, int width = -1, int height = -1) {
                 for (const auto &[key, hash] : tiles) {
-                    const mask::IRect rect = tileRect(key, tree.width, tree.height);
+                    const mask::IRect rect = tileRect(key, width < 0 ? tree.width : width, height < 0 ? tree.height : height);
                     const QString place = QStringLiteral("%1|%2|%3|%4").arg(hash).arg(rect.width).arg(rect.height).arg(channels);
                     if (verified.contains(place))
                         continue;
@@ -756,6 +771,12 @@ Result<CanvasInfo> CanvasStore::importCanvas(const QString &wantedId, const QStr
                 for (const Errors &problems : {storeTiles(layer.tiles, layer.channels()), storeTiles(layer.maskTiles, 1)})
                     if (hasErrors(problems))
                         return problems;
+                if (layer.source) { // the original of a placed or transformed layer (#236): its tiles are the source's size
+                    for (const Errors &problems : {storeTiles(layer.source->tiles, 4, layer.source->width, layer.source->height),
+                                                   storeTiles(layer.source->maskTiles, 1, layer.source->width, layer.source->height)})
+                        if (hasErrors(problems))
+                            return problems;
+                }
                 for (const LayerRecord &child : layer.children)
                     if (const Errors problems = storeLayer(child); hasErrors(problems))
                         return problems;
@@ -992,6 +1013,12 @@ void collectTiles(const LayerRecord &layer, std::set<QString> *all) {
         all->insert(entry.second);
     for (const auto &entry : layer.maskTiles)
         all->insert(entry.second);
+    if (layer.source) {
+        for (const auto &entry : layer.source->tiles)
+            all->insert(entry.second);
+        for (const auto &entry : layer.source->maskTiles)
+            all->insert(entry.second);
+    }
     for (const LayerRecord &child : layer.children)
         collectTiles(child, all);
 }
@@ -1051,6 +1078,60 @@ Result<Commit> CanvasStore::commitTree(const QString &canvasId, const QString &b
     if (!moved->moved) // lost a race with a run: not a candidate to review and not a redo target, an edit that did not happen
         (void)replaceFile(resolvedPath(canvasId, added->id), QByteArrayLiteral("lost\n"), QStringLiteral("a canvas resolution"));
     return Commit{added.value(), moved.value()};
+}
+
+Result<Commit> CanvasStore::transformLayer(const QString &canvasId, const QString &base, int position, const LayerTransform &transform, const QString &producer,
+                                           const SeenPlacement *seen) {
+    const TileReader read = [this](const QString &hash, int width, int height, int channels) { return readBlob(hash, width, height, channels); };
+    const TileSink sink = [this](const TileKey &, const QString &hash, const MaskPaint &tile) { return storeBlob(hash, tile); };
+    return commitTree(canvasId, base, [&](const Tree &tree) { return transformedTree(tree, position, transform, read, sink, seen); }, producer, true);
+}
+
+Result<Commit> CanvasStore::pasteLayer(const QString &canvasId, const QString &base, const MaskPaint &picture, double cx, double cy, int above, const QString &name,
+                                       const QString &producer) {
+    if (picture.channels() != 4)
+        return Result<Commit>(makeError(QStringLiteral("input_invalid"), QStringLiteral("Only a color picture is pasted as a layer.")));
+    if (const QString why = placeableProblem(picture.width(), picture.height()); !why.isEmpty())
+        return Result<Commit>(makeError(QStringLiteral("input_invalid"), why));
+    const TileSink sink = [this](const TileKey &, const QString &hash, const MaskPaint &tile) { return storeBlob(hash, tile); };
+    Result<TileMap> original = cutLayer(picture, sink);
+    if (!original)
+        return Result<Commit>(original.errors());
+    return commitTree(canvasId, base, [&](const Tree &tree) -> Result<Tree> {
+        if (above < -1 || above >= int(tree.layers.size()))
+            return makeError(QStringLiteral("input_invalid"), QStringLiteral("There is no layer %1: the revision has %2.").arg(above).arg(tree.layers.size()));
+        LayerSource source;
+        source.width = picture.width();
+        source.height = picture.height();
+        source.tiles = original.value();
+        source.transform = centeredPlacement(picture.width(), picture.height(), cx, cy);
+        Result<MaskPaint> shown = renderPlaced(picture, source.transform, tree.width, tree.height);
+        if (!shown)
+            return Result<Tree>(shown.errors());
+        Result<TileMap> tiles = cutLayer(shown.value(), sink);
+        if (!tiles)
+            return Result<Tree>(tiles.errors());
+        source.rendered = renderedKey(tiles.value(), false, {});
+        LayerRecord layer;
+        layer.tiles = std::move(tiles.value());
+        layer.source = std::move(source);
+        layer.producer = producer;
+        layer.created = isoTime(utcNow(m_clock));
+        if (name.trimmed().isEmpty()) {
+            std::set<QString> taken;
+            for (const LayerRecord &other : tree.layers)
+                taken.insert(other.name);
+            int n = 1;
+            while (taken.count(QStringLiteral("Pasted %1").arg(n)))
+                ++n;
+            layer.name = QStringLiteral("Pasted %1").arg(n);
+        } else {
+            layer.name = name.trimmed().left(120);
+        }
+        Tree out = tree;
+        out.layers.insert(out.layers.begin() + (above < 0 ? int(out.layers.size()) : above + 1), std::move(layer));
+        return out;
+    }, producer, true);
 }
 
 Result<TileMap> CanvasStore::storeLayerTiles(const MaskPaint &layer) {

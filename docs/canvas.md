@@ -314,7 +314,7 @@ the view is a row of a menu, with its key beside it; what does not apply to the 
   id; the copy is shown), **Clear canvas…** (asks; one undoable step that leaves one empty layer of the same size),
   **Delete canvas…** (asks; permanent; the next canvas is shown, or the empty state) and Close canvas (the dialog closes; an
   area shows no canvas).
-- **Edit**: Undo and Redo of the canvas's own history, as the keys do. It stays here, and not only in the window's Edit, because the canvas has its own history and the File > Canvas… dialog covers the window's bar.
+- **Edit**: Paste as new layer, Paste as new canvas and Free transform (below), and Undo and Redo of the canvas's own history, as the keys do. It stays here, and not only in the window's Edit, because the canvas has its own history and the File > Canvas… dialog covers the window's bar.
 - **Select**: Select all (Ctrl+A: the whole canvas as the rectangle, or the whole Quick Mask), **Deselect** (Ctrl+D, and
   Escape when nothing is being dragged or run: it clears the free rectangle, sets the Canvas Region node's area back to 0, 0, 0, 0 = the
   whole canvas as one undo step, and clears a painted selection), Inverse (Ctrl+Shift+I, the painted selection), Quick Mask
@@ -336,6 +336,57 @@ canvas: they are kept in `guides.json` in the canvas's folder, not in a revision
 back; Duplicate canvas copies them), and a damaged file reads as no guides. Guides, grid and rulers are shown only for one
 picture, not while comparing. A press within 6 pixels of a guide with the Rectangle region or Hand tool takes the guide, not
 the frame.
+
+**Paste and place a picture (#236).** Edit > **Paste as new layer** (Ctrl+V while the Canvas view is the one in use: the pointer is
+over it or it has the focus, as for every key of the view; the Graph's Ctrl+V still pastes nodes) puts the clipboard's picture on the
+canvas as a new layer above the current one (on top when none is picked), centered in what the view shows of the canvas, named
+"Pasted 1", "Pasted 2"... A picture file dropped on the picture, or Canvas > **Place picture…**, does the same and names the
+layer after the file. Each is ONE revision (producer `canvas-view:paste`, history "Layer pasted: Pasted 1"); Undo takes it back.
+Edit > **Paste as new canvas** makes a canvas of the clipboard's picture (the same as File > Paste as new canvas). The picture is
+**kept whole**: one bigger than the canvas is shown cut at the canvas's edge, and its off-canvas part stays in the layer's original
+(below), so it can be scaled down later. A picture comes from outside and is checked first: at most 16384 px a side and 64
+megapixels (the canvas's own limit), a file at most 256 MB and only a PNG, JPEG, WebP, GIF, BMP or TIFF by its name, its size read
+from the header before anything is decoded; a refusal says why under the picture and changes nothing.
+
+**A layer's original (#236).** A pasted picture, and a layer after a transform (below), keeps the pixels it started from: the layer
+record has an optional `"source"` ({width, height, tiles, an optional mask's tiles, the placement (cx, cy, width, height, angle,
+flipX, flipY, filter) and `rendered`}), written only for a layer that has one, so every tree from before keeps its hash. The
+source's tiles are blobs like any other (shared by content, carried by a package and a duplicate). The layer's own tiles stay the
+picture a revision SHOWS (the original placed, cut at the canvas), so the composite, nodes, a flattened export, **.ora and .psd read the
+shown layer as they always did and never see the original**: a file exported and opened elsewhere has the transformed pixels, canvas
+sized, with the layer's mask; the original stays in Fugue (and in a `.fuguepack`). `rendered` is a hash of the shown tiles and mask
+the placement produced: a layer painted on, or given another mask, since then no longer matches it, and its next transform starts
+from the layer as it is then (Photoshop's rasterise-on-paint).
+
+**Transforming a layer (#236).** Layer > **Transform** has Flip horizontal, Flip vertical, Rotate 90° clockwise and Rotate 90° counterclockwise for the
+current paint layer (a group, a mask layer and a picture layer say in words that they cannot be moved or transformed: transform the group's layers, or
+merge it into one layer first). A layer is drawn from its **original**: a pasted picture's own pixels; for a plain layer, the first transform takes
+the smallest rectangle that holds every pixel that is not transparent (Photoshop's Free Transform box) as the original and draws it again, its
+layer mask cut to the same rectangle and **transformed with it** (where the layer has nothing the mask hides nothing). Every later transform
+starts again from the original, so scaling a layer down to a tenth and back to its size gives the original pixels exactly, and a picture
+bigger than the canvas that was scaled down shows all of it. The picture is resampled on premultiplied alpha (a transparent edge leaks no color) with
+**Lanczos** (the default) or **bicubic**, their support widened when shrinking, or **nearest** (for pixel art; a turn then has no soft edge);
+a quarter turn and a flip lose nothing, any other angle is resampled a second time at the turned positions with a one pixel soft edge. Only the part the
+canvas shows is computed. A layer may reach past the canvas edge: the layer's tiles are cut there (the canvas is the picture), the original keeps the
+rest; a layer is at most 32768 px a side and 16384 x 16384 px. Each transform is ONE revision (producer `canvas-view:transform`; History says
+"Layer moved: Fill", "Layer scaled: …", "Layer rotated: …", "Layer flipped: …", or "Layer transformed: …" for several at once). A layer painted on, or
+given another mask, since its last transform has no current original: its next transform starts from the layer as it is. Growing the canvas
+(Canvas size) moves the original with the layer. The sizes and the placement are kept to a thousandth. Not yet: transforming a group, a mask layer
+or a selection together with a layer, and a command line verb (`fugue canvas layer transform`).
+
+**Move and Free Transform (#236).** The **Move** tool (V, in the tool strip under Zoom) moves the current layer: a drag anywhere on the picture, and the
+layer is drawn at its new place while the canvas under it has the layer left out; when the button is let go it is ONE revision ("Layer moved: Card").
+Shift holds one axis. The arrow keys nudge it one pixel, with Shift ten, each a revision, while the picture has the focus. **Edit > Free transform**
+(Ctrl+T, any tool) opens the layer's box: eight handles (a corner or an edge scales from the opposite one, the box's own edges when it is turned), a drag
+inside moves it, and a drag just outside a corner turns it about its center. **Shift** keeps the proportions (and turns by 15° steps, and moves along one
+axis), **Alt** works from the center, and the size never goes under 1 px or flips (Layer > Transform flips). The options bar has X and Y (the center),
+W and H (with a **Link** toggle that scales the other side along when one is typed), Angle, the resampling (Lanczos, Bicubic, Nearest) and Apply and
+Cancel; the numbers and the drag are the same box. **Enter** or Apply keeps it as ONE revision, **Escape** or Cancel leaves the layer as it was; another
+tool picked, or Apply with nothing changed, writes nothing extra (a box nobody changed makes no revision), and another layer or canvas ends the box.
+**Snapping** uses the view's guides and grid (View > Snap to guides and grid, #253) through the same targets as the Region frame: a move is pulled by the
+nearest of its bounds' edges and middle, a handle drag of an unturned box by the edge it moves; nothing snaps with Shift, Alt or a turned box. The pull
+is not clamped to the canvas (a layer may reach past it; `snap::snapFloating`). Only a paint layer can be moved or transformed: a group, a mask layer
+and a picture layer say so in words and nothing opens. The preview shows the layer without its layer mask and blend; the revision has both.
 
 A greyed row with the tooltip "Not built yet (#N)" is a feature that is planned and tracked in issue N; it is not a command and has
 no key ([the research](canvas-menus-research.md) says what the other editors have and what was decided). The top bar keeps the

@@ -94,4 +94,53 @@ crop::Rect snapRect(const crop::Rect &rect, const Targets &targets, const crop::
     return out;
 }
 
+namespace {
+
+// One axis of snapFloating, with `keepSize`: the shift (a line minus the start, the middle or the end) of least size within the threshold, else 0.
+double floatingShift(double start, double length, const std::vector<int> &lines, int spacing, double threshold) {
+    double best = 0, bestSize = threshold + 1;
+    for (const double at : {start, start + length / 2, start + length}) {
+        bool hit = false;
+        const double line = snapCoordinate(at, lines, spacing, threshold, &hit);
+        if (hit && std::abs(line - at) < bestSize) {
+            best = line - at;
+            bestSize = std::abs(best);
+        }
+    }
+    return best;
+}
+
+} // namespace
+
+crop::RectF snapFloating(const crop::RectF &rect, const Targets &targets, bool keepSize) {
+    crop::RectF out = rect;
+    if (targets.threshold <= 0)
+        return out;
+    const bool across = !targets.xs.empty() || targets.gridX > 0, down = !targets.ys.empty() || targets.gridY > 0;
+    if (keepSize) {
+        if (across)
+            out.x += floatingShift(rect.x, rect.width, targets.xs, targets.gridX, targets.threshold);
+        if (down)
+            out.y += floatingShift(rect.y, rect.height, targets.ys, targets.gridY, targets.threshold);
+        return out;
+    }
+    if (across) {
+        const double left = snapCoordinate(rect.x, targets.xs, targets.gridX, targets.threshold);
+        const double right = snapCoordinate(rect.x + rect.width, targets.xs, targets.gridX, targets.threshold);
+        if (right - left >= 1) {
+            out.x = left;
+            out.width = right - left;
+        }
+    }
+    if (down) {
+        const double top = snapCoordinate(rect.y, targets.ys, targets.gridY, targets.threshold);
+        const double bottom = snapCoordinate(rect.y + rect.height, targets.ys, targets.gridY, targets.threshold);
+        if (bottom - top >= 1) {
+            out.y = top;
+            out.height = bottom - top;
+        }
+    }
+    return out;
+}
+
 } // namespace fugue::snap

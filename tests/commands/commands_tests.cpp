@@ -304,6 +304,20 @@ private slots:
         QCOMPARE(registry.ownerOf("Escape"), QString("group.leave"));
     }
 
+    // #236: Ctrl+V pastes nodes in the Graph and a picture as a layer while a Canvas view is the one in use (its context is the more specific).
+    void ctrlVPastesNodesInTheGraphAndALayerInTheCanvasView() {
+        CommandRegistry registry;
+        fugue::registerDefaultCommands(registry);
+        for (const char *id : {"edit.paste", "canvas-view.paste-layer"})
+            QVERIFY(registry.setHandler(id, [] {}));
+        registry.setContextActive("canvas", true);
+        QCOMPARE(registry.ownerOfPress(Qt::Key_V, Qt::ControlModifier), QString("edit.paste"));
+        registry.setContextActive("canvas-view", true);
+        QCOMPARE(registry.ownerOfPress(Qt::Key_V, Qt::ControlModifier), QString("canvas-view.paste-layer"));
+        registry.setContextActive("canvas-view", false);
+        QCOMPARE(registry.ownerOfPress(Qt::Key_V, Qt::ControlModifier), QString("edit.paste"));
+    }
+
     // One keymap for a picture and the Graph (#228, docs/ui-ergonomics.md D5): + and - zoom the Graph too, and a key
     // press is told its owner, so a focused Canvas view keeps the Graph's keys (and only those) from the Graph.
     void aPressIsToldItsOwnerAndWhetherItActsOnTheGraph() {

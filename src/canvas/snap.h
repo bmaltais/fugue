@@ -40,4 +40,10 @@ crop::Point snapPoint(const crop::Point &point, const Targets &targets);
 // smaller pull of its two edges per axis; otherwise each edge is pulled on its own (never to less than one pixel wide).
 crop::Rect snapRect(const crop::Rect &rect, const Targets &targets, const crop::Size &canvas, bool keepSize = false);
 
+// A rectangle that may reach past the canvas (a layer being moved, #236): the same lines, not clamped to the canvas and not
+// rounded. With `keepSize` the rectangle is pulled by the nearest of its left, middle and right (and top, middle and bottom) to a
+// line within `threshold`; otherwise each edge on its own, never to less than one pixel. The Multiple does not apply.
+// (snapRect clamps into the canvas and rounds to whole pixels, which a Region needs and a layer that sticks out must not have.)
+crop::RectF snapFloating(const crop::RectF &rect, const Targets &targets, bool keepSize);
+
 } // namespace fugue::snap

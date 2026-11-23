@@ -47,7 +47,7 @@ import "canvasMenu.js" as CanvasMenu
 //
 // The tool strip (#230; Photoshop's toolbar, Blender's toolbar: docs/ui-ergonomics.md References) is a narrow column at
 // the start of the picture, one icon button per tool with its key in the tooltip, the current one in the quiet marking:
-// Hand (H; Space held for a moment), Zoom (Z; Alt zooms out), Rectangle region (M or R: the frame above, the default),
+// Hand (H; Space held for a moment), Zoom (Z; Alt zooms out), Move (V, #236: drags the current layer; Ctrl+T is Free Transform), Rectangle region (M or R: the frame above, the default),
 // Mask brush (B) and eraser (E; X swaps them), then Quick Mask (Q) at its foot. The options bar over the picture holds the
 // current tool's settings: Snap for the region; Zoom in or out; for the brush what it paints (the mask of a layer, the
 // Quick Mask selection, or nothing yet: Add mask, Quick Mask), Size, Hardness and Opacity as drag-number fields ([ and ]
@@ -183,6 +183,8 @@ Item {
     readonly property real maxBrush: Math.max(64, Math.min(2048, Math.max(canvasData.pictureSize.width, canvasData.pictureSize.height)))
     // #252: the rows the layers panel has selected, and whether Merge down has two shown layers that can merge (paint layers or groups).
     readonly property var chosenRows: layersPanel.chosen.map(p => canvasData.layers.find(r => r.position === p)).filter(r => r !== undefined)
+    // #236: the current layer can be moved, flipped or turned: a single paint layer (not a group, mask or picture) on the latest version.
+    readonly property bool transformable: canvasData.layersEditable && layersPanel.current !== null && chosenRows.length === 1 && layersPanel.current.kind === "paint"
     readonly property bool mergeable: {
         const upper = layersPanel.current
         if (!canvasData.layersEditable || upper === null || chosenRows.length !== 1 || upper.position < 1)
@@ -209,8 +211,70 @@ Item {
         toolBeforeQuickMask = "" // a tool picked by hand stays when Quick Mask ends
         if (name === tool)
             return
+        if (freeTransform)
+            commitTransform() // another tool keeps the transform, as Photoshop does
         canvasData.commitMask() // the strokes so far are their own step
         tool = name
+    }
+    // Move and Free Transform (#236): the layer's placement being made. The Move tool drags the current layer (one revision when the
+    // button is let go); Free Transform (Ctrl+T) opens the box with its handles and the numbers, and Enter keeps it (one revision),
+    // Escape leaves it. Nothing is stored until then: the picture shows the canvas without the layer and the frame draws the layer's
+    // original at `xfPlacement` (CanvasViewModel.beginTransform), whose numbers are TransformGesture's.
+    property var xfPlacement: null
+    property var xfStart: null
+    property int xfPosition: -1
+    property bool freeTransform: false
+    property bool xfLink: false
+    readonly property bool xfOpen: xfPosition >= 0
+    function beginTransformSession() {
+        if (xfOpen)
+            return true
+        const row = layersPanel.current
+        if (!transformable || !row) {
+            canvasData.showNotice(row && row.kind !== "paint" ? qsTr("Only a paint layer can be moved or transformed.") : qsTr("Pick one paint layer to move or transform."))
+            return false
+        }
+        if (!canvasData.beginTransform(row.position))
+            return false
+        const box = canvasData.layerBox(row.position)
+        if (!box.valid) {
+            canvasData.endTransform()
+            return false
+        }
+        xfPosition = row.position
+        xfStart = xfGesture.describe(box)
+        xfPlacement = xfStart
+        return true
+    }
+    function endTransformSession() {
+        canvasData.endTransform()
+        xfPlacement = null
+        xfStart = null
+        xfPosition = -1
+        freeTransform = false
+    }
+    function startFreeTransform() {
+        if (freeTransform || !beginTransformSession())
+            return
+        freeTransform = true
+        pictureView.forceActiveFocus()
+    }
+    // Keeps what the box shows as ONE revision; a box nobody changed makes none.
+    function commitTransform() {
+        if (!xfOpen)
+            return
+        const changed = JSON.stringify(xfPlacement) !== JSON.stringify(xfStart)
+        const position = xfPosition
+        const placement = xfPlacement
+        endTransformSession()
+        if (changed)
+            canvasData.transformLayer(position, placement)
+    }
+    function nudgeLayer(dx, dy) {
+        if (freeTransform)
+            xfPlacement = xfGesture.nudged(xfPlacement, dx, dy)
+        else if (tool === "move" && transformable)
+            canvasData.moveLayerBy(layersPanel.current.position, dx, dy)
     }
     function setSize(v) { brushSize = Math.max(1, Math.min(maxBrush, Math.round(v))) }
     function setHardness(v) { brushHardness = Math.max(0, Math.min(1, Math.round(v * 100) / 100)) }
@@ -267,7 +331,7 @@ Item {
     // What Deselect can clear now: the free rectangle, the node's area (when its numbers are not linked or compared), the painted selection.
     readonly property bool deselectable: (rectSelected && (!regionValid || regionEditable)) || maskSelected
     // Escape clears the selection when nothing else wants it: no drag, no run of the task bar or the Graph.
-    readonly property bool escapeDeselects: deselectable && !taskBar.busy && !dragging && App.commands.entry("run.cancel").enabled !== true
+    readonly property bool escapeDeselects: deselectable && !freeTransform && !taskBar.busy && !dragging && App.commands.entry("run.cancel").enabled !== true
     // The node's area goes back to 0, 0, 0, 0 (the whole canvas: the run takes the edge, one undo step, a stored selection
     // goes too); the free rectangle and the painted selection are cleared.
     function deselect() {
@@ -358,6 +422,10 @@ Item {
         case "canvas-view.batch": return {enabled: App.canvasBatch !== null}
         case "canvas-view.rename": case "canvas-view.share": case "canvas-view.duplicate": case "canvas-view.delete": case "canvas-view.close": return {enabled: has}
         case "canvas-view.clear": return {enabled: canvasData.layersEditable}
+        case "canvas-view.paste-layer": case "canvas-view.place-picture": return {enabled: canvasData.layersEditable}
+        case "canvas-view.paste-canvas": return {enabled: true}
+        case "canvas-view.flip-horizontal": case "canvas-view.flip-vertical": case "canvas-view.turn-clockwise": case "canvas-view.turn-counterclockwise":
+            return {enabled: transformable}
         case "canvas-view.select-all": return {enabled: shows && canvasData.pictureSize.width > 0}
         case "canvas-view.deselect": return {enabled: deselectable}
         case "canvas-view.invert-selection": return {enabled: quickMask}
@@ -396,6 +464,8 @@ Item {
         case "canvas-view.clear-guides": return {enabled: guidesData.guides.length > 0}
         case "canvas-view.tool-hand": return tool("hand")
         case "canvas-view.tool-zoom": return tool("zoom")
+        case "canvas-view.tool-move": return tool("move")
+        case "canvas-view.free-transform": return {enabled: freeTransform || (canvasData.layersEditable && layersPanel.current !== null), checkable: true, checked: freeTransform} // a group says why in words when it is asked
         case "canvas-view.tool-region": return tool("region")
         case "canvas-view.tool-brush": return {enabled: has, checkable: true, checked: root.tool === "brush"}
         case "canvas-view.tool-eraser": return tool("eraser")
@@ -418,6 +488,8 @@ Item {
         switch (id) {
         case "canvas-view.tool-hand": setTool("hand"); break
         case "canvas-view.tool-zoom": setTool("zoom"); break
+        case "canvas-view.tool-move": setTool("move"); break
+        case "canvas-view.free-transform": if (freeTransform) commitTransform(); else startFreeTransform(); break
         case "canvas-view.tool-region": setTool("region"); break
         case "canvas-view.tool-brush": setTool("brush"); break
         case "canvas-view.tool-eraser": setTool("eraser"); break
@@ -446,6 +518,13 @@ Item {
         case "canvas-view.batch": batchDialog.openDialog(); break
         case "canvas-view.duplicate": canvasData.duplicateCanvas(); break
         case "canvas-view.clear": fileDialogs.askClear(); break
+        case "canvas-view.flip-horizontal": if (transformable) canvasData.flipLayer(layersPanel.current.position, true); break
+        case "canvas-view.flip-vertical": if (transformable) canvasData.flipLayer(layersPanel.current.position, false); break
+        case "canvas-view.turn-clockwise": if (transformable) canvasData.turnLayer(layersPanel.current.position, true); break
+        case "canvas-view.turn-counterclockwise": if (transformable) canvasData.turnLayer(layersPanel.current.position, false); break
+        case "canvas-view.paste-layer": pasteLayerOrNodes(); break
+        case "canvas-view.paste-canvas": pasteAsNewCanvas(); break
+        case "canvas-view.place-picture": placePicture(); break
         case "canvas-view.delete": fileDialogs.askDelete(); break
         case "canvas-view.close": closeCanvas(); break
         case "canvas-view.select-all": selectAll(); break
@@ -495,6 +574,8 @@ Item {
             const state = root.menuState(id)
             if (state === undefined || state.enabled)
                 root.runTool(id)
+            else if (id === "canvas-view.paste-layer") // not on the latest version: the key still belongs to the Graph's paste
+                App.commands.trigger("edit.paste")
         }
     }
     // Escape clears the selection wherever the focus is, as Ctrl+D does (a key to a focused item would miss it after a click
@@ -599,6 +680,43 @@ Item {
     function importPicture() {
         (pictureDialog.createObject(root) as FilePicker).open()
     }
+    // Paste as new layer, Place picture… and a dropped file (#236): the picture is put on the canvas as a layer, centered in
+    // what the view shows of the canvas (a drop: where it fell). Each is one revision; a problem is said under the picture.
+    function visibleCenter() {
+        const k = pictureView.imageScale, size = canvasData.pictureSize
+        if (k <= 0 || size.width <= 0)
+            return {x: -1, y: -1}
+        const span = (offset, shown, whole) => {
+            const from = Math.max(0, -offset / k), to = Math.min(whole, (shown - offset) / k)
+            return to > from ? (from + to) / 2 : whole / 2
+        }
+        return {x: span(pictureView.imageX, pictureView.width, size.width), y: span(pictureView.imageY, pictureView.height, size.height)}
+    }
+    // Ctrl+V over this view: a picture on the clipboard is a layer; anything else is the Graph's paste (nodes), which this view's key hides.
+    function pasteLayerOrNodes() {
+        if (!canvasData.clipboardHasPicture() && App.commands.trigger("edit.paste"))
+            return
+        pasteLayer()
+    }
+    function pasteLayer() {
+        const at = visibleCenter()
+        canvasData.pasteLayer(at.x, at.y)
+    }
+    function placeFiles(urls, x, y) {
+        for (const url of urls)
+            if (!canvasData.placeFile(url.toString(), x, y))
+                break // the problem is said under the picture; the rest would only repeat it
+    }
+    function placePicture() {
+        (placeDialog.createObject(root) as FilePicker).open()
+    }
+    function pasteAsNewCanvas() {
+        if (!newCanvasDialog)
+            newCanvasDialog = newCanvasComponent.createObject(root, { storeRoot: canvasData.storeRoot })
+        const why = newCanvasDialog.model.pasteAsNew()
+        if (why !== "")
+            newCanvasDialog.openNew(why)
+    }
     Component {
         id: exportComponent
         CanvasExportDialog {
@@ -617,6 +735,18 @@ Item {
                 if (madeDialog.model.importNotes() !== "") // a Photoshop file's layers Fugue could not keep: never silent
                     canvasData.showNotice(qsTr("Imported, with changes: %1").arg(madeDialog.model.importNotes()))
             }
+        }
+    }
+    Component {
+        id: placeDialog
+        FilePicker {
+            id: d
+            objectName: "canvasViewPlaceDialog"
+            title: qsTr("Place a picture on the canvas")
+            fileMode: PortalFileDialog.OpenFile
+            nameFilters: [qsTr("Pictures (*.png *.jpg *.jpeg *.webp)"), qsTr("All files (*)")]
+            onAccepted: { const at = root.visibleCenter(); canvasData.placeFile(d.selectedFile.toString(), at.x, at.y); d.destroy() }
+            onRejected: d.destroy()
         }
     }
     Component {
@@ -720,7 +850,11 @@ Item {
     Keys.onShortcutOverride: event => {
         const bare = !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))
         if (event.key === Qt.Key_Escape) {
-            event.accepted = root.dragging || taskBar.busy || root.escapeDeselects // a drag's, the task bar's Cancel, or Deselect
+            event.accepted = root.freeTransform || root.dragging || taskBar.busy || root.escapeDeselects // the box's, a drag's, the task bar's Cancel, or Deselect
+            return
+        }
+        if (root.freeTransform && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && !App.commands.textFieldFocus) {
+            event.accepted = true // Enter keeps the transform, not the host dialog's confirm
             return
         }
         const owner = App.commands.ownerOfPress(event.key, event.modifiers)
@@ -728,6 +862,25 @@ Item {
         event.accepted = (event.key === Qt.Key_Q && bare && !owner.startsWith("canvas-view.")) || (owner !== "" && App.commands.actsOnGraph(owner))
     }
     Keys.onPressed: event => {
+        if (root.freeTransform && event.key === Qt.Key_Escape) {
+            root.endTransformSession()
+            event.accepted = true
+            return
+        }
+        if (root.freeTransform && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) {
+            root.commitTransform()
+            event.accepted = true
+            return
+        }
+        if ((root.freeTransform || (root.tool === "move" && root.transformable)) && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) {
+            const step = (event.modifiers & Qt.ShiftModifier) ? 10 : 1
+            const arrows = {[Qt.Key_Left]: [-1, 0], [Qt.Key_Right]: [1, 0], [Qt.Key_Up]: [0, -1], [Qt.Key_Down]: [0, 1]}
+            if (arrows[event.key] !== undefined) {
+                root.nudgeLayer(arrows[event.key][0] * step, arrows[event.key][1] * step)
+                event.accepted = true
+                return
+            }
+        }
         if (event.key === Qt.Key_Escape) {
             const frame = regionFrame.item as CropFrame
             if ((!frame || !frame.cancel()) && !taskBar.cancelIfBusy()) {
@@ -854,8 +1007,8 @@ Item {
             rightPadding: root.u
             color: root.look.label
             font.pixelSize: root.look.labelSize
-            text: root.quickMask && root.brushing ? qsTr("Quick Mask") : root.tool === "hand" ? qsTr("Hand") : root.tool === "zoom" ? qsTr("Zoom")
-                  : root.tool === "brush" ? qsTr("Mask brush") : root.tool === "eraser" ? qsTr("Mask eraser") : qsTr("Rectangle region")
+            text: root.freeTransform ? qsTr("Free transform") : root.quickMask && root.brushing ? qsTr("Quick Mask") : root.tool === "hand" ? qsTr("Hand") : root.tool === "zoom" ? qsTr("Zoom")
+                  : root.tool === "brush" ? qsTr("Mask brush") : root.tool === "eraser" ? qsTr("Mask eraser") : root.tool === "move" ? qsTr("Move") : qsTr("Rectangle region")
         }
         // The region: Snap to the node's Multiple of.
         ViewButton {
@@ -887,6 +1040,157 @@ Item {
             format: v => qsTr("%1 px").arg(Math.round(v))
             parse: text => Number(String(text).replace("px", "").trim())
             onCommitted: v => guidesData.setGridSpacing(Math.round(v))
+        }
+        // Free transform (#236): where the layer is, how big, how turned, how it is resampled; Apply keeps it. Made only while a box is open: its
+        // fields would otherwise be one more dozen objects in every Canvas view that never transforms anything.
+        Loader {
+            id: transformOptions
+            active: root.freeTransform && root.xfPlacement !== null
+            visible: active
+            sourceComponent: Flow {
+                width: optionsBar.width // wraps as the options bar does, not one overflowing row
+                spacing: root.u
+        // Free transform (#236): where the layer is (its center), how big, how turned, and how it is resampled; Apply keeps it.
+        Chunk {
+            lead: false
+            DragNumberField {
+                objectName: "canvasViewTransformX"
+                width: 30 * root.u
+                look: root.look
+                label: qsTr("X")
+                tip: qsTr("Where the layer's center is, across, in canvas pixels")
+                value: root.xfPlacement ? root.xfPlacement.cx : 0
+                from: -100000
+                to: 100000
+                step: 1
+                snap: 1
+                defaultValue: 0
+                format: v => qsTr("%1 px").arg(Math.round(v * 10) / 10)
+                parse: text => Number(String(text).replace("px", "").trim())
+                onCommitted: v => root.xfPlacement = xfGesture.changed(root.xfPlacement, {cx: v}, false)
+            }
+            DragNumberField {
+                objectName: "canvasViewTransformY"
+                width: 30 * root.u
+                look: root.look
+                label: qsTr("Y")
+                tip: qsTr("Where the layer's center is, down, in canvas pixels")
+                value: root.xfPlacement ? root.xfPlacement.cy : 0
+                from: -100000
+                to: 100000
+                step: 1
+                snap: 1
+                defaultValue: 0
+                format: v => qsTr("%1 px").arg(Math.round(v * 10) / 10)
+                parse: text => Number(String(text).replace("px", "").trim())
+                onCommitted: v => root.xfPlacement = xfGesture.changed(root.xfPlacement, {cy: v}, false)
+            }
+            DragNumberField {
+                objectName: "canvasViewTransformW"
+                width: 30 * root.u
+                look: root.look
+                label: qsTr("W")
+                tip: qsTr("The layer's width in canvas pixels, before it is turned")
+                value: root.xfPlacement ? root.xfPlacement.width : 1
+                from: 1
+                to: 32768
+                step: 1
+                snap: 10
+                defaultValue: root.xfStart ? root.xfStart.width : 1
+                format: v => qsTr("%1 px").arg(Math.round(v * 10) / 10)
+                parse: text => Number(String(text).replace("px", "").trim())
+                onCommitted: v => root.xfPlacement = xfGesture.changed(root.xfPlacement, {width: v}, root.xfLink)
+            }
+            ViewButton {
+                objectName: "canvasViewTransformLink"
+                look: root.look
+                text: qsTr("Link")
+                accented: false
+                checkable: true
+                current: root.xfLink
+                tip: qsTr("Keep the proportions when the width or the height is typed")
+                onTapped: root.xfLink = !root.xfLink
+            }
+            DragNumberField {
+                objectName: "canvasViewTransformH"
+                width: 30 * root.u
+                look: root.look
+                label: qsTr("H")
+                tip: qsTr("The layer's height in canvas pixels, before it is turned")
+                value: root.xfPlacement ? root.xfPlacement.height : 1
+                from: 1
+                to: 32768
+                step: 1
+                snap: 10
+                defaultValue: root.xfStart ? root.xfStart.height : 1
+                format: v => qsTr("%1 px").arg(Math.round(v * 10) / 10)
+                parse: text => Number(String(text).replace("px", "").trim())
+                onCommitted: v => root.xfPlacement = xfGesture.changed(root.xfPlacement, {height: v}, root.xfLink)
+            }
+            DragNumberField {
+                objectName: "canvasViewTransformAngle"
+                width: 30 * root.u
+                look: root.look
+                label: qsTr("Angle")
+                tip: qsTr("How far the layer is turned, in degrees, clockwise")
+                value: root.xfPlacement ? root.xfPlacement.angle : 0
+                from: -180
+                to: 180
+                step: 1
+                snap: 15
+                defaultValue: 0
+                format: v => qsTr("%1°").arg(Math.round(v * 10) / 10)
+                parse: text => Number(String(text).replace("°", "").trim())
+                onCommitted: v => root.xfPlacement = xfGesture.changed(root.xfPlacement, {angle: v}, false)
+            }
+        }
+        Chunk {
+            lead: false
+            Repeater {
+                model: [{id: "lanczos", text: qsTr("Lanczos"), tip: qsTr("The sharpest resampling for photographs (the default)")},
+                        {id: "bicubic", text: qsTr("Bicubic"), tip: qsTr("A smoother resampling")},
+                        {id: "nearest", text: qsTr("Nearest"), tip: qsTr("No blending: hard pixels, for pixel art")}]
+                delegate: ViewButton {
+                    required property var modelData
+                    objectName: "canvasViewTransformFilter-" + modelData.id
+                    look: root.look
+                    text: modelData.text
+                    tip: modelData.tip
+                    accented: false
+                    checkable: true
+                    current: root.xfPlacement !== null && root.xfPlacement.filter === modelData.id
+                    onTapped: root.xfPlacement = xfGesture.changed(root.xfPlacement, {filter: modelData.id}, false)
+                }
+            }
+        }
+        Chunk {
+            lead: false
+            ViewButton {
+                objectName: "canvasViewTransformApply"
+                look: root.look
+                text: qsTr("Apply")
+                tip: qsTr("Keep the transform as one step (%1)").arg(qsTr("Enter"))
+                onTapped: root.commitTransform()
+            }
+            ViewButton {
+                objectName: "canvasViewTransformCancel"
+                look: root.look
+                text: qsTr("Cancel")
+                tip: qsTr("Leave the layer as it was (%1)").arg(qsTr("Escape"))
+                accented: false
+                onTapped: root.endTransformSession()
+            }
+        }
+            }
+        }
+        Text {
+            objectName: "canvasViewMoveHint"
+            visible: root.tool === "move" && !root.freeTransform
+            height: 7 * root.u
+            verticalAlignment: Text.AlignVCenter
+            color: root.look.label
+            font.pixelSize: root.look.captionSize
+            text: qsTr("Drag to move the current layer; arrow keys nudge it (Shift: 10 px); %1 transforms it").arg(root.keysOf("canvas-view.free-transform"))
         }
         // Zoom: in or out with a click (Alt does the other).
         Chunk {
@@ -1095,6 +1399,8 @@ Item {
             ToolButton { toolName: "hand"; command: "canvas-view.tool-hand"; glyph: "hand"; name: qsTr("Hand: drag to pan; Space held does it with any tool") }
             ToolButton { toolName: "zoom"; command: "canvas-view.tool-zoom"; glyph: "zoom-in"; name: qsTr("Zoom: click to zoom in, Alt+click to zoom out") }
             Item { width: 1; height: 2 * root.u }
+            ToolButton { toolName: "move"; command: "canvas-view.tool-move"; glyph: "maximize-2"; name: qsTr("Move: drag the current layer; the arrow keys nudge it") }
+            Item { width: 1; height: 2 * root.u }
             ToolButton { toolName: "region"; command: "canvas-view.tool-region"; glyph: "square-dashed"; name: qsTr("Rectangle region: drag the area a run redraws") }
             Item { width: 1; height: 2 * root.u }
             ToolButton { toolName: "brush"; command: "canvas-view.tool-brush"; glyph: "brush"; name: qsTr("Mask brush: paint a layer mask or the Quick Mask") }
@@ -1147,6 +1453,22 @@ Item {
         sizeB: canvasData.sizeB
         labelA: root.compareOn ? root.labelOf(root.rowA) : root.labelOf(root.rowB)
         labelB: root.labelOf(root.rowB)
+    }
+    // A picture file dropped on the picture is placed as a new layer where it fell (#236); anything else is left to the window's own drop.
+    DropArea {
+        id: pictureDrop
+        objectName: "canvasViewDropArea"
+        anchors.fill: pictureView
+        keys: ["text/uri-list"]
+        enabled: pictureView.visible && canvasData.layersEditable && !root.compareOn
+        onEntered: drag => { drag.accepted = drag.hasUrls && drag.urls.length > 0 && drag.urls.every(url => canvasData.isPictureFile(url.toString())) }
+        onDropped: drop => {
+            if (!drop.hasUrls)
+                return
+            const k = pictureView.imageScale
+            drop.accept()
+            root.placeFiles(drop.urls, k > 0 ? (drop.x - pictureView.imageX) / k : -1, k > 0 ? (drop.y - pictureView.imageY) / k : -1)
+        }
     }
     // History (#228, the owner's decision; Photoshop's History panel is the reference): the canvas's changes in words,
     // newest first, at the start side of the picture, closed at first. A click shows that step (read only: the Layers
@@ -1554,6 +1876,57 @@ Item {
         HoverHandler { cursorShape: Qt.OpenHandCursor }
     }
 
+    // The Move tool and Free Transform (#236): the layer's box over the picture; the numbers are TransformGesture's.
+    TransformGesture {
+        id: xfGesture
+        guides: guidesData
+        snapOptions: root.snapOptions
+    }
+    TransformFrame {
+        id: xfFrame
+        objectName: "canvasViewTransformFrame"
+        anchors.fill: pictureView
+        LayoutMirroring.enabled: false
+        LayoutMirroring.childrenInherit: true
+        look: root.look
+        gesture: xfGesture
+        placement: root.xfPlacement
+        imageSource: canvasData.transformImage
+        opacityOfLayer: canvasData.transformOpacity
+        originX: pictureView.imageX
+        originY: pictureView.imageY
+        zoom: pictureView.imageScale
+        handles: root.freeTransform
+        moveAnywhere: root.tool === "move" && !root.freeTransform
+        yieldPress: root.panKey
+        visible: pictureView.visible && !root.compareOn && (root.xfOpen || (root.tool === "move" && !root.freeTransform))
+        onAboutToPress: { pictureView.forceActiveFocus(); root.beginTransformSession() }
+        onChangeRequested: placement => root.xfPlacement = placement
+        onDragEnded: committed => {
+            if (!root.freeTransform) {
+                if (committed)
+                    root.commitTransform()
+                else
+                    root.endTransformSession()
+            }
+        }
+    }
+    // Free Transform's keys (Enter keeps it, Escape leaves it, the arrows move the layer a pixel, with Shift ten) are the view's own key
+    // handlers above (Keys.onShortcutOverride and Keys.onPressed), not Shortcut objects: a dozen of those made while the view is made upset
+    // the creation of the dialogs under it, which then failed under load with "Cannot find member data".
+    // What the box was made for goes away with it: another layer picked, another canvas, a change of the Head.
+    Connections {
+        target: root.layersPanel
+        function onCurrentChanged() {
+            if (root.xfOpen && (root.layersPanel.current === null || root.layersPanel.current.position !== root.xfPosition))
+                root.endTransformSession()
+        }
+    }
+    Connections {
+        target: canvasData
+        function onCanvasChanged() { if (root.xfOpen) root.endTransformSession() }
+        function onTransformingChanged() { if (!canvasData.transforming && root.xfOpen) root.endTransformSession() }
+    }
     // A run's layer landed on the Head while the view was on it (the normal flow, #228): the view went along; a short
     // notice says what came, with Undo (the layers panel's: the Head back one step) and a close. No decision to take.
     Banner {

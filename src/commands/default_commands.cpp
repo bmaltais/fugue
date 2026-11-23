@@ -78,6 +78,8 @@ QList<Row> defaultRows() {
         // The Canvas view's tool strip (#230): its keys while the pointer is over the view or it has the focus (Blender's
         // hover rule); Photoshop's keys (docs/ui-ergonomics.md References). Over the layers panel the panel's own win.
         {"canvas-view.tool-hand", QT_TRANSLATE_NOOP("Command", "Hand: drag the picture to pan"), {"H"}, {"Space held"}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Hand")},
+        {"canvas-view.tool-move", QT_TRANSLATE_NOOP("Command", "Move: drag to move the current layer; the arrow keys nudge it 1 px, with Shift 10 px"), {"V"}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Move")},
+        {"canvas-view.free-transform", QT_TRANSLATE_NOOP("Command", "Free transform the current layer: scale, turn and move it, then Enter to keep it or Escape to leave it"), {"Ctrl+T"}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Free transform")},
         {"canvas-view.tool-zoom", QT_TRANSLATE_NOOP("Command", "Zoom: click to zoom in, Alt+click to zoom out"), {"Z"}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Zoom")},
         {"canvas-view.tool-region", QT_TRANSLATE_NOOP("Command", "Rectangle region"), {"M", "R"}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Rectangle region")},
         {"canvas-view.tool-brush", QT_TRANSLATE_NOOP("Command", "Mask brush"), {"B"}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Mask brush")},
@@ -125,6 +127,16 @@ QList<Row> defaultRows() {
         {"canvas-view.group", QT_TRANSLATE_NOOP("Command", "Put the selected layers in a new group"), {"Ctrl+G"}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Group layers")},
         {"canvas-view.ungroup", QT_TRANSLATE_NOOP("Command", "Take the layers out of the selected groups"), {"Ctrl+Shift+G"}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Ungroup layers")},
         {"canvas-view.layer-properties", QT_TRANSLATE_NOOP("Command", "Name, opacity, blend mode and layer mask of the selected layer in one dialog"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Layer properties…")},
+        // #236: Edit > Paste as new layer (Ctrl+V while the view is the one in use: the Graph's own Ctrl+V pastes nodes), Paste as new
+        // canvas, and Canvas > Place picture….
+        {"canvas-view.paste-layer", QT_TRANSLATE_NOOP("Command", "Paste the clipboard's picture as a new layer, centered in the view (one undo step)"), {"Ctrl+V"}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Paste as new layer")},
+        {"canvas-view.paste-canvas", QT_TRANSLATE_NOOP("Command", "Make a new canvas of the clipboard's picture"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Paste as new canvas")},
+        {"canvas-view.place-picture", QT_TRANSLATE_NOOP("Command", "Place a picture file on the canvas as a new layer (one undo step)"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Place picture…")},
+        // #236: Layer > Transform: flip and quarter turns of the current layer, each one revision.
+        {"canvas-view.flip-horizontal", QT_TRANSLATE_NOOP("Command", "Flip the current layer left to right about its center (one undo step)"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Flip horizontal")},
+        {"canvas-view.flip-vertical", QT_TRANSLATE_NOOP("Command", "Flip the current layer top to bottom about its center (one undo step)"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Flip vertical")},
+        {"canvas-view.turn-clockwise", QT_TRANSLATE_NOOP("Command", "Turn the current layer a quarter turn clockwise (one undo step)"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Rotate 90° clockwise")},
+        {"canvas-view.turn-counterclockwise", QT_TRANSLATE_NOOP("Command", "Turn the current layer a quarter turn counterclockwise (one undo step)"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Rotate 90° counterclockwise")},
         {"canvas-view.fit", QT_TRANSLATE_NOOP("Command", "Fit the picture in the view"), {}, {"Home or 0"}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Fit")},
         {"canvas-view.actual-size", QT_TRANSLATE_NOOP("Command", "Show the picture at 100%"), {}, {"1"}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "100%")},
         {"canvas-view.zoom-in", QT_TRANSLATE_NOOP("Command", "Zoom in the picture"), {}, {"+"}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Zoom in")},

@@ -54,9 +54,9 @@ struct TileUse {
 };
 std::vector<TileUse> tilesOf(const Tree &tree) {
     std::vector<TileUse> uses;
-    const auto add = [&](const TileMap &tiles, int channels) {
+    const auto add = [&](const TileMap &tiles, int channels, int width = -1, int height = -1) {
         for (const auto &[key, hash] : tiles) {
-            const mask::IRect rect = tileRect(key, tree.width, tree.height);
+            const mask::IRect rect = tileRect(key, width < 0 ? tree.width : width, height < 0 ? tree.height : height);
             uses.push_back({hash, rect.width, rect.height, channels});
         }
     };
@@ -64,6 +64,10 @@ std::vector<TileUse> tilesOf(const Tree &tree) {
     const std::function<void(const LayerRecord &)> walk = [&](const LayerRecord &layer) {
         add(layer.tiles, layer.channels());
         add(layer.maskTiles, 1);
+        if (layer.source) { // the original of a placed or transformed layer travels with the canvas (#236)
+            add(layer.source->tiles, 4, layer.source->width, layer.source->height);
+            add(layer.source->maskTiles, 1, layer.source->width, layer.source->height);
+        }
         for (const LayerRecord &child : layer.children)
             walk(child);
     };

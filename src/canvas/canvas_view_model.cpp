@@ -1,14 +1,21 @@
 #include "canvas/canvas_view_model.h"
 
+#include <QClipboard>
 #include <QDateTime>
+#include <QGuiApplication>
+#include <QMimeData>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QUrl>
 #include <QLocale>
 #include <QPointer>
 #include <QUndoStack>
 
 #include <algorithm>
+#include <cmath>
 
+#include "canvas/picture_import.h"
 #include "canvas/region_pick.h"
 #include "canvas/snap.h"
 
@@ -200,6 +207,55 @@ QString CanvasViewModel::stepName(const QString &revisionId) {
             name = added.size() == 1 ? tr("Grouped: %1").arg(added.first()) : tr("Grouped");
         else if (producer == QLatin1String("canvas-view:ungroup") || producer == QLatin1String("canvas-cli:ungroup"))
             name = removed.size() == 1 ? tr("Ungrouped: %1").arg(removed.first()) : tr("Ungrouped");
+        else if (producer == QLatin1String("canvas-view:transform")) {
+            // The layer whose placement changed, and in what way: moved, scaled, turned, mirrored, or several of them.
+            QString changed;
+            enum { Moved, Scaled, Rotated, Flipped, Resampled, Several };
+            QList<int> how;
+            for (size_t i = 0; i < now.size() && i < was.size() && changed.isEmpty(); ++i) {
+                if (now[i] == was[i])
+                    continue;
+                changed = now[i].name;
+                if (!now[i].source)
+                    break;
+                const canvas::LayerTransform &after = now[i].source->transform;
+                if (!was[i].source || !canvas::hasCurrentOriginal(was[i])) {
+                    // The first one, from the layer's own pixels: what it was before is the original's size at no turn.
+                    if (after.flipX || after.flipY)
+                        how << Flipped;
+                    else if (after.angle != 0)
+                        how << Rotated;
+                    if (after.width != now[i].source->width || after.height != now[i].source->height)
+                        how << Scaled;
+                    if (how.isEmpty())
+                        how << Moved;
+                    break;
+                }
+                const canvas::LayerTransform &before = was[i].source->transform;
+                if (before.flipX != after.flipX || before.flipY != after.flipY)
+                    how << Flipped;
+                else if (before.angle != after.angle)
+                    how << Rotated;
+                if (before.width != after.width || before.height != after.height)
+                    how << Scaled;
+                if (before.cx != after.cx || before.cy != after.cy)
+                    how << Moved;
+                if (before.filter != after.filter)
+                    how << Resampled;
+            }
+            if (changed.isEmpty())
+                name = tr("Layer transformed");
+            else if (how.size() != 1)
+                name = tr("Layer transformed: %1").arg(changed);
+            else
+                name = how.first() == Moved ? tr("Layer moved: %1").arg(changed)
+                       : how.first() == Scaled ? tr("Layer scaled: %1").arg(changed)
+                       : how.first() == Rotated ? tr("Layer rotated: %1").arg(changed)
+                       : how.first() == Flipped ? tr("Layer flipped: %1").arg(changed)
+                       : how.first() == Resampled ? tr("Layer resampled: %1").arg(changed) : tr("Layer transformed: %1").arg(changed);
+        }
+        else if (producer == QLatin1String("canvas-view:paste"))
+            name = added.size() == 1 ? tr("Layer pasted: %1").arg(added.first()) : tr("Layer pasted");
         else if (producer == QLatin1String("canvas-view:properties")) {
             // The layer the dialog changed: the first one that differs (its new name when it was renamed).
             QString changed;
@@ -272,6 +328,8 @@ void CanvasViewModel::setFollowNode(const QString &node) {
 }
 
 QUrl CanvasViewModel::pictureSource() const {
+    if (m_xPosition >= 0 && !m_xBase.isEmpty() && m_xOf == revisionB())
+        return m_xBase;
     if (m_solo >= 0 && !m_soloSource.isEmpty())
         return m_soloSource;
     return sourceB();
@@ -508,6 +566,7 @@ void CanvasViewModel::rebuildLayers() {
     m_layers.clear();
     m_canUndo = m_canRedo = false;
     if (!sameRevision) {
+        endTransform(); // a transform in progress was of the revision before
         m_solo = -1;
         m_soloSource = QUrl();
     }
@@ -649,6 +708,253 @@ bool CanvasViewModel::applyEdit(const canvas::LayerEdit &edit, const QList<int> 
     if (!layersEditable())
         return false;
     return land(store().editLayers(canvasId(), revisionB(), edit, QStringLiteral("canvas-view:") + canvas::layerOpName(edit.op)), select);
+}
+
+bool CanvasViewModel::placePicture(const mask::MaskPaint &picture, double cx, double cy, const QString &name) {
+    if (!layersEditable())
+        return false;
+    commitMask(); // the strokes painted so far are a step of their own, before this one
+    if (!layersEditable())
+        return false;
+    const QSize size = pictureSize();
+    // Above the current layer (the last one picked), else on top.
+    const int above = m_selected.isEmpty() ? -1 : m_selected.last();
+    const int next = above < 0 ? int(m_layers.size()) : above + 1;
+    return land(store().pasteLayer(canvasId(), revisionB(), picture, cx < 0 ? size.width() / 2.0 : cx, cy < 0 ? size.height() / 2.0 : cy, above, name,
+                                   QStringLiteral("canvas-view:paste")),
+                {next});
+}
+
+Result<canvas::CurrentPlacement> CanvasViewModel::placementOf(int position, QString *why) const {
+    why->clear();
+    if (!layersEditable()) {
+        *why = tr("Go to the latest version to change a layer.");
+        return Result<canvas::CurrentPlacement>(makeError(QStringLiteral("input_invalid"), *why));
+    }
+    const canvas::CanvasStore s = store();
+    const Result<canvas::Tree> tree = s.loadTree(canvasId(), revisionB());
+    if (!tree) {
+        *why = tr("The canvas could not be read.");
+        return Result<canvas::CurrentPlacement>(tree.errors());
+    }
+    if (position < 0 || position >= int(tree->layers.size())) {
+        *why = tr("There is no such layer.");
+        return Result<canvas::CurrentPlacement>(makeError(QStringLiteral("input_invalid"), *why));
+    }
+    const canvas::LayerRecord &layer = tree->layers[size_t(position)];
+    if (layer.group || layer.kind != mask::LayerKind::Paint) {
+        *why = layer.group ? tr("A group cannot be moved or transformed: do it on its layers, or merge it into one layer first.")
+                           : tr("Only a paint layer can be moved or transformed.");
+        return Result<canvas::CurrentPlacement>(makeError(QStringLiteral("input_invalid"), *why));
+    }
+    const Result<canvas::CurrentPlacement> placement = canvas::currentPlacement(layer, tree->width, tree->height, [&s](const QString &hash, int w, int h, int c) { return s.tilePixels(hash, w, h, c); });
+    if (!placement) {
+        *why = tr("%1 has no pixels to move or transform: it is empty.").arg(layer.name);
+        return placement;
+    }
+    return placement;
+}
+
+QVariantMap CanvasViewModel::layerBox(int position) const {
+    QString why;
+    const Result<canvas::CurrentPlacement> placement = placementOf(position, &why);
+    if (!placement)
+        return QVariantMap{{"valid", false}, {"reason", why}};
+    const canvas::LayerTransform &t = placement->transform;
+    const double w = std::round(t.width), h = std::round(t.height);
+    const double a = t.angle * M_PI / 180.0, c = std::cos(a), sn = std::sin(a);
+    QVariantList corners;
+    for (const auto &[dx, dy] : {std::pair{-w / 2, -h / 2}, std::pair{w / 2, -h / 2}, std::pair{w / 2, h / 2}, std::pair{-w / 2, h / 2}})
+        corners.append(QVariantMap{{"x", t.cx + dx * c - dy * sn}, {"y", t.cy + dx * sn + dy * c}});
+    return QVariantMap{{"valid", true}, {"reason", QString()}, {"original", placement->original}, {"x", t.cx - w / 2}, {"y", t.cy - h / 2}, {"width", w}, {"height", h},
+                       {"cx", t.cx}, {"cy", t.cy}, {"angle", t.angle}, {"flipX", t.flipX}, {"flipY", t.flipY}, {"filter", canvas::filterName(t.filter)},
+                       {"sourceWidth", placement->sourceWidth}, {"sourceHeight", placement->sourceHeight}, {"corners", corners}};
+}
+
+bool CanvasViewModel::applyTransform(int position, const canvas::LayerTransform &placement, const canvas::CurrentPlacement &seen) {
+    if (!layersEditable())
+        return false;
+    // `seen` is the placement the caller worked from; the store refuses when the layer is no longer that (a stale guard).
+    const canvas::SeenPlacement guard{seen.transform, seen.original, seen.sourceWidth, seen.sourceHeight};
+    return land(store().transformLayer(canvasId(), revisionB(), position, placement, QStringLiteral("canvas-view:transform"), &guard), {position});
+}
+
+bool CanvasViewModel::beginTransform(int position) {
+    commitMask(); // the box is of the revision after any stroke not stored yet
+    QString why;
+    const Result<canvas::CurrentPlacement> now = placementOf(position, &why);
+    if (!now) {
+        fail({makeError(QStringLiteral("input_invalid"), why)});
+        return false;
+    }
+    const QString rev = revisionB();
+    if (m_xPosition == position && m_xOf == rev)
+        return true;
+    const canvas::CanvasStore s = store();
+    const Result<canvas::Tree> tree = s.loadTree(canvasId(), rev);
+    if (!tree)
+        return false;
+    const canvas::LayerRecord &layer = tree->layers[size_t(position)];
+    const QString imagePath = m_folder.filePath(QStringLiteral("xf-layer-%1-%2.png").arg(hexOf(rev)).arg(position));
+    const QString basePath = m_folder.filePath(QStringLiteral("xf-base-%1-%2.png").arg(hexOf(rev)).arg(position));
+    const auto write = [](const QString &path, const Result<QByteArray> &png) {
+        QFile file(path);
+        return png && file.open(QIODevice::WriteOnly) && file.write(png.value()) == png->size();
+    };
+    const canvas::TileReader read = [&s](const QString &hash, int w, int h, int c) { return s.tilePixels(hash, w, h, c); };
+    if (!QFile::exists(imagePath)) {
+        // The layer's original: its kept pixels while they are current, else its own pixels cut to their bounds.
+        Result<mask::MaskPaint> pixels = Result<mask::MaskPaint>(makeError(QStringLiteral("internal"), QStringLiteral("no layer")));
+        if (canvas::hasCurrentOriginal(layer)) {
+            const canvas::LayerSource &origin = *layer.source;
+            pixels = canvas::assembleLayer(origin.width, origin.height, 4, origin.tiles, [&](const canvas::TileKey &key, const QString &hash) {
+                const mask::IRect rect = canvas::tileRect(key, origin.width, origin.height);
+                return read(hash, rect.width, rect.height, 4);
+            });
+        } else {
+            Result<canvas::LayerContent> content = canvas::contentOf(layer, tree->width, tree->height, read);
+            if (!content) {
+                fail(content.errors());
+                return false;
+            }
+            pixels = std::move(content->pixels);
+        }
+        if (!pixels || !write(imagePath, pixels->toPng(1))) {
+            fail({makeError(QStringLiteral("internal"), tr("The layer could not be read."))});
+            return false;
+        }
+    }
+    if (!QFile::exists(basePath)) {
+        Result<mask::PaintDocument> document = s.load(canvasId(), rev);
+        if (!document) {
+            fail(document.errors());
+            return false;
+        }
+        for (int i = 0; i < document->layerCount(); ++i)
+            if (i == position)
+                document->setVisible(document->layer(i).id, false);
+        if (!write(basePath, document->flattenToPng())) {
+            fail({makeError(QStringLiteral("internal"), tr("The picture could not be made."))});
+            return false;
+        }
+    }
+    m_xPosition = position;
+    m_xOf = rev;
+    m_xImage = QUrl::fromLocalFile(imagePath);
+    m_xBase = QUrl::fromLocalFile(basePath);
+    m_xOpacity = layer.opacity;
+    emit transformChanged();
+    emit pictureChanged();
+    return true;
+}
+
+void CanvasViewModel::endTransform() {
+    if (m_xPosition < 0)
+        return;
+    m_xPosition = -1;
+    m_xImage = m_xBase = QUrl();
+    m_xOf.clear();
+    emit transformChanged();
+    emit pictureChanged();
+}
+
+bool CanvasViewModel::transformLayer(int position, const QVariantMap &spec) {
+    commitMask(); // a stroke not stored yet is a revision of its own: the placement below is read from the revision after it
+    QString why;
+    const Result<canvas::CurrentPlacement> now = placementOf(position, &why);
+    if (!now) {
+        fail({makeError(QStringLiteral("input_invalid"), why)});
+        return false;
+    }
+    canvas::LayerTransform t = now->transform;
+    const auto number = [&spec](const char *key, double *to) {
+        if (spec.contains(QLatin1String(key)))
+            *to = spec.value(QLatin1String(key)).toDouble();
+    };
+    number("cx", &t.cx);
+    number("cy", &t.cy);
+    number("width", &t.width);
+    number("height", &t.height);
+    number("angle", &t.angle);
+    if (spec.contains("flipX"))
+        t.flipX = spec.value("flipX").toBool();
+    if (spec.contains("flipY"))
+        t.flipY = spec.value("flipY").toBool();
+    if (spec.contains("filter") && !canvas::filterFromName(spec.value("filter").toString(), &t.filter)) {
+        fail({makeError(QStringLiteral("input_invalid"), tr("The resampling is Lanczos, Bicubic or Nearest."))});
+        return false;
+    }
+    if (const QString problem = canvas::transformProblem(t); !problem.isEmpty()) {
+        fail({makeError(QStringLiteral("input_invalid"), tr("The layer cannot be placed there: %1").arg(problem))});
+        return false;
+    }
+    return applyTransform(position, canvas::snappedToPixels(t), now.value());
+}
+
+bool CanvasViewModel::flipLayer(int position, bool horizontal) {
+    commitMask(); // a stroke not stored yet is a revision of its own: the placement below is read from the revision after it
+    QString why;
+    const Result<canvas::CurrentPlacement> now = placementOf(position, &why);
+    if (!now) {
+        fail({makeError(QStringLiteral("input_invalid"), why)});
+        return false;
+    }
+    return applyTransform(position, canvas::flippedOnScreen(now->transform, horizontal), now.value());
+}
+
+bool CanvasViewModel::turnLayer(int position, bool clockwise) {
+    commitMask(); // a stroke not stored yet is a revision of its own: the placement below is read from the revision after it
+    QString why;
+    const Result<canvas::CurrentPlacement> now = placementOf(position, &why);
+    if (!now) {
+        fail({makeError(QStringLiteral("input_invalid"), why)});
+        return false;
+    }
+    return applyTransform(position, canvas::turnedQuarter(now->transform, clockwise), now.value());
+}
+
+bool CanvasViewModel::moveLayerBy(int position, double dx, double dy) {
+    commitMask(); // a stroke not stored yet is a revision of its own: the placement below is read from the revision after it
+    QString why;
+    const Result<canvas::CurrentPlacement> now = placementOf(position, &why);
+    if (!now) {
+        fail({makeError(QStringLiteral("input_invalid"), why)});
+        return false;
+    }
+    canvas::LayerTransform t = now->transform;
+    t.cx += std::round(dx);
+    t.cy += std::round(dy);
+    return applyTransform(position, t, now.value());
+}
+
+bool CanvasViewModel::clipboardHasPicture() const {
+    const QClipboard *board = QGuiApplication::instance() ? QGuiApplication::clipboard() : nullptr;
+    return board && board->mimeData() && board->mimeData()->hasImage();
+}
+
+bool CanvasViewModel::pasteLayer(double cx, double cy) {
+    if (!layersEditable())
+        return false;
+    const ImportedPicture picture = pictureFromClipboard();
+    if (!picture.ok()) {
+        fail({makeError(QStringLiteral("input_invalid"), picture.problem)});
+        return false;
+    }
+    return placePicture(picture.pixels, cx, cy, {});
+}
+
+bool CanvasViewModel::isPictureFile(const QString &pathOrUrl) const { return fugue::isPictureFile(pathOrUrl); }
+
+bool CanvasViewModel::placeFile(const QString &pathOrUrl, double cx, double cy) {
+    if (!layersEditable())
+        return false;
+    const ImportedPicture picture = pictureFromFile(pathOrUrl);
+    if (!picture.ok()) {
+        fail({makeError(QStringLiteral("input_invalid"), picture.problem)});
+        return false;
+    }
+    const QUrl url(pathOrUrl);
+    return placePicture(picture.pixels, cx, cy, QFileInfo(url.isLocalFile() ? url.toLocalFile() : pathOrUrl).completeBaseName());
 }
 
 bool CanvasViewModel::land(const Result<canvas::Commit> &done, const QList<int> &select) {

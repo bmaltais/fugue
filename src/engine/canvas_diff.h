@@ -23,7 +23,7 @@ struct LayerDiff {
     mask::IRect bounds;        // the pixels those tiles cover (whole tiles); empty (0 x 0) when none. tightenBounds narrows it to the pixels that differ.
     std::vector<TileKey> changedTiles; // the tiles counted in tilesChanged
     int indexA = -1, indexB = -1;      // the layer's place in a and in b (-1: not there)
-    QStringList properties;    // for a changed layer: "name" (a rename: same kind and pixels), "kind", "visible", "opacity", "blend", "mask"
+    QStringList properties;    // for a changed layer: "name" (a rename: same kind and pixels), "kind", "visible", "opacity", "blend", "mask", "placement" (#236: the original or its placement changed with the same pixels)
 };
 
 struct TreeDiff {

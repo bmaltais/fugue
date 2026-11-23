@@ -157,7 +157,10 @@ public:
     static Result<MaskPaint> fromPng(const QByteArray &bytes);
     // Any picture libvips reads as a four-channel buffer (gray and RGB get an opaque alpha, 16-bit is
     // scaled to 8).
-    static Result<MaskPaint> fromPicture(const QByteArray &bytes);
+    // `maxPixels` is a cap read from the picture's header, before anything is decoded: a larger picture is media_unreadable.
+    static Result<MaskPaint> fromPicture(const QByteArray &bytes, qint64 maxPixels = 268435456);
+    // The size a picture's header gives, nothing decoded; false for bytes libvips cannot read as a picture.
+    static bool pictureSize(const QByteArray &bytes, int *width, int *height);
     // The buffer at another size, bilinear (pixel centers; a color buffer's channels are not premultiplied).
     MaskPaint scaled(int width, int height) const;
 

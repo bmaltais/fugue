@@ -47,6 +47,7 @@
 #include "canvas/canvas_history.h"
 #include "canvas/mask_layer.h"
 #include "engine/canvas_layer_ops.h"
+#include "engine/canvas_transform.h"
 #include "canvas/widget_edit.h"
 
 namespace fugue {
@@ -82,6 +83,10 @@ class CanvasViewModel : public CanvasHistory {
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY layersChanged)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY layersChanged)
     Q_PROPERTY(int solo READ solo WRITE setSolo NOTIFY layersChanged)
+    // A Move or Free Transform in progress (#236): see the header.
+    Q_PROPERTY(bool transforming READ transforming NOTIFY transformChanged)
+    Q_PROPERTY(QUrl transformImage READ transformImage NOTIFY transformChanged)
+    Q_PROPERTY(double transformOpacity READ transformOpacity NOTIFY transformChanged)
     // The mask brush (#230): see the header.
     Q_PROPERTY(fugue::MaskLayer *maskLayer READ maskLayer WRITE setMaskLayer NOTIFY maskChanged)
     Q_PROPERTY(int maskTarget READ maskTarget NOTIFY maskChanged)
@@ -154,6 +159,39 @@ public:
     Q_INVOKABLE bool groupLayers(const QVariantList &positions);
     Q_INVOKABLE bool ungroup(const QVariantList &positions);
     Q_INVOKABLE bool setProperties(int position, const QVariantMap &changes);
+    // #236, Edit > Paste as new layer and a picture file dropped on the view: the picture (untrusted: canvas/picture_import.h) goes on the
+    // Head as a new layer right above the current one (on top when none), centered on (`cx`, `cy`) canvas pixels (a negative
+    // `cx` or `cy`: the canvas's center), named "Pasted N" (a file: its name). It is kept whole as the layer's original, so a
+    // picture bigger than the canvas can be scaled down later. ONE revision, producer `canvas-view:paste`, history "Layer
+    // pasted: <name>". False, with `error` in words, when nothing could be placed (no picture, too large, not the Head).
+    Q_INVOKABLE bool pasteLayer(double cx = -1, double cy = -1);
+    // Whether the clipboard holds a picture (else Ctrl+V over this view is the Graph's: it pastes nodes).
+    Q_INVOKABLE bool clipboardHasPicture() const;
+    Q_INVOKABLE bool placeFile(const QString &pathOrUrl, double cx = -1, double cy = -1);
+    // Whether a dragged file is one placeFile reads (a drop takes only pictures; the window's own drop keeps the rest).
+    Q_INVOKABLE bool isPictureFile(const QString &pathOrUrl) const;
+    // #236, Move and Free Transform, Layer > Transform: the layer at `position` placed anew from its original (engine/canvas_transform.h).
+    // `layerBox` says where it is now: {valid, reason, original (an original is kept: a pasted or transformed layer), x, y, width, height
+    // (the box before it is turned: the original scaled), cx, cy (its center), angle (degrees clockwise), flipX, flipY, filter
+    // ("lanczos", "bicubic" or "nearest"), sourceWidth, sourceHeight, corners [{x, y} x4: top left, top right, bottom right, bottom left,
+    // as drawn]}; a layer with no original is its pixels' bounds. Not valid (`reason` in words): a group, a mask or picture layer, an empty
+    // layer, or not the Head shown. `transformLayer` takes {cx, cy, width, height, angle, flipX, flipY, filter} (any left out stays as it
+    // is) and makes ONE revision, producer `canvas-view:transform`, History "Layer moved/scaled/rotated/flipped/transformed: <name>".
+    // `flipLayer` mirrors on screen about the box's center, `turnLayer` a quarter turn, `moveLayerBy` shifts by whole pixels.
+    Q_INVOKABLE QVariantMap layerBox(int position) const;
+    Q_INVOKABLE bool transformLayer(int position, const QVariantMap &placement);
+    Q_INVOKABLE bool flipLayer(int position, bool horizontal);
+    Q_INVOKABLE bool turnLayer(int position, bool clockwise);
+    Q_INVOKABLE bool moveLayerBy(int position, double dx, double dy);
+    // While a layer is dragged or Free Transform is open the picture shows the canvas WITHOUT that layer (`pictureSource`) and the view
+    // draws the layer's original (`transformImage`, at `transformOpacity`) at the placement being made, so nothing is stored until it is
+    // committed (transformLayer). beginTransform makes both pictures (once per revision and layer; false, with `error`, when the layer
+    // cannot be transformed); endTransform drops them. A change of canvas or revision ends it too.
+    Q_INVOKABLE bool beginTransform(int position);
+    Q_INVOKABLE void endTransform();
+    bool transforming() const { return m_xPosition >= 0; }
+    QUrl transformImage() const { return m_xImage; }
+    double transformOpacity() const { return m_xOpacity; }
     // Empties the canvas (File > Clear canvas): ONE new revision of the Head, the same size, one empty layer; Undo takes it
     // back. False when the Head is not what is shown.
     Q_INVOKABLE bool clearCanvas();
@@ -216,10 +254,16 @@ signals:
     void headNoticeChanged();
     void layersChanged();
     void maskChanged();
+    void transformChanged();
 
 private:
     // Stores the edit on the shown head and moves the view to it, with `select` as the selection there.
     bool applyEdit(const canvas::LayerEdit &edit, const QList<int> &select);
+    // A picture placed as a layer (pasteLayer, placeFile).
+    bool placePicture(const mask::MaskPaint &picture, double cx, double cy, const QString &name);
+    // The placement of the layer at `position` of the shown revision (an empty `why` when it can be moved).
+    Result<canvas::CurrentPlacement> placementOf(int position, QString *why) const;
+    bool applyTransform(int position, const canvas::LayerTransform &placement, const canvas::CurrentPlacement &seen);
     // A stored edit: the view moves on to it (false, with `error`, when it did not land).
     bool land(const Result<canvas::Commit> &done, const QList<int> &select);
     // The target's mask read again from the shown revision when it is another one (an undo, a run's layer).
@@ -258,6 +302,10 @@ private:
     bool m_canRedo = false;
     int m_solo = -1;
     QUrl m_soloSource;
+    int m_xPosition = -1;   // the layer being transformed (a position), -1: none
+    QUrl m_xImage, m_xBase; // its original, and the canvas without it
+    double m_xOpacity = 1;
+    QString m_xOf;          // the revision they were made for
     QPointer<MaskLayer> m_maskLayer;
     int m_maskTarget = -1;
     QString m_maskOf; // the revision whose mask `m_maskLayer` holds

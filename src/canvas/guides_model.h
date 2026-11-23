@@ -74,6 +74,9 @@ public:
     Q_INVOKABLE QVariantMap snapRect(const QVariantMap &rect, bool keepSize, const QVariantMap &options) const;
     // `point` is {x, y}; answers {x, y}.
     Q_INVOKABLE QVariantMap snapPoint(const QVariantMap &point, const QVariantMap &options) const;
+    // The same lines for a rectangle that may stick out of the canvas (a layer being moved, #236): not clamped or rounded; `rect` and the answer are
+    // {x, y, width, height}. `keepSize` pulls the rectangle by the nearest of its edges and middle; otherwise each edge on its own.
+    Q_INVOKABLE QVariantMap snapFloating(const QVariantMap &rect, bool keepSize, const QVariantMap &options) const;
     // The targets `options` ask for, for a caller that works on plain structs.
     snap::Targets targets(const QVariantMap &options) const;
 

@@ -92,6 +92,17 @@ inline QString prepareLook(const QTemporaryDir &dir, const Look &look) {
 }
 
 struct App {
+    // Declared first, so destroyed last: once the engine and everything it made are gone, the events they left behind (deferred deletes,
+    // timers) are run before the next test builds its own engine. Back to back, the QML of a new window was seen to be made while the
+    // last one's leftovers ran, and a Question or the theme read from it came back empty, under load (docs: tests/canvas/canvas_app.h).
+    struct SettleAfterTeardown {
+        ~SettleAfterTeardown() {
+            for (int i = 0; i < 4; ++i) {
+                QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+                QTest::qWait(10);
+            }
+        }
+    } settleAfterTeardown; // first member: destroyed last
     QTemporaryDir dir;
     QString hyprctl;
     Translator translator{dir.path() + "/language"};
@@ -125,8 +136,10 @@ struct App {
     // The window's areas (#217), their layout kept in the test's own folder.
     fugue::Workspace workspace{dir.path() + "/workspaces.json"};
     fugue::ActiveCanvas activeCanvas; // the canvas last used in a Canvas view (#246)
-    QQmlApplicationEngine engine;
+    // Before the engine, so it outlives it: the engine's teardown can still warn, into this list (declared after it, the list was
+    // destroyed first and the warning wrote into freed memory, a heap corruption that surfaced as an abort or a 300 s hang).
     QStringList warnings;
+    QQmlApplicationEngine engine;
     QList<QUrl> openedUrls; // what help.docs and help.report-issue opened
     QQuickWindow *window = nullptr;
     QQuickItem *canvas = nullptr;

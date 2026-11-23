@@ -119,6 +119,34 @@ private slots:
         QCOMPARE(shared, 3); // 512 px is four tiles of 256; the strokes touched one
     }
 
+    // #236: a transform asked for while a mask stroke is not stored yet puts the stroke in its own revision FIRST, and is worked out on the
+    // revision after it (never read from one and applied to another, which would draw it twice or stale).
+    void aTransformAfterAPendingMaskStrokeIsWorkedOutOnTheRevisionAfterIt() {
+        CanvasViewModel model;
+        MaskLayer layer;
+        open(model, layer);
+        QVERIFY(model.moveLayerBy(1, 10, 0)); // the layer gets an original and a placement
+        QVERIFY(model.addMask(1));            // a mask: its original is not current any more
+        model.setMaskIdle(5000);
+        stroke(layer, 20, 20, 80, 30, true);
+        model.maskPainted();
+        QVERIFY(model.maskPending());
+        const int before = revisionCount();
+        QVERIFY(model.turnLayer(1, true));
+        QVERIFY(!model.maskPending());
+        QCOMPARE(revisionCount(), before + 2); // the stroke, then the turn
+        const auto head = store().info(m_canvas)->head;
+        const auto parent = store().revision(m_canvas, head)->parent;
+        QCOMPARE(store().revision(m_canvas, head)->producer, QString("canvas-view:transform"));
+        QCOMPARE(store().revision(m_canvas, parent)->producer, QString("canvas-view:mask-paint"));
+        // Turned once, from the layer as it was after the stroke (its mask has the stroke).
+        const canvas::LayerRecord layerNow = top();
+        QCOMPARE(layerNow.source->transform.angle, 90.0);
+        QVERIFY(canvas::hasCurrentOriginal(layerNow));
+        QVERIFY(layerNow.source->hasMask);
+        QVERIFY(!layerNow.source->maskTiles.empty());
+    }
+
     void undoGoesBackOneRevisionAndReadsTheMaskAgain() {
         CanvasViewModel model;
         MaskLayer layer;
