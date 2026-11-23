@@ -352,7 +352,8 @@ private slots:
         canvas.setDocument(document(threeNodes));
         QSignalSpy linkChanges(canvas.links(), &QAbstractItemModel::dataChanged);
         QSignalSpy nodeChanges(canvas.nodes(), &QAbstractItemModel::dataChanged);
-        canvas.beginMove("save");
+        canvas.beginMove("save"); // raises the node (its stack role): not a move's change
+        nodeChanges.clear();
         canvas.moveBy(10, -20);
         QCOMPARE(nodeChanges.count(), 1);
         QCOMPARE(linkChanges.count(), 1);
@@ -382,6 +383,29 @@ private slots:
         canvas.moveBy(1, 1);
         canvas.endMove();
         QCOMPARE(canvas.position("gen"), QPointF(305, 85));
+    }
+
+    // Overlapping nodes: the one selected or moved last comes to the front, also when it was already selected.
+    void aSelectedOrMovedNodeComesToTheFront() {
+        CanvasModel canvas(&m_registry);
+        canvas.setDocument(document(threeNodes));
+        const auto stack = [&](const QString &id) { return node(canvas, id).value("stack").toInt(); };
+        QCOMPARE(stack("gen"), 0);
+        canvas.select({"gen"});
+        canvas.select({"save"});
+        QVERIFY(stack("save") > stack("gen"));
+        canvas.select({"gen"});
+        QVERIFY(stack("gen") > stack("save"));
+        // Pressing a node of a selection of two and dragging it raises that one.
+        canvas.select({"gen", "save"});
+        canvas.beginMove("save");
+        canvas.endMove();
+        QVERIFY(stack("save") > stack("gen"));
+        // Taking a node out of the selection raises nothing.
+        const int top = stack("save");
+        canvas.select({"gen"}, "subtract");
+        QCOMPARE(stack("save"), top);
+        QCOMPARE(stack("prompt"), 0);
     }
 
     void selectAddsSubtractsAndToggles() {

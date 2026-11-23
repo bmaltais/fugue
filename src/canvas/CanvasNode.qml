@@ -25,6 +25,7 @@ Item {
     required property bool collapsed
     required property string mode // "normal", "bypass" or "mute"
     required property bool selected
+    required property int stack // where it stands among overlapping nodes: the last selected or moved is on top
     required property var inputs
     required property var outputs
     required property string color // layout color: a theme role, or empty
@@ -47,6 +48,8 @@ Item {
     required property string updateAvailable // a group the library has a newer version of (5.3)
     required property string newerMajor // a node on an older installed major: the newest version to move to (3.6)
     required property int groupSize // a group instance: the nodes it holds (docs/canvas-look.md 9), else 0
+
+    z: stack // overlapping nodes: the one selected or moved last is in front
 
     // Set by the canvas.
     property CanvasModel canvasModel

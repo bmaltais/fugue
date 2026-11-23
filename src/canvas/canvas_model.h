@@ -139,6 +139,7 @@ public:
         UpdateAvailable, // a group whose library version is newer: that version (5.3), else empty
         GroupSize,       // a group instance: how many nodes its definition holds (its caption row), else 0
         NewerMajor,      // a node running on an older installed major: the newest version it can move to (3.6, #118), else empty
+        Stack,           // its place in the stacking order, session only: a node that was selected or moved last is the highest (the node's z)
     };
 
     explicit NodeList(CanvasModel *canvas);
@@ -699,6 +700,11 @@ private:
         QString header;       // the header's section name
         bool hidden = false;
     };
+    // Stacking order of nodes that overlap: raised when a node is selected or moved, not saved.
+    QHash<QString, int> m_stack;
+    int m_stackTop = 0;
+    void raise(const QString &node);
+
     struct NodeRow {
         QString id;
         QString title;

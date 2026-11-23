@@ -88,6 +88,7 @@ QVariant NodeList::data(const QModelIndex &index, int role) const {
     case UpdateAvailable: return m_canvas->updateAvailable(row.id);
     case GroupSize: return row.groupSize;
     case NewerMajor: return m_canvas->newerMajor(row.id);
+    case Stack: return m_canvas->m_stack.value(row.id, 0);
     default: break;
     }
     const CanvasModel::RunInfo run = m_canvas->m_run.value(row.id);
@@ -118,7 +119,7 @@ QHash<int, QByteArray> NodeList::roleNames() const {
             {Seconds, "seconds"}, {Error, "error"}, {Warnings, "warnings"}, {Thumbnail, "thumbnail"},
             {ThumbnailInfo, "thumbnailInfo"}, {ThumbnailFile, "thumbnailFile"}, {ThumbnailRect, "thumbnailRect"}, {ThumbnailText, "thumbnailText"}, {ThumbnailDim, "thumbnailDim"},
             {Compare, "compare"}, {CompareView, "compareView"}, {Media, "media"},
-            {Notice, "notice"}, {UpdateAvailable, "updateAvailable"}, {GroupSize, "groupSize"}, {NewerMajor, "newerMajor"}};
+            {Notice, "notice"}, {UpdateAvailable, "updateAvailable"}, {GroupSize, "groupSize"}, {NewerMajor, "newerMajor"}, {Stack, "stack"}};
 }
 
 LinkList::LinkList(CanvasModel *canvas) : QAbstractListModel(canvas), m_canvas(canvas) {}
@@ -1562,6 +1563,7 @@ void CanvasModel::beginMove(const QString &node) {
     beginEdit();
     m_moveOpen = true;
     startMoving(m_selected.contains(node) ? selectedIds() : QStringList{node});
+    raise(node);
 }
 
 QStringList CanvasModel::startMoving(const QStringList &ids) {
@@ -1653,6 +1655,15 @@ QPointF CanvasModel::position(const QString &node) const {
     return r < 0 ? QPointF() : m_rows[size_t(r)].pos;
 }
 
+// A node that overlaps another comes to the front when it is selected or moved, as a click on it asks for.
+void CanvasModel::raise(const QString &node) {
+    const int r = rowOf(node);
+    if (r < 0 || (m_stackTop > 0 && m_stack.value(node, 0) == m_stackTop))
+        return;
+    m_stack.insert(node, ++m_stackTop);
+    emitNodeChanged(r, {NodeList::Stack});
+}
+
 void CanvasModel::select(const QStringList &ids, const QString &mode) {
     const QSet<QString> before = m_selected;
     QSet<QString> given;
@@ -1671,6 +1682,11 @@ void CanvasModel::select(const QStringList &ids, const QString &mode) {
     const QSet<QString> changed = (before - m_selected) + (m_selected - before);
     for (const QString &id : changed)
         emitNodeChanged(rowOf(id), {NodeList::Selected});
+    // The last node given and now selected is the one on top (a click on one of several that overlap).
+    if (mode != QLatin1String("subtract"))
+        for (const QString &id : ids)
+            if (m_selected.contains(id))
+                raise(id);
     if (!changed.isEmpty())
         emit selectionChanged();
 }
