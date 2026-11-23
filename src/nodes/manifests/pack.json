@@ -66,6 +66,7 @@
     "stitch",
     "text",
     "text-concat",
+    "text-template",
     "text-encode",
     "text-generate",
     "threshold-mask",

@@ -241,7 +241,7 @@ private slots:
         for (int i = 0; i < 10; ++i)
             QTest::keyClick(app.window, Qt::Key_Backspace);
         typeText(app.window, "concat");
-        QTRY_COMPARE(app.search()->count(), 1);
+        QTRY_COMPARE(app.search()->count(), 2); // Text Concat and Text Template (keyword "concat")
         QTest::keyClick(app.window, Qt::Key_Return);
         QTRY_VERIFY(!app.popupOpen());
         QCOMPARE(app.model.links()->rowCount(), 1);
