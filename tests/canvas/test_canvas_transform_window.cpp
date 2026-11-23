@@ -277,9 +277,8 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(model(app), "groupLayers", Q_ARG(QVariantList, QVariantList{1})));
         QTRY_COMPARE(revisions(), 2);
         key(app, Qt::Key_T, Qt::ControlModifier);
-        QTest::qWait(100);
+        QTRY_VERIFY(model(app)->property("notice").toString().contains("paint layer"));
         QVERIFY(!view(app)->property("freeTransform").toBool());
-        QVERIFY(model(app)->property("notice").toString().contains("paint layer"));
         QCOMPARE(revisions(), 2);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
