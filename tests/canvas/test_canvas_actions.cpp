@@ -196,6 +196,41 @@ private slots:
         QCOMPARE(r.actions->history("test-fill"), QStringList{"a red umbrella"});
     }
 
+    // Expand (slice 7): an action on the canvas bounds grows the canvas first (one revision, one side, an "Expanded area" layer
+    // under the picture), then its Region reads the grown canvas at that revision: the new strip and the overlap.
+    void anActionOnTheBoundsGrowsTheCanvasThenFillsTheStrip() {
+        Rig r;
+        QByteArray expand = kTestFill;
+        expand.replace("\"selection\": \"required\"", "\"selection\": \"bounds\"").replace("Test fill", "Test expand");
+        r.addTemplate("lib-expand", expand);
+        QCOMPARE(r.row("lib-expand").value("selection").toString(), QStringLiteral("bounds"));
+        const auto size = [&](const QString &revision) {
+            const auto tree = store().tree(store().revision(m_canvas, revision)->tree);
+            return QSize(tree->width, tree->height);
+        };
+        QVariantMap request{{"action", "lib-expand"}, {"canvas", m_canvas}, {"revision", head()}, {"prompt", "more sky"}};
+        QVERIFY(!r.actions->generate(request).value("ok").toBool()); // no side asked for: nothing grows
+        QCOMPARE(size(head()), QSize(256, 256));
+        request.insert("expand", QVariantMap{{"side", "left"}, {"percent", 25}});
+        const QVariantMap started = r.actions->generate(request);
+        QVERIFY2(started.value("ok").toBool(), qPrintable(r.actions->error()));
+        QCOMPARE(size(head()), QSize(320, 256));
+        QCOMPARE(layers(head()), 2);
+        QCOMPARE(store().tree(store().revision(m_canvas, head())->tree)->layers.front().name, QStringLiteral("Expanded area"));
+        QTRY_COMPARE(r.jobs().size(), 1);
+        QFile workflow(r.app.dir.path() + "/runs/" + started.value("run").toString() + "/workflow.json");
+        QVERIFY(workflow.open(QIODevice::ReadOnly));
+        const QJsonObject region = QJsonDocument::fromJson(workflow.readAll()).object().value("graph").toObject()
+                                       .value("nodes").toObject().value("region").toObject().value("inputs").toObject();
+        QCOMPARE(region.value("revision").toString(), head()); // the grown canvas, not the one that was shown
+        QCOMPARE(region.value("x").toInt(), 0);
+        QCOMPARE(region.value("width").toInt(), 64 + 32); // the strip and the overlap
+        QCOMPARE(region.value("height").toInt(), 256);
+        QCOMPARE(region.value("padding").toInt(), 256);
+        r.actions->cancel();
+        QTRY_VERIFY(!r.actions->busy());
+    }
+
     void cancelEndsTheRunAndWritesNothing() {
         Rig r;
         QVERIFY(press(r).value("ok").toBool());
