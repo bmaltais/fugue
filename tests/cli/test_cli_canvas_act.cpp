@@ -223,6 +223,25 @@ private slots:
         QCOMPARE(fugue({"canvas", "act", id, grow, "--expand", "left", "--pixels", "32", "--wait", "--json"}).data().value("expanded").toObject().value("width").toInt(), 112);
     }
 
+    // An Expand that fails after the canvas grew takes the strip back (#310): the head returns to the revision before the growth, and the
+    // error says so. (A cancel is the same code; the bar's test covers it, a signal to the process is not worth a flaky test here.)
+    void aFailedExpandTakesTheGrowthBack() {
+        const QString id = canvas();
+        const QString before = fugue({"canvas", "show", id, "--json"}).data().value("revision").toString();
+        // A Write onto a layer that is not there fails after the growth.
+        QByteArray broken = kGrow;
+        broken.replace("\"blend\": 0,", "\"blend\": 0, \"onto\": \"Nowhere\",");
+        const Outcome ran = fugue({"canvas", "act", id, write("broken.fugue", broken), "--expand", "right", "--percent", "25", "--wait", "--json"});
+        QCOMPARE(ran.exitCode, 1);
+        QVERIFY2(ran.error().value("message").toString().contains("The canvas is back to its size"), ran.out + ran.err);
+        const Outcome shown = fugue({"canvas", "show", id, "--json"});
+        QCOMPARE(shown.data().value("width").toInt(), 64);
+        QCOMPARE(shown.data().value("revision").toString(), before);
+        // The growth revision is still in the history: Redo has it.
+        QCOMPARE(fugue({"canvas", "redo", id, "--json"}).exitCode, 0);
+        QCOMPARE(fugue({"canvas", "show", id, "--json"}).data().value("width").toInt(), 80);
+    }
+
     // A layer-role action works on the layer named by --layer (a name or a position), and says so when none is given.
     void aLayerActionTakesALayer() {
         const QString id = canvas();

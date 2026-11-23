@@ -508,7 +508,9 @@ model, FLUX.2 Klein 4B Q8, 4 steps, as Generative fill):
   side). Generate first grows the canvas (one step in History, Undo takes it back; the new area is pre-filled from the edge
   pixels as a layer called "Expanded area") and then fills the new strip plus 32 px of the old picture, with 256 px of the
   picture beside it in view. One side per run; the prompt is optional (a description of the whole scene helps). If the run
-  fails or is cancelled the canvas stays grown: Undo.
+  fails or is cancelled the growth is taken back (the head moves back to the revision before it, as Undo does, and the bar says
+  "The canvas is back to its size: Expand was cancelled."; Redo brings the growth back). When the canvas changed meanwhile (a
+  variation of Count landed, you edited it) it is left as it is. `fugue canvas act` does the same and says so in its error.
 
 - **Upscale** makes the whole picture (every visible layer, flattened, as it looks now) 2 or 4 times bigger and puts it on
   a **new canvas** named Upscaled (Upscaled 2 and so on when taken), which then opens; the canvas you came from is not

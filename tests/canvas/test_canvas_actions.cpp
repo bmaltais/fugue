@@ -267,6 +267,55 @@ private slots:
         QTRY_VERIFY(!r.actions->busy());
     }
 
+    // An Expand that is cancelled or fails after the canvas grew takes the empty strip back (#310): the head goes back to the revision
+    // before the growth (as Undo does; the growth revision stays in the history, Redo brings it back) and the bar says so. A head that
+    // moved meanwhile is left alone, and an action that did not grow anything is unaffected.
+    void anExpandThatIsCancelledOrFailsTakesTheGrowthBack() {
+        Rig r;
+        QByteArray expand = kTestFill;
+        expand.replace("\"selection\": \"required\"", "\"selection\": \"bounds\"").replace("Test fill", "Test expand");
+        r.addTemplate("lib-expand", expand);
+        const QVariantMap request{{"action", "lib-expand"}, {"canvas", m_canvas}, {"revision", head()}, {"prompt", "more sky"},
+                                  {"expand", QVariantMap{{"side", "left"}, {"percent", 25}}}};
+        const auto width = [&] { return store().tree(store().revision(m_canvas, head())->tree)->width; };
+        for (const bool cancel : {true, false}) {
+            const QString before = head();
+            const int jobs = int(r.jobs().size());
+            QVERIFY2(r.actions->generate(request).value("ok").toBool(), qPrintable(r.actions->error()));
+            const QString grown = head();
+            QVERIFY(grown != before);
+            QCOMPARE(width(), 320);
+            QTRY_COMPARE(r.jobs().size(), jobs + 1);
+            if (cancel)
+                r.actions->cancel();
+            else
+                r.onFake([&](FakeProvider &f) { f.fail(f.jobs().last(), makeError("out_of_memory", "CUDA out of memory.")); });
+            QTRY_VERIFY(!r.actions->busy());
+            QCOMPARE(head(), before);
+            QCOMPARE(width(), 256);
+            QVERIFY(bool(store().revision(m_canvas, grown))); // the growth stays in the history
+            QCOMPARE(store().redoTarget(m_canvas).value(), grown);
+            QVERIFY2(r.actions->notice().contains(cancel ? "was cancelled" : "did not finish"), qPrintable(r.actions->notice()));
+            QVERIFY(r.actions->notice().startsWith("The canvas is back to its size"));
+        }
+        // The head moved after the growth (a person edited the canvas): nothing is taken back.
+        const QString before = head();
+        QVERIFY(r.actions->generate(request).value("ok").toBool());
+        canvas::LayerEdit lock;
+        lock.op = canvas::LayerOp::Lock;
+        lock.layers = {0};
+        lock.flag = true;
+        const auto edited = store().editLayers(m_canvas, head(), lock, "test");
+        QVERIFY(edited && edited->move.moved);
+        QTRY_VERIFY(!r.jobs().isEmpty());
+        r.actions->cancel();
+        QTRY_VERIFY(!r.actions->busy());
+        QCOMPARE(head(), edited->revision.id);
+        QCOMPARE(width(), 320);
+        QVERIFY(r.actions->notice().isEmpty());
+        QVERIFY(head() != before);
+    }
+
     // The Advanced popover (slice 4): the rows are the block's inputs the bar has no field for; a value set through the form's
     // widgets, or a choice's word, is remembered per action and root and is what the next Generate's run gets.
     void theAdvancedPopoverListsTheBoundInputsAndRemembersTheirValues() {
@@ -421,6 +470,7 @@ private slots:
         QCOMPARE(r.actions->error(), QStringLiteral("Not enough GPU memory. Try a smaller selection."));
         QCOMPARE(r.actions->errorCode(), QStringLiteral("out_of_memory"));
         QCOMPARE(head(), m_head);
+        QVERIFY(r.actions->notice().isEmpty()); // nothing grew, so nothing is taken back
         QCOMPARE(CanvasActions::plainWords(makeError("mask_empty", "x"), "Fill"), QStringLiteral("The selection is empty. Draw one, then Generate."));
         QCOMPARE(CanvasActions::plainWords(makeError("capability_unavailable", "x"), "Generative fill"),
                  QStringLiteral("No model on this machine can run Generative fill."));

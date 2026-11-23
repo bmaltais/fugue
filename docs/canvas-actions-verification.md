@@ -50,6 +50,12 @@ noisy early-step picture of the plant. Works.
 - Refine "Restyle" barely changes anything at 4 steps.
 - Harmonize's default strength 1 was judged on one picture and 3 runs; the whole-picture path was run once at 1 and once at the old default.
 
+## Resolved afterwards (2026-11-23)
+
+- `--set model=<file name>` now resolves a model by its file name (#309).
+- A cancelled or failed Expand takes the growth back when the head is unchanged (#310, canvas-actions-design.md, Expand row).
+- Upscale's new canvas names its layer after the canvas, `Upscaled` (#311).
+
 ## Not run
 
 Remove Background (`--layer`), the pack is not installed. No window or task-bar run; this was only the CLI. A cancel was not tried while only waiting

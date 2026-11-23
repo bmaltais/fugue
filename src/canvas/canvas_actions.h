@@ -267,6 +267,10 @@ private:
     QVariantMap m_liveBox, m_liveClip;
     bool m_liveFade = false;
     void clearLive(bool fade);
+    // The growth an Expand made before its runs (#310): taken back when the last run ends cancelled or failed and the canvas is as the
+    // growth left it. `m_growEnd` is the first run's status that was not ok.
+    canvas::ActPlan m_grown;
+    QString m_growEnd;
     QHash<QString, QStringList> m_made; // per run, the canvases its Canvas New nodes made
     QHash<QString, QList<WriteResult>> m_writes; // per run, its Writes' landed revisions
     QHash<QString, Errors> m_nodeErrors;         // per run, its node errors so far

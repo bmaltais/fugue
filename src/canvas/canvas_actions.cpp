@@ -302,6 +302,13 @@ QVariantMap CanvasActions::generate(const QVariantMap &request) {
             m_errorAction = id;
         return refuse(plan.error().message);
     }
+    m_grown = {};
+    m_growEnd.clear();
+    if (plan->grew) {
+        m_grown.canvas = plan->canvas;
+        m_grown.grew = true;
+        m_grown.growRevision = plan->growRevision;
+    }
     QStringList started;
     for (const Document &bound : plan->runs) {
         RunRequest run;
@@ -445,6 +452,15 @@ void CanvasActions::endRun(const QString &run, const QString &status, const Erro
         // A missing model offers the download; nothing else does.
         setError(plainWords(first, m_actionName), first.code, cannotRunNow(first.code) ? m_action : QString());
         cancel(); // the rest of a Count N would fail the same way: one Generate ends as one
+    }
+    if (m_grown.grew && status != QLatin1String("ok") && m_growEnd.isEmpty())
+        m_growEnd = status;
+    if (m_grown.grew && m_runs.isEmpty()) {
+        // The last run of this Generate ended: an Expand that did not write anything takes its empty strip back.
+        if (!m_growEnd.isEmpty() && canvas::takeBackGrowth(m_grown))
+            m_notice = canvas::growthTakenBack(m_actionName, m_growEnd == QLatin1String("cancelled"));
+        m_grown = {};
+        m_growEnd.clear();
     }
     emit stateChanged();
     emit progressChanged();

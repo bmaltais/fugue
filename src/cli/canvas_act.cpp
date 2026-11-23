@@ -416,6 +416,7 @@ Reply canvasAct(const Command &command, Context &context) {
         if (!folder) {
             for (const RunFolder &started : std::as_const(runs))
                 cancelBound(started, context);
+            canvas::takeBackGrowth(plan.value());
             return Reply::failure(folder.errors());
         }
         runs.append(folder.value());
@@ -492,6 +493,11 @@ Reply canvasAct(const Command &command, Context &context) {
             cancelBound(runs.at(rest), context);
         break;
     }
+    // An Expand that was cancelled or failed after the canvas grew: the empty strip is taken back when nothing else changed the canvas
+    // (#310; the growth stays in the history, Redo brings it back).
+    QString growthNotice;
+    if (status != QLatin1String("ok") && canvas::takeBackGrowth(plan.value()))
+        growthNotice = canvas::growthTakenBack(action.name, status == QLatin1String("cancelled"));
     // A Write that came from the cache lands nothing: its revision goes on the head again (design decision 5).
     QString notice;
     for (const Written &write : std::as_const(writes))
@@ -528,6 +534,8 @@ Reply canvasAct(const Command &command, Context &context) {
         data.insert("notice", notice);
     if (status != QLatin1String("ok")) {
         failure.message += QStringLiteral(" (%1 of %2 run(s) finished.)").arg(finished).arg(runs.size());
+        if (!growthNotice.isEmpty())
+            failure.message += QLatin1Char(' ') + growthNotice;
         return Reply::failure(failure);
     }
     QStringList names;
