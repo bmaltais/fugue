@@ -35,6 +35,8 @@ public:
 
     // Moves a job, emitting statusChanged.
     void progress(const QString &job, double value, const QString &stage);
+    // Reports a running job with a preview frame (PNG bytes).
+    void preview(const QString &job, const QByteArray &frame);
     // Writes each file (name -> bytes) into outputDir; each becomes an output named by the
     // file's base name, e.g. image.png -> outputs.image.
     void finish(const QString &job, const QMap<QString, QByteArray> &files,

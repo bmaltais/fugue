@@ -525,6 +525,73 @@ private slots:
         QTRY_VERIFY(item(card, "thumbnail") && item(card, "thumbnail")->property("active").toBool());
     }
 
+    // The live frame shows even where the picture mode hides the node's picture (a Sampler in Sinks
+    // mode, or inside a group), and goes when the node ends; the node's own Hide picture wins.
+    void aLiveFrameShowsInSinksModeUntilTheNodeEnds() {
+        RunApp r(R"({
+          "fugue": 1,
+          "groups": {"local/s": {"version": "1.0.0", "name": "S", "inputs": [], "outputs": [],
+            "nodes": {"inner": {"type": "fugue/sampler", "version": "1.2.0"}}}},
+          "graph": {"nodes": {"top": {"type": "fugue/sampler", "version": "1.2.0"},
+                              "hid": {"type": "fugue/sampler", "version": "1.2.0"},
+                              "grp": {"type": "local/s", "version": "1.0.0"}}},
+          "layout": {"nodes": {"top": {"pos": [0, 0]}, "hid": {"pos": [0, 300], "picture": "hide"}, "grp": {"pos": [400, 0]}}, "view": {"center": [300, 300], "zoom": 1}}
+        })");
+        QVERIFY(r.app.open());
+        QVERIFY(r.app.commands.trigger("view.picture-sinks"));
+        const QString file = r.app.dir.filePath("step.png");
+        QVERIFY(QImage(64, 32, QImage::Format_RGB32).save(file));
+        const QString run = r.runs->start();
+        QVERIFY(!run.isEmpty());
+        const auto shown = [&](const QString &node) { return r.role(node, NodeList::Thumbnail).toString().startsWith("file://"); };
+        const auto event = [&](const char *kind, const QString &node, bool frame) {
+            QJsonObject e{{"event", kind}, {"node", node}};
+            if (frame)
+                e.insert("thumbnails", QJsonObject{{"preview", QJsonObject{{"url", QUrl::fromLocalFile(file).toString()},
+                                                                           {"width", 64}, {"height", 32}, {"source", file}}}});
+            emit r.service->event(run, e);
+        };
+        for (const QString node : {"top", "hid", "grp/inner"}) {
+            event("node.running", node, false);
+            event("node.preview", node, true);
+        }
+        const qreal bare = r.role("top", NodeList::Height).toReal();
+        QTRY_VERIFY(shown("top"));
+        QTRY_VERIFY(shown("grp"));
+        QVERIFY(r.role("top", NodeList::Height).toReal() > 0);
+        QVERIFY(!shown("hid"));
+        for (const QString node : {"top", "hid", "grp/inner"})
+            event("node.done", node, false);
+        QTRY_VERIFY(!shown("top"));
+        QTRY_VERIFY(!shown("grp"));
+        QVERIFY(r.role("top", NodeList::Height).toReal() <= bare);
+    }
+
+    // The service makes a thumbnail for a live frame of a node whose picture is hidden (the key of the live
+    // preview in Sinks mode), and none for its result.
+    void aHiddenPicturesLiveFrameGetsAThumbnailButItsResultDoesNot() {
+        RunApp r(kChain);
+        QVERIFY(r.app.open());
+        QVERIFY(r.app.commands.trigger("view.picture-sinks"));
+        QSignalSpy events(r.service.get(), &RunService::event);
+        r.app.key(Qt::Key_Return, Qt::ControlModifier);
+        QTRY_COMPARE(r.jobs().size(), 1);
+        r.onFake([&](FakeProvider &f) { f.preview(f.jobs().at(0), png(64, 32)); });
+        const auto thumbnails = [&](const char *kind) {
+            for (const QList<QVariant> &args : events) {
+                const QJsonObject e = args.at(1).toJsonObject();
+                if (e.value("node").toString() == "gen" && e.value("event").toString() == kind)
+                    return e.value("thumbnails").toObject();
+            }
+            return QJsonObject{{"none", true}};
+        };
+        QTRY_VERIFY(!thumbnails("node.preview").contains("none"));
+        QVERIFY(!thumbnails("node.preview").value("preview").toObject().isEmpty());
+        r.onFake([&](FakeProvider &f) { f.finish(f.jobs().at(0), {{"image.png", png(320, 240)}}); });
+        QTRY_VERIFY(!thumbnails("node.done").contains("none"));
+        QVERIFY(thumbnails("node.done").isEmpty());
+    }
+
     // A node nothing can serve says so before any run, and how to fix it (8.5); a run that
     // reaches it fails with the same words.
     void aNodeNoProviderCanServeShowsWhatIsMissing() {

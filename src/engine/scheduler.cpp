@@ -1111,7 +1111,9 @@ private:
             if (!status.preview.isEmpty()) {
                 const QString file = n.workDir + QStringLiteral("/preview.png");
                 QFile preview(file);
-                if (preview.open(QIODevice::WriteOnly) && preview.write(status.preview) == status.preview.size())
+                const bool written = preview.open(QIODevice::WriteOnly) && preview.write(status.preview) == status.preview.size();
+                preview.close(); // flushed before anyone reads the file
+                if (written)
                     this->preview(path, QJsonObject{{"path", file}, {"format", "png"}});
             }
             return;

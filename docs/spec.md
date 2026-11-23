@@ -1653,7 +1653,9 @@ it as a module folder and run it with no code of its own in Fugue.
   their cost), nor has a helper over HTTP (nothing would fetch the file). Both ends ignore keys they do not know, so
   an older helper or Fugue works as before without pictures. A group's card shows the frame of a node inside it
   as its own picture while that runs (the card is the group's result slot), until the group's result replaces
-  it; a new run starts from the last result again.
+  it; a new run starts from the last result again. The frame shows whatever the picture mode is (a hidden
+  picture's card grows while the node runs and returns to its short form after), except for a node whose own
+  Hide picture is set; preview thumbnails are made for hidden pictures too.
 - The component-level helper is based on stable-diffusion.cpp with separate encode, sample and
   decode steps, C++ only. The M0 spike showed the split works
   ([spikes/02](spikes/02-sdcpp-split.md)).

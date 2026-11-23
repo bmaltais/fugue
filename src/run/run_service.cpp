@@ -505,7 +505,8 @@ private:
     QJsonObject withThumbnails(QJsonObject e, const QSet<QString> &skip = {}) {
         const QString kind = e.value("event").toString();
         QJsonObject thumbnails;
-        if (skip.contains(e.value("node").toString()))
+        // A live frame is made for a hidden picture too: the card shows it while the node runs.
+        if (kind != QLatin1String("node.preview") && skip.contains(e.value("node").toString()))
             return e;
         if (kind == QLatin1String("node.preview")) {
             QJsonObject image = e.value("image").toObject();
