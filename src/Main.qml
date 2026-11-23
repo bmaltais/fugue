@@ -351,12 +351,6 @@ ApplicationWindow {
                 win.templatesDialog.open()
                 return
             }
-            if (id === "file.canvas-history") {
-                if (!win.canvasHistoryDialog)
-                    win.canvasHistoryDialog = canvasHistoryComponent.createObject(win.contentItem)
-                win.canvasHistoryDialog.openFor("")
-                return
-            }
             if (id === "file.projects") {
                 if (App.projects === null)
                     return
@@ -398,12 +392,6 @@ ApplicationWindow {
     Component {
         id: templatesComponent
         TemplatesDialog {}
-    }
-    // The canvas revision history (#210), made the first time file.canvas-history asks for it.
-    property var canvasHistoryDialog: null
-    Component {
-        id: canvasHistoryComponent
-        CanvasHistoryDialog {}
     }
     // The Projects dialog (spec 1.4.2), made the first time file.projects (or the project chip) asks for it.
     property var projectsDialog: null

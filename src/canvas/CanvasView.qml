@@ -91,6 +91,9 @@ Item {
     property alias trailing: trailingChunk.data
     // The layers panel at the right (#226), and whether it binds its own keys (a modal host's window shortcuts sleep).
     property bool showLayers: true
+    // The width of the History and Layers panels: 56u in a roomy view, a quarter of a narrow one (a small Canvas area), never
+    // under 32u, so the picture keeps most of the width.
+    readonly property real sideWidth: Math.max(32 * u, Math.min(56 * u, width / 4))
     property bool ownShortcuts: false
     readonly property alias layersPanel: layersPanel
     readonly property alias backend: canvasData
@@ -436,7 +439,7 @@ Item {
         case "canvas-view.quick-mask": return {enabled: has, checkable: true, checked: quickMask}
         case "canvas-view.add-mask": return {enabled: canvasData.layersEditable && layersPanel.current !== null && layersPanel.current.kind !== "mask"}
         case "canvas-view.mask-invert": return {enabled: quickMask || paintsMask}
-        case "canvas-view.mask-overlay": return {enabled: paintsMask, checkable: true, checked: maskOverlay}
+        case "canvas-view.mask-overlay": return {enabled: paintsMask || compareOn, checkable: true, checked: maskOverlay}
         case "canvas-view.mask-reveal": case "canvas-view.mask-hide": return {enabled: paintsMask}
         // #252: the layer operations, on the layers panel's selection.
         case "canvas-view.new-layer": case "canvas-view.flatten": return {enabled: canvasData.layersEditable && canvasData.layers.length > 0}
@@ -483,14 +486,16 @@ Item {
         })
         return decorate(App.commands.menu("canvas-view")[index].items)
     }
-    // A command of the strip (the registry's `canvas-view.*`), from a key or a menu.
+    // A command of the strip (the registry's `canvas-view.*`), from a key or a menu. While Compare is on the picture has no
+    // region to draw and no mask overlay, so M steps through the compare modes and \ flips A and B, as in Compare Images
+    // (`compare.next-mode`, `compare.flip`), and keep their Photoshop jobs otherwise.
     function runTool(id) {
         switch (id) {
         case "canvas-view.tool-hand": setTool("hand"); break
         case "canvas-view.tool-zoom": setTool("zoom"); break
         case "canvas-view.tool-move": setTool("move"); break
         case "canvas-view.free-transform": if (freeTransform) commitTransform(); else startFreeTransform(); break
-        case "canvas-view.tool-region": setTool("region"); break
+        case "canvas-view.tool-region": if (compareOn) pictureView.nextMode(); else setTool("region"); break
         case "canvas-view.tool-brush": setTool("brush"); break
         case "canvas-view.tool-eraser": setTool("eraser"); break
         case "canvas-view.brush-swap": if (brushing) tool = tool === "brush" ? "eraser" : "brush"; break
@@ -504,7 +509,7 @@ Item {
         case "canvas-view.group": canvasData.groupLayers(layersPanel.chosen); break
         case "canvas-view.ungroup": canvasData.ungroup(layersPanel.chosen); break
         case "canvas-view.layer-properties": if (layersPanel.current) fileDialogs.askProperties(layersPanel.current.position); break
-        case "canvas-view.mask-overlay": maskOverlay = !maskOverlay; break
+        case "canvas-view.mask-overlay": if (compareOn) pictureView.flip(); else maskOverlay = !maskOverlay; break
         case "canvas-view.mask-invert": if (quickMask) selectionLayer.invert(); else canvasData.invertMask(); break
         // Undo follows what is being done: a Quick Mask stroke, a layer mask's revision, else the document's (the region).
         case "canvas-view.new": newCanvas(); break
@@ -1482,7 +1487,7 @@ Item {
         anchors.bottom: pictureView.bottom
         anchors.left: toolStrip.visible ? toolStrip.right : parent.left
         anchors.leftMargin: toolStrip.visible ? 2 * root.u : 0
-        width: 56 * root.u
+        width: root.sideWidth
         visible: root.showHistory && canvasData.canvasId !== "" && !root.compareOn
         radius: root.look.smallCorner
         color: root.look.body
@@ -1602,6 +1607,7 @@ Item {
         anchors.top: pictureView.top
         anchors.bottom: pictureView.bottom
         anchors.right: parent.right
+        width: root.sideWidth
         visible: root.showLayers && pictureView.visible && !root.compareOn
         look: root.look
         model: canvasData

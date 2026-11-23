@@ -1264,6 +1264,29 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // #228: while Compare is on, M steps through the compare modes and \ flips A and B, as in Compare Images; with it off the
+    // keys keep their Photoshop jobs (the Rectangle region tool, the mask overlay).
+    void theCompareKeysWorkInTheViewsCompare() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        showRevision(app, m_a);
+        QTRY_COMPARE(model(app)->property("revisionB").toString(), m_a);
+        viaMenu(app, "View", "canvas-view.compare");
+        QObject *viewer = view(app)->property("viewer").value<QObject *>();
+        QTRY_VERIFY(viewer->property("mode").toString() != "single");
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, centerOf(find(app.window, "canvasViewViewer")));
+        const QStringList modes{"slider", "slider_horizontal", "side_by_side", "flip", "difference"};
+        const QString before = viewer->property("mode").toString();
+        QTest::keyClick(app.window, Qt::Key_M);
+        QTRY_COMPARE(viewer->property("mode").toString(), modes.at((int(modes.indexOf(before)) + 1) % modes.size()));
+        QTest::keyClick(app.window, Qt::Key_Backslash);
+        QTRY_COMPARE(viewer->property("mode").toString(), QString("flip"));
+        QTest::keyClick(app.window, Qt::Key_Backslash); // in flip it shows the other side
+        QTRY_VERIFY(viewer->property("showB").toBool());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     // L5: the view's canvas menu has the picker's rows: size and last change, the id, New canvas… and Import picture….
     void theCanvasMenuHasThePickersRowsAndMakesACanvas() {
         App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
