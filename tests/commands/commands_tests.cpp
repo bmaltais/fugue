@@ -228,7 +228,7 @@ private slots:
             titles << menu.toMap().value("title").toString();
         walk(bar);
         QCOMPARE(titles, (QStringList{"&Canvas", "&Edit", "&Select", "&Layer", "&View"}));
-        QVERIFY(planned.size() >= 10);
+        // Placeholders are honest (checked above, per item); how many remain is not asserted: each is built in time.
         // Every canvas-view command is reachable from the bar.
         for (const QString &id : registry.ids())
             if (id.startsWith("canvas-view."))

@@ -1,5 +1,7 @@
 #include "canvas/canvas_export_model.h"
 
+#include "engine/canvas_psd.h"
+
 #include <QDir>
 #include <QFileInfo>
 #include <QLocale>
@@ -9,6 +11,7 @@
 #include <algorithm>
 
 #include "engine/atomic_file.h"
+#include "engine/canvas_psd.h"
 #include "engine/new_canvas.h"
 
 namespace fugue {
@@ -45,6 +48,16 @@ struct CanvasExportModel::Job {
     QVariantList files;
     QString skipped;
 };
+
+namespace {
+// The picture for these options. A Photoshop file is made from the stored tree, so the canvas's groups stay groups there.
+Result<canvas::ExportedPicture> pictureOf(const mask::PaintDocument &document, const canvas::PictureExport &options, const QString &root, const QString &canvasId, const QString &revision) {
+    if (options.format != QLatin1String("psd"))
+        return canvas::exportPicture(document, options);
+    const canvas::CanvasStore store = root.isEmpty() ? canvas::CanvasStore::forSession() : canvas::CanvasStore(root);
+    return canvas::exportRevisionAsPsd(store, canvasId, revision, options);
+}
+} // namespace
 
 CanvasExportModel::CanvasExportModel(QObject *parent) : QObject(parent) {}
 CanvasExportModel::~CanvasExportModel() { ++m_generation; } // a job still running finds nobody to tell
@@ -267,6 +280,7 @@ void CanvasExportModel::start() {
     const bool layers = m_layers;
     const canvas::PictureExport picture = pictureOptions();
     const canvas::LayersExport layerOptions = this->layerOptions();
+    const QString root = m_root, canvasId = m_canvasId, revision = m_revision;
     QPointer<CanvasExportModel> self(this);
     QThreadPool::globalInstance()->start([=]() {
         auto job = std::make_shared<Job>();
@@ -287,14 +301,15 @@ void CanvasExportModel::start() {
                                                               locale.formattedDataSize(total));
             }
         } else {
-            const Result<canvas::ExportedPicture> made = canvas::exportPicture(*document, picture);
+            const Result<canvas::ExportedPicture> made = pictureOf(*document, picture, root, canvasId, revision);
             if (!made) {
                 job->problem = messageOf(made.errors());
             } else {
                 job->picture = made.value();
+                job->skipped = job->picture.notes.join(QLatin1Char(' ')); // a layered file's own sentences: what it could not keep
                 job->estimate = QStringLiteral("%1 · %2 × %3 px").arg(locale.formattedDataSize(job->picture.bytes.size())).arg(job->picture.width).arg(job->picture.height);
                 // The preview is the encoded picture decoded again (so a JPEG's artifacts show), fitted to a small box.
-                Result<mask::MaskPaint> shown = job->picture.format == QLatin1String("ora") ? Result<mask::MaskPaint>(document->flatten())
+                Result<mask::MaskPaint> shown = job->picture.format == QLatin1String("ora") || job->picture.format == QLatin1String("psd") ? Result<mask::MaskPaint>(document->flatten())
                                                                                               : mask::MaskPaint::fromPicture(job->picture.bytes);
                 if (shown) {
                     mask::MaskPaint small = shown.value();
@@ -363,7 +378,7 @@ bool CanvasExportModel::exportTo(const QString &target) {
             }
             job->layers = made.value();
         } else {
-            const Result<canvas::ExportedPicture> made = canvas::exportPicture(*m_document, pictureOptions());
+            const Result<canvas::ExportedPicture> made = pictureOf(*m_document, pictureOptions(), m_root, m_canvasId, m_revision);
             if (!made) {
                 setError(messageOf(made.errors()));
                 return false;

@@ -70,7 +70,7 @@ LargeViewDialog {
             objectName: "canvasHistoryImportDialog"
             title: qsTr("Import a picture as a canvas")
             fileMode: PortalFileDialog.OpenFile
-            nameFilters: [qsTr("Pictures and canvases (*.png *.jpg *.jpeg *.webp *.ora *.fuguepack)"), qsTr("All files (*)")]
+            nameFilters: [qsTr("Pictures and canvases (*.png *.jpg *.jpeg *.webp *.ora *.psd *.fuguepack)"), qsTr("All files (*)")]
             onAccepted: { backend.importPicture(d.selectedFile, ""); d.destroy() }
             onRejected: d.destroy()
         }
@@ -83,7 +83,7 @@ LargeViewDialog {
         title: qsTr("Save the revision as a picture")
         fileMode: PortalFileDialog.SaveFile
         defaultSuffix: "png"
-        nameFilters: [qsTr("PNG images (*.png)"), qsTr("JPEG images (*.jpg *.jpeg)"), qsTr("WebP images (*.webp)"), qsTr("Layered image (*.ora)")]
+        nameFilters: [qsTr("PNG images (*.png)"), qsTr("JPEG images (*.jpg *.jpeg)"), qsTr("WebP images (*.webp)"), qsTr("Layered image (*.ora)"), qsTr("Photoshop file (*.psd)")]
         onAccepted: backend.exportPicture(selectedFile.toString())
     }
     Component.onDestruction: exportDialog.close()

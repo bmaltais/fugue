@@ -55,8 +55,9 @@ public:
     QString makeFromImage(const QString &name, const QImage &image, QString *id);
     // "Untitled 1", "Untitled 2", ...: the first of `base` and a number that no canvas of this root has as its name.
     QString freeName(const QString &base);
-    // A canvas from a PNG, JPEG, WebP or .ora file (a path or a file: URL). A blank name is the file's.
-    QString makeFromFile(const QString &path, const QString &name, QString *id);
+    // A canvas from a PNG, JPEG, WebP, .ora or Photoshop .psd file (a path or a file: URL). A blank name is the file's.
+    // `dropped`, when given, gets what a .psd could not bring across, one sentence each (engine/psd_file.h).
+    QString makeFromFile(const QString &path, const QString &name, QString *id, QStringList *dropped = nullptr);
 
 signals:
     void changed();

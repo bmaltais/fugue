@@ -279,6 +279,39 @@ Item {
         if (maskSelected)
             selectionLayer.clear()
     }
+    // ---- Select > Modify and Transform selection (#251) ----
+    // The painted selection is the one the operations work on. A rectangle (the free one, or the Region node's) is painted into
+    // it first, and the free rectangle goes (the Region node's area stays: Deselect clears it). The result is shown as the
+    // Quick Mask, the only view of a painted selection. Each is one step of the selection's own undo (Ctrl+Z).
+    readonly property bool canModifySelection: canvasData.canvasId !== "" && pictureView.visible && (maskSelected || rectSelected)
+    function selectionToMask() {
+        if (maskSelected)
+            return true
+        const r = regionValid ? canvasData.region : freeRect
+        if (!rectSelected || !r || r.width <= 0 || r.height <= 0)
+            return false
+        selectionLayer.fillRect(r.x, r.y, r.width, r.height, false)
+        if (hasFreeRect)
+            freeRect = noRect
+        return true
+    }
+    function showSelectionMask() {
+        if (!quickMask)
+            toggleQuickMask()
+    }
+    function modifySelection(kind, amount) {
+        const op = {expand: "grow", contract: "shrink", feather: "feather", border: "border", smooth: "smooth"}[kind]
+        if (!op || !selectionToMask())
+            return
+        selectionLayer.modify(op, amount)
+        showSelectionMask()
+    }
+    function transformSelection(dx, dy, scaleX, scaleY, degrees) {
+        if (!selectionToMask())
+            return
+        selectionLayer.transformBy(dx, dy, scaleX, scaleY, degrees)
+        showSelectionMask()
+    }
     function selectAll() {
         const w = canvasData.pictureSize.width, h = canvasData.pictureSize.height
         if (w <= 0 || h <= 0)
@@ -328,6 +361,9 @@ Item {
         case "canvas-view.select-all": return {enabled: shows && canvasData.pictureSize.width > 0}
         case "canvas-view.deselect": return {enabled: deselectable}
         case "canvas-view.invert-selection": return {enabled: quickMask}
+        case "canvas-view.selection-expand": case "canvas-view.selection-contract": case "canvas-view.selection-feather":
+        case "canvas-view.selection-border": case "canvas-view.selection-smooth": case "canvas-view.selection-transform":
+            return {enabled: canModifySelection}
         case "canvas-view.use-selection": return {enabled: quickMask && regionValid && canvasData.region.selectionWritable === true}
         case "canvas-view.quick-mask": return {enabled: has, checkable: true, checked: quickMask}
         case "canvas-view.add-mask": return {enabled: canvasData.layersEditable && layersPanel.current !== null && layersPanel.current.kind !== "mask"}
@@ -416,6 +452,12 @@ Item {
         case "canvas-view.deselect": deselect(); break
         case "canvas-view.invert-selection": if (quickMask) selectionLayer.invert(); break
         case "canvas-view.use-selection": if (quickMask) useSelection(); break
+        case "canvas-view.selection-expand": selectionDialogs.askModify("expand"); break
+        case "canvas-view.selection-contract": selectionDialogs.askModify("contract"); break
+        case "canvas-view.selection-feather": selectionDialogs.askModify("feather"); break
+        case "canvas-view.selection-border": selectionDialogs.askModify("border"); break
+        case "canvas-view.selection-smooth": selectionDialogs.askModify("smooth"); break
+        case "canvas-view.selection-transform": selectionDialogs.askTransform(); break
         case "canvas-view.mask-reveal": canvasData.fillMask(); break
         case "canvas-view.mask-hide": canvasData.clearMask(); break
         case "canvas-view.fit": fit(); break
@@ -521,7 +563,7 @@ Item {
         title: qsTr("Save the revision as a picture")
         fileMode: PortalFileDialog.SaveFile
         defaultSuffix: "png"
-        nameFilters: [qsTr("PNG images (*.png)"), qsTr("JPEG images (*.jpg *.jpeg)"), qsTr("WebP images (*.webp)"), qsTr("Layered image (*.ora)")]
+        nameFilters: [qsTr("PNG images (*.png)"), qsTr("JPEG images (*.jpg *.jpeg)"), qsTr("WebP images (*.webp)"), qsTr("Layered image (*.ora)"), qsTr("Photoshop file (*.psd)")]
         onAccepted: canvasData.exportPicture(selectedFile.toString())
     }
     // Batch… (#250): a canvas action over a folder of pictures.
@@ -532,6 +574,11 @@ Item {
     CanvasFileDialogs {
         id: fileDialogs
         view: root
+    }
+    CanvasSelectionDialogs {
+        id: selectionDialogs
+        onModifyAsked: (kind, amount) => root.modifySelection(kind, amount)
+        onTransformAsked: (dx, dy, scaleX, scaleY, degrees) => root.transformSelection(dx, dy, scaleX, scaleY, degrees)
     }
     Component.onDestruction: {
         exportDialog.close()
@@ -562,10 +609,13 @@ Item {
     Component {
         id: newCanvasComponent
         NewCanvasDialog {
+            id: madeDialog
             parent: Overlay.overlay
             onCreated: id => {
                 root.makeProblem = ""
                 canvasData.useCanvas(id)
+                if (madeDialog.model.importNotes() !== "") // a Photoshop file's layers Fugue could not keep: never silent
+                    canvasData.showNotice(qsTr("Imported, with changes: %1").arg(madeDialog.model.importNotes()))
             }
         }
     }
@@ -576,7 +626,7 @@ Item {
             objectName: "canvasViewImportDialog"
             title: qsTr("Import a picture as a canvas")
             fileMode: PortalFileDialog.OpenFile
-            nameFilters: [qsTr("Pictures and canvases (*.png *.jpg *.jpeg *.webp *.ora *.fuguepack)"), qsTr("All files (*)")]
+            nameFilters: [qsTr("Pictures and canvases (*.png *.jpg *.jpeg *.webp *.ora *.psd *.fuguepack)"), qsTr("All files (*)")]
             onAccepted: { root.makeProblem = canvasData.importPicture(d.selectedFile, ""); d.destroy() }
             onRejected: d.destroy()
         }

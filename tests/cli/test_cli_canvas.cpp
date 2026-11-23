@@ -168,6 +168,32 @@ private slots:
         QVERIFY(fugue({"canvas", "export", id, out}).exitCode != 0);
     }
 
+    // #227: a canvas out as a Photoshop file and back; the second file is the first, and what a .psd lacks is said.
+    void aPhotoshopFileGoesOutAndComesBackWithItsLayers() {
+        const QString source = oraFile("in.ora"); // a paint layer and a mask layer
+        const Outcome imported = fugue({"canvas", "import", source, "--json"});
+        QVERIFY2(imported.exitCode == 0, imported.out + imported.err);
+        const QString id = imported.data().value("canvas").toString();
+        const Outcome out = fugue({"canvas", "export", id, path("work/out.psd"), "--json"});
+        QVERIFY2(out.exitCode == 0, out.out + out.err);
+        QCOMPARE(out.data().value("format").toString(), QString("psd"));
+        QVERIFY(out.data().value("notes").toArray().size() == 1); // the mask layer is a selection
+        QVERIFY(readFile(path("work/out.psd")).startsWith("8BPS"));
+        const Outcome back = fugue({"canvas", "import", path("work/out.psd"), "--json"});
+        QVERIFY2(back.exitCode == 0, back.out + back.err);
+        const QString again = back.data().value("canvas").toString();
+        QCOMPARE(fugue({"canvas", "export", again, path("work/again.psd")}).exitCode, 0);
+        QCOMPARE(readFile(path("work/again.psd")), readFile(path("work/out.psd")));
+        QVERIFY(fugue({"canvas", "export", id, path("work/out.psd")}).exitCode != 0); // never replaced
+        QVERIFY(fugue({"canvas", "export", id, path("work/q.psd"), "--quality", "50"}).exitCode != 0);
+        // A cut-off Photoshop file: refused in words, nothing made.
+        QFile bad(path("work/bad.psd"));
+        QVERIFY(bad.open(QIODevice::WriteOnly));
+        bad.write("8BPS\x00\x02", 6);
+        bad.close();
+        QCOMPARE(fugue({"canvas", "import", path("work/bad.psd"), "--json"}).errorCode(), QString("media_unreadable"));
+    }
+
     // #249 with #247 and #248: a .fuguepack target is the package path; the picture and layer flags clash with it, and --history clashes with anything else.
     void aPackageTargetAndThePictureFlagsDoNotMix() {
         const QString id = fugue({"canvas", "new", "--name", "Mix", "--size", "300x200", "--json"}).data().value("canvas").toString();

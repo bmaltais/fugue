@@ -9,11 +9,12 @@ are in [spec 14.5](spec.md#145-the-canvas-revision-store-206-208).
 ```
 fugue canvas new --name Sketch --size 1024x768     # prints the canvas id, canvas-0123456789ab
 fugue canvas new --size 1920x1080 --background white   # filled: transparent (default), white, black or #rrggbb
-fugue canvas import photo.png                      # a canvas from a PNG, JPEG or WebP (one layer) or an .ora
+fugue canvas import photo.png                      # a canvas from a PNG, JPEG or WebP (one layer), an .ora or a Photoshop .psd
 fugue canvas log canvas-0123456789ab               # the revisions, newest first
 fugue canvas show canvas-0123456789ab@sha256:ab12cd34   # one revision: tree hash, layers, tiles
 fugue canvas export canvas-0123456789ab out.ora    # the head as an .ora (never replaces a file)
 fugue canvas export canvas-0123456789ab@head out.png  # flattened: .png, .jpg (on white) or .webp
+fugue canvas export canvas-0123456789ab out.psd    # layers kept, for Photoshop, Affinity, Photopea, Krita, GIMP (docs/psd-research.md)
 fugue canvas export canvas-0123456789ab team.fuguepack            # a package to share: the layers as they are now (head only)
 fugue canvas export canvas-0123456789ab team.fuguepack --history  # ... with every revision, so the other person can undo
 fugue canvas import team.fuguepack                 # a package's canvas, as a new canvas (a new id when yours is taken)
@@ -81,7 +82,7 @@ reads the canvas as it looks (the visible layers, with their opacity, blend mode
 
 In the window, Canvas Region's **Canvas** is a drop-down of the canvases of the folder you are working in
 (the Default's, or the project's own: a canvas belongs to the one it was made in). Each row has the name,
-the size, the time of the last change and the id. **New canvas…** opens the New canvas dialog (below); **Import picture…** makes a canvas straight from a PNG, JPEG, WebP or `.ora`. The
+the size, the time of the last change and the id. **New canvas…** opens the New canvas dialog (below); **Import picture…** makes a canvas straight from a PNG, JPEG, WebP, `.ora` or `.psd`. The
 canvas is put in the input. The input still holds the id (a workflow file is the same as before). An id this
 folder has no canvas by, such as one copied from the Default into a project, shows as `canvas-… (missing)`
 and the list is there to pick the right one. The list follows `fugue canvas new` and runs as they happen.
@@ -92,7 +93,7 @@ and the list is there to pick the right one. The list follows `fugue canvas new`
 
 - **Blank**: pick a preset (Square 1024 × 1024, Landscape 4:3, Wide 16:9, Portrait 3:4, HD, 4K) or type a width and a height, then a background: Transparent, White, Black or a Color. A canvas is at most 16384 px a side and 67 megapixels; the line under the fields shows the size in megapixels and says when it is too much. A transparent canvas is one empty layer, any other background one filled layer called Background.
 - **Clipboard**: when you have copied a picture, the dialog opens on it with its size filled in, and Create makes the canvas from it (a screenshot, a picture copied from a browser). **File > Paste as new canvas** skips the dialog: it makes the canvas at once, named Pasted 1, Pasted 2, ….
-- **A file…**: a PNG, JPEG, WebP or `.ora` file, as Import picture… does, named after the file.
+- **A file…**: a PNG, JPEG, WebP, `.ora` or `.psd` file, as Import picture… does, named after the file.
 
 The size, background and color of the last canvas you made are there the next time. A canvas made from the File menu opens in the Canvas view (in the active Canvas area when there is one).
 
@@ -154,14 +155,14 @@ File > Canvas history… lists your canvases (or, with none yet, offers New canv
 see its revisions and candidates, and click a revision to see it at full size (zoom and pan; the head is shown
 first). Press **Compare** to see a candidate against the head and any other revision against the one before it (the
 same views as Compare Images), and **Accept** (or Enter) or **Drop** on a candidate. Ctrl+click a revision to use it as the left
-side of a comparison. **File > Export > Export as…** saves the revision you are looking at: a flattened PNG, JPEG or WebP, or an .ora with its layers, by the file's extension.
+side of a comparison. **File > Export > Export as…** saves the revision you are looking at: a flattened PNG, JPEG or WebP, or an .ora or .psd with its layers, by the file's extension.
 
 `fugue canvas export <id>[@<revision>] <file>` writes the same flattened picture from the command line by
 the file extension: `.png`, `.jpg` or `.webp` (a JPEG has no transparency, so it is flattened onto white
-and the command says so; WebP is lossless); `.ora` keeps the layers. It never replaces a file.
+and the command says so; WebP is lossless); `.ora` and `.psd` keep the layers. It never replaces a file.
 
 **File > Export > Export with quality and scale…** (Save for Web) is the same command with a window: PNG, JPEG, WebP or
-the layers kept (.ora); a quality (JPEG, and WebP unless Lossless); a size as 25, 50, 100 or 200 percent or in pixels
+the layers kept (.ora, or Photoshop .psd); a quality (JPEG, and WebP unless Lossless); a size as 25, 50, 100 or 200 percent or in pixels
 (width and height keep the canvas's proportions); a background under the transparency (a JPEG has none, so it
 is white unless you choose another color); and a preview of the picture as it will be written, with its size in bytes,
 made again as you change a choice. **Export…** asks where and never replaces a file. On the command line the same
@@ -221,7 +222,18 @@ A layer can have a **layer mask**: white shows the layer, black hides it, grey i
 of the layer (it moves and is deleted with it) and can be turned off to see the layer whole
 (`--mask off`, `--mask on`) or deleted (`--mask delete`). Other programs have no layer mask in an
 `.ora`, so an export gives them the layer as it looks with its mask applied, and keeps the mask for
-Fugue to read back.
+Fugue to read back. A `.psd` does have layer masks, so a Photoshop file keeps the layer's own pixels and its mask apart.
+
+**Photoshop files (.psd, #227).** `fugue canvas export <id> out.psd` (or Photoshop (.psd) in Export with quality and
+scale…) writes every paint and picture layer and every group (as a layer group) with its name, visibility, opacity, blend mode and layer mask, its own
+pixels unblended, and the merged picture; 8-bit RGB, deterministic, at most 30000 px a side (more is refused in plain
+words). A mask layer is a selection, not a picture, so it is left out and the answer names it. `fugue canvas import
+x.psd` (and Import picture…, New canvas… from a file) reads such a file back and lists, one warning each and never
+silently, what it could not keep: groups that are not plain (a group that holds only layers is a real group again; any other has
+its layers kept in order with its visibility and opacity folded in), adjustment layers (dropped), text and smart objects (kept as pixels), layer effects, vector masks and clipping
+(dropped), blend modes Fugue lacks (shown as Normal; the ones with an OpenRaster name are kept for exporting). It reads
+8-bit RGB only and refuses 16-bit, CMYK, grayscale and `.psb` with the way to convert them. Details, limits and the
+checklist for trying it in real programs: [psd-research.md](psd-research.md).
 
 In the window, the Canvas view (File > Canvas…, or a Canvas area) has a **Layers** panel at the right
 of the picture, top layer first, with a small picture of each layer (and of its mask), its name and
@@ -276,12 +288,28 @@ Canvas Region's **Selection** input (advanced) is what Use selection writes: the
 it, the Mask input and the rectangle are not used; the selection's bounds are in X, Y, Width and Height so the frame
 and the size the model gets read right. A replay of the run reads the same selection.
 
+## Modify and transform a selection
+
+**Select > Modify** and **Select > Transform selection…** (#251) change the selection by a number you type, with Photoshop's
+meanings. Each asks in a small dialog (Enter applies, the last amount is offered again) and is one step of the selection's own undo
+(Ctrl+Z in the view). They need a selection: the painted one, or a rectangle (the free one, or the Region node's), which is
+painted into the selection first (the free rectangle goes; the Region node's area stays until Deselect). The result shows as the
+Quick Mask, the one view a painted selection has until the marching ants (#232) come.
+
+- **Expand** and **Contract**: every edge moves out or in by N pixels (round corners). A selection against the picture's edge is not eaten from that side.
+- **Feather**: the edge fades over about N pixels each side of where it was (a Gaussian). A selection reaching the picture's edge stays solid there.
+- **Border**: a band N pixels wide centered on the edge (an odd width puts the extra pixel outside); the inside is let go.
+- **Smooth**: blurs by N and keeps what is more than half selected: rounds corners and drops specks.
+- **Transform selection**: Scale in percent and Rotate in degrees about the selection's center, then Move right and down in pixels. There are no handles to drag yet, and no live preview: Undo takes it back. What leaves the picture is lost.
+
+An amount is 1 to 250 pixels. The work is `engine/mask_ops.h`: Expand and Contract run the Grow Mask node's own 3x3 pass (`morphPass`, shared), alternating the tapered and the full footprint so the growth looks round (the node alone makes a diamond).
+
 ## The menu bar
 
 The Canvas view has its own menu bar at the top, in the File > Canvas… dialog and in an area alike (#232). Every option of
 the view is a row of a menu, with its key beside it; what does not apply to the canvas now is greyed.
 
-- **Canvas** (it was File; the window's File is the workflows', #262): New canvas…, Open canvas… (the picker), Import picture… (also a `.fuguepack`, below), **Export** (Export as…: PNG, JPEG, WebP flattened, .ora
+- **Canvas** (it was File; the window's File is the workflows', #262): New canvas…, Open canvas… (the picker), Import picture… (also a `.psd` or a `.fuguepack`, below), **Export** (Export as…: PNG, JPEG, WebP flattened, .ora or .psd
   with layers, by the extension; Export with quality and scale… and Export layers as files…, #247 and #248, above; never replaces a file), **Share…** (asks, then where: a `.fuguepack` of the canvas as it is now, or with its history; see Sharing a canvas), Rename canvas…, Duplicate canvas (the whole history, under a new
   id; the copy is shown), **Clear canvas…** (asks; one undoable step that leaves one empty layer of the same size),
   **Delete canvas…** (asks; permanent; the next canvas is shown, or the empty state) and Close canvas (the dialog closes; an
@@ -290,7 +318,7 @@ the view is a row of a menu, with its key beside it; what does not apply to the 
 - **Select**: Select all (Ctrl+A: the whole canvas as the rectangle, or the whole Quick Mask), **Deselect** (Ctrl+D, and
   Escape when nothing is being dragged or run: it clears the free rectangle, sets the Canvas Region node's area back to 0, 0, 0, 0 = the
   whole canvas as one undo step, and clears a painted selection), Inverse (Ctrl+Shift+I, the painted selection), Quick Mask
-  and Use selection.
+  and Use selection, **Modify** and **Transform selection** (below).
 - **Layer**: Add layer mask, Invert mask, Mask overlay, Reveal all, Hide all. The layers panel keeps its own rows.
 - **View**: Fit, 100%, Zoom in, Zoom out, History, Layers, Compare, Advanced details, Snap region, and
   **Tools** (Hand, Zoom, Rectangle region, Mask brush, Mask eraser, swap, brush size); then the rulers, grid and guides below.

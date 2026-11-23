@@ -93,6 +93,11 @@ public:
     Q_INVOKABLE void invert();
     Q_INVOKABLE void clear();
     Q_INVOKABLE void fill();
+    // Select > Modify (#251): the mask as a selection grown or shrunk (`kind` "grow", "shrink"), feathered, made a border or
+    // smoothed by `amount` pixels (engine/mask_ops.h); one undo step. False when the kind is unknown or nothing changed.
+    Q_INVOKABLE bool modify(const QString &kind, int amount);
+    // Transform Selection: moved by (dx, dy) pixels, scaled (1 = as is) and turned (degrees) about the selection's center.
+    Q_INVOKABLE bool transformBy(double dx, double dy, double scaleX, double scaleY, double degrees);
     Q_INVOKABLE void undo();
     Q_INVOKABLE void redo();
 

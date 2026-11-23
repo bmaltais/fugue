@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "engine/edge_fill.h"
+#include "engine/mask_ops.h"
 #include "engine/vips.h"
 #include "nodes/pixel_io.h"
 #include "nodes/resample.h"
@@ -674,24 +675,9 @@ public:
         const int expand = toInt(context.input("expand"));
         const bool tapered = context.input("tapered_corners").json().toBool(true);
         const bool grow = expand > 0;
-        const int w = mask.width, h = mask.height;
         Pixels next = mask;
-        for (int pass = 0; pass < std::abs(expand); ++pass) {
-            for (int y = 0; y < h; ++y)
-                for (int x = 0; x < w; ++x) {
-                    float best = mask.at(x, y, 0);
-                    for (int dy = -1; dy <= 1; ++dy)
-                        for (int dx = -1; dx <= 1; ++dx) {
-                            if (tapered && dx != 0 && dy != 0)
-                                continue;
-                            const int nx = x + dx, ny = y + dy;
-                            if (nx < 0 || ny < 0 || nx >= w || ny >= h)
-                                continue;
-                            const float v = mask.at(nx, ny, 0);
-                            best = grow ? std::max(best, v) : std::min(best, v);
-                        }
-                    next.at(x, y, 0) = best;
-                }
+        for (int pass = 0; pass < std::abs(expand); ++pass) { // the pass is shared with Select > Modify (engine/mask_ops.h)
+            fugue::mask::morphPass(mask.data.data(), next.data.data(), mask.width, mask.height, grow, tapered);
             std::swap(mask, next);
         }
         return namedOutput(std::move(mask), "mask");

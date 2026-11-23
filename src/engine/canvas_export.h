@@ -6,7 +6,7 @@
 // It works on a PaintDocument and knows no window and no store; the caller loads the revision.
 //
 // A picture is the flattened canvas (PaintDocument::flatten, the picture the history window shows) in one format,
-// at a size, over a background, or the layered .ora. Layers to files is one picture per layer: the layer's own
+// at a size, over a background, or the layered .ora or .psd (psd_file.h). Layers to files is one picture per layer: the layer's own
 // pixels (its opacity and blend are not applied, the layer mask is unless asked), named from the layer names.
 // Nothing here writes over a file: the writers refuse when a name is taken, before they write the first one.
 
@@ -24,7 +24,7 @@ namespace fugue::canvas {
 // How one picture is made. A size is a `scale`, or a `width` and/or `height` in pixels (one of them keeps the
 // canvas's proportions); `scale` is used only when both are 0.
 struct PictureExport {
-    QString format = QStringLiteral("png"); // "png", "jpg", "webp" or "ora" (layers kept)
+    QString format = QStringLiteral("png"); // "png", "jpg", "webp", "ora" or "psd" (layers kept)
     int quality = 92;                       // 1 to 100, for "jpg" and for a lossy "webp"
     bool lossless = true;                   // "webp": every pixel and the alpha kept; false follows `quality`
     double scale = 1;
@@ -39,16 +39,17 @@ struct ExportedPicture {
     QByteArray bytes;
     int width = 0;
     int height = 0;
-    QString format;     // "png", "jpg", "webp" or "ora"
+    QString format;     // "png", "jpg", "webp", "ora" or "psd"
+    QStringList notes;  // what a layered format could not keep (a mask layer left out of a psd), plain words; empty for none
     QString background; // what the picture lies over: "transparent", "white", "black" or "#rrggbb"; "" for ora
 };
 
-// "png", "jpg" (also "jpeg") or "webp", or "ora" when `allowLayered`; else "" .
+// "png", "jpg" (also "jpeg") or "webp", or "ora" or "psd" when `allowLayered`; else "" .
 QString normalFormat(const QString &format, bool allowLayered);
 // The picture's size for these options, or input_invalid when it is past the canvas size limit (new_canvas.h).
 Result<QSize> exportSize(int canvasWidth, int canvasHeight, const PictureExport &options);
 // The canvas as one picture. usage for an unknown format or a quality out of 1..100; input_invalid for a size past
-// the limit, a jpg asked to be transparent, or a webp too large (16383 px a side).
+// the limit, a jpg asked to be transparent, a webp too large (16383 px a side) or a psd past 30000 px a side.
 Result<ExportedPicture> exportPicture(const mask::PaintDocument &document, const PictureExport &options);
 
 // One picture per layer.

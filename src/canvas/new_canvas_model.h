@@ -107,6 +107,8 @@ public:
     Q_INVOKABLE void showError(const QString &why);
     // The canvas just made.
     Q_INVOKABLE QString createdId() const { return m_created; }
+    // What a Photoshop file could not bring across into the canvas just made, one sentence after another; empty for none.
+    Q_INVOKABLE QString importNotes() const { return m_notes.join(QLatin1Char(' ')); }
 
 signals:
     void changed();
@@ -134,6 +136,7 @@ private:
     QSize m_clipboardPixels;
     QString m_error;
     QString m_created;
+    QStringList m_notes;
 };
 
 } // namespace fugue

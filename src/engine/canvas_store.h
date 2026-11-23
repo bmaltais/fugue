@@ -165,6 +165,9 @@ public:
     // ---- canvases ----
     // Makes a canvas whose first revision is `document` (producer `producer`), head on it.
     Result<CanvasInfo> create(const QString &name, const mask::PaintDocument &document, const QString &producer);
+    // The same, with `edits` (engine/canvas_layer_ops.h: Group and the group's settings) applied to the document's tree before it
+    // is stored: ONE first revision whose layers are the edited tree (a file with groups, #227). A bad edit fails with nothing made.
+    Result<CanvasInfo> createWithEdits(const QString &name, const mask::PaintDocument &document, const std::vector<LayerEdit> &edits, const QString &producer);
     Result<CanvasInfo> info(const QString &canvasId) const;
     // ---- the canvas as a whole (the Canvas view's File menu, #232) ----
     // Renames the canvas (input_invalid for a blank name, canvas_not_found for an id this store lacks). Its id, history and
@@ -256,6 +259,8 @@ public:
 
     // The revision as a document (no history). Picture layers come back as placeholders.
     Result<mask::PaintDocument> load(const QString &canvasId, const QString &revisionId) const;
+    // The revision's layer tree, groups kept (load() composites a group into one layer).
+    Result<Tree> loadTree(const QString &canvasId, const QString &revisionId) const;
 
     // The pixels of one stored tile (`width` x `height`, `channels` as the layer's kind says); canvas_corrupt when missing or not what it is named for.
     Result<mask::MaskPaint> tilePixels(const QString &hash, int width, int height, int channels) const { return readBlob(hash, width, height, channels); }
