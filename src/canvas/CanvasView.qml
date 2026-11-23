@@ -180,6 +180,8 @@ Item {
     property real brushHardness: 0.8
     property real brushOpacity: 1
     property bool maskOverlay: true
+    // The red tint of the Quick Mask selection (#313), optional (\\ in Quick Mask; the layer mask's Overlay is separate).
+    property bool selectionOverlay: false
     // Why the last Use selection did nothing (the options bar says it; a stroke clears it).
     property string selectionProblem: ""
     readonly property bool brushing: tool === "brush" || tool === "eraser"
@@ -362,8 +364,10 @@ Item {
             freeRect = noRect
         if (regionValid && regionEditable && (regionSet || canvasData.region.selection))
             canvasData.setRegion(noRect)
-        if (maskSelected)
+        if (maskSelected) {
             selectionLayer.clear()
+            selectionLast = true // Ctrl+Z brings it back
+        }
     }
     // ---- Select > Modify and Transform selection (#251) ----
     // The painted selection is the one the operations work on. A rectangle (the free one, or the Region node's) is painted into
@@ -381,31 +385,28 @@ Item {
             freeRect = noRect
         return true
     }
-    function showSelectionMask() {
-        if (!quickMask)
-            toggleQuickMask()
-    }
     function modifySelection(kind, amount) {
         const op = {expand: "grow", contract: "shrink", feather: "feather", border: "border", smooth: "smooth"}[kind]
         if (!op || !selectionToMask())
             return
         selectionLayer.modify(op, amount)
-        showSelectionMask()
+        selectionLast = true
     }
     function transformSelection(dx, dy, scaleX, scaleY, degrees) {
         if (!selectionToMask())
             return
         selectionLayer.transformBy(dx, dy, scaleX, scaleY, degrees)
-        showSelectionMask()
+        selectionLast = true
     }
     function selectAll() {
         const w = canvasData.pictureSize.width, h = canvasData.pictureSize.height
         if (w <= 0 || h <= 0)
             return
         const whole = {x: 0, y: 0, width: w, height: h}
-        if (quickMask)
+        if (quickMask || maskSelected) {
             selectionLayer.fill()
-        else if (regionValid)
+            selectionLast = true
+        } else if (regionValid)
             canvasData.setRegion(whole)
         else if (freeMode)
             placeFree(whole)
@@ -454,11 +455,11 @@ Item {
         case "canvas-view.selection-expand": case "canvas-view.selection-contract": case "canvas-view.selection-feather":
         case "canvas-view.selection-border": case "canvas-view.selection-smooth": case "canvas-view.selection-transform":
             return {enabled: canModifySelection}
-        case "canvas-view.use-selection": return {enabled: quickMask && regionValid && canvasData.region.selectionWritable === true}
+        case "canvas-view.use-selection": return {enabled: maskSelected && regionValid && canvasData.region.selectionWritable === true}
         case "canvas-view.quick-mask": return {enabled: has, checkable: true, checked: quickMask}
         case "canvas-view.add-mask": return {enabled: canvasData.layersEditable && layersPanel.current !== null && layersPanel.current.kind !== "mask"}
         case "canvas-view.mask-invert": return {enabled: quickMask || paintsMask}
-        case "canvas-view.mask-overlay": return {enabled: paintsMask || compareOn, checkable: true, checked: maskOverlay}
+        case "canvas-view.mask-overlay": return {enabled: paintsMask || quickMask || compareOn, checkable: true, checked: quickMask ? selectionOverlay : maskOverlay}
         case "canvas-view.mask-reveal": case "canvas-view.mask-hide": return {enabled: paintsMask}
         // #252: the layer operations, on the layers panel's selection.
         case "canvas-view.new-layer": case "canvas-view.flatten": return {enabled: canvasData.layersEditable && canvasData.layers.length > 0}
@@ -530,7 +531,7 @@ Item {
         case "canvas-view.group": canvasData.groupLayers(layersPanel.chosen); break
         case "canvas-view.ungroup": canvasData.ungroup(layersPanel.chosen); break
         case "canvas-view.layer-properties": if (layersPanel.current) fileDialogs.askProperties(layersPanel.current.position); break
-        case "canvas-view.mask-overlay": if (compareOn) pictureView.flip(); else maskOverlay = !maskOverlay; break
+        case "canvas-view.mask-overlay": if (compareOn) pictureView.flip(); else if (quickMask) selectionOverlay = !selectionOverlay; else maskOverlay = !maskOverlay; break
         case "canvas-view.mask-invert": if (quickMask) selectionLayer.invert(); else canvasData.invertMask(); break
         // Undo follows what is being done: a Quick Mask stroke, a layer mask's revision, else the document's (the region).
         case "canvas-view.new": newCanvas(); break
@@ -556,7 +557,7 @@ Item {
         case "canvas-view.select-all": selectAll(); break
         case "canvas-view.deselect": deselect(); break
         case "canvas-view.invert-selection": if (quickMask || maskSelected) { selectionLayer.invert(); selectionLast = true } break
-        case "canvas-view.use-selection": if (quickMask) useSelection(); break
+        case "canvas-view.use-selection": if (maskSelected) useSelection(); break
         case "canvas-view.selection-expand": selectionDialogs.askModify("expand"); break
         case "canvas-view.selection-contract": selectionDialogs.askModify("contract"); break
         case "canvas-view.selection-feather": selectionDialogs.askModify("feather"); break
@@ -1368,14 +1369,15 @@ Item {
             visible: root.brushing && root.paintTarget !== null
             ViewButton {
                 objectName: "canvasViewMaskOverlay"
-                visible: root.paintsMask
+                visible: root.paintsMask || root.quickMask
                 look: root.look
                 text: qsTr("Overlay")
-                tip: qsTr("Show the hidden part of the mask in red (%1)").arg(root.keysOf("canvas-view.mask-overlay"))
+                tip: root.quickMask ? qsTr("Show the selection in red (%1)").arg(root.keysOf("canvas-view.mask-overlay"))
+                                    : qsTr("Show the hidden part of the mask in red (%1)").arg(root.keysOf("canvas-view.mask-overlay"))
                 accented: false
                 checkable: true
-                current: root.maskOverlay
-                onTapped: root.maskOverlay = !root.maskOverlay
+                current: root.quickMask ? root.selectionOverlay : root.maskOverlay
+                onTapped: root.runTool("canvas-view.mask-overlay")
             }
             ViewButton {
                 id: maskMenuButton
@@ -1682,7 +1684,8 @@ Item {
             objectName: "canvasViewSelection"
             anchors.fill: parent
             clip: true
-            visible: root.quickMask // the red tint is Quick Mask's editing view; a selection otherwise shows as marching ants
+            // The red tint is optional in Quick Mask (\\); it shows by itself when the ants have nothing to outline (a stroke under 50%).
+            visible: root.quickMask && (root.selectionOverlay || (root.maskSelected && !ants.outlined))
             imageSize: canvasData.pictureSize
             originX: pictureView.imageX
             originY: pictureView.imageY
@@ -1803,14 +1806,14 @@ Item {
         LayoutMirroring.enabled: false
         LayoutMirroring.childrenInherit: true
         visible: pictureView.visible && !root.compareOn && !pictureView.paired && pictureView.mode !== "difference"
-                 && (root.rectSelected || (root.maskSelected && !root.quickMask))
+                 && (root.rectSelected || root.maskSelected)
         clip: true
         originX: pictureView.imageX
         originY: pictureView.imageY
         zoom: pictureView.imageScale
-        rect: root.rectSelected && root.liveRect === null ? Qt.rect(root.shownRegion.x, root.shownRegion.y, root.shownRegion.width, root.shownRegion.height)
+        rect: root.rectSelected && !root.maskSelected && root.liveRect === null ? Qt.rect(root.shownRegion.x, root.shownRegion.y, root.shownRegion.width, root.shownRegion.height)
                                                            : Qt.rect(0, 0, 0, 0)
-        mask: root.maskSelected && !root.quickMask ? selectionLayer : null
+        mask: root.maskSelected ? selectionLayer : null
     }
 
 
@@ -1933,13 +1936,20 @@ Item {
         spaceHeld: root.panKey
         flipErase: root.paintsMask
         prefix: "canvasViewBrush"
-        onPressedAt: pictureView.forceActiveFocus()
+        onPressedAt: {
+            pictureView.forceActiveFocus()
+            if (root.quickMask && root.brushing)
+                root.selectionToMask() // a rectangle is the start of the painted selection (#313)
+        }
         onResize: (size, hardness) => { root.setSize(size); root.setHardness(hardness) }
         onPainted: {
             root.selectionProblem = ""
             if (root.lassoing)
                 root.lassoDone()
-            else if (!root.quickMask)
+            else if (root.quickMask) {
+                root.freeRect = root.noRect
+                root.selectionLast = true // the stroke is the selection now, and Ctrl+Z takes it back after Q
+            } else
                 canvasData.maskPainted()
         }
     }
