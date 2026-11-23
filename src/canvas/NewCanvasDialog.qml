@@ -17,7 +17,7 @@ Question {
     property string storeRoot: ""
     readonly property alias model: backend
     signal created(string id)
-    width: Math.min((parent ? parent.width : 560) - 12 * look.unit, 560)
+    width: Math.min((Overlay.overlay ? Overlay.overlay.width : 560) - 12 * look.unit, 560)
 
     // Opens on the last settings, the clipboard's picture when there is one; `why` is a reason to show at once
     // (a paste that could not be made).

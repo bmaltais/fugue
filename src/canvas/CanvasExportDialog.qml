@@ -22,7 +22,7 @@ Question {
     readonly property alias model: backend
     readonly property bool layers: backend.mode === "layers"
     signal saved(string notice)
-    width: Math.min((parent ? parent.width : 640) - 12 * look.unit, 640)
+    width: Math.min((Overlay.overlay ? Overlay.overlay.width : 640) - 12 * look.unit, 640)
 
     // Opens on a revision of a canvas; `mode` is "picture" or "layers". Returns why not (the dialog stays closed), or "".
     function openFor(canvasId, revision, mode) {

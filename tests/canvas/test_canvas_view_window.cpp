@@ -1092,6 +1092,46 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // A question keeps its frame and padding whatever its content is (the content may be a ColumnLayout filling the popup):
+    // the text is inside the surface by the padding, the answers sit a gap below the text, the surface wraps the answers.
+    // FUGUE_SHOT_DIR=<dir> also saves the picture as question-delete.png.
+    void aQuestionWithFilledContentKeepsItsPaddingAndGaps() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        QTRY_COMPARE(model(app)->property("canvasId").toString(), m_canvas);
+        viaMenu(app, "Canvas", "canvas-view.delete");
+        QTRY_VERIFY(find(app.window, "canvasDeleteKeep"));
+        QTest::qWait(300);
+        QObject *ask = app.window->findChild<QObject *>("canvasDeleteAsk");
+        QVERIFY(ask);
+        if (const QByteArray dir = qgetenv("FUGUE_SHOT_DIR"); !dir.isEmpty())
+            QVERIFY(test_support::grab(app.window).save(QString::fromLocal8Bit(dir) + "/question-delete.png"));
+        QQuickItem *keep = find(app.window, "canvasDeleteKeep");
+        QQuickItem *yes = find(app.window, "canvasDeleteYes");
+        QQuickItem *text = nullptr;
+        const std::function<void(QQuickItem *)> walk = [&](QQuickItem *from) {
+            for (QQuickItem *item : from->childItems()) {
+                if (item->metaObject()->indexOfProperty("wrapMode") >= 0 && item->property("text").toString().size() > 40)
+                    text = item;
+                walk(item);
+            }
+        };
+        walk(ask->property("contentItem").value<QQuickItem *>());
+        QVERIFY(text);
+        const auto rect = [](QQuickItem *item) { return QRectF(item->mapToScene(QPointF(0, 0)), QSizeF(item->width(), item->height())); };
+        const double unit = 8; // the test app's look unit; the rule is in units
+        const QRectF frame(QPointF(ask->property("x").toDouble(), ask->property("y").toDouble()),
+                           QSizeF(ask->property("width").toDouble(), ask->property("height").toDouble()));
+        qInfo() << "frame" << frame << "text" << rect(text) << "keep" << rect(keep) << "yes" << rect(yes);
+        QVERIFY2(rect(text).top() - frame.top() >= 2 * unit, "the text touches the top of the surface");
+        QVERIFY2(rect(text).left() - frame.left() >= 2 * unit, "the text touches the left of the surface");
+        QVERIFY2(rect(keep).top() - rect(text).bottom() >= 2 * unit, "the answers are jammed against the text");
+        QVERIFY2(frame.bottom() - rect(yes).bottom() >= 2 * unit, "the answers touch the foot of the surface");
+        click(app, "canvasDeleteKeep");
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     // #249: Share… asks what goes in, and the model's package opens again as a canvas of its own, history and all, with a
     // notice; the same file again is a second canvas, never the first one replaced.
     void shareAsksThenAPackageImportsAsANewCanvas() {
