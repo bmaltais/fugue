@@ -291,6 +291,8 @@ void TestCompiler::unknownTypesAreReportedWithoutFollowOnErrors() {
     const Error &inner = result.problems()[0];
     QCOMPARE(inner.node, QString("g7/x"));
     QVERIFY(inner.message.contains("io.example.gone/thing"));
+    QCOMPARE(inner.pack, QString("io.example.gone")); // the pack to ask for (#264); a built-in's type names none
+    QCOMPARE(result.problems()[1].pack, QString());
     const Error &top = result.problems()[1];
     QCOMPARE(top.node, QString("gen"));
     QCOMPARE(top.hint, QString("Did you mean \"fugue/generate-image\"?"));

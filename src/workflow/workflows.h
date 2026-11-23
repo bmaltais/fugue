@@ -254,6 +254,14 @@ public:
     Q_INVOKABLE void setDownloadRoot(const QString &root);
     // Asks for the offered pack to be installed (packInstallRequested).
     Q_INVOKABLE void installPack();
+    // How the shown workflow's nodes of `pack` (a pack id) are told on a card (#264): {id, name (display
+    // name), text ("Needs the Remove Background pack"), installable (it says where to get the pack,
+    // and it is not installed here), source, ref}. Not tied to the banner: the card keeps its
+    // button after the banner is dismissed.
+    Q_INVOKABLE QVariantMap packNeed(const QString &pack) const;
+    // Asks for that pack to be installed as the banner's button does (packInstallRequested);
+    // false when nothing says where to get it.
+    Q_INVOKABLE bool installPackById(const QString &pack);
 
     Q_INVOKABLE void dismissNotice();
     // A line for the banner from outside (the image actions, #57).
@@ -320,6 +328,8 @@ private:
     // The first pack the shown tab's template carries that `document` still needs, as the banner
     // offers it: id, source (the folder in the template), ref (empty), text. Empty for none.
     QVariantMap carriedPackOffer(const Document &document) const;
+    // The same for `pack`, and the recorded source of a pack that is not installed at all (4.3).
+    QVariantMap packNeedOf(const Document &document, const QString &pack) const;
     QString missingNotice(const Document &document, const QString &title, DownloadOffer *offer = nullptr) const;
     // The shown workflow's missing line and offer again, after its models may have changed.
     // The banner shows it when it showed the last one, or `force`.

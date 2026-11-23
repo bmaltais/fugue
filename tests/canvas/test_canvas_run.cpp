@@ -1181,6 +1181,56 @@ private slots:
         QVERIFY(first < 1500);
     }
 
+    // #264: a node of a pack that is not installed, plain or inside a group instance, says in words
+    // which pack it needs (the display name the workflow records), with the full text in the chip's
+    // tooltip detail, and its Install… button asks for the pack as the banner's does.
+    void aNodeOfAMissingPackSaysWhichPackAndOffersToInstall() {
+        const QString packs = fugue::packsDir();
+        FUGUE_REQUIRE_TEST_HOME(packs);
+        QDir(packs).removeRecursively();
+        RunApp r(R"({
+  "fugue": 1,
+  "graph": {"nodes": {
+    "plain": {"type": "io.example.tools/say", "version": "1.0.0"},
+    "wrap": {"type": "local/wrap", "version": "1.0.0"}
+  }},
+  "groups": {"local/wrap": {"name": "Wrap", "version": "1.0.0",
+    "inputs": [{"name": "threshold", "label": "Threshold", "section": "Advanced", "targets": ["find.threshold"]}],
+    "outputs": [],
+    "nodes": {"find": {"type": "io.example.tools/say", "version": "1.0.0"}}}},
+  "requires": {"packs": {"io.example.tools": {"version": "1.0.0", "source": "example.com:tools.git", "name": "Say Words"}}},
+  "layout": {"nodes": {"plain": {"pos": [0, 0]}, "wrap": {"pos": [300, 0]}}}
+})");
+        QVERIFY(r.app.open());
+        r.app.workflows.dismissPendingTrust(); // the question about the packs is not under test
+        QSignalSpy finished(r.runs.get(), &CanvasRuns::finished);
+        r.runs->start();
+        QTRY_COMPARE(finished.size(), 1);
+        const QStringList both{"plain", "wrap"};
+        for (const QString &node : both) {
+            QTRY_COMPARE(r.role(node, NodeList::Error).toString(), QStringLiteral("Needs the Say Words pack"));
+            const QVariantMap pack = r.role(node, NodeList::ErrorPack).toMap();
+            QCOMPARE(pack.value("id").toString(), QStringLiteral("io.example.tools"));
+            QVERIFY(pack.value("installable").toBool());
+            QVERIFY2(r.role(node, NodeList::ErrorDetail).toString().contains("is not installed"),
+                     qPrintable(r.role(node, NodeList::ErrorDetail).toString()));
+        }
+        // The group's own detail names the inner node, as the technical text did.
+        QVERIFY(r.role("wrap", NodeList::ErrorDetail).toString().contains("wrap/find"));
+
+        QSignalSpy install(&r.app.workflows, &fugue::Workflows::packInstallRequested);
+        QQuickItem *card = item(r.app.window->contentItem(), "node-wrap");
+        QVERIFY(card);
+        QQuickItem *button = nullptr;
+        QTRY_VERIFY((button = item(card, "installPackChip")) && button->isVisible());
+        QTest::mouseClick(r.app.window, Qt::LeftButton, {},
+                          button->mapToScene(QPointF(button->width() / 2, button->height() / 2)).toPoint());
+        QCOMPARE(install.size(), 1);
+        QCOMPARE(install.first().at(0).toString(), QStringLiteral("example.com:tools.git"));
+        QCOMPARE(install.first().at(1).toString(), QString());
+        QVERIFY2(r.app.warnings.isEmpty(), qPrintable(r.app.warnings.join('\n')));
+    }
+
     // #70: a pack installed between two runs is what the next run runs, with no restart, and so
     // is its update (a new version, trusted again): the run thread reloads between runs.
     void aReloadBetweenTwoRunsRunsTheNewTypes() {

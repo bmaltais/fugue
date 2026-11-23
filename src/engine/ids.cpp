@@ -35,6 +35,11 @@ QString typeNamespace(const QString &typeId) {
     return typeId.section(u'/', 0, 0);
 }
 
+QString packOfType(const QString &typeId) {
+    const QString ns = typeNamespace(typeId);
+    return ns == QLatin1String("fugue") || ns == QLatin1String("local") || ns == typeId ? QString() : ns;
+}
+
 bool isPortName(const QString &text) {
     static const QRegularExpression form(QStringLiteral("^[a-z][a-z0-9_]*$"));
     return matches(form, text);

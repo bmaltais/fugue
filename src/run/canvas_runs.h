@@ -150,6 +150,8 @@ private:
         qreal progress = -1;
         qreal seconds = -1;
         QString error;
+        QString errorDetail; // the whole text when `error` is the short form (a missing pack's words); else empty
+        QVariantMap pack;    // that missing pack: {id, name, text, installable}; else empty (#264)
         QStringList warnings;
         QString notice; // a check's word on why the node cannot run now, and the fix (8.5)
         QString thumbnail;
@@ -169,6 +171,7 @@ private:
         bool inputMissing = false;
         QHash<QString, QString> inner; // a group's nodes: path id -> state
         QHash<QString, qreal> innerSeconds;
+        void clearError() { error.clear(); errorDetail.clear(); pack.clear(); }
     };
     struct TabRuns {
         QHash<QString, NodeView> nodes; // by path id: every node, and each group instance holding one
@@ -210,6 +213,9 @@ private:
     static QString aggregate(const NodeView &view);
 
     CanvasModel *m_canvas;
+    // Puts `error` on `view`: its message, and for a node of a pack that is not installed the words of
+    // "Needs the X pack" with the full text kept for the tooltip (#264). `path` names an inner node.
+    void setError(NodeView &view, const Error &error, const QString &path, bool inner) const;
     Workflows *m_workflows;
     RunService *m_service;
     const Registry *m_registry;

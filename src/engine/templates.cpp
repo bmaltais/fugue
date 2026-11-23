@@ -133,7 +133,7 @@ QList<CarriedPack> carriedPacksOf(const QString &templateId, const QString &fold
             continue;
         }
         const CarriedPack pack{read->value(QStringLiteral("id")).toString(), read->value(QStringLiteral("version")).toString(),
-                               entry.absoluteFilePath()};
+                               entry.absoluteFilePath(), read->value(QStringLiteral("name")).toString()};
         if (pack.id != entry.fileName() || pack.version.isEmpty()) {
             if (problems)
                 problems->append(problem(QStringLiteral("Template %1: packs/%2 must hold the pack %2 with a version in its pack.json.")
@@ -322,6 +322,18 @@ QStringList packsNeeded(const Document &document, const Registry &registry) {
     QSet<QString> packs = unmetNamespaces(document, registry);
     packs.remove(QStringLiteral("fugue"));
     return sorted(packs);
+}
+
+QString packTitle(const QString &id, const QString &name) {
+    if (!name.trimmed().isEmpty())
+        return name.trimmed();
+    QString last = id.section(QLatin1Char('.'), -1);
+    if (last.startsWith(QLatin1String("fugue-")) && last.size() > 6)
+        last = last.mid(6);
+    QStringList words = last.split(QLatin1Char('-'), Qt::SkipEmptyParts);
+    for (QString &word : words)
+        word[0] = word.at(0).toUpper();
+    return words.isEmpty() ? id : words.join(QLatin1Char(' '));
 }
 
 QList<Template> TemplateLibrary::list() const {

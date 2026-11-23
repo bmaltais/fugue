@@ -448,6 +448,7 @@ void Compiler::build(Scope *scope) {
                                                "this workflow.")
                                     .arg(path, node.type));
         error.valid = QJsonArray::fromStringList(known);
+        error.pack = packOfType(node.type);
         addHint(error, node.type, known);
         if (error.hint.isEmpty())
             error.hint = QStringLiteral("Install the pack that provides %1, or change the node's type.").arg(node.type);

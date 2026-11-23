@@ -522,7 +522,8 @@ An object is a link if and only if it has the key `from`. `null` is not a value;
 - `fugue`: the app version that wrote the file.
 - `nodes`: every node type used, including inside groups, with its version.
 - `packs`: the packs those types come from, with an optional `source` Fugue can offer to install
-  from (a prompt; nothing installs silently). A save writes each pack installed here at its
+  from (a prompt; nothing installs silently), and an optional `name`, the pack's display name for
+  the words that ask for it (11.6; an install adds none, a template or a hand edit may). A save writes each pack installed here at its
   version (of the pack that holds the newest major of its nodes in use), with the git URL it was added from (`.fugue-source.json`, 6.6) and the commit it is
   at (`ref`), when it was added from git (#91). The URL never carries a credential (https
   user and password, ssh password are dropped) and a `file://` one is not written.
@@ -2083,6 +2084,20 @@ Missing node types open as placeholders that keep their inputs ([3.6](#36-versio
 models are reported from `requires.models` with their source if one is recorded. Neither blocks
 opening or editing.
 
+**A missing pack in words (#264).** A pack is named for a person by its display name: the `name` in
+its `pack.json` when a template carries it (`packs/<id>/`), else the `name` its `requires.packs`
+entry records, else the last part of the id with a leading `fugue-` dropped, hyphens as spaces and
+each word capitalized (`io.github.bmaltais.fugue-remove-background` is "Remove Background").
+- A run that reaches a node whose type is of a missing pack fails it with `unknown_node_type`
+  and `pack`. The node's card does not show that text (cut off, technical, naming an inner node):
+  its error chip says "Needs the Remove Background pack", on a plain node and on a group
+  instance whose inner node needs the pack (the card's error shows on every group holding the
+  node, 5.6), and the whole text, with the inner node's path id and the hint, is the chip's tooltip.
+- When the pack's source is known (the template carries it, or `requires.packs` records one and no
+  version is installed) the chip has an **Install…** button that does what the banner's does: it
+  opens Settings > Packs and starts the install, which asks before it installs and before the pack
+  is trusted (6.6). It stays after the banner is dismissed. Without a source the chip has no button.
+
 ### 11.7 Embedding in outputs
 
 - Save Image embeds the workflow in PNG and WebP by default, so dragging an output back onto
@@ -2878,6 +2893,7 @@ With `--json`, failures are structured, on stdout:
 | `message` | One sentence a person can read. |
 | `valid` | The valid options, in full and never truncated. |
 | `hint` | How to fix it. |
+| `pack` | On `unknown_node_type` for a type of a pack (not a built-in or `local/` type): the pack's id. The window words the error from it (11.6). |
 
 Codes in v0.1:
 

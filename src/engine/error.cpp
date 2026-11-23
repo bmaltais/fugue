@@ -21,6 +21,7 @@ QJsonObject Error::toJson() const {
     setIfAny(object, "input", input);
     setIfAny(object, "output", output);
     setIfAny(object, "hint", hint);
+    setIfAny(object, "pack", pack);
     if (!valid.isEmpty())
         object.insert("valid", valid);
     return object;
@@ -38,6 +39,7 @@ Error Error::fromJson(const QJsonObject &object) {
     error.message = object.value("message").toString();
     error.valid = object.value("valid").toArray();
     error.hint = object.value("hint").toString();
+    error.pack = object.value("pack").toString();
     return error;
 }
 

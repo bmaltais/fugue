@@ -1,5 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import QtQuick.Controls
 import QtQuick.Shapes
 import Fugue
 import "widgets"
@@ -34,6 +35,8 @@ Item {
     required property real progress
     required property real seconds
     required property string error
+    required property string errorDetail // the whole text when `error` is the short words of a missing pack (#264)
+    required property var errorPack      // a node of a pack that is not installed: {id, name, text, installable}, else empty
     required property var warnings
     required property string notice // why it cannot run now, and the fix (8.5), from a check
     required property string thumbnail
@@ -947,9 +950,14 @@ Item {
                         visible: face.failed && node.error !== "" && face.full
                         y: node.height + Math.round(1.5 * face.u)
                         width: node.width
-                        height: errorText.height + 3 * face.u
+                        height: errorText.height + 3 * face.u + (installPackChip.visible ? installPackChip.height + face.u : 0)
                         radius: node.look.smallCorner
                         color: node.look.errorChip
+                        // The full text (a missing pack's words are short; the technical text is here).
+                        HoverHandler { id: errorHover }
+                        ToolTip.visible: errorHover.hovered && node.error !== ""
+                        ToolTip.delay: node.look.tooltipDelay
+                        ToolTip.text: node.errorDetail !== "" ? node.errorDetail : node.error
                         MouseArea {
                             anchors.fill: parent
                             cursorShape: Qt.PointingHandCursor
@@ -981,6 +989,32 @@ Item {
                             lineHeight: 15
                             color: node.look.text
                             font.pixelSize: node.look.labelSize
+                        }
+                        // A node of a pack that is not installed: the button of the banner's flow (#91,
+                        // Settings > Packs, which asks before it installs and before it trusts).
+                        Rectangle {
+                            id: installPackChip
+                            objectName: "installPackChip"
+                            visible: node.errorPack.installable === true
+                            x: errorText.x
+                            y: errorText.y + errorText.height + face.u
+                            width: installPackText.implicitWidth + 4 * face.u
+                            height: 7 * face.u
+                            radius: node.look.smallCorner
+                            color: node.look.accent
+                            Text {
+                                id: installPackText
+                                anchors.centerIn: parent
+                                text: qsTr("Install…")
+                                textFormat: Text.PlainText
+                                color: node.look.accentForeground
+                                font.pixelSize: node.look.captionSize
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: App.workflows.installPackById(node.errorPack.id)
+                            }
                         }
                     }
                 }

@@ -52,6 +52,7 @@ struct CarriedPack {
     QString id;
     QString version;
     QString folder; // absolute: what `fugue pack add` takes
+    QString name;   // its pack.json's display name, empty when it has none
 };
 
 struct Template {
@@ -75,6 +76,12 @@ struct Template {
 // major it recorded with at least its minor (3.6), built-in `fugue` excluded. What a window
 // asks of a template's carried pack: still needed here, or installed now.
 QStringList packsNeeded(const Document &document, const Registry &registry);
+
+// How a missing pack is named in words (#264): `name` when given (a pack.json's, or the `name` a
+// workflow's requires.packs entry records), else the last part of the id, a leading "fugue-"
+// dropped, hyphens as spaces, each word capitalized: "io.github.bmaltais.fugue-remove-background"
+// is "Remove Background".
+QString packTitle(const QString &id, const QString &name = {});
 
 class TemplateLibrary {
 public:

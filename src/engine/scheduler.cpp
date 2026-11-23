@@ -516,9 +516,12 @@ private:
             if (d.state == NodeState::Skipped && d.reason == QLatin1String("cancelled"))
                 return skip(n, QStringLiteral("cancelled"));
         }
-        if (!n.type)
-            return fail(n, nodeError(QStringLiteral("unknown_node_type"),
-                                     QStringLiteral("Node type %1 is not installed.").arg(n.node->type)));
+        if (!n.type) {
+            Error error = nodeError(QStringLiteral("unknown_node_type"),
+                                    QStringLiteral("Node type %1 is not installed.").arg(n.node->type));
+            error.pack = packOfType(n.node->type);
+            return fail(n, error);
+        }
 
         const ResolvedInputs resolved = resolveInputs(n);
         if (resolved.problem)

@@ -21,6 +21,8 @@ bool isTypeId(const QString &text);
 
 // The part of a type id before the '/': the pack id ("fugue" for built-ins).
 QString typeNamespace(const QString &typeId);
+// The pack a node type id comes from: its namespace, empty for a built-in (`fugue`) or `local` type.
+QString packOfType(const QString &typeId);
 
 // An input or output name (6.1): [a-z][a-z0-9_]*.
 bool isPortName(const QString &text);

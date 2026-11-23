@@ -140,6 +140,8 @@ public:
         UpdateAvailable, // a group whose library version is newer: that version (5.3), else empty
         GroupSize,       // a group instance: how many nodes its definition holds (its caption row), else 0
         NewerMajor,      // a node running on an older installed major: the newest version it can move to (3.6, #118), else empty
+        ErrorDetail,     // the whole error text when `error` is the short words of a missing pack (#264), else empty: the chip's tooltip
+        ErrorPack,       // a node of a pack that is not installed: {id, name, text, installable}, else empty (the chip's Install button)
         Stack,           // its place in the stacking order, session only: a node that was selected or moved last is the highest (the node's z)
     };
 
@@ -783,6 +785,8 @@ private:
         QVariantMap media;
         QVariantMap values;
         QString notice;
+        QString errorDetail;
+        QVariantMap errorPack;
     };
 
     Snapshot snapshot() const;

@@ -439,6 +439,8 @@
   "Inputs that go: %1": "Inputs that go: %1",
   "Install %1 %2?": "Install %1 %2?",
   "Install %1…": "Install %1…",
+  "Install…": "Install…",
+  "Needs the %1 pack": "Needs the %1 pack",
   "Installed %1 %2. Its nodes are in node search; trust it before they run.": "Installed %1 %2. Its nodes are in node search; trust it before they run.",
   "Into %1": "Into %1",
   "Its setup was not run.": "Its setup was not run.",

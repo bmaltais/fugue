@@ -11,6 +11,7 @@
 #include "engine/file_inputs.h"
 #include "engine/file_roots.h"
 #include "engine/group_library.h"
+#include "engine/ids.h"
 #include "engine/file_hashes.h"
 #include "engine/json.h"
 #include "engine/model_download.h"
@@ -832,6 +833,43 @@ QVariantMap Workflows::carriedPackOffer(const Document &document) const {
     return {};
 }
 
+QVariantMap Workflows::packNeedOf(const Document &document, const QString &pack) const {
+    QString name;
+    QVariantMap offer;
+    if (m_current >= 0)
+        for (const CarriedPack &carried : m_tabs[size_t(m_current)].carried)
+            if (carried.id == pack) {
+                name = carried.name;
+                offer = QVariantMap{{"source", carried.folder}, {"ref", QString()}};
+                break;
+            }
+    const QJsonObject entry = document.requirements.value(QStringLiteral("packs")).toObject().value(pack).toObject();
+    if (name.isEmpty())
+        name = entry.value(QStringLiteral("name")).toString();
+    if (offer.isEmpty() && !entry.value(QStringLiteral("source")).toString().isEmpty() && m_registry->packVersion(pack).isEmpty())
+        offer = QVariantMap{{"source", entry.value(QStringLiteral("source")).toString()},
+                            {"ref", entry.value(QStringLiteral("ref")).toString()}};
+    const QString title = packTitle(pack, name);
+    return QVariantMap{{"id", pack},
+                       {"name", title},
+                       {"text", tr("Needs the %1 pack").arg(title)},
+                       {"installable", !offer.isEmpty()},
+                       {"source", offer.value("source")},
+                       {"ref", offer.value("ref")}};
+}
+
+QVariantMap Workflows::packNeed(const QString &pack) const {
+    return m_current < 0 ? QVariantMap() : packNeedOf(documentOf(m_current), pack);
+}
+
+bool Workflows::installPackById(const QString &pack) {
+    const QVariantMap need = packNeed(pack);
+    if (!need.value("installable").toBool())
+        return false;
+    emit packInstallRequested(need.value("source").toString(), need.value("ref").toString());
+    return true;
+}
+
 QString Workflows::missingNotice(const Document &document, const QString &title, DownloadOffer *offer) const {
     QStringList lines;
     const QVariantMap carried = carriedPackOffer(document);
@@ -863,7 +901,7 @@ QString Workflows::missingNotice(const Document &document, const QString &title,
         offer->pack = carried;
         const QJsonObject packs = document.requirements.value(QStringLiteral("packs")).toObject();
         for (const QString &type : carried.isEmpty() ? missing : QStringList()) {
-            const QString pack = type.section(QLatin1Char('/'), 0, 0);
+            const QString pack = packOfType(type);
             const QJsonObject entry = packs.value(pack).toObject();
             if (entry.value(QStringLiteral("source")).toString().isEmpty() || !m_registry->packVersion(pack).isEmpty())
                 continue;

@@ -21,6 +21,7 @@ struct Error {
     QString message;         // one sentence a person can read
     QJsonArray valid;        // the valid options, in full, never truncated
     QString hint;            // how to fix it
+    QString pack;            // unknown_node_type: the pack the node's type comes from, when it names one (a missing pack, #264)
 
     // Only the fields that are set; `valid` only when it is non-empty.
     QJsonObject toJson() const;

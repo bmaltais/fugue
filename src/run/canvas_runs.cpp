@@ -115,6 +115,24 @@ CanvasRuns::CanvasRuns(CanvasModel *canvas, Workflows *workflows, RunService *se
 
 CanvasRuns::~CanvasRuns() = default;
 
+void CanvasRuns::setError(NodeView &view, const Error &error, const QString &path, bool inner) const {
+    const QString prefix = inner ? path + QStringLiteral(": ") : QString();
+    view.error = prefix + shownMessage(error);
+    view.errorDetail.clear();
+    view.pack.clear();
+    if (error.code != QLatin1String("unknown_node_type") || error.pack.isEmpty())
+        return;
+    // A node of a pack that is not installed: the card says which pack, in words; the technical
+    // text, with the inner node's id, is the tooltip's.
+    const QVariantMap need = m_workflows->packNeed(error.pack);
+    if (need.isEmpty())
+        return;
+    view.errorDetail = prefix + error.message + (error.hint.isEmpty() ? QString() : QLatin1Char(' ') + error.hint);
+    view.error = need.value("text").toString();
+    view.pack = QVariantMap{{"id", need.value("id")}, {"name", need.value("name")},
+                            {"text", need.value("text")}, {"installable", need.value("installable")}};
+}
+
 void CanvasRuns::registerCommands(CommandRegistry &commands) {
     m_commands = &commands;
     commands.setHandler(QStringLiteral("run.start"), [this] { start(false); });
@@ -329,7 +347,7 @@ void CanvasRuns::show(const QString &tab, const QString &node) {
     const NodeView view = m_tabs.value(tab).nodes.value(node);
     QVariantMap state{{"state", aggregate(view)}, {"progress", progressOf(view)}, {"seconds", view.seconds},
                       {"error", view.error},      {"warnings", view.warnings}, {"values", view.values},
-                      {"notice", view.notice}};
+                      {"notice", view.notice},    {"errorDetail", view.errorDetail}, {"errorPack", view.pack}};
     const auto image = [&](const QString &url, int width, int height, const QString &file) {
         const QString size = QStringLiteral("%1 \u00d7 %2").arg(width).arg(height);
         state.insert("thumbnail", url);
@@ -458,7 +476,7 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
             for (const QString &level : error.node.isEmpty() ? QStringList() : levelsOf(error.node)) {
                 NodeView &view = runs.nodes[level];
                 view.state = QStringLiteral("error");
-                view.error = level != error.node ? error.node + QStringLiteral(": ") + shownMessage(error) : shownMessage(error);
+                setError(view, error, error.node, level != error.node);
                 show(tab, level);
             }
         }
@@ -660,7 +678,7 @@ void CanvasRuns::onEvent(const QString &run, const QJsonObject &event) {
             setState(QStringLiteral("error"));
             view.progress = -1;
             // An inner node's error names its path id (5.6).
-            view.error = inner ? path + QStringLiteral(": ") + shownMessage(error) : shownMessage(error);
+            setError(view, error, path, inner);
         }
         show(tab, top);
     }
@@ -715,7 +733,7 @@ void CanvasRuns::onChecked(int ticket, const QJsonObject &nodes, const QJsonArra
             view.warnings.clear();
             view.notice.clear();
             if (asked.edit || !failed) {
-                view.error.clear();
+                view.clearError();
                 view.state.clear();
             } else {
                 view.state = QStringLiteral("error");
@@ -755,7 +773,7 @@ void CanvasRuns::onChecked(int ticket, const QJsonObject &nodes, const QJsonArra
         view.notice.clear();
         if (asked.edit || !failed) {
             view.state.clear();
-            view.error.clear();
+            view.clearError();
         } else {
             view.state = QStringLiteral("error");
         }

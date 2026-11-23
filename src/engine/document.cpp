@@ -563,6 +563,8 @@ public:
                 field(it.value().toObject(), at, "version", isVersion, "a version such as \"1.0.0\"");
                 field(it.value().toObject(), at, "source", [](const QJsonValue &v) { return v.isString(); },
                       "a string");
+                field(it.value().toObject(), at, "name", [](const QJsonValue &v) { return v.isString(); },
+                      "a string");
             }
         }
         if (o.contains("models") && list(o.value("models"), "requires.models")) {

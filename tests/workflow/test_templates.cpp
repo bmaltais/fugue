@@ -317,6 +317,43 @@ private slots:
         QVERIFY(workflows.packOffer().isEmpty()); // installed at another major: needs review, not missing
     }
 
+    // #264: a missing pack is named in words (the name the workflow records, else the id's last part) and
+    // installed from where it says, with or without the banner.
+    void aMissingPackIsNamedInWordsAndInstallable() {
+        QCOMPARE(packTitle("io.github.bmaltais.fugue-remove-background"), QStringLiteral("Remove Background"));
+        QCOMPARE(packTitle("io.example.tools"), QStringLiteral("Tools"));
+        QCOMPARE(packTitle("io.example.tools", " Sharp Tools "), QStringLiteral("Sharp Tools"));
+
+        Fixture f;
+        makeTemplate(f.bundled.filePath("many"), {{"title", "Many"}},
+                     workflow({{"a", node("io.example.tools/sharpen", {}, "1.0.0")},
+                               {"b", node("io.example.tools/sharpen", {}, "1.0.0")},
+                               {"c", node("io.example.other-pack/shrink", {}, "1.0.0")}},
+                              QJsonObject{{"packs", QJsonObject{{"io.example.tools", QJsonObject{{"version", "1.0.0"},
+                                                                                              {"source", "https://example.com/tools"},
+                                                                                              {"name", "Sharp Tools"}}}}}}));
+        CanvasModel canvas(&f.registry);
+        CommandRegistry commands;
+        QTemporaryDir state;
+        WorkflowLocations locations;
+        locations.recoveryDir = state.filePath("recovery");
+        locations.trustPath = state.filePath("trust.json");
+        locations.templateRoots = {{f.own.path(), true}, {f.bundled.path(), false}};
+        Workflows workflows(&canvas, &f.registry, &commands, locations);
+        QVERIFY(workflows.openTemplateById("many"));
+        const QVariantMap need = workflows.packNeed("io.example.tools");
+        QCOMPARE(need.value("text").toString(), QStringLiteral("Needs the Sharp Tools pack"));
+        QVERIFY(need.value("installable").toBool());
+        QVERIFY(!workflows.packNeed("io.example.other-pack").value("installable").toBool()); // no source recorded
+        QSignalSpy install(&workflows, &Workflows::packInstallRequested);
+        QVERIFY(!workflows.installPackById("io.example.other-pack"));
+        QVERIFY(workflows.installPackById("io.example.tools"));
+        QCOMPARE(install.size(), 1);
+        QCOMPARE(install.first().at(0).toString(), QStringLiteral("https://example.com/tools"));
+        workflows.dismissNotice();
+        QVERIFY(workflows.packNeed("io.example.tools").value("installable").toBool()); // the card keeps it
+    }
+
     void theBannerOffersNothingOnceTheCarriedPackIsInstalled() {
         Fixture f;
         makeTemplate(f.bundled.filePath("carrier"), {{"title", "Carrier"}},
