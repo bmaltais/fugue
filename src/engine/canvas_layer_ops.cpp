@@ -22,12 +22,16 @@ constexpr OpName kOps[] = {
     {LayerOp::Duplicate, "duplicate"}, {LayerOp::MaskEnabled, "mask-enabled"}, {LayerOp::RemoveMask, "mask-delete"},
     {LayerOp::SetMask, "mask-set"},   {LayerOp::New, "new"},               {LayerOp::Group, "group"},
     {LayerOp::Ungroup, "ungroup"},    {LayerOp::MergeDown, "merge-down"},  {LayerOp::Flatten, "flatten"},
-    {LayerOp::Properties, "properties"},
+    {LayerOp::Properties, "properties"}, {LayerOp::Lock, "lock"},
 };
 
 Error invalid(const QString &message, const QString &hint = {}) { return makeError(QStringLiteral("input_invalid"), message, hint); }
 
 } // namespace
+
+Error lockedError(const LayerRecord &layer, const QString &what) {
+    return invalid(QStringLiteral("%1 is locked: %2.").arg(layer.name, what), QStringLiteral("Unlock it first (the lock in the Layers panel, or `fugue canvas layer set <canvas> <layer> --lock false`)."));
+}
 
 bool layerOpNeedsPixels(LayerOp op) { return op == LayerOp::MergeDown || op == LayerOp::Flatten; }
 
@@ -128,6 +132,10 @@ Result<Tree> applyLayerEdit(const Tree &tree, const LayerEdit &edit) {
             out.layers[size_t(p)].compositeOp = blend == mask::Blend::Normal ? QString() : mask::opOfBlend(blend);
         break;
     }
+    case LayerOp::Lock:
+        for (int p : chosen)
+            out.layers[size_t(p)].locked = edit.flag;
+        break;
     case LayerOp::Rename: {
         const QString name = edit.text.trimmed();
         if (chosen.size() != 1)
@@ -138,6 +146,9 @@ Result<Tree> applyLayerEdit(const Tree &tree, const LayerEdit &edit) {
         break;
     }
     case LayerOp::Remove:
+        for (int p : chosen)
+            if (tree.layers[size_t(p)].locked)
+                return lockedError(tree.layers[size_t(p)], QStringLiteral("it cannot be deleted"));
         for (auto it = chosen.rbegin(); it != chosen.rend(); ++it)
             out.layers.erase(out.layers.begin() + *it);
         break;
@@ -164,6 +175,8 @@ Result<Tree> applyLayerEdit(const Tree &tree, const LayerEdit &edit) {
             LayerRecord &layer = out.layers[size_t(p)];
             if (!layer.hasMask)
                 return invalid(QStringLiteral("Layer %1 (%2) has no layer mask.").arg(p).arg(layer.name));
+            if (edit.op == LayerOp::RemoveMask && layer.locked)
+                return lockedError(layer, QStringLiteral("its layer mask cannot be deleted"));
             if (edit.op == LayerOp::MaskEnabled) {
                 layer.maskEnabled = edit.flag;
             } else {
@@ -207,6 +220,8 @@ Result<Tree> applyLayerEdit(const Tree &tree, const LayerEdit &edit) {
         for (int p : chosen)
             if (!tree.layers[size_t(p)].group)
                 return invalid(QStringLiteral("Layer %1 (%2) is not a group.").arg(p).arg(tree.layers[size_t(p)].name));
+            else if (tree.layers[size_t(p)].locked)
+                return lockedError(tree.layers[size_t(p)], QStringLiteral("it cannot be ungrouped"));
             else if (const LayerRecord &g = tree.layers[size_t(p)]; !g.visible || g.opacity != 1 || !g.compositeOp.isEmpty() || g.hasMask)
                 return invalid(QStringLiteral("The group %1 is hidden, has an opacity or blend mode of its own, or has a layer mask: ungrouping would lose that.").arg(g.name),
                                QStringLiteral("Show it, and set its opacity to 100%, its blend to Normal and delete its mask first (Layer properties…)."));
@@ -224,6 +239,8 @@ Result<Tree> applyLayerEdit(const Tree &tree, const LayerEdit &edit) {
         if (chosen.size() != 1)
             return invalid(QStringLiteral("A layer mask is set on one layer at a time."));
         LayerRecord &layer = out.layers[size_t(*chosen.begin())];
+        if (layer.locked)
+            return lockedError(layer, QStringLiteral("its layer mask cannot be painted or replaced"));
         if (layer.kind == mask::LayerKind::Mask)
             return invalid(QStringLiteral("Layer %1 (%2) is a mask layer: it has no layer mask.").arg(*chosen.begin()).arg(layer.name));
         for (const auto &entry : edit.maskTiles)

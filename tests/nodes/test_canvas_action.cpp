@@ -272,6 +272,16 @@ private slots:
         QCOMPARE(region.inputs.value("width").literal(), QJsonValue(3)); // its bounds, as Use selection writes them
     }
 
+    void aNamedLayerIsReadInsteadOfThePictureAndNoneLeavesTheWorkflowsOwn() {
+        const Document document = load(fillWorkflow());
+        const Action action = **actionOf(document);
+        const ActionGraph graph = checkAction(action, document, m_registry).value();
+        ActionBinding binding{"c1", "sha256:" + QString(64, 'a'), RouteRect{1, 2, 3, 4}, {}, {}, {}, {{"prompt", "x"}}};
+        QVERIFY(!bindAction(document, action, graph, binding)->graph.nodes.value("region").inputs.contains("layer"));
+        binding.layer = "Sky";
+        QCOMPARE(bindAction(document, action, graph, binding)->graph.nodes.value("region").inputs.value("layer").literal(), QJsonValue("Sky"));
+    }
+
     void anotherBlankRegionReadsTheSamePictureAndANamedOneIsLeftAlone() {
         QJsonObject workflow = withNode(fillWorkflow(), "ref", QJsonObject{{"type", "fugue/canvas-region"}, {"version", "1.2.0"},
                                                                          {"inputs", QJsonObject{{"canvas", ""}, {"x", 5}}}});

@@ -171,6 +171,30 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // #226: the lock toggle is one revision that disables Delete for the layer; Generate reading a layer shows a notice, no revision.
+    void theLockProtectsALayerAndGenerateCanReadOneLayerOnly() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        click(app, "canvasLayer-1");
+        QTRY_COMPARE(model(app)->property("selection").toList(), (QVariantList{1}));
+        QVERIFY(find(app.window, "canvasLayerDelete")->isEnabled());
+        click(app, "canvasLayerLock-1");
+        QTRY_VERIFY(layer(app, 1).value("locked").toBool());
+        QCOMPARE(revisions(), 2);
+        QTRY_VERIFY(!find(app.window, "canvasLayerDelete")->isEnabled());
+        QVERIFY(!find(app.window, "canvasLayersRegion"));
+        QVERIFY(QMetaObject::invokeMethod(model(app), "setRegionLayer", Q_ARG(int, 1)));
+        QTRY_VERIFY(find(app.window, "canvasLayersRegion"));
+        QCOMPARE(revisions(), 2); // a view state
+        click(app, "canvasLayersRegionEnd");
+        QTRY_VERIFY(!find(app.window, "canvasLayersRegion"));
+        click(app, "canvasLayerLock-1");
+        QTRY_VERIFY(!layer(app, 1).value("locked").toBool());
+        QTRY_VERIFY(find(app.window, "canvasLayerDelete")->isEnabled());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
     void opacityIsADragNumberFieldAndBlendAMenu() {
         App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
         QVERIFY(app.open());

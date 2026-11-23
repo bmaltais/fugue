@@ -25,6 +25,8 @@ Item {
     property string canvasId: ""
     property string revision: ""
     property bool onHead: false
+    // The layer Generate reads instead of the whole picture ("" for the picture as it looks), set in the Layers panel.
+    property string regionLayer: ""
     // The rectangle on the picture (canvas pixels; width 0: none), and the Quick Mask selection while Quick Mask is on.
     property var rect: ({x: 0, y: 0, width: 0, height: 0})
     property MaskLayer quickMask: null
@@ -92,6 +94,8 @@ Item {
             return
         }
         const request = {action: chosen, canvas: canvasId, revision: revision, prompt: promptField.text}
+        if (regionLayer !== "")
+            request.layer = regionLayer
         if (usesMask) {
             const stored = actions.storeSelection(quickMask)
             if (!stored.ok)

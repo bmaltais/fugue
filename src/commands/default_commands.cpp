@@ -67,6 +67,8 @@ QList<Row> defaultRows() {
         {"panel.queue", QT_TRANSLATE_NOOP("Command", "Toggle the run queue"), {"Alt+Q"}, {}, "canvas", "added"},
         // The Canvas view's layers panel (#226): its keys while the pointer is over it (Blender's hover rule).
         {"canvas-layers.visible", QT_TRANSLATE_NOOP("Command", "Hide or show the selected layers"), {"H"}, {"Click the eye", "Alt+click the eye: that layer alone"}, "canvas-layers", "added"},
+        {"canvas-layers.lock", QT_TRANSLATE_NOOP("Command", "Lock or unlock the selected layers"), {"Ctrl+/"}, {"Click the lock"}, "canvas-layers", "added"},
+        {"canvas-layers.use-in-region", QT_TRANSLATE_NOOP("Command", "Generate reads this layer only, or the whole picture again"), {}, {"Right-click the layer"}, "canvas-layers", "added"},
         {"canvas-layers.rename", QT_TRANSLATE_NOOP("Command", "Rename the layer"), {"F2"}, {"Double-click its name"}, "canvas-layers", "added"},
         {"canvas-layers.duplicate", QT_TRANSLATE_NOOP("Command", "Duplicate the selected layers"), {"Ctrl+D"}, {}, "canvas-layers", "added"},
         {"canvas-layers.raise", QT_TRANSLATE_NOOP("Command", "Move the selected layers up"), {"]"}, {"Drag a layer"}, "canvas-layers", "added"},

@@ -68,12 +68,14 @@ Rectangle {
         const found = model.blendModes.find(b => b.id === id)
         return found ? found.label : (current ? current.compositeOp : "")
     }
-    // Whether the layer and the one under it are shown paint layers or groups, which Merge down needs.
+    // Whether the layer and the one under it are shown, unlocked paint layers or groups, which Merge down needs.
     function canMergeDown(row) {
         const under = rows.find(r => r.position === row.position - 1)
-        const merges = r => r !== undefined && r.visible && r.kind !== "mask" && r.kind !== "picture"
+        const merges = r => r !== undefined && r.visible && !r.locked && r.kind !== "mask" && r.kind !== "picture"
         return merges(row) && merges(under)
     }
+    // Whether any of these positions is locked (#226): a delete, a mask delete or a merge of it is refused.
+    function lockedIn(positions) { return positions.some(p => rows.find(r => r.position === p)?.locked === true) }
     function addMask(position) {
         if (editable && model.addMask(position))
             maskTargeted()
@@ -92,6 +94,8 @@ Rectangle {
         const sel = chosen
         switch (id) {
         case "canvas-layers.visible": if (sel.length > 0) model.toggleVisible(sel); break
+        case "canvas-layers.lock": if (sel.length > 0) model.toggleLocked(sel); break
+        case "canvas-layers.use-in-region": if (current && sel.length === 1) model.setRegionLayer(current.position); break
         case "canvas-layers.rename": if (current) startRename(current.position); break
         case "canvas-layers.duplicate": if (sel.length > 0) model.duplicate(sel); break
         case "canvas-layers.raise": if (sel.length > 0) model.raise(sel); break
@@ -142,9 +146,12 @@ Rectangle {
         const entries = [
             {text: row.visible ? qsTr("Hide") : qsTr("Show"), value: "visible", detail: keysOf("canvas-layers.visible"), enabled: !off},
             {text: model.solo === row.position ? qsTr("Show every layer") : qsTr("Show this layer alone"), value: "solo", detail: qsTr("Alt+click the eye")},
+            {text: row.locked ? qsTr("Unlock") : qsTr("Lock"), value: "lock", detail: keysOf("canvas-layers.lock"), enabled: !off},
+            {text: model.regionLayer === row.name && row.kind === "paint" ? qsTr("Generate reads the whole picture") : qsTr("Generate reads this layer only"), value: "region", detail: keysOf("canvas-layers.use-in-region"),
+             enabled: !off && sel.length === 1 && row.kind === "paint"},
             {text: qsTr("Rename…"), value: "rename", detail: keysOf("canvas-layers.rename"), enabled: !off && sel.length === 1},
             {heading: true, enabled: false, text: qsTr("Remove")},
-            {text: sel.length > 1 ? qsTr("Delete %n layers", "", sel.length) : qsTr("Delete"), value: "delete", detail: keysOf("canvas-layers.delete"), enabled: !off},
+            {text: sel.length > 1 ? qsTr("Delete %n layers", "", sel.length) : qsTr("Delete"), value: "delete", detail: keysOf("canvas-layers.delete"), enabled: !off && !lockedIn(sel)},
             {heading: true, enabled: false, text: qsTr("Arrange")},
             {text: qsTr("Duplicate"), value: "duplicate", detail: keysOf("canvas-layers.duplicate"), enabled: !off},
             {text: qsTr("Move up"), value: "raise", detail: keysOf("canvas-layers.raise"), enabled: !off},
@@ -158,7 +165,7 @@ Rectangle {
         ]
         if (row.hasMask)
             entries.push({heading: true, enabled: false, text: qsTr("Layer mask")},
-                         {text: qsTr("Delete the mask"), value: "mask-delete", enabled: !off},
+                         {text: qsTr("Delete the mask"), value: "mask-delete", enabled: !off && !lockedIn(sel)},
                          {text: qsTr("Paint the mask"), value: "mask-paint", detail: qsTr("Click the mask"), enabled: !off},
                          {text: row.maskEnabled ? qsTr("Turn the mask off") : qsTr("Turn the mask on"), value: "mask", detail: qsTr("Shift+click the mask"), enabled: !off})
         else if (row.kind !== "mask")
@@ -168,6 +175,8 @@ Rectangle {
             switch (value) {
             case "visible": model.toggleVisible(sel); break
             case "solo": model.solo = row.position; break
+            case "lock": model.toggleLocked(sel); break
+            case "region": model.setRegionLayer(row.position); break
             case "rename": startRename(row.position); break
             case "delete": model.removeLayers(sel); break
             case "duplicate": model.duplicate(sel); break
@@ -419,7 +428,7 @@ Rectangle {
                     objectName: "canvasLayerName-" + row.position
                     anchors.verticalCenter: parent.verticalCenter
                     x: (row.modelData.hasMask ? 16 : 9) * root.u + row.modelData.depth * 4 * root.u
-                    width: eye.x - x - root.u
+                    width: lockToggle.x - x - root.u
                     visible: root.renaming !== row.position
                     elide: Text.ElideRight
                     textFormat: Text.PlainText
@@ -448,6 +457,24 @@ Rectangle {
                     }
                     Keys.onEscapePressed: event => { root.renaming = -1; list.forceActiveFocus(); event.accepted = true }
                     onActiveFocusChanged: if (!activeFocus && root.renaming === row.position) root.renaming = -1
+                }
+                // The lock, left of the eye as in Blender's outliner: quiet and dim while open, lit while locked. The font has no
+                // padlock yet, so the pin stands for it.
+                ViewButton {
+                    id: lockToggle
+                    objectName: "canvasLayerLock-" + row.position
+                    anchors.right: eye.left
+                    anchors.rightMargin: root.u / 2
+                    anchors.verticalCenter: parent.verticalCenter
+                    look: root.look
+                    glyph: "pin"
+                    accented: false
+                    checkable: true
+                    current: row.modelData.locked === true
+                    opacity: row.modelData.locked === true ? 1 : 0.4
+                    tip: row.modelData.locked === true ? qsTr("Locked: it cannot be deleted, merged, transformed or have its mask changed. Click to unlock (%1)").arg(root.keysOf("canvas-layers.lock"))
+                                                       : qsTr("Lock the layer so it cannot be deleted, merged, transformed or have its mask changed (%1)").arg(root.keysOf("canvas-layers.lock"))
+                    onTapped: if (root.editable) root.model.setLocked(root.targetsFor(row.position), row.modelData.locked !== true)
                 }
                 // The eye, at the right as an outliner's toggles are. A hidden layer's is flat and dim (the font has no
                 // crossed eye). While one layer is shown alone its eye alone is on and the others' are flat and dim, as
@@ -551,6 +578,39 @@ Rectangle {
                     }
                 }
             }
+            // Which layer Generate reads (#226): a view state like Show alone, so a notice with its way back.
+            Banner {
+                objectName: "canvasLayersRegion"
+                visible: root.model.regionLayer !== ""
+                width: parent.width
+                look: root.look
+                Item {
+                    width: parent.width
+                    height: regionEnd.height
+                    Text {
+                        anchors.left: parent.left
+                        anchors.right: regionEnd.left
+                        anchors.rightMargin: root.u
+                        anchors.verticalCenter: parent.verticalCenter
+                        elide: Text.ElideRight
+                        color: root.look.text
+                        font.pixelSize: root.look.captionSize
+                        text: qsTr("Generate reads %1 only").arg(root.model.regionLayer)
+                    }
+                    ViewButton {
+                        id: regionEnd
+                        objectName: "canvasLayersRegionEnd"
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        look: root.look
+                        glyph: "x"
+                        flat: true
+                        compact: true
+                        tip: qsTr("Generate reads the whole picture again")
+                        onTapped: root.model.setRegionLayer(-1)
+                    }
+                }
+            }
             DragNumberField {
                 objectName: "canvasLayerOpacity"
                 width: parent.width
@@ -614,7 +674,7 @@ Rectangle {
                     objectName: "canvasLayerMaskDelete"
                     look: root.look
                     danger: true
-                    enabled: root.editable
+                    enabled: root.editable && !root.lockedIn(root.chosen)
                     text: qsTr("Delete mask")
                     tip: qsTr("Delete the layer mask (Undo brings it back)")
                     onTapped: root.model.removeMask(root.chosen)
@@ -666,7 +726,7 @@ Rectangle {
                     look: root.look
                     glyph: "trash-2"
                     danger: true
-                    enabled: root.editable && root.chosen.length > 0
+                    enabled: root.editable && root.chosen.length > 0 && !root.lockedIn(root.chosen)
                     tip: qsTr("Delete the selected layers (%1); Undo brings them back").arg(root.keysOf("canvas-layers.delete"))
                     onTapped: root.model.removeLayers(root.chosen)
                 }

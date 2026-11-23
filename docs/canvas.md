@@ -206,6 +206,8 @@ fugue canvas layer rename canvas-0123456789ab 2 Sky
 fugue canvas layer dup canvas-0123456789ab Sky          # "Sky copy", right above it
 fugue canvas layer move canvas-0123456789ab "Sky copy" --to 0   # to the bottom
 fugue canvas layer rm canvas-0123456789ab 3
+fugue canvas layer set canvas-0123456789ab Sky --lock true      # protect it (--lock false lets go)
+fugue canvas layer merge canvas-0123456789ab "Fill 2"           # into the layer under it
 fugue canvas undo canvas-0123456789ab
 fugue canvas redo canvas-0123456789ab
 ```
@@ -249,6 +251,14 @@ an eye:
   keys keep their meaning in the graph.
 - Each change is a new revision of the head and shows at once; **Undo** and **Redo** at the top of
   the panel go back and forward. Layers are changed on the head only: on an older revision the list is there to look at.
+- The lock beside the eye (Ctrl+/) protects the layer: a **locked layer** cannot be deleted, merged (as the upper or the lower
+  one), flattened, moved or transformed, or have its layer mask painted, replaced or deleted. Showing, opacity, blend, a name,
+  order and Duplicate stay open. Locking is a revision like the rest, so Undo takes it back, and the lock is kept in an `.ora` (and a
+  `.fuguepack`). The layer list says "locked" in `fugue canvas layer list`.
+- **Generate reads this layer only** (the row's menu; again on the same layer, or the x in the notice, goes back) makes the
+  task bar's Generate read that layer's own pixels, as Canvas Region's **Layer** input does, instead of the whole picture. It is a
+  view state, like Show alone, not a revision; it ends with the canvas, and when the layer is renamed or deleted. Only a paint layer
+  whose name no layer above shares can be read this way.
 - Hover a layer to see where it came from (the Canvas Write that made it, and when).
 
 ## Tools, masks and Quick Mask

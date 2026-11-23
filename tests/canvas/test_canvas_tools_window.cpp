@@ -5,6 +5,8 @@
 // (Quick Mask), and Use selection hands it to the followed Canvas Region as one undo step.
 
 #include <QDir>
+#include <QQmlContext>
+#include <QQmlProperty>
 #include <QQuickStyle>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -63,6 +65,9 @@ MaskPaint solid(int w, int h, Rgba c) {
     m.fill(c);
     return m;
 }
+
+// Whether `item`'s tooltip is showing: the attached ToolTip.visible, which the shared popup follows.
+bool tipShown(QQuickItem *item) { return QQmlProperty(item, "ToolTip.visible", qmlContext(item)).read().toBool(); }
 
 QByteArray withRegion(const QString &canvas) {
     return QStringLiteral(R"({"fugue": 1, "graph": {"nodes": {"region": {"type": "fugue/canvas-region", "version": "1.2.0", "inputs": {"canvas": "%1"}}}},
@@ -244,6 +249,34 @@ private slots:
         key(app, Qt::Key_Q);
         QTRY_VERIFY(!view(app)->property("quickMask").toBool());
         QVERIFY(!find(app.window, "canvasViewSelection"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // #281: Qt gives a disabled item no hover, so a disabled button's "why is this off" tip never showed. Use selection is
+    // off with no Canvas Region node in the graph; resting the pointer on it shows its tip, a click on it does nothing,
+    // and leaving it hides the tip.
+    void aDisabledButtonShowsItsTip() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        hoverPicture(app);
+        key(app, Qt::Key_Q);
+        QTRY_VERIFY(view(app)->property("quickMask").toBool());
+        QQuickItem *button = find(app.window, "canvasViewUseSelection");
+        QVERIFY(button);
+        QVERIFY(!button->isEnabled());
+        const int steps = app.model.undoStack()->count();
+        const QPoint at = settled(app.window, "canvasViewUseSelection");
+        QVERIFY(at.x() >= 0);
+        QTest::mouseMove(app.window, at - QPoint(60, 0));
+        QVERIFY(!tipShown(button));
+        QTest::mouseMove(app.window, at);
+        QTRY_VERIFY(tipShown(button));
+        QCOMPARE(button->property("tip").toString(), QString("Add or select a Canvas Region node first: it is what a run redraws"));
+        QTest::mouseClick(app.window, Qt::LeftButton, {}, at);
+        QCOMPARE(app.model.undoStack()->count(), steps); // the click did nothing
+        QTest::mouseMove(app.window, at - QPoint(60, 0));
+        QTRY_VERIFY(!tipShown(button));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 

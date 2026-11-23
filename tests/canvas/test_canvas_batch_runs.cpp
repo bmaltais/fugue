@@ -6,6 +6,8 @@
 // loop is tests/nodes/test_canvas_batch.cpp.
 
 #include <QDir>
+#include <QQmlContext>
+#include <QQmlProperty>
 #include <QQuickStyle>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -55,6 +57,8 @@ QPoint settled(QQuickWindow *window, const QString &name) {
     }
     return still >= 3 ? at : QPoint(-1, -1);
 }
+
+bool tipShown(QQuickItem *item) { return QQmlProperty(item, "ToolTip.visible", qmlContext(item)).read().toBool(); }
 
 } // namespace
 
@@ -204,6 +208,20 @@ private slots:
         QVERIFY(!find(r.app.window, "canvasBatchAction-broken")); // a broken action is not offered
         QVERIFY(!find(r.app.window, "canvasBatchRun")->isEnabled());
         QVERIFY(!find(r.app.window, "canvasBatchAction-generative-fill")->isEnabled()); // its models are missing
+        {
+            // #281: a disabled button shows its tip on hover: why the action is off.
+            QQuickItem *off = find(r.app.window, "canvasBatchAction-generative-fill");
+            const QPoint at = settled(r.app.window, "canvasBatchAction-generative-fill");
+            QVERIFY(at.x() >= 0);
+            QTest::mouseMove(r.app.window, at);
+            QTRY_VERIFY(tipShown(off));
+            QVERIFY(off->property("tip").toString().startsWith("Its models are not on this machine"));
+            const QVariant before = dialog->property("action");
+            QTest::mouseClick(r.app.window, Qt::LeftButton, {}, at);
+            QCOMPARE(dialog->property("action"), before); // the click did nothing
+            QTest::mouseMove(r.app.window, QPoint(2, 2));
+            QTRY_VERIFY(!tipShown(off));
+        }
         click("canvasBatchAction-test-fill");
         click("canvasBatchFormat-jpg");
         // The portal pickers are the desktop's; a test sets what they would.

@@ -302,6 +302,7 @@ int PaintDocument::loadLayer(const LayerInfo &info, const MaskPaint &pixels, con
     setCompositeOp(id, info.compositeOp);
     l->info.producer = info.producer;
     l->info.created = info.created;
+    l->info.locked = info.locked;
     if (mask && info.kind != LayerKind::Mask) {
         setLayerMask(id, *mask);
         l->info.maskEnabled = info.maskEnabled;
