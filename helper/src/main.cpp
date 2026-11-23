@@ -112,6 +112,7 @@
 #include "ggml-backend.h"
 #include "json.hpp"
 #include "stable-diffusion.h"
+#include "strength_args.h"
 
 // stb and json.hpp come from stable-diffusion.cpp's thirdparty/, a system include folder here
 // (CMakeLists.txt): their warnings are not ours.
@@ -604,6 +605,14 @@ json run(const json &request, Contexts &contexts, const Hooks &hooks = {}) {
         fail("out_of_memory", "cannot create the options");
     for (const auto &[key, value] : params.items())
         setOption(options.get(), key, value);
+    // Strength below 1 is a noise level for a model on a shifted flow schedule (strength_args.h, #244).
+    // A video model's strength is read by its own pipeline.
+    if (!video && params.contains("strength") && params["strength"].is_number()) {
+        const std::string args = params.value("sample.args", std::string());
+        const std::string sent = fugue_helper::strengthSampleArgs(args, sd_get_model_version_name(ctx), params["strength"].get<double>());
+        if (sent != args)
+            check(sd_opt_set_string(options.get(), "sample.args", sent.c_str()), "sample.args");
+    }
     // Video to video: the clip's own size, rate and length are the request's.
     const std::string clipFile = op == "vae_encode" && video ? required(request, "video") : request.value("init_video", "");
     if (!clipFile.empty()) {

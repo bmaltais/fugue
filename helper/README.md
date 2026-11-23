@@ -198,6 +198,18 @@ The folder is on the helper's disk, so a paired host (`--serve-http`) does not t
 heard between frames (`cancelled`); inside one image the library has no hook, and Fugue ends the
 helper after its grace period. No change to the stage patch: the upscaler API is the library's own.
 
+## Strength (image to image)
+
+`params.strength` below 1 is the library's step fraction by default: it keeps the last `int(steps * strength) + 1` sigmas
+of the schedule. On a shifted flow schedule (FLUX.2 at 4 steps: 1.0, 0.96, 0.88, 0.72) that is a coarse and misleading
+scale (0.5 starts at 0.96, 0.75 is a full redraw), so for every model that is not of the Stable Diffusion family the helper
+adds `strength_as_noise_level=true,force_first_sigma=true` to `sample.args`: strength is the sigma the start picture is
+noised to, the same at any step count (`src/strength_args.h`, tested by `tests/engine/test_helper_strength.cpp`; numbers in
+`docs/inpaint-outpaint-research.md` 4.7). A request that sends either key itself is not changed; a video model is not
+touched. No patch hunk: both options are the library's own at the pin. Re-check at a pin move that they still exist
+(`grep -n strength_as_noise_level src/pipeline/image.cpp`) and that new version names in `src/model/integrations/` are
+not step-fraction models.
+
 ## Opt-in hunks (not stage seams)
 
 The patch is stage hooks, plus these hunks that change behaviour only when an option is set and leave
