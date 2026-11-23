@@ -164,6 +164,16 @@ Item {
     property string selectionProblem: ""
     readonly property bool brushing: tool === "brush" || tool === "eraser"
     readonly property real maxBrush: Math.max(64, Math.min(2048, Math.max(canvasData.pictureSize.width, canvasData.pictureSize.height)))
+    // #252: the rows the layers panel has selected, and whether Merge down has two shown layers that can merge (paint layers or groups).
+    readonly property var chosenRows: layersPanel.chosen.map(p => canvasData.layers.find(r => r.position === p)).filter(r => r !== undefined)
+    readonly property bool mergeable: {
+        const upper = layersPanel.current
+        if (!canvasData.layersEditable || upper === null || chosenRows.length !== 1 || upper.position < 1)
+            return false
+        const lower = canvasData.layers.find(r => r.position === upper.position - 1)
+        const merges = r => r !== undefined && r.visible && r.kind !== "mask" && r.kind !== "picture"
+        return merges(upper) && merges(lower)
+    }
     readonly property bool paintsMask: !quickMask && canvasData.maskTarget >= 0
     readonly property var maskRow: canvasData.layers.find(r => r.position === canvasData.maskTarget) ?? null
     readonly property var paintTarget: quickMask ? selectionLayer : paintsMask ? layerMask : null
@@ -328,7 +338,7 @@ Item {
         case "canvas-view.new": case "canvas-view.import": return {enabled: true}
         case "canvas-view.open": return {enabled: canvasData.canvases.length > 0}
         case "canvas-view.export": case "canvas-view.export-options": case "canvas-view.export-layers": return {enabled: canvasData.revisionB !== ""}
-        case "canvas-view.rename": case "canvas-view.duplicate": case "canvas-view.delete": case "canvas-view.close": return {enabled: has}
+        case "canvas-view.rename": case "canvas-view.share": case "canvas-view.duplicate": case "canvas-view.delete": case "canvas-view.close": return {enabled: has}
         case "canvas-view.clear": return {enabled: canvasData.layersEditable}
         case "canvas-view.select-all": return {enabled: shows && canvasData.pictureSize.width > 0}
         case "canvas-view.deselect": return {enabled: deselectable}
@@ -342,6 +352,12 @@ Item {
         case "canvas-view.mask-invert": return {enabled: quickMask || paintsMask}
         case "canvas-view.mask-overlay": return {enabled: paintsMask, checkable: true, checked: maskOverlay}
         case "canvas-view.mask-reveal": case "canvas-view.mask-hide": return {enabled: paintsMask}
+        // #252: the layer operations, on the layers panel's selection.
+        case "canvas-view.new-layer": case "canvas-view.flatten": return {enabled: canvasData.layersEditable && canvasData.layers.length > 0}
+        case "canvas-view.group": return {enabled: canvasData.layersEditable && chosenRows.length > 0 && chosenRows.every(r => r.kind !== "picture")}
+        case "canvas-view.ungroup": return {enabled: canvasData.layersEditable && chosenRows.length > 0 && chosenRows.every(r => r.kind === "group")}
+        case "canvas-view.merge-down": return {enabled: mergeable}
+        case "canvas-view.layer-properties": return {enabled: canvasData.layersEditable && layersPanel.current !== null}
         case "canvas-view.undo": return {enabled: !quickMask || selectionLayer.canUndo}
         case "canvas-view.redo": return {enabled: !quickMask || selectionLayer.canRedo}
         // The keys the view handles by hand are shown as text (they are not bound twice).
@@ -386,6 +402,12 @@ Item {
         case "canvas-view.brush-larger": stepSize(true); break
         case "canvas-view.quick-mask": toggleQuickMask(); break
         case "canvas-view.add-mask": addMaskToCurrent(); break
+        case "canvas-view.new-layer": canvasData.newLayer(); break
+        case "canvas-view.merge-down": if (mergeable) canvasData.mergeDown(layersPanel.current.position); break
+        case "canvas-view.flatten": canvasData.flatten(); break
+        case "canvas-view.group": canvasData.groupLayers(layersPanel.chosen); break
+        case "canvas-view.ungroup": canvasData.ungroup(layersPanel.chosen); break
+        case "canvas-view.layer-properties": if (layersPanel.current) fileDialogs.askProperties(layersPanel.current.position); break
         case "canvas-view.mask-overlay": maskOverlay = !maskOverlay; break
         case "canvas-view.mask-invert": if (quickMask) selectionLayer.invert(); else canvasData.invertMask(); break
         // Undo follows what is being done: a Quick Mask stroke, a layer mask's revision, else the document's (the region).
@@ -396,6 +418,7 @@ Item {
         case "canvas-view.export-options": exportWith("picture"); break
         case "canvas-view.export-layers": exportWith("layers"); break
         case "canvas-view.rename": fileDialogs.askRename(); break
+        case "canvas-view.share": fileDialogs.askShare(); break
         case "canvas-view.duplicate": canvasData.duplicateCanvas(); break
         case "canvas-view.clear": fileDialogs.askClear(); break
         case "canvas-view.delete": fileDialogs.askDelete(); break
@@ -557,7 +580,7 @@ Item {
             objectName: "canvasViewImportDialog"
             title: qsTr("Import a picture as a canvas")
             fileMode: PortalFileDialog.OpenFile
-            nameFilters: [qsTr("Pictures and canvases (*.png *.jpg *.jpeg *.webp *.ora)"), qsTr("All files (*)")]
+            nameFilters: [qsTr("Pictures and canvases (*.png *.jpg *.jpeg *.webp *.ora *.fuguepack)"), qsTr("All files (*)")]
             onAccepted: { root.makeProblem = canvasData.importPicture(d.selectedFile, ""); d.destroy() }
             onRejected: d.destroy()
         }
@@ -1198,6 +1221,7 @@ Item {
         model: canvasData
         ownShortcuts: root.ownShortcuts
         onMaskTargeted: root.paintTheMask()
+        onPropertiesRequested: position => fileDialogs.askProperties(position)
     }
     // The masks painted on the picture (#230): the targeted layer mask (its hidden part in red, while Overlay is on) and
     // the Quick Mask selection (red where painted). Under the region's frame, over the picture.

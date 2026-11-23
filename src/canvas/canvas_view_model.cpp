@@ -188,8 +188,25 @@ QString CanvasViewModel::stepName(const QString &revisionId) {
             added.removeOne(n);
         for (const QString &n : after)
             removed.removeOne(n);
+        const QString producer = revision->producer;
         if (tree->width != parent->width || tree->height != parent->height)
             name = tr("Canvas size %1 × %2").arg(tree->width).arg(tree->height);
+        else if (producer == QLatin1String("canvas-view:merge-down") || producer == QLatin1String("canvas-cli:merge-down"))
+            name = removed.size() == 1 ? tr("Merged down: %1").arg(removed.first()) : tr("Merged down");
+        else if (producer == QLatin1String("canvas-view:flatten") || producer == QLatin1String("canvas-cli:flatten"))
+            name = tr("Flattened");
+        else if (producer == QLatin1String("canvas-view:group") || producer == QLatin1String("canvas-cli:group"))
+            name = added.size() == 1 ? tr("Grouped: %1").arg(added.first()) : tr("Grouped");
+        else if (producer == QLatin1String("canvas-view:ungroup") || producer == QLatin1String("canvas-cli:ungroup"))
+            name = removed.size() == 1 ? tr("Ungrouped: %1").arg(removed.first()) : tr("Ungrouped");
+        else if (producer == QLatin1String("canvas-view:properties")) {
+            // The layer the dialog changed: the first one that differs (its new name when it was renamed).
+            QString changed;
+            for (size_t i = 0; i < now.size() && i < was.size() && changed.isEmpty(); ++i)
+                if (!(now[i] == was[i]))
+                    changed = now[i].name;
+            name = tr("Properties: %1").arg(changed);
+        }
         else if (now.size() > was.size())
             name = added.size() == 1 ? tr("Layer added: %1").arg(added.first()) : tr("%n layers added", nullptr, int(now.size() - was.size()));
         else if (now.size() < was.size())
@@ -518,7 +535,7 @@ void CanvasViewModel::rebuildLayers() {
                 const canvas::LayerRecord &layer = tree->layers[size_t(i)];
                 bool known = true;
                 const mask::Blend blend = mask::blendOfOp(layer.compositeOp, &known);
-                const QString kind = layer.kind == mask::LayerKind::Mask ? QStringLiteral("mask") : layer.kind == mask::LayerKind::Picture ? QStringLiteral("picture") : QStringLiteral("paint");
+                const QString kind = layer.group ? QStringLiteral("group") : layer.kind == mask::LayerKind::Mask ? QStringLiteral("mask") : layer.kind == mask::LayerKind::Picture ? QStringLiteral("picture") : QStringLiteral("paint");
                 m_layers.append(QVariantMap{{"position", i},
                                             {"name", layer.name},
                                             {"kind", kind},
@@ -532,6 +549,7 @@ void CanvasViewModel::rebuildLayers() {
                                             {"from", fromText(layer.producer)},
                                             {"created", layer.created},
                                             {"depth", 0},
+                                            {"children", int(layer.children.size())},
                                             {"thumbnail", QFile::exists(thumb(i, false)) ? QUrl::fromLocalFile(thumb(i, false)) : QUrl()},
                                             {"maskThumbnail", layer.hasMask && QFile::exists(thumb(i, true)) ? QUrl::fromLocalFile(thumb(i, true)) : QUrl()}});
             }
@@ -620,7 +638,8 @@ void CanvasViewModel::updateSoloPicture() {
 }
 
 bool CanvasViewModel::applyEdit(const canvas::LayerEdit &edit, const QList<int> &select) {
-    if (!layersEditable() || edit.layers.empty())
+    const bool namesNoLayer = edit.op == canvas::LayerOp::New || edit.op == canvas::LayerOp::Flatten;
+    if (!layersEditable() || (edit.layers.empty() && !namesNoLayer))
         return false;
     commitMask(); // the strokes painted so far are a step of their own, before this one
     if (!layersEditable())
@@ -777,6 +796,83 @@ bool CanvasViewModel::setMaskEnabled(const QVariantList &positions, bool enabled
 }
 
 bool CanvasViewModel::removeMask(const QVariantList &positions) { return applyEdit(makeEdit(canvas::LayerOp::RemoveMask, positionsOf(positions)), m_selected); }
+
+bool CanvasViewModel::newLayer() {
+    // Above the current layer; on top when none is current.
+    canvas::LayerEdit edit = makeEdit(canvas::LayerOp::New, {});
+    int at = int(m_layers.size());
+    if (m_selected.size() == 1 && m_selected.first() >= 0 && m_selected.first() < int(m_layers.size())) {
+        edit.layers = {m_selected.first()};
+        at = m_selected.first() + 1;
+    }
+    return applyEdit(edit, {at});
+}
+
+bool CanvasViewModel::mergeDown(int position) {
+    if (position < 1)
+        return false;
+    return applyEdit(makeEdit(canvas::LayerOp::MergeDown, {position}), {position - 1});
+}
+
+bool CanvasViewModel::flatten() { return applyEdit(makeEdit(canvas::LayerOp::Flatten, {}), {0}); }
+
+bool CanvasViewModel::groupLayers(const QVariantList &positions) {
+    QList<int> chosen = positionsOf(positions);
+    if (chosen.isEmpty())
+        return false;
+    std::sort(chosen.begin(), chosen.end());
+    // The group lands where the highest chosen layer was, once the others are out of the way.
+    return applyEdit(makeEdit(canvas::LayerOp::Group, chosen), {chosen.last() - int(chosen.size()) + 1});
+}
+
+bool CanvasViewModel::ungroup(const QVariantList &positions) {
+    QList<int> chosen = positionsOf(positions);
+    if (chosen.isEmpty())
+        return false;
+    std::sort(chosen.begin(), chosen.end());
+    // The children take the place of their group: the selection is all of them, counted layer by layer from the bottom.
+    QList<int> children;
+    int shift = 0;
+    for (int p = 0; p < int(m_layers.size()); ++p) {
+        const QVariantMap row = m_layers.at(int(m_layers.size()) - 1 - p).toMap();
+        if (chosen.contains(p)) {
+            for (int c = 0; c < row.value("children").toInt(); ++c)
+                children.append(p + shift + c);
+            shift += row.value("children").toInt() - 1;
+        }
+    }
+    return applyEdit(makeEdit(canvas::LayerOp::Ungroup, chosen), children);
+}
+
+bool CanvasViewModel::setProperties(int position, const QVariantMap &changes) {
+    canvas::LayerEdit batch = makeEdit(canvas::LayerOp::Properties, {});
+    batch.layers = {position};
+    if (changes.contains("name")) {
+        canvas::LayerEdit step = makeEdit(canvas::LayerOp::Rename, {position});
+        step.text = changes.value("name").toString();
+        batch.steps.push_back(step);
+    }
+    if (changes.contains("opacity")) {
+        canvas::LayerEdit step = makeEdit(canvas::LayerOp::Opacity, {position});
+        step.number = std::clamp(changes.value("opacity").toDouble(), 0.0, 1.0);
+        batch.steps.push_back(step);
+    }
+    if (changes.contains("blend")) {
+        canvas::LayerEdit step = makeEdit(canvas::LayerOp::Blend, {position});
+        step.text = changes.value("blend").toString();
+        batch.steps.push_back(step);
+    }
+    if (changes.value("removeMask").toBool()) {
+        batch.steps.push_back(makeEdit(canvas::LayerOp::RemoveMask, {position}));
+    } else if (changes.contains("maskEnabled")) {
+        canvas::LayerEdit step = makeEdit(canvas::LayerOp::MaskEnabled, {position});
+        step.flag = changes.value("maskEnabled").toBool();
+        batch.steps.push_back(step);
+    }
+    if (batch.steps.empty())
+        return false;
+    return applyEdit(batch, {position});
+}
 
 bool CanvasViewModel::clearCanvas() {
     commitMask(); // the strokes painted so far are a step of their own, before this one

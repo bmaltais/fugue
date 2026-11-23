@@ -5,6 +5,7 @@
 
 #include "cli/process.h"
 #include "engine/atomic_file.h"
+#include "engine/canvas_package.h"
 #include "engine/compile_for_run.h"
 #include "engine/compiler.h"
 #include "engine/embed.h"
@@ -458,7 +459,7 @@ bool Workflows::openPath(const QString &pathOrUrl) {
         }
     }
     if (info.isFile() && isSharePackage(path))
-        return openPackage(path);
+        return canvas::isCanvasPackage(path) ? openCanvasPackage(path) : openPackage(path);
     const Result<ImportedWorkflow> imported = readWorkflowFile(path);
     if (!imported.ok()) {
         setNotice(tr("Could not open %1: %2").arg(info.fileName().isEmpty() ? path : info.fileName(),
@@ -471,6 +472,24 @@ bool Workflows::openPath(const QString &pathOrUrl) {
     addTab(document, fromImage ? QString() : info.absoluteFilePath(),
            fromImage ? info.completeBaseName() : info.fileName(), false, true);
     analyze(document, m_tabs[size_t(m_current)].title);
+    return true;
+}
+
+// A package that carries a canvas (#249): it is imported into this project's canvases as a new canvas, never over one.
+bool Workflows::openCanvasPackage(const QString &path) {
+    const QString shown = QFileInfo(path).fileName();
+    canvas::CanvasStore store = canvas::CanvasStore::forSession();
+    const Result<canvas::CanvasImported> got = canvas::importCanvasPackage(path, store);
+    if (!got) {
+        setNotice(tr("Could not open %1: %2").arg(shown, firstMessage(got.errors())));
+        return false;
+    }
+    QString line = got->part == canvas::SharedPart::History
+                       ? tr("Imported the canvas %1 from %2, with its history (%3 revisions). Open it from the Canvas view.").arg(got->info.name, shown).arg(got->revisions)
+                       : tr("Imported the canvas %1 from %2. Open it from the Canvas view.").arg(got->info.name, shown);
+    if (got->renamedId)
+        line += QLatin1Char(' ') + tr("You already had a canvas with its id, so it is a new canvas and yours is untouched.");
+    setNotice(line);
     return true;
 }
 

@@ -168,6 +168,53 @@ private slots:
         QVERIFY(fugue({"canvas", "export", id, out}).exitCode != 0);
     }
 
+    // #249 with #247 and #248: a .fuguepack target is the package path; the picture and layer flags clash with it, and --history clashes with anything else.
+    void aPackageTargetAndThePictureFlagsDoNotMix() {
+        const QString id = fugue({"canvas", "new", "--name", "Mix", "--size", "300x200", "--json"}).data().value("canvas").toString();
+        for (const QStringList &flags : {QStringList{"--layers"}, QStringList{"--format", "png"}, QStringList{"--quality", "50"}, QStringList{"--scale", "50%"},
+                                         QStringList{"--lossless"}, QStringList{"--estimate"}, QStringList{"--background", "white"}, QStringList{"--prefix", "x"}}) {
+            QStringList args{"canvas", "export", id, path("work/mix.fuguepack")};
+            args << flags << "--json";
+            const Outcome out = fugue(args);
+            QCOMPARE(out.errorCode(), QString("usage"));
+            QVERIFY(!QFileInfo::exists(path("work/mix.fuguepack")));
+        }
+        QCOMPARE(fugue({"canvas", "export", id, path("work/mix.png"), "--history", "--json"}).errorCode(), QString("usage"));
+        QCOMPARE(fugue({"canvas", "export", id, path("work/mixdir"), "--layers", "--history", "--json"}).errorCode(), QString("usage"));
+        // The plain forms still work side by side.
+        QCOMPARE(fugue({"canvas", "export", id, path("work/mix.fuguepack"), "--json"}).exitCode, 0);
+        QCOMPARE(fugue({"canvas", "export", id, path("work/mix.webp"), "--quality", "80", "--json"}).exitCode, 0);
+    }
+
+    // #249: a canvas as a package, head only or with its history, and back in as a new canvas, never over one.
+    void aCanvasPackageGoesOutAndComesBackAsANewCanvas() {
+        const Outcome made = fugue({"canvas", "new", "--name", "Team", "--size", "300x200", "--background", "white", "--json"});
+        const QString id = made.data().value("canvas").toString();
+        QVERIFY(fugue({"canvas", "layer", "rename", id, "0", "Backdrop", "--json"}).exitCode == 0); // a second revision
+        const Outcome head = fugue({"canvas", "export", id, path("work/head.fuguepack"), "--json"});
+        QVERIFY2(head.exitCode == 0, head.out + head.err);
+        QCOMPARE(head.data().value("part").toString(), QString("head"));
+        const Outcome history = fugue({"canvas", "export", id, path("work/hist.fuguepack"), "--history", "--json"});
+        QVERIFY2(history.exitCode == 0, history.out + history.err);
+        // Never over a file, and never a revision other than the head.
+        QVERIFY(fugue({"canvas", "export", id, path("work/head.fuguepack"), "--json"}).exitCode != 0);
+        QVERIFY(fugue({"canvas", "export", id + "@sha256:abcdef0123", path("work/x.fuguepack"), "--json"}).exitCode != 0);
+
+        // Into the store that has it: the id is taken, so it is a new canvas and the old one stays.
+        const Outcome again = fugue({"canvas", "import", path("work/hist.fuguepack"), "--json"});
+        QVERIFY2(again.exitCode == 0, again.out + again.err);
+        QVERIFY(again.data().value("renamed").toBool());
+        QCOMPARE(again.data().value("packagedId").toString(), id);
+        QVERIFY(again.data().value("canvas").toString() != id);
+        QCOMPARE(again.data().value("revisions").toInt(), 2);
+        const Outcome onlyHead = fugue({"canvas", "import", path("work/head.fuguepack"), "--name", "Just the layers", "--json"});
+        QCOMPARE(onlyHead.data().value("revisions").toInt(), 1);
+        QCOMPARE(onlyHead.data().value("name").toString(), QString("Just the layers"));
+        QCOMPARE(fugue({"canvas", "list", "--json"}).data().value("canvases").toArray().size(), 3);
+        // A file that is not a package keeps the old behaviour.
+        QCOMPARE(fugue({"canvas", "import", path("work/missing.png"), "--json"}).exitCode == 0, false);
+    }
+
     void exportWritesAFlattenedPictureByTheExtension() {
         const QString source = oraFile("in.ora"); // 300 x 200: a red square on a transparent paint layer
         const Outcome imported = fugue({"canvas", "import", source, "--json"});
@@ -417,6 +464,44 @@ private slots:
         QVERIFY(fugue({"canvas", "candidates", id}).out.contains("no candidate"));
     }
 
+
+    // New, merge, group, ungroup and flatten from the command line (#252): one revision each.
+    void layersAreCreatedMergedGroupedAndFlattened() {
+        const QString source = oraFile("in.ora"); // Paint (0), Mask (1)
+        const QString id = fugue({"canvas", "import", source, "--json"}).data().value("canvas").toString();
+        const auto layers = [&] { return fugue({"canvas", "layer", "list", id, "--json"}).data().value("layers").toArray(); };
+
+        const Outcome made = fugue({"canvas", "layer", "new", id, "--name", "Sky", "--json"});
+        QVERIFY2(made.exitCode == 0, made.out + made.err);
+        QCOMPARE(layers().at(0).toObject().value("name").toString(), QString("Sky"));
+        QCOMPARE(fugue({"canvas", "layer", "new", id, "0", "--json"}).exitCode, 0); // above the bottom one
+        QCOMPARE(layers().size(), 4);
+
+        const Outcome grouped = fugue({"canvas", "layer", "group", id, "0", "1", "--name", "Pair", "--json"});
+        QVERIFY2(grouped.exitCode == 0, grouped.out + grouped.err);
+        const QJsonObject top = layers().at(0).toObject();
+        QCOMPARE(top.value("name").toString(), QString("Sky"));
+        const QJsonObject pair = layers().at(2).toObject(); // top first: Sky, Mask, Pair
+        QCOMPARE(pair.value("kind").toString(), QString("group"));
+        QCOMPARE(pair.value("children").toArray().size(), 2);
+        QCOMPARE(fugue({"canvas", "layer", "ungroup", id, "Pair", "--json"}).exitCode, 0);
+        QCOMPARE(layers().size(), 4);
+        QCOMPARE(fugue({"canvas", "layer", "ungroup", id, "0", "--json"}).errorCode(), QString("input_invalid"));
+
+        // Merge down: the layer into the one under it (a mask layer does not merge).
+        QCOMPARE(fugue({"canvas", "layer", "merge", id, "Layer 4", "--json"}).exitCode, 0);
+        QCOMPARE(layers().size(), 3);
+        QCOMPARE(fugue({"canvas", "layer", "merge", id, "Sky", "--json"}).errorCode(), QString("input_invalid")); // the Mask is under it
+        QCOMPARE(fugue({"canvas", "layer", "merge", id, "0", "--json"}).errorCode(), QString("input_invalid"));
+        QCOMPARE(fugue({"canvas", "layer", "merge", id, "--json"}).errorCode(), QString("usage"));
+
+        const Outcome flat = fugue({"canvas", "layer", "flatten", id, "--json"});
+        QVERIFY2(flat.exitCode == 0, flat.out + flat.err);
+        const QJsonArray after = layers();
+        QCOMPARE(after.at(after.size() - 1).toObject().value("name").toString(), QString("Background"));
+        QCOMPARE(fugue({"canvas", "layer", "flatten", id, "0", "--json"}).errorCode(), QString("usage"));
+        QCOMPARE(fugue({"canvas", "layer", "rm", id, "0", "--name", "x", "--json"}).errorCode(), QString("usage"));
+    }
 
     // Layer edits from the command line (#226): each is one revision of the head, named by position or name.
     void layersAreListedEditedAndUndone() {

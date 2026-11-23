@@ -14,6 +14,9 @@ fugue canvas log canvas-0123456789ab               # the revisions, newest first
 fugue canvas show canvas-0123456789ab@sha256:ab12cd34   # one revision: tree hash, layers, tiles
 fugue canvas export canvas-0123456789ab out.ora    # the head as an .ora (never replaces a file)
 fugue canvas export canvas-0123456789ab@head out.png  # flattened: .png, .jpg (on white) or .webp
+fugue canvas export canvas-0123456789ab team.fuguepack            # a package to share: the layers as they are now (head only)
+fugue canvas export canvas-0123456789ab team.fuguepack --history  # ... with every revision, so the other person can undo
+fugue canvas import team.fuguepack                 # a package's canvas, as a new canvas (a new id when yours is taken)
 fugue canvas export canvas-0123456789ab out.webp --quality 80 --scale 50%   # lossy WebP at half size
 fugue canvas export canvas-0123456789ab --format jpg --quality 60 --estimate   # the size it would be, nothing written
 fugue canvas export canvas-0123456789ab shots --layers   # one picture per layer into the folder shots
@@ -277,8 +280,8 @@ An amount is 1 to 250 pixels. The work is `engine/mask_ops.h`: Expand and Contra
 The Canvas view has its own menu bar at the top, in the File > Canvas… dialog and in an area alike (#232). Every option of
 the view is a row of a menu, with its key beside it; what does not apply to the canvas now is greyed.
 
-- **Canvas** (it was File; the window's File is the workflows', #262): New canvas…, Open canvas… (the picker), Import picture…, **Export** (Export as…: PNG, JPEG, WebP flattened, .ora
-  with layers, by the extension; Export with quality and scale… and Export layers as files…, #247 and #248, above; never replaces a file), Rename canvas…, Duplicate canvas (the whole history, under a new
+- **Canvas** (it was File; the window's File is the workflows', #262): New canvas…, Open canvas… (the picker), Import picture… (also a `.fuguepack`, below), **Export** (Export as…: PNG, JPEG, WebP flattened, .ora
+  with layers, by the extension; Export with quality and scale… and Export layers as files…, #247 and #248, above; never replaces a file), **Share…** (asks, then where: a `.fuguepack` of the canvas as it is now, or with its history; see Sharing a canvas), Rename canvas…, Duplicate canvas (the whole history, under a new
   id; the copy is shown), **Clear canvas…** (asks; one undoable step that leaves one empty layer of the same size),
   **Delete canvas…** (asks; permanent; the next canvas is shown, or the empty state) and Close canvas (the dialog closes; an
   area shows no canvas).
@@ -324,3 +327,19 @@ panel under the action's name and waits for the GPU like any run. The bundled Ge
 4B Q8, 4 steps, the selection redrawn near 1 MP with the crop as its reference, a Blend of 16. If you generate again
 with exactly the same prompt, seed and selection on the same version after an Undo, the cached result is placed again.
 The prompts you type are kept per project, 200 per action, and never shared with another project.
+
+## Sharing a canvas
+
+A canvas travels in a `.fuguepack`, the same kind of file as a shared workflow (spec 11.5), so a teammate opens it with Fugue.
+**Canvas > Share…** (the Canvas view) asks what goes in: **As it is now…** (the layers, their masks and properties, with no
+history: one revision) or **With history…** (the head and every revision it came from, so the other person can undo your
+steps). Candidates and what an Undo left for Redo stay out. `fugue canvas export <id> <file>.fuguepack [--history]` does the
+same; the file is never written over another.
+
+Opening a package that carries a canvas (File > Open, a double click, **Import picture…** in the Canvas view or
+`fugue canvas import <file>.fuguepack`) imports it as a canvas of your own, under its name or the `--name` you give. It never
+replaces a canvas of yours: when the package's id is one you already have, the canvas gets a new id and the notice says so.
+A package is untrusted input: its files are read only by the hashes its manifest lists, never by their own names or paths;
+every revision, tree and tile must be what its hash says and every tile the size its place gives, or nothing is imported
+(`canvas_corrupt`); names outside the package's folder, links, and files or packages past the size limits are refused
+(`invalid_document`), and all of it is checked before a canvas appears in your store. Layout and checks: `src/engine/canvas_package.h`.

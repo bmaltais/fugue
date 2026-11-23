@@ -12,6 +12,7 @@
 #include "canvas/canvas_choices.h"
 #include "engine/atomic_file.h"
 #include "engine/canvas_diff.h"
+#include "engine/canvas_package.h"
 #include "engine/paint_file.h"
 
 namespace fugue {
@@ -387,7 +388,45 @@ void CanvasHistory::useCanvas(const QString &id) {
     setCanvasId(id);
 }
 
+bool CanvasHistory::sharePackage(const QString &target, bool withHistory) {
+    QString path = target.startsWith(QStringLiteral("file:")) ? QUrl(target).toLocalFile() : target;
+    if (m_canvas.isEmpty() || path.isEmpty())
+        return false;
+    if (QFileInfo(path).suffix().compare(QLatin1String("fuguepack"), Qt::CaseInsensitive) != 0)
+        path += QStringLiteral(".fuguepack");
+    const Errors written = canvas::writeCanvasPackage(store(), m_canvas, withHistory ? canvas::SharedPart::History : canvas::SharedPart::Head, path);
+    if (hasErrors(written)) {
+        fail(written);
+        return false;
+    }
+    m_notice = withHistory ? tr("Saved %1: the canvas with its history").arg(QFileInfo(path).fileName()) : tr("Saved %1: the canvas as it is now").arg(QFileInfo(path).fileName());
+    emit noticeChanged();
+    return true;
+}
+
 QString CanvasHistory::importPicture(const QString &path, const QString &name) {
+    const QString file = path.startsWith(QStringLiteral("file:")) ? QUrl(path).toLocalFile() : path;
+    if (canvas::isCanvasPackage(file)) {
+        // A shared canvas (#249): a new canvas, whatever is here; its id is new when the package's is taken.
+        canvas::CanvasStore into = store();
+        const Result<canvas::CanvasImported> got = canvas::importCanvasPackage(file, into, name);
+        if (!got) {
+            QString text;
+            for (const Error &error : got.errors())
+                if (error.severity == Error::Severity::Error)
+                    text += (text.isEmpty() ? QString() : QStringLiteral(" ")) + error.message;
+            return text;
+        }
+        emit storeChanged();
+        setCanvasId(got->info.id);
+        QString line = got->part == canvas::SharedPart::History ? tr("Opened %1 with its history (%2 revisions)").arg(got->info.name).arg(got->revisions)
+                                                                : tr("Opened %1").arg(got->info.name);
+        if (got->renamedId)
+            line += tr(". It came with an id you already have, so it is a new canvas and yours is untouched");
+        m_notice = line;
+        emit noticeChanged();
+        return {};
+    }
     CanvasChoices choices;
     choices.setStoreRoot(m_root);
     QString id;
