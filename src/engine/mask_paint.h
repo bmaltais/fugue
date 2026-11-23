@@ -139,6 +139,17 @@ public:
     // A color buffer as a picture file by its suffix: "png" (as toPng), "jpg" (quality 92, transparency flattened
     // onto white: JPEG has no alpha) or "webp" (lossless, alpha kept). WebP is at most 16383 px a side.
     Result<QByteArray> toPicture(const QString &suffix) const;
+    // The same with a say in the encoding (canvas export, engine/canvas_export.h).
+    struct PictureEncoding {
+        int quality = 92;      // 1 to 100: a JPEG's, and a lossy WebP's
+        bool lossless = true;  // WebP only: lossless keeps every pixel and the alpha, lossy follows `quality`
+    };
+    Result<QByteArray> toPicture(const QString &suffix, const PictureEncoding &encoding) const;
+    // A color buffer at another size, resampled with Lanczos on premultiplied alpha, so shrinking is clean (the
+    // quick `scaled` below is bilinear, fine for a layer fitted to a canvas, and aliases when it shrinks a lot).
+    Result<MaskPaint> resampled(int width, int height) const;
+    // A color buffer laid over an opaque color (straight RGBA, alpha 255 everywhere).
+    MaskPaint onBackground(uint8_t red, uint8_t green, uint8_t blue) const;
     // A PNG (or any picture libvips reads) as a mask: its first channel, 16-bit scaled to 8.
     static Result<MaskPaint> fromPng(const QByteArray &bytes);
     // Any picture libvips reads as a four-channel buffer (gray and RGB get an opaque alpha, 16-bit is

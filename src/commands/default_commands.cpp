@@ -98,6 +98,8 @@ QList<Row> defaultRows() {
         {"canvas-view.open", QT_TRANSLATE_NOOP("Command", "Choose the canvas to look at"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Open canvas…")},
         {"canvas-view.import", QT_TRANSLATE_NOOP("Command", "Import a picture as a new canvas"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Import picture…")},
         {"canvas-view.export", QT_TRANSLATE_NOOP("Command", "Export the shown revision as a picture (.png, .jpg, .webp) or with its layers (.ora)"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Export as…")},
+        {"canvas-view.export-options", QT_TRANSLATE_NOOP("Command", "Export the shown revision as one picture with a format, quality, size and background, and a preview"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Export with quality and scale…")},
+        {"canvas-view.export-layers", QT_TRANSLATE_NOOP("Command", "Export each layer of the shown revision as a picture file in a folder"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Export layers as files…")},
         {"canvas-view.rename", QT_TRANSLATE_NOOP("Command", "Rename the canvas"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Rename canvas…")},
         {"canvas-view.duplicate", QT_TRANSLATE_NOOP("Command", "Duplicate the canvas with its whole history"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Duplicate canvas")},
         {"canvas-view.clear", QT_TRANSLATE_NOOP("Command", "Clear the canvas: one undoable step that leaves one empty layer"), {}, {}, "canvas-view", "added", QT_TRANSLATE_NOOP("Command", "Clear canvas…")},
