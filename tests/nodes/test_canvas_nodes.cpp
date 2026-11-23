@@ -987,6 +987,32 @@ private slots:
         QCOMPARE(headOf(id), head);
     }
 
+    void aWriteOntoPixelsOfTheSameNoOpWritesNoRevisionAndKeepsTheSource() {
+        Bench bench;
+        const QString id = makeCanvas();
+        QVERIFY(greenOnto(bench, id, "Base", {}, "first").ok());
+        const QString head = headOf(id);
+        const Result<Values> again = greenOnto(bench, id, "Base", {}, "again"); // the layer already holds these pixels
+        QVERIFY2(again.ok(), qPrintable(codeOf(again)));
+        QCOMPARE(headOf(id), head);
+        QCOMPARE(again->value("head").text(), head);
+    }
+
+    void aWriteOntoPixelsAndRegionMeanTheSameLayerAndAGroupIsRefused() {
+        Bench bench;
+        const QString id = makeCanvas();
+        canvas::LayerEdit group;
+        group.op = canvas::LayerOp::Group;
+        group.layers = {0};
+        group.text = "Base"; // a group named like the layer under it, on top: both nodes resolve the group
+        QVERIFY(CanvasStore::forSession().editLayers(id, headOf(id), group, "test")->move.moved);
+        const QString head = headOf(id);
+        const Result<Values> w = greenOnto(bench, id, "Base", {}, "group");
+        QCOMPARE(codeOf(w), QString("input_invalid"));
+        QVERIFY(w.errors().first().message.contains("group"));
+        QCOMPARE(headOf(id), head);
+    }
+
     void aWriteOntoPixelsRefusesALockedMissingOrDoubleTarget() {
         Bench bench;
         const QString id = makeCanvas();

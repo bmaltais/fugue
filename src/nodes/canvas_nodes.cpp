@@ -191,12 +191,11 @@ public:
         } else {
             const mask::MaskPaint *found = nullptr;
             QStringList names;
-            for (int i = opened->layerCount() - 1; i >= 0 && !found; --i) { // the top one of that name
-                const mask::LayerInfo info = opened->layer(i);
-                names << info.name;
-                if (info.name == layerName && info.kind != LayerKind::Picture)
-                    found = opened->pixels(info.id);
-            }
+            std::vector<canvas::LayerFace> faces;
+            for (int i = 0; i < opened->layerCount(); ++i)
+                faces.push_back({opened->layer(i).name, opened->layer(i).kind, false});
+            if (const int at = canvas::topLayerNamed(faces, layerName, &names); at >= 0) // the same layer Canvas Write means
+                found = opened->pixels(opened->layer(at).id);
             if (!found)
                 return makeInputError(QStringLiteral("input_invalid"), QStringLiteral("layer"),
                                       QStringLiteral("The canvas has no layer named \"%1\" at this revision.").arg(layerName.left(60)),
@@ -470,17 +469,15 @@ public:
     Result<Values> writeLayerPixels(const NodeContext &context, const CanvasHandle &base, const canvas::Tree &tree, const QString &name, const CropBox &,
                                     const PlacedLayer &placed) {
         const int width = tree.width, height = tree.height;
-        int position = -1;
         QStringList names;
-        for (int i = int(tree.layers.size()) - 1; i >= 0 && position < 0; --i) {
-            names << tree.layers[size_t(i)].name;
-            if (tree.layers[size_t(i)].name == name && tree.layers[size_t(i)].kind == LayerKind::Paint && !tree.layers[size_t(i)].group)
-                position = i;
-        }
+        const std::vector<canvas::LayerFace> faces = canvas::layerFaces(tree);
+        const int position = canvas::topLayerNamed(faces, name, &names);
         if (position < 0)
             return makeInputError(QStringLiteral("input_invalid"), QStringLiteral("onto_pixels"),
-                                  QStringLiteral("The canvas has no paint layer named \"%1\" at this revision.").arg(name.left(60)),
+                                  QStringLiteral("The canvas has no layer named \"%1\" at this revision.").arg(name.left(60)),
                                   QStringLiteral("Its layers are: %1.").arg(names.join(QStringLiteral(", ")).left(300)));
+        if (const QString why = canvas::noPixelsReason(faces[size_t(position)]); !why.isEmpty())
+            return makeInputError(QStringLiteral("input_invalid"), QStringLiteral("onto_pixels"), why);
         CanvasStore store = CanvasStore::forSession();
         const canvas::LayerRecord &layer = tree.layers[size_t(position)];
         if (layer.locked) // said before reading a pixel; the store says it again if it got locked since
@@ -514,18 +511,24 @@ public:
             }
             // The head moved: rebase when the layer is just as it was read, found again on the new head.
             const Result<canvas::Tree> there = store.loadTree(base.canvas, done->move.head);
+            if (!there)
+                return Result<Values>(makeError(QStringLiteral("canvas_unreadable"),
+                                                QStringLiteral("The canvas changed while this ran and the store could not read its new version, so nothing was written."),
+                                                QStringLiteral("Run again; if it keeps failing, check the canvas with `fugue canvas show`.")));
             at = -1;
-            if (there && there->width == width && there->height == height)
+            if (there->width == width && there->height == height)
                 for (int i = int(there->layers.size()) - 1; i >= 0 && at < 0; --i)
                     if (there->layers[size_t(i)].name == here && there->layers[size_t(i)].tiles == tiles && !there->layers[size_t(i)].group)
                         at = i;
             if (at < 0)
-                break;
+                return Result<Values>(makeError(QStringLiteral("canvas_head_moved"),
+                                                QStringLiteral("The layer \"%1\" changed while this ran, so the picture was not written onto it.").arg(here.left(60)),
+                                                QStringLiteral("Run again from the canvas as it is now.")));
             from = done->move.head;
         }
         return Result<Values>(makeError(QStringLiteral("canvas_head_moved"),
-                                        QStringLiteral("The layer \"%1\" changed while this ran, so the picture was not written onto it.").arg(here.left(60)),
-                                        QStringLiteral("Run again from the canvas as it is now.")));
+                                        QStringLiteral("The canvas kept changing while this ran, so the picture was not written onto \"%1\".").arg(here.left(60)),
+                                        QStringLiteral("Try again.")));
     }
 
     // Onto (1.6.0): `layer_mask` becomes the layer mask of the layer named `onto`, one revision made from the one Region read.

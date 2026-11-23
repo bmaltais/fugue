@@ -1199,6 +1199,8 @@ Result<Commit> CanvasStore::setLayerPixels(const QString &canvasId, const QStrin
             return lockedError(layer, QStringLiteral("its pixels cannot be painted or replaced"));
         if (layer.group || layer.kind != mask::LayerKind::Paint)
             return makeError(QStringLiteral("input_invalid"), QStringLiteral("%1 is not a paint layer: it has no pixels to write.").arg(layer.name));
+        if (layer.tiles == tiles.value())
+            return tree; // the same pixels: nothing changes, the source stays
         layer.tiles = tiles.value();
         layer.source.reset();
         return out;

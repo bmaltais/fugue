@@ -33,6 +33,31 @@ Error lockedError(const LayerRecord &layer, const QString &what) {
     return invalid(QStringLiteral("%1 is locked: %2.").arg(layer.name, what), QStringLiteral("Unlock it first (the lock in the Layers panel, or `fugue canvas layer set <canvas> <layer> --lock false`)."));
 }
 
+int topLayerNamed(const std::vector<LayerFace> &layers, const QString &name, QStringList *names) {
+    for (int i = int(layers.size()) - 1; i >= 0; --i) {
+        if (names)
+            *names << layers[size_t(i)].name;
+        if (layers[size_t(i)].name == name && layers[size_t(i)].kind != mask::LayerKind::Picture)
+            return i;
+    }
+    return -1;
+}
+
+std::vector<LayerFace> layerFaces(const Tree &tree) {
+    std::vector<LayerFace> out;
+    for (const LayerRecord &layer : tree.layers)
+        out.push_back({layer.name, layer.kind, layer.group});
+    return out;
+}
+
+QString noPixelsReason(const LayerFace &layer) {
+    if (layer.group)
+        return QStringLiteral("%1 is a group: it has no pixels of its own to write.").arg(layer.name);
+    if (layer.kind == mask::LayerKind::Mask)
+        return QStringLiteral("%1 is a mask layer: it has no picture to write.").arg(layer.name);
+    return {};
+}
+
 bool layerOpNeedsPixels(LayerOp op) { return op == LayerOp::MergeDown || op == LayerOp::Flatten; }
 
 QString layerOpName(LayerOp op) {

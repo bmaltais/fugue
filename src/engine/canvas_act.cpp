@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "engine/canvas_layer_ops.h"
 #include "engine/canvas_router.h"
 #include "engine/canvas_store.h"
 #include "engine/edge_fill.h"
@@ -283,6 +284,25 @@ Result<ActPlan> planAct(const ActionEntry &entry, const ActRequest &request) {
             return refused(QCoreApplication::translate("CanvasActions", "Select a layer first: click one in the Layers panel."), QStringLiteral("Give --layer <name|position>."));
         binding.layer.clear();
         binding.values.insert(QStringLiteral("layer"), current);
+    }
+    // A Write onto the layer's own pixels (#314): the layer must be one with pixels, said now and not after the sampler ran, and variations
+    // would race (all start from this revision; the first one lands, the others find the layer changed), so Count stays 1.
+    bool onPixels = false;
+    if (onLayer)
+        for (const PortRef &target : action.input(QStringLiteral("layer"))->targets)
+            onPixels = onPixels || (target.port == QLatin1String("onto_pixels") && entry.document.graph.nodes.value(target.node).type == QLatin1String("fugue/canvas-write"));
+    if (onPixels) {
+        if (request.count > 1)
+            return refused(QCoreApplication::translate("CanvasActions", "%1 changes the layer's own pixels, so it makes one result at a time. Set Count to 1.").arg(action.name), QStringLiteral("Give --count 1."));
+        const Result<Tree> tree = CanvasStore::forSession().loadTree(request.canvas, shown->revision);
+        if (!tree)
+            return tree.errors();
+        const std::vector<LayerFace> faces = layerFaces(tree.value());
+        const int at = topLayerNamed(faces, request.currentLayer.trimmed());
+        if (at < 0)
+            return makeError(QStringLiteral("input_invalid"), QCoreApplication::translate("CanvasActions", "The canvas has no layer named \"%1\" at this revision.").arg(request.currentLayer.trimmed().left(60)));
+        if (const QString why = noPixelsReason(faces[size_t(at)]); !why.isEmpty())
+            return makeError(QStringLiteral("input_invalid"), why);
     }
     if (routed.action != RouteAction::None && !onLayer) {
         binding.padding = routed.padding;

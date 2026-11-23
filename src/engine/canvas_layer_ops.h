@@ -50,6 +50,19 @@ struct LayerEdit {
     std::vector<int> parent;
 };
 
+// The layer a name means (#314): Canvas Region's Layer and Canvas Write's Onto the pixels of layer resolve it the same way, so the
+// two never name different layers. The top one (the last, bottom first) of that name that is not a picture layer; a group counts (Region
+// reads it as the one picture it composites). `names` gets the layer names seen, for a hint. -1 when there is none.
+struct LayerFace {
+    QString name;
+    mask::LayerKind kind = mask::LayerKind::Paint;
+    bool group = false;
+};
+int topLayerNamed(const std::vector<LayerFace> &layers, const QString &name, QStringList *names = nullptr);
+std::vector<LayerFace> layerFaces(const Tree &tree);
+// Why a layer has no pixels to write (a group, a picture or a mask layer), in words; empty for a paint layer.
+QString noPixelsReason(const LayerFace &layer);
+
 // A locked layer (#226) refuses what changes its pixels or its mask, takes it out of the stack or merges it: Remove, RemoveMask, SetMask,
 // Ungroup of a locked group, a transform (canvas_transform.h) and a merge. The error says which layer and how to unlock it.
 Error lockedError(const LayerRecord &layer, const QString &what);
