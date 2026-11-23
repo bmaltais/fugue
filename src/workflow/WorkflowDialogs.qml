@@ -140,12 +140,13 @@ Item {
                     }
                 }
                 // A pack its nodes come from, where the workflow says it can be had (#91).
-                Loader {
-                    active: App.workflows.packOffer.id !== undefined
-                    sourceComponent: ThemedButton {
+                Repeater {
+                    model: App.workflows.packOffers
+                    ThemedButton {
+                        required property var modelData
                         objectName: "installPack"
-                        text: App.workflows.packOffer.text
-                        onClicked: App.workflows.installPack()
+                        text: modelData.text
+                        onClicked: App.workflows.installPackById(modelData.id)
                     }
                 }
                 Loader {
