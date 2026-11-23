@@ -66,16 +66,25 @@ Item {
         return actionRows.find(row => row.id === id) ?? ({})
     }
     readonly property bool missingModels: (current.missing ?? 0) > 0
+    // An action on the canvas bounds (Expand) grows the canvas by a side and an amount from the bar, not by a selection
+    // (design 4): the bar stays up while it is the chosen action, so it can be used with nothing selected.
+    readonly property bool boundsAction: current.selection === "bounds"
+    property string expandSide: "right"
+    property int expandPercent: 25
+    readonly property string expandText: expandSide === "left" ? qsTr("Left, %1%").arg(expandPercent)
+                                       : expandSide === "top" ? qsTr("Top, %1%").arg(expandPercent)
+                                       : expandSide === "bottom" ? qsTr("Bottom, %1%").arg(expandPercent)
+                                       : qsTr("Right, %1%").arg(expandPercent)
     readonly property bool hasPrompt: promptField.text.trim() !== ""
     readonly property string blocker: !onHead ? qsTr("Generate works on the latest version")
                                     : otherBusy ? qsTr("Another canvas is generating")
                                     : current.broken === true ? current.reason
                                     : missingModels ? qsTr("Download the models first")
-                                    : selection === null ? qsTr("Select an area first")
+                                    : selection === null && !boundsAction ? qsTr("Select an area first")
                                     : current.needsPrompt === true && !hasPrompt ? qsTr("Type what to put in the selection")
                                     : ""
     readonly property bool hasWord: mine && actions !== null && (actions.error !== "" || actions.notice !== "")
-    readonly property bool shown: actions !== null && canvasId !== "" && (selection !== null || busy || hasWord)
+    readonly property bool shown: actions !== null && canvasId !== "" && (selection !== null || busy || hasWord || boundsAction)
     visible: shown
     // Where the bar may go when the picture is too narrow for it (a small area): the host's whole width, in this item's
     // coordinates. Then it docks across the foot of the picture rather than squeezing its controls.
@@ -96,7 +105,9 @@ Item {
         const request = {action: chosen, canvas: canvasId, revision: revision, prompt: promptField.text}
         if (regionLayer !== "")
             request.layer = regionLayer
-        if (usesMask) {
+        if (boundsAction) {
+            request.expand = {side: expandSide, percent: expandPercent}
+        } else if (usesMask) {
             const stored = actions.storeSelection(quickMask)
             if (!stored.ok)
                 return
@@ -158,6 +169,15 @@ Item {
             rows.push({text: row.name, value: row.id, checked: chosen === row.id, enabled: !row.broken,
                        note: row.broken ? row.reason : row.description})
         openMenu(actionButton, rows, value => { bar.chosen = value; bar.historyStep = -1 }, 64, "canvasTaskActionMenu")
+    }
+    function chooseExpand() {
+        const rows = []
+        for (const side of ["left", "right", "top", "bottom"])
+            for (const percent of [25, 50]) {
+                const name = side === "left" ? qsTr("Left, %1%") : side === "right" ? qsTr("Right, %1%") : side === "top" ? qsTr("Top, %1%") : qsTr("Bottom, %1%")
+                rows.push({text: name.arg(percent), value: side + ":" + percent, checked: expandSide === side && expandPercent === percent})
+            }
+        openMenu(expandButton, rows, value => { const parts = value.split(":"); bar.expandSide = parts[0]; bar.expandPercent = Number(parts[1]) }, 40, "canvasTaskExpandMenu")
     }
     function chooseHistory() {
         openMenu(historyButton, history.slice(0, 20).map(text => ({text: text, value: text})),
@@ -288,7 +308,9 @@ Item {
                         elide: Text.ElideRight
                         color: bar.look.label
                         font.pixelSize: bar.look.labelSize
-                        text: bar.selection === null ? qsTr("Select an area first") : qsTr("Describe what to put in the selection")
+                        text: bar.boundsAction ? qsTr("Describe the scene, or leave empty")
+                            : bar.current.hasPrompt === false ? qsTr("No prompt needed: press Generate")
+                            : bar.selection === null ? qsTr("Select an area first") : qsTr("Describe what to put in the selection")
                     }
                     maximumLength: 2000
                     Accessible.name: qsTr("Prompt")
@@ -359,6 +381,28 @@ Item {
                     flat: true
                     tip: qsTr("More")
                     onTapped: bar.more()
+                }
+            }
+            // Expand: which side the canvas grows on and by how much of the picture's side (one side per run).
+            RowLayout {
+                id: expandRow
+                objectName: "canvasTaskExpandRow"
+                Layout.fillWidth: true
+                visible: bar.boundsAction
+                spacing: bar.u
+                Text {
+                    color: bar.look.label
+                    font.pixelSize: bar.look.labelSize
+                    text: qsTr("Grow the canvas")
+                }
+                ViewButton {
+                    id: expandButton
+                    objectName: "canvasTaskExpand"
+                    look: bar.look
+                    text: bar.expandText
+                    trailingGlyph: "chevron-down"
+                    tip: qsTr("The side to grow, and how much of the picture's size")
+                    onTapped: bar.chooseExpand()
                 }
             }
             // What there is to say, one line, with its one action: progress, the missing models, the latest version, or the

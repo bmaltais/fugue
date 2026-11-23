@@ -459,6 +459,24 @@ workflow compiled into Fugue, used only when the library lacks it) is the recomm
 with exactly the same prompt, seed and selection on the same version after an Undo, the cached result is placed again.
 The prompts you type are kept per project, 200 per action, and never shared with another project.
 
+### Refine, Remove and Expand
+
+Three more actions are in the action menu (templates `refine`, `remove` and `expand`, category Canvas actions; same
+model, FLUX.2 Klein 4B Q8, 4 steps, as Generative fill):
+
+- **Refine** redraws the selection lightly, keeping its shapes and colours (strength 0.7: a noise level, 0.55 polishes,
+  0.9 restyles). The prompt is optional: left empty it asks to refine the details. The strength is the action's Advanced
+  input (the Advanced popover comes later; until then it is the workflow's value, which Edit workflow changes).
+- **Remove** takes out what is selected and fills it from its surroundings: no prompt, a fixed instruction, the selection
+  blurred into the surroundings first and at least 128 px of them in view. For hard removals a LaMa pack
+  ([Remove Object](../examples/packs/io.github.bmaltais.fugue-remove-object)) can do that first fill.
+- **Expand** grows the canvas, then continues the picture into the new border. It needs no selection: the bar shows a
+  **Grow the canvas** row with the side (Left, Right, Top or Bottom) and how much (25% or 50% of the picture's size on that
+  side). Generate first grows the canvas (one step in History, Undo takes it back; the new area is pre-filled from the edge
+  pixels as a layer called "Expanded area") and then fills the new strip plus 32 px of the old picture, with 256 px of the
+  picture beside it in view. One side per run; the prompt is optional (a description of the whole scene helps). If the run
+  fails or is cancelled the canvas stays grown: Undo.
+
 ## Sharing a canvas
 
 A canvas travels in a `.fuguepack`, the same kind of file as a shared workflow (spec 11.5), so a teammate opens it with Fugue.

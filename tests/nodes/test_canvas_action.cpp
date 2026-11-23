@@ -263,7 +263,7 @@ private slots:
         const Document document = load(withOld);
         const Action action = **actionOf(document);
         const ActionGraph graph = checkAction(action, document, m_registry).value();
-        ActionBinding binding{"c1", "sha256:" + QString(64, 'a'), RouteRect{1, 2, 3, 4}, {}, {}, {}, {{"prompt", "x"}}};
+        ActionBinding binding{"c1", "sha256:" + QString(64, 'a'), RouteRect{1, 2, 3, 4}, {}, {}, {}, {{"prompt", "x"}}, {}};
         // A rectangle never reads the selection the file held.
         QVERIFY(!bindAction(document, action, graph, binding)->graph.nodes.value("region").inputs.contains("selection"));
         binding.selection = "sha256:" + QString(64, 'c');
@@ -276,7 +276,7 @@ private slots:
         const Document document = load(fillWorkflow());
         const Action action = **actionOf(document);
         const ActionGraph graph = checkAction(action, document, m_registry).value();
-        ActionBinding binding{"c1", "sha256:" + QString(64, 'a'), RouteRect{1, 2, 3, 4}, {}, {}, {}, {{"prompt", "x"}}};
+        ActionBinding binding{"c1", "sha256:" + QString(64, 'a'), RouteRect{1, 2, 3, 4}, {}, {}, {}, {{"prompt", "x"}}, {}};
         QVERIFY(!bindAction(document, action, graph, binding)->graph.nodes.value("region").inputs.contains("layer"));
         binding.layer = "Sky";
         QCOMPARE(bindAction(document, action, graph, binding)->graph.nodes.value("region").inputs.value("layer").literal(), QJsonValue("Sky"));
@@ -289,7 +289,7 @@ private slots:
         const Document document = load(workflow);
         const Action action = **actionOf(document);
         const ActionGraph graph = checkAction(action, document, m_registry).value();
-        const ActionBinding binding{"c1", "sha256:" + QString(64, 'a'), RouteRect{1, 2, 3, 4}, {}, {}, {}, {}};
+        const ActionBinding binding{"c1", "sha256:" + QString(64, 'a'), RouteRect{1, 2, 3, 4}, {}, {}, {}, {}, {}};
         const Document bound = bindAction(document, action, graph, binding).value();
         QCOMPARE(bound.graph.nodes.value("ref").inputs.value("canvas").literal(), QJsonValue("c1"));
         QCOMPARE(bound.graph.nodes.value("ref").inputs.value("revision").literal(), QJsonValue(binding.revision));
@@ -302,7 +302,7 @@ private slots:
         const Document document = load(fillWorkflow());
         const Action action = **actionOf(document);
         const ActionGraph graph = checkAction(action, document, m_registry).value();
-        const ActionBinding empty{"c1", "sha256:" + QString(64, 'a'), RouteRect{1, 2, 3, 4}, {}, {}, {}, {{"prompt", "  "}}};
+        const ActionBinding empty{"c1", "sha256:" + QString(64, 'a'), RouteRect{1, 2, 3, 4}, {}, {}, {}, {{"prompt", "  "}}, {}};
         const Result<Document> refused = bindAction(document, action, graph, empty);
         QVERIFY(!refused);
         QVERIFY(refused.error().message.contains("Type what to put"));
@@ -314,7 +314,7 @@ private slots:
         const Document bound = bindAction(withFallback, fallback, graph, empty).value();
         QCOMPARE(bound.graph.nodes.value("encode").inputs.value("prompt").literal(), QJsonValue("Continue the scene."));
         // No selection where one is required: said in words, nothing bound.
-        const ActionBinding none{"c1", "sha256:" + QString(64, 'a'), {}, {}, {}, {}, {{"prompt", "x"}}};
+        const ActionBinding none{"c1", "sha256:" + QString(64, 'a'), {}, {}, {}, {}, {{"prompt", "x"}}, {}};
         QVERIFY(bindAction(document, action, graph, none).error().message.contains("Select an area first"));
     }
 
@@ -355,7 +355,7 @@ private slots:
         QCOMPARE(nodes.value("sample").inputs.value("guidance").literal().toDouble(), 1.0);
         QCOMPARE(nodes.value("write").inputs.value("blend").literal().toInt(), 16);
         QVERIFY(nodes.value("region").inputs.value("canvas").literal().toString().isEmpty()); // no canvas id in the file
-        ActionBinding binding{"c1", "sha256:" + QString(64, 'a'), RouteRect{100, 100, 200, 150}, {}, 100, 1.5, {{"prompt", "a red umbrella"}, {"seed", 7}}};
+        ActionBinding binding{"c1", "sha256:" + QString(64, 'a'), RouteRect{100, 100, 200, 150}, {}, 100, 1.5, {{"prompt", "a red umbrella"}, {"seed", 7}}, {}};
         const Result<Document> bound = bindAction(*document, **action, *graph, binding);
         QVERIFY(bound);
         QVERIFY(!hasErrors(compile(*bound, m_registry).problems()));
@@ -396,11 +396,64 @@ private slots:
                 values.insert("prompt", prompt.value("prompt").toString());
             // No selection (the whole picture), then a rectangle.
             for (const std::optional<RouteRect> &rect : {std::optional<RouteRect>{}, std::optional<RouteRect>{RouteRect{100, 100, 200, 150}}}) {
-                ActionBinding binding{"c1", "sha256:" + QString(64, 'a'), rect, {}, std::nullopt, std::nullopt, values};
+                ActionBinding binding{"c1", "sha256:" + QString(64, 'a'), rect, {}, std::nullopt, std::nullopt, values, {}};
                 const Result<Document> bound = bindAction(*document, **action, *graph, binding);
                 QVERIFY2(bound, qPrintable(firstMessage(bound.errors())));
                 QVERIFY(!hasErrors(compile(*bound, m_registry).problems()));
             }
+        }
+    }
+    // The Refine, Remove and Expand templates (slice 5 and 7, the benchmark's recommendations in docs/inpaint-workflows): each block
+    // fits its graph, no input binds one target twice, and the bound copy compiles with and without a prompt, with and without a
+    // rectangle (Expand has no selection of its own: its Region gets the strip).
+    void theRefineRemoveAndExpandTemplatesFitTheirGraphsAndTheirBoundCopiesCompile_data() {
+        QTest::addColumn<QString>("id");
+        QTest::addColumn<QString>("selection");
+        QTest::addColumn<bool>("hasPrompt");
+        QTest::addColumn<double>("strength");
+        QTest::newRow("refine") << "refine" << "required" << true << 0.7;
+        QTest::newRow("remove") << "remove" << "required" << false << 1.0;
+        QTest::newRow("expand") << "expand" << "bounds" << true << 1.0;
+    }
+    void theRefineRemoveAndExpandTemplatesFitTheirGraphsAndTheirBoundCopiesCompile() {
+        QFETCH(QString, id);
+        QFETCH(QString, selection);
+        QFETCH(bool, hasPrompt);
+        QFETCH(double, strength);
+        const Result<Document> document = Document::loadFile(QStringLiteral(FUGUE_SOURCE_DIR "/templates/%1/workflow.fugue").arg(id));
+        QVERIFY2(document, qPrintable(firstMessage(document.errors())));
+        const Result<std::optional<Action>> action = actionOf(*document);
+        QVERIFY(action && action->has_value());
+        QCOMPARE((*action)->selection, selection);
+        QVERIFY(!(*action)->needsPrompt()); // Refine and Expand carry a fallback, Remove has no prompt at all
+        QCOMPARE(bool((*action)->input("prompt")), hasPrompt);
+        const Result<ActionGraph> graph = checkAction(**action, *document, m_registry);
+        QVERIFY2(graph, qPrintable(firstMessage(graph.errors())));
+        QStringList seen;
+        for (const ActionInput &input : (*action)->inputs)
+            for (const PortRef &target : input.targets) {
+                const QString key = target.node + "." + target.port;
+                QVERIFY2(!seen.contains(key), qPrintable(key + " is bound twice"));
+                seen << key;
+            }
+        const auto &nodes = document->graph.nodes;
+        QCOMPARE(nodes.value("models").inputs.value("diffusion_model").handle().value("name").toString(), QStringLiteral("flux-2-klein-4b-Q8_0.gguf"));
+        QCOMPARE(nodes.value("region").version.toString(), QStringLiteral("1.2.0"));
+        QCOMPARE(nodes.value("sample").inputs.value("steps").literal().toInt(), 4);
+        QCOMPARE(nodes.value("sample").inputs.value("guidance").literal().toDouble(), 1.0);
+        QCOMPARE(nodes.value("sample").inputs.value("denoise").literal().toDouble(), strength);
+        QCOMPARE((*action)->input("strength")->defaultValue.toDouble(), strength);
+        QVERIFY(nodes.value("region").inputs.value("canvas").literal().toString().isEmpty());
+        for (const bool withPrompt : {false, true}) {
+            QMap<QString, QJsonValue> values{{"seed", 7}};
+            if (withPrompt && hasPrompt)
+                values.insert("prompt", "warm evening light");
+            ActionBinding binding{"c1", "sha256:" + QString(64, 'a'), RouteRect{100, 100, 200, 150}, {}, 128, 1.5, values, {}};
+            const Result<Document> bound = bindAction(*document, **action, *graph, binding);
+            QVERIFY2(bound, qPrintable(firstMessage(bound.errors())));
+            QVERIFY(!hasErrors(compile(*bound, m_registry).problems()));
+            if (hasPrompt)
+                QVERIFY(!bound->graph.nodes.value("encode").inputs.value("prompt").literal().toString().trimmed().isEmpty()); // the fallback
         }
     }
 };

@@ -7,12 +7,14 @@
 #include <QRandomGenerator>
 
 #include <algorithm>
+#include <cmath>
 
 #include "canvas/mask_layer.h"
 #include "engine/atomic_file.h"
 #include "engine/canvas_handle.h"
 #include "engine/canvas_router.h"
 #include "engine/canvas_store.h"
+#include "engine/edge_fill.h"
 #include "engine/paths.h"
 #include "engine/registry.h"
 #include "run/run_service.h"
@@ -58,6 +60,34 @@ canvas::RouteRect clamped(const canvas::RouteRect &r, int width, int height) {
     const int left = std::clamp(r.x, 0, width), top = std::clamp(r.y, 0, height);
     const int right = std::clamp(r.x + r.width, 0, width), bottom = std::clamp(r.y + r.height, 0, height);
     return {left, top, right - left, bottom - top};
+}
+
+// How far an Expand grows the canvas: `side` (left, right, top or bottom) by `percent` of the picture's side along that
+// direction, in whole multiples of 16, at least 16; or by `pixels` when the request gives them. The rectangle of the
+// grown canvas in the old canvas's pixels. Empty, with `why`, for a side that is not one of the four.
+std::optional<canvas::RouteRect> expandedBounds(const QVariantMap &expand, int width, int height, QString *why) {
+    const QString side = expand.value("side").toString();
+    const bool horizontal = side == QLatin1String("left") || side == QLatin1String("right");
+    if (!horizontal && side != QLatin1String("top") && side != QLatin1String("bottom")) {
+        *why = CanvasActions::tr("Pick the side to grow: left, right, top or bottom.");
+        return std::nullopt;
+    }
+    int grow = expand.value("pixels").toInt();
+    if (grow <= 0)
+        grow = std::max(16, int(std::lround(double(horizontal ? width : height) * expand.value("percent", 25).toDouble() / 100.0 / 16.0)) * 16);
+    canvas::RouteRect to{0, 0, width, height};
+    if (side == QLatin1String("left")) {
+        to.x = -grow;
+        to.width += grow;
+    } else if (side == QLatin1String("right")) {
+        to.width += grow;
+    } else if (side == QLatin1String("top")) {
+        to.y = -grow;
+        to.height += grow;
+    } else {
+        to.height += grow;
+    }
+    return to;
 }
 
 // The size of a canvas at a revision, and that revision in full.
@@ -313,12 +343,22 @@ QVariantMap CanvasActions::generate(const QVariantMap &request) {
         return refuse(chosen->broken);
     }
     const canvas::Action &action = *chosen->action;
+    // An action on the canvas bounds (Expand) ignores the selection: it grows the canvas by the side and the amount asked for.
+    const bool bounds = action.selection == QLatin1String("bounds");
+    std::optional<canvas::RouteRect> grown;
+    if (bounds) {
+        QString why;
+        grown = expandedBounds(request.value("expand").toMap(), shown->width, shown->height, &why);
+        if (!grown)
+            return refuse(why);
+        rect.reset();
+    }
     if (rect) {
         rect = clamped(*rect, shown->width, shown->height);
         in.selection = rect;
         routed = canvas::routeAction(in);
     }
-    if (action.selection == QLatin1String("required") && !rect && selection.isEmpty())
+    if (action.selection == QLatin1String("required") && !rect && selection.isEmpty() && !bounds)
         return refuse(tr("Select an area first."));
     if (rect && routed.action == canvas::RouteAction::None) {
         m_errorCode = QStringLiteral("mask_empty");
@@ -339,11 +379,37 @@ QVariantMap CanvasActions::generate(const QVariantMap &request) {
     binding.canvas = canvasId;
     binding.revision = shown->revision;
     binding.rect = rect;
-    binding.selection = selection;
+    binding.selection = bounds ? QString() : selection;
     binding.layer = request.value("layer").toString().trimmed();
     if (routed.action != canvas::RouteAction::None) {
         binding.padding = routed.padding;
         binding.scale = routed.scale;
+    }
+    // Remove continues its surroundings, so it wants the router's Remove margin even when a prompt routed the pick elsewhere.
+    if (id == QLatin1String("remove") && !bounds)
+        binding.padding = std::max(binding.padding.value_or(0), canvas::RouteTuning{}.removeMinPadding);
+    if (bounds) {
+        // The canvas grows first (one revision, undone in one step, with the new area pre-filled as a layer), then the
+        // action's Region reads the grown canvas: the new strip plus the overlap, with the router's context beside it.
+        canvas::RouteInput grow;
+        grow.canvasWidth = shown->width;
+        grow.canvasHeight = shown->height;
+        grow.resize = grown;
+        grow.hasPrompt = !prompt.isEmpty();
+        const canvas::Route expanded = canvas::routeAction(grow);
+        const Result<canvas::Commit> done = canvas::CanvasStore::forSession().resize(
+            canvasId, shown->revision, mask::IRect{grown->x, grown->y, grown->width, grown->height}, edgefill::Mode::EdgeBlur,
+            edgefill::defaultBlur, QStringLiteral("action:%1").arg(id));
+        if (!done)
+            return refuse(done.error().message);
+        if (!done->move.moved) {
+            m_errorCode = QStringLiteral("canvas_head_moved");
+            return refuse(tr("%1 works on the latest version of the canvas.").arg(m_actionName));
+        }
+        binding.revision = done->revision.id;
+        binding.rect = expanded.fill;
+        binding.padding = expanded.padding;
+        binding.scale = expanded.scale;
     }
     if (action.input(QStringLiteral("prompt")))
         binding.values.insert(QStringLiteral("prompt"), prompt);
@@ -365,7 +431,7 @@ QVariantMap CanvasActions::generate(const QVariantMap &request) {
     m_action = id;
     m_progress = -1;
     m_lastRun = started;
-    if (!prompt.isEmpty())
+    if (!prompt.isEmpty() && action.input(QStringLiteral("prompt")))
         remember(id, prompt);
     emit stateChanged();
     emit progressChanged();

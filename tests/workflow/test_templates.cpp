@@ -1106,6 +1106,19 @@ private slots:
         QCOMPARE(action->category, QStringLiteral("canvas"));
     }
 
+    // Refine, Remove and Expand (#231 slices 5 and 7): canvas actions in the Canvas category, each with a preview.
+    void theRefineRemoveAndExpandTemplatesAreCanvasActions() {
+        const QString root = QStringLiteral(FUGUE_SOURCE_DIR "/templates");
+        Fixture f;
+        const TemplateLibrary library({{root, false}}, &f.registry);
+        for (const char *id : {"refine", "remove", "expand"}) {
+            const auto found = library.find(id);
+            QVERIFY2(found.has_value(), id);
+            QCOMPARE(found->category, QStringLiteral("canvas"));
+            QVERIFY(!hasErrors(compile(Document::loadFile(found->workflow).value(), f.registry).problems()));
+        }
+    }
+
     // The video to video template (#130): VAE Encode Video makes the start latent of a clip that
     // ships beside the template, and the Sampler 1.2.0 redraws it by Denoise, in plain nodes.
     void theVideoToVideoTemplateRedrawsAClipByDenoise() {
