@@ -237,9 +237,12 @@ public:
     // the layer has writes nothing (as editLayers). input_invalid for a mask of another size or channels.
     Result<Commit> setLayerMask(const QString &canvasId, const QString &base, int position, const mask::MaskPaint &mask, const QString &producer);
 
-    // Whether the revision has a group (#252). Writers that go through a PaintDocument (resize, a Canvas Write, the rebase of
-    // an accept) would store a group as one flat layer, so they refuse while there is one: groupsRefused() is their answer.
-    Result<bool> hasGroups(const QString &canvasId, const QString &revisionId) const;
+    // A layer written at the tree level, groups kept (#274; a Canvas Write): `layer` goes on top of the revision `parent`'s layers as a
+    // new revision with that parent (producer `producer`), the head not moved: moveHead does that, or accept places it on a newer
+    // head. The layer's tiles are ones storeLayerTiles stored (a tile that is not stored is canvas_corrupt on the next read).
+    Result<Revision> addLayerRevision(const QString &canvasId, const QString &parent, const LayerRecord &layer, const QString &producer);
+    // Cuts a one- or four-channel layer into tiles and stores the ones not stored yet: the tile maps of a LayerRecord that addLayerRevision takes.
+    Result<TileMap> storeLayerTiles(const mask::MaskPaint &layer);
 
     // ---- selections (#230, docs/canvas-actions-design.md 3) ----
     // A selection painted in a Canvas view (Quick Mask) kept by content: its one-channel tiles in blobs/ and
@@ -294,7 +297,8 @@ private:
     Result<QString> storeTreeRecord(const Tree &tree);
     Result<Revision> addCommit(const QString &canvasId, const QString &treeHash, const QString &parent, const QString &producer);
     // editLayers' body: `change` of the head `base`'s tree, one revision; `newTiles` lets it name tiles the base has not (SetMask, merges).
-    Result<Commit> commitTree(const QString &canvasId, const QString &base, const std::function<Result<Tree>(const Tree &)> &change, const QString &producer, bool newTiles);
+    // `keepSame`: a change that gives the same tree still makes a revision (a resize to the same rectangle), else it writes nothing.
+    Result<Commit> commitTree(const QString &canvasId, const QString &base, const std::function<Result<Tree>(const Tree &)> &change, const QString &producer, bool newTiles, bool keepSame = false);
     Result<Commit> commitEdit(const QString &canvasId, const QString &base, const LayerEdit &edit, const QString &producer, bool newTiles);
     QString selectionPath(const QString &hash) const;
     Errors storeBlob(const QString &hash, const mask::MaskPaint &tile);
@@ -309,8 +313,6 @@ inline constexpr int maxGroupDepth = 8;
 int groupDepth(const LayerRecord &layer);
 // Whether any layer of the tree is a group.
 bool treeHasGroup(const Tree &tree);
-// input_invalid, in plain words: `what` cannot be done to a canvas that has groups (ungroup them first).
-Error groupsRefused(const QString &what);
 
 // The tree as the JSON that is hashed and stored, and back (a bad one is canvas_corrupt).
 QJsonObject treeToJson(const Tree &tree);

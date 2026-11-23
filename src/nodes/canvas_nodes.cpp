@@ -107,11 +107,11 @@ QString promptName(const QString &prompt) {
 }
 
 // "Fill n": one more than the largest n of a layer named "Fill n" ("Fill" alone is 1).
-QString nextFillName(const PaintDocument &document) {
+QString nextFillName(const canvas::Tree &tree) {
     static const QRegularExpression pattern(QStringLiteral("^Fill(?: ([0-9]{1,6}))?$"));
     int highest = 0;
-    for (int i = 0; i < document.layerCount(); ++i) {
-        const QRegularExpressionMatch match = pattern.match(document.layer(i).name);
+    for (const canvas::LayerRecord &layer : tree.layers) {
+        const QRegularExpressionMatch match = pattern.match(layer.name);
         if (match.hasMatch())
             highest = std::max(highest, match.captured(1).isEmpty() ? 1 : match.captured(1).toInt());
     }
@@ -308,17 +308,12 @@ public:
         if (autoName)
             name = promptName(upstreamPrompt(context.document, context.node));
 
-        // A Canvas Write stores the revision as a document, which has no groups: refuse rather than flatten them.
-        const Result<bool> grouped = CanvasStore::forSession().hasGroups(base->canvas, base->revision);
-        if (!grouped)
-            return Result<Values>(grouped.errors());
-        if (grouped.value())
-            return Result<Values>(canvas::groupsRefused(QStringLiteral("Writing a layer")));
-        Result<PaintDocument> opened = openRevision(base.value());
-        if (!opened)
-            return Result<Values>(opened.errors());
-        PaintDocument &document = opened.value();
-        const int width = document.width(), height = document.height();
+        // The layer is written at the tree level (the base tree and one new layer record on top), so a group in the canvas stays a group.
+        CanvasStore store = CanvasStore::forSession();
+        const Result<canvas::Tree> baseTree = store.loadTree(base->canvas, base->revision);
+        if (!baseTree)
+            return Result<Values>(baseTree.errors());
+        const int width = baseTree->width, height = baseTree->height;
 
         CropBox box{0, 0, width, height};
         Pixels mask(width, height, 1, 1.0f);
@@ -350,28 +345,34 @@ public:
                                   QStringLiteral("Keep the Sampler on the region's latent, so the picture keeps its shape."));
 
         if (name.isEmpty())
-            name = nextFillName(document);
-        mask::LayerInfo info;
-        info.name = name;
-        info.producer = QStringLiteral("canvas-write:") + context.node;
-        info.created = isoTime(utcNow());
+            name = nextFillName(baseTree.value());
+        canvas::LayerRecord layer;
+        layer.name = name;
+        layer.producer = QStringLiteral("canvas-write:") + context.node;
+        layer.created = isoTime(utcNow());
         // The redrawn picture whole, with the blend as its layer mask (#226), or baked into its alpha as before.
+        Result<canvas::TileMap> pictureTiles = canvas::TileMap{};
         if (context.input(QStringLiteral("bake")).json().toBool()) {
-            document.loadLayer(info, pixelsToLayer(placedLayer(width, height, box, redrawn.value(), mask, blend.value())));
+            pictureTiles = store.storeLayerTiles(pixelsToLayer(placedLayer(width, height, box, redrawn.value(), mask, blend.value())));
         } else {
             const PlacedLayer placed = placedLayerWithMask(width, height, box, redrawn.value(), mask, blend.value());
             std::vector<uint8_t> gray(placed.mask.data.size());
             for (size_t i = 0; i < gray.size(); ++i)
                 gray[i] = uint8_t(std::lround(std::clamp(placed.mask.data[i], 0.0f, 1.0f) * 255.0f));
-            const mask::MaskPaint layerMask(width, height, gray, 1);
-            info.hasMask = true;
-            document.loadLayer(info, pixelsToLayer(placed.layer), &layerMask);
+            const Result<canvas::TileMap> maskTiles = store.storeLayerTiles(mask::MaskPaint(width, height, gray, 1));
+            if (!maskTiles)
+                return Result<Values>(maskTiles.errors());
+            layer.hasMask = true;
+            layer.maskTiles = maskTiles.value();
+            pictureTiles = store.storeLayerTiles(pixelsToLayer(placed.layer));
         }
+        if (!pictureTiles)
+            return Result<Values>(pictureTiles.errors());
+        layer.tiles = std::move(pictureTiles.value());
 
         // The result lands on the head and nowhere else: a revision made from the one this work started at, then the head
         // by compare-and-swap (the store's rule, 14.5). A head that moved meanwhile takes the layer as it is now (layers
         // only add). A canvas that changed size cannot take it: the run says so and writes nothing (#239).
-        CanvasStore store = CanvasStore::forSession();
         const auto cannotPlace = [&](const QString &head) {
             return Result<Values>(makeError(QStringLiteral("canvas_head_moved"),
                                             QStringLiteral("The canvas changed size while this ran (its head is now %1), so the new layer could not be placed on it and nothing was written.").arg(head.left(19)),
@@ -381,19 +382,14 @@ public:
         if (!current)
             return Result<Values>(current.errors());
         if (current->head != base->revision) {
-            const Result<mask::PaintDocument> there = store.load(base->canvas, current->head);
+            const Result<canvas::Tree> there = store.loadTree(base->canvas, current->head);
             if (!there)
                 return Result<Values>(there.errors());
-            const Result<bool> groupedNow = store.hasGroups(base->canvas, current->head);
-            if (!groupedNow)
-                return Result<Values>(groupedNow.errors());
-            if (groupedNow.value())
-                return Result<Values>(canvas::groupsRefused(QStringLiteral("Writing a layer")));
-            if (there->width() != width || there->height() != height)
+            if (there->width != width || there->height != height)
                 return cannotPlace(current->head);
         }
         const Result<canvas::Revision> added =
-            store.addRevision(base->canvas, document, base->revision, QStringLiteral("canvas-write:") + context.node);
+            store.addLayerRevision(base->canvas, base->revision, layer, QStringLiteral("canvas-write:") + context.node);
         if (!added)
             return Result<Values>(added.errors());
         Result<canvas::HeadMove> moved = store.moveHead(base->canvas, base->revision, added->id);

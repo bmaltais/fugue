@@ -16,6 +16,7 @@
 #include "engine/canvas_diff.h"
 #include "engine/canvas_layer_merge.h"
 #include "engine/canvas_layer_ops.h"
+#include "engine/canvas_resize.h"
 #include "engine/canvas_store.h"
 
 using namespace fugue;
@@ -530,21 +531,89 @@ private slots:
         QCOMPARE(s.info(made.id)->head, off.revision.id);
     }
 
-    void resizeAndAnAcceptsRebaseRefuseACanvasWithAGroup() {
+    // #274: a resize keeps a group (its children and its own mask are moved like any layer) and the picture it shows.
+    void resizeKeepsAGroupAndThePictureItShows() {
+        CanvasStore s = store();
+        const CanvasInfo made = s.create("g", sample(), "test").value();
+        const Commit c = s.editLayers(made.id, made.head, edit(LayerOp::Group, {1, 2}), "canvas-view:group").value();
+        const PaintDocument before = s.load(made.id, c.revision.id).value();
+        // Shift and cut: the new canvas is the rectangle (50, 20) 200 x 100 of the old one, no pre-fill.
+        const Commit r = s.resize(made.id, c.revision.id, IRect{50, 20, 200, 100}, edgefill::Mode::Transparent, 0, "canvas-cli:resize").value();
+        QVERIFY(r.move.moved);
+        const Tree grown = s.loadTree(made.id, r.revision.id).value();
+        QCOMPARE(grown.width, 200);
+        QCOMPARE(grown.height, 100);
+        QCOMPARE(grown.layers.size(), size_t(2)); // Base, and the group
+        QVERIFY(grown.layers[1].group);
+        QCOMPARE(grown.layers[1].children.size(), size_t(2));
+        QCOMPARE(grown.layers[1].children[0].name, QString("Fill 1"));
+        QVERIFY(grown.layers[1].children[0].hasMask); // the mask went with it
+        const PaintDocument after = s.load(made.id, r.revision.id).value();
+        const MaskPaint was = before.flatten(), now = after.flatten();
+        for (const auto &[x, y] : {std::pair{0, 0}, {199, 99}, {100, 50}})
+            for (int ch = 0; ch < 4; ++ch)
+                QCOMPARE(now.pixels()[(size_t(y) * 200 + size_t(x)) * 4 + size_t(ch)], was.pixels()[(size_t(y + 20) * 300 + size_t(x + 50)) * 4 + size_t(ch)]);
+        // Growing with a pre-fill puts one new bottom layer under the group, whose children are moved by the new corner.
+        const Commit g = s.resize(made.id, r.revision.id, IRect{-10, -10, 220, 120}, edgefill::Mode::Edge, 0, "x").value();
+        const Tree bigger = s.loadTree(made.id, g.revision.id).value();
+        QCOMPARE(bigger.layers.size(), size_t(3));
+        QCOMPARE(bigger.layers[0].name, QString("Expanded area"));
+        QVERIFY(bigger.layers[2].group);
+        QCOMPARE(s.undo(made.id, g.revision.id)->head, r.revision.id);
+    }
+
+    // #274: for a tree without groups the tree-level resize stores the tree the document path would have (same hash).
+    void aTreeWithoutGroupsResizesToTheSameHashAsTheDocumentPath() {
+        CanvasStore s = store();
+        const CanvasInfo made = s.create("p", sample(), "test").value();
+        for (const IRect to : {IRect{50, 20, 200, 100}, IRect{-10, -20, 330, 340}}) {
+            for (const edgefill::Mode mode : {edgefill::Mode::Transparent, edgefill::Mode::Edge}) {
+                const QString head = s.info(made.id)->head;
+                const PaintDocument start = s.load(made.id, head).value();
+                const Commit r = s.resize(made.id, head, to, mode, 0, "x").value();
+                const PaintDocument viaDocument = resizedCanvas(start, to, mode, 0).value();
+                QCOMPARE(r.revision.tree, CanvasStore::treeHashOf(viaDocument).value());
+                s.undo(made.id, r.revision.id);
+            }
+        }
+    }
+
+    // #274: a candidate made before a group was made is placed on the grouped head, group and all.
+    void anAcceptsRebaseKeepsTheGroupsOfTheNewerHead() {
         CanvasStore s = store();
         const CanvasInfo made = s.create("g", sample(), "test").value();
         const Commit c = s.editLayers(made.id, made.head, edit(LayerOp::Group, {0, 1}), "canvas-view:group").value();
-        const auto resized = s.resize(made.id, c.revision.id, IRect{0, 0, 100, 100}, edgefill::Mode::Edge, 0, "x");
-        QVERIFY(!resized);
-        QVERIFY(resized.errors().first().message.contains("groups"));
-        // A candidate made from the revision before the group cannot be placed on the grouped head, and the message is about groups.
         PaintDocument fill = s.load(made.id, made.head).value();
         fill.loadLayer(LayerKind::Paint, "Fill 3", true, 1, solid(300, 300, {1, 2, 3, 255}));
         const Revision candidate = s.addRevision(made.id, fill, made.head, "canvas-write:w").value();
-        const auto accepted = s.accept(made.id, candidate.id);
-        QVERIFY(!accepted);
-        QVERIFY(accepted.errors().first().message.contains("groups"));
-        QCOMPARE(s.info(made.id)->head, c.revision.id);
+        const Accepted accepted = s.accept(made.id, candidate.id).value();
+        QVERIFY(accepted.rebased);
+        QVERIFY(accepted.moved);
+        QCOMPARE(s.info(made.id)->head, accepted.head.id);
+        const Tree placed = s.loadTree(made.id, accepted.head.id).value();
+        QCOMPARE(placed.layers.size(), size_t(3));
+        QVERIFY(placed.layers[0].group);
+        QCOMPARE(placed.layers[0].children.size(), size_t(2));
+        QCOMPARE(placed.layers[2].name, QString("Fill 3"));
+        QCOMPARE(s.revision(made.id, accepted.head.id)->parent, c.revision.id);
+    }
+
+    // #274: the rebase keeps what the newer head changed (here a rename) and puts the added layer on top.
+    void anAcceptsRebaseKeepsTheHeadsOwnChanges() {
+        CanvasStore s = store();
+        const CanvasInfo made = s.create("g", sample(), "test").value();
+        PaintDocument withFill = s.load(made.id, made.head).value();
+        withFill.loadLayer(LayerKind::Paint, "Fill 3", true, 1, solid(300, 300, {1, 2, 3, 255}));
+        const Revision candidate = s.addRevision(made.id, withFill, made.head, "canvas-write:w").value();
+        // The head moves on: a rename.
+        LayerEdit rename = edit(LayerOp::Rename, {0});
+        rename.text = "Renamed";
+        QVERIFY(s.editLayers(made.id, made.head, rename, "x").value().move.moved);
+        const Accepted accepted = s.accept(made.id, candidate.id).value();
+        QVERIFY(accepted.rebased && accepted.moved);
+        const Tree placed = s.loadTree(made.id, accepted.head.id).value();
+        QCOMPARE(placed.layers[0].name, QString("Renamed"));
+        QCOMPARE(placed.layers.back().name, QString("Fill 3"));
     }
 };
 

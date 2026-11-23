@@ -24,6 +24,9 @@ namespace fugue::mask {
 inline constexpr const char *resizeFillLayerName = "Expanded area";
 inline constexpr const char *resizeProducer = "canvas-resize";
 
+// `source` placed on a width x height buffer at (dx, dy) (what sticks out is cut); `outside` fills the rest of every channel.
+MaskPaint movedPixels(const MaskPaint &source, int width, int height, int dx, int dy, uint8_t outside);
+
 // Whether `to` (in the old canvas's pixels) reaches past the old canvas on any side.
 bool growsCanvas(int oldWidth, int oldHeight, const IRect &to);
 
