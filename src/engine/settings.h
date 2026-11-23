@@ -27,6 +27,9 @@
 // |                  | shows a node at zoom 1 (12.6, #74, #123)  |                          |
 // | picture_mode    | "smart", "sinks" or "all": which nodes    | "smart"                  |
 // |                  | show a picture (12.7, #263)               |                          |
+// | step_preview     | "off", "fast", "tae" or "vae": the picture| "fast"                   |
+// |                  | a Sampler's card shows while a local      |                          |
+// |                  | helper samples (8.10, #297)               |                          |
 // | restore_tabs     | true or false: start with the saved       | true                     |
 // |                  | workflows that were open when the session |                          |
 // |                  | ended (12.10, #212)                        |                          |
@@ -63,6 +66,7 @@ struct Settings {
     static constexpr int maxCornerRadius = 16;
     int cornerRadius = 8;
     QString pictureMode = QStringLiteral("smart"); // which nodes show a picture (#263)
+    QString stepPreview = QStringLiteral("fast"); // the Sampler's picture while it runs (#297)
     bool hoverMagnifier = false; // the hover magnifier (#74), off unless set (#123)
     bool restoreTabs = true;     // reopen the last session's saved tabs at start (#212)
     // The cache limits (#141); the cache manager turns them into bytes. 0 is no limit.

@@ -54,7 +54,7 @@
 //
 // --serve reads one JSON line per operation on stdin, each with an "id" its reply echoes:
 //
-//   {"op": "submit", "capability", "params", "inputs", "output_dir"}  -> {"job"}
+//   {"op": "submit", "capability", "params", "inputs", "output_dir", "preview"?}  -> {"job"}
 //   {"op": "status", "job"}    -> {"state", "progress", "stage", "error"?}
 //   {"op": "cancel", "job"}    -> {"state"}
 //   {"op": "result", "job"}    -> {"outputs": {NAME: {"path"} or a list of them}, "used"}
@@ -66,7 +66,11 @@
 // .image, .mask and .frames ({"path"}) are its input files, and its outputs are written into output_dir
 // as conditioning.bin, latent.bin, image.png (an upscale of frames: the folder frames-out/). Jobs
 // run one at a time, in order. Unasked, it writes
-// {"op": "status", "job", "state", "progress", "stage", "error"?} lines as a job moves.
+// {"op": "status", "job", "state", "progress", "stage", "error"?, "preview"?} lines as a job moves.
+// A latent.sample submit with "preview" ("proj", "tae" or "vae"; anything else is none) also
+// writes about 8 pictures of the sampling to output_dir/preview.png, one after the other (each
+// renamed over the last), and a status line with "preview": PATH tells each is there. A key an
+// older helper does not know is ignored, and a status line's unknown key is ignored by an older Fugue.
 // An error is {"error": {"code", "message"}}; out of memory is "out_of_memory".
 //
 // Loaded models stay loaded between jobs (one context per set of context options) until their
@@ -494,6 +498,60 @@ struct Hooks {
     // The share of an upscale's frames done, 0 to 1 (a job of one image reports its tiles through
     // the library's own callback).
     std::function<void(double)> progress;
+    // A preview frame of the sampling was written to this file (the request's "preview_file").
+    std::function<void(const std::string &)> preview;
+};
+
+// The library's preview callback for the length of one sampling call (op "sample"): the request's
+// "preview" is the mode (proj, tae or vae) and "preview_file" where each frame goes, written beside
+// it and renamed over it, so a reader never sees half a picture. About 8 frames a run, whatever the
+// steps. A video model has none (the frames of a clip are not worth their cost). Without
+// "preview", with "off", or in a request no one listens to, it does nothing; the library's
+// callback is global, and the worker runs one job at a time.
+class PreviewScope {
+public:
+    PreviewScope(const json &request, const Hooks &hooks, bool video) : m_hooks(hooks) {
+        std::string mode = request.value("preview", "");
+        m_file = request.value("preview_file", "");
+        if (video || m_file.empty() || !hooks.preview || (mode != "proj" && mode != "tae" && mode != "vae"))
+            return;
+        // A tiny autoencoder needs its file (context "taesd_path"); without it, the cheap projection.
+        if (mode == "tae" && !request.value("context", json::object()).contains("taesd_path"))
+            mode = "proj";
+        const json params = request.value("params", json::object());
+        const json &asked = params.contains("sample.steps") ? params["sample.steps"] : params.value("steps", json());
+        const int steps = asked.is_number() ? asked.get<int>() : 20;
+        m_active = sd_set_preview_callback(&PreviewScope::frame, mode.c_str(), std::max(1, (steps + 7) / 8), true, false,
+                                           this) == SD_STATUS_OK;
+    }
+    ~PreviewScope() {
+        if (m_active)
+            sd_set_preview_callback(nullptr, "none", 1, false, false, nullptr);
+    }
+    PreviewScope(const PreviewScope &) = delete;
+    PreviewScope &operator=(const PreviewScope &) = delete;
+
+private:
+    static void frame(int, int count, const sd_tensor_t *const *frames, bool, void *data) {
+        auto *self = static_cast<PreviewScope *>(data);
+        const sd_tensor_t *image = count > 0 && frames ? frames[0] : nullptr;
+        if (!image || sd_tensor_type(image) != SD_TENSOR_U8 || sd_tensor_rank(image) != 3)
+            return;
+        const int c = static_cast<int>(sd_tensor_dim(image, 0));
+        const int w = static_cast<int>(sd_tensor_dim(image, 1));
+        const int h = static_cast<int>(sd_tensor_dim(image, 2));
+        const std::string temporary = self->m_file + ".tmp";
+        std::error_code ignored;
+        if (!stbi_write_png(temporary.c_str(), w, h, c, sd_tensor_data(image), w * c))
+            return;
+        std::filesystem::rename(temporary, self->m_file, ignored);
+        if (!ignored)
+            self->m_hooks.preview(self->m_file);
+    }
+
+    const Hooks &m_hooks;
+    std::string m_file;
+    bool m_active = false;
 };
 
 // One image through the upscaler (the library's tiling reports each tile as progress).
@@ -684,6 +742,7 @@ json run(const json &request, Contexts &contexts, const Hooks &hooks = {}) {
     }
 
     sd_result_t *result = nullptr;
+    PreviewScope previews(request, hooks, video);
     // sd_generate_image clears a cancel asked before it starts, so that one is heard here.
     if (running && !running(ctx))
         fail("cancelled", op + " was cancelled");
@@ -1573,6 +1632,13 @@ private:
             request["video"] = (dir / "video.y4m").string();
         }
 
+        // A frame of the sampling for Fugue's card (stdio only: over HTTP nothing fetches it). An older
+        // helper never reads this key, so a newer Fugue's request still runs there, without frames.
+        if (!m_models && op->second == "sample" && message.value("preview", json()).is_string()) {
+            request["preview"] = message["preview"];
+            request["preview_file"] = (dir / "preview.png").string();
+        }
+
         std::lock_guard<std::mutex> lock(m_mutex);
         const std::string id = std::to_string(++m_count);
         Job job;
@@ -1645,6 +1711,12 @@ private:
                     std::lock_guard<std::mutex> lock(m_mutex);
                     m_progress[m_current] = done;
                     say(statusOf(m_current, m_jobs[m_current]));
+                };
+                hooks.preview = [this](const std::string &file) {
+                    std::lock_guard<std::mutex> lock(m_mutex);
+                    json status = statusOf(m_current, m_jobs[m_current]);
+                    status["preview"] = file;
+                    say(status);
                 };
                 return run(request, contexts, hooks);
             });

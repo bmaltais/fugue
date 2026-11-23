@@ -7,6 +7,8 @@
 //   crash true      exits (code 3) at its first step, as a helper that crashed
 //   hold true       runs until it is cancelled
 //   ignore_cancel   a cancel changes nothing
+//   frames true     a sample job asked to preview (the submit's "preview") writes output_dir/preview.png
+//                   and says so ("preview": PATH) at each step, as the helper does
 //
 // A finished job writes one file into output_dir, named by what the capability makes
 // (conditioning.bin, latent.bin, image.png). The .bin files hold the job's params without
@@ -14,7 +16,7 @@
 // A decode with a "video_frames" param (a video model) writes video.y4m instead, as the real
 // helper does: two 16x16 gray frames at 8 a second.
 // With FAKE_HELPER_LOG set, it appends "start <pid>", "job <capability>" and "shutdown" lines
-// to that file.
+// to that file; a submit's "preview" is logged as "preview <mode>".
 
 #include <QCoreApplication>
 #include <QDir>
@@ -29,6 +31,9 @@
 #include <unistd.h>
 
 namespace {
+
+// A 1x1 PNG.
+const QByteArray kPng = QByteArray::fromBase64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==");
 
 void log(const QByteArray &text) {
     const QByteArray path = qgetenv("FAKE_HELPER_LOG");
@@ -95,6 +100,8 @@ private:
             Job job;
             job.id = QString::number(++m_count);
             job.request = message;
+            if (message.contains("preview"))
+                log("preview " + message.value("preview").toString().toUtf8());
             m_jobs.append(job);
             reply.insert("job", job.id);
             say(reply);
@@ -174,11 +181,23 @@ private:
         const int steps = fake.value("steps").toInt(2);
         if (fake.value("hold").toBool() || job->step < steps) {
             ++job->step;
-            say({{"op", "status"},
-                 {"job", job->id},
-                 {"state", "running"},
-                 {"stage", "sample"},
-                 {"progress", steps > 0 ? double(std::min(job->step, steps)) / steps : 0.0}});
+            QJsonObject status{{"op", "status"},
+                               {"job", job->id},
+                               {"state", "running"},
+                               {"stage", "sample"},
+                               {"progress", steps > 0 ? double(std::min(job->step, steps)) / steps : 0.0}};
+            if (fake.value("frames").toBool() && job->request.contains("preview")) {
+                const QString file = QDir(job->request.value("output_dir").toString()).filePath("preview.png");
+                QFile frame(file + ".tmp");
+                if (frame.open(QIODevice::WriteOnly)) {
+                    frame.write(kPng);
+                    frame.close();
+                    QFile::remove(file);
+                    QFile::rename(file + ".tmp", file);
+                }
+                status.insert("preview", file);
+            }
+            say(status);
             return;
         }
         if (fake.contains("fail"))
@@ -203,7 +222,7 @@ private:
                 out.write(QByteArray(16 * 16 + 2 * 8 * 8, char(128)));
             }
         } else if (name == QLatin1String("image")) {
-            out.write(QByteArray::fromBase64("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="));
+            out.write(kPng);
         } else {
             QJsonObject made = params;
             made.remove(QStringLiteral("fake"));

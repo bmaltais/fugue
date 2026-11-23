@@ -9,6 +9,7 @@
 #include <algorithm>
 
 #include "engine/paths.h"
+#include "engine/settings.h"
 
 namespace fugue {
 
@@ -192,12 +193,18 @@ void HelperProvider::submit(const JobRequest &request, Reply<QString> reply) {
             return later(std::move(reply), Result<QString>(unreachable(why)));
     }
     const int generation = m_generation;
-    send(QJsonObject{{"op", "submit"},
-                     {"capability", request.capability},
-                     {"model", request.model},
-                     {"params", request.params},
-                     {"inputs", request.inputs},
-                     {"output_dir", request.outputDir}},
+    QJsonObject message{{"op", "submit"},
+                        {"capability", request.capability},
+                        {"model", request.model},
+                        {"params", request.params},
+                        {"inputs", request.inputs},
+                        {"output_dir", request.outputDir}};
+    // The picture of the sampling (8.10): a message key, not a param, so it is not in the cache key and
+    // a helper that does not know it ignores it.
+    const QString preview = previewMode(request.capability);
+    if (!preview.isEmpty())
+        message.insert("preview", preview);
+    send(message,
          [this, reply, generation](const Result<QJsonObject> &answer) {
              if (!answer)
                  return reply(Result<QString>(answer.error()));
@@ -302,6 +309,15 @@ QString HelperProvider::start() {
     return {};
 }
 
+// The helper's preview mode for a job (settings.json's step_preview): "fast" is the helper's cheap
+// "proj"; empty for no picture, or for a job that makes none.
+QString HelperProvider::previewMode(const QString &capability) {
+    if (capability != QLatin1String("latent.sample"))
+        return {};
+    const QString setting = currentSettings().stepPreview;
+    return setting == QLatin1String("fast") ? QStringLiteral("proj") : setting == QLatin1String("off") ? QString() : setting;
+}
+
 QList<QByteArray> HelperProvider::takeLines(QByteArray &buffer) {
     QList<QByteArray> lines;
     qsizetype end;
@@ -356,6 +372,12 @@ void HelperProvider::helperStatus(const QString &helperJob, const QJsonObject &m
     status.state = message.value("state").toString();
     status.progress = message.value("progress").toDouble();
     status.stage = message.value("stage").toString();
+    // A frame of the sampling: a picture file the helper just wrote, read at once (it writes the next over it).
+    if (const QString file = message.value("preview").toString(); !file.isEmpty()) {
+        QFile frame(file);
+        if (frame.open(QIODevice::ReadOnly))
+            status.preview = frame.readAll();
+    }
     if (status.state == QLatin1String("error"))
         status.error = helperError(message.value("error").toObject());
     if (status.state != QLatin1String("done"))

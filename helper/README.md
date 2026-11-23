@@ -170,6 +170,20 @@ than the request, an unreadable one, an inpaint model without `image`, a mask wi
 `init_latent` nor `init_image`. `smoke-http.sh` checks the size and the unreadable mask without a
 model; the others need a loaded one (see the pin-move checklist).
 
+## Step previews (`latent.sample`)
+
+`{"op": "submit", "capability": "latent.sample", ..., "preview": "proj"}` (a key of the message, not of
+`params`) makes the helper register the library's `sd_set_preview_callback` for that job. `proj` is the
+cheap latent-to-RGB projection (a picture of the latent's size, a few ms), `vae` decodes the denoised latent
+with the full VAE each time, `tae` uses the tiny autoencoder of the context's `taesd_path` (without one it is
+`proj`); anything else is none. The interval is every Nth step so that about 8 pictures come (`ceil(steps / 8)`, from
+`sample.steps`). Each picture is written beside `<output_dir>/preview.png` and renamed over it, and a status line
+`{"op": "status", ..., "preview": "<output_dir>/preview.png"}` says it is new. Video models, the one-shot
+mode and `--serve-http` make none. The key and the status field are ignored by a helper and a Fugue that do not
+know them. Pin move: `sd_set_preview_callback`, `sd_get_preview_info` and the `U8 [C,W,H]` frames are in
+`stable-diffusion.h` of the pin (checked at `532d2c1`); a `proj` mode that does not know the model's latent
+(it logs "No latent to RGB projection known") gives no pictures, and the run is not affected.
+
 ## Upscaling (`image.upscale`)
 
 An image through an upscale model, with the library's own ESRGAN and MoSR upscaler (spec 8.1). No

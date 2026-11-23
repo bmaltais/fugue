@@ -133,6 +133,7 @@ private:
     void updateIdle();
     Error unreachable(const QString &why = {}) const;
     static Error stopped(const QString &why);
+    static QString previewMode(const QString &capability);
     static QList<QByteArray> takeLines(QByteArray &buffer);
     QString lastLog() const;
 
