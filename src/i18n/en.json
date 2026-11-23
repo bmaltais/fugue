@@ -1369,5 +1369,7 @@
   "Zoom out the picture": "Zoom out the picture",
   "JPEG images (*.jpg *.jpeg)": "JPEG images (*.jpg *.jpeg)",
   "WebP images (*.webp)": "WebP images (*.webp)",
-  "Layered image (*.ora)": "Layered image (*.ora)"
+  "Layered image (*.ora)": "Layered image (*.ora)",
+  "Mute (%1%; the wheel changes the volume)": "Mute (%1%; the wheel changes the volume)",
+  "Volume": "Volume"
 }
