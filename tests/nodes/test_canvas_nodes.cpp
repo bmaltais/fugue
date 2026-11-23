@@ -851,12 +851,14 @@ private slots:
             Values in{{"image", picture.value().value("image")}, {"name", Value(name)}};
             return bench.run("fugue/canvas-new", in, work);
         };
-        const Result<Values> first = make("Upscaled", 800, 600, "new1");
+        // A name of its own: the test home persists between runs, so a fixed name would meet its own earlier canvases.
+        const QString base = QStringLiteral("Upscaled ") + QUuid::createUuid().toString(QUuid::Id128).left(8);
+        const Result<Values> first = make(base, 800, 600, "new1");
         QVERIFY2(first.ok(), qPrintable(codeOf(first)));
         const QString id = first->value("id").text();
         QVERIFY(id != source && canvas::isCanvasId(id));
         const auto info = CanvasStore::forSession().info(id);
-        QCOMPARE(info->name, QStringLiteral("Upscaled"));
+        QCOMPARE(info->name, base);
         const auto tree = CanvasStore::forSession().loadTree(id, info->head);
         QCOMPARE(tree->width, 800);
         QCOMPARE(tree->height, 600);
@@ -865,10 +867,10 @@ private slots:
         QCOMPARE(pixel(id, info->head, 10, 10, 0), 0);
         QCOMPARE(headOf(source), before); // the source canvas is as it was
         // The same input again is another canvas (the node is never cached), and the taken name gets a number.
-        const Result<Values> second = make("Upscaled", 800, 600, "new2");
+        const Result<Values> second = make(base, 800, 600, "new2");
         QVERIFY2(second.ok(), qPrintable(codeOf(second)));
         QVERIFY(second->value("id").text() != id);
-        QCOMPARE(CanvasStore::forSession().info(second->value("id").text())->name, QStringLiteral("Upscaled 2"));
+        QCOMPARE(CanvasStore::forSession().info(second->value("id").text())->name, base + QStringLiteral(" 2"));
         QVERIFY(!registryNode(bench, "fugue/canvas-new").deterministic);
     }
 
