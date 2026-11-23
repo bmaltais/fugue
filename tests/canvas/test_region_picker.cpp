@@ -102,10 +102,24 @@ struct RegionApp {
         QTest::qWait(30);
         app->drag(Qt::LeftButton, from, to);
     }
+    // Clicks the button once it has stopped moving: a popup is still sliding in for a moment after it opens, and a click on
+    // a slower machine (CI's) would land where the button was.
     void click(const QString &name) {
-        QQuickItem *b = find(name);
-        QVERIFY2(b, qPrintable(name));
-        QTest::mouseClick(app->window, Qt::LeftButton, {}, b->mapToScene(QPointF(b->width() / 2, b->height() / 2)).toPoint());
+        QPoint at;
+        int still = 0;
+        for (int i = 0; still < 3 && i < 500; ++i) {
+            QTest::qWait(20);
+            QQuickItem *now = find(name);
+            if (!now) {
+                still = 0;
+                continue;
+            }
+            const QPoint here = now->mapToScene(QPointF(now->width() / 2, now->height() / 2)).toPoint();
+            still = here == at ? still + 1 : 0;
+            at = here;
+        }
+        QVERIFY2(still >= 3, qPrintable(name));
+        QTest::mouseClick(app->window, Qt::LeftButton, {}, at);
     }
     QString infoText() const { return find("regionInfo")->property("text").toString(); }
 };

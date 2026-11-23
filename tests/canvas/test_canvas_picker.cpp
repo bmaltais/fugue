@@ -119,12 +119,13 @@ private slots:
         QVERIFY(app.open());
         QVERIFY(app.widget());
         QCOMPARE(app.widget()->property("kind").toString(), QString("canvas"));
-        QCOMPARE(app.face(), QString("Choose a canvas"));
+        QCOMPARE(app.face(), QString("Active canvas")); // empty is the Active canvas (#246)
         app.openList();
         QTRY_VERIFY2(app.listOpen(), qPrintable(app.warnings.join('\n')));
-        QCOMPARE(app.texts(), (QStringList{"No canvases yet", "New canvas…", "Import picture…", "Pick region…"}));
-        // No canvas chosen: there is nothing to pick a region on.
-        QVERIFY(!app.entries().last().toMap().value("enabled", true).toBool());
+        QCOMPARE(app.texts(), (QStringList{"Active canvas", "No canvases yet", "New canvas…", "Import picture…", "Pick region…"}));
+        QVERIFY(app.entries().first().toMap().value("checked").toBool()); // the active canvas is the checked default
+        // The active canvas is whatever the Canvas view shows: a region can be picked on it.
+        QVERIFY(app.entries().last().toMap().value("enabled", true).toBool());
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
@@ -136,26 +137,45 @@ private slots:
         QVERIFY(app.open());
         app.openList();
         QTRY_VERIFY2(app.listOpen(), qPrintable(app.warnings.join('\n')));
-        QCOMPARE(app.texts(), (QStringList{"Photo", "Sketch", "New canvas…", "Import picture…", "Pick region…"}));
+        QCOMPARE(app.texts(), (QStringList{"Active canvas", "Photo", "Sketch", "New canvas…", "Import picture…", "Pick region…"}));
         // The actions are a chunk of their own: a hairline between the canvases and New canvas… (the cohesion audit's N10).
-        QVERIFY(app.entries().at(2).toMap().value("separator").toBool());
-        QCOMPARE(app.entries().at(3).toMap().value("text").toString(), QString("New canvas…"));
-        const QVariantMap photo = app.entries().at(0).toMap();
+        QVERIFY(app.entries().at(3).toMap().value("separator").toBool());
+        QCOMPARE(app.entries().at(4).toMap().value("text").toString(), QString("New canvas…"));
+        const QVariantMap photo = app.entries().at(1).toMap();
         QVERIFY2(photo.value("detail").toString().startsWith("320 × 200 · "), qPrintable(photo.value("detail").toString()));
         QCOMPARE(photo.value("note").toString(), second); // the id, so two canvases of one name can be told apart
         QVERIFY(!photo.value("checked").toBool());
         app.choose("Sketch");
         QTRY_COMPARE(app.stored(), QJsonValue(first)); // the value is the id, not the name
         QCOMPARE(app.steps(), 1);
-        QTRY_COMPARE(app.face(), QString("Sketch"));
+        QTRY_COMPARE(app.face(), QString("Sketch · pinned")); // a chosen canvas is pinned, and says so
         app.openList();
         QTRY_VERIFY(app.listOpen());
-        QVERIFY(app.entries().at(1).toMap().value("checked").toBool());
+        QVERIFY(app.entries().at(2).toMap().value("checked").toBool());
+        QVERIFY(!app.entries().at(0).toMap().value("checked").toBool());
         app.key(Qt::Key_Escape);
         QTRY_VERIFY(!app.listOpen());
         app.key(Qt::Key_Z, Qt::ControlModifier);
         QCOMPARE(app.stored(), QJsonValue(QJsonValue::Undefined));
-        QTRY_COMPARE(app.face(), QString("Choose a canvas"));
+        QTRY_COMPARE(app.face(), QString("Active canvas"));
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // #246: one click on the first row takes a pinned node back to the Active canvas.
+    void activeCanvasUnpinsANodeInOneStep() {
+        PickerApp app;
+        const QString only = app.makeCanvas("Sketch");
+        QVERIFY(app.open());
+        app.openList();
+        QTRY_VERIFY(app.listOpen());
+        app.choose("Sketch");
+        QTRY_COMPARE(app.stored(), QJsonValue(only));
+        app.openList();
+        QTRY_VERIFY(app.listOpen());
+        app.choose("Active canvas");
+        QTRY_COMPARE(app.face(), QString("Active canvas"));
+        QVERIFY(app.stored().toString().isEmpty());
+        QCOMPARE(app.steps(), 2);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
@@ -167,14 +187,14 @@ private slots:
         QCOMPARE(app.face(), QString("canvas-0123456789ab (missing)"));
         app.openList();
         QTRY_VERIFY2(app.listOpen(), qPrintable(app.warnings.join('\n')));
-        QCOMPARE(app.texts(), (QStringList{"canvas-0123456789ab", "Mine", "New canvas…", "Import picture…", "Pick region…"}));
-        const QVariantMap gone = app.entries().at(0).toMap();
+        QCOMPARE(app.texts(), (QStringList{"Active canvas", "canvas-0123456789ab", "Mine", "New canvas…", "Import picture…", "Pick region…"}));
+        const QVariantMap gone = app.entries().at(1).toMap();
         QVERIFY(gone.value("dim").toBool());
         QVERIFY(gone.value("checked").toBool());
         QCOMPARE(gone.value("detail").toString(), QString("Not in this root"));
         app.choose("Mine");
         QTRY_COMPARE(app.stored(), QJsonValue(mine));
-        QTRY_COMPARE(app.face(), QString("Mine"));
+        QTRY_COMPARE(app.face(), QString("Mine · pinned"));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
@@ -200,7 +220,7 @@ private slots:
         QCOMPARE(made[0].name, QString("Poster"));
         QCOMPARE(app.stored(), QJsonValue(made[0].id));
         QCOMPARE(app.steps(), 1);
-        QTRY_COMPARE(app.face(), QString("Poster"));
+        QTRY_COMPARE(app.face(), QString("Poster · pinned"));
         QCOMPARE(app.writer().load(made[0].id, made[0].head)->width(), 1024);
         QCOMPARE(app.writer().load(made[0].id, made[0].head)->height(), 768);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
@@ -227,9 +247,9 @@ private slots:
         QVERIFY(app.open());
         app.openList();
         QTRY_VERIFY(app.listOpen());
-        QCOMPARE(app.texts(), (QStringList{"No canvases yet", "New canvas…", "Import picture…", "Pick region…"}));
+        QCOMPARE(app.texts(), (QStringList{"Active canvas", "No canvases yet", "New canvas…", "Import picture…", "Pick region…"}));
         app.makeCanvas("Arrived"); // `fugue canvas new` in another process, or a Canvas Write
-        QTRY_COMPARE(app.texts(), (QStringList{"Arrived", "New canvas…", "Import picture…", "Pick region…"}));
+        QTRY_COMPARE(app.texts(), (QStringList{"Active canvas", "Arrived", "New canvas…", "Import picture…", "Pick region…"}));
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 };

@@ -25,12 +25,22 @@ using CanvasRevisionResolver = std::function<Result<QString>(const QString &canv
 // The resolver of the session's canvas store (canvas/canvas_store.h).
 CanvasRevisionResolver sessionCanvasResolver();
 
+// The id of the Active canvas (#246), or empty when there is none to name. Called once per compile.
+using ActiveCanvasProvider = std::function<QString()>;
+
+// The Active canvas as a compile names it: `shown` (the canvas last used in a Canvas view) when the session's store
+// has it, else the newest canvas of the root, else empty. A headless run (the CLI) passes no `shown`.
+QString activeCanvasOrNewest(const QString &shown);
+
 inline constexpr char canvasRegionType[] = "fugue/canvas-region";
 
 // Replaces, in every node of `graph` that reads a canvas (Canvas Region), the `revision` input by
 // the full hash it names, "head" when the input is not set. A node whose `canvas` or `revision` is
 // not a literal (a link) is left as it is: its kernel refuses a revision that is not a full hash.
+// An empty `canvas` (not yet chosen) means the Active canvas (#246): `active` names it, and it is written into the
+// node as a literal, so the id is in the cache key and in compiled.json and a replay is exact. With no `active`, or
+// none to name (a root with no canvas), it is left empty for the kernel to refuse in words.
 // Returns what could not be resolved (canvas_not_found, canvas_ambiguous), each on its node.
-Errors resolveCanvasRevisions(CompiledGraph &graph, const CanvasRevisionResolver &resolve);
+Errors resolveCanvasRevisions(CompiledGraph &graph, const CanvasRevisionResolver &resolve, const ActiveCanvasProvider &active = {});
 
 } // namespace fugue

@@ -540,7 +540,7 @@ bool Workflows::exportCompiled(const QString &pathOrUrl) {
     // would run. The providers go into a copy, not into the registry the window shows.
     Registry registry = *m_registry;
     const Compilation compilation = compileForRun(documentOf(m_current), registry, {},
-                                                  runCompileSetup(m_registerProviders, m_trust));
+                                                  runCompileSetup(m_registerProviders, m_trust, m_activeCanvas));
     if (!compilation) {
         setNotice(tr("%1 does not compile: %2").arg(title, withHints(compilation.errors())));
         return false;

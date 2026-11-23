@@ -335,7 +335,7 @@ private slots:
         QCOMPARE(codeOf(bench.region(id, {{"selection", Value("sha256:" + QString(64, '0'))}})), QString("canvas_not_found"));
         QCOMPARE(codeOf(bench.region(id, {{"selection", Value("not a hash")}})), QString("input_invalid"));
         const NodeType &type = *bench.registry.nodeType("fugue/canvas-region");
-        QCOMPARE(type.version.toString(), QString("1.3.0"));
+        QCOMPARE(type.version.toString(), QString("1.4.0"));
     }
 
     void anEmptyMaskOrARectangleOffTheCanvasIsRefused() {

@@ -17,7 +17,8 @@ A working pack to read and copy is [examples/packs/io.github.bmaltais.fugue-exam
 `shout` is one-shot, `counter` is persistent. The tests run both.
 A pack with a Python environment, a model and a download catalog:
 [examples/packs/io.github.bmaltais.fugue-remove-background](../../examples/packs/io.github.bmaltais.fugue-remove-background)
-(BiRefNet through ONNX Runtime; [masking](../masking.md#remove-a-background)); its sibling
+(BiRefNet through ONNX Runtime; [masking](../masking.md#remove-a-background)); [examples/packs/io.github.bmaltais.fugue-remove-object](../../examples/packs/io.github.bmaltais.fugue-remove-object)
+(LaMa through ONNX Runtime, a node with two inputs and a group; [masking](../masking.md#remove-an-object)); its sibling
 [examples/packs/io.github.bmaltais.fugue-segment](../../examples/packs/io.github.bmaltais.fugue-segment) (SAM 2.1 from points or a box, and GroundingDINO to find what words name;
 [masking](../masking.md#select-an-object-by-points-or-a-box)) shows a model that is a zip of two files, a persistent node that keeps what it computed between runs, and two small nodes that compose by wiring a text output to a text input.
 

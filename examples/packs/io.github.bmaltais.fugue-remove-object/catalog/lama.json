@@ -1,0 +1,23 @@
+{
+  "catalog": 1,
+  "models": [
+    {
+      "id": "lama-big-512",
+      "resource": "io.github.bmaltais.fugue-remove-object/lama-model",
+      "title": "LaMa big-lama, 512 x 512 (ONNX, fp32)",
+      "description": "Fills a masked part of a picture from its surroundings; about 3 s on a CPU, 200 MB. The input is fixed at 512 x 512, so the node fits the picture into that square.",
+      "file": "lama_fp32.onnx",
+      "url": "https://huggingface.co/Carve/LaMa-ONNX/resolve/c3c0c9e468934d62e79c329e35d82dd09ff8c444/lama_fp32.onnx",
+      "size": 208044816,
+      "sha256": "1faef5301d78db7dda502fe59966957ec4b79dd64e16f03ed96913c7a4eb68d6",
+      "architecture": "LaMa (big-lama, Fast Fourier Convolutions), 512 x 512",
+      "license": "Apache-2.0",
+      "license_url": "https://github.com/advimman/lama/blob/main/LICENSE",
+      "commercial": true,
+      "attribution": true,
+      "author": "Roman Suvorov et al. (LaMa); ONNX export by Carve",
+      "source": "https://huggingface.co/Carve/LaMa-ONNX",
+      "tags": ["inpaint", "remove", "onnx"]
+    }
+  ]
+}

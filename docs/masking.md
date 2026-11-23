@@ -174,6 +174,25 @@ It needs about 8 GB of memory while it runs and frees it a minute after the last
 makes the edge hard: 0 keeps the soft edge, 0.5 cuts at half. For a cleaner seam, follow it with Grow Mask or
 Feather Mask. The pack's folder has its own README with the tests.
 
+## Remove an object
+
+The pack **Remove Object** fills a masked part of a picture from its surroundings with LaMa, a model made for
+this. Under Image > Mask it has the node **LaMa Fill** (a picture and a mask in, the picture with the masked part
+filled out; only the masked pixels change) and the group **Remove Object** (Grow Mask, then LaMa Fill; Grow mask,
+8 px, is its advanced input, so no rim or shadow of the object is left). It is the **pre-fill of the Remove
+action**: LaMa makes a clean base, then the same FLUX.2 Klein pass polishes it, which is better than asking the
+edit model to invent the fill when a large object sits against the edge of the picture. The scratch workflow
+[inpaint-workflows/remove-lama](inpaint-workflows/remove-lama/workflow.fugue) is that wiring (it replaces Fill
+Masked in the Remove workflow with LaMa Fill).
+
+It is an optional pack like Remove Background: install it from Settings > Packs or with
+`fugue pack add examples/packs/io.github.bmaltais.fugue-remove-object` (setup: `uv sync --no-dev --extra cpu`,
+needs uv and the network; `--extra cuda` for an NVIDIA GPU). The model is not part of the pack: the Model picker
+lists **LaMa big-lama, 512 x 512** (208 MB, Apache-2.0, about 3 s on a CPU) under Download, asks first naming the
+licence, the size and the host (huggingface.co), and checks the file against its SHA-256. The model works at
+512 x 512, so give it a crop around the mask for a large picture. MAT is not offered: its weights are for research
+only. The pack's own README has the licences and the tests.
+
 ## Select an object by points or a box
 
 The pack **Segment by Points or Box** cuts one object out of a picture and gives it as a mask (white is the object,

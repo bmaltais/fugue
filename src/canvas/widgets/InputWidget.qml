@@ -75,9 +75,9 @@ Rectangle {
         if (linked)
             return edits.source(nodeId, name)
         if (kind === "canvas" && canvasId === "")
-            return qsTr("Choose a canvas")
+            return qsTr("Active canvas")
         if (kind === "canvas")
-            return canvasRow.id !== undefined ? canvasRow.name : qsTr("%1 (missing)").arg(canvasId)
+            return canvasRow.id !== undefined ? qsTr("%1 · pinned").arg(canvasRow.name) : qsTr("%1 (missing)").arg(canvasId)
         if (hashing.error !== undefined)
             return hashing.error
         if (hashing.progress !== undefined)
@@ -350,10 +350,10 @@ Rectangle {
     // (canvasMenu.js); a stored id this root has none of heads the list, checked and dimmed, and says so: the list is
     // still there to replace it. A Canvas Region can also drag its rectangle out on the canvas (#213).
     function canvasEntries() {
-        const entries = CanvasMenu.entries(edits.canvases(), canvasId, canvasMissing ? canvasId : "")
+        const entries = CanvasMenu.entries(edits.canvases(), canvasId, canvasMissing ? canvasId : "", true)
         if (edits.regionState(nodeId).ok === true)
             entries.push({ text: qsTr("Pick region…"), value: { action: "region" }, keep: true,
-                           enabled: canvasId !== "" && !canvasMissing,
+                           enabled: !canvasMissing,
                            note: qsTr("Drag the rectangle on the canvas instead of typing X, Y, Width and Height.") })
         return entries
     }
@@ -459,6 +459,8 @@ Rectangle {
                 return picker().askPicture()
             if (value.action === "region")
                 return canvasView ? canvasView.openRegion(nodeId) : undefined
+            if (value.active)
+                return edits.setValue(nodeId, name, "")
             return edits.setValue(nodeId, name, value.id)
         case "choice":
             return edits.setValue(nodeId, name, value)

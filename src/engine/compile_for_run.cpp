@@ -4,11 +4,13 @@
 
 namespace fugue {
 
-RunCompileSetup runCompileSetup(std::function<Errors(Registry &)> registerProviders, const TrustStore &trust) {
+RunCompileSetup runCompileSetup(std::function<Errors(Registry &)> registerProviders, const TrustStore &trust,
+                                std::function<QString()> shownCanvas) {
     RunCompileSetup setup;
     setup.registerProviders = std::move(registerProviders);
     setup.trusted = [trust](const QString &pack, const QString &version) { return trust.isTrusted(pack, version); };
     setup.resolveCanvas = sessionCanvasResolver();
+    setup.activeCanvas = [shownCanvas = std::move(shownCanvas)] { return activeCanvasOrNewest(shownCanvas ? shownCanvas() : QString()); };
     return setup;
 }
 
@@ -36,7 +38,7 @@ Compilation compileForRun(const Document &document, Registry &registry, const Ru
     // After the compile, so a group's inner nodes (path ids) are pinned too, and only a graph that
     // can run is looked up in the store.
     CompiledGraph graph = compilation.value();
-    const Errors canvasProblems = resolveCanvasRevisions(graph, setup.resolveCanvas);
+    const Errors canvasProblems = resolveCanvasRevisions(graph, setup.resolveCanvas, setup.activeCanvas);
     const Errors problems = providerProblems + compilation.problems() + canvasProblems;
     return hasErrors(canvasProblems) ? Compilation(problems) : Compilation(graph, problems);
 }

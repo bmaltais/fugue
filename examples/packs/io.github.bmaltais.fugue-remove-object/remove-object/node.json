@@ -1,0 +1,61 @@
+{
+  "manifest": 1,
+  "id": "io.github.bmaltais.fugue-remove-object/remove-object",
+  "version": "1.0.0",
+  "name": "Remove Object",
+  "description": "Take an object out of a picture: the mask is grown a few pixels so no rim of it is left, then LaMa fills the place from its surroundings. The image comes back with the masked part filled. It is the pre-fill of the Remove action; add an edit model pass (Fill Masked's place in the Remove workflow) for the finish.",
+  "category": "Image/Mask",
+  "keywords": [
+    "remove",
+    "object",
+    "erase",
+    "lama",
+    "inpaint",
+    "cleanup",
+    "pre-fill"
+  ],
+  "runtime": {
+    "kind": "group",
+    "definition": "group.fugue"
+  },
+  "inputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Image"
+    },
+    {
+      "name": "mask",
+      "type": "image",
+      "role": "mask",
+      "label": "Mask",
+      "description": "White is what to take away."
+    },
+    {
+      "name": "model",
+      "type": "io.github.bmaltais.fugue-remove-object/lama-model",
+      "label": "Model",
+      "optional": true,
+      "description": "A LaMa ONNX file. The picker offers the download, with its licence shown first."
+    },
+    {
+      "name": "grow",
+      "type": "number",
+      "label": "Grow mask",
+      "default": 8,
+      "min": 0,
+      "max": 128,
+      "step": 1,
+      "integer": true,
+      "section": "Advanced",
+      "description": "Pixels the mask is grown before the fill, so a rim or a shadow of the object is not left. 0 uses the mask as drawn."
+    }
+  ],
+  "outputs": [
+    {
+      "name": "image",
+      "type": "image",
+      "label": "Filled"
+    }
+  ]
+}

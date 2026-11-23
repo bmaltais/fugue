@@ -69,6 +69,9 @@ struct RunSetup {
     // Puts the provider instances into a registry, on the run thread (providers are QObjects
     // that answer through its event loop). Default: cli::registerProviders (providers.json).
     std::function<Errors(Registry &)> registerProviders;
+    // The canvas last used in a Canvas view, from any thread (canvas/active_canvas.h); a Canvas Region with no
+    // canvas chosen reads it (#246). None: the newest canvas of the root.
+    std::function<QString()> activeCanvas;
     QString runsRoot;     // default RunFolder::defaultRoot()
     QString queueDir;     // default Queue::defaultDir()
     QString lockPath;     // default Queue::defaultLockPath()

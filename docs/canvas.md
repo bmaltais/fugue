@@ -126,8 +126,8 @@ drag draws a region. The canvas button opens the
 list of your canvases, with **New canvas…** and **Import picture…** under it; with no canvas yet the picture's place
 offers the same two. Export… is in File > Export, and **Compare** opens the views of Compare Images (slider, horizontal slider, side
 by side, flip and difference) against the step before; the view you pick last comes back next time. The view follows the Canvas
-Region node you select in the graph, or by itself the only one that reads this canvas (a new one with no canvas yet
-takes this canvas at your first change): its rectangle (and the padded box the node cuts) is drawn on the picture;
+Region node you select in the graph, or by itself the only one that reads this canvas (a node with no canvas chosen reads the **Active canvas**, the one in the Canvas view you used last, so a drag
+on one does not change its canvas): its rectangle (and the padded box the node cuts) is drawn on the picture;
 A node reads the latest version unless you pinned it to a step; only then a line under the picture says which step and **Use for region** points it at the step you are looking at (the latest version, if you are on it), as one
 undo step. With no node followed a drag still draws a rectangle: with several Region nodes the view asks which one it
 is for, with none it offers **Add a Canvas Region node** (one undo step); until then the rectangle is not kept. A node

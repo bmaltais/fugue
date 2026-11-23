@@ -723,8 +723,9 @@ private slots:
           "layout": {"nodes": {"region": {"pos": [20, 20]}}}})").arg(canvas).toUtf8();
     }
 
-    // A Region node with no canvas takes the one shown at the first drawn rectangle, in the same undo step.
-    void aRegionNodeWithNoCanvasTakesTheShownOneAtTheFirstDraw() {
+    // #246: a Region node with no canvas reads the Active canvas, so drawing a rectangle writes the rectangle and leaves
+    // the canvas empty; the view reports the canvas it shows as the active one.
+    void aRegionNodeWithNoCanvasStaysOnTheActiveCanvasWhenDrawn() {
         App app(load(regionReading("")));
         QVERIFY(app.open());
         app.model.select({"region"});
@@ -732,14 +733,14 @@ private slots:
         QTRY_COMPARE(model(app)->property("followNode").toString(), QString("region"));
         QTRY_VERIFY(model(app)->property("region").toMap().value("valid").toBool());
         QVERIFY(!find(app.window, "canvasViewCanvasMismatch"));
-        QVERIFY(find(app.window, "canvasViewRegionHint")->property("text").toString().contains("takes this one"));
+        QTRY_COMPARE(app.activeCanvas.id(), m_canvas); // the view reports the canvas it shows
         QTest::keyClick(app.window, Qt::Key_0);
         QTest::qWait(50);
         drag(app, pixelAt(app, 300, 320), pixelAt(app, 420, 400));
         QCOMPARE(app.model.undoStack()->count(), 1);
-        QCOMPARE(regionOf(app).value("canvas").toString(), m_canvas);
+        QCOMPARE(regionOf(app).value("canvas").toString(), QString()); // still the Active canvas
         QVERIFY(near(regionOf(app).value("width").toInt(), 120));
-        app.model.undoStack()->undo(); // one step: the canvas and the rectangle
+        app.model.undoStack()->undo();
         QCOMPARE(regionOf(app).value("canvas").toString(), QString());
         QCOMPARE(regionOf(app).value("width").toInt(), 64);
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
@@ -769,6 +770,32 @@ private slots:
         QCOMPARE(app.model.undoStack()->count(), 1);
         QTRY_VERIFY(!find(app.window, "canvasViewCanvasMismatch"));
         QTRY_VERIFY(model(app)->property("region").toMap().value("valid").toBool());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // A pinned node offers the way back: one click and it follows the Active canvas again (#246).
+    void aPinnedNodeCanGoBackToTheActiveCanvas() {
+        PaintDocument other(128, 96);
+        other.addLayer(LayerKind::Paint, "Base");
+        const QString otherId = canvas::CanvasStore::forSession().create("Poster", other, "new")->id;
+        App app(load(regionReading(m_canvas)));
+        QVERIFY(app.open());
+        app.model.select({"region"});
+        openDialog(app);
+        QTRY_COMPARE(view(app)->property("canvasId").toString(), m_canvas);
+        QVERIFY(model(app)->property("region").toMap().value("pinned").toBool());
+        view(app)->setProperty("canvasId", otherId);
+        QTRY_COMPARE(app.activeCanvas.id(), otherId); // choosing a canvas in the view makes it the active one
+        QTRY_VERIFY(find(app.window, "canvasViewCanvasMismatch"));
+        QQuickItem *button = find(app.window, "canvasViewUseActiveForNode");
+        QVERIFY(button && button->isVisible());
+        QCOMPARE(button->property("text").toString(), QString("Use the active canvas"));
+        // The banner's row sits past the test window's foot, so the tap is sent to the button, not the pointer.
+        QVERIFY(QMetaObject::invokeMethod(button, "tapped"));
+        QTRY_COMPARE(regionOf(app).value("canvas").toString(), QString());
+        QCOMPARE(app.model.undoStack()->count(), 1);
+        QTRY_VERIFY(!find(app.window, "canvasViewCanvasMismatch")); // no notice: nothing is pinned any more
+        QVERIFY(model(app)->property("region").toMap().value("active").toBool());
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 

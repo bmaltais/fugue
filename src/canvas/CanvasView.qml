@@ -73,7 +73,7 @@ Item {
     property string chosenRegion: ""
     // The document's Canvas Region nodes [{id, name, canvas}], and those that read the shown canvas.
     readonly property var regionNodes: canvasData.edits && canvasData.edits.graphRevision >= 0 ? canvasData.edits.regionNodes() : []
-    // A node with no canvas yet counts as this canvas's: it takes it at the first edit.
+    // A node with no canvas chosen reads the Active canvas, which this view reports as its own when it is used (#246).
     readonly property var regionsHere: regionNodes.filter(node => node.canvas === canvasData.canvasId || node.canvas === "")
     readonly property string selectedRegion: selection.length === 1 && regionNodes.some(node => node.id === selection[0]) ? selection[0] : ""
     onSelectedRegionChanged: if (selectedRegion !== "") chosenRegion = selectedRegion
@@ -423,10 +423,22 @@ Item {
         delayed: true
     }
     readonly property bool dragging: (regionFrame.item as CropFrame)?.dragging ?? false
+    // The Active canvas (#246): the canvas this view shows, once it is used (a press on the picture, the canvas changed, the
+    // view opened). A window with no such object (a test's) has none.
+    function reportActive() {
+        if (visible && canvasData.canvasId !== "" && App.activeCanvas !== null)
+            App.activeCanvas.use(canvasData.canvasId)
+    }
+    onVisibleChanged: reportActive()
+    Connections {
+        target: canvasData
+        function onCanvasChanged() { root.reportActive() }
+    }
     Component.onCompleted: {
         // One canvas by default: with none chosen, the newest.
         if (canvasData.canvasId === "" && canvasData.canvases.length > 0)
             canvasData.canvasId = canvasData.canvases[0].id
+        reportActive()
     }
     onCompareOnChanged: pictureView.setView({mode: compareOn ? modeButtons.remembered() : "single"})
 
@@ -963,7 +975,12 @@ Item {
         anchors.bottomMargin: root.u
         width: parent.width - startReserve - endReserve
         visible: canvasData.canvasId !== "" && canvasData.revisionB !== ""
-        onActiveFocusChanged: if (!activeFocus) root.panKey = false
+        onActiveFocusChanged: {
+            if (!activeFocus)
+                root.panKey = false
+            else
+                root.reportActive()
+        }
         mode: "single"
         showZoom: true
         showSize: false // the status line under the picture says the size and the zoom
@@ -1448,6 +1465,13 @@ Item {
                         tip: qsTr("Make %1 read the canvas shown (one undo step)").arg(root.followName)
                         onTapped: canvasData.useCanvasForNode()
                     }
+                    ViewButton {
+                        objectName: "canvasViewUseActiveForNode"
+                        look: root.look
+                        text: qsTr("Use the active canvas")
+                        tip: qsTr("Make %1 follow the canvas you work on in the Canvas view, not this one (one undo step)").arg(root.followName)
+                        onTapped: canvasData.useActiveCanvasForNode()
+                    }
                 }
             }
         }
@@ -1498,7 +1522,6 @@ Item {
                                                          : App.canvasActions !== null ? ""
                                                          : qsTr("This rectangle is not saved: no Canvas Region node reads this canvas. Add one to use it."))
                                    : "")
-                  : root.regionEditable && canvasData.region.adopts === true ? qsTr("Drag on the picture to pick the region: this Canvas Region has no canvas yet and takes this one.")
                   : root.regionEditable ? ""   // how to pick is taught by the tool strip's tooltips (#234)
                   : root.compareOn ? qsTr("Turn Compare off to pick the region on the picture.")
                   : qsTr("X, Y, Width or Height is linked to another node: pick it there.")

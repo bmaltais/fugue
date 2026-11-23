@@ -1,0 +1,20 @@
+{
+  "manifest": 1,
+  "id": "io.github.bmaltais.fugue-remove-object/lama-fill",
+  "version": "1.0.0",
+  "name": "LaMa Fill",
+  "description": "Fills the masked part of a picture from its surroundings with LaMa, a model made for removing objects. Only the masked pixels change. It is a base, not a finished edit: feed it to an edit model (the Remove action does) or use it as it is for a plain object removal. The model works at 512 x 512, so give it a crop around the mask (Canvas Region) for a large picture.",
+  "category": "Image/Mask",
+  "keywords": ["lama", "remove", "object", "inpaint", "fill", "erase", "pre-fill", "cleanup"],
+  "runtime": {"kind": "command", "entry": "./run.sh", "mode": "persistent", "idle_timeout_s": 60},
+  "inputs": [
+    {"name": "image", "type": "image", "label": "Image"},
+    {"name": "mask", "type": "image", "role": "mask", "label": "Mask", "description": "White is what to take away."},
+    {"name": "model", "type": "io.github.bmaltais.fugue-remove-object/lama-model", "label": "Model", "optional": true,
+     "description": "A LaMa ONNX file. The picker offers the download, with its licence shown first."},
+    {"name": "device", "type": "text", "default": "auto", "choices": ["auto", "cpu", "cuda"], "advanced": true,
+     "description": "Auto uses the GPU when the pack's environment has the CUDA build of ONNX Runtime."}
+  ],
+  "outputs": [{"name": "image", "type": "image", "label": "Filled"}],
+  "needs": {"memory_mb": 4000}
+}
