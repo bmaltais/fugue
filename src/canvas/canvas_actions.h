@@ -58,6 +58,7 @@
 
 #include "canvas/canvas_model.h"
 #include "canvas/mask_layer.h"
+#include "engine/canvas_act.h"
 #include "engine/canvas_action.h"
 #include "engine/canvas_batch.h"
 #include "engine/document.h"
@@ -211,19 +212,7 @@ signals:
     void canvasMade(const QString &source, const QString &made);
 
 private:
-    struct Entry {
-        QString id;
-        QString file;
-        bool library = false; // from the template library, else compiled into Fugue
-        Document document;
-        std::optional<canvas::Action> action;
-        canvas::ActionGraph graph;
-        QString broken; // the reason it cannot run, in words
-        QList<CarriedPack> carried; // the packs its template folder holds
-        // The packs its nodes need that are not installed (#231 slice 6): {id, name, source, ref}. The action is not broken for
-        // that: the bar offers to install them, and the inputs of the block that point into their nodes wait for them.
-        QVariantList needPacks;
-    };
+    using Entry = canvas::ActionEntry;
     struct WriteResult {
         bool cached = false;
         QString canvas, revision;

@@ -72,6 +72,8 @@ const QMap<QString, QMap<QString, Spec>> &table() {
           {"import", {1, 1, {"name"}, {}, canvasImport}},
           {"export", {1, 2, {"format", "quality", "scale", "size", "width", "height", "background", "prefix"}, {"layers", "history", "estimate", "lossless", "only-visible", "no-masks"}, canvasExport}},
           {"batch", {3, 3, {"format", "quality", "scale", "size", "width", "height", "background", "prompt", "seed"}, {"lossless", "keep"}, canvasBatch}},
+          {"act", {0, 2, {"prompt", "seed", "count", "layer", "rect", "selection", "expand", "percent", "pixels", "set"}, {"wait", "list"}, canvasAct}},
+          {"actions", {0, 0, {}, {}, canvasActions}},
           {"log", {1, 1, {"limit"}, {}, canvasLog}},
           {"show", {1, 1, {}, {}, canvasShow}},
           {"list", {0, 0, {}, {}, canvasList}},
@@ -229,7 +231,8 @@ Result<Command> parseArguments(const QStringList &rawArgs) {
                                   : QStringLiteral("%1 to %2").arg(spec.minPositionals).arg(spec.maxPositionals))
                          .arg(command.positionals.size()));
 
-    for (const QString &set : command.options.value("set")) {
+    // `canvas act` takes <input>=<value> as well (canvasAct checks its own).
+    for (const QString &set : command.name == "canvas.act" ? QStringList() : command.options.value("set")) {
         // <node>.<input>=<value>
         const int dot = set.indexOf('.');
         const int equals = set.indexOf('=');

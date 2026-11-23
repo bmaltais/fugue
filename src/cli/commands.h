@@ -98,6 +98,8 @@ Reply canvasNew(const Command &command, Context &context);
 Reply canvasImport(const Command &command, Context &context);
 Reply canvasExport(const Command &command, Context &context);
 Reply canvasBatch(const Command &command, Context &context); // canvas_batch.cpp (#250)
+Reply canvasAct(const Command &command, Context &context);     // canvas_act.cpp (#231 slice 10): run a canvas action, or list them
+Reply canvasActions(const Command &command, Context &context);
 // The picture options of `canvas export` and `canvas batch` (--format, --quality, --scale, --size, --width, --height,
 // --background, --lossless); `out` is the file named, whose extension gives the format when --format is not given.
 Result<canvas::PictureExport> pictureOptions(const Command &command, const QString &out);

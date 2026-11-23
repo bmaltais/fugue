@@ -28,12 +28,7 @@ namespace fugue {
 
 namespace {
 
-// The errors of 8.5: nothing can serve the node now (as CanvasRuns names them).
-bool cannotRunNow(const QString &code) {
-    static const QStringList codes{"capability_unavailable", "model_not_running", "model_missing", "provider_unreachable",
-                                   "unknown_provider"};
-    return codes.contains(code);
-}
+using canvas::cannotRunNow;
 
 // The router's action as the bundled action that does it.
 QString bundledFor(canvas::RouteAction action) {
@@ -56,81 +51,6 @@ std::optional<canvas::RouteRect> rectOf(const QVariantMap &map) {
     if (map.value("width").toInt() <= 0 || map.value("height").toInt() <= 0)
         return std::nullopt;
     return canvas::RouteRect{map.value("x").toInt(), map.value("y").toInt(), map.value("width").toInt(), map.value("height").toInt()};
-}
-
-// The rectangle held inside the canvas (a Generate never asks for an Expand it cannot do in this slice).
-canvas::RouteRect clamped(const canvas::RouteRect &r, int width, int height) {
-    const int left = std::clamp(r.x, 0, width), top = std::clamp(r.y, 0, height);
-    const int right = std::clamp(r.x + r.width, 0, width), bottom = std::clamp(r.y + r.height, 0, height);
-    return {left, top, right - left, bottom - top};
-}
-
-// How far an Expand grows the canvas: `side` (left, right, top or bottom) by `percent` of the picture's side along that
-// direction, in whole multiples of 16, at least 16; or by `pixels` when the request gives them. The rectangle of the
-// grown canvas in the old canvas's pixels. Empty, with `why`, for a side that is not one of the four.
-std::optional<canvas::RouteRect> expandedBounds(const QVariantMap &expand, int width, int height, QString *why) {
-    const QString side = expand.value("side").toString();
-    const bool horizontal = side == QLatin1String("left") || side == QLatin1String("right");
-    if (!horizontal && side != QLatin1String("top") && side != QLatin1String("bottom")) {
-        *why = CanvasActions::tr("Pick the side to grow: left, right, top or bottom.");
-        return std::nullopt;
-    }
-    int grow = expand.value("pixels").toInt();
-    if (grow <= 0)
-        grow = std::max(16, int(std::lround(double(horizontal ? width : height) * expand.value("percent", 25).toDouble() / 100.0 / 16.0)) * 16);
-    canvas::RouteRect to{0, 0, width, height};
-    if (side == QLatin1String("left")) {
-        to.x = -grow;
-        to.width += grow;
-    } else if (side == QLatin1String("right")) {
-        to.width += grow;
-    } else if (side == QLatin1String("top")) {
-        to.y = -grow;
-        to.height += grow;
-    } else {
-        to.height += grow;
-    }
-    return to;
-}
-
-// The size of a canvas at a revision, and that revision in full.
-struct Shown {
-    QString revision;
-    int width = 0, height = 0;
-};
-Result<Shown> shownOf(const QString &canvasId, const QString &ref) {
-    const canvas::CanvasStore store = canvas::CanvasStore::forSession();
-    const Result<QString> full = store.resolve(canvasId, ref.isEmpty() ? QStringLiteral("head") : ref);
-    if (!full)
-        return full.errors();
-    const Result<canvas::Revision> revision = store.revision(canvasId, full.value());
-    if (!revision)
-        return revision.errors();
-    const Result<canvas::Tree> tree = store.tree(revision->tree);
-    if (!tree)
-        return tree.errors();
-    return Shown{full.value(), tree->width, tree->height};
-}
-
-// The packs `document` needs that this Fugue lacks, each with where to get it: the pack its template folder carries, else the
-// source its requires.packs entry records. {id, name, source, ref}; source is empty when nothing says.
-QVariantList packNeeds(const Document &document, const QList<CarriedPack> &carried, const Registry &registry) {
-    QVariantList needs;
-    for (const QString &pack : packsNeeded(document, registry)) {
-        const auto folder = std::find_if(carried.cbegin(), carried.cend(), [&](const CarriedPack &c) { return c.id == pack; });
-        const QJsonObject recorded = document.requirements.value(QStringLiteral("packs")).toObject().value(pack).toObject();
-        QString source, ref, name = recorded.value(QStringLiteral("name")).toString();
-        if (folder != carried.cend()) {
-            source = folder->folder;
-            if (!folder->name.isEmpty())
-                name = folder->name;
-        } else if (registry.packVersion(pack).isEmpty()) {
-            source = recorded.value(QStringLiteral("source")).toString();
-            ref = recorded.value(QStringLiteral("ref")).toString();
-        }
-        needs << QVariantMap{{"id", pack}, {"name", packTitle(pack, name)}, {"source", source}, {"ref", ref}};
-    }
-    return needs;
 }
 
 } // namespace
@@ -181,65 +101,17 @@ QString CanvasActions::downloadText() const {
 }
 
 void CanvasActions::refresh() {
-    m_entries.clear();
     // Where an action may come from, in order, the first of an id winning: the templates of the library (the person's own
     // first, a template of the library being how a person's own and a project's actions arrive, design 8), then the files
     // of the roots (the ones compiled into Fugue; they stay the fallback of a library that lacks them).
-    struct Source {
-        QString id, file, title;
-        bool library;
-        QList<CarriedPack> carried;
-    };
-    QList<Source> sources;
+    QList<canvas::ActionSource> sources;
     if (m_workflows)
         for (const Template &t : m_workflows->templateList())
-            sources.append({t.id, t.workflow, t.title, true, t.carriedPacks});
+            sources.append({t.id, t.workflow, true, t.carriedPacks});
     for (const QString &root : std::as_const(m_roots))
         for (const QString &name : QDir(root).entryList({QStringLiteral("*.fugue")}, QDir::Files, QDir::Name))
-            sources.append({QFileInfo(name).completeBaseName(), QDir(root).filePath(name), {}, false, {}});
-    QSet<QString> seen;
-    for (const Source &source : std::as_const(sources)) {
-        if (seen.contains(source.id))
-            continue;
-        QFile file(source.file);
-        const Result<Document> loaded = file.open(QIODevice::ReadOnly) ? Document::load(file.readAll())
-                                                                      : Result<Document>(makeError("file_not_found", source.file));
-        if (!loaded)
-            continue; // not a workflow: not an action either
-        Entry entry;
-        entry.id = source.id;
-        entry.file = source.file;
-        entry.library = source.library;
-        entry.document = loaded.value();
-        entry.carried = source.carried;
-        entry.needPacks = packNeeds(entry.document, source.carried, *m_registry);
-        const Result<std::optional<canvas::Action>> action = canvas::actionOf(entry.document);
-        if (action && !action->has_value())
-            continue; // a plain workflow: it never hides an action of the same id
-        seen.insert(entry.id);
-        if (!action) {
-            entry.broken = action.error().code == QLatin1String("unsupported_format_version") ? tr("Needs a newer Fugue.") : action.error().message;
-        } else {
-            entry.action = **action;
-            // The inputs that point into a node of a pack that is not installed wait for the pack: the action is listed with the
-            // offer to install it, not as broken.
-            canvas::Action seen = **action;
-            if (!entry.needPacks.isEmpty())
-                seen.inputs.removeIf([&](const canvas::ActionInput &input) {
-                    return std::any_of(input.targets.cbegin(), input.targets.cend(), [&](const PortRef &target) {
-                        const auto node = entry.document.graph.nodes.constFind(target.node);
-                        return node != entry.document.graph.nodes.cend() && !entry.document.groups.contains(node->type) &&
-                               !m_registry->nodeType(node->type);
-                    });
-                });
-            const Result<canvas::ActionGraph> graph = canvas::checkAction(seen, entry.document, *m_registry);
-            if (graph)
-                entry.graph = graph.value();
-            else
-                entry.broken = graph.error().message;
-        }
-        m_entries << entry;
-    }
+            sources.append({QFileInfo(name).completeBaseName(), QDir(root).filePath(name), false, {}});
+    m_entries = canvas::collectActions(sources, *m_registry);
     rebuildList();
 }
 
@@ -299,21 +171,7 @@ const CanvasActions::Entry *CanvasActions::entry(const QString &id) const {
     return nullptr;
 }
 
-QString CanvasActions::plainWords(const Error &error, const QString &actionName) {
-    if (error.code == QLatin1String("mask_empty"))
-        return tr("The selection is empty. Draw one, then Generate.");
-    if (cannotRunNow(error.code))
-        return tr("No model on this machine can run %1.").arg(actionName);
-    if (error.code == QLatin1String("out_of_memory"))
-        return tr("Not enough GPU memory. Try a smaller selection.");
-    if (error.code == QLatin1String("input_invalid") && error.message.contains(QLatin1String(" is locked: ")))
-        return tr("The layer is locked, so %1 cannot change its mask. Unlock it in the Layers panel, then try again.").arg(actionName);
-    if (error.code == QLatin1String("stitch_mismatch"))
-        return tr("The action's workflow returned a picture of another shape.");
-    if (error.code == QLatin1String("canvas_conflict") || error.code == QLatin1String("canvas_head_moved"))
-        return tr("The canvas changed size while this ran, so nothing was written. Run again.");
-    return error.message;
-}
+QString CanvasActions::plainWords(const Error &error, const QString &actionName) { return canvas::plainWords(error, actionName); }
 
 void CanvasActions::setError(const QString &line, const QString &code, const QString &action) {
     m_error = line;
@@ -338,7 +196,7 @@ QVariantMap CanvasActions::refuse(const QString &why) {
 }
 
 QVariantMap CanvasActions::route(const QString &canvasId, const QString &revision, const QVariantMap &rect, bool hasPrompt) const {
-    const Result<Shown> shown = shownOf(canvasId, revision);
+    const Result<canvas::Shown> shown = canvas::shownOf(canvasId, revision);
     if (!shown)
         return {{"action", QString()}, {"reason", shown.error().message}};
     canvas::RouteInput in;
@@ -361,7 +219,7 @@ QVariantMap CanvasActions::generate(const QVariantMap &request) {
     const QString canvasId = request.value("canvas").toString();
     if (canvasId.isEmpty())
         return refuse(tr("Open a canvas first."));
-    const Result<Shown> shown = shownOf(canvasId, request.value("revision").toString());
+    const Result<canvas::Shown> shown = canvas::shownOf(canvasId, request.value("revision").toString());
     if (!shown)
         return refuse(shown.error().message);
     const QString prompt = request.value("prompt").toString().trimmed();
@@ -402,40 +260,12 @@ QVariantMap CanvasActions::generate(const QVariantMap &request) {
         return refuse(chosen->broken);
     }
     // A pack it needs is not installed: the bar offers to install it (installPack asks the person); nothing runs.
-    if (!chosen->needPacks.isEmpty()) {
-        m_errorCode = QStringLiteral("pack_missing");
+    if (const std::optional<Error> why = canvas::notRunnable(*chosen)) {
+        m_errorCode = why->code;
         m_errorAction = id;
-        return refuse(tr("%1 needs the %2 pack, which is not installed here. Install it first.")
-                          .arg(m_actionName, chosen->needPacks.first().toMap().value("name").toString()));
+        return refuse(why->message);
     }
     const canvas::Action &action = *chosen->action;
-    // An action on the canvas bounds (Expand) ignores the selection: it grows the canvas by the side and the amount asked for.
-    const bool bounds = action.selection == QLatin1String("bounds");
-    // `none` (Upscale) takes the whole picture: a rectangle or a painted selection is left out, not read.
-    const bool whole = action.selection == QLatin1String("none");
-    if (whole)
-        rect.reset();
-    std::optional<canvas::RouteRect> grown;
-    if (bounds) {
-        QString why;
-        grown = expandedBounds(request.value("expand").toMap(), shown->width, shown->height, &why);
-        if (!grown)
-            return refuse(why);
-        rect.reset();
-    }
-    if (rect) {
-        rect = clamped(*rect, shown->width, shown->height);
-        in.selection = rect;
-        routed = canvas::routeAction(in);
-    }
-    if (action.selection == QLatin1String("required") && !rect && selection.isEmpty() && !bounds)
-        return refuse(tr("Select an area first."));
-    if (rect && routed.action == canvas::RouteAction::None) {
-        m_errorCode = QStringLiteral("mask_empty");
-        return refuse(tr("The selection is empty. Draw one, then Generate."));
-    }
-    if (action.needsPrompt() && prompt.isEmpty())
-        return refuse(tr("Type what to put in the selection, then Generate."));
     // The Advanced values the person set (a model they picked is the one that must be here), a word only of a choice input.
     QJsonObject remembered = settingsOf(id).value("values").toObject();
     for (auto it = remembered.begin(); it != remembered.end();) {
@@ -444,98 +274,49 @@ QVariantMap CanvasActions::generate(const QVariantMap &request) {
                           (!input->choiceValues || (it->isString() && input->choices->contains(it->toString())));
         it = fits ? it + 1 : remembered.erase(it);
     }
-    if (m_workflows) {
-        const QVariantMap missing = m_workflows->missingModels(withRemembered(*chosen, remembered).models());
-        if (missing.value("count").toInt() > 0) {
-            m_errorCode = QStringLiteral("model_missing");
-            m_errorAction = id;
-            return refuse(tr("%1 needs models that are not on this machine. Download them first.").arg(m_actionName));
-        }
-    }
-
-    canvas::ActionBinding binding;
-    binding.canvas = canvasId;
-    binding.revision = shown->revision;
-    binding.rect = rect;
-    binding.selection = bounds || whole ? QString() : selection;
-    binding.layer = request.value("layer").toString().trimmed();
-    // An action with a layer role works on the current layer (Remove background: its mask): that layer's name goes into every target
-    // of the role (Canvas Region's Layer, Canvas Write's Onto), and Region keeps its own padding and scale: the layer whole, as it is.
-    const bool onLayer = action.input(QStringLiteral("layer")) != nullptr;
-    if (onLayer) {
-        const QString current = request.value("currentLayer").toString().trimmed();
-        if (current.isEmpty())
-            return refuse(tr("Select a layer first: click one in the Layers panel."));
-        binding.layer.clear();
-        binding.values.insert(QStringLiteral("layer"), current);
-    }
-    if (routed.action != canvas::RouteAction::None && !onLayer) {
-        binding.padding = routed.padding;
-        binding.scale = routed.scale;
-    }
-    // Remove continues its surroundings, so it wants the router's Remove margin even when a prompt routed the pick elsewhere.
-    if (id == QLatin1String("remove") && !bounds)
-        binding.padding = std::max(binding.padding.value_or(0), canvas::RouteTuning{}.removeMinPadding);
-    if (bounds) {
-        // The canvas grows first (one revision, undone in one step, with the new area pre-filled as a layer), then the
-        // action's Region reads the grown canvas: the new strip plus the overlap, with the router's context beside it.
-        canvas::RouteInput grow;
-        grow.canvasWidth = shown->width;
-        grow.canvasHeight = shown->height;
-        grow.resize = grown;
-        grow.hasPrompt = !prompt.isEmpty();
-        const canvas::Route expanded = canvas::routeAction(grow);
-        const Result<canvas::Commit> done = canvas::CanvasStore::forSession().resize(
-            canvasId, shown->revision, mask::IRect{grown->x, grown->y, grown->width, grown->height}, edgefill::Mode::EdgeBlur,
-            edgefill::defaultBlur, QStringLiteral("action:%1").arg(id));
-        if (!done)
-            return refuse(done.error().message);
-        if (!done->move.moved) {
-            m_errorCode = QStringLiteral("canvas_head_moved");
-            return refuse(tr("%1 works on the latest version of the canvas.").arg(m_actionName));
-        }
-        binding.revision = done->revision.id;
-        binding.rect = expanded.fill;
-        binding.padding = expanded.padding;
-        binding.scale = expanded.scale;
-    }
-    if (action.input(QStringLiteral("prompt")))
-        binding.values.insert(QStringLiteral("prompt"), prompt);
-    for (auto it = remembered.begin(); it != remembered.end(); ++it)
-        binding.values.insert(it.key(), it.value());
-    // Count N: N runs of the same head and selection (an action with no seed role would repeat itself: one).
-    int total = 1;
-    if (action.input(QStringLiteral("seed")))
-        total = std::clamp(request.contains("count") ? request.value("count").toInt() : variations(id), 1, maxVariations);
+    canvas::ActRequest act;
+    act.canvas = canvasId;
+    act.revision = shown->revision;
+    act.prompt = prompt;
+    act.rect = rect;
+    act.selection = selection;
+    act.layer = request.value("layer").toString();
+    act.currentLayer = request.value("currentLayer").toString();
+    act.expand = request.value("expand").toMap();
+    act.values = remembered;
     const QVariant fixedSeed = request.value("seed");
-    const bool fixed = fixedSeed.isValid() && !fixedSeed.isNull();
+    if (fixedSeed.isValid() && !fixedSeed.isNull())
+        act.seed = fixedSeed.toLongLong();
+    act.count = request.contains("count") ? request.value("count").toInt() : variations(id);
+    act.beforeChange = [&]() -> std::optional<Error> {
+        if (m_workflows && m_workflows->missingModels(withRemembered(*chosen, remembered).models()).value("count").toInt() > 0)
+            return makeError(QStringLiteral("model_missing"), tr("%1 needs models that are not on this machine. Download them first.").arg(m_actionName));
+        return std::nullopt;
+    };
+    const Result<canvas::ActPlan> plan = canvas::planAct(*chosen, act);
+    if (!plan) {
+        const QString code = plan.error().code;
+        if (code == QLatin1String("mask_empty") || code == QLatin1String("canvas_head_moved") || code == QLatin1String("model_missing"))
+            m_errorCode = code;
+        if (code == QLatin1String("model_missing"))
+            m_errorAction = id;
+        return refuse(plan.error().message);
+    }
     QStringList started;
-    for (int n = 0; n < total; ++n) {
-        if (action.input(QStringLiteral("seed")))
-            binding.values.insert(QStringLiteral("seed"), fixed ? QJsonValue(fixedSeed.toLongLong() + n)
-                                                                : QJsonValue(qint64(QRandomGenerator::global()->generate())));
-        binding.suffix = total > 1 ? tr("(%1 of %2)").arg(n + 1).arg(total) : QString();
-        binding.hidden = n > 0;
-        const Result<Document> bound = canvas::bindAction(chosen->document, action, chosen->graph, binding);
-        if (!bound) {
-            if (!started.isEmpty())
-                break; // the same inputs bound once: only a changed seed could differ, so this does not happen; keep what started
-            return refuse(bound.error().message);
-        }
+    for (const Document &bound : plan->runs) {
         RunRequest run;
-        run.document = bound.value();
+        run.document = bound;
         run.workflow = chosen->file;
         const QString runId = m_service->start(run);
         started << runId;
         m_runs << runId;
-        if (binding.rect) {
+        if (plan->rect) {
             // Where a step picture of this run goes: the Region's context box (the selection grown by padding, raised for the
             // feather, kept in the canvas), and the selection inside it.
-            const Node &regionNode = bound.value().graph.nodes[chosen->graph.region];
+            const Node &regionNode = bound.graph.nodes[chosen->graph.region];
             const auto literal = [&](const char *name) { return regionNode.inputs.value(QLatin1String(name)).literal().toInt(); };
-            const int width = bounds && grown ? grown->width : shown->width, height = bounds && grown ? grown->height : shown->height;
-            const canvas::RouteRect &sel = *binding.rect;
-            const auto box = region::contextOf(sel.x, sel.y, sel.width, sel.height, literal("padding"), width, height, literal("feather"));
+            const canvas::RouteRect &sel = *plan->rect;
+            const auto box = region::contextOf(sel.x, sel.y, sel.width, sel.height, literal("padding"), plan->width, plan->height, literal("feather"));
             const int left = std::max(box.x, sel.x), top = std::max(box.y, sel.y);
             const int right = std::min(box.x + box.width, sel.x + sel.width), bottom = std::min(box.y + box.height, sel.y + sel.height);
             const auto map = [](int x, int y, int w, int h) { return QVariantMap{{"x", x}, {"y", y}, {"width", w}, {"height", h}}; };
@@ -671,26 +452,11 @@ void CanvasActions::endRun(const QString &run, const QString &status, const Erro
 }
 
 void CanvasActions::placeAgain(const WriteResult &write) {
-    canvas::CanvasStore store = canvas::CanvasStore::forSession();
-    for (int attempt = 0; attempt < 4; ++attempt) {
-        const Result<canvas::Accepted> placed = store.accept(write.canvas, write.revision);
-        if (placed && placed->moved)
-            return;
-        if (placed)
-            continue; // the head moved meanwhile: try again on the new one
-        const QString code = placed.error().code;
-        if (code == QLatin1String("canvas_not_candidate")) {
-            // Still on the head: the cache was right, and nothing new can come of the same prompt, seed and selection.
-            QString layer;
-            if (const Result<canvas::Revision> revision = store.revision(write.canvas, write.revision))
-                if (const Result<canvas::Tree> tree = store.tree(revision->tree); tree && !tree->layers.empty())
-                    layer = tree->layers.back().name;
-            m_notice = tr("Same prompt, seed and selection as “%1”. Change the seed to get another.").arg(layer);
-        } else {
-            setError(plainWords(placed.error(), m_actionName), code);
-        }
-        return;
-    }
+    const Result<canvas::PlacedAgain> placed = canvas::placeWriteAgain(write.canvas, write.revision);
+    if (!placed)
+        setError(plainWords(placed.error(), m_actionName), placed.error().code);
+    else if (!placed->moved && !placed->layer.isEmpty())
+        m_notice = tr("Same prompt, seed and selection as “%1”. Change the seed to get another.").arg(placed->layer);
 }
 
 // --- the Advanced popover and Count (slice 4) ---
@@ -728,26 +494,9 @@ QString CanvasActions::resolved(const QString &id) const {
     return id.isEmpty() || id == QLatin1String("auto") ? QStringLiteral("generative-fill") : id;
 }
 
-bool CanvasActions::inPopover(const canvas::ActionInput &input) {
-    // What the bar has a field for stays on the bar; everything else is the popover's.
-    return input.role != QLatin1String("prompt") && input.role != QLatin1String("seed") && input.role != QLatin1String("layer");
-}
+bool CanvasActions::inPopover(const canvas::ActionInput &input) { return canvas::inPopover(input); }
 
-Document CanvasActions::withRemembered(const Entry &entry, const QJsonObject &values) const {
-    Document document = entry.document;
-    if (!entry.action)
-        return document;
-    for (const canvas::ActionInput &input : entry.action->inputs) {
-        // What a run would use: the remembered value, else the block's default (else the file's own, which stays).
-        const QJsonValue value = values.contains(input.key()) ? values.value(input.key()) : input.defaultValue;
-        if (input.choiceValues || !inPopover(input) || value.isUndefined())
-            continue;
-        for (const PortRef &target : input.targets)
-            if (document.graph.nodes.contains(target.node))
-                document.graph.nodes[target.node].inputs.insert(target.port, InputValue::fromJson(value));
-    }
-    return document;
-}
+Document CanvasActions::withRemembered(const Entry &entry, const QJsonObject &values) const { return canvas::withValues(entry, values); }
 
 QVariantList CanvasActions::advanced(const QString &id) {
     const Entry *e = entry(resolved(id));
