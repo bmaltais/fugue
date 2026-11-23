@@ -380,7 +380,7 @@ private slots:
         app.model.select({"region"});
         QTRY_VERIFY(find(app.window, "canvasViewFrame"));
         settle();
-        QVERIFY(app.commands.trigger("view.zoom-in")); // the Graph zoomed, so a fit of it would show
+        QVERIFY(app.commands.trigger("view.zoom-out")); // the Graph zoomed (out: framing the Region lands near 1.1, so zooming in could meet it), so a fit of it would show
         const qreal graphZoom = app.zoom();
         // A press on the picture (clear of the border's 24px target): the area is active and its view has the keys.
         QTest::mouseClick(app.window, Qt::LeftButton, {}, viewer->mapToScene(QPointF(40, 40)).toPoint());
