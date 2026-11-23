@@ -117,6 +117,9 @@ public:
     bool paste(const QMimeData &data);
     // The Paste button of a Load Image node: its image from the clipboard.
     Q_INVOKABLE bool pasteInto(const QString &node);
+    // The input an image can be pasted or dropped into on this node: a Load Image's `file`, or the exposed input of a
+    // group instance that ends in a Load Image's; empty for any other node.
+    Q_INVOKABLE QString imageInput(const QString &node) const;
     // Whether the node and input are the ones an image can be pasted into.
     Q_INVOKABLE bool accepts(const QString &node, const QString &input) const;
 

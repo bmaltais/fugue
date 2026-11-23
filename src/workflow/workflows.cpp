@@ -568,7 +568,7 @@ void Workflows::openUrls(const QVariantList &urls) {
 
 void Workflows::dropUrls(const QVariantList &urls, qreal x, qreal y) {
     const QString onNode = m_canvas->nodeAt(x, y);
-    const bool onLoadImage = m_images->accepts(onNode, QStringLiteral("file"));
+    const bool onLoadImage = !m_images->imageInput(onNode).isEmpty();
     QStringList images, workflows;
     for (const QVariant &url : urls) {
         const QString text = url.toString();

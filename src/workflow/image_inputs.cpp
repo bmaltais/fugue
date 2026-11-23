@@ -463,21 +463,45 @@ QVariantList ImageInputs::recent() const {
 bool ImageInputs::use(const QString &node, const QString &path) {
     // Only what is in the inputs folder, by its canonical path; anything else is the file browser's.
     const QString canonical = canonicalPath(path);
-    if (!accepts(node, QStringLiteral("file")) || !isInside(canonical, canonicalPath(inputsDir()))
+    if (imageInput(node).isEmpty() || !isInside(canonical, canonicalPath(inputsDir()))
         || !QFileInfo(canonical).isFile())
         return false;
     return take({canonical}, node, QPointF());
 }
 
-bool ImageInputs::accepts(const QString &node, const QString &input) const {
+namespace {
+// The input an image can go into on a node of this type: a Load Image's `file`, or the exposed input of a
+// group that ends in one (a group of Load Image and Resize to Megapixels takes the picture on its own face).
+QString imageInputOfType(const Document &document, const QString &type, int depth = 0) {
+    if (type == QLatin1String(ImageInputs::loadImageType))
+        return QStringLiteral("file");
+    const auto group = document.groups.constFind(type);
+    if (group == document.groups.cend() || depth > 8)
+        return {};
+    for (const GroupInput &input : group->inputs) {
+        if (input.targets.isEmpty())
+            continue;
+        const PortRef &target = input.targets.first();
+        if (imageInputOfType(document, group->nodes.value(target.node).type, depth + 1) == target.port)
+            return input.name;
+    }
+    return {};
+}
+} // namespace
+
+QString ImageInputs::imageInput(const QString &node) const {
     const Document document = m_canvas->scopeDocument();
-    return input == QLatin1String("file") && document.graph.nodes.value(node).type == QLatin1String(loadImageType);
+    return imageInputOfType(document, document.graph.nodes.value(node).type);
 }
 
-// The one selected Load Image, when the selection is exactly that.
+bool ImageInputs::accepts(const QString &node, const QString &input) const {
+    return !input.isEmpty() && input == imageInput(node);
+}
+
+// The one selected node that takes an image (a Load Image, or a group with one on its face), when the selection is exactly that.
 bool ImageInputs::replacing(QString &node) const {
     const QStringList selected = m_canvas->selectedIds();
-    if (selected.size() != 1 || !accepts(selected.first(), QStringLiteral("file")))
+    if (selected.size() != 1 || imageInput(selected.first()).isEmpty())
         return false;
     node = selected.first();
     return true;
@@ -529,8 +553,9 @@ QStringList ImageInputs::storeFiles(const QStringList &paths) {
 bool ImageInputs::take(const QStringList &files, const QString &replace, QPointF at) {
     if (files.isEmpty())
         return false;
+    const QString replaceInput = replace.isEmpty() ? QString() : imageInput(replace);
     if (!replace.isEmpty()
-        && m_canvas->scopeDocument().graph.nodes.value(replace).inputs.value(QStringLiteral("file")).kind()
+        && m_canvas->scopeDocument().graph.nodes.value(replace).inputs.value(replaceInput).kind()
                == InputValue::Kind::Link) {
         emit message(tr("The file of this node comes from a link; take the link out to paste an image."));
         return false;
@@ -541,12 +566,15 @@ bool ImageInputs::take(const QStringList &files, const QString &replace, QPointF
     int made = 0;
     for (int i = 0; i < files.size(); ++i) {
         QString node = i == 0 ? replace : QString();
-        if (node.isEmpty())
+        QString input = i == 0 ? replaceInput : QString();
+        if (node.isEmpty()) {
             node = m_canvas->addNode(QLatin1String(loadImageType), at.x(), at.y() + made++ * newNodeStep);
+            input = QStringLiteral("file");
+        }
         if (node.isEmpty())
             continue;
         Document document = m_canvas->scopeDocument();
-        document.graph.nodes[node].inputs.insert(QStringLiteral("file"), InputValue::literal(files.at(i)));
+        document.graph.nodes[node].inputs.insert(input, InputValue::literal(files.at(i)));
         m_canvas->commit(document, {});
         nodes.append(node);
     }
@@ -566,7 +594,7 @@ bool ImageInputs::paste(const QMimeData &data) {
 
 bool ImageInputs::pasteInto(const QString &node) {
     const QMimeData *data = QGuiApplication::clipboard()->mimeData();
-    if (!accepts(node, QStringLiteral("file")) || !data || !clipboardHasImage(*data)) {
+    if (imageInput(node).isEmpty() || !data || !clipboardHasImage(*data)) {
         emit message(tr("The clipboard holds no image."));
         return false;
     }
@@ -574,7 +602,7 @@ bool ImageInputs::pasteInto(const QString &node) {
 }
 
 bool ImageInputs::dropFiles(const QStringList &paths, QPointF at, const QString &onNode) {
-    return take(storeFiles(paths), accepts(onNode, QStringLiteral("file")) ? onNode : QString(), at);
+    return take(storeFiles(paths), imageInput(onNode).isEmpty() ? QString() : onNode, at);
 }
 
 } // namespace fugue

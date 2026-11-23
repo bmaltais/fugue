@@ -32,6 +32,22 @@ const char *oneLoadImage = R"({
              "view": {"center": [480, 340], "zoom": 1}}
 })";
 
+// A group of a Load Image and a Resize to Megapixels that exposes the Load Image's file on its face.
+const char *groupWithAnImage = R"({
+  "fugue": 1,
+  "groups": {"local/pic": {
+    "version": "1.0.0", "name": "Picture",
+    "inputs": [{"name": "picture", "targets": ["load.file"]}],
+    "outputs": [{"name": "image", "from": "size.image"}],
+    "nodes": {"load": {"type": "fugue/load-image", "version": "1.0.0"},
+              "size": {"type": "fugue/resize-megapixels", "version": "1.0.0", "inputs": {"image": {"from": "load.image"}}}}}},
+  "graph": {"nodes": {
+    "grp": {"type": "local/pic", "version": "1.0.0"},
+    "txt": {"type": "fugue/text", "version": "1.0.0", "inputs": {"text": "hi"}}}},
+  "layout": {"nodes": {"grp": {"pos": [100, 100]}, "txt": {"pos": [500, 100]}},
+             "view": {"center": [480, 340], "zoom": 1}}
+})";
+
 QByteArray encoded(const QImage &image, const char *format) {
     QByteArray bytes;
     QBuffer buffer(&bytes);
@@ -176,6 +192,27 @@ private slots:
         app.key(Qt::Key_Z, Qt::ControlModifier);
         app.key(Qt::Key_Z, Qt::ControlModifier);
         QCOMPARE(fileOf(app, "src"), QString());
+    }
+
+    // A group whose face exposes a Load Image's file takes the picture on its own face: no new Load Image node.
+    void pasteWithAGroupThatExposesAnImageFillsItsFaceInput() {
+        App app(load(groupWithAnImage));
+        QVERIFY(app.open());
+        QCOMPARE(app.model.widgets()->canPasteImage("grp", "picture"), true);
+        QVERIFY(!app.model.widgets()->canPasteImage("grp", "file"));
+        app.model.select({QStringLiteral("grp")});
+        auto *data = new QMimeData;
+        data->setData("image/png", encoded(picture(Qt::red), "PNG"));
+        putOnClipboard(data);
+        const int steps = app.model.undoStack()->count();
+        app.key(Qt::Key_V, Qt::ControlModifier);
+        QCOMPARE(app.model.document().graph.nodes.size(), 2); // none made
+        const InputValue value = app.model.document().graph.nodes.value("grp").inputs.value("picture");
+        QCOMPARE(value.kind(), InputValue::Kind::Literal);
+        QVERIFY(value.literal().toString().endsWith(".png"));
+        QCOMPARE(app.model.undoStack()->count(), steps + 1);
+        // A drop on the group does the same with another picture.
+        QVERIFY(app.model.widgets()->useInput("grp", value.literal().toString()));
     }
 
     void workflowDataOnTheClipboardIsPastedBeforeAnImage() {
