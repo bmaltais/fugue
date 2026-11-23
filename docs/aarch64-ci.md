@@ -11,7 +11,7 @@ carry the arch). Its ccache key is `package-aarch64-ccache-`.
 
 ## Why Arch Linux ARM, in a container the job makes
 
-- The app needs Qt 6.11 or newer (`QQmlEngine::setExternalSingletonInstance`, src/qml_app.cpp).
+- The app needs Qt 6.12 or newer (`QQmlEngine::setExternalSingletonInstance`, src/qml_app.cpp; 6.11 does not have it; CMakeLists.txt asks for 6.12).
   Ubuntu 24.04 (the runner's OS) has Qt 6.4, Debian 13 has 6.8 and Ubuntu 26.04 has 6.10: all fail to
   compile it. Arch (6.12) and Arch Linux ARM (6.12) are current.
 - Arch Linux ARM is the distribution the aarch64 package targets, with the same pacman packages and

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Builds Fugue-<version>-<arch>.AppImage from this checkout. Decisions and what is rejected: docs/appimage.md.
 #
-#   QT_ROOT=/opt/qt/6.11.2/gcc_64 packaging/appimage/build-appimage.sh [--out DIR] [--work DIR]
+#   QT_ROOT=/opt/qt/6.12.1/gcc_64 packaging/appimage/build-appimage.sh [--out DIR] [--work DIR]
 #
-# QT_ROOT is a Qt 6.11 (or newer) with qtmultimedia, qtimageformats and qtshadertools; the workflow
+# QT_ROOT is a Qt 6.12 (or newer) with qtmultimedia, qtimageformats and qtshadertools; the workflow
 # (.github/workflows/appimage.yml) installs it with aqtinstall in an Ubuntu 22.04 container, the oldest glibc
-# that Qt 6.11 supports. Needs cmake, ninja or make, a C++17 compiler, libvips 8.15+ (found by pkg-config) and libarchive headers, the Vulkan
+# that Qt 6.12 supports. Needs cmake, ninja or make, a C++17 compiler, libvips 8.15+ (found by pkg-config) and libarchive headers, the Vulkan
 # loader headers, zlib and patchelf; curl and sha256sum for the tools below.
 #
 # Third-party tools are downloaded once into $WORK/tools and checked against the sha256 below. Set
@@ -31,7 +31,7 @@ say() { echo "==> $*"; }
 arch=$(uname -m)
 [[ $arch == x86_64 ]] || die "only x86_64 is built so far (see docs/appimage.md); this is $arch"
 qt=${QT_ROOT:-}
-[[ -x $qt/bin/qmake ]] || die "set QT_ROOT to a Qt 6.11 folder (the one with bin/qmake)"
+[[ -x $qt/bin/qmake ]] || die "set QT_ROOT to a Qt 6.12 folder (the one with bin/qmake)"
 
 # --- pinned third-party tools (versions and sha256 of the release assets) ----------------------------------
 ld_url=https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage
@@ -87,7 +87,7 @@ say "libvips $(pkg-config --modversion vips-cpp) from $vips_lib"
 appdir=$work/AppDir
 rm -rf "$appdir" "$work/build"
 # glib's gio headers have a struct field called `signals`, which Qt's `signals` keyword turns into `public`: a
-# header that reaches them after Qt's macros fails (seen with aqtinstall's Qt 6.11.2 and Ubuntu 22.04's libvips,
+# header that reaches them after Qt's macros fails (seen with aqtinstall's Qt 6.12.1 and Ubuntu 22.04's libvips,
 # whose pkg-config flags put glib on the include path). Reading gio first makes any later include a no-op.
 # The Arch build does not hit it, and the flag is harmless there.
 pkg-config --exists gio-2.0 || die "libglib2.0-dev (gio-2.0) is needed: libvips's headers use it"
