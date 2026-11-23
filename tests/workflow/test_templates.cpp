@@ -1091,7 +1091,7 @@ private slots:
         const auto &nodes = document.graph.nodes;
         QCOMPARE(nodes.value("sample").inputs.value("steps").literal().toInt(), 4);
         QCOMPARE(nodes.value("sample").inputs.value("guidance").literal().toDouble(), 1.0);
-        QCOMPARE(nodes.value("sample").inputs.value("denoise").literal().toDouble(), 0.9);
+        QCOMPARE(nodes.value("sample").inputs.value("denoise").literal().toDouble(), 1.0);
         QVERIFY(nodes.value("sample").inputs.value("soft_mask").literal().toBool());
         QCOMPARE(nodes.value("match").type, QStringLiteral("fugue/color-match"));
         QCOMPARE(nodes.value("match").inputs.value("reference").from().toString(), QStringLiteral("load.image"));
