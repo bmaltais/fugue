@@ -125,7 +125,11 @@ clone with `--recurse-submodules`, or run `git submodule update --init` once.
 bin/build        # the app and the tests
 bin/test         # builds, then runs every test (arguments go to ctest); a test running over 300 s fails
 bin/build fugue  # only the app; any CMake target works, e.g. bin/build test_menus
+bin/test --changed  # only the tests the change since origin/main can affect (docs/testing.md)
 ```
+
+A new `build/` uses Ninja and lld when they are installed (`pacman -S ninja lld`); a `build/` made with Make
+keeps Make. The rules for tests and what each command does are in [docs/testing.md](docs/testing.md).
 
 The app is `build/fugue`.
 
