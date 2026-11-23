@@ -62,11 +62,17 @@ QString blendText(const QString &compositeOp) {
 QJsonObject layerJson(const canvas::LayerRecord &layer, int position) {
     QJsonObject out{{"position", position},
                     {"name", layer.name},
-                    {"kind", kindText(layer.kind)},
+                    {"kind", layer.group ? QStringLiteral("group") : kindText(layer.kind)},
                     {"visible", layer.visible},
                     {"opacity", layer.opacity},
                     {"blend", blendText(layer.compositeOp)},
-                    {"tiles", int(layer.tiles.size())}};
+                    {"tiles", layer.tileCount()}};
+    if (layer.group) {
+        QJsonArray children;
+        for (const canvas::LayerRecord &child : layer.children)
+            children.append(child.name);
+        out.insert(QStringLiteral("children"), children);
+    }
     if (layer.hasMask)
         out.insert(QStringLiteral("mask"), QJsonObject{{"enabled", layer.maskEnabled}, {"tiles", int(layer.maskTiles.size())}});
     if (!layer.producer.isEmpty())
@@ -77,9 +83,9 @@ QJsonObject layerJson(const canvas::LayerRecord &layer, int position) {
 }
 
 QString layerLine(const canvas::LayerRecord &layer, int position) {
-    QString line = QStringLiteral("%1 %2: %3%4, opacity %5, %6 tiles").arg(position).arg(layer.name, kindText(layer.kind),
+    QString line = QStringLiteral("%1 %2: %3%4, opacity %5, %6 tiles").arg(position).arg(layer.name, layer.group ? QStringLiteral("group of %1").arg(layer.children.size()) : kindText(layer.kind),
                                                                            layer.visible ? QString() : QStringLiteral(", hidden"))
-                       .arg(layer.opacity).arg(layer.tiles.size());
+                       .arg(layer.opacity).arg(layer.tileCount());
     if (!layer.compositeOp.isEmpty())
         line += QStringLiteral(", blend %1").arg(blendText(layer.compositeOp));
     if (layer.hasMask)
@@ -461,9 +467,9 @@ Reply canvasLayer(const Command &command, Context &) {
             return Reply::failure(usageError(QStringLiteral("layer list takes a canvas (and a revision) only.")));
         return layerList(store, ref);
     }
-    static const QStringList actions{"list", "set", "rename", "rm", "dup", "move"};
+    static const QStringList actions{"list", "set", "rename", "rm", "dup", "move", "new", "merge", "flatten", "group", "ungroup"};
     if (!actions.contains(action))
-        return Reply::failure(usageError(QStringLiteral("\"%1\" is not a layer action.").arg(action), QStringLiteral("Use list, set, rename, rm, dup or move.")));
+        return Reply::failure(usageError(QStringLiteral("\"%1\" is not a layer action.").arg(action), QStringLiteral("Use list, set, rename, rm, dup, move, new, merge, flatten, group or ungroup.")));
     if (ref.written && ref.revision != QLatin1String("head"))
         return Reply::failure(usageError(QStringLiteral("Layers are edited on the head only: write the canvas id without @revision."),
                                          QStringLiteral("To edit an older revision, accept it or undo back to it first.")));
@@ -487,9 +493,12 @@ Reply canvasLayer(const Command &command, Context &) {
             return Reply::failure(usageError(QStringLiteral("layer rename takes a canvas, a layer and the new name.")));
         layerWords = rest.mid(0, 1);
     }
-    if (layerWords.isEmpty())
+    const bool wantsNoLayer = action == QLatin1String("flatten") || action == QLatin1String("new");
+    if (layerWords.isEmpty() && !wantsNoLayer)
         return Reply::failure(usageError(QStringLiteral("Name at least one layer, by its position (0 is the bottom) or its name.")));
-    const Result<std::vector<int>> positions = layerPositions(tree.value(), layerWords);
+    if (command.has("name") && action != QLatin1String("new") && action != QLatin1String("group"))
+        return Reply::failure(usageError(QStringLiteral("--name names the layer `layer new` or `layer group` makes; `layer rename` renames one.")));
+    const Result<std::vector<int>> positions = layerPositions(tree.value(), layerWords); // empty for flatten and an on-top new layer
     if (!positions)
         return Reply::failure(positions.errors());
     const auto add = [&](canvas::LayerOp op) -> canvas::LayerEdit & {
@@ -530,6 +539,22 @@ Reply canvasLayer(const Command &command, Context &) {
             return Reply::failure(usageError(QStringLiteral("layer set needs --visible, --opacity, --blend or --mask.")));
     } else if (action == QLatin1String("rename")) {
         add(canvas::LayerOp::Rename).text = rest.at(1);
+    } else if (action == QLatin1String("new")) {
+        if (layerWords.size() > 1)
+            return Reply::failure(usageError(QStringLiteral("layer new takes the one layer the new one goes above, or none (on top).")));
+        add(canvas::LayerOp::New).text = command.value("name");
+    } else if (action == QLatin1String("merge")) {
+        if (layerWords.size() != 1)
+            return Reply::failure(usageError(QStringLiteral("layer merge takes the one layer to merge down into the layer under it.")));
+        add(canvas::LayerOp::MergeDown);
+    } else if (action == QLatin1String("flatten")) {
+        if (!layerWords.isEmpty())
+            return Reply::failure(usageError(QStringLiteral("layer flatten takes the canvas only: it flattens every shown layer.")));
+        add(canvas::LayerOp::Flatten);
+    } else if (action == QLatin1String("group")) {
+        add(canvas::LayerOp::Group).text = command.value("name");
+    } else if (action == QLatin1String("ungroup")) {
+        add(canvas::LayerOp::Ungroup);
     } else if (action == QLatin1String("rm")) {
         add(canvas::LayerOp::Remove);
     } else if (action == QLatin1String("dup")) {

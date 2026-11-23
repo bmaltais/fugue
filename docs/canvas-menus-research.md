@@ -64,7 +64,7 @@ is a **placeholder**: a greyed row, not a command (no handler, no key, nothing i
 | Add layer mask (Ctrl+Shift+M), Invert mask (Ctrl+I), Overlay (\\) | built | existing commands |
 | Reveal all, Hide all (mask) | built | `fillMask`, `clearMask` |
 | Duplicate, Delete, Rename, Raise, Lower, Show or hide | stay in the Layers panel | the panel has them with keys; doubling them is the follow-up |
-| New layer, Merge down, Flatten, Group, Layer properties | placeholder, #252 | the engine has no new-layer or merge op |
+| New layer (Ctrl+Shift+N), Merge down (Ctrl+E), Flatten, Group (Ctrl+G), Ungroup (Ctrl+Shift+G), Layer properties… | built, #252 | engine ops (`canvas_layer_ops`, `canvas_layer_merge`) and `fugue canvas layer new/merge/flatten/group/ungroup`; Photoshop's keys; a group is one row, its composite is what readers see |
 
 ## View
 
