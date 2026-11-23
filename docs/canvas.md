@@ -320,7 +320,7 @@ pointer is over the view; over the Layers panel the panel's own keys win). The t
 - **Rectangle region** (M or R), the tool you start with: the region rectangle described above.
 - **Lasso** (L): drag freehand around the area; letting go closes the outline and it becomes the selection (a soft, anti-aliased edge).
   A new lasso replaces the selection, **Shift** adds to it, **Alt** subtracts; Escape drops a drag; Ctrl+Z takes the step back. It is
-  the same selection Quick Mask paints (below), shown in red, and the task bar's Generate uses it (the Region gets it as its
+  the same selection Quick Mask paints (below), shown as marching ants (red while Quick Mask is on), and the task bar's Generate uses it (the Region gets it as its
   `selection` input and the live frame follows its bounds). Select > Inverse, Deselect and Modify work on it. A rectangle drawn after
   it replaces it.
 - **Mask brush** (B) and **eraser** (E; X swaps them): paint a layer mask, or the Quick Mask selection. `[` and `]`
@@ -341,7 +341,7 @@ revision of the canvas (History names it "Painted: <layer>"), and Ctrl+Z takes i
 **Paint the area to change (Quick Mask).** Press Q, or the Quick Mask button: the same brush now paints a selection, in
 red, which no revision keeps (Ctrl+Z undoes a stroke). With a Canvas Region node followed, **Use selection** gives it the
 selection as the area to change, as one undo step of the workflow: the next run redraws the painted part, and its
-result lands as a layer. Drawing a rectangle afterwards replaces it. Press Q again to leave Quick Mask; the selection
+result lands as a layer. Drawing a rectangle afterwards replaces it. Press Q again to leave Quick Mask (the red tint goes and the selection shows as marching ants); the selection
 stays until you clear it (**Select > Deselect**, Ctrl+D, or Escape) or change canvas.
 
 **A layer as the selection.** Ctrl+click a layer's mask thumbnail in the Layers panel (Ctrl+Shift+click adds, Ctrl+Alt+click
@@ -352,13 +352,22 @@ Canvas Region's **Selection** input (advanced) is what Use selection writes: the
 it, the Mask input and the rectangle are not used; the selection's bounds are in X, Y, Width and Height so the frame
 and the size the model gets read right. A replay of the run reads the same selection.
 
+**Marching ants (#313).** Whatever is selected shows as an animated dashed outline, black and white so it reads on any picture:
+the rectangle's sides, or the edge of the painted, lasso or layer-mask selection (the mask at 50%: a feathered edge is outlined
+in its middle). The dashes move slowly (8 px a second, 8 redraws a second) and only while a selection exists; they follow pan
+and zoom, are hidden while Quick Mask is on (its red tint is the editing view) and while a rectangle is dragged, and
+**Select > Deselect** removes them. The outline of a mask is computed for the part in view only, on a grid of two screen
+pixels, so a huge canvas costs what a small one does; at 100% and below it can lie up to one pixel off the true edge.
+Not yet: a brush stroke does not become the selection when you let go (the Quick Mask brush still paints into the selection
+that Q shows in red; see #313), and there is no reduced-motion setting.
+
 ## Modify and transform a selection
 
 **Select > Modify** and **Select > Transform selection…** (#251) change the selection by a number you type, with Photoshop's
 meanings. Each asks in a small dialog (Enter applies, the last amount is offered again) and is one step of the selection's own undo
 (Ctrl+Z in the view). They need a selection: the painted one, or a rectangle (the free one, or the Region node's), which is
 painted into the selection first (the free rectangle goes; the Region node's area stays until Deselect). The result shows as the
-Quick Mask, the one view a painted selection has until the marching ants (#232) come.
+Quick Mask and as marching ants (#313).
 
 - **Expand** and **Contract**: every edge moves out or in by N pixels (round corners). A selection against the picture's edge is not eaten from that side.
 - **Feather**: the edge fades over about N pixels each side of where it was (a Gaussian). A selection reaching the picture's edge stays solid there.

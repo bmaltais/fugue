@@ -295,6 +295,89 @@ private slots:
         QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
     }
 
+    // The marching ants (#313): a rectangle (the free one the region tool draws) and a lasso selection have an outlined ants item,
+    // Quick Mask (the red tint) hides it while it edits, a layer mask made the selection (Ctrl+click its thumbnail) has one, and
+    // Deselect (Ctrl+D) removes it.
+    void theSelectionHasMarchingAnts() {
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"));
+        QVERIFY(app.open());
+        openDialog(app);
+        const auto ants = [&] { return find(app.window, "canvasViewAnts"); };
+        QVERIFY(!ants());
+        const QPoint at = hoverPicture(app);
+        const QPoint from = at - QPoint(40, 40);
+        QTest::mousePress(app.window, Qt::LeftButton, {}, from);
+        for (int i = 4; i <= 60; i += 4)
+            QTest::mouseMove(app.window, from + QPoint(i, i));
+        QTest::mouseRelease(app.window, Qt::LeftButton, {}, from + QPoint(60, 60));
+        QTRY_VERIFY(ants() && ants()->property("outlined").toBool());
+        QCOMPARE(ants()->property("pathCount").toInt(), 1);
+        QVERIFY(app.commands.trigger("canvas-view.deselect"));
+        QTRY_VERIFY(!ants());
+        key(app, Qt::Key_L);
+        QTRY_COMPARE(view(app)->property("tool").toString(), QString("lasso"));
+        const QPoint corners[] = {{-20, -20}, {20, -20}, {20, 20}, {-20, 20}};
+        QTest::mousePress(app.window, Qt::LeftButton, {}, at + corners[0]);
+        for (int i = 1; i <= 4; ++i)
+            for (int t = 1; t <= 4; ++t)
+                QTest::mouseMove(app.window, at + corners[i - 1] + (corners[i % 4] - corners[i - 1]) * t / 4);
+        QTest::mouseRelease(app.window, Qt::LeftButton, {}, at + corners[0]);
+        QTRY_VERIFY(ants() && ants()->property("outlined").toBool());
+        QVERIFY(ants()->property("pointCount").toInt() < 2000);
+        const int before = ants()->property("pointCount").toInt();
+        QVERIFY(app.commands.trigger("canvas-view.invert-selection")); // the same edge and the picture's own
+        QTRY_VERIFY(ants()->property("pointCount").toInt() != before);
+        key(app, Qt::Key_Q); // Quick Mask edits it as the red tint: no ants meanwhile
+        QTRY_VERIFY(view(app)->property("quickMask").toBool());
+        QTRY_VERIFY(!ants());
+        key(app, Qt::Key_Q);
+        QTRY_VERIFY(ants());
+        key(app, Qt::Key_D, Qt::ControlModifier);
+        QTRY_VERIFY(!ants());
+        // A layer mask as the selection.
+        click(app, "canvasLayer-1");
+        click(app, "canvasLayerAddMask");
+        QTRY_VERIFY(find(app.window, "canvasLayerMask-1"));
+        click(app, "canvasLayerMask-1", Qt::ControlModifier);
+        QTRY_VERIFY(ants() && ants()->property("outlined").toBool());
+        QVERIFY(app.commands.trigger("canvas-view.deselect"));
+        QTRY_VERIFY(!ants());
+        QVERIFY2(app.warnings.isEmpty(), qPrintable(app.warnings.join('\n')));
+    }
+
+    // Pictures: FUGUE_SHOT_DIR=<dir> test_canvas_tools_window savesThePicturesOfTheAnts (nothing without the variable).
+    void savesThePicturesOfTheAnts() {
+        const QByteArray dir = qgetenv("FUGUE_SHOT_DIR");
+        if (dir.isEmpty())
+            QSKIP("FUGUE_SHOT_DIR is not set");
+        App app(load(R"({"fugue": 1, "graph": {"nodes": {}}})"), {}, Look{"tokyo-night", 8});
+        QVERIFY(app.open());
+        openDialog(app);
+        const auto save = [&](const QString &what) {
+            QTest::mouseMove(app.window, QPoint(2, 2)); // the pointer off the picture
+            QTest::qWait(400);
+            QVERIFY(test_support::grab(app.window).save(QStringLiteral("%1/ants-%2.png").arg(QString::fromLocal8Bit(dir), what)));
+        };
+        const QPoint at = hoverPicture(app);
+        const QPoint from = at - QPoint(60, 50);
+        QTest::mousePress(app.window, Qt::LeftButton, {}, from);
+        for (int i = 4; i <= 100; i += 4)
+            QTest::mouseMove(app.window, from + QPoint(i, i * 3 / 4));
+        QTest::mouseRelease(app.window, Qt::LeftButton, {}, from + QPoint(100, 75));
+        QTRY_VERIFY(find(app.window, "canvasViewAnts"));
+        save("rect");
+        QVERIFY(app.commands.trigger("canvas-view.deselect"));
+        key(app, Qt::Key_L);
+        const QPoint ring[] = {{0, -45}, {35, -30}, {50, 5}, {30, 40}, {-5, 50}, {-40, 30}, {-50, -10}, {-30, -40}};
+        QTest::mousePress(app.window, Qt::LeftButton, {}, at + ring[0]);
+        for (int i = 1; i <= 8; ++i)
+            for (int t = 1; t <= 4; ++t)
+                QTest::mouseMove(app.window, at + ring[i - 1] + (ring[i % 8] - ring[i - 1]) * t / 4);
+        QTest::mouseRelease(app.window, Qt::LeftButton, {}, at + ring[0]);
+        QTRY_VERIFY(find(app.window, "canvasViewAnts"));
+        save("lasso");
+    }
+
     // #281: Qt gives a disabled item no hover, so a disabled button's "why is this off" tip never showed. Use selection is
     // off with no Canvas Region node in the graph; resting the pointer on it shows its tip, a click on it does nothing,
     // and leaving it hides the tip.
