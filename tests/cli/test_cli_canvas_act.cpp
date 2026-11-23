@@ -253,6 +253,30 @@ private slots:
         QVERIFY(QString::fromUtf8(ran.err).contains("new"));
     }
 
+    // A model is picked by its file name, as the bar's picker does (#309): the file is found in the model folders and hashed
+    // (remembered). Not found is a plain usage error that lists nothing it made up; a full resource handle still works as given.
+    void aModelIsSetByItsFileName() {
+        const QString id = canvas(32);
+        QVERIFY(QDir().mkpath(path("home/.local/share/fugue/models/upscale_models/sub")));
+        QFile file(path("home/.local/share/fugue/models/upscale_models/sub/stand-in.safetensors"));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write("not a real model");
+        file.close();
+        const Outcome absent = fugue({"canvas", "act", id, "upscale", "--set", "model=nonesuch.safetensors", "--json"});
+        QCOMPARE(absent.errorCode(), QString("usage"));
+        QVERIFY2(absent.error().value("message").toString().contains("nonesuch.safetensors"), absent.out);
+        QVERIFY(absent.error().value("valid").toArray().contains("sub/stand-in.safetensors"));
+        // The name (as the library lists it, or the bare file name) finds the file: the run goes on and fails on the fake file, not on the name.
+        for (const char *name : {"sub/stand-in.safetensors", "stand-in.safetensors"}) {
+            const Outcome ran = fugue({"canvas", "act", id, "upscale", "--set", QString("model=%1").arg(name), "--wait", "--json"});
+            QVERIFY2(ran.errorCode() != "usage" && ran.errorCode() != "model_missing" && ran.errorCode() != "type_mismatch", ran.out + ran.err);
+        }
+        // A full handle is taken as it is: a name no file has is model_missing, not a usage or type error.
+        const QString zeros(64, QLatin1Char('0'));
+        const QString handle = QString(R"({"resource":"fugue/upscale-model","name":"gone.safetensors","hash":"sha256:%1"})").arg(zeros);
+        QCOMPARE(fugue({"canvas", "act", id, "upscale", "--set", "model=" + handle, "--json"}).errorCode(), QString("model_missing"));
+    }
+
     // What cannot run says why, in words, with a coded error and a failing exit status.
     void whatCannotRunSaysWhy() {
         const QString id = canvas();

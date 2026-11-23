@@ -230,7 +230,8 @@ per picture (one JSON event per line with `--json`). Its exit code is 1 when any
 code binds the canvas, the head, the selection (`--rect x,y,w,h`, or `--selection mask.png`, white is selected, kept by content in
 the store as the lasso's is), the prompt and seed, the layer an action works on (`--layer`), Count (`--count 3`: three layers, the
 first visible, the others hidden), Expand (`--expand right --percent 25`: the canvas grows by one revision, then the strip is written)
-and any Advanced input (`--set steps=8`, `--set strength=Light`). Without `--wait` the runs are queued and the command returns; with
+and any Advanced input (`--set steps=8`, `--set strength=Light`, `--set model=RealESRGAN_x4plus.safetensors`: a model by its file name, found in the
+model folders and hashed once like the picker's pick, or a whole resource handle; a name no folder has is a plain `usage` error listing the names). Without `--wait` the runs are queued and the command returns; with
 `--wait` it blocks, prints progress on stderr (Ctrl+C cancels the runs), and says the new head and the new layers (or, for Upscale,
 the new canvas). A missing model or pack is refused before anything changes, saying what to fetch. `fugue canvas actions` lists the
 actions and what each needs. This is the way for a script or an agent to run the whole bar path, headless, on the GPU or on a
