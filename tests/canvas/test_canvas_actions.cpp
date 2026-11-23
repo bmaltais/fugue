@@ -478,6 +478,51 @@ private slots:
         QCOMPARE(head(), locked);
     }
 
+    // Slice 8, Upscale: the result is a NEW canvas (Canvas New), the source stays as it was. The plain Lanczos template runs for real
+    // here (no model, CPU): a 256 px canvas at 2x is a 512 px canvas of its own, named Upscaled, announced by canvasMade; a selection
+    // given with the press is not read; the source's head and layers do not move. The model template without its model is the
+    // Download offer (model_missing), not a crash, and queues nothing.
+    void upscaleMakesANewCanvasAndLeavesTheSourceAsItWas() {
+        Rig r;
+        r.addRepositoryTemplate("upscale-no-model");
+        QCOMPARE(r.row("upscale-no-model").value("broken").toBool(), false);
+        QCOMPARE(r.row("upscale-no-model").value("selection").toString(), QStringLiteral("none"));
+        QSignalSpy made(r.actions.get(), &CanvasActions::canvasMade);
+        const QVariantMap started = r.actions->generate({{"action", "upscale-no-model"}, {"canvas", m_canvas}, {"revision", head()}, {"rect", rect(96, 96, 64, 64)}});
+        QVERIFY2(started.value("ok").toBool(), qPrintable(started.value("reason").toString()));
+        QTRY_VERIFY(!r.actions->busy());
+        QCOMPARE(r.actions->error(), QString());
+        QCOMPARE(made.size(), 1);
+        QCOMPARE(made.first().at(0).toString(), m_canvas);
+        const QString id = made.first().at(1).toString();
+        QVERIFY(id != m_canvas);
+        const auto info = store().info(id);
+        QCOMPARE(info->name, QStringLiteral("Upscaled"));
+        const auto tree = store().loadTree(id, info->head);
+        QCOMPARE(tree->width, 512); // the default Scale is 2x, of the whole 256 px picture, not of the 64 px selection
+        QCOMPARE(tree->height, 512);
+        QCOMPARE(head(), m_head);
+        QCOMPARE(layers(head()), 1);
+        // 4x by the Advanced choice.
+        QVERIFY(r.actions->setChoice("upscale-no-model", "scale", "4x"));
+        QVERIFY(r.actions->generate({{"action", "upscale-no-model"}, {"canvas", m_canvas}, {"revision", head()}}).value("ok").toBool());
+        QTRY_COMPARE(made.size(), 2);
+        QCOMPARE(store().loadTree(made.last().at(1).toString(), store().info(made.last().at(1).toString())->head)->width, 1024);
+        QCOMPARE(store().info(made.last().at(1).toString())->name, QStringLiteral("Upscaled 2"));
+    }
+
+    void upscaleWithoutItsModelIsTheDownloadOfferAndQueuesNothing() {
+        Rig r;
+        r.addRepositoryTemplate("upscale");
+        QSignalSpy made(r.actions.get(), &CanvasActions::canvasMade);
+        const QVariantMap refused = r.actions->generate({{"action", "upscale"}, {"canvas", m_canvas}, {"revision", head()}});
+        QVERIFY(!refused.value("ok").toBool());
+        QCOMPARE(r.actions->errorCode(), QStringLiteral("model_missing"));
+        QCOMPARE(r.actions->errorAction(), QStringLiteral("upscale"));
+        QCOMPARE(r.jobs().size(), 0);
+        QVERIFY(made.isEmpty());
+    }
+
     // The pack is a hard requirement of Remove background: without it the action is listed with the offer to install it (never
     // broken, never a crash), Generate says so before anything is queued, and installing asks the window (the person agrees there).
     // The other actions are not touched.

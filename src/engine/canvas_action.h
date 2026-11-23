@@ -6,7 +6,7 @@
 //
 // The block (design 1.2):
 //   "action": {"format": 1, "name": "Generative fill", "description": "...", "glyph": "sparkles",
-//              "selection": "required" | "optional" | "bounds", "region": "<Canvas Region id>",
+//              "selection": "required" | "optional" | "bounds" | "none", "region": "<Canvas Region id>",
 //              "inputs": [{"role": "prompt", "targets": ["encode.prompt"], "label", "section", "default", "min", "max",
 //                          "choices", "choice_values", "optional", "fallback"}, {"name": "steps", "targets": ["sample.steps"]}, ...]}
 // It is a top-level key the document keeps as `extra` on a round trip (spec 4.1) and it is outside sourceHash(), so it
@@ -47,6 +47,7 @@ namespace fugue::canvas {
 inline constexpr int actionFormat = 1;
 inline constexpr char regionType[] = "fugue/canvas-region";
 inline constexpr char writeType[] = "fugue/canvas-write";
+inline constexpr char newType[] = "fugue/canvas-new"; // a sink that makes a canvas of its own (Upscale, slice 8)
 
 struct ActionInput {
     QString role;  // one of actionRoles(), or empty for a plain input
@@ -95,6 +96,7 @@ struct ActionGraph {
     QString region;      // the Canvas Region that takes the selection
     QStringList regions; // every top-level Canvas Region
     QStringList writes;  // every top-level Canvas Write
+    QStringList news;    // every top-level Canvas New: the action's result is a new canvas, not a layer
 };
 
 Result<ActionGraph> checkAction(const Action &action, const Document &document, const Registry &registry);

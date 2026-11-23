@@ -210,9 +210,9 @@ Result<Action> parseAction(const QJsonValue &block) {
     action.region = text(object, "region", errors, QStringLiteral("The action"));
     if (object.contains(QLatin1String("selection"))) {
         action.selection = text(object, "selection", errors, QStringLiteral("The action"));
-        static const QStringList kinds{QStringLiteral("required"), QStringLiteral("optional"), QStringLiteral("bounds")};
+        static const QStringList kinds{QStringLiteral("required"), QStringLiteral("optional"), QStringLiteral("bounds"), QStringLiteral("none")};
         if (!kinds.contains(action.selection))
-            errors << invalid(QStringLiteral("The action's `selection` is \"%1\"; it is required, optional or bounds.").arg(action.selection));
+            errors << invalid(QStringLiteral("The action's `selection` is \"%1\"; it is required, optional, bounds or none.").arg(action.selection));
     }
     const QJsonValue inputs = object.value(QLatin1String("inputs"));
     if (!inputs.isUndefined() && !inputs.isArray())
@@ -248,6 +248,8 @@ Result<ActionGraph> checkAction(const Action &action, const Document &document, 
             graph.regions << it.key();
         else if (it->type == QLatin1String(writeType))
             graph.writes << it.key();
+        else if (it->type == QLatin1String(newType))
+            graph.news << it.key();
     }
     Errors errors;
     if (graph.regions.isEmpty())
@@ -266,8 +268,8 @@ Result<ActionGraph> checkAction(const Action &action, const Document &document, 
     for (const char *input : {"canvas", "revision", "x", "y", "width", "height"})
         if (region.inputs.value(QLatin1String(input)).kind() == InputValue::Kind::Link)
             errors << invalid(QStringLiteral("The %1 of %2 is linked to another node, so the selection cannot be put in.").arg(QLatin1String(input), graph.region));
-    if (graph.writes.isEmpty())
-        errors << invalid(QStringLiteral("This action has no Canvas Write, so nothing would land on the canvas."));
+    if (graph.writes.isEmpty() && graph.news.isEmpty())
+        errors << invalid(QStringLiteral("This action has no Canvas Write or Canvas New, so nothing would land anywhere."));
     // Every Write lands on the shown canvas: its canvas comes from the selection's Region, or from a Region that is left
     // blank (it gets the shown canvas too).
     for (const QString &write : graph.writes) {
@@ -327,22 +329,24 @@ Result<Document> bindAction(const Document &document, const Action &action, cons
     Node &region = bound.graph.nodes[graph.region];
     setLiteral(region, QStringLiteral("canvas"), binding.canvas);
     setLiteral(region, QStringLiteral("revision"), binding.revision);
-    if (binding.rect) {
+    // `none` (Upscale): the action takes the whole picture whatever is selected; the Region keeps its own rectangle, padding and scale.
+    const bool wholePicture = action.selection == QLatin1String("none");
+    if (binding.rect && !wholePicture) {
         setLiteral(region, QStringLiteral("x"), binding.rect->x);
         setLiteral(region, QStringLiteral("y"), binding.rect->y);
         setLiteral(region, QStringLiteral("width"), binding.rect->width);
         setLiteral(region, QStringLiteral("height"), binding.rect->height);
     }
     // A stored selection, or none: a rectangle never reads one the workflow happened to hold.
-    if (!binding.selection.isEmpty())
+    if (!binding.selection.isEmpty() && !wholePicture)
         setLiteral(region, QStringLiteral("selection"), binding.selection);
     else
         region.inputs.remove(QStringLiteral("selection"));
     if (!binding.layer.isEmpty()) // else the workflow's own Layer stays (an action may read one layer by design)
         setLiteral(region, QStringLiteral("layer"), binding.layer);
-    if (binding.padding)
+    if (binding.padding && !wholePicture)
         setLiteral(region, QStringLiteral("padding"), *binding.padding);
-    if (binding.scale)
+    if (binding.scale && !wholePicture)
         setLiteral(region, QStringLiteral("scale"), *binding.scale);
     // Other Regions of a blank canvas read the same picture: the same canvas and revision.
     for (const QString &other : graph.regions) {

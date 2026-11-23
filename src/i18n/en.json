@@ -1343,6 +1343,7 @@
   "Grow the canvas": "Grow the canvas",
   "Describe the scene, or leave empty": "Describe the scene, or leave empty",
   "No prompt needed: press Generate": "No prompt needed: press Generate",
+  "Made a new canvas: the original is as it was (File > Open canvas…).": "Made a new canvas: the original is as it was (File > Open canvas…).",
   "The side to grow, and how much of the picture's size": "The side to grow, and how much of the picture's size",
   "Pick the side to grow: left, right, top or bottom.": "Pick the side to grow: left, right, top or bottom.",
   "%1 works on the latest version of the canvas.": "%1 works on the latest version of the canvas.",

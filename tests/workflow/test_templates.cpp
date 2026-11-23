@@ -1111,7 +1111,7 @@ private slots:
         const QString root = QStringLiteral(FUGUE_SOURCE_DIR "/templates");
         Fixture f;
         const TemplateLibrary library({{root, false}}, &f.registry);
-        for (const char *id : {"refine", "remove", "expand"}) {
+        for (const char *id : {"refine", "remove", "expand", "upscale", "upscale-no-model"}) {
             const auto found = library.find(id);
             QVERIFY2(found.has_value(), id);
             QCOMPARE(found->category, QStringLiteral("canvas"));

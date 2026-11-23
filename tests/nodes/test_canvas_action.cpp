@@ -160,7 +160,7 @@ private slots:
         QTest::newRow("twice choice") << strength({{"choices", QJsonArray{"A", "A"}}, {"choice_values", QJsonArray{1, 2}}, {"default", "A"}}) << "names a choice twice";
         QTest::newRow("default not a choice") << strength({{"choices", words}, {"choice_values", QJsonArray{0.55, 0.7, 0.9}}, {"default", 0.7}})
                                               << "`default` must be one of its choices";
-        QTest::newRow("selection") << change([](QJsonObject &b) { b.insert("selection", "maybe"); }) << "required, optional or bounds";
+        QTest::newRow("selection") << change([](QJsonObject &b) { b.insert("selection", "maybe"); }) << "required, optional, bounds or none";
     }
     void aMalformedBlockSaysWhatIsWrong() {
         QFETCH(QJsonValue, block);
@@ -516,6 +516,51 @@ private slots:
             QVERIFY(!hasErrors(compile(*bound, m_registry).problems()));
             if (hasPrompt)
                 QVERIFY(!bound->graph.nodes.value("encode").inputs.value("prompt").literal().toString().trimmed().isEmpty()); // the fallback
+        }
+    }
+
+    // Upscale (slice 8): the two templates (model, and plain Lanczos) end in a Canvas New sink, not a Write; the selection is `none`, so a
+    // rectangle or a painted selection is left out and the Region keeps reading the whole picture; Scale is 2x or 4x by choice_values
+    // into both multipliers, and each bound copy compiles. No model is needed to run this: the model is a requirement the bar offers.
+    void theUpscaleTemplatesFitTheirGraphsAndReadTheWholePictureWhateverIsSelected_data() {
+        QTest::addColumn<QString>("id");
+        QTest::addColumn<bool>("model");
+        QTest::newRow("with the model") << "upscale" << true;
+        QTest::newRow("no model") << "upscale-no-model" << false;
+    }
+    void theUpscaleTemplatesFitTheirGraphsAndReadTheWholePictureWhateverIsSelected() {
+        QFETCH(QString, id);
+        QFETCH(bool, model);
+        const Result<Document> document = Document::loadFile(QStringLiteral(FUGUE_SOURCE_DIR "/templates/%1/workflow.fugue").arg(id));
+        QVERIFY2(document, qPrintable(firstMessage(document.errors())));
+        const Result<std::optional<Action>> action = actionOf(*document);
+        QVERIFY2(action && action->has_value(), qPrintable(firstMessage(action.errors())));
+        QCOMPARE((*action)->selection, QStringLiteral("none"));
+        QVERIFY(!(*action)->input("prompt") && !(*action)->input("seed")); // one click
+        QCOMPARE(bool((*action)->input("model")), model);
+        const Result<ActionGraph> graph = checkAction(**action, *document, m_registry);
+        QVERIFY2(graph, qPrintable(firstMessage(graph.errors())));
+        QCOMPARE(graph->news, QStringList{"new"});
+        QVERIFY(graph->writes.isEmpty());
+        const ActionInput *scale = (*action)->input("scale");
+        QVERIFY(scale && scale->choiceValues);
+        QCOMPARE(*scale->choices, (QStringList{"2x", "4x"}));
+        QCOMPARE(*scale->choiceValues, (QList<double>{2, 4}));
+        for (const QString &word : {QStringLiteral("2x"), QStringLiteral("4x")}) {
+            // A rectangle and a stored selection are both left out: the Region's own rectangle (0: the whole) and padding stay.
+            ActionBinding binding{"c1", "sha256:" + QString(64, 'a'), RouteRect{100, 100, 200, 150}, "sha256:" + QString(64, 'b'), 128, 1.5,
+                                  {{"scale", word}}, {}};
+            const Result<Document> bound = bindAction(*document, **action, *graph, binding);
+            QVERIFY2(bound, qPrintable(firstMessage(bound.errors())));
+            const Node &region = bound->graph.nodes.value("region");
+            QCOMPARE(region.inputs.value("width").literal().toInt(), 0);
+            QCOMPARE(region.inputs.value("padding").literal().toInt(), 0);
+            QCOMPARE(region.inputs.value("scale").literal().toDouble(), 1.0);
+            QVERIFY(!region.inputs.contains("selection"));
+            const double factor = word == "2x" ? 2.0 : 4.0;
+            QCOMPARE(bound->graph.nodes.value("wide").inputs.value("b").literal().toDouble(), factor);
+            QCOMPARE(bound->graph.nodes.value("tall").inputs.value("b").literal().toDouble(), factor);
+            QVERIFY2(!hasErrors(compile(*bound, m_registry).problems()), qPrintable(firstMessage(compile(*bound, m_registry).problems())));
         }
     }
 

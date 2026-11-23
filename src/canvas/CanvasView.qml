@@ -662,6 +662,18 @@ Item {
         target: canvasData
         function onCanvasChanged() { root.reportActive() }
     }
+    // An action that makes a new canvas (Upscale) finished: the view that was showing the source shows the new one, which is its own
+    // canvas; the source is as it was and is in the list (File > Open canvas…).
+    Connections {
+        target: App.canvasActions
+        enabled: App.canvasActions !== null
+        function onCanvasMade(source, made) {
+            if (source !== canvasData.canvasId)
+                return
+            canvasData.useCanvas(made)
+            canvasData.showNotice(qsTr("Made a new canvas: the original is as it was (File > Open canvas…)."))
+        }
+    }
     Component.onCompleted: {
         // One canvas by default: with none chosen, the newest.
         if (canvasData.canvasId === "" && canvasData.canvases.length > 0)

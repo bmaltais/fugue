@@ -411,6 +411,10 @@ QVariantMap CanvasActions::generate(const QVariantMap &request) {
     const canvas::Action &action = *chosen->action;
     // An action on the canvas bounds (Expand) ignores the selection: it grows the canvas by the side and the amount asked for.
     const bool bounds = action.selection == QLatin1String("bounds");
+    // `none` (Upscale) takes the whole picture: a rectangle or a painted selection is left out, not read.
+    const bool whole = action.selection == QLatin1String("none");
+    if (whole)
+        rect.reset();
     std::optional<canvas::RouteRect> grown;
     if (bounds) {
         QString why;
@@ -453,7 +457,7 @@ QVariantMap CanvasActions::generate(const QVariantMap &request) {
     binding.canvas = canvasId;
     binding.revision = shown->revision;
     binding.rect = rect;
-    binding.selection = bounds ? QString() : selection;
+    binding.selection = bounds || whole ? QString() : selection;
     binding.layer = request.value("layer").toString().trimmed();
     // An action with a layer role works on the current layer (Remove background: its mask): that layer's name goes into every target
     // of the role (Canvas Region's Layer, Canvas Write's Onto), and Region keeps its own padding and scale: the layer whole, as it is.
@@ -612,6 +616,11 @@ void CanvasActions::onEvent(const QString &run, const QJsonObject &event) {
             const QJsonObject meta = event.value("outputs").toObject().value("canvas").toObject().value("meta").toObject();
             m_writes[run] << WriteResult{kind == QLatin1String("node.cached"), meta.value("canvas").toString(), meta.value("revision").toString()};
         }
+        if (chosen && chosen->graph.news.contains(node) && kind == QLatin1String("node.done")) {
+            const QString made = event.value("outputs").toObject().value("canvas").toObject().value("meta").toObject().value("canvas").toString();
+            if (!made.isEmpty())
+                m_made[run] << made;
+        }
     } else if (kind == QLatin1String("node.error")) {
         m_nodeErrors[run] << Error::fromJson(event.value("error").toObject());
     } else if (kind == QLatin1String("run.done")) {
@@ -641,7 +650,11 @@ void CanvasActions::endRun(const QString &run, const QString &status, const Erro
         m_progress = -1;
     }
     const QList<WriteResult> writes = m_writes.take(run);
+    const QStringList made = m_made.take(run);
     if (status == QLatin1String("ok")) {
+        const QString source = m_canvas;
+        for (const QString &id : made)
+            emit canvasMade(source, id);
         for (const WriteResult &write : writes)
             if (write.cached && !write.revision.isEmpty())
                 placeAgain(write);

@@ -124,6 +124,8 @@ public:
     Kernels kernels;
 };
 
+const NodeType &registryNode(Bench &bench, const QString &id) { return *bench.registry.nodeType(id); }
+
 QString codeOf(const Result<Values> &r) { return r.errors().isEmpty() ? QString() : r.errors().first().code; }
 
 } // namespace
@@ -837,6 +839,49 @@ private slots:
         const auto undone = CanvasStore::forSession().undo(id, after); // Undo takes it back, as any layer edit
         QVERIFY(undone && undone->moved);
         QCOMPARE(headOf(id), before);
+    }
+
+    // Canvas New (#231 slice 8): a picture becomes a canvas of its own, at its own size; the source is not touched; each run makes one more.
+    void canvasNewMakesACanvasOfThePicturesSizeAndNumbersATakenName() {
+        Bench bench;
+        const QString source = makeCanvas();
+        const QString before = headOf(source);
+        const auto make = [&](const QString &name, int w, int h, const QString &work) {
+            Result<Values> picture = imageOutput(solid(w, h, 0, 1, 0));
+            Values in{{"image", picture.value().value("image")}, {"name", Value(name)}};
+            return bench.run("fugue/canvas-new", in, work);
+        };
+        // A name of its own: the test home persists between runs, so a fixed name would meet its own earlier canvases.
+        const QString base = QStringLiteral("Upscaled ") + QUuid::createUuid().toString(QUuid::Id128).left(8);
+        const Result<Values> first = make(base, 800, 600, "new1");
+        QVERIFY2(first.ok(), qPrintable(codeOf(first)));
+        const QString id = first->value("id").text();
+        QVERIFY(id != source && canvas::isCanvasId(id));
+        const auto info = CanvasStore::forSession().info(id);
+        QCOMPARE(info->name, base);
+        const auto tree = CanvasStore::forSession().loadTree(id, info->head);
+        QCOMPARE(tree->width, 800);
+        QCOMPARE(tree->height, 600);
+        QCOMPARE(int(tree->layers.size()), 1); // one layer holding the picture whole, one revision
+        QCOMPARE(pixel(id, info->head, 799, 599, 1), 255);
+        QCOMPARE(pixel(id, info->head, 10, 10, 0), 0);
+        QCOMPARE(headOf(source), before); // the source canvas is as it was
+        // The same input again is another canvas (the node is never cached), and the taken name gets a number.
+        const Result<Values> second = make(base, 800, 600, "new2");
+        QVERIFY2(second.ok(), qPrintable(codeOf(second)));
+        QVERIFY(second->value("id").text() != id);
+        QCOMPARE(CanvasStore::forSession().info(second->value("id").text())->name, base + QStringLiteral(" 2"));
+        QVERIFY(!registryNode(bench, "fugue/canvas-new").deterministic);
+    }
+
+    void canvasNewRefusesAPictureNoCanvasCanBeAndMakesNothing() {
+        Bench bench;
+        const size_t before = CanvasStore::forSession().list().size();
+        Result<Values> huge = imageOutput(solid(16385, 8, 0, 1, 0));
+        const Result<Values> made = bench.run("fugue/canvas-new", Values{{"image", huge.value().value("image")}}, "toobig");
+        QVERIFY(!made.ok());
+        QCOMPARE(codeOf(made), QStringLiteral("canvas_too_big"));
+        QCOMPARE(CanvasStore::forSession().list().size(), before);
     }
 
     void aWriteOntoALockedOrMissingLayerSaysSoAndWritesNothing() {
