@@ -1,13 +1,13 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Dialogs
 import QtQuick.Layouts
 import Fugue
+import "../menu"
 import "../canvas"
 
 // Everything the workflows show besides the tabs (spec 11): the file pickers (the desktop
-// portal when there is one), the save/discard/cancel question, the trust question, the offer
+// portal, Qt's own dialog when it is not there), the save/discard/cancel question, the trust question, the offer
 // to recover, the banner for what went wrong, and the drop area for files. Reads
 // App.workflows and App.theme. Styled from theme.look (docs/canvas-look.md):
 // dialogs are level 3 surfaces over the scrim, notices sit on the popup fill.
@@ -22,23 +22,24 @@ Item {
     property alias trustQuestion: trustAsk
     property alias recoveryQuestion: recoverAsk
 
-    // The pickers use the platform's native dialog, which is the desktop portal's on Omarchy;
-    // Qt's own is the fallback where there is none.
-    FileDialog {
+    // The pickers ask the desktop portal (FilePicker, src/menu/FilePicker.qml: org.freedesktop.portal.FileChooser).
+    // Qt's FileDialog is not native here: Omarchy's platform theme (qtengine) has no file dialog, so it
+    // would always show Qt's own. That one is the fallback, where the portal is not running or fails.
+    FilePicker {
         id: openDialog
         objectName: "openDialog"
         title: qsTr("Open a workflow")
-        fileMode: FileDialog.OpenFiles
+        fileMode: PortalFileDialog.OpenFiles
         currentFolder: App.workflows.suggestedFolder
         nameFilters: [qsTr("Fugue workflows, packages and images with one (*.fugue *.fuguepack *.png *.webp)"), qsTr("All files (*)")]
         onAccepted: App.workflows.openUrls(selectedFiles)
     }
 
-    FileDialog {
+    FilePicker {
         id: saveDialog
         objectName: "saveDialog"
         title: qsTr("Save the workflow")
-        fileMode: FileDialog.SaveFile
+        fileMode: PortalFileDialog.SaveFile
         currentFolder: App.workflows.suggestedFolder
         defaultSuffix: "fugue"
         nameFilters: [qsTr("Fugue workflows (*.fugue)")]
@@ -47,22 +48,22 @@ Item {
     }
 
     // File > Export for sharing (#91): where the .fuguepack goes; its preview is the last picture made.
-    FileDialog {
+    FilePicker {
         id: exportDialog
         objectName: "exportDialog"
         title: qsTr("Export for sharing")
-        fileMode: FileDialog.SaveFile
+        fileMode: PortalFileDialog.SaveFile
         currentFolder: App.workflows.suggestedFolder
         defaultSuffix: "fuguepack"
         nameFilters: [qsTr("Fugue packages (*.fuguepack)")]
         onAccepted: App.workflows.exportShare(selectedFile.toString(), App.runs ? App.runs.lastPicture() : "")
     }
 
-    FileDialog {
+    FilePicker {
         id: compiledDialog
         objectName: "compiledDialog"
         title: qsTr("Export the compiled graph")
-        fileMode: FileDialog.SaveFile
+        fileMode: PortalFileDialog.SaveFile
         currentFolder: App.workflows.suggestedFolder
         defaultSuffix: "json"
         nameFilters: [qsTr("JSON (*.json)")]

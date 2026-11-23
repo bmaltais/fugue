@@ -2,8 +2,8 @@ pragma ComponentBehavior: Bound
 import QtCore
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Dialogs
 import Fugue
+import "../menu"
 import "widgets"
 import "canvasMenu.js" as CanvasMenu
 
@@ -461,11 +461,11 @@ Item {
     onCompareOnChanged: pictureView.setView({mode: compareOn ? modeButtons.remembered() : "single"})
 
     // The picture is saved by the file dialog, as Save Image does: the model writes it and never replaces a file.
-    FileDialog {
+    FilePicker {
         id: exportDialog
         objectName: "canvasViewExportDialog"
         title: qsTr("Save the revision as a picture")
-        fileMode: FileDialog.SaveFile
+        fileMode: PortalFileDialog.SaveFile
         defaultSuffix: "png"
         nameFilters: [qsTr("PNG images (*.png)"), qsTr("JPEG images (*.jpg *.jpeg)"), qsTr("WebP images (*.webp)"), qsTr("Layered image (*.ora)")]
         onAccepted: canvasData.exportPicture(selectedFile.toString())
@@ -489,7 +489,7 @@ Item {
         newCanvasDialog.openNew("")
     }
     function importPicture() {
-        (pictureDialog.createObject(root) as FileDialog).open()
+        (pictureDialog.createObject(root) as FilePicker).open()
     }
     Component {
         id: newCanvasComponent
@@ -503,11 +503,11 @@ Item {
     }
     Component {
         id: pictureDialog
-        FileDialog {
+        FilePicker {
             id: d
             objectName: "canvasViewImportDialog"
             title: qsTr("Import a picture as a canvas")
-            fileMode: FileDialog.OpenFile
+            fileMode: PortalFileDialog.OpenFile
             nameFilters: [qsTr("Pictures and canvases (*.png *.jpg *.jpeg *.webp *.ora)"), qsTr("All files (*)")]
             onAccepted: { root.makeProblem = canvasData.importPicture(d.selectedFile, ""); d.destroy() }
             onRejected: d.destroy()

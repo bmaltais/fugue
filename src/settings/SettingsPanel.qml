@@ -1,9 +1,9 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Dialogs
 import QtQuick.Layouts
 import Fugue
+import "../menu"
 import "../canvas"
 
 // The settings panel (#51), opened by app.settings (Ctrl+,): eight pages on the left, the
@@ -51,14 +51,15 @@ Popup {
     function pickFolder(callback) {
         pickDone = callback
         // A line starting with "(" would continue the line above as a call of `callback`.
-        const dialog = folderDialog.createObject(panel) as FolderDialog
+        const dialog = folderDialog.createObject(panel) as FilePicker
         dialog.open()
     }
     Component {
         id: folderDialog
-        FolderDialog {
+        FilePicker {
             id: d
             objectName: "settingsFolderDialog"
+            fileMode: PortalFileDialog.Directory
             onAccepted: { if (panel.pickDone) panel.pickDone(d.selectedFolder); d.destroy() }
             onRejected: d.destroy()
         }

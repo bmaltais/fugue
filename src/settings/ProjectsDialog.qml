@@ -1,9 +1,9 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
-import QtQuick.Dialogs
 import QtQuick.Layouts
 import Fugue
+import "../menu"
 import "../canvas"
 
 // The Projects dialog (spec 1.4.2, #204 step 2), opened by file.projects (File > Projects…) or the project
@@ -77,16 +77,17 @@ Popup {
 
     Component {
         id: folderDialog
-        FolderDialog {
+        FilePicker {
             id: d
             objectName: "projectFolderDialog"
+            fileMode: PortalFileDialog.Directory
             property var done: null
             onAccepted: { if (d.done) d.done(d.selectedFolder); d.destroy() }
             onRejected: d.destroy()
         }
     }
     function pickFolder(callback) {
-        const picker = folderDialog.createObject(dialog, {done: callback}) as FolderDialog
+        const picker = folderDialog.createObject(dialog, {done: callback}) as FilePicker
         picker.open()
     }
 

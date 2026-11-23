@@ -20,6 +20,7 @@
 #include "commands/command_registry.h"
 #include "menu/color_history.h"
 #include "menu/image_actions.h"
+#include "menu/portal_file_dialog.h" // a QML type (PortalFileDialog): the module registers it from here
 #include "media/media_library.h"
 #include "menu/layout_colors.h"
 #include "panels/chrome_visibility.h"
