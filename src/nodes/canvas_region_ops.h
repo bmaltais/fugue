@@ -47,4 +47,9 @@ struct PlacedLayer {
 };
 PlacedLayer placedLayerWithMask(int canvasWidth, int canvasHeight, const CropBox &box, const Pixels &redrawn, const Pixels &mask, int blend);
 
+// The redrawn picture put into a layer's own pixels (#314, Canvas Write onto a layer): `old` is the layer's RGBA at the canvas's size,
+// `placed` what placedLayerWithMask made. Where the mask is `m` the result is old*(1-m) + picture*m in premultiplied terms (so
+// an empty layer takes the picture's color at its own alpha), straight RGBA again; `m` 0 leaves old untouched.
+Pixels layerWithPicture(const Pixels &old, const PlacedLayer &placed);
+
 } // namespace fugue::nodes

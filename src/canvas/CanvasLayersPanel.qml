@@ -526,8 +526,8 @@ Rectangle {
                     Keys.onEscapePressed: event => { root.renaming = -1; list.forceActiveFocus(); event.accepted = true }
                     onActiveFocusChanged: if (!activeFocus && root.renaming === row.position) root.renaming = -1
                 }
-                // The lock, left of the eye as in Blender's outliner: quiet and dim while open, lit while locked. The font has no
-                // padlock yet, so the pin stands for it.
+                // The lock, left of the eye as in Blender's outliner: quiet and dim while open, lit while locked: Lucide's closed
+                // padlock when locked (or locked by its group), the open one when not.
                 ViewButton {
                     id: lockToggle
                     objectName: "canvasLayerLock-" + row.position
@@ -535,7 +535,7 @@ Rectangle {
                     anchors.rightMargin: root.u / 2
                     anchors.verticalCenter: parent.verticalCenter
                     look: root.look
-                    glyph: "pin"
+                    glyph: row.modelData.locked === true || row.modelData.lockedAbove === true ? "lock" : "lock-open"
                     accented: false
                     checkable: true
                     current: row.modelData.locked === true || row.modelData.lockedAbove === true

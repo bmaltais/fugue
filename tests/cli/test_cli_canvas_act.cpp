@@ -60,6 +60,16 @@ const char *kLayer = R"({"fugue": 1,
    "find": {"type": "fugue/image-to-mask", "version": "1.0.1", "inputs": {"image": {"from": "region.image"}}},
    "write": {"type": "fugue/canvas-write", "version": "1.6.0", "inputs": {"canvas": {"from": "region.canvas"}, "stitch": {"from": "region.stitch"}, "layer_mask": {"from": "find.mask"}, "onto": "", "blend": 0}}}}})";
 
+// An action that redraws one layer's own pixels (Canvas Write 1.7.0 onto_pixels): the layer role targets the Region's layer and the Write's.
+const char *kPixels = R"({"fugue": 1,
+ "action": {"format": 1, "name": "Stand-in repaint", "selection": "optional", "region": "region",
+            "inputs": [{"role": "seed", "targets": ["roll.value"]}, {"role": "layer", "targets": ["region.layer", "write.onto_pixels"]}]},
+ "graph": {"nodes": {
+   "roll": {"type": "fugue/number", "version": "1.0.0", "inputs": {"value": 0}},
+   "region": {"type": "fugue/canvas-region", "version": "1.4.0", "inputs": {"canvas": "", "revision": "head", "layer": "", "x": 0, "y": 0, "width": 0, "height": 0, "padding": 0, "scale": 1, "multiple": 1}},
+   "flip": {"type": "fugue/invert", "version": "1.0.0", "inputs": {"image": {"from": "region.image"}}},
+   "write": {"type": "fugue/canvas-write", "version": "1.7.0", "inputs": {"canvas": {"from": "region.canvas"}, "image": {"from": "flip.image"}, "stitch": {"from": "region.stitch"}, "onto_pixels": "", "blend": 0}}}}})";
+
 } // namespace
 
 class TestCliCanvasAct : public QObject {
@@ -255,6 +265,22 @@ private slots:
         QVERIFY(ran.data().value("head").toString() != ran.data().value("previous").toString());
         QVERIFY(fugue({"canvas", "layer", "list", id, "--json"}).out.contains("\"has_mask\":true") ||
                 fugue({"canvas", "layer", "list", id}).out.contains("mask"));
+    }
+
+    // Write onto a layer's pixels: no layer is added, the head moves by one revision.
+    void aRepaintWritesTheLayersOwnPixels() {
+        const QString id = canvas();
+        const int count = layers(id).size();
+        const Outcome ran = fugue({"canvas", "act", id, write("pixels.fugue", kPixels), "--layer", "0", "--wait", "--json"});
+        QVERIFY2(ran.exitCode == 0, ran.out + ran.err);
+        QVERIFY(ran.data().value("head").toString() != ran.data().value("previous").toString());
+        QCOMPARE(layers(id).size(), count);
+    }
+
+    // Variations of a repaint would race for the same layer: refused in words, before anything runs.
+    void aRepaintRefusesCountAboveOne() {
+        const Outcome ran = fugue({"canvas", "act", canvas(), write("pixels2.fugue", kPixels), "--layer", "0", "--count", "2", "--wait", "--json"});
+        QCOMPARE(ran.errorCode(), QString("act_refused"));
     }
 
     // Upscale makes a new canvas and says which; the one it ran on is as it was.
