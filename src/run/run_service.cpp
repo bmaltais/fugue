@@ -12,6 +12,7 @@
 #include <QTimer>
 #include <QUrl>
 
+#include <atomic>
 #include <memory>
 #include <utility>
 
@@ -308,7 +309,10 @@ public:
                 emit event(id, withThumbnails(e));
     }
 
-    void reloadNodeTypes() { ++m_typesWanted; }
+    // Called from the window's thread, not queued: the count must be up when this returns, so a run
+    // whose start is already under way on this thread (compiled, not yet begun) sees the reload at
+    // its turn and fails as changed, instead of the reload waiting in the queue behind it (#223).
+    void reloadNodeTypes() { m_typesWanted.fetch_add(1); }
 
     void check(const RunRequest &request, int ticket) {
         m_check = request;
@@ -363,12 +367,13 @@ private:
     // Fills `registry` again when a reload was asked for since `filled`; called only where nothing
     // uses it (compileRequest: no check under way; begin: no run active).
     void refill(Registry &registry, int &filled) {
-        if (filled == m_typesWanted || !m_setup.addNodeTypes)
+        const int wanted = m_typesWanted.load();
+        if (filled == wanted || !m_setup.addNodeTypes)
             return;
         Registry fresh;
         m_setup.addNodeTypes(fresh);
         registry.replaceTypes(std::move(fresh));
-        filled = m_typesWanted;
+        filled = wanted;
     }
 
     // Compiles as `fugue run` does (cli::compileDocument), with the providers from the setup,
@@ -588,7 +593,7 @@ private:
     cli::Context m_context;
     Registry m_compileRegistry;
     // Reloads asked for, and the one each registry was last filled for.
-    int m_typesWanted = 0;
+    std::atomic<int> m_typesWanted{0};
     int m_compileTypes = 0;
     int m_runTypes = 0;
     std::unique_ptr<cli::Process> m_process;
@@ -661,7 +666,7 @@ void RunService::replay(const QString &run) {
 }
 
 void RunService::reloadNodeTypes() {
-    QMetaObject::invokeMethod(m_worker, [w = m_worker] { w->reloadNodeTypes(); }, Qt::QueuedConnection);
+    m_worker->reloadNodeTypes(); // thread-safe: see RunThread::reloadNodeTypes
 }
 
 void RunService::onRunThread(const std::function<void()> &call) {
