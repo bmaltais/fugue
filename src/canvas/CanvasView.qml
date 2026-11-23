@@ -368,7 +368,7 @@ Item {
     // ---- Select > Modify and Transform selection (#251) ----
     // The painted selection is the one the operations work on. A rectangle (the free one, or the Region node's) is painted into
     // it first, and the free rectangle goes (the Region node's area stays: Deselect clears it). The result is shown as the
-    // Quick Mask, the only view of a painted selection. Each is one step of the selection's own undo (Ctrl+Z).
+    // Quick Mask (the tint); the ants show it otherwise. Each is one step of the selection's own undo (Ctrl+Z).
     readonly property bool canModifySelection: canvasData.canvasId !== "" && pictureView.visible && (maskSelected || rectSelected)
     function selectionToMask() {
         if (maskSelected)
@@ -1682,7 +1682,7 @@ Item {
             objectName: "canvasViewSelection"
             anchors.fill: parent
             clip: true
-            visible: root.quickMask || root.maskSelected
+            visible: root.quickMask // the red tint is Quick Mask's editing view; a selection otherwise shows as marching ants
             imageSize: canvasData.pictureSize
             originX: pictureView.imageX
             originY: pictureView.imageY
@@ -1792,6 +1792,25 @@ Item {
         ToolTip.visible: frameHover.over && frameHover.text !== "" && root.liveRect === null
         ToolTip.delay: root.look.tooltipDelay
         ToolTip.text: frameHover.text
+    }
+
+    // The selection's marching ants (#313): the rectangle, and the contour of the painted, lasso or layer-mask selection while
+    // Quick Mask (the red tint, its editing view) is off. Over the frame, under the grid and guides; it never takes the pointer.
+    SelectionAnts {
+        id: ants
+        objectName: "canvasViewAnts"
+        anchors.fill: pictureView
+        LayoutMirroring.enabled: false
+        LayoutMirroring.childrenInherit: true
+        visible: pictureView.visible && !root.compareOn && !pictureView.paired && pictureView.mode !== "difference"
+                 && (root.rectSelected || (root.maskSelected && !root.quickMask))
+        clip: true
+        originX: pictureView.imageX
+        originY: pictureView.imageY
+        zoom: pictureView.imageScale
+        rect: root.rectSelected && root.liveRect === null ? Qt.rect(root.shownRegion.x, root.shownRegion.y, root.shownRegion.width, root.shownRegion.height)
+                                                           : Qt.rect(0, 0, 0, 0)
+        mask: root.maskSelected && !root.quickMask ? selectionLayer : null
     }
 
 

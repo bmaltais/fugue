@@ -46,6 +46,7 @@
 
 #include "canvas/canvas_history.h"
 #include "canvas/mask_layer.h"
+#include "canvas/selection_ants.h" // registers SelectionAnts for QML (the type registration finds a type through a header it includes)
 #include "engine/canvas_layer_ops.h"
 #include "engine/canvas_transform.h"
 #include "canvas/widget_edit.h"
